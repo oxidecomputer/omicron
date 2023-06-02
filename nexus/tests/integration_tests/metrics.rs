@@ -28,7 +28,7 @@ pub async fn get_latest_system_metric(
 ) -> i64 {
     let client = &cptestctx.external_client;
     let url = format!(
-        "/v1/system/metrics/{metric_name}?start_time={:?}&end_time={:?}&id={:?}&order=descending", 
+        "/v1/system/metrics/{metric_name}?start_time={:?}&end_time={:?}&id={:?}&order=descending&limit=1", 
         cptestctx.start_time,
         Utc::now(),
         resource_id,
@@ -37,7 +37,7 @@ pub async fn get_latest_system_metric(
         objects_list_page_authz(client, &url).await;
 
     // prevent more confusing error on next line
-    assert!(measurements.items.len() > 0, "Expected at least one measurement");
+    assert!(measurements.items.len() == 1, "Expected exactly one measurement");
 
     let item = &measurements.items[0];
     let datum = match item.datum() {
