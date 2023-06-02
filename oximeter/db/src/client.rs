@@ -112,16 +112,16 @@ impl Client {
             None => BTreeMap::new(),
         };
 
-        // Error if a limit is specified with a query that resolves to multiple
-        // timeseries. Because query results are ordered in part by timeseries
-        // key, results with a limit will selected measurements in a way that is
-        // arbitrary with respect to the query.
-        if limit.is_some() && info.len() != 1 {
-            return Err(Error::InvalidLimitQuery);
-        }
-
         if info.is_empty() {
+            // allow queries that resolve to zero timeseries even with limit
+            // specified because the results are not misleading
             Ok(vec![])
+        } else if limit.is_some() && info.len() != 1 {
+            // Error if a limit is specified with a query that resolves to
+            // multiple timeseries. Because query results are ordered in part by
+            // timeseries key, results with a limit will select measurements in
+            // a way that is arbitrary with respect to the query.
+            Err(Error::InvalidLimitQuery)
         } else {
             self.select_timeseries_with_keys(&query, &info, &schema).await
         }
@@ -1448,6 +1448,20 @@ mod tests {
             )
             .await
             .expect_err("Should fail to select timeseries");
+
+        // queries with limit do not fail when they resolve to zero timeseries
+        let empty_result = &client
+            .select_timeseries_with(
+                timeseries_name,
+                &["name==not_a_real_name"],
+                None,
+                None,
+                Some(limit),
+                None,
+            )
+            .await
+            .expect("Failed to select timeseries");
+        assert_eq!(empty_result.len(), 0);
 
         let timeseries = &client
             .select_timeseries_with(
