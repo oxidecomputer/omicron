@@ -8,7 +8,9 @@
 //! results. This is where the bulk of the protocol logic lives. It's
 //! written this way to enable easy testing and auditing.
 
-use crate::peer_msgs::{Msg, Request};
+use std::collections::BTreeSet;
+
+use super::messages::{Envelope, Msg, Request, Response};
 use crate::trust_quorum::{LearnedSharePkgV0, SharePkgV0};
 use sled_hardware::Baseboard;
 
@@ -49,7 +51,7 @@ impl SharePkg {
 }
 
 /// State stored on the M.2s.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PersistentState {
     // The generation number for ledger writing purposes on both M.2s
     pub ledger_generation: u32,
@@ -58,13 +60,67 @@ pub struct PersistentState {
 
 /// The state machine for a [`$crate::Peer`]
 pub struct Fsm {
+    config: Config,
     state: PersistentState,
+    peers: BTreeSet<Baseboard>,
+    // The current time in ticks
+    clock: usize,
+}
+
+/// Configuration of the FSM
+pub struct Config {
+    retry_timeout_in_ticks: usize,
 }
 
 impl Fsm {
-    pub fn new(state: PersistentState) {
-        Fsm { state }
+    pub fn new(config: Config, state: PersistentState) {
+        Fsm { config, state, peers: BTreeSet::new(), clock: 0 }
     }
 
-    pub fn handle_req(&mut self, request: Request) -> Msg {}
+    /// Handle a message from a peer.
+    ///
+    /// Return any persistent state to sync to disk and a set of messages to
+    /// send to other peers. Persistant state must be saved by the caller and
+    /// safely persisted before messages should be sent, or the next message
+    /// processed.
+    pub fn handle(
+        &mut self,
+        from: Baseboard,
+        msg: Msg,
+    ) -> (Option<PersistentState>, Vec<Envelope>) {
+        match msg {
+            Msg::Req(req) => self.handle_request(from, req),
+            Msg::Rsp(rsp) => self.handle_response(from, rsp),
+        }
+    }
+
+    /// An abstraction of a timer tick.
+    ///
+    /// Ticks mutate state and can result in message retries.
+    ///
+    /// Each tick represents some abstract duration of time.
+    /// Timeouts are represented by number of ticks in this module, which
+    /// allows for deterministic property based tests in a straightforward manner.
+    /// On each tick, the current duration since start is passed in. We only
+    /// deal in relative time needed for timeouts, and not absolute time. This
+    /// strategy allows for deterministic property based tests.
+    pub fn tick(&mut self) -> Vec<Envelope> {
+        self.clock += 1;
+    }
+
+    fn handle_request(
+        &mut self,
+        from: Baseboard,
+        request: Request,
+    ) -> (Option<PersistentState>, Vec<Envelope>) {
+        unimplemented!()
+    }
+
+    fn handle_response(
+        &mut self,
+        from: Baseboard,
+        response: Response,
+    ) -> (Option<PersistentState>, Vec<Envelope>) {
+        unimplemented!()
+    }
 }

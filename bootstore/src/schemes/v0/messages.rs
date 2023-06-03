@@ -4,33 +4,35 @@
 
 //! Messages sent between peers
 
-/// A header for messages sent between peers over TCP
-#[derive(Debug, PartialEq, Serialize, Deserialize)]
-pub struct MsgHeader {
-    // The version of the bootstore protocol
-    scheme: u32,
-    // The version of the protocol for given bootstore scheme
-    // Each scheme has independently numbered protocol versions
-    // It's probably easiest to actually run the schemes themselves
-    // on different ports and switch over to the new one when ready.
-    version: u32,
+use serde::{Deserialize, Serialize};
+use sled_hardware::Baseboard;
 
-    // The size of the Msg to follow
-    size: u32,
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
+pub struct Envelope {
+    to: Baseboard,
+    msg: Msg,
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
-pub enum Msg {}
+pub enum Msg {
+    Req(Request),
+    Rsp(Response),
+}
 
 /// A request from a peer to another peer over TCP
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub enum Request {
+    /// The first thing a peer does is identify themselves to the connected peer
+    ///
+    /// The Baseboard is mapped to the connection after this.
+    Identify(Baseboard),
+
     /// A rack initialization request informing the peer that it is a member of
     /// the initial trust quorum.
     Init(SharePkgV0),
 
     /// Request a share from a remote peer
-    GetShare { rack_uuid: Uuid, epoch: u32 },
+    GetShare { rack_uuid: Uuid },
 
     /// Get a [`LearnedSharePkgV0`] from a peer that was part of the rack
     /// initialization group
@@ -42,6 +44,9 @@ pub enum Request {
 /// A response to a request from a peer over TCP
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub enum Response {
+    /// Response to [`Request::Identify`]
+    IdentifyAck(Baseboard),
+
     /// Response to [`Request::Init`]
     InitAck,
 

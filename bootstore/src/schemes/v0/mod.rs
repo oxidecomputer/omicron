@@ -4,6 +4,9 @@
 
 //! The v0 bootstore protocol (aka Low-Rent Trust Quorum)
 
+mod fsm;
+mod messages;
+
 /// The current version of supported messages within the v0 scheme
 ///
 /// This number should be incremented when new messages or enum variants are
