@@ -622,7 +622,6 @@ version = "0.1.0"
 dependencies = [
  "assert_matches",
  "bcs",
- "bincode",
  "chacha20poly1305",
  "curve25519-dalek 3.2.0",
  "derive_more",

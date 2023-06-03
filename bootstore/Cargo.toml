@@ -35,6 +35,5 @@ pq-sys = "*"
 
 [dev-dependencies]
 assert_matches.workspace = true
-bincode.workspace = true
 omicron-test-utils.workspace = true
 proptest.workspace = true
