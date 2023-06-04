@@ -11,7 +11,9 @@ use rand::{rngs::OsRng, RngCore};
 use secrecy::{ExposeSecret, Secret};
 use serde::{Deserialize, Serialize};
 use sha3::{Digest, Sha3_256};
+use sled_hardware::Baseboard;
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::fmt;
 use uuid::Uuid;
 use zeroize::Zeroizing;
@@ -53,13 +55,22 @@ impl SharePkgHeader {
 /// to whomever asks.
 #[derive(Clone, PartialEq, Serialize, Deserialize, Zeroize, ZeroizeOnDrop)]
 pub struct SharePkgV0 {
+    /// Unique Id of the rack
     #[zeroize(skip)]
     pub rack_uuid: Uuid,
-    // We aren't planning on doing any reconfigurations with this version of
-    // the protocol. This is here in case we decide otherwise, and because an
-    // epoch is used for disk encryption purposes.
+    /// We aren't planning on doing any reconfigurations with this version of
+    /// the protocol. This is here in case we decide otherwise, and because an
+    /// epoch is used for disk encryption purposes.
     pub epoch: u32,
+
+    /// The number of shares required to recompute the [`RackSecret`]
     pub threshold: u8,
+
+    /// The initial group membership
+    #[zeroize(skip)]
+    pub initial_membership: BTreeSet<Baseboard>,
+
+    /// This sled's unencrypted share
     pub share: Vec<u8>,
 
     /// Digests of all 256 shares so that each sled can verify the integrity
@@ -104,7 +115,11 @@ pub struct LearnedSharePkgV0 {
     // We aren't planning on doing any reconfigurations with this version of
     // the protocol
     pub epoch: u32,
+
+    /// The number of shares required to recompute the [`RackSecret`]
     pub threshold: u8,
+
+    /// This sled's unencrypted share
     pub share: Vec<u8>,
 
     // Digests of all 256 shares so that each sled can verify the integrity
@@ -118,8 +133,10 @@ pub struct LearnedSharePkgV0 {
 /// Create a package for each sled
 pub fn create_pkgs(
     rack_uuid: Uuid,
-    n: u8,
+    initial_membership: BTreeSet<Baseboard>,
 ) -> Result<Secret<Vec<SharePkgV0>>, TrustQuorumError> {
+    // There are only up to 32 sleds in a rack.
+    let n = u8::try_from(initial_membership.len()).unwrap();
     let rack_secret = RackSecret::new();
     let threshold = n / 2 + 1;
     let epoch = 0;
@@ -157,6 +174,7 @@ pub fn create_pkgs(
             rack_uuid,
             epoch,
             threshold,
+            initial_membership: initial_membership.clone(),
             share: share.clone(),
             share_digests: share_digests.clone(),
             salt,
@@ -270,8 +288,15 @@ mod tests {
     #[test]
     fn create_packages() {
         let uuid = Uuid::new_v4();
-        let num_sleds = 4;
-        let packages = create_pkgs(uuid, num_sleds).unwrap();
+        let initial_members: BTreeSet<Baseboard> =
+            [("a", "1"), ("b", "1"), ("c", "1"), ("d", "1")]
+                .iter()
+                .map(|(id, model)| {
+                    Baseboard::new_pc(id.to_string(), model.to_string())
+                })
+                .collect();
+        let num_sleds = initial_members.len();
+        let packages = create_pkgs(uuid, initial_members).unwrap();
 
         let mut threshold_of_shares = vec![];
         // Verify basic properties of each pkg
@@ -291,7 +316,7 @@ mod tests {
 
         // We divide all shares among each package, and leave one of them
         // unencrypted
-        let num_encrypted_shares_per_pkg = (255 / num_sleds - 1) as usize;
+        let num_encrypted_shares_per_pkg = (255 / num_sleds - 1);
 
         // Decrypt shares for each package
         let mut decrypted_shares: Vec<Vec<u8>> = vec![];
@@ -309,7 +334,7 @@ mod tests {
 
         assert_eq!(
             decrypted_shares.len(),
-            (num_encrypted_shares_per_pkg + 1) * num_sleds as usize
+            (num_encrypted_shares_per_pkg + 1) * num_sleds
         );
 
         let hashes = packages.expose_secret()[0].share_digests.clone();

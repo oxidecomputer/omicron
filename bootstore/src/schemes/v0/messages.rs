@@ -5,17 +5,19 @@
 //! Messages sent between peers
 
 use crate::trust_quorum::{LearnedSharePkgV0, SharePkgV0};
+use derive_more::From;
 use serde::{Deserialize, Serialize};
 use sled_hardware::Baseboard;
+use std::collections::BTreeSet;
 use uuid::Uuid;
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct Envelope {
-    to: Baseboard,
-    msg: Msg,
+    pub to: Baseboard,
+    pub msg: Msg,
 }
 
-#[derive(Debug, PartialEq, Serialize, Deserialize)]
+#[derive(From, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Msg {
     Req(Request),
     Rsp(Response),
@@ -32,6 +34,9 @@ pub enum Request {
     /// A rack initialization request informing the peer that it is a member of
     /// the initial trust quorum.
     Init(SharePkgV0),
+
+    /// Initialize a peer as a Learner
+    InitLearner { peers: BTreeSet<Baseboard> },
 
     /// Request a share from a remote peer
     GetShare { rack_uuid: Uuid },

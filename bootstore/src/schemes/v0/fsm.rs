@@ -17,10 +17,10 @@ use uuid::Uuid;
 
 // An index into an encrypted share
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct ShareIdx(usize);
+pub struct ShareIdx(usize);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-enum SharePkg {
+pub enum SharePkg {
     Initial {
         pkg: SharePkgV0,
         // Shares given to other sleds. We mark them as used so that we don't
@@ -61,11 +61,16 @@ pub struct PersistentState {
 
 /// The state machine for a [`$crate::Peer`]
 pub struct Fsm {
+    id: Baseboard,
     config: Config,
     state: PersistentState,
     peers: BTreeSet<Baseboard>,
     // The current time in ticks
     clock: usize,
+
+    // Is this node a learner or member of the initial group?
+    // This is determe
+    is_learner: Option<bool>,
 }
 
 /// Configuration of the FSM
@@ -74,8 +79,21 @@ pub struct Config {
 }
 
 impl Fsm {
-    pub fn new(config: Config, state: PersistentState) -> Fsm {
-        Fsm { config, state, peers: BTreeSet::new(), clock: 0 }
+    pub fn new(id: Baseboard, config: Config, state: PersistentState) -> Fsm {
+        Fsm {
+            id,
+            config,
+            state,
+            peers: BTreeSet::new(),
+            clock: 0,
+            is_learner: None,
+        }
+    }
+
+    /// Return true if the FSM is initialized as a member of the initial group
+    /// or a learner, false otherwise.
+    pub fn is_initialized(&self) -> bool {
+        self.state.pkg.is_some()
     }
 
     /// Handle a message from a peer.
@@ -107,7 +125,7 @@ impl Fsm {
     /// strategy allows for deterministic property based tests.
     pub fn tick(&mut self) -> Vec<Envelope> {
         self.clock += 1;
-        unimplemented!()
+        vec![]
     }
 
     fn handle_request(
@@ -115,7 +133,19 @@ impl Fsm {
         from: Baseboard,
         request: Request,
     ) -> (Option<PersistentState>, Vec<Envelope>) {
-        unimplemented!()
+        match request {
+            Request::Identify(peer) => {
+                self.peers.insert(peer.clone());
+                (
+                    None,
+                    vec![Envelope {
+                        to: peer,
+                        msg: Response::IdentifyAck(self.id.clone()).into(),
+                    }],
+                )
+            }
+            _ => unimplemented!(),
+        }
     }
 
     fn handle_response(
