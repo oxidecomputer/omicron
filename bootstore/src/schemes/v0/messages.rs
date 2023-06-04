@@ -4,8 +4,10 @@
 
 //! Messages sent between peers
 
+use crate::trust_quorum::{LearnedSharePkgV0, SharePkgV0};
 use serde::{Deserialize, Serialize};
 use sled_hardware::Baseboard;
+use uuid::Uuid;
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct Envelope {

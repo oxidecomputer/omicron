@@ -74,7 +74,16 @@ pub enum SledMode {
 
 /// Describes properties that should uniquely identify a Gimlet.
 #[derive(
-    Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema,
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Serialize,
+    Deserialize,
+    JsonSchema,
 )]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Baseboard {

@@ -8,17 +8,18 @@
 //! results. This is where the bulk of the protocol logic lives. It's
 //! written this way to enable easy testing and auditing.
 
-use std::collections::BTreeSet;
-
 use super::messages::{Envelope, Msg, Request, Response};
 use crate::trust_quorum::{LearnedSharePkgV0, SharePkgV0};
+use serde::{Deserialize, Serialize};
 use sled_hardware::Baseboard;
+use std::collections::{BTreeMap, BTreeSet};
+use uuid::Uuid;
 
 // An index into an encrypted share
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct ShareIdx(usize);
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 enum SharePkg {
     Initial {
         pkg: SharePkgV0,
@@ -44,7 +45,7 @@ enum SharePkg {
 impl SharePkg {
     pub fn rack_uuid(&self) -> Uuid {
         match self {
-            SharePkg::Initial(pkg) => pkg.rack_uuid,
+            SharePkg::Initial { pkg, .. } => pkg.rack_uuid,
             SharePkg::Learned(pkg) => pkg.rack_uuid,
         }
     }
@@ -73,7 +74,7 @@ pub struct Config {
 }
 
 impl Fsm {
-    pub fn new(config: Config, state: PersistentState) {
+    pub fn new(config: Config, state: PersistentState) -> Fsm {
         Fsm { config, state, peers: BTreeSet::new(), clock: 0 }
     }
 
@@ -106,6 +107,7 @@ impl Fsm {
     /// strategy allows for deterministic property based tests.
     pub fn tick(&mut self) -> Vec<Envelope> {
         self.clock += 1;
+        unimplemented!()
     }
 
     fn handle_request(
@@ -123,4 +125,10 @@ impl Fsm {
     ) -> (Option<PersistentState>, Vec<Envelope>) {
         unimplemented!()
     }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn blah() {}
 }
