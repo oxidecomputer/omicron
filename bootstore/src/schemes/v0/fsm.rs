@@ -8,18 +8,20 @@
 //! results. This is where the bulk of the protocol logic lives. It's
 //! written this way to enable easy testing and auditing.
 
-use super::messages::{Envelope, Msg, Request, Response};
+use super::messages::{Envelope, Error, Msg, Request, Response};
 use crate::trust_quorum::{LearnedSharePkgV0, SharePkgV0};
 use serde::{Deserialize, Serialize};
 use sled_hardware::Baseboard;
 use std::collections::{BTreeMap, BTreeSet};
 use uuid::Uuid;
 
-// An index into an encrypted share
-#[derive(Debug, Clone, Serialize, Deserialize)]
+type Persist = bool;
+
+// An index intjo an encrypted share
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ShareIdx(usize);
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SharePkg {
     Initial {
         pkg: SharePkgV0,
@@ -43,6 +45,14 @@ pub enum SharePkg {
 }
 
 impl SharePkg {
+    pub fn new_initial(pkg: SharePkgV0) -> SharePkg {
+        SharePkg::Initial { pkg, distributed_shares: BTreeMap::new() }
+    }
+
+    pub fn new_learned(pkg: LearnedSharePkgV0) -> SharePkg {
+        SharePkg::Learned(pkg)
+    }
+
     pub fn rack_uuid(&self) -> Uuid {
         match self {
             SharePkg::Initial { pkg, .. } => pkg.rack_uuid,
@@ -55,7 +65,7 @@ impl SharePkg {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PersistentState {
     // The generation number for ledger writing purposes on both M.2s
-    pub ledger_generation: u32,
+    pub version: u32,
     pub pkg: Option<SharePkg>,
 }
 
@@ -96,17 +106,22 @@ impl Fsm {
         self.state.pkg.is_some()
     }
 
+    /// Return the current persistent state
+    pub fn persistent_state(&self) -> &PersistentState {
+        &self.state
+    }
+
     /// Handle a message from a peer.
     ///
-    /// Return any persistent state to sync to disk and a set of messages to
-    /// send to other peers. Persistant state must be saved by the caller and
-    /// safely persisted before messages should be sent, or the next message
-    /// processed.
+    /// Return whether persistent state needs syncing to disk and a set of
+    /// messages to send to other peers. Persistant state must be saved by
+    /// the caller and safely persisted before messages are sent, or the next
+    /// message is handled here.
     pub fn handle(
         &mut self,
         from: Baseboard,
         msg: Msg,
-    ) -> (Option<PersistentState>, Vec<Envelope>) {
+    ) -> (Persist, Vec<Envelope>) {
         match msg {
             Msg::Req(req) => self.handle_request(from, req),
             Msg::Rsp(rsp) => self.handle_response(from, rsp),
@@ -132,17 +147,39 @@ impl Fsm {
         &mut self,
         from: Baseboard,
         request: Request,
-    ) -> (Option<PersistentState>, Vec<Envelope>) {
+    ) -> (Persist, Vec<Envelope>) {
         match request {
             Request::Identify(peer) => {
                 self.peers.insert(peer.clone());
-                (
-                    None,
-                    vec![Envelope {
-                        to: peer,
-                        msg: Response::IdentifyAck(self.id.clone()).into(),
-                    }],
-                )
+                self.respond(from, Response::IdentifyAck(self.id.clone()))
+            }
+            Request::Init(new_pkg) => {
+                match &self.state.pkg {
+                    Some(SharePkg::Initial { pkg, .. }) => {
+                        if new_pkg == *pkg {
+                            // Idempotent response given same pkg
+                            self.respond(from, Response::InitAck)
+                        } else {
+                            self.respond(
+                                from,
+                                Error::AlreadyInitialized {
+                                    rack_uuid: pkg.rack_uuid,
+                                }
+                                .into(),
+                            )
+                        }
+                    }
+                    Some(SharePkg::Learned(pkg)) => self.respond(
+                        from,
+                        Error::AlreadyInitialized { rack_uuid: pkg.rack_uuid }
+                            .into(),
+                    ),
+                    None => {
+                        self.state.pkg = Some(SharePkg::new_initial(new_pkg));
+                        self.state.version += 1;
+                        self.persist_and_respond(from, Response::InitAck)
+                    }
+                }
             }
             _ => unimplemented!(),
         }
@@ -152,8 +189,27 @@ impl Fsm {
         &mut self,
         from: Baseboard,
         response: Response,
-    ) -> (Option<PersistentState>, Vec<Envelope>) {
+    ) -> (Persist, Vec<Envelope>) {
         unimplemented!()
+    }
+
+    // Return a response directly to a peer that doesn't require persistence
+    fn respond(
+        &self,
+        to: Baseboard,
+        response: Response,
+    ) -> (Persist, Vec<Envelope>) {
+        (false, vec![Envelope { to, msg: response.into() }])
+    }
+
+    // Indicate to the caller that state must be perisisted and then a response
+    // returned to the peer.
+    fn persist_and_respond(
+        &self,
+        to: Baseboard,
+        response: Response,
+    ) -> (Persist, Vec<Envelope>) {
+        (true, vec![Envelope { to, msg: response.into() }])
     }
 }
 

@@ -26,7 +26,8 @@ pub enum Msg {
 /// A request from a peer to another peer over TCP
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub enum Request {
-    /// The first thing a peer does is identify themselves to the connected peer
+    /// The first thing a peer does is identify themselves to the connected
+    /// peer
     ///
     /// The Baseboard is mapped to the connection after this.
     Identify(Baseboard),
@@ -49,7 +50,7 @@ pub enum Request {
 }
 
 /// A response to a request from a peer over TCP
-#[derive(Debug, PartialEq, Serialize, Deserialize)]
+#[derive(From, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Response {
     /// Response to [`Request::Identify`]
     IdentifyAck(Baseboard),

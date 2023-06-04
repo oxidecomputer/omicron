@@ -53,7 +53,9 @@ impl SharePkgHeader {
 ///
 /// This scheme does not verify membership, and will hand out shares
 /// to whomever asks.
-#[derive(Clone, PartialEq, Serialize, Deserialize, Zeroize, ZeroizeOnDrop)]
+#[derive(
+    Clone, PartialEq, Eq, Serialize, Deserialize, Zeroize, ZeroizeOnDrop,
+)]
 pub struct SharePkgV0 {
     /// Unique Id of the rack
     #[zeroize(skip)]
@@ -108,7 +110,9 @@ pub struct SharePkgV0 {
 
 /// An analog to [`SharePkgV0`] for nodes that were added after rack
 /// initialization. There is no encrypted_shares or nonces because of this.
-#[derive(Clone, PartialEq, Serialize, Deserialize, Zeroize, ZeroizeOnDrop)]
+#[derive(
+    Clone, PartialEq, Eq, Serialize, Deserialize, Zeroize, ZeroizeOnDrop,
+)]
 pub struct LearnedSharePkgV0 {
     #[zeroize(skip)]
     pub rack_uuid: Uuid,
@@ -316,7 +320,7 @@ mod tests {
 
         // We divide all shares among each package, and leave one of them
         // unencrypted
-        let num_encrypted_shares_per_pkg = (255 / num_sleds - 1);
+        let num_encrypted_shares_per_pkg = 255 / num_sleds - 1;
 
         // Decrypt shares for each package
         let mut decrypted_shares: Vec<Vec<u8>> = vec![];
