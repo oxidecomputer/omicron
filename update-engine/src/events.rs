@@ -189,6 +189,7 @@ impl<S: StepSpec> StepEvent<S> {
             StepEventKind::NoStepsDefined
             | StepEventKind::ExecutionCompleted { .. }
             | StepEventKind::ExecutionFailed { .. }
+            | StepEventKind::ExecutionAborted { .. }
             | StepEventKind::Unknown => None,
         }
     }
@@ -386,6 +387,29 @@ pub enum StepEventKind<S: StepSpec> {
         causes: Vec<String>,
     },
 
+    /// Execution aborted by an external user.
+    ///
+    /// This is a terminal event: it is guaranteed that no more events will be
+    /// seen after this one.
+    ExecutionAborted {
+        /// Information about the step that was running at the time execution
+        /// was aborted.
+        aborted_step: StepInfoWithMetadata<S>,
+
+        /// The attempt that was running at the time the step was aborted.
+        attempt: usize,
+
+        /// Total time elapsed since the start of the step. Includes prior
+        /// attempts.
+        step_elapsed: Duration,
+
+        /// The time it took for this attempt to complete.
+        attempt_elapsed: Duration,
+
+        /// A message associated with the abort.
+        message: String,
+    },
+
     /// A nested step event occurred.
     Nested {
         /// Information about the step that's occurring.
@@ -423,7 +447,8 @@ impl<S: StepSpec> StepEventKind<S> {
             | StepEventKind::ExecutionCompleted { .. } => {
                 StepEventIsTerminal::Terminal { success: true }
             }
-            StepEventKind::ExecutionFailed { .. } => {
+            StepEventKind::ExecutionFailed { .. }
+            | StepEventKind::ExecutionAborted { .. } => {
                 StepEventIsTerminal::Terminal { success: false }
             }
             StepEventKind::ExecutionStarted { .. }
@@ -444,7 +469,8 @@ impl<S: StepSpec> StepEventKind<S> {
             | StepEventKind::ExecutionStarted { .. }
             | StepEventKind::StepCompleted { .. }
             | StepEventKind::ExecutionCompleted { .. }
-            | StepEventKind::ExecutionFailed { .. } => StepEventPriority::High,
+            | StepEventKind::ExecutionFailed { .. }
+            | StepEventKind::ExecutionAborted { .. } => StepEventPriority::High,
             StepEventKind::ProgressReset { .. }
             | StepEventKind::AttemptRetry { .. }
             | StepEventKind::Unknown => StepEventPriority::Low,
@@ -567,6 +593,20 @@ impl<S: StepSpec> StepEventKind<S> {
                 message,
                 causes,
             },
+            StepEventKind::ExecutionAborted {
+                aborted_step,
+                attempt,
+                step_elapsed,
+                attempt_elapsed,
+                message,
+            } => StepEventKind::ExecutionAborted {
+                aborted_step: StepInfoWithMetadata::from_generic(aborted_step)
+                    .map_err(|error| error.parent("aborted_step"))?,
+                attempt,
+                step_elapsed,
+                attempt_elapsed,
+                message,
+            },
             StepEventKind::Nested {
                 step,
                 attempt,
@@ -686,6 +726,19 @@ impl<S: StepSpec> StepEventKind<S> {
                 message,
                 causes,
             },
+            StepEventKind::ExecutionAborted {
+                aborted_step,
+                attempt,
+                step_elapsed,
+                attempt_elapsed,
+                message,
+            } => StepEventKind::ExecutionAborted {
+                aborted_step: aborted_step.into_generic(),
+                attempt,
+                step_elapsed,
+                attempt_elapsed,
+                message,
+            },
             StepEventKind::Nested {
                 step,
                 attempt,
@@ -717,6 +770,7 @@ impl<S: StepSpec> StepEventKind<S> {
             | StepEventKind::ProgressReset { .. }
             | StepEventKind::AttemptRetry { .. }
             | StepEventKind::ExecutionFailed { .. }
+            | StepEventKind::ExecutionAborted { .. }
             | StepEventKind::Nested { .. }
             | StepEventKind::Unknown => None,
         }

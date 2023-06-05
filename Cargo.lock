@@ -8702,6 +8702,7 @@ dependencies = [
  "omicron-test-utils",
  "owo-colors",
  "petgraph",
+ "pin-project-lite",
  "schemars",
  "serde",
  "serde_json",
