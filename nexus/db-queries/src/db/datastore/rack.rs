@@ -17,6 +17,9 @@ use crate::db::collection_insert::DatastoreCollection;
 use crate::db::error::public_error_from_diesel_pool;
 use crate::db::error::ErrorHandler;
 use crate::db::error::TransactionError;
+use crate::db::fixed_data::vpc_subnet::DNS_VPC_SUBNET;
+use crate::db::fixed_data::vpc_subnet::NEXUS_VPC_SUBNET;
+use crate::db::fixed_data::vpc_subnet::NTP_VPC_SUBNET;
 use crate::db::identity::Asset;
 use crate::db::model::Dataset;
 use crate::db::model::IncompleteExternalIp;
@@ -31,6 +34,7 @@ use chrono::Utc;
 use diesel::prelude::*;
 use diesel::upsert::excluded;
 use nexus_db_model::ExternalIp;
+use nexus_db_model::IncompleteNetworkInterface;
 use nexus_db_model::InitialDnsGroup;
 use nexus_db_model::PasswordHashString;
 use nexus_db_model::SiloUser;
@@ -70,6 +74,7 @@ pub struct RackInit {
 #[derive(Debug)]
 enum RackInitError {
     AddingIp(Error),
+    AddingNic(Error),
     ServiceInsert(Error),
     DatasetInsert { err: AsyncInsertError, zpool_id: Uuid },
     RackUpdate { err: PoolError, rack_id: Uuid },
@@ -83,6 +88,7 @@ impl From<TxnError> for Error {
     fn from(e: TxnError) -> Self {
         match e {
             TxnError::CustomError(RackInitError::AddingIp(err)) => err,
+            TxnError::CustomError(RackInitError::AddingNic(err)) => err,
             TxnError::CustomError(RackInitError::DatasetInsert {
                 err,
                 zpool_id,
@@ -327,7 +333,7 @@ impl DataStore {
 
         // For services with external connectivity, we record their
         // explicit IP allocation and create a service NIC as well.
-        let service_ip = match service.kind {
+        let service_ip_nic = match service.kind {
             ServiceKind::ExternalDns { external_address, ref nic }
             | ServiceKind::Nexus { external_address, ref nic } => {
                 let db_ip = IncompleteExternalIp::for_service_explicit(
@@ -338,9 +344,28 @@ impl DataStore {
                     service_pool.id(),
                     external_address,
                 );
-                Some((external_address, db_ip))
+                let vpc_subnet = match service.kind {
+                    ServiceKind::ExternalDns { .. } => DNS_VPC_SUBNET.clone(),
+                    ServiceKind::Nexus { .. } => NEXUS_VPC_SUBNET.clone(),
+                    _ => unreachable!(),
+                };
+                let db_nic = IncompleteNetworkInterface::new_service(
+                    nic.id,
+                    service.service_id,
+                    vpc_subnet,
+                    IdentityMetadataCreateParams {
+                        name: nic.name.clone(),
+                        description: format!("{} service vNIC", service.kind),
+                    },
+                    Some(nic.ip),
+                    Some(nic.mac),
+                )
+                .map_err(|e| {
+                    TxnError::CustomError(RackInitError::AddingNic(e))
+                })?;
+                Some((external_address, db_ip, db_nic))
             }
-            ServiceKind::BoundaryNtp { snat, .. } => {
+            ServiceKind::BoundaryNtp { snat, ref nic } => {
                 let db_ip = IncompleteExternalIp::for_service_explicit_snat(
                     Uuid::new_v4(),
                     service.service_id,
@@ -348,11 +373,25 @@ impl DataStore {
                     snat.ip,
                     (snat.first_port, snat.last_port),
                 );
-                Some((snat.ip, db_ip))
+                let db_nic = IncompleteNetworkInterface::new_service(
+                    nic.id,
+                    service.service_id,
+                    NTP_VPC_SUBNET.clone(),
+                    IdentityMetadataCreateParams {
+                        name: nic.name.clone(),
+                        description: format!("{} service vNIC", service.kind),
+                    },
+                    Some(nic.ip),
+                    Some(nic.mac),
+                )
+                .map_err(|e| {
+                    TxnError::CustomError(RackInitError::AddingNic(e))
+                })?;
+                Some((snat.ip, db_ip, db_nic))
             }
             _ => None,
         };
-        if let Some((external_ip, db_ip)) = service_ip {
+        if let Some((external_ip, db_ip, db_nic)) = service_ip_nic {
             let allocated_ip =
                 Self::allocate_external_ip_on_connection(conn, db_ip)
                     .await
@@ -366,6 +405,22 @@ impl DataStore {
                         TxnError::CustomError(RackInitError::AddingIp(err))
                     })?;
             assert_eq!(allocated_ip.ip.ip(), external_ip);
+
+            self.create_network_interface_raw_conn(conn, db_nic)
+                .await
+                .map(|_| ())
+                .or_else(|e| {
+                    use db::queries::network_interface::InsertError;
+                    match e {
+                        InsertError::InterfaceAlreadyExists(
+                            _,
+                            db::model::NetworkInterfaceKind::Service,
+                        ) => Ok(()),
+                        _ => Err(TxnError::CustomError(
+                            RackInitError::AddingNic(e.into_external()),
+                        )),
+                    }
+                })?;
         }
 
         info!(log, "Inserted records for {} service", service.kind);

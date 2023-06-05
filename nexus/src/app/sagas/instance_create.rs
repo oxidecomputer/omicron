@@ -1462,10 +1462,12 @@ pub mod test {
 
     async fn no_network_interface_records_exist(datastore: &DataStore) -> bool {
         use crate::db::model::NetworkInterface;
+        use crate::db::model::NetworkInterfaceKind;
         use crate::db::schema::network_interface::dsl;
 
         dsl::network_interface
             .filter(dsl::time_deleted.is_null())
+            .filter(dsl::kind.eq(NetworkInterfaceKind::Instance))
             .select(NetworkInterface::as_select())
             .first_async::<NetworkInterface>(
                 datastore.pool_for_tests().await.unwrap(),
