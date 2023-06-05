@@ -435,6 +435,7 @@ async fn cmd_cert_create(args: &CertCreateArgs) -> Result<(), anyhow::Error> {
     Ok(())
 }
 
+#[cfg_attr(not(mac), allow(clippy::useless_conversion))]
 fn write_private_file(
     path: &Utf8Path,
     contents: &[u8],
@@ -444,7 +445,7 @@ fn write_private_file(
     let mut file = std::fs::OpenOptions::new()
         .write(true)
         .create_new(true)
-        .mode(perms.into())
+        .mode(perms.into()) // into() needed on mac only
         .open(path)
         .with_context(|| format!("open {:?} for writing", path))?;
     file.write_all(contents).with_context(|| format!("write to {:?}", path))
