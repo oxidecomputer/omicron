@@ -257,6 +257,7 @@ progenitor-client = { git = "https://github.com/oxidecomputer/progenitor", branc
 bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "78314ae5f74f951c03b0cb97b06f9bc28446bdb5" }
 propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "78314ae5f74f951c03b0cb97b06f9bc28446bdb5", features = [ "generated-migration" ] }
 propolis-server = { git = "https://github.com/oxidecomputer/propolis", rev = "78314ae5f74f951c03b0cb97b06f9bc28446bdb5", default-features = false, features = ["mock-only"] }
+#propolis-server = { path = "../propolis/bin/propolis-server" }
 proptest = "1.2.0"
 quote = "1.0"
 rand = "0.8.5"
