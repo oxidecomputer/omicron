@@ -932,20 +932,20 @@ dependencies = [
 
 [[package]]
 name = "clap"
-version = "4.3.0"
+version = "4.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "93aae7a4192245f70fe75dd9157fc7b4a5bf53e88d30bd4396f7d8f9284d5acc"
+checksum = "b4ed2379f8603fa2b7509891660e802b88c70a79a6427a70abb5968054de2c28"
 dependencies = [
  "clap_builder",
- "clap_derive 4.3.0",
+ "clap_derive 4.3.1",
  "once_cell",
 ]
 
 [[package]]
 name = "clap_builder"
-version = "4.3.0"
+version = "4.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4f423e341edefb78c9caba2d9c7f7687d0e72e89df3ce3394554754393ac3990"
+checksum = "72394f3339a76daf211e57d4bcb374410f3965dcc606dd0e03738c7888766980"
 dependencies = [
  "anstream",
  "anstyle",
@@ -969,9 +969,9 @@ dependencies = [
 
 [[package]]
 name = "clap_derive"
-version = "4.3.0"
+version = "4.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "191d9573962933b4027f932c600cd252ce27a8ad5979418fe78e43c07996f27b"
+checksum = "59e9ef9a08ee1c0e1f2e162121665ac45ac3783b0f897db7244ae75ad9a8f65b"
 dependencies = [
  "heck 0.4.1",
  "proc-macro2",
@@ -1870,7 +1870,7 @@ dependencies = [
  "anyhow",
  "camino",
  "chrono",
- "clap 4.3.0",
+ "clap 4.3.1",
  "dns-service-client",
  "dropshot",
  "expectorate",
@@ -2535,7 +2535,7 @@ name = "gateway-cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "clap 4.3.0",
+ "clap 4.3.1",
  "futures",
  "gateway-client",
  "gateway-messages",
@@ -3216,7 +3216,7 @@ dependencies = [
  "buf-list",
  "bytes",
  "camino",
- "clap 4.3.0",
+ "clap 4.3.1",
  "ddm-admin-client",
  "display-error-chain",
  "futures",
@@ -3278,7 +3278,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "camino",
- "clap 4.3.0",
+ "clap 4.3.1",
  "dropshot",
  "expectorate",
  "hyper",
@@ -4420,7 +4420,7 @@ name = "omicron-deploy"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "clap 4.3.0",
+ "clap 4.3.1",
  "crossbeam",
  "omicron-package",
  "omicron-sled-agent",
@@ -4439,7 +4439,7 @@ dependencies = [
  "anyhow",
  "camino",
  "camino-tempfile",
- "clap 4.3.0",
+ "clap 4.3.1",
  "dropshot",
  "expectorate",
  "futures",
@@ -4470,7 +4470,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "ciborium",
- "clap 4.3.0",
+ "clap 4.3.1",
  "crucible-smf",
  "dropshot",
  "expectorate",
@@ -4519,7 +4519,7 @@ dependencies = [
  "bb8",
  "camino",
  "chrono",
- "clap 4.3.0",
+ "clap 4.3.1",
  "cookie",
  "criterion",
  "crucible-agent-client",
@@ -4616,7 +4616,7 @@ name = "omicron-package"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "clap 4.3.0",
+ "clap 4.3.1",
  "expectorate",
  "futures",
  "hex",
@@ -4678,7 +4678,7 @@ dependencies = [
  "camino-tempfile",
  "cfg-if 1.0.0",
  "chrono",
- "clap 4.3.0",
+ "clap 4.3.1",
  "crucible-agent-client",
  "crucible-client-types",
  "ddm-admin-client",
@@ -5041,7 +5041,7 @@ dependencies = [
 name = "oximeter-collector"
 version = "0.1.0"
 dependencies = [
- "clap 4.3.0",
+ "clap 4.3.1",
  "dropshot",
  "expectorate",
  "futures",
@@ -5073,7 +5073,7 @@ dependencies = [
  "async-trait",
  "bytes",
  "chrono",
- "clap 4.3.0",
+ "clap 4.3.1",
  "dropshot",
  "itertools",
  "omicron-test-utils",
@@ -5919,7 +5919,7 @@ dependencies = [
  "bytes",
  "cfg-if 1.0.0",
  "chrono",
- "clap 4.3.0",
+ "clap 4.3.1",
  "const_format",
  "dropshot",
  "enum-iterator",
@@ -7497,7 +7497,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
- "clap 4.3.0",
+ "clap 4.3.1",
  "dropshot",
  "futures",
  "gateway-messages",
@@ -8426,7 +8426,7 @@ dependencies = [
  "assert_cmd",
  "camino",
  "chrono",
- "clap 4.3.0",
+ "clap 4.3.1",
  "console",
  "datatest-stable",
  "fs-err",
@@ -9057,7 +9057,7 @@ dependencies = [
  "buf-list",
  "camino",
  "ciborium",
- "clap 4.3.0",
+ "clap 4.3.1",
  "crossterm 0.26.1",
  "futures",
  "hex",
@@ -9115,7 +9115,7 @@ dependencies = [
  "bytes",
  "camino",
  "ciborium",
- "clap 4.3.0",
+ "clap 4.3.1",
  "crossterm 0.26.1",
  "reedline",
  "serde",
@@ -9138,7 +9138,7 @@ dependencies = [
  "bytes",
  "camino",
  "camino-tempfile",
- "clap 4.3.0",
+ "clap 4.3.1",
  "debug-ignore",
  "display-error-chain",
  "dropshot",
