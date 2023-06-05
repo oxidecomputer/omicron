@@ -207,6 +207,15 @@ impl super::Nexus {
             )
             .await?;
 
+        // Plumb the firewall rules for the built-in services
+        let svcs_vpc = db::lookup::LookupPath::new(opctx, &self.db_datastore)
+            .vpc_id(*db::fixed_data::vpc::SERVICES_VPC_ID);
+        let svcs_fw_rules =
+            self.vpc_list_firewall_rules(opctx, &svcs_vpc).await?;
+        let (_, _, _, svcs_vpc) = svcs_vpc.fetch().await?;
+        self.send_sled_agents_firewall_rules(opctx, &svcs_vpc, &svcs_fw_rules)
+            .await?;
+
         // We've potentially updated the list of DNS servers and the DNS
         // configuration for both internal and external DNS, plus the Silo
         // certificates.  Activate the relevant background tasks.
