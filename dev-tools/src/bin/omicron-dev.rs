@@ -444,7 +444,7 @@ fn write_private_file(
     let mut file = std::fs::OpenOptions::new()
         .write(true)
         .create_new(true)
-        .mode(perms)
+        .mode(perms.into())
         .open(path)
         .with_context(|| format!("open {:?} for writing", path))?;
     file.write_all(contents).with_context(|| format!("write to {:?}", path))
