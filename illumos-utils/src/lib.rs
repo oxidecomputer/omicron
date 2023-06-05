@@ -49,6 +49,9 @@ pub enum ExecutionError {
 
     #[error("{0}")]
     CommandFailure(Box<CommandFailureInfo>),
+
+    #[error("Failed to enter zone: {err}")]
+    ZoneEnter { err: std::io::Error },
 }
 
 // We wrap this method in an inner module to make it possible to mock
