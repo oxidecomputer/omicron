@@ -4,10 +4,9 @@
 
 //! Tests basic instance support in the API
 
-use super::metrics::query_for_latest_metric;
+use super::metrics::get_latest_system_metric;
 
 use camino::Utf8Path;
-use chrono::Utc;
 use http::method::Method;
 use http::StatusCode;
 use nexus_db_queries::context::OpContext;
@@ -742,38 +741,23 @@ async fn test_instance_metrics(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(virtual_provisioning_collection.cpus_provisioned, 0);
     assert_eq!(virtual_provisioning_collection.ram_provisioned.to_bytes(), 0);
 
-    // Query the view of these metrics stored within Clickhouse
-    let metric_url = |metric_type: &str, id: Uuid| {
-        format!(
-            "/v1/system/metrics/{metric_type}?start_time={:?}&end_time={:?}&id={id}",
-            cptestctx.start_time,
-            Utc::now(),
-        )
-    };
     oximeter.force_collect().await;
     for id in &[*SILO_ID, project_id] {
         assert_eq!(
-            query_for_latest_metric(
-                client,
-                &metric_url("virtual_disk_space_provisioned", *id),
+            get_latest_system_metric(
+                cptestctx,
+                "virtual_disk_space_provisioned",
+                *id,
             )
             .await,
             0
         );
         assert_eq!(
-            query_for_latest_metric(
-                client,
-                &metric_url("cpus_provisioned", *id),
-            )
-            .await,
+            get_latest_system_metric(cptestctx, "cpus_provisioned", *id).await,
             0
         );
         assert_eq!(
-            query_for_latest_metric(
-                client,
-                &metric_url("ram_provisioned", *id),
-            )
-            .await,
+            get_latest_system_metric(cptestctx, "ram_provisioned", *id).await,
             0
         );
     }
@@ -820,27 +804,20 @@ async fn test_instance_metrics(cptestctx: &ControlPlaneTestContext) {
     oximeter.force_collect().await;
     for id in &[*SILO_ID, project_id] {
         assert_eq!(
-            query_for_latest_metric(
-                client,
-                &metric_url("virtual_disk_space_provisioned", *id),
+            get_latest_system_metric(
+                cptestctx,
+                "virtual_disk_space_provisioned",
+                *id,
             )
             .await,
             0
         );
         assert_eq!(
-            query_for_latest_metric(
-                client,
-                &metric_url("cpus_provisioned", *id),
-            )
-            .await,
+            get_latest_system_metric(cptestctx, "cpus_provisioned", *id).await,
             expected_cpus
         );
         assert_eq!(
-            query_for_latest_metric(
-                client,
-                &metric_url("ram_provisioned", *id),
-            )
-            .await,
+            get_latest_system_metric(cptestctx, "ram_provisioned", *id).await,
             expected_ram
         );
     }
@@ -861,27 +838,20 @@ async fn test_instance_metrics(cptestctx: &ControlPlaneTestContext) {
     oximeter.force_collect().await;
     for id in &[*SILO_ID, project_id] {
         assert_eq!(
-            query_for_latest_metric(
-                client,
-                &metric_url("virtual_disk_space_provisioned", *id),
+            get_latest_system_metric(
+                cptestctx,
+                "virtual_disk_space_provisioned",
+                *id,
             )
             .await,
             0
         );
         assert_eq!(
-            query_for_latest_metric(
-                client,
-                &metric_url("cpus_provisioned", *id),
-            )
-            .await,
+            get_latest_system_metric(cptestctx, "cpus_provisioned", *id).await,
             0
         );
         assert_eq!(
-            query_for_latest_metric(
-                client,
-                &metric_url("ram_provisioned", *id),
-            )
-            .await,
+            get_latest_system_metric(cptestctx, "ram_provisioned", *id).await,
             0
         );
     }

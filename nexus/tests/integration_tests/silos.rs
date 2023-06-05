@@ -1822,7 +1822,7 @@ async fn test_jit_silo_constraints(cptestctx: &ControlPlaneTestContext) {
         client,
         StatusCode::NOT_FOUND,
         Method::POST,
-        "/login/jit/local",
+        "/v1/login/jit/local",
         &params::UsernamePasswordCredentials {
             username: params::UserId::from_str(admin_username).unwrap(),
             password: password.clone(),
@@ -1835,7 +1835,7 @@ async fn test_jit_silo_constraints(cptestctx: &ControlPlaneTestContext) {
         client,
         StatusCode::NOT_FOUND,
         Method::POST,
-        "/login/jit/local",
+        "/v1/login/jit/local",
         &params::UsernamePasswordCredentials {
             username: params::UserId::from_str("bogus").unwrap(),
             password: password.clone(),

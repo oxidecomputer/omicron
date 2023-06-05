@@ -11,6 +11,7 @@ use serde::Deserialize;
 use serde::Serialize;
 use std::fmt;
 use thiserror::Error;
+use update_engine::errors::NestedEngineError;
 use update_engine::StepSpec;
 
 #[derive(JsonSchema)]
@@ -41,8 +42,7 @@ pub enum UpdateStepId {
     TestStep,
     SetHostPowerState { state: PowerState },
     InterrogateRot,
-    ResetRot,
-    ResetSp,
+    InterrogateSp,
     SpComponentUpdate,
     SettingInstallinatorImageId,
     ClearingInstallinatorImageId,
@@ -65,6 +65,41 @@ impl StepSpec for WicketdEngineSpec {
 update_engine::define_update_engine!(pub WicketdEngineSpec);
 
 #[derive(JsonSchema)]
+pub enum TestStepSpec {}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum TestStepComponent {
+    Test,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum TestStepId {
+    Delay,
+    Stub,
+}
+
+#[derive(Debug, Error)]
+pub enum TestStepError {}
+
+impl update_engine::AsError for TestStepError {
+    fn as_error(&self) -> &(dyn std::error::Error + 'static) {
+        self
+    }
+}
+
+impl StepSpec for TestStepSpec {
+    type Component = TestStepComponent;
+    type StepId = TestStepId;
+    type StepMetadata = serde_json::Value;
+    type ProgressMetadata = serde_json::Value;
+    type CompletionMetadata = serde_json::Value;
+    type SkippedMetadata = serde_json::Value;
+    type Error = TestStepError;
+}
+
+#[derive(JsonSchema)]
 pub enum SpComponentUpdateSpec {}
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -73,6 +108,8 @@ pub enum SpComponentUpdateStepId {
     Sending,
     Preparing,
     Writing,
+    SettingActiveBootSlot,
+    Resetting,
 }
 
 impl StepSpec for SpComponentUpdateSpec {
@@ -82,7 +119,7 @@ impl StepSpec for SpComponentUpdateSpec {
     type ProgressMetadata = serde_json::Value;
     type CompletionMetadata = serde_json::Value;
     type SkippedMetadata = serde_json::Value;
-    type Error = UpdateTerminalError;
+    type Error = SpComponentUpdateTerminalError;
 }
 
 #[derive(Debug, Error)]
@@ -104,20 +141,25 @@ pub enum UpdateTerminalError {
         #[source]
         error: anyhow::Error,
     },
-    #[error("setting currently-active RoT slot failed")]
-    SetRotActiveSlotFailed {
-        #[source]
-        error: anyhow::Error,
+    #[error("error in test step")]
+    TestStepError {
+        #[from]
+        error: NestedEngineError<TestStepSpec>,
     },
-    #[error("resetting RoT failed")]
-    RotResetFailed {
-        #[source]
-        error: anyhow::Error,
+    #[error("error updating component")]
+    ComponentNestedError {
+        #[from]
+        error: NestedEngineError<SpComponentUpdateSpec>,
     },
-    #[error("SP reset failed")]
-    SpResetFailed {
+    #[error("getting RoT caboose failed")]
+    GetRotCabooseFailed {
         #[source]
-        error: anyhow::Error,
+        error: gateway_client::Error<gateway_client::types::Error>,
+    },
+    #[error("getting SP caboose failed")]
+    GetSpCabooseFailed {
+        #[source]
+        error: gateway_client::Error<gateway_client::types::Error>,
     },
     #[error("setting installinator image ID failed")]
     SetInstallinatorImageIdFailed {
@@ -135,18 +177,11 @@ pub enum UpdateTerminalError {
         #[source]
         error: gateway_client::Error<gateway_client::types::Error>,
     },
-    #[error(
-        "SP component update failed at stage \"{stage}\" for {}",
-        display_artifact_id(.artifact)
-    )]
-    SpComponentUpdateFailed {
-        stage: SpComponentUpdateStage,
-        artifact: ArtifactId,
-        #[source]
-        error: anyhow::Error,
-    },
-    #[error("failed to upload trampoline phase 2 to MGS (was a new TUF repo uploaded)?")]
-    // XXX should this carry an error message?
+    #[error("failed to upload trampoline phase 2 to MGS (was a new TUF repo uploaded?)")]
+    // Currently, the only way this error variant can be produced is if the
+    // upload task died or was replaced because a new TUF repository was
+    // uploaded. In the future, we may want to produce errors here if the upload
+    // to MGS fails too many times, for example.
     TrampolinePhase2UploadFailed,
     #[error("downloading installinator failed")]
     DownloadingInstallinatorFailed {
@@ -161,6 +196,41 @@ pub enum UpdateTerminalError {
 }
 
 impl update_engine::AsError for UpdateTerminalError {
+    fn as_error(&self) -> &(dyn std::error::Error + 'static) {
+        self
+    }
+}
+
+#[derive(Debug, Error)]
+pub enum SpComponentUpdateTerminalError {
+    #[error(
+        "SP component update failed at stage \"{stage}\" for {}",
+        display_artifact_id(.artifact)
+    )]
+    SpComponentUpdateFailed {
+        stage: SpComponentUpdateStage,
+        artifact: ArtifactId,
+        #[source]
+        error: anyhow::Error,
+    },
+    #[error("setting currently-active RoT slot failed")]
+    SetRotActiveSlotFailed {
+        #[source]
+        error: anyhow::Error,
+    },
+    #[error("resetting RoT failed")]
+    RotResetFailed {
+        #[source]
+        error: anyhow::Error,
+    },
+    #[error("SP reset failed")]
+    SpResetFailed {
+        #[source]
+        error: anyhow::Error,
+    },
+}
+
+impl update_engine::AsError for SpComponentUpdateTerminalError {
     fn as_error(&self) -> &(dyn std::error::Error + 'static) {
         self
     }

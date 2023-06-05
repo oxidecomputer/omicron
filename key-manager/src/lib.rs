@@ -11,8 +11,11 @@ use async_trait::async_trait;
 use hkdf::Hkdf;
 use secrecy::{ExposeSecret, Secret};
 use sha3::Sha3_256;
-use sled_hardware::DiskIdentity;
+use slog::{o, warn, Logger};
+use tokio::sync::{mpsc, oneshot};
 use zeroize::{Zeroize, ZeroizeOnDrop};
+
+use omicron_common::disk::DiskIdentity;
 
 /// Input Key Material
 ///
@@ -62,6 +65,8 @@ pub enum Error {
 #[derive(Zeroize, ZeroizeOnDrop, Default)]
 struct Aes256GcmDiskEncryptionKey(Box<[u8; 32]>);
 
+/// A Disk encryption key for a given epoch to be used with ZFS datasets for
+/// U.2 devices
 pub struct VersionedAes256GcmDiskEncryptionKey {
     epoch: u64,
     key: Secret<Aes256GcmDiskEncryptionKey>,
@@ -74,6 +79,63 @@ impl VersionedAes256GcmDiskEncryptionKey {
 
     pub fn expose_secret(&self) -> &[u8; 32] {
         &self.key.expose_secret().0
+    }
+}
+
+/// A request sent from a [`StorageKeyRequester`] to the [`KeyManager`].
+enum StorageKeyRequest {
+    GetKey {
+        epoch: u64,
+        disk_id: DiskIdentity,
+        responder:
+            oneshot::Sender<Result<VersionedAes256GcmDiskEncryptionKey, Error>>,
+    },
+    LoadLatestSecret {
+        responder: oneshot::Sender<Result<u64, Error>>,
+    },
+}
+
+/// A client of [`KeyManager`] that can request generation of storage related keys
+///
+/// The StorageKeyRequester only derives `Clone` because the `HardwareMonitor`
+/// requires it to get passed in and the `HardwareMonitor` gets recreated when
+/// the sled-agent starts. The `HardwareMonitor` gets the StorageKeyRequester
+/// from the bootstrap agent. If this changes, we should remove the `Clone` to
+/// limit who has access to the storage keys.
+#[derive(Clone)]
+pub struct StorageKeyRequester {
+    tx: mpsc::Sender<StorageKeyRequest>,
+}
+
+impl StorageKeyRequester {
+    /// Get a disk encryption key from the [`KeyManager`] for the given epoch
+    pub async fn get_key(
+        &self,
+        epoch: u64,
+        disk_id: DiskIdentity,
+    ) -> Result<VersionedAes256GcmDiskEncryptionKey, Error> {
+        let (tx, rx) = oneshot::channel();
+        self.tx
+            .send(StorageKeyRequest::GetKey { epoch, disk_id, responder: tx })
+            .await
+            .map_err(|e| e.to_string())
+            .expect("Failed to send GetKey request to KeyManager");
+
+        rx.await.expect("KeyManager bug (dropped responder without responding)")
+    }
+
+    /// Loads the rack secret for the latest epoch into the [`KeyManager`]
+    ///
+    /// Return the latest epoch on success
+    pub async fn load_latest_secret(&self) -> Result<u64, Error> {
+        let (tx, rx) = oneshot::channel();
+        self.tx
+            .send(StorageKeyRequest::LoadLatestSecret { responder: tx })
+            .await
+            .map_err(|e| e.to_string())
+            .expect("Failed to send LoadLatestSecret request to KeyManager");
+
+        rx.await.expect("KeyManager bug (dropped responder without responding)")
     }
 }
 
@@ -96,22 +158,75 @@ pub struct KeyManager<S: SecretRetriever> {
     /// reconfigurations before a node is no longer part of the trust quorum.
     /// This should most likely be a small number like `3`.
     prks: BTreeMap<u64, Hkdf<Sha3_256>>,
+
+    // Receives requests from a `StorageKeyRequester`, which is expected to run
+    // in the `StorageWorker` task.
+    storage_rx: mpsc::Receiver<StorageKeyRequest>,
+
+    log: Logger,
 }
 
 impl<S: SecretRetriever> KeyManager<S> {
-    pub fn new(secret_retriever: S) -> KeyManager<S> {
-        KeyManager { secret_retriever, prks: BTreeMap::new() }
+    pub fn new(
+        log: &Logger,
+        secret_retriever: S,
+    ) -> (KeyManager<S>, StorageKeyRequester) {
+        // There are up to 10 U.2 drives per sleds, but only one request should
+        // come in at a time from a single worker. We leave a small buffer for
+        // the possibility of asynchronous requests without responses that we
+        // may want to send in series.
+        let (tx, rx) = mpsc::channel(10);
+
+        let storage_key_requester = StorageKeyRequester { tx };
+        let key_manager = KeyManager {
+            secret_retriever,
+            prks: BTreeMap::new(),
+            storage_rx: rx,
+            log: log.new(o!("component" => "KeyManager")),
+        };
+
+        (key_manager, storage_key_requester)
+    }
+
+    /// Run the main receive loop of the `KeyManager`
+    ///
+    /// This should be spawned into a tokio task
+    pub async fn run(&mut self) {
+        loop {
+            if let Some(request) = self.storage_rx.recv().await {
+                use StorageKeyRequest::*;
+                match request {
+                    GetKey { epoch, disk_id, responder } => {
+                        let rsp =
+                            self.disk_encryption_key(epoch, &disk_id).await;
+                        let _ = responder.send(rsp);
+                    }
+                    LoadLatestSecret { responder } => {
+                        let rsp = self.load_latest_secret().await;
+                        let _ = responder.send(rsp);
+                    }
+                }
+            } else {
+                warn!(
+                    self.log,
+                    "Failed to receive from a storage key requester",
+                );
+            }
+        }
     }
 
     /// Load latest version of the input key material into the key manager.
-    pub async fn load_latest_secret(&mut self) -> Result<(), Error> {
+    ///
+    /// Return the latest epoch on success
+    async fn load_latest_secret(&mut self) -> Result<u64, Error> {
         let ikm = self.secret_retriever.get_latest().await?;
+        let epoch = ikm.epoch();
         self.insert_prk(ikm);
-        Ok(())
+        Ok(epoch)
     }
 
     /// Load input key material for the given epoch into the key manager.
-    pub async fn load_secret(&mut self, epoch: u64) -> Result<(), Error> {
+    async fn load_secret(&mut self, epoch: u64) -> Result<(), Error> {
         match self.secret_retriever.get(epoch).await? {
             SecretState::Current(ikm) => self.insert_prk(ikm),
             SecretState::Reconfiguration { old, new } => {
@@ -122,8 +237,8 @@ impl<S: SecretRetriever> KeyManager<S> {
         Ok(())
     }
 
-    /// Derive an encryption key for the given [`sled_hardware::DiskIdentity`]
-    pub async fn disk_encryption_key(
+    /// Derive an encryption key for the given [`DiskIdentity`]
+    async fn disk_encryption_key(
         &mut self,
         epoch: u64,
         disk_id: &DiskIdentity,
@@ -153,7 +268,8 @@ impl<S: SecretRetriever> KeyManager<S> {
     }
 
     /// Return the epochs for all secrets which are loaded
-    pub fn loaded_epochs(&self) -> Vec<u64> {
+    #[cfg(test)]
+    fn loaded_epochs(&self) -> Vec<u64> {
         self.prks.keys().copied().collect()
     }
 
@@ -162,7 +278,11 @@ impl<S: SecretRetriever> KeyManager<S> {
     /// TODO(AJS): From what I can tell, the internal PRKs inside
     /// Hkdf instances are not zeroized, and so will remain in memory
     /// after drop. We should fix this one way or another.
-    pub fn clear(&mut self) {
+    ///
+    /// TODO(AJS): We should have a timeout mechanism so that we can clear
+    /// unused secrets from memory.
+    #[allow(unused)]
+    fn clear(&mut self) {
         self.prks = BTreeMap::new();
     }
 
@@ -224,6 +344,11 @@ mod tests {
     use super::*;
     use std::collections::BTreeMap;
 
+    pub fn log() -> slog::Logger {
+        let drain = slog::Discard;
+        slog::Logger::root(drain, o!())
+    }
+
     pub struct TestSecretRetriever {
         ikms: BTreeMap<u64, [u8; 32]>,
     }
@@ -269,7 +394,7 @@ mod tests {
 
     #[tokio::test]
     async fn disk_encryption_key_epoch_0() {
-        let mut km = KeyManager::new(TestSecretRetriever::new());
+        let (mut km, _) = KeyManager::new(&log(), TestSecretRetriever::new());
         km.load_latest_secret().await.unwrap();
         let disk_id = DiskIdentity {
             vendor: "a".to_string(),
@@ -293,7 +418,7 @@ mod tests {
 
     #[tokio::test]
     async fn different_disks_produce_different_keys() {
-        let mut km = KeyManager::new(TestSecretRetriever::new());
+        let (mut km, _) = KeyManager::new(&log(), TestSecretRetriever::new());
         km.load_latest_secret().await.unwrap();
         let id_1 = DiskIdentity {
             vendor: "a".to_string(),
@@ -321,7 +446,7 @@ mod tests {
         // Load a distinct secret (IKM) for epoch 1
         retriever.insert(1, [1u8; 32]);
 
-        let mut km = KeyManager::new(retriever);
+        let (mut km, _) = KeyManager::new(&log(), retriever);
         km.load_latest_secret().await.unwrap();
         let disk_id = DiskIdentity {
             vendor: "a".to_string(),
@@ -343,7 +468,7 @@ mod tests {
         // Load a distinct secret (IKM) for epoch 1
         retriever.insert(1, [1u8; 32]);
 
-        let mut km = KeyManager::new(retriever);
+        let (mut km, _) = KeyManager::new(&log(), retriever);
 
         let disk_id = DiskIdentity {
             vendor: "a".to_string(),

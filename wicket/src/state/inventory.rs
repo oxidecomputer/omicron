@@ -13,8 +13,8 @@ use std::fmt::Display;
 use std::iter::Iterator;
 use tui::text::Text;
 use wicketd_client::types::{
-    RackV1Inventory, RotInventory, SpComponentCaboose, SpComponentInfo,
-    SpIgnition, SpState, SpType,
+    RackV1Inventory, RotInventory, RotSlot, SpComponentCaboose,
+    SpComponentInfo, SpIgnition, SpState, SpType,
 };
 
 pub static ALL_COMPONENT_IDS: Lazy<Vec<ComponentId>> = Lazy::new(|| {
@@ -59,7 +59,8 @@ impl Inventory {
             let sp = Sp {
                 ignition: sp.ignition,
                 state: sp.state,
-                caboose: sp.caboose,
+                caboose_active: sp.caboose_active,
+                caboose_inactive: sp.caboose_inactive,
                 components: sp.components,
                 rot: sp.rot,
             };
@@ -104,9 +105,10 @@ impl Inventory {
 pub struct Sp {
     ignition: Option<SpIgnition>,
     state: Option<SpState>,
-    caboose: Option<SpComponentCaboose>,
+    caboose_active: Option<SpComponentCaboose>,
+    caboose_inactive: Option<SpComponentCaboose>,
     components: Option<Vec<SpComponentInfo>>,
-    rot: RotInventory,
+    rot: Option<RotInventory>,
 }
 
 // XXX: Eventually a Sled will have a host component.
@@ -115,6 +117,10 @@ pub enum Component {
     Sled(Sp),
     Switch(Sp),
     Psc(Sp),
+}
+
+fn version_or_unknown(caboose: Option<&SpComponentCaboose>) -> String {
+    caboose.and_then(|c| c.version.as_deref()).unwrap_or("UNKNOWN").to_string()
 }
 
 impl Component {
@@ -126,23 +132,28 @@ impl Component {
         }
     }
 
-    pub fn sp_version(&self) -> String {
-        self.sp()
-            .caboose
-            .as_ref()
-            .and_then(|caboose| caboose.version.as_deref())
-            .unwrap_or("UNKNOWN")
-            .to_string()
+    pub fn sp_version_active(&self) -> String {
+        version_or_unknown(self.sp().caboose_active.as_ref())
     }
 
-    pub fn rot_version(&self) -> String {
-        self.sp()
-            .rot
-            .caboose
-            .as_ref()
-            .and_then(|caboose| caboose.version.as_deref())
-            .unwrap_or("UNKNOWN")
-            .to_string()
+    pub fn sp_version_inactive(&self) -> String {
+        version_or_unknown(self.sp().caboose_inactive.as_ref())
+    }
+
+    pub fn rot_active_slot(&self) -> Option<RotSlot> {
+        self.sp().rot.as_ref().map(|rot| rot.active)
+    }
+
+    pub fn rot_version_a(&self) -> String {
+        version_or_unknown(
+            self.sp().rot.as_ref().and_then(|rot| rot.caboose_a.as_ref()),
+        )
+    }
+
+    pub fn rot_version_b(&self) -> String {
+        version_or_unknown(
+            self.sp().rot.as_ref().and_then(|rot| rot.caboose_b.as_ref()),
+        )
     }
 }
 

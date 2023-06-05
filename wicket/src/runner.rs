@@ -25,6 +25,7 @@ use tokio::sync::mpsc::{
 use tokio::time::{interval, Duration};
 use tui::backend::CrosstermBackend;
 use tui::Terminal;
+use wicketd_client::types::AbortUpdateOptions;
 use wicketd_client::types::ClearUpdateStateOptions;
 use wicketd_client::types::StartUpdateOptions;
 use wicketd_client::types::UpdateTestError;
@@ -196,6 +197,21 @@ impl RunnerCore {
                     };
                     wicketd.tx.blocking_send(
                         wicketd::Request::StartUpdate { component_id, options },
+                    )?;
+                }
+            }
+            Action::AbortUpdate(component_id) => {
+                if let Some(wicketd) = wicketd {
+                    let test_error = get_update_test_error(
+                        "WICKET_TEST_ABORT_UPDATE_ERROR",
+                    )?;
+
+                    let options = AbortUpdateOptions {
+                        message: "Aborted by wicket user".to_owned(),
+                        test_error,
+                    };
+                    wicketd.tx.blocking_send(
+                        wicketd::Request::AbortUpdate { component_id, options },
                     )?;
                 }
             }

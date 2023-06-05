@@ -161,7 +161,7 @@ source.type = "local"
 source.paths = [
 	{ from = "smf/ntp/manifest", to = "/var/svc/manifest/site/ntp" },
 	{ from = "smf/ntp/method", to = "/var/svc/method" },
-	{ from = "smf/ntp/etc", to = "/etc/inet" },
+	{ from = "smf/ntp/etc", to = "/etc" },
 ]
 output.type = "zone"
 
@@ -264,10 +264,10 @@ source.repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "ae633485f570554455ce180acf0091db79d46850"
+source.commit = "772db05a071747014c9fdc3d18154e2c82940798"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/maghemite.sha256.txt
-source.sha256 = "efb6333f392278a49b7ae347857d83b9bb921f0a3a86ade6c8968ba0cd3da5a0"
+source.sha256 = "58c1973e39c0d97b63673ce3b1e184428e1f463d4f359830a81bd0fc24e04817"
 output.type = "tarball"
 
 [package.mg-ddm]
@@ -280,10 +280,10 @@ source.repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "ae633485f570554455ce180acf0091db79d46850"
+source.commit = "772db05a071747014c9fdc3d18154e2c82940798"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mg-ddm.sha256.txt
-source.sha256 = "bb4ce993eae149c7a94ae889b9c835a4415bd14c5f4fd45bd18d4bea2c197329"
+source.sha256 = "a57260b8daa39e0fdb3987c9f1ee8c466196cc84628f9af12705e0ae4f768457"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -300,8 +300,8 @@ only_for_targets.image = "standard"
 # 2. Copy dendrite.tar.gz from dendrite/out to omicron/out
 source.type = "prebuilt"
 source.repo = "dendrite"
-source.commit = "60a7c97d08d9fc26cda1e133f7f25e65895fe167"
-source.sha256 = "f4742daf8b26dc2977f5d2ff4ba8ccc9d7e06a620e019e09ba57c4b14854cc77"
+source.commit = "ca7ad51924dc55112c6cc2f1346e0737f71b6487"
+source.sha256 = "ea4f0ed28108a19a78870992342720ec1eeeaef4f299f968f41b967adffa9445"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -325,8 +325,8 @@ only_for_targets.image = "standard"
 # 2. Copy the output zone image from dendrite/out to omicron/out
 source.type = "prebuilt"
 source.repo = "dendrite"
-source.commit = "60a7c97d08d9fc26cda1e133f7f25e65895fe167"
-source.sha256 = "7c795ca9bc252efd6c5443e845ed6b1fa1f07a1971fda28b4b2c943c6efe0d33"
+source.commit = "ca7ad51924dc55112c6cc2f1346e0737f71b6487"
+source.sha256 = "a3bfee3802c98d206be49882d48c05ab52e764724b41ffb186000ea99265acda"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -343,8 +343,8 @@ only_for_targets.image = "standard"
 # 2. Copy dendrite.tar.gz from dendrite/out to omicron/out/dendrite-softnpu.tar.gz
 source.type = "prebuilt"
 source.repo = "dendrite"
-source.commit = "60a7c97d08d9fc26cda1e133f7f25e65895fe167"
-source.sha256 = "19fcb003b5070e0b8d029f015d2ba31a00518317bffa0fc24a58058e0ed5b32c"
+source.commit = "ca7ad51924dc55112c6cc2f1346e0737f71b6487"
+source.sha256 = "4ab19e871094a25410c629f191052eeb88bbb0c6ea294f92258962af056d36f9"
 output.type = "zone"
 output.intermediate_only = true
 

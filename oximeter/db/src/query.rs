@@ -10,6 +10,7 @@ use crate::{
     DATABASE_NAME, DATABASE_SELECT_FORMAT,
 };
 use chrono::{DateTime, Utc};
+use dropshot::PaginationOrder;
 use oximeter::types::{DatumType, FieldType, FieldValue};
 use oximeter::{Metric, Target};
 use regex::Regex;
@@ -37,6 +38,7 @@ pub struct SelectQueryBuilder {
     time_range: TimeRange,
     limit: Option<NonZeroU32>,
     offset: Option<u32>,
+    order: Option<PaginationOrder>,
 }
 
 impl SelectQueryBuilder {
@@ -48,6 +50,7 @@ impl SelectQueryBuilder {
             time_range: TimeRange { start: None, end: None },
             limit: None,
             offset: None,
+            order: None,
         }
     }
 
@@ -72,6 +75,12 @@ impl SelectQueryBuilder {
     /// Set the number of rows to skip in the result set.
     pub fn offset(mut self, offset: u32) -> Self {
         self.offset.replace(offset);
+        self
+    }
+
+    /// Set the order direction for the query
+    pub fn order(mut self, order: PaginationOrder) -> Self {
+        self.order.replace(order);
         self
     }
 
@@ -253,6 +262,7 @@ impl SelectQueryBuilder {
             time_range: self.time_range,
             limit: self.limit,
             offset: self.offset,
+            order: self.order.unwrap_or(PaginationOrder::Ascending),
         }
     }
 }
@@ -479,6 +489,7 @@ pub struct SelectQuery {
     time_range: TimeRange,
     limit: Option<NonZeroU32>,
     offset: Option<u32>,
+    order: PaginationOrder,
 }
 
 fn create_join_on_condition(columns: &[&str], current: usize) -> String {
@@ -620,6 +631,10 @@ impl SelectQuery {
             };
             clause
         };
+        let order_dir = match self.order {
+            PaginationOrder::Descending => "DESC ",
+            PaginationOrder::Ascending => "",
+        };
         format!(
             concat!(
                 "SELECT * ",
@@ -628,7 +643,7 @@ impl SelectQuery {
                 "timeseries_name = '{timeseries_name}'",
                 "{key_clause}",
                 "{timestamp_clause}",
-                "ORDER BY (timeseries_name, timeseries_key, timestamp) ",
+                "ORDER BY (timeseries_name, timeseries_key, timestamp) {order_dir}",
                 "{pagination_clause}",
                 "FORMAT {fmt};",
             ),
@@ -639,6 +654,7 @@ impl SelectQuery {
             key_clause = key_clause,
             timestamp_clause = self.time_range.as_query(),
             pagination_clause = pagination_clause,
+            order_dir = order_dir,
             fmt = DATABASE_SELECT_FORMAT,
         )
     }

@@ -2,6 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use std::borrow::Cow;
 use std::collections::BTreeMap;
 
 use super::{align_by, help_text, push_text_lines, Control};
@@ -27,11 +28,14 @@ use tui::widgets::{
     Row, Table,
 };
 use tui_tree_widget::{Tree, TreeItem, TreeState};
-use update_engine::{ExecutionStatus, StepKey};
-use wicket_common::update_events::{
-    EventBuffer, EventReport, StepOutcome, StepStatus, UpdateComponent,
+use update_engine::{
+    AbortReason, ExecutionStatus, StepKey, WillNotBeRunReason,
 };
-use wicketd_client::types::SemverVersion;
+use wicket_common::update_events::{
+    EventBuffer, EventReport, ProgressEvent, StepOutcome, StepStatus,
+    UpdateComponent,
+};
+use wicketd_client::types::{RotSlot, SemverVersion};
 
 const MAX_COLUMN_WIDTH: u16 = 25;
 
@@ -58,6 +62,7 @@ enum PopupKind {
     StartUpdate { popup_state: StartUpdatePopupState },
     StepLogs,
     Ignition,
+    AbortUpdate { popup_state: AbortUpdatePopupState },
     ClearUpdateState { popup_state: ClearUpdateStatePopupState },
 }
 
@@ -67,6 +72,7 @@ impl PopupKind {
             Self::StartUpdate { popup_state } => popup_state.is_scrollable(),
             Self::StepLogs => true,
             Self::Ignition => false,
+            Self::AbortUpdate { popup_state } => popup_state.is_scrollable(),
             Self::ClearUpdateState { popup_state } => {
                 popup_state.is_scrollable()
             }
@@ -82,6 +88,22 @@ enum StartUpdatePopupState {
 }
 
 impl StartUpdatePopupState {
+    fn is_scrollable(&self) -> bool {
+        match self {
+            Self::Prompting | Self::Waiting => false,
+            Self::Failed { .. } => true,
+        }
+    }
+}
+
+#[derive(Debug)]
+enum AbortUpdatePopupState {
+    Prompting,
+    Waiting,
+    Failed { message: String },
+}
+
+impl AbortUpdatePopupState {
     fn is_scrollable(&self) -> bool {
         match self {
             Self::Prompting | Self::Waiting => false,
@@ -112,6 +134,7 @@ pub struct UpdatePane {
     log: Logger,
     help: Vec<(&'static str, &'static str)>,
     not_started_help: Vec<(&'static str, &'static str)>,
+    running_help: Vec<(&'static str, &'static str)>,
     completed_help: Vec<(&'static str, &'static str)>,
 
     /// TODO: Move following  state into global `State` so that recorder snapshots
@@ -160,6 +183,7 @@ impl UpdatePane {
                 ("Update", "<Enter>"),
             ],
             not_started_help: vec![("Start", "<Ctrl-U>")],
+            running_help: vec![("Abort", "<Ctrl-Alt-A>")],
             completed_help: vec![("Clear", "<Ctrl-Alt-R>")],
             component_state: ALL_COMPONENT_IDS
                 .iter()
@@ -243,38 +267,9 @@ impl UpdatePane {
 
                 body.lines.push(Spans::default());
 
-                let mut progress_spans = Vec::new();
-                if let Some(progress) = progress_event.kind.progress_counter() {
-                    progress_spans
-                        .push(Span::styled("Progress: ", style::selected()));
-                    let current = progress.current;
-                    progress_spans.push(Span::styled(
-                        format!("{current}"),
-                        style::plain_text_bold(),
-                    ));
-                    if let Some(total) = progress.total {
-                        progress_spans
-                            .push(Span::styled("/", style::plain_text()));
-                        progress_spans.push(Span::styled(
-                            format!("{total}"),
-                            style::plain_text_bold(),
-                        ));
-                    }
-                    // TODO: progress units
-                    // TODO: show a progress bar?
-                } else {
-                    progress_spans.push(Span::raw("Waiting for progress"));
-                }
-                if let Some(step_elapsed) =
-                    progress_event.kind.leaf_step_elapsed()
-                {
-                    progress_spans.push(Span::styled(
-                        format!(" (at {step_elapsed:.2?})"),
-                        style::plain_text(),
-                    ));
-                }
-
-                body.lines.push(Spans::from(progress_spans));
+                let progress_spans =
+                    progress_event_spans(progress_event, "Progress:");
+                body.lines.push(progress_spans);
 
                 // TODO: show previous attempts
             }
@@ -387,22 +382,109 @@ impl UpdatePane {
                 ];
                 body.lines.push(Spans::from(spans));
             }
-            StepStatus::WillNotBeRun { step_that_failed } => {
+            StepStatus::Aborted {
+                reason: AbortReason::StepAborted(info),
+                last_progress,
+            } => {
                 let mut spans = vec![
                     Span::styled("Status: ", style::selected()),
-                    Span::styled("Will not be run", style::plain_text_bold()),
+                    Span::styled("Aborted", style::failed_update_bold()),
                 ];
-                if let Some(value) = id_state.event_buffer.get(step_that_failed)
-                {
+                if info.attempt > 1 {
+                    // Display the attempt number.
                     spans.push(Span::styled(
-                        " because step ",
+                        " (at attempt ",
+                        style::plain_text(),
+                    ));
+                    spans.push(Span::styled(
+                        format!("{}", info.attempt),
+                        style::plain_text(),
+                    ));
+                    spans.push(Span::styled(")", style::plain_text()));
+                }
+                spans.push(Span::styled(
+                    format!(" after {:.2?}", info.step_elapsed),
+                    style::plain_text(),
+                ));
+                body.lines.push(Spans::from(spans));
+
+                body.lines.push(Spans::default());
+
+                // Show the message.
+                let prefix = vec![Span::styled("Message: ", style::selected())];
+                push_text_lines(&info.message, prefix, &mut body.lines);
+
+                // Show last progress if available.
+                if let Some(last_progress) = last_progress {
+                    let progress_spans =
+                        progress_event_spans(last_progress, "Last progress:");
+                    body.lines.push(Spans::default());
+                    body.lines.push(progress_spans);
+                }
+            }
+            StepStatus::Aborted {
+                reason: AbortReason::ParentAborted { parent_step },
+                last_progress,
+            } => {
+                let mut spans = vec![
+                    Span::styled("Status: ", style::selected()),
+                    Span::styled("Aborted", style::failed_update_bold()),
+                ];
+                if let Some(value) = id_state.event_buffer.get(parent_step) {
+                    spans.push(Span::styled(
+                        " at parent step ",
                         style::plain_text(),
                     ));
                     spans.push(Span::styled(
                         value.step_info().description.as_ref(),
                         style::selected(),
                     ));
-                    spans.push(Span::styled(" failed", style::plain_text()));
+                }
+                body.lines.push(Spans::from(spans));
+
+                // Show last progress if available.
+                if let Some(last_progress) = last_progress {
+                    let progress_spans =
+                        progress_event_spans(last_progress, "Last progress:");
+                    body.lines.push(Spans::default());
+                    body.lines.push(progress_spans);
+                }
+            }
+            StepStatus::WillNotBeRun { reason } => {
+                let mut spans = vec![
+                    Span::styled("Status: ", style::selected()),
+                    Span::styled("Will not be run", style::plain_text_bold()),
+                ];
+
+                let (step, preceding_desc, following_desc) = match reason {
+                    WillNotBeRunReason::PreviousStepFailed { step } => {
+                        (step, "previous step", Some("failed"))
+                    }
+                    WillNotBeRunReason::ParentStepFailed { step } => {
+                        (step, "parent step", Some("failed"))
+                    }
+                    WillNotBeRunReason::PreviousStepAborted { step } => {
+                        (step, "aborted at previous step", None)
+                    }
+                    WillNotBeRunReason::ParentAborted { step } => {
+                        (step, "aborted at parent step", None)
+                    }
+                };
+                if let Some(value) = id_state.event_buffer.get(step) {
+                    spans.push(Span::styled(
+                        format!("; {preceding_desc} "),
+                        style::plain_text(),
+                    ));
+                    spans.push(Span::styled(
+                        value.step_info().description.as_ref(),
+                        style::selected(),
+                    ));
+                    if let Some(following_desc) = following_desc {
+                        spans.push(Span::styled(
+                            format!(" {following_desc}"),
+                            style::plain_text(),
+                        ));
+                    };
                 }
                 body.lines.push(Spans::from(spans));
             }
@@ -501,6 +583,113 @@ impl UpdatePane {
         let popup_builder = PopupBuilder {
             header: Spans::from(vec![Span::styled(
                 format!("START UPDATE FAILED: {}", state.rack_state.selected),
+                style::failed_update(),
+            )]),
+            body,
+            buttons: vec![ButtonText::new("Close", "Esc")],
+        };
+        let full_screen = Rect {
+            width: state.screen_width,
+            height: state.screen_height,
+            x: 0,
+            y: 0,
+        };
+
+        let popup = popup_builder.build(full_screen, scroll_kind);
+        let actual_scroll_kind = popup.actual_scroll_kind();
+        frame.render_widget(popup, full_screen);
+        actual_scroll_kind
+    }
+
+    pub fn draw_abort_update_prompting_popup(
+        &mut self,
+        state: &State,
+        frame: &mut Frame<'_>,
+        scroll_kind: PopupScrollKind,
+    ) -> PopupScrollKind {
+        let mut body = Text::default();
+        body.lines.push(Spans::from(vec![Span::styled(
+            "Would you like to abort this update?",
+            style::plain_text(),
+        )]));
+        body.lines.push(Spans::from(Vec::new()));
+        body.lines.push(Spans::from(vec![
+            Span::styled("Warning: ", style::warning_update()),
+            Span::styled(
+                "This might result in an inconsistent state. \
+                Reset via ignition afterwards if necessary.",
+                style::plain_text(),
+            ),
+        ]));
+
+        let popup_builder = PopupBuilder {
+            header: Spans::from(vec![Span::styled(
+                format!("ABORT UPDATE: {}", state.rack_state.selected),
+                style::header(true),
+            )]),
+            body,
+            buttons: vec![
+                ButtonText::new("Yes", "Y"),
+                ButtonText::new("No", "N"),
+            ],
+        };
+        let full_screen = Rect {
+            width: state.screen_width,
+            height: state.screen_height,
+            x: 0,
+            y: 0,
+        };
+
+        let popup = popup_builder.build(full_screen, scroll_kind);
+        let actual_scroll_kind = popup.actual_scroll_kind();
+        frame.render_widget(popup, full_screen);
+        actual_scroll_kind
+    }
+
+    fn draw_abort_update_waiting_popup(
+        &self,
+        state: &State,
+        frame: &mut Frame<'_>,
+        scroll_kind: PopupScrollKind,
+    ) -> PopupScrollKind {
+        let popup_builder = PopupBuilder {
+            header: Spans::from(vec![Span::styled(
+                format!("ABORT UPDATE: {}", state.rack_state.selected),
+                style::header(true),
+            )]),
+            body: Text::from(vec![Spans::from(vec![Span::styled(
+                "Waiting for update to be aborted",
+                style::plain_text(),
+            )])]),
+            buttons: Vec::new(),
+        };
+        let full_screen = Rect {
+            width: state.screen_width,
+            height: state.screen_height,
+            x: 0,
+            y: 0,
+        };
+
+        let popup = popup_builder.build(full_screen, scroll_kind);
+        let actual_scroll_kind = popup.actual_scroll_kind();
+        frame.render_widget(popup, full_screen);
+        actual_scroll_kind
+    }
+
+    fn draw_abort_update_failed_popup(
+        &self,
+        state: &State,
+        message: &str,
+        frame: &mut Frame<'_>,
+        scroll_kind: PopupScrollKind,
+    ) -> PopupScrollKind {
+        let mut body = Text::default();
+        let prefix = vec![Span::styled("Message: ", style::selected())];
+        push_text_lines(message, prefix, &mut body.lines);
+
+        let popup_builder = PopupBuilder {
+            header: Spans::from(vec![Span::styled(
+                format!("ABORT UPDATE FAILED: {}", state.rack_state.selected),
                 style::failed_update(),
             )]),
             body,
@@ -623,29 +812,29 @@ impl UpdatePane {
             .map(|(id, states)| {
                 let children: Vec<_> = states
                     .iter()
-                    .map(|(component, s)| {
+                    .flat_map(|(component, s)| {
                         let target_version =
                             artifact_version(id, component, &versions);
-                        let installed_version =
-                            installed_version(id, component, inventory);
-                        let spans = vec![
-                            Span::styled(
-                                update_component_title(component),
-                                style::selected(),
-                            ),
-                            Span::styled(
-                                installed_version,
-                                style::selected_line(),
-                            ),
-                            Span::styled(target_version, style::selected()),
-                            Span::styled(s.to_string(), s.style()),
-                        ];
-                        TreeItem::new_leaf(align_by(
-                            0,
-                            MAX_COLUMN_WIDTH,
-                            self.contents_rect,
-                            spans,
-                        ))
+                        let installed_versions =
+                            all_installed_versions(id, component, inventory);
+                        let contents_rect = self.contents_rect;
+                        installed_versions.into_iter().map(move |v| {
+                            let spans = vec![
+                                Span::styled(v.title, style::selected()),
+                                Span::styled(v.version, style::selected_line()),
+                                Span::styled(
+                                    target_version.clone(),
+                                    style::selected(),
+                                ),
+                                Span::styled(s.to_string(), s.style()),
+                            ];
+                            TreeItem::new_leaf(align_by(
+                                0,
+                                MAX_COLUMN_WIDTH,
+                                contents_rect,
+                                spans,
+                            ))
+                        })
                     })
                     .collect();
                 TreeItem::new(*id, children)
@@ -759,6 +948,7 @@ impl UpdatePane {
                     | UpdateItemState::RunningOrCompleted { .. } => None,
                 }
             }
+            Cmd::AbortUpdate => self.handle_abort_update(state),
             Cmd::ClearUpdateState => self.handle_clear_update_state(state),
             Cmd::GotoTop => {
                 let id_state = self
@@ -777,6 +967,47 @@ impl UpdatePane {
                 Some(Action::Redraw)
             }
             _ => None,
+        }
+    }
+
+    fn handle_abort_update(&mut self, state: &mut State) -> Option<Action> {
+        let selected = state.rack_state.selected;
+        match state.update_state.item_state(selected) {
+            UpdateItemState::RunningOrCompleted { .. } => {
+                let id_state = self.component_state.get(&selected).unwrap();
+                let event_buffer = &id_state.event_buffer;
+                if let Some(root_execution_id) =
+                    event_buffer.root_execution_id()
+                {
+                    let summary = event_buffer.steps().summarize();
+                    let summary = summary.get(&root_execution_id).expect(
+                        "root execution ID should have a summary \
+                            associated with it",
+                    );
+                    match summary.execution_status {
+                        ExecutionStatus::Running { .. } => {
+                            // If execution is still running, we can abort it.
+                            self.popup = Some(UpdatePanePopup::new(
+                                PopupKind::AbortUpdate {
+                                    popup_state:
+                                        AbortUpdatePopupState::Prompting,
+                                },
+                            ));
+                            Some(Action::Redraw)
+                        }
+
+                        ExecutionStatus::NotStarted
+                        | ExecutionStatus::Completed { .. }
+                        | ExecutionStatus::Failed { .. }
+                        | ExecutionStatus::Aborted { .. } => None,
+                    }
+                } else {
+                    None
+                }
+            }
+            UpdateItemState::AwaitingRepository
+            | UpdateItemState::NotStarted
+            | UpdateItemState::UpdateStarted => None,
         }
     }
 
@@ -799,7 +1030,8 @@ impl UpdatePane {
                     );
                     match summary.execution_status {
                         ExecutionStatus::Completed { .. }
-                        | ExecutionStatus::Failed { .. } => {
+                        | ExecutionStatus::Failed { .. }
+                        | ExecutionStatus::Aborted { .. } => {
                             // If execution has reached a terminal
                             // state, we can clear it.
                             self.popup = Some(UpdatePanePopup::new(
@@ -959,6 +1191,64 @@ impl UpdatePane {
                     _ => None,
                 }
             }
+            PopupKind::AbortUpdate { popup_state } => {
+                match (popup_state, cmd) {
+                    (
+                        popup_state @ AbortUpdatePopupState::Prompting,
+                        Cmd::Yes,
+                    ) => {
+                        // Trigger the update
+                        let selected = state.rack_state.selected;
+                        info!(self.log, "Aborting update for {}", selected);
+                        *popup_state = AbortUpdatePopupState::Waiting;
+                        Some(Action::AbortUpdate(selected))
+                    }
+                    (AbortUpdatePopupState::Prompting, Cmd::No) => {
+                        self.popup = None;
+                        Some(Action::Redraw)
+                    }
+                    (
+                        popup_state,
+                        Cmd::ShowPopup(ShowPopupCmd::AbortUpdateResponse {
+                            component_id,
+                            response,
+                        }),
+                    ) => {
+                        let component_id_matches =
+                            state.rack_state.selected == component_id;
+                        match (component_id_matches, response) {
+                            (true, Ok(())) => {
+                                // We're done waiting, close the popup.
+                                self.popup = None;
+                                Some(Action::Redraw)
+                            }
+                            (true, Err(message)) => {
+                                *popup_state =
+                                    AbortUpdatePopupState::Failed { message };
+                                Some(Action::Redraw)
+                            }
+                            (false, _) => {
+                                // This message isn't meant for this component.
+                                // It's a bit of a weird situation (we should
+                                // only be making one abort-update request at a
+                                // time, and shouldn't let
+                                // state.rack_state.selected be changed in the
+                                // meantime) so log this.
+                                slog::warn!(
+                                    self.log,
+                                    "currently waiting on abort update \
+                                    response for {}, but received response \
+                                    for {component_id}",
+                                    state.rack_state.selected
+                                );
+                                None
+                            }
+                        }
+                    }
+                    _ => None,
+                }
+            }
+
             PopupKind::ClearUpdateState { popup_state } => {
                 // The popup state doesn't matter here.
                 match cmd {
@@ -1058,7 +1348,7 @@ impl UpdatePane {
                 Span::styled("STATUS", header_style),
             ],
         ))
-        .block(block.clone());
+        .block(block.clone().title("OVERVIEW (* = active)"));
         frame.render_widget(headers, self.table_headers_rect);
 
         // Need to refresh the items, as their versions/state may have changed
@@ -1125,7 +1415,7 @@ impl UpdatePane {
                     .style(header_style),
             )
             .widths(&width_constraints)
-            .block(block.clone().title("OVERVIEW"));
+            .block(block.clone().title("OVERVIEW (* = active)"));
         frame.render_widget(header_table, self.table_headers_rect);
 
         // For the selected item, draw the version table.
@@ -1133,26 +1423,28 @@ impl UpdatePane {
         let item_state = &state.update_state.items[&selected];
 
         let version_rows =
-            item_state.iter().map(|(component, update_state)| {
+            item_state.iter().flat_map(|(component, update_state)| {
                 let target_version = artifact_version(
                     &state.rack_state.selected,
                     component,
                     versions,
                 );
-                let installed_version = installed_version(
+                let installed_versions = all_installed_versions(
                     &state.rack_state.selected,
                     component,
                     inventory,
                 );
 
-                Row::new(vec![
-                    Cell::from(update_component_title(component))
-                        .style(style::selected()),
-                    Cell::from(installed_version).style(style::selected_line()),
-                    Cell::from(target_version).style(style::selected()),
-                    Cell::from(update_state.to_string())
-                        .style(update_state.style()),
-                ])
+                installed_versions.into_iter().map(move |v| {
+                    Row::new(vec![
+                        Cell::from(v.title).style(style::selected()),
+                        Cell::from(v.version).style(style::selected_line()),
+                        Cell::from(target_version.clone())
+                            .style(style::selected()),
+                        Cell::from(update_state.to_string())
+                            .style(update_state.style()),
+                    ])
+                })
             });
         let version_table =
             Table::new(version_rows).widths(&width_constraints).block(
@@ -1286,6 +1578,9 @@ impl UpdatePane {
                 .highlight_style(style::highlighted());
 
                 let help_text = match id_state.show_help {
+                    Some(ComponentUpdateShowHelp::Running) => {
+                        Some(help_text(&self.running_help))
+                    }
                     Some(ComponentUpdateShowHelp::Completed) => {
                         Some(help_text(&self.completed_help))
                     }
@@ -1306,6 +1601,42 @@ impl UpdatePane {
             }
         }
     }
+}
+
+fn progress_event_spans(
+    progress_event: &ProgressEvent,
+    header: &str,
+) -> Spans<'static> {
+    let mut progress_spans = Vec::new();
+    progress_spans.push(Span::styled(header.to_owned(), style::selected()));
+    progress_spans.push(Span::raw(" "));
+
+    if let Some(progress) = progress_event.kind.progress_counter() {
+        let current = progress.current;
+        progress_spans
+            .push(Span::styled(format!("{current}"), style::plain_text_bold()));
+        if let Some(total) = progress.total {
+            progress_spans.push(Span::styled("/", style::plain_text()));
+            progress_spans.push(Span::styled(
+                format!("{total}"),
+                style::plain_text_bold(),
+            ));
+        }
+        // TODO: progress units
+        // TODO: show a progress bar?
+    } else {
+        progress_spans
+            .push(Span::styled("Waiting for progress", style::plain_text()));
+    }
+
+    if let Some(step_elapsed) = progress_event.kind.leaf_step_elapsed() {
+        progress_spans.push(Span::styled(
+            format!(" (at {step_elapsed:.2?})"),
+            style::plain_text(),
+        ));
+    }
+
+    Spans(progress_spans)
 }
 
 struct ComponentForceUpdateSelectionState {
@@ -1339,7 +1670,7 @@ impl From<&'_ State> for ForceUpdateSelectionState {
             let artifact_version =
                 artifact_version(&component_id, component, versions);
             let installed_version =
-                installed_version(&component_id, component, inventory);
+                active_installed_version(&component_id, component, inventory);
             match component {
                 UpdateComponent::Rot => {
                     assert!(
@@ -1527,7 +1858,7 @@ impl ComponentUpdateListState {
                         ),
                         style::plain_text(),
                     ));
-                    None
+                    Some(ComponentUpdateShowHelp::Running)
                 }
                 ExecutionStatus::Completed { .. } => {
                     status_text
@@ -1543,6 +1874,23 @@ impl ComponentUpdateListState {
                         .push(Span::styled("Update ", style::plain_text()));
                     status_text.push(Span::styled(
                         "failed",
+                        style::failed_update_bold(),
+                    ));
+                    status_text.push(Span::styled(
+                        format!(
+                            " at step {}/{}",
+                            step_key.index + 1,
+                            summary.total_steps,
+                        ),
+                        style::plain_text(),
+                    ));
+                    Some(ComponentUpdateShowHelp::Completed)
+                }
+                ExecutionStatus::Aborted { step_key } => {
+                    status_text
+                        .push(Span::styled("Update ", style::plain_text()));
+                    status_text.push(Span::styled(
+                        "aborted",
                         style::failed_update_bold(),
                     ));
                     status_text.push(Span::styled(
@@ -1633,6 +1981,14 @@ impl ComponentUpdateListState {
                     item_spans.push(Span::styled(
                         format!("{:>5} ", "✘"),
                         style::failed_update(),
+                    ));
+                    style::selected()
+                }
+                StepStatus::Aborted { .. } => {
+                    // Exclamation mark is probably the best we can do.
+                    item_spans.push(Span::styled(
+                        format!("{:>5} ", "!"),
+                        style::failed_update_bold(),
                     ));
                     style::selected()
                 }
@@ -1749,11 +2105,13 @@ impl ComponentUpdateListState {
 /// The kind of help text to display under the component update.
 #[derive(Clone, Copy, Debug)]
 enum ComponentUpdateShowHelp {
+    /// Show running help text.
+    Running,
     /// Show completed or failed help text.
     Completed,
 }
 
-fn installed_version(
+fn active_installed_version(
     id: &ComponentId,
     update_component: UpdateComponent,
     inventory: &Inventory,
@@ -1762,16 +2120,94 @@ fn installed_version(
     match update_component {
         UpdateComponent::Sp => component.map_or_else(
             || "UNKNOWN".to_string(),
-            |component| component.sp_version(),
+            |component| component.sp_version_active(),
         ),
         UpdateComponent::Rot => component.map_or_else(
             || "UNKNOWN".to_string(),
-            |component| component.rot_version(),
+            |component| match component.rot_active_slot() {
+                Some(RotSlot::A) => component.rot_version_a(),
+                Some(RotSlot::B) => component.rot_version_b(),
+                None => return "UNKNOWN".to_string(),
+            },
         ),
         UpdateComponent::Host => {
             // We currently have no way to tell what version of host software is
             // installed.
             "-----".to_string()
+        }
+    }
+}
+
+struct InstalledVersion {
+    title: Cow<'static, str>,
+    version: Cow<'static, str>,
+}
+
+fn all_installed_versions(
+    id: &ComponentId,
+    update_component: UpdateComponent,
+    inventory: &Inventory,
+) -> Vec<InstalledVersion> {
+    let base_title = update_component_title(update_component);
+    let component = inventory.get_inventory(id);
+    match update_component {
+        UpdateComponent::Sp => component.map_or_else(
+            || {
+                vec![InstalledVersion {
+                    title: base_title.into(),
+                    version: "UNKNOWN".into(),
+                }]
+            },
+            |component| {
+                vec![
+                    InstalledVersion {
+                        title: format!("{base_title}/0 *").into(),
+                        version: component.sp_version_active().into(),
+                    },
+                    InstalledVersion {
+                        title: format!("{base_title}/1").into(),
+                        version: component.sp_version_inactive().into(),
+                    },
+                ]
+            },
+        ),
+        UpdateComponent::Rot => component.map_or_else(
+            || {
+                vec![InstalledVersion {
+                    title: base_title.into(),
+                    version: "UNKNOWN".into(),
+                }]
+            },
+            |component| {
+                let Some(active) = component.rot_active_slot() else {
+                    return vec![InstalledVersion {
+                        title: base_title.into(),
+                        version: "UNKNOWN".into(),
+                    }];
+                };
+                let (active_a, active_b) = match active {
+                    RotSlot::A => (" *", ""),
+                    RotSlot::B => ("", " *"),
+                };
+                vec![
+                    InstalledVersion {
+                        title: format!("{base_title}/A{active_a}").into(),
+                        version: component.rot_version_a().into(),
+                    },
+                    InstalledVersion {
+                        title: format!("{base_title}/B{active_b}").into(),
+                        version: component.rot_version_b().into(),
+                    },
+                ]
+            },
+        ),
+        UpdateComponent::Host => {
+            // We currently have no way to tell what version of host software is
+            // installed.
+            vec![InstalledVersion {
+                title: base_title.into(),
+                version: "-----".into(),
+            }]
         }
     }
 }
@@ -1844,7 +2280,7 @@ impl Control for UpdatePane {
                 [
                     Constraint::Length(3),
                     Constraint::Length(3),
-                    Constraint::Length(4),
+                    Constraint::Length(6),
                     Constraint::Min(0),
                     Constraint::Length(3),
                 ]
@@ -1959,6 +2395,27 @@ impl Control for UpdatePane {
                         ),
                     StartUpdatePopupState::Failed { message } => self
                         .draw_start_update_failed_popup(
+                            state,
+                            &message,
+                            frame,
+                            popup.scroll_kind,
+                        ),
+                },
+                PopupKind::AbortUpdate { popup_state } => match popup_state {
+                    AbortUpdatePopupState::Prompting => self
+                        .draw_abort_update_prompting_popup(
+                            state,
+                            frame,
+                            popup.scroll_kind,
+                        ),
+                    AbortUpdatePopupState::Waiting => self
+                        .draw_abort_update_waiting_popup(
+                            state,
+                            frame,
+                            popup.scroll_kind,
+                        ),
+                    AbortUpdatePopupState::Failed { message } => self
+                        .draw_abort_update_failed_popup(
                             state,
                             &message,
                             frame,

@@ -16,6 +16,7 @@ use nexus_test_utils::resource_helpers::DiskTest;
 use nexus_test_utils::RACK_UUID;
 use nexus_test_utils::SLED_AGENT_UUID;
 use nexus_test_utils::SWITCH_UUID;
+use omicron_common::api::external::AddressLotKind;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::IdentityMetadataUpdateParams;
@@ -387,7 +388,7 @@ lazy_static! {
         "/v1/system/networking/switch-port-settings?port_settings=portofino"
     );
     pub static ref DEMO_SWITCH_PORT_SETTINGS_INFO_URL: String =
-        format!("/v1/system/networking/switch-port-settings/protofino/info");
+        format!("/v1/system/networking/switch-port-settings/protofino");
     pub static ref DEMO_SWITCH_PORT_SETTINGS_CREATE: params::SwitchPortSettingsCreate =
         params::SwitchPortSettingsCreate::new(IdentityMetadataCreateParams {
             name: "portofino".parse().unwrap(),
@@ -408,7 +409,7 @@ lazy_static! {
                 name: "parkinglot".parse().unwrap(),
                 description: "an address parking lot".into(),
             },
-            kind: params::AddressLotKind::Infra,
+            kind: AddressLotKind::Infra,
             blocks: vec![params::AddressLotBlockCreate {
                 first_address: "203.0.113.10".parse().unwrap(),
                 last_address: "203.0.113.20".parse().unwrap(),

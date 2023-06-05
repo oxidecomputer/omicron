@@ -71,7 +71,7 @@ use omicron_common::api::external::RouterRoute;
 use omicron_common::api::external::RouterRouteKind;
 use omicron_common::api::external::SwitchPort;
 use omicron_common::api::external::SwitchPortSettings;
-use omicron_common::api::external::SwitchPortSettingsInfo;
+use omicron_common::api::external::SwitchPortSettingsView;
 use omicron_common::api::external::VpcFirewallRuleUpdateParams;
 use omicron_common::api::external::VpcFirewallRules;
 use omicron_common::bail_unless;
@@ -224,19 +224,19 @@ pub fn external_api() -> NexusApiDescription {
         api.register(current_user_ssh_key_delete)?;
 
         // Customer network integration
+        api.register(networking_address_lot_list)?;
         api.register(networking_address_lot_create)?;
         api.register(networking_address_lot_delete)?;
-        api.register(networking_address_lot_list)?;
         api.register(networking_address_lot_block_list)?;
 
         api.register(networking_loopback_address_create)?;
         api.register(networking_loopback_address_delete)?;
         api.register(networking_loopback_address_list)?;
 
+        api.register(networking_switch_port_settings_list)?;
+        api.register(networking_switch_port_settings_view)?;
         api.register(networking_switch_port_settings_create)?;
         api.register(networking_switch_port_settings_delete)?;
-        api.register(networking_switch_port_settings_list)?;
-        api.register(networking_switch_port_settings_info)?;
 
         api.register(networking_switch_port_list)?;
         api.register(networking_switch_port_apply_settings)?;
@@ -285,6 +285,7 @@ pub fn external_api() -> NexusApiDescription {
 
         // Console API operations
         api.register(console_api::login_begin)?;
+        api.register(console_api::login_local_begin)?;
         api.register(console_api::login_local)?;
         api.register(console_api::login_spoof_begin)?;
         api.register(console_api::login_spoof)?;
@@ -2294,7 +2295,7 @@ async fn certificate_delete(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Create an address lot.
+/// Create an address lot
 #[endpoint {
     method = POST,
     path = "/v1/system/networking/address-lot",
@@ -2320,7 +2321,7 @@ async fn networking_address_lot_create(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Delete an address lot.
+/// Delete an address lot
 #[endpoint {
     method = DELETE,
     path = "/v1/system/networking/address-lot/{address_lot}",
@@ -2343,7 +2344,7 @@ async fn networking_address_lot_delete(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// List address lots.
+/// List address lots
 #[endpoint {
     method = GET,
     path = "/v1/system/networking/address-lot",
@@ -2377,7 +2378,7 @@ async fn networking_address_lot_list(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// List the blocks in an address lot.
+/// List the blocks in an address lot
 #[endpoint {
     method = GET,
     path = "/v1/system/networking/address-lot/{address_lot}/blocks",
@@ -2413,7 +2414,7 @@ async fn networking_address_lot_block_list(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Create a loopback address.
+/// Create a loopback address
 #[endpoint {
     method = POST,
     path = "/v1/system/networking/loopback-address",
@@ -2454,7 +2455,7 @@ pub struct LoopbackAddressPath {
     pub subnet_mask: u8,
 }
 
-/// Delete a loopback address.
+/// Delete a loopback address
 #[endpoint {
     method = DELETE,
     path = "/v1/system/networking/loopback-address/{rack_id}/{switch_location}/{address}/{subnet_mask}",
@@ -2489,7 +2490,7 @@ async fn networking_loopback_address_delete(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Get loopback addresses, optionally filtering by id.
+/// Get loopback addresses, optionally filtering by id
 #[endpoint {
     method = GET,
     path = "/v1/system/networking/loopback-address",
@@ -2521,7 +2522,7 @@ async fn networking_loopback_address_list(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Create port settings.
+/// Create switch port settings
 #[endpoint {
     method = POST,
     path = "/v1/system/networking/switch-port-settings",
@@ -2530,7 +2531,7 @@ async fn networking_loopback_address_list(
 async fn networking_switch_port_settings_create(
     rqctx: RequestContext<Arc<ServerContext>>,
     new_settings: TypedBody<params::SwitchPortSettingsCreate>,
-) -> Result<HttpResponseCreated<SwitchPortSettingsInfo>, HttpError> {
+) -> Result<HttpResponseCreated<SwitchPortSettingsView>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let nexus = &apictx.nexus;
@@ -2538,13 +2539,13 @@ async fn networking_switch_port_settings_create(
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
         let result = nexus.switch_port_settings_create(&opctx, params).await?;
 
-        let settings: SwitchPortSettingsInfo = result.into();
+        let settings: SwitchPortSettingsView = result.into();
         Ok(HttpResponseCreated(settings))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Delete port settings.
+/// Delete switch port settings
 #[endpoint {
     method = DELETE,
     path = "/v1/system/networking/switch-port-settings",
@@ -2565,7 +2566,7 @@ async fn networking_switch_port_settings_delete(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// List port settings.
+/// List switch port settings
 #[endpoint {
     method = GET,
     path = "/v1/system/networking/switch-port-settings",
@@ -2601,16 +2602,16 @@ async fn networking_switch_port_settings_list(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Get information about a switch port.
+/// Get information about a switch port
 #[endpoint {
     method = GET,
     path = "/v1/system/networking/switch-port-settings/{port}/info",
     tags = ["system/networking"],
 }]
-async fn networking_switch_port_settings_info(
+async fn networking_switch_port_settings_view(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::SwitchPortSettingsInfoSelector>,
-) -> Result<HttpResponseOk<SwitchPortSettingsInfo>, HttpError> {
+) -> Result<HttpResponseOk<SwitchPortSettingsView>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let nexus = &apictx.nexus;
@@ -2622,7 +2623,7 @@ async fn networking_switch_port_settings_info(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// List switch ports.
+/// List switch ports
 #[endpoint {
     method = GET,
     path = "/v1/system/hardware/switch-port",
@@ -2654,7 +2655,7 @@ async fn networking_switch_port_list(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Apply switch port settings.
+/// Apply switch port settings
 #[endpoint {
     method = POST,
     path = "/v1/system/hardware/switch-port/{port}/settings",
@@ -2681,7 +2682,7 @@ async fn networking_switch_port_apply_settings(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Clear switch port settings.
+/// Clear switch port settings
 #[endpoint {
     method = DELETE,
     path = "/v1/system/hardware/switch-port/{port}/settings",
@@ -4292,12 +4293,6 @@ async fn sled_physical_disk_list(
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct SystemMetricParams {
-    #[serde(flatten)]
-    pub pagination: dropshot::PaginationParams<
-        params::ResourceMetrics,
-        params::ResourceMetrics,
-    >,
-
     /// The UUID of the container being queried
     // TODO: I might want to force the caller to specify type here?
     pub id: Uuid,
@@ -4326,19 +4321,28 @@ struct SystemMetricsPathParam {
 async fn system_metric(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<SystemMetricsPathParam>,
-    query_params: Query<SystemMetricParams>,
+    pag_params: Query<
+        PaginationParams<params::ResourceMetrics, params::ResourceMetrics>,
+    >,
+    other_params: Query<SystemMetricParams>,
 ) -> Result<HttpResponseOk<ResultsPage<oximeter_db::Measurement>>, HttpError> {
     let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let metric_name = path_params.into_inner().metric_name;
-
-    let query = query_params.into_inner();
-    let limit = rqctx.page_limit(&query.pagination)?;
-
     let handler = async {
+        let nexus = &apictx.nexus;
+        let metric_name = path_params.into_inner().metric_name;
+        let resource_id = other_params.into_inner().id;
+        let pagination = pag_params.into_inner();
+        let limit = rqctx.page_limit(&pagination)?;
+
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
         let result = nexus
-            .system_metric_lookup(&opctx, metric_name, query, limit)
+            .system_metric_lookup(
+                &opctx,
+                metric_name,
+                resource_id,
+                pagination,
+                limit,
+            )
             .await?;
 
         Ok(HttpResponseOk(result))

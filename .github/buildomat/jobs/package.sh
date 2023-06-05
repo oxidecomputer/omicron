@@ -3,7 +3,7 @@
 #: name = "helios / package"
 #: variety = "basic"
 #: target = "helios-latest"
-#: rust_toolchain = "1.68.2"
+#: rust_toolchain = "1.70.0"
 #: output_rules = [
 #:	"=/work/package.tar.gz",
 #:	"=/work/global-zone-packages.tar.gz",
@@ -104,4 +104,3 @@ ptime -m cargo run --locked --release --bin omicron-package -- \
 
 # Create trampoline global zone package @ /work/trampoline-global-zone-packages.tar.gz
 ptime -m ./tools/build-trampoline-global-zone-packages.sh $tarball_src_dir /work
-

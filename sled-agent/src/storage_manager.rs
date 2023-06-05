@@ -13,13 +13,15 @@ use futures::FutureExt;
 use futures::StreamExt;
 use illumos_utils::zpool::{ZpoolKind, ZpoolName};
 use illumos_utils::{zfs::Mountpoint, zpool::ZpoolInfo};
+use key_manager::StorageKeyRequester;
 use nexus_client::types::PhysicalDiskDeleteRequest;
 use nexus_client::types::PhysicalDiskKind;
 use nexus_client::types::PhysicalDiskPutRequest;
 use nexus_client::types::ZpoolPutRequest;
 use omicron_common::api::external::{ByteCount, ByteCountRangeError};
 use omicron_common::backoff;
-use sled_hardware::{Disk, DiskIdentity, DiskVariant, UnparsedDisk};
+use omicron_common::disk::DiskIdentity;
+use sled_hardware::{Disk, DiskVariant, UnparsedDisk};
 use slog::Logger;
 use std::collections::hash_map;
 use std::collections::HashMap;
@@ -287,6 +289,10 @@ struct StorageWorker {
     nexus_notifications: FuturesOrdered<NotifyFut>,
     rx: mpsc::Receiver<StorageWorkerRequest>,
     underlay: Arc<Mutex<Option<UnderlayAccess>>>,
+
+    // A mechanism for requesting disk encryption keys from the
+    // [`key_manager::KeyManager`]
+    key_requester: StorageKeyRequester,
 }
 
 #[derive(Clone, Debug)]
@@ -308,11 +314,13 @@ impl StorageWorker {
         let zoned = true;
         let fs_name = &dataset_name.full();
         let do_format = true;
+        let encryption_details = None;
         Zfs::ensure_filesystem(
             &dataset_name.full(),
             Mountpoint::Path(Utf8PathBuf::from("/data")),
             zoned,
             do_format,
+            encryption_details,
         )?;
         // Ensure the dataset has a usable UUID.
         if let Ok(id_str) = Zfs::get_oxide_value(&fs_name, "uuid") {
@@ -333,7 +341,20 @@ impl StorageWorker {
 
     // Adds a "notification to nexus" to `nexus_notifications`,
     // informing it about the addition of `pool_id` to this sled.
-    fn add_zpool_notify(&mut self, pool: &Pool, size: ByteCount) {
+    async fn add_zpool_notify(&mut self, pool: &Pool, size: ByteCount) {
+        // The underlay network is setup once at sled-agent startup. Before
+        // there is an underlay we want to avoid sending notifications to nexus for
+        // two reasons:
+        //  1. They can't possibly succeed
+        //  2. They increase the backoff time exponentially, so that once
+        //   sled-agent does start it may take much longer to notify nexus
+        //   than it would if we avoid this. This goes especially so for rack
+        //   setup, when bootstrap agent is waiting an aribtrary time for RSS
+        //   initialization.
+        if self.underlay.lock().await.is_none() {
+            return;
+        }
+
         let pool_id = pool.name.id();
         let DiskIdentity { vendor, serial, model } = pool.parent.clone();
         let underlay = self.underlay.clone();
@@ -407,7 +428,13 @@ impl StorageWorker {
 
         // Ensure all disks conform to the expected partition layout.
         for disk in unparsed_disks.into_iter() {
-            match sled_hardware::Disk::new(&self.log, disk).map_err(|err| {
+            match sled_hardware::Disk::new(
+                &self.log,
+                disk,
+                Some(&self.key_requester),
+            )
+            .await
+            .map_err(|err| {
                 warn!(self.log, "Could not ensure partitions: {err}");
                 err
             }) {
@@ -500,11 +527,16 @@ impl StorageWorker {
         info!(self.log, "Upserting disk: {disk:?}");
 
         // Ensure the disk conforms to an expected partition layout.
-        let disk =
-            sled_hardware::Disk::new(&self.log, disk).map_err(|err| {
-                warn!(self.log, "Could not ensure partitions: {err}");
-                err
-            })?;
+        let disk = sled_hardware::Disk::new(
+            &self.log,
+            disk,
+            Some(&self.key_requester),
+        )
+        .await
+        .map_err(|err| {
+            warn!(self.log, "Could not ensure partitions: {err}");
+            err
+        })?;
 
         let mut disks = resources.disks.lock().await;
         let disk = DiskWrapper::Real {
@@ -522,7 +554,18 @@ impl StorageWorker {
         info!(self.log, "Upserting synthetic disk for: {zpool_name:?}");
 
         let mut disks = resources.disks.lock().await;
-        sled_hardware::Disk::ensure_zpool_ready(&self.log, &zpool_name)?;
+        let synthetic_id = DiskIdentity {
+            vendor: "fake_vendor".to_string(),
+            serial: "fake_serial".to_string(),
+            model: zpool_name.id().to_string(),
+        };
+        sled_hardware::Disk::ensure_zpool_ready(
+            &self.log,
+            &zpool_name,
+            &synthetic_id,
+            Some(&self.key_requester),
+        )
+        .await?;
         let disk = DiskWrapper::Synthetic { zpool_name };
         self.upsert_disk_locked(resources, &mut disks, disk).await
     }
@@ -540,7 +583,8 @@ impl StorageWorker {
         self.physical_disk_notify(NotifyDiskRequest::Add {
             identity: disk.identity(),
             variant: disk.variant(),
-        });
+        })
+        .await;
         self.upsert_zpool(&resources, disk.identity(), disk.zpool_name())
             .await?;
 
@@ -574,14 +618,70 @@ impl StorageWorker {
     ) -> Result<(), Error> {
         if let Some(parsed_disk) = disks.remove(key) {
             resources.pools.lock().await.remove(&parsed_disk.zpool_name().id());
-            self.physical_disk_notify(NotifyDiskRequest::Remove(key.clone()));
+            self.physical_disk_notify(NotifyDiskRequest::Remove(key.clone()))
+                .await;
         }
         Ok(())
     }
 
+    /// When the underlay becomes available, we need to notify nexus about any
+    /// discovered disks and pools, since we don't attempt to notify until there
+    /// is an underlay available.
+    async fn notify_nexus_about_existing_resources(
+        &mut self,
+        resources: &StorageResources,
+    ) -> Result<(), Error> {
+        let disks = resources.disks.lock().await;
+        for disk in disks.values() {
+            self.physical_disk_notify(NotifyDiskRequest::Add {
+                identity: disk.identity(),
+                variant: disk.variant(),
+            })
+            .await;
+        }
+
+        // We may encounter errors while processing any of the pools; keep track of
+        // any errors that occur and return any of them if something goes wrong.
+        //
+        // That being said, we should not prevent notification to nexus of the
+        // other pools if only one failure occurs.
+        let mut err: Option<Error> = None;
+
+        let pools = resources.pools.lock().await;
+        for pool in pools.values() {
+            match ByteCount::try_from(pool.info.size()).map_err(|err| {
+                Error::BadPoolSize { name: pool.name.to_string(), err }
+            }) {
+                Ok(size) => self.add_zpool_notify(pool, size).await,
+                Err(e) => {
+                    warn!(self.log, "Failed to notify nexus about pool: {e}");
+                    err = Some(e)
+                }
+            }
+        }
+
+        if let Some(err) = err {
+            Err(err)
+        } else {
+            Ok(())
+        }
+    }
+
     // Adds a "notification to nexus" to `self.nexus_notifications`, informing it
     // about the addition/removal of a physical disk to this sled.
-    fn physical_disk_notify(&mut self, disk: NotifyDiskRequest) {
+    async fn physical_disk_notify(&mut self, disk: NotifyDiskRequest) {
+        // The underlay network is setup once at sled-agent startup. Before
+        // there is an underlay we want to avoid sending notifications to nexus for
+        // two reasons:
+        //  1. They can't possibly succeed
+        //  2. They increase the backoff time exponentially, so that once
+        //   sled-agent does start it may take much longer to notify nexus
+        //   than it would if we avoid this. This goes especially so for rack
+        //   setup, when bootstrap agent is waiting an aribtrary time for RSS
+        //   initialization.
+        if self.underlay.lock().await.is_none() {
+            return;
+        }
         let underlay = self.underlay.clone();
         let disk2 = disk.clone();
         let notify_nexus = move || {
@@ -676,7 +776,7 @@ impl StorageWorker {
             Error::BadPoolSize { name: pool_name.to_string(), err }
         })?;
         // Notify Nexus of the zpool.
-        self.add_zpool_notify(&pool, size);
+        self.add_zpool_notify(&pool, size).await;
         Ok(())
     }
 
@@ -750,7 +850,16 @@ impl StorageWorker {
                             self.ensure_using_exactly_these_disks(&resources, disks).await?;
                         },
                         SetupUnderlayAccess(UnderlayRequest { underlay, responder }) => {
-                            self.underlay.lock().await.replace(underlay);
+                            // If this is the first time establishing an
+                            // underlay we should notify nexus of all existing
+                            // disks and zpools.
+                            //
+                            // Instead of individual notifications, we should
+                            // send a bulk notification as described in https://
+                            // github.com/oxidecomputer/omicron/issues/1917
+                            if self.underlay.lock().await.replace(underlay).is_none() {
+                                self.notify_nexus_about_existing_resources(&resources).await?;
+                            }
                             let _ = responder.send(Ok(()));
                         }
                     }
@@ -788,7 +897,7 @@ pub struct StorageManager {
 
 impl StorageManager {
     /// Creates a new [`StorageManager`] which should manage local storage.
-    pub async fn new(log: &Logger) -> Self {
+    pub async fn new(log: &Logger, key_requester: StorageKeyRequester) -> Self {
         let log = log.new(o!("component" => "StorageManager"));
         let resources = StorageResources {
             disks: Arc::new(Mutex::new(HashMap::new())),
@@ -807,6 +916,7 @@ impl StorageManager {
                         nexus_notifications: FuturesOrdered::new(),
                         rx,
                         underlay: Arc::new(Mutex::new(None)),
+                        key_requester,
                     };
 
                     worker.do_work(resources).await

@@ -12,11 +12,11 @@ use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils_macros::nexus_test;
 use omicron_common::api::external::{
-    AddressLot, AddressLotBlock, AddressLotCreateResponse,
+    AddressLot, AddressLotBlock, AddressLotCreateResponse, AddressLotKind,
     IdentityMetadataCreateParams,
 };
 use omicron_nexus::external_api::params::{
-    AddressLotBlockCreate, AddressLotCreate, AddressLotKind,
+    AddressLotBlockCreate, AddressLotCreate,
 };
 use std::net::IpAddr;
 

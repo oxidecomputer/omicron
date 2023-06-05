@@ -160,7 +160,7 @@ impl ServerContext {
                 .map_err(|e| format!("Cannot parse Postgres URL: {}", e))?
             }
         };
-        let pool = db::Pool::new(&db::Config { url });
+        let pool = db::Pool::new(&log, &db::Config { url });
         let nexus = Nexus::new_with_id(
             rack_id,
             log.new(o!("component" => "nexus")),

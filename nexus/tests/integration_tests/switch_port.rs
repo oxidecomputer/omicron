@@ -9,14 +9,13 @@ use http::StatusCode;
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use nexus_test_utils_macros::nexus_test;
 use omicron_common::api::external::{
-    self, IdentityMetadataCreateParams, NameOrId, SwitchPort,
-    SwitchPortSettingsInfo,
+    self, AddressLotKind, IdentityMetadataCreateParams, NameOrId, SwitchPort,
+    SwitchPortSettingsView,
 };
 use omicron_nexus::external_api::params::{
     Address, AddressConfig, AddressLotBlockCreate, AddressLotCreate,
-    AddressLotKind, LinkConfig, LldpServiceConfig, Route, RouteConfig,
-    SwitchInterfaceConfig, SwitchInterfaceKind, SwitchPortApplySettings,
-    SwitchPortSettingsCreate,
+    LinkConfig, LldpServiceConfig, Route, RouteConfig, SwitchInterfaceConfig,
+    SwitchInterfaceKind, SwitchPortApplySettings, SwitchPortSettingsCreate,
 };
 use omicron_nexus::external_api::views::Rack;
 
@@ -93,7 +92,7 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
         },
     );
 
-    let created: SwitchPortSettingsInfo = NexusRequest::objects_post(
+    let created: SwitchPortSettingsView = NexusRequest::objects_post(
         client,
         "/v1/system/networking/switch-port-settings",
         &settings,
@@ -130,9 +129,9 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
     assert_eq!(addr0.address, "203.0.113.10/24".parse().unwrap());
 
     // Get the port settings back
-    let roundtrip: SwitchPortSettingsInfo = NexusRequest::object_get(
+    let roundtrip: SwitchPortSettingsView = NexusRequest::object_get(
         client,
-        "/v1/system/networking/switch-port-settings/portofino/info",
+        "/v1/system/networking/switch-port-settings/portofino",
     )
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()
@@ -179,7 +178,7 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
     .unwrap();
 
     // Create same port settings again. Should not see conflict.
-    let _created: SwitchPortSettingsInfo = NexusRequest::objects_post(
+    let _created: SwitchPortSettingsView = NexusRequest::objects_post(
         client,
         "/v1/system/networking/switch-port-settings",
         &settings,

@@ -10,6 +10,54 @@
     "version": "0.0.1"
   },
   "paths": {
+    "/abort-update/{type}/{slot}": {
+      "post": {
+        "summary": "Forcibly cancels a running update.",
+        "description": "This is a potentially dangerous operation, but one that is sometimes required. A machine reset might be required after this operation completes.",
+        "operationId": "post_abort_update",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slot",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            }
+          },
+          {
+            "in": "path",
+            "name": "type",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SpType"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AbortUpdateOptions"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/artifacts-and-event-reports": {
       "get": {
         "summary": "An endpoint used to report all available artifacts and event reports.",
@@ -322,6 +370,27 @@
       }
     },
     "schemas": {
+      "AbortUpdateOptions": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "description": "The message to abort the update with.",
+            "type": "string"
+          },
+          "test_error": {
+            "nullable": true,
+            "description": "If passed in, fails the force cancel update operation with a simulated error.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/UpdateTestError"
+              }
+            ]
+          }
+        },
+        "required": [
+          "message"
+        ]
+      },
       "ArtifactId": {
         "description": "An identifier for an artifact.\n\nThe kind is [`ArtifactKind`], indicating that it might represent an artifact whose kind is unknown.",
         "type": "object",
@@ -614,25 +683,6 @@
               "type"
             ]
           }
-        ]
-      },
-      "ImageVersion": {
-        "type": "object",
-        "properties": {
-          "epoch": {
-            "type": "integer",
-            "format": "uint32",
-            "minimum": 0
-          },
-          "version": {
-            "type": "integer",
-            "format": "uint32",
-            "minimum": 0
-          }
-        },
-        "required": [
-          "epoch",
-          "version"
         ]
       },
       "PowerState": {
@@ -1123,26 +1173,22 @@
           "sps"
         ]
       },
-      "RotImageDetails": {
-        "type": "object",
-        "properties": {
-          "digest": {
-            "type": "string"
-          },
-          "version": {
-            "$ref": "#/components/schemas/ImageVersion"
-          }
-        },
-        "required": [
-          "digest",
-          "version"
-        ]
-      },
       "RotInventory": {
         "description": "RoT-related data that isn't already supplied in [`SpState`].",
         "type": "object",
         "properties": {
-          "caboose": {
+          "active": {
+            "$ref": "#/components/schemas/RotSlot"
+          },
+          "caboose_a": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SpComponentCaboose"
+              }
+            ]
+          },
+          "caboose_b": {
             "nullable": true,
             "allOf": [
               {
@@ -1150,7 +1196,10 @@
               }
             ]
           }
-        }
+        },
+        "required": [
+          "active"
+        ]
       },
       "RotSlot": {
         "oneOf": [
@@ -1192,31 +1241,43 @@
               "active": {
                 "$ref": "#/components/schemas/RotSlot"
               },
-              "slot_a": {
+              "pending_persistent_boot_preference": {
                 "nullable": true,
                 "allOf": [
                   {
-                    "$ref": "#/components/schemas/RotImageDetails"
+                    "$ref": "#/components/schemas/RotSlot"
                   }
                 ]
               },
-              "slot_b": {
+              "persistent_boot_preference": {
+                "$ref": "#/components/schemas/RotSlot"
+              },
+              "slot_a_sha3_256_digest": {
                 "nullable": true,
-                "allOf": [
-                  {
-                    "$ref": "#/components/schemas/RotImageDetails"
-                  }
-                ]
+                "type": "string"
+              },
+              "slot_b_sha3_256_digest": {
+                "nullable": true,
+                "type": "string"
               },
               "state": {
                 "type": "string",
                 "enum": [
                   "enabled"
                 ]
+              },
+              "transient_boot_preference": {
+                "nullable": true,
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/RotSlot"
+                  }
+                ]
               }
             },
             "required": [
               "active",
+              "persistent_boot_preference",
               "state"
             ]
           },
@@ -1511,7 +1572,15 @@
         "description": "SP-related data",
         "type": "object",
         "properties": {
-          "caboose": {
+          "caboose_active": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SpComponentCaboose"
+              }
+            ]
+          },
+          "caboose_inactive": {
             "nullable": true,
             "allOf": [
               {
@@ -1538,7 +1607,12 @@
             ]
           },
           "rot": {
-            "$ref": "#/components/schemas/RotInventory"
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/RotInventory"
+              }
+            ]
           },
           "state": {
             "nullable": true,
@@ -1550,8 +1624,7 @@
           }
         },
         "required": [
-          "id",
-          "rot"
+          "id"
         ]
       },
       "SpState": {
@@ -1586,9 +1659,6 @@
           },
           "serial_number": {
             "type": "string"
-          },
-          "version": {
-            "$ref": "#/components/schemas/ImageVersion"
           }
         },
         "required": [
@@ -1598,8 +1668,7 @@
           "power_state",
           "revision",
           "rot",
-          "serial_number",
-          "version"
+          "serial_number"
         ]
       },
       "SpType": {
@@ -2127,6 +2196,60 @@
             ]
           },
           {
+            "description": "Execution aborted by an external user.\n\nThis is a terminal event: it is guaranteed that no more events will be seen after this one.",
+            "type": "object",
+            "properties": {
+              "aborted_step": {
+                "description": "Information about the step that was running at the time execution was aborted.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/StepInfoWithMetadataForGenericSpec"
+                  }
+                ]
+              },
+              "attempt": {
+                "description": "The attempt that was running at the time the step was aborted.",
+                "type": "integer",
+                "format": "uint",
+                "minimum": 0
+              },
+              "attempt_elapsed": {
+                "description": "The time it took for this attempt to complete.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/Duration"
+                  }
+                ]
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "execution_aborted"
+                ]
+              },
+              "message": {
+                "description": "A message associated with the abort.",
+                "type": "string"
+              },
+              "step_elapsed": {
+                "description": "Total time elapsed since the start of the step. Includes prior attempts.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/Duration"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "aborted_step",
+              "attempt",
+              "attempt_elapsed",
+              "kind",
+              "message",
+              "step_elapsed"
+            ]
+          },
+          {
             "description": "A nested step event occurred.",
             "type": "object",
             "properties": {
@@ -2555,6 +2678,60 @@
               "message",
               "step_elapsed",
               "total_attempts"
+            ]
+          },
+          {
+            "description": "Execution aborted by an external user.\n\nThis is a terminal event: it is guaranteed that no more events will be seen after this one.",
+            "type": "object",
+            "properties": {
+              "aborted_step": {
+                "description": "Information about the step that was running at the time execution was aborted.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/StepInfoWithMetadataForWicketdEngineSpec"
+                  }
+                ]
+              },
+              "attempt": {
+                "description": "The attempt that was running at the time the step was aborted.",
+                "type": "integer",
+                "format": "uint",
+                "minimum": 0
+              },
+              "attempt_elapsed": {
+                "description": "The time it took for this attempt to complete.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/Duration"
+                  }
+                ]
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "execution_aborted"
+                ]
+              },
+              "message": {
+                "description": "A message associated with the abort.",
+                "type": "string"
+              },
+              "step_elapsed": {
+                "description": "Total time elapsed since the start of the step. Includes prior attempts.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/Duration"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "aborted_step",
+              "attempt",
+              "attempt_elapsed",
+              "kind",
+              "message",
+              "step_elapsed"
             ]
           },
           {
@@ -3020,21 +3197,7 @@
               "id": {
                 "type": "string",
                 "enum": [
-                  "reset_rot"
-                ]
-              }
-            },
-            "required": [
-              "id"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "id": {
-                "type": "string",
-                "enum": [
-                  "reset_sp"
+                  "interrogate_sp"
                 ]
               }
             },
