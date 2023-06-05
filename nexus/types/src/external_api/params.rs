@@ -11,7 +11,8 @@ use chrono::{DateTime, Utc};
 use omicron_common::api::external::{
     AddressLotKind, ByteCount, IdentityMetadataCreateParams,
     IdentityMetadataUpdateParams, InstanceCpuCount, IpNet, Ipv4Net, Ipv6Net,
-    Name, NameOrId, RouteDestination, RouteTarget, SemverVersion,
+    Name, NameOrId, PaginationOrder, RouteDestination, RouteTarget,
+    SemverVersion,
 };
 use schemars::JsonSchema;
 use serde::{
@@ -1639,6 +1640,8 @@ pub struct ResourceMetrics {
     pub start_time: DateTime<Utc>,
     /// An exclusive end time of metrics.
     pub end_time: DateTime<Utc>,
+    /// Query result order
+    pub order: Option<PaginationOrder>,
 }
 
 // SYSTEM UPDATE
