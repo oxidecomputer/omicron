@@ -97,6 +97,12 @@ pub struct LearnAttempt {
     start: Ticks,
 }
 
+impl LearnAttempt {
+    fn expired(&self, now: Ticks, timeout: Ticks) -> bool {
+        now.saturating_sub(self.start) >= timeout
+    }
+}
+
 /// The state machine for a [`$crate::Peer`]
 ///
 /// This FSM assumes a network layer above it that can map peer IDs
@@ -145,12 +151,31 @@ impl Fsm {
     /// On each tick, the current duration since start is passed in. We only
     /// deal in relative time needed for timeouts, and not absolute time. This
     /// strategy allows for deterministic property based tests.
-    pub fn tick(&mut self) -> Vec<Envelope> {
+    pub fn tick(&mut self) -> Output<'_> {
         self.clock += 1;
 
-        // TODO: Check to see if messages need to be transmitted,
-        // learn attempts need to be made, etc...
-        unimplemented!()
+        match &mut self.state.state {
+            state @ State::Learning(None) => {
+                if let Some(peer) = self.peers.first() {
+                    let attempt =
+                        LearnAttempt { peer: peer.clone(), start: self.clock };
+                    *state = State::Learning(Some(attempt));
+                    return self.request(peer.clone(), Request::Learn);
+                }
+            }
+            State::Learning(Some(attempt)) => {
+                if attempt.expired(self.clock, self.config.learn_timeout) {
+                    if let Some(peer) = next_peer(&attempt.peer, &self.peers) {
+                        attempt.peer = peer.clone();
+                        attempt.start = self.clock;
+                        return self.request(peer, Request::Learn);
+                    }
+                    self.state.state = State::Learning(None)
+                }
+            }
+            _ => (),
+        }
+        Output { persist: None, envelopes: vec![] }
     }
 
     /// A connection has been established an a peer has been learned.
@@ -258,6 +283,14 @@ impl Fsm {
         unimplemented!()
     }
 
+    // Send a request directly to a peer
+    fn request(&self, to: Baseboard, request: Request) -> Output<'_> {
+        Output {
+            persist: None,
+            envelopes: vec![Envelope { to, msg: request.into() }],
+        }
+    }
+
     // Return a response directly to a peer that doesn't require persistence
     fn respond(&self, to: Baseboard, response: Response) -> Output<'_> {
         Output {
@@ -277,5 +310,17 @@ impl Fsm {
             persist: Some(&self.state),
             envelopes: vec![Envelope { to, msg: response.into() }],
         }
+    }
+}
+
+fn next_peer(
+    current: &Baseboard,
+    peers: &BTreeSet<Baseboard>,
+) -> Option<Baseboard> {
+    if let Some(index) = peers.iter().position(|x| x == current) {
+        let next_index = (index + 1) % peers.len();
+        peers.iter().nth(next_index).cloned()
+    } else {
+        peers.first().cloned()
     }
 }
