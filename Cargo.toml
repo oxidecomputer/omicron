@@ -186,7 +186,7 @@ hyper = "0.14"
 humantime = "2.1.0"
 illumos-utils = { path = "illumos-utils" }
 indexmap = "1.9.3"
-indicatif = { version = "0.17.3", features = ["rayon"] }
+indicatif = { version = "0.17.5", features = ["rayon"] }
 installinator = { path = "installinator" }
 installinator-artifactd = { path = "installinator-artifactd" }
 installinator-artifact-client = { path = "installinator-artifact-client" }
