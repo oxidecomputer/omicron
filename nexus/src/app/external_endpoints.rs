@@ -677,64 +677,11 @@ impl super::Nexus {
         let rqinfo = &rqctx.request;
         let requested_authority = authority_for_request(rqinfo)
             .map_err(|e| Error::invalid_request(&format!("{:#}", e)))?;
-
-        let requested_host = requested_authority.host();
-        let log = log.new(o!("server_name" => requested_host.to_string()));
-        trace!(&log, "determining endpoint");
-
-        // If we have not successfully loaded the endpoint configuration yet,
-        // there's nothing we can do here.  We could try to do better (e.g., use
-        // the recovery Silo?).  But if we failed to load endpoints, it's likely
-        // the database is down, and we're not going to get much further anyway.
-        let endpoint_config = self.background_tasks.external_endpoints.borrow();
-        let endpoints = endpoint_config.as_ref().ok_or_else(|| {
-            error!(&log, "received request with no endpoints loaded");
-            Error::unavail("endpoints not loaded")
-        })?;
-
-        // See if there's an endpoint for the requested name.  If so, use it.
-        if let Some(endpoint) = endpoints.by_dns_name.get(requested_host) {
-            trace!(
-                &log,
-                "received request for endpoint";
-                "silo_name" => ?endpoint.db_silo.name(),
-                "silo_id" => ?endpoint.silo_id,
-            );
-
-            return Ok(endpoint.clone());
-        }
-
-        // There was no endpoint for the requested name.  This should generally
-        // not happen in deployed systems where we expect people to have set up
-        // DNS to find the external endpoints.  But in development, we don't
-        // always have DNS set up.  People may use an IP address to get here.
-        // To accommodate this use case, we make a best-effort to pick a default
-        // endpoint when we can't find one for the name we were given.
-        //
-        // If this ever does happen in a production system, this might be
-        // confusing.  The best thing to do in a production system is probably
-        // to return an error saying that the requested server name was unknown.
-        // Instead, we'll wind up choosing some Silo here.  This has no impact
-        // on authenticated requests because for those we use the authenticated
-        // identity's Silo.  (That's as of this writing.  Again, we may want to
-        // disallow this and produce an error instead.)  If the request is not
-        // authenticated, we may wind up sending them to a login page for this
-        // Silo that may not be the Silo they meant.
-        endpoints
-            .default_endpoint
-            .as_ref()
-            .ok_or_else(|| {
-                error!(
-                    &log,
-                    "received request for unknown host and no default \
-                    endpoint is available",
-                );
-                Error::invalid_request(&format!(
-                    "HTTP request for unknown server name {:?}",
-                    requested_host,
-                ))
-            })
-            .map(|c| c.clone())
+        endpoint_for_authority(
+            log,
+            &requested_authority,
+            &self.background_tasks.external_endpoints,
+        )
     }
 }
 
@@ -772,8 +719,75 @@ pub fn authority_for_request(
     }
 }
 
+// See `Nexus::endpoint_for_request()` above.  This is factored out to be able
+// to test it without a whole server.
+fn endpoint_for_authority(
+    log: &slog::Logger,
+    requested_authority: &http::uri::Authority,
+    config_rx: &tokio::sync::watch::Receiver<Option<ExternalEndpoints>>,
+) -> Result<Arc<ExternalEndpoint>, Error> {
+    let requested_host = requested_authority.host();
+    let log = log.new(o!("server_name" => requested_host.to_string()));
+    trace!(&log, "determining endpoint");
+
+    // If we have not successfully loaded the endpoint configuration yet,
+    // there's nothing we can do here.  We could try to do better (e.g., use
+    // the recovery Silo?).  But if we failed to load endpoints, it's likely
+    // the database is down, and we're not going to get much further anyway.
+    let endpoint_config = config_rx.borrow();
+    let endpoints = endpoint_config.as_ref().ok_or_else(|| {
+        error!(&log, "received request with no endpoints loaded");
+        Error::unavail("endpoints not loaded")
+    })?;
+
+    // See if there's an endpoint for the requested name.  If so, use it.
+    if let Some(endpoint) = endpoints.by_dns_name.get(requested_host) {
+        trace!(
+            &log,
+            "received request for endpoint";
+            "silo_name" => ?endpoint.db_silo.name(),
+            "silo_id" => ?endpoint.silo_id,
+        );
+
+        return Ok(endpoint.clone());
+    }
+
+    // There was no endpoint for the requested name.  This should generally
+    // not happen in deployed systems where we expect people to have set up
+    // DNS to find the external endpoints.  But in development, we don't
+    // always have DNS set up.  People may use an IP address to get here.
+    // To accommodate this use case, we make a best-effort to pick a default
+    // endpoint when we can't find one for the name we were given.
+    //
+    // If this ever does happen in a production system, this might be
+    // confusing.  The best thing to do in a production system is probably
+    // to return an error saying that the requested server name was unknown.
+    // Instead, we'll wind up choosing some Silo here.  This has no impact
+    // on authenticated requests because for those we use the authenticated
+    // identity's Silo.  (That's as of this writing.  Again, we may want to
+    // disallow this and produce an error instead.)  If the request is not
+    // authenticated, we may wind up sending them to a login page for this
+    // Silo that may not be the Silo they meant.
+    endpoints
+        .default_endpoint
+        .as_ref()
+        .ok_or_else(|| {
+            error!(
+                &log,
+                "received request for unknown host and no default \
+                    endpoint is available",
+            );
+            Error::invalid_request(&format!(
+                "HTTP request for unknown server name {:?}",
+                requested_host,
+            ))
+        })
+        .map(|c| c.clone())
+}
+
 #[cfg(test)]
 mod test {
+    use super::endpoint_for_authority;
     use super::ExternalEndpoints;
     use super::TlsCertificate;
     use crate::app::external_endpoints::authority_for_request;
@@ -785,6 +799,7 @@ mod test {
     use dropshot::ConfigLogging;
     use dropshot::ConfigLoggingIfExists;
     use dropshot::ConfigLoggingLevel;
+    use http::uri::Authority;
     use nexus_db_model::Certificate;
     use nexus_db_model::DnsGroup;
     use nexus_db_model::DnsZone;
@@ -793,6 +808,7 @@ mod test {
     use nexus_types::external_api::params;
     use nexus_types::external_api::shared;
     use nexus_types::identity::Resource;
+    use omicron_common::api::external::Error;
     use omicron_common::api::external::IdentityMetadataCreateParams;
     use schemars::JsonSchema;
     use serde::Deserialize;
@@ -800,14 +816,19 @@ mod test {
     use std::net::SocketAddr;
     use uuid::Uuid;
 
-    fn create_silo(silo_id: Option<Uuid>, name: &str) -> Silo {
+    fn create_silo(silo_id: Option<Uuid>, name: &str, saml: bool) -> Silo {
+        let identity_mode = if saml {
+            shared::SiloIdentityMode::SamlJit
+        } else {
+            shared::SiloIdentityMode::LocalOnly
+        };
         let params = params::SiloCreate {
             identity: IdentityMetadataCreateParams {
                 name: name.parse().unwrap(),
                 description: String::new(),
             },
             discoverable: false,
-            identity_mode: shared::SiloIdentityMode::LocalOnly,
+            identity_mode,
             admin_group_name: None,
             tls_certificates: vec![],
         };
@@ -868,12 +889,13 @@ mod test {
             ee1.warnings[0].to_string(),
             "no external endpoints were found"
         );
+        assert!(ee1.default_endpoint.is_none());
 
         // There are also no endpoints if there's a Silo but no external DNS
         // zones.
         let silo_id: Uuid =
             "6bcbd3bb-f93b-e8b3-d41c-dce6d98281d3".parse().unwrap();
-        let silo = create_silo(Some(silo_id), "dummy");
+        let silo = create_silo(Some(silo_id), "dummy", false);
         let ee2 = ExternalEndpoints::new(vec![silo], vec![], vec![]);
         assert_eq!(ee2.ndomains(), 0);
         assert_eq!(ee2.nwarnings(), 1);
@@ -881,6 +903,7 @@ mod test {
             ee2.warnings[0].to_string(),
             "no external endpoints were found"
         );
+        assert!(ee2.default_endpoint.is_none());
         // Test PartialEq impl.
         assert_eq!(ee1, ee2);
 
@@ -894,6 +917,7 @@ mod test {
             ee2.warnings[0].to_string(),
             "no external endpoints were found"
         );
+        assert!(ee2.default_endpoint.is_none());
         // Test PartialEq impl.
         assert_eq!(ee1, ee2);
 
@@ -917,6 +941,7 @@ mod test {
             ee2.warnings[1].to_string(),
             "no external endpoints were found"
         );
+        assert!(ee2.default_endpoint.is_none());
     }
 
     #[test]
@@ -927,7 +952,7 @@ mod test {
         // Sample data
         let silo_id: Uuid =
             "6bcbd3bb-f93b-e8b3-d41c-dce6d98281d3".parse().unwrap();
-        let silo = create_silo(Some(silo_id), "dummy");
+        let silo = create_silo(Some(silo_id), "dummy", false);
         let dns_zone1 = create_dns_zone("oxide1");
         let cert_create = create_certificate("dummy.sys.oxide1.test", false);
         let cert = Certificate::new(
@@ -964,6 +989,7 @@ mod test {
             "silo 6bcbd3bb-f93b-e8b3-d41c-dce6d98281d3 has no usable \
             certificates"
         );
+        assert_eq!(ee3.default_endpoint.as_ref().unwrap().silo_id, silo_id);
 
         // Now try with a certificate.
         let ee4 = ExternalEndpoints::new(
@@ -984,6 +1010,7 @@ mod test {
             *endpoint.best_certificate().unwrap(),
             endpoint.tls_certs[0]
         );
+        assert_eq!(ee4.default_endpoint.as_ref().unwrap().silo_id, silo_id);
 
         // Add a second external DNS zone.  There should now be two endpoints,
         // both pointing to the same Silo.
@@ -1003,6 +1030,7 @@ mod test {
         assert!(ee5.has_domain("dummy.sys.oxide1.test"));
         assert!(ee5.has_domain("dummy.sys.oxide2.test"));
         assert_eq!(ee5.nwarnings(), 0);
+        assert_eq!(ee5.default_endpoint.as_ref().unwrap().silo_id, silo_id);
         let endpoint1 = &ee5.by_dns_name["dummy.sys.oxide1.test"];
         let endpoint2 = &ee5.by_dns_name["dummy.sys.oxide2.test"];
         assert_eq!(endpoint1, endpoint2);
@@ -1017,7 +1045,8 @@ mod test {
         // overlap like this.
         let silo2_same_name_id =
             "e3f36f20-56c3-c545-8320-c19d98b82c1d".parse().unwrap();
-        let silo2_same_name = create_silo(Some(silo2_same_name_id), "dummy");
+        let silo2_same_name =
+            create_silo(Some(silo2_same_name_id), "dummy", false);
         let ee6 = ExternalEndpoints::new(
             vec![silo, silo2_same_name],
             vec![cert],
@@ -1026,6 +1055,7 @@ mod test {
         assert_ne!(ee5, ee6);
         assert_eq!(ee6.ndomains(), 1);
         assert!(ee6.has_domain("dummy.sys.oxide1.test"));
+        assert_eq!(ee6.default_endpoint.as_ref().unwrap().silo_id, silo_id);
         let endpoint = &ee6.by_dns_name["dummy.sys.oxide1.test"];
         assert_eq!(endpoint.silo_id, silo_id);
         assert_eq!(endpoint.tls_certs.len(), 1);
@@ -1052,10 +1082,10 @@ mod test {
         // - two DNS zones
         //
         // We should wind up with eight endpoints and one warning.
-        let silo1 = create_silo(None, "silo1");
-        let silo2 = create_silo(None, "silo2");
-        let silo3 = create_silo(None, "silo3");
-        let silo4 = create_silo(None, "silo4");
+        let silo1 = create_silo(None, "silo1", true);
+        let silo2 = create_silo(None, "silo2", true);
+        let silo3 = create_silo(None, "silo3", false);
+        let silo4 = create_silo(None, "silo4", true);
         let silo1_cert1_params =
             create_certificate("silo1.sys.oxide1.test", false);
         let silo1_cert1 = Certificate::new(
@@ -1165,6 +1195,10 @@ mod test {
             ee.by_dns_name["silo4.sys.oxide1.test"],
             ee.by_dns_name["silo4.sys.oxide2.test"]
         );
+        assert_eq!(
+            ee.default_endpoint.as_ref().unwrap().silo_id,
+            silo3.identity().id
+        );
 
         let e1 = &ee.by_dns_name["silo1.sys.oxide1.test"];
         assert_eq!(e1.silo_id, silo1.id());
@@ -1190,7 +1224,9 @@ mod test {
         let c4 = e4.best_certificate().unwrap();
         assert!(cert_matches(c4, &silo4_cert));
 
-        // Now test the NexusCertResolver.
+        //
+        // Test endpoint lookup by authority.
+        //
         let logctx = LogContext::new(
             "test_external_endpoints_complex",
             &ConfigLogging::File {
@@ -1199,6 +1235,42 @@ mod test {
                 if_exists: ConfigLoggingIfExists::Append,
             },
         );
+        let log = &logctx.log;
+        let (_, watch_rx) = tokio::sync::watch::channel(Some(ee.clone()));
+
+        // Basic cases: look up a few Silos by name.
+        let authority = Authority::from_static("silo1.sys.oxide1.test");
+        let ae1 = endpoint_for_authority(&log, &authority, &watch_rx).unwrap();
+        assert_eq!(ae1, *e1);
+        let authority = Authority::from_static("silo1.sys.oxide2.test");
+        let ae1 = endpoint_for_authority(&log, &authority, &watch_rx).unwrap();
+        assert_eq!(ae1, *e1);
+        let authority = Authority::from_static("silo2.sys.oxide1.test");
+        let ae2 = endpoint_for_authority(&log, &authority, &watch_rx).unwrap();
+        assert_eq!(ae2, *e2);
+        // The port number in the authority should be ignored.
+        let authority = Authority::from_static("silo3.sys.oxide1.test:456");
+        let ae3 = endpoint_for_authority(&log, &authority, &watch_rx).unwrap();
+        assert_eq!(ae3, *e3);
+        // We should get back a default endpoint if we use a server name that's
+        // not known.  That includes any IPv4 or IPv6 address, too.  The default
+        // endpoint should always be silo3 because it's the only one we've
+        // created LocalOnly.
+        for name in [
+            "springfield.sys.oxide1.test",
+            "springfield.sys.oxide1.test:123",
+            "10.1.2.3:456",
+            "[fe80::1]:789",
+        ] {
+            let authority = Authority::from_static(name);
+            let ae =
+                endpoint_for_authority(&log, &authority, &watch_rx).unwrap();
+            assert_eq!(ae, *e3);
+        }
+
+        //
+        // Now test the NexusCertResolver.
+        //
         let (watch_tx, watch_rx) = tokio::sync::watch::channel(None);
         let cert_resolver =
             NexusCertResolver::new(logctx.log.clone(), watch_rx);
@@ -1419,6 +1491,65 @@ mod test {
         assert_eq!(authority.port, None);
 
         server.close().await.expect("failed to shut down dropshot server");
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_no_endpoint() {
+        let logctx =
+            omicron_test_utils::dev::test_setup_log("test_no_endpoint");
+        let log = &logctx.log;
+
+        // We'll test two configurations at the same time: one where there's no
+        // configuration at all, and one where there's a configuration but no
+        // default endpoint.  These should always produce errors, no matter what
+        // endpoint we're looking up.
+        let ee = ExternalEndpoints::new(vec![], vec![], vec![]);
+        let (_, none_rx) =
+            tokio::sync::watch::channel::<Option<ExternalEndpoints>>(None);
+        let (_, empty_rx) =
+            tokio::sync::watch::channel::<Option<ExternalEndpoints>>(Some(ee));
+
+        for name in [
+            "dummy",
+            "dummy.example",
+            "dummy.example:123",
+            "10.1.2.3:456",
+            "[fe80::1]:789",
+        ] {
+            let authority = Authority::from_static(name);
+            for (rx_label, rx_channel) in
+                [("empty", &empty_rx), ("none", &none_rx)]
+            {
+                println!("config {:?} endpoint {:?}", rx_label, name);
+                let result =
+                    endpoint_for_authority(&log, &authority, rx_channel);
+                match result {
+                    Err(Error::ServiceUnavailable { internal_message }) => {
+                        assert_eq!(rx_label, "none");
+                        assert_eq!(internal_message, "endpoints not loaded");
+                    }
+                    Err(Error::InvalidRequest { message }) => {
+                        assert_eq!(rx_label, "empty");
+                        assert_eq!(
+                            message,
+                            format!(
+                                "HTTP request for unknown server name {:?}",
+                                authority.host()
+                            )
+                        );
+                    }
+                    result => {
+                        panic!(
+                            "unexpected result looking up endpoint for \
+                            {:?} with config {:?}: {:?}",
+                            name, rx_label, result
+                        );
+                    }
+                }
+            }
+        }
+
         logctx.cleanup_successful();
     }
 }
