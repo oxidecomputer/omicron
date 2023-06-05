@@ -4291,12 +4291,6 @@ async fn sled_physical_disk_list(
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct SystemMetricParams {
-    #[serde(flatten)]
-    pub pagination: dropshot::PaginationParams<
-        params::ResourceMetrics,
-        params::ResourceMetrics,
-    >,
-
     /// The UUID of the container being queried
     // TODO: I might want to force the caller to specify type here?
     pub id: Uuid,
@@ -4325,19 +4319,28 @@ struct SystemMetricsPathParam {
 async fn system_metric(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<SystemMetricsPathParam>,
-    query_params: Query<SystemMetricParams>,
+    pag_params: Query<
+        PaginationParams<params::ResourceMetrics, params::ResourceMetrics>,
+    >,
+    other_params: Query<SystemMetricParams>,
 ) -> Result<HttpResponseOk<ResultsPage<oximeter_db::Measurement>>, HttpError> {
     let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let metric_name = path_params.into_inner().metric_name;
-
-    let query = query_params.into_inner();
-    let limit = rqctx.page_limit(&query.pagination)?;
-
     let handler = async {
+        let nexus = &apictx.nexus;
+        let metric_name = path_params.into_inner().metric_name;
+        let resource_id = other_params.into_inner().id;
+        let pagination = pag_params.into_inner();
+        let limit = rqctx.page_limit(&pagination)?;
+
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
         let result = nexus
-            .system_metric_lookup(&opctx, metric_name, query, limit)
+            .system_metric_lookup(
+                &opctx,
+                metric_name,
+                resource_id,
+                pagination,
+                limit,
+            )
             .await?;
 
         Ok(HttpResponseOk(result))

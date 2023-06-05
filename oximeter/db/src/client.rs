@@ -11,7 +11,7 @@ use crate::{
 };
 use crate::{TimeseriesKey, TimeseriesName};
 use async_trait::async_trait;
-use dropshot::{EmptyScanParams, ResultsPage, WhichPage};
+use dropshot::{EmptyScanParams, PaginationOrder, ResultsPage, WhichPage};
 use oximeter::types::Sample;
 use slog::{debug, error, trace, Logger};
 use std::collections::{btree_map::Entry, BTreeMap, BTreeSet};
@@ -67,6 +67,7 @@ impl Client {
         start_time: Option<query::Timestamp>,
         end_time: Option<query::Timestamp>,
         limit: Option<NonZeroU32>,
+        order: Option<PaginationOrder>,
     ) -> Result<Vec<Timeseries>, Error> {
         // Querying uses up to three queries to the database:
         //  1. Retrieve the schema
@@ -94,6 +95,10 @@ impl Client {
             query_builder
         };
 
+        if let Some(order) = order {
+            query_builder = query_builder.order(order);
+        }
+
         for criterion in criteria.iter() {
             query_builder = query_builder.filter_raw(criterion)?;
         }
@@ -106,8 +111,17 @@ impl Client {
             }
             None => BTreeMap::new(),
         };
+
         if info.is_empty() {
+            // allow queries that resolve to zero timeseries even with limit
+            // specified because the results are not misleading
             Ok(vec![])
+        } else if limit.is_some() && info.len() != 1 {
+            // Error if a limit is specified with a query that resolves to
+            // multiple timeseries. Because query results are ordered in part by
+            // timeseries key, results with a limit will select measurements in
+            // a way that is arbitrary with respect to the query.
+            Err(Error::InvalidLimitQuery)
         } else {
             self.select_timeseries_with_keys(&query, &info, &schema).await
         }
@@ -839,6 +853,7 @@ mod tests {
                 None,
                 None,
                 None,
+                None,
             )
             .await
             .unwrap();
@@ -1004,6 +1019,7 @@ mod tests {
                 None,
                 None,
                 None,
+                None,
             )
             .await
             .expect("Failed to select test samples");
@@ -1092,6 +1108,7 @@ mod tests {
                 criteria,
                 start_time,
                 end_time,
+                None,
                 None,
             )
             .await
@@ -1350,6 +1367,7 @@ mod tests {
                 Some(query::Timestamp::Exclusive(start_time)),
                 None,
                 None,
+                None,
             )
             .await
             .expect("Failed to select timeseries");
@@ -1386,9 +1404,20 @@ mod tests {
             .expect("Failed to insert samples");
         let timeseries_name = "service:request_latency";
 
+        // So we have to define criteria that resolve to a single timeseries
+        let criteria =
+            &["name==oximeter", "route==/a", "method==GET", "status_code==200"];
+
         // First, query without a limit. We should see all the results.
         let all_measurements = &client
-            .select_timeseries_with(timeseries_name, &[], None, None, None)
+            .select_timeseries_with(
+                timeseries_name,
+                criteria,
+                None,
+                None,
+                None,
+                None,
+            )
             .await
             .expect("Failed to select timeseries")[0]
             .measurements;
@@ -1405,13 +1434,43 @@ mod tests {
         let limit =
             NonZeroU32::new(u32::try_from(all_measurements.len() / 2).unwrap())
                 .unwrap();
-        let timeseries = &client
+
+        // We expect queries with a limit to fail when they fail to resolve to a
+        // single timeseries, so run a query without any criteria to test that
+        client
             .select_timeseries_with(
                 timeseries_name,
                 &[],
                 None,
                 None,
                 Some(limit),
+                None,
+            )
+            .await
+            .expect_err("Should fail to select timeseries");
+
+        // queries with limit do not fail when they resolve to zero timeseries
+        let empty_result = &client
+            .select_timeseries_with(
+                timeseries_name,
+                &["name==not_a_real_name"],
+                None,
+                None,
+                Some(limit),
+                None,
+            )
+            .await
+            .expect("Failed to select timeseries");
+        assert_eq!(empty_result.len(), 0);
+
+        let timeseries = &client
+            .select_timeseries_with(
+                timeseries_name,
+                criteria,
+                None,
+                None,
+                Some(limit),
+                None,
             )
             .await
             .expect("Failed to select timeseries")[0];
@@ -1425,12 +1484,13 @@ mod tests {
         let timeseries = &client
             .select_timeseries_with(
                 timeseries_name,
-                &[],
+                criteria,
                 Some(query::Timestamp::Exclusive(
                     timeseries.measurements.last().unwrap().timestamp(),
                 )),
                 None,
                 Some(limit),
+                None,
             )
             .await
             .expect("Failed to select timeseries")[0];
@@ -1438,6 +1498,107 @@ mod tests {
         assert_eq!(
             all_measurements[all_measurements.len() / 2..],
             timeseries.measurements
+        );
+
+        db.cleanup().await.expect("Failed to cleanup database");
+    }
+
+    #[tokio::test]
+    async fn test_select_timeseries_with_order() {
+        let (_, _, samples) = setup_select_test();
+        let mut db = ClickHouseInstance::new(0)
+            .await
+            .expect("Failed to start ClickHouse");
+        let address = SocketAddr::new("::1".parse().unwrap(), db.port());
+        let log = Logger::root(slog::Discard, o!());
+        let client = Client::new(address, &log);
+        client
+            .init_db()
+            .await
+            .expect("Failed to initialize timeseries database");
+        client
+            .insert_samples(&samples)
+            .await
+            .expect("Failed to insert samples");
+        let timeseries_name = "service:request_latency";
+
+        // Limits only work with a single timeseries, so we have to use criteria
+        // that resolve to a single timeseries
+        let criteria =
+            &["name==oximeter", "route==/a", "method==GET", "status_code==200"];
+
+        // First, query without an order. We should see all the results in ascending order.
+        let all_measurements = &client
+            .select_timeseries_with(
+                timeseries_name,
+                criteria,
+                None,
+                None,
+                None,
+                None,
+            )
+            .await
+            .expect("Failed to select timeseries")[0]
+            .measurements;
+
+        assert!(
+            all_measurements.len() > 1,
+            "need more than one measurement to test ordering"
+        );
+
+        // Explicitly specifying asc should give the same results
+        let timeseries_asc = &client
+            .select_timeseries_with(
+                timeseries_name,
+                criteria,
+                None,
+                None,
+                None,
+                Some(PaginationOrder::Ascending),
+            )
+            .await
+            .expect("Failed to select timeseries")[0]
+            .measurements;
+        assert_eq!(all_measurements, timeseries_asc);
+
+        // Now get the results in reverse order
+        let timeseries_desc = &client
+            .select_timeseries_with(
+                timeseries_name,
+                criteria,
+                None,
+                None,
+                None,
+                Some(PaginationOrder::Descending),
+            )
+            .await
+            .expect("Failed to select timeseries")[0]
+            .measurements;
+
+        let mut timeseries_asc_rev = timeseries_asc.clone();
+        timeseries_asc_rev.reverse();
+
+        assert_ne!(timeseries_desc, timeseries_asc);
+        assert_eq!(timeseries_desc, &timeseries_asc_rev);
+
+        // can use limit 1 to get single most recent measurement
+        let desc_limit_1 = &client
+            .select_timeseries_with(
+                timeseries_name,
+                criteria,
+                None,
+                None,
+                Some(NonZeroU32::new(1).unwrap()),
+                Some(PaginationOrder::Descending),
+            )
+            .await
+            .expect("Failed to select timeseries")[0]
+            .measurements;
+
+        assert_eq!(desc_limit_1.len(), 1);
+        assert_eq!(
+            desc_limit_1.first().unwrap(),
+            timeseries_asc.last().unwrap()
         );
 
         db.cleanup().await.expect("Failed to cleanup database");
