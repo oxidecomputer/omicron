@@ -7,10 +7,13 @@
 use std::{
     borrow::Cow,
     fmt,
+    ops::ControlFlow,
+    pin::Pin,
     sync::{
         atomic::{AtomicUsize, Ordering},
         Mutex,
     },
+    task::{ready, Poll},
 };
 
 use debug_ignore::DebugIgnore;
@@ -69,6 +72,11 @@ pub struct UpdateEngine<'a, S: StepSpec> {
     log: slog::Logger,
     execution_id: ExecutionId,
     sender: mpsc::Sender<Event<S>>,
+
+    // This is set to None in Self::execute.
+    abort_sender: Option<mpsc::UnboundedSender<AbortMessage>>,
+    abort_receiver: mpsc::UnboundedReceiver<AbortMessage>,
+
     // This is a mutex to allow borrows to steps to be held by both
     // ComponentRegistrar and NewStep at the same time. (This could also be a
     // `RefCell` if a `Send` bound isn't required.)
@@ -78,10 +86,11 @@ pub struct UpdateEngine<'a, S: StepSpec> {
     steps: Mutex<Steps<'a, S>>,
 }
 
-impl<'a, S: StepSpec> UpdateEngine<'a, S> {
+impl<'a, S: StepSpec + 'a> UpdateEngine<'a, S> {
     /// Creates a new `UpdateEngine`.
     pub fn new(log: &slog::Logger, sender: mpsc::Sender<Event<S>>) -> Self {
         let execution_id = ExecutionId(Uuid::new_v4());
+        let (abort_sender, abort_receiver) = mpsc::unbounded_channel();
         Self {
             log: log.new(slog::o!(
                 "component" => "UpdateEngine",
@@ -89,6 +98,8 @@ impl<'a, S: StepSpec> UpdateEngine<'a, S> {
             )),
             execution_id: ExecutionId(Uuid::new_v4()),
             sender,
+            abort_sender: Some(abort_sender),
+            abort_receiver,
             steps: Default::default(),
         }
     }
@@ -140,11 +151,50 @@ impl<'a, S: StepSpec> UpdateEngine<'a, S> {
         ComponentRegistrar { steps: &self.steps, component }
     }
 
-    /// Executes the list of steps. The sender is a list of steps.
-    pub async fn execute(
-        self,
+    /// Creates and returns an abort handle for this engine.
+    ///
+    /// An abort handle can be used to forcibly cancel update engine executions.
+    pub fn abort_handle(&self) -> AbortHandle {
+        AbortHandle {
+            abort_sender: self
+                .abort_sender
+                .as_ref()
+                .expect("abort_sender should always be present")
+                .clone(),
+        }
+    }
+
+    /// Executes the engine.
+    ///
+    /// This returns an `ExecutionHandle`, which needs to be awaited on to drive
+    /// the engine forward.
+    pub fn execute(mut self) -> ExecutionHandle<'a, S> {
+        let abort_sender = self
+            .abort_sender
+            .take()
+            .expect("execute is the only function which does this");
+        let abort_handle = AbortHandle { abort_sender };
+
+        let engine_fut = self.execute_impl().boxed();
+
+        ExecutionHandle { engine_fut: DebugIgnore(engine_fut), abort_handle }
+    }
+
+    async fn execute_impl(
+        mut self,
     ) -> Result<CompletionContext<S>, ExecutionError<S>> {
-        let total_start = Instant::now();
+        // TODO: this absolutely does not need to be an atomic! However it is
+        // currently so because of a bug in rustc, fixed in Rust 1.70. Fix this
+        // once omicron is on Rust 1.70.
+        //
+        // https://github.com/rust-lang/rust/pull/107844
+        let event_index = AtomicUsize::new(0);
+        let next_event_index = || event_index.fetch_add(1, Ordering::SeqCst);
+        let exec_cx = ExecutionContext::new(
+            self.execution_id,
+            next_event_index,
+            self.sender.clone(),
+        );
 
         let steps = {
             let mut steps_lock = self.steps.lock().unwrap();
@@ -187,21 +237,13 @@ impl<'a, S: StepSpec> UpdateEngine<'a, S> {
         // * Intermediate steps
         // * The last step
 
-        // TODO: this absolutely does not need to be an atomic! However it is
-        // currently so because of a bug in rustc, fixed in Rust 1.70. Fix this
-        // once omicron is on Rust 1.70.
-        //
-        // https://github.com/rust-lang/rust/pull/107844
-        let event_index = AtomicUsize::new(0);
-        let next_event_index = || event_index.fetch_add(1, Ordering::SeqCst);
-
         let Some((index, first_step)) = steps_iter.next() else {
             // There are no steps defined.
             self.sender.send(Event::Step(StepEvent {
                 spec: S::schema_name(),
                 execution_id: self.execution_id,
                 event_index: next_event_index(),
-                total_elapsed: total_start.elapsed(),
+                total_elapsed: exec_cx.total_start.elapsed(),
                 kind: StepEventKind::NoStepsDefined,
             })).await?;
             return Ok(CompletionContext::new());
@@ -218,30 +260,25 @@ impl<'a, S: StepSpec> UpdateEngine<'a, S> {
                 .await
         };
 
-        self.sender
-            .send(Event::Step(StepEvent {
-                spec: S::schema_name(),
-                execution_id: self.execution_id,
-                event_index: next_event_index(),
-                total_elapsed: total_start.elapsed(),
-                kind: StepEventKind::ExecutionStarted {
-                    steps: step_infos,
-                    components,
-                    first_step: first_step_info.clone(),
-                },
-            }))
-            .await?;
+        let event = Event::Step(StepEvent {
+            spec: S::schema_name(),
+            execution_id: self.execution_id,
+            event_index: next_event_index(),
+            total_elapsed: exec_cx.total_start.elapsed(),
+            kind: StepEventKind::ExecutionStarted {
+                steps: step_infos,
+                components,
+                first_step: first_step_info.clone(),
+            },
+        });
+
+        self.sender.send(event).await?;
+
+        let step_exec_cx = exec_cx.create(first_step_info);
 
         let (mut step_res, mut reporter) = first_step
             .exec
-            .execute(
-                &self.log,
-                self.execution_id,
-                &next_event_index,
-                total_start,
-                first_step_info,
-                self.sender.clone(),
-            )
+            .execute(&self.log, step_exec_cx, &mut self.abort_receiver)
             .await?;
 
         // Now run all remaining steps.
@@ -255,19 +292,14 @@ impl<'a, S: StepSpec> UpdateEngine<'a, S> {
                 .metadata_gen
                 .into_step_info_with_metadata(index, *total_component_steps)
                 .await;
+            let next_step = reporter.next_step(step_res, &step_info);
+            next_step.await?;
 
-            reporter.next_step(step_res, &step_info).await?;
+            let step_exec_cx = exec_cx.create(step_info);
 
             (step_res, reporter) = step
                 .exec
-                .execute(
-                    &self.log,
-                    self.execution_id,
-                    &next_event_index,
-                    total_start,
-                    step_info,
-                    self.sender.clone(),
-                )
+                .execute(&self.log, step_exec_cx, &mut self.abort_receiver)
                 .await?;
         }
 
@@ -275,6 +307,117 @@ impl<'a, S: StepSpec> UpdateEngine<'a, S> {
         reporter.last_step(step_res).await?;
 
         Ok(CompletionContext::new())
+    }
+}
+
+pin_project_lite::pin_project! {
+    /// A join handle for an UpdateEngine.
+    ///
+    /// This handle should be awaited to drive and obtain the result of an execution.
+    #[derive(Debug)]
+    #[must_use = "ExecutionHandle does nothing unless polled"]
+    pub struct ExecutionHandle<'a, S: StepSpec> {
+        #[pin]
+        engine_fut: DebugIgnore<BoxFuture<'a, Result<CompletionContext<S>, ExecutionError<S>>>>,
+        abort_handle: AbortHandle,
+    }
+}
+
+impl<'a, S: StepSpec> ExecutionHandle<'a, S> {
+    /// Aborts this engine execution with a message.
+    ///
+    /// This sends the message immediately, and returns a future that can be
+    /// optionally waited against to block until the abort is processed.
+    ///
+    /// If this engine is still running, it is immediately aborted. The engine
+    /// sends an `ExecutionAborted` message over the wire, and an
+    /// `ExecutionError::Aborted` is returned.
+    pub fn abort(&self, message: impl Into<String>) -> AbortWaiter {
+        self.abort_handle.abort(message.into())
+    }
+
+    /// Creates and returns an abort handle for this engine.
+    ///
+    /// An abort handle can be used to forcibly cancel update engine executions.
+    pub fn abort_handle(&self) -> AbortHandle {
+        self.abort_handle.clone()
+    }
+}
+
+impl<'a, S: StepSpec> Future for ExecutionHandle<'a, S> {
+    type Output = Result<CompletionContext<S>, ExecutionError<S>>;
+
+    fn poll(
+        mut self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Self::Output> {
+        self.engine_fut.0.as_mut().poll(cx)
+    }
+}
+
+/// An abort handle, used to forcibly cancel update engine executions.
+#[derive(Clone, Debug)]
+pub struct AbortHandle {
+    // This is an unbounded sender to make Self::abort not async. In general we
+    // don't expect more than one message to ever be sent on this channel.
+    abort_sender: mpsc::UnboundedSender<AbortMessage>,
+}
+
+impl AbortHandle {
+    /// Aborts this engine execution with a message.
+    ///
+    /// This sends the message immediately, and returns a future that can be
+    /// optionally waited against to block until the abort is processed.
+    ///
+    /// If this engine is still running, it is immediately aborted. The engine
+    /// sends an `ExecutionAborted` message over the wire, and an
+    /// `ExecutionError::Aborted` is returned.
+    pub fn abort(&self, message: impl Into<String>) -> AbortWaiter {
+        // Ignore errors here because if the receiver is closed, the engine has
+        // completed (or failed) execution.
+        let (message, processed_receiver) = AbortMessage::new(message.into());
+        _ = self.abort_sender.send(message);
+        AbortWaiter { processed_receiver }
+    }
+}
+
+pin_project_lite::pin_project! {
+    /// A future which can be used to optionally block until an abort message is
+    /// processed.
+    ///
+    /// Dropping this future does not cancel the abort.
+    #[derive(Debug)]
+    pub struct AbortWaiter {
+        #[pin]
+        processed_receiver: oneshot::Receiver<()>,
+    }
+}
+
+impl Future for AbortWaiter {
+    type Output = ();
+
+    fn poll(
+        self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> Poll<Self::Output> {
+        // The return value of the receiver doesn't matter. If it's an error, it
+        // means that the sender was dropped, which means that execution
+        // finished.
+        _ = ready!(self.project().processed_receiver.poll(cx));
+        Poll::Ready(())
+    }
+}
+
+#[derive(Debug)]
+struct AbortMessage {
+    message: String,
+    processed_sender: oneshot::Sender<()>,
+}
+
+impl AbortMessage {
+    fn new(message: String) -> (Self, oneshot::Receiver<()>) {
+        let (processed_sender, processed_receiver) = oneshot::channel();
+        (Self { message, processed_sender }, processed_receiver)
     }
 }
 
@@ -627,7 +770,8 @@ impl<'a, S: StepSpec> StepMetadataGen<'a, S> {
             None => None,
             Some(DebugIgnore(metadata_fn)) => {
                 let cx = MetadataContext::new();
-                let metadata = (metadata_fn)(cx).await;
+                let metadata_fut = (metadata_fn)(cx);
+                let metadata = metadata_fut.await;
                 Some(metadata)
             }
         };
@@ -645,57 +789,83 @@ impl<'a, S: StepSpec> StepExec<'a, S> {
     async fn execute<F: Fn() -> usize>(
         self,
         log: &slog::Logger,
-        execution_id: ExecutionId,
-        next_event_index: F,
-        total_start: Instant,
-        step_info: StepInfoWithMetadata<S>,
-        sender: mpsc::Sender<Event<S>>,
+        step_exec_cx: StepExecutionContext<S, F>,
+        abort_receiver: &mut mpsc::UnboundedReceiver<AbortMessage>,
     ) -> Result<
         (Result<StepOutcome<S>, S::Error>, StepProgressReporter<S, F>),
-        mpsc::error::SendError<Event<S>>,
+        ExecutionError<S>,
     > {
         slog::debug!(
             log,
             "start executing step";
-            "step component" => ?step_info.info.component,
-            "step id" => ?step_info.info.id,
+            "step component" => ?step_exec_cx.step_info.info.component,
+            "step id" => ?step_exec_cx.step_info.info.id,
         );
         let (payload_sender, mut payload_receiver) = mpsc::channel(16);
         let cx = StepContext::new(log, payload_sender);
 
         let mut step_fut = (self.exec_fn.0)(cx);
-        let mut reporter = StepProgressReporter::new(
-            execution_id,
-            next_event_index,
-            total_start,
-            step_info,
-            sender,
-        );
+        let mut reporter = StepProgressReporter::new(step_exec_cx);
 
         let mut step_res = None;
         let mut payload_done = false;
 
         loop {
-            tokio::select! {
-                res = &mut step_fut, if step_res.is_none() => {
-                    step_res = Some(res);
-                }
+            // This is the main execution select loop. We break it up into two
+            // portions:
+            //
+            // 1. The inner select, which is the meat of the engine. It consists
+            //    of driving the step and the payload receiver forward.
+            //
+            // 2. The outer select, which consists of selecting over the inner
+            //    select and the abort receiver.
+            //
+            // The two selects cannot be combined! That's because the else block
+            // of the inner select only applies to the step and payload
+            // receivers. We do not want to wait for the abort receiver to exit
+            // before exiting the loop.
+            let inner_select = async {
+                tokio::select! {
+                    res = &mut step_fut, if step_res.is_none() => {
+                        step_res = Some(res);
+                        Ok(ControlFlow::Continue(()))
+                    }
 
-                payload = payload_receiver.recv(), if !payload_done => {
-                    match payload {
-                        Some(payload) => {
-                            reporter.handle_payload(payload).await?;
+                    payload = payload_receiver.recv(), if !payload_done => {
+                        match payload {
+                            Some(payload) => {
+                                reporter.handle_payload(payload).await?;
+                            }
+                            None => {
+                                // The payload receiver is complete.
+                                payload_done = true;
+                            }
                         }
-                        None => {
-                            // The payload receiver is complete.
-                            payload_done = true;
+                        Ok(ControlFlow::Continue(()))
+                    }
+
+                    else => Ok(ControlFlow::Break(())),
+                }
+            };
+
+            // This is the outer select.
+            tokio::select! {
+                ret = inner_select => {
+                    match ret {
+                        Ok(op) => {
+                            if op.is_break() {
+                                break;
+                            }
+                        }
+                        Err(error) => {
+                            return Err(error);
                         }
                     }
                 }
 
-                // This branch matches if none of the preconditions expressed
-                // above are met.
-                else => break,
+                Some(message) = abort_receiver.recv() => {
+                    return Err(reporter.handle_abort(message).await);
+                }
             }
         }
 
@@ -703,6 +873,52 @@ impl<'a, S: StepSpec> StepExec<'a, S> {
         let step_res = step_res.expect("can only get here if res is Some");
         Ok((step_res, reporter))
     }
+}
+
+#[derive_where(Debug)]
+struct ExecutionContext<S: StepSpec, F> {
+    execution_id: ExecutionId,
+    next_event_index: DebugIgnore<F>,
+    total_start: Instant,
+    sender: mpsc::Sender<Event<S>>,
+}
+
+impl<S: StepSpec, F> ExecutionContext<S, F> {
+    fn new(
+        execution_id: ExecutionId,
+        next_event_index: F,
+        sender: mpsc::Sender<Event<S>>,
+    ) -> Self {
+        let total_start = Instant::now();
+        Self {
+            execution_id,
+            next_event_index: DebugIgnore(next_event_index),
+            total_start,
+            sender,
+        }
+    }
+
+    fn create(
+        &self,
+        step_info: StepInfoWithMetadata<S>,
+    ) -> StepExecutionContext<S, &F> {
+        StepExecutionContext {
+            execution_id: self.execution_id,
+            next_event_index: DebugIgnore(&self.next_event_index.0),
+            total_start: self.total_start,
+            step_info,
+            sender: self.sender.clone(),
+        }
+    }
+}
+
+#[derive_where(Debug)]
+struct StepExecutionContext<S: StepSpec, F> {
+    execution_id: ExecutionId,
+    next_event_index: DebugIgnore<F>,
+    total_start: Instant,
+    step_info: StepInfoWithMetadata<S>,
+    sender: mpsc::Sender<Event<S>>,
 }
 
 type StepMetadataFn<'a, S> = Box<
@@ -741,24 +957,18 @@ struct StepProgressReporter<S: StepSpec, F> {
 }
 
 impl<S: StepSpec, F: Fn() -> usize> StepProgressReporter<S, F> {
-    fn new(
-        execution_id: ExecutionId,
-        next_event_index: F,
-        total_start: Instant,
-        step_info: StepInfoWithMetadata<S>,
-        sender: mpsc::Sender<Event<S>>,
-    ) -> Self {
+    fn new(step_exec_cx: StepExecutionContext<S, F>) -> Self {
         let step_start = Instant::now();
         Self {
-            execution_id,
-            next_event_index,
-            total_start,
-            step_info,
+            execution_id: step_exec_cx.execution_id,
+            next_event_index: step_exec_cx.next_event_index.0,
+            total_start: step_exec_cx.total_start,
+            step_info: step_exec_cx.step_info,
             step_start,
             attempt: 1,
             // It's slightly nicer for step_start and attempt_start to be exactly the same.
             attempt_start: step_start,
-            sender,
+            sender: step_exec_cx.sender,
         }
     }
 
@@ -874,6 +1084,44 @@ impl<S: StepSpec, F: Fn() -> usize> StepProgressReporter<S, F> {
         }
     }
 
+    async fn handle_abort(self, message: AbortMessage) -> ExecutionError<S> {
+        // Send the abort message over the channel.
+        //
+        // The only way this can fail is if the event receiver is closed or
+        // dropped. That failure doesn't have any implications on whether this
+        // aborts or not.
+        let res = self
+            .sender
+            .send(Event::Step(StepEvent {
+                spec: S::schema_name(),
+                execution_id: self.execution_id,
+                event_index: (self.next_event_index)(),
+                total_elapsed: self.total_start.elapsed(),
+                kind: StepEventKind::ExecutionAborted {
+                    aborted_step: self.step_info.clone(),
+                    attempt: self.attempt,
+                    step_elapsed: self.step_start.elapsed(),
+                    attempt_elapsed: self.attempt_start.elapsed(),
+                    message: message.message.clone(),
+                },
+            }))
+            .await;
+
+        // An error here doesn't matter -- it just means that the abort handle
+        // was dropped.
+        _ = message.processed_sender.send(());
+
+        match res {
+            Ok(()) => ExecutionError::Aborted {
+                component: self.step_info.info.component.clone(),
+                id: self.step_info.info.id.clone(),
+                description: self.step_info.info.description.clone(),
+                message: message.message,
+            },
+            Err(error) => error.into(),
+        }
+    }
+
     async fn next_step(
         self,
         step_res: Result<StepOutcome<S>, S::Error>,
@@ -902,8 +1150,14 @@ impl<S: StepSpec, F: Fn() -> usize> StepProgressReporter<S, F> {
             Err(error) => {
                 let component = self.step_info.info.component.clone();
                 let id = self.step_info.info.id.clone();
+                let description = self.step_info.info.description.clone();
                 self.send_error(&error).await?;
-                Err(ExecutionError::StepFailed { component, id, error })
+                Err(ExecutionError::StepFailed {
+                    component,
+                    id,
+                    description,
+                    error,
+                })
             }
         }
     }
@@ -934,8 +1188,14 @@ impl<S: StepSpec, F: Fn() -> usize> StepProgressReporter<S, F> {
             Err(error) => {
                 let component = self.step_info.info.component.clone();
                 let id = self.step_info.info.id.clone();
+                let description = self.step_info.info.description.clone();
                 self.send_error(&error).await?;
-                Err(ExecutionError::StepFailed { component, id, error })
+                Err(ExecutionError::StepFailed {
+                    component,
+                    id,
+                    description,
+                    error,
+                })
             }
         }
     }

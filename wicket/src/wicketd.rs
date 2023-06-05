@@ -10,8 +10,9 @@ use std::net::SocketAddrV6;
 use tokio::sync::mpsc::{self, Sender, UnboundedSender};
 use tokio::time::{interval, Duration, MissedTickBehavior};
 use wicketd_client::types::{
-    ClearUpdateStateOptions, GetInventoryParams, GetInventoryResponse,
-    IgnitionCommand, SpIdentifier, SpType, StartUpdateOptions,
+    AbortUpdateOptions, ClearUpdateStateOptions, GetInventoryParams,
+    GetInventoryResponse, IgnitionCommand, SpIdentifier, SpType,
+    StartUpdateOptions,
 };
 
 use crate::events::EventReportMap;
@@ -53,6 +54,10 @@ pub enum Request {
     StartUpdate {
         component_id: ComponentId,
         options: StartUpdateOptions,
+    },
+    AbortUpdate {
+        component_id: ComponentId,
+        options: AbortUpdateOptions,
     },
     ClearUpdateState {
         component_id: ComponentId,
@@ -114,6 +119,9 @@ impl WicketdManager {
                         Request::StartUpdate { component_id, options } => {
                             self.start_update(component_id, options);
                         }
+                        Request::AbortUpdate { component_id, options } => {
+                            self.abort_update(component_id, options);
+                        }
                         Request::ClearUpdateState { component_id, options } => {
                             self.clear_update_state(component_id, options);
                         }
@@ -162,6 +170,38 @@ impl WicketdManager {
             );
             _ = events_tx.send(Event::Term(Cmd::ShowPopup(
                 ShowPopupCmd::StartUpdateResponse { component_id, response },
+            )));
+        });
+    }
+
+    fn abort_update(
+        &self,
+        component_id: ComponentId,
+        options: AbortUpdateOptions,
+    ) {
+        let log = self.log.clone();
+        let addr = self.wicketd_addr;
+        let events_tx = self.events_tx.clone();
+        tokio::spawn(async move {
+            let update_client =
+                create_wicketd_client(&log, addr, WICKETD_TIMEOUT);
+            let sp: SpIdentifier = component_id.into();
+            let response = match update_client
+                .post_abort_update(sp.type_, sp.slot, &options)
+                .await
+            {
+                Ok(_) => Ok(()),
+                Err(error) => Err(error.to_string()),
+            };
+
+            slog::info!(
+                log,
+                "Abort update state response for {}: {:?}",
+                component_id,
+                response
+            );
+            _ = events_tx.send(Event::Term(Cmd::ShowPopup(
+                ShowPopupCmd::AbortUpdateResponse { component_id, response },
             )));
         });
     }

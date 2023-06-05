@@ -6,18 +6,21 @@
 
 use crate::authz;
 use crate::external_api::http_entrypoints::SystemMetricName;
-use crate::external_api::http_entrypoints::SystemMetricParams;
+use crate::external_api::params::ResourceMetrics;
+use dropshot::PaginationParams;
 use nexus_db_queries::context::OpContext;
 use omicron_common::api::external::Error;
 use oximeter_db::Measurement;
 use std::num::NonZeroU32;
+use uuid::Uuid;
 
 impl super::Nexus {
     pub async fn system_metric_lookup(
         &self,
         opctx: &OpContext,
         metric_name: SystemMetricName,
-        query: SystemMetricParams,
+        resource_id: Uuid,
+        pagination: PaginationParams<ResourceMetrics, ResourceMetrics>,
         limit: NonZeroU32,
     ) -> Result<dropshot::ResultsPage<Measurement>, Error> {
         let timeseries = match metric_name {
@@ -30,8 +33,8 @@ impl super::Nexus {
         };
         self.select_timeseries(
             &timeseries,
-            &[&format!("id=={}", query.id)],
-            query.pagination,
+            &[&format!("id=={}", resource_id)],
+            pagination,
             limit,
         )
         .await
