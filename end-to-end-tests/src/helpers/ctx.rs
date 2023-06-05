@@ -5,9 +5,7 @@ use omicron_sled_agent::rack_setup::config::SetupServiceConfig;
 use omicron_test_utils::dev::poll::{wait_for_condition, CondCheckError};
 use oxide_client::types::{Name, ProjectCreate};
 use oxide_client::CustomDnsResolver;
-use oxide_client::{
-    Client, ClientProjectsExt, ClientVpcsExt, ClientVpcsSubnetsExt,
-};
+use oxide_client::{Client, ClientProjectsExt, ClientVpcsExt};
 use reqwest::header::{HeaderMap, HeaderValue};
 use reqwest::Url;
 use std::net::IpAddr;

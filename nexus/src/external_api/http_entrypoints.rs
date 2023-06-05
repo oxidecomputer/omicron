@@ -1078,8 +1078,8 @@ async fn project_policy_update(
 /// List IP pools
 #[endpoint {
     method = GET,
-    path = "/v1/system/ip-pools",
-    tags = ["system/ip-pools"],
+    path = "/v1/system/networking",
+    tags = ["system/networking"],
 }]
 async fn ip_pool_list(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -1116,8 +1116,8 @@ pub struct IpPoolPathParam {
 /// Create an IP pool
 #[endpoint {
     method = POST,
-    path = "/v1/system/ip-pools",
-    tags = ["system/ip-pools"],
+    path = "/v1/system/networking",
+    tags = ["system/networking"],
 }]
 async fn ip_pool_create(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -1138,7 +1138,7 @@ async fn ip_pool_create(
 #[endpoint {
     method = GET,
     path = "/v1/system/ip-pools/{pool}",
-    tags = ["system/ip-pools"],
+    tags = ["system/networking"],
 }]
 async fn ip_pool_view(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -1160,7 +1160,7 @@ async fn ip_pool_view(
 #[endpoint {
     method = DELETE,
     path = "/v1/system/ip-pools/{pool}",
-    tags = ["system/ip-pools"],
+    tags = ["system/networking"],
 }]
 async fn ip_pool_delete(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -1182,7 +1182,7 @@ async fn ip_pool_delete(
 #[endpoint {
     method = PUT,
     path = "/v1/system/ip-pools/{pool}",
-    tags = ["system/ip-pools"],
+    tags = ["system/networking"],
 }]
 async fn ip_pool_update(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -1206,7 +1206,7 @@ async fn ip_pool_update(
 #[endpoint {
     method = GET,
     path = "/v1/system/ip-pools-service",
-    tags = ["system/ip-pools"],
+    tags = ["system/networking"],
 }]
 async fn ip_pool_service_view(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -1229,7 +1229,7 @@ type IpPoolRangePaginationParams = PaginationParams<EmptyScanParams, IpNetwork>;
 #[endpoint {
     method = GET,
     path = "/v1/system/ip-pools/{pool}/ranges",
-    tags = ["system/ip-pools"],
+    tags = ["system/networking"],
 }]
 async fn ip_pool_range_list(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -1273,7 +1273,7 @@ async fn ip_pool_range_list(
 #[endpoint {
     method = POST,
     path = "/v1/system/ip-pools/{pool}/ranges/add",
-    tags = ["system/ip-pools"],
+    tags = ["system/networking"],
 }]
 async fn ip_pool_range_add(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -1297,7 +1297,7 @@ async fn ip_pool_range_add(
 #[endpoint {
     method = POST,
     path = "/v1/system/ip-pools/{pool}/ranges/remove",
-    tags = ["system/ip-pools"],
+    tags = ["system/networking"],
 }]
 async fn ip_pool_range_remove(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -1324,7 +1324,7 @@ async fn ip_pool_range_remove(
 #[endpoint {
     method = GET,
     path = "/v1/system/ip-pools-service/ranges",
-    tags = ["system/ip-pools"],
+    tags = ["system/networking"],
 }]
 async fn ip_pool_service_range_list(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -1365,7 +1365,7 @@ async fn ip_pool_service_range_list(
 #[endpoint {
     method = POST,
     path = "/v1/system/ip-pools-service/ranges/add",
-    tags = ["system/ip-pools"],
+    tags = ["system/networking"],
 }]
 async fn ip_pool_service_range_add(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -1386,7 +1386,7 @@ async fn ip_pool_service_range_add(
 #[endpoint {
     method = POST,
     path = "/v1/system/ip-pools-service/ranges/remove",
-    tags = ["system/ip-pools"],
+    tags = ["system/networking"],
 }]
 async fn ip_pool_service_range_remove(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -3427,7 +3427,7 @@ async fn vpc_delete(
 #[endpoint {
     method = GET,
     path = "/v1/vpc-subnets",
-    tags = ["vpcs/subnets"],
+    tags = ["vpcs"],
 }]
 async fn vpc_subnet_list(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -3462,7 +3462,7 @@ async fn vpc_subnet_list(
 #[endpoint {
     method = POST,
     path = "/v1/vpc-subnets",
-    tags = ["vpcs/subnets"],
+    tags = ["vpcs"],
 }]
 async fn vpc_subnet_create(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -3487,7 +3487,7 @@ async fn vpc_subnet_create(
 #[endpoint {
     method = GET,
     path = "/v1/vpc-subnets/{subnet}",
-    tags = ["vpcs/subnets"],
+    tags = ["vpcs"],
 }]
 async fn vpc_subnet_view(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -3516,7 +3516,7 @@ async fn vpc_subnet_view(
 #[endpoint {
     method = DELETE,
     path = "/v1/vpc-subnets/{subnet}",
-    tags = ["vpcs/subnets"],
+    tags = ["vpcs"],
 }]
 async fn vpc_subnet_delete(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -3545,7 +3545,7 @@ async fn vpc_subnet_delete(
 #[endpoint {
     method = PUT,
     path = "/v1/vpc-subnets/{subnet}",
-    tags = ["vpcs/subnets"],
+    tags = ["vpcs"],
 }]
 async fn vpc_subnet_update(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -3582,7 +3582,7 @@ async fn vpc_subnet_update(
 #[endpoint {
     method = GET,
     path = "/v1/vpc-subnets/{subnet}/network-interfaces",
-    tags = ["vpcs/subnets"],
+    tags = ["vpcs"],
 }]
 async fn vpc_subnet_list_network_interfaces(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -3630,7 +3630,7 @@ async fn vpc_subnet_list_network_interfaces(
 #[endpoint {
     method = GET,
     path = "/v1/vpc-firewall-rules",
-    tags = ["vpcs/firewall-rules"],
+    tags = ["vpcs"],
 }]
 async fn vpc_firewall_rules_view(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -3657,7 +3657,7 @@ async fn vpc_firewall_rules_view(
 #[endpoint {
     method = PUT,
     path = "/v1/vpc-firewall-rules",
-    tags = ["vpcs/firewall-rules"],
+    tags = ["vpcs"],
 }]
 async fn vpc_firewall_rules_update(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -3689,7 +3689,7 @@ async fn vpc_firewall_rules_update(
 #[endpoint {
     method = GET,
     path = "/v1/vpc-routers",
-    tags = ["vpcs/routers"],
+    tags = ["vpcs"],
 }]
 async fn vpc_router_list(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -3724,7 +3724,7 @@ async fn vpc_router_list(
 #[endpoint {
     method = GET,
     path = "/v1/vpc-routers/{router}",
-    tags = ["vpcs/routers"],
+    tags = ["vpcs"],
 }]
 async fn vpc_router_view(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -3753,7 +3753,7 @@ async fn vpc_router_view(
 #[endpoint {
     method = POST,
     path = "/v1/vpc-routers",
-    tags = ["vpcs/routers"],
+    tags = ["vpcs"],
 }]
 async fn vpc_router_create(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -3784,7 +3784,7 @@ async fn vpc_router_create(
 #[endpoint {
     method = DELETE,
     path = "/v1/vpc-routers/{router}",
-    tags = ["vpcs/routers"],
+    tags = ["vpcs"],
 }]
 async fn vpc_router_delete(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -3813,7 +3813,7 @@ async fn vpc_router_delete(
 #[endpoint {
     method = PUT,
     path = "/v1/vpc-routers/{router}",
-    tags = ["vpcs/routers"],
+    tags = ["vpcs"],
 }]
 async fn vpc_router_update(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -3848,7 +3848,7 @@ async fn vpc_router_update(
 #[endpoint {
     method = GET,
     path = "/v1/vpc-router-routes",
-    tags = ["vpcs/routes"],
+    tags = ["vpcs"],
 }]
 async fn vpc_router_route_list(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -3885,7 +3885,7 @@ async fn vpc_router_route_list(
 #[endpoint {
     method = GET,
     path = "/v1/vpc-router-routes/{route}",
-    tags = ["vpcs/routes"],
+    tags = ["vpcs"],
 }]
 async fn vpc_router_route_view(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -3917,7 +3917,7 @@ async fn vpc_router_route_view(
 #[endpoint {
     method = POST,
     path = "/v1/vpc-router-routes",
-    tags = ["vpcs/routes"],
+    tags = ["vpcs"],
 }]
 async fn vpc_router_route_create(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -3948,7 +3948,7 @@ async fn vpc_router_route_create(
 #[endpoint {
     method = DELETE,
     path = "/v1/vpc-router-routes/{route}",
-    tags = ["vpcs/routes"],
+    tags = ["vpcs"],
 }]
 async fn vpc_router_route_delete(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -3979,7 +3979,7 @@ async fn vpc_router_route_delete(
 #[endpoint {
     method = PUT,
     path = "/v1/vpc-router-routes/{route}",
-    tags = ["vpcs/routes"],
+    tags = ["vpcs"],
 }]
 async fn vpc_router_route_update(
     rqctx: RequestContext<Arc<ServerContext>>,

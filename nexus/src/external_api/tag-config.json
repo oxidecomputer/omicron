@@ -50,30 +50,6 @@
         "url": "http://docs.oxide.computer/api/vpcs"
       }
     },
-    "vpcs/routers": {
-      "description": "Routers manage the traffic between subnets within a Virtual Private Cloud (VPC) or to external networks.",
-      "external_docs": {
-        "url": "http://docs.oxide.computer/api/vpcs/routers"
-      }
-    },
-    "vpcs/routes": {
-      "description": "Routes determine the path that network traffic should take from one subnet to another, or to an external IP.",
-      "external_docs": {
-        "url": "http://docs.oxide.computer/api/vpcs/routes"
-      }
-    },
-    "vpcs/subnets": {
-      "description": "Subnets are segments of a VPC's IP address space.",
-      "external_docs": {
-        "url": "http://docs.oxide.computer/api/vpcs/subnets"
-      }
-    },
-    "vpcs/nics": {
-      "description": "Network interface controllers (NICs) serve as the interface for instances to connect to a network within a VPC.",
-      "external_docs": {
-        "url": "http://docs.oxide.computer/api/vpcs/nics"
-      }
-    },
     "policy": {
       "description": "System-wide IAM policy",
       "external_docs": {
@@ -132,12 +108,6 @@
       "description": "Identity providers manage the process of establishing, maintaining, and integrating user identity and access control.",
       "external_docs": {
         "url": "http://docs.oxide.computer/api/system/identity-providers"
-      }
-    },
-    "system/ip-pools": {
-      "description": "An IP pool is a collection of external addresses that are maintained by operators.",
-      "external_docs": {
-        "url": "http://docs.oxide.computer/api/ip-pools"
       }
     },
     "system/metrics": {

@@ -4216,104 +4216,10 @@
         }
       }
     },
-    "/v1/system/ip-pools": {
-      "get": {
-        "tags": [
-          "system/ip-pools"
-        ],
-        "summary": "List IP pools",
-        "operationId": "ip_pool_list",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "limit",
-            "description": "Maximum number of items returned by a single call",
-            "schema": {
-              "nullable": true,
-              "type": "integer",
-              "format": "uint32",
-              "minimum": 1
-            }
-          },
-          {
-            "in": "query",
-            "name": "page_token",
-            "description": "Token returned by previous call to retrieve the subsequent page",
-            "schema": {
-              "nullable": true,
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "sort_by",
-            "schema": {
-              "$ref": "#/components/schemas/NameOrIdSortMode"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/IpPoolResultsPage"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "x-dropshot-pagination": {
-          "required": []
-        }
-      },
-      "post": {
-        "tags": [
-          "system/ip-pools"
-        ],
-        "summary": "Create an IP pool",
-        "operationId": "ip_pool_create",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/IpPoolCreate"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "description": "successful creation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/IpPool"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
     "/v1/system/ip-pools/{pool}": {
       "get": {
         "tags": [
-          "system/ip-pools"
+          "system/networking"
         ],
         "summary": "Fetch an IP pool",
         "operationId": "ip_pool_view",
@@ -4349,7 +4255,7 @@
       },
       "put": {
         "tags": [
-          "system/ip-pools"
+          "system/networking"
         ],
         "summary": "Update an IP Pool",
         "operationId": "ip_pool_update",
@@ -4395,7 +4301,7 @@
       },
       "delete": {
         "tags": [
-          "system/ip-pools"
+          "system/networking"
         ],
         "summary": "Delete an IP Pool",
         "operationId": "ip_pool_delete",
@@ -4426,7 +4332,7 @@
     "/v1/system/ip-pools/{pool}/ranges": {
       "get": {
         "tags": [
-          "system/ip-pools"
+          "system/networking"
         ],
         "summary": "List ranges for an IP pool",
         "description": "List ranges for an IP pool. Ranges are ordered by their first address.",
@@ -4488,7 +4394,7 @@
     "/v1/system/ip-pools/{pool}/ranges/add": {
       "post": {
         "tags": [
-          "system/ip-pools"
+          "system/networking"
         ],
         "summary": "Add a range to an IP pool",
         "operationId": "ip_pool_range_add",
@@ -4536,7 +4442,7 @@
     "/v1/system/ip-pools/{pool}/ranges/remove": {
       "post": {
         "tags": [
-          "system/ip-pools"
+          "system/networking"
         ],
         "summary": "Remove a range from an IP pool",
         "operationId": "ip_pool_range_remove",
@@ -4577,7 +4483,7 @@
     "/v1/system/ip-pools-service": {
       "get": {
         "tags": [
-          "system/ip-pools"
+          "system/networking"
         ],
         "summary": "Fetch the IP pool used for Oxide services",
         "operationId": "ip_pool_service_view",
@@ -4604,7 +4510,7 @@
     "/v1/system/ip-pools-service/ranges": {
       "get": {
         "tags": [
-          "system/ip-pools"
+          "system/networking"
         ],
         "summary": "List ranges for the IP pool used for Oxide services",
         "description": "List ranges for the IP pool used for Oxide services. Ranges are ordered by their first address.",
@@ -4657,7 +4563,7 @@
     "/v1/system/ip-pools-service/ranges/add": {
       "post": {
         "tags": [
-          "system/ip-pools"
+          "system/networking"
         ],
         "summary": "Add a range to an IP pool used for Oxide services",
         "operationId": "ip_pool_service_range_add",
@@ -4694,7 +4600,7 @@
     "/v1/system/ip-pools-service/ranges/remove": {
       "post": {
         "tags": [
-          "system/ip-pools"
+          "system/networking"
         ],
         "summary": "Remove a range from an IP pool used for Oxide services",
         "operationId": "ip_pool_service_range_remove",
@@ -4809,6 +4715,100 @@
             "end_time",
             "start_time"
           ]
+        }
+      }
+    },
+    "/v1/system/networking": {
+      "get": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "List IP pools",
+        "operationId": "ip_pool_list",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrIdSortMode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IpPoolResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": {
+          "required": []
+        }
+      },
+      "post": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "Create an IP pool",
+        "operationId": "ip_pool_create",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IpPoolCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IpPool"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
         }
       }
     },
@@ -6407,7 +6407,7 @@
     "/v1/vpc-firewall-rules": {
       "get": {
         "tags": [
-          "vpcs/firewall-rules"
+          "vpcs"
         ],
         "summary": "List firewall rules",
         "operationId": "vpc_firewall_rules_view",
@@ -6451,7 +6451,7 @@
       },
       "put": {
         "tags": [
-          "vpcs/firewall-rules"
+          "vpcs"
         ],
         "summary": "Replace firewall rules",
         "operationId": "vpc_firewall_rules_update",
@@ -6507,7 +6507,7 @@
     "/v1/vpc-router-routes": {
       "get": {
         "tags": [
-          "vpcs/routes"
+          "vpcs"
         ],
         "summary": "List routes",
         "description": "List the routes associated with a router in a particular VPC.",
@@ -6591,7 +6591,7 @@
       },
       "post": {
         "tags": [
-          "vpcs/routes"
+          "vpcs"
         ],
         "summary": "Create a router",
         "operationId": "vpc_router_route_create",
@@ -6655,7 +6655,7 @@
     "/v1/vpc-router-routes/{route}": {
       "get": {
         "tags": [
-          "vpcs/routes"
+          "vpcs"
         ],
         "summary": "Fetch a route",
         "operationId": "vpc_router_route_view",
@@ -6716,7 +6716,7 @@
       },
       "put": {
         "tags": [
-          "vpcs/routes"
+          "vpcs"
         ],
         "summary": "Update a route",
         "operationId": "vpc_router_route_update",
@@ -6786,7 +6786,7 @@
       },
       "delete": {
         "tags": [
-          "vpcs/routes"
+          "vpcs"
         ],
         "summary": "Delete a route",
         "operationId": "vpc_router_route_delete",
@@ -6841,7 +6841,7 @@
     "/v1/vpc-routers": {
       "get": {
         "tags": [
-          "vpcs/routers"
+          "vpcs"
         ],
         "summary": "List routers",
         "operationId": "vpc_router_list",
@@ -6916,7 +6916,7 @@
       },
       "post": {
         "tags": [
-          "vpcs/routers"
+          "vpcs"
         ],
         "summary": "Create a VPC router",
         "operationId": "vpc_router_create",
@@ -6972,7 +6972,7 @@
     "/v1/vpc-routers/{router}": {
       "get": {
         "tags": [
-          "vpcs/routers"
+          "vpcs"
         ],
         "summary": "Fetch a router",
         "operationId": "vpc_router_view",
@@ -7024,7 +7024,7 @@
       },
       "put": {
         "tags": [
-          "vpcs/routers"
+          "vpcs"
         ],
         "summary": "Update a router",
         "operationId": "vpc_router_update",
@@ -7086,7 +7086,7 @@
       },
       "delete": {
         "tags": [
-          "vpcs/routers"
+          "vpcs"
         ],
         "summary": "Delete a router",
         "operationId": "vpc_router_delete",
@@ -7133,7 +7133,7 @@
     "/v1/vpc-subnets": {
       "get": {
         "tags": [
-          "vpcs/subnets"
+          "vpcs"
         ],
         "summary": "List subnets",
         "operationId": "vpc_subnet_list",
@@ -7208,7 +7208,7 @@
       },
       "post": {
         "tags": [
-          "vpcs/subnets"
+          "vpcs"
         ],
         "summary": "Create a subnet",
         "operationId": "vpc_subnet_create",
@@ -7264,7 +7264,7 @@
     "/v1/vpc-subnets/{subnet}": {
       "get": {
         "tags": [
-          "vpcs/subnets"
+          "vpcs"
         ],
         "summary": "Fetch a subnet",
         "operationId": "vpc_subnet_view",
@@ -7316,7 +7316,7 @@
       },
       "put": {
         "tags": [
-          "vpcs/subnets"
+          "vpcs"
         ],
         "summary": "Update a subnet",
         "operationId": "vpc_subnet_update",
@@ -7378,7 +7378,7 @@
       },
       "delete": {
         "tags": [
-          "vpcs/subnets"
+          "vpcs"
         ],
         "summary": "Delete a subnet",
         "operationId": "vpc_subnet_delete",
@@ -7425,7 +7425,7 @@
     "/v1/vpc-subnets/{subnet}/network-interfaces": {
       "get": {
         "tags": [
-          "vpcs/subnets"
+          "vpcs"
         ],
         "summary": "List network interfaces",
         "operationId": "vpc_subnet_list_network_interfaces",
@@ -14443,13 +14443,6 @@
       }
     },
     {
-      "name": "system/ip-pools",
-      "description": "An IP pool is a collection of external addresses that are maintained by operators.",
-      "externalDocs": {
-        "url": "http://docs.oxide.computer/api/ip-pools"
-      }
-    },
-    {
       "name": "system/metrics",
       "description": "Metrics provide insight into the operation of the Oxide deployment. These include telemetry on hardware and software components that can be used to understand the current state as well as to diagnose issues.",
       "externalDocs": {
@@ -14496,34 +14489,6 @@
       "description": "Firewall rules are used to control incoming and outgoing network traffic.",
       "externalDocs": {
         "url": "http://docs.oxide.computer/api/firewall-rules"
-      }
-    },
-    {
-      "name": "vpcs/nics",
-      "description": "Network interface controllers (NICs) serve as the interface for instances to connect to a network within a VPC.",
-      "externalDocs": {
-        "url": "http://docs.oxide.computer/api/vpcs/nics"
-      }
-    },
-    {
-      "name": "vpcs/routers",
-      "description": "Routers manage the traffic between subnets within a Virtual Private Cloud (VPC) or to external networks.",
-      "externalDocs": {
-        "url": "http://docs.oxide.computer/api/vpcs/routers"
-      }
-    },
-    {
-      "name": "vpcs/routes",
-      "description": "Routes determine the path that network traffic should take from one subnet to another, or to an external IP.",
-      "externalDocs": {
-        "url": "http://docs.oxide.computer/api/vpcs/routes"
-      }
-    },
-    {
-      "name": "vpcs/subnets",
-      "description": "Subnets are segments of a VPC's IP address space.",
-      "externalDocs": {
-        "url": "http://docs.oxide.computer/api/vpcs/subnets"
       }
     }
   ]

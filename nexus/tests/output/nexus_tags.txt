@@ -128,11 +128,15 @@ saml_identity_provider_create            POST     /v1/system/identity-providers/
 saml_identity_provider_view              GET      /v1/system/identity-providers/saml/{provider}
 silo_identity_provider_list              GET      /v1/system/identity-providers
 
-API operations found with tag "system/ip-pools"
+API operations found with tag "system/metrics"
 OPERATION ID                             METHOD   URL PATH
-ip_pool_create                           POST     /v1/system/ip-pools
+system_metric                            GET      /v1/system/metrics/{metric_name}
+
+API operations found with tag "system/networking"
+OPERATION ID                             METHOD   URL PATH
+ip_pool_create                           POST     /v1/system/networking
 ip_pool_delete                           DELETE   /v1/system/ip-pools/{pool}
-ip_pool_list                             GET      /v1/system/ip-pools
+ip_pool_list                             GET      /v1/system/networking
 ip_pool_range_add                        POST     /v1/system/ip-pools/{pool}/ranges/add
 ip_pool_range_list                       GET      /v1/system/ip-pools/{pool}/ranges
 ip_pool_range_remove                     POST     /v1/system/ip-pools/{pool}/ranges/remove
@@ -142,13 +146,6 @@ ip_pool_service_range_remove             POST     /v1/system/ip-pools-service/ra
 ip_pool_service_view                     GET      /v1/system/ip-pools-service
 ip_pool_update                           PUT      /v1/system/ip-pools/{pool}
 ip_pool_view                             GET      /v1/system/ip-pools/{pool}
-
-API operations found with tag "system/metrics"
-OPERATION ID                             METHOD   URL PATH
-system_metric                            GET      /v1/system/metrics/{metric_name}
-
-API operations found with tag "system/networking"
-OPERATION ID                             METHOD   URL PATH
 networking_address_lot_block_list        GET      /v1/system/networking/address-lot/{address_lot}/blocks
 networking_address_lot_create            POST     /v1/system/networking/address-lot
 networking_address_lot_delete            DELETE   /v1/system/networking/address-lot/{address_lot}
@@ -194,37 +191,25 @@ API operations found with tag "vpcs"
 OPERATION ID                             METHOD   URL PATH
 vpc_create                               POST     /v1/vpcs
 vpc_delete                               DELETE   /v1/vpcs/{vpc}
-vpc_list                                 GET      /v1/vpcs
-vpc_update                               PUT      /v1/vpcs/{vpc}
-vpc_view                                 GET      /v1/vpcs/{vpc}
-
-API operations found with tag "vpcs/firewall-rules"
-OPERATION ID                             METHOD   URL PATH
 vpc_firewall_rules_update                PUT      /v1/vpc-firewall-rules
 vpc_firewall_rules_view                  GET      /v1/vpc-firewall-rules
-
-API operations found with tag "vpcs/routers"
-OPERATION ID                             METHOD   URL PATH
+vpc_list                                 GET      /v1/vpcs
 vpc_router_create                        POST     /v1/vpc-routers
 vpc_router_delete                        DELETE   /v1/vpc-routers/{router}
 vpc_router_list                          GET      /v1/vpc-routers
-vpc_router_update                        PUT      /v1/vpc-routers/{router}
-vpc_router_view                          GET      /v1/vpc-routers/{router}
-
-API operations found with tag "vpcs/routes"
-OPERATION ID                             METHOD   URL PATH
 vpc_router_route_create                  POST     /v1/vpc-router-routes
 vpc_router_route_delete                  DELETE   /v1/vpc-router-routes/{route}
 vpc_router_route_list                    GET      /v1/vpc-router-routes
 vpc_router_route_update                  PUT      /v1/vpc-router-routes/{route}
 vpc_router_route_view                    GET      /v1/vpc-router-routes/{route}
-
-API operations found with tag "vpcs/subnets"
-OPERATION ID                             METHOD   URL PATH
+vpc_router_update                        PUT      /v1/vpc-routers/{router}
+vpc_router_view                          GET      /v1/vpc-routers/{router}
 vpc_subnet_create                        POST     /v1/vpc-subnets
 vpc_subnet_delete                        DELETE   /v1/vpc-subnets/{subnet}
 vpc_subnet_list                          GET      /v1/vpc-subnets
 vpc_subnet_list_network_interfaces       GET      /v1/vpc-subnets/{subnet}/network-interfaces
 vpc_subnet_update                        PUT      /v1/vpc-subnets/{subnet}
 vpc_subnet_view                          GET      /v1/vpc-subnets/{subnet}
+vpc_update                               PUT      /v1/vpcs/{vpc}
+vpc_view                                 GET      /v1/vpcs/{vpc}
 
