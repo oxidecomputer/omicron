@@ -6,10 +6,11 @@ license = "MPL-2.0"
 
 [dependencies]
 async-trait.workspace = true
-hkdf = "0.12.3"
+hkdf.workspace = true
 omicron-common.workspace = true
 secrecy.workspace = true
 sha3.workspace = true
+slog.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 zeroize.workspace = true

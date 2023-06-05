@@ -372,6 +372,30 @@
         "description": "Password hashes must be in PHC (Password Hashing Competition) string format.  Passwords must be hashed with Argon2id.  Password hashes may be rejected if the parameters appear not to be secure enough.",
         "type": "string"
       },
+      "PortFec": {
+        "description": "Switchport FEC options",
+        "type": "string",
+        "enum": [
+          "firecode",
+          "none",
+          "rs"
+        ]
+      },
+      "PortSpeed": {
+        "description": "Switchport Speed options",
+        "type": "string",
+        "enum": [
+          "speed0_g",
+          "speed1_g",
+          "speed10_g",
+          "speed25_g",
+          "speed40_g",
+          "speed50_g",
+          "speed100_g",
+          "speed200_g",
+          "speed400_g"
+        ]
+      },
       "RackInitializeRequest": {
         "description": "Configuration for the \"rack setup service\".\n\nThe Rack Setup Service should be responsible for one-time setup actions, such as CockroachDB placement and initialization.  Without operator intervention, however, these actions need a way to be automated in our deployment.",
         "type": "object",
@@ -479,6 +503,22 @@
           "uplink_port": {
             "description": "Switchport to use for external connectivity",
             "type": "string"
+          },
+          "uplink_port_fec": {
+            "description": "Forward Error Correction setting for the uplink port",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PortFec"
+              }
+            ]
+          },
+          "uplink_port_speed": {
+            "description": "Speed for the Switchport",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PortSpeed"
+              }
+            ]
           }
         },
         "required": [
@@ -486,7 +526,9 @@
           "infra_ip_first",
           "infra_ip_last",
           "uplink_ip",
-          "uplink_port"
+          "uplink_port",
+          "uplink_port_fec",
+          "uplink_port_speed"
         ]
       },
       "RecoverySiloConfig": {

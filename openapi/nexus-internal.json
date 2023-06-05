@@ -2280,6 +2280,30 @@
       "PhysicalDiskPutResponse": {
         "type": "object"
       },
+      "PortFec": {
+        "description": "Switchport FEC options",
+        "type": "string",
+        "enum": [
+          "firecode",
+          "none",
+          "rs"
+        ]
+      },
+      "PortSpeed": {
+        "description": "Switchport Speed options",
+        "type": "string",
+        "enum": [
+          "speed0_g",
+          "speed1_g",
+          "speed10_g",
+          "speed25_g",
+          "speed40_g",
+          "speed50_g",
+          "speed100_g",
+          "speed200_g",
+          "speed400_g"
+        ]
+      },
       "ProducerEndpoint": {
         "description": "Information announced by a metric server, used so that clients can contact it and collect available metric data from it.",
         "type": "object",
@@ -2449,6 +2473,22 @@
           "uplink_port": {
             "description": "Switchport to use for external connectivity",
             "type": "string"
+          },
+          "uplink_port_fec": {
+            "description": "Forward Error Correction setting for the uplink port",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PortFec"
+              }
+            ]
+          },
+          "uplink_port_speed": {
+            "description": "Speed for the Switchport",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PortSpeed"
+              }
+            ]
           }
         },
         "required": [
@@ -2456,7 +2496,9 @@
           "infra_ip_first",
           "infra_ip_last",
           "uplink_ip",
-          "uplink_port"
+          "uplink_port",
+          "uplink_port_fec",
+          "uplink_port_speed"
         ]
       },
       "RecoverySiloConfig": {

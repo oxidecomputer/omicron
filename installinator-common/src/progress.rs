@@ -15,7 +15,7 @@ use schemars::{
 use serde::{Deserialize, Serialize};
 use serde_with::rust::deserialize_ignore_any;
 use thiserror::Error;
-use update_engine::{AsError, StepSpec};
+use update_engine::{errors::NestedEngineError, AsError, StepSpec};
 
 // ---
 // Type definitions for use by installinator code.
@@ -285,6 +285,17 @@ pub enum WriteError {
         #[from]
         error: zpool::Error,
     },
+    #[error("error writing control plane")]
+    ControlPlaneWriteError {
+        #[source]
+        error: Box<NestedEngineError<ControlPlaneZonesSpec>>,
+    },
+}
+
+impl From<NestedEngineError<ControlPlaneZonesSpec>> for WriteError {
+    fn from(error: NestedEngineError<ControlPlaneZonesSpec>) -> Self {
+        Self::ControlPlaneWriteError { error: Box::new(error) }
+    }
 }
 
 impl AsError for WriteError {
