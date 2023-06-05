@@ -11,6 +11,14 @@ use sled_hardware::Baseboard;
 use std::collections::BTreeSet;
 use uuid::Uuid;
 
+/// The first thing a peer does after connecting or accepting is to identify
+/// themselves to the connected peer.
+///
+/// This message is interpreted at the peer (network) level, and not at the FSM level,
+/// because it is used to associate IP addresses with [`Baseboard`]s.
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
+pub struct Identify(Baseboard);
+
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct Envelope {
     pub to: Baseboard,
@@ -26,35 +34,24 @@ pub enum Msg {
 /// A request from a peer to another peer over TCP
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub enum Request {
-    /// The first thing a peer does is identify themselves to the connected
-    /// peer
-    ///
-    /// The Baseboard is mapped to the connection after this.
-    Identify(Baseboard),
-
     /// A rack initialization request informing the peer that it is a member of
     /// the initial trust quorum.
     Init(SharePkgV0),
 
     /// Initialize a peer as a Learner
-    InitLearner { peers: BTreeSet<Baseboard> },
+    InitLearner,
 
     /// Request a share from a remote peer
     GetShare { rack_uuid: Uuid },
 
     /// Get a [`LearnedSharePkgV0`] from a peer that was part of the rack
     /// initialization group
-    ///
-    /// `Baseboard` uniquely identifies the requesting sled.
-    Learn(Baseboard),
+    Learn,
 }
 
 /// A response to a request from a peer over TCP
 #[derive(From, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Response {
-    /// Response to [`Request::Identify`]
-    IdentifyAck(Baseboard),
-
     /// Response to [`Request::Init`]
     InitAck,
 
@@ -71,8 +68,14 @@ pub enum Response {
 /// An error returned from a peer over TCP
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub enum Error {
-    /// The peer is already initialized
+    /// The peer is already initialized as a member of the original group
     AlreadyInitialized { rack_uuid: Uuid },
+
+    /// The peer has already learned it is a shared member of the group
+    AlreadyLearned { rack_uuid: Uuid },
+
+    /// The peer is already in the process of learning
+    AlreadyLearning,
 
     /// The peer is not initialized yet
     NotInitialized,

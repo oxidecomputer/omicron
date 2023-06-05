@@ -15,50 +15,17 @@ use sled_hardware::Baseboard;
 use std::collections::{BTreeMap, BTreeSet};
 use uuid::Uuid;
 
-type Persist = bool;
-
 // An index intjo an encrypted share
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ShareIdx(usize);
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum SharePkg {
-    Initial {
-        pkg: SharePkgV0,
-        // Shares given to other sleds. We mark them as used so that we don't
-        // hand them out twice. If the same sled asks us for a share, because
-        // it crashes or there is a network blip, we will return the same share
-        // each time.
-        //
-        // Note that this is a fairly optimistic strategy as the requesting
-        // sled can always go ask another sled after a network blip. However,
-        // this guarantees that a single sled never hands out more than one of
-        // its shares to any given sled.
-        //
-        // We can't do much better than this without some sort of centralized
-        // distributor which is part of the reconfiguration mechanism in later
-        // versions of the trust quourum protocol.
-        distributed_shares: BTreeMap<Baseboard, ShareIdx>,
-    },
+/// Output from a a call to [`Fsm::Handle`]
+pub struct Output<'a> {
+    /// Possible state that needs persisting before any messages are sent
+    pub persist: Option<&'a PersistentState>,
 
-    Learned(LearnedSharePkgV0),
-}
-
-impl SharePkg {
-    pub fn new_initial(pkg: SharePkgV0) -> SharePkg {
-        SharePkg::Initial { pkg, distributed_shares: BTreeMap::new() }
-    }
-
-    pub fn new_learned(pkg: LearnedSharePkgV0) -> SharePkg {
-        SharePkg::Learned(pkg)
-    }
-
-    pub fn rack_uuid(&self) -> Uuid {
-        match self {
-            SharePkg::Initial { pkg, .. } => pkg.rack_uuid,
-            SharePkg::Learned(pkg) => pkg.rack_uuid,
-        }
-    }
+    /// Messages wrapped with a destination
+    pub envelopes: Vec<Envelope>,
 }
 
 /// State stored on the M.2s.
@@ -66,21 +33,65 @@ impl SharePkg {
 pub struct PersistentState {
     // The generation number for ledger writing purposes on both M.2s
     pub version: u32,
-    pub pkg: Option<SharePkg>,
+    pub state: State,
+}
+
+/// The possible states of a peer FSM
+///
+/// The following are valid state transitions
+///
+///   * Uninitialized -> InitialMember
+///   * Uninitialized -> Learning -> Learned
+///
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum State {
+    /// The peer does not yet know whether it is an initial member of the group
+    /// or a learner.
+    Uninitialized,
+
+    /// The peer is an initial member of the group setup via RSS
+    InitialMember {
+        pkg: SharePkgV0,
+
+        /// Shares given to other sleds. We mark them as used so that we don't
+        /// hand them out twice. If the same sled asks us for a share, because
+        /// it crashes or there is a network blip, we will return the same
+        /// share each time.
+        ///
+        /// Note that this is a fairly optimistic strategy as the requesting
+        /// sled can always go ask another sled after a network blip. However,
+        /// this guarantees that a single sled never hands out more than one of
+        /// its shares to any given sled.
+        ///
+        /// We can't do much better than this without some sort of centralized
+        /// distributor which is part of the reconfiguration mechanism in later
+        /// versions of the trust quourum protocol.
+        distributed_shares: BTreeMap<Baseboard, ShareIdx>,
+    },
+
+    /// The peer has been instructed to learn a share
+    Learning,
+
+    /// The peer has learned its share
+    Learned { pkg: LearnedSharePkgV0 },
 }
 
 /// The state machine for a [`$crate::Peer`]
 pub struct Fsm {
+    // Unique IDs of this peer
     id: Baseboard,
+
+    // Configuration of the FSM
     config: Config,
+
+    // The state of the FSM and the version of it written to the M.2 SSDs
     state: PersistentState,
+
+    // Unique IDs of known peers
     peers: BTreeSet<Baseboard>,
+
     // The current time in ticks
     clock: usize,
-
-    // Is this node a learner or member of the initial group?
-    // This is determe
-    is_learner: Option<bool>,
 }
 
 /// Configuration of the FSM
@@ -90,42 +101,7 @@ pub struct Config {
 
 impl Fsm {
     pub fn new(id: Baseboard, config: Config, state: PersistentState) -> Fsm {
-        Fsm {
-            id,
-            config,
-            state,
-            peers: BTreeSet::new(),
-            clock: 0,
-            is_learner: None,
-        }
-    }
-
-    /// Return true if the FSM is initialized as a member of the initial group
-    /// or a learner, false otherwise.
-    pub fn is_initialized(&self) -> bool {
-        self.state.pkg.is_some()
-    }
-
-    /// Return the current persistent state
-    pub fn persistent_state(&self) -> &PersistentState {
-        &self.state
-    }
-
-    /// Handle a message from a peer.
-    ///
-    /// Return whether persistent state needs syncing to disk and a set of
-    /// messages to send to other peers. Persistant state must be saved by
-    /// the caller and safely persisted before messages are sent, or the next
-    /// message is handled here.
-    pub fn handle(
-        &mut self,
-        from: Baseboard,
-        msg: Msg,
-    ) -> (Persist, Vec<Envelope>) {
-        match msg {
-            Msg::Req(req) => self.handle_request(from, req),
-            Msg::Rsp(rsp) => self.handle_response(from, rsp),
-        }
+        Fsm { id, config, state, peers: BTreeSet::new(), clock: 0 }
     }
 
     /// An abstraction of a timer tick.
@@ -143,45 +119,100 @@ impl Fsm {
         vec![]
     }
 
+    /// A connection has been established an a peer has been learned.
+    /// This peer may or may not already be known by the FSM.
+    pub fn insert_peer(&mut self, peer: Baseboard) {
+        self.peers.insert(peer);
+    }
+
+    /// When a the upper layer sees the advertised prefix for a peer go away,
+    /// and not just a dropped connection, it will inform the FSM to remove the peer.
+    ///
+    /// This is a useful mechanism to prevent generating requests for failed sleds.
+    pub fn remove_peer(&mut self, peer: Baseboard) {
+        self.peers.remove(&peer);
+    }
+
+    /// Handle a message from a peer.
+    ///
+    /// Return whether persistent state needs syncing to disk and a set of
+    /// messages to send to other peers. Persistant state must be saved by
+    /// the caller and safely persisted before messages are sent, or the next
+    /// message is handled here.
+    pub fn handle(&mut self, from: Baseboard, msg: Msg) -> Output<'_> {
+        match msg {
+            Msg::Req(req) => self.handle_request(from, req),
+            Msg::Rsp(rsp) => self.handle_response(from, rsp),
+        }
+    }
+
+    // Handle a `Request` message
     fn handle_request(
         &mut self,
         from: Baseboard,
         request: Request,
-    ) -> (Persist, Vec<Envelope>) {
+    ) -> Output<'_> {
         match request {
-            Request::Identify(peer) => {
-                self.peers.insert(peer.clone());
-                self.respond(from, Response::IdentifyAck(self.id.clone()))
+            Request::Init(new_pkg) => self.on_init(from, new_pkg),
+            Request::InitLearner => self.on_init_learner(from),
+            _ => unimplemented!(),
+        }
+    }
+
+    // Handle a `Request::Init` message
+    fn on_init(&mut self, from: Baseboard, new_pkg: SharePkgV0) -> Output<'_> {
+        let version = &mut self.state.version;
+        match &mut self.state.state {
+            state @ State::Uninitialized => {
+                *state = State::InitialMember {
+                    pkg: new_pkg,
+                    distributed_shares: BTreeMap::new(),
+                };
+                *version += 1;
+                self.persist_and_respond(from, Response::InitAck)
             }
-            Request::Init(new_pkg) => {
-                match &self.state.pkg {
-                    Some(SharePkg::Initial { pkg, .. }) => {
-                        if new_pkg == *pkg {
-                            // Idempotent response given same pkg
-                            self.respond(from, Response::InitAck)
-                        } else {
-                            self.respond(
-                                from,
-                                Error::AlreadyInitialized {
-                                    rack_uuid: pkg.rack_uuid,
-                                }
-                                .into(),
-                            )
-                        }
-                    }
-                    Some(SharePkg::Learned(pkg)) => self.respond(
+            State::InitialMember { pkg, .. } => {
+                if new_pkg == *pkg {
+                    // Idempotent response given same pkg
+                    self.respond(from, Response::InitAck)
+                } else {
+                    let rack_uuid = pkg.rack_uuid;
+                    self.respond(
                         from,
-                        Error::AlreadyInitialized { rack_uuid: pkg.rack_uuid }
-                            .into(),
-                    ),
-                    None => {
-                        self.state.pkg = Some(SharePkg::new_initial(new_pkg));
-                        self.state.version += 1;
-                        self.persist_and_respond(from, Response::InitAck)
-                    }
+                        Error::AlreadyInitialized { rack_uuid }.into(),
+                    )
                 }
             }
-            _ => unimplemented!(),
+            State::Learning => {
+                self.respond(from, Error::AlreadyLearning.into())
+            }
+            State::Learned { pkg } => {
+                let rack_uuid = pkg.rack_uuid;
+                self.respond(from, Error::AlreadyLearned { rack_uuid }.into())
+            }
+        }
+    }
+
+    // Handle a `Request::InitLearner` message
+    fn on_init_learner(&mut self, from: Baseboard) -> Output<'_> {
+        let version = &mut self.state.version;
+        match &mut self.state.state {
+            state @ State::Uninitialized => {
+                *state = State::Learning;
+                *version += 1;
+                self.persist_and_respond(from, Response::InitAck)
+            }
+            State::InitialMember { pkg, .. } => {
+                let rack_uuid = pkg.rack_uuid;
+                self.respond(
+                    from,
+                    Error::AlreadyInitialized { rack_uuid }.into(),
+                )
+            }
+            State::Learning | State::Learned { .. } => {
+                // Idempotent
+                self.persist_and_respond(from, Response::InitAck)
+            }
         }
     }
 
@@ -189,17 +220,16 @@ impl Fsm {
         &mut self,
         from: Baseboard,
         response: Response,
-    ) -> (Persist, Vec<Envelope>) {
+    ) -> Output<'_> {
         unimplemented!()
     }
 
     // Return a response directly to a peer that doesn't require persistence
-    fn respond(
-        &self,
-        to: Baseboard,
-        response: Response,
-    ) -> (Persist, Vec<Envelope>) {
-        (false, vec![Envelope { to, msg: response.into() }])
+    fn respond(&self, to: Baseboard, response: Response) -> Output<'_> {
+        Output {
+            persist: None,
+            envelopes: vec![Envelope { to, msg: response.into() }],
+        }
     }
 
     // Indicate to the caller that state must be perisisted and then a response
@@ -208,13 +238,10 @@ impl Fsm {
         &self,
         to: Baseboard,
         response: Response,
-    ) -> (Persist, Vec<Envelope>) {
-        (true, vec![Envelope { to, msg: response.into() }])
+    ) -> Output<'_> {
+        Output {
+            persist: Some(&self.state),
+            envelopes: vec![Envelope { to, msg: response.into() }],
+        }
     }
-}
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn blah() {}
 }
