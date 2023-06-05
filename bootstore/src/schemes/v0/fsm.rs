@@ -15,7 +15,10 @@ use sled_hardware::Baseboard;
 use std::collections::{BTreeMap, BTreeSet};
 use uuid::Uuid;
 
-// An index intjo an encrypted share
+/// A number of clock ticks from some unknown epoch
+type Ticks = usize;
+
+// An index into an encrypted share
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ShareIdx(usize);
 
@@ -70,13 +73,40 @@ pub enum State {
     },
 
     /// The peer has been instructed to learn a share
-    Learning,
+    ///
+    /// There is no need to record what are online attempts. That could
+    /// cause too many write cycles to the M.2s.
+    Learning(#[serde(skip)] Option<LearnAttempt>),
 
     /// The peer has learned its share
     Learned { pkg: LearnedSharePkgV0 },
 }
 
+/// An attempt to learn a key share
+///
+/// When an attempt is started, a peer is selected from those known to the FSM,
+/// and a `Request::Learn` message is sent to that peer. This peer is recorded
+/// along with the current clock as `start`. If `Config.learn_timeout` ticks
+/// have fired since `start` based on the current FSM clock, without this
+/// FSM having received a `Response::Pkg`, then the `LearnAttempt` will be
+/// cancelled, and the next peer in order known to the FSM will be contacted in
+/// a new attempt.
+#[derive(Debug, Clone)]
+pub struct LearnAttempt {
+    peer: Baseboard,
+    start: Ticks,
+}
+
 /// The state machine for a [`$crate::Peer`]
+///
+/// This FSM assumes a network layer above it that can map peer IDs
+/// ( [`Baseboard`]s) to TCP sockets. When an attempt is made to send a
+/// message to a given peer the network layer will send it over an established
+/// connection if one exists. If there is no connection already to that peer,
+/// but the prefix is present and known, the network layer will attempt to
+/// establish a connection and then transmit the message. If the peer is not
+/// known then it must have just had its network prefix removed. In this case
+/// the message will be dropped and the FSM will be told to remove the peer.
 pub struct Fsm {
     // Unique IDs of this peer
     id: Baseboard,
@@ -90,13 +120,14 @@ pub struct Fsm {
     // Unique IDs of known peers
     peers: BTreeSet<Baseboard>,
 
-    // The current time in ticks
-    clock: usize,
+    // The current time in ticks since the creation of the FSM
+    clock: Ticks,
 }
 
 /// Configuration of the FSM
 pub struct Config {
-    retry_timeout_in_ticks: usize,
+    pub retry_timeout: Ticks,
+    pub learn_timeout: Ticks,
 }
 
 impl Fsm {
@@ -116,7 +147,10 @@ impl Fsm {
     /// strategy allows for deterministic property based tests.
     pub fn tick(&mut self) -> Vec<Envelope> {
         self.clock += 1;
-        vec![]
+
+        // TODO: Check to see if messages need to be transmitted,
+        // learn attempts need to be made, etc...
+        unimplemented!()
     }
 
     /// A connection has been established an a peer has been learned.
@@ -183,7 +217,7 @@ impl Fsm {
                     )
                 }
             }
-            State::Learning => {
+            State::Learning(_) => {
                 self.respond(from, Error::AlreadyLearning.into())
             }
             State::Learned { pkg } => {
@@ -198,7 +232,7 @@ impl Fsm {
         let version = &mut self.state.version;
         match &mut self.state.state {
             state @ State::Uninitialized => {
-                *state = State::Learning;
+                *state = State::Learning(None);
                 *version += 1;
                 self.persist_and_respond(from, Response::InitAck)
             }
@@ -209,7 +243,7 @@ impl Fsm {
                     Error::AlreadyInitialized { rack_uuid }.into(),
                 )
             }
-            State::Learning | State::Learned { .. } => {
+            State::Learning(_) | State::Learned { .. } => {
                 // Idempotent
                 self.persist_and_respond(from, Response::InitAck)
             }
