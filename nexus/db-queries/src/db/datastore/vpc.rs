@@ -152,10 +152,64 @@ impl DataStore {
                 _ => Err(e),
             })?;
 
+        self.load_builtin_vpc_fw_rules(opctx).await?;
         self.load_builtin_vpc_subnets(opctx).await?;
 
         info!(opctx.log, "created built-in services vpc");
 
+        Ok(())
+    }
+
+    /// Load firewall rules for built-in VPCs.
+    async fn load_builtin_vpc_fw_rules(
+        &self,
+        opctx: &OpContext,
+    ) -> Result<(), Error> {
+        use db::fixed_data::vpc_firewall_rule::DNS_VPC_FW_RULE;
+        use db::fixed_data::vpc_firewall_rule::NEXUS_VPC_FW_RULE;
+
+        debug!(opctx.log, "attempting to create built-in VPC firewall rules");
+
+        // Create firewall rules for Oxide Services
+
+        let (_, _, authz_vpc) = db::lookup::LookupPath::new(opctx, self)
+            .vpc_id(*SERVICES_VPC_ID)
+            .lookup_for(authz::Action::CreateChild)
+            .await
+            .internal_context("lookup built-in services vpc")?;
+
+        let mut fw_rules = self
+            .vpc_list_firewall_rules(opctx, &authz_vpc)
+            .await?
+            .into_iter()
+            .map(|rule| (rule.name().clone(), rule))
+            .collect::<BTreeMap<_, _>>();
+
+        fw_rules.entry(DNS_VPC_FW_RULE.name.clone()).or_insert_with(|| {
+            VpcFirewallRule::new(
+                Uuid::new_v4(),
+                *SERVICES_VPC_ID,
+                &*DNS_VPC_FW_RULE,
+            )
+        });
+        fw_rules.entry(NEXUS_VPC_FW_RULE.name.clone()).or_insert_with(|| {
+            VpcFirewallRule::new(
+                Uuid::new_v4(),
+                *SERVICES_VPC_ID,
+                &*NEXUS_VPC_FW_RULE,
+            )
+        });
+
+        let rules = fw_rules
+            .into_iter()
+            .map(|(_, mut rule)| {
+                rule.identity.id = Uuid::new_v4();
+                rule
+            })
+            .collect();
+        self.vpc_update_firewall_rules(opctx, &authz_vpc, rules).await?;
+
+        debug!(opctx.log, "created built-in VPC firewall rules");
         Ok(())
     }
 

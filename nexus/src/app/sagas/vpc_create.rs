@@ -680,6 +680,8 @@ pub(crate) mod test {
 
         dsl::vpc_firewall_rule
             .filter(dsl::time_deleted.is_null())
+            // ignore built-in services VPC
+            .filter(dsl::vpc_id.ne(*SERVICES_VPC_ID))
             .select(VpcFirewallRule::as_select())
             .first_async::<VpcFirewallRule>(
                 datastore.pool_for_tests().await.unwrap(),

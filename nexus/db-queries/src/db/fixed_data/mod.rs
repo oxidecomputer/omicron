@@ -40,6 +40,7 @@ pub mod silo;
 pub mod silo_user;
 pub mod user_builtin;
 pub mod vpc;
+pub mod vpc_firewall_rule;
 pub mod vpc_subnet;
 
 lazy_static! {
