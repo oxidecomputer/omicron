@@ -1694,23 +1694,22 @@ pub mod test {
                 .saga_inject_error(runnable_saga.id(), node.index())
                 .await
                 .unwrap();
+
             nexus
-                .run_saga(runnable_saga)
+                .sec()
+                .saga_start(runnable_saga.id())
                 .await
-                .expect_err("Saga should have failed");
+                .expect("saga should be runnable");
+            let saga_error = runnable_saga
+                .run_yielding_raw_result()
+                .await
+                .kind
+                .expect_err("saga should have failed");
+
+            assert_eq!(saga_error.error_node_name, *node.name());
 
             verify_clean_slate(&cptestctx).await;
         }
-
-        // Run the "original" saga (the one whose DAG's size was first examined)
-        // to completion. This is meant to help detect cases like omicron#3265:
-        // if the original saga was used repeatedly for error injection in a way
-        // that makes it deterministically fail at some node, using it here
-        // (without injecting an error) will produce an unexpected error.
-        info!(log, "Running saga to completion");
-        let runnable_saga =
-            nexus.create_runnable_saga(dag.clone()).await.unwrap();
-        let _ = nexus.run_saga(runnable_saga).await.unwrap();
     }
 
     #[nexus_test(server = crate::Server)]
@@ -1782,22 +1781,20 @@ pub mod test {
                 .unwrap();
 
             nexus
-                .run_saga(runnable_saga)
+                .sec()
+                .saga_start(runnable_saga.id())
                 .await
-                .expect_err("Saga should have failed");
+                .expect("saga should be runnable");
+            let saga_error = runnable_saga
+                .run_yielding_raw_result()
+                .await
+                .kind
+                .expect_err("saga should have failed");
+
+            assert_eq!(saga_error.error_node_name, *error_node.name());
 
             verify_clean_slate(&cptestctx).await;
         }
-
-        // Run the "original" saga (the one whose DAG's size was first examined)
-        // to completion. This is meant to help detect cases like omicron#3265:
-        // if the original saga was used repeatedly for error injection in a way
-        // that makes it deterministically fail at some node, using it here
-        // (without injecting an error) will produce an unexpected error.
-        info!(log, "Running saga to completion");
-        let runnable_saga =
-            nexus.create_runnable_saga(dag.clone()).await.unwrap();
-        let _ = nexus.run_saga(runnable_saga).await.unwrap();
     }
 
     async fn destroy_instance(cptestctx: &ControlPlaneTestContext) {

@@ -42,6 +42,17 @@ impl RunnableSaga {
     pub fn id(&self) -> SagaId {
         self.id
     }
+
+    /// Run the saga and yield the raw saga result. This is a test-only routine
+    /// meant for tests that want to examine the saga executor result to, e.g.,
+    /// reason about the precise node at which the saga failed. Regular callers
+    /// should submit the saga to `[super::Nexus::run_saga]` instead to get
+    /// standard Omicron errors as return values and to have failures logged in
+    /// a standard manner.
+    #[cfg(test)]
+    pub async fn run_yielding_raw_result(self) -> SagaResult {
+        self.fut.await
+    }
 }
 
 pub fn create_saga_dag<N: NexusSaga>(
