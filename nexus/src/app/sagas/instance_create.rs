@@ -1702,9 +1702,11 @@ pub mod test {
             verify_clean_slate(&cptestctx).await;
         }
 
-        // Run the saga to completion without injecting any errors to help
-        // ensure that an earlier injected failure didn't prevent the saga from
-        // failing deterministically.
+        // Run the "original" saga (the one whose DAG's size was first examined)
+        // to completion. This is meant to help detect cases like omicron#3265:
+        // if the original saga was used repeatedly for error injection in a way
+        // that makes it deterministically fail at some node, using it here
+        // (without injecting an error) will produce an unexpected error.
         info!(log, "Running saga to completion");
         let runnable_saga =
             nexus.create_runnable_saga(dag.clone()).await.unwrap();
@@ -1787,9 +1789,11 @@ pub mod test {
             verify_clean_slate(&cptestctx).await;
         }
 
-        // Run the saga to completion without injecting any errors to help
-        // ensure that an earlier injected failure didn't prevent the saga from
-        // failing deterministically.
+        // Run the "original" saga (the one whose DAG's size was first examined)
+        // to completion. This is meant to help detect cases like omicron#3265:
+        // if the original saga was used repeatedly for error injection in a way
+        // that makes it deterministically fail at some node, using it here
+        // (without injecting an error) will produce an unexpected error.
         info!(log, "Running saga to completion");
         let runnable_saga =
             nexus.create_runnable_saga(dag.clone()).await.unwrap();
