@@ -1138,7 +1138,7 @@ async fn ip_pool_create(
 /// Fetch an IP pool
 #[endpoint {
     method = GET,
-    path = "/v1/system/ip-pools/{pool}",
+    path = "/v1/system/networking/ip-pools/{pool}",
     tags = ["system/networking"],
 }]
 async fn ip_pool_view(
@@ -1160,7 +1160,7 @@ async fn ip_pool_view(
 /// Delete an IP Pool
 #[endpoint {
     method = DELETE,
-    path = "/v1/system/ip-pools/{pool}",
+    path = "/v1/system/networking/ip-pools/{pool}",
     tags = ["system/networking"],
 }]
 async fn ip_pool_delete(
@@ -1182,7 +1182,7 @@ async fn ip_pool_delete(
 /// Update an IP Pool
 #[endpoint {
     method = PUT,
-    path = "/v1/system/ip-pools/{pool}",
+    path = "/v1/system/networking/ip-pools/{pool}",
     tags = ["system/networking"],
 }]
 async fn ip_pool_update(
@@ -1206,7 +1206,7 @@ async fn ip_pool_update(
 /// Fetch the IP pool used for Oxide services
 #[endpoint {
     method = GET,
-    path = "/v1/system/ip-pools-service",
+    path = "/v1/system/networking/ip-pools-service",
     tags = ["system/networking"],
 }]
 async fn ip_pool_service_view(
@@ -1229,7 +1229,7 @@ type IpPoolRangePaginationParams = PaginationParams<EmptyScanParams, IpNetwork>;
 /// List ranges for an IP pool. Ranges are ordered by their first address.
 #[endpoint {
     method = GET,
-    path = "/v1/system/ip-pools/{pool}/ranges",
+    path = "/v1/system/networking/ip-pools/{pool}/ranges",
     tags = ["system/networking"],
 }]
 async fn ip_pool_range_list(
@@ -1273,7 +1273,7 @@ async fn ip_pool_range_list(
 /// Add a range to an IP pool
 #[endpoint {
     method = POST,
-    path = "/v1/system/ip-pools/{pool}/ranges/add",
+    path = "/v1/system/networking/ip-pools/{pool}/ranges/add",
     tags = ["system/networking"],
 }]
 async fn ip_pool_range_add(
@@ -1297,7 +1297,7 @@ async fn ip_pool_range_add(
 /// Remove a range from an IP pool
 #[endpoint {
     method = POST,
-    path = "/v1/system/ip-pools/{pool}/ranges/remove",
+    path = "/v1/system/networking/ip-pools/{pool}/ranges/remove",
     tags = ["system/networking"],
 }]
 async fn ip_pool_range_remove(
@@ -1324,7 +1324,7 @@ async fn ip_pool_range_remove(
 /// their first address.
 #[endpoint {
     method = GET,
-    path = "/v1/system/ip-pools-service/ranges",
+    path = "/v1/system/networking/ip-pools-service/ranges",
     tags = ["system/networking"],
 }]
 async fn ip_pool_service_range_list(
@@ -1365,7 +1365,7 @@ async fn ip_pool_service_range_list(
 /// Add a range to an IP pool used for Oxide services
 #[endpoint {
     method = POST,
-    path = "/v1/system/ip-pools-service/ranges/add",
+    path = "/v1/system/networking/ip-pools-service/ranges/add",
     tags = ["system/networking"],
 }]
 async fn ip_pool_service_range_add(
@@ -1386,7 +1386,7 @@ async fn ip_pool_service_range_add(
 /// Remove a range from an IP pool used for Oxide services
 #[endpoint {
     method = POST,
-    path = "/v1/system/ip-pools-service/ranges/remove",
+    path = "/v1/system/networking/ip-pools-service/ranges/remove",
     tags = ["system/networking"],
 }]
 async fn ip_pool_service_range_remove(

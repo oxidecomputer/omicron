@@ -336,7 +336,7 @@ has_relation(fleet: Fleet, "parent_fleet", collection: SamlIdentityProvider)
 #
 # The resources here do not correspond to anything that appears explicitly in
 # the API or is stored in the database.  These are used either at the top level
-# of the API path (e.g., "/v1/system/ip-pools") or as an implementation detail of the system
+# of the API path (e.g., "/v1/system/networking/ip-pools") or as an implementation detail of the system
 # (in the case of console sessions and "Database").  The policies are
 # either statically-defined in this file or driven by role assignments on the
 # Fleet.  None of these resources defines their own roles.
@@ -360,7 +360,7 @@ resource DnsConfig {
 has_relation(fleet: Fleet, "parent_fleet", dns_config: DnsConfig)
 	if dns_config.fleet = fleet;
 
-# Describes the policy for accessing "/v1/system/ip-pools" in the API
+# Describes the policy for accessing "/v1/system/networking/ip-pools" in the API
 resource IpPoolList {
 	permissions = [
 	    "list_children",

@@ -34,7 +34,7 @@ type ControlPlaneTestContext =
 #[nexus_test]
 async fn test_ip_pool_basic_crud(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
-    let ip_pools_url = "/v1/system/ip-pools";
+    let ip_pools_url = "/v1/system/networking/ip-pools";
     let pool_name = "p0";
     let description = "an ip pool";
     let ip_pool_url = format!("{}/{}", ip_pools_url, pool_name);
@@ -278,7 +278,7 @@ async fn test_ip_pool_range_overlapping_ranges_fails(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    let ip_pools_url = "/v1/system/ip-pools";
+    let ip_pools_url = "/v1/system/networking/ip-pools";
     let pool_name = "p0";
     let description = "an ip pool";
     let ip_pool_url = format!("{}/{}", ip_pools_url, pool_name);
@@ -459,7 +459,7 @@ async fn test_bad_ip_ranges(
 #[nexus_test]
 async fn test_ip_pool_range_pagination(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
-    let ip_pools_url = "/v1/system/ip-pools";
+    let ip_pools_url = "/v1/system/networking/ip-pools";
     let pool_name = "p0";
     let description = "an ip pool";
     let ip_pool_url = format!("{}/{}", ip_pools_url, pool_name);
@@ -559,7 +559,7 @@ async fn test_ip_range_delete_with_allocated_external_ip_fails(
     let client = &cptestctx.external_client;
     let apictx = &cptestctx.server.apictx();
     let nexus = &apictx.nexus;
-    let ip_pools_url = "/v1/system/ip-pools";
+    let ip_pools_url = "/v1/system/networking/ip-pools";
     let pool_name = "default";
     let ip_pool_url = format!("{}/{}", ip_pools_url, pool_name);
     let ip_pool_ranges_url = format!("{}/ranges", ip_pool_url);
@@ -658,7 +658,7 @@ async fn test_ip_range_delete_with_allocated_external_ip_fails(
 #[nexus_test]
 async fn test_ip_pool_service(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
-    let ip_pool_url = "/v1/system/ip-pools-service".to_string();
+    let ip_pool_url = "/v1/system/networking/ip-pools-service".to_string();
     let ip_pool_ranges_url = format!("{}/ranges", ip_pool_url);
     let ip_pool_add_range_url = format!("{}/add", ip_pool_ranges_url);
     let ip_pool_remove_range_url = format!("{}/remove", ip_pool_ranges_url);
