@@ -141,9 +141,12 @@ pub struct Fsm {
     // to hand out to learners.
     rack_secret_state: Option<RackSecretState>,
 
-    // Pending learn requests. When a peer attempts to learn a share, we may
-    // not be able to give it one because we cannot yet recompute the rack
-    // secret. We queue requests here.
+    // Pending learn requests from other peers.
+    //
+    // When a peer attempts to learn a share, we may not be able to give it
+    // one because we cannot yet recompute the rack secret. We queue requests
+    // here, and respond when we can recompute the rack secret or we timeout.
+    // TODO: Insert a clock value to use in timeouts
     pending_learn_requests: BTreeSet<Baseboard>,
 
     // Our own attempt to learn our share
@@ -353,61 +356,32 @@ impl Fsm {
             State::InitialMember { pkg, distributed_shares } => {
                 match &self.rack_secret_state {
                     Some(RackSecretState::Secret(rack_secret)) => {
-                        match pkg.decrypt_shares(rack_secret) {
-                            Ok(shares) => {
-                                if let Some(idx) = distributed_shares.get(&from)
-                                {
-                                    // The share was already handed out to this
-                                    // peer. Give back the same one.
-                                    let share =
-                                        shares.expose_secret()[idx.0].clone();
-                                    respond(from, Response::Share(share))
-                                } else {
-                                    // We need to pick a share to hand out and
-                                    // persist that fact. We find the highest currently used
-                                    // index and add 1 or we select index 0.
-                                    let idx = distributed_shares
-                                        .values()
-                                        .max()
-                                        .cloned()
-                                        .map(|idx| idx.0 + 1)
-                                        .unwrap_or(0);
-
-                                    match shares.expose_secret().get(idx) {
-                                        Some(share) => {
-                                            distributed_shares.insert(
-                                                from.clone(),
-                                                ShareIdx(idx),
-                                            );
-                                            state.version += 1;
-                                            persist_and_respond(
-                                                from,
-                                                Response::Share(share.clone()),
-                                            )
-                                        }
-                                        None => respond(
-                                            from,
-                                            Error::CannotSpareAShare.into(),
-                                        ),
-                                    }
-                                }
-                            }
-                            Err(_) => respond(
-                                from,
-                                Error::FailedToDecryptShares.into(),
-                            ),
-                        }
+                        // We already know the rack secret so respond to the
+                        // peer.
+                        send_share_response(
+                            &mut state.version,
+                            from,
+                            &pkg,
+                            distributed_shares,
+                            rack_secret,
+                        )
                     }
                     Some(RackSecretState::Shares(shares)) => {
-                        // We need to register the request and try to collect
-                        // enough shares to unlock the rack secret. When we have
+                        // Register the request and try to collect enough
+                        // shares to unlock the rack secret. When we have
                         // enough we will respond to the caller.
                         self.pending_learn_requests.insert(from);
-                        self.broadcast_share_requests(pkg.rack_uuid)
+                        self.broadcast_share_requests(
+                            pkg.rack_uuid,
+                            Some(shares),
+                        )
                     }
                     None => {
+                        // Register the request and try to collect enough
+                        // shares to unlock the rack secret. When we have
+                        // enough we will respond to the caller.
                         self.pending_learn_requests.insert(from);
-                        self.broadcast_share_requests(pkg.rack_uuid)
+                        self.broadcast_share_requests(pkg.rack_uuid, None)
                     }
                 }
             }
@@ -423,7 +397,7 @@ impl Fsm {
         unimplemented!()
     }
 
-    // Send a learn request
+    // Send a `Request::Learn` message
     fn send_learn_request(&mut self, peer: Baseboard) -> Output {
         self.learn_attempt =
             Some(LearnAttempt { peer: peer.clone(), start: self.clock });
@@ -431,10 +405,12 @@ impl Fsm {
     }
 
     // Send a request for a share to each peer
-    fn broadcast_share_requests(&self, rack_uuid: Uuid) -> Output {
-        let known_peers = if let Some(RackSecretState::Shares(shares)) =
-            &self.rack_secret_state
-        {
+    fn broadcast_share_requests(
+        &self,
+        rack_uuid: Uuid,
+        known_shares: Option<&BTreeMap<Baseboard, Vec<u8>>>,
+    ) -> Output {
+        let known_peers = if let Some(shares) = known_shares {
             shares.keys().cloned().collect()
         } else {
             BTreeSet::new()
@@ -451,6 +427,49 @@ impl Fsm {
             .collect();
 
         Output { persist: false, envelopes }
+    }
+}
+
+// Send a `Response::Share` message once we have recomputed the rack secret
+fn send_share_response(
+    persistent_state_version: &mut u32,
+    from: Baseboard,
+    pkg: &SharePkgV0,
+    distributed_shares: &mut BTreeMap<Baseboard, ShareIdx>,
+    rack_secret: &RackSecret,
+) -> Output {
+    match pkg.decrypt_shares(rack_secret) {
+        Ok(shares) => {
+            if let Some(idx) = distributed_shares.get(&from) {
+                // The share was already handed out to this
+                // peer. Give back the same one.
+                let share = shares.expose_secret()[idx.0].clone();
+                respond(from, Response::Share(share))
+            } else {
+                // We need to pick a share to hand out and
+                // persist that fact. We find the highest currently used
+                // index and add 1 or we select index 0.
+                let idx = distributed_shares
+                    .values()
+                    .max()
+                    .cloned()
+                    .map(|idx| idx.0 + 1)
+                    .unwrap_or(0);
+
+                match shares.expose_secret().get(idx) {
+                    Some(share) => {
+                        distributed_shares.insert(from.clone(), ShareIdx(idx));
+                        *persistent_state_version += 1;
+                        persist_and_respond(
+                            from,
+                            Response::Share(share.clone()),
+                        )
+                    }
+                    None => respond(from, Error::CannotSpareAShare.into()),
+                }
+            }
+        }
+        Err(_) => respond(from, Error::FailedToDecryptShares.into()),
     }
 }
 
