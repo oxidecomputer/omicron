@@ -29,6 +29,10 @@ type ControlPlaneTestContext =
 // note: no signing keys
 pub const SAML_IDP_DESCRIPTOR: &str =
     include_str!("data/saml_idp_descriptor.xml");
+pub const SAML_IDP_DESCRIPTOR_ENCRYPTION_KEY_ONLY: &str =
+    include_str!("data/saml_idp_descriptor_encryption_key_only.xml");
+pub const SAML_IDP_DESCRIPTOR_NO_KEYS: &str =
+    include_str!("data/saml_idp_descriptor_no_keys.xml");
 
 // Create a SAML IdP
 #[nexus_test]
@@ -235,6 +239,120 @@ async fn test_create_a_saml_idp_invalid_descriptor_no_redirect_binding(
 
     assert!(!saml_idp_descriptor
         .contains("urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect"));
+
+    let server = Server::run();
+    server.expect(
+        Expectation::matching(request::method_path("GET", "/descriptor"))
+            .respond_with(status_code(200).body(saml_idp_descriptor)),
+    );
+
+    NexusRequest::new(
+        RequestBuilder::new(
+            client,
+            Method::POST,
+            &format!("/v1/system/identity-providers/saml?silo={}", SILO_NAME),
+        )
+        .body(Some(&params::SamlIdentityProviderCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "some-totally-real-saml-provider"
+                    .to_string()
+                    .parse()
+                    .unwrap(),
+                description: "a demo provider".to_string(),
+            },
+
+            idp_metadata_source: params::IdpMetadataSource::Url {
+                url: server.url("/descriptor").to_string(),
+            },
+
+            idp_entity_id: "entity_id".to_string(),
+            sp_client_id: "client_id".to_string(),
+            acs_url: "http://acs".to_string(),
+            slo_url: "http://slo".to_string(),
+            technical_contact_email: "technical@fake".to_string(),
+
+            signing_keypair: None,
+
+            group_attribute_name: None,
+        }))
+        .expect_status(Some(StatusCode::BAD_REQUEST)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("unexpected success");
+}
+
+// Fail to create a SAML IdP from a metadata document that only has encryption
+// keys
+#[nexus_test]
+async fn test_create_a_saml_idp_metadata_only_encryption_keys(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+
+    const SILO_NAME: &str = "saml-silo";
+    create_silo(&client, SILO_NAME, true, shared::SiloIdentityMode::SamlJit)
+        .await;
+
+    let saml_idp_descriptor =
+        SAML_IDP_DESCRIPTOR_ENCRYPTION_KEY_ONLY.to_string();
+
+    let server = Server::run();
+    server.expect(
+        Expectation::matching(request::method_path("GET", "/descriptor"))
+            .respond_with(status_code(200).body(saml_idp_descriptor)),
+    );
+
+    NexusRequest::new(
+        RequestBuilder::new(
+            client,
+            Method::POST,
+            &format!("/v1/system/identity-providers/saml?silo={}", SILO_NAME),
+        )
+        .body(Some(&params::SamlIdentityProviderCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "some-totally-real-saml-provider"
+                    .to_string()
+                    .parse()
+                    .unwrap(),
+                description: "a demo provider".to_string(),
+            },
+
+            idp_metadata_source: params::IdpMetadataSource::Url {
+                url: server.url("/descriptor").to_string(),
+            },
+
+            idp_entity_id: "entity_id".to_string(),
+            sp_client_id: "client_id".to_string(),
+            acs_url: "http://acs".to_string(),
+            slo_url: "http://slo".to_string(),
+            technical_contact_email: "technical@fake".to_string(),
+
+            signing_keypair: None,
+
+            group_attribute_name: None,
+        }))
+        .expect_status(Some(StatusCode::BAD_REQUEST)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("unexpected success");
+}
+
+// Fail to create a SAML IdP from a metadata document that has no keys
+#[nexus_test]
+async fn test_create_a_saml_idp_metadata_no_keys(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+
+    const SILO_NAME: &str = "saml-silo";
+    create_silo(&client, SILO_NAME, true, shared::SiloIdentityMode::SamlJit)
+        .await;
+
+    let saml_idp_descriptor = SAML_IDP_DESCRIPTOR_NO_KEYS.to_string();
 
     let server = Server::run();
     server.expect(
