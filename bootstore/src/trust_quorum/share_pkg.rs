@@ -108,6 +108,17 @@ pub struct SharePkgV0 {
     pub encrypted_shares: Vec<u8>,
 }
 
+impl SharePkgV0 {
+    pub fn decrypt_shares(
+        &self,
+        rack_secret: &RackSecret,
+    ) -> Result<Secret<Vec<Vec<u8>>>, TrustQuorumError> {
+        let cipher =
+            derive_encryption_key(&self.rack_uuid, &rack_secret, &self.salt);
+        decrypt_shares(self.nonce, &cipher, &self.encrypted_shares)
+    }
+}
+
 /// An analog to [`SharePkgV0`] for nodes that were added after rack
 /// initialization. There is no encrypted_shares or nonces because of this.
 #[derive(

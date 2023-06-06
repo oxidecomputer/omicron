@@ -8,7 +8,6 @@ use crate::trust_quorum::{LearnedSharePkgV0, SharePkgV0};
 use derive_more::From;
 use serde::{Deserialize, Serialize};
 use sled_hardware::Baseboard;
-use std::collections::BTreeSet;
 use uuid::Uuid;
 
 /// The first thing a peer does after connecting or accepting is to identify
@@ -80,7 +79,13 @@ pub enum Error {
     /// The peer is not initialized yet
     NotInitialized,
 
+    /// The peer is trying to learn its share
+    StillLearning,
+
     /// The peer does not have any shares to hand out
     /// to learners
-    NoShares,
+    CannotSpareAShare,
+
+    /// Shares to hand to learners cannot be decrypted
+    FailedToDecryptShares,
 }

@@ -9,7 +9,8 @@
 //! written this way to enable easy testing and auditing.
 
 use super::messages::{Envelope, Error, Msg, Request, Response};
-use crate::trust_quorum::{LearnedSharePkgV0, SharePkgV0};
+use crate::trust_quorum::{LearnedSharePkgV0, RackSecret, SharePkgV0};
+use secrecy::{ExposeSecret, Secret};
 use serde::{Deserialize, Serialize};
 use sled_hardware::Baseboard;
 use std::collections::{BTreeMap, BTreeSet};
@@ -19,7 +20,9 @@ use uuid::Uuid;
 type Ticks = usize;
 
 // An index into an encrypted share
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize,
+)]
 pub struct ShareIdx(usize);
 
 /// Output from a a call to [`Fsm::Handle`]
@@ -103,6 +106,16 @@ impl LearnAttempt {
     }
 }
 
+/// Whether we are in the process of learning enough shares to recompute the
+/// rack secret or if we have already recomputed it.
+pub enum RackSecretState {
+    // We use a Vec instead of a `BTreeSet` here so that we can wrap it in
+    // `Secret`. However, that means that in order to insert shares we must
+    // check for duplicates manually.
+    Shares(Secret<Vec<u8>>),
+    Secret(RackSecret),
+}
+
 /// The state machine for a [`$crate::Peer`]
 ///
 /// This FSM assumes a network layer above it that can map peer IDs
@@ -128,6 +141,13 @@ pub struct Fsm {
 
     // The current time in ticks since the creation of the FSM
     clock: Ticks,
+
+    // In `InitialMember` or `Learned` states, it is sometimes necessary to
+    // reconstruct the rack secret.
+    //
+    // This is needed to both unlock local storage or decrypt our extra shares
+    // to hand out to learners.
+    rack_secret_state: Option<RackSecretState>,
 }
 
 /// Configuration of the FSM
@@ -138,7 +158,14 @@ pub struct Config {
 
 impl Fsm {
     pub fn new(id: Baseboard, config: Config, state: PersistentState) -> Fsm {
-        Fsm { id, config, state, peers: BTreeSet::new(), clock: 0 }
+        Fsm {
+            id,
+            config,
+            state,
+            peers: BTreeSet::new(),
+            clock: 0,
+            rack_secret_state: None,
+        }
     }
 
     /// An abstraction of a timer tick.
@@ -214,7 +241,10 @@ impl Fsm {
         match request {
             Request::Init(new_pkg) => self.on_init(from, new_pkg),
             Request::InitLearner => self.on_init_learner(from),
-            _ => unimplemented!(),
+            Request::GetShare { rack_uuid } => {
+                self.on_get_share(from, rack_uuid)
+            }
+            Request::Learn => self.on_learn(from),
         }
     }
 
@@ -271,6 +301,92 @@ impl Fsm {
             State::Learning(_) | State::Learned { .. } => {
                 // Idempotent
                 self.persist_and_respond(from, Response::InitAck)
+            }
+        }
+    }
+
+    // Handle a `Request::GetShare` message
+    fn on_get_share(&self, from: Baseboard, rack_uuid: Uuid) -> Output<'_> {
+        match &self.state.state {
+            State::Uninitialized => {
+                self.respond(from, Error::NotInitialized.into())
+            }
+            State::Learning(_) => {
+                self.respond(from, Error::StillLearning.into())
+            }
+            State::InitialMember { pkg, .. } => {
+                self.respond(from, Response::Share(pkg.share.clone()))
+            }
+            State::Learned { pkg } => {
+                self.respond(from, Response::Share(pkg.share.clone()))
+            }
+        }
+    }
+
+    // Handle a `Request::Learn` message
+    fn on_learn(&mut self, from: Baseboard) -> Output<'_> {
+        let version = &mut self.state.version;
+        match &mut self.state.state {
+            State::Uninitialized => {
+                self.respond(from, Error::NotInitialized.into())
+            }
+            State::Learning(_) => {
+                self.respond(from, Error::StillLearning.into())
+            }
+            State::Learned { .. } => {
+                self.respond(from, Error::CannotSpareAShare.into())
+            }
+            State::InitialMember { pkg, distributed_shares } => {
+                if let Some(RackSecretState::Secret(rack_secret)) =
+                    &self.rack_secret_state
+                {
+                    match pkg.decrypt_shares(rack_secret) {
+                        Ok(shares) => {
+                            if let Some(idx) = distributed_shares.get(&from) {
+                                // The share was already handed out to this
+                                // peer. Give back the same one.
+                                let share =
+                                    shares.expose_secret()[idx.0].clone();
+                                self.respond(from, Response::Share(share))
+                            } else {
+                                // We need to pick a share to hand out and
+                                // persist that fact. We find the highest currently used
+                                // index and add 1 or we select index 0.
+                                let idx = distributed_shares
+                                    .values()
+                                    .max()
+                                    .cloned()
+                                    .map(|idx| idx.0 + 1)
+                                    .unwrap_or(0);
+
+                                match shares.expose_secret().get(idx) {
+                                    Some(share) => {
+                                        distributed_shares.insert(
+                                            from.clone(),
+                                            ShareIdx(idx),
+                                        );
+                                        *version += 1;
+                                        self.persist_and_respond(
+                                            from,
+                                            Response::Share(share.clone()),
+                                        )
+                                    }
+                                    None => self.respond(
+                                        from,
+                                        Error::CannotSpareAShare.into(),
+                                    ),
+                                }
+                            }
+                        }
+                        Err(_) => self
+                            .respond(from, Error::FailedToDecryptShares.into()),
+                    }
+                } else {
+                    // We need to register the request and try to collect enough shares
+                    // to unlock the rack secret. When we have enough we will respond to the
+                    // caller.
+                    unimplemented!()
+                }
             }
         }
     }
