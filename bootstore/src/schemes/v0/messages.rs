@@ -24,17 +24,31 @@ pub struct Envelope {
     pub msg: Msg,
 }
 
-// TODO: We almost certainly want a sequence number to match requests and
-// responses
 #[derive(From, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Msg {
     Req(Request),
     Rsp(Response),
 }
 
+/// A request sent to a peer
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
+pub struct Request {
+    // A counter to uniquely match a request to a response for a given peer
+    pub id: Uuid,
+    pub type_: RequestType,
+}
+
+/// A response sent from a peer that matches a request with the same sequence
+/// number
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
+pub struct Response {
+    pub request_id: Uuid,
+    pub type_: ResponseType,
+}
+
 /// A request from a peer to another peer over TCP
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
-pub enum Request {
+pub enum RequestType {
     /// A rack initialization request informing the peer that it is a member of
     /// the initial trust quorum.
     Init(SharePkgV0),
@@ -52,7 +66,7 @@ pub enum Request {
 
 /// A response to a request from a peer over TCP
 #[derive(From, Debug, PartialEq, Serialize, Deserialize)]
-pub enum Response {
+pub enum ResponseType {
     /// Response to [`Request::Init`]
     InitAck,
 

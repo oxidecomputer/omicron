@@ -8,9 +8,11 @@
 //! results. This is where the bulk of the protocol logic lives. It's
 //! written this way to enable easy testing and auditing.
 
-use super::messages::{Envelope, Error, Msg, Request, Response};
+use super::messages::{
+    Envelope, Error, Msg, Request, RequestType, Response, ResponseType,
+};
 use crate::trust_quorum::{LearnedSharePkgV0, RackSecret, SharePkgV0};
-use secrecy::{ExposeSecret, Secret};
+use secrecy::ExposeSecret;
 use serde::{Deserialize, Serialize};
 use sled_hardware::Baseboard;
 use std::collections::{BTreeMap, BTreeSet};
@@ -82,13 +84,13 @@ pub enum State {
     Learned { pkg: LearnedSharePkgV0 },
 }
 
-/// An attempt to learn a key share
+/// An attempt by *this* peer to learn a key share
 ///
 /// When an attempt is started, a peer is selected from those known to the FSM,
-/// and a `Request::Learn` message is sent to that peer. This peer is recorded
+/// and a `RequestType::Learn` message is sent to that peer. This peer is recorded
 /// along with the current clock as `start`. If `Config.learn_timeout` ticks
 /// have fired since `start` based on the current FSM clock, without this
-/// FSM having received a `Response::Pkg`, then the `LearnAttempt` will be
+/// FSM having received a `ResponseType::Pkg`, then the `LearnAttempt` will be
 /// cancelled, and the next peer in order known to the FSM will be contacted in
 /// a new attempt.
 #[derive(Debug, Clone)]
@@ -101,6 +103,12 @@ impl LearnAttempt {
     fn expired(&self, now: Ticks, timeout: Ticks) -> bool {
         now.saturating_sub(self.start) >= timeout
     }
+}
+
+/// Metadata associated with a request that is keyed by `Baseboard`
+pub struct RequestMetadata {
+    request_id: Uuid,
+    start: Ticks,
 }
 
 /// Whether we are in the process of learning enough shares to recompute the
@@ -148,17 +156,13 @@ pub struct Fsm {
     // here and respond when we can recompute the rack secret. If we timeout before
     // we can recompute the rack secret, we respond with a timeout Error.
     //
-    // Note that if we get a new `Request::Learn` from a peer that is already
+    // Note that if we get a new `RequestType::Learn` from a peer that is already
     // pending, we will reset the start time.
     //
     // TODO: If we add message sequence numbers we must include them in the
     // value here and we should discard the old message still.
-    pending_learn_requests: BTreeMap<Baseboard, Ticks>,
+    pending_learn_requests: BTreeMap<Baseboard, RequestMetadata>,
 
-    // TODO: We should almost certainly keep track of any requests with sequence numbers.
-    // For broadcasts, we can have each message to a peer share a sequence number. This
-    // will allow us to match errors to each response appropriately.
-    //
     // Our own attempt to learn our share
     //
     // While this is only valid in the `Learning` state, we do not want to
@@ -263,21 +267,26 @@ impl Fsm {
         from: Baseboard,
         request: Request,
     ) -> Output {
-        match request {
-            Request::Init(new_pkg) => self.on_init(state, from, new_pkg),
-            Request::InitLearner => self.on_init_learner(state, from),
-            Request::GetShare { rack_uuid } => {
-                self.on_get_share(state, from, rack_uuid)
+        match request.type_ {
+            RequestType::Init(new_pkg) => {
+                self.on_init(state, from, request.id, new_pkg)
             }
-            Request::Learn => self.on_learn(state, from),
+            RequestType::InitLearner => {
+                self.on_init_learner(state, from, request.id)
+            }
+            RequestType::GetShare { rack_uuid } => {
+                self.on_get_share(state, from, request.id, rack_uuid)
+            }
+            RequestType::Learn => self.on_learn(state, from, request.id),
         }
     }
 
-    // Handle a `Request::Init` message
+    // Handle a `RequestType::Init` message
     fn on_init(
         &mut self,
         state: &mut PersistentState,
         from: Baseboard,
+        request_id: Uuid,
         new_pkg: SharePkgV0,
     ) -> Output {
         match &mut state.fsm_state {
@@ -287,81 +296,107 @@ impl Fsm {
                     distributed_shares: BTreeMap::new(),
                 };
                 state.version += 1;
-                persist_and_respond(from, Response::InitAck)
+                persist_and_respond(from, request_id, ResponseType::InitAck)
             }
             State::InitialMember { pkg, .. } => {
                 if new_pkg == *pkg {
                     // Idempotent response given same pkg
-                    respond(from, Response::InitAck)
+                    respond(from, request_id, ResponseType::InitAck)
                 } else {
                     let rack_uuid = pkg.rack_uuid;
                     respond(
                         from,
+                        request_id,
                         Error::AlreadyInitialized { rack_uuid }.into(),
                     )
                 }
             }
-            State::Learning => respond(from, Error::AlreadyLearning.into()),
+            State::Learning => {
+                respond(from, request_id, Error::AlreadyLearning.into())
+            }
             State::Learned { pkg } => {
                 let rack_uuid = pkg.rack_uuid;
-                respond(from, Error::AlreadyLearned { rack_uuid }.into())
+                respond(
+                    from,
+                    request_id,
+                    Error::AlreadyLearned { rack_uuid }.into(),
+                )
             }
         }
     }
 
-    // Handle a `Request::InitLearner` message
+    // Handle a `RequestType::InitLearner` message
     fn on_init_learner(
         &mut self,
         state: &mut PersistentState,
         from: Baseboard,
+        request_id: Uuid,
     ) -> Output {
         match &mut state.fsm_state {
             State::Uninitialized => {
                 state.fsm_state = State::Learning;
                 state.version += 1;
-                persist_and_respond(from, Response::InitAck)
+                persist_and_respond(from, request_id, ResponseType::InitAck)
             }
             State::InitialMember { pkg, .. } => {
                 let rack_uuid = pkg.rack_uuid;
-                respond(from, Error::AlreadyInitialized { rack_uuid }.into())
+                respond(
+                    from,
+                    request_id,
+                    Error::AlreadyInitialized { rack_uuid }.into(),
+                )
             }
             State::Learning | State::Learned { .. } => {
                 // Idempotent
-                persist_and_respond(from, Response::InitAck)
+                persist_and_respond(from, request_id, ResponseType::InitAck)
             }
         }
     }
 
-    // Handle a `Request::GetShare` message
+    // Handle a `RequestType::GetShare` message
     fn on_get_share(
         &self,
         state: &mut PersistentState,
         from: Baseboard,
+        request_id: Uuid,
         rack_uuid: Uuid,
     ) -> Output {
         match &state.fsm_state {
-            State::Uninitialized => respond(from, Error::NotInitialized.into()),
-            State::Learning => respond(from, Error::StillLearning.into()),
-            State::InitialMember { pkg, .. } => {
-                respond(from, Response::Share(pkg.share.clone()))
+            State::Uninitialized => {
+                respond(from, request_id, Error::NotInitialized.into())
             }
-            State::Learned { pkg } => {
-                respond(from, Response::Share(pkg.share.clone()))
+            State::Learning => {
+                respond(from, request_id, Error::StillLearning.into())
             }
+            State::InitialMember { pkg, .. } => respond(
+                from,
+                request_id,
+                ResponseType::Share(pkg.share.clone()),
+            ),
+            State::Learned { pkg } => respond(
+                from,
+                request_id,
+                ResponseType::Share(pkg.share.clone()),
+            ),
         }
     }
 
-    // Handle a `Request::Learn` message
+    // Handle a `RequestType::Learn` message
     fn on_learn(
         &mut self,
         state: &mut PersistentState,
         from: Baseboard,
+        request_id: Uuid,
     ) -> Output {
         match &mut state.fsm_state {
-            State::Uninitialized => respond(from, Error::NotInitialized.into()),
-            State::Learning => respond(from, Error::StillLearning.into()),
+            State::Uninitialized => {
+                respond(from, request_id, Error::NotInitialized.into())
+            }
+            State::Learning => {
+                respond(from, request_id, Error::StillLearning.into())
+            }
             State::Learned { .. } => {
-                respond(from, Error::CannotSpareAShare.into())
+                respond(from, request_id, Error::CannotSpareAShare.into())
             }
             State::InitialMember { pkg, distributed_shares } => {
                 match &self.rack_secret_state {
@@ -371,6 +406,7 @@ impl Fsm {
                         send_share_response(
                             &mut state.version,
                             from,
+                            request_id,
                             &pkg,
                             distributed_shares,
                             rack_secret,
@@ -380,7 +416,10 @@ impl Fsm {
                         // Register the request and try to collect enough
                         // shares to unlock the rack secret. When we have
                         // enough we will respond to the caller.
-                        self.pending_learn_requests.insert(from, self.clock);
+                        self.pending_learn_requests.insert(
+                            from,
+                            RequestMetadata { request_id, start: self.clock },
+                        );
                         self.broadcast_share_requests(
                             pkg.rack_uuid,
                             Some(shares),
@@ -390,7 +429,10 @@ impl Fsm {
                         // Register the request and try to collect enough
                         // shares to unlock the rack secret. When we have
                         // enough we will respond to the caller.
-                        self.pending_learn_requests.insert(from, self.clock);
+                        self.pending_learn_requests.insert(
+                            from,
+                            RequestMetadata { request_id, start: self.clock },
+                        );
                         self.broadcast_share_requests(pkg.rack_uuid, None)
                     }
                 }
@@ -404,8 +446,8 @@ impl Fsm {
         from: Baseboard,
         response: Response,
     ) -> Output {
-        match response {
-            Response::InitAck => {
+        match response.type_ {
+            ResponseType::InitAck => {
                 // TODO: This is the result of a coordinator action like
                 // `FSM::rack_init`. We need to add this to our list of
                 // acknowledged init requests. When we have hear from everyone
@@ -414,7 +456,7 @@ impl Fsm {
                 // message type for this or encode it in the `Output` in some
                 // other manner.
             }
-            Response::Share(share) => {
+            ResponseType::Share(share) => {
                 // TODO: Add the share to `self.rack_secrert_state`
                 // If we have enough of them then we respond to any pending
                 // requests that require a recomputation of the rack secret.
@@ -422,11 +464,11 @@ impl Fsm {
                 // TODO: Should we send a local message for response error
                 // logging or log directly from the FSM?
             }
-            Response::Pkg(pkg) => {
+            ResponseType::Pkg(pkg) => {
                 // TODO: If we are in `Learning` state then set the state to `Learned`
                 // with this pkg. Otherwise, discard the message and log it.
             }
-            Response::Error(error) => {
+            ResponseType::Error(error) => {
                 // TODO: If the error is relevant to any outstanding requests
                 // then handle them appropriately. For instance, if it's related
                 // to initialization then inform the caller. If it's a `Learn` request
@@ -438,11 +480,11 @@ impl Fsm {
         unimplemented!();
     }
 
-    // Send a `Request::Learn` message
+    // Send a `RequestType::Learn` message
     fn send_learn_request(&mut self, peer: Baseboard) -> Output {
         self.learn_attempt =
             Some(LearnAttempt { peer: peer.clone(), start: self.clock });
-        request(peer, Request::Learn)
+        request(peer, RequestType::Learn)
     }
 
     // Send a request for a share to each peer
@@ -457,13 +499,19 @@ impl Fsm {
             BTreeSet::new()
         };
 
+        // All broadcast requests share the same id
+        let request_id = Uuid::new_v4();
         let envelopes = self
             .peers
             .difference(&known_peers)
             .cloned()
             .map(|to| Envelope {
                 to,
-                msg: Request::GetShare { rack_uuid }.into(),
+                msg: Request {
+                    id: request_id,
+                    type_: RequestType::GetShare { rack_uuid },
+                }
+                .into(),
             })
             .collect();
 
@@ -471,10 +519,11 @@ impl Fsm {
     }
 }
 
-// Send a `Response::Share` message once we have recomputed the rack secret
+// Send a `ResponseType::Share` message once we have recomputed the rack secret
 fn send_share_response(
     persistent_state_version: &mut u32,
     from: Baseboard,
+    request_id: Uuid,
     pkg: &SharePkgV0,
     distributed_shares: &mut BTreeMap<Baseboard, ShareIdx>,
     rack_secret: &RackSecret,
@@ -485,7 +534,7 @@ fn send_share_response(
                 // The share was already handed out to this
                 // peer. Give back the same one.
                 let share = shares.expose_secret()[idx.0].clone();
-                respond(from, Response::Share(share))
+                respond(from, request_id, ResponseType::Share(share))
             } else {
                 // We need to pick a share to hand out and
                 // persist that fact. We find the highest currently used
@@ -503,19 +552,27 @@ fn send_share_response(
                         *persistent_state_version += 1;
                         persist_and_respond(
                             from,
-                            Response::Share(share.clone()),
+                            request_id,
+                            ResponseType::Share(share.clone()),
                         )
                     }
-                    None => respond(from, Error::CannotSpareAShare.into()),
+                    None => respond(
+                        from,
+                        request_id,
+                        Error::CannotSpareAShare.into(),
+                    ),
                 }
             }
         }
-        Err(_) => respond(from, Error::FailedToDecryptShares.into()),
+        Err(_) => {
+            respond(from, request_id, Error::FailedToDecryptShares.into())
+        }
     }
 }
 
 // Send a request directly to a peer
-fn request(to: Baseboard, request: Request) -> Output {
+fn request(to: Baseboard, type_: RequestType) -> Output {
+    let request = Request { id: Uuid::new_v4(), type_ };
     Output {
         persist: false,
         envelopes: vec![Envelope { to, msg: request.into() }],
@@ -523,7 +580,8 @@ fn request(to: Baseboard, request: Request) -> Output {
 }
 
 // Return a response directly to a peer that doesn't require persistence
-fn respond(to: Baseboard, response: Response) -> Output {
+fn respond(to: Baseboard, request_id: Uuid, type_: ResponseType) -> Output {
+    let response = Response { request_id, type_ };
     Output {
         persist: false,
         envelopes: vec![Envelope { to, msg: response.into() }],
@@ -532,7 +590,12 @@ fn respond(to: Baseboard, response: Response) -> Output {
 
 // Indicate to the caller that state must be perisisted and then a response
 // returned to the peer.
-fn persist_and_respond(to: Baseboard, response: Response) -> Output {
+fn persist_and_respond(
+    to: Baseboard,
+    request_id: Uuid,
+    type_: ResponseType,
+) -> Output {
+    let response = Response { request_id, type_ };
     Output {
         persist: true,
         envelopes: vec![Envelope { to, msg: response.into() }],
