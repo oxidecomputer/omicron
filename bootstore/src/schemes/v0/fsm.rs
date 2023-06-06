@@ -11,7 +11,9 @@
 use super::messages::{
     Envelope, Error, Msg, Request, RequestType, Response, ResponseType,
 };
-use crate::trust_quorum::{LearnedSharePkgV0, RackSecret, SharePkgV0};
+use crate::trust_quorum::{
+    create_pkgs, LearnedSharePkgV0, RackSecret, SharePkgV0, TrustQuorumError,
+};
 use secrecy::ExposeSecret;
 use serde::{Deserialize, Serialize};
 use sled_hardware::Baseboard;
@@ -94,6 +96,22 @@ impl Output {
             api_output: Some(ApiOutput::RackInitComplete),
         }
     }
+
+    fn rack_already_initialized() -> Output {
+        Output {
+            persist: false,
+            envelopes: vec![],
+            api_output: Some(ApiOutput::RackAlreadyInitialized),
+        }
+    }
+
+    fn rack_init_failed(err: TrustQuorumError) -> Output {
+        Output {
+            persist: false,
+            envelopes: vec![],
+            api_output: Some(ApiOutput::RackInitFailed(err)),
+        }
+    }
 }
 
 /// The caller of the API (aka the peer/network layer will sometimes need to get
@@ -101,7 +119,14 @@ impl Output {
 /// provide this information in `Output::api_output`.
 pub enum ApiOutput {
     RackInitComplete,
-    RackInitTimeout { unacked_peers: BTreeSet<Baseboard> },
+    RackInitTimeout {
+        unacked_peers: BTreeSet<Baseboard>,
+    },
+
+    /// Rack initialization was already run once.
+    RackAlreadyInitialized,
+
+    RackInitFailed(TrustQuorumError),
 }
 
 /// State stored on the M.2s.
@@ -275,6 +300,52 @@ impl Fsm {
             pending_learn_requests: BTreeMap::new(),
             rack_init_state: None,
             learn_attempt: None,
+        }
+    }
+
+    /// This call is triggered locally as a result of RSS running
+    /// It may only be called once, which is enforced by checking to see if
+    /// we already are in `State::Uninitialized`.
+    pub fn init_rack(
+        &mut self,
+        state: &mut PersistentState,
+        rack_uuid: Uuid,
+        initial_membership: BTreeSet<Baseboard>,
+    ) -> Output {
+        let State::Uninitialized = state.fsm_state else {
+            return Output::rack_already_initialized();
+        };
+        match create_pkgs(rack_uuid, initial_membership.clone()) {
+            Ok(pkgs) => {
+                let request_id = Uuid::new_v4();
+                let envelopes = pkgs
+                    .expose_secret()
+                    .into_iter()
+                    .zip(initial_membership)
+                    .filter_map(|(pkg, peer)| {
+                        if peer == self.id {
+                            // Don't send a message to ourself
+                            state.version += 1;
+                            state.fsm_state = State::InitialMember {
+                                pkg: pkg.clone(),
+                                distributed_shares: BTreeMap::new(),
+                            };
+                            None
+                        } else {
+                            Some(Envelope {
+                                to: peer,
+                                msg: Request {
+                                    id: request_id,
+                                    type_: RequestType::Init(pkg.clone()),
+                                }
+                                .into(),
+                            })
+                        }
+                    })
+                    .collect();
+                Output { persist: true, envelopes, api_output: None }
+            }
+            Err(e) => return Output::rack_init_failed(e),
         }
     }
 
