@@ -38,12 +38,6 @@
         "url": "http://docs.oxide.computer/api/login"
       }
     },
-    "vpcs/firewall-rules": {
-      "description": "Firewall rules are used to control incoming and outgoing network traffic.",
-      "external_docs": {
-        "url": "http://docs.oxide.computer/api/firewall-rules"
-      }
-    },
     "vpcs": {
       "description": "Virtual Private Clouds (VPCs) provide isolated network environments for managing and deploying services.",
       "external_docs": {

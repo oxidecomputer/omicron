@@ -1079,7 +1079,7 @@ async fn project_policy_update(
 /// List IP pools
 #[endpoint {
     method = GET,
-    path = "/v1/system/networking",
+    path = "/v1/system/ip-pools",
     tags = ["system/networking"],
 }]
 async fn ip_pool_list(
@@ -1117,7 +1117,7 @@ pub struct IpPoolPathParam {
 /// Create an IP pool
 #[endpoint {
     method = POST,
-    path = "/v1/system/networking",
+    path = "/v1/system/ip-pools",
     tags = ["system/networking"],
 }]
 async fn ip_pool_create(
@@ -2605,7 +2605,7 @@ async fn networking_switch_port_settings_list(
 /// Get information about a switch port
 #[endpoint {
     method = GET,
-    path = "/v1/system/networking/switch-port-settings/{port}/info",
+    path = "/v1/system/networking/switch-port-settings/{port}",
     tags = ["system/networking"],
 }]
 async fn networking_switch_port_settings_view(

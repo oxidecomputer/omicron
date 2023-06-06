@@ -134,9 +134,9 @@ system_metric                            GET      /v1/system/metrics/{metric_nam
 
 API operations found with tag "system/networking"
 OPERATION ID                             METHOD   URL PATH
-ip_pool_create                           POST     /v1/system/networking
+ip_pool_create                           POST     /v1/system/ip-pools
 ip_pool_delete                           DELETE   /v1/system/ip-pools/{pool}
-ip_pool_list                             GET      /v1/system/networking
+ip_pool_list                             GET      /v1/system/ip-pools
 ip_pool_range_add                        POST     /v1/system/ip-pools/{pool}/ranges/add
 ip_pool_range_list                       GET      /v1/system/ip-pools/{pool}/ranges
 ip_pool_range_remove                     POST     /v1/system/ip-pools/{pool}/ranges/remove
@@ -156,7 +156,7 @@ networking_loopback_address_list         GET      /v1/system/networking/loopback
 networking_switch_port_settings_create   POST     /v1/system/networking/switch-port-settings
 networking_switch_port_settings_delete   DELETE   /v1/system/networking/switch-port-settings
 networking_switch_port_settings_list     GET      /v1/system/networking/switch-port-settings
-networking_switch_port_settings_view     GET      /v1/system/networking/switch-port-settings/{port}/info
+networking_switch_port_settings_view     GET      /v1/system/networking/switch-port-settings/{port}
 
 API operations found with tag "system/silos"
 OPERATION ID                             METHOD   URL PATH

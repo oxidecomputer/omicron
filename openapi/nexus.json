@@ -4215,6 +4215,100 @@
         }
       }
     },
+    "/v1/system/ip-pools": {
+      "get": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "List IP pools",
+        "operationId": "ip_pool_list",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrIdSortMode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IpPoolResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": {
+          "required": []
+        }
+      },
+      "post": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "Create an IP pool",
+        "operationId": "ip_pool_create",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IpPoolCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IpPool"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/v1/system/ip-pools/{pool}": {
       "get": {
         "tags": [
@@ -4725,100 +4819,6 @@
         }
       }
     },
-    "/v1/system/networking": {
-      "get": {
-        "tags": [
-          "system/networking"
-        ],
-        "summary": "List IP pools",
-        "operationId": "ip_pool_list",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "limit",
-            "description": "Maximum number of items returned by a single call",
-            "schema": {
-              "nullable": true,
-              "type": "integer",
-              "format": "uint32",
-              "minimum": 1
-            }
-          },
-          {
-            "in": "query",
-            "name": "page_token",
-            "description": "Token returned by previous call to retrieve the subsequent page",
-            "schema": {
-              "nullable": true,
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "sort_by",
-            "schema": {
-              "$ref": "#/components/schemas/NameOrIdSortMode"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/IpPoolResultsPage"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "x-dropshot-pagination": {
-          "required": []
-        }
-      },
-      "post": {
-        "tags": [
-          "system/networking"
-        ],
-        "summary": "Create an IP pool",
-        "operationId": "ip_pool_create",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/IpPoolCreate"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "description": "successful creation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/IpPool"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
     "/v1/system/networking/address-lot": {
       "get": {
         "tags": [
@@ -5298,7 +5298,7 @@
         }
       }
     },
-    "/v1/system/networking/switch-port-settings/{port}/info": {
+    "/v1/system/networking/switch-port-settings/{port}": {
       "get": {
         "tags": [
           "system/networking"
@@ -14506,13 +14506,6 @@
       "description": "Virtual Private Clouds (VPCs) provide isolated network environments for managing and deploying services.",
       "externalDocs": {
         "url": "http://docs.oxide.computer/api/vpcs"
-      }
-    },
-    {
-      "name": "vpcs/firewall-rules",
-      "description": "Firewall rules are used to control incoming and outgoing network traffic.",
-      "externalDocs": {
-        "url": "http://docs.oxide.computer/api/firewall-rules"
       }
     }
   ]
