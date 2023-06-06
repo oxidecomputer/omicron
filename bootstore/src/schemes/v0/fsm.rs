@@ -86,6 +86,14 @@ impl Output {
             api_output: Some(ApiOutput::RackInitTimeout { unacked_peers }),
         }
     }
+
+    fn rack_init_complete() -> Output {
+        Output {
+            persist: false,
+            envelopes: vec![],
+            api_output: Some(ApiOutput::RackInitComplete),
+        }
+    }
 }
 
 /// The caller of the API (aka the peer/network layer will sometimes need to get
@@ -314,6 +322,7 @@ impl Fsm {
                             .difference(&rack_init_state.acks)
                             .cloned()
                             .collect();
+                        self.rack_init_state = None;
                         return Output::rack_init_timeout(unacked_peers);
                     }
                 }
@@ -593,11 +602,8 @@ impl Fsm {
         if let Some(rack_init_state) = &mut self.rack_init_state {
             rack_init_state.acks.insert(from);
             if rack_init_state.acks.len() == rack_init_state.total_members {
-                return Output {
-                    persist: false,
-                    envelopes: vec![],
-                    api_output: Some(ApiOutput::RackInitComplete),
-                };
+                self.rack_init_state = None;
+                return Output::rack_init_complete();
             }
         }
         //TODO: Log receipt of a message that was sent to the wrong peer?
