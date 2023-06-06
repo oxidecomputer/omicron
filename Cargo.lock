@@ -3563,13 +3563,14 @@ checksum = "348108ab3fba42ec82ff6e9564fc4ca0247bdccdc68dd8af9764bbc79c3c8ffb"
 [[package]]
 name = "libnet"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/netadm-sys#e632591ab052ec1ddd6898822706c95a5098638e"
+source = "git+https://github.com/oxidecomputer/netadm-sys#f114bd0d543d886cd453932e9f0967de57289bc2"
 dependencies = [
  "anyhow",
  "cfg-if 1.0.0",
  "colored",
  "dlpi",
  "libc",
+ "num_enum",
  "nvpair",
  "nvpair-sys",
  "rusty-doors",
@@ -6668,7 +6669,7 @@ checksum = "4f3208ce4d8448b3f3e7d168a73f5e0c43a61e32930de3bceeccedb388b6bf06"
 [[package]]
 name = "rusty-doors"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/rusty-doors#c9c064efbb686af124264ee6995d9db7082b249d"
+source = "git+https://github.com/oxidecomputer/rusty-doors#42ad0104095425eea76934b5d735b4c6a438ef66"
 dependencies = [
  "libc",
  "rusty-doors-macros",
@@ -6677,7 +6678,7 @@ dependencies = [
 [[package]]
 name = "rusty-doors-macros"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/rusty-doors#c9c064efbb686af124264ee6995d9db7082b249d"
+source = "git+https://github.com/oxidecomputer/rusty-doors#42ad0104095425eea76934b5d735b4c6a438ef66"
 dependencies = [
  "quote",
  "syn 1.0.109",
