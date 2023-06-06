@@ -109,10 +109,8 @@ impl LearnAttempt {
 /// Whether we are in the process of learning enough shares to recompute the
 /// rack secret or if we have already recomputed it.
 pub enum RackSecretState {
-    // We use a Vec instead of a `BTreeSet` here so that we can wrap it in
-    // `Secret`. However, that means that in order to insert shares we must
-    // check for duplicates manually.
-    Shares(Secret<Vec<u8>>),
+    // TODO: Zeroize or wrap in a Secert
+    Shares(BTreeMap<Baseboard, Vec<u8>>),
     Secret(RackSecret),
 }
 
@@ -148,6 +146,11 @@ pub struct Fsm {
     // This is needed to both unlock local storage or decrypt our extra shares
     // to hand out to learners.
     rack_secret_state: Option<RackSecretState>,
+
+    // Pending learn requests. When a peer attempts to learn a share, we may
+    // not be able to give it one because we cannot yet recompute the rack
+    // secret. We queue requests here.
+    pending_learn_requests: BTreeSet<Baseboard>,
 }
 
 /// Configuration of the FSM
@@ -165,6 +168,7 @@ impl Fsm {
             peers: BTreeSet::new(),
             clock: 0,
             rack_secret_state: None,
+            pending_learn_requests: BTreeSet::new(),
         }
     }
 
@@ -382,10 +386,35 @@ impl Fsm {
                             .respond(from, Error::FailedToDecryptShares.into()),
                     }
                 } else {
-                    // We need to register the request and try to collect enough shares
-                    // to unlock the rack secret. When we have enough we will respond to the
-                    // caller.
-                    unimplemented!()
+                    // We need to register the request and try to collect
+                    // enough shares to unlock the rack secret. When we have
+                    // enough we will respond to the caller.
+                    self.pending_learn_requests.insert(from);
+
+                    // Don't send requests to peers that we already have shares for
+                    let known_peers =
+                        if let Some(RackSecretState::Shares(shares)) =
+                            &self.rack_secret_state
+                        {
+                            shares.keys().cloned().collect()
+                        } else {
+                            BTreeSet::new()
+                        };
+
+                    // Broadcast requests for shares to all peers we haven't
+                    // heard from yet.
+                    let envelopes = self
+                        .peers
+                        .difference(&known_peers)
+                        .cloned()
+                        .map(|to| Envelope {
+                            to,
+                            msg: Request::GetShare { rack_uuid: pkg.rack_uuid }
+                                .into(),
+                        })
+                        .collect();
+
+                    Output { persist: None, envelopes }
                 }
             }
         }
