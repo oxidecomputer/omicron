@@ -209,7 +209,8 @@ impl DataStore {
             .collect();
         self.vpc_update_firewall_rules(opctx, &authz_vpc, rules).await?;
 
-        debug!(opctx.log, "created built-in VPC firewall rules");
+        info!(opctx.log, "created built-in VPC firewall rules");
+
         Ok(())
     }
 

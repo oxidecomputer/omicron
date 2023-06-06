@@ -187,6 +187,9 @@ impl DataStore {
             })
     }
 
+    // The following methods which return a `TxnError` take a `conn` parameter
+    // which comes from the transaction created in `rack_set_initialized`.
+
     #[allow(clippy::too_many_arguments)]
     async fn rack_create_recovery_silo<ConnError>(
         &self,
