@@ -33,9 +33,8 @@ lazy_static! {
         *super::vpc::SERVICES_VPC_ID,
         IdentityMetadataCreateParams {
             name: "external-dns".parse().unwrap(),
-            description: format!(
-                "Built-in VPC Subnet for Oxide service (external-dns)"
-            ),
+            description: "Built-in VPC Subnet for Oxide service (external-dns)"
+                .to_string(),
         },
         *DNS_OPTE_IPV4_SUBNET,
         *DNS_OPTE_IPV6_SUBNET,
@@ -47,9 +46,8 @@ lazy_static! {
         *super::vpc::SERVICES_VPC_ID,
         IdentityMetadataCreateParams {
             name: "nexus".parse().unwrap(),
-            description: format!(
-                "Built-in VPC Subnet for Oxide service (nexus)"
-            ),
+            description: "Built-in VPC Subnet for Oxide service (nexus)"
+                .to_string(),
         },
         *NEXUS_OPTE_IPV4_SUBNET,
         *NEXUS_OPTE_IPV6_SUBNET,
@@ -61,9 +59,8 @@ lazy_static! {
         *super::vpc::SERVICES_VPC_ID,
         IdentityMetadataCreateParams {
             name: "boundary-ntp".parse().unwrap(),
-            description: format!(
-                "Built-in VPC Subnet for Oxide service (boundary-ntp)"
-            ),
+            description: "Built-in VPC Subnet for Oxide service (boundary-ntp)"
+                .to_string(),
         },
         *NTP_OPTE_IPV4_SUBNET,
         *NTP_OPTE_IPV6_SUBNET,

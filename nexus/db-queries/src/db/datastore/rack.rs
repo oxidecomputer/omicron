@@ -187,6 +187,7 @@ impl DataStore {
             })
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn rack_create_recovery_silo<ConnError>(
         &self,
         opctx: &OpContext,

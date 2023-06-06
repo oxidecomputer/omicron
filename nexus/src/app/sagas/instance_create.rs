@@ -755,7 +755,7 @@ async fn create_default_primary_network_interface(
         .lookup_for(authz::Action::CreateChild)
         .await
         .map_err(ActionError::action_failed)?;
-    let (.., _, authz_subnet, db_subnet) = LookupPath::new(&opctx, &datastore)
+    let (.., authz_subnet, db_subnet) = LookupPath::new(&opctx, &datastore)
         .project_id(saga_params.project_id)
         .vpc_name(&internal_default_name)
         .vpc_subnet_name(&internal_default_name)

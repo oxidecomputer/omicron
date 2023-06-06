@@ -189,20 +189,20 @@ impl DataStore {
             VpcFirewallRule::new(
                 Uuid::new_v4(),
                 *SERVICES_VPC_ID,
-                &*DNS_VPC_FW_RULE,
+                &DNS_VPC_FW_RULE,
             )
         });
         fw_rules.entry(NEXUS_VPC_FW_RULE.name.clone()).or_insert_with(|| {
             VpcFirewallRule::new(
                 Uuid::new_v4(),
                 *SERVICES_VPC_ID,
-                &*NEXUS_VPC_FW_RULE,
+                &NEXUS_VPC_FW_RULE,
             )
         });
 
         let rules = fw_rules
-            .into_iter()
-            .map(|(_, mut rule)| {
+            .into_values()
+            .map(|mut rule| {
                 rule.identity.id = Uuid::new_v4();
                 rule
             })

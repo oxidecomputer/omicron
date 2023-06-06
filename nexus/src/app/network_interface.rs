@@ -77,7 +77,7 @@ impl super::Nexus {
         // IDs for creating the network interface.
         let vpc_name = db::model::Name(params.vpc_name.clone());
         let subnet_name = db::model::Name(params.subnet_name.clone());
-        let (.., _, authz_subnet, db_subnet) =
+        let (.., authz_subnet, db_subnet) =
             LookupPath::new(opctx, &self.db_datastore)
                 .project_id(authz_project.id())
                 .vpc_name(&vpc_name)
