@@ -3,7 +3,6 @@ login_saml_begin                         (get    "/login/{silo_name}/saml/{provi
 device_auth_request                      (post   "/device/auth")
 device_auth_confirm                      (post   "/device/confirm")
 device_access_token                      (post   "/device/token")
-login_spoof                              (post   "/login")
 login_saml                               (post   "/login/{silo_name}/saml/{provider_name}")
 login_local                              (post   "/v1/login/{silo_name}/local")
 logout                                   (post   "/v1/logout")
