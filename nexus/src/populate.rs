@@ -341,7 +341,7 @@ mod test {
         let logctx = dev::test_setup_log("test_populator");
         let mut db = test_setup_database(&logctx.log).await;
         let cfg = db::Config { url: db.pg_config().clone() };
-        let pool = Arc::new(db::Pool::new(&cfg));
+        let pool = Arc::new(db::Pool::new(&logctx.log, &cfg));
         let datastore = Arc::new(db::DataStore::new(pool));
         let opctx = OpContext::for_background(
             logctx.log.clone(),
@@ -387,7 +387,8 @@ mod test {
         //
         // Anyway, if we try again with a broken database, we should get a
         // ServiceUnavailable error, which indicates a transient failure.
-        let pool = Arc::new(db::Pool::new_failfast_for_tests(&cfg));
+        let pool =
+            Arc::new(db::Pool::new_failfast_for_tests(&logctx.log, &cfg));
         let datastore = Arc::new(db::DataStore::new(pool));
         let opctx = OpContext::for_background(
             logctx.log.clone(),

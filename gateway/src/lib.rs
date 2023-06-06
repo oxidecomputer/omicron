@@ -93,7 +93,6 @@ fn start_dropshot_server(
     let dropshot = ConfigDropshot {
         bind_address: SocketAddr::V6(addr),
         request_body_max_bytes,
-        ..Default::default()
     };
     let http_server_starter = dropshot::HttpServerStarter::new(
         &dropshot,

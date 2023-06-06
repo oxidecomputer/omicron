@@ -12,6 +12,6 @@ mod http_entrypoints;
 mod maghemite;
 pub(crate) mod params;
 pub(crate) mod rss_handle;
+mod secret_retriever;
 pub mod server;
-pub mod trust_quorum;
 mod views;

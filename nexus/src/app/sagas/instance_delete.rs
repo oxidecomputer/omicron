@@ -7,6 +7,7 @@ use super::NexusActionContext;
 use super::NexusSaga;
 use crate::app::sagas::declare_saga_actions;
 use crate::db;
+use crate::db::lookup::LookupPath;
 use crate::{authn, authz};
 use nexus_types::identity::Resource;
 use omicron_common::api::external::{Error, ResourceType};
@@ -119,9 +120,18 @@ async fn sid_v2p_ensure_undo(
         &params.serialized_authn,
     );
 
+    let (.., db_instance) = LookupPath::new(&opctx, &osagactx.datastore())
+        .instance_id(params.authz_instance.id())
+        .fetch_for(authz::Action::Read)
+        .await?;
+
     osagactx
         .nexus()
-        .create_instance_v2p_mappings(&opctx, params.authz_instance.id())
+        .create_instance_v2p_mappings(
+            &opctx,
+            params.authz_instance.id(),
+            db_instance.runtime().sled_id,
+        )
         .await
         .map_err(ActionError::action_failed)?;
 

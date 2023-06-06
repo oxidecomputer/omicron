@@ -16,6 +16,8 @@ crossterm.workspace = true
 futures.workspace = true
 hex = { workspace = true, features = ["serde"] }
 humantime.workspace = true
+indexmap.workspace = true
+itertools.workspace = true
 omicron-common.workspace = true
 once_cell.workspace = true
 reqwest.workspace = true
@@ -31,12 +33,16 @@ slog-term.workspace = true
 snafu.workspace = true
 libsw.workspace = true
 tar.workspace = true
+textwrap.workspace = true
 tokio = { workspace = true, features = ["full"] }
 tokio-util.workspace = true
 toml.workspace = true
 tui.workspace = true
-tui-tree-widget = "0.11.0"
+tui-tree-widget = "0.12.0"
+unicode-width.workspace = true
 
+update-engine.workspace = true
+wicket-common.workspace = true
 wicketd-client.workspace = true
 
 [dev-dependencies]

@@ -568,9 +568,8 @@
           },
           "flush_timeout": {
             "nullable": true,
-            "type": "integer",
-            "format": "uint32",
-            "minimum": 0
+            "type": "number",
+            "format": "float"
           },
           "id": {
             "type": "string",
@@ -1650,14 +1649,14 @@
         "title": "An IPv4 subnet",
         "description": "An IPv4 subnet, including prefix and subnet mask",
         "type": "string",
-        "pattern": "^(([0-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])\\.){3}([0-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])/([8-9]|1[0-9]|2[0-9]|3[0-2])$"
+        "pattern": "^(([0-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])\\.){3}([0-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])/([0-9]|1[0-9]|2[0-9]|3[0-2])$"
       },
       "Ipv6Net": {
         "example": "fd12:3456::/64",
         "title": "An IPv6 subnet",
         "description": "An IPv6 subnet, including prefix and subnet mask",
         "type": "string",
-        "pattern": "^([fF][dD])[0-9a-fA-F]{2}:(([0-9a-fA-F]{1,4}:){6}[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,6}:)\\/([1-9]|[1-9][0-9]|1[0-1][0-9]|12[0-8])$"
+        "pattern": "^([fF][dD])[0-9a-fA-F]{2}:(([0-9a-fA-F]{1,4}:){6}[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,6}:)([0-9a-fA-F]{1,4})?\\/([0-9]|[1-9][0-9]|1[0-1][0-9]|12[0-8])$"
       },
       "KnownArtifactKind": {
         "description": "Kinds of update artifacts, as used by Nexus to determine what updates are available and by sled-agent to determine how to apply an update when asked.",
@@ -1823,6 +1822,10 @@
                 "type": "string",
                 "format": "ip"
               },
+              "external_tls": {
+                "description": "Whether Nexus's external endpoint should use TLS",
+                "type": "boolean"
+              },
               "internal_ip": {
                 "description": "The address at which the internal nexus server is reachable.",
                 "type": "string",
@@ -1845,6 +1848,7 @@
             },
             "required": [
               "external_ip",
+              "external_tls",
               "internal_ip",
               "nic",
               "type"

@@ -5,17 +5,12 @@
 [console]
 # Directory for static assets. Absolute path or relative to CWD.
 static_dir = "out/console-assets"
-cache_control_max_age_minutes = 10
 session_idle_timeout_minutes = 480 # 6 hours
 session_absolute_timeout_minutes = 1440 # 24 hours
 
 # List of authentication schemes to support.
-#
-# This is not fleshed out yet and the only reason to change it now is for
-# working on authentication or authorization.
 [authn]
-# TODO(https://github.com/oxidecomputer/omicron/issues/372): Remove "spoof".
-schemes_external = ["spoof", "session_cookie", "access_token"]
+schemes_external = ["session_cookie", "access_token"]
 
 [log]
 # Show log messages of this level and more severe
@@ -44,6 +39,12 @@ bind_address = "127.0.0.1:12220"
 # Allow larger request bodies (1MiB) to accomodate firewall endpoints (one
 # rule is ~500 bytes)
 request_body_max_bytes = 1048576
+# To have Nexus's external HTTP endpoint use TLS, uncomment the line below.  You
+# will also need to provide an initial TLS certificate during rack
+# initialization.  If you're using this config file, you're probably running a
+# simulated system.  In that case, the initial certificate is provided to the
+# simulated sled agent (acting as RSS) via command-line arguments.
+#tls = true
 
 [deployment.dropshot_internal]
 # IP Address and TCP port on which to listen for the internal API
@@ -78,3 +79,8 @@ dns_external.period_secs_config = 60
 dns_external.period_secs_servers = 60
 dns_external.period_secs_propagation = 60
 dns_external.max_concurrent_server_updates = 5
+# How frequently we check the list of stored TLS certificates.  This is
+# approximately an upper bound on how soon after updating the list of
+# certificates it will take _other_ Nexus instances to notice and stop serving
+# them (on a sunny day).
+external_endpoints.period_secs = 60

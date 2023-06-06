@@ -328,7 +328,7 @@ mod test {
     ) -> (dev::db::CockroachInstance, Arc<db::DataStore>) {
         let db = test_setup_database(&log).await;
         let cfg = crate::db::Config { url: db.pg_config().clone() };
-        let pool = Arc::new(db::Pool::new(&cfg));
+        let pool = Arc::new(db::Pool::new(log, &cfg));
         let db_datastore = Arc::new(db::DataStore::new(Arc::clone(&pool)));
         (db, db_datastore)
     }

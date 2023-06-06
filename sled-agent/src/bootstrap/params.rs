@@ -4,8 +4,8 @@
 
 //! Request types for the bootstrap agent
 
-use super::trust_quorum::SerializableShareDistribution;
 use omicron_common::address::{self, Ipv6Subnet, SLED_PREFIX};
+use omicron_common::api::internal::shared::RackNetworkConfig;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
@@ -55,15 +55,22 @@ pub struct RackInitializeRequest {
     /// DNS name for the DNS zone delegated to the rack for external DNS
     pub external_dns_zone_name: String,
 
+    /// initial TLS certificates for the external API
+    pub external_certificates: Vec<Certificate>,
+
     /// Configuration of the Recovery Silo (the initial Silo)
     pub recovery_silo: RecoverySiloConfig,
+
+    /// Initial rack network configuration
+    pub rack_network_config: Option<RackNetworkConfig>,
 }
 
+pub type Certificate = nexus_client::types::Certificate;
 pub type RecoverySiloConfig = nexus_client::types::RecoverySiloConfig;
 
 /// Configuration information for launching a Sled Agent.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
-pub struct SledAgentRequest {
+pub struct StartSledAgentRequest {
     /// Uuid of the Sled Agent to be created.
     pub id: Uuid,
 
@@ -83,7 +90,7 @@ pub struct SledAgentRequest {
     pub subnet: Ipv6Subnet<SLED_PREFIX>,
 }
 
-impl SledAgentRequest {
+impl StartSledAgentRequest {
     pub fn sled_address(&self) -> SocketAddrV6 {
         address::get_sled_address(self.subnet)
     }
@@ -93,65 +100,16 @@ impl SledAgentRequest {
     }
 }
 
-// We intentionally DO NOT derive `Debug` or `Serialize`; both provide avenues
-// by which we may accidentally log the contents of our `share`. To serialize a
-// request, use `RequestEnvelope::danger_serialize_as_json()`.
-#[derive(Clone, Deserialize, PartialEq)]
-// Clippy wants us to put the SledAgentRequest in a Box, but (a) it's not _that_
-// big (a couple hundred bytes), and (b) that makes matching annoying.
-// `Request`s are relatively rare over the life of a sled agent.
-#[allow(clippy::large_enum_variant)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum Request<'a> {
     /// Send configuration information for launching a Sled Agent.
-    SledAgentRequest(
-        Cow<'a, SledAgentRequest>,
-        Option<SerializableShareDistribution>,
-    ),
-
-    /// Request the sled's share of the rack secret.
-    ShareRequest,
+    StartSledAgentRequest(Cow<'a, StartSledAgentRequest>),
 }
 
-#[derive(Clone, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct RequestEnvelope<'a> {
     pub version: u32,
     pub request: Request<'a>,
-}
-
-impl RequestEnvelope<'_> {
-    /// On success, the returned `Vec` will contain our raw
-    /// trust quorum share. This method is named `danger_*` to remind the
-    /// caller that they must not log it.
-    pub(crate) fn danger_serialize_as_json(
-        &self,
-    ) -> Result<Vec<u8>, serde_json::Error> {
-        #[derive(Serialize)]
-        #[serde(remote = "Request")]
-        #[allow(clippy::large_enum_variant)]
-        pub enum RequestDef<'a> {
-            /// Send configuration information for launching a Sled Agent.
-            SledAgentRequest(
-                Cow<'a, SledAgentRequest>,
-                Option<SerializableShareDistribution>,
-            ),
-
-            /// Request the sled's share of the rack secret.
-            ShareRequest,
-        }
-
-        #[derive(Serialize)]
-        #[serde(remote = "RequestEnvelope")]
-        struct RequestEnvelopeDef<'a> {
-            version: u32,
-            #[serde(borrow, with = "RequestDef")]
-            request: Request<'a>,
-        }
-
-        let mut writer = Vec::with_capacity(128);
-        let mut serializer = serde_json::Serializer::new(&mut writer);
-        RequestEnvelopeDef::serialize(self, &mut serializer)?;
-        Ok(writer)
-    }
 }
 
 pub(super) mod version {
@@ -163,8 +121,6 @@ mod tests {
     use std::net::Ipv6Addr;
 
     use super::*;
-    use crate::bootstrap::trust_quorum::RackSecret;
-    use crate::bootstrap::trust_quorum::ShareDistribution;
     use camino::Utf8PathBuf;
 
     #[test]
@@ -187,35 +143,51 @@ mod tests {
     }
 
     #[test]
-    fn json_serialization_round_trips() {
-        let secret = RackSecret::new();
-        let (mut shares, verifier) = secret.split(2, 4).unwrap();
+    fn parse_rack_initialization_weak_hash() {
+        let config = r#"
+            rack_subnet = "fd00:1122:3344:0100::"
+            bootstrap_discovery.type = "only_ours"
+            rack_secret_threshold = 1
+            ntp_servers = [ "ntp.eng.oxide.computer" ]
+            dns_servers = [ "1.1.1.1", "9.9.9.9" ]
+            external_dns_zone_name = "oxide.test"
+            
+            [[internal_services_ip_pool_ranges]]
+            first = "192.168.1.20"
+            last = "192.168.1.22"
+            
+            [recovery_silo]
+            silo_name = "recovery"
+            user_name = "recovery"
+            user_password_hash = "$argon2i$v=19$m=16,t=2,p=1$NVR0a2QxVXNiQjlObFJXbA$iGFJWOlUqN20B8KR4Fsmrg"
+        "#;
 
+        let error = toml::from_str::<RackInitializeRequest>(config)
+            .expect_err("unexpectedly parsed with bad password hash");
+        println!("found error: {}", error);
+        assert!(error.to_string().contains(
+            "password hash: algorithm: expected argon2id, found argon2i"
+        ));
+    }
+
+    #[test]
+    fn json_serialization_round_trips() {
         let envelope = RequestEnvelope {
             version: 1,
-            request: Request::SledAgentRequest(
-                Cow::Owned(SledAgentRequest {
+            request: Request::StartSledAgentRequest(Cow::Owned(
+                StartSledAgentRequest {
                     id: Uuid::new_v4(),
                     rack_id: Uuid::new_v4(),
                     ntp_servers: vec![String::from("test.pool.example.com")],
                     dns_servers: vec![String::from("1.1.1.1")],
                     subnet: Ipv6Subnet::new(Ipv6Addr::LOCALHOST),
-                }),
-                Some(
-                    ShareDistribution {
-                        threshold: 2,
-                        verifier,
-                        share: shares.pop().unwrap(),
-                        member_device_id_certs: vec![],
-                    }
-                    .into(),
-                ),
-            ),
+                },
+            )),
         };
 
-        let serialized = envelope.danger_serialize_as_json().unwrap();
+        let serialized = serde_json::to_vec(&envelope).unwrap();
         let deserialized: RequestEnvelope =
-            serde_json::from_slice(&serialized).unwrap();
+            serde_json::from_slice(serialized.as_slice()).unwrap();
 
         assert!(envelope == deserialized, "serialization round trip failed");
     }

@@ -25,6 +25,7 @@ use nexus_types::external_api::views::IpPoolRange;
 use nexus_types::external_api::views::User;
 use nexus_types::external_api::views::{Project, Silo, Vpc, VpcRouter};
 use nexus_types::internal_api::params as internal_params;
+use nexus_types::internal_api::params::Baseboard;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Disk;
 use omicron_common::api::external::IdentityMetadataCreateParams;
@@ -151,7 +152,7 @@ pub async fn create_certificate(
     cert: Vec<u8>,
     key: Vec<u8>,
 ) -> Certificate {
-    let url = "/v1/system/certificates".to_string();
+    let url = "/v1/certificates".to_string();
     object_create(
         client,
         &url,
@@ -169,8 +170,30 @@ pub async fn create_certificate(
 }
 
 pub async fn delete_certificate(client: &ClientTestContext, cert_name: &str) {
-    let url = format!("/v1/system/certificates/{}", cert_name);
+    let url = format!("/v1/certificates/{}", cert_name);
     object_delete(client, &url).await
+}
+
+pub async fn create_switch(
+    client: &ClientTestContext,
+    serial: &str,
+    part: &str,
+    revision: i64,
+    rack_id: Uuid,
+) -> views::Switch {
+    object_put(
+        client,
+        "/switches",
+        &internal_params::SwitchPutRequest {
+            baseboard: Baseboard {
+                serial_number: serial.to_string(),
+                part_number: part.to_string(),
+                revision,
+            },
+            rack_id,
+        },
+    )
+    .await
 }
 
 pub async fn create_physical_disk(
@@ -239,6 +262,7 @@ pub async fn create_silo(
             discoverable,
             identity_mode,
             admin_group_name: None,
+            tls_certificates: vec![],
         },
     )
     .await

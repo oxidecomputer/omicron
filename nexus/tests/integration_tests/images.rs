@@ -83,7 +83,7 @@ async fn test_image_create(cptestctx: &ControlPlaneTestContext) {
     .expect("Expected 404");
 
     // create the project, now we expect an empty list
-    create_project(client, PROJECT_NAME).await;
+    let project = create_project(client, PROJECT_NAME).await;
 
     let images = NexusRequest::object_get(client, &images_url)
         .authn_as(AuthnMode::PrivilegedUser)
@@ -158,6 +158,35 @@ async fn test_image_create(cptestctx: &ControlPlaneTestContext) {
 
     // Ensure project 2 images with silos lists the promoted image
     let images = NexusRequest::object_get(client, &project_2_images_url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute_and_parse_unwrap::<ResultsPage<views::Image>>()
+        .await
+        .items;
+    assert_eq!(images.len(), 1);
+
+    // demote the image back to the project
+    let demote_url = format!(
+        "/v1/images/{}/demote?project={}",
+        silo_images[0].identity.id, project.identity.id
+    );
+    NexusRequest::new(
+        RequestBuilder::new(client, http::Method::POST, &demote_url)
+            .expect_status(Some(http::StatusCode::ACCEPTED)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute_and_parse_unwrap::<views::Image>()
+    .await;
+
+    // Ensure there are no more silo images now that it has been demoted
+    let silo_images = NexusRequest::object_get(client, &silo_images_url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute_and_parse_unwrap::<ResultsPage<views::Image>>()
+        .await
+        .items;
+    assert_eq!(silo_images.len(), 0);
+
+    // Ensure image has returned to the project it was demoted to
+    let images = NexusRequest::object_get(client, &project_images_url)
         .authn_as(AuthnMode::PrivilegedUser)
         .execute_and_parse_unwrap::<ResultsPage<views::Image>>()
         .await

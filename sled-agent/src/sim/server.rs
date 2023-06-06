@@ -96,8 +96,11 @@ impl Server {
                         sa_address: sa_address.to_string(),
                         role: NexusTypes::SledRole::Gimlet,
                         baseboard: NexusTypes::Baseboard {
-                            identifier: format!("Simulated sled {}", config.id),
-                            model: String::from("Unknown"),
+                            serial_number: format!(
+                                "Simulated sled {}",
+                                config.id
+                            ),
+                            part_number: String::from("Unknown"),
                             revision: 0,
                         },
                         usable_hardware_threads: config
@@ -105,6 +108,10 @@ impl Server {
                             .hardware_threads,
                         usable_physical_ram: NexusTypes::ByteCount::try_from(
                             config.hardware.physical_ram,
+                        )
+                        .unwrap(),
+                        reservoir_size: NexusTypes::ByteCount::try_from(
+                            config.hardware.reservoir_ram,
                         )
                         .unwrap(),
                     },
@@ -241,30 +248,22 @@ impl Server {
 
         // Record the internal DNS server as though RSS had provisioned it so
         // that Nexus knows about it.
-        let dns_bound = match dns_server.local_address() {
-            SocketAddr::V4(_) => panic!("did not expect v4 address"),
-            SocketAddr::V6(a) => *a,
-        };
+        if let SocketAddr::V4(_) = dns_server.local_address() {
+            panic!("expected internal DNS server to have IPv6 address");
+        }
         let http_bound = match dns_dropshot_server.local_addr() {
-            SocketAddr::V4(_) => panic!("did not expect v4 address"),
+            SocketAddr::V4(_) => panic!(
+                "expected internal DNS config (HTTP) server to have IPv6 address"
+            ),
             SocketAddr::V6(a) => a,
         };
-        let mut services = vec![
-            NexusTypes::ServicePutRequest {
-                address: dns_bound.to_string(),
-                kind: NexusTypes::ServiceKind::InternalDns,
-                service_id: Uuid::new_v4(),
-                sled_id: config.id,
-                zone_id: Some(Uuid::new_v4()),
-            },
-            NexusTypes::ServicePutRequest {
-                address: http_bound.to_string(),
-                kind: NexusTypes::ServiceKind::InternalDnsConfig,
-                service_id: Uuid::new_v4(),
-                sled_id: config.id,
-                zone_id: Some(Uuid::new_v4()),
-            },
-        ];
+        let mut services = vec![NexusTypes::ServicePutRequest {
+            address: http_bound.to_string(),
+            kind: NexusTypes::ServiceKind::InternalDns,
+            service_id: Uuid::new_v4(),
+            sled_id: config.id,
+            zone_id: Some(Uuid::new_v4()),
+        }];
 
         let mut internal_services_ip_pool_ranges = vec![];
         if let Some(nexus_external_addr) = rss_args.nexus_external_addr {
@@ -291,13 +290,19 @@ impl Server {
         if let Some(external_dns_internal_addr) =
             rss_args.external_dns_internal_addr
         {
+            let ip = *external_dns_internal_addr.ip();
             services.push(NexusTypes::ServicePutRequest {
                 address: external_dns_internal_addr.to_string(),
-                kind: NexusTypes::ServiceKind::ExternalDnsConfig,
+                kind: NexusTypes::ServiceKind::ExternalDns {
+                    external_address: ip.into(),
+                },
                 service_id: Uuid::new_v4(),
                 sled_id: config.id,
                 zone_id: Some(Uuid::new_v4()),
             });
+
+            internal_services_ip_pool_ranges
+                .push(IpRange::V6(Ipv6Range { first: ip, last: ip }));
         }
 
         let recovery_silo = NexusTypes::RecoverySiloConfig {
@@ -310,22 +315,29 @@ impl Server {
             // needs to be changed with this hash are the instructions given to
             // individuals running this program who then want to log in as this
             // user.  For more on what's supported, see the API docs for this
-            // type and the specific constraints in the nexus-passwords crate.
+            // type and the specific constraints in the omicron-passwords crate.
             user_password_hash: "$argon2id$v=19$m=98304,t=13,p=1$\
             RUlWc0ZxaHo0WFdrN0N6ZQ$S8p52j85GPvMhR/ek3GL0el/oProgTwWpHJZ8lsQQoY"
                 .parse()
                 .unwrap(),
         };
 
+        let certs = match &rss_args.tls_certificate {
+            Some(c) => vec![c.clone()],
+            None => vec![],
+        };
+
         let rack_init_request = NexusTypes::RackInitializationRequest {
             services,
             datasets,
             internal_services_ip_pool_ranges,
-            certs: vec![],
+            certs,
             internal_dns_zone_config: d2n_params(&dns_config),
             external_dns_zone_name:
                 internal_dns::names::DNS_ZONE_EXTERNAL_TESTING.to_owned(),
             recovery_silo,
+            external_port_count: 1,
+            rack_network_config: None,
         };
 
         Ok((
@@ -390,6 +402,9 @@ pub struct RssArgs {
     /// Specify the (internal) address of an external DNS server so that Nexus
     /// will know about it and keep it up to date
     pub external_dns_internal_addr: Option<SocketAddrV6>,
+    /// Specify a certificate and associated private key for the initial Silo's
+    /// initial TLS certificates
+    pub tls_certificate: Option<NexusTypes::Certificate>,
 }
 
 /// Run an instance of the `Server`

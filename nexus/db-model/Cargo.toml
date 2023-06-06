@@ -16,7 +16,6 @@ hex.workspace = true
 ipnetwork.workspace = true
 macaddr.workspace = true
 newtype_derive.workspace = true
-openssl.workspace = true
 parse-display.workspace = true
 # See omicron-rpaths for more about the "pq-sys" dependency.
 pq-sys = "*"
@@ -31,8 +30,9 @@ steno.workspace = true
 uuid.workspace = true
 
 db-macros.workspace = true
+omicron-certificates.workspace = true
 omicron-common.workspace = true
 nexus-defaults.workspace = true
-nexus-passwords.workspace = true
 nexus-types.workspace = true
+omicron-passwords.workspace = true
 sled-agent-client.workspace = true

@@ -8,6 +8,7 @@ use super::common;
 use super::dns_config;
 use super::dns_propagation;
 use super::dns_servers;
+use super::external_endpoints;
 use nexus_db_model::DnsGroup;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
@@ -34,6 +35,13 @@ pub struct BackgroundTasks {
     pub task_external_dns_config: common::TaskHandle,
     /// task handle for the external DNS servers background task
     pub task_external_dns_servers: common::TaskHandle,
+
+    /// task handle for the task that keeps track of external endpoints
+    pub task_external_endpoints: common::TaskHandle,
+    /// external endpoints read by the background task
+    pub external_endpoints: tokio::sync::watch::Receiver<
+        Option<external_endpoints::ExternalEndpoints>,
+    >,
 }
 
 impl BackgroundTasks {
@@ -55,10 +63,25 @@ impl BackgroundTasks {
         let (task_external_dns_config, task_external_dns_servers) = init_dns(
             &mut driver,
             opctx,
-            datastore,
+            datastore.clone(),
             DnsGroup::External,
             &config.dns_external,
         );
+
+        // Background task: External endpoints list watcher
+        let (task_external_endpoints, external_endpoints) = {
+            let watcher =
+                external_endpoints::ExternalEndpointsWatcher::new(datastore);
+            let watcher_channel = watcher.watcher();
+            let task = driver.register(
+                "external_endpoints".to_string(),
+                config.external_endpoints.period_secs,
+                Box::new(watcher),
+                opctx.child(BTreeMap::new()),
+                vec![],
+            );
+            (task, watcher_channel)
+        };
 
         BackgroundTasks {
             driver,
@@ -66,6 +89,8 @@ impl BackgroundTasks {
             task_internal_dns_servers,
             task_external_dns_config,
             task_external_dns_servers,
+            task_external_endpoints,
+            external_endpoints,
         }
     }
 
@@ -223,7 +248,6 @@ pub mod test {
             &dropshot::ConfigDropshot {
                 bind_address: "[::1]:0".parse().unwrap(),
                 request_body_max_bytes: 8 * 1024,
-                ..Default::default()
             },
         )
         .await
@@ -240,7 +264,7 @@ pub mod test {
                 cptestctx.sled_agent.sled_agent.id,
                 Some(Uuid::new_v4()),
                 new_dns_addr,
-                ServiceKind::InternalDnsConfig.into(),
+                ServiceKind::InternalDns.into(),
             )
             .await
             .unwrap();

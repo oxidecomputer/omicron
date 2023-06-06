@@ -21,5 +21,5 @@ uuid.workspace = true
 
 api_identity.workspace = true
 dns-service-client.workspace = true
-nexus-passwords.workspace = true
 omicron-common.workspace = true
+omicron-passwords.workspace = true

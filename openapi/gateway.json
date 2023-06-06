@@ -452,6 +452,15 @@
             "schema": {
               "$ref": "#/components/schemas/SpType"
             }
+          },
+          {
+            "in": "query",
+            "name": "persist",
+            "description": "Persist this choice of active slot.",
+            "required": true,
+            "schema": {
+              "type": "boolean"
+            }
           }
         ],
         "requestBody": {
@@ -508,6 +517,17 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/SpType"
+            }
+          },
+          {
+            "in": "query",
+            "name": "firmware_slot",
+            "description": "The firmware slot to for which we want to request caboose information.",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint16",
+              "minimum": 0
             }
           }
         ],
@@ -1414,25 +1434,6 @@
           "verbose"
         ]
       },
-      "ImageVersion": {
-        "type": "object",
-        "properties": {
-          "epoch": {
-            "type": "integer",
-            "format": "uint32",
-            "minimum": 0
-          },
-          "version": {
-            "type": "integer",
-            "format": "uint32",
-            "minimum": 0
-          }
-        },
-        "required": [
-          "epoch",
-          "version"
-        ]
-      },
       "InstallinatorImageId": {
         "type": "object",
         "properties": {
@@ -2070,21 +2071,6 @@
           "A2"
         ]
       },
-      "RotImageDetails": {
-        "type": "object",
-        "properties": {
-          "digest": {
-            "type": "string"
-          },
-          "version": {
-            "$ref": "#/components/schemas/ImageVersion"
-          }
-        },
-        "required": [
-          "digest",
-          "version"
-        ]
-      },
       "RotSlot": {
         "oneOf": [
           {
@@ -2125,31 +2111,43 @@
               "active": {
                 "$ref": "#/components/schemas/RotSlot"
               },
-              "slot_a": {
+              "pending_persistent_boot_preference": {
                 "nullable": true,
                 "allOf": [
                   {
-                    "$ref": "#/components/schemas/RotImageDetails"
+                    "$ref": "#/components/schemas/RotSlot"
                   }
                 ]
               },
-              "slot_b": {
+              "persistent_boot_preference": {
+                "$ref": "#/components/schemas/RotSlot"
+              },
+              "slot_a_sha3_256_digest": {
                 "nullable": true,
-                "allOf": [
-                  {
-                    "$ref": "#/components/schemas/RotImageDetails"
-                  }
-                ]
+                "type": "string"
+              },
+              "slot_b_sha3_256_digest": {
+                "nullable": true,
+                "type": "string"
               },
               "state": {
                 "type": "string",
                 "enum": [
                   "enabled"
                 ]
+              },
+              "transient_boot_preference": {
+                "nullable": true,
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/RotSlot"
+                  }
+                ]
               }
             },
             "required": [
               "active",
+              "persistent_boot_preference",
               "state"
             ]
           },
@@ -2633,9 +2631,6 @@
           },
           "serial_number": {
             "type": "string"
-          },
-          "version": {
-            "$ref": "#/components/schemas/ImageVersion"
           }
         },
         "required": [
@@ -2645,8 +2640,7 @@
           "power_state",
           "revision",
           "rot",
-          "serial_number",
-          "version"
+          "serial_number"
         ]
       },
       "SpType": {
@@ -2797,6 +2791,30 @@
             "required": [
               "code",
               "id",
+              "state"
+            ]
+          },
+          {
+            "description": "The update process failed with an RoT-specific error.",
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "message": {
+                "type": "string"
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "rot_error"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "message",
               "state"
             ]
           }

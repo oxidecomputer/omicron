@@ -7,9 +7,8 @@
 //! This was originally conceived as a separate dropshot server from the
 //! external API, but in order to avoid CORS issues for now, we are serving
 //! these routes directly from the external API.
-use crate::authn::{
-    silos::IdentityProviderType, USER_TEST_PRIVILEGED, USER_TEST_UNPRIVILEGED,
-};
+
+use crate::authn::silos::IdentityProviderType;
 use crate::ServerContext;
 use crate::{
     authn::external::{
@@ -25,86 +24,23 @@ use anyhow::Context;
 use dropshot::{
     endpoint, http_response_found, http_response_see_other, HttpError,
     HttpResponseFound, HttpResponseHeaders, HttpResponseSeeOther,
-    HttpResponseUpdatedNoContent, Path, Query, RequestContext, TypedBody,
+    HttpResponseUpdatedNoContent, Path, Query, RequestContext,
 };
 use http::{header, Response, StatusCode};
 use hyper::Body;
 use lazy_static::lazy_static;
 use mime_guess;
+use nexus_db_model::AuthenticationMode;
 use nexus_db_queries::context::OpContext;
 use nexus_types::external_api::params;
-use omicron_common::api::external::Error;
+use nexus_types::identity::Resource;
+use omicron_common::api::external::http_pagination::PaginatedBy;
+use omicron_common::api::external::{DataPageParams, Error, NameOrId};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_urlencoded;
+use std::num::NonZeroU32;
 use std::{collections::HashSet, ffi::OsString, path::PathBuf, sync::Arc};
-use uuid::Uuid;
-
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct SpoofLoginBody {
-    pub username: String,
-}
-
-// This is just for demo purposes. we will probably end up with a real
-// username/password login endpoint, but I think it will only be for use while
-// setting up the rack
-#[endpoint {
-   method = POST,
-   path = "/login",
-   // TODO: this should be unpublished, but for now it's convenient for the
-   // console to use the generated client for this request
-   tags = ["hidden"],
-}]
-pub async fn login_spoof(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    params: TypedBody<SpoofLoginBody>,
-) -> Result<HttpResponseHeaders<HttpResponseUpdatedNoContent>, HttpError> {
-    let apictx = rqctx.context();
-    let handler = async {
-        let nexus = &apictx.nexus;
-        let params = params.into_inner();
-        let user_id: Option<Uuid> = match params.username.as_str() {
-            "privileged" => Some(USER_TEST_PRIVILEGED.id()),
-            "unprivileged" => Some(USER_TEST_UNPRIVILEGED.id()),
-            _ => None,
-        };
-
-        if user_id.is_none() {
-            Err(Error::Unauthenticated {
-                internal_message: String::from("unknown user specified"),
-            })?;
-        }
-
-        let user_id = user_id.unwrap();
-
-        // For now, we use the external authn context to create the session.
-        // Once we have real SAML login, maybe we can cons up a real OpContext
-        // for this user and use their own privileges to create the session.
-        let authn_opctx = nexus.opctx_external_authn();
-        let session = nexus.session_create(&authn_opctx, user_id).await?;
-
-        let mut response =
-            HttpResponseHeaders::new_unnamed(HttpResponseUpdatedNoContent());
-        {
-            let headers = response.headers_mut();
-            headers.append(
-                header::SET_COOKIE,
-                http::HeaderValue::from_str(&session_cookie_header_value(
-                    &session.token,
-                    apictx.session_idle_timeout(),
-                ))
-                .map_err(|error| {
-                    HttpError::for_internal_error(format!(
-                        "unsupported cookie value: {:#}",
-                        error
-                    ))
-                })?,
-            );
-        };
-        Ok(response)
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
 
 // Silos have one or more identity providers, and an unauthenticated user will
 // be asked to authenticate to one of those below. Silo identity provider
@@ -382,8 +318,24 @@ pub async fn login_saml(
             )
             .await?;
 
-        login_finish(&opctx, apictx, user, relay_state.and_then(|r| r.referer))
-            .await
+        let session = create_session(opctx, apictx, user).await?;
+        let next_url = relay_state
+            .and_then(|r| r.referer)
+            .unwrap_or_else(|| "/".to_string());
+        let mut response = http_response_see_other(next_url)?;
+
+        {
+            let headers = response.headers_mut();
+            let cookie = session_cookie_header_value(
+                &session.token,
+                // use absolute timeout even though session might idle out first.
+                // browser expiration is mostly for convenience, as the API will
+                // reject requests with an expired session regardless
+                apictx.session_absolute_timeout(),
+            )?;
+            headers.append(header::SET_COOKIE, cookie);
+        }
+        Ok(response)
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -393,17 +345,34 @@ pub struct LoginPathParam {
     pub silo_name: crate::db::model::Name,
 }
 
+#[endpoint {
+   method = GET,
+   path = "/login/{silo_name}/local",
+   tags = ["login"],
+   unpublished = true,
+}]
+pub async fn login_local_begin(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    _path_params: Path<LoginPathParam>,
+) -> Result<Response<Body>, HttpError> {
+    // TODO: figure out why instrumenting doesn't work
+    // let apictx = rqctx.context();
+    // let handler = async { serve_console_index(rqctx.context()).await };
+    // apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+    serve_console_index(rqctx.context()).await
+}
+
 /// Authenticate a user via username and password
 #[endpoint {
    method = POST,
-   path = "/login/{silo_name}/local",
+   path = "/v1/login/{silo_name}/local",
    tags = ["login"],
 }]
 pub async fn login_local(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<LoginPathParam>,
     credentials: dropshot::TypedBody<params::UsernamePasswordCredentials>,
-) -> Result<HttpResponseSeeOther, HttpError> {
+) -> Result<HttpResponseHeaders<HttpResponseUpdatedNoContent>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let nexus = &apictx.nexus;
@@ -417,59 +386,49 @@ pub async fn login_local(
         let opctx = nexus.opctx_external_authn();
         let silo_lookup = nexus.silo_lookup(&opctx, silo)?;
         let user = nexus.login_local(&opctx, &silo_lookup, credentials).await?;
-        login_finish(&opctx, apictx, user, None).await
+
+        let session = create_session(opctx, apictx, user).await?;
+        let mut response =
+            HttpResponseHeaders::new_unnamed(HttpResponseUpdatedNoContent());
+
+        {
+            let headers = response.headers_mut();
+            let cookie = session_cookie_header_value(
+                &session.token,
+                // use absolute timeout even though session might idle out first.
+                // browser expiration is mostly for convenience, as the API will
+                // reject requests with an expired session regardless
+                apictx.session_absolute_timeout(),
+            )?;
+            headers.append(header::SET_COOKIE, cookie);
+        }
+        Ok(response)
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-async fn login_finish(
+async fn create_session(
     opctx: &OpContext,
     apictx: &ServerContext,
     user: Option<crate::db::model::SiloUser>,
-    next_url: Option<String>,
-) -> Result<HttpResponseSeeOther, HttpError> {
+) -> Result<crate::db::model::ConsoleSession, HttpError> {
     let nexus = &apictx.nexus;
-
-    if user.is_none() {
-        Err(Error::Unauthenticated {
+    let session = match user {
+        Some(user) => nexus.session_create(&opctx, user.id()).await?,
+        None => Err(Error::Unauthenticated {
             internal_message: String::from(
                 "no matching user found or credentials were not valid",
             ),
-        })?;
-    }
-
-    let user = user.unwrap();
-    let session = nexus.session_create(&opctx, user.id()).await?;
-    let next_url = next_url.unwrap_or_else(|| "/".to_string());
-
-    let mut response_with_headers = http_response_see_other(next_url)?;
-
-    {
-        let headers = response_with_headers.headers_mut();
-        headers.append(
-            header::SET_COOKIE,
-            http::HeaderValue::from_str(&session_cookie_header_value(
-                &session.token,
-                apictx.session_idle_timeout(),
-            ))
-            .map_err(|error| {
-                HttpError::for_internal_error(format!(
-                    "unsupported cookie value: {:#}",
-                    error
-                ))
-            })?,
-        );
-    }
-    Ok(response_with_headers)
+        })?,
+    };
+    Ok(session)
 }
 
-// Log user out of web console by deleting session in both server and browser
+/// Log user out of web console by deleting session on client and server
 #[endpoint {
    // important for security that this be a POST despite the empty req body
    method = POST,
-   path = "/logout",
-   // TODO: this should be unpublished, but for now it's convenient for the
-   // console to use the generated client for this request
+   path = "/v1/logout",
    tags = ["hidden"],
 }]
 pub async fn logout(
@@ -503,15 +462,7 @@ pub async fn logout(
             let headers = response.headers_mut();
             headers.append(
                 header::SET_COOKIE,
-                http::HeaderValue::from_str(
-                    &clear_session_cookie_header_value(),
-                )
-                .map_err(|error| {
-                    HttpError::for_internal_error(format!(
-                        "unsupported cookie value: {:#}",
-                        error
-                    ))
-                })?,
+                clear_session_cookie_header_value()?,
             );
         };
 
@@ -526,29 +477,11 @@ pub struct RestPathParam {
     path: Vec<String>,
 }
 
-// Serve the console bundle without an auth gate just for the login form. This
-// is meant to stand in for the customers identity provider. Since this is a
-// placeholder, it's easiest to build the form into the console bundle. If we
-// really wanted a login form, we would probably make it a standalone page,
-// otherwise the user is downloading a bunch of JS for nothing.
-#[endpoint {
-   method = GET,
-   path = "/spoof_login",
-   unpublished = true,
-}]
-pub async fn login_spoof_begin(
-    rqctx: RequestContext<Arc<ServerContext>>,
-) -> Result<Response<Body>, HttpError> {
-    serve_console_index(rqctx.context()).await
-}
-
 #[derive(Deserialize, JsonSchema)]
 pub struct StateParam {
     state: Option<String>,
 }
 
-// this happens to be the same as StateParam, but it may include other things
-// later
 #[derive(Serialize)]
 pub struct LoginUrlQuery {
     // TODO: give state param the correct name. In SAML it's called RelayState.
@@ -557,40 +490,73 @@ pub struct LoginUrlQuery {
     state: Option<String>,
 }
 
-/// Generate URI to IdP login form. Optional `redirect_url` represents the URL
-/// to send the user back to after successful login, and is included in `state`
-/// query param if present
-fn get_login_url(redirect_url: Option<String>) -> String {
-    // TODO: Once we have IdP integration, this will be a URL for the IdP login
-    // page. For now we point to our own placeholder login page. When the user
-    // is logged out and hits an auth-gated route, if there are multiple IdPs
-    // and we don't known which one they want to use, we need to send them to a
-    // page that will allow them to choose among discoverable IdPs. However,
-    // there may be ways to give ourselves a hint about which one they want, for
-    // example, by storing that info in a browser cookie when they log in. When
-    // their session ends, we will not be able to look at the dead session to
-    // find the silo or IdP (well, maybe we can but we probably shouldn't) but
-    // we can look at the cookie and default to sending them to the IdP
-    // indicated (though if they don't want that one we need to make sure they
-    // can get to a different one). If there is no cookie, we send them to the
-    // selector page. In any case, none of this is done here yet. We go to
-    // /spoof_login no matter what.
-    let login_uri = "/spoof_login";
+/// Generate URI to the appropriate login form for this Silo. Optional
+/// `redirect_url` represents the URL to send the user back to after successful
+/// login, and is included in `state` query param if present
+async fn get_login_url(
+    rqctx: &RequestContext<Arc<ServerContext>>,
+    redirect_url: Option<String>,
+) -> Result<String, Error> {
+    let nexus = &rqctx.context().nexus;
+    let endpoint = nexus.endpoint_for_request(rqctx)?;
+    let silo = endpoint.silo();
+
+    let login_uri = if silo.authentication_mode == AuthenticationMode::Local {
+        format!("/login/{}/local", silo.name())
+    } else {
+        // List the available identity providers and pick an arbitrary one.
+        // It might be nice to have some policy for choosing which one is used
+        // here.
+        let opctx = nexus.opctx_external_authn();
+        let silo_lookup = nexus.silo_lookup(opctx, NameOrId::Id(silo.id()))?;
+        let idps = nexus
+            .identity_provider_list(
+                opctx,
+                &silo_lookup,
+                &PaginatedBy::Name(DataPageParams {
+                    marker: None,
+                    direction: dropshot::PaginationOrder::Ascending,
+                    limit: NonZeroU32::try_from(2).unwrap(),
+                }),
+            )
+            .await?;
+
+        if idps.is_empty() {
+            let error = Error::invalid_request(
+                "no identity providers are configured for Silo",
+            );
+            warn!(&rqctx.log, "{}", error; "silo_id" => ?silo.id());
+            return Err(error);
+        }
+
+        if idps.len() > 1 {
+            warn!(
+                &rqctx.log,
+                "found more than one IdP for Silo";
+                "silo_id" => ?silo.id()
+            );
+        }
+
+        format!(
+            "/login/{}/saml/{}",
+            silo.name(),
+            idps.into_iter().next().unwrap().name()
+        )
+    };
 
     // Stick redirect_url into the state param and URL encode it so it can be
     // used as a query string. We assume it's not already encoded.
     let query_data = LoginUrlQuery { state: redirect_url };
 
-    match serde_urlencoded::to_string(query_data) {
+    Ok(match serde_urlencoded::to_string(query_data) {
         // only put the ? in front if there's something there
         Ok(encoded) if !encoded.is_empty() => format!("{login_uri}?{encoded}"),
         // redirect_url is either None or not url-encodable for some reason
-        _ => login_uri.to_string(),
-    }
+        _ => login_uri,
+    })
 }
 
-/// Redirect to IdP login URL
-// Currently hard-coded to redirect to our own fake login form.
+/// Redirect to a login page for the current Silo (if that can be determined)
 #[endpoint {
    method = GET,
    path = "/login",
@@ -604,7 +570,7 @@ pub async fn login_begin(
     let handler = async {
         let query = query_params.into_inner();
         let redirect_url = query.state.filter(|s| !s.trim().is_empty());
-        let login_url = get_login_url(redirect_url);
+        let login_url = get_login_url(&rqctx, redirect_url).await?;
         http_response_found(login_url)
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -631,66 +597,51 @@ pub async fn console_index_or_login_redirect(
     // full URL.
     let redirect_url =
         rqctx.request.uri().path_and_query().map(|p| p.to_string());
+    let login_url = get_login_url(&rqctx, redirect_url).await?;
 
     Ok(Response::builder()
         .status(StatusCode::FOUND)
-        .header(http::header::LOCATION, get_login_url(redirect_url))
+        .header(http::header::LOCATION, login_url)
         .body("".into())?)
 }
 
 // Dropshot does not have route match ranking and does not allow overlapping
-// route definitions, so we cannot have a catchall `/*` route for console pages
-// and then also define, e.g., `/api/blah/blah` and give the latter priority
-// because it's a more specific match. So for now we simply give the console
-// catchall route a prefix to avoid overlap. Long-term, if a route prefix is
-// part of the solution, we would probably prefer it to be on the API endpoints,
-// not on the console pages.
-#[endpoint {
-   method = GET,
-   path = "/projects/{path:.*}",
-   unpublished = true,
-}]
-pub async fn console_page(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    _path_params: Path<RestPathParam>,
-) -> Result<Response<Body>, HttpError> {
-    console_index_or_login_redirect(rqctx).await
+// route definitions, so we cannot use a catchall `/*` route for console pages
+// because it would overlap with the API routes definitions. So instead we have
+// to manually define more specific routes.
+
+macro_rules! console_page {
+    ($name:ident, $path:literal) => {
+        #[endpoint { method = GET, path = $path, unpublished = true, }]
+        pub async fn $name(
+            rqctx: RequestContext<Arc<ServerContext>>,
+        ) -> Result<Response<Body>, HttpError> {
+            console_index_or_login_redirect(rqctx).await
+        }
+    };
 }
 
-#[endpoint {
-   method = GET,
-   path = "/settings/{path:.*}",
-   unpublished = true,
-}]
-pub async fn console_settings_page(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    _path_params: Path<RestPathParam>,
-) -> Result<Response<Body>, HttpError> {
-    console_index_or_login_redirect(rqctx).await
+// only difference is the _path_params arg
+macro_rules! console_page_wildcard {
+    ($name:ident, $path:literal) => {
+        #[endpoint { method = GET, path = $path, unpublished = true, }]
+        pub async fn $name(
+            rqctx: RequestContext<Arc<ServerContext>>,
+            _path_params: Path<RestPathParam>,
+        ) -> Result<Response<Body>, HttpError> {
+            console_index_or_login_redirect(rqctx).await
+        }
+    };
 }
 
-#[endpoint {
-   method = GET,
-   path = "/sys/{path:.*}",
-   unpublished = true,
-}]
-pub async fn console_system_page(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    _path_params: Path<RestPathParam>,
-) -> Result<Response<Body>, HttpError> {
-    console_index_or_login_redirect(rqctx).await
-}
-
-#[endpoint {
-   method = GET,
-   path = "/",
-   unpublished = true,
-}]
-pub async fn console_root(
-    rqctx: RequestContext<Arc<ServerContext>>,
-) -> Result<Response<Body>, HttpError> {
-    console_index_or_login_redirect(rqctx).await
-}
+console_page_wildcard!(console_projects, "/projects/{path:.*}");
+console_page_wildcard!(console_settings_page, "/settings/{path:.*}");
+console_page_wildcard!(console_system_page, "/system/{path:.*}");
+console_page!(console_root, "/");
+console_page!(console_projects_new, "/projects-new");
+console_page!(console_silo_images, "/images");
+console_page!(console_silo_utilization, "/utilization");
+console_page!(console_silo_access, "/access");
 
 /// Make a new PathBuf with `.gz` on the end
 fn with_gz_ext(path: &PathBuf) -> PathBuf {
@@ -706,7 +657,8 @@ fn with_gz_ext(path: &PathBuf) -> PathBuf {
 /// Fetch a static asset from `<static_dir>/assets`. 404 on virtually all
 /// errors. No auth. NO SENSITIVE FILES. Will serve a gzipped version if the
 /// `.gz` file is present in the directory and `Accept-Encoding: gzip` is
-/// present on the request.
+/// present on the request. Cache in browser for a year because assets have
+/// content hash in filename.
 #[endpoint {
    method = GET,
    path = "/assets/{path:.*}",
@@ -763,18 +715,13 @@ pub async fn asset(
     let mut resp = Response::builder()
         .status(StatusCode::OK)
         .header(http::header::CONTENT_TYPE, content_type)
-        .header(http::header::CACHE_CONTROL, cache_control_value(apictx));
+        .header(http::header::CACHE_CONTROL, "max-age=31536000, immutable"); // 1 year
 
     if set_content_encoding_gzip {
         resp = resp.header(http::header::CONTENT_ENCODING, "gzip");
     }
 
     Ok(resp.body(file_contents.into())?)
-}
-
-fn cache_control_value(apictx: &ServerContext) -> String {
-    let max_age = apictx.console_config.cache_control_max_age.num_seconds();
-    format!("max-age={max_age}")
 }
 
 pub async fn serve_console_index(
@@ -792,7 +739,8 @@ pub async fn serve_console_index(
     Ok(Response::builder()
         .status(StatusCode::OK)
         .header(http::header::CONTENT_TYPE, "text/html; charset=UTF-8")
-        .header(http::header::CACHE_CONTROL, cache_control_value(apictx))
+        // do not cache this response in browser
+        .header(http::header::CACHE_CONTROL, "no-store")
         .body(file_contents.into())?)
 }
 

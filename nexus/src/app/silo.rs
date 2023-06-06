@@ -16,6 +16,7 @@ use crate::{authn, authz};
 use anyhow::Context;
 use nexus_db_model::{DnsGroup, UserProvisionType};
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db::datastore::Discoverability;
 use nexus_db_queries::db::datastore::DnsVersionUpdateBuilder;
 use nexus_types::internal_api::params::DnsRecord;
 use omicron_common::api::external::http_pagination::PaginatedBy;
@@ -64,19 +65,6 @@ impl super::Nexus {
         }
     }
 
-    /// Returns the (relative) DNS name for this Silo's API and console endpoints
-    /// _within_ the control plane DNS zone (i.e., without that zone's suffix)
-    ///
-    /// This specific naming scheme is determined under RFD 357.
-    pub(crate) fn silo_dns_name(
-        name: &omicron_common::api::external::Name,
-    ) -> String {
-        // RFD 4 constrains resource names (including Silo names) to DNS-safe
-        // strings, which is why it's safe to directly put the name of the
-        // resource into the DNS name rather than doing any kind of escaping.
-        format!("{}.sys", name)
-    }
-
     pub async fn silo_create(
         &self,
         opctx: &OpContext,
@@ -107,13 +95,15 @@ impl super::Nexus {
             format!("create silo: {:?}", silo_name),
             self.id.to_string(),
         );
-        dns_update.add_name(Self::silo_dns_name(silo_name), dns_records)?;
+        dns_update.add_name(silo_dns_name(silo_name), dns_records)?;
 
         let silo = datastore
             .silo_create(&opctx, &nexus_opctx, new_silo_params, dns_update)
             .await?;
         self.background_tasks
             .activate(&self.background_tasks.task_external_dns_config);
+        self.background_tasks
+            .activate(&self.background_tasks.task_external_endpoints);
         Ok(silo)
     }
 
@@ -122,7 +112,9 @@ impl super::Nexus {
         opctx: &OpContext,
         pagparams: &PaginatedBy<'_>,
     ) -> ListResultVec<db::model::Silo> {
-        self.db_datastore.silos_list(opctx, pagparams).await
+        self.db_datastore
+            .silos_list(opctx, pagparams, Discoverability::DiscoverableOnly)
+            .await
     }
 
     pub async fn silo_delete(
@@ -139,12 +131,14 @@ impl super::Nexus {
             format!("delete silo: {:?}", db_silo.name()),
             self.id.to_string(),
         );
-        dns_update.remove_name(Self::silo_dns_name(&db_silo.name()))?;
+        dns_update.remove_name(silo_dns_name(&db_silo.name()))?;
         datastore
             .silo_delete(opctx, &authz_silo, &db_silo, dns_opctx, dns_update)
             .await?;
         self.background_tasks
             .activate(&self.background_tasks.task_external_dns_config);
+        self.background_tasks
+            .activate(&self.background_tasks.task_external_endpoints);
         Ok(())
     }
 
@@ -480,7 +474,7 @@ impl super::Nexus {
         let password_hash = match password_value {
             params::UserPassword::InvalidPassword => None,
             params::UserPassword::Password(password) => {
-                let mut hasher = nexus_passwords::Hasher::default();
+                let mut hasher = omicron_passwords::Hasher::default();
                 let password_hash = hasher
                     .create_password(password.as_ref())
                     .map_err(|e| {
@@ -516,7 +510,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         maybe_authz_silo_user: Option<&authz::SiloUser>,
-        password: &nexus_passwords::Password,
+        password: &omicron_passwords::Password,
     ) -> Result<bool, Error> {
         let maybe_hash = match maybe_authz_silo_user {
             None => None,
@@ -527,7 +521,7 @@ impl super::Nexus {
             }
         };
 
-        let mut hasher = nexus_passwords::Hasher::default();
+        let mut hasher = omicron_passwords::Hasher::default();
         match maybe_hash {
             None => {
                 // If the user or their password hash does not exist, create a
@@ -879,4 +873,17 @@ impl super::Nexus {
     ) -> db::lookup::SiloGroup<'a> {
         LookupPath::new(opctx, &self.db_datastore).silo_group_id(*group_id)
     }
+}
+
+/// Returns the (relative) DNS name for this Silo's API and console endpoints
+/// _within_ the external DNS zone (i.e., without that zone's suffix)
+///
+/// This specific naming scheme is determined under RFD 357.
+pub(crate) fn silo_dns_name(
+    name: &omicron_common::api::external::Name,
+) -> String {
+    // RFD 4 constrains resource names (including Silo names) to DNS-safe
+    // strings, which is why it's safe to directly put the name of the
+    // resource into the DNS name rather than doing any kind of escaping.
+    format!("{}.sys", name)
 }

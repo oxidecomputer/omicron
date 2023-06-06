@@ -2,6 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use anyhow::bail;
+use anyhow::Context;
 use crossterm::event::Event as TermEvent;
 use crossterm::event::EventStream;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -11,16 +13,24 @@ use crossterm::terminal::{
     LeaveAlternateScreen,
 };
 use futures::StreamExt;
+use slog::Logger;
 use slog::{debug, error, info};
+use std::env::VarError;
 use std::io::{stdout, Stdout};
 use std::net::SocketAddrV6;
+use std::time::Instant;
 use tokio::sync::mpsc::{
     unbounded_channel, UnboundedReceiver, UnboundedSender,
 };
 use tokio::time::{interval, Duration};
 use tui::backend::CrosstermBackend;
 use tui::Terminal;
+use wicketd_client::types::AbortUpdateOptions;
+use wicketd_client::types::ClearUpdateStateOptions;
+use wicketd_client::types::StartUpdateOptions;
+use wicketd_client::types::UpdateTestError;
 
+use crate::events::EventReportMap;
 use crate::ui::Screen;
 use crate::wicketd::{self, WicketdHandle, WicketdManager};
 use crate::{Action, Cmd, Event, KeyHandler, Recorder, State, TICK_INTERVAL};
@@ -49,9 +59,23 @@ pub struct RunnerCore {
 
     // Our friendly neighborhood logger
     pub log: slog::Logger,
+
+    // Helper to limit our logging of event reports (which can be quite large)
+    // to a slower cadence than their arrival.
+    log_throttler: EventReportLogThrottler,
 }
 
 impl RunnerCore {
+    pub fn new(log: Logger) -> Self {
+        Self {
+            screen: Screen::new(&log),
+            state: State::new(),
+            terminal: Terminal::new(CrosstermBackend::new(stdout())).unwrap(),
+            log,
+            log_throttler: EventReportLogThrottler::default(),
+        }
+    }
+
     /// Resize and draw the initial screen before handling `Event`s
     pub fn init_screen(&mut self) -> anyhow::Result<()> {
         // Size the initial screen
@@ -108,17 +132,19 @@ impl RunnerCore {
                 self.state.inventory.update_inventory(inventory)?;
                 self.screen.draw(&self.state, &mut self.terminal)?;
             }
-            Event::UpdateArtifacts { system_version, artifacts } => {
+            Event::ArtifactsAndEventReports {
+                system_version,
+                artifacts,
+                event_reports,
+            } => {
                 self.state.service_status.reset_wicketd(Duration::ZERO);
-                self.state
-                    .update_state
-                    .update_artifacts(system_version, artifacts);
-                self.screen.draw(&self.state, &mut self.terminal)?;
-            }
-            Event::EventReportAll(reports) => {
-                self.state.service_status.reset_wicketd(Duration::ZERO);
-                debug!(self.log, "{:#?}", reports);
-                self.state.update_state.update_logs(&self.log, reports);
+                self.log_throttler.log_event_report(&event_reports, &self.log);
+                self.state.update_state.update_artifacts_and_reports(
+                    &self.log,
+                    system_version,
+                    artifacts,
+                    event_reports,
+                );
                 self.screen.draw(&self.state, &mut self.terminal)?;
             }
             Event::Shutdown => return Ok(true),
@@ -139,11 +165,69 @@ impl RunnerCore {
             Action::Redraw => {
                 self.screen.draw(&self.state, &mut self.terminal)?;
             }
-            Action::Update(component_id) => {
+            Action::StartUpdate(component_id) => {
                 if let Some(wicketd) = wicketd {
-                    wicketd.tx.blocking_send(wicketd::Request::StartUpdate(
-                        component_id,
-                    ))?;
+                    let test_error = get_update_test_error(
+                        "WICKET_TEST_START_UPDATE_ERROR",
+                    )?;
+
+                    // This is a debug environment variable used to
+                    // add a test step.
+                    let test_step_seconds =
+                        std::env::var("WICKET_UPDATE_TEST_STEP_SECONDS")
+                            .ok()
+                            .map(|v| {
+                                v.parse().expect(
+                                    "parsed WICKET_UPDATE_TEST_STEP_SECONDS \
+                                        as a u64",
+                                )
+                            });
+
+                    let options = StartUpdateOptions {
+                        test_error,
+                        test_step_seconds,
+                        skip_rot_version_check: self
+                            .state
+                            .force_update_state
+                            .force_update_rot,
+                        skip_sp_version_check: self
+                            .state
+                            .force_update_state
+                            .force_update_sp,
+                    };
+                    wicketd.tx.blocking_send(
+                        wicketd::Request::StartUpdate { component_id, options },
+                    )?;
+                }
+            }
+            Action::AbortUpdate(component_id) => {
+                if let Some(wicketd) = wicketd {
+                    let test_error = get_update_test_error(
+                        "WICKET_TEST_ABORT_UPDATE_ERROR",
+                    )?;
+
+                    let options = AbortUpdateOptions {
+                        message: "Aborted by wicket user".to_owned(),
+                        test_error,
+                    };
+                    wicketd.tx.blocking_send(
+                        wicketd::Request::AbortUpdate { component_id, options },
+                    )?;
+                }
+            }
+            Action::ClearUpdateState(component_id) => {
+                if let Some(wicketd) = wicketd {
+                    let test_error = get_update_test_error(
+                        "WICKET_TEST_CLEAR_UPDATE_STATE_ERROR",
+                    )?;
+
+                    let options = ClearUpdateStateOptions { test_error };
+                    wicketd.tx.blocking_send(
+                        wicketd::Request::ClearUpdateState {
+                            component_id,
+                            options,
+                        },
+                    )?;
                 }
             }
             Action::Ignition(component_id, ignition_command) => {
@@ -159,6 +243,46 @@ impl RunnerCore {
         }
         Ok(())
     }
+}
+
+fn get_update_test_error(
+    env_var: &str,
+) -> Result<Option<UpdateTestError>, anyhow::Error> {
+    // 30 seconds should always be enough to cause a timeout. (The default
+    // timeout for progenitor is 15 seconds, and in wicket we set an even
+    // shorter timeout.)
+    const DEFAULT_TEST_TIMEOUT_SECS: u64 = 30;
+
+    let test_error = match std::env::var(env_var) {
+        Ok(v) if v == "fail" => Some(UpdateTestError::Fail),
+        Ok(v) if v == "timeout" => {
+            Some(UpdateTestError::Timeout { secs: DEFAULT_TEST_TIMEOUT_SECS })
+        }
+        Ok(v) if v.starts_with("timeout:") => {
+            // Extended start_timeout syntax with a custom
+            // number of seconds.
+            let suffix = v.strip_prefix("timeout:").unwrap();
+            match suffix.parse::<u64>() {
+                Ok(secs) => Some(UpdateTestError::Timeout { secs }),
+                Err(error) => {
+                    return Err(error).with_context(|| {
+                        format!(
+                            "could not parse {env_var} \
+                             in the form `timeout:<secs>`: {v}"
+                        )
+                    });
+                }
+            }
+        }
+        Ok(value) => {
+            bail!("unrecognized value for {env_var}: {value}");
+        }
+        Err(VarError::NotPresent) => None,
+        Err(VarError::NotUnicode(value)) => {
+            bail!("invalid Unicode for {env_var}: {}", value.to_string_lossy());
+        }
+    };
+    Ok(test_error)
 }
 
 /// The `Runner` owns the main UI thread, and starts a tokio runtime
@@ -193,19 +317,13 @@ pub struct Runner {
 impl Runner {
     pub fn new(log: slog::Logger, wicketd_addr: SocketAddrV6) -> Runner {
         let (events_tx, events_rx) = unbounded_channel();
-        let backend = CrosstermBackend::new(stdout());
         let tokio_rt = tokio::runtime::Builder::new_multi_thread()
             .enable_all()
             .build()
             .unwrap();
         let (wicketd, wicketd_manager) =
             WicketdManager::new(&log, events_tx.clone(), wicketd_addr);
-        let core = RunnerCore {
-            screen: Screen::new(&log),
-            state: State::new(),
-            terminal: Terminal::new(backend).unwrap(),
-            log,
-        };
+        let core = RunnerCore::new(log);
         Runner {
             core,
             events_rx,
@@ -328,4 +446,53 @@ async fn run_event_listener(
             }
         }
     });
+}
+
+struct EventReportLogThrottler {
+    last_log: Option<Instant>,
+    min_time_between_logs: Duration,
+}
+
+impl Default for EventReportLogThrottler {
+    fn default() -> Self {
+        const DEFAULT_TIME_BETWEEN_LOGS: Duration = Duration::from_secs(15);
+        Self::new(DEFAULT_TIME_BETWEEN_LOGS)
+    }
+}
+
+impl EventReportLogThrottler {
+    fn new(min_time_between_logs: Duration) -> Self {
+        Self { last_log: None, min_time_between_logs }
+    }
+
+    fn log_event_report(
+        &mut self,
+        event_report: &EventReportMap,
+        log: &slog::Logger,
+    ) {
+        let should_log_full_report = self
+            .last_log
+            .map(|last| last.elapsed() >= self.min_time_between_logs)
+            .unwrap_or(true);
+
+        if should_log_full_report {
+            debug!(
+                log,
+                "received event reports for {} sleds",
+                event_report.len();
+                "details" => format!("{:#?}", event_report),
+            );
+            self.last_log = Some(Instant::now());
+        } else {
+            debug!(
+                log,
+                "received event reports for {} sleds",
+                event_report.len();
+                "details" => format!(
+                    "(omitted; only logged every {:?})",
+                    self.min_time_between_logs,
+                ),
+            );
+        }
+    }
 }

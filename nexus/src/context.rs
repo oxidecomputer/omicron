@@ -57,8 +57,6 @@ pub struct ConsoleConfig {
     pub session_idle_timeout: Duration,
     /// how long a session can exist before expiring
     pub session_absolute_timeout: Duration,
-    /// how long browsers can cache static assets
-    pub cache_control_max_age: Duration,
     /// directory containing static file to serve
     pub static_dir: Option<PathBuf>,
 }
@@ -162,7 +160,7 @@ impl ServerContext {
                 .map_err(|e| format!("Cannot parse Postgres URL: {}", e))?
             }
         };
-        let pool = db::Pool::new(&db::Config { url });
+        let pool = db::Pool::new(&log, &db::Config { url });
         let nexus = Nexus::new_with_id(
             rack_id,
             log.new(o!("component" => "nexus")),
@@ -191,9 +189,6 @@ impl ServerContext {
                     config.pkg.console.session_absolute_timeout_minutes.into(),
                 ),
                 static_dir,
-                cache_control_max_age: Duration::minutes(
-                    config.pkg.console.cache_control_max_age_minutes.into(),
-                ),
             },
         }))
     }

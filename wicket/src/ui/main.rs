@@ -282,7 +282,6 @@ impl Control for Sidebar {
         let panes = List::new(items)
             .block(
                 Block::default()
-                    .title("<ESC>")
                     .borders(Borders::ALL)
                     .border_type(BorderType::Rounded)
                     .style(border_style),
