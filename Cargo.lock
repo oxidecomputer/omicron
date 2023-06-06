@@ -4751,7 +4751,7 @@ dependencies = [
  "chrono",
  "clap 4.3.3",
  "crucible-agent-client",
- "crucible-client-types",
+ "crucible-client-types 0.1.0 (git+https://github.com/oxidecomputer/crucible?rev=8757b3fb55a1763382ad7111144bc60ec72af23d)",
  "ddm-admin-client",
  "dns-server",
  "dns-service-client 0.1.0",
@@ -5946,7 +5946,7 @@ version = "0.1.0"
 source = "git+https://github.com/oxidecomputer/propolis?rev=96ba33d2629b93bfb9cdb806327c16113bcf0cf3#96ba33d2629b93bfb9cdb806327c16113bcf0cf3"
 dependencies = [
  "base64 0.21.2",
- "crucible-client-types",
+ "crucible-client-types 0.1.0 (git+https://github.com/oxidecomputer/crucible?rev=c7879bc8fbf68d977eb1c983cb0bab34b1b8b805)",
  "futures",
  "progenitor",
  "propolis_types",
