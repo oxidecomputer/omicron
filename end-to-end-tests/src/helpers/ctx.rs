@@ -132,33 +132,70 @@ pub async fn nexus_addr() -> Result<IpAddr> {
     .await
 }
 
-pub async fn build_client() -> Result<oxide_client::Client> {
-    // Make a reqwest client that we can use to make the initial login request.
-    // To do this, we need to find the IP of the external DNS server in the RSS
-    // configuration and then set up a custom resolver to use this DNS server.
-    let config = rss_config()?;
-    let dns_addr = external_dns_addr(&config)?;
-    let dns_name = nexus_external_dns_name(&config);
-    let resolver = Arc::new(CustomDnsResolver::new(dns_addr)?);
+pub struct ClientParams {
+    rss_config: SetupServiceConfig,
+    nexus_dns_name: String,
+    resolver: Arc<CustomDnsResolver>,
+    proto: &'static str,
+    extra_root_cert: Option<reqwest::tls::Certificate>,
+}
 
-    // If we were provided with a path to a certificate in the environment, add
-    // it as a trusted one.
-    let (proto, extra_root_cert) = match std::env::var(E2E_TLS_CERT_ENV) {
-        Err(_) => ("http", None),
-        Ok(path) => {
-            let cert_bytes = std::fs::read(&path).with_context(|| {
-                format!("reading certificate from {:?}", &path)
-            })?;
-            let cert = reqwest::tls::Certificate::from_pem(&cert_bytes)
-                .with_context(|| {
-                    format!("parsing certificate from {:?}", &path)
+impl ClientParams {
+    pub fn new() -> Result<ClientParams> {
+        // We need to find the IP of the external DNS server in the RSS
+        // configuration and then set up a custom resolver to use this DNS
+        // server.
+        let rss_config = rss_config()?;
+        let dns_addr = external_dns_addr(&rss_config)?;
+        let nexus_dns_name = nexus_external_dns_name(&rss_config);
+        let resolver = Arc::new(CustomDnsResolver::new(dns_addr)?);
+
+        // If we were provided with a path to a certificate in the environment,
+        // add it as a trusted one.
+        let (proto, extra_root_cert) = match std::env::var(E2E_TLS_CERT_ENV) {
+            Err(_) => ("http", None),
+            Ok(path) => {
+                let cert_bytes = std::fs::read(&path).with_context(|| {
+                    format!("reading certificate from {:?}", &path)
                 })?;
-            ("https", Some(cert))
-        }
-    };
+                let cert = reqwest::tls::Certificate::from_pem(&cert_bytes)
+                    .with_context(|| {
+                        format!("parsing certificate from {:?}", &path)
+                    })?;
+                ("https", Some(cert))
+            }
+        };
 
+        Ok(ClientParams {
+            rss_config,
+            nexus_dns_name,
+            resolver,
+            proto,
+            extra_root_cert,
+        })
+    }
+
+    pub fn base_url(&self) -> String {
+        format!("{}://{}", self.proto, self.nexus_dns_name)
+    }
+
+    pub fn reqwest_builder(&self) -> reqwest::ClientBuilder {
+        let mut builder =
+            reqwest::ClientBuilder::new().dns_resolver(self.resolver.clone());
+
+        if let Some(cert) = &self.extra_root_cert {
+            builder = builder.add_root_certificate(cert.clone());
+        }
+
+        builder
+    }
+}
+
+pub async fn build_client() -> Result<oxide_client::Client> {
     // Prepare to make a login request.
-    let base_url = format!("{}://{}", proto, dns_name);
+    let client_params = ClientParams::new()?;
+    let config = &client_params.rss_config;
+    let base_url = client_params.base_url();
     let silo_name = config.recovery_silo.silo_name.as_str();
     let login_url = format!("{}/v1/login/{}/local", base_url, silo_name);
     let username: oxide_client::types::UserId =
@@ -179,14 +216,10 @@ pub async fn build_client() -> Result<oxide_client::Client> {
             // codes.  See progenitor#451.
             eprintln!("{}: attempting to log into API", Utc::now());
 
-            let mut builder = reqwest::ClientBuilder::new()
+            let builder = client_params
+                .reqwest_builder()
                 .connect_timeout(Duration::from_secs(15))
-                .dns_resolver(resolver.clone())
                 .timeout(Duration::from_secs(60));
-
-            if let Some(cert) = &extra_root_cert {
-                builder = builder.add_root_certificate(cert.clone());
-            }
 
             oxide_client::login(
                 builder,
@@ -220,17 +253,12 @@ pub async fn build_client() -> Result<oxide_client::Client> {
         HeaderValue::from_str(&format!("session={}", session_token)).unwrap(),
     );
 
-    let mut builder = reqwest::ClientBuilder::new()
+    let reqwest_client = client_params
+        .reqwest_builder()
         .default_headers(headers)
         .connect_timeout(Duration::from_secs(15))
-        .dns_resolver(resolver)
-        .timeout(Duration::from_secs(60));
-
-    if let Some(cert) = extra_root_cert {
-        builder = builder.add_root_certificate(cert);
-    }
-
-    let reqwest_client = builder.build()?;
+        .timeout(Duration::from_secs(60))
+        .build()?;
     Ok(Client::new_with_client(&base_url, reqwest_client))
 }
 

@@ -7,9 +7,8 @@
 //! This was originally conceived as a separate dropshot server from the
 //! external API, but in order to avoid CORS issues for now, we are serving
 //! these routes directly from the external API.
-use crate::authn::{
-    silos::IdentityProviderType, USER_TEST_PRIVILEGED, USER_TEST_UNPRIVILEGED,
-};
+
+use crate::authn::silos::IdentityProviderType;
 use crate::ServerContext;
 use crate::{
     authn::external::{
@@ -25,78 +24,23 @@ use anyhow::Context;
 use dropshot::{
     endpoint, http_response_found, http_response_see_other, HttpError,
     HttpResponseFound, HttpResponseHeaders, HttpResponseSeeOther,
-    HttpResponseUpdatedNoContent, Path, Query, RequestContext, TypedBody,
+    HttpResponseUpdatedNoContent, Path, Query, RequestContext,
 };
 use http::{header, Response, StatusCode};
 use hyper::Body;
 use lazy_static::lazy_static;
 use mime_guess;
+use nexus_db_model::AuthenticationMode;
 use nexus_db_queries::context::OpContext;
 use nexus_types::external_api::params;
-use omicron_common::api::external::Error;
+use nexus_types::identity::Resource;
+use omicron_common::api::external::http_pagination::PaginatedBy;
+use omicron_common::api::external::{DataPageParams, Error, NameOrId};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_urlencoded;
+use std::num::NonZeroU32;
 use std::{collections::HashSet, ffi::OsString, path::PathBuf, sync::Arc};
-use uuid::Uuid;
-
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct SpoofLoginBody {
-    pub username: String,
-}
-
-// This is just for demo purposes. we will probably end up with a real
-// username/password login endpoint, but I think it will only be for use while
-// setting up the rack
-#[endpoint {
-   method = POST,
-   path = "/login",
-   tags = ["hidden"],
-}]
-pub async fn login_spoof(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    params: TypedBody<SpoofLoginBody>,
-) -> Result<HttpResponseHeaders<HttpResponseUpdatedNoContent>, HttpError> {
-    let apictx = rqctx.context();
-    let handler = async {
-        let nexus = &apictx.nexus;
-        let params = params.into_inner();
-        let user_id: Option<Uuid> = match params.username.as_str() {
-            "privileged" => Some(USER_TEST_PRIVILEGED.id()),
-            "unprivileged" => Some(USER_TEST_UNPRIVILEGED.id()),
-            _ => None,
-        };
-
-        if user_id.is_none() {
-            Err(Error::Unauthenticated {
-                internal_message: String::from("unknown user specified"),
-            })?;
-        }
-
-        let user_id = user_id.unwrap();
-
-        // For now, we use the external authn context to create the session.
-        // Once we have real SAML login, maybe we can cons up a real OpContext
-        // for this user and use their own privileges to create the session.
-        let authn_opctx = nexus.opctx_external_authn();
-        let session = nexus.session_create(&authn_opctx, user_id).await?;
-
-        let mut response =
-            HttpResponseHeaders::new_unnamed(HttpResponseUpdatedNoContent());
-        {
-            let headers = response.headers_mut();
-            headers.append(
-                header::SET_COOKIE,
-                session_cookie_header_value(
-                    &session.token,
-                    apictx.session_absolute_timeout(),
-                )?,
-            );
-        };
-        Ok(response)
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
 
 // Silos have one or more identity providers, and an unauthenticated user will
 // be asked to authenticate to one of those below. Silo identity provider
@@ -546,40 +490,73 @@ pub struct LoginUrlQuery {
     state: Option<String>,
 }
 
-/// Generate URI to IdP login form. Optional `redirect_url` represents the URL
-/// to send the user back to after successful login, and is included in `state`
-/// query param if present
-fn get_login_url(redirect_url: Option<String>) -> String {
-    // TODO: Once we have IdP integration, this will be a URL for the IdP login
-    // page. For now we point to our own placeholder login page. When the user
-    // is logged out and hits an auth-gated route, if there are multiple IdPs
-    // and we don't known which one they want to use, we need to send them to a
-    // page that will allow them to choose among discoverable IdPs. However,
-    // there may be ways to give ourselves a hint about which one they want, for
-    // example, by storing that info in a browser cookie when they log in. When
-    // their session ends, we will not be able to look at the dead session to
-    // find the silo or IdP (well, maybe we can but we probably shouldn't) but
-    // we can look at the cookie and default to sending them to the IdP
-    // indicated (though if they don't want that one we need to make sure they
-    // can get to a different one). If there is no cookie, we send them to the
-    // selector page. In any case, none of this is done here yet. We go to
-    // /spoof_login no matter what.
-    let login_uri = "/spoof_login";
+/// Generate URI to the appropriate login form for this Silo. Optional
+/// `redirect_url` represents the URL to send the user back to after successful
+/// login, and is included in `state` query param if present
+async fn get_login_url(
+    rqctx: &RequestContext<Arc<ServerContext>>,
+    redirect_url: Option<String>,
+) -> Result<String, Error> {
+    let nexus = &rqctx.context().nexus;
+    let endpoint = nexus.endpoint_for_request(rqctx)?;
+    let silo = endpoint.silo();
+
+    let login_uri = if silo.authentication_mode == AuthenticationMode::Local {
+        format!("/login/{}/local", silo.name())
+    } else {
+        // List the available identity providers and pick an arbitrary one.
+        // It might be nice to have some policy for choosing which one is used
+        // here.
+        let opctx = nexus.opctx_external_authn();
+        let silo_lookup = nexus.silo_lookup(opctx, NameOrId::Id(silo.id()))?;
+        let idps = nexus
+            .identity_provider_list(
+                opctx,
+                &silo_lookup,
+                &PaginatedBy::Name(DataPageParams {
+                    marker: None,
+                    direction: dropshot::PaginationOrder::Ascending,
+                    limit: NonZeroU32::try_from(2).unwrap(),
+                }),
+            )
+            .await?;
+
+        if idps.is_empty() {
+            let error = Error::invalid_request(
+                "no identity providers are configured for Silo",
+            );
+            warn!(&rqctx.log, "{}", error; "silo_id" => ?silo.id());
+            return Err(error);
+        }
+
+        if idps.len() > 1 {
+            warn!(
+                &rqctx.log,
+                "found more than one IdP for Silo";
+                "silo_id" => ?silo.id()
+            );
+        }
+
+        format!(
+            "/login/{}/saml/{}",
+            silo.name(),
+            idps.into_iter().next().unwrap().name()
+        )
+    };
 
     // Stick redirect_url into the state param and URL encode it so it can be
     // used as a query string. We assume it's not already encoded.
     let query_data = LoginUrlQuery { state: redirect_url };
 
-    match serde_urlencoded::to_string(query_data) {
+    Ok(match serde_urlencoded::to_string(query_data) {
         // only put the ? in front if there's something there
         Ok(encoded) if !encoded.is_empty() => format!("{login_uri}?{encoded}"),
         // redirect_url is either None or not url-encodable for some reason
-        _ => login_uri.to_string(),
-    }
+        _ => login_uri,
+    })
 }
 
-/// Redirect to IdP login URL
-// Currently hard-coded to redirect to our own fake login form.
+/// Redirect to a login page for the current Silo (if that can be determined)
 #[endpoint {
    method = GET,
    path = "/login",
@@ -593,7 +570,7 @@ pub async fn login_begin(
     let handler = async {
         let query = query_params.into_inner();
         let redirect_url = query.state.filter(|s| !s.trim().is_empty());
-        let login_url = get_login_url(redirect_url);
+        let login_url = get_login_url(&rqctx, redirect_url).await?;
         http_response_found(login_url)
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -620,27 +597,12 @@ pub async fn console_index_or_login_redirect(
     // full URL.
     let redirect_url =
         rqctx.request.uri().path_and_query().map(|p| p.to_string());
+    let login_url = get_login_url(&rqctx, redirect_url).await?;
 
     Ok(Response::builder()
         .status(StatusCode::FOUND)
-        .header(http::header::LOCATION, get_login_url(redirect_url))
+        .header(http::header::LOCATION, login_url)
         .body("".into())?)
-}
-
-// Serve the console bundle without an auth gate just for the login form. This
-// is meant to stand in for the customers identity provider. Since this is a
-// placeholder, it's easiest to build the form into the console bundle. If we
-// really wanted a login form, we would probably make it a standalone page,
-// otherwise the user is downloading a bunch of JS for nothing.
-#[endpoint {
-   method = GET,
-   path = "/spoof_login",
-   unpublished = true,
-}]
-pub async fn login_spoof_begin(
-    rqctx: RequestContext<Arc<ServerContext>>,
-) -> Result<Response<Body>, HttpError> {
-    serve_console_index(rqctx.context()).await
 }
 
 // Dropshot does not have route match ranking and does not allow overlapping

@@ -568,9 +568,8 @@
           },
           "flush_timeout": {
             "nullable": true,
-            "type": "integer",
-            "format": "uint32",
-            "minimum": 0
+            "type": "number",
+            "format": "float"
           },
           "id": {
             "type": "string",
