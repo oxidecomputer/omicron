@@ -141,13 +141,16 @@ pub struct Fsm {
     // to hand out to learners.
     rack_secret_state: Option<RackSecretState>,
 
-    // Pending learn requests from other peers.
+    // Pending learn requests from other peers mapped to their start time.
     //
     // When a peer attempts to learn a share, we may not be able to give it
     // one because we cannot yet recompute the rack secret. We queue requests
-    // here, and respond when we can recompute the rack secret or we timeout.
-    // TODO: Insert a clock value to use in timeouts
-    pending_learn_requests: BTreeSet<Baseboard>,
+    // here and respond when we can recompute the rack secret. If we timeout before
+    // we can recompute the rack secret, we respond with a timeout Error.
+    //
+    // Note that if we get a new `Request::Learn` from a peer that is already
+    // pending, we will reset the start time.
+    pending_learn_requests: BTreeMap<Baseboard, Ticks>,
 
     // Our own attempt to learn our share
     //
@@ -171,7 +174,7 @@ impl Fsm {
             peers: BTreeSet::new(),
             clock: 0,
             rack_secret_state: None,
-            pending_learn_requests: BTreeSet::new(),
+            pending_learn_requests: BTreeMap::new(),
             learn_attempt: None,
         }
     }
@@ -370,7 +373,7 @@ impl Fsm {
                         // Register the request and try to collect enough
                         // shares to unlock the rack secret. When we have
                         // enough we will respond to the caller.
-                        self.pending_learn_requests.insert(from);
+                        self.pending_learn_requests.insert(from, self.clock);
                         self.broadcast_share_requests(
                             pkg.rack_uuid,
                             Some(shares),
@@ -380,7 +383,7 @@ impl Fsm {
                         // Register the request and try to collect enough
                         // shares to unlock the rack secret. When we have
                         // enough we will respond to the caller.
-                        self.pending_learn_requests.insert(from);
+                        self.pending_learn_requests.insert(from, self.clock);
                         self.broadcast_share_requests(pkg.rack_uuid, None)
                     }
                 }
@@ -498,6 +501,7 @@ fn persist_and_respond(to: Baseboard, response: Response) -> Output {
     }
 }
 
+// Round-robin peer selection
 fn next_peer(
     current: &Baseboard,
     peers: &BTreeSet<Baseboard>,

@@ -24,6 +24,8 @@ pub struct Envelope {
     pub msg: Msg,
 }
 
+// TODO: We almost certainly want a sequence number to match requests and
+// responses
 #[derive(From, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Msg {
     Req(Request),
@@ -88,4 +90,7 @@ pub enum Error {
 
     /// Shares to hand to learners cannot be decrypted
     FailedToDecryptShares,
+
+    /// A timeout that occurred while trying to recompute the rack secret
+    TimeoutWaitingForShares,
 }
