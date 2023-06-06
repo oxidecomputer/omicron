@@ -155,6 +155,10 @@ pub struct Fsm {
     // value here and we should discard the old message still.
     pending_learn_requests: BTreeMap<Baseboard, Ticks>,
 
+    // TODO: We should almost certainly keep track of any requests with sequence numbers.
+    // For broadcasts, we can have each message to a peer share a sequence number. This
+    // will allow us to match errors to each response appropriately.
+    //
     // Our own attempt to learn our share
     //
     // While this is only valid in the `Learning` state, we do not want to
@@ -400,7 +404,38 @@ impl Fsm {
         from: Baseboard,
         response: Response,
     ) -> Output {
-        unimplemented!()
+        match response {
+            Response::InitAck => {
+                // TODO: This is the result of a coordinator action like
+                // `FSM::rack_init`. We need to add this to our list of
+                // acknowledged init requests. When we have hear from everyone
+                // in the initial group or there is a timeout then we respond
+                // to the caller. We should probably add a special `Local`
+                // message type for this or encode it in the `Output` in some
+                // other manner.
+            }
+            Response::Share(share) => {
+                // TODO: Add the share to `self.rack_secrert_state`
+                // If we have enough of them then we respond to any pending
+                // requests that require a recomputation of the rack secret.
+                // We must also verify the share is valid here.
+                // TODO: Should we send a local message for response error
+                // logging or log directly from the FSM?
+            }
+            Response::Pkg(pkg) => {
+                // TODO: If we are in `Learning` state then set the state to `Learned`
+                // with this pkg. Otherwise, discard the message and log it.
+            }
+            Response::Error(error) => {
+                // TODO: If the error is relevant to any outstanding requests
+                // then handle them appropriately. For instance, if it's related
+                // to initialization then inform the caller. If it's a `Learn` request
+                // then cancel the attempt and try the next peer.
+                // We almost certainly need sequence numbers to track any
+                // outstanding requests.
+            }
+        }
+        unimplemented!();
     }
 
     // Send a `Request::Learn` message
