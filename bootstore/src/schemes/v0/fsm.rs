@@ -150,6 +150,9 @@ pub struct Fsm {
     //
     // Note that if we get a new `Request::Learn` from a peer that is already
     // pending, we will reset the start time.
+    //
+    // TODO: If we add message sequence numbers we must include them in the
+    // value here and we should discard the old message still.
     pending_learn_requests: BTreeMap<Baseboard, Ticks>,
 
     // Our own attempt to learn our share
