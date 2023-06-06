@@ -339,15 +339,15 @@ impl Nexus {
         &self,
         tls_enabled: bool,
     ) -> Option<rustls::ServerConfig> {
-        if !tls_enabled {
-            return None;
-        }
-
         // Wait for the background task to complete at least once.  We don't
         // care about its value.  To do this, we need our own copy of the
         // channel.
         let mut rx = self.background_tasks.external_endpoints.clone();
         let _ = rx.wait_for(|s| s.is_some()).await;
+        if !tls_enabled {
+            return None;
+        }
+
         let mut rustls_cfg = rustls::ServerConfig::builder()
             .with_safe_default_cipher_suites()
             .with_safe_default_kx_groups()
