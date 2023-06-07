@@ -14,8 +14,10 @@ use super::messages::{
 use crate::trust_quorum::{
     create_pkgs, LearnedSharePkgV0, RackSecret, SharePkgV0, TrustQuorumError,
 };
+use crate::Sha3_256Digest;
 use secrecy::ExposeSecret;
 use serde::{Deserialize, Serialize};
+use sha3::{Sha3_256, Digest};
 use sled_hardware::Baseboard;
 use std::collections::{BTreeMap, BTreeSet};
 use uuid::Uuid;
@@ -779,16 +781,8 @@ impl Fsm {
             ResponseType::InitAck => {
                 self.on_init_ack(state, from, response.request_id)
             }
-            /*ResponseType::Share(share) => {
-                self.on_share(state, from)
-                // TODO: Add the share to `self.rack_secrert_state`
-                // If we have enough of them then we respond to any pending
-                // requests that require a recomputation of the rack secret.
-                // We must also verify the share is valid here.
-                // TODO: Should we send a local message for response error
-                // logging or log directly from the FSM?
-            }
-            ResponseType::Pkg(pkg) => {
+            ResponseType::Share(share) => self.on_share(state, from, share),
+            /*ResponseType::Pkg(pkg) => {
                 // TODO: If we are in `Learning` state then set the state to `Learned`
                 // with this pkg. Otherwise, discard the message and log it.
             }
@@ -836,72 +830,109 @@ impl Fsm {
     }
 
     // Handle a `ResponseType::Share` message
-    /*    fn on_share(
-            &mut self,
-            state: &mut PersistentState,
-            from: Baseboard,
-        ) -> Output {
-            match &mut self.rack_secret_state {
-                None => Output::log(
-                    Warn,
-                    format!(
-                        "Received share from {}, but no share collection ongoing.",
-                        from
+    fn on_share(
+        &mut self,
+        state: &mut State,
+        from: Baseboard,
+        share: Vec<u8>,
+    ) -> Output {
+        match state {
+            State::Uninitialized | State::Learning(_) => Output::log(
+                Warn,
+                format!(
+                    concat!(
+                        "Received share from {}, but no ",
+                        "share collection ongoing in state {}"
                     ),
+                    from,
+                    state.name()
                 ),
-                Some(RackSecretState::Secret(_)) => {
-                    // We already have the rack secret, just drop the extra share
-                    Output::none()
-                }
-                Some(RackSecretState::Shares(shares)) => {
-                    // 1. Ensure we are in Learned or InitialMember states
-                    // 2. Compute the hash of the received share
-                    // 3. Check that our pkg has the hash
-                    // 4. Insert the key share
-                    // 5. If we have enough shares compute the rack secret
-                    // 6. Resolve any outstanding requests that require the rack secret
-                    let pkg = match &mut state.fsm_state {
-                        State::InitialMember { pkg, .. } => pkg,
-                        State::Learned { pkg } => pkg,
-                        s => {
-                            // An invariant is that we cannot ask for shares until
-                            // we are in one of the two prior states.
-                            panic!(
-                                "Invariant Violation: RackSecretState::Shares
-    invalid for FSM state {}",
-                                s.name()
-                            )
-                        }
-                    };
-                    let computed_hash = Sha3_256Digest(
-                        Sha3_256::digest(share).as_slice().try_into().unwrap(),
-                    );
-
-                    if !pkg.share_digests.contains(&computed_hash) {
-                        return Output::log(
-                            Error,
-                            format!("Invalid share received from {from}"),
-                        );
+            ),
+            State::InitialMember(InitialMemberState {
+                pkg,
+                distributed_shares,
+                pending_learn_requests,
+                rack_secret_state,
+                ..
+            }) => {
+                match rack_secret_state {
+                    None => Output::log(
+                        Warn,
+                        format!(
+                            concat!(
+                                "Received share from {}, ",
+                                "but no share collection ongoing."
+                            ),
+                            from
+                        ),
+                    ),
+                    Some(RackSecretState::Secret(_)) => {
+                        // We already have the rack secret, just drop the extra share
+                        Output::none()
                     }
-
-                    shares.insert(from, share);
-
-                    if shares.len() == pkg.threshold {
-                        let to_combine = shares.values().collect();
-                        match RackSecret::combine_shares(to_combine) {
-                            Ok(rack_secret) => {
-                                // TODO
-                                // 1. Switch state
-                                // 2. Resolve any outstanding requests with success
-                            }
-                            Err(e) => {
-                                // Resolve any outstanding requests with an error
-                            }
+                    Some(RackSecretState::Shares(shares)) => {
+                        // 1. Compute the hash of the received share
+                        // 2. Check that our pkg has the hash
+                        // 3. Insert the key share
+                        // 4. If we have enough shares compute the rack secret
+                        // 5. Resolve any outstanding requests that require the rack secret
+                        if let Some(error_log) =
+                            validate_share(&from, &share, &pkg.share_digests)
+                        {
+                            return error_log;
                         }
+                        shares.insert(from, share);
+
+                        // TODO: Include ourselves
+                        if shares.len() == pkg.threshold as usize {
+                            let to_combine: Vec<_> =
+                                shares.values().cloned().collect();
+                            match RackSecret::combine_shares(&to_combine) {
+                                Ok(rack_secret) => {
+                                    let (persist, envelopes) = resolve_learn_requests(
+                                        &rack_secret,
+                                        &pkg,
+                                        distributed_shares,
+                                        pending_learn_requests,
+                                    );
+                                    *rack_secret_state = Some(
+                                        RackSecretState::Secret(rack_secret),
+                                    );
+                                    // TODO: resolve any API requests for the rack secret
+                                    Output {
+                                        persist,
+                                        envelopes,
+                                        api_output: None,
+                                    }
+                                }
+                                Err(e) => {
+                                    let envelopes = 
+                                        resolve_learn_requests_with_error(
+                                        Error::FailedToReconstructRackSecret,
+                                        pending_learn_requests,
+                                    );
+                                    // TODO: resolve any API requests for the rack secret
+                                    Output {
+                                        persist: false,
+                                        envelopes,
+                                        api_output: None,
+                                    }
+                                }
+                            }
+                        } else {
+                            // Still waiting to receive more shares
+                            Output::none()
+                        }
+
                     }
                 }
             }
-        }*/
+
+            State::Learned(LearnedState { pkg, rack_secret_state }) => {
+                unimplemented!()
+            }
+        }
+    }
 
     // Send a request for a share to each peer
     fn broadcast_share_requests(
@@ -933,6 +964,90 @@ impl Fsm {
 
         Output { persist: false, envelopes, api_output: None }
     }
+}
+
+// We've just recomputed the rack secret. Now resolve any pending learn
+// requests. Return whether we need to persist state and any envelopes to
+// send to peers.
+fn resolve_learn_requests(
+    rack_secret: &RackSecret,
+    pkg: &SharePkgV0,
+    distributed_shares: &mut BTreeMap<Baseboard, ShareIdx>,
+    pending_learn_requests: &mut BTreeMap<Baseboard, RequestMetadata>,
+) -> (bool, Vec<Envelope>) {
+    let mut persist = false;
+    let mut envelopes = Vec::with_capacity(pending_learn_requests.len());
+    match pkg.decrypt_shares(rack_secret) {
+        Ok(shares) => {
+            while let Some((to, metadata)) = pending_learn_requests.pop_first()
+            {
+                if let Some(idx) = distributed_shares.get(&to) {
+                    // The share was already handed out to this
+                    // peer. Give back the same one.
+                    let share = shares.expose_secret()[idx.0].clone();
+                    let msg = Response {
+                        request_id: metadata.request_id,
+                        type_: ResponseType::Share(share),
+                    };
+                    envelopes.push(Envelope { to, msg: msg.into() });
+                } else {
+                    // We need to pick a share to hand out and
+                    // persist that fact. We find the highest currently used
+                    // index and add 1 or we select index 0.
+                    let idx = distributed_shares
+                        .values()
+                        .max()
+                        .cloned()
+                        .map(|idx| idx.0 + 1)
+                        .unwrap_or(0);
+
+                    match shares.expose_secret().get(idx) {
+                        Some(share) => {
+                            distributed_shares
+                                .insert(to.clone(), ShareIdx(idx));
+                            let msg = Response {
+                                request_id: metadata.request_id,
+                                type_: ResponseType::Share(share.clone()),
+                            };
+                            envelopes.push(Envelope { to, msg: msg.into() });
+                            // We just handed out a new share
+                            // Ensure we perist this state
+                            persist = true
+                        }
+                        None => {
+                            let msg = Response {
+                                request_id: metadata.request_id,
+                                type_: Error::CannotSpareAShare.into(),
+                            };
+                            envelopes.push(Envelope { to, msg: msg.into() });
+                        }
+                    }
+                }
+            }
+        }
+        Err(_) => {
+            envelopes = resolve_learn_requests_with_error(
+                Error::FailedToDecryptShares,
+                pending_learn_requests,
+            );
+        }
+    }
+
+    (persist, envelopes)
+}
+
+/// An error prevented successful resolution of learn requests
+fn resolve_learn_requests_with_error(
+    error: Error,
+    pending_learn_requests: &mut BTreeMap<Baseboard, RequestMetadata>,
+) -> Vec<Envelope> {
+    let mut envelopes = Vec::with_capacity(pending_learn_requests.len());
+    while let Some((to, metadata)) = pending_learn_requests.pop_first() {
+        let msg =
+            Response { request_id: metadata.request_id, type_: error.clone().into() };
+        envelopes.push(Envelope { to, msg: msg.into() })
+    }
+    envelopes
 }
 
 // Send a `ResponseType::Share` message once we have recomputed the rack secret
@@ -996,5 +1111,22 @@ fn next_peer(
         peers.iter().nth(next_index).cloned()
     } else {
         peers.first().cloned()
+    }
+}
+
+// Return `Some(Output::Log)` if the share fails to validate, `None`
+// otherwise
+fn validate_share(
+    from: &Baseboard,
+    share: &Vec<u8>,
+    share_digests: &Vec<Sha3_256Digest>,
+) -> Option<Output> {
+    let computed_hash =
+        Sha3_256Digest(Sha3_256::digest(share).as_slice().try_into().unwrap());
+
+    if !share_digests.contains(&computed_hash) {
+        Some(Output::log(Error, format!("Invalid share received from {from}")))
+    } else {
+        None
     }
 }

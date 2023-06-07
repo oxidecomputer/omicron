@@ -81,7 +81,7 @@ pub enum ResponseType {
 }
 
 /// An error returned from a peer over TCP
-#[derive(Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum Error {
     /// The peer is already initialized as a member of the original group
     AlreadyInitialized { rack_uuid: Uuid },
@@ -107,4 +107,8 @@ pub enum Error {
 
     /// A timeout that occurred while trying to recompute the rack secret
     TimeoutWaitingForShares,
+
+    /// We could not reconstruct the rack secret even after retrieving enough
+    /// valid shares.
+    FailedToReconstructRackSecret,
 }
