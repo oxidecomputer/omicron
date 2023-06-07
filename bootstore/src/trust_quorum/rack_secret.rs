@@ -42,6 +42,12 @@ pub struct RackSecret {
     secret: Secret<Scalar>,
 }
 
+impl Clone for RackSecret {
+    fn clone(&self) -> Self {
+        RackSecret { secret: Secret::new(self.secret.expose_secret().clone()) }
+    }
+}
+
 impl DebugSecret for RackSecret {}
 
 impl Debug for RackSecret {

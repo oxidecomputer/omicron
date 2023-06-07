@@ -11,13 +11,17 @@
 use super::messages::{
     Envelope, Error, Msg, Request, RequestType, Response, ResponseType,
 };
+use super::state::{
+    InitialMemberState, LearnAttempt, LearnedState, PersistentFsmState,
+    PersistentState, RackInitState, RackSecretState, RequestMetadata, ShareIdx,
+    State, Ticks,
+};
 use crate::trust_quorum::{
     create_pkgs, LearnedSharePkgV0, RackSecret, SharePkgV0, TrustQuorumError,
 };
 use crate::Sha3_256Digest;
 use secrecy::ExposeSecret;
-use serde::{Deserialize, Serialize};
-use sha3::{Sha3_256, Digest};
+use sha3::{Digest, Sha3_256};
 use sled_hardware::Baseboard;
 use std::collections::{BTreeMap, BTreeSet};
 use uuid::Uuid;
@@ -29,15 +33,6 @@ pub enum LogLevel {
 }
 
 use LogLevel::*;
-
-/// A number of clock ticks from some unknown epoch
-type Ticks = usize;
-
-// An index into an encrypted share
-#[derive(
-    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize,
-)]
-pub struct ShareIdx(usize);
 
 /// Output from a a call to [`Fsm::Handle`]
 pub struct Output {
@@ -115,6 +110,14 @@ impl Output {
         }
     }
 
+    fn rack_not_initialized() -> Output {
+        Output {
+            persist: false,
+            envelopes: vec![],
+            api_output: Some(ApiOutput::RackNotInitialized),
+        }
+    }
+
     fn rack_init_failed(err: TrustQuorumError) -> Output {
         Output {
             persist: false,
@@ -141,252 +144,23 @@ pub enum ApiOutput {
         unacked_peers: BTreeSet<Baseboard>,
     },
 
+    // Return the rack secret
+    RackSecret(RackSecret),
+
     /// Rack initialization was already run once.
     RackAlreadyInitialized,
 
     RackInitFailed(TrustQuorumError),
 
+    /// The rack must be initialized before the rack secret can be loaded
+    RackNotInitialized,
+
+    // A timeout when retreiving the rack secret
+    RackSecretLoadTimeout,
+
     // We don't log inside the FSM, we return logs to the caller as part of our
     // "No IO in the FSM" paradigm
     Log(LogLevel, String),
-}
-
-/// State stored on the M.2s.
-#[derive(Debug, Serialize, Deserialize)]
-pub struct PersistentState {
-    // The generation number for ledger writing purposes on both M.2s
-    pub version: u32,
-    pub fsm_state: PersistentFsmState,
-}
-
-// Based on the state machine of how `PersistentState` gets updated, we can
-// deterministically infer a version.
-impl From<PersistentFsmState> for PersistentState {
-    fn from(fsm_state: PersistentFsmState) -> Self {
-        use PersistentFsmState::*;
-        let version = match &fsm_state {
-            Uninitialized => 0,
-            InitialMember { distributed_shares, .. } => {
-                (1 + distributed_shares.len()).try_into().unwrap()
-            }
-            Learning => 1,
-            Learned => 2,
-        };
-        PersistentState { version, fsm_state }
-    }
-}
-
-/// A subset of `State` that must be persisted to the M.2s
-#[derive(Debug, Serialize, Deserialize)]
-pub enum PersistentFsmState {
-    Uninitialized,
-    InitialMember {
-        pkg: SharePkgV0,
-        distributed_shares: BTreeMap<Baseboard, ShareIdx>,
-    },
-    Learning,
-    Learned {
-        pkg: LearnedSharePkgV0,
-    },
-}
-
-impl From<State> for PersistentFsmState {
-    fn from(value: State) -> Self {
-        match value {
-            State::Uninitialized => Self::Uninitialized,
-            State::InitialMember(InitialMemberState {
-                pkg,
-                distributed_shares,
-                ..
-            }) => Self::InitialMember { pkg, distributed_shares },
-            State::Learning(_) => Self::Learning,
-            State::Learned(LearnedState { pkg, .. }) => Self::Learned { pkg },
-        }
-    }
-}
-
-impl From<PersistentFsmState> for State {
-    fn from(value: PersistentFsmState) -> Self {
-        use PersistentFsmState::*;
-        match value {
-            Uninitialized => Self::Uninitialized,
-            InitialMember { pkg, distributed_shares } => Self::InitialMember(
-                InitialMemberState::new(pkg, distributed_shares),
-            ),
-            Learning => Self::Learning(None),
-            Learned { pkg } => Self::Learned(LearnedState::new(pkg)),
-        }
-    }
-}
-
-/// The possible states of a peer FSM
-///
-/// The following are valid state transitions
-///
-///   * Uninitialized -> InitialMember
-///   * Uninitialized -> Learning -> Learned
-///
-#[derive(Debug)]
-pub enum State {
-    /// The peer does not yet know whether it is an initial member of the group
-    /// or a learner.
-    ///
-    /// All peers start out in this state prior to RSS running
-    Uninitialized,
-
-    /// The peer is an initial member of the group setup via RSS
-    ///
-    /// This is a terminal state of the peer, mutually exclusive with
-    /// `Learned`
-    InitialMember(InitialMemberState),
-
-    /// The peer has been instructed to learn a share
-    ///
-    /// This peer was added to the cluster after rack initialization completed.
-    Learning(Option<LearnAttempt>),
-
-    /// The peer has learned its share
-    ///
-    /// This is a terminal state of the peer, mutually exclusive with
-    /// `InitialMember`
-    Learned(LearnedState),
-}
-
-impl State {
-    pub fn name(&self) -> &'static str {
-        match self {
-            Self::Uninitialized => "uninitialized",
-            Self::InitialMember(_) => "initial_member",
-            Self::Learning(_) => "learning",
-            Self::Learned(_) => "learned",
-        }
-    }
-}
-
-#[derive(Debug)]
-pub struct LearnedState {
-    pkg: LearnedSharePkgV0,
-    // In `InitialMember` or `Learned` states, it is sometimes necessary to
-    // reconstruct the rack secret.
-    //
-    // This is needed to both unlock local storage or decrypt our extra shares
-    // to hand out to learners.
-    rack_secret_state: Option<RackSecretState>,
-}
-
-impl LearnedState {
-    pub fn new(pkg: LearnedSharePkgV0) -> Self {
-        LearnedState { pkg, rack_secret_state: None }
-    }
-}
-
-#[derive(Debug)]
-pub struct InitialMemberState {
-    pkg: SharePkgV0,
-
-    /// Shares given to other sleds. We mark them as used so that we don't
-    /// hand them out twice. If the same sled asks us for a share, because
-    /// it crashes or there is a network blip, we will return the same
-    /// share each time.
-    ///
-    /// Note that this is a fairly optimistic strategy as the requesting
-    /// sled can always go ask another sled after a network blip. However,
-    /// this guarantees that a single sled never hands out more than one of
-    /// its shares to any given sled.
-    ///
-    /// We can't do much better than this without some sort of centralized
-    /// distributor which is part of the reconfiguration mechanism in later
-    /// versions of the trust quourum protocol.
-    distributed_shares: BTreeMap<Baseboard, ShareIdx>,
-
-    // Acknowledgements tracked during rack initialization if this node is
-    // the one acting as coordinator (local to RSS).
-    rack_init_state: Option<RackInitState>,
-
-    // Pending learn requests from other peers mapped to their start time.
-    //
-    // When a peer attempts to learn a share, we may not be able to give it
-    // one because we cannot yet recompute the rack secret. We queue requests
-    // here and respond when we can recompute the rack secret. If we timeout before
-    // we can recompute the rack secret, we respond with a timeout Error.
-    //
-    // Note that if we get a new `RequestType::Learn` from a peer that is already
-    // pending, we will reset the start time.
-    pending_learn_requests: BTreeMap<Baseboard, RequestMetadata>,
-
-    // In `InitialMember` or `Learned` states, it is sometimes necessary to
-    // reconstruct the rack secret.
-    //
-    // This is needed to both unlock local storage or decrypt our extra shares
-    // to hand out to learners.
-    rack_secret_state: Option<RackSecretState>,
-}
-
-impl InitialMemberState {
-    pub fn new(
-        pkg: SharePkgV0,
-        distributed_shares: BTreeMap<Baseboard, ShareIdx>,
-    ) -> Self {
-        InitialMemberState {
-            pkg,
-            distributed_shares,
-            rack_init_state: None,
-            pending_learn_requests: BTreeMap::new(),
-            rack_secret_state: None,
-        }
-    }
-}
-
-/// An attempt by *this* peer to learn a key share
-///
-/// When an attempt is started, a peer is selected from those known to the FSM,
-/// and a `RequestType::Learn` message is sent to that peer. This peer is recorded
-/// along with the current clock as `start`. If `Config.learn_timeout` ticks
-/// have fired since `start` based on the current FSM clock, without this
-/// FSM having received a `ResponseType::Pkg`, then the `LearnAttempt` will be
-/// cancelled, and the next peer in order known to the FSM will be contacted in
-/// a new attempt.
-#[derive(Debug, Clone)]
-pub struct LearnAttempt {
-    peer: Baseboard,
-    start: Ticks,
-}
-
-impl LearnAttempt {
-    fn expired(&self, now: Ticks, timeout: Ticks) -> bool {
-        now.saturating_sub(self.start) >= timeout
-    }
-}
-
-/// Metadata associated with a request that is keyed by `Baseboard`
-#[derive(Debug)]
-pub struct RequestMetadata {
-    request_id: Uuid,
-    start: Ticks,
-}
-
-/// Whether we are in the process of learning enough shares to recompute the
-/// rack secret or if we have already recomputed it.
-#[derive(Debug)]
-pub enum RackSecretState {
-    // TODO: Zeroize or wrap in a Secert
-    Shares(BTreeMap<Baseboard, Vec<u8>>),
-    Secret(RackSecret),
-}
-
-/// Initialization state for tracking rack init on the coordinator node (the one
-/// local to RSS)
-#[derive(Debug)]
-pub struct RackInitState {
-    start: Ticks,
-    total_members: usize,
-    acks: BTreeSet<Baseboard>,
-}
-
-impl RackInitState {
-    pub fn timer_expired(&self, now: Ticks, timeout: Ticks) -> bool {
-        now.saturating_sub(self.start) >= timeout
-    }
 }
 
 /// The state machine for a [`$crate::Peer`]
@@ -412,6 +186,19 @@ pub struct Fsm {
 
     // The current time in ticks since the creation of the FSM
     clock: Ticks,
+
+    // An api caller can issue a request for a `RackSecret` with
+    // `load_rack_secret`. Sometimes we don't have the `RackSecret` recomputed
+    // and so we have to mark the request as pending until we retrieve enough
+    // shares to recompute it and return it to the caller. We keep track
+    // of the pending request here as it's valid in all FSM states except
+    // `State::Uninitialized`.
+    //
+    // The value stored inside the `Option` is the start time of the request.
+    //
+    // A caller should only issue this once. If it's issued more times, we'll
+    // overwrite the start time to extend the timeout.
+    pending_api_rack_secret_request: Option<Ticks>,
 }
 
 /// Configuration of the FSM
@@ -424,7 +211,13 @@ pub struct Config {
 
 impl Fsm {
     pub fn new(id: Baseboard, config: Config) -> Fsm {
-        Fsm { id, config, peers: BTreeSet::new(), clock: 0 }
+        Fsm {
+            id,
+            config,
+            peers: BTreeSet::new(),
+            clock: 0,
+            pending_api_rack_secret_request: None,
+        }
     }
 
     /// This call is triggered locally as a result of RSS running
@@ -477,6 +270,58 @@ impl Fsm {
                 Output { persist: true, envelopes, api_output: None }
             }
             Err(e) => return Output::rack_init_failed(e),
+        }
+    }
+
+    /// This call is triggered locally after RSS runs, in order to retrieve the
+    /// `RackSecret` so that it can be used as input key material.
+    ///
+    /// if the rack secret has not already been loaded, then share retrieval
+    /// will begin.
+    pub fn load_rack_secret(&mut self, state: &mut State) -> Output {
+        match state {
+            // We don't allow retrieval before initialization
+            State::Uninitialized => Output::rack_not_initialized(),
+            State::Learning(_) => {
+                self.pending_api_rack_secret_request = Some(self.clock);
+                Output::none()
+            }
+            State::InitialMember(InitialMemberState {
+                pkg,
+                rack_secret_state,
+                ..
+            }) => {
+                match rack_secret_state {
+                    None => {
+                        self.pending_api_rack_secret_request = Some(self.clock);
+                        // Add our own share during initialization
+                        *rack_secret_state =
+                            Some(RackSecretState::Shares(BTreeMap::from([(
+                                self.id.clone(),
+                                pkg.share.clone(),
+                            )])));
+                        Output::none()
+                    }
+                    Some(RackSecretState::Shares(_)) => {
+                        // Refresh the start time to extend the request timeout
+                        self.pending_api_rack_secret_request = Some(self.clock);
+                        Output::none()
+                    }
+                    Some(RackSecretState::Secret(rack_secret)) => {
+                        // We already know the secret, so return it.
+                        Output {
+                            persist: false,
+                            envelopes: vec![],
+                            api_output: Some(ApiOutput::RackSecret(
+                                rack_secret.clone(),
+                            )),
+                        }
+                    }
+                }
+            }
+            State::Learned(LearnedState { rack_secret_state, .. }) => {
+                Output::none()
+            }
         }
     }
 
@@ -889,12 +734,13 @@ impl Fsm {
                                 shares.values().cloned().collect();
                             match RackSecret::combine_shares(&to_combine) {
                                 Ok(rack_secret) => {
-                                    let (persist, envelopes) = resolve_learn_requests(
-                                        &rack_secret,
-                                        &pkg,
-                                        distributed_shares,
-                                        pending_learn_requests,
-                                    );
+                                    let (persist, envelopes) =
+                                        resolve_learn_requests(
+                                            &rack_secret,
+                                            &pkg,
+                                            distributed_shares,
+                                            pending_learn_requests,
+                                        );
                                     *rack_secret_state = Some(
                                         RackSecretState::Secret(rack_secret),
                                     );
@@ -906,8 +752,7 @@ impl Fsm {
                                     }
                                 }
                                 Err(e) => {
-                                    let envelopes = 
-                                        resolve_learn_requests_with_error(
+                                    let envelopes = resolve_learn_requests_with_error(
                                         Error::FailedToReconstructRackSecret,
                                         pending_learn_requests,
                                     );
@@ -923,7 +768,6 @@ impl Fsm {
                             // Still waiting to receive more shares
                             Output::none()
                         }
-
                     }
                 }
             }
@@ -1044,7 +888,7 @@ fn resolve_learn_requests_with_error(
     let mut envelopes = Vec::with_capacity(pending_learn_requests.len());
     while let Some((to, metadata)) = pending_learn_requests.pop_first() {
         let msg =
-            Response { request_id: metadata.request_id, type_: error.clone().into() };
+            Response { request_id: metadata.request_id, type_: error.into() };
         envelopes.push(Envelope { to, msg: msg.into() })
     }
     envelopes

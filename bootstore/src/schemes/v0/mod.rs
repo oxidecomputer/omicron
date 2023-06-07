@@ -6,6 +6,7 @@
 
 mod fsm;
 mod messages;
+mod state;
 
 /// The current version of supported messages within the v0 scheme
 ///
