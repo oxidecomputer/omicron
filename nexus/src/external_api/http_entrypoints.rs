@@ -39,8 +39,10 @@ use dropshot::{
     channel, endpoint, WebsocketChannelResult, WebsocketConnection,
 };
 use ipnetwork::IpNetwork;
+use nexus_db_queries::authz::ApiResource;
 use nexus_db_queries::db::lookup::ImageLookup;
 use nexus_db_queries::db::lookup::ImageParentLookup;
+use nexus_types::external_api::params::ProjectSelector;
 use nexus_types::{
     external_api::views::{SledInstance, Switch},
     identity::AssetIdentityMetadata,
@@ -107,6 +109,8 @@ pub fn external_api() -> NexusApiDescription {
         api.register(project_update)?;
         api.register(project_policy_view)?;
         api.register(project_policy_update)?;
+        api.register(project_ip_pool_list)?;
+        api.register(project_ip_pool_view)?;
 
         // Operator-Accessible IP Pools API
         api.register(ip_pool_list)?;
@@ -1073,6 +1077,83 @@ async fn project_policy_update(
 }
 
 // IP Pools
+
+/// List all IP Pools that can be used by a given project.
+#[endpoint {
+    method = GET,
+    path = "/v1/ip-pools",
+    tags = ["projects"],
+}]
+async fn project_ip_pool_list(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    query_params: Query<PaginatedByNameOrId<params::ProjectSelector>>,
+) -> Result<HttpResponseOk<ResultsPage<IpPool>>, HttpError> {
+    // Per https://github.com/oxidecomputer/omicron/issues/2148
+    // This is currently the same list as /v1/system/ip-pools, that is to say,
+    // IP pools that are *available to* a given project, those being ones that
+    // are not the internal pools for Oxide service usage. This may change
+    // in the future as the scoping of pools is further developed, but for now,
+    // this is literally a near-duplicate of `ip_pool_list`:
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let query = query_params.into_inner();
+        let pag_params = data_page_params_for(&rqctx, &query)?;
+        let scan_params = ScanByNameOrId::from_query(&query)?;
+        let paginated_by = name_or_id_pagination(&pag_params, scan_params)?;
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let project_lookup =
+            nexus.project_lookup(&opctx, scan_params.selector.clone())?;
+        let pools = nexus
+            .project_ip_pools_list(&opctx, &project_lookup, &paginated_by)
+            .await?
+            .into_iter()
+            .map(IpPool::from)
+            .collect();
+        Ok(HttpResponseOk(ScanByNameOrId::results_page(
+            &query,
+            pools,
+            &marker_for_name_or_id,
+        )?))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Fetch an IP pool
+#[endpoint {
+    method = GET,
+    path = "/v1/ip-pools/{pool}",
+    tags = ["projects"],
+}]
+async fn project_ip_pool_view(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<params::IpPoolPath>,
+    project: Query<params::OptionalProjectSelector>,
+) -> Result<HttpResponseOk<views::IpPool>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let nexus = &apictx.nexus;
+        let pool_selector = path_params.into_inner().pool;
+        let project_lookup = if let Some(project) = project.into_inner().project
+        {
+            Some(nexus.project_lookup(&opctx, ProjectSelector { project })?)
+        } else {
+            None
+        };
+        let (authz_pool, pool) = nexus
+            .project_ip_pool_lookup(&opctx, &pool_selector, &project_lookup)?
+            .fetch()
+            .await?;
+        // TODO(2148): once we've actualy implemented filtering to pools belonging to
+        // the specified project, we can remove this internal check.
+        if pool.internal {
+            return Err(authz_pool.not_found().into());
+        }
+        Ok(HttpResponseOk(IpPool::from(pool)))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
 
 /// List IP pools
 #[endpoint {

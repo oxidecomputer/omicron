@@ -348,7 +348,9 @@ pub async fn create_instance(
         instance_name,
         &params::InstanceNetworkInterfaceAttachment::Default,
         // Disks=
-        vec![],
+        Vec::<params::InstanceDiskAttachment>::new(),
+        // External IPs=
+        Vec::<params::ExternalIpCreate>::new(),
     )
     .await
 }
@@ -360,6 +362,7 @@ pub async fn create_instance_with(
     instance_name: &str,
     nics: &params::InstanceNetworkInterfaceAttachment,
     disks: Vec<params::InstanceDiskAttachment>,
+    external_ips: Vec<params::ExternalIpCreate>,
 ) -> Instance {
     let url = format!("/v1/instances?project={}", project_name);
     object_create(
@@ -377,7 +380,7 @@ pub async fn create_instance_with(
                 b"#cloud-config\nsystem_info:\n  default_user:\n    name: oxide"
                     .to_vec(),
             network_interfaces: nics.clone(),
-            external_ips: vec![],
+            external_ips,
             disks,
             start: true,
         },

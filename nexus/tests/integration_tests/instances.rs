@@ -522,7 +522,8 @@ async fn test_instance_migrate(cptestctx: &ControlPlaneTestContext) {
         PROJECT_NAME,
         instance_name,
         &params::InstanceNetworkInterfaceAttachment::Default,
-        vec![],
+        Vec::<params::InstanceDiskAttachment>::new(),
+        Vec::<params::ExternalIpCreate>::new(),
     )
     .await;
     let instance_id = instance.identity.id;
@@ -609,7 +610,8 @@ async fn test_instance_migrate_v2p(cptestctx: &ControlPlaneTestContext) {
         &params::InstanceNetworkInterfaceAttachment::Default,
         // Omit disks: simulated sled agent assumes that disks are always co-
         // located with their instances.
-        vec![],
+        Vec::<params::InstanceDiskAttachment>::new(),
+        Vec::<params::ExternalIpCreate>::new(),
     )
     .await;
     let instance_id = instance.identity.id;
