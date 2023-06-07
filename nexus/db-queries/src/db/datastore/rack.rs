@@ -8,8 +8,6 @@ use super::dns::DnsVersionUpdateBuilder;
 use super::DataStore;
 use super::SERVICE_IP_POOL_NAME;
 use crate::authz;
-use crate::authz::FleetRole;
-use crate::authz::SiloRole;
 use crate::context::OpContext;
 use crate::db;
 use crate::db::collection_insert::AsyncInsertError;
@@ -38,6 +36,7 @@ use nexus_types::external_api::params as external_params;
 use nexus_types::external_api::shared;
 use nexus_types::external_api::shared::IdentityType;
 use nexus_types::external_api::shared::IpRange;
+use nexus_types::external_api::shared::{FleetRole, SiloRole};
 use nexus_types::identity::Resource;
 use nexus_types::internal_api::params as internal_params;
 use omicron_common::api::external::DataPageParams;
@@ -602,6 +601,10 @@ mod test {
                     identity_mode: SiloIdentityMode::LocalOnly,
                     admin_group_name: None,
                     tls_certificates: vec![],
+                    // XXX-dap consider using this to specify that the initial
+                    // user gets Fleet Admin rather than explicitly granting it
+                    // to them?
+                    mapped_fleet_roles: Default::default(),
                 },
                 recovery_user_id: "test-user".parse().unwrap(),
                 // empty string password

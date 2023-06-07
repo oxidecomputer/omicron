@@ -19,6 +19,7 @@ use serde::{
     de::{self, Visitor},
     Deserialize, Deserializer, Serialize, Serializer,
 };
+use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::{net::IpAddr, str::FromStr};
 use uuid::Uuid;
@@ -298,6 +299,13 @@ pub struct SiloCreate {
     /// Initial TLS certificates to be used for the new Silo's console and API
     /// endpoints.  These should be valid for the Silo's DNS name(s).
     pub tls_certificates: Vec<CertificateCreate>,
+
+    /// Mapping of which Fleet roles are conferred by each Silo role
+    ///
+    /// The default is that no Fleet roles are conferred by any Silo roles
+    /// unless there's a corresponding entry in this map.
+    #[serde(default)]
+    pub mapped_fleet_roles: BTreeMap<shared::SiloRole, Vec<shared::FleetRole>>,
 }
 
 /// Create-time parameters for a `User`

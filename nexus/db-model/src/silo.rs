@@ -106,12 +106,25 @@ pub struct Silo {
 
 impl Silo {
     /// Creates a new database Silo object.
-    pub fn new(params: params::SiloCreate) -> Self {
+    pub fn new(params: params::SiloCreate) -> Result<Self, Error> {
         Self::new_with_id(Uuid::new_v4(), params)
     }
 
-    pub fn new_with_id(id: Uuid, params: params::SiloCreate) -> Self {
-        Self {
+    pub fn new_with_id(
+        id: Uuid,
+        params: params::SiloCreate,
+    ) -> Result<Self, Error> {
+        // XXX-dap do we want to take some kind of care to prevent this from
+        // being accidentally modified incompatibly, similar to what we do with
+        // DnsName's DnsRecord?
+        let mapped_fleet_roles =
+            serde_json::to_value(&params.mapped_fleet_roles).map_err(|e| {
+                Error::internal_error(&format!(
+                    "failed to serialize mapped_fleet_roles: {:#}",
+                    e
+                ))
+            })?;
+        Ok(Self {
             identity: SiloIdentity::new(id, params.identity),
             discoverable: params.discoverable,
             authentication_mode: params
@@ -123,7 +136,8 @@ impl Silo {
                 .user_provision_type()
                 .into(),
             rcgen: Generation::new(),
-        }
+            mapped_fleet_roles,
+        })
     }
 }
 
@@ -150,10 +164,21 @@ impl TryFrom<Silo> for views::Silo {
             ))
         })?;
 
+        let mapped_fleet_roles = serde_json::from_value(
+            silo.mapped_fleet_roles.clone(),
+        )
+        .map_err(|e| {
+            Error::internal_error(&format!(
+                "failed to deserialize mapped fleet roles from database: {:#}",
+                e
+            ))
+        })?;
+
         Ok(Self {
             identity: silo.identity(),
             discoverable: silo.discoverable,
             identity_mode,
+            mapped_fleet_roles,
         })
     }
 }

@@ -14,7 +14,6 @@ mod coverage;
 mod resource_builder;
 mod resources;
 
-use super::SiloRole;
 use crate::authn;
 use crate::authz;
 use crate::context::OpContext;
@@ -24,6 +23,7 @@ use coverage::Coverage;
 use futures::StreamExt;
 use nexus_test_utils::db::test_setup_database;
 use nexus_types::external_api::shared;
+use nexus_types::external_api::shared::SiloRole;
 use nexus_types::identity::Asset;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::LookupType;

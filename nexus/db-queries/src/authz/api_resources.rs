@@ -41,19 +41,14 @@ use crate::db::fixed_data::FLEET_ID;
 use crate::db::model::KnownArtifactKind;
 use crate::db::model::SemverVersion;
 use crate::db::DataStore;
-use anyhow::anyhow;
 use authz_macros::authz_resource;
 use futures::future::BoxFuture;
 use futures::FutureExt;
 use lazy_static::lazy_static;
+use nexus_types::external_api::shared::{FleetRole, ProjectRole, SiloRole};
 use omicron_common::api::external::{Error, LookupType, ResourceType};
 use oso::PolarClass;
-use parse_display::Display;
-use parse_display::FromStr;
-use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-#[cfg(test)]
-use strum::EnumIter;
 use uuid::Uuid;
 
 /// Describes an authz resource that corresponds to an API resource that has a
@@ -262,40 +257,6 @@ impl ApiResourceWithRoles for Fleet {
 
 impl ApiResourceWithRolesType for Fleet {
     type AllowedRoles = FleetRole;
-}
-
-#[derive(
-    Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema,
-)]
-#[cfg_attr(test, derive(EnumIter))]
-#[serde(rename_all = "snake_case")]
-pub enum FleetRole {
-    Admin,
-    Collaborator,
-    Viewer,
-    // There are other Fleet roles, but they are not externally-visible and so
-    // they do not show up in this enum.
-}
-
-impl db::model::DatabaseString for FleetRole {
-    type Error = anyhow::Error;
-
-    fn to_database_string(&self) -> &str {
-        match self {
-            FleetRole::Admin => "admin",
-            FleetRole::Collaborator => "collaborator",
-            FleetRole::Viewer => "viewer",
-        }
-    }
-
-    fn from_database_string(s: &str) -> Result<Self, Self::Error> {
-        match s {
-            "admin" => Ok(FleetRole::Admin),
-            "collaborator" => Ok(FleetRole::Collaborator),
-            "viewer" => Ok(FleetRole::Viewer),
-            _ => Err(anyhow!("unsupported Fleet role from database: {:?}", s)),
-        }
-    }
 }
 
 // TODO: refactor synthetic resources below
@@ -741,50 +702,6 @@ impl ApiResourceWithRolesType for Project {
     type AllowedRoles = ProjectRole;
 }
 
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    Deserialize,
-    Display,
-    Eq,
-    FromStr,
-    PartialEq,
-    Serialize,
-    JsonSchema,
-)]
-#[cfg_attr(test, derive(EnumIter))]
-#[display(style = "kebab-case")]
-#[serde(rename_all = "snake_case")]
-pub enum ProjectRole {
-    Admin,
-    Collaborator,
-    Viewer,
-}
-
-impl db::model::DatabaseString for ProjectRole {
-    type Error = anyhow::Error;
-
-    fn to_database_string(&self) -> &str {
-        match self {
-            ProjectRole::Admin => "admin",
-            ProjectRole::Collaborator => "collaborator",
-            ProjectRole::Viewer => "viewer",
-        }
-    }
-
-    fn from_database_string(s: &str) -> Result<Self, Self::Error> {
-        match s {
-            "admin" => Ok(ProjectRole::Admin),
-            "collaborator" => Ok(ProjectRole::Collaborator),
-            "viewer" => Ok(ProjectRole::Viewer),
-            _ => {
-                Err(anyhow!("unsupported Project role from database: {:?}", s))
-            }
-        }
-    }
-}
-
 authz_resource! {
     name = "Disk",
     parent = "Project",
@@ -961,48 +878,6 @@ impl ApiResourceWithRolesType for Silo {
     type AllowedRoles = SiloRole;
 }
 
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    Deserialize,
-    Display,
-    Eq,
-    FromStr,
-    PartialEq,
-    Serialize,
-    JsonSchema,
-)]
-#[cfg_attr(test, derive(EnumIter))]
-#[display(style = "kebab-case")]
-#[serde(rename_all = "snake_case")]
-pub enum SiloRole {
-    Admin,
-    Collaborator,
-    Viewer,
-}
-
-impl db::model::DatabaseString for SiloRole {
-    type Error = anyhow::Error;
-
-    fn to_database_string(&self) -> &str {
-        match self {
-            SiloRole::Admin => "admin",
-            SiloRole::Collaborator => "collaborator",
-            SiloRole::Viewer => "viewer",
-        }
-    }
-
-    fn from_database_string(s: &str) -> Result<Self, Self::Error> {
-        match s {
-            "admin" => Ok(SiloRole::Admin),
-            "collaborator" => Ok(SiloRole::Collaborator),
-            "viewer" => Ok(SiloRole::Viewer),
-            _ => Err(anyhow!("unsupported Silo role from database: {:?}", s)),
-        }
-    }
-}
-
 authz_resource! {
     name = "SiloUser",
     parent = "Silo",
@@ -1130,25 +1005,4 @@ authz_resource! {
     primary_key = Uuid,
     roles_allowed = false,
     polar_snippet = FleetChild,
-}
-
-#[cfg(test)]
-mod test {
-    use super::FleetRole;
-    use super::ProjectRole;
-    use super::SiloRole;
-    use crate::db::test_database_string_impl;
-
-    #[test]
-    fn test_roles_database_strings() {
-        test_database_string_impl::<FleetRole, _>(
-            "tests/output/authz-roles-fleet.txt",
-        );
-        test_database_string_impl::<SiloRole, _>(
-            "tests/output/authz-roles-silo.txt",
-        );
-        test_database_string_impl::<ProjectRole, _>(
-            "tests/output/authz-roles-project.txt",
-        );
-    }
 }
