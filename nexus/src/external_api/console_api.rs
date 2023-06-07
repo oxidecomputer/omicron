@@ -191,12 +191,12 @@ impl RelayState {
 pub async fn login_saml_begin(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<LoginToProviderPathParam>,
+    query_params: Query<StateParam>,
 ) -> Result<HttpResponseFound, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let nexus = &apictx.nexus;
         let path_params = path_params.into_inner();
-        let request = &rqctx.request;
 
         // Use opctx_external_authn because this request will be
         // unauthenticated.
@@ -214,42 +214,20 @@ pub async fn login_saml_begin(
             IdentityProviderType::Saml(saml_identity_provider) => {
                 // Relay state is sent to the IDP, to be sent back to the SP
                 // after a successful login.
-                let relay_state: Option<String> = if let Some(value) =
-                    request.headers().get(hyper::header::REFERER)
-                {
-                    let relay_state = RelayState {
-                        referer: {
-                            Some(
-                                value
-                                    .to_str()
-                                    .map_err(|e| {
-                                        HttpError::for_bad_request(
-                                            None,
-                                            format!(
-                                            "referer header to_str failed! {}",
-                                            e
-                                        ),
-                                        )
-                                    })?
-                                    .to_string(),
-                            )
-                        },
-                    };
-
-                    Some(relay_state.to_encoded().map_err(|e| {
+                let referer = query_params.into_inner().state;
+                let relay_state =
+                    RelayState { referer }.to_encoded().map_err(|e| {
                         HttpError::for_internal_error(format!(
                             "encoding relay state failed: {}",
                             e
                         ))
-                    })?)
-                } else {
-                    None
-                };
+                    })?;
 
-                let sign_in_url =
-                    saml_identity_provider.sign_in_url(relay_state).map_err(
-                        |e| HttpError::for_internal_error(e.to_string()),
-                    )?;
+                let sign_in_url = saml_identity_provider
+                    .sign_in_url(Some(relay_state))
+                    .map_err(|e| {
+                        HttpError::for_internal_error(e.to_string())
+                    })?;
 
                 http_response_found(sign_in_url)
             }
@@ -300,7 +278,7 @@ pub async fn login_saml(
                 }
             };
 
-        let relay_state: Option<RelayState> =
+        let relay_state =
             if let Some(value) = relay_state_string {
                 Some(RelayState::from_encoded(value).map_err(|e| {
                     HttpError::for_internal_error(format!("{}", e))

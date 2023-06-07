@@ -584,7 +584,7 @@ async fn test_login_redirect_multiple_silos(
         port: u16,
     ) -> Redirect {
         let url = format!(
-            "http://{}.sys.{}:{}/login",
+            "http://{}.sys.{}:{}/login?state=%2Fabc%2Fdef",
             silo_name, DNS_ZONE_EXTERNAL_TESTING, port,
         );
         let response = client
@@ -668,7 +668,10 @@ async fn test_login_redirect_multiple_silos(
     // Recovery silo: redirect for local username/password login
     assert_eq!(
         make_request(&reqwest_client, cptestctx.silo_name.as_str(), port).await,
-        Redirect::Location(format!("/login/{}/local", &cptestctx.silo_name,)),
+        Redirect::Location(format!(
+            "/login/{}/local?state=%2Fabc%2Fdef",
+            &cptestctx.silo_name,
+        )),
     );
     // SAML with no idps: no redirect possible
     assert_eq!(
@@ -683,7 +686,7 @@ async fn test_login_redirect_multiple_silos(
         make_request(&reqwest_client, silo_saml1.identity.name.as_str(), port)
             .await,
         Redirect::Location(format!(
-            "/login/{}/saml/idp0",
+            "/login/{}/saml/idp0?state=%2Fabc%2Fdef",
             silo_saml1.identity.name.as_str()
         )),
     );
@@ -694,7 +697,7 @@ async fn test_login_redirect_multiple_silos(
         make_request(&reqwest_client, silo_saml2.identity.name.as_str(), port)
             .await,
         Redirect::Location(format!(
-            "/login/{}/saml/idp0",
+            "/login/{}/saml/idp0?state=%2Fabc%2Fdef",
             silo_saml2.identity.name.as_str()
         )),
     );
