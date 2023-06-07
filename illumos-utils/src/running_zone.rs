@@ -261,10 +261,10 @@ impl RunningZone {
     // another, if the task is swapped out at an await point. That would leave
     // the first thread's template in a modified state.
     //
-    // If we do need to make this method synchronous, we will need to change the
+    // If we do need to make this method asynchronous, we will need to change the
     // internals to avoid changing the thread's contract. One possible approach
     // here would be to use `libscf` directly, rather than `exec`-ing `svccfg`
-    // directly in a forked childe. That would obviate the need to work on the
+    // directly in a forked child. That would obviate the need to work on the
     // contract at all.
     #[cfg(target_os = "illumos")]
     pub fn run_cmd<I, S>(&self, args: I) -> Result<String, RunCommandError>
