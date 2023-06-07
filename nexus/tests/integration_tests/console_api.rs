@@ -189,7 +189,7 @@ async fn test_console_pages(cptestctx: &ControlPlaneTestContext) {
         testctx,
         "/projects/irrelevant-path",
         &format!(
-            "/login/{}/local?state=%2Fprojects%2Firrelevant-path",
+            "/login/{}/local?redirect_uri=%2Fprojects%2Firrelevant-path",
             cptestctx.silo_name
         ),
     )
@@ -467,21 +467,21 @@ async fn test_login_redirect_simple(cptestctx: &ControlPlaneTestContext) {
     // encoded path is /abc/def
     expect_redirect(
         testctx,
-        "/login?state=%2Fabc%2Fdef",
-        &format!("{}?state=%2Fabc%2Fdef", expected),
+        "/login?redirect_uri=%2Fabc%2Fdef",
+        &format!("{}?redirect_uri=%2Fabc%2Fdef", expected),
     )
     .await;
 
     // if state param comes in not URL encoded, we should still URL encode it
     expect_redirect(
         testctx,
-        "/login?state=/abc/def",
-        &format!("{}?state=%2Fabc%2Fdef", expected),
+        "/login?redirect_uri=/abc/def",
+        &format!("{}?redirect_uri=%2Fabc%2Fdef", expected),
     )
     .await;
 
     // empty state param gets dropped
-    expect_redirect(testctx, "/login?state=", &expected).await;
+    expect_redirect(testctx, "/login?redirect_uri=", &expected).await;
 }
 
 #[nexus_test]
@@ -584,7 +584,8 @@ async fn test_login_redirect_multiple_silos(
         port: u16,
         state: Option<&str>,
     ) -> Redirect {
-        let query = state.map_or("".to_string(), |s| format!("?state={}", s));
+        let query =
+            state.map_or("".to_string(), |s| format!("?redirect_uri={}", s));
         let url = format!(
             "http://{}.sys.{}:{}/login{}",
             silo_name, DNS_ZONE_EXTERNAL_TESTING, port, query
@@ -684,7 +685,7 @@ async fn test_login_redirect_multiple_silos(
         )
         .await,
         Redirect::Location(format!(
-            "/login/{}/local?state=%2Fabc%2Fdef",
+            "/login/{}/local?redirect_uri=%2Fabc%2Fdef",
             &cptestctx.silo_name,
         )),
     );
@@ -726,7 +727,7 @@ async fn test_login_redirect_multiple_silos(
         )
         .await,
         Redirect::Location(format!(
-            "/login/{}/saml/idp0?state=%2Fabc%2Fdef",
+            "/login/{}/saml/idp0?redirect_uri=%2Fabc%2Fdef",
             silo_saml1.identity.name.as_str()
         )),
     );

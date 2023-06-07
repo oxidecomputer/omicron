@@ -93,7 +93,7 @@ use std::{collections::HashSet, ffi::OsString, path::PathBuf, sync::Arc};
 //   https://some.idp.test/auth/saml?SAMLRequest=...&RelayState=...&SigAlg=...&Signature=...
 //
 // SAMLRequest is base64 encoded zlib compressed XML, and RelayState can be
-// anything - Nexus currently encodes the referer header so that when SAML login
+// anything - Nexus currently encodes a redirect_uri so that when SAML login
 // is successful the user can be sent back to where they were originally.
 //
 // The user will then authenticate with that IdP, and if successful will be
@@ -114,8 +114,8 @@ use std::{collections::HashSet, ffi::OsString, path::PathBuf, sync::Arc};
 //
 // The IdP's SAMLResponse will authenticate a subject, and from this external
 // subject a silo user has to be created or retrieved (depending on the Silo's
-// user provision type). After that, users will be redirected to the referer in
-// the relay state, or to `/organizations`.
+// user provision type). After that, users will be redirected to the `redirect_uri`
+// in the relay state, or to `/organizations`.
 //
 // SAML logout flow
 // ----------------
@@ -153,7 +153,7 @@ pub struct LoginToProviderPathParam {
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct RelayState {
-    pub referer: Option<String>,
+    pub redirect_uri: Option<String>,
 }
 
 impl RelayState {
@@ -191,7 +191,7 @@ impl RelayState {
 pub async fn login_saml_begin(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<LoginToProviderPathParam>,
-    query_params: Query<StateParam>,
+    query_params: Query<LoginUrlQuery>,
 ) -> Result<HttpResponseFound, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
@@ -214,9 +214,9 @@ pub async fn login_saml_begin(
             IdentityProviderType::Saml(saml_identity_provider) => {
                 // Relay state is sent to the IDP, to be sent back to the SP
                 // after a successful login.
-                let referer = query_params.into_inner().state;
+                let redirect_uri = query_params.into_inner().redirect_uri;
                 let relay_state =
-                    RelayState { referer }.to_encoded().map_err(|e| {
+                    RelayState { redirect_uri }.to_encoded().map_err(|e| {
                         HttpError::for_internal_error(format!(
                             "encoding relay state failed: {}",
                             e
@@ -298,7 +298,7 @@ pub async fn login_saml(
 
         let session = create_session(opctx, apictx, user).await?;
         let next_url = relay_state
-            .and_then(|r| r.referer)
+            .and_then(|r| r.redirect_uri)
             .unwrap_or_else(|| "/".to_string());
         let mut response = http_response_see_other(next_url)?;
 
@@ -455,25 +455,17 @@ pub struct RestPathParam {
     path: Vec<String>,
 }
 
-#[derive(Deserialize, JsonSchema)]
-pub struct StateParam {
-    state: Option<String>,
-}
-
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize, JsonSchema)]
 pub struct LoginUrlQuery {
-    // TODO: give state param the correct name. In SAML it's called RelayState.
-    // If/when we support auth protocols other than SAML, we will need to have
-    // separate implementations here for each one
-    state: Option<String>,
+    redirect_uri: Option<String>,
 }
 
 /// Generate URI to the appropriate login form for this Silo. Optional
-/// `redirect_url` represents the URL to send the user back to after successful
+/// `redirect_uri` represents the URL to send the user back to after successful
 /// login, and is included in `state` query param if present
 async fn get_login_url(
     rqctx: &RequestContext<Arc<ServerContext>>,
-    redirect_url: Option<String>,
+    redirect_uri: Option<String>,
 ) -> Result<String, Error> {
     let nexus = &rqctx.context().nexus;
     let endpoint = nexus.endpoint_for_request(rqctx)?;
@@ -524,7 +516,7 @@ async fn get_login_url(
 
     // Stick redirect_url into the state param and URL encode it so it can be
     // used as a query string. We assume it's not already encoded.
-    let query_data = LoginUrlQuery { state: redirect_url };
+    let query_data = LoginUrlQuery { redirect_uri };
 
     Ok(match serde_urlencoded::to_string(query_data) {
         // only put the ? in front if there's something there
@@ -542,13 +534,13 @@ async fn get_login_url(
 }]
 pub async fn login_begin(
     rqctx: RequestContext<Arc<ServerContext>>,
-    query_params: Query<StateParam>,
+    query_params: Query<LoginUrlQuery>,
 ) -> Result<HttpResponseFound, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let query = query_params.into_inner();
-        let redirect_url = query.state.filter(|s| !s.trim().is_empty());
-        let login_url = get_login_url(&rqctx, redirect_url).await?;
+        let redirect_uri = query.redirect_uri.filter(|s| !s.trim().is_empty());
+        let login_url = get_login_url(&rqctx, redirect_uri).await?;
         http_response_found(login_url)
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -569,13 +561,9 @@ pub async fn console_index_or_login_redirect(
     // otherwise redirect to idp
 
     // Put the current URI in the query string to redirect back to after login.
-    // Right now this is a relative path, which only works as long as we're
-    // using the spoof login page, which is hosted by Nexus. Once we start
-    // sending users to a real external IdP login page, this will need to be a
-    // full URL.
-    let redirect_url =
+    let redirect_uri =
         rqctx.request.uri().path_and_query().map(|p| p.to_string());
-    let login_url = get_login_url(&rqctx, redirect_url).await?;
+    let login_url = get_login_url(&rqctx, redirect_uri).await?;
 
     Ok(Response::builder()
         .status(StatusCode::FOUND)

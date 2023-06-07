@@ -125,6 +125,14 @@
             "schema": {
               "$ref": "#/components/schemas/Name"
             }
+          },
+          {
+            "in": "query",
+            "name": "redirect_uri",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
           }
         ],
         "responses": {

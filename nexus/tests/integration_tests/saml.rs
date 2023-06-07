@@ -1137,7 +1137,9 @@ async fn test_post_saml_response_with_relay_state(
                     .encode(SAML_RESPONSE),
                 relay_state: Some(
                     console_api::RelayState {
-                        referer: Some("/some/actual/nexus/url".to_string()),
+                        redirect_uri: Some(
+                            "/some/actual/nexus/url".to_string(),
+                        ),
                     }
                     .to_encoded()
                     .unwrap(),
