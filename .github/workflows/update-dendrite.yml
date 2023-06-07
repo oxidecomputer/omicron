@@ -1,0 +1,151 @@
+name: Update dendrite
+
+on:
+  workflow_dispatch:
+    inputs:
+      reflector_access_token:
+        description: Access token for use in authenticating as the Reflector bot
+        type: string
+      reflector_user_id:
+        description: User id of the Reflector bot
+        type: string
+
+permissions:
+  contents: write
+  pull-requests: write
+  # This is a workaround for the GitHub cli requiring excessive permissions when updating a pull
+  # request (https://github.com/cli/cli/discussions/5307)
+  repository-projects: read
+
+jobs:
+  generate-update:
+    concurrency:
+      group: dendrite-integration
+      cancel-in-progress: true
+    runs-on: ubuntu-22.04
+    env:
+      INT_BRANCH: dendrite-integration
+      TARGET_BRANCH: main
+    steps:
+
+      # Checkout both the target and integration branches
+      - uses: actions/checkout@v3.5.0
+        with:
+          token: ${{ inputs.reflector_access_token }}
+          fetch-depth: 0
+
+      - name: Update from main
+        run: |
+          git config --local user.name "reflector[bot]"
+          git config --local user.email "${{ inputs.reflector_user_id }}+reflector[bot]@users.noreply.github.com"
+
+          MERGE_STATUS=0
+          git checkout $INT_BRANCH 2>/dev/null || git checkout -b $INT_BRANCH
+          git merge $TARGET_BRANCH || MERGE_STATUS=$?
+
+          # If there was a merge conflict attempt to reset the generated files and commit them back
+          if [ $MERGE_STATUS -eq 1 ]
+          then
+            echo "Found conflicts. Attempt to use changes from $TARGET_BRANCH"
+            git checkout $TARGET_BRANCH -- tools
+            git commit -m "Merge branch '$TARGET_BRANCH' into $INT_BRANCH and reset generated code"
+          fi
+
+          STATUS=$(git status --porcelain=v1 2>/dev/null | wc -l)
+          if [ $STATUS -eq 0 ]
+          then
+            exit 0
+          else
+            echo 'Found additional conflicts from merge attempt that need to be manually resolved'
+            git status
+            exit 1
+          fi
+
+      # Configure Rust tools
+      - name: Install nightly rustfmt
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: nightly
+          components: rustfmt
+          default: false
+
+      - name: Install toml2json
+        run: |
+          cargo install toml2json
+
+      - name: Update dendrite versions
+        run: |
+          ./tools/update_dendrite.sh
+
+      - name: Extract new dendrite package version
+        run: |
+          eval $(cat tools/dendrite_openapi_version | grep COMMIT)
+          echo "version=${COMMIT:0:7}" >> $GITHUB_OUTPUT
+        id: updated
+
+      - name: Commit changes
+        run: |
+          git config --local user.name "oxide-reflector-bot[bot]"
+          git config --local user.email "${{ inputs.reflector_user_id }}+oxide-reflector-bot[bot]@users.noreply.github.com"
+
+          git add .
+          git commit -m "Update with latest dendrite version" || echo "Nothing to commit"
+          git push origin $INT_BRANCH
+
+          # Detect changes to report back
+
+          # Check if the API version has been updated
+          git diff $TARGET_BRANCH...$INT_BRANCH --quiet tools/dendrite_openapi_version || APIUPDATED=$?
+          echo "api=${APIUPDATED}" >> $GITHUB_OUTPUT
+        id: committed
+
+      - name: Update pull request
+        env:
+          GH_TOKEN: ${{ inputs.reflector_access_token }}
+        run: |
+          # Compare the integration branch with the target branch
+          TARGET_TO_INT="$(git rev-list --count $TARGET_BRANCH..$INT_BRANCH)"
+          INT_TO_TARGET="$(git rev-list --count $INT_BRANCH..$TARGET_BRANCH)"
+
+          # Check for an existing pull request from the integration branch to the target branch
+          eval $(gh pr view $INT_BRANCH --repo $GITHUB_REPOSITORY --json url,number,state | jq -r 'to_entries[] | "\(.key | ascii_upcase)=\(.value)"')
+          HASPR=0
+          [ "$NUMBER" != "" ] && [ "$BASEREFNAME" == "$TARGET_BRANCH" ] || HASPR=$?
+
+          if [ "$TARGET_TO_INT" -eq 0 -a "$INT_TO_TARGET" -eq 0 ]
+          then
+            echo "$TARGET_BRANCH is up to date with $INT_BRANCH. No pull request needed"
+
+            if [ $HASPR -eq 0 && "$NUMBER" != "" ]
+            then
+              echo "Closing existing PR"
+              gh pr close $NUMBER
+            fi
+          elif [ "$TARGET_TO_INT" -gt 0 ]
+          then
+            echo "$TARGET_BRANCH is behind $INT_BRANCH ($TARGET_TO_INT)"
+
+            title=""
+            echo "" > body
+
+            if [ ${{ steps.committed.outputs.api }} ]
+            then
+              title+=" dendrite to ${{ steps.updated.outputs.version }}"
+
+              echo "Updated dendrite API version to ${{ steps.updated.outputs.version }}" >> body
+              echo "" >> body
+            fi
+
+            title="Update${title}"
+
+            if [ -z "$NUMBER" -o "$STATE" != "OPEN" ]
+            then
+              gh pr create -B $TARGET_BRANCH -H $INT_BRANCH --title "$title" --body-file body
+            else
+              echo "PR already exists: ($NUMBER) $URL . Updating..."
+              gh pr edit "$NUMBER" --title "$title" --body-file body
+            fi
+          else
+            echo "$INT_BRANCH is behind $TARGET_BRANCH ($INT_TO_TARGET). This is likely an error"
+            exit 1
+          fi
