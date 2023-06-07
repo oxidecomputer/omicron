@@ -1695,16 +1695,12 @@ pub mod test {
                 .await
                 .unwrap();
 
-            nexus
-                .sec()
-                .saga_start(runnable_saga.id())
+            let saga_error = nexus
+                .run_saga_raw_result(runnable_saga)
                 .await
-                .expect("saga should be runnable");
-            let saga_error = runnable_saga
-                .run_yielding_raw_result()
-                .await
+                .expect("saga should have started successfully")
                 .kind
-                .expect_err("saga should have failed");
+                .expect_err("saga execution should have failed");
 
             assert_eq!(saga_error.error_node_name, *node.name());
 
@@ -1780,16 +1776,12 @@ pub mod test {
                 .await
                 .unwrap();
 
-            nexus
-                .sec()
-                .saga_start(runnable_saga.id())
+            let saga_error = nexus
+                .run_saga_raw_result(runnable_saga)
                 .await
-                .expect("saga should be runnable");
-            let saga_error = runnable_saga
-                .run_yielding_raw_result()
-                .await
+                .expect("saga should have started successfully")
                 .kind
-                .expect_err("saga should have failed");
+                .expect_err("saga execution should have failed");
 
             assert_eq!(saga_error.error_node_name, *error_node.name());
 
