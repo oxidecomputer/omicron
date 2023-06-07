@@ -397,6 +397,22 @@ impl Zones {
         Ok(Self::get().await?.into_iter().find(|zone| zone.name() == name))
     }
 
+    /// Return the ID for a _running_ zone with the specified name.
+    //
+    // NOTE: This mostly exists for testing purposes. It's simple enough to call
+    // `Zones::find()` and then use the `zone::Zone::id()` method on that
+    // object. But that can't easily be done, because we need to supply
+    // `mockall` with a value to return, and `zone::Zone` objects can't be
+    // constructed since they have private fields.
+    pub async fn id(name: &str) -> Result<Option<i32>, AdmError> {
+        // Safety: illumos defines `zoneid_t` as a typedef for an integer, i.e.,
+        // an `i32`, so this unwrap should always be safe.
+        match Self::find(name).await?.map(|zn| zn.id()) {
+            Some(Some(id)) => Ok(Some(id.try_into().unwrap())),
+            Some(None) | None => Ok(None),
+        }
+    }
+
     /// Returns the name of the VNIC used to communicate with the control plane.
     pub fn get_control_interface(
         zone: &str,
