@@ -257,7 +257,12 @@ impl RunningZone {
         S: AsRef<std::ffi::OsStr>,
     {
         use std::os::unix::process::CommandExt;
-        let id = self.id.expect("Must have a zone ID for a running zone");
+        let Some(id) = self.id else {
+            return Err(RunCommandError {
+                zone: self.name().to_string(),
+                err: crate::ExecutionError::NotRunning,
+            });
+        };
         let template =
             std::sync::Arc::new(zenter::Template::new().map_err(|err| {
                 RunCommandError { zone: self.name().to_string(), err }

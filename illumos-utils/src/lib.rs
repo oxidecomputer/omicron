@@ -52,6 +52,9 @@ pub enum ExecutionError {
 
     #[error("Failed to enter zone: {err}")]
     ZoneEnter { err: std::io::Error },
+
+    #[error("Zone is not running")]
+    NotRunning,
 }
 
 // We wrap this method in an inner module to make it possible to mock
