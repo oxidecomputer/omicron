@@ -19,6 +19,7 @@ use crate::external_api::params;
 use futures::future::Fuse;
 use futures::{FutureExt, SinkExt, StreamExt};
 use nexus_db_model::IpKind;
+use nexus_db_queries::authz::ApiResource;
 use nexus_db_queries::context::OpContext;
 use omicron_common::address::PROPOLIS_PORT;
 use omicron_common::api::external::http_pagination::PaginatedBy;
@@ -1360,18 +1361,40 @@ impl super::Nexus {
         instance_lookup: &lookup::Instance<'_>,
         action: authz::Action,
     ) -> Result<propolis_client::Client, Error> {
-        let (.., instance) = instance_lookup.fetch_for(action).await?;
-        let ip_addr = instance
-            .runtime_state
-            .propolis_ip
-            .ok_or_else(|| {
-                Error::internal_error(
-                    "instance's hypervisor IP address not found",
-                )
-            })?
-            .ip();
-        let socket_addr = SocketAddr::new(ip_addr, PROPOLIS_PORT);
-        Ok(propolis_client::Client::new(&format!("http://{}", socket_addr)))
+        let (.., authz_instance, instance) =
+            instance_lookup.fetch_for(action).await?;
+        match instance.runtime_state.state.0 {
+            InstanceState::Running
+            | InstanceState::Rebooting
+            | InstanceState::Migrating
+            | InstanceState::Repairing => {
+                let ip_addr = instance
+                    .runtime_state
+                    .propolis_ip
+                    .ok_or_else(|| {
+                        Error::internal_error(
+                            "instance's hypervisor IP address not found",
+                        )
+                    })?
+                    .ip();
+                let socket_addr = SocketAddr::new(ip_addr, PROPOLIS_PORT);
+                Ok(propolis_client::Client::new(&format!(
+                    "http://{}",
+                    socket_addr
+                )))
+            }
+            InstanceState::Creating
+            | InstanceState::Starting
+            | InstanceState::Stopping
+            | InstanceState::Stopped
+            | InstanceState::Failed => Err(Error::ServiceUnavailable {
+                internal_message: format!(
+                    "Cannot connect to hypervisor of instance in state {:?}",
+                    instance.runtime_state.state
+                ),
+            }),
+            InstanceState::Destroyed => Err(authz_instance.not_found()),
+        }
     }
 
     async fn proxy_instance_serial_ws(
