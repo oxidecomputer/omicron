@@ -232,16 +232,7 @@ impl From<&'_ CurrentRssConfig> for CurrentRssUserConfig {
                     .internal_services_ip_pool_ranges
                     .clone(),
                 external_dns_zone_name: rss.external_dns_zone_name.clone(),
-                rack_network_config: rss
-                    .rack_network_config
-                    .clone()
-                    .unwrap_or_else(|| RackNetworkConfig {
-                        gateway_ip: "".into(),
-                        infra_ip_first: "".into(),
-                        infra_ip_last: "".into(),
-                        uplink_port: "".into(),
-                        uplink_ip: "".into(),
-                    }),
+                rack_network_config: rss.rack_network_config.clone(),
             },
         }
     }

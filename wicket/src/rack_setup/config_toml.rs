@@ -5,6 +5,8 @@
 //! Support for the TOML file we give to and accept from clients for setting
 //! (most of) the rack setup configuration.
 
+use serde::Serialize;
+use std::borrow::Cow;
 use std::fmt;
 use toml_edit::Array;
 use toml_edit::Document;
@@ -82,7 +84,7 @@ impl TomlTemplate {
 
         populate_network_table(
             doc.get_mut("rack_network_config").unwrap().as_table_mut().unwrap(),
-            &config.rack_network_config,
+            config.rack_network_config.as_ref(),
         );
 
         Self { doc }
@@ -149,22 +151,45 @@ fn build_sleds_array(sleds: &[BootstrapSledDescription]) -> Array {
     array
 }
 
-fn populate_network_table(table: &mut Table, config: &RackNetworkConfig) {
+fn populate_network_table(
+    table: &mut Table,
+    config: Option<&RackNetworkConfig>,
+) {
+    // Helper function to serialize enums into their appropriate string
+    // representations.
+    fn enum_to_toml_string<T: Serialize>(value: &T) -> Cow<'static, str> {
+        let value = toml::Value::try_from(value).unwrap();
+        match value {
+            toml::Value::String(s) => Cow::from(s),
+            other => {
+                panic!("improper use of enum_to_toml_string: got {other:?}");
+            }
+        }
+    }
+
+    let Some(config) = config else {
+        return;
+    };
+
     for (property, value) in [
-        ("gateway_ip", &config.gateway_ip),
-        ("infra_ip_first", &config.infra_ip_first),
-        ("infra_ip_last", &config.infra_ip_last),
-        ("uplink_port", &config.uplink_port),
-        ("uplink_ip", &config.uplink_ip),
+        ("gateway_ip", Cow::from(&config.gateway_ip)),
+        ("infra_ip_first", Cow::from(&config.infra_ip_first)),
+        ("infra_ip_last", Cow::from(&config.infra_ip_last)),
+        ("uplink_port", Cow::from(&config.uplink_port)),
+        ("uplink_port_speed", enum_to_toml_string(&config.uplink_port_speed)),
+        ("uplink_port_fec", enum_to_toml_string(&config.uplink_port_fec)),
+        ("uplink_ip", Cow::from(&config.uplink_ip)),
     ] {
         *table.get_mut(property).unwrap().as_value_mut().unwrap() =
-            Value::String(Formatted::new(value.clone()));
+            Value::String(Formatted::new(value.into_owned()));
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use wicketd_client::types::PortFec;
+    use wicketd_client::types::PortSpeed;
     use wicketd_client::types::PutRssUserConfigInsensitive;
     use wicketd_client::types::SpIdentifier;
 
@@ -182,17 +207,8 @@ mod tests {
             internal_services_ip_pool_ranges: value
                 .internal_services_ip_pool_ranges,
             ntp_servers: value.ntp_servers,
-            rack_network_config: value.rack_network_config,
+            rack_network_config: value.rack_network_config.unwrap(),
         }
-    }
-
-    #[test]
-    fn round_trip_empty_config() {
-        let config = CurrentRssUserConfigInsensitive::default();
-        let template = TomlTemplate::populate(&config).to_string();
-        let parsed: PutRssUserConfigInsensitive =
-            toml::de::from_str(&template).unwrap();
-        assert_eq!(put_config_from_current_config(config), parsed);
     }
 
     #[test]
@@ -221,13 +237,15 @@ mod tests {
                 },
             )],
             ntp_servers: vec!["ntp1.com".into(), "ntp2.com".into()],
-            rack_network_config: RackNetworkConfig {
+            rack_network_config: Some(RackNetworkConfig {
                 gateway_ip: "1.2.3.4".into(),
                 infra_ip_first: "2.3.4.5".into(),
                 infra_ip_last: "3.4.5.6".into(),
                 uplink_ip: "4.5.6.7".into(),
+                uplink_port_speed: PortSpeed::Speed400G,
+                uplink_port_fec: PortFec::Firecode,
                 uplink_port: "port0".into(),
-            },
+            }),
         };
         let template = TomlTemplate::populate(&config).to_string();
         let parsed: PutRssUserConfigInsensitive =

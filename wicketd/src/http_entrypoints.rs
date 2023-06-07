@@ -97,7 +97,7 @@ pub struct CurrentRssUserConfigInsensitive {
     pub dns_servers: Vec<String>,
     pub internal_services_ip_pool_ranges: Vec<address::IpRange>,
     pub external_dns_zone_name: String,
-    pub rack_network_config: RackNetworkConfig,
+    pub rack_network_config: Option<RackNetworkConfig>,
 }
 
 // This is a summary of the subset of `RackInitializeRequest` that is sensitive;
