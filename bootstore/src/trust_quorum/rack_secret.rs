@@ -3,7 +3,8 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use rand::rngs::OsRng;
-use secrecy::{ExposeSecret, Secret};
+use secrecy::{DebugSecret, ExposeSecret, Secret};
+use std::fmt::Debug;
 use vsss_rs::curve25519::WrappedScalar;
 use vsss_rs::curve25519_dalek::Scalar;
 use vsss_rs::shamir;
@@ -39,6 +40,14 @@ use vsss_rs::subtle::ConstantTimeEq;
 /// type and orthogonal to its implementation.
 pub struct RackSecret {
     secret: Secret<Scalar>,
+}
+
+impl DebugSecret for RackSecret {}
+
+impl Debug for RackSecret {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        Self::debug_secret(f)
+    }
 }
 
 impl PartialEq for RackSecret {
