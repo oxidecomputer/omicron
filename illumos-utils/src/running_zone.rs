@@ -308,7 +308,8 @@ impl RunningZone {
         // it must actually call `crate::execute()` for the testing purposes.
         // That's mocked by `mockall` to return known data, and so the command
         // that's actually run is irrelevant.
-        let command = std::process::Command::new("echo").args(args);
+        let command = std::process::Command::new("echo");
+        let command = command.args(args);
         crate::execute(command)
             .map_err(|err| RunCommandError {
                 zone: self.name().to_string(),
