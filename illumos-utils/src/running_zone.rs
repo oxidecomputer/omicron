@@ -173,10 +173,9 @@ mod zenter {
     impl Drop for Template {
         fn drop(&mut self) {
             self.clear();
-            if unsafe { libc::close(self.fd) } != 0 {
-                let e = std::io::Error::last_os_error();
-                eprintln!("failed to close ctfs template file: {e}");
-            }
+            // Ignore any error, since printing may interfere with `slog`'s
+            // structured output.
+            unsafe { libc::close(self.fd) };
         }
     }
 
