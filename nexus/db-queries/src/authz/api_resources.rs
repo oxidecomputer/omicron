@@ -72,6 +72,13 @@ pub trait ApiResource:
     /// Otherwise, returns `None`.
     fn parent(&self) -> Option<&dyn AuthorizedResource>;
 
+    /// Returns an optional other resource whose roles should be fetched along
+    /// with this resource.  This differs from "parent".  With "parent", all of
+    /// the roles that might affect the parent will be fetched, which include
+    /// all of _its_ parents (i.e., it's recursive).  With "extra", we only
+    /// fetch this one resource's roles.
+    fn extra(&self, _authn: &authn::Context) -> Option<(ResourceType, Uuid)>;
+
     fn resource_type(&self) -> ResourceType;
     fn lookup_type(&self) -> &LookupType;
 
@@ -110,8 +117,18 @@ impl<T: ApiResource + oso::PolarClass + Clone> AuthorizedResource for T {
         'd: 'f,
         'e: 'f,
     {
-        load_roles_for_resource_tree(self, opctx, datastore, authn, roleset)
-            .boxed()
+        async {
+            if let Some((extra_type, extra_id)) = self.extra(authn) {
+                load_roles_for_resource(
+                    opctx, datastore, authn, extra_type, extra_id, roleset,
+                )
+                .await?;
+            }
+
+            load_roles_for_resource_tree(self, opctx, datastore, authn, roleset)
+                .await
+        }
+        .boxed()
     }
 
     fn on_unauthorized(
@@ -186,6 +203,18 @@ impl ApiResource for Fleet {
 
     fn parent(&self) -> Option<&dyn AuthorizedResource> {
         None
+    }
+
+    fn extra(&self, authn: &authn::Context) -> Option<(ResourceType, Uuid)> {
+        // We support operators configuring Silos such that a particular Silo
+        // level role confers a particular Fleet-level role.  So when loading
+        // fleet-level roles, we also have to load an actor's Silo-level roles,
+        // assuming there _is_ an actor and that this actor is associated with a
+        // Silo.
+        authn
+            .actor()
+            .and_then(|actor| actor.silo_id())
+            .map(|silo_id| (ResourceType::Silo, silo_id))
     }
 
     fn resource_type(&self) -> ResourceType {

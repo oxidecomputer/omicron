@@ -25,6 +25,11 @@ allow(actor: AnyActor, action: Action, resource) if
 has_role(actor: AuthenticatedActor, role: String, resource: Resource)
 	if resource.has_role(actor, role);
 
+# The Fleet is a little special: a user has the "Fleet Admin" role if they have
+# a role in their own Silo that itself confers some fleet-level role.
+has_role(actor: AuthenticatedActor, role: String, fleet: Fleet)
+	if actor.has_fleet_role(role)
+
 #
 # ROLES AND PERMISSIONS IN THE FLEET/SILO/PROJECT HIERARCHY
 #

@@ -374,6 +374,13 @@ fn do_authz_resource(
                 Some(&self.parent)
             }
 
+            fn extra(
+                &self,
+                _authn: &authn::Context
+            ) -> Option<(ResourceType, Uuid)> {
+                None
+            }
+
             fn resource_type(&self) -> ResourceType {
                 ResourceType::#resource_name
             }
