@@ -606,7 +606,10 @@ async fn test_saml_idp_metadata_data_valid(
         RequestBuilder::new(
             client,
             Method::GET,
-            &format!("/login/blahblah/saml/{}", silo_saml_idp.identity.name),
+            &format!(
+                "/login/blahblah/saml/{}/redirect",
+                silo_saml_idp.identity.name
+            ),
         )
         .expect_status(Some(StatusCode::FOUND)),
     )

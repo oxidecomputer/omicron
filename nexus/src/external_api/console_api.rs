@@ -179,16 +179,33 @@ impl RelayState {
     }
 }
 
-/// Prompt user login
-///
-/// Either display a page asking a user for their credentials, or redirect them
-/// to their identity provider.
+/// SAML login console page (just a link to the IdP)
 #[endpoint {
    method = GET,
    path = "/login/{silo_name}/saml/{provider_name}",
    tags = ["login"],
+   unpublished = true,
 }]
 pub async fn login_saml_begin(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    _path_params: Path<LoginToProviderPathParam>,
+    _query_params: Query<LoginUrlQuery>,
+) -> Result<Response<Body>, HttpError> {
+    serve_console_index(rqctx.context()).await
+}
+
+/// Get a redirect straight to the IdP
+///
+/// Console uses this to avoid having to ask the API anything about the IdP. It
+/// already knows the IdP name from the path, so it can just link to this path
+/// and rely on Nexus to redirect to the actual IdP.
+#[endpoint {
+   method = GET,
+   path = "/login/{silo_name}/saml/{provider_name}/redirect",
+   tags = ["login"],
+   unpublished = true,
+}]
+pub async fn login_saml_redirect(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<LoginToProviderPathParam>,
     query_params: Query<LoginUrlQuery>,

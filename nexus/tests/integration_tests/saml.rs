@@ -129,7 +129,7 @@ async fn test_create_a_saml_idp(cptestctx: &ControlPlaneTestContext) {
             client,
             Method::GET,
             &format!(
-                "/login/{}/saml/{}",
+                "/login/{}/saml/{}/redirect",
                 silo.identity.name, silo_saml_idp.identity.name
             ),
         )
@@ -332,7 +332,10 @@ async fn test_create_a_hidden_silo_saml_idp(
         RequestBuilder::new(
             client,
             Method::GET,
-            &format!("/login/hidden/saml/{}", silo_saml_idp.identity.name),
+            &format!(
+                "/login/hidden/saml/{}/redirect",
+                silo_saml_idp.identity.name
+            ),
         )
         .expect_status(Some(StatusCode::FOUND)),
     )
