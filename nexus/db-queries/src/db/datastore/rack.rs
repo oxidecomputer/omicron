@@ -367,7 +367,7 @@ impl DataStore {
                 .map_err(|e| {
                     TxnError::CustomError(RackInitError::AddingNic(e))
                 })?;
-                Some((external_address, db_ip, db_nic))
+                Some((db_ip, db_nic))
             }
             ServiceKind::BoundaryNtp { snat, ref nic } => {
                 let db_ip = IncompleteExternalIp::for_service_explicit_snat(
@@ -391,24 +391,22 @@ impl DataStore {
                 .map_err(|e| {
                     TxnError::CustomError(RackInitError::AddingNic(e))
                 })?;
-                Some((snat.ip, db_ip, db_nic))
+                Some((db_ip, db_nic))
             }
             _ => None,
         };
-        if let Some((external_ip, db_ip, db_nic)) = service_ip_nic {
-            let allocated_ip =
-                Self::allocate_external_ip_on_connection(conn, db_ip)
-                    .await
-                    .map_err(|err| {
-                        warn!(
-                            log,
-                            "Initializing Rack: Failed to allocate \
-                            IP address for {}",
-                            service.kind,
-                        );
-                        TxnError::CustomError(RackInitError::AddingIp(err))
-                    })?;
-            assert_eq!(allocated_ip.ip.ip(), external_ip);
+        if let Some((db_ip, db_nic)) = service_ip_nic {
+            Self::allocate_external_ip_on_connection(conn, db_ip)
+                .await
+                .map_err(|err| {
+                    warn!(
+                        log,
+                        "Initializing Rack: Failed to allocate \
+                        IP address for {}",
+                        service.kind,
+                    );
+                    TxnError::CustomError(RackInitError::AddingIp(err))
+                })?;
 
             self.create_network_interface_raw_conn(conn, db_nic)
                 .await
