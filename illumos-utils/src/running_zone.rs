@@ -172,6 +172,7 @@ mod zenter {
 
     impl Drop for Template {
         fn drop(&mut self) {
+            self.clear();
             if unsafe { libc::close(self.fd) } != 0 {
                 let e = std::io::Error::last_os_error();
                 eprintln!("failed to close ctfs template file: {e}");
@@ -250,6 +251,22 @@ impl RunningZone {
     }
 
     /// Runs a command within the Zone, return the output.
+    //
+    // NOTE: It's important that this function is synchronous.
+    //
+    // Internally, we're setting the (thread-local) contract template before
+    // forking a child to exec the command inside the target zone. In order for
+    // that to all work correctly, that template must be set and then later
+    // cleared in the _same_ OS thread. An async method here would open the
+    // possibility that the template is set in some thread, and then cleared in
+    // another, if the task is swapped out at an await point. That would leave
+    // the first thread's template in a modified state.
+    //
+    // If we do need to make this method synchronous, we will need to change the
+    // internals to avoid changing the thread's contract. One possible approach
+    // here would be to use `libscf` directly, rather than `exec`-ing `svccfg`
+    // directly in a forked childe. That would obviate the need to work on the
+    // contract at all.
     #[cfg(target_os = "illumos")]
     pub fn run_cmd<I, S>(&self, args: I) -> Result<String, RunCommandError>
     where
