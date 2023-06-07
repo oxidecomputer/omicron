@@ -2591,18 +2591,6 @@ mod test {
             }
             Ok(SecretState::Current(self.get_latest().await?))
         }
-
-        fn override_paths(&self, mgr: &ServiceManager) {
-            let dir = self.config_dir.path();
-            mgr.override_ledger_directory(dir.to_path_buf());
-            mgr.override_image_directory(dir.to_path_buf());
-
-            // We test launching "fake" versions of the zones, but the
-            // logic to find paths relies on checking the existence of
-            // files.
-            std::fs::write(dir.join("oximeter.tar.gz"), "Not a real file")
-                .unwrap();
-        }
     }
 
     async fn spawn_key_manager(log: &Logger) -> StorageKeyRequester {
