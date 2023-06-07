@@ -187,12 +187,35 @@ impl PartialEq for Fleet {
 
 impl oso::PolarClass for Fleet {
     fn get_polar_class_builder() -> oso::ClassBuilder<Self> {
-        oso::Class::builder().with_equality_check().add_method(
-            "has_role",
-            |_: &Fleet, actor: AuthenticatedActor, role: String| {
-                actor.has_role_resource(ResourceType::Fleet, *FLEET_ID, &role)
-            },
-        )
+        oso::Class::builder()
+            .with_equality_check()
+            .add_method(
+                "has_role",
+                |_: &Fleet, actor: AuthenticatedActor, role: String| {
+                    actor.has_role_resource(
+                        ResourceType::Fleet,
+                        *FLEET_ID,
+                        &role,
+                    )
+                },
+            )
+            .add_method(
+                "has_conferred_role",
+                |_: &Fleet, actor: AuthenticatedActor, role: String| {
+                    // XXX-dap check silo policy first
+                    if let Some(silo_id) = actor.silo_id() {
+                        // XXX-dap For now as a proof of concept let's say that
+                        // you need the corresponding role on the Silo.
+                        actor.has_role_resource(
+                            ResourceType::Silo,
+                            silo_id,
+                            &role,
+                        )
+                    } else {
+                        false
+                    }
+                },
+            )
     }
 }
 
