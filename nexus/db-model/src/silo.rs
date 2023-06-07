@@ -92,6 +92,14 @@ pub struct Silo {
     pub authentication_mode: AuthenticationMode,
     pub user_provision_type: UserProvisionType,
 
+    // The mapping of Silo roles to Fleet roles in each row is stored as a
+    // JSON-serialized map.  This is an implementation detail hidden behind this
+    // struct.  For writes, consumers provide a BTreeMap in `Silo::new()`.  For
+    // reads, consumers use mapped_fleet_roles() to get this information back
+    // out.  This struct takes care of converting to/from the stored
+    // representation (which happens to be identical).
+    mapped_fleet_roles: serde_json::Value,
+
     /// child resource generation number, per RFD 192
     pub rcgen: Generation,
 }
