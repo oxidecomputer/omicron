@@ -111,7 +111,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         project_lookup: &lookup::Project<'_>,
-    ) -> LookupResult<shared::Policy<authz::ProjectRole>> {
+    ) -> LookupResult<shared::Policy<shared::ProjectRole>> {
         let (.., authz_project) =
             project_lookup.lookup_for(authz::Action::ReadPolicy).await?;
         let role_assignments = self
@@ -129,8 +129,8 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         project_lookup: &lookup::Project<'_>,
-        policy: &shared::Policy<authz::ProjectRole>,
-    ) -> UpdateResult<shared::Policy<authz::ProjectRole>> {
+        policy: &shared::Policy<shared::ProjectRole>,
+    ) -> UpdateResult<shared::Policy<shared::ProjectRole>> {
         let (.., authz_project) =
             project_lookup.lookup_for(authz::Action::ModifyPolicy).await?;
 

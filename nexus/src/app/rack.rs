@@ -183,6 +183,7 @@ impl super::Nexus {
             identity_mode: SiloIdentityMode::LocalOnly,
             admin_group_name: None,
             tls_certificates,
+            mapped_fleet_roles: Default::default(),
         };
 
         self.db_datastore

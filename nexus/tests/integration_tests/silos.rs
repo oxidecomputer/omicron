@@ -16,7 +16,7 @@ use omicron_common::api::external::{
 };
 use omicron_nexus::authn::silos::{AuthenticatedSubject, IdentityProviderType};
 use omicron_nexus::authn::{USER_TEST_PRIVILEGED, USER_TEST_UNPRIVILEGED};
-use omicron_nexus::authz::{self, SiloRole};
+use omicron_nexus::authz::{self};
 use omicron_nexus::db;
 use omicron_nexus::db::fixed_data::silo::{DEFAULT_SILO, SILO_ID};
 use omicron_nexus::db::identity::Asset;
@@ -35,6 +35,7 @@ use base64::Engine;
 use http::method::Method;
 use http::StatusCode;
 use httptest::{matchers::*, responders::*, Expectation, Server};
+use omicron_nexus::external_api::shared::SiloRole;
 use std::convert::Infallible;
 use std::net::Ipv4Addr;
 use std::time::Duration;
@@ -66,6 +67,7 @@ async fn test_silos(cptestctx: &ControlPlaneTestContext) {
                 identity_mode: shared::SiloIdentityMode::LocalOnly,
                 admin_group_name: None,
                 tls_certificates: vec![],
+                mapped_fleet_roles: Default::default(),
             },
         )
         .authn_as(AuthnMode::PrivilegedUser)
@@ -285,6 +287,7 @@ async fn test_silo_admin_group(cptestctx: &ControlPlaneTestContext) {
             identity_mode: shared::SiloIdentityMode::SamlJit,
             admin_group_name: Some("administrator".into()),
             tls_certificates: vec![],
+            mapped_fleet_roles: Default::default(),
         },
     )
     .await;
