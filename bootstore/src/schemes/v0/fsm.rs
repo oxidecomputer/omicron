@@ -319,8 +319,34 @@ impl Fsm {
                     }
                 }
             }
-            State::Learned(LearnedState { rack_secret_state, .. }) => {
-                Output::none()
+            State::Learned(LearnedState { pkg, rack_secret_state }) => {
+                match rack_secret_state {
+                    None => {
+                        self.pending_api_rack_secret_request = Some(self.clock);
+                        // Add our own share during initialization
+                        *rack_secret_state =
+                            Some(RackSecretState::Shares(BTreeMap::from([(
+                                self.id.clone(),
+                                pkg.share.clone(),
+                            )])));
+                        Output::none()
+                    }
+                    Some(RackSecretState::Shares(_)) => {
+                        // Refresh the start time to extend the request timeout
+                        self.pending_api_rack_secret_request = Some(self.clock);
+                        Output::none()
+                    }
+                    Some(RackSecretState::Secret(rack_secret)) => {
+                        // We already know the secret, so return it.
+                        Output {
+                            persist: false,
+                            envelopes: vec![],
+                            api_output: Some(ApiOutput::RackSecret(
+                                rack_secret.clone(),
+                            )),
+                        }
+                    }
+                }
             }
         }
     }
