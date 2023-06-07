@@ -54,6 +54,7 @@ pub fn api() -> WicketdApiDescription {
         api.register(post_rss_config_cert)?;
         api.register(post_rss_config_key)?;
         api.register(delete_rss_config)?;
+        api.register(post_run_rack_setup)?;
         api.register(get_inventory)?;
         api.register(put_repository)?;
         api.register(get_artifacts_and_event_reports)?;
@@ -194,7 +195,7 @@ async fn inventory_or_unavail(
 /// some cases) RSS configuration.
 #[endpoint {
     method = GET,
-    path = "/rss-config"
+    path = "/rack-setup"
 }]
 async fn get_rss_config(
     rqctx: RequestContext<ServerContext>,
@@ -220,7 +221,7 @@ async fn get_rss_config(
 /// endpoint.
 #[endpoint {
     method = PUT,
-    path = "/rss-config"
+    path = "/rack-setup"
 }]
 async fn put_rss_config(
     rqctx: RequestContext<ServerContext>,
@@ -265,7 +266,7 @@ pub enum CertificateUploadResponse {
 /// order, but one cannot post two certs in a row (or two keys in a row).
 #[endpoint {
     method = POST,
-    path = "/rss-config/cert"
+    path = "/rack-setup/cert"
 }]
 async fn post_rss_config_cert(
     rqctx: RequestContext<ServerContext>,
@@ -287,7 +288,7 @@ async fn post_rss_config_cert(
 /// order, but one cannot post two keys in a row (or two certs in a row).
 #[endpoint {
     method = POST,
-    path = "/rss-config/key"
+    path = "/rack-setup/key"
 }]
 async fn post_rss_config_key(
     rqctx: RequestContext<ServerContext>,
@@ -311,7 +312,7 @@ pub struct PutRssRecoveryUserPasswordHash {
 /// Update the RSS config recovery silo user password hash.
 #[endpoint {
     method = PUT,
-    path = "/rss-config/recovery-user-password-hash"
+    path = "/rack-setup/recovery-user-password-hash"
 }]
 async fn put_rss_config_recovery_user_password_hash(
     rqctx: RequestContext<ServerContext>,
@@ -328,7 +329,7 @@ async fn put_rss_config_recovery_user_password_hash(
 /// Reset all RSS configuration to their default values.
 #[endpoint {
     method = DELETE,
-    path = "/rss-config"
+    path = "/rack-setup"
 }]
 async fn delete_rss_config(
     rqctx: RequestContext<ServerContext>,
@@ -337,6 +338,60 @@ async fn delete_rss_config(
 
     let mut config = ctx.rss_config.lock().unwrap();
     *config = Default::default();
+
+    Ok(HttpResponseUpdatedNoContent())
+}
+
+/// Run rack setup.
+///
+/// Will return an error if not all of the rack setup configuration has been
+/// populated.
+#[endpoint {
+    method = POST,
+    path = "/rack-setup/execute"
+}]
+async fn post_run_rack_setup(
+    rqctx: RequestContext<ServerContext>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let ctx = rqctx.context();
+
+    let request = {
+        let config = ctx.rss_config.lock().unwrap();
+        config.start_rss_request(
+            &ctx.bootstrap_peers,
+            ctx.baseboard.as_ref(),
+        ).map_err(|err| HttpError::for_bad_request(None, format!("{err:#}")))?
+    };
+
+    slog::info!(
+        ctx.log,
+        "Sending RSS initialize request to {}",
+        request.sled_agent_addr
+    );
+    let client = bootstrap_agent_client::Client::new(
+        &format!("http://{}", request.sled_agent_addr),
+        ctx.log.new(slog::o!("component" => "bootstrap client")),
+    );
+
+    client.rack_initialize(&request.request).await.map_err(|err| {
+        use bootstrap_agent_client::Error as BaError;
+        match err {
+            BaError::CommunicationError(err) => {
+                let message =
+                    format!("Failed to send rack setup request: {err}");
+                HttpError {
+                    status_code: http::StatusCode::SERVICE_UNAVAILABLE,
+                    error_code: None,
+                    external_message: message.clone(),
+                    internal_message: message,
+                }
+            }
+            other => HttpError::for_bad_request(
+                None,
+                format!("Rack setup request failed: {other}"),
+            ),
+        }
+    })?;
 
     Ok(HttpResponseUpdatedNoContent())
 }

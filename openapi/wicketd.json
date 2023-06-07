@@ -260,36 +260,7 @@
         }
       }
     },
-    "/repository": {
-      "put": {
-        "summary": "Upload a TUF repository to the server.",
-        "description": "At any given time, wicketd will keep at most one TUF repository in memory. Any previously-uploaded repositories will be discarded.",
-        "operationId": "put_repository",
-        "requestBody": {
-          "content": {
-            "application/octet-stream": {
-              "schema": {
-                "type": "string",
-                "format": "binary"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "204": {
-            "description": "resource updated"
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/rss-config": {
+    "/rack-setup": {
       "get": {
         "summary": "Get the current status of the user-provided (or system-default-provided, in",
         "description": "some cases) RSS configuration.",
@@ -355,7 +326,7 @@
         }
       }
     },
-    "/rss-config/cert": {
+    "/rack-setup/cert": {
       "post": {
         "summary": "Add an external certificate.",
         "description": "This must be paired with its private key. They may be posted in either order, but one cannot post two certs in a row (or two keys in a row).",
@@ -396,7 +367,25 @@
         }
       }
     },
-    "/rss-config/key": {
+    "/rack-setup/execute": {
+      "post": {
+        "summary": "Run rack setup.",
+        "description": "Will return an error if not all of the rack setup configuration has been populated.",
+        "operationId": "post_run_rack_setup",
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/rack-setup/key": {
       "post": {
         "summary": "Add the private key of an external certificate.",
         "description": "This must be paired with its certificate. They may be posted in either order, but one cannot post two keys in a row (or two certs in a row).",
@@ -437,7 +426,7 @@
         }
       }
     },
-    "/rss-config/recovery-user-password-hash": {
+    "/rack-setup/recovery-user-password-hash": {
       "put": {
         "summary": "Update the RSS config recovery silo user password hash.",
         "operationId": "put_rss_config_recovery_user_password_hash",
@@ -446,6 +435,35 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/PutRssRecoveryUserPasswordHash"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/repository": {
+      "put": {
+        "summary": "Upload a TUF repository to the server.",
+        "description": "At any given time, wicketd will keep at most one TUF repository in memory. Any previously-uploaded repositories will be discarded.",
+        "operationId": "put_repository",
+        "requestBody": {
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
               }
             }
           },

@@ -17,6 +17,7 @@ use sled_hardware::Baseboard;
 pub struct ServerContext {
     pub mgs_handle: MgsHandle,
     pub mgs_client: gateway_client::Client,
+    pub(crate) log: slog::Logger,
     pub(crate) bootstrap_peers: BootstrapPeers,
     pub(crate) update_tracker: Arc<UpdateTracker>,
     pub(crate) baseboard: Option<Baseboard>,
