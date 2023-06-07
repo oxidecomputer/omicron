@@ -582,10 +582,12 @@ async fn test_login_redirect_multiple_silos(
         client: &reqwest::Client,
         silo_name: &str,
         port: u16,
+        state: Option<&str>,
     ) -> Redirect {
+        let query = state.map_or("".to_string(), |s| format!("?state={}", s));
         let url = format!(
-            "http://{}.sys.{}:{}/login?state=%2Fabc%2Fdef",
-            silo_name, DNS_ZONE_EXTERNAL_TESTING, port,
+            "http://{}.sys.{}:{}/login{}",
+            silo_name, DNS_ZONE_EXTERNAL_TESTING, port, query
         );
         let response = client
             .get(&url)
@@ -667,24 +669,62 @@ async fn test_login_redirect_multiple_silos(
 
     // Recovery silo: redirect for local username/password login
     assert_eq!(
-        make_request(&reqwest_client, cptestctx.silo_name.as_str(), port).await,
+        make_request(&reqwest_client, cptestctx.silo_name.as_str(), port, None)
+            .await,
+        Redirect::Location(format!("/login/{}/local", &cptestctx.silo_name,)),
+    );
+
+    // same thing, but with state param in URL
+    assert_eq!(
+        make_request(
+            &reqwest_client,
+            cptestctx.silo_name.as_str(),
+            port,
+            Some("/abc/def")
+        )
+        .await,
         Redirect::Location(format!(
             "/login/{}/local?state=%2Fabc%2Fdef",
             &cptestctx.silo_name,
         )),
     );
+
     // SAML with no idps: no redirect possible
     assert_eq!(
-        make_request(&reqwest_client, silo_saml0.identity.name.as_str(), port)
-            .await,
+        make_request(
+            &reqwest_client,
+            silo_saml0.identity.name.as_str(),
+            port,
+            None
+        )
+        .await,
         Redirect::Error(String::from(
             "no identity providers are configured for Silo"
         ))
     );
     // SAML with one idp: redirect to that idp
     assert_eq!(
-        make_request(&reqwest_client, silo_saml1.identity.name.as_str(), port)
-            .await,
+        make_request(
+            &reqwest_client,
+            silo_saml1.identity.name.as_str(),
+            port,
+            None
+        )
+        .await,
+        Redirect::Location(format!(
+            "/login/{}/saml/idp0",
+            silo_saml1.identity.name.as_str()
+        )),
+    );
+    // same thing but, with state param in URL
+    assert_eq!(
+        make_request(
+            &reqwest_client,
+            silo_saml1.identity.name.as_str(),
+            port,
+            Some("/abc/def"),
+        )
+        .await,
         Redirect::Location(format!(
             "/login/{}/saml/idp0?state=%2Fabc%2Fdef",
             silo_saml1.identity.name.as_str()
@@ -694,17 +734,22 @@ async fn test_login_redirect_multiple_silos(
     // This is arbitrary.  We just don't want /login to break if you add a
     // second IdP.
     assert_eq!(
-        make_request(&reqwest_client, silo_saml2.identity.name.as_str(), port)
-            .await,
+        make_request(
+            &reqwest_client,
+            silo_saml2.identity.name.as_str(),
+            port,
+            None
+        )
+        .await,
         Redirect::Location(format!(
-            "/login/{}/saml/idp0?state=%2Fabc%2Fdef",
+            "/login/{}/saml/idp0",
             silo_saml2.identity.name.as_str()
         )),
     );
 
     // Bogus Silo: this currently redirects you to _some_ Silo.
     assert_matches::assert_matches!(
-        make_request(&reqwest_client, "not-a-silo", port).await,
+        make_request(&reqwest_client, "not-a-silo", port, None).await,
         Redirect::Location(_)
     );
 
@@ -734,6 +779,7 @@ async fn test_login_redirect_multiple_silos(
                 &reqwest_client,
                 silo_saml1.identity.name.as_str(),
                 port,
+                None,
             )
             .await
             {
