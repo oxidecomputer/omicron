@@ -520,6 +520,25 @@ pub async fn project_get(
         .expect("failed to parse Project")
 }
 
+pub async fn projects_list(
+    client: &ClientTestContext,
+    projects_url: &str,
+    initial_params: &str,
+    limit: Option<usize>,
+) -> Vec<Project> {
+    NexusRequest::iter_collection_authn(
+        client,
+        projects_url,
+        initial_params,
+        limit,
+    )
+    .await
+    .expect("failed to list projects")
+    .all_items
+    .into_iter()
+    .collect()
+}
+
 pub struct TestDataset {
     pub id: Uuid,
 }

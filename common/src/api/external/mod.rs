@@ -708,6 +708,7 @@ pub enum ResourceType {
     PhysicalDisk,
     Rack,
     Service,
+    ServiceNetworkInterface,
     Sled,
     SledInstance,
     Switch,
@@ -1904,6 +1905,18 @@ impl MacAddr {
         Self::from_i64(value)
     }
 
+    /// Is this a MAC in the Guest Addresses range
+    pub fn is_guest(&self) -> bool {
+        let value = self.to_i64();
+        value >= Self::MIN_GUEST_ADDR && value <= Self::MAX_GUEST_ADDR
+    }
+
+    /// Is this a MAC in the System Addresses range
+    pub fn is_system(&self) -> bool {
+        let value = self.to_i64();
+        value >= Self::MIN_SYSTEM_ADDR && value <= Self::MAX_SYSTEM_ADDR
+    }
+
     /// Construct a MAC address from its i64 big-endian byte representation.
     // NOTE: This is the representation used in the database.
     pub fn from_i64(value: i64) -> Self {
@@ -2024,6 +2037,11 @@ impl Vni {
     /// Create a new random VNI.
     pub fn random() -> Self {
         Self(rand::thread_rng().gen_range(Self::MIN_GUEST_VNI..=Self::MAX_VNI))
+    }
+
+    /// Create a new random VNI in the Oxide-reserved space.
+    pub fn random_system() -> Self {
+        Self(rand::thread_rng().gen_range(0..Self::MIN_GUEST_VNI))
     }
 }
 
