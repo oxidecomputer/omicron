@@ -85,6 +85,7 @@ impl From<ApiError> for Output {
 
 /// Errors returned to the FSM caller not to a peer FSM in a message
 // TODO: Use thiserror
+#[derive(Debug)]
 pub enum ApiError {
     RackInitTimeout {
         unacked_peers: BTreeSet<Baseboard>,
@@ -114,6 +115,22 @@ pub enum ApiError {
     /// We could not reconstruct the rack secret even after retrieving enough
     /// valid shares.
     FailedToReconstructRackSecret,
+
+    /// Unexpected response received
+    UnexpectedRequest {
+        from: Baseboard,
+        state: &'static str,
+        request_id: Uuid,
+        msg: &'static str,
+    },
+
+    /// Unexpected response received
+    UnexpectedResponse {
+        from: Baseboard,
+        state: &'static str,
+        request_id: Uuid,
+        msg: &'static str,
+    },
 }
 
 /// The caller of the API (aka the peer/network layer will sometimes need to get

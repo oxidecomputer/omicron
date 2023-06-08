@@ -13,9 +13,9 @@ use super::messages::{
     Envelope, Error, Msg, Request, RequestType, Response, ResponseType,
 };
 use super::state::{
-    InitialMemberState, LearnAttempt, LearnedState, PersistentFsmState,
-    PersistentState, RackInitState, RackSecretState, RequestMetadata, ShareIdx,
-    State, Ticks,
+    Config, FsmCommonData, InitialMemberState, LearnAttempt, LearnedState,
+    PersistentFsmState, PersistentState, RackInitState, RackSecretState,
+    RequestMetadata, ShareIdx, State, Ticks,
 };
 use crate::trust_quorum::{
     create_pkgs, LearnedSharePkgV0, RackSecret, SharePkgV0, TrustQuorumError,
@@ -26,6 +26,27 @@ use sha3::{Digest, Sha3_256};
 use sled_hardware::Baseboard;
 use std::collections::{BTreeMap, BTreeSet};
 use uuid::Uuid;
+
+/// Handler methods implemented by each FSM state
+pub trait StateHandler {
+    fn handle_request(
+        mut self,
+        common: &mut FsmCommonData,
+        from: Baseboard,
+        request_id: Uuid,
+        request: RequestType,
+    ) -> (state, Output);
+
+    fn handle_response(
+        mut self,
+        common: &mut FsmCommonData,
+        from: Baseboard,
+        request_id: Uuid,
+        response: ResponseType,
+    ) -> (State, Output);
+
+    fn tick(mut self, common: &mut FsmCommonData) -> (State, Output);
+}
 
 /// The state machine for a [`$crate::Peer`]
 ///
@@ -39,49 +60,15 @@ use uuid::Uuid;
 /// the message will be dropped and the FSM will be told to remove the peer.
 #[derive(Debug)]
 pub struct Fsm {
-    // Unique IDs of this peer
-    id: Baseboard,
+    common: FsmCommonData,
 
-    // Configuration of the FSM
-    config: Config,
-
-    // Unique IDs of known peers
-    peers: BTreeSet<Baseboard>,
-
-    // The current time in ticks since the creation of the FSM
-    clock: Ticks,
-
-    // An api caller can issue a request for a `RackSecret` with
-    // `load_rack_secret`. Sometimes we don't have the `RackSecret` recomputed
-    // and so we have to mark the request as pending until we retrieve enough
-    // shares to recompute it and return it to the caller. We keep track
-    // of the pending request here as it's valid in all FSM states except
-    // `State::Uninitialized`.
-    //
-    // The value stored inside the `Option` is the start time of the request.
-    //
-    // A caller should only issue this once. If it's issued more times, we'll
-    // overwrite the start time to extend the timeout.
-    pending_api_rack_secret_request: Option<Ticks>,
-}
-
-/// Configuration of the FSM
-#[derive(Debug, Clone)]
-pub struct Config {
-    pub retry_timeout: Ticks,
-    pub learn_timeout: Ticks,
-    pub rack_init_timeout: Ticks,
+    // Use an option to allow taking and mutating `State` independently of `Fsm`
+    state: Option<State>,
 }
 
 impl Fsm {
-    pub fn new(id: Baseboard, config: Config) -> Fsm {
-        Fsm {
-            id,
-            config,
-            peers: BTreeSet::new(),
-            clock: 0,
-            pending_api_rack_secret_request: None,
-        }
+    pub fn new(id: Baseboard, config: Config, state: State) -> Fsm {
+        Fsm { common: FsmCommonData::new(id, config), state: Some(state) }
     }
 
     /// This call is triggered locally as a result of RSS running
@@ -225,55 +212,13 @@ impl Fsm {
     /// On each tick, the current duration since start is passed in. We only
     /// deal in relative time needed for timeouts, and not absolute time. This
     /// strategy allows for deterministic property based tests.
-    pub fn tick(&mut self, state: &mut State) -> Output {
+    pub fn tick(&mut self) -> Output {
         self.clock += 1;
 
-        match state {
-            State::Learning(Some(attempt)) => {
-                if attempt.expired(self.clock, self.config.learn_timeout) {
-                    if let Some(peer) = next_peer(&attempt.peer, &self.peers) {
-                        attempt.peer = peer.clone();
-                        attempt.start = self.clock;
-                        return Output::request(peer, RequestType::Learn);
-                    }
-                    // No peers to learn from
-                    *state = State::Learning(None);
-                }
-            }
-            State::Learning(None) => {
-                if let Some(peer) = self.peers.first() {
-                    *state = State::Learning(Some(LearnAttempt {
-                        peer: peer.clone(),
-                        start: self.clock,
-                    }));
-                    return Output::request(peer.clone(), RequestType::Learn);
-                }
-                // No peers to learn from
-            }
-            State::InitialMember(InitialMemberState {
-                pkg,
-                rack_init_state,
-                ..
-            }) => {
-                if let Some(rack_init_state2) = rack_init_state {
-                    if rack_init_state2.timer_expired(
-                        self.clock,
-                        self.config.rack_init_timeout,
-                    ) {
-                        let unacked_peers = pkg
-                            .initial_membership
-                            .difference(&rack_init_state2.acks)
-                            .cloned()
-                            .collect();
-                        *rack_init_state = None;
-                        return ApiError::RackInitTimeout { unacked_peers }
-                            .into();
-                    }
-                }
-            }
-            _ => (),
-        }
-        Output::none()
+        let state = self.state.take().unwrap();
+        let (new_state, output) = state.tick(&mut self.common);
+        self.state = Some(new_state);
+        output
     }
 
     /// A connection has been established an a peer has been learned.
@@ -859,7 +804,7 @@ fn send_share_response(
 }
 
 // Round-robin peer selection
-fn next_peer(
+pub fn next_peer(
     current: &Baseboard,
     peers: &BTreeSet<Baseboard>,
 ) -> Option<Baseboard> {

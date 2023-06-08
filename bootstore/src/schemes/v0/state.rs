@@ -4,6 +4,10 @@
 
 //! State for the V0 protocol state machine
 
+use super::state_initial_member::InitialMemberState;
+use super::state_learned::LearnedState;
+use super::state_learning::LearningState;
+use super::state_uninitialized::UninitializedState;
 use crate::trust_quorum::{
     create_pkgs, LearnedSharePkgV0, RackSecret, SharePkgV0, TrustQuorumError,
 };
@@ -21,24 +25,51 @@ pub type Ticks = usize;
 )]
 pub struct ShareIdx(pub usize);
 
-/// An attempt by *this* peer to learn a key share
-///
-/// When an attempt is started, a peer is selected from those known to the FSM,
-/// and a `RequestType::Learn` message is sent to that peer. This peer is recorded
-/// along with the current clock as `start`. If `Config.learn_timeout` ticks
-/// have fired since `start` based on the current FSM clock, without this
-/// FSM having received a `ResponseType::Pkg`, then the `LearnAttempt` will be
-/// cancelled, and the next peer in order known to the FSM will be contacted in
-/// a new attempt.
+/// Configuration of the FSM
 #[derive(Debug, Clone)]
-pub struct LearnAttempt {
-    pub peer: Baseboard,
-    pub start: Ticks,
+pub struct Config {
+    pub retry_timeout: Ticks,
+    pub learn_timeout: Ticks,
+    pub rack_init_timeout: Ticks,
 }
 
-impl LearnAttempt {
-    pub fn expired(&self, now: Ticks, timeout: Ticks) -> bool {
-        now.saturating_sub(self.start) >= timeout
+/// In memory state shared by all 4 FSM states
+pub struct FsmCommonData {
+    // Unique IDs of this peer
+    pub id: Baseboard,
+
+    // Configuration of the FSM
+    pub config: Config,
+
+    // Unique IDs of known peers
+    pub peers: BTreeSet<Baseboard>,
+
+    // The current time in ticks since the creation of the FSM
+    pub clock: Ticks,
+
+    // An api caller can issue a request for a `RackSecret` with
+    // `load_rack_secret`. Sometimes we don't have the `RackSecret` recomputed
+    // and so we have to mark the request as pending until we retrieve enough
+    // shares to recompute it and return it to the caller. We keep track
+    // of the pending request here as it's valid in all FSM states except
+    // `State::Uninitialized`.
+    //
+    // The value stored inside the `Option` is the start time of the request.
+    //
+    // A caller should only issue this once. If it's issued more times, we'll
+    // overwrite the start time to extend the timeout.
+    pub pending_api_rack_secret_request: Option<Ticks>,
+}
+
+impl FsmCommonData {
+    pub fn new(id: Baseboard, config: Config) -> FsmCommonData {
+        FsmCommonData {
+            id,
+            config,
+            peers: BTreeSet::new(),
+            clock: 0,
+            pending_api_rack_secret_request: None,
+        }
     }
 }
 
@@ -154,7 +185,7 @@ pub enum State {
     /// or a learner.
     ///
     /// All peers start out in this state prior to RSS running
-    Uninitialized,
+    Uninitialized(UninitializedState),
 
     /// The peer is an initial member of the group setup via RSS
     ///
@@ -165,7 +196,7 @@ pub enum State {
     /// The peer has been instructed to learn a share
     ///
     /// This peer was added to the cluster after rack initialization completed.
-    Learning(Option<LearnAttempt>),
+    Learning(LearningState),
 
     /// The peer has learned its share
     ///
@@ -182,83 +213,5 @@ impl State {
             Self::Learning(_) => "learning",
             Self::Learned(_) => "learned",
         }
-    }
-}
-
-#[derive(Debug)]
-pub struct LearnedState {
-    pub pkg: LearnedSharePkgV0,
-    // In `InitialMember` or `Learned` states, it is sometimes necessary to
-    // reconstruct the rack secret.
-    //
-    // This is needed to both unlock local storage or decrypt our extra shares
-    // to hand out to learners.
-    pub rack_secret_state: Option<RackSecretState>,
-}
-
-impl LearnedState {
-    pub fn new(pkg: LearnedSharePkgV0) -> Self {
-        LearnedState { pkg, rack_secret_state: None }
-    }
-}
-
-#[derive(Debug)]
-pub struct InitialMemberState {
-    pub pkg: SharePkgV0,
-
-    /// Shares given to other sleds. We mark them as used so that we don't
-    /// hand them out twice. If the same sled asks us for a share, because
-    /// it crashes or there is a network blip, we will return the same
-    /// share each time.
-    ///
-    /// Note that this is a fairly optimistic strategy as the requesting
-    /// sled can always go ask another sled after a network blip. However,
-    /// this guarantees that a single sled never hands out more than one of
-    /// its shares to any given sled.
-    ///
-    /// We can't do much better than this without some sort of centralized
-    /// distributor which is part of the reconfiguration mechanism in later
-    /// versions of the trust quourum protocol.
-    pub distributed_shares: BTreeMap<Baseboard, ShareIdx>,
-
-    // Acknowledgements tracked during rack initialization if this node is
-    // the one acting as coordinator (local to RSS).
-    pub rack_init_state: Option<RackInitState>,
-
-    // Pending learn requests from other peers mapped to their start time.
-    //
-    // When a peer attempts to learn a share, we may not be able to give it
-    // one because we cannot yet recompute the rack secret. We queue requests
-    // here and respond when we can recompute the rack secret. If we timeout before
-    // we can recompute the rack secret, we respond with a timeout Error.
-    //
-    // Note that if we get a new `RequestType::Learn` from a peer that is already
-    // pending, we will reset the start time.
-    pub pending_learn_requests: BTreeMap<Baseboard, RequestMetadata>,
-
-    // In `InitialMember` or `Learned` states, it is sometimes necessary to
-    // reconstruct the rack secret.
-    //
-    // This is needed to both unlock local storage or decrypt our extra shares
-    // to hand out to learners.
-    pub rack_secret_state: Option<RackSecretState>,
-}
-
-impl InitialMemberState {
-    pub fn new(
-        pkg: SharePkgV0,
-        distributed_shares: BTreeMap<Baseboard, ShareIdx>,
-    ) -> Self {
-        InitialMemberState {
-            pkg,
-            distributed_shares,
-            rack_init_state: None,
-            pending_learn_requests: BTreeMap::new(),
-            rack_secret_state: None,
-        }
-    }
-
-    pub fn name(&self) -> &'static str {
-        "initial_member"
     }
 }

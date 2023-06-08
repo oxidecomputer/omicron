@@ -64,6 +64,18 @@ pub enum RequestType {
     Learn,
 }
 
+impl RequestType {
+    pub fn name(&self) -> &'static str {
+        use RequestType::*;
+        match RequestType {
+            Init(_) => "init",
+            InitLearner => "init_learner",
+            GetShare { .. } => "get_share",
+            Learn => "learn",
+        }
+    }
+}
+
 /// A response to a request from a peer over TCP
 #[derive(From, Debug, PartialEq, Serialize, Deserialize)]
 pub enum ResponseType {
@@ -78,6 +90,18 @@ pub enum ResponseType {
 
     /// An error response
     Error(Error),
+}
+
+impl ResponseType {
+    pub fn name(&self) -> &'static str {
+        use ResponseType::*;
+        match ResponseType {
+            InitAck(_) => "init_ack",
+            Share(_) => "share",
+            Pkg(_) => "pkg",
+            ResponseType::Error(_) => "error",
+        }
+    }
 }
 
 /// An error returned from a peer over TCP
