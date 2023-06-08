@@ -12,12 +12,6 @@ use sled_hardware::Baseboard;
 use std::collections::BTreeSet;
 use uuid::Uuid;
 
-pub enum LogLevel {
-    Info,
-    Warn,
-    Error,
-}
-
 /// Output from a a call to [`Fsm::Handle`]
 pub struct Output {
     /// Possible state that needs persisting before any messages are sent
@@ -27,7 +21,7 @@ pub struct Output {
     pub envelopes: Vec<Envelope>,
 
     // A reply to the user of the FSM API
-    pub api_output: Option<ApiOutput>,
+    pub api_output: Option<Result<ApiOutput, ApiError>>,
 }
 
 impl Output {
@@ -74,67 +68,27 @@ impl Output {
         }
     }
 
-    pub fn rack_init_timeout(unacked_peers: BTreeSet<Baseboard>) -> Output {
-        Output {
-            persist: false,
-            envelopes: vec![],
-            api_output: Some(ApiOutput::RackInitTimeout { unacked_peers }),
-        }
-    }
-
     pub fn rack_init_complete() -> Output {
         Output {
             persist: false,
             envelopes: vec![],
-            api_output: Some(ApiOutput::RackInitComplete),
-        }
-    }
-
-    pub fn rack_already_initialized() -> Output {
-        Output {
-            persist: false,
-            envelopes: vec![],
-            api_output: Some(ApiOutput::RackAlreadyInitialized),
-        }
-    }
-
-    pub fn rack_not_initialized() -> Output {
-        Output {
-            persist: false,
-            envelopes: vec![],
-            api_output: Some(ApiOutput::RackNotInitialized),
-        }
-    }
-
-    pub fn rack_init_failed(err: TrustQuorumError) -> Output {
-        Output {
-            persist: false,
-            envelopes: vec![],
-            api_output: Some(ApiOutput::RackInitFailed(err)),
-        }
-    }
-
-    pub fn log<S: Into<String>>(level: LogLevel, msg: S) -> Output {
-        Output {
-            persist: false,
-            envelopes: vec![],
-            api_output: Some(ApiOutput::Log(level, msg.into())),
+            api_output: Some(Ok(ApiOutput::RackInitComplete)),
         }
     }
 }
 
-/// The caller of the API (aka the peer/network layer will sometimes need to get
-/// messages delivered to it, such as when rack initialization has completed. We
-/// provide this information in `Output::api_output`.
-pub enum ApiOutput {
-    RackInitComplete,
+impl From<ApiError> for Output {
+    fn from(err: ApiError) -> Self {
+        Output { persist: false, envelopes: vec![], api_output: Some(Err(err)) }
+    }
+}
+
+/// Errors returned to the FSM caller not to a peer FSM in a message
+// TODO: Use thiserror
+pub enum ApiError {
     RackInitTimeout {
         unacked_peers: BTreeSet<Baseboard>,
     },
-
-    // Return the rack secret
-    RackSecret(RackSecret),
-
     /// Rack initialization was already run once.
     RackAlreadyInitialized,
 
@@ -143,10 +97,29 @@ pub enum ApiOutput {
     /// The rack must be initialized before the rack secret can be loaded
     RackNotInitialized,
 
-    // A timeout when retreiving the rack secret
+    /// A timeout when retreiving the rack secret
     RackSecretLoadTimeout,
 
-    // We don't log inside the FSM, we return logs to the caller as part of our
-    // "No IO in the FSM" paradigm
-    Log(LogLevel, String),
+    /// Share digest does not match what's in our package
+    InvalidShare {
+        from: Baseboard,
+    },
+
+    /// We received a share with no share collection ongoing
+    UnexpectedShareReceived {
+        from: Baseboard,
+        state: &'static str,
+    },
+
+    /// We could not reconstruct the rack secret even after retrieving enough
+    /// valid shares.
+    FailedToReconstructRackSecret,
+}
+
+/// The caller of the API (aka the peer/network layer will sometimes need to get
+/// messages delivered to it, such as when rack initialization has completed. We
+/// provide this information in `Output::api_output`.
+pub enum ApiOutput {
+    RackInitComplete,
+    RackSecret(RackSecret),
 }

@@ -8,7 +8,7 @@
 //! results. This is where the bulk of the protocol logic lives. It's
 //! written this way to enable easy testing and auditing.
 
-use super::fsm_output::{ApiOutput, LogLevel, Output};
+use super::fsm_output::{ApiError, ApiOutput, Output};
 use super::messages::{
     Envelope, Error, Msg, Request, RequestType, Response, ResponseType,
 };
@@ -26,8 +26,6 @@ use sha3::{Digest, Sha3_256};
 use sled_hardware::Baseboard;
 use std::collections::{BTreeMap, BTreeSet};
 use uuid::Uuid;
-
-use LogLevel::*;
 
 /// The state machine for a [`$crate::Peer`]
 ///
@@ -96,7 +94,7 @@ impl Fsm {
         initial_membership: BTreeSet<Baseboard>,
     ) -> Output {
         let State::Uninitialized = state else {
-            return Output::rack_already_initialized();
+            return ApiError::RackAlreadyInitialized.into();
         };
         let total_members = initial_membership.len();
         match create_pkgs(rack_uuid, initial_membership.clone()) {
@@ -135,7 +133,7 @@ impl Fsm {
                     .collect();
                 Output { persist: true, envelopes, api_output: None }
             }
-            Err(e) => return Output::rack_init_failed(e),
+            Err(e) => ApiError::RackInitFailed(e).into(),
         }
     }
 
@@ -147,7 +145,7 @@ impl Fsm {
     pub fn load_rack_secret(&mut self, state: &mut State) -> Output {
         match state {
             // We don't allow retrieval before initialization
-            State::Uninitialized => Output::rack_not_initialized(),
+            State::Uninitialized => ApiError::RackNotInitialized.into(),
             State::Learning(_) => {
                 self.pending_api_rack_secret_request = Some(self.clock);
                 Output::none()
@@ -178,9 +176,9 @@ impl Fsm {
                         Output {
                             persist: false,
                             envelopes: vec![],
-                            api_output: Some(ApiOutput::RackSecret(
+                            api_output: Some(Ok(ApiOutput::RackSecret(
                                 rack_secret.clone(),
-                            )),
+                            ))),
                         }
                     }
                 }
@@ -207,9 +205,9 @@ impl Fsm {
                         Output {
                             persist: false,
                             envelopes: vec![],
-                            api_output: Some(ApiOutput::RackSecret(
+                            api_output: Some(Ok(ApiOutput::RackSecret(
                                 rack_secret.clone(),
-                            )),
+                            ))),
                         }
                     }
                 }
@@ -268,7 +266,8 @@ impl Fsm {
                             .cloned()
                             .collect();
                         *rack_init_state = None;
-                        return Output::rack_init_timeout(unacked_peers);
+                        return ApiError::RackInitTimeout { unacked_peers }
+                            .into();
                     }
                 }
             }
@@ -574,98 +573,120 @@ impl Fsm {
         share: Vec<u8>,
     ) -> Output {
         match state {
-            State::Uninitialized | State::Learning(_) => Output::log(
-                Warn,
-                format!(
-                    concat!(
-                        "Received share from {}, but no ",
-                        "share collection ongoing in state {}"
-                    ),
-                    from,
-                    state.name()
-                ),
-            ),
-            State::InitialMember(InitialMemberState {
-                pkg,
-                distributed_shares,
-                pending_learn_requests,
-                rack_secret_state,
-                ..
-            }) => {
-                match rack_secret_state {
-                    None => Output::log(
-                        Warn,
-                        format!(
-                            concat!(
-                                "Received share from {}, ",
-                                "but no share collection ongoing."
-                            ),
-                            from
-                        ),
-                    ),
-                    Some(RackSecretState::Secret(_)) => {
-                        // We already have the rack secret, just drop the extra share
-                        Output::none()
-                    }
-                    Some(RackSecretState::Shares(shares)) => {
-                        // 1. Compute the hash of the received share
-                        // 2. Check that our pkg has the hash
-                        // 3. Insert the key share
-                        // 4. If we have enough shares compute the rack secret
-                        // 5. Resolve any outstanding requests that require the rack secret
-                        if let Some(error_log) =
-                            validate_share(&from, &share, &pkg.share_digests)
-                        {
-                            return error_log;
-                        }
-                        shares.insert(from, share);
-
-                        // TODO: Include ourselves
-                        if shares.len() == pkg.threshold as usize {
-                            let to_combine: Vec<_> =
-                                shares.values().cloned().collect();
-                            match RackSecret::combine_shares(&to_combine) {
-                                Ok(rack_secret) => {
-                                    let (persist, envelopes) =
-                                        resolve_learn_requests(
-                                            &rack_secret,
-                                            &pkg,
-                                            distributed_shares,
-                                            pending_learn_requests,
-                                        );
-                                    *rack_secret_state = Some(
-                                        RackSecretState::Secret(rack_secret),
-                                    );
-                                    // TODO: resolve any API requests for the rack secret
-                                    Output {
-                                        persist,
-                                        envelopes,
-                                        api_output: None,
-                                    }
-                                }
-                                Err(e) => {
-                                    let envelopes = resolve_learn_requests_with_error(
-                                        Error::FailedToReconstructRackSecret,
-                                        pending_learn_requests,
-                                    );
-                                    // TODO: resolve any API requests for the rack secret
-                                    Output {
-                                        persist: false,
-                                        envelopes,
-                                        api_output: None,
-                                    }
-                                }
-                            }
-                        } else {
-                            // Still waiting to receive more shares
-                            Output::none()
-                        }
-                    }
-                }
+            State::Uninitialized | State::Learning(_) => {
+                ApiError::UnexpectedShareReceived { from, state: state.name() }
+                    .into()
             }
-
+            State::InitialMember(state) => {
+                self.on_share_as_initial_member(from, share, state)
+            }
             State::Learned(LearnedState { pkg, rack_secret_state }) => {
                 unimplemented!()
+            }
+        }
+    }
+
+    /// Handle a `ResponseType::Share` message in `State::InitialMember`
+    fn on_share_as_initial_member(
+        &mut self,
+        from: Baseboard,
+        share: Vec<u8>,
+        state: &mut InitialMemberState,
+    ) -> Output {
+        let InitialMemberState {
+            pkg,
+            distributed_shares,
+            pending_learn_requests,
+            rack_secret_state,
+            ..
+        } = state;
+
+        match rack_secret_state {
+            None => {
+                ApiError::UnexpectedShareReceived { from, state: state.name() }
+                    .into()
+            }
+            Some(RackSecretState::Secret(_)) => {
+                // We already have the rack secret, just drop the extra share
+                Output::none()
+            }
+            Some(RackSecretState::Shares(shares)) => {
+                // 4. If we have enough shares compute the rack secret
+                // 5. Resolve any outstanding requests that require the rack secret
+
+                /// Compute and validate hash of the received key share
+                if let Err(api_error) =
+                    validate_share(&from, &share, &pkg.share_digests)
+                {
+                    return api_error.into();
+                }
+
+                // Add the share to our current set
+                shares.insert(from, share);
+
+                // Do we have enough shares to compute the rack secret?
+                if shares.len() == pkg.threshold as usize {
+                    let to_combine: Vec<_> = shares.values().cloned().collect();
+                    match RackSecret::combine_shares(&to_combine) {
+                        Ok(rack_secret) => {
+                            // If we have any pending peer learn requests, we
+                            // can now resolve them.
+                            let (persist, envelopes) = resolve_learn_requests(
+                                &rack_secret,
+                                &pkg,
+                                distributed_shares,
+                                pending_learn_requests,
+                            );
+                            // If we have a pending API request for the rack secret we can
+                            // resolve it now.
+                            let api_output = if self
+                                .pending_api_rack_secret_request
+                                .is_some()
+                            {
+                                self.pending_api_rack_secret_request = None;
+                                Some(Ok(ApiOutput::RackSecret(
+                                    rack_secret.clone(),
+                                )))
+                            } else {
+                                None
+                            };
+
+                            *rack_secret_state =
+                                Some(RackSecretState::Secret(rack_secret));
+
+                            // TODO: resolve any API requests for the rack secret
+                            Output { persist, envelopes, api_output }
+                        }
+                        Err(e) => {
+                            // Resolve all pending learn requests with an error
+                            let envelopes = resolve_learn_requests_with_error(
+                                Error::FailedToReconstructRackSecret,
+                                pending_learn_requests,
+                            );
+                            // If we have a pending API request for the rack secret we can
+                            // resolve it now.
+                            let api_output = if self
+                                .pending_api_rack_secret_request
+                                .is_some()
+                            {
+                                self.pending_api_rack_secret_request = None;
+                                Some(Err(
+                                    ApiError::FailedToReconstructRackSecret,
+                                ))
+                            } else {
+                                None
+                            };
+                            Output {
+                                persist: false,
+                                envelopes,
+                                api_output: api_output,
+                            }
+                        }
+                    }
+                } else {
+                    // Still waiting to receive more shares
+                    Output::none()
+                }
             }
         }
     }
@@ -850,19 +871,17 @@ fn next_peer(
     }
 }
 
-// Return `Some(Output::Log)` if the share fails to validate, `None`
-// otherwise
 fn validate_share(
     from: &Baseboard,
     share: &Vec<u8>,
     share_digests: &Vec<Sha3_256Digest>,
-) -> Option<Output> {
+) -> Result<(), ApiError> {
     let computed_hash =
         Sha3_256Digest(Sha3_256::digest(share).as_slice().try_into().unwrap());
 
     if !share_digests.contains(&computed_hash) {
-        Some(Output::log(Error, format!("Invalid share received from {from}")))
+        Err(ApiError::InvalidShare { from: from.clone() })
     } else {
-        None
+        Ok(())
     }
 }

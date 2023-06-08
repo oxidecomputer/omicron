@@ -257,4 +257,8 @@ impl InitialMemberState {
             rack_secret_state: None,
         }
     }
+
+    pub fn name(&self) -> &'static str {
+        "initial_member"
+    }
 }
