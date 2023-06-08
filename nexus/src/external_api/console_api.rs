@@ -71,8 +71,8 @@ use std::{collections::HashSet, ffi::OsString, path::PathBuf, sync::Arc};
 // a page with a link to /login/{silo}/saml/{provider}/redirect?redirect_uri={}
 // (note the /redirect), which redirects to the IdP  with `redirect_uri` encoded
 // in a RelayState query param). On successful login in the IdP, the IdP will
-// POST /login/{silo}/saml/{} with a body including that redirect_uri, so that
-// on success, we can redirect to the original target page.
+// POST /login/{silo}/saml/{provider} with a body including that redirect_uri,
+// so that on success, we can redirect to the original target page.
 
 // -------------------------------
 // Detailed overview of SAML login

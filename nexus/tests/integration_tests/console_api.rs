@@ -220,7 +220,8 @@ async fn test_console_pages(cptestctx: &ControlPlaneTestContext) {
 async fn test_unauthed_console_pages(cptestctx: &ControlPlaneTestContext) {
     let testctx = &cptestctx.external_client;
 
-    let unauthed_console_paths = &["/login/irrelevant-silo/local"];
+    let unauthed_console_paths =
+        &["/login/irrelevant-silo/local", "/login/irrelevant-silo/saml/my-idp"];
 
     for path in unauthed_console_paths {
         expect_console_page(testctx, path, None).await;
