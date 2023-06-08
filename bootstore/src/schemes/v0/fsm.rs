@@ -213,8 +213,7 @@ impl Fsm {
     /// deal in relative time needed for timeouts, and not absolute time. This
     /// strategy allows for deterministic property based tests.
     pub fn tick(&mut self) -> Output {
-        self.clock += 1;
-
+        self.common.clock += 1;
         let state = self.state.take().unwrap();
         let (new_state, output) = state.tick(&mut self.common);
         self.state = Some(new_state);
@@ -241,243 +240,40 @@ impl Fsm {
     /// messages to send to other peers. Persistant state must be saved by
     /// the caller and safely persisted before messages are sent, or the next
     /// message is handled here.
-    pub fn handle(
-        &mut self,
-        state: &mut State,
-        from: Baseboard,
-        msg: Msg,
-    ) -> Output {
+    pub fn handle(&mut self, from: Baseboard, msg: Msg) -> Output {
         match msg {
-            Msg::Req(req) => self.handle_request(state, from, req),
-            Msg::Rsp(rsp) => self.handle_response(state, from, rsp),
+            Msg::Req(req) => self.handle_request(from, req),
+            Msg::Rsp(rsp) => self.handle_response(from, rsp),
         }
     }
 
     // Handle a `Request` message
-    fn handle_request(
-        &mut self,
-        state: &mut State,
-        from: Baseboard,
-        request: Request,
-    ) -> Output {
-        match request.type_ {
-            RequestType::Init(new_pkg) => {
-                self.on_init(state, from, request.id, new_pkg)
-            }
-            RequestType::InitLearner => {
-                self.on_init_learner(state, from, request.id)
-            }
-            RequestType::GetShare { rack_uuid } => {
-                self.on_get_share(state, from, request.id, rack_uuid)
-            }
-            RequestType::Learn => self.on_learn(state, from, request.id),
-        }
-    }
-
-    // Handle a `RequestType::Init` message
-    fn on_init(
-        &mut self,
-        state: &mut State,
-        from: Baseboard,
-        request_id: Uuid,
-        new_pkg: SharePkgV0,
-    ) -> Output {
-        match state {
-            State::Uninitialized => {
-                *state = State::InitialMember(InitialMemberState::new(
-                    new_pkg,
-                    BTreeMap::new(),
-                ));
-                Output::persist_and_respond(
-                    from,
-                    request_id,
-                    ResponseType::InitAck,
-                )
-            }
-            State::InitialMember(InitialMemberState { pkg, .. }) => {
-                if new_pkg == *pkg {
-                    // Idempotent response given same pkg
-                    Output::respond(from, request_id, ResponseType::InitAck)
-                } else {
-                    let rack_uuid = pkg.rack_uuid;
-                    Output::respond(
-                        from,
-                        request_id,
-                        Error::AlreadyInitialized { rack_uuid }.into(),
-                    )
-                }
-            }
-            State::Learning(_) => {
-                Output::respond(from, request_id, Error::AlreadyLearning.into())
-            }
-            State::Learned(LearnedState { pkg, .. }) => {
-                let rack_uuid = pkg.rack_uuid;
-                Output::respond(
-                    from,
-                    request_id,
-                    Error::AlreadyLearned { rack_uuid }.into(),
-                )
-            }
-        }
-    }
-
-    // Handle a `RequestType::InitLearner` message
-    fn on_init_learner(
-        &mut self,
-        state: &mut State,
-        from: Baseboard,
-        request_id: Uuid,
-    ) -> Output {
-        match state {
-            State::Uninitialized => {
-                *state = State::Learning(None);
-                Output::persist_and_respond(
-                    from,
-                    request_id,
-                    ResponseType::InitAck,
-                )
-            }
-            State::InitialMember(InitialMemberState { pkg, .. }) => {
-                let rack_uuid = pkg.rack_uuid;
-                Output::respond(
-                    from,
-                    request_id,
-                    Error::AlreadyInitialized { rack_uuid }.into(),
-                )
-            }
-            State::Learning(_) | State::Learned(_) => {
-                // Idempotent
-                Output::persist_and_respond(
-                    from,
-                    request_id,
-                    ResponseType::InitAck,
-                )
-            }
-        }
-    }
-
-    // Handle a `RequestType::GetShare` message
-    fn on_get_share(
-        &self,
-        state: &State,
-        from: Baseboard,
-        request_id: Uuid,
-        rack_uuid: Uuid,
-    ) -> Output {
-        match state {
-            State::Uninitialized => {
-                Output::respond(from, request_id, Error::NotInitialized.into())
-            }
-            State::Learning(_) => {
-                Output::respond(from, request_id, Error::StillLearning.into())
-            }
-            State::InitialMember(InitialMemberState { pkg, .. }) => {
-                Output::respond(
-                    from,
-                    request_id,
-                    ResponseType::Share(pkg.share.clone()),
-                )
-            }
-            State::Learned(LearnedState { pkg, .. }) => Output::respond(
-                from,
-                request_id,
-                ResponseType::Share(pkg.share.clone()),
-            ),
-        }
-    }
-
-    // Handle a `RequestType::Learn` message
-    fn on_learn(
-        &mut self,
-        state: &mut State,
-        from: Baseboard,
-        request_id: Uuid,
-    ) -> Output {
-        match state {
-            State::Uninitialized => {
-                Output::respond(from, request_id, Error::NotInitialized.into())
-            }
-            State::Learning(_) => {
-                Output::respond(from, request_id, Error::StillLearning.into())
-            }
-            State::Learned(_) => Output::respond(
-                from,
-                request_id,
-                Error::CannotSpareAShare.into(),
-            ),
-            State::InitialMember(InitialMemberState {
-                pkg,
-                distributed_shares,
-                rack_secret_state,
-                pending_learn_requests,
-                ..
-            }) => {
-                match rack_secret_state {
-                    Some(RackSecretState::Secret(rack_secret)) => {
-                        // We already know the rack secret so respond to the
-                        // peer.
-                        send_share_response(
-                            from,
-                            request_id,
-                            &pkg,
-                            distributed_shares,
-                            rack_secret,
-                        )
-                    }
-                    Some(RackSecretState::Shares(shares)) => {
-                        // Register the request and try to collect enough
-                        // shares to unlock the rack secret. When we have
-                        // enough we will respond to the caller.
-                        pending_learn_requests.insert(
-                            from,
-                            RequestMetadata { request_id, start: self.clock },
-                        );
-                        self.broadcast_share_requests(
-                            pkg.rack_uuid,
-                            Some(shares),
-                        )
-                    }
-                    None => {
-                        // Register the request and try to collect enough
-                        // shares to unlock the rack secret. When we have
-                        // enough we will respond to the caller.
-                        pending_learn_requests.insert(
-                            from,
-                            RequestMetadata { request_id, start: self.clock },
-                        );
-                        self.broadcast_share_requests(pkg.rack_uuid, None)
-                    }
-                }
-            }
-        }
+    fn handle_request(&mut self, from: Baseboard, request: Request) -> Output {
+        let state = self.state.take().unwrap();
+        let (new_state, output) = state.handle_request(
+            &mut self.common,
+            from,
+            request.id,
+            request.type_,
+        );
+        self.state = Some(new_state);
+        output
     }
 
     fn handle_response(
         &mut self,
-        state: &mut State,
         from: Baseboard,
         response: Response,
     ) -> Output {
-        match response.type_ {
-            ResponseType::InitAck => {
-                self.on_init_ack(state, from, response.request_id)
-            }
-            ResponseType::Share(share) => self.on_share(state, from, share),
-            /*ResponseType::Pkg(pkg) => {
-                // TODO: If we are in `Learning` state then set the state to `Learned`
-                // with this pkg. Otherwise, discard the message and log it.
-            }
-            ResponseType::Error(error) => {
-                // TODO: If the error is relevant to any outstanding requests
-                // then handle them appropriately. For instance, if it's related
-                // to initialization then inform the caller. If it's a `Learn` request
-                // then cancel the attempt and try the next peer.
-                // We almost certainly need sequence numbers to track any
-                // outstanding requests.
-            }
-            */
-            _ => unimplemented!(),
-        }
+        let state = self.state.take().unwrap();
+        let (new_state, output) = state.handle_response(
+            &mut self.common,
+            from,
+            response.request_id,
+            response.type_,
+        );
+        self.state = Some(new_state);
+        output
     }
 
     // Handle a `ResponseType::InitAck` message
@@ -635,37 +431,38 @@ impl Fsm {
             }
         }
     }
+}
 
-    // Send a request for a share to each peer
-    fn broadcast_share_requests(
-        &self,
-        rack_uuid: Uuid,
-        known_shares: Option<&BTreeMap<Baseboard, Vec<u8>>>,
-    ) -> Output {
-        let known_peers = if let Some(shares) = known_shares {
-            shares.keys().cloned().collect()
-        } else {
-            BTreeSet::new()
-        };
+// Send a request for a share to each peer
+// TODO: Hang this off `FsmCommonData` ?
+pub fn broadcast_share_requests(
+    common: &FsmCommonData,
+    rack_uuid: Uuid,
+    known_shares: Option<&BTreeMap<Baseboard, Vec<u8>>>,
+) -> Output {
+    let known_peers = if let Some(shares) = known_shares {
+        shares.keys().cloned().collect()
+    } else {
+        BTreeSet::new()
+    };
 
-        // All broadcast requests share the same id
-        let request_id = Uuid::new_v4();
-        let envelopes = self
-            .peers
-            .difference(&known_peers)
-            .cloned()
-            .map(|to| Envelope {
-                to,
-                msg: Request {
-                    id: request_id,
-                    type_: RequestType::GetShare { rack_uuid },
-                }
-                .into(),
-            })
-            .collect();
+    // All broadcast requests share the same id
+    let request_id = Uuid::new_v4();
+    let envelopes = common
+        .peers
+        .difference(&known_peers)
+        .cloned()
+        .map(|to| Envelope {
+            to,
+            msg: Request {
+                id: request_id,
+                type_: RequestType::GetShare { rack_uuid },
+            }
+            .into(),
+        })
+        .collect();
 
-        Output { persist: false, envelopes, api_output: None }
-    }
+    Output { persist: false, envelopes, api_output: None }
 }
 
 // We've just recomputed the rack secret. Now resolve any pending learn
@@ -739,7 +536,7 @@ fn resolve_learn_requests(
 }
 
 /// An error prevented successful resolution of learn requests
-fn resolve_learn_requests_with_error(
+pub fn resolve_learn_requests_with_error(
     error: Error,
     pending_learn_requests: &mut BTreeMap<Baseboard, RequestMetadata>,
 ) -> Vec<Envelope> {
@@ -750,57 +547,6 @@ fn resolve_learn_requests_with_error(
         envelopes.push(Envelope { to, msg: msg.into() })
     }
     envelopes
-}
-
-// Send a `ResponseType::Share` message once we have recomputed the rack secret
-fn send_share_response(
-    from: Baseboard,
-    request_id: Uuid,
-    pkg: &SharePkgV0,
-    distributed_shares: &mut BTreeMap<Baseboard, ShareIdx>,
-    rack_secret: &RackSecret,
-) -> Output {
-    match pkg.decrypt_shares(rack_secret) {
-        Ok(shares) => {
-            if let Some(idx) = distributed_shares.get(&from) {
-                // The share was already handed out to this
-                // peer. Give back the same one.
-                let share = shares.expose_secret()[idx.0].clone();
-                Output::respond(from, request_id, ResponseType::Share(share))
-            } else {
-                // We need to pick a share to hand out and
-                // persist that fact. We find the highest currently used
-                // index and add 1 or we select index 0.
-                let idx = distributed_shares
-                    .values()
-                    .max()
-                    .cloned()
-                    .map(|idx| idx.0 + 1)
-                    .unwrap_or(0);
-
-                match shares.expose_secret().get(idx) {
-                    Some(share) => {
-                        distributed_shares.insert(from.clone(), ShareIdx(idx));
-                        Output::persist_and_respond(
-                            from,
-                            request_id,
-                            ResponseType::Share(share.clone()),
-                        )
-                    }
-                    None => Output::respond(
-                        from,
-                        request_id,
-                        Error::CannotSpareAShare.into(),
-                    ),
-                }
-            }
-        }
-        Err(_) => Output::respond(
-            from,
-            request_id,
-            Error::FailedToDecryptShares.into(),
-        ),
-    }
 }
 
 // Round-robin peer selection

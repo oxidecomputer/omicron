@@ -135,4 +135,7 @@ pub enum Error {
     /// We could not reconstruct the rack secret even after retrieving enough
     /// valid shares.
     FailedToReconstructRackSecret,
+
+    /// A request was received with a rack UUID that does not match this peer
+    RackUuidMismatch { my_rack_uuid: Uuid },
 }

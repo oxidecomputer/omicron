@@ -44,11 +44,15 @@ impl StateHandler for UninitializedState {
             ),
             InitLearner => (
                 State::Learning(None).into(),
-                Output::respond(from, request_id, ResponseType::InitAck),
+                Output::persist_and_respond(
+                    from,
+                    request_id,
+                    ResponseType::InitAck,
+                ),
             ),
             GetShare { .. } => (
                 self.into(),
-                Output::respond(from, request_id, Error::StillLearning.into()),
+                Output::respond(from, request_id, Error::NotInitialized.into()),
             ),
             Learn => (
                 self.into(),

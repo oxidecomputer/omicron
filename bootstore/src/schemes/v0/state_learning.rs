@@ -48,6 +48,39 @@ impl LearningState {
 }
 
 impl StateHandler for LearningState {
+    fn handle_request(
+        mut self,
+        common: &mut FsmCommonData,
+        from: Baseboard,
+        request_id: Uuid,
+        request: RequestType,
+    ) -> (state, Output) {
+        use RequestType::*;
+        let output = match request {
+            Init(_) => {
+                Output::respond(from, request_id, Error::AlreadyLearning.into())
+            }
+            InitLearner => {
+                // Idempotent, since we are already learning
+                // TODO: Should we send a rack_uuid with this messsage
+                // and check it ?
+                Output::respond(from, request_id, ResponseType::InitAck)
+            }
+            GetShare { .. } => {
+                Output::respond(from, request_id, Error::StillLearning.into())
+            }
+            Learn => {
+                // Learners can't distribute shares to other learners
+                Output::respond(
+                    from,
+                    request_id,
+                    Error::CannotSpareAShare.into(),
+                )
+            }
+        };
+        (state.into(), output)
+    }
+
     /// Check for expired learn attempts
     fn tick(mut self, common: &mut FsmCommonData) -> (State, Output) {
         match &mut self.attempt {
@@ -74,9 +107,9 @@ impl StateHandler for LearningState {
                         Output::request(peer.clone(), RequestType::Learn),
                     )
                 } else {
+                    // No peers to learn from
                     (self.into(), Output::none())
                 }
-                // No peers to learn from
             }
         }
     }
