@@ -550,7 +550,7 @@ async fn test_deleting_a_silo_deletes_the_idp(
             client,
             Method::GET,
             &format!(
-                "/login/{}/saml/{}",
+                "/login/{}/saml/{}/redirect",
                 SILO_NAME, silo_saml_idp.identity.name
             ),
         )
@@ -1936,7 +1936,7 @@ async fn test_local_silo_constraints(cptestctx: &ControlPlaneTestContext) {
         client,
         StatusCode::NOT_FOUND,
         Method::GET,
-        "/login/fixed/saml/foo",
+        "/login/fixed/saml/foo/redirect",
     )
     .execute()
     .await

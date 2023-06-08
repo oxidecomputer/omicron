@@ -42,6 +42,40 @@ use serde_urlencoded;
 use std::num::NonZeroU32;
 use std::{collections::HashSet, ffi::OsString, path::PathBuf, sync::Arc};
 
+// -----------------------------------------------------
+// High-level overview of how login works in the console
+// -----------------------------------------------------
+//
+// There's a lot of noise in this file, so here is the big picture. A user can
+// get sent to login in two ways in the console:
+//
+// 1. Navigate an auth-gated console page (e.g., /projects) directly while
+//    logged out. This goes through `console_index_or_login_redirect` and
+//    therefore results in a redirect straight to either
+//    /login/{silo}/local?redirect_uri={} or
+//    /login/{silo}/saml/{provider}?redirect_uri={} depending on the silo's
+//    authn mode. Nexus takes the path the user was trying to hit and sticks it
+//    in a `redirect_uri` query param.
+// 2. Hit a 401 on a background API call while already in the console (for
+//    example, if session expires while in use). In that case, the console will
+//    navigate to `/login?redirect_uri={current_path}`, which will respond with
+//    a redirect to local or SAML login as above.
+//
+// Local login is very simple. We show a login form, the username and password
+// are POSTed to the API, and on success, the console pulls `redirect_uri` out
+// of the query params and navigates to that route client-side.
+//
+// SAML is more complicated. /login/{silo}/saml/{provider}?redirect_uri={} shows
+// a page with a link to /login/{silo}/saml/{provider}/redirect?redirect_uri={}
+// (note the /redirect), which redirects to the IdP  with `redirect_uri` encoded
+// in a RelayState query param). On successful login in the IdP, the IdP will
+// POST /login/{silo}/saml/{} with a body including that redirect_uri, so that
+// on success, we can redirect to the original target page.
+
+// -------------------------------
+// Detailed overview of SAML login
+// -------------------------------
+//
 // Silos have one or more identity providers, and an unauthenticated user will
 // be asked to authenticate to one of those below. Silo identity provider
 // selection is currently performed as a name on the /login/ path. This will
