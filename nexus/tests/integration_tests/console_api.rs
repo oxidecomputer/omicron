@@ -479,9 +479,6 @@ async fn test_login_redirect_simple(cptestctx: &ControlPlaneTestContext) {
         &format!("{}?redirect_uri=%2Fabc%2Fdef", expected),
     )
     .await;
-
-    // empty state param gets dropped
-    // expect_redirect(testctx, "/login?redirect_uri=", &expected).await;
 }
 
 // reject anything that's not a relative URI
