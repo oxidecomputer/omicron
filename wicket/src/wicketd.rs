@@ -110,6 +110,7 @@ impl WicketdManager {
 
         self.poll_inventory(poll_interval_now_rx).await;
         self.poll_artifacts_and_event_reports().await;
+        self.poll_rack_setup_config().await;
 
         loop {
             tokio::select! {
@@ -267,6 +268,39 @@ impl WicketdManager {
             // means either someone else has already queued up an inventory poll
             // or the polling task has died).
             _ = poll_inventory_now.try_send(sp);
+        });
+    }
+
+    async fn poll_rack_setup_config(&self) {
+        let log = self.log.clone();
+        let tx = self.events_tx.clone();
+        let addr = self.wicketd_addr;
+        tokio::spawn(async move {
+            let client = create_wicketd_client(&log, addr, WICKETD_TIMEOUT);
+            let mut ticker = interval(WICKETD_POLL_INTERVAL * 2);
+            let mut prev = None;
+            ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
+            loop {
+                ticker.tick().await;
+                // TODO: We should really be using ETAGs here
+                match client.get_rss_config().await {
+                    Ok(val) => {
+                        let rsp = val.into_inner();
+                        // Only send a new event if the config has changed
+                        if Some(&rsp) == prev.as_ref() {
+                            continue;
+                        }
+                        prev = Some(rsp.clone());
+                        let _ = tx.send(Event::RssConfig(rsp));
+                    }
+                    Err(err) => {
+                        warn!(
+                            log, "getting current RSS config failed";
+                            "err" => #%err,
+                        );
+                    }
+                }
+            }
         });
     }
 

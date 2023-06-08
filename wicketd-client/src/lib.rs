@@ -41,6 +41,8 @@ progenitor::generate_api!(
         BootstrapSledDescription = { derives = [ PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize ] },
         RackNetworkConfig = { derives = [ PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize ] },
         CurrentRssUserConfigInsensitive = { derives = [ PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize ] },
+        CurrentRssUserConfigSensitive = { derives = [ PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize ] },
+        CurrentRssUserConfig = { derives = [ PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize ] },
     },
     replace = {
         Duration = std::time::Duration,

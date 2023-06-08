@@ -10,7 +10,8 @@ use std::fs::File;
 use std::time::{Duration, SystemTime};
 use wicket_common::update_events::EventReport;
 use wicketd_client::types::{
-    ArtifactId, IgnitionCommand, RackV1Inventory, SemverVersion,
+    ArtifactId, CurrentRssUserConfig, IgnitionCommand, RackV1Inventory,
+    SemverVersion,
 };
 
 /// Event report type returned by the get_artifacts_and_event_reports API call.
@@ -33,6 +34,9 @@ pub enum Event {
         artifacts: Vec<ArtifactId>,
         event_reports: EventReportMap,
     },
+
+    /// The current RSS configuration.
+    RssConfig(CurrentRssUserConfig),
 
     /// The tick of a Timer
     /// This can be used to draw a frame to the terminal

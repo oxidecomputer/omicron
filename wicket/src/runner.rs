@@ -147,6 +147,10 @@ impl RunnerCore {
                 );
                 self.screen.draw(&self.state, &mut self.terminal)?;
             }
+            Event::RssConfig(config) => {
+                self.state.rss_config = Some(config);
+                self.screen.draw(&self.state, &mut self.terminal)?;
+            }
             Event::Shutdown => return Ok(true),
         }
         Ok(false)
