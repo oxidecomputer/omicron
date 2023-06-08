@@ -452,7 +452,7 @@ dependencies = [
 [[package]]
 name = "bhyve_api"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=78314ae5f74f951c03b0cb97b06f9bc28446bdb5#78314ae5f74f951c03b0cb97b06f9bc28446bdb5"
+source = "git+https://github.com/oxidecomputer/propolis?rev=96ba33d2629b93bfb9cdb806327c16113bcf0cf3#96ba33d2629b93bfb9cdb806327c16113bcf0cf3"
 dependencies = [
  "bhyve_api_sys",
  "libc",
@@ -462,7 +462,7 @@ dependencies = [
 [[package]]
 name = "bhyve_api_sys"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=78314ae5f74f951c03b0cb97b06f9bc28446bdb5#78314ae5f74f951c03b0cb97b06f9bc28446bdb5"
+source = "git+https://github.com/oxidecomputer/propolis?rev=96ba33d2629b93bfb9cdb806327c16113bcf0cf3#96ba33d2629b93bfb9cdb806327c16113bcf0cf3"
 dependencies = [
  "libc",
  "num_enum",
@@ -643,7 +643,7 @@ dependencies = [
  "sha3",
  "slog",
  "thiserror",
- "uuid",
+ "uuid 1.3.3",
  "vsss-rs",
  "zeroize",
 ]
@@ -661,7 +661,7 @@ dependencies = [
  "reqwest",
  "serde",
  "slog",
- "uuid",
+ "uuid 1.3.3",
 ]
 
 [[package]]
@@ -1312,7 +1312,7 @@ dependencies = [
 [[package]]
 name = "crucible-agent-client"
 version = "0.0.1"
-source = "git+https://github.com/oxidecomputer/crucible?rev=8757b3fb55a1763382ad7111144bc60ec72af23d#8757b3fb55a1763382ad7111144bc60ec72af23d"
+source = "git+https://github.com/oxidecomputer/crucible?rev=c7879bc8fbf68d977eb1c983cb0bab34b1b8b805#c7879bc8fbf68d977eb1c983cb0bab34b1b8b805"
 dependencies = [
  "anyhow",
  "chrono",
@@ -1327,19 +1327,19 @@ dependencies = [
 [[package]]
 name = "crucible-client-types"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/crucible?rev=8757b3fb55a1763382ad7111144bc60ec72af23d#8757b3fb55a1763382ad7111144bc60ec72af23d"
+source = "git+https://github.com/oxidecomputer/crucible?rev=c7879bc8fbf68d977eb1c983cb0bab34b1b8b805#c7879bc8fbf68d977eb1c983cb0bab34b1b8b805"
 dependencies = [
  "base64 0.21.2",
  "schemars",
  "serde",
  "serde_json",
- "uuid",
+ "uuid 1.3.3",
 ]
 
 [[package]]
 name = "crucible-pantry-client"
 version = "0.0.1"
-source = "git+https://github.com/oxidecomputer/crucible?rev=8757b3fb55a1763382ad7111144bc60ec72af23d#8757b3fb55a1763382ad7111144bc60ec72af23d"
+source = "git+https://github.com/oxidecomputer/crucible?rev=c7879bc8fbf68d977eb1c983cb0bab34b1b8b805#c7879bc8fbf68d977eb1c983cb0bab34b1b8b805"
 dependencies = [
  "anyhow",
  "chrono",
@@ -1349,13 +1349,13 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
- "uuid",
+ "uuid 1.3.3",
 ]
 
 [[package]]
 name = "crucible-smf"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/crucible?rev=8757b3fb55a1763382ad7111144bc60ec72af23d#8757b3fb55a1763382ad7111144bc60ec72af23d"
+source = "git+https://github.com/oxidecomputer/crucible?rev=c7879bc8fbf68d977eb1c983cb0bab34b1b8b805#c7879bc8fbf68d977eb1c983cb0bab34b1b8b805"
 dependencies = [
  "libc",
  "num-derive",
@@ -1715,7 +1715,7 @@ dependencies = [
  "pq-sys",
  "r2d2",
  "serde_json",
- "uuid",
+ "uuid 1.3.3",
 ]
 
 [[package]]
@@ -1726,7 +1726,7 @@ dependencies = [
  "diesel",
  "serde",
  "usdt",
- "uuid",
+ "uuid 1.3.3",
  "version_check",
 ]
 
@@ -1825,7 +1825,7 @@ checksum = "7e1a8646b2c125eeb9a84ef0faa6d2d102ea0d5da60b824ade2743263117b848"
 [[package]]
 name = "dladm"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=78314ae5f74f951c03b0cb97b06f9bc28446bdb5#78314ae5f74f951c03b0cb97b06f9bc28446bdb5"
+source = "git+https://github.com/oxidecomputer/propolis?rev=96ba33d2629b93bfb9cdb806327c16113bcf0cf3#96ba33d2629b93bfb9cdb806327c16113bcf0cf3"
 dependencies = [
  "libc",
  "num_enum",
@@ -1877,7 +1877,7 @@ dependencies = [
  "trust-dns-proto",
  "trust-dns-resolver",
  "trust-dns-server",
- "uuid",
+ "uuid 1.3.3",
 ]
 
 [[package]]
@@ -1893,7 +1893,7 @@ dependencies = [
  "serde",
  "serde_json",
  "slog",
- "uuid",
+ "uuid 1.3.3",
 ]
 
 [[package]]
@@ -1910,7 +1910,7 @@ dependencies = [
  "serde",
  "serde_json",
  "slog",
- "uuid",
+ "uuid 1.3.3",
 ]
 
 [[package]]
@@ -1957,7 +1957,7 @@ dependencies = [
  "serde_json",
  "slog",
  "toml 0.7.4",
- "uuid",
+ "uuid 1.3.3",
 ]
 
 [[package]]
@@ -1999,7 +1999,7 @@ dependencies = [
  "tokio-rustls",
  "toml 0.7.4",
  "usdt",
- "uuid",
+ "uuid 1.3.3",
  "version_check",
 ]
 
@@ -2125,7 +2125,7 @@ dependencies = [
  "tokio",
  "toml 0.7.4",
  "trust-dns-resolver",
- "uuid",
+ "uuid 1.3.3",
 ]
 
 [[package]]
@@ -2543,7 +2543,7 @@ dependencies = [
  "termios",
  "tokio",
  "tokio-tungstenite 0.18.0",
- "uuid",
+ "uuid 1.3.3",
 ]
 
 [[package]]
@@ -2559,7 +2559,7 @@ dependencies = [
  "serde",
  "serde_json",
  "slog",
- "uuid",
+ "uuid 1.3.3",
 ]
 
 [[package]]
@@ -2573,7 +2573,7 @@ dependencies = [
  "serde_repr",
  "smoltcp 0.9.1",
  "static_assertions",
- "uuid",
+ "uuid 1.3.3",
  "zerocopy 0.6.1",
 ]
 
@@ -2602,7 +2602,7 @@ dependencies = [
  "tlvc",
  "tokio",
  "usdt",
- "uuid",
+ "uuid 1.3.3",
  "version_check",
  "zip",
 ]
@@ -2619,7 +2619,7 @@ dependencies = [
  "slog",
  "sp-sim",
  "tokio",
- "uuid",
+ "uuid 1.3.3",
 ]
 
 [[package]]
@@ -3055,6 +3055,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "hyper-tls"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d6183ddfa99b85da61a140bea0efc93fdf56ceaa041b37d553518030827f9905"
+dependencies = [
+ "bytes",
+ "hyper",
+ "native-tls",
+ "tokio",
+ "tokio-native-tls",
+]
+
+[[package]]
 name = "iana-time-zone"
 version = "0.1.53"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3144,7 +3157,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "toml 0.7.4",
- "uuid",
+ "uuid 1.3.3",
  "zone",
 ]
 
@@ -3245,7 +3258,7 @@ dependencies = [
  "toml 0.7.4",
  "tufaceous-lib",
  "update-engine",
- "uuid",
+ "uuid 1.3.3",
 ]
 
 [[package]]
@@ -3261,7 +3274,7 @@ dependencies = [
  "serde_json",
  "slog",
  "update-engine",
- "uuid",
+ "uuid 1.3.3",
 ]
 
 [[package]]
@@ -3286,7 +3299,7 @@ dependencies = [
  "slog",
  "subprocess",
  "tokio",
- "uuid",
+ "uuid 1.3.3",
 ]
 
 [[package]]
@@ -3336,7 +3349,7 @@ dependencies = [
  "tokio",
  "trust-dns-proto",
  "trust-dns-resolver",
- "uuid",
+ "uuid 1.3.3",
 ]
 
 [[package]]
@@ -3354,7 +3367,7 @@ dependencies = [
  "thiserror",
  "trust-dns-proto",
  "trust-dns-resolver",
- "uuid",
+ "uuid 1.3.3",
 ]
 
 [[package]]
@@ -3378,7 +3391,7 @@ dependencies = [
  "serde",
  "test-strategy",
  "thiserror",
- "uuid",
+ "uuid 1.3.3",
 ]
 
 [[package]]
@@ -3539,7 +3552,7 @@ dependencies = [
  "libc",
  "libefi-sys",
  "thiserror",
- "uuid",
+ "uuid 1.3.3",
 ]
 
 [[package]]
@@ -3861,6 +3874,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "native-tls"
+version = "0.2.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "07226173c32f2926027b63cce4bcd8076c3552846cbe7925f3aaffeac0a3b92e"
+dependencies = [
+ "lazy_static",
+ "libc",
+ "log",
+ "openssl",
+ "openssl-probe",
+ "openssl-sys",
+ "schannel",
+ "security-framework",
+ "security-framework-sys",
+ "tempfile",
+]
+
+[[package]]
 name = "new_debug_unreachable"
 version = "1.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3899,7 +3930,7 @@ dependencies = [
  "serde",
  "serde_json",
  "slog",
- "uuid",
+ "uuid 1.3.3",
 ]
 
 [[package]]
@@ -3918,7 +3949,7 @@ dependencies = [
  "serde",
  "serde_json",
  "slog",
- "uuid",
+ "uuid 1.3.3",
 ]
 
 [[package]]
@@ -3951,7 +3982,7 @@ dependencies = [
  "sled-agent-client",
  "steno",
  "thiserror",
- "uuid",
+ "uuid 1.3.3",
 ]
 
 [[package]]
@@ -4032,7 +4063,7 @@ dependencies = [
  "tokio-postgres",
  "toml 0.7.4",
  "usdt",
- "uuid",
+ "uuid 1.3.3",
 ]
 
 [[package]]
@@ -4056,7 +4087,7 @@ dependencies = [
  "nexus-types",
  "omicron-common 0.1.0",
  "slog",
- "uuid",
+ "uuid 1.3.3",
 ]
 
 [[package]]
@@ -4095,7 +4126,7 @@ dependencies = [
  "tokio",
  "trust-dns-proto",
  "trust-dns-resolver",
- "uuid",
+ "uuid 1.3.3",
 ]
 
 [[package]]
@@ -4127,7 +4158,7 @@ dependencies = [
  "serde",
  "serde_json",
  "steno",
- "uuid",
+ "uuid 1.3.3",
 ]
 
 [[package]]
@@ -4383,7 +4414,7 @@ dependencies = [
  "tokio",
  "tokio-postgres",
  "toml 0.7.4",
- "uuid",
+ "uuid 1.3.3",
 ]
 
 [[package]]
@@ -4422,7 +4453,7 @@ dependencies = [
  "tokio",
  "tokio-postgres",
  "toml 0.7.4",
- "uuid",
+ "uuid 1.3.3",
 ]
 
 [[package]]
@@ -4513,7 +4544,7 @@ dependencies = [
  "tokio-tungstenite 0.18.0",
  "tokio-util",
  "toml 0.7.4",
- "uuid",
+ "uuid 1.3.3",
 ]
 
 [[package]]
@@ -4618,7 +4649,7 @@ dependencies = [
  "tough",
  "trust-dns-resolver",
  "usdt",
- "uuid",
+ "uuid 1.3.3",
 ]
 
 [[package]]
@@ -4759,7 +4790,7 @@ dependencies = [
  "tokio",
  "tokio-tungstenite 0.18.0",
  "toml 0.7.4",
- "uuid",
+ "uuid 1.3.3",
  "zone",
 ]
 
@@ -5004,7 +5035,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "trust-dns-resolver",
- "uuid",
+ "uuid 1.3.3",
 ]
 
 [[package]]
@@ -5032,7 +5063,7 @@ dependencies = [
  "serde",
  "thiserror",
  "trybuild",
- "uuid",
+ "uuid 1.3.3",
 ]
 
 [[package]]
@@ -5047,7 +5078,7 @@ dependencies = [
  "schemars",
  "serde",
  "thiserror",
- "uuid",
+ "uuid 1.3.3",
 ]
 
 [[package]]
@@ -5060,7 +5091,7 @@ dependencies = [
  "reqwest",
  "serde",
  "slog",
- "uuid",
+ "uuid 1.3.3",
 ]
 
 [[package]]
@@ -5088,7 +5119,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "toml 0.7.4",
- "uuid",
+ "uuid 1.3.3",
 ]
 
 [[package]]
@@ -5115,7 +5146,7 @@ dependencies = [
  "slog-term",
  "thiserror",
  "tokio",
- "uuid",
+ "uuid 1.3.3",
 ]
 
 [[package]]
@@ -5128,7 +5159,7 @@ dependencies = [
  "http",
  "oximeter 0.1.0",
  "tokio",
- "uuid",
+ "uuid 1.3.3",
 ]
 
 [[package]]
@@ -5166,7 +5197,7 @@ dependencies = [
  "slog-dtrace",
  "thiserror",
  "tokio",
- "uuid",
+ "uuid 1.3.3",
 ]
 
 [[package]]
@@ -5186,7 +5217,7 @@ dependencies = [
  "slog-dtrace",
  "thiserror",
  "tokio",
- "uuid",
+ "uuid 1.3.3",
 ]
 
 [[package]]
@@ -5653,7 +5684,7 @@ dependencies = [
  "postgres-protocol",
  "serde",
  "serde_json",
- "uuid",
+ "uuid 1.3.3",
 ]
 
 [[package]]
@@ -5865,7 +5896,7 @@ dependencies = [
 [[package]]
 name = "propolis"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=78314ae5f74f951c03b0cb97b06f9bc28446bdb5#78314ae5f74f951c03b0cb97b06f9bc28446bdb5"
+source = "git+https://github.com/oxidecomputer/propolis?rev=96ba33d2629b93bfb9cdb806327c16113bcf0cf3#96ba33d2629b93bfb9cdb806327c16113bcf0cf3"
 dependencies = [
  "anyhow",
  "bhyve_api",
@@ -5888,14 +5919,14 @@ dependencies = [
  "thiserror",
  "tokio",
  "usdt",
- "uuid",
+ "uuid 1.3.3",
  "viona_api",
 ]
 
 [[package]]
 name = "propolis-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=78314ae5f74f951c03b0cb97b06f9bc28446bdb5#78314ae5f74f951c03b0cb97b06f9bc28446bdb5"
+source = "git+https://github.com/oxidecomputer/propolis?rev=96ba33d2629b93bfb9cdb806327c16113bcf0cf3#96ba33d2629b93bfb9cdb806327c16113bcf0cf3"
 dependencies = [
  "base64 0.21.2",
  "crucible-client-types",
@@ -5912,13 +5943,13 @@ dependencies = [
  "thiserror",
  "tokio",
  "tokio-tungstenite 0.17.2",
- "uuid",
+ "uuid 1.3.3",
 ]
 
 [[package]]
 name = "propolis-server"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=78314ae5f74f951c03b0cb97b06f9bc28446bdb5#78314ae5f74f951c03b0cb97b06f9bc28446bdb5"
+source = "git+https://github.com/oxidecomputer/propolis?rev=96ba33d2629b93bfb9cdb806327c16113bcf0cf3#96ba33d2629b93bfb9cdb806327c16113bcf0cf3"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -5935,6 +5966,7 @@ dependencies = [
  "enum-iterator",
  "erased-serde",
  "futures",
+ "http",
  "hyper",
  "internal-dns 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
  "lazy_static",
@@ -5963,13 +5995,13 @@ dependencies = [
  "tokio-util",
  "toml 0.5.11",
  "usdt",
- "uuid",
+ "uuid 1.3.3",
 ]
 
 [[package]]
 name = "propolis-server-config"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=78314ae5f74f951c03b0cb97b06f9bc28446bdb5#78314ae5f74f951c03b0cb97b06f9bc28446bdb5"
+source = "git+https://github.com/oxidecomputer/propolis?rev=96ba33d2629b93bfb9cdb806327c16113bcf0cf3#96ba33d2629b93bfb9cdb806327c16113bcf0cf3"
 dependencies = [
  "serde",
  "serde_derive",
@@ -5980,7 +6012,7 @@ dependencies = [
 [[package]]
 name = "propolis_types"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=78314ae5f74f951c03b0cb97b06f9bc28446bdb5#78314ae5f74f951c03b0cb97b06f9bc28446bdb5"
+source = "git+https://github.com/oxidecomputer/propolis?rev=96ba33d2629b93bfb9cdb806327c16113bcf0cf3#96ba33d2629b93bfb9cdb806327c16113bcf0cf3"
 dependencies = [
  "schemars",
  "serde",
@@ -6342,10 +6374,12 @@ dependencies = [
  "http-body",
  "hyper",
  "hyper-rustls",
+ "hyper-tls",
  "ipnet",
  "js-sys",
  "log",
  "mime",
+ "native-tls",
  "once_cell",
  "percent-encoding",
  "pin-project-lite",
@@ -6355,6 +6389,7 @@ dependencies = [
  "serde_json",
  "serde_urlencoded",
  "tokio",
+ "tokio-native-tls",
  "tokio-rustls",
  "tokio-util",
  "tower-service",
@@ -6733,7 +6768,7 @@ dependencies = [
  "serde",
  "snafu",
  "url",
- "uuid",
+ "uuid 1.3.3",
 ]
 
 [[package]]
@@ -6775,7 +6810,8 @@ dependencies = [
  "schemars_derive",
  "serde",
  "serde_json",
- "uuid",
+ "uuid 0.8.2",
+ "uuid 1.3.3",
 ]
 
 [[package]]
@@ -7270,7 +7306,7 @@ dependencies = [
  "reqwest",
  "serde",
  "slog",
- "uuid",
+ "uuid 1.3.3",
 ]
 
 [[package]]
@@ -7297,7 +7333,7 @@ dependencies = [
  "thiserror",
  "tofino",
  "tokio",
- "uuid",
+ "uuid 1.3.3",
 ]
 
 [[package]]
@@ -7598,7 +7634,7 @@ dependencies = [
  "slog",
  "thiserror",
  "tokio",
- "uuid",
+ "uuid 1.3.3",
 ]
 
 [[package]]
@@ -8083,6 +8119,16 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.18",
+]
+
+[[package]]
+name = "tokio-native-tls"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bbae76ab933c85776efabc971569dd6119c580d8f5d448769dec1764bf796ef2"
+dependencies = [
+ "native-tls",
+ "tokio",
 ]
 
 [[package]]
@@ -8680,7 +8726,7 @@ dependencies = [
  "slog",
  "tokio",
  "tokio-stream",
- "uuid",
+ "uuid 1.3.3",
 ]
 
 [[package]]
@@ -8769,6 +8815,12 @@ checksum = "711b9620af191e0cdc7468a8d14e709c3dcdb115b36f838e601583af800a370a"
 
 [[package]]
 name = "uuid"
+version = "0.8.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bc5cf98d8186244414c848017f0e2676b3fcb46807f6668a97dfe67359a3c4b7"
+
+[[package]]
+name = "uuid"
 version = "1.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "345444e32442451b267fc254ae85a209c64be56d2890e601a0c37ff0c3c5ecd2"
@@ -8798,7 +8850,7 @@ checksum = "49874b5167b65d7193b8aba1567f5c7d93d001cafc34600cee003eda787e483f"
 [[package]]
 name = "viona_api"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=78314ae5f74f951c03b0cb97b06f9bc28446bdb5#78314ae5f74f951c03b0cb97b06f9bc28446bdb5"
+source = "git+https://github.com/oxidecomputer/propolis?rev=96ba33d2629b93bfb9cdb806327c16113bcf0cf3#96ba33d2629b93bfb9cdb806327c16113bcf0cf3"
 dependencies = [
  "libc",
  "num_enum",
@@ -8808,7 +8860,7 @@ dependencies = [
 [[package]]
 name = "viona_api_sys"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=78314ae5f74f951c03b0cb97b06f9bc28446bdb5#78314ae5f74f951c03b0cb97b06f9bc28446bdb5"
+source = "git+https://github.com/oxidecomputer/propolis?rev=96ba33d2629b93bfb9cdb806327c16113bcf0cf3#96ba33d2629b93bfb9cdb806327c16113bcf0cf3"
 dependencies = [
  "libc",
 ]
@@ -9148,7 +9200,7 @@ dependencies = [
  "tufaceous",
  "tufaceous-lib",
  "update-engine",
- "uuid",
+ "uuid 1.3.3",
  "wicket-common",
  "wicketd-client",
 ]
@@ -9167,7 +9219,7 @@ dependencies = [
  "serde_json",
  "slog",
  "update-engine",
- "uuid",
+ "uuid 1.3.3",
  "wicket-common",
 ]
 
