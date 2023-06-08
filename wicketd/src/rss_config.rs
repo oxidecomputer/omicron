@@ -9,7 +9,6 @@ use crate::http_entrypoints::CertificateUploadResponse;
 use crate::http_entrypoints::CurrentRssUserConfig;
 use crate::http_entrypoints::CurrentRssUserConfigInsensitive;
 use crate::http_entrypoints::CurrentRssUserConfigSensitive;
-use crate::http_entrypoints::PutRssUserConfigInsensitive;
 use crate::RackV1Inventory;
 use bootstrap_agent_client::types::Certificate;
 use gateway_client::types::SpType;
@@ -18,6 +17,7 @@ use omicron_common::address;
 use omicron_common::api::internal::shared::RackNetworkConfig;
 use sled_hardware::Baseboard;
 use std::collections::BTreeSet;
+use wicket_common::rack_setup::PutRssUserConfigInsensitive;
 
 #[derive(Default)]
 struct PartialCertificate {

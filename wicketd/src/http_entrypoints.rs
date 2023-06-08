@@ -35,6 +35,7 @@ use std::collections::BTreeSet;
 use std::time::Duration;
 use uuid::Uuid;
 use wicket_common::update_events::EventReport;
+use wicket_common::rack_setup::PutRssUserConfigInsensitive;
 
 use crate::ServerContext;
 
@@ -112,23 +113,6 @@ pub struct CurrentRssUserConfigSensitive {
 pub struct CurrentRssUserConfig {
     pub sensitive: CurrentRssUserConfigSensitive,
     pub insensitive: CurrentRssUserConfigInsensitive,
-}
-
-// The portion of `CurrentRssUserConfig` that can be posted in one shot; it is
-// provided by the wicket user uploading a TOML file, currently.
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
-pub struct PutRssUserConfigInsensitive {
-    /// List of slot numbers only.
-    ///
-    /// `wicketd` will map this back to sleds with the correct `SpIdentifier`
-    /// based on the `bootstrap_sleds` it provides in
-    /// `CurrentRssUserConfigInsensitive`.
-    pub bootstrap_sleds: BTreeSet<u32>,
-    pub ntp_servers: Vec<String>,
-    pub dns_servers: Vec<String>,
-    pub internal_services_ip_pool_ranges: Vec<address::IpRange>,
-    pub external_dns_zone_name: String,
-    pub rack_network_config: RackNetworkConfig,
 }
 
 // Get the current inventory or return a 503 Unavailable.

@@ -40,10 +40,10 @@ progenitor::generate_api!(
         BootstrapSledDescription = { derives = [ PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize ] },
         RackNetworkConfig = { derives = [ PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize ] },
         CurrentRssUserConfigInsensitive = { derives = [ PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize ] },
-        PutRssUserConfigInsensitive = { derives = [ PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize ] },
     },
     replace = {
         Duration = std::time::Duration,
+        PutRssUserConfigInsensitive = wicket_common::rack_setup::PutRssUserConfigInsensitive,
         EventReportForWicketdEngineSpec = wicket_common::update_events::EventReport,
         StepEventForWicketdEngineSpec = wicket_common::update_events::StepEvent,
         ProgressEventForWicketdEngineSpec = wicket_common::update_events::ProgressEvent,

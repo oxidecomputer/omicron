@@ -17,10 +17,10 @@ use std::io::Read;
 use std::mem;
 use std::net::SocketAddrV6;
 use std::time::Duration;
+use wicket_common::rack_setup::PutRssUserConfigInsensitive;
 use wicketd_client::types::CertificateUploadResponse;
 use wicketd_client::types::NewPasswordHash;
 use wicketd_client::types::PutRssRecoveryUserPasswordHash;
-use wicketd_client::types::PutRssUserConfigInsensitive;
 use zeroize::Zeroizing;
 
 mod config_toml;
