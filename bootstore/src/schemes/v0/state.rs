@@ -28,9 +28,9 @@ pub struct ShareIdx(pub usize);
 /// Configuration of the FSM
 #[derive(Debug, Clone)]
 pub struct Config {
-    pub retry_timeout: Ticks,
     pub learn_timeout: Ticks,
     pub rack_init_timeout: Ticks,
+    pub rack_secret_request_timeout: Ticks,
 }
 
 /// In memory state shared by all 4 FSM states
@@ -100,7 +100,7 @@ pub struct RackInitState {
 
 impl RackInitState {
     pub fn timer_expired(&self, now: Ticks, timeout: Ticks) -> bool {
-        now.saturating_sub(self.start) >= timeout
+        now.saturating_sub(self.start) > timeout
     }
 }
 

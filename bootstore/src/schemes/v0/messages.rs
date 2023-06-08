@@ -137,5 +137,5 @@ pub enum Error {
     FailedToReconstructRackSecret,
 
     /// A request was received with a rack UUID that does not match this peer
-    RackUuidMismatch { my_rack_uuid: Uuid },
+    RackUuidMismatch { expected: Uuid, got: Uuid },
 }

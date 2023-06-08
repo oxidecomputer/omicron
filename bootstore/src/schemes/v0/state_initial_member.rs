@@ -183,12 +183,10 @@ impl StateHandler for InitialMemberState {
         (self.into(), output)
     }
 
-    /// Check for rack initialization timeout
-    ///
-    /// TODO: Also need to check for:
-    ///  * pending learn request timeouts
+    ///  TODO: check for pending learn request timeouts
     ///  * rack secret expiry - so we can zero it or shares
     fn tick(mut self, common: &mut FsmCommonData) -> (State, Output) {
+        // Check for rack initialization timeout
         if let Some(rack_init_state) = &mut self.rack_init_state {
             if rack_init_state
                 .timer_expired(common.clock, common.config.rack_init_timeout)
@@ -203,6 +201,20 @@ impl StateHandler for InitialMemberState {
                     self.into(),
                     ApiError::RackInitTimeout { unacked_peers }.into(),
                 )
+            }
+        }
+
+        // Check for rack secret request timeout
+        //
+        // It's fine if this happens in a separate tick from the check above.
+        // In practice the two requests should never be pending simultaneously
+        if let Some(start) = common.pending_api_rack_secret_request {
+            // Check for rack secret request expiry
+            if common.clock.saturating_sub(start)
+                > common.config.rack_secret_request_timeout
+            {
+                common.pending_api_rack_secret_request = None;
+                return (self.into(), ApiError::RackSecretLoadTimeout.into());
             }
         }
 

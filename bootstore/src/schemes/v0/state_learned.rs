@@ -84,4 +84,18 @@ impl StateHandler for LearnedState {
         // This is a terminal state
         (self.into(), output)
     }
+
+    fn tick(mut self, common: &mut FsmCommonData) -> (State, Output) {
+        // Check for rack secret request expiry
+        if let Some(start) = common.pending_api_rack_secret_request {
+            if common.clock.saturating_sub(start)
+                > common.config.rack_secret_request_timeout
+            {
+                common.pending_api_rack_secret_request = None;
+                return (self.into(), ApiError::RackSecretLoadTimeout.into());
+            }
+        }
+
+        (self.into(), Output::none())
+    }
 }
