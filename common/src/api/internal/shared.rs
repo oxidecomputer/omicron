@@ -83,25 +83,24 @@ pub struct RackNetworkConfig {
 
 /// Switchport Speed options
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
-#[serde(rename_all = "snake_case")]
 pub enum PortSpeed {
-    #[serde(alias = "0G")]
+    #[serde(rename = "0G")]
     Speed0G,
-    #[serde(alias = "1G")]
+    #[serde(rename = "1G")]
     Speed1G,
-    #[serde(alias = "10G")]
+    #[serde(rename = "10G")]
     Speed10G,
-    #[serde(alias = "25G")]
+    #[serde(rename = "25G")]
     Speed25G,
-    #[serde(alias = "40G")]
+    #[serde(rename = "40G")]
     Speed40G,
-    #[serde(alias = "50G")]
+    #[serde(rename = "50G")]
     Speed50G,
-    #[serde(alias = "100G")]
+    #[serde(rename = "100G")]
     Speed100G,
-    #[serde(alias = "200G")]
+    #[serde(rename = "200G")]
     Speed200G,
-    #[serde(alias = "400G")]
+    #[serde(rename = "400G")]
     Speed400G,
 }
 
