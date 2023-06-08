@@ -6,6 +6,7 @@
 
 use std::collections::BTreeMap;
 
+use crate::schemes::v0::fsm_output::ApiError;
 use crate::trust_quorum::SharePkgV0;
 
 use super::fsm::StateHandler;
@@ -79,6 +80,67 @@ impl StateHandler for LearnedState {
                 request_id,
                 Error::CannotSpareAShare.into(),
             ),
+        };
+
+        // This is a terminal state
+        (self.into(), output)
+    }
+
+    fn handle_response(
+        mut self,
+        common: &mut FsmCommonData,
+        from: Baseboard,
+        request_id: Uuid,
+        response: ResponseType,
+    ) -> (State, Output) {
+        use ResponseType::*;
+        let output = match response {
+            InitAck => ApiError::UnexpectedResponse {
+                from,
+                state: self.name(),
+                request_id,
+                msg: response.name(),
+            }
+            .into(),
+            Share(Share) => {
+                let rack_secret_result =
+                    match RackSecretState::combine_shares_if_necessary(
+                        &mut self.rack_secret_state,
+                        from,
+                        share,
+                        &self.pkg.share_digests,
+                    ) {
+                        Ok(rack_secret_result) => rack_secret_result,
+                        Err(output) => return output,
+                    };
+
+                // Did computation of the rack secret succeed or fail?
+                //
+                // If we got to this point it means we at least had enough shares to try
+                // to reconstruct the rack secret.
+
+                // If we have a pending API request for the rack secret we can
+                // resolve it now.
+                common
+                    .resolve_pending_api_request(
+                        rack_secret_result.as_ref().ok(),
+                    )
+                    .into()
+            }
+            Pkg(_) => ApiError::UnexpectedResponse {
+                from,
+                state: self.name(),
+                request_id,
+                msg: response.name(),
+            }
+            .into(),
+            Error(error) => ApiError::ErrorResponseReceived {
+                from,
+                state: self.name(),
+                request_id,
+                error,
+            }
+            .into(),
         };
 
         // This is a terminal state

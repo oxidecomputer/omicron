@@ -87,39 +87,16 @@ impl InitialMemberState {
         request_id: Uuid,
         share: Vec<u8>,
     ) -> Output {
-        let rack_secret_result = match &mut self.rack_secret_state {
-            None => {
-                return ApiError::UnexpectedResponse {
-                    from,
-                    state: self.name(),
-                    request_id,
-                    msg: response.name(),
-                }
-                .into()
-            }
-            Some(RackSecretState::Secret(_)) => {
-                // We already have the rack secret, just drop the extra share
-                return Output::none();
-            }
-            Some(RackSecretState::Shares(shares)) => {
-                /// Compute and validate hash of the received key share
-                if let Err(api_error) =
-                    validate_share(&from, &share, &self.pkg.share_digests)
-                {
-                    return api_error.into();
-                }
-
-                // Add the share to our current set
-                shares.insert(from, share);
-
-                if shares.len() == pkg.threshold as usize {
-                    let to_combine: Vec<_> = shares.values().cloned().collect();
-                    RackSecret::combine_shares(&to_combine)
-                } else {
-                    return Output::none();
-                }
-            }
-        };
+        let rack_secret_result =
+            match RackSecretState::combine_shares_if_necessary(
+                &mut self.rack_secret_state,
+                from,
+                share,
+                &self.pkg.share_digests,
+            ) {
+                Ok(rack_secret_result) => rack_secret_result,
+                Err(output) => return output,
+            };
 
         // Did computation of the rack secret succeed or fail?
         //

@@ -156,6 +156,57 @@ pub enum RackSecretState {
     Secret(RackSecret),
 }
 
+impl RackSecretState {
+    /// If there are enough shares *and* we are currently collecting shares
+    /// *and* the new share validates, then try to reconstruct and return the
+    /// *`RackSecret`.
+    ///
+    /// We return the result of the share combination so that callers can
+    /// handle what is essentially a fatal error if secret reconstruction fails.
+    ///
+    /// If we are not currently collecting shares, or the share does not
+    /// validate we return an `Err(Output)` that can be directly returned to our
+    /// caller's caller.
+    pub fn combine_shares_if_necessary(
+        state: &mut Option<RackSecretState>,
+        from: Baseboard,
+        share: Vec<u8>,
+        share_digests: &Vec<Sha3_256Digest>,
+    ) -> Result<Result<RackSecret, vsss_rs::Error>, Output> {
+        match state {
+            None => Err(return ApiError::UnexpectedResponse {
+                from,
+                state: self.name(),
+                request_id,
+                msg: response.name(),
+            }
+            .into()),
+            Some(RackSecretState::Secret(_)) => {
+                // We already have the rack secret, just drop the extra share
+                Err(Output::none())
+            }
+            Some(RackSecretState::Shares(shares)) => {
+                /// Compute and validate hash of the received key share
+                if let Err(api_error) =
+                    validate_share(&from, &share, &self.pkg.share_digests)
+                {
+                    return Err(api_error.into());
+                }
+
+                // Add the share to our current set
+                shares.insert(from, share);
+
+                if shares.len() == pkg.threshold as usize {
+                    let to_combine: Vec<_> = shares.values().cloned().collect();
+                    Ok(RackSecret::combine_shares(&to_combine))
+                } else {
+                    Err(Output::none())
+                }
+            }
+        }
+    }
+}
+
 /// Initialization state for tracking rack init on the coordinator node (the one
 /// local to RSS)
 #[derive(Debug)]
