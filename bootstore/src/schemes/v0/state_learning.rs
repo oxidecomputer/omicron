@@ -6,6 +6,7 @@
 
 use std::collections::BTreeMap;
 
+use crate::schemes::v0::fsm_output::ApiError;
 use crate::trust_quorum::SharePkgV0;
 
 use super::fsm::{next_peer, StateHandler};
@@ -81,6 +82,49 @@ impl StateHandler for LearningState {
         (state.into(), output)
     }
 
+    fn handle_response(
+        mut self,
+        common: &mut FsmCommonData,
+        from: Baseboard,
+        request_id: Uuid,
+        response: ResponseType,
+    ) -> (State, Output) {
+        use ResponseType::*;
+        match response {
+            InitAck | Share(_) => {
+                let state = self.name();
+                (
+                    self.into(),
+                    ApiError::UnexpectedResponse {
+                        from,
+                        state,
+                        request_id,
+                        msg: response.name(),
+                    }
+                    .into(),
+                )
+            }
+            Pkg(pkg) => {
+                // We learned our share pkg. We need to transition to
+                // `State::Learned`
+                (LearningState::new(pkg), Output::none())
+            }
+            Error(error) => {
+                let state = self.name();
+                (
+                    self.into(),
+                    ApiError::ErrorResponseReceived {
+                        from,
+                        state,
+                        request_id,
+                        error,
+                    }
+                    .into(),
+                )
+            }
+        }
+    }
+
     /// Check for expired learn attempts
     fn tick(mut self, common: &mut FsmCommonData) -> (State, Output) {
         match &mut self.attempt {
@@ -98,14 +142,14 @@ impl StateHandler for LearningState {
             }
             None => {
                 if let Some(peer) = self.peers.first() {
-                    *state = State::Learning(Some(LearnAttempt {
-                        peer: peer.clone(),
-                        start: self.clock,
-                    }));
-                    (
-                        self.into(),
-                        Output::request(peer.clone(), RequestType::Learn),
-                    )
+                    let state = LearningState {
+                        attempt: Some(LearnAttempt {
+                            peer: peer.clone(),
+                            start: self.clock,
+                        }),
+                    }
+                    .into();
+                    (state, Output::request(peer.clone(), RequestType::Learn))
                 } else {
                     // No peers to learn from
                     (self.into(), Output::none())

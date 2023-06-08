@@ -131,6 +131,14 @@ pub enum ApiError {
         request_id: Uuid,
         msg: &'static str,
     },
+
+    // Error response received from a peer request
+    ErrorResponseReceived {
+        from: Baseboard,
+        state: &'static str,
+        request_id: Uuid,
+        error: Error,
+    },
 }
 
 /// The caller of the API (aka the peer/network layer will sometimes need to get
