@@ -4,12 +4,17 @@
 
 //! State for the V0 protocol state machine
 
-use super::state_initial_member::InitialMemberState;
+use super::fsm_output::ApiOutput;
 use super::state_learned::LearnedState;
 use super::state_learning::LearningState;
 use super::state_uninitialized::UninitializedState;
-use crate::trust_quorum::{
-    create_pkgs, LearnedSharePkgV0, RackSecret, SharePkgV0, TrustQuorumError,
+use super::{fsm_output::Output, state_initial_member::InitialMemberState};
+use crate::{
+    trust_quorum::{
+        create_pkgs, LearnedSharePkgV0, RackSecret, SharePkgV0,
+        TrustQuorumError,
+    },
+    Sha3_256Digest,
 };
 use serde::{Deserialize, Serialize};
 use sled_hardware::Baseboard;
@@ -71,6 +76,27 @@ impl FsmCommonData {
             pending_api_rack_secret_request: None,
         }
     }
+
+    // If there's a pending api request for the rack secret:
+    //
+    // Return the secret if there is one passed in, otherwise return an error.
+    // Return `None` if no request is pending
+    pub fn resolve_pending_api_request(
+        &mut self,
+        rack_secret: Option<&RackSecret>,
+    ) -> Option<Result<ApiOutput, ApiError>> {
+        match (rack_secret, &mut self.pending_api_rack_secret_request) {
+            (None, Some(_)) => {
+                self.pending_api_rack_secret_request = None;
+                Some(Err(ApiError::FailedToReconstructRackSecret))
+            }
+            (Some(rack_secret), Some(_)) => {
+                self.pending_api_rack_secret_request = None;
+                Some(Ok(ApiOutput::RackSecret(rack_secret.clone())))
+            }
+            (_, None) => None,
+        }
+    }
 }
 
 /// Metadata associated with a request that is keyed by `Baseboard`
@@ -101,6 +127,10 @@ pub struct RackInitState {
 impl RackInitState {
     pub fn timer_expired(&self, now: Ticks, timeout: Ticks) -> bool {
         now.saturating_sub(self.start) > timeout
+    }
+
+    pub fn is_complete(&self) -> bool {
+        self.acks.len() == self.total_members
     }
 }
 

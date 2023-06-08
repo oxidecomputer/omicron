@@ -67,12 +67,14 @@ impl Output {
             api_output: None,
         }
     }
+}
 
-    pub fn rack_init_complete() -> Output {
+impl From<ApiOutput> for Output {
+    fn from(value: ApiOutput) -> Self {
         Output {
             persist: false,
             envelopes: vec![],
-            api_output: Some(Ok(ApiOutput::RackInitComplete)),
+            api_output: Some(Ok(value)),
         }
     }
 }
@@ -104,12 +106,6 @@ pub enum ApiError {
     /// Share digest does not match what's in our package
     InvalidShare {
         from: Baseboard,
-    },
-
-    /// We received a share with no share collection ongoing
-    UnexpectedShareReceived {
-        from: Baseboard,
-        state: &'static str,
     },
 
     /// We could not reconstruct the rack secret even after retrieving enough
