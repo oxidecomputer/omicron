@@ -102,53 +102,6 @@
       }
     },
     "/login/{silo_name}/saml/{provider_name}": {
-      "get": {
-        "tags": [
-          "login"
-        ],
-        "summary": "Prompt user login",
-        "description": "Either display a page asking a user for their credentials, or redirect them to their identity provider.",
-        "operationId": "login_saml_begin",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "provider_name",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          },
-          {
-            "in": "path",
-            "name": "silo_name",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          }
-        ],
-        "responses": {
-          "302": {
-            "description": "redirect (found)",
-            "headers": {
-              "location": {
-                "description": "HTTP \"Location\" header",
-                "style": "simple",
-                "required": true,
-                "schema": {
-                  "type": "string"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      },
       "post": {
         "tags": [
           "login"
