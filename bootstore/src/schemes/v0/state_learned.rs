@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 
 use crate::trust_quorum::SharePkgV0;
 
-use super::fsm::{next_peer, StateHandler};
+use super::fsm::StateHandler;
 use super::fsm_output::Output;
 use super::messages::{Request, RequestType, Response, ResponseType};
 use super::state::{FsmCommonData, InitialMemberState, State};

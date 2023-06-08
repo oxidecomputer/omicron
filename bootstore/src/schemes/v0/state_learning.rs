@@ -10,7 +10,7 @@ use crate::schemes::v0::fsm_output::ApiError;
 use crate::schemes::v0::state_learned::LearnedState;
 use crate::trust_quorum::SharePkgV0;
 
-use super::fsm::{next_peer, StateHandler};
+use super::fsm::StateHandler;
 use super::fsm_output::Output;
 use super::messages::{Request, RequestType, Response, ResponseType};
 use super::state::{FsmCommonData, InitialMemberState, State};
@@ -136,7 +136,7 @@ impl StateHandler for LearningState {
         match &mut self.attempt {
             Some(attempt) => {
                 if attempt.expired(common.clock, common.config.learn_timeout) {
-                    if let Some(peer) = next_peer(&attempt.peer, &self.peers) {
+                    if let Some(peer) = common.next_peer(&attempt.peer) {
                         attempt.peer = peer.clone();
                         attempt.start = self.clock;
                         (self.into(), Output::request(peer, RequestType::Learn))

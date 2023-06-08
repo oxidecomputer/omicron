@@ -97,6 +97,47 @@ impl FsmCommonData {
             (_, None) => None,
         }
     }
+
+    // Send a request for a share to each peer
+    pub fn broadcast_share_requests(
+        &self,
+        rack_uuid: Uuid,
+        known_shares: Option<&BTreeMap<Baseboard, Vec<u8>>>,
+    ) -> Output {
+        let known_peers = if let Some(shares) = known_shares {
+            shares.keys().cloned().collect()
+        } else {
+            BTreeSet::new()
+        };
+
+        // All broadcast requests share the same id
+        let request_id = Uuid::new_v4();
+        let envelopes = self
+            .peers
+            .difference(&known_peers)
+            .cloned()
+            .map(|to| Envelope {
+                to,
+                msg: Request {
+                    id: request_id,
+                    type_: RequestType::GetShare { rack_uuid },
+                }
+                .into(),
+            })
+            .collect();
+
+        Output { persist: false, envelopes, api_output: None }
+    }
+
+    // Round-robin peer selection
+    pub fn next_peer(&self, current: &Baseboard) -> Option<Baseboard> {
+        if let Some(index) = self.peers.iter().position(|x| x == current) {
+            let next_index = (index + 1) % peers.len();
+            self.peers.iter().nth(next_index).cloned()
+        } else {
+            self.peers.first().cloned()
+        }
+    }
 }
 
 /// Metadata associated with a request that is keyed by `Baseboard`

@@ -9,9 +9,7 @@ use std::collections::BTreeMap;
 use crate::schemes::v0::fsm_output::{ApiError, ApiOutput};
 use crate::trust_quorum::SharePkgV0;
 
-use super::fsm::{
-    broadcast_share_requests, next_peer, validate_share, StateHandler,
-};
+use super::fsm::{validate_share, StateHandler};
 use super::fsm_output::Output;
 use super::messages::{Error, Request, RequestType, Response, ResponseType};
 use super::state::{
@@ -319,8 +317,7 @@ impl StateHandler for InitialMemberState {
                             from,
                             RequestMetadata { request_id, start: self.clock },
                         );
-                        broadcast_share_requests(
-                            &common,
+                        common.broadcast_share_requests(
                             self.pkg.rack_uuid,
                             Some(shares),
                         )
@@ -339,11 +336,8 @@ impl StateHandler for InitialMemberState {
                                 common.id.clone(),
                                 self.pkg.share.clone(),
                             )])));
-                        broadcast_share_requests(
-                            &common,
-                            self.pkg.rack_uuid,
-                            None,
-                        )
+                        common
+                            .broadcast_share_requests(self.pkg.rack_uuid, None)
                     }
                 }
             }
