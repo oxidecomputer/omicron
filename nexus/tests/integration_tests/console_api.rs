@@ -481,7 +481,35 @@ async fn test_login_redirect_simple(cptestctx: &ControlPlaneTestContext) {
     .await;
 
     // empty state param gets dropped
-    expect_redirect(testctx, "/login?redirect_uri=", &expected).await;
+    // expect_redirect(testctx, "/login?redirect_uri=", &expected).await;
+}
+
+// reject anything that's not a relative URI
+#[nexus_test]
+async fn test_bad_redirect_uri(cptestctx: &ControlPlaneTestContext) {
+    let testctx = &cptestctx.external_client;
+
+    let paths = [
+        "/login",
+        "/login/my-silo/local",
+        "/login/my-silo/saml/my-idp",
+        "/login/my-silo/saml/my-idp/redirect",
+    ];
+    let bad_uris = ["foo", "", "http://example.com"];
+
+    for path in paths.iter() {
+        for bad_uri in bad_uris.iter() {
+            let uri = format!("{}?redirect_uri={}", path, bad_uri);
+            let body = RequestBuilder::new(testctx, Method::GET, &uri)
+                .expect_status(Some(StatusCode::BAD_REQUEST))
+                .execute()
+                .await
+                .expect("failed to 400")
+                .parsed_body::<dropshot::HttpErrorResponseBody>()
+                .unwrap();
+            assert!(body.message.ends_with("not a relative URI"));
+        }
+    }
 }
 
 #[nexus_test]

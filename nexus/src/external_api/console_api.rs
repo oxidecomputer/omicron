@@ -26,7 +26,7 @@ use dropshot::{
     HttpResponseFound, HttpResponseHeaders, HttpResponseSeeOther,
     HttpResponseUpdatedNoContent, Path, Query, RequestContext,
 };
-use http::{header, Response, StatusCode};
+use http::{header, Response, StatusCode, Uri};
 use hyper::Body;
 use lazy_static::lazy_static;
 use mime_guess;
@@ -36,10 +36,12 @@ use nexus_types::external_api::params;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::{DataPageParams, Error, NameOrId};
+use parse_display::Display;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_urlencoded;
 use std::num::NonZeroU32;
+use std::str::FromStr;
 use std::{collections::HashSet, ffi::OsString, path::PathBuf, sync::Arc};
 
 // -----------------------------------------------------
@@ -187,7 +189,7 @@ pub struct LoginToProviderPathParam {
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct RelayState {
-    pub redirect_uri: Option<String>,
+    pub redirect_uri: Option<RelativeUri>,
 }
 
 impl RelayState {
@@ -350,6 +352,7 @@ pub async fn login_saml(
         let session = create_session(opctx, apictx, user).await?;
         let next_url = relay_state
             .and_then(|r| r.redirect_uri)
+            .map(|u| u.to_string())
             .unwrap_or_else(|| "/".to_string());
         let mut response = http_response_see_other(next_url)?;
 
@@ -383,6 +386,7 @@ pub struct LoginPathParam {
 pub async fn login_local_begin(
     rqctx: RequestContext<Arc<ServerContext>>,
     _path_params: Path<LoginPathParam>,
+    _query_params: Query<LoginUrlQuery>,
 ) -> Result<Response<Body>, HttpError> {
     // TODO: figure out why instrumenting doesn't work
     // let apictx = rqctx.context();
@@ -506,9 +510,46 @@ pub struct RestPathParam {
     path: Vec<String>,
 }
 
+/// This is meant as a security feature. We want to ensure we never redirect to
+/// a URI on a different host.
+#[derive(Serialize, Deserialize, Debug, JsonSchema, Clone, Display)]
+#[serde(try_from = "String")]
+#[display("{0}")]
+pub struct RelativeUri(String);
+
+impl FromStr for RelativeUri {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::try_from(s.to_string())
+    }
+}
+
+impl TryFrom<Uri> for RelativeUri {
+    type Error = String;
+
+    fn try_from(uri: Uri) -> Result<Self, Self::Error> {
+        if uri.host().is_none() && uri.scheme().is_none() {
+            Ok(Self(uri.to_string()))
+        } else {
+            Err(format!("\"{}\" is not a relative URI", uri))
+        }
+    }
+}
+
+impl TryFrom<String> for RelativeUri {
+    type Error = String;
+
+    fn try_from(s: String) -> Result<Self, Self::Error> {
+        s.parse::<Uri>()
+            .map_err(|_| format!("\"{}\" is not a relative URI", s))
+            .and_then(|uri| Self::try_from(uri))
+    }
+}
+
 #[derive(Serialize, Deserialize, JsonSchema)]
 pub struct LoginUrlQuery {
-    redirect_uri: Option<String>,
+    redirect_uri: Option<RelativeUri>,
 }
 
 /// Generate URI to the appropriate login form for this Silo. Optional
@@ -516,7 +557,7 @@ pub struct LoginUrlQuery {
 /// login, and is included in `state` query param if present
 async fn get_login_url(
     rqctx: &RequestContext<Arc<ServerContext>>,
-    redirect_uri: Option<String>,
+    redirect_uri: Option<RelativeUri>,
 ) -> Result<String, Error> {
     let nexus = &rqctx.context().nexus;
     let endpoint = nexus.endpoint_for_request(rqctx)?;
@@ -590,8 +631,7 @@ pub async fn login_begin(
     let apictx = rqctx.context();
     let handler = async {
         let query = query_params.into_inner();
-        let redirect_uri = query.redirect_uri.filter(|s| !s.trim().is_empty());
-        let login_url = get_login_url(&rqctx, redirect_uri).await?;
+        let login_url = get_login_url(&rqctx, query.redirect_uri).await?;
         http_response_found(login_url)
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -612,8 +652,11 @@ pub async fn console_index_or_login_redirect(
     // otherwise redirect to idp
 
     // Put the current URI in the query string to redirect back to after login.
-    let redirect_uri =
-        rqctx.request.uri().path_and_query().map(|p| p.to_string());
+    let redirect_uri = rqctx
+        .request
+        .uri()
+        .path_and_query()
+        .map(|p| RelativeUri(p.to_string()));
     let login_url = get_login_url(&rqctx, redirect_uri).await?;
 
     Ok(Response::builder()
@@ -809,7 +852,7 @@ fn find_file(path: &PathBuf, root_dir: &PathBuf) -> Result<PathBuf, HttpError> {
 
 #[cfg(test)]
 mod test {
-    use super::find_file;
+    use super::{find_file, RelativeUri};
     use http::StatusCode;
     use std::{env::current_dir, path::PathBuf};
 
@@ -886,5 +929,18 @@ mod test {
         let error = find_file(&PathBuf::from(path_str), &root).unwrap_err();
         assert_eq!(error.status_code, StatusCode::NOT_FOUND);
         assert_eq!(error.internal_message, "attempted to follow a symlink");
+    }
+
+    #[test]
+    fn test_relative_uri() {
+        let good = ["/", "/abc", "/abc/def"];
+        for g in good.iter() {
+            assert!(RelativeUri::try_from(g.to_string()).is_ok());
+        }
+
+        let bad = ["", "abc", "example.com", "http://example.com"];
+        for b in bad.iter() {
+            assert!(RelativeUri::try_from(b.to_string()).is_err());
+        }
     }
 }
