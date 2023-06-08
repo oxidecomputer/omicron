@@ -11,7 +11,7 @@ use omicron_nexus::authn::silos::{
     IdentityProviderType, SamlIdentityProvider, SamlLoginPost,
 };
 use omicron_nexus::external_api::console_api;
-use omicron_nexus::external_api::views::{self, Silo};
+use omicron_nexus::external_api::views;
 use omicron_nexus::external_api::{params, shared};
 use omicron_nexus::TestInterfaces;
 
@@ -38,16 +38,6 @@ async fn test_create_a_saml_idp(cptestctx: &ControlPlaneTestContext) {
     const SILO_NAME: &str = "saml-silo";
     create_silo(&client, SILO_NAME, true, shared::SiloIdentityMode::SamlJit)
         .await;
-    let silo: Silo = NexusRequest::object_get(
-        &client,
-        &format!("/v1/system/silos/{}", SILO_NAME,),
-    )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .expect("failed to make request")
-    .parsed_body()
-    .unwrap();
 
     let saml_idp_descriptor = SAML_IDP_DESCRIPTOR;
 
@@ -128,10 +118,7 @@ async fn test_create_a_saml_idp(cptestctx: &ControlPlaneTestContext) {
         RequestBuilder::new(
             client,
             Method::GET,
-            &format!(
-                "/login/{}/saml/{}/redirect",
-                silo.identity.name, silo_saml_idp.identity.name
-            ),
+            &format!("/login/saml/{}/redirect", silo_saml_idp.identity.name),
         )
         .expect_status(Some(StatusCode::FOUND)),
     )
@@ -332,10 +319,7 @@ async fn test_create_a_hidden_silo_saml_idp(
         RequestBuilder::new(
             client,
             Method::GET,
-            &format!(
-                "/login/hidden/saml/{}/redirect",
-                silo_saml_idp.identity.name
-            ),
+            &format!("/login/saml/{}/redirect", silo_saml_idp.identity.name),
         )
         .expect_status(Some(StatusCode::FOUND)),
     )
@@ -998,10 +982,7 @@ async fn test_post_saml_response(cptestctx: &ControlPlaneTestContext) {
         RequestBuilder::new(
             client,
             Method::POST,
-            &format!(
-                "/login/{}/saml/some-totally-real-saml-provider",
-                SILO_NAME
-            ),
+            "/login/saml/some-totally-real-saml-provider",
         )
         .raw_body(Some(
             serde_urlencoded::to_string(SamlLoginPost {
@@ -1129,10 +1110,7 @@ async fn test_post_saml_response_with_relay_state(
         RequestBuilder::new(
             client,
             Method::POST,
-            &format!(
-                "/login/{}/saml/some-totally-real-saml-provider",
-                SILO_NAME
-            ),
+            "/login/saml/some-totally-real-saml-provider",
         )
         .raw_body(Some(
             serde_urlencoded::to_string(SamlLoginPost {

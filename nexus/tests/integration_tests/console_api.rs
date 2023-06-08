@@ -188,10 +188,7 @@ async fn test_console_pages(cptestctx: &ControlPlaneTestContext) {
     expect_redirect(
         testctx,
         "/projects/irrelevant-path",
-        &format!(
-            "/login/{}/local?redirect_uri=%2Fprojects%2Firrelevant-path",
-            cptestctx.silo_name
-        ),
+        "/login/local?redirect_uri=%2Fprojects%2Firrelevant-path",
     )
     .await;
 
@@ -460,8 +457,8 @@ async fn test_session_me_groups(cptestctx: &ControlPlaneTestContext) {
 async fn test_login_redirect_simple(cptestctx: &ControlPlaneTestContext) {
     let testctx = &cptestctx.external_client;
 
-    let expected = format!("/login/{}/local", cptestctx.silo_name);
-    expect_redirect(testctx, "/login", &expected).await;
+    let expected = "/login/local";
+    expect_redirect(testctx, "/login", expected).await;
 
     // pass through state param to login redirect URL. keep it URL encoded, don't double encode
     // encoded path is /abc/def
@@ -488,9 +485,9 @@ async fn test_bad_redirect_uri(cptestctx: &ControlPlaneTestContext) {
 
     let paths = [
         "/login",
-        "/login/my-silo/local",
-        "/login/my-silo/saml/my-idp",
-        "/login/my-silo/saml/my-idp/redirect",
+        "/login/local",
+        "/login/saml/my-idp",
+        "/login/saml/my-idp/redirect",
     ];
     let bad_uris = ["foo", "", "http://example.com"];
 
@@ -697,7 +694,7 @@ async fn test_login_redirect_multiple_silos(
     assert_eq!(
         make_request(&reqwest_client, cptestctx.silo_name.as_str(), port, None)
             .await,
-        Redirect::Location(format!("/login/{}/local", &cptestctx.silo_name,)),
+        Redirect::Location("/login/local".to_string()),
     );
 
     // same thing, but with state param in URL
@@ -709,10 +706,9 @@ async fn test_login_redirect_multiple_silos(
             Some("/abc/def")
         )
         .await,
-        Redirect::Location(format!(
-            "/login/{}/local?redirect_uri=%2Fabc%2Fdef",
-            &cptestctx.silo_name,
-        )),
+        Redirect::Location(
+            "/login/local?redirect_uri=%2Fabc%2Fdef".to_string(),
+        ),
     );
 
     // SAML with no idps: no redirect possible
@@ -737,10 +733,7 @@ async fn test_login_redirect_multiple_silos(
             None
         )
         .await,
-        Redirect::Location(format!(
-            "/login/{}/saml/idp0",
-            silo_saml1.identity.name.as_str()
-        )),
+        Redirect::Location("/login/saml/idp0".to_string(),),
     );
     // same thing but, with state param in URL
     assert_eq!(
@@ -751,10 +744,9 @@ async fn test_login_redirect_multiple_silos(
             Some("/abc/def"),
         )
         .await,
-        Redirect::Location(format!(
-            "/login/{}/saml/idp0?redirect_uri=%2Fabc%2Fdef",
-            silo_saml1.identity.name.as_str()
-        )),
+        Redirect::Location(
+            "/login/saml/idp0?redirect_uri=%2Fabc%2Fdef".to_string(),
+        ),
     );
     // SAML with two idps: redirect to the first one
     // This is arbitrary.  We just don't want /login to break if you add a
@@ -767,10 +759,7 @@ async fn test_login_redirect_multiple_silos(
             None
         )
         .await,
-        Redirect::Location(format!(
-            "/login/{}/saml/idp0",
-            silo_saml2.identity.name.as_str()
-        )),
+        Redirect::Location("/login/saml/idp0".to_string(),),
     );
 
     // Bogus Silo: this currently redirects you to _some_ Silo.
@@ -835,12 +824,12 @@ async fn log_in_and_extract_token(
     cptestctx: &ControlPlaneTestContext,
 ) -> String {
     let testctx = &cptestctx.external_client;
-    let url = format!("/v1/login/{}/local", cptestctx.silo_name);
+    let url = "/v1/login/local";
     let credentials = UsernamePasswordCredentials {
         username: cptestctx.user_name.as_ref().parse().unwrap(),
         password: TEST_SUITE_PASSWORD.parse().unwrap(),
     };
-    let login = RequestBuilder::new(&testctx, Method::POST, &url)
+    let login = RequestBuilder::new(&testctx, Method::POST, url)
         .body(Some(&credentials))
         .expect_status(Some(StatusCode::NO_CONTENT))
         .execute()

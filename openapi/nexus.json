@@ -101,7 +101,7 @@
         }
       }
     },
-    "/login/{silo_name}/saml/{provider_name}": {
+    "/login/saml/{provider_name}": {
       "post": {
         "tags": [
           "login"
@@ -112,14 +112,6 @@
           {
             "in": "path",
             "name": "provider_name",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          },
-          {
-            "in": "path",
-            "name": "silo_name",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
@@ -2124,23 +2116,13 @@
         }
       }
     },
-    "/v1/login/{silo_name}/local": {
+    "/v1/login/local": {
       "post": {
         "tags": [
           "login"
         ],
         "summary": "Authenticate a user via username and password",
         "operationId": "login_local",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "silo_name",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          }
-        ],
         "requestBody": {
           "content": {
             "application/json": {

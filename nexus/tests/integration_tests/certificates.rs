@@ -687,11 +687,7 @@ impl SiloCert {
 
     /// Returns the full URL to the login endpoint for this Silo
     fn login_url(&self, port: u16) -> String {
-        format!(
-            "{}/v1/login/{}/local",
-            &self.base_url(port),
-            &self.silo_name.as_str()
-        )
+        format!("{}/v1/login/local", &self.base_url(port),)
     }
 
     /// Returns a new `ReqwestClientBuilder` that's configured to trust this

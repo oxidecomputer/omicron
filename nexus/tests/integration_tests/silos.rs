@@ -549,10 +549,7 @@ async fn test_deleting_a_silo_deletes_the_idp(
         RequestBuilder::new(
             client,
             Method::GET,
-            &format!(
-                "/login/{}/saml/{}/redirect",
-                SILO_NAME, silo_saml_idp.identity.name
-            ),
+            &format!("/login/saml/{}/redirect", silo_saml_idp.identity.name),
         )
         .expect_status(Some(StatusCode::NOT_FOUND)),
     )
@@ -606,10 +603,7 @@ async fn test_saml_idp_metadata_data_valid(
         RequestBuilder::new(
             client,
             Method::GET,
-            &format!(
-                "/login/blahblah/saml/{}/redirect",
-                silo_saml_idp.identity.name
-            ),
+            &format!("/login/saml/{}/redirect", silo_saml_idp.identity.name),
         )
         .expect_status(Some(StatusCode::FOUND)),
     )
@@ -1936,7 +1930,7 @@ async fn test_local_silo_constraints(cptestctx: &ControlPlaneTestContext) {
         client,
         StatusCode::NOT_FOUND,
         Method::GET,
-        "/login/fixed/saml/foo/redirect",
+        "/login/saml/foo/redirect",
     )
     .execute()
     .await
@@ -1948,7 +1942,7 @@ async fn test_local_silo_constraints(cptestctx: &ControlPlaneTestContext) {
         client,
         StatusCode::NOT_FOUND,
         Method::POST,
-        "/login/fixed/saml/foo",
+        "/login/saml/foo",
     )
     .execute()
     .await

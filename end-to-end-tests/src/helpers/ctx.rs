@@ -196,8 +196,7 @@ pub async fn build_client() -> Result<oxide_client::Client> {
     let client_params = ClientParams::new()?;
     let config = &client_params.rss_config;
     let base_url = client_params.base_url();
-    let silo_name = config.recovery_silo.silo_name.as_str();
-    let login_url = format!("{}/v1/login/{}/local", base_url, silo_name);
+    let login_url = format!("{}/v1/login/local", base_url);
     let username: oxide_client::types::UserId =
         config.recovery_silo.user_name.as_str().parse().map_err(|s| {
             anyhow!("parsing configured recovery user name: {:?}", s)

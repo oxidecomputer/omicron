@@ -54,10 +54,9 @@ use std::{collections::HashSet, ffi::OsString, path::PathBuf, sync::Arc};
 // 1. Navigate an auth-gated console page (e.g., /projects) directly while
 //    logged out. This goes through `console_index_or_login_redirect` and
 //    therefore results in a redirect straight to either
-//    /login/{silo}/local?redirect_uri={} or
-//    /login/{silo}/saml/{provider}?redirect_uri={} depending on the silo's
-//    authn mode. Nexus takes the path the user was trying to hit and sticks it
-//    in a `redirect_uri` query param.
+//    /login/local?redirect_uri={} or /login/saml/{provider}?redirect_uri={}
+//    depending on the silo's authn mode. Nexus takes the path the user was
+//    trying to hit and sticks it in a `redirect_uri` query param.
 // 2. Hit a 401 on a background API call while already in the console (for
 //    example, if session expires while in use). In that case, the console will
 //    navigate to `/login?redirect_uri={current_path}`, which will respond with
@@ -67,12 +66,12 @@ use std::{collections::HashSet, ffi::OsString, path::PathBuf, sync::Arc};
 // are POSTed to the API, and on success, the console pulls `redirect_uri` out
 // of the query params and navigates to that route client-side.
 //
-// SAML is more complicated. /login/{silo}/saml/{provider}?redirect_uri={} shows
-// a page with a link to /login/{silo}/saml/{provider}/redirect?redirect_uri={}
-// (note the /redirect), which redirects to the IdP  with `redirect_uri` encoded
-// in a RelayState query param). On successful login in the IdP, the IdP will
-// POST /login/{silo}/saml/{} with a body including that redirect_uri, so that
-// on success, we can redirect to the original target page.
+// SAML is more complicated. /login/saml/{provider}?redirect_uri={} shows a page
+// with a link to /login/saml/{provider}/redirect?redirect_uri={} (note the
+// /redirect), which redirects to the IdP  with `redirect_uri` encoded in a
+// RelayState query param). On successful login in the IdP, the IdP will POST
+// /login/saml/{} with a body including that redirect_uri, so that on success,
+// we can redirect to the original target page.
 
 // -------------------------------
 // Detailed overview of SAML login
@@ -94,7 +93,7 @@ use std::{collections::HashSet, ffi::OsString, path::PathBuf, sync::Arc};
 //
 // Nexus in this case is the service provider (SP), and when the silo identity
 // provider is type SAML, SP initiated login flow will begin when the user does
-// a GET /login/{silo_name}/{provider_name}.
+// a GET /login/saml/{provider_name}.
 //
 // But before that, as an example, say an unauthenticated user (or a user whose
 // credentials have expired) tries to navigate to:
@@ -113,7 +112,7 @@ use std::{collections::HashSet, ffi::OsString, path::PathBuf, sync::Arc};
 //
 // Once the appropriate login URL is created, the user's browser is redirected:
 //
-//   GET /login/{silo_name}/{provider_name}
+//   GET /login/saml/{provider_name}
 //
 // For identity provider type SAML, this will cause Nexus to send a AuthnRequest
 // to the selected IdP in the SAMLRequest parameter. It will optionally be
@@ -135,7 +134,7 @@ use std::{collections::HashSet, ffi::OsString, path::PathBuf, sync::Arc};
 // The user will then authenticate with that IdP, and if successful will be
 // redirected back to the SP (Nexus) with a POST:
 //
-//   POST /login/{silo_name}/{provider_name}
+//   POST /login/saml/{provider_name}
 //
 // The body of this POST will contain a URL encoded payload that includes the
 // IdP's SAMLResponse plus optional relay state:
@@ -183,7 +182,6 @@ use std::{collections::HashSet, ffi::OsString, path::PathBuf, sync::Arc};
 
 #[derive(Deserialize, JsonSchema)]
 pub struct LoginToProviderPathParam {
-    pub silo_name: crate::db::model::Name,
     pub provider_name: crate::db::model::Name,
 }
 
@@ -218,7 +216,7 @@ impl RelayState {
 /// SAML login console page (just a link to the IdP)
 #[endpoint {
    method = GET,
-   path = "/login/{silo_name}/saml/{provider_name}",
+   path = "/login/saml/{provider_name}",
    tags = ["login"],
    unpublished = true,
 }]
@@ -237,7 +235,7 @@ pub async fn login_saml_begin(
 /// and rely on Nexus to redirect to the actual IdP.
 #[endpoint {
    method = GET,
-   path = "/login/{silo_name}/saml/{provider_name}/redirect",
+   path = "/login/saml/{provider_name}/redirect",
    tags = ["login"],
    unpublished = true,
 }]
@@ -251,6 +249,9 @@ pub async fn login_saml_redirect(
         let nexus = &apictx.nexus;
         let path_params = path_params.into_inner();
 
+        let endpoint = nexus.endpoint_for_request(&rqctx)?;
+        let silo = endpoint.silo();
+
         // Use opctx_external_authn because this request will be
         // unauthenticated.
         let opctx = nexus.opctx_external_authn();
@@ -258,7 +259,7 @@ pub async fn login_saml_redirect(
         let (.., identity_provider) = IdentityProviderType::lookup(
             &nexus.datastore(),
             &opctx,
-            &path_params.silo_name,
+            &silo.name().clone().into(),
             &path_params.provider_name,
         )
         .await?;
@@ -293,7 +294,7 @@ pub async fn login_saml_redirect(
 /// Authenticate a user via SAML
 #[endpoint {
    method = POST,
-   path = "/login/{silo_name}/saml/{provider_name}",
+   path = "/login/saml/{provider_name}",
    tags = ["login"],
 }]
 pub async fn login_saml(
@@ -306,6 +307,9 @@ pub async fn login_saml(
         let nexus = &apictx.nexus;
         let path_params = path_params.into_inner();
 
+        let endpoint = nexus.endpoint_for_request(&rqctx)?;
+        let silo = endpoint.silo();
+
         // By definition, this request is not authenticated.  These operations
         // happen using the Nexus "external authentication" context, which we
         // keep specifically for this purpose.
@@ -315,7 +319,7 @@ pub async fn login_saml(
             IdentityProviderType::lookup(
                 &nexus.datastore(),
                 &opctx,
-                &path_params.silo_name,
+                &silo.name().clone().into(),
                 &path_params.provider_name,
             )
             .await?;
@@ -372,20 +376,14 @@ pub async fn login_saml(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-#[derive(Deserialize, JsonSchema)]
-pub struct LoginPathParam {
-    pub silo_name: crate::db::model::Name,
-}
-
 #[endpoint {
    method = GET,
-   path = "/login/{silo_name}/local",
+   path = "/login/local",
    tags = ["login"],
    unpublished = true,
 }]
 pub async fn login_local_begin(
     rqctx: RequestContext<Arc<ServerContext>>,
-    _path_params: Path<LoginPathParam>,
     _query_params: Query<LoginUrlQuery>,
 ) -> Result<Response<Body>, HttpError> {
     // TODO: figure out why instrumenting doesn't work
@@ -398,26 +396,27 @@ pub async fn login_local_begin(
 /// Authenticate a user via username and password
 #[endpoint {
    method = POST,
-   path = "/v1/login/{silo_name}/local",
+   path = "/v1/login/local",
    tags = ["login"],
 }]
 pub async fn login_local(
     rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<LoginPathParam>,
     credentials: dropshot::TypedBody<params::UsernamePasswordCredentials>,
 ) -> Result<HttpResponseHeaders<HttpResponseUpdatedNoContent>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let nexus = &apictx.nexus;
-        let path = path_params.into_inner();
         let credentials = credentials.into_inner();
-        let silo = path.silo_name.into();
+
+        let endpoint = nexus.endpoint_for_request(&rqctx)?;
+        let silo = endpoint.silo();
 
         // By definition, this request is not authenticated.  These operations
         // happen using the Nexus "external authentication" context, which we
         // keep specifically for this purpose.
         let opctx = nexus.opctx_external_authn();
-        let silo_lookup = nexus.silo_lookup(&opctx, silo)?;
+        let silo_lookup =
+            nexus.silo_lookup(&opctx, silo.name().clone().into())?;
         let user = nexus.login_local(&opctx, &silo_lookup, credentials).await?;
 
         let session = create_session(opctx, apictx, user).await?;
@@ -564,7 +563,7 @@ async fn get_login_url(
     let silo = endpoint.silo();
 
     let login_uri = if silo.authentication_mode == AuthenticationMode::Local {
-        format!("/login/{}/local", silo.name())
+        "/login/local".to_string()
     } else {
         // List the available identity providers and pick an arbitrary one.
         // It might be nice to have some policy for choosing which one is used
@@ -599,11 +598,7 @@ async fn get_login_url(
             );
         }
 
-        format!(
-            "/login/{}/saml/{}",
-            silo.name(),
-            idps.into_iter().next().unwrap().name()
-        )
+        format!("/login/saml/{}", idps.into_iter().next().unwrap().name())
     };
 
     // Stick redirect_url into the state param and URL encode it so it can be

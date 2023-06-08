@@ -71,10 +71,7 @@ async fn test_device_auth_flow(cptestctx: &ControlPlaneTestContext) {
         .expect_status(Some(StatusCode::FOUND))
         .expect_response_header(
             header::LOCATION,
-            &format!(
-                "/login/{}/local?redirect_uri=%2Fdevice%2Fverify",
-                cptestctx.silo_name
-            ),
+            "/login/local?redirect_uri=%2Fdevice%2Fverify",
         )
         .execute()
         .await
