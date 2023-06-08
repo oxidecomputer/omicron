@@ -205,9 +205,6 @@ impl StateHandler for InitialMemberState {
         }
 
         // Check for rack secret request timeout
-        //
-        // It's fine if this happens in a separate tick from the check above.
-        // In practice the two requests should never be pending simultaneously
         if let Some(start) = common.pending_api_rack_secret_request {
             // Check for rack secret request expiry
             if common.clock.saturating_sub(start)

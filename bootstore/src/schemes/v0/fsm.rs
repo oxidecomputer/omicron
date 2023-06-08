@@ -314,10 +314,6 @@ impl Fsm {
         share: Vec<u8>,
     ) -> Output {
         match state {
-            State::Uninitialized | State::Learning(_) => {
-                ApiError::UnexpectedShareReceived { from, state: state.name() }
-                    .into()
-            }
             State::InitialMember(state) => {
                 self.on_share_as_initial_member(from, share, state)
             }

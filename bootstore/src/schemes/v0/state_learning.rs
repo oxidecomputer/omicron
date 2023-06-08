@@ -7,6 +7,7 @@
 use std::collections::BTreeMap;
 
 use crate::schemes::v0::fsm_output::ApiError;
+use crate::schemes::v0::state_learned::LearnedState;
 use crate::trust_quorum::SharePkgV0;
 
 use super::fsm::{next_peer, StateHandler};
@@ -71,7 +72,7 @@ impl StateHandler for LearningState {
                 Output::respond(from, request_id, Error::StillLearning.into())
             }
             Learn => {
-                // Learners can't distribute shares to other learners
+                // Learners can't distribute new shares to other learners
                 Output::respond(
                     from,
                     request_id,
@@ -105,9 +106,14 @@ impl StateHandler for LearningState {
                 )
             }
             Pkg(pkg) => {
-                // We learned our share pkg. We need to transition to
-                // `State::Learned`
-                (LearningState::new(pkg), Output::none())
+                // Tansition to `State::Learned`
+                //
+                // It doesn't matter who we received the response from, as it
+                // must have been a peer we asked.
+                //
+                // TODO: We should check the rack_uuid if we add it to
+                // `RequestType::InitLearner`  and save it.
+                (LearnedState::new(pkg), Output::none())
             }
             Error(error) => {
                 let state = self.name();
