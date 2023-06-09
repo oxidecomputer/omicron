@@ -1,8 +1,8 @@
 # Reflector configuration (oxidecompuer/reflector)
 
-# When any of the listeners configured below activate, run .github/workflows/update-dendrite.yml targeting main
+# When any of the listeners configured below activate, run .github/workflows/update-maghemite.yml targeting main
 
-workflow = "update-dendrite.yml"
+workflow = "update-maghemite.yml"
 branch = "main"
 
 # Request an installation token when running this workflow
@@ -13,7 +13,7 @@ requires_token = true
 # timeframe
 
 [[on]]
-repository = "oxidecomputer/dendrite"
+repository = "oxidecomputer/maghemite"
 paths = [
   "**",
 ]
