@@ -8,6 +8,7 @@ use super::config::{
     Config, BOOTSTRAP_AGENT_HTTP_PORT, BOOTSTRAP_AGENT_RACK_INIT_PORT,
 };
 use super::hardware::HardwareMonitor;
+use super::http_entrypoints::SledOperationInterlock;
 use super::params::RackInitializeRequest;
 use super::params::StartSledAgentRequest;
 use super::rss_handle::RssHandle;
@@ -84,8 +85,8 @@ pub enum BootstrapError {
     #[error("Failed to get bootstrap address: {err}")]
     GetBootstrapAddress { err: illumos_utils::zone::GetAddressError },
 
-    #[error("RSS is already executing, and should not run concurrently")]
-    ConcurrentRSSAccess,
+    #[error("Concurrent sled access error: {message}")]
+    ConcurrentSledOperationAccess { message: &'static str },
 
     #[error("Failed to initialize rack: {0}")]
     RackSetup(#[from] crate::rack_setup::service::SetupServiceError),
@@ -180,7 +181,7 @@ pub struct Agent {
 
     /// Ensures that RSS (initialization or teardown) is not executed
     /// concurrently.
-    rss_access: Mutex<()>,
+    pub(super) rss_interlock: SledOperationInterlock,
 
     sled_state: Mutex<SledAgentState>,
     storage_resources: StorageResources,
@@ -407,7 +408,7 @@ impl Agent {
             log: ba_log,
             parent_log: log,
             ip,
-            rss_access: Mutex::new(()),
+            rss_interlock: SledOperationInterlock::new(),
             sled_state: Mutex::new(SledAgentState::Before(Some(
                 hardware_monitor,
             ))),
@@ -663,12 +664,6 @@ impl Agent {
         &self,
         request: RackInitializeRequest,
     ) -> Result<(), BootstrapError> {
-        // Avoid concurrent initialization and teardown.
-        let _rss_access = self
-            .rss_access
-            .try_lock()
-            .map_err(|_| BootstrapError::ConcurrentRSSAccess)?;
-
         RssHandle::run_rss(
             &self.parent_log,
             request,
@@ -685,12 +680,6 @@ impl Agent {
 
     /// Runs the rack setup service to completion
     pub async fn rack_reset(&self) -> Result<(), BootstrapError> {
-        // Avoid concurrent initialization and teardown.
-        let _rss_access = self
-            .rss_access
-            .try_lock()
-            .map_err(|_| BootstrapError::ConcurrentRSSAccess)?;
-
         RssHandle::run_rss_reset(&self.parent_log, self.ip).await?;
         Ok(())
     }
