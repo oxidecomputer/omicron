@@ -6,6 +6,7 @@ use super::ActionRegistry;
 use super::NexusActionContext;
 use super::NexusSaga;
 use crate::app::sagas::declare_saga_actions;
+use crate::app::sagas::retry_until_known_result;
 use crate::db;
 use crate::db::lookup::LookupPath;
 use crate::{authn, authz};
@@ -165,34 +166,25 @@ async fn sid_delete_network_config(
     // bailing out before we've attempted deletion of all entries.
     for entry in external_ips {
         debug!(log, "deleting nat mapping for entry: {entry:#?}");
-        let result = match entry.ip {
-            ipnetwork::IpNetwork::V4(network) => {
-                dpd_client
-                    .nat_ipv4_delete(&network.ip(), *entry.first_port)
-                    .await
-            }
-            ipnetwork::IpNetwork::V6(network) => {
-                dpd_client
-                    .nat_ipv6_delete(&network.ip(), *entry.first_port)
-                    .await
-            }
-        };
+
+        let result = retry_until_known_result(log, || async {
+            dpd_client
+                .ensure_nat_entry_deleted(log, entry.ip, *entry.first_port)
+                .await
+        })
+        .await;
 
         match result {
             Ok(_) => {
                 debug!(log, "deletion of nat entry successful for: {entry:#?}");
             }
             Err(e) => {
-                if e.status() == Some(http::StatusCode::NOT_FOUND) {
-                    debug!(log, "no nat entry found for: {entry:#?}");
-                } else {
-                    let new_error =
-                        ActionError::action_failed(Error::internal_error(
-                            &format!("failed to delete nat entry via dpd: {e}"),
-                        ));
-                    error!(log, "{new_error:#?}");
-                    errors.push(new_error);
-                }
+                let new_error =
+                    ActionError::action_failed(Error::internal_error(
+                        &format!("failed to delete nat entry via dpd: {e}"),
+                    ));
+                error!(log, "{new_error:#?}");
+                errors.push(new_error);
             }
         }
     }

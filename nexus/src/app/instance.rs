@@ -8,6 +8,7 @@ use super::MAX_DISKS_PER_INSTANCE;
 use super::MAX_EXTERNAL_IPS_PER_INSTANCE;
 use super::MAX_NICS_PER_INSTANCE;
 use crate::app::sagas;
+use crate::app::sagas::retry_until_known_result;
 use crate::authn;
 use crate::authz;
 use crate::cidata::InstanceCiData;
@@ -1241,22 +1242,27 @@ impl super::Nexus {
             })
             .map(|(_, ip)| ip)
         {
-            dpd_client
-                .ensure_nat_entry(
-                    &log,
-                    target_ip.ip,
-                    dpd_client::types::MacAddr { a: mac_address.into_array() },
-                    *target_ip.first_port,
-                    *target_ip.last_port,
-                    vni,
-                    sled_ip_address.ip(),
-                )
-                .await
-                .map_err(|e| {
-                    Error::internal_error(&format!(
-                        "failed to ensure dpd entry: {e}"
-                    ))
-                })?;
+            retry_until_known_result(log, || async {
+                dpd_client
+                    .ensure_nat_entry(
+                        &log,
+                        target_ip.ip,
+                        dpd_client::types::MacAddr {
+                            a: mac_address.into_array(),
+                        },
+                        *target_ip.first_port,
+                        *target_ip.last_port,
+                        vni,
+                        sled_ip_address.ip(),
+                    )
+                    .await
+            })
+            .await
+            .map_err(|e| {
+                Error::internal_error(&format!(
+                    "failed to ensure dpd entry: {e}"
+                ))
+            })?;
         }
 
         Ok(())

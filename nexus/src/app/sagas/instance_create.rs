@@ -6,6 +6,7 @@ use super::{NexusActionContext, NexusSaga, SagaInitError, ACTION_GENERATE_ID};
 use crate::app::instance::WriteBackUpdatedInstance;
 use crate::app::sagas::declare_saga_actions;
 use crate::app::sagas::disk_create::{self, SagaDiskCreate};
+use crate::app::sagas::retry_until_known_result;
 use crate::app::{
     MAX_DISKS_PER_INSTANCE, MAX_EXTERNAL_IPS_PER_INSTANCE,
     MAX_NICS_PER_INSTANCE,
@@ -437,34 +438,23 @@ async fn sic_remove_network_config(
 
     debug!(log, "deleting nat mapping for entry: {target_ip:#?}");
 
-    let result = match target_ip.ip {
-        ipnetwork::IpNetwork::V4(network) => {
-            dpd_client
-                .nat_ipv4_delete(&network.ip(), *target_ip.first_port)
-                .await
-        }
-        ipnetwork::IpNetwork::V6(network) => {
-            dpd_client
-                .nat_ipv6_delete(&network.ip(), *target_ip.first_port)
-                .await
-        }
-    };
+    let result = retry_until_known_result(log, || async {
+        dpd_client
+            .ensure_nat_entry_deleted(log, target_ip.ip, *target_ip.first_port)
+            .await
+    })
+    .await;
+
     match result {
         Ok(_) => {
             debug!(log, "deletion of nat entry successful for: {target_ip:#?}");
             Ok(())
         }
-        Err(e) => {
-            if e.status() == Some(http::StatusCode::NOT_FOUND) {
-                debug!(log, "no nat entry found for: {target_ip:#?}");
-                Ok(())
-            } else {
-                Err(ActionError::action_failed(Error::internal_error(
-                    &format!("failed to delete nat entry via dpd: {e}"),
-                )))
-            }
-        }
+        Err(e) => Err(Error::internal_error(&format!(
+            "failed to delete nat entry via dpd: {e}"
+        ))),
     }?;
+
     Ok(())
 }
 

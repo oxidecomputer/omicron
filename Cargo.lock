@@ -4588,6 +4588,7 @@ dependencies = [
  "pem",
  "petgraph",
  "pq-sys",
+ "progenitor-client",
  "propolis-client",
  "rand 0.8.5",
  "rcgen",
