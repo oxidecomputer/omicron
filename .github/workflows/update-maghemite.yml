@@ -1,4 +1,4 @@
-name: Update dendrite
+name: Update maghemite
 
 on:
   workflow_dispatch:
@@ -20,11 +20,11 @@ permissions:
 jobs:
   generate-update:
     concurrency:
-      group: dendrite-integration
+      group: maghemite-integration
       cancel-in-progress: true
     runs-on: ubuntu-22.04
     env:
-      INT_BRANCH: dendrite-integration
+      INT_BRANCH: maghemite-integration
       TARGET_BRANCH: main
     steps:
 
@@ -41,13 +41,13 @@ jobs:
           PATHS=("tools")
           merge $TARGET_BRANCH $INT_BRANCH ${{ inputs.reflector_user_id }} $PATHS
 
-      - name: Update dendrite versions
+      - name: Update maghemite versions
         run: |
-          ./tools/update_dendrite.sh
+          ./tools/update_maghemite.sh
 
-      - name: Extract new dendrite package version
+      - name: Extract new maghemite package version
         run: |
-          eval $(cat tools/dendrite_openapi_version | grep COMMIT)
+          eval $(cat tools/maghemite_openapi_version | grep COMMIT)
           echo "version=${COMMIT:0:7}" >> $GITHUB_OUTPUT
         id: updated
 
@@ -55,7 +55,7 @@ jobs:
         run: |
           . ./tools/reflector/helpers.sh
 
-          PATHS=("tools/dendrite_openapi_version")
+          PATHS=("tools/maghemite_openapi_version")
           CHANGES=()
           commit $TARGET_BRANCH $INT_BRANCH ${{ inputs.reflector_user_id }} PATHS CHANGES
 
@@ -73,9 +73,9 @@ jobs:
 
           if [ ${{ steps.committed.outputs.api }} ]
           then
-            TITLE+=" dendrite to ${{ steps.updated.outputs.version }}"
+            TITLE+=" maghemite to ${{ steps.updated.outputs.version }}"
 
-            echo "Updated dendrite API version to ${{ steps.updated.outputs.version }}" >> body
+            echo "Updated maghemite API version to ${{ steps.updated.outputs.version }}" >> body
             echo "" >> body
           fi
 
