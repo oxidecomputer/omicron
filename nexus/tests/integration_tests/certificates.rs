@@ -624,6 +624,7 @@ async fn test_silo_certificates() {
         assert!(
             error.to_string().contains("invalid peer certificate")
                 || error.to_string().contains("self-signed certificate")
+                || error.to_string().contains("self signed certificate")
         );
     } else {
         panic!(
@@ -646,6 +647,7 @@ async fn test_silo_certificates() {
         assert!(
             error.to_string().contains("invalid peer certificate")
                 || error.to_string().contains("self-signed certificate")
+                || error.to_string().contains("self signed certificate")
         );
     } else {
         panic!(
