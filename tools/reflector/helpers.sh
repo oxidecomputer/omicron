@@ -1,5 +1,10 @@
+#!/bin/bash
+
+set -o pipefail
+set -o errexit
+
 function set_reflector_bot {
-  local BOT_ID="$1"
+  local BOT_ID=$1
 
   # Setup commits to be made by reflector bot
   git config --local user.name "reflector[bot]"
@@ -12,13 +17,14 @@ function merge {
   local BOT_ID="$3"
   local -n CHECKOUT_PATHS=$4
 
-  set_reflector_bot $BOT_ID
+  set_reflector_bot "$BOT_ID"
 
   # Merge the target branch into the integration branch and detect conflicts
   local MERGE_STATUS=0
+
   # Checkout the integration branch or create if if it does not exist
-  git checkout $INTEGRATION_BRANCH 2>/dev/null || git checkout -b $INTEGRATION_BRANCH
-  git merge $TARGET_BRANCH || MERGE_STATUS=$?
+  git checkout "$INTEGRATION_BRANCH" 2>/dev/null || git checkout -b "$INTEGRATION_BRANCH"
+  git merge "$TARGET_BRANCH" || MERGE_STATUS=$?
 
   # If there was a merge conflict attempt to reset the generated files and commit them back
   if [ $MERGE_STATUS -eq 1 ]
@@ -28,15 +34,17 @@ function merge {
     # For each of the requests paths, use the version on the target branch
     for path in "${CHECKOUT_PATHS[@]}"
     do
-      git checkout $TARGET_BRANCH -- $path
+      git checkout "$TARGET_BRANCH" -- "$path"
     done
 
     git commit -m "Merge branch '$TARGET_BRANCH' into $INTEGRATION_BRANCH and reset generated code"
   fi
 
   # Determine if there are any outstanding conflicts, if so they will need to be manually fixed.
-  local STATUS=$(git status --porcelain=v1 2>/dev/null | wc -l)
-  if [ $STATUS -eq 0 ]
+  local STATUS
+  STATUS=$(git status --porcelain=v1 2>/dev/null | wc -l)
+
+  if [ "$STATUS" -eq 0 ]
   then
     exit 0
   else
@@ -53,19 +61,19 @@ function commit {
   local -n DIFF_PATHS=$4
   local -n OUTPUT=$5
 
-  set_reflector_bot $BOT_ID
+  set_reflector_bot "$BOT_ID"
 
   # Commit all changes back to the integration branch
   git add .
   git commit -m "Update with latest version" || echo "Nothing to commit"
-  git push origin $INTEGRATION_BRANCH
+  git push origin "$INTEGRATION_BRANCH"
 
   # Check if the API version has been updated
   for path in "${DIFF_PATHS[@]}"
   do
     CHANGED=0
-    git diff $TARGET_BRANCH...$INTEGRATION_BRANCH --quiet $path || CHANGED=$?
-    OUTPUT+=(CHANGED)
+    git diff "$TARGET_BRANCH...$INTEGRATION_BRANCH" --quiet "$path" || CHANGED=$?
+    OUTPUT+=("$CHANGED")
   done
 }
 
@@ -76,30 +84,32 @@ function update_pr {
   local BODY_FILE="$4"
 
   # Compare the integration branch with the target branch
-  local TARGET_TO_INTEGRATION="$(git rev-list --count $TARGET_BRANCH..$INTEGRATION_BRANCH)"
-  local INTEGRATION_TO_TARGET="$(git rev-list --count $INTEGRATION_BRANCH..$TARGET_BRANCH)"
+  local TARGET_TO_INTEGRATION
+  TARGET_TO_INTEGRATION="$(git rev-list --count $TARGET_BRANCH..$INTEGRATION_BRANCH)"
+  local INTEGRATION_TO_TARGET
+  INTEGRATION_TO_TARGET="$(git rev-list --count $INTEGRATION_BRANCH..$TARGET_BRANCH)"
 
   # Check for an existing pull request from the integration branch to the target branch
-  eval $(gh pr view $INTEGRATION_BRANCH --repo $GITHUB_REPOSITORY --json url,number,state | jq -r 'to_entries[] | "\(.key | ascii_upcase)=\(.value)"')
+  eval "$(gh pr view "$INTEGRATION_BRANCH" --repo "$GITHUB_REPOSITORY" --json url,number,state | jq -r 'to_entries[] | "\(.key | ascii_upcase)=\(.value)"')"
   local HASPR=0
-  [ "$NUMBER" != "" ] && [ "$BASEREFNAME" == "$TARGET_BRANCH" ] || HASPR=$?
+  if [ "$NUMBER" != "" ] && [ "$BASEREFNAME" == "$TARGET_BRANCH" ]; then HASPR=1; fi
 
-  if [ "$TARGET_TO_INTEGRATION" -eq 0 -a "$INTEGRATION_TO_TARGET" -eq 0 ]
+  if [ "$TARGET_TO_INTEGRATION" -eq 0 ] && [ "$INTEGRATION_TO_TARGET" -eq 0 ]
   then
     echo "$TARGET_BRANCH is up to date with $INTEGRATION_BRANCH. No pull request needed"
 
     if [ $HASPR -eq 0 ] && [ "$NUMBER" != "" ]
     then
       echo "Closing existing PR"
-      gh pr close $NUMBER
+      gh pr close "$NUMBER"
     fi
   elif [ "$TARGET_TO_INTEGRATION" -gt 0 ]
   then
     echo "$TARGET_BRANCH is behind $INTEGRATION_BRANCH ($TARGET_TO_INTEGRATION)"
 
-    if [ -z "$NUMBER" -o "$STATE" != "OPEN" ]
+    if [ -z "$NUMBER" ] || [ "$STATE" != "OPEN" ]
     then
-      gh pr create -B $TARGET_BRANCH -H $INTEGRATION_BRANCH --title "$TITLE" --body-file "$BODY_FILE"
+      gh pr create -B "$TARGET_BRANCH" -H "$INTEGRATION_BRANCH" --title "$TITLE" --body-file "$BODY_FILE"
     else
       echo "PR already exists: ($NUMBER) $URL . Updating..."
       gh pr edit "$NUMBER" --title "$TITLE" --body-file "$BODY_FILE"
