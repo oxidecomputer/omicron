@@ -34,8 +34,8 @@ use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::time::Duration;
 use uuid::Uuid;
-use wicket_common::update_events::EventReport;
 use wicket_common::rack_setup::PutRssUserConfigInsensitive;
+use wicket_common::update_events::EventReport;
 
 use crate::ServerContext;
 
