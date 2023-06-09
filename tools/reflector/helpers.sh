@@ -3,6 +3,7 @@
 set -o pipefail
 set -o errexit
 
+# Configure the git cli to perform commits as Reflector Bot
 function set_reflector_bot {
   local BOT_ID=$1
 
@@ -11,6 +12,9 @@ function set_reflector_bot {
   git config --local user.email "$BOT_ID+reflector[bot]@users.noreply.github.com"
 }
 
+# Attempt to merge a target branch in to an integration branch, ignoring conflicts on the the
+# specified checkout paths. Merge will fail if there are additional conflicts left over after those
+# paths are ignored.
 function merge {
   local TARGET_BRANCH="$1"
   local INTEGRATION_BRANCH="$2"
@@ -54,6 +58,8 @@ function merge {
   fi
 }
 
+# Generate a commit from all of the outstanding changes and report back on `OUTPUT` the paths that
+# have changed. The order of the values in `OUTPUT` corresponds to order of paths in `DIFF_PATHS`.
 function commit {
   local TARGET_BRANCH="$1"
   local INTEGRATION_BRANCH="$2"
@@ -77,6 +83,11 @@ function commit {
   done
 }
 
+# Create a new PR from the integration branch to the target branch if one is needed. Otherwise
+# either update or close the branch. These behaviors will trigger in the following cases:
+# 1. Create PR if: integration is ahead of main in commits and no open PR exists
+# 2. Update PR if: integration is ahead of main in commits and an open PR exists
+# 3. Close PR if: integration is equal to main
 function update_pr {
   local TARGET_BRANCH="$1"
   local INTEGRATION_BRANCH="$2"
