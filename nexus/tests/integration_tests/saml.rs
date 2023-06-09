@@ -840,6 +840,47 @@ fn test_correct_saml_response_ecdsa_sha256() {
     assert_eq!(relay_state, None);
 }
 
+// Test rejecting a SAML response signed with a key that doesn't match the silo
+// identity provider's key
+#[test]
+fn test_reject_saml_response_signed_with_other_key() {
+    let silo_saml_identity_provider = SamlIdentityProvider {
+        idp_metadata_document_string: SAML_RESPONSE_IDP_DESCRIPTOR.to_string(),
+
+        idp_entity_id: "https://some.idp.test/oxide_rack/".to_string(),
+        sp_client_id: "https://customer.site/oxide_rack/saml".to_string(),
+        acs_url: "https://customer.site/oxide_rack/saml".to_string(),
+        slo_url: "http://slo".to_string(),
+        technical_contact_email: "technical@fake".to_string(),
+
+        public_cert: None,
+        private_key: None,
+
+        group_attribute_name: None,
+    };
+
+    let body_bytes = serde_urlencoded::to_string(SamlLoginPost {
+        saml_response: base64::engine::general_purpose::STANDARD
+            .encode(&SAML_RESPONSE_SIGNED_WITH_ECDSA_SHA256),
+        relay_state: None,
+    })
+    .unwrap();
+
+    let result = silo_saml_identity_provider.authenticated_subject(
+        &body_bytes,
+        // Set max_issue_delay so that SAMLResponse is valid
+        Some(
+            chrono::Utc::now()
+                - "2022-05-04T15:36:12.631Z"
+                    .parse::<chrono::DateTime<chrono::Utc>>()
+                    .unwrap()
+                + chrono::Duration::seconds(60),
+        ),
+    );
+
+    assert!(result.is_err());
+}
+
 // Test a SAML response with only the assertion signed
 #[test]
 fn test_accept_saml_response_only_assertion_signed() {
