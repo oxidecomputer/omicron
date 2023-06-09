@@ -188,14 +188,20 @@ fn populate_network_table(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use omicron_common::api::internal::shared::RackNetworkConfig as InternalRackNetworkConfig;
+    use wicket_common::rack_setup::PutRssUserConfigInsensitive;
     use wicketd_client::types::PortFec;
     use wicketd_client::types::PortSpeed;
-    use wicketd_client::types::PutRssUserConfigInsensitive;
     use wicketd_client::types::SpIdentifier;
 
     fn put_config_from_current_config(
         value: CurrentRssUserConfigInsensitive,
     ) -> PutRssUserConfigInsensitive {
+        use omicron_common::api::internal::shared::PortFec as InternalPortFec;
+        use omicron_common::api::internal::shared::PortSpeed as InternalPortSpeed;
+
+        let rnc = value.rack_network_config.unwrap();
+
         PutRssUserConfigInsensitive {
             bootstrap_sleds: value
                 .bootstrap_sleds
@@ -205,9 +211,44 @@ mod tests {
             dns_servers: value.dns_servers,
             external_dns_zone_name: value.external_dns_zone_name,
             internal_services_ip_pool_ranges: value
-                .internal_services_ip_pool_ranges,
+                .internal_services_ip_pool_ranges
+                .into_iter()
+                .map(|r| {
+                    use omicron_common::address;
+                    match r {
+                        IpRange::V4(r) => address::IpRange::V4(
+                            address::Ipv4Range::new(r.first, r.last).unwrap(),
+                        ),
+                        IpRange::V6(r) => address::IpRange::V6(
+                            address::Ipv6Range::new(r.first, r.last).unwrap(),
+                        ),
+                    }
+                })
+                .collect(),
             ntp_servers: value.ntp_servers,
-            rack_network_config: value.rack_network_config.unwrap(),
+            rack_network_config: InternalRackNetworkConfig {
+                gateway_ip: rnc.gateway_ip,
+                infra_ip_first: rnc.infra_ip_first,
+                infra_ip_last: rnc.infra_ip_last,
+                uplink_port: rnc.uplink_port,
+                uplink_port_speed: match rnc.uplink_port_speed {
+                    PortSpeed::Speed0G => InternalPortSpeed::Speed0G,
+                    PortSpeed::Speed1G => InternalPortSpeed::Speed1G,
+                    PortSpeed::Speed10G => InternalPortSpeed::Speed10G,
+                    PortSpeed::Speed25G => InternalPortSpeed::Speed25G,
+                    PortSpeed::Speed40G => InternalPortSpeed::Speed40G,
+                    PortSpeed::Speed50G => InternalPortSpeed::Speed50G,
+                    PortSpeed::Speed100G => InternalPortSpeed::Speed100G,
+                    PortSpeed::Speed200G => InternalPortSpeed::Speed200G,
+                    PortSpeed::Speed400G => InternalPortSpeed::Speed400G,
+                },
+                uplink_port_fec: match rnc.uplink_port_fec {
+                    PortFec::Firecode => InternalPortFec::Firecode,
+                    PortFec::None => InternalPortFec::None,
+                    PortFec::Rs => InternalPortFec::Rs,
+                },
+                uplink_ip: rnc.uplink_ip,
+            },
         }
     }
 
