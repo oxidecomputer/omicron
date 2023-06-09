@@ -621,7 +621,11 @@ async fn test_silo_certificates() {
         );
     if let oxide_client::Error::CommunicationError(error) = error {
         assert!(error.is_connect());
-        assert!(error.to_string().contains("invalid peer certificate"));
+        assert!(
+            error.to_string().contains("invalid peer certificate")
+                || error.to_string().contains("self-signed certificate")
+                || error.to_string().contains("self signed certificate")
+        );
     } else {
         panic!(
             "unexpected error connecting with wrong certificate: {:#}",
@@ -640,7 +644,11 @@ async fn test_silo_certificates() {
         );
     if let oxide_client::Error::CommunicationError(error) = error {
         assert!(error.is_connect());
-        assert!(error.to_string().contains("invalid peer certificate"));
+        assert!(
+            error.to_string().contains("invalid peer certificate")
+                || error.to_string().contains("self-signed certificate")
+                || error.to_string().contains("self signed certificate")
+        );
     } else {
         panic!(
             "unexpected error connecting with wrong certificate: {:#}",

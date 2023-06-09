@@ -11,8 +11,11 @@
 
 use super::console_api::console_index_or_login_redirect;
 use super::views::DeviceAccessTokenGrant;
-use crate::db::model::DeviceAccessToken;
 use crate::ServerContext;
+use crate::{
+    app::external_endpoints::authority_for_request,
+    db::model::DeviceAccessToken,
+};
 use dropshot::{
     endpoint, HttpError, HttpResponseUpdatedNoContent, RequestContext,
     TypedBody,
@@ -71,37 +74,15 @@ pub async fn device_auth_request(
     let params = params.into_inner();
     let handler = async {
         let opctx = nexus.opctx_external_authn();
-        let request = &rqctx.request;
-
-        let host = if request.version() > hyper::Version::HTTP_11 {
-            request.uri().authority().map(|a| a.as_str())
-        } else {
-            let host = request
-                .headers()
-                .get(header::HOST)
-                .map(|h| h.to_str())
-                .transpose();
-            match host {
-                Ok(host) => host,
-                Err(e) => {
-                    return build_oauth_response(
-                        StatusCode::BAD_REQUEST,
-                        &serde_json::json!({
-                            "error": "invalid_request",
-                            "error_description": format!("could not decode Host header: {}", e)
-                        }),
-                    )
-                }
-            }
-        };
-        let host = match host {
-            Some(host) => host,
-            None => {
+        let authority = authority_for_request(&rqctx.request);
+        let host = match &authority {
+            Ok(host) => host.as_str(),
+            Err(error) => {
                 return build_oauth_response(
                     StatusCode::BAD_REQUEST,
                     &serde_json::json!({
                         "error": "invalid_request",
-                        "error_description": "missing Host header",
+                        "error_description": error,
                     }),
                 )
             }

@@ -3,6 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::{NexusActionContext, NEXUS_DPD_TAG};
+use crate::app::sagas::retry_until_known_result;
 use crate::app::sagas::{
     declare_saga_actions, ActionRegistry, NexusSaga, SagaInitError,
 };
@@ -200,6 +201,7 @@ async fn spa_ensure_switch_port_settings(
 ) -> Result<(), ActionError> {
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
+    let log = sagactx.user_data().log();
 
     let settings = sagactx
         .lookup::<SwitchPortSettingsCombinedResult>("switch_port_settings")?;
@@ -213,10 +215,11 @@ async fn spa_ensure_switch_port_settings(
     let dpd_port_settings = api_to_dpd_port_settings(&settings)
         .map_err(ActionError::action_failed)?;
 
-    dpd_client
-        .port_settings_apply(&port_id, &dpd_port_settings)
-        .await
-        .map_err(|e| ActionError::action_failed(e.to_string()))?;
+    retry_until_known_result(log, || async {
+        dpd_client.port_settings_apply(&port_id, &dpd_port_settings).await
+    })
+    .await
+    .map_err(|e| ActionError::action_failed(e.to_string()))?;
 
     Ok(())
 }
@@ -231,6 +234,7 @@ async fn spa_undo_ensure_switch_port_settings(
         &sagactx,
         &params.serialized_authn,
     );
+    let log = sagactx.user_data().log();
 
     let port_id: PortId = PortId::from_str(&params.switch_port_name)
         .map_err(|e| external::Error::internal_error(e))?;
@@ -245,10 +249,11 @@ async fn spa_undo_ensure_switch_port_settings(
     let id = match orig_port_settings_id {
         Some(id) => id,
         None => {
-            dpd_client
-                .port_settings_clear(&port_id)
-                .await
-                .map_err(|e| external::Error::internal_error(&e.to_string()))?;
+            retry_until_known_result(log, || async {
+                dpd_client.port_settings_clear(&port_id).await
+            })
+            .await
+            .map_err(|e| external::Error::internal_error(&e.to_string()))?;
 
             return Ok(());
         }
@@ -262,10 +267,11 @@ async fn spa_undo_ensure_switch_port_settings(
     let dpd_port_settings = api_to_dpd_port_settings(&settings)
         .map_err(ActionError::action_failed)?;
 
-    dpd_client
-        .port_settings_apply(&port_id, &dpd_port_settings)
-        .await
-        .map_err(|e| external::Error::internal_error(&e.to_string()))?;
+    retry_until_known_result(log, || async {
+        dpd_client.port_settings_apply(&port_id, &dpd_port_settings).await
+    })
+    .await
+    .map_err(|e| external::Error::internal_error(&e.to_string()))?;
 
     Ok(())
 }

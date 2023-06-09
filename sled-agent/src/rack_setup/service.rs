@@ -618,6 +618,7 @@ impl ServiceInner {
                         ServiceType::Nexus {
                             external_ip,
                             internal_ip: _,
+                            nic,
                             ..
                         } => {
                             services.push(NexusTypes::ServicePutRequest {
@@ -633,6 +634,12 @@ impl ServiceInner {
                                 .to_string(),
                                 kind: NexusTypes::ServiceKind::Nexus {
                                     external_address: *external_ip,
+                                    nic: NexusTypes::ServiceNic {
+                                        id: nic.id,
+                                        name: nic.name.clone(),
+                                        ip: nic.ip,
+                                        mac: nic.mac,
+                                    },
                                 },
                             });
                         }
@@ -654,7 +661,7 @@ impl ServiceInner {
                         ServiceType::ExternalDns {
                             http_address,
                             dns_address,
-                            ..
+                            nic,
                         } => {
                             services.push(NexusTypes::ServicePutRequest {
                                 service_id,
@@ -663,6 +670,12 @@ impl ServiceInner {
                                 address: http_address.to_string(),
                                 kind: NexusTypes::ServiceKind::ExternalDns {
                                     external_address: dns_address.ip(),
+                                    nic: NexusTypes::ServiceNic {
+                                        id: nic.id,
+                                        name: nic.name.clone(),
+                                        ip: nic.ip,
+                                        mac: nic.mac,
+                                    },
                                 },
                             });
                         }
@@ -705,7 +718,7 @@ impl ServiceInner {
                                 kind: NexusTypes::ServiceKind::CruciblePantry,
                             });
                         }
-                        ServiceType::BoundaryNtp { snat_cfg, .. } => {
+                        ServiceType::BoundaryNtp { snat_cfg, nic, .. } => {
                             services.push(NexusTypes::ServicePutRequest {
                                 service_id,
                                 zone_id,
@@ -717,8 +730,14 @@ impl ServiceInner {
                                     0,
                                 )
                                 .to_string(),
-                                kind: NexusTypes::ServiceKind::Ntp {
-                                    snat_cfg: Some(snat_cfg.into()),
+                                kind: NexusTypes::ServiceKind::BoundaryNtp {
+                                    snat: snat_cfg.into(),
+                                    nic: NexusTypes::ServiceNic {
+                                        id: nic.id,
+                                        name: nic.name.clone(),
+                                        ip: nic.ip,
+                                        mac: nic.mac,
+                                    },
                                 },
                             });
                         }
@@ -734,9 +753,7 @@ impl ServiceInner {
                                     0,
                                 )
                                 .to_string(),
-                                kind: NexusTypes::ServiceKind::Ntp {
-                                    snat_cfg: None,
-                                },
+                                kind: NexusTypes::ServiceKind::InternalNtp,
                             });
                         }
                         details => {

@@ -16,7 +16,6 @@ OPERATION ID                             METHOD   URL PATH
 device_access_token                      POST     /device/token
 device_auth_confirm                      POST     /device/confirm
 device_auth_request                      POST     /device/auth
-login_spoof                              POST     /login
 logout                                   POST     /v1/logout
 
 API operations found with tag "images"
@@ -54,7 +53,6 @@ API operations found with tag "login"
 OPERATION ID                             METHOD   URL PATH
 login_local                              POST     /v1/login/{silo_name}/local
 login_saml                               POST     /login/{silo_name}/saml/{provider_name}
-login_saml_begin                         GET      /login/{silo_name}/saml/{provider_name}
 
 API operations found with tag "policy"
 OPERATION ID                             METHOD   URL PATH
@@ -65,6 +63,8 @@ API operations found with tag "projects"
 OPERATION ID                             METHOD   URL PATH
 project_create                           POST     /v1/projects
 project_delete                           DELETE   /v1/projects/{project}
+project_ip_pool_list                     GET      /v1/ip-pools
+project_ip_pool_view                     GET      /v1/ip-pools/{pool}
 project_list                             GET      /v1/projects
 project_policy_update                    PUT      /v1/projects/{project}/policy
 project_policy_view                      GET      /v1/projects/{project}/policy

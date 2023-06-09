@@ -2046,6 +2046,15 @@
           "last"
         ]
       },
+      "MacAddr": {
+        "example": "ff:ff:ff:ff:ff:ff",
+        "title": "A MAC address",
+        "description": "A Media Access Control address, in EUI-48 format",
+        "type": "string",
+        "pattern": "^([0-9a-fA-F]{0,2}:){5}[0-9a-fA-F]{0,2}$",
+        "minLength": 5,
+        "maxLength": 17
+      },
       "Measurement": {
         "description": "A `Measurement` is a timestamped datum from a single metric",
         "type": "object",
@@ -2774,10 +2783,14 @@
                   "external_address": {
                     "type": "string",
                     "format": "ip"
+                  },
+                  "nic": {
+                    "$ref": "#/components/schemas/ServiceNic"
                   }
                 },
                 "required": [
-                  "external_address"
+                  "external_address",
+                  "nic"
                 ]
               },
               "type": {
@@ -2815,10 +2828,14 @@
                   "external_address": {
                     "type": "string",
                     "format": "ip"
+                  },
+                  "nic": {
+                    "$ref": "#/components/schemas/ServiceNic"
                   }
                 },
                 "required": [
-                  "external_address"
+                  "external_address",
+                  "nic"
                 ]
               },
               "type": {
@@ -2895,20 +2912,22 @@
               "content": {
                 "type": "object",
                 "properties": {
-                  "snat_cfg": {
-                    "nullable": true,
-                    "allOf": [
-                      {
-                        "$ref": "#/components/schemas/SourceNatConfig"
-                      }
-                    ]
+                  "nic": {
+                    "$ref": "#/components/schemas/ServiceNic"
+                  },
+                  "snat": {
+                    "$ref": "#/components/schemas/SourceNatConfig"
                   }
-                }
+                },
+                "required": [
+                  "nic",
+                  "snat"
+                ]
               },
               "type": {
                 "type": "string",
                 "enum": [
-                  "ntp"
+                  "boundary_ntp"
                 ]
               }
             },
@@ -2916,7 +2935,47 @@
               "content",
               "type"
             ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "internal_ntp"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
           }
+        ]
+      },
+      "ServiceNic": {
+        "description": "Describes the RSS allocated values for a service vnic",
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "ip": {
+            "type": "string",
+            "format": "ip"
+          },
+          "mac": {
+            "$ref": "#/components/schemas/MacAddr"
+          },
+          "name": {
+            "$ref": "#/components/schemas/Name"
+          }
+        },
+        "required": [
+          "id",
+          "ip",
+          "mac",
+          "name"
         ]
       },
       "ServicePutRequest": {

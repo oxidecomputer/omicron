@@ -16,10 +16,15 @@ use nexus_types::external_api::params::UserId;
 use nexus_types::internal_api::params::Certificate;
 use nexus_types::internal_api::params::RecoverySiloConfig;
 use nexus_types::internal_api::params::ServiceKind;
+use nexus_types::internal_api::params::ServiceNic;
 use nexus_types::internal_api::params::ServicePutRequest;
+use omicron_common::address::DNS_OPTE_IPV4_SUBNET;
+use omicron_common::address::NEXUS_OPTE_IPV4_SUBNET;
+use omicron_common::api::external::MacAddr;
 use omicron_common::api::external::{IdentityMetadata, Name};
 use omicron_common::api::internal::nexus::ProducerEndpoint;
 use omicron_common::nexus_config;
+use omicron_common::nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
 use omicron_sled_agent::sim;
 use omicron_test_utils::dev;
 use oximeter_collector::Oximeter;
@@ -239,6 +244,15 @@ pub async fn test_setup_with_config<N: NexusServer>(
         address: dns_server_address_external,
         kind: ServiceKind::ExternalDns {
             external_address: external_dns_server.local_address().ip(),
+            nic: ServiceNic {
+                id: Uuid::new_v4(),
+                name: "external-dns".parse().unwrap(),
+                ip: DNS_OPTE_IPV4_SUBNET
+                    .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES as u32 + 1)
+                    .unwrap()
+                    .into(),
+                mac: MacAddr::random_system(),
+            },
         },
     };
     let nexus_service = ServicePutRequest {
@@ -261,6 +275,15 @@ pub async fn test_setup_with_config<N: NexusServer>(
                 .dropshot
                 .bind_address
                 .ip(),
+            nic: ServiceNic {
+                id: Uuid::new_v4(),
+                name: "nexus".parse().unwrap(),
+                ip: NEXUS_OPTE_IPV4_SUBNET
+                    .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES as u32 + 1)
+                    .unwrap()
+                    .into(),
+                mac: MacAddr::random_system(),
+            },
         },
     };
     let external_dns_zone_name =

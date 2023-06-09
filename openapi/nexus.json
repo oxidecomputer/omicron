@@ -101,83 +101,7 @@
         }
       }
     },
-    "/login": {
-      "post": {
-        "tags": [
-          "hidden"
-        ],
-        "operationId": "login_spoof",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SpoofLoginBody"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "204": {
-            "description": "resource updated"
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
     "/login/{silo_name}/saml/{provider_name}": {
-      "get": {
-        "tags": [
-          "login"
-        ],
-        "summary": "Prompt user login",
-        "description": "Either display a page asking a user for their credentials, or redirect them to their identity provider.",
-        "operationId": "login_saml_begin",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "provider_name",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          },
-          {
-            "in": "path",
-            "name": "silo_name",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          }
-        ],
-        "responses": {
-          "302": {
-            "description": "redirect (found)",
-            "headers": {
-              "location": {
-                "description": "HTTP \"Location\" header",
-                "style": "simple",
-                "required": true,
-                "schema": {
-                  "type": "string"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      },
       "post": {
         "tags": [
           "login"
@@ -866,6 +790,14 @@
               "type": "integer",
               "format": "uint32",
               "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "order",
+            "description": "Query result order",
+            "schema": {
+              "$ref": "#/components/schemas/PaginationOrder"
             }
           },
           {
@@ -2064,6 +1996,121 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/Instance"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/ip-pools": {
+      "get": {
+        "tags": [
+          "projects"
+        ],
+        "summary": "List all IP Pools that can be used by a given project.",
+        "operationId": "project_ip_pool_list",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrIdSortMode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IpPoolResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": {
+          "required": [
+            "project"
+          ]
+        }
+      }
+    },
+    "/v1/ip-pools/{pool}": {
+      "get": {
+        "tags": [
+          "projects"
+        ],
+        "summary": "Fetch an IP pool",
+        "operationId": "project_ip_pool_view",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pool",
+            "description": "Name or ID of the IP pool",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IpPool"
                 }
               }
             }
@@ -4739,16 +4786,6 @@
           },
           {
             "in": "query",
-            "name": "id",
-            "description": "The UUID of the container being queried",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          },
-          {
-            "in": "query",
             "name": "limit",
             "description": "Maximum number of items returned by a single call",
             "schema": {
@@ -4756,6 +4793,14 @@
               "type": "integer",
               "format": "uint32",
               "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "order",
+            "description": "Query result order",
+            "schema": {
+              "$ref": "#/components/schemas/PaginationOrder"
             }
           },
           {
@@ -4774,6 +4819,16 @@
             "schema": {
               "type": "string",
               "format": "date-time"
+            }
+          },
+          {
+            "in": "query",
+            "name": "id",
+            "description": "The UUID of the container being queried",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
             }
           }
         ],
@@ -12187,17 +12242,6 @@
           "destroyed"
         ]
       },
-      "SpoofLoginBody": {
-        "type": "object",
-        "properties": {
-          "username": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "username"
-        ]
-      },
       "SshKey": {
         "description": "View of an SSH Key",
         "type": "object",
@@ -14293,6 +14337,14 @@
           "read_bytes",
           "write",
           "write_bytes"
+        ]
+      },
+      "PaginationOrder": {
+        "description": "The order in which the client wants to page through the requested collection",
+        "type": "string",
+        "enum": [
+          "ascending",
+          "descending"
         ]
       },
       "IdSortMode": {

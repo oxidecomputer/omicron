@@ -6,6 +6,7 @@
 
 use super::*;
 
+use crate::app::sagas::retry_until_known_result;
 use crate::authz;
 use crate::db;
 use crate::db::identity::Asset;
@@ -281,73 +282,6 @@ pub async fn get_pantry_address(
 
 // Common Pantry operations
 
-#[macro_export]
-macro_rules! retry_until_known_result {
-    ( $log:ident, $func:block ) => {{
-        use omicron_common::backoff;
-
-        #[derive(Debug, thiserror::Error)]
-        enum InnerError {
-            #[error("Reqwest error: {0}")]
-            Reqwest(#[from] reqwest::Error),
-
-            #[error("Pantry client error: {0}")]
-            PantryClient(
-                #[from]
-                crucible_pantry_client::Error<
-                    crucible_pantry_client::types::Error,
-                >,
-            ),
-        }
-
-        backoff::retry_notify(
-            backoff::retry_policy_internal_service(),
-            || async {
-                match ($func).await {
-                    Err(crucible_pantry_client::Error::CommunicationError(
-                        e,
-                    )) => {
-                        warn!(
-                            $log,
-                            "saw transient communication error {}, retrying...",
-                            e,
-                        );
-
-                        Err(backoff::BackoffError::<InnerError>::transient(
-                            e.into(),
-                        ))
-                    }
-
-                    Err(e) => {
-                        warn!($log, "saw permanent error {}, aborting", e,);
-
-                        Err(backoff::BackoffError::<InnerError>::Permanent(
-                            e.into(),
-                        ))
-                    }
-
-                    Ok(v) => Ok(v),
-                }
-            },
-            |error: InnerError, delay| {
-                warn!(
-                    $log,
-                    "failed external call ({:?}), will retry in {:?}",
-                    error,
-                    delay,
-                );
-            },
-        )
-        .await
-        .map_err(|e| {
-            ActionError::action_failed(format!(
-                "gave up on external call due to {:?}",
-                e
-            ))
-        })
-    }};
-}
-
 pub async fn call_pantry_attach_for_disk(
     log: &slog::Logger,
     opctx: &OpContext,
@@ -392,8 +326,12 @@ pub async fn call_pantry_attach_for_disk(
         volume_construction_request,
     };
 
-    retry_until_known_result!(log, {
-        client.attach(&disk_id.to_string(), &attach_request)
+    retry_until_known_result(log, || async {
+        client.attach(&disk_id.to_string(), &attach_request).await
+    })
+    .await
+    .map_err(|e| {
+        ActionError::action_failed(format!("pantry attach failed with {:?}", e))
     })?;
 
     Ok(())
@@ -410,7 +348,13 @@ pub async fn call_pantry_detach_for_disk(
 
     let client = crucible_pantry_client::Client::new(&endpoint);
 
-    retry_until_known_result!(log, { client.detach(&disk_id.to_string()) })?;
+    retry_until_known_result(log, || async {
+        client.detach(&disk_id.to_string()).await
+    })
+    .await
+    .map_err(|e| {
+        ActionError::action_failed(format!("pantry detach failed with {:?}", e))
+    })?;
 
     Ok(())
 }

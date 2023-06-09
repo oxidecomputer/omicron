@@ -473,8 +473,8 @@ mod test {
         assert_eq!(r1.gen, instance.object.current().gen);
         assert!(rx.try_next().is_err());
 
-        // Stopping an instance that was never started synchronously destroys
-        // it.
+        // Stopping an instance that was never started synchronously marks it
+        // stopped.
         let rprev = r1;
         assert!(rprev.run_state.is_stopped());
         let dropped =
@@ -484,7 +484,7 @@ mod test {
         let rnext = instance.object.current();
         assert!(rnext.gen > rprev.gen);
         assert!(rnext.time_updated >= rprev.time_updated);
-        assert_eq!(rnext.run_state, InstanceState::Destroyed);
+        assert_eq!(rnext.run_state, InstanceState::Stopped);
         assert!(rx.try_next().is_err());
 
         logctx.cleanup_successful();

@@ -6,6 +6,7 @@
 
 use crate::common::instance::{
     Action as InstanceAction, InstanceStates, ObservedPropolisState,
+    PublishedInstanceState,
 };
 use crate::instance_manager::InstanceTicket;
 use crate::nexus::LazyNexusClient;
@@ -27,7 +28,6 @@ use illumos_utils::zfs::ZONE_ZFS_RAMDISK_DATASET_MOUNTPOINT;
 use illumos_utils::zone::{AddressRequest, PROPOLIS_ZONE_PREFIX};
 use omicron_common::address::NEXUS_INTERNAL_PORT;
 use omicron_common::address::PROPOLIS_PORT;
-use omicron_common::api::external::InstanceState;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
 use omicron_common::api::internal::shared::{
     NetworkInterface, SourceNatConfig,
@@ -334,18 +334,21 @@ impl InstanceInner {
     ) -> Result<Reaction, Error> {
         info!(self.log, "Observing new propolis state: {:?}", state);
 
-        // The instance might have been rudely terminated between the time the
-        // call to Propolis returned and the time the instance lock was
-        // acquired for this call. If that happened, do not publish the Propolis
-        // state; simply remain in the Destroyed state.
-        //
-        // Returning the `Terminate` action is OK because terminating a
-        // previously-terminated instance is a no-op.
-        if self.state.current().run_state == InstanceState::Destroyed {
+        // This instance may no longer have a Propolis zone if it was rudely
+        // terminated between the time the call to Propolis returned and the
+        // time this thread acquired the instance lock and entered this routine.
+        // If the Propolis zone is gone, do not publish the Propolis state;
+        // instead, maintain whatever state was published when the zone was
+        // destroyed.
+        if self.running_state.is_none() {
             info!(
                 self.log,
-                "Ignoring new propolis state: instance is already destroyed"
+                "Ignoring new propolis state: Propolis is already destroyed"
             );
+
+            // Return the Terminate action so that the caller will cleanly
+            // cease to monitor this Propolis. Note that terminating an instance
+            // that's already terminated is a no-op.
             return Ok(Reaction::Terminate);
         }
 
@@ -681,7 +684,7 @@ impl Instance {
                 // logically running (on the source) while the target Propolis
                 // is being launched.
                 if migration_params.is_none() {
-                    inner.state.transition(InstanceState::Starting);
+                    inner.state.transition(PublishedInstanceState::Starting);
                     if let Err(e) = inner.publish_state_to_nexus().await {
                         break 'setup Err(e);
                     }
@@ -713,7 +716,7 @@ impl Instance {
             // start a migration target simply leaves the VM running untouched
             // on the source.
             if migration_params.is_none() && setup_result.is_err() {
-                inner.state.transition(InstanceState::Failed);
+                inner.state.transition(PublishedInstanceState::Failed);
                 inner.publish_state_to_nexus().await?;
             }
             setup_result?;
@@ -755,16 +758,22 @@ impl Instance {
                 // "Destroyed" state and return it to the caller.
                 if inner.running_state.is_none() {
                     inner.terminate().await?;
-                    (None, Some(InstanceState::Destroyed))
+                    (None, Some(PublishedInstanceState::Stopped))
                 } else {
-                    (Some(PropolisRequest::Stop), Some(InstanceState::Stopping))
+                    (
+                        Some(PropolisRequest::Stop),
+                        Some(PublishedInstanceState::Stopping),
+                    )
                 }
             }
             InstanceStateRequested::Reboot => {
                 if inner.running_state.is_none() {
                     return Err(Error::InstanceNotRunning(*inner.id()));
                 }
-                (Some(PropolisRequest::Reboot), Some(InstanceState::Rebooting))
+                (
+                    Some(PropolisRequest::Reboot),
+                    Some(PublishedInstanceState::Rebooting),
+                )
             }
         };
 
@@ -995,7 +1004,7 @@ impl Instance {
     pub async fn terminate(&self) -> Result<InstanceRuntimeState, Error> {
         let mut inner = self.inner.lock().await;
         inner.terminate().await?;
-        inner.state.transition(InstanceState::Destroyed);
+        inner.state.transition(PublishedInstanceState::Stopped);
         Ok(inner.state.current().clone())
     }
 

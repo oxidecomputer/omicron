@@ -15,9 +15,13 @@ use crucible_agent_client::types::State as RegionState;
 use internal_dns::ServiceName;
 use nexus_client::types as NexusTypes;
 use nexus_client::types::{IpRange, Ipv4Range, Ipv6Range};
+use omicron_common::address::DNS_OPTE_IPV4_SUBNET;
+use omicron_common::address::NEXUS_OPTE_IPV4_SUBNET;
+use omicron_common::api::external::MacAddr;
 use omicron_common::backoff::{
     retry_notify, retry_policy_internal_service_aggressive, BackoffError,
 };
+use omicron_common::nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
 use slog::{info, Drain, Logger};
 use std::net::IpAddr;
 use std::net::SocketAddr;
@@ -271,7 +275,18 @@ impl Server {
 
             services.push(NexusTypes::ServicePutRequest {
                 address: config.nexus_address.to_string(),
-                kind: NexusTypes::ServiceKind::Nexus { external_address: ip },
+                kind: NexusTypes::ServiceKind::Nexus {
+                    external_address: ip,
+                    nic: NexusTypes::ServiceNic {
+                        id: Uuid::new_v4(),
+                        name: "nexus".parse().unwrap(),
+                        ip: NEXUS_OPTE_IPV4_SUBNET
+                            .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES as u32 + 1)
+                            .unwrap()
+                            .into(),
+                        mac: MacAddr::random_system(),
+                    },
+                },
                 service_id: Uuid::new_v4(),
                 sled_id: config.id,
                 zone_id: Some(Uuid::new_v4()),
@@ -295,6 +310,15 @@ impl Server {
                 address: external_dns_internal_addr.to_string(),
                 kind: NexusTypes::ServiceKind::ExternalDns {
                     external_address: ip.into(),
+                    nic: NexusTypes::ServiceNic {
+                        id: Uuid::new_v4(),
+                        name: "external-dns".parse().unwrap(),
+                        ip: DNS_OPTE_IPV4_SUBNET
+                            .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES as u32 + 1)
+                            .unwrap()
+                            .into(),
+                        mac: MacAddr::random_system(),
+                    },
                 },
                 service_id: Uuid::new_v4(),
                 sled_id: config.id,
