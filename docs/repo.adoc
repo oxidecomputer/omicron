@@ -50,10 +50,8 @@ A large, consolidated repo like Omicron has its downsides, though using separate
 * All things being equal, a larger repo means more developers in the same repo, meaning more merge conflicts.  But merge conflicts for unrelated changes should be automatically resolved.
 * All things being equal, a full CI run takes longer, since it tests more.  (This can likely be mitigated with a merge queue.  We haven't tried that yet.)
 * Putting a bunch of components into one repo can create the illusion that if you update both sides of a client/server interface, you're done.  That's not true.  We need to consider when a newer client is deployed against an older server and vice versa.  But given that we need to do that, we don't _also_ need to make it harder to mechanically _make_ such API changes by requiring coordinated pushes to separate repos.
-
-There are other annoying things about working on Omicron:
-
-* Dependabot is incredibly noisy and annoying to work with for various reasons.  These are mostly implementation issues, and we could probably improve it considerably if we want to invest time in setting it up better (e.g., having it merge into a separate branch and merge _that_ branch into main once a week or so).
+* It takes a lot of compute resources (CPU, memory, and disk space) on one's development machine to build the whole repo.
+* Dependabot is incredibly noisy and annoying to work with for various reasons.  These are mostly implementation issues, and we could probably improve it considerably if we want to invest time in setting it up better (e.g., having it merge into a separate branch and merge _that_ branch into main once a week or so).  With separate repos that _also_ used dependabot, the noise would presumably be much larger since many dependencies would be updated separately in each repo.
 
 Some of us have worked on large systems that used separate repos for deployed components, particularly Joyent's https://github.com/TritonDataCenter/manta[Manta].  We ran into many challenges with this.  Some of these are implementation details, and not all of these have to do with using separate repos, but many were exacerbated by that pattern:
 
