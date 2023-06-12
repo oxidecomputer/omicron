@@ -7,6 +7,7 @@
 pub mod agent;
 pub mod client;
 pub mod config;
+mod context;
 mod hardware;
 mod http_entrypoints;
 mod maghemite;

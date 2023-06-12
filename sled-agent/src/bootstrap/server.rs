@@ -6,11 +6,13 @@
 
 use super::agent::Agent;
 use super::config::Config;
+use super::context::BootstrapContext;
 use super::params::version;
 use super::params::Request;
 use super::params::RequestEnvelope;
 use super::views::Response;
 use super::views::ResponseEnvelope;
+use crate::bootstrap::context::SledOperationInterlock;
 use crate::bootstrap::http_entrypoints::api as http_api;
 use crate::bootstrap::maghemite;
 use crate::config::Config as SledConfig;
@@ -31,7 +33,7 @@ use tokio::task::JoinHandle;
 pub struct Server {
     bootstrap_agent: Arc<Agent>,
     rack_init_server_handle: JoinHandle<Result<(), String>>,
-    _http_server: dropshot::HttpServer<Arc<Agent>>,
+    _http_server: dropshot::HttpServer<BootstrapContext>,
 }
 
 impl Server {
@@ -84,7 +86,10 @@ impl Server {
         let http_server = dropshot::HttpServerStarter::new(
             &dropshot_config,
             http_api(),
-            bootstrap_agent.clone(),
+            BootstrapContext {
+                agent: Arc::clone(&bootstrap_agent),
+                operation_interlock: SledOperationInterlock::new(),
+            },
             &dropshot_log,
         )
         .map_err(|error| format!("initializing server: {}", error))?

@@ -8,7 +8,6 @@ use super::config::{
     Config, BOOTSTRAP_AGENT_HTTP_PORT, BOOTSTRAP_AGENT_RACK_INIT_PORT,
 };
 use super::hardware::HardwareMonitor;
-use super::http_entrypoints::SledOperationInterlock;
 use super::params::RackInitializeRequest;
 use super::params::StartSledAgentRequest;
 use super::rss_handle::RssHandle;
@@ -178,10 +177,6 @@ pub struct Agent {
 
     /// Bootstrap network address.
     ip: Ipv6Addr,
-
-    /// Ensures that RSS (initialization or teardown) is not executed
-    /// concurrently.
-    pub(super) rss_interlock: SledOperationInterlock,
 
     sled_state: Mutex<SledAgentState>,
     storage_resources: StorageResources,
@@ -408,7 +403,6 @@ impl Agent {
             log: ba_log,
             parent_log: log,
             ip,
-            rss_interlock: SledOperationInterlock::new(),
             sled_state: Mutex::new(SledAgentState::Before(Some(
                 hardware_monitor,
             ))),
