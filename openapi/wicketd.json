@@ -10,6 +10,54 @@
     "version": "0.0.1"
   },
   "paths": {
+    "/abort-update/{type}/{slot}": {
+      "post": {
+        "summary": "Forcibly cancels a running update.",
+        "description": "This is a potentially dangerous operation, but one that is sometimes required. A machine reset might be required after this operation completes.",
+        "operationId": "post_abort_update",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slot",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            }
+          },
+          {
+            "in": "path",
+            "name": "type",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SpType"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AbortUpdateOptions"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/artifacts-and-event-reports": {
       "get": {
         "summary": "An endpoint used to report all available artifacts and event reports.",
@@ -25,6 +73,78 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/baseboard": {
+      "get": {
+        "summary": "Report the configured baseboard details",
+        "operationId": "get_baseboard",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetBaseboardResponse"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/clear-update-state/{type}/{slot}": {
+      "post": {
+        "summary": "Resets update state for a sled.",
+        "description": "Use this to clear update state after a failed update.",
+        "operationId": "post_clear_update_state",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slot",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            }
+          },
+          {
+            "in": "path",
+            "name": "type",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SpType"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClearUpdateStateOptions"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -212,6 +332,16 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StartUpdateOptions"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "204": {
             "description": "resource updated"
@@ -240,6 +370,27 @@
       }
     },
     "schemas": {
+      "AbortUpdateOptions": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "description": "The message to abort the update with.",
+            "type": "string"
+          },
+          "test_error": {
+            "nullable": true,
+            "description": "If passed in, fails the force cancel update operation with a simulated error.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/UpdateTestError"
+              }
+            ]
+          }
+        },
+        "required": [
+          "message"
+        ]
+      },
       "ArtifactId": {
         "description": "An identifier for an artifact.\n\nThe kind is [`ArtifactKind`], indicating that it might represent an artifact whose kind is unknown.",
         "type": "object",
@@ -266,6 +417,88 @@
           "name",
           "version"
         ]
+      },
+      "Baseboard": {
+        "description": "Describes properties that should uniquely identify a Gimlet.",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "identifier": {
+                "type": "string"
+              },
+              "model": {
+                "type": "string"
+              },
+              "revision": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "gimlet"
+                ]
+              }
+            },
+            "required": [
+              "identifier",
+              "model",
+              "revision",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "unknown"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "identifier": {
+                "type": "string"
+              },
+              "model": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "pc"
+                ]
+              }
+            },
+            "required": [
+              "identifier",
+              "model",
+              "type"
+            ]
+          }
+        ]
+      },
+      "ClearUpdateStateOptions": {
+        "type": "object",
+        "properties": {
+          "test_error": {
+            "nullable": true,
+            "description": "If passed in, fails the clear update state operation with a simulated error.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/UpdateTestError"
+              }
+            ]
+          }
+        }
       },
       "Duration": {
         "type": "object",
@@ -323,6 +556,12 @@
               "$ref": "#/components/schemas/ProgressEventForWicketdEngineSpec"
             }
           },
+          "root_execution_id": {
+            "nullable": true,
+            "description": "The root execution ID for this report.\n\nEach report has a root execution ID, which ties together all step and progress events. This is always filled out if the list of step events is non-empty.",
+            "type": "string",
+            "format": "uuid"
+          },
           "step_events": {
             "description": "A list of step events.\n\nStep events include success and failure events.",
             "type": "array",
@@ -368,6 +607,19 @@
           "artifacts",
           "event_reports"
         ]
+      },
+      "GetBaseboardResponse": {
+        "type": "object",
+        "properties": {
+          "baseboard": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Baseboard"
+              }
+            ]
+          }
+        }
       },
       "GetInventoryParams": {
         "type": "object",
@@ -433,25 +685,6 @@
           }
         ]
       },
-      "ImageVersion": {
-        "type": "object",
-        "properties": {
-          "epoch": {
-            "type": "integer",
-            "format": "uint32",
-            "minimum": 0
-          },
-          "version": {
-            "type": "integer",
-            "format": "uint32",
-            "minimum": 0
-          }
-        },
-        "required": [
-          "epoch",
-          "version"
-        ]
-      },
       "PowerState": {
         "description": "See RFD 81.\n\nThis enum only lists power states the SP is able to control; higher power states are controlled by ignition.",
         "type": "string",
@@ -497,6 +730,10 @@
             "type": "string",
             "format": "uuid"
           },
+          "spec": {
+            "description": "The specification that this event belongs to.\n\nThis is typically the name of the type `S` for which `StepSpec` is implemented.\n\nThis can be used with `Self::from_generic` to deserialize generic metadata.",
+            "type": "string"
+          },
           "total_elapsed": {
             "description": "Total time elapsed since the start of execution.",
             "allOf": [
@@ -509,6 +746,7 @@
         "required": [
           "data",
           "execution_id",
+          "spec",
           "total_elapsed"
         ]
       },
@@ -528,6 +766,10 @@
             "type": "string",
             "format": "uuid"
           },
+          "spec": {
+            "description": "The specification that this event belongs to.\n\nThis is typically the name of the type `S` for which `StepSpec` is implemented.\n\nThis can be used with `Self::from_generic` to deserialize generic metadata.",
+            "type": "string"
+          },
           "total_elapsed": {
             "description": "Total time elapsed since the start of execution.",
             "allOf": [
@@ -540,6 +782,7 @@
         "required": [
           "data",
           "execution_id",
+          "spec",
           "total_elapsed"
         ]
       },
@@ -930,26 +1173,22 @@
           "sps"
         ]
       },
-      "RotImageDetails": {
-        "type": "object",
-        "properties": {
-          "digest": {
-            "type": "string"
-          },
-          "version": {
-            "$ref": "#/components/schemas/ImageVersion"
-          }
-        },
-        "required": [
-          "digest",
-          "version"
-        ]
-      },
       "RotInventory": {
         "description": "RoT-related data that isn't already supplied in [`SpState`].",
         "type": "object",
         "properties": {
-          "caboose": {
+          "active": {
+            "$ref": "#/components/schemas/RotSlot"
+          },
+          "caboose_a": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SpComponentCaboose"
+              }
+            ]
+          },
+          "caboose_b": {
             "nullable": true,
             "allOf": [
               {
@@ -957,7 +1196,10 @@
               }
             ]
           }
-        }
+        },
+        "required": [
+          "active"
+        ]
       },
       "RotSlot": {
         "oneOf": [
@@ -999,31 +1241,43 @@
               "active": {
                 "$ref": "#/components/schemas/RotSlot"
               },
-              "slot_a": {
+              "pending_persistent_boot_preference": {
                 "nullable": true,
                 "allOf": [
                   {
-                    "$ref": "#/components/schemas/RotImageDetails"
+                    "$ref": "#/components/schemas/RotSlot"
                   }
                 ]
               },
-              "slot_b": {
+              "persistent_boot_preference": {
+                "$ref": "#/components/schemas/RotSlot"
+              },
+              "slot_a_sha3_256_digest": {
                 "nullable": true,
-                "allOf": [
-                  {
-                    "$ref": "#/components/schemas/RotImageDetails"
-                  }
-                ]
+                "type": "string"
+              },
+              "slot_b_sha3_256_digest": {
+                "nullable": true,
+                "type": "string"
               },
               "state": {
                 "type": "string",
                 "enum": [
                   "enabled"
                 ]
+              },
+              "transient_boot_preference": {
+                "nullable": true,
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/RotSlot"
+                  }
+                ]
               }
             },
             "required": [
               "active",
+              "persistent_boot_preference",
               "state"
             ]
           },
@@ -1163,14 +1417,6 @@
               "error"
             ]
           }
-        ]
-      },
-      "SpComponentUpdateStage": {
-        "type": "string",
-        "enum": [
-          "sending",
-          "preparing",
-          "writing"
         ]
       },
       "SpIdentifier": {
@@ -1326,7 +1572,15 @@
         "description": "SP-related data",
         "type": "object",
         "properties": {
-          "caboose": {
+          "caboose_active": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SpComponentCaboose"
+              }
+            ]
+          },
+          "caboose_inactive": {
             "nullable": true,
             "allOf": [
               {
@@ -1353,7 +1607,12 @@
             ]
           },
           "rot": {
-            "$ref": "#/components/schemas/RotInventory"
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/RotInventory"
+              }
+            ]
           },
           "state": {
             "nullable": true,
@@ -1365,8 +1624,7 @@
           }
         },
         "required": [
-          "id",
-          "rot"
+          "id"
         ]
       },
       "SpState": {
@@ -1401,9 +1659,6 @@
           },
           "serial_number": {
             "type": "string"
-          },
-          "version": {
-            "$ref": "#/components/schemas/ImageVersion"
           }
         },
         "required": [
@@ -1413,8 +1668,7 @@
           "power_state",
           "revision",
           "rot",
-          "serial_number",
-          "version"
+          "serial_number"
         ]
       },
       "SpType": {
@@ -1423,6 +1677,39 @@
           "sled",
           "power",
           "switch"
+        ]
+      },
+      "StartUpdateOptions": {
+        "type": "object",
+        "properties": {
+          "skip_rot_version_check": {
+            "description": "If true, skip the check on the current RoT version and always update it regardless of whether the update appears to be neeeded.",
+            "type": "boolean"
+          },
+          "skip_sp_version_check": {
+            "description": "If true, skip the check on the current SP version and always update it regardless of whether the update appears to be neeeded.",
+            "type": "boolean"
+          },
+          "test_error": {
+            "nullable": true,
+            "description": "If passed in, fails the update with a simulated error.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/UpdateTestError"
+              }
+            ]
+          },
+          "test_step_seconds": {
+            "nullable": true,
+            "description": "If passed in, creates a test step that lasts these many seconds long.\n\nThis is used for testing.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "skip_rot_version_check",
+          "skip_sp_version_check"
         ]
       },
       "StepComponentSummaryForGenericSpec": {
@@ -1488,6 +1775,10 @@
             "type": "string",
             "format": "uuid"
           },
+          "spec": {
+            "description": "The specification that this event belongs to.\n\nThis is typically the name of the type `S` for which `StepSpec` is implemented.\n\nThis can be used along with `Self::from_generic` to identify which specification to deserialize generic metadata against. For example:\n\n```rust,ignore if event.spec == \"MySpec\" { // event is likely generated from a MySpec engine. let event = Event::<MySpec>::from_generic(event)?; // ... } ```",
+            "type": "string"
+          },
           "total_elapsed": {
             "description": "Total time elapsed since the start of execution.",
             "allOf": [
@@ -1501,6 +1792,7 @@
           "data",
           "event_index",
           "execution_id",
+          "spec",
           "total_elapsed"
         ]
       },
@@ -1526,6 +1818,10 @@
             "type": "string",
             "format": "uuid"
           },
+          "spec": {
+            "description": "The specification that this event belongs to.\n\nThis is typically the name of the type `S` for which `StepSpec` is implemented.\n\nThis can be used along with `Self::from_generic` to identify which specification to deserialize generic metadata against. For example:\n\n```rust,ignore if event.spec == \"MySpec\" { // event is likely generated from a MySpec engine. let event = Event::<MySpec>::from_generic(event)?; // ... } ```",
+            "type": "string"
+          },
           "total_elapsed": {
             "description": "Total time elapsed since the start of execution.",
             "allOf": [
@@ -1539,6 +1835,7 @@
           "data",
           "event_index",
           "execution_id",
+          "spec",
           "total_elapsed"
         ]
       },
@@ -1896,6 +2193,60 @@
               "message",
               "step_elapsed",
               "total_attempts"
+            ]
+          },
+          {
+            "description": "Execution aborted by an external user.\n\nThis is a terminal event: it is guaranteed that no more events will be seen after this one.",
+            "type": "object",
+            "properties": {
+              "aborted_step": {
+                "description": "Information about the step that was running at the time execution was aborted.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/StepInfoWithMetadataForGenericSpec"
+                  }
+                ]
+              },
+              "attempt": {
+                "description": "The attempt that was running at the time the step was aborted.",
+                "type": "integer",
+                "format": "uint",
+                "minimum": 0
+              },
+              "attempt_elapsed": {
+                "description": "The time it took for this attempt to complete.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/Duration"
+                  }
+                ]
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "execution_aborted"
+                ]
+              },
+              "message": {
+                "description": "A message associated with the abort.",
+                "type": "string"
+              },
+              "step_elapsed": {
+                "description": "Total time elapsed since the start of the step. Includes prior attempts.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/Duration"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "aborted_step",
+              "attempt",
+              "attempt_elapsed",
+              "kind",
+              "message",
+              "step_elapsed"
             ]
           },
           {
@@ -2330,6 +2681,60 @@
             ]
           },
           {
+            "description": "Execution aborted by an external user.\n\nThis is a terminal event: it is guaranteed that no more events will be seen after this one.",
+            "type": "object",
+            "properties": {
+              "aborted_step": {
+                "description": "Information about the step that was running at the time execution was aborted.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/StepInfoWithMetadataForWicketdEngineSpec"
+                  }
+                ]
+              },
+              "attempt": {
+                "description": "The attempt that was running at the time the step was aborted.",
+                "type": "integer",
+                "format": "uint",
+                "minimum": 0
+              },
+              "attempt_elapsed": {
+                "description": "The time it took for this attempt to complete.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/Duration"
+                  }
+                ]
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "execution_aborted"
+                ]
+              },
+              "message": {
+                "description": "A message associated with the abort.",
+                "type": "string"
+              },
+              "step_elapsed": {
+                "description": "Total time elapsed since the start of the step. Includes prior attempts.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/Duration"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "aborted_step",
+              "attempt",
+              "attempt_elapsed",
+              "kind",
+              "message",
+              "step_elapsed"
+            ]
+          },
+          {
             "description": "A nested step event occurred.",
             "type": "object",
             "properties": {
@@ -2552,13 +2957,18 @@
                   "success"
                 ]
               },
+              "message": {
+                "nullable": true,
+                "description": "An optional message associated with this step.",
+                "type": "string"
+              },
               "metadata": {
-                "description": "Completion metadata associated with the step."
+                "nullable": true,
+                "description": "Optional completion metadata associated with the step."
               }
             },
             "required": [
-              "kind",
-              "metadata"
+              "kind"
             ]
           },
           {
@@ -2576,13 +2986,13 @@
                 "type": "string"
               },
               "metadata": {
-                "description": "Completion metadata associated with the step."
+                "nullable": true,
+                "description": "Optional completion metadata associated with the step."
               }
             },
             "required": [
               "kind",
-              "message",
-              "metadata"
+              "message"
             ]
           },
           {
@@ -2596,17 +3006,17 @@
                 ]
               },
               "message": {
-                "description": "Metadata associated with the step.",
+                "description": "Message associated with the skip.",
                 "type": "string"
               },
               "metadata": {
-                "description": "Skipped metadata associated with the step."
+                "nullable": true,
+                "description": "Optional metadata associated with the skip."
               }
             },
             "required": [
               "kind",
-              "message",
-              "metadata"
+              "message"
             ]
           }
         ]
@@ -2623,13 +3033,18 @@
                   "success"
                 ]
               },
+              "message": {
+                "nullable": true,
+                "description": "An optional message associated with this step.",
+                "type": "string"
+              },
               "metadata": {
-                "description": "Completion metadata associated with the step."
+                "nullable": true,
+                "description": "Optional completion metadata associated with the step."
               }
             },
             "required": [
-              "kind",
-              "metadata"
+              "kind"
             ]
           },
           {
@@ -2647,13 +3062,13 @@
                 "type": "string"
               },
               "metadata": {
-                "description": "Completion metadata associated with the step."
+                "nullable": true,
+                "description": "Optional completion metadata associated with the step."
               }
             },
             "required": [
               "kind",
-              "message",
-              "metadata"
+              "message"
             ]
           },
           {
@@ -2667,17 +3082,17 @@
                 ]
               },
               "message": {
-                "description": "Metadata associated with the step.",
+                "description": "Message associated with the skip.",
                 "type": "string"
               },
               "metadata": {
-                "description": "Skipped metadata associated with the step."
+                "nullable": true,
+                "description": "Optional metadata associated with the skip."
               }
             },
             "required": [
               "kind",
-              "message",
-              "metadata"
+              "message"
             ]
           }
         ]
@@ -2736,6 +3151,20 @@
               "id": {
                 "type": "string",
                 "enum": [
+                  "test_step"
+                ]
+              }
+            },
+            "required": [
+              "id"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "enum": [
                   "set_host_power_state"
                 ]
               },
@@ -2768,21 +3197,7 @@
               "id": {
                 "type": "string",
                 "enum": [
-                  "reset_rot"
-                ]
-              }
-            },
-            "required": [
-              "id"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "id": {
-                "type": "string",
-                "enum": [
-                  "reset_sp"
+                  "interrogate_sp"
                 ]
               }
             },
@@ -2798,14 +3213,10 @@
                 "enum": [
                   "sp_component_update"
                 ]
-              },
-              "stage": {
-                "$ref": "#/components/schemas/SpComponentUpdateStage"
               }
             },
             "required": [
-              "id",
-              "stage"
+              "id"
             ]
           },
           {
@@ -2890,6 +3301,55 @@
             },
             "required": [
               "id"
+            ]
+          }
+        ]
+      },
+      "UpdateTestError": {
+        "oneOf": [
+          {
+            "description": "Simulate an error where the operation fails to complete.",
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "fail"
+                ]
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          {
+            "description": "Simulate an issue where the operation times out.",
+            "type": "object",
+            "properties": {
+              "content": {
+                "type": "object",
+                "properties": {
+                  "secs": {
+                    "description": "The number of seconds to time out after.",
+                    "type": "integer",
+                    "format": "uint64",
+                    "minimum": 0
+                  }
+                },
+                "required": [
+                  "secs"
+                ]
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "timeout"
+                ]
+              }
+            },
+            "required": [
+              "content",
+              "kind"
             ]
           }
         ]

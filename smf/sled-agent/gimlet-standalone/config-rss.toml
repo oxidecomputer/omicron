@@ -1,4 +1,8 @@
 # RSS (Rack Setup Service) "stand-in" configuration.
+#
+# This file conforms to the schema for "RackInitializeRequest" in the Bootstrap
+# Agent API.  See the `RackInitializeRequest` type in bootstrap-agent or its
+# OpenAPI spec (in openapi/bootstrap-agent.json in the root of this workspace).
 
 # The /56 subnet for the rack.
 # Also implies the /48 AZ subnet.
@@ -19,6 +23,15 @@ dns_servers = [ "1.1.1.1", "9.9.9.9" ]
 
 # Delegated external DNS zone name
 external_dns_zone_name = "oxide.test"
+
+# Initial TLS certificates for the external API
+#
+# For the structure of these certificates, see `Certificate` in the Nexus
+# internal API.  In practice, it can be unwieldy to put them here.  You can also
+# specify a certificate by including the certificate chain and private key in
+# PEM-format files called "initial-tls-cert.pem" and "initial-tls-key.pem",
+# respectively, in the same place as this configuration file.
+external_certificates = []
 
 # The IP ranges configured as part of the services IP Pool.
 # e.g., Nexus will be configured to use an address from this

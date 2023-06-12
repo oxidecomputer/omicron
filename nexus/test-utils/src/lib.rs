@@ -14,18 +14,25 @@ use dropshot::ConfigLogging;
 use dropshot::ConfigLoggingLevel;
 use nexus_test_interface::NexusServer;
 use nexus_types::external_api::params::UserId;
+use nexus_types::internal_api::params::Certificate;
 use nexus_types::internal_api::params::DatasetCreateRequest;
 use nexus_types::internal_api::params::DatasetKind;
 use nexus_types::internal_api::params::DatasetPutRequest;
 use nexus_types::internal_api::params::RecoverySiloConfig;
 use nexus_types::internal_api::params::ServiceKind;
+use nexus_types::internal_api::params::ServiceNic;
 use nexus_types::internal_api::params::ServicePutRequest;
+use omicron_common::address::DNS_OPTE_IPV4_SUBNET;
+use omicron_common::address::NEXUS_OPTE_IPV4_SUBNET;
+use omicron_common::api::external::MacAddr;
 use omicron_common::api::external::{IdentityMetadata, Name};
 use omicron_common::api::internal::nexus::ProducerEndpoint;
 use omicron_common::nexus_config;
+use omicron_common::nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
 use omicron_sled_agent::sim;
 use omicron_test_utils::dev;
 use oximeter_collector::Oximeter;
+use oximeter_producer::LogConfig;
 use oximeter_producer::Server as ProducerServer;
 use slog::{debug, o, Logger};
 use std::fmt::Debug;
@@ -44,6 +51,7 @@ pub mod resource_helpers;
 
 pub const SLED_AGENT_UUID: &str = "b6d65341-167c-41df-9b5c-41cded99c229";
 pub const RACK_UUID: &str = "c19a698f-c6f9-4a17-ae30-20d711b8f7dc";
+pub const SWITCH_UUID: &str = "dae4e1f1-410e-4314-bff1-fec0504be07e";
 pub const OXIMETER_UUID: &str = "39e6175b-4df2-4730-b11d-cbc1e60a2e78";
 pub const PRODUCER_UUID: &str = "a6458b7d-87c3-4483-be96-854d814c20de";
 
@@ -51,6 +59,8 @@ pub const PRODUCER_UUID: &str = "a6458b7d-87c3-4483-be96-854d814c20de";
 pub const TEST_HARDWARE_THREADS: u32 = 16;
 /// The reported amount of physical RAM for an emulated sled agent.
 pub const TEST_PHYSICAL_RAM: u64 = 32 * (1 << 30);
+/// The reported amount of VMM reservoir RAM for an emulated sled agent.
+pub const TEST_RESERVOIR_RAM: u64 = 16 * (1 << 30);
 
 /// Password for the user created by the test suite
 ///
@@ -91,36 +101,6 @@ impl<N: NexusServer> ControlPlaneTestContext<N> {
         self.dendrite.cleanup().await.unwrap();
         self.logctx.cleanup_successful();
     }
-
-    pub async fn external_http_client(&self) -> ClientTestContext {
-        self.server
-            .get_http_server_external_address()
-            .await
-            .map(|addr| {
-                ClientTestContext::new(
-                    addr,
-                    self.logctx.log.new(
-                        o!("component" => "external http client test context"),
-                    ),
-                )
-            })
-            .unwrap()
-    }
-
-    pub async fn external_https_client(&self) -> ClientTestContext {
-        self.server
-            .get_https_server_external_address()
-            .await
-            .map(|addr| {
-                ClientTestContext::new(
-                    addr,
-                    self.logctx.log.new(
-                        o!("component" => "external https client test context"),
-                    ),
-                )
-            })
-            .unwrap()
-    }
 }
 
 pub fn load_test_config() -> omicron_common::nexus_config::Config {
@@ -151,8 +131,13 @@ pub async fn test_setup<N: NexusServer>(
     test_name: &str,
 ) -> ControlPlaneTestContext<N> {
     let mut config = load_test_config();
-    test_setup_with_config::<N>(test_name, &mut config, sim::SimMode::Explicit)
-        .await
+    test_setup_with_config::<N>(
+        test_name,
+        &mut config,
+        sim::SimMode::Explicit,
+        None,
+    )
+    .await
 }
 
 struct RackInitRequestBuilder {
@@ -295,14 +280,14 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
         // Start up CockroachDB.
         let database = db::test_setup_database(log).await;
 
-        eprintln!("DB URL: {}", database.pg_config().to_string());
+        eprintln!("DB URL: {}", database.pg_config());
         let address = database
             .pg_config()
             .to_string()
             .split("postgresql://root@")
             .nth(1)
             .expect("Malformed URL: Missing postgresql prefix")
-            .split("/")
+            .split('/')
             .next()
             .expect("Malformed URL: No slash after port")
             .parse::<std::net::SocketAddrV6>()
@@ -422,13 +407,12 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
 
         self.config.deployment.internal_dns =
             nexus_config::InternalDns::FromAddress {
-                address: self
+                address: *self
                     .internal_dns
                     .as_ref()
                     .expect("Must initialize internal DNS server first")
                     .server
-                    .local_address()
-                    .clone(),
+                    .local_address(),
             };
         self.config.deployment.database = nexus_config::Database::FromDns;
         let (nexus_internal, nexus_internal_addr) =
@@ -452,8 +436,18 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                     .config
                     .deployment
                     .dropshot_external
+                    .dropshot
                     .bind_address
                     .ip(),
+                nic: ServiceNic {
+                    id: Uuid::new_v4(),
+                    name: "nexus".parse().unwrap(),
+                    ip: NEXUS_OPTE_IPV4_SUBNET
+                        .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES as u32 + 1)
+                        .unwrap()
+                        .into(),
+                    mac: MacAddr::random_system(),
+                },
             },
             internal_dns::ServiceName::Nexus,
             sled_id,
@@ -486,7 +480,11 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
     }
 
     // Perform RSS handoff
-    pub async fn start_nexus_external(&mut self, dns_config: DnsConfigParams) {
+    pub async fn start_nexus_external(
+        &mut self,
+        dns_config: DnsConfigParams,
+        tls_certificates: Vec<Certificate>,
+    ) {
         let log = &self.logctx.log;
         debug!(log, "Starting Nexus (external API)");
 
@@ -523,11 +521,12 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             dns_config,
             &external_dns_zone_name,
             recovery_silo,
+            tls_certificates,
         )
         .await;
 
         let external_server_addr =
-            server.get_http_server_external_address().await.unwrap();
+            server.get_http_server_external_address().await;
         let internal_server_addr =
             server.get_http_server_internal_address().await;
         let testctx_external = ClientTestContext::new(
@@ -567,13 +566,12 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
 
     pub async fn start_sled(&mut self, sim_mode: sim::SimMode) {
         let nexus_address = sim::NexusAddressSource::FromDns {
-            internal_dns_address: self
+            internal_dns_address: *self
                 .internal_dns
                 .as_ref()
                 .expect("Must initialize internal DNS server first")
                 .server
-                .local_address()
-                .clone(),
+                .local_address(),
         };
 
         // Set up a single sled agent.
@@ -626,25 +624,30 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
 
         let dns = dns_server::InMemoryServer::new(&log).await.unwrap();
 
-        let SocketAddr::V6(address) = *dns.server.local_address() else {
+        let SocketAddr::V6(dns_address) = *dns.server.local_address() else {
             panic!("Unsupported IPv4 DNS address");
         };
-        self.rack_init_builder.add_service(
-            address,
-            ServiceKind::ExternalDns,
-            internal_dns::ServiceName::ExternalDns,
-            sled_id,
-        );
-        let SocketAddr::V6(address) = dns.dropshot_server.local_addr() else {
-            panic!("Unsupported IPv4 DNS address");
+        let SocketAddr::V6(dropshot_address) = dns.dropshot_server.local_addr() else {
+            panic!("Unsupported IPv4 Dropshot address");
         };
-        self.rack_init_builder.add_service(
-            address,
-            ServiceKind::ExternalDnsConfig,
-            internal_dns::ServiceName::ExternalDns,
-            sled_id,
-        );
 
+        self.rack_init_builder.add_service(
+            dropshot_address,
+            ServiceKind::ExternalDns {
+                external_address: (*dns_address.ip()).into(),
+                nic: ServiceNic {
+                    id: Uuid::new_v4(),
+                    name: "external-dns".parse().unwrap(),
+                    ip: DNS_OPTE_IPV4_SUBNET
+                        .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES as u32 + 1)
+                        .unwrap()
+                        .into(),
+                    mac: MacAddr::random_system(),
+                },
+            },
+            internal_dns::ServiceName::ExternalDns,
+            sled_id,
+        );
         self.external_dns = Some(dns);
     }
 
@@ -660,16 +663,6 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
         self.rack_init_builder.add_service(
             address,
             ServiceKind::InternalDns,
-            internal_dns::ServiceName::InternalDns,
-            sled_id,
-        );
-
-        let SocketAddr::V6(address) = dns.dropshot_server.local_addr() else {
-            panic!("Unsupported IPv4 DNS address");
-        };
-        self.rack_init_builder.add_service(
-            address,
-            ServiceKind::InternalDnsConfig,
             internal_dns::ServiceName::InternalDns,
             sled_id,
         );
@@ -729,6 +722,7 @@ pub async fn test_setup_with_config<N: NexusServer>(
     test_name: &str,
     config: &mut omicron_common::nexus_config::Config,
     sim_mode: sim::SimMode,
+    initial_cert: Option<Certificate>,
 ) -> ControlPlaneTestContext<N> {
     let mut builder =
         ControlPlaneTestContextBuilder::<N>::new(test_name, config);
@@ -752,7 +746,9 @@ pub async fn test_setup_with_config<N: NexusServer>(
     // Give Nexus necessary information to find the Crucible Pantry
     let dns_config = builder.populate_internal_dns().await;
 
-    builder.start_nexus_external(dns_config).await;
+    builder
+        .start_nexus_external(dns_config, initial_cert.into_iter().collect())
+        .await;
 
     builder.start_oximeter().await;
     builder.start_producer_server().await;
@@ -774,7 +770,6 @@ pub async fn start_sled_agent(
         dropshot: ConfigDropshot {
             bind_address: SocketAddr::new(Ipv6Addr::LOCALHOST.into(), 0),
             request_body_max_bytes: 1024 * 1024,
-            ..Default::default()
         },
         // TODO-cleanup this is unused
         log: ConfigLogging::StderrTerminal { level: ConfigLoggingLevel::Debug },
@@ -788,6 +783,7 @@ pub async fn start_sled_agent(
         hardware: sim::ConfigHardware {
             hardware_threads: TEST_HARDWARE_THREADS,
             physical_ram: TEST_PHYSICAL_RAM,
+            reservoir_ram: TEST_RESERVOIR_RAM,
         },
     };
     let server =
@@ -872,13 +868,13 @@ pub async fn start_producer_server(
     let config = oximeter_producer::Config {
         server_info,
         registration_address: nexus_address,
-        dropshot_config: ConfigDropshot {
+        dropshot: ConfigDropshot {
             bind_address: producer_address,
             ..Default::default()
         },
-        logging_config: ConfigLogging::StderrTerminal {
+        log: LogConfig::Config(ConfigLogging::StderrTerminal {
             level: ConfigLoggingLevel::Error,
-        },
+        }),
     };
     let server =
         ProducerServer::start(&config).await.map_err(|e| e.to_string())?;
@@ -956,7 +952,6 @@ pub async fn start_dns_server(
         &dropshot::ConfigDropshot {
             bind_address: "[::1]:0".parse().unwrap(),
             request_body_max_bytes: 8 * 1024,
-            ..Default::default()
         },
     )
     .await

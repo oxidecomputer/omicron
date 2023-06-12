@@ -10,6 +10,8 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use serde::{Deserialize, Serialize};
 
+use crate::state::ComponentId;
+
 /// All commands handled by [`crate::Control::on`].
 ///
 /// These are mostly user input commands from the keyboard,
@@ -22,6 +24,9 @@ pub enum Cmd {
 
     /// Exit the current context
     Exit,
+
+    /// Toggle the currently-selected item (e.g., checkbox).
+    Toggle,
 
     /// Expand the current tree context
     Expand,
@@ -64,6 +69,15 @@ pub enum Cmd {
     /// Accept
     Yes,
 
+    /// Begin an update.
+    StartUpdate,
+
+    /// Force cancel an update.
+    AbortUpdate,
+
+    /// Reset update state.
+    ClearUpdateState,
+
     /// Goto top of list/screen/etc...
     GotoTop,
 
@@ -80,6 +94,12 @@ pub enum Cmd {
     /// animations.
     Tick,
 
+    /// Display a popup.
+    ///
+    /// This isn't a key shortcut (it is typically driven by the system) but
+    /// needs to be handled by screens the same way keys are.
+    ShowPopup(ShowPopupCmd),
+
     /// Switch to the next pane.
     NextPane,
 
@@ -88,6 +108,33 @@ pub enum Cmd {
 
     /// Write the current snapshot to a file
     DumpSnapshot,
+}
+
+/// A command to display a popup.
+///
+/// Part of [`Cmd::ShowPopup`].
+///
+/// This isn't a key shortcut (it is typically driven by the system) but
+/// needs to be handled by screens the same way keys are.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ShowPopupCmd {
+    /// A response to a start-update request.
+    StartUpdateResponse {
+        component_id: ComponentId,
+        response: Result<(), String>,
+    },
+
+    /// A response to a abort-update request.
+    AbortUpdateResponse {
+        component_id: ComponentId,
+        response: Result<(), String>,
+    },
+
+    /// A response to a clear-update-state request.
+    ClearUpdateStateResponse {
+        component_id: ComponentId,
+        response: Result<(), String>,
+    },
 }
 
 /// We allow certain multi-key sequences, and explicitly enumerate the starting
@@ -137,6 +184,7 @@ impl KeyHandler {
         let cmd = match event.code {
             KeyCode::Enter => Cmd::Enter,
             KeyCode::Esc => Cmd::Exit,
+            KeyCode::Char(' ') => Cmd::Toggle,
             KeyCode::Char('e') => Cmd::Expand,
             KeyCode::Char('c') => Cmd::Collapse,
             KeyCode::Char('d') => Cmd::Details,
@@ -146,6 +194,21 @@ impl KeyHandler {
             KeyCode::Right => Cmd::Right,
             KeyCode::Left => Cmd::Left,
             KeyCode::Char('y') => Cmd::Yes,
+            KeyCode::Char('u') if event.modifiers == KeyModifiers::CONTROL => {
+                Cmd::StartUpdate
+            }
+            KeyCode::Char('a')
+                if event.modifiers
+                    == KeyModifiers::CONTROL | KeyModifiers::ALT =>
+            {
+                Cmd::AbortUpdate
+            }
+            KeyCode::Char('r')
+                if event.modifiers
+                    == KeyModifiers::CONTROL | KeyModifiers::ALT =>
+            {
+                Cmd::ClearUpdateState
+            }
             KeyCode::Char('n') => Cmd::No,
             KeyCode::Char('k') if event.modifiers == KeyModifiers::CONTROL => {
                 Cmd::KnightRiderMode

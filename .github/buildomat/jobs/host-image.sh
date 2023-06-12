@@ -3,7 +3,7 @@
 #: name = "helios / build OS image"
 #: variety = "basic"
 #: target = "helios-latest"
-#: rust_toolchain = "1.68.2"
+#: rust_toolchain = "1.70.0"
 #: output_rules = [
 #:	"=/work/helios/image/output/os.tar.gz",
 #: ]
@@ -54,5 +54,6 @@ git checkout "$COMMIT"
 
 cd "$TOP"
 ./tools/build-host-image.sh -B \
+    -S /input/package/work/zones/switch-asic.tar.gz \
     /work/helios \
     /input/package/work/global-zone-packages.tar.gz

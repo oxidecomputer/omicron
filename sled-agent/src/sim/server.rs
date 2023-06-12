@@ -15,9 +15,13 @@ use crucible_agent_client::types::State as RegionState;
 use internal_dns::ServiceName;
 use nexus_client::types as NexusTypes;
 use nexus_client::types::{IpRange, Ipv4Range, Ipv6Range};
+use omicron_common::address::DNS_OPTE_IPV4_SUBNET;
+use omicron_common::address::NEXUS_OPTE_IPV4_SUBNET;
+use omicron_common::api::external::MacAddr;
 use omicron_common::backoff::{
     retry_notify, retry_policy_internal_service_aggressive, BackoffError,
 };
+use omicron_common::nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
 use slog::{info, Drain, Logger};
 use std::net::IpAddr;
 use std::net::SocketAddr;
@@ -96,8 +100,11 @@ impl Server {
                         sa_address: sa_address.to_string(),
                         role: NexusTypes::SledRole::Gimlet,
                         baseboard: NexusTypes::Baseboard {
-                            identifier: format!("Simulated sled {}", config.id),
-                            model: String::from("Unknown"),
+                            serial_number: format!(
+                                "Simulated sled {}",
+                                config.id
+                            ),
+                            part_number: String::from("Unknown"),
                             revision: 0,
                         },
                         usable_hardware_threads: config
@@ -105,6 +112,10 @@ impl Server {
                             .hardware_threads,
                         usable_physical_ram: NexusTypes::ByteCount::try_from(
                             config.hardware.physical_ram,
+                        )
+                        .unwrap(),
+                        reservoir_size: NexusTypes::ByteCount::try_from(
+                            config.hardware.reservoir_ram,
                         )
                         .unwrap(),
                     },
@@ -245,6 +256,9 @@ pub struct RssArgs {
     /// Specify the (internal) address of an external DNS server so that Nexus
     /// will know about it and keep it up to date
     pub external_dns_internal_addr: Option<SocketAddrV6>,
+    /// Specify a certificate and associated private key for the initial Silo's
+    /// initial TLS certificates
+    pub tls_certificate: Option<NexusTypes::Certificate>,
 }
 
 /// Run an instance of the `Server` which is able to handoff to Nexus.
@@ -309,34 +323,20 @@ pub async fn run_standalone_server(
     // Initialize the internal DNS entries
     let dns_config = dns_config_builder.build();
     dns.initialize_with_config(&log, &dns_config).await?;
-    drop(pantry_server);
 
     // Record the internal DNS server as though RSS had provisioned it so
     // that Nexus knows about it.
-    let dns_bound = match dns.server.local_address() {
-        SocketAddr::V4(_) => panic!("did not expect v4 address"),
-        SocketAddr::V6(a) => *a,
-    };
     let http_bound = match dns.dropshot_server.local_addr() {
         SocketAddr::V4(_) => panic!("did not expect v4 address"),
         SocketAddr::V6(a) => a,
     };
-    let mut services = vec![
-        NexusTypes::ServicePutRequest {
-            address: dns_bound.to_string(),
-            kind: NexusTypes::ServiceKind::InternalDns,
-            service_id: Uuid::new_v4(),
-            sled_id: config.id,
-            zone_id: Some(Uuid::new_v4()),
-        },
-        NexusTypes::ServicePutRequest {
-            address: http_bound.to_string(),
-            kind: NexusTypes::ServiceKind::InternalDnsConfig,
-            service_id: Uuid::new_v4(),
-            sled_id: config.id,
-            zone_id: Some(Uuid::new_v4()),
-        },
-    ];
+    let mut services = vec![NexusTypes::ServicePutRequest {
+        address: http_bound.to_string(),
+        kind: NexusTypes::ServiceKind::InternalDns,
+        service_id: Uuid::new_v4(),
+        sled_id: config.id,
+        zone_id: Some(Uuid::new_v4()),
+    }];
 
     let mut internal_services_ip_pool_ranges = vec![];
     if let Some(nexus_external_addr) = rss_args.nexus_external_addr {
@@ -357,7 +357,18 @@ pub async fn run_standalone_server(
 
         services.push(NexusTypes::ServicePutRequest {
             address: address.to_string(),
-            kind: NexusTypes::ServiceKind::Nexus { external_address: ip },
+            kind: NexusTypes::ServiceKind::Nexus {
+                external_address: ip,
+                nic: NexusTypes::ServiceNic {
+                    id: Uuid::new_v4(),
+                    name: "nexus".parse().unwrap(),
+                    ip: NEXUS_OPTE_IPV4_SUBNET
+                        .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES as u32 + 1)
+                        .unwrap()
+                        .into(),
+                    mac: MacAddr::random_system(),
+                },
+            },
             service_id: Uuid::new_v4(),
             sled_id: config.id,
             zone_id: Some(Uuid::new_v4()),
@@ -376,9 +387,21 @@ pub async fn run_standalone_server(
     if let Some(external_dns_internal_addr) =
         rss_args.external_dns_internal_addr
     {
+        let ip = *external_dns_internal_addr.ip();
         services.push(NexusTypes::ServicePutRequest {
             address: external_dns_internal_addr.to_string(),
-            kind: NexusTypes::ServiceKind::ExternalDnsConfig,
+            kind: NexusTypes::ServiceKind::ExternalDns {
+                external_address: ip.into(),
+                nic: NexusTypes::ServiceNic {
+                    id: Uuid::new_v4(),
+                    name: "external-dns".parse().unwrap(),
+                    ip: DNS_OPTE_IPV4_SUBNET
+                        .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES as u32 + 1)
+                        .unwrap()
+                        .into(),
+                    mac: MacAddr::random_system(),
+                },
+            },
             service_id: Uuid::new_v4(),
             sled_id: config.id,
             zone_id: Some(Uuid::new_v4()),
@@ -418,15 +441,22 @@ pub async fn run_standalone_server(
         }
     }
 
+    let certs = match &rss_args.tls_certificate {
+        Some(c) => vec![c.clone()],
+        None => vec![],
+    };
+
     let rack_init_request = NexusTypes::RackInitializationRequest {
         services,
         datasets,
         internal_services_ip_pool_ranges,
-        certs: vec![],
+        certs,
         internal_dns_zone_config: d2n_params(&dns_config),
         external_dns_zone_name: internal_dns::names::DNS_ZONE_EXTERNAL_TESTING
             .to_owned(),
         recovery_silo,
+        external_port_count: 1,
+        rack_network_config: None,
     };
 
     handoff_to_nexus(&log, &config, &rack_init_request).await?;

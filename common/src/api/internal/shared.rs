@@ -61,3 +61,81 @@ pub struct SourceNatConfig {
     /// The last port used for source NAT, also inclusive.
     pub last_port: u16,
 }
+
+/// Initial network configuration
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
+pub struct RackNetworkConfig {
+    /// Gateway address
+    pub gateway_ip: String,
+    /// First ip address to be used for configuring network infrastructure
+    pub infra_ip_first: String,
+    /// Last ip address to be used for configuring network infrastructure
+    pub infra_ip_last: String,
+    /// Switchport to use for external connectivity
+    pub uplink_port: String,
+    /// Speed for the Switchport
+    pub uplink_port_speed: PortSpeed,
+    /// Forward Error Correction setting for the uplink port
+    pub uplink_port_fec: PortFec,
+    /// IP Address to apply to switchport (must be in infra_ip pool)
+    pub uplink_ip: String,
+}
+
+/// Switchport Speed options
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum PortSpeed {
+    #[serde(alias = "0G")]
+    Speed0G,
+    #[serde(alias = "1G")]
+    Speed1G,
+    #[serde(alias = "10G")]
+    Speed10G,
+    #[serde(alias = "25G")]
+    Speed25G,
+    #[serde(alias = "40G")]
+    Speed40G,
+    #[serde(alias = "50G")]
+    Speed50G,
+    #[serde(alias = "100G")]
+    Speed100G,
+    #[serde(alias = "200G")]
+    Speed200G,
+    #[serde(alias = "400G")]
+    Speed400G,
+}
+
+impl From<PortSpeed> for dpd_client::types::PortSpeed {
+    fn from(value: PortSpeed) -> Self {
+        match value {
+            PortSpeed::Speed0G => dpd_client::types::PortSpeed::Speed0G,
+            PortSpeed::Speed1G => dpd_client::types::PortSpeed::Speed1G,
+            PortSpeed::Speed10G => dpd_client::types::PortSpeed::Speed10G,
+            PortSpeed::Speed25G => dpd_client::types::PortSpeed::Speed25G,
+            PortSpeed::Speed40G => dpd_client::types::PortSpeed::Speed40G,
+            PortSpeed::Speed50G => dpd_client::types::PortSpeed::Speed50G,
+            PortSpeed::Speed100G => dpd_client::types::PortSpeed::Speed100G,
+            PortSpeed::Speed200G => dpd_client::types::PortSpeed::Speed200G,
+            PortSpeed::Speed400G => dpd_client::types::PortSpeed::Speed400G,
+        }
+    }
+}
+
+/// Switchport FEC options
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum PortFec {
+    Firecode,
+    None,
+    Rs,
+}
+
+impl From<PortFec> for dpd_client::types::PortFec {
+    fn from(value: PortFec) -> Self {
+        match value {
+            PortFec::Firecode => dpd_client::types::PortFec::Firecode,
+            PortFec::None => dpd_client::types::PortFec::None,
+            PortFec::Rs => dpd_client::types::PortFec::Rs,
+        }
+    }
+}

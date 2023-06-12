@@ -17,6 +17,7 @@ use omicron_common::api::external::Generation;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::nexus::ProducerEndpoint;
+use oximeter_producer::LogConfig;
 use oximeter_producer::Server as ProducerServer;
 use propolis_client::api::DiskAttachmentState as PropolisDiskState;
 use std::net::{Ipv6Addr, SocketAddr};
@@ -173,13 +174,13 @@ impl SimDisk {
         let config = oximeter_producer::Config {
             server_info,
             registration_address: nexus_address,
-            dropshot_config: ConfigDropshot {
+            dropshot: ConfigDropshot {
                 bind_address: producer_address,
                 ..Default::default()
             },
-            logging_config: ConfigLogging::StderrTerminal {
+            log: LogConfig::Config(ConfigLogging::StderrTerminal {
                 level: ConfigLoggingLevel::Error,
-            },
+            }),
         };
         let server =
             ProducerServer::start(&config).await.map_err(|e| e.to_string())?;

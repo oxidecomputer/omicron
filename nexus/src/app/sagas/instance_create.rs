@@ -6,6 +6,7 @@ use super::{NexusActionContext, NexusSaga, SagaInitError, ACTION_GENERATE_ID};
 use crate::app::instance::WriteBackUpdatedInstance;
 use crate::app::sagas::declare_saga_actions;
 use crate::app::sagas::disk_create::{self, SagaDiskCreate};
+use crate::app::sagas::retry_until_known_result;
 use crate::app::{
     MAX_DISKS_PER_INSTANCE, MAX_EXTERNAL_IPS_PER_INSTANCE,
     MAX_NICS_PER_INSTANCE,
@@ -34,7 +35,6 @@ use slog::warn;
 use std::convert::TryFrom;
 use std::fmt::Debug;
 use std::net::Ipv6Addr;
-use std::str::FromStr;
 use steno::ActionError;
 use steno::Node;
 use steno::{DagBuilder, SagaName};
@@ -146,6 +146,8 @@ impl NexusSaga for SagaInstanceCreate {
         params: &Self::Params,
         mut builder: steno::DagBuilder,
     ) -> Result<steno::Dag, SagaInitError> {
+        // Pre-create the instance ID so that it can be supplied as a constant
+        // parameter to the subsagas that create and attach devices.
         let instance_id = Uuid::new_v4();
 
         builder.append(Node::constant(
@@ -373,131 +375,35 @@ async fn sic_add_network_config(
         &params.serialized_authn,
     );
     let osagactx = sagactx.user_data();
-    let dpd_client: &dpd_client::Client = &osagactx.nexus().dpd_client;
-    let datastore = &osagactx.datastore();
-    let log = sagactx.user_data().log();
-
-    let (.., authz_instance, db_instance) = LookupPath::new(&opctx, &datastore)
+    let datastore = osagactx.datastore();
+    let (.., db_instance) = LookupPath::new(&opctx, &datastore)
         .instance_id(instance_id)
         .fetch()
         .await
         .map_err(ActionError::action_failed)?;
 
-    let instance_id = db_instance.id();
+    // Read the sled record from the database. This needs to use the instance-
+    // create context (and not the regular saga context) to leverage its fleet-
+    // read permissions.
     let sled_uuid = db_instance.runtime_state.sled_id;
-
     let (.., sled) = LookupPath::new(&osagactx.nexus().opctx_alloc, &datastore)
         .sled_id(sled_uuid)
         .fetch()
         .await
         .map_err(ActionError::action_failed)?;
 
-    let sled_ip_address = sled.address();
-
-    debug!(log, "fetching network interfaces");
-
-    let network_interface = match datastore
-        .derive_guest_network_interface_info(&opctx, &authz_instance)
+    // Set up Dendrite configuration using the saga context, which supplies
+    // access to the instance's device configuration.
+    osagactx
+        .nexus()
+        .instance_ensure_dpd_config(
+            &opctx,
+            instance_id,
+            &sled.address(),
+            Some(which),
+        )
         .await
-        .map_err(ActionError::action_failed)?
-        .into_iter()
-        .find(|interface| interface.primary)
-    {
-        Some(interface) => interface,
-        // Return early if instance does not have a primary network
-        // interface
-        None => return Ok(()),
-    };
-
-    let mac_address =
-        macaddr::MacAddr6::from_str(&network_interface.mac.to_string())
-            .map_err(|e| {
-                ActionError::action_failed(Error::internal_error(&format!(
-                    "failed to convert mac address: {e}"
-                )))
-            })?;
-
-    let vni: u32 = network_interface.vni.into();
-
-    debug!(log, "fetching external ip addresses");
-
-    let target_ip = &datastore
-        .instance_lookup_external_ips(&opctx, instance_id)
-        .await
-        .map_err(ActionError::action_failed)?
-        .get(which)
-        .ok_or_else(|| {
-            ActionError::action_failed(Error::internal_error(&format!(
-                "failed to find external ip address at index: {which}"
-            )))
-        })?
-        .to_owned();
-
-    debug!(log, "checking for existing nat mapping for {target_ip:#?}");
-
-    let existing_nat = match target_ip.ip {
-        ipnetwork::IpNetwork::V4(network) => {
-            dpd_client.nat_ipv4_get(&network.ip(), *target_ip.first_port).await
-        }
-        ipnetwork::IpNetwork::V6(network) => {
-            dpd_client.nat_ipv6_get(&network.ip(), *target_ip.first_port).await
-        }
-    };
-
-    match existing_nat {
-        Ok(_) => {
-            // nat entry already exists, do nothing
-            return Ok(());
-        }
-        Err(e) => {
-            if e.status() == Some(http::StatusCode::NOT_FOUND) {
-                debug!(log, "no nat entry found for: {target_ip:#?}");
-            } else {
-                return Err(ActionError::action_failed(Error::internal_error(
-                    &format!("failed to query dpd: {e}"),
-                )));
-            }
-        }
-    }
-
-    debug!(log, "creating nat entry for: {target_ip:#?}");
-
-    let nat_target = dpd_client::types::NatTarget {
-        inner_mac: dpd_client::types::MacAddr { a: mac_address.into_array() },
-        internal_ip: *sled_ip_address.ip(),
-        vni: vni.into(),
-    };
-
-    match target_ip.ip {
-        ipnetwork::IpNetwork::V4(network) => {
-            dpd_client
-                .nat_ipv4_create(
-                    &network.ip(),
-                    *target_ip.first_port,
-                    *target_ip.last_port,
-                    &nat_target,
-                )
-                .await
-        }
-        ipnetwork::IpNetwork::V6(network) => {
-            dpd_client
-                .nat_ipv6_create(
-                    &network.ip(),
-                    *target_ip.first_port,
-                    *target_ip.last_port,
-                    &nat_target,
-                )
-                .await
-        }
-    }
-    .map_err(|e| {
-        ActionError::action_failed(Error::internal_error(&format!(
-            "failed to create nat entry via dpd: {e}"
-        )))
-    })?;
-
-    debug!(log, "creation of nat entry successful for: {target_ip:#?}");
-    Ok(())
+        .map_err(ActionError::action_failed)
 }
 
 async fn sic_remove_network_config(
@@ -532,34 +438,23 @@ async fn sic_remove_network_config(
 
     debug!(log, "deleting nat mapping for entry: {target_ip:#?}");
 
-    let result = match target_ip.ip {
-        ipnetwork::IpNetwork::V4(network) => {
-            dpd_client
-                .nat_ipv4_delete(&network.ip(), *target_ip.first_port)
-                .await
-        }
-        ipnetwork::IpNetwork::V6(network) => {
-            dpd_client
-                .nat_ipv6_delete(&network.ip(), *target_ip.first_port)
-                .await
-        }
-    };
+    let result = retry_until_known_result(log, || async {
+        dpd_client
+            .ensure_nat_entry_deleted(log, target_ip.ip, *target_ip.first_port)
+            .await
+    })
+    .await;
+
     match result {
         Ok(_) => {
             debug!(log, "deletion of nat entry successful for: {target_ip:#?}");
             Ok(())
         }
-        Err(e) => {
-            if e.status() == Some(http::StatusCode::NOT_FOUND) {
-                debug!(log, "no nat entry found for: {target_ip:#?}");
-                Ok(())
-            } else {
-                Err(ActionError::action_failed(Error::internal_error(
-                    &format!("failed to delete nat entry via dpd: {e}"),
-                )))
-            }
-        }
+        Err(e) => Err(Error::internal_error(&format!(
+            "failed to delete nat entry via dpd: {e}"
+        ))),
     }?;
+
     Ok(())
 }
 
@@ -769,7 +664,6 @@ async fn create_custom_network_interface(
     let interface = db::model::IncompleteNetworkInterface::new_instance(
         interface_id,
         instance_id,
-        authz_vpc.id(),
         db_subnet.clone(),
         interface_params.identity.clone(),
         interface_params.ip,
@@ -853,19 +747,17 @@ async fn create_default_primary_network_interface(
         .lookup_for(authz::Action::CreateChild)
         .await
         .map_err(ActionError::action_failed)?;
-    let (.., authz_vpc, authz_subnet, db_subnet) =
-        LookupPath::new(&opctx, &datastore)
-            .project_id(saga_params.project_id)
-            .vpc_name(&internal_default_name)
-            .vpc_subnet_name(&internal_default_name)
-            .fetch()
-            .await
-            .map_err(ActionError::action_failed)?;
+    let (.., authz_subnet, db_subnet) = LookupPath::new(&opctx, &datastore)
+        .project_id(saga_params.project_id)
+        .vpc_name(&internal_default_name)
+        .vpc_subnet_name(&internal_default_name)
+        .fetch()
+        .await
+        .map_err(ActionError::action_failed)?;
 
     let interface = db::model::IncompleteNetworkInterface::new_instance(
         interface_id,
         instance_id,
-        authz_vpc.id(),
         db_subnet.clone(),
         interface_params.identity.clone(),
         interface_params.ip,
@@ -1280,10 +1172,11 @@ async fn sic_v2p_ensure(
         &params.serialized_authn,
     );
     let instance_id = sagactx.lookup::<Uuid>("instance_id")?;
+    let sled_id = sagactx.lookup::<Uuid>("server_id")?;
 
     osagactx
         .nexus()
-        .create_instance_v2p_mappings(&opctx, instance_id)
+        .create_instance_v2p_mappings(&opctx, instance_id, sled_id)
         .await
         .map_err(ActionError::action_failed)?;
 
@@ -1561,10 +1454,12 @@ pub mod test {
 
     async fn no_network_interface_records_exist(datastore: &DataStore) -> bool {
         use crate::db::model::NetworkInterface;
+        use crate::db::model::NetworkInterfaceKind;
         use crate::db::schema::network_interface::dsl;
 
         dsl::network_interface
             .filter(dsl::time_deleted.is_null())
+            .filter(dsl::kind.eq(NetworkInterfaceKind::Instance))
             .select(NetworkInterface::as_select())
             .first_async::<NetworkInterface>(
                 datastore.pool_for_tests().await.unwrap(),
@@ -1576,12 +1471,12 @@ pub mod test {
     }
 
     async fn no_external_ip_records_exist(datastore: &DataStore) -> bool {
-        use crate::db::model::{ExternalIp, IpKind};
+        use crate::db::model::ExternalIp;
         use crate::db::schema::external_ip::dsl;
 
         dsl::external_ip
             .filter(dsl::time_deleted.is_null())
-            .filter(dsl::kind.ne(IpKind::Service))
+            .filter(dsl::is_service.eq(false))
             .select(ExternalIp::as_select())
             .first_async::<ExternalIp>(
                 datastore.pool_for_tests().await.unwrap(),
@@ -1755,10 +1650,21 @@ pub mod test {
         let opctx = test_opctx(&cptestctx);
 
         let params = new_test_params(&opctx, project_id);
-        let dag = create_saga_dag::<SagaInstanceCreate>(params).unwrap();
 
-        for node in dag.get_nodes() {
-            // Create a new saga for this node.
+        // Each run of the test needs to use a distinct DAG so that it has a
+        // distinct instance ID. Instead of creating a DAG and iterating over
+        // each node to turn it into a failure point, create an initial DAG to
+        // find out how many nodes there are, then iterate over possible failure
+        // points, creating a new DAG each time.
+        let dag =
+            create_saga_dag::<SagaInstanceCreate>(params.clone()).unwrap();
+        let num_nodes = dag.get_nodes().count();
+
+        for failure_index in 0..num_nodes {
+            let dag =
+                create_saga_dag::<SagaInstanceCreate>(params.clone()).unwrap();
+
+            let node = dag.get_nodes().nth(failure_index).unwrap();
             info!(
                 log,
                 "Creating new saga which will fail at index {:?}", node.index();
@@ -1777,10 +1683,15 @@ pub mod test {
                 .saga_inject_error(runnable_saga.id(), node.index())
                 .await
                 .unwrap();
-            nexus
-                .run_saga(runnable_saga)
+
+            let saga_error = nexus
+                .run_saga_raw_result(runnable_saga)
                 .await
-                .expect_err("Saga should have failed");
+                .expect("saga should have started successfully")
+                .kind
+                .expect_err("saga execution should have failed");
+
+            assert_eq!(saga_error.error_node_name, *node.name());
 
             verify_clean_slate(&cptestctx).await;
         }
@@ -1800,14 +1711,24 @@ pub mod test {
         // Build the saga DAG with the provided test parameters
         let opctx = test_opctx(&cptestctx);
 
+        // Create the DAG once to determine how many nodes it has (for iteration
+        // purposes), then recreate it in each iteration of the test. This is
+        // needed to ensure each iteration gets a distinct instance ID.
         let params = new_test_params(&opctx, project_id);
-        let dag = create_saga_dag::<SagaInstanceCreate>(params).unwrap();
+        let dag =
+            create_saga_dag::<SagaInstanceCreate>(params.clone()).unwrap();
+        let num_nodes = dag.get_nodes().count();
 
-        // The "undo_node" should always be immediately preceding the
-        // "error_node".
-        for (undo_node, error_node) in
-            dag.get_nodes().zip(dag.get_nodes().skip(1))
-        {
+        // Iterate over pairs of adjacent nodes. Inject an error into the second
+        // node, then configure the undo action for the first node to be
+        // repeated.
+        let node_indices = Vec::from_iter(0..num_nodes);
+        for indices in node_indices.windows(2) {
+            let dag =
+                create_saga_dag::<SagaInstanceCreate>(params.clone()).unwrap();
+            let undo_node = dag.get_nodes().nth(indices[0]).unwrap();
+            let error_node = dag.get_nodes().nth(indices[1]).unwrap();
+
             // Create a new saga for this node.
             info!(
                 log,
@@ -1844,10 +1765,14 @@ pub mod test {
                 .await
                 .unwrap();
 
-            nexus
-                .run_saga(runnable_saga)
+            let saga_error = nexus
+                .run_saga_raw_result(runnable_saga)
                 .await
-                .expect_err("Saga should have failed");
+                .expect("saga should have started successfully")
+                .kind
+                .expect_err("saga execution should have failed");
+
+            assert_eq!(saga_error.error_node_name, *error_node.name());
 
             verify_clean_slate(&cptestctx).await;
         }

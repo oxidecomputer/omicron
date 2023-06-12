@@ -67,6 +67,23 @@ impl<S: StepSpec> Event<S> {
 #[serde(bound = "", rename_all = "snake_case")]
 #[schemars(rename = "StepEventFor{S}")]
 pub struct StepEvent<S: StepSpec> {
+    /// The specification that this event belongs to.
+    ///
+    /// This is typically the name of the type `S` for which `StepSpec` is
+    /// implemented.
+    ///
+    /// This can be used along with `Self::from_generic` to identify which
+    /// specification to deserialize generic metadata against. For example:
+    ///
+    /// ```rust,ignore
+    /// if event.spec == "MySpec" {
+    ///     // event is likely generated from a MySpec engine.
+    ///     let event = Event::<MySpec>::from_generic(event)?;
+    ///     // ...
+    /// }
+    /// ```
+    pub spec: String,
+
     /// The execution ID.
     pub execution_id: ExecutionId,
 
@@ -91,6 +108,7 @@ impl<S: StepSpec> StepEvent<S> {
         match &self.kind {
             StepEventKind::ExecutionStarted { first_step, .. } => {
                 Some(ProgressEvent {
+                    spec: self.spec.clone(),
                     execution_id: self.execution_id,
                     total_elapsed: self.total_elapsed,
                     kind: ProgressEventKind::WaitingForProgress {
@@ -108,6 +126,7 @@ impl<S: StepSpec> StepEvent<S> {
                 attempt_elapsed,
                 ..
             } => Some(ProgressEvent {
+                spec: self.spec.clone(),
                 execution_id: self.execution_id,
                 total_elapsed: self.total_elapsed,
                 kind: ProgressEventKind::WaitingForProgress {
@@ -123,6 +142,7 @@ impl<S: StepSpec> StepEvent<S> {
                 step_elapsed,
                 ..
             } => Some(ProgressEvent {
+                spec: self.spec.clone(),
                 execution_id: self.execution_id,
                 total_elapsed: self.total_elapsed,
                 kind: ProgressEventKind::WaitingForProgress {
@@ -135,6 +155,7 @@ impl<S: StepSpec> StepEvent<S> {
             }),
             StepEventKind::StepCompleted { next_step, .. } => {
                 Some(ProgressEvent {
+                    spec: self.spec.clone(),
                     execution_id: self.execution_id,
                     total_elapsed: self.total_elapsed,
                     kind: ProgressEventKind::WaitingForProgress {
@@ -154,6 +175,7 @@ impl<S: StepSpec> StepEvent<S> {
                 event,
                 ..
             } => event.progress_event().map(|progress_event| ProgressEvent {
+                spec: self.spec.clone(),
                 execution_id: self.execution_id,
                 total_elapsed: self.total_elapsed,
                 kind: ProgressEventKind::Nested {
@@ -167,9 +189,29 @@ impl<S: StepSpec> StepEvent<S> {
             StepEventKind::NoStepsDefined
             | StepEventKind::ExecutionCompleted { .. }
             | StepEventKind::ExecutionFailed { .. }
+            | StepEventKind::ExecutionAborted { .. }
             | StepEventKind::Unknown => None,
         }
     }
+
+    /// Returns the execution ID for the leaf event, recursing into nested
+    /// events if necessary.
+    pub fn leaf_execution_id(&self) -> ExecutionId {
+        match &self.kind {
+            StepEventKind::Nested { event, .. } => event.leaf_execution_id(),
+            _ => self.execution_id,
+        }
+    }
+
+    /// Returns the event index for the leaf event, recursing into nested events
+    /// if necessary.
+    pub fn leaf_event_index(&self) -> usize {
+        match &self.kind {
+            StepEventKind::Nested { event, .. } => event.leaf_event_index(),
+            _ => self.event_index,
+        }
+    }
+
     /// Converts a generic version into self.
     ///
     /// This version can be used to convert a generic type into a more concrete
@@ -178,6 +220,7 @@ impl<S: StepSpec> StepEvent<S> {
         value: StepEvent<GenericSpec<E>>,
     ) -> Result<Self, ConvertGenericError> {
         Ok(StepEvent {
+            spec: value.spec,
             execution_id: value.execution_id,
             event_index: value.event_index,
             total_elapsed: value.total_elapsed,
@@ -198,6 +241,7 @@ impl<S: StepSpec> StepEvent<S> {
     /// anyway.
     pub fn into_generic<E: AsError>(self) -> StepEvent<GenericSpec<E>> {
         StepEvent {
+            spec: self.spec,
             execution_id: self.execution_id,
             event_index: self.event_index,
             total_elapsed: self.total_elapsed,
@@ -343,6 +387,29 @@ pub enum StepEventKind<S: StepSpec> {
         causes: Vec<String>,
     },
 
+    /// Execution aborted by an external user.
+    ///
+    /// This is a terminal event: it is guaranteed that no more events will be
+    /// seen after this one.
+    ExecutionAborted {
+        /// Information about the step that was running at the time execution
+        /// was aborted.
+        aborted_step: StepInfoWithMetadata<S>,
+
+        /// The attempt that was running at the time the step was aborted.
+        attempt: usize,
+
+        /// Total time elapsed since the start of the step. Includes prior
+        /// attempts.
+        step_elapsed: Duration,
+
+        /// The time it took for this attempt to complete.
+        attempt_elapsed: Duration,
+
+        /// A message associated with the abort.
+        message: String,
+    },
+
     /// A nested step event occurred.
     Nested {
         /// Information about the step that's occurring.
@@ -380,7 +447,8 @@ impl<S: StepSpec> StepEventKind<S> {
             | StepEventKind::ExecutionCompleted { .. } => {
                 StepEventIsTerminal::Terminal { success: true }
             }
-            StepEventKind::ExecutionFailed { .. } => {
+            StepEventKind::ExecutionFailed { .. }
+            | StepEventKind::ExecutionAborted { .. } => {
                 StepEventIsTerminal::Terminal { success: false }
             }
             StepEventKind::ExecutionStarted { .. }
@@ -401,7 +469,8 @@ impl<S: StepSpec> StepEventKind<S> {
             | StepEventKind::ExecutionStarted { .. }
             | StepEventKind::StepCompleted { .. }
             | StepEventKind::ExecutionCompleted { .. }
-            | StepEventKind::ExecutionFailed { .. } => StepEventPriority::High,
+            | StepEventKind::ExecutionFailed { .. }
+            | StepEventKind::ExecutionAborted { .. } => StepEventPriority::High,
             StepEventKind::ProgressReset { .. }
             | StepEventKind::AttemptRetry { .. }
             | StepEventKind::Unknown => StepEventPriority::Low,
@@ -524,6 +593,20 @@ impl<S: StepSpec> StepEventKind<S> {
                 message,
                 causes,
             },
+            StepEventKind::ExecutionAborted {
+                aborted_step,
+                attempt,
+                step_elapsed,
+                attempt_elapsed,
+                message,
+            } => StepEventKind::ExecutionAborted {
+                aborted_step: StepInfoWithMetadata::from_generic(aborted_step)
+                    .map_err(|error| error.parent("aborted_step"))?,
+                attempt,
+                step_elapsed,
+                attempt_elapsed,
+                message,
+            },
             StepEventKind::Nested {
                 step,
                 attempt,
@@ -643,6 +726,19 @@ impl<S: StepSpec> StepEventKind<S> {
                 message,
                 causes,
             },
+            StepEventKind::ExecutionAborted {
+                aborted_step,
+                attempt,
+                step_elapsed,
+                attempt_elapsed,
+                message,
+            } => StepEventKind::ExecutionAborted {
+                aborted_step: aborted_step.into_generic(),
+                attempt,
+                step_elapsed,
+                attempt_elapsed,
+                message,
+            },
             StepEventKind::Nested {
                 step,
                 attempt,
@@ -657,6 +753,26 @@ impl<S: StepSpec> StepEventKind<S> {
                 attempt_elapsed,
             },
             StepEventKind::Unknown => StepEventKind::Unknown,
+        }
+    }
+
+    /// If this represents a successfully-completed step, returns the outcome.
+    ///
+    /// This does not recurse into nested events.
+    pub fn step_outcome(&self) -> Option<&StepOutcome<S>> {
+        match self {
+            StepEventKind::StepCompleted { outcome, .. }
+            | StepEventKind::ExecutionCompleted {
+                last_outcome: outcome, ..
+            } => Some(outcome),
+            StepEventKind::NoStepsDefined
+            | StepEventKind::ExecutionStarted { .. }
+            | StepEventKind::ProgressReset { .. }
+            | StepEventKind::AttemptRetry { .. }
+            | StepEventKind::ExecutionFailed { .. }
+            | StepEventKind::ExecutionAborted { .. }
+            | StepEventKind::Nested { .. }
+            | StepEventKind::Unknown => None,
         }
     }
 }
@@ -711,26 +827,29 @@ pub enum StepEventPriority {
 pub enum StepOutcome<S: StepSpec> {
     /// The step completed successfully.
     Success {
-        /// Completion metadata associated with the step.
-        metadata: S::CompletionMetadata,
+        /// An optional message associated with this step.
+        message: Option<Cow<'static, str>>,
+
+        /// Optional completion metadata associated with the step.
+        metadata: Option<S::CompletionMetadata>,
     },
 
     /// The step completed with a warning.
     Warning {
-        /// Completion metadata associated with the step.
-        metadata: S::CompletionMetadata,
-
         /// A warning message.
         message: Cow<'static, str>,
+
+        /// Optional completion metadata associated with the step.
+        metadata: Option<S::CompletionMetadata>,
     },
 
     /// The step was skipped with a message.
     Skipped {
-        /// Skipped metadata associated with the step.
-        metadata: S::SkippedMetadata,
-
-        /// Metadata associated with the step.
+        /// Message associated with the skip.
         message: Cow<'static, str>,
+
+        /// Optional metadata associated with the skip.
+        metadata: Option<S::SkippedMetadata>,
     },
 }
 
@@ -743,29 +862,56 @@ impl<S: StepSpec> StepOutcome<S> {
         value: StepOutcome<GenericSpec<E>>,
     ) -> Result<Self, ConvertGenericError> {
         let ret = match value {
-            StepOutcome::Success { metadata } => StepOutcome::Success {
-                metadata: serde_json::from_value(metadata).map_err(
-                    |error| ConvertGenericError::new("metadata", error),
-                )?,
-            },
-            StepOutcome::Warning { metadata, message } => {
-                StepOutcome::Warning {
-                    metadata: serde_json::from_value(metadata).map_err(
-                        |error| ConvertGenericError::new("metadata", error),
-                    )?,
+            StepOutcome::Success { message, metadata } => {
+                StepOutcome::Success {
                     message,
+                    metadata: metadata
+                        .map(|metadata| {
+                            serde_json::from_value(metadata).map_err(|error| {
+                                ConvertGenericError::new("metadata", error)
+                            })
+                        })
+                        .transpose()?,
                 }
             }
-            StepOutcome::Skipped { metadata, message } => {
-                StepOutcome::Skipped {
-                    metadata: serde_json::from_value(metadata).map_err(
-                        |error| ConvertGenericError::new("metadata", error),
-                    )?,
+            StepOutcome::Warning { message, metadata } => {
+                StepOutcome::Warning {
                     message,
+                    metadata: metadata
+                        .map(|metadata| {
+                            serde_json::from_value(metadata).map_err(|error| {
+                                ConvertGenericError::new("metadata", error)
+                            })
+                        })
+                        .transpose()?,
+                }
+            }
+            StepOutcome::Skipped { message, metadata } => {
+                StepOutcome::Skipped {
+                    message,
+                    metadata: metadata
+                        .map(|metadata| {
+                            serde_json::from_value(metadata).map_err(|error| {
+                                ConvertGenericError::new("metadata", error)
+                            })
+                        })
+                        .transpose()?,
                 }
             }
         };
         Ok(ret)
+    }
+
+    /// If this outcome represents completion, returns the metadata associated
+    /// with this event.
+    ///
+    /// Returns `None` if this outcome represents "skipped".
+    pub fn completion_metadata(&self) -> Option<&S::CompletionMetadata> {
+        match self {
+            StepOutcome::Success { metadata, .. }
+            | StepOutcome::Warning { metadata, .. } => metadata.as_ref(),
+            StepOutcome::Skipped { .. } => None,
+        }
     }
 
     /// Converts self into its generic version.
@@ -780,22 +926,31 @@ impl<S: StepSpec> StepOutcome<S> {
     /// anyway.
     pub fn into_generic<E: AsError>(self) -> StepOutcome<GenericSpec<E>> {
         match self {
-            StepOutcome::Success { metadata } => StepOutcome::Success {
-                metadata: serde_json::to_value(metadata)
-                    .unwrap_or_else(|_| serde_json::Value::Null),
-            },
+            StepOutcome::Success { message, metadata } => {
+                StepOutcome::Success {
+                    message,
+                    metadata: metadata.map(|metadata| {
+                        serde_json::to_value(metadata)
+                            .unwrap_or_else(|_| serde_json::Value::Null)
+                    }),
+                }
+            }
             StepOutcome::Warning { metadata, message } => {
                 StepOutcome::Warning {
-                    metadata: serde_json::to_value(metadata)
-                        .unwrap_or_else(|_| serde_json::Value::Null),
                     message,
+                    metadata: metadata.map(|metadata| {
+                        serde_json::to_value(metadata)
+                            .unwrap_or_else(|_| serde_json::Value::Null)
+                    }),
                 }
             }
             StepOutcome::Skipped { metadata, message } => {
                 StepOutcome::Skipped {
-                    metadata: serde_json::to_value(metadata)
-                        .unwrap_or_else(|_| serde_json::Value::Null),
                     message,
+                    metadata: metadata.map(|metadata| {
+                        serde_json::to_value(metadata)
+                            .unwrap_or_else(|_| serde_json::Value::Null)
+                    }),
                 }
             }
         }
@@ -807,6 +962,15 @@ impl<S: StepSpec> StepOutcome<S> {
 #[serde(bound = "", rename_all = "snake_case")]
 #[schemars(rename = "ProgressEventFor{S}")]
 pub struct ProgressEvent<S: StepSpec> {
+    /// The specification that this event belongs to.
+    ///
+    /// This is typically the name of the type `S` for which `StepSpec` is
+    /// implemented.
+    ///
+    /// This can be used with `Self::from_generic` to deserialize generic
+    /// metadata.
+    pub spec: String,
+
     /// The execution ID.
     pub execution_id: ExecutionId,
 
@@ -827,6 +991,7 @@ impl<S: StepSpec> ProgressEvent<S> {
         value: ProgressEvent<GenericSpec<E>>,
     ) -> Result<Self, ConvertGenericError> {
         Ok(Self {
+            spec: value.spec,
             execution_id: value.execution_id,
             total_elapsed: value.total_elapsed,
             kind: ProgressEventKind::from_generic(value.kind)
@@ -846,6 +1011,7 @@ impl<S: StepSpec> ProgressEvent<S> {
     /// anyway.
     pub fn into_generic<E: AsError>(self) -> ProgressEvent<GenericSpec<E>> {
         ProgressEvent {
+            spec: self.spec,
             execution_id: self.execution_id,
             total_elapsed: self.total_elapsed,
             kind: self.kind.into_generic(),
@@ -922,6 +1088,48 @@ pub enum ProgressEventKind<S: StepSpec> {
 }
 
 impl<S: StepSpec> ProgressEventKind<S> {
+    /// Returns the progress counter for this event, if available.
+    pub fn progress_counter(&self) -> Option<ProgressCounter> {
+        match self {
+            ProgressEventKind::Progress { progress, .. } => *progress,
+            ProgressEventKind::Nested { event, .. } => {
+                event.kind.progress_counter()
+            }
+            ProgressEventKind::WaitingForProgress { .. }
+            | ProgressEventKind::Unknown => None,
+        }
+    }
+
+    /// Returns `attempt` for the leaf event, recursing into nested events as
+    /// necessary.
+    ///
+    /// Returns None for unknown events.
+    pub fn leaf_attempt(&self) -> Option<usize> {
+        match self {
+            ProgressEventKind::WaitingForProgress { attempt, .. }
+            | ProgressEventKind::Progress { attempt, .. } => Some(*attempt),
+            ProgressEventKind::Nested { event, .. } => {
+                event.kind.leaf_attempt()
+            }
+            ProgressEventKind::Unknown => None,
+        }
+    }
+
+    /// Returns `step_elapsed` for the leaf event, recursing into nested events
+    /// as necessary.
+    pub fn leaf_step_elapsed(&self) -> Option<Duration> {
+        match self {
+            ProgressEventKind::WaitingForProgress { step_elapsed, .. }
+            | ProgressEventKind::Progress { step_elapsed, .. } => {
+                Some(*step_elapsed)
+            }
+            ProgressEventKind::Nested { event, .. } => {
+                event.kind.leaf_step_elapsed()
+            }
+            ProgressEventKind::Unknown => None,
+        }
+    }
+
     /// Converts a generic version into self.
     ///
     /// This version can be used to convert a generic type into a more concrete
@@ -1224,7 +1432,9 @@ impl<S: StepSpec> StepInfoWithMetadata<S> {
 /// number of bytes. There is no guarantee that the counter won't go back in
 /// subsequent events; that can happen e.g. if a fetch happens from multiple
 /// peers within a single attempt.
-#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize, JsonSchema)]
+#[derive(
+    Copy, Clone, Debug, Eq, PartialEq, Deserialize, Serialize, JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub struct ProgressCounter {
     pub current: u64,
@@ -1337,6 +1547,13 @@ pub struct EventReport<S: StepSpec> {
     /// nested event in progress.
     pub progress_events: Vec<ProgressEvent<S>>,
 
+    /// The root execution ID for this report.
+    ///
+    /// Each report has a root execution ID, which ties together all step and
+    /// progress events. This is always filled out if the list of step events is
+    /// non-empty.
+    pub root_execution_id: Option<ExecutionId>,
+
     /// The last event seen.
     ///
     /// `last_seen` can be used to retrieve deltas of events.
@@ -1372,6 +1589,7 @@ impl<S: StepSpec> EventReport<S> {
                     })
                 })
                 .collect::<Result<Vec<_>, _>>()?,
+            root_execution_id: value.root_execution_id,
             last_seen: value.last_seen,
         })
     }
@@ -1398,6 +1616,7 @@ impl<S: StepSpec> EventReport<S> {
                 .into_iter()
                 .map(|event| event.into_generic())
                 .collect(),
+            root_execution_id: self.root_execution_id,
             last_seen: self.last_seen,
         }
     }
@@ -1419,6 +1638,7 @@ mod tests {
             (
                 r#"
                   {
+                    "spec": "TestSpec",
                     "execution_id": "2cc08a14-5e96-4917-bc70-e98293a3b703",
                     "event_index": 0,
                     "total_elapsed": {
@@ -1455,6 +1675,7 @@ mod tests {
                   }
                 "#,
                 StepEvent {
+                    spec: TestSpec::schema_name(),
                     execution_id,
                     event_index: 0,
                     total_elapsed: Duration::ZERO,
@@ -1464,6 +1685,7 @@ mod tests {
             (
                 r#"
                   {
+                    "spec": "TestSpec",
                     "execution_id": "2cc08a14-5e96-4917-bc70-e98293a3b703",
                     "event_index": 1,
                     "total_elapsed": {
@@ -1486,6 +1708,7 @@ mod tests {
                       "last_attempt": 1,
                       "last_outcome": {
                         "kind": "success",
+                        "message": null,
                         "metadata": null
                       },
                       "step_elapsed": {
@@ -1501,6 +1724,7 @@ mod tests {
                   }
                 "#,
                 StepEvent::<TestSpec> {
+                    spec: TestSpec::schema_name(),
                     execution_id,
                     event_index: 1,
                     total_elapsed: Duration::ZERO,
@@ -1518,7 +1742,8 @@ mod tests {
                         },
                         last_attempt: 1,
                         last_outcome: StepOutcome::Success {
-                            metadata: serde_json::Value::Null,
+                            message: None,
+                            metadata: None,
                         },
                         step_elapsed: Duration::ZERO,
                         attempt_elapsed: Duration::ZERO,
@@ -1553,6 +1778,7 @@ mod tests {
             (
                 r#"
                   {
+                    "spec": "TestSpec",
                     "execution_id": "2cc08a14-5e96-4917-bc70-e98293a3b703",
                     "total_elapsed": {
                       "secs": 0,
@@ -1589,6 +1815,7 @@ mod tests {
                   }
                 "#,
                 ProgressEvent {
+                    spec: TestSpec::schema_name(),
                     execution_id,
                     total_elapsed: Duration::ZERO,
                     kind: ProgressEventKind::Unknown,
@@ -1597,6 +1824,7 @@ mod tests {
             (
                 r#"
                   {
+                    "spec": "TestSpec",
                     "execution_id": "2cc08a14-5e96-4917-bc70-e98293a3b703",
                     "total_elapsed": {
                       "secs": 0,
@@ -1634,6 +1862,7 @@ mod tests {
                   }
                 "#,
                 ProgressEvent::<TestSpec> {
+                    spec: TestSpec::schema_name(),
                     execution_id,
                     total_elapsed: Duration::ZERO,
                     kind: ProgressEventKind::Progress {

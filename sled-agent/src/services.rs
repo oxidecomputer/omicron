@@ -25,6 +25,7 @@
 //! - [ServiceManager::activate_switch] exposes an API to specifically enable
 //! or disable (via [ServiceManager::deactivate_switch]) the switch zone.
 
+use crate::config::SidecarRevision;
 use crate::ledger::{Ledger, Ledgerable};
 use crate::params::{
     DendriteAsic, ServiceEnsureBody, ServiceType, ServiceZoneRequest,
@@ -69,7 +70,7 @@ use omicron_common::backoff::{
     BackoffError,
 };
 use omicron_common::nexus_config::{
-    self, DeploymentConfig as NexusDeploymentConfig,
+    self, ConfigDropshotWithTls, DeploymentConfig as NexusDeploymentConfig,
 };
 use once_cell::sync::OnceCell;
 use sled_hardware::is_gimlet;
@@ -173,6 +174,12 @@ pub enum Error {
 
     #[error("Error resolving DNS name: {0}")]
     ResolveError(#[from] internal_dns::resolver::ResolveError),
+
+    #[error("Serde error: {0}")]
+    SerdeError(#[from] serde_json::Error),
+
+    #[error("Sidecar revision error")]
+    SidecarRevision(#[from] anyhow::Error),
 }
 
 impl Error {
@@ -198,11 +205,11 @@ pub struct Config {
     pub sled_id: Uuid,
 
     /// Identifies the revision of the sidecar to be used.
-    pub sidecar_revision: String,
+    pub sidecar_revision: SidecarRevision,
 }
 
 impl Config {
-    pub fn new(sled_id: Uuid, sidecar_revision: String) -> Self {
+    pub fn new(sled_id: Uuid, sidecar_revision: SidecarRevision) -> Self {
         Self { sled_id, sidecar_revision }
     }
 }
@@ -294,8 +301,8 @@ pub struct ServiceManagerInner {
     sled_mode: SledMode,
     skip_timesync: Option<bool>,
     time_synced: AtomicBool,
-    sidecar_revision: String,
     switch_zone_maghemite_links: Vec<PhysicalLink>,
+    sidecar_revision: SidecarRevision,
     // Zones representing running services
     zones: Mutex<Vec<RunningZone>>,
     // Zones representing services which own datasets
@@ -312,6 +319,7 @@ pub struct ServiceManagerInner {
     // rather than simply placing them on the ramdisk.
     storage: StorageManager,
     ledger_directory_override: OnceCell<Utf8PathBuf>,
+    image_directory_override: OnceCell<Utf8PathBuf>,
 }
 
 // Late-binding information, only known once the sled agent is up and
@@ -351,7 +359,7 @@ impl ServiceManager {
         bootstrap_etherstub: Etherstub,
         sled_mode: SledMode,
         skip_timesync: Option<bool>,
-        sidecar_revision: String,
+        sidecar_revision: SidecarRevision,
         switch_zone_bootstrap_address: Ipv6Addr,
         switch_zone_maghemite_links: Vec<PhysicalLink>,
         storage: StorageManager,
@@ -387,14 +395,20 @@ impl ServiceManager {
                 switch_zone_bootstrap_address,
                 storage,
                 ledger_directory_override: OnceCell::new(),
+                image_directory_override: OnceCell::new(),
             }),
         };
         Ok(mgr)
     }
 
     #[cfg(test)]
-    async fn override_ledger_directory(&self, path: Utf8PathBuf) {
+    fn override_ledger_directory(&self, path: Utf8PathBuf) {
         self.inner.ledger_directory_override.set(path).unwrap();
+    }
+
+    #[cfg(test)]
+    fn override_image_directory(&self, path: Utf8PathBuf) {
+        self.inner.image_directory_override.set(path).unwrap();
     }
 
     pub fn switch_zone_bootstrap_address(&self) -> Ipv6Addr {
@@ -747,14 +761,6 @@ impl ServiceManager {
             })?;
 
             // We also need to update the switch with the NAT mappings
-            let nat_target = dpd_client::types::NatTarget {
-                inner_mac: dpd_client::types::MacAddr {
-                    a: port.0.mac().into_array(),
-                },
-                internal_ip: *underlay_address,
-                vni: port.0.vni().as_u32().into(),
-            };
-
             let (target_ip, first_port, last_port) = match snat {
                 Some(s) => (s.ip, s.first_port, s.last_port),
                 None => (external_ips[0], 0, u16::MAX),
@@ -767,29 +773,22 @@ impl ServiceManager {
                     self.inner.log, "creating NAT entry for service";
                     "service" => ?svc,
                 );
-                match &target_ip {
-                    IpAddr::V4(ip) => {
-                        dpd_client
-                            .nat_ipv4_create(
-                                ip,
-                                first_port,
-                                last_port,
-                                &nat_target,
-                            )
-                            .await
-                    }
-                    IpAddr::V6(ip) => {
-                        dpd_client
-                            .nat_ipv6_create(
-                                ip,
-                                first_port,
-                                last_port,
-                                &nat_target,
-                            )
-                            .await
-                    }
-                }
-                .map_err(BackoffError::transient)?;
+
+                dpd_client
+                    .ensure_nat_entry(
+                        &self.inner.log,
+                        target_ip.into(),
+                        dpd_client::types::MacAddr {
+                            a: port.0.mac().into_array(),
+                        },
+                        first_port,
+                        last_port,
+                        port.0.vni().as_u32(),
+                        underlay_address,
+                    )
+                    .await
+                    .map_err(BackoffError::transient)?;
+
                 Ok::<(), BackoffError<DpdError<DpdTypes::Error>>>(())
             };
             let log_failure = |error, _| {
@@ -930,10 +929,29 @@ impl ServiceManager {
             .map(|d| zone::Device { name: d.to_string() })
             .collect();
 
+        // Look for the image in the ramdisk first
+        let mut zone_image_paths = vec![Utf8PathBuf::from("/opt/oxide")];
+        // Inject an image path if requested by a test.
+        if let Some(path) = self.inner.image_directory_override.get() {
+            zone_image_paths.push(path.clone());
+        };
+
+        // If the boot disk exists, look for the image in the "install" dataset
+        // there too.
+        if let Some((_, boot_zpool)) =
+            self.inner.storage.resources().boot_disk().await
+        {
+            zone_image_paths.push(
+                boot_zpool
+                    .dataset_mountpoint(sled_hardware::disk::INSTALL_DATASET),
+            );
+        }
+
         let installed_zone = InstalledZone::install(
             &self.inner.log,
             &self.inner.underlay_vnic_allocator,
             &request.root,
+            zone_image_paths.as_slice(),
             &request.zone.zone_type.to_string(),
             unique_name.as_deref(),
             datasets.as_slice(),
@@ -1276,7 +1294,7 @@ impl ServiceManager {
             smfh.import_manifest()?;
 
             match &service.details {
-                ServiceType::Nexus { internal_ip, .. } => {
+                ServiceType::Nexus { internal_ip, external_tls, .. } => {
                     info!(self.inner.log, "Setting up Nexus service");
 
                     let sled_info = self
@@ -1295,24 +1313,32 @@ impl ServiceManager {
 
                     // Nexus takes a separate config file for parameters which
                     // cannot be known at packaging time.
+                    let nexus_port = if *external_tls { 443 } else { 80 };
                     let deployment_config = NexusDeploymentConfig {
                         id: request.zone.id,
                         rack_id: sled_info.rack_id,
 
-                        dropshot_external: dropshot::ConfigDropshot {
-                            bind_address: SocketAddr::new(port_ip, 80),
-                            // This has to be large enough to support:
-                            // - bulk writes to disks
-                            request_body_max_bytes: 8192 * 1024,
-                            ..Default::default()
+                        dropshot_external: ConfigDropshotWithTls {
+                            tls: *external_tls,
+                            dropshot: dropshot::ConfigDropshot {
+                                bind_address: SocketAddr::new(
+                                    port_ip, nexus_port,
+                                ),
+                                // This has to be large enough to support:
+                                // - bulk writes to disks
+                                request_body_max_bytes: 8192 * 1024,
+                            },
                         },
                         dropshot_internal: dropshot::ConfigDropshot {
                             bind_address: SocketAddr::new(
                                 IpAddr::V6(*internal_ip),
                                 NEXUS_INTERNAL_PORT,
                             ),
-                            request_body_max_bytes: 1048576,
-                            ..Default::default()
+                            // This has to be large enough to support, among
+                            // other things, the initial list of TLS
+                            // certificates provided by the customer during rack
+                            // setup.
+                            request_body_max_bytes: 10 * 1024 * 1024,
                         },
                         internal_dns: nexus_config::InternalDns::FromSubnet {
                             subnet: Ipv6Subnet::<RACK_PREFIX>::new(
@@ -1486,15 +1512,26 @@ impl ServiceManager {
                         "config/mgs-address",
                         &format!("[::1]:{MGS_PORT}"),
                     )?;
+
+                    let serialized_baseboard =
+                        serde_json::to_string_pretty(&baseboard)?;
+                    let serialized_baseboard_path = Utf8PathBuf::from(format!(
+                        "{}/opt/oxide/baseboard.json",
+                        running_zone.root()
+                    ));
+                    tokio::fs::write(
+                        &serialized_baseboard_path,
+                        &serialized_baseboard,
+                    )
+                    .await
+                    .map_err(|err| {
+                        Error::io_path(&serialized_baseboard_path, err)
+                    })?;
                     smfh.setprop(
-                        "config/baseboard-identifier",
-                        baseboard.identifier(),
+                        "config/baseboard-file",
+                        String::from("/opt/oxide/baseboard.json"),
                     )?;
-                    smfh.setprop("config/baseboard-model", baseboard.model())?;
-                    smfh.setprop(
-                        "config/baseboard-revision",
-                        baseboard.revision(),
-                    )?;
+
                     smfh.refresh()?;
                 }
                 ServiceType::Dendrite { asic } => {
@@ -1551,10 +1588,18 @@ impl ServiceManager {
                                 "config/port_config",
                                 "/opt/oxide/dendrite/misc/sidecar_config.toml",
                             )?;
-                            smfh.setprop(
-                                "config/board_rev",
-                                &self.inner.sidecar_revision,
-                            )?;
+                            let sidecar_revision =
+                                match self.inner.sidecar_revision {
+                                    SidecarRevision::Physical(ref rev) => rev,
+                                    _ => {
+                                        return Err(Error::SidecarRevision(
+                                            anyhow::anyhow!(
+                                            "expected physical sidecar revision"
+                                        ),
+                                        ))
+                                    }
+                                };
+                            smfh.setprop("config/board_rev", sidecar_revision)?;
                         }
                         DendriteAsic::TofinoStub => smfh.setprop(
                             "config/port_config",
@@ -1566,6 +1611,28 @@ impl ServiceManager {
                                 "config/uds_path",
                                 "/opt/softnpu/stuff",
                             )?;
+                            let s = match self.inner.sidecar_revision {
+                                SidecarRevision::Soft(ref s) => s,
+                                _ => {
+                                    return Err(Error::SidecarRevision(
+                                        anyhow::anyhow!(
+                                            "expected soft sidecar revision"
+                                        ),
+                                    ))
+                                }
+                            };
+                            smfh.setprop(
+                                "config/front_ports",
+                                &s.front_port_count.to_string(),
+                            )?;
+                            smfh.setprop(
+                                "config/rear_ports",
+                                &s.rear_port_count.to_string(),
+                            )?;
+                            smfh.setprop(
+                                "config/port_config",
+                                "/opt/oxide/dendrite/misc/softnpu_single_sled_config.toml",
+                            )?
                         }
                     };
                     smfh.refresh()?;
@@ -1687,8 +1754,14 @@ impl ServiceManager {
 
                     smfh.setprop(
                         "config/interfaces",
+                        // `svccfg setprop` requires a list of values to be
+                        // enclosed in `()`, and each string value to be
+                        // enclosed in `""`. Note that we do _not_ need to
+                        // escape the parentheses, since this is not passed
+                        // through a shell, but directly to `exec(2)` in the
+                        // zone.
                         format!(
-                            "\'({})\'",
+                            "({})",
                             maghemite_interfaces
                                 .iter()
                                 .map(|interface| format!(r#""{}""#, interface))
@@ -2337,6 +2410,7 @@ impl ServiceManager {
 mod test {
     use super::*;
     use crate::params::{ServiceZoneService, ZoneType};
+    use async_trait::async_trait;
     use illumos_utils::{
         dladm::{
             Etherstub, MockDladm, BOOTSTRAP_ETHERSTUB_NAME,
@@ -2344,6 +2418,10 @@ mod test {
         },
         svc,
         zone::MockZones,
+    };
+    use key_manager::{
+        KeyManager, SecretRetriever, SecretRetrieverError, SecretState,
+        StorageKeyRequester, VersionedIkm,
     };
     use std::net::Ipv6Addr;
     use std::os::unix::process::ExitStatusExt;
@@ -2360,7 +2438,7 @@ mod test {
         // Create a VNIC
         let create_vnic_ctx = MockDladm::create_vnic_context();
         create_vnic_ctx.expect().return_once(
-            |physical_link: &Etherstub, _, _, _| {
+            |physical_link: &Etherstub, _, _, _, _| {
                 assert_eq!(&physical_link.0, &UNDERLAY_ETHERSTUB_NAME);
                 Ok(())
             },
@@ -2371,11 +2449,21 @@ mod test {
             assert_eq!(name, EXPECTED_ZONE_NAME);
             Ok(())
         });
-        // Boot the zone
+
+        // Boot the zone.
         let boot_ctx = MockZones::boot_context();
         boot_ctx.expect().return_once(|name| {
             assert_eq!(name, EXPECTED_ZONE_NAME);
             Ok(())
+        });
+
+        // After calling `MockZones::boot`, `RunningZone::boot` will then look
+        // up the zone ID for the booted zone. This goes through
+        // `MockZone::id` to find the zone and get its ID.
+        let id_ctx = MockZones::id_context();
+        id_ctx.expect().return_once(|name| {
+            assert_eq!(name, EXPECTED_ZONE_NAME);
+            Ok(Some(1))
         });
 
         // Ensure the address exists
@@ -2388,6 +2476,7 @@ mod test {
         // Wait for the networking service.
         let wait_ctx = svc::wait_for_service_context();
         wait_ctx.expect().return_once(|_, _| Ok(()));
+
         // Import the manifest, enable the service
         let execute_ctx = illumos_utils::execute_context();
         execute_ctx.expect().times(..).returning(|_| {
@@ -2402,6 +2491,7 @@ mod test {
             Box::new(create_vnic_ctx),
             Box::new(install_ctx),
             Box::new(boot_ctx),
+            Box::new(id_ctx),
             Box::new(ensure_address_ctx),
             Box::new(wait_ctx),
             Box::new(execute_ctx),
@@ -2479,9 +2569,56 @@ mod test {
         fn make_config(&self) -> Config {
             Config {
                 sled_id: Uuid::new_v4(),
-                sidecar_revision: "rev_whatever_its_a_test".to_string(),
+                sidecar_revision: SidecarRevision::Physical(
+                    "rev_whatever_its_a_test".to_string(),
+                ),
             }
         }
+
+        fn override_paths(&self, mgr: &ServiceManager) {
+            let dir = self.config_dir.path();
+            mgr.override_ledger_directory(dir.to_path_buf());
+            mgr.override_image_directory(dir.to_path_buf());
+
+            // We test launching "fake" versions of the zones, but the
+            // logic to find paths relies on checking the existence of
+            // files.
+            std::fs::write(dir.join("oximeter.tar.gz"), "Not a real file")
+                .unwrap();
+        }
+    }
+
+    pub struct TestSecretRetriever {}
+
+    #[async_trait]
+    impl SecretRetriever for TestSecretRetriever {
+        async fn get_latest(
+            &self,
+        ) -> Result<VersionedIkm, SecretRetrieverError> {
+            let epoch = 0;
+            let salt = [0u8; 32];
+            let secret = [0x1d; 32];
+
+            Ok(VersionedIkm::new(epoch, salt, &secret))
+        }
+
+        async fn get(
+            &self,
+            epoch: u64,
+        ) -> Result<SecretState, SecretRetrieverError> {
+            if epoch != 0 {
+                return Err(SecretRetrieverError::NoSuchEpoch(epoch));
+            }
+            Ok(SecretState::Current(self.get_latest().await?))
+        }
+    }
+
+    async fn spawn_key_manager(log: &Logger) -> StorageKeyRequester {
+        let (mut key_manager, storage_key_requester) =
+            KeyManager::new(log, TestSecretRetriever {});
+
+        tokio::spawn(async move { key_manager.run().await });
+        storage_key_requester
     }
 
     #[tokio::test]
@@ -2491,6 +2628,7 @@ mod test {
             omicron_test_utils::dev::test_setup_log("test_ensure_service");
         let log = logctx.log.clone();
         let test_config = TestConfig::new().await;
+        let storage_key_requester = spawn_key_manager(&log).await;
 
         let mgr = ServiceManager::new(
             log.clone(),
@@ -2499,18 +2637,15 @@ mod test {
             EtherstubVnic(UNDERLAY_ETHERSTUB_VNIC_NAME.to_string()),
             Etherstub(BOOTSTRAP_ETHERSTUB_NAME.to_string()),
             SledMode::Auto,
-            None, // skip_timesync
-            "rev-test".to_string(),
+            Some(true),
+            SidecarRevision::Physical("rev-test".to_string()),
             SWITCH_ZONE_BOOTSTRAP_IP,
             vec![],
-            StorageManager::new(&log).await,
+            StorageManager::new(&log, storage_key_requester).await,
         )
         .await
         .unwrap();
-        mgr.override_ledger_directory(
-            test_config.config_dir.path().to_path_buf(),
-        )
-        .await;
+        test_config.override_paths(&mgr);
 
         let port_manager = PortManager::new(
             logctx.log.new(o!("component" => "PortManager")),
@@ -2540,6 +2675,7 @@ mod test {
         );
         let log = logctx.log.clone();
         let test_config = TestConfig::new().await;
+        let storage_key_requester = spawn_key_manager(&log).await;
 
         let mgr = ServiceManager::new(
             log.clone(),
@@ -2548,18 +2684,15 @@ mod test {
             EtherstubVnic(UNDERLAY_ETHERSTUB_VNIC_NAME.to_string()),
             Etherstub(BOOTSTRAP_ETHERSTUB_NAME.to_string()),
             SledMode::Auto,
-            None, // skip_timesync
-            "rev-test".to_string(),
+            Some(true),
+            SidecarRevision::Physical("rev-test".to_string()),
             SWITCH_ZONE_BOOTSTRAP_IP,
             vec![],
-            StorageManager::new(&log).await,
+            StorageManager::new(&log, storage_key_requester).await,
         )
         .await
         .unwrap();
-        mgr.override_ledger_directory(
-            test_config.config_dir.path().to_path_buf(),
-        )
-        .await;
+        test_config.override_paths(&mgr);
 
         let port_manager = PortManager::new(
             logctx.log.new(o!("component" => "PortManager")),
@@ -2590,6 +2723,7 @@ mod test {
         );
         let log = logctx.log.clone();
         let test_config = TestConfig::new().await;
+        let storage_key_requester = spawn_key_manager(&log).await;
 
         // First, spin up a ServiceManager, create a new service, and tear it
         // down.
@@ -2601,17 +2735,14 @@ mod test {
             Etherstub(BOOTSTRAP_ETHERSTUB_NAME.to_string()),
             SledMode::Auto,
             Some(true),
-            "rev-test".to_string(),
+            SidecarRevision::Physical("rev-test".to_string()),
             SWITCH_ZONE_BOOTSTRAP_IP,
             vec![],
-            StorageManager::new(&log).await,
+            StorageManager::new(&log, storage_key_requester).await,
         )
         .await
         .unwrap();
-        mgr.override_ledger_directory(
-            test_config.config_dir.path().to_path_buf(),
-        )
-        .await;
+        test_config.override_paths(&mgr);
 
         let port_manager = PortManager::new(
             logctx.log.new(o!("component" => "PortManager")),
@@ -2632,6 +2763,7 @@ mod test {
 
         // Before we re-create the service manager - notably, using the same
         // config file! - expect that a service gets initialized.
+        let storage_key_requester = spawn_key_manager(&log).await;
         let _expectations = expect_new_service();
         let mgr = ServiceManager::new(
             logctx.log.clone(),
@@ -2641,17 +2773,14 @@ mod test {
             Etherstub(BOOTSTRAP_ETHERSTUB_NAME.to_string()),
             SledMode::Auto,
             Some(true),
-            "rev-test".to_string(),
+            SidecarRevision::Physical("rev-test".to_string()),
             SWITCH_ZONE_BOOTSTRAP_IP,
             vec![],
-            StorageManager::new(&log).await,
+            StorageManager::new(&log, storage_key_requester).await,
         )
         .await
         .unwrap();
-        mgr.override_ledger_directory(
-            test_config.config_dir.path().to_path_buf(),
-        )
-        .await;
+        test_config.override_paths(&mgr);
 
         let port_manager = PortManager::new(
             logctx.log.new(o!("component" => "PortManager")),
@@ -2679,6 +2808,7 @@ mod test {
         );
         let log = logctx.log.clone();
         let test_config = TestConfig::new().await;
+        let storage_key_requester = spawn_key_manager(&log).await;
 
         // First, spin up a ServiceManager, create a new service, and tear it
         // down.
@@ -2690,17 +2820,15 @@ mod test {
             Etherstub(BOOTSTRAP_ETHERSTUB_NAME.to_string()),
             SledMode::Auto,
             Some(true),
-            "rev-test".to_string(),
+            SidecarRevision::Physical("rev-test".to_string()),
             SWITCH_ZONE_BOOTSTRAP_IP,
             vec![],
-            StorageManager::new(&log).await,
+            StorageManager::new(&log, storage_key_requester).await,
         )
         .await
         .unwrap();
-        mgr.override_ledger_directory(
-            test_config.config_dir.path().to_path_buf(),
-        )
-        .await;
+        test_config.override_paths(&mgr);
+
         let port_manager = PortManager::new(
             logctx.log.new(o!("component" => "PortManager")),
             Ipv6Addr::new(0xfd00, 0x1de, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01),
@@ -2725,6 +2853,11 @@ mod test {
         )
         .unwrap();
 
+        // We don't really have a need to make the StorageKeyRequester `Clone`
+        // and we want to keep the channel buffer size management simple. So
+        // for tests, just create another key manager and `storage_key_requester`.
+        // They all manage the same hardcoded test secrets and will derive the same keys.
+        let storage_key_requester = spawn_key_manager(&log).await;
         // Observe that the old service is not re-initialized.
         let mgr = ServiceManager::new(
             logctx.log.clone(),
@@ -2734,17 +2867,14 @@ mod test {
             Etherstub(BOOTSTRAP_ETHERSTUB_NAME.to_string()),
             SledMode::Auto,
             Some(true),
-            "rev-test".to_string(),
+            SidecarRevision::Physical("rev-test".to_string()),
             SWITCH_ZONE_BOOTSTRAP_IP,
             vec![],
-            StorageManager::new(&log).await,
+            StorageManager::new(&log, storage_key_requester).await,
         )
         .await
         .unwrap();
-        mgr.override_ledger_directory(
-            test_config.config_dir.path().to_path_buf(),
-        )
-        .await;
+        test_config.override_paths(&mgr);
 
         let port_manager = PortManager::new(
             logctx.log.new(o!("component" => "PortManager")),

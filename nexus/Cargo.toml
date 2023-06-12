@@ -51,6 +51,7 @@ parse-display.workspace = true
 paste.workspace = true
 # See omicron-rpaths for more about the "pq-sys" dependency.
 pq-sys = "*"
+progenitor-client.workspace = true
 propolis-client.workspace = true
 rand.workspace = true
 ref-cast.workspace = true
@@ -87,6 +88,7 @@ omicron-passwords.workspace = true
 oximeter.workspace = true
 oximeter-instruments = { workspace = true, features = ["http-instruments"] }
 oximeter-producer.workspace = true
+rustls = { workspace = true }
 
 [dev-dependencies]
 assert_matches.workspace = true
@@ -101,11 +103,12 @@ omicron-sled-agent.workspace = true
 omicron-test-utils.workspace = true
 openapi-lint.workspace = true
 openapiv3.workspace = true
+oxide-client.workspace = true
 pem.workspace = true
 petgraph.workspace = true
 rcgen.workspace = true
 regex.workspace = true
-rustls = { workspace = true, features = ["dangerous_configuration"] }
+rustls = { workspace = true }
 subprocess.workspace = true
 term.workspace = true
 trust-dns-resolver.workspace = true

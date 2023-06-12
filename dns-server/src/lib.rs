@@ -96,11 +96,11 @@ pub async fn start_servers(
 ///
 /// Intended to be used for testing only.
 pub struct InMemoryServer {
-    /// real internal dns server storage dir
+    /// Server storage dir
     pub storage_dir: tempfile::TempDir,
-    /// real internal dns server
+    /// DNS server
     pub server: dns_server::ServerHandle,
-    /// real internal dns dropshot server
+    /// Dropshot server
     pub dropshot_server: dropshot::HttpServer<http_server::Context>,
 }
 
@@ -130,7 +130,6 @@ impl InMemoryServer {
             &dropshot::ConfigDropshot {
                 bind_address: "[::1]:0".parse().unwrap(),
                 request_body_max_bytes: 4 * 1024 * 1024,
-                ..Default::default()
             },
         )
         .await?;

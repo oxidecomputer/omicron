@@ -2,21 +2,24 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Params define the request bodies of API endpoints for creating or updating resources.
+//! Params define the request bodies of API endpoints for creating or updating
+//! resources.
 
 use crate::external_api::shared;
 use base64::Engine;
 use chrono::{DateTime, Utc};
 use omicron_common::api::external::{
-    ByteCount, IdentityMetadataCreateParams, IdentityMetadataUpdateParams,
-    InstanceCpuCount, Ipv4Net, Ipv6Net, Name, NameOrId, RouteDestination,
-    RouteTarget, SemverVersion,
+    AddressLotKind, ByteCount, IdentityMetadataCreateParams,
+    IdentityMetadataUpdateParams, InstanceCpuCount, IpNet, Ipv4Net, Ipv6Net,
+    Name, NameOrId, PaginationOrder, RouteDestination, RouteTarget,
+    SemverVersion,
 };
 use schemars::JsonSchema;
 use serde::{
     de::{self, Visitor},
     Deserialize, Deserializer, Serialize, Serializer,
 };
+use std::collections::HashMap;
 use std::{net::IpAddr, str::FromStr};
 use uuid::Uuid;
 
@@ -27,6 +30,17 @@ macro_rules! path_param {
             #[doc = "Name or ID of the "]
             #[doc = $name]
             pub $param: NameOrId,
+        }
+    };
+}
+
+macro_rules! id_path_param {
+    ($struct:ident, $param:ident, $name:tt) => {
+        #[derive(Serialize, Deserialize, JsonSchema)]
+        pub struct $struct {
+            #[doc = "ID of the "]
+            #[doc = $name]
+            pub $param: Uuid,
         }
     };
 }
@@ -45,15 +59,23 @@ path_param!(SiloPath, silo, "silo");
 path_param!(ProviderPath, provider, "SAML identity provider");
 path_param!(IpPoolPath, pool, "IP pool");
 path_param!(SshKeyPath, ssh_key, "SSH key");
+path_param!(AddressLotPath, address_lot, "address lot");
 
-// Only by ID because groups have an `external_id` instead of a name and
-// therefore don't implement `ObjectIdentity`, which makes lookup by name
-// inconvenient. We should figure this out more generally, as there are several
-// resources like this.
-#[derive(Deserialize, JsonSchema)]
-pub struct GroupPath {
-    /// ID of the group
-    pub group: Uuid,
+id_path_param!(GroupPath, group_id, "group");
+
+// TODO: The hardware resources should be represented by its UUID or a hardware
+// ID that can be used to deterministically generate the UUID.
+id_path_param!(SledPath, sled_id, "sled");
+id_path_param!(SwitchPath, switch_id, "switch");
+
+pub struct SledSelector {
+    /// ID of the sled
+    pub sled: Uuid,
+}
+
+pub struct SwitchSelector {
+    /// ID of the switch
+    pub switch: Uuid,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
@@ -272,6 +294,10 @@ pub struct SiloCreate {
     /// group_attribute_name must be set for users to be considered part of a
     /// group. See `SamlIdentityProviderCreate` for more information.
     pub admin_group_name: Option<String>,
+
+    /// Initial TLS certificates to be used for the new Silo's console and API
+    /// endpoints.  These should be valid for the Silo's DNS name(s).
+    pub tls_certificates: Vec<CertificateCreate>,
 }
 
 /// Create-time parameters for a `User`
@@ -951,9 +977,17 @@ pub struct InstanceSerialConsoleRequest {
     /// Maximum number of bytes of buffered serial console contents to return. If the requested
     /// range runs to the end of the available buffer, the data returned will be shorter than
     /// `max_bytes`.
-    /// This parameter is only useful for the non-streaming GET request for serial console data,
-    /// and *ignored* by the streaming websocket endpoint.
     pub max_bytes: Option<u64>,
+}
+
+/// Forwarded to a propolis server to request the contents of an Instance's serial console.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+pub struct InstanceSerialConsoleStreamRequest {
+    /// Name or ID of the project, only required if `instance` is provided as a `Name`
+    pub project: Option<NameOrId>,
+    /// Character index in the serial buffer from which to read, counting *backward* from the most
+    /// recently buffered data retrieved from the instance.
+    pub most_recent: Option<u64>,
 }
 
 /// Contents of an Instance's serial console buffer.
@@ -1124,10 +1158,8 @@ pub enum DiskSource {
     },
     /// Create a disk from a disk snapshot
     Snapshot { snapshot_id: Uuid },
-    /// Create a disk from a project image
+    /// Create a disk from an image
     Image { image_id: Uuid },
-    /// Create a disk from a global image
-    GlobalImage { image_id: Uuid },
     /// Create a blank disk that will accept bulk writes or pull blocks from an
     /// external source.
     ImportingBlocks { block_size: BlockSize },
@@ -1179,6 +1211,325 @@ pub struct FinalizeDisk {
     pub snapshot_name: Option<Name>,
 }
 
+/// Select an address lot by an optional name or id.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+pub struct AddressLotSelector {
+    /// Name or id of the address lot to select
+    pub address_lot: NameOrId,
+}
+
+/// Parameters for creating an address lot.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct AddressLotCreate {
+    #[serde(flatten)]
+    pub identity: IdentityMetadataCreateParams,
+    /// The kind of address lot to create.
+    pub kind: AddressLotKind,
+    /// The blocks to add along with the new address lot.
+    pub blocks: Vec<AddressLotBlockCreate>,
+}
+
+/// Parameters for creating an address lot block. Fist and last addresses are
+/// inclusive.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct AddressLotBlockCreate {
+    /// The first address in the lot (inclusive).
+    pub first_address: IpAddr,
+    /// The last address in the lot (inclusive).
+    pub last_address: IpAddr,
+}
+
+/// Parameters for creating a loopback address on a particular rack switch.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct LoopbackAddressCreate {
+    /// The name or id of the address lot this loopback address will pull an
+    /// address from.
+    pub address_lot: NameOrId,
+
+    /// The containing the switch this loopback address will be configured on.
+    pub rack_id: Uuid,
+
+    /// The location of the switch within the rack this loopback address will be
+    /// configured on.
+    pub switch_location: Name,
+
+    /// The address to create.
+    pub address: IpAddr,
+
+    /// The subnet mask to use for the address.
+    pub mask: u8,
+}
+
+/// Parameters for creating a port settings group.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct SwtichPortSettingsGroupCreate {
+    #[serde(flatten)]
+    pub identity: IdentityMetadataCreateParams,
+    /// Switch port settings to associate with the settings group being created.
+    pub settings: SwitchPortSettingsCreate,
+}
+
+/// Parameters for creating switch port settings. Switch port settings are the
+/// central data structure for setting up external networking. Switch port
+/// settings include link, interface, route, address and dynamic network
+/// protocol configuration.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct SwitchPortSettingsCreate {
+    #[serde(flatten)]
+    pub identity: IdentityMetadataCreateParams,
+    pub port_config: SwitchPortConfig,
+    pub groups: Vec<NameOrId>,
+    /// Links indexed by phy name. On ports that are not broken out, this is
+    /// always phy0. On a 2x breakout the options are phy0 and phy1, on 4x
+    /// phy0-phy3, etc.
+    pub links: HashMap<String, LinkConfig>,
+    /// Interfaces indexed by link name.
+    pub interfaces: HashMap<String, SwitchInterfaceConfig>,
+    /// Routes indexed by interface name.
+    pub routes: HashMap<String, RouteConfig>,
+    /// BGP peers indexed by interface name.
+    pub bgp_peers: HashMap<String, BgpPeerConfig>,
+    /// Addresses indexed by interface name.
+    pub addresses: HashMap<String, AddressConfig>,
+}
+
+impl SwitchPortSettingsCreate {
+    pub fn new(identity: IdentityMetadataCreateParams) -> Self {
+        Self {
+            identity,
+            port_config: SwitchPortConfig {
+                geometry: SwitchPortGeometry::Qsfp28x1,
+            },
+            groups: Vec::new(),
+            links: HashMap::new(),
+            interfaces: HashMap::new(),
+            routes: HashMap::new(),
+            bgp_peers: HashMap::new(),
+            addresses: HashMap::new(),
+        }
+    }
+}
+
+/// Physical switch port configuration.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub struct SwitchPortConfig {
+    /// Link geometry for the switch port.
+    pub geometry: SwitchPortGeometry,
+}
+
+/// The link geometry associated with a switch port.
+#[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum SwitchPortGeometry {
+    /// The port contains a single QSFP28 link with four lanes.
+    Qsfp28x1,
+
+    /// The port contains two QSFP28 links each with two lanes.
+    Qsfp28x2,
+
+    /// The port contains four SFP28 links each with one lane.
+    Sfp28x4,
+}
+
+/// Switch link configuration.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct LinkConfig {
+    /// Maximum transmission unit for the link.
+    pub mtu: u16,
+
+    /// The link-layer discovery protocol (LLDP) configuration for the link.
+    pub lldp: LldpServiceConfig,
+}
+
+/// The LLDP configuration associated with a port. LLDP may be either enabled or
+/// disabled, if enabled, an LLDP configuration must be provided by name or id.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct LldpServiceConfig {
+    /// Whether or not LLDP is enabled.
+    pub enabled: bool,
+
+    /// A reference to the LLDP configuration used. Must not be `None` when
+    /// `enabled` is `true`.
+    pub lldp_config: Option<NameOrId>,
+}
+
+/// A layer-3 switch interface configuration. When IPv6 is enabled, a link local
+/// address will be created for the interface.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct SwitchInterfaceConfig {
+    /// Whether or not IPv6 is enabled.
+    pub v6_enabled: bool,
+
+    /// What kind of switch interface this configuration represents.
+    pub kind: SwitchInterfaceKind,
+}
+
+/// Indicates the kind for a switch interface.
+#[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum SwitchInterfaceKind {
+    /// Primary interfaces are associated with physical links. There is exactly
+    /// one primary interface per physical link.
+    Primary,
+
+    /// VLAN interfaces allow physical interfaces to be multiplexed onto
+    /// multiple logical links, each distinguished by a 12-bit 802.1Q Ethernet
+    /// tag.
+    Vlan(SwitchVlanInterface),
+
+    /// Loopback interfaces are anchors for IP addresses that are not specific
+    /// to any particular port.
+    Loopback,
+}
+
+/// Configuration data associated with a switch VLAN interface. The VID
+/// indicates a VLAN identifier. Must be between 1 and 4096.
+#[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct SwitchVlanInterface {
+    /// The virtual network id (VID) that distinguishes this interface and is
+    /// used for producing and consuming 802.1Q Ethernet tags. This field has a
+    /// maximum value of 4095 as 802.1Q tags are twelve bits.
+    pub vid: u16,
+}
+
+/// Route configuration data associated with a switch port configuration.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct RouteConfig {
+    /// The set of routes assigned to a switch port.
+    pub routes: Vec<Route>,
+}
+
+/// A route to a destination network through a gateway address.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct Route {
+    /// The route destination.
+    pub dst: IpNet,
+
+    /// The route gateway.
+    pub gw: IpAddr,
+}
+
+/// A BGP peer configuration for an interface. Includes the set of announcements
+/// that will be advertised to the peer identified by `addr`. The `bgp_config`
+/// parameter is a reference to global BGP parameters. The `interface_name`
+/// indicates what interface the peer should be contacted on.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct BgpPeerConfig {
+    /// The set of announcements advertised by the peer.
+    pub bgp_announce_set: NameOrId,
+
+    /// The global BGP configuration used for establishing a session with this
+    /// peer.
+    pub bgp_config: NameOrId,
+
+    /// The name of interface to peer on. This is relative to the port
+    /// configuration this BGP peer configuration is a part of. For example this
+    /// value could be phy0 to refer to a primary physical interface. Or it
+    /// could be vlan47 to refer to a VLAN interface.
+    pub interface_name: String,
+
+    /// The address of the host to peer with.
+    pub addr: IpAddr,
+}
+
+/// Parameters for creating a named set of BGP announcements.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct CreateBgpAnnounceSet {
+    #[serde(flatten)]
+    pub identity: IdentityMetadataCreateParams,
+
+    /// The announcements in this set.
+    pub announcement: Vec<BgpAnnouncement>,
+}
+
+/// A BGP announcement tied to a particular address lot block.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct BgpAnnouncement {
+    /// Address lot this announcement is drawn from.
+    pub address_lot_block: NameOrId,
+
+    /// The network being announced.
+    pub network: IpNet,
+}
+
+/// Parameters for creating a BGP configuration. This includes and autonomous
+/// system number (ASN) and a virtual routing and forwarding (VRF) identifier.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct CreateBgpConfig {
+    #[serde(flatten)]
+    pub identity: IdentityMetadataCreateParams,
+
+    /// The autonomous system number of this BGP configuration.
+    pub asn: u32,
+
+    /// Optional virtual routing and forwarding identifier for this BGP
+    /// configuration.
+    pub vrf: Option<Name>,
+}
+
+/// A set of addresses associated with a port configuration.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct AddressConfig {
+    /// The set of addresses assigned to the port configuration.
+    pub addresses: Vec<Address>,
+}
+
+/// An address tied to an address lot.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct Address {
+    /// The address lot this address is drawn from.
+    pub address_lot: NameOrId,
+
+    /// The address and prefix length of this address.
+    pub address: IpNet,
+}
+
+/// Select a port settings object by an optional name or id.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+pub struct SwitchPortSettingsSelector {
+    /// An optional name or id to use when selecting port settings.
+    pub port_settings: Option<NameOrId>,
+}
+
+/// Select a port settings info object by name or id.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+pub struct SwitchPortSettingsInfoSelector {
+    /// A name or id to use when selecting switch port settings info objects.
+    pub port: NameOrId,
+}
+
+/// Select a switch port by name.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+pub struct SwitchPortPathSelector {
+    /// A name to use when selecting switch ports.
+    pub port: Name,
+}
+
+/// Select switch ports by rack id and location.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+pub struct SwitchPortSelector {
+    /// A rack id to use when selecting switch ports.
+    pub rack_id: Uuid,
+
+    /// A switch location to use when selecting switch ports.
+    pub switch_location: Name,
+}
+
+/// Select switch port interfaces by id.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+pub struct SwitchPortPageSelector {
+    /// An optional switch port id to use when listing switch ports.
+    pub switch_port_id: Option<Uuid>,
+}
+
+/// Parameters for applying settings to switch ports.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+pub struct SwitchPortApplySettings {
+    /// A name or id to use when applying switch port settings.
+    pub port_settings: NameOrId,
+}
+
 // IMAGES
 
 /// The source of the underlying image.
@@ -1204,23 +1555,6 @@ pub struct Distribution {
     pub name: Name,
     /// The version of the distribution (e.g. "3.10" or "18.04")
     pub version: String,
-}
-
-/// Create-time parameters for a `GlobalImage`
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct GlobalImageCreate {
-    /// common identifying metadata
-    #[serde(flatten)]
-    pub identity: IdentityMetadataCreateParams,
-
-    /// OS image distribution
-    pub distribution: Distribution,
-
-    /// block size in bytes
-    pub block_size: BlockSize,
-
-    /// The source of the image's contents.
-    pub source: ImageSource,
 }
 
 /// Create-time parameters for an `Image`
@@ -1306,6 +1640,8 @@ pub struct ResourceMetrics {
     pub start_time: DateTime<Utc>,
     /// An exclusive end time of metrics.
     pub end_time: DateTime<Utc>,
+    /// Query result order
+    pub order: Option<PaginationOrder>,
 }
 
 // SYSTEM UPDATE

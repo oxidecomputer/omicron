@@ -91,8 +91,8 @@ The control plane repository contains a packaging tool which bundles binaries
 and SMF manifests. After building the expected binaries, they can be packaged
 in a format which lets them be transferred to a Helios machine.
 
-This tool acts on a `package-manifest.toml` file which describes the packages to be
-bundled in the build.
+This tool acts on a `package-manifest.toml` file which describes the packages
+to be bundled in the build.
 
 Configuration files are used to select IP addresses, and to manage Zpools
 utilized by the Sled Agent. These configuration files are located within
@@ -136,6 +136,55 @@ Created new build target 'default' and set it as active
 
 NOTE: The `target create` command will set the new target as active and thus let you
 omit the `-t` flag in subsequent commands.
+
+Initial TLS certificates for the externally-facing endpoints are also part of
+the runtime configuration that would normally come from the customer during
+initial setup.  In development, by default, a deployed Omicron system will have
+no TLS certificates.  You can deploy a system with TLS certificates by putting
+a PEM-format certificate chain and private key into files called
+"initial-tls-cert.pem" and "initial-tls-key.pem" in the same directory as the
+"config-rss.toml" file that you're using.  This must happen before packaging up
+the sled agent (which is the next step below).
+
+If you don't specify initial certificates in this way, you can always load
+certificates later via the API.  This assumes you have a way to reach the API
+that doesn't require a valid TLS certificate.  Today, Nexus always starts an
+HTTP server that you can use for this.  This may be removed in the future.
+
+=== Configuration
+
+Update your `smf/seld-agent/$MACHINE/config-rss.toml` with the appropriate network information:
+
+----
+[[internal_services_ip_pool_ranges]]
+first = "192.168.1.20"          <--- first address of pool used for internal services (like Nexus)
+last = "192.168.1.22"           <--- last address of pool used for internal services
+
+# Configuration to bring up boundary services and make nexus reachable from the outside
+[rack_network_config]
+gateway_ip = "192.168.1.199"    <--- ip address of your default gateway / router
+infra_ip_first = "192.168.1.30" <--- first address of pool used for rack networking
+infra_ip_last = "192.168.1.50"  <--- last address of pool used for rack networking
+uplink_port = "qsfp0"           <--- for "softnpu" environments, this will always be "qsfp0"
+uplink_port_speed = "40G"       <--- uplink interface speed
+uplink_ip = "192.168.1.32"      <--- address to assign to the uplink port
+----
+
+Update your `smf/sled-agent/$MACHINE/config.toml` if necessary:
+----
+# An optional data link from which we extract a MAC address.
+# This is used as a unique identifier for the bootstrap address.
+#
+# If empty, this will be equivalent to the first result from:
+# $ dladm show-phys -p -o LINK
+# data_link = "igb0"           <--- update if necessary
+
+# If testing on non-gimlet hardware, fill this in with the name of links that
+# should be mapped into the switch zone and used for transit mode maghemite
+# there. On gimlets, this is not required as tfportd will create links in the
+# switch zone when it boots, and maghemite is configured to use those.
+# switch_zone_maghemite_links = ["ixgbe0", "ixgbe1"] <--- update if necessary
+----
 
 === Building
 
@@ -397,7 +446,7 @@ $ pfexec /opt/oxide/softnpu/stuff/scadm \
 
  b. Or an ISO / raw disk image / etc hosted at a URL:
 
-    oxide api /v1/images?project=<proj> --method POST --input - <<EOF
+    oxide api /v1/images --method POST --input - <<EOF
     {
       "name": "crucible-tester-sparse",
       "description": "boot from a url!",
@@ -413,7 +462,7 @@ $ pfexec /opt/oxide/softnpu/stuff/scadm \
     }
     EOF
 
-4. Create a disk from that global image (note that disk size must be greater than or equal to image size and a 1GiB multiple!). The example below creates a disk using the image made from the alpine ISO that ships with propolis, and sets the size to the next 1GiB multiple of the original alpine source:
+4. Create a disk from that image (note that disk size must be greater than or equal to image size and a 1GiB multiple!). The example below creates a disk using the image made from the alpine ISO that ships with propolis, and sets the size to the next 1GiB multiple of the original alpine source:
 
     oxide api /v1/disks?project=myproj --method POST --input - <<EOF
     {
@@ -422,8 +471,8 @@ $ pfexec /opt/oxide/softnpu/stuff/scadm \
       "block_size": 512,
       "size": 1073741824,
       "disk_source": {
-          "type": "global_image",
-          "image_id": "$(oxide api /system/images/alpine | jq -r .id)"
+          "type": "image",
+          "image_id": "$(oxide api /v1/images/alpine | jq -r .id)"
       }
     }
     EOF

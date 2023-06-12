@@ -27,7 +27,6 @@ use dropshot::UntypedBody;
 use dropshot::WebsocketEndpointResult;
 use dropshot::WebsocketUpgrade;
 use futures::TryFutureExt;
-use gateway_messages::SpComponent;
 use gateway_messages::SpError;
 use gateway_sp_comms::error::CommunicationError;
 use gateway_sp_comms::HostPhase2Provider;
@@ -58,7 +57,6 @@ pub struct SpState {
     pub revision: u32,
     pub hubris_archive_id: String,
     pub base_mac_address: [u8; 6],
-    pub version: ImageVersion,
     pub power_state: PowerState,
     pub rot: RotState,
 }
@@ -76,13 +74,13 @@ pub struct SpState {
 )]
 #[serde(tag = "state", rename_all = "snake_case")]
 pub enum RotState {
-    // TODO gateway_messages's RotState includes a couple nested structures that
-    // I've flattened here because they only contain one field each. When those
-    // structures grow we'll need to expand/change this.
     Enabled {
         active: RotSlot,
-        slot_a: Option<RotImageDetails>,
-        slot_b: Option<RotImageDetails>,
+        persistent_boot_preference: RotSlot,
+        pending_persistent_boot_preference: Option<RotSlot>,
+        transient_boot_preference: Option<RotSlot>,
+        slot_a_sha3_256_digest: Option<String>,
+        slot_b_sha3_256_digest: Option<String>,
     },
     CommunicationFailed {
         message: String,
@@ -220,6 +218,8 @@ enum SpUpdateStatus {
     Aborted { id: Uuid },
     /// The update process failed.
     Failed { id: Uuid, code: u32 },
+    /// The update process failed with an RoT-specific error.
+    RotError { id: Uuid, message: String },
 }
 
 /// Progress of an SP preparing to update.
@@ -617,6 +617,7 @@ async fn sp_component_get(
 async fn sp_component_caboose_get(
     rqctx: RequestContext<Arc<ServerContext>>,
     path: Path<PathSpComponent>,
+    query_params: Query<ComponentCabooseSlot>,
 ) -> Result<HttpResponseOk<SpComponentCaboose>, HttpError> {
     const CABOOSE_KEY_GIT_COMMIT: [u8; 4] = *b"GITC";
     const CABOOSE_KEY_BOARD: [u8; 4] = *b"BORD";
@@ -626,18 +627,8 @@ async fn sp_component_caboose_get(
     let apictx = rqctx.context();
     let PathSpComponent { sp, component } = path.into_inner();
     let sp = apictx.mgmt_switch.sp(sp.into())?;
-
-    // At the moment this endpoint only works if the requested component
-    // is the SP itself; we have no way (yet!) of asking the SP for (e.g.) RoT
-    // caboose values.
+    let ComponentCabooseSlot { firmware_slot } = query_params.into_inner();
     let component = component_from_str(&component)?;
-    if component != SpComponent::SP_ITSELF {
-        return Err(HttpError::from(SpCommsError::from(
-            CommunicationError::SpError(
-                SpError::RequestUnsupportedForComponent,
-            ),
-        )));
-    }
 
     let from_utf8 = |key: &[u8], bytes| {
         // This helper closure is only called with the ascii-printable [u8; 4]
@@ -653,18 +644,25 @@ async fn sp_component_caboose_get(
     };
 
     let git_commit = sp
-        .get_caboose_value(CABOOSE_KEY_GIT_COMMIT)
+        .read_component_caboose(
+            component,
+            firmware_slot,
+            CABOOSE_KEY_GIT_COMMIT,
+        )
         .await
         .map_err(SpCommsError::from)?;
     let board = sp
-        .get_caboose_value(CABOOSE_KEY_BOARD)
+        .read_component_caboose(component, firmware_slot, CABOOSE_KEY_BOARD)
         .await
         .map_err(SpCommsError::from)?;
     let name = sp
-        .get_caboose_value(CABOOSE_KEY_NAME)
+        .read_component_caboose(component, firmware_slot, CABOOSE_KEY_NAME)
         .await
         .map_err(SpCommsError::from)?;
-    let version = match sp.get_caboose_value(CABOOSE_KEY_VERSION).await {
+    let version = match sp
+        .read_component_caboose(component, firmware_slot, CABOOSE_KEY_VERSION)
+        .await
+    {
         Ok(value) => Some(from_utf8(&CABOOSE_KEY_VERSION, value)?),
         Err(CommunicationError::SpError(SpError::NoSuchCabooseKey(_))) => None,
         Err(err) => return Err(SpCommsError::from(err).into()),
@@ -833,6 +831,12 @@ pub struct ComponentUpdateIdSlot {
     pub id: Uuid,
     /// The update slot to apply this image to. Supply 0 if the component only
     /// has one update slot.
+    pub firmware_slot: u16,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct ComponentCabooseSlot {
+    /// The firmware slot to for which we want to request caboose information.
     pub firmware_slot: u16,
 }
 

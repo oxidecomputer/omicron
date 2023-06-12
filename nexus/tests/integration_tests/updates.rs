@@ -71,6 +71,7 @@ async fn test_update_end_to_end() {
         "test_update_end_to_end",
         &mut config,
         sim::SimMode::Explicit,
+        None,
     )
     .await;
     let client = &cptestctx.external_client;

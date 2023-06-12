@@ -4,9 +4,10 @@
 
 //! Developer tool for easily running bits of Omicron
 
-use anyhow::anyhow;
 use anyhow::bail;
 use anyhow::Context;
+use camino::Utf8Path;
+use camino::Utf8PathBuf;
 use clap::Args;
 use clap::Parser;
 use futures::stream::StreamExt;
@@ -17,6 +18,8 @@ use omicron_sled_agent::sim;
 use omicron_test_utils::dev;
 use signal_hook::consts::signal::SIGINT;
 use signal_hook_tokio::Signals;
+use std::io::Write;
+use std::os::unix::prelude::OpenOptionsExt;
 use std::path::PathBuf;
 
 #[tokio::main]
@@ -28,6 +31,7 @@ async fn main() -> Result<(), anyhow::Error> {
         OmicronDb::DbWipe { ref args } => cmd_db_wipe(args).await,
         OmicronDb::ChRun { ref args } => cmd_clickhouse_run(args).await,
         OmicronDb::RunAll { ref args } => cmd_run_all(args).await,
+        OmicronDb::CertCreate { ref args } => cmd_cert_create(args).await,
     };
     if let Err(error) = result {
         fatal(CmdError::Failure(format!("{:#}", error)));
@@ -68,6 +72,12 @@ enum OmicronDb {
     RunAll {
         #[clap(flatten)]
         args: RunAllArgs,
+    },
+
+    /// Create a self-signed certificate for use with Omicron
+    CertCreate {
+        #[clap(flatten)]
+        args: CertCreateArgs,
     },
 }
 
@@ -321,7 +331,7 @@ async fn cmd_run_all(args: &RunAllArgs) -> Result<(), anyhow::Error> {
     };
 
     if let Some(p) = args.nexus_listen_port {
-        config.deployment.dropshot_external.bind_address.set_port(p);
+        config.deployment.dropshot_external.dropshot.bind_address.set_port(p);
     }
 
     // Start up a ControlPlaneTestContext, which tautologically sets up
@@ -329,17 +339,14 @@ async fn cmd_run_all(args: &RunAllArgs) -> Result<(), anyhow::Error> {
     println!("omicron-dev: setting up all services ... ");
     let cptestctx = nexus_test_utils::test_setup_with_config::<
         omicron_nexus::Server,
-    >("omicron-dev", &mut config, sim::SimMode::Auto)
+    >("omicron-dev", &mut config, sim::SimMode::Auto, None)
     .await;
     println!("omicron-dev: services are running.");
 
     // Print out basic information about what was started.
     // NOTE: The stdout strings here are not intended to be stable, but they are
     // used by the test suite.
-    let addr =
-        cptestctx.server.get_http_server_external_address().await.ok_or_else(
-            || anyhow!("Nexus unexpectedly had no external HTTP address"),
-        )?;
+    let addr = cptestctx.external_client.bind_address;
     println!("omicron-dev: nexus external API:    {:?}", addr);
     println!(
         "omicron-dev: nexus internal API:    {:?}",
@@ -392,4 +399,54 @@ async fn cmd_run_all(args: &RunAllArgs) -> Result<(), anyhow::Error> {
 
     cptestctx.teardown().await;
     Ok(())
+}
+
+#[derive(Clone, Debug, Args)]
+struct CertCreateArgs {
+    /// path to where the generated certificate and key files should go
+    /// (e.g., "out/initial-" would cause the files to be called
+    /// "out/initial-cert.pem" and "out/initial-key.pem")
+    #[clap(action)]
+    output_base: Utf8PathBuf,
+
+    /// DNS names that the certificate claims to be valid for (subject
+    /// alternative names)
+    #[clap(action, required = true)]
+    server_names: Vec<String>,
+}
+
+async fn cmd_cert_create(args: &CertCreateArgs) -> Result<(), anyhow::Error> {
+    let cert = rcgen::generate_simple_self_signed(args.server_names.clone())
+        .context("generating certificate")?;
+    let cert_pem =
+        cert.serialize_pem().context("serializing certificate as PEM")?;
+    let key_pem = cert.serialize_private_key_pem();
+
+    let cert_path = Utf8PathBuf::from(format!("{}cert.pem", args.output_base));
+    write_private_file(&cert_path, cert_pem.as_bytes())
+        .context("writing certificate file")?;
+    println!("wrote certificate to {}", cert_path);
+
+    let key_path = Utf8PathBuf::from(format!("{}key.pem", args.output_base));
+    write_private_file(&key_path, key_pem.as_bytes())
+        .context("writing private key file")?;
+    println!("wrote private key to {}", key_path);
+
+    Ok(())
+}
+
+#[cfg_attr(not(mac), allow(clippy::useless_conversion))]
+fn write_private_file(
+    path: &Utf8Path,
+    contents: &[u8],
+) -> Result<(), anyhow::Error> {
+    // The file should be readable and writable by the user only.
+    let perms = libc::S_IRUSR | libc::S_IWUSR;
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(perms.into()) // into() needed on mac only
+        .open(path)
+        .with_context(|| format!("open {:?} for writing", path))?;
+    file.write_all(contents).with_context(|| format!("write to {:?}", path))
 }

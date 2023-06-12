@@ -16,13 +16,13 @@ OPERATION ID                             METHOD   URL PATH
 device_access_token                      POST     /device/token
 device_auth_confirm                      POST     /device/confirm
 device_auth_request                      POST     /device/auth
-login_spoof                              POST     /login
-logout                                   POST     /logout
+logout                                   POST     /v1/logout
 
 API operations found with tag "images"
 OPERATION ID                             METHOD   URL PATH
 image_create                             POST     /v1/images
 image_delete                             DELETE   /v1/images/{image}
+image_demote                             POST     /v1/images/{image}/demote
 image_list                               GET      /v1/images
 image_promote                            POST     /v1/images/{image}/promote
 image_view                               GET      /v1/images/{image}
@@ -51,9 +51,8 @@ instance_view                            GET      /v1/instances/{instance}
 
 API operations found with tag "login"
 OPERATION ID                             METHOD   URL PATH
-login_local                              POST     /login/{silo_name}/local
+login_local                              POST     /v1/login/{silo_name}/local
 login_saml                               POST     /login/{silo_name}/saml/{provider_name}
-login_saml_begin                         GET      /login/{silo_name}/saml/{provider_name}
 
 API operations found with tag "policy"
 OPERATION ID                             METHOD   URL PATH
@@ -64,6 +63,8 @@ API operations found with tag "projects"
 OPERATION ID                             METHOD   URL PATH
 project_create                           POST     /v1/projects
 project_delete                           DELETE   /v1/projects/{project}
+project_ip_pool_list                     GET      /v1/ip-pools
+project_ip_pool_view                     GET      /v1/ip-pools/{pool}
 project_list                             GET      /v1/projects
 project_policy_update                    PUT      /v1/projects/{project}/policy
 project_policy_view                      GET      /v1/projects/{project}/policy
@@ -86,8 +87,12 @@ current_user_view                        GET      /v1/me
 
 API operations found with tag "silos"
 OPERATION ID                             METHOD   URL PATH
+certificate_create                       POST     /v1/certificates
+certificate_delete                       DELETE   /v1/certificates/{certificate}
+certificate_list                         GET      /v1/certificates
+certificate_view                         GET      /v1/certificates/{certificate}
 group_list                               GET      /v1/groups
-group_view                               GET      /v1/groups/{group}
+group_view                               GET      /v1/groups/{group_id}
 policy_update                            PUT      /v1/policy
 policy_view                              GET      /v1/policy
 user_list                                GET      /v1/users
@@ -101,10 +106,6 @@ snapshot_view                            GET      /v1/snapshots/{snapshot}
 
 API operations found with tag "system"
 OPERATION ID                             METHOD   URL PATH
-certificate_create                       POST     /v1/system/certificates
-certificate_delete                       DELETE   /v1/system/certificates/{certificate}
-certificate_list                         GET      /v1/system/certificates
-certificate_view                         GET      /v1/system/certificates/{certificate}
 ip_pool_create                           POST     /v1/system/ip-pools
 ip_pool_delete                           DELETE   /v1/system/ip-pools/{pool}
 ip_pool_list                             GET      /v1/system/ip-pools
@@ -120,6 +121,20 @@ ip_pool_view                             GET      /v1/system/ip-pools/{pool}
 local_idp_user_create                    POST     /v1/system/identity-providers/local/users
 local_idp_user_delete                    DELETE   /v1/system/identity-providers/local/users/{user_id}
 local_idp_user_set_password              POST     /v1/system/identity-providers/local/users/{user_id}/set-password
+networking_address_lot_block_list        GET      /v1/system/networking/address-lot/{address_lot}/blocks
+networking_address_lot_create            POST     /v1/system/networking/address-lot
+networking_address_lot_delete            DELETE   /v1/system/networking/address-lot/{address_lot}
+networking_address_lot_list              GET      /v1/system/networking/address-lot
+networking_loopback_address_create       POST     /v1/system/networking/loopback-address
+networking_loopback_address_delete       DELETE   /v1/system/networking/loopback-address/{rack_id}/{switch_location}/{address}/{subnet_mask}
+networking_loopback_address_list         GET      /v1/system/networking/loopback-address
+networking_switch_port_apply_settings    POST     /v1/system/hardware/switch-port/{port}/settings
+networking_switch_port_clear_settings    DELETE   /v1/system/hardware/switch-port/{port}/settings
+networking_switch_port_list              GET      /v1/system/hardware/switch-port
+networking_switch_port_settings_create   POST     /v1/system/networking/switch-port-settings
+networking_switch_port_settings_delete   DELETE   /v1/system/networking/switch-port-settings
+networking_switch_port_settings_list     GET      /v1/system/networking/switch-port-settings
+networking_switch_port_settings_view     GET      /v1/system/networking/switch-port-settings/{port}
 physical_disk_list                       GET      /v1/system/hardware/disks
 rack_list                                GET      /v1/system/hardware/racks
 rack_view                                GET      /v1/system/hardware/racks/{rack_id}
@@ -134,15 +149,13 @@ silo_policy_view                         GET      /v1/system/silos/{silo}/policy
 silo_user_list                           GET      /v1/system/users
 silo_user_view                           GET      /v1/system/users/{user_id}
 silo_view                                GET      /v1/system/silos/{silo}
+sled_instance_list                       GET      /v1/system/hardware/sleds/{sled_id}/instances
 sled_list                                GET      /v1/system/hardware/sleds
 sled_physical_disk_list                  GET      /v1/system/hardware/sleds/{sled_id}/disks
 sled_view                                GET      /v1/system/hardware/sleds/{sled_id}
+switch_list                              GET      /v1/system/hardware/switches
+switch_view                              GET      /v1/system/hardware/switches/{switch_id}
 system_component_version_list            GET      /v1/system/update/components
-system_image_create                      POST     /system/images
-system_image_delete                      DELETE   /system/images/{image_name}
-system_image_list                        GET      /system/images
-system_image_view                        GET      /system/images/{image_name}
-system_image_view_by_id                  GET      /system/by-id/images/{id}
 system_metric                            GET      /v1/system/metrics/{metric_name}
 system_update_components_list            GET      /v1/system/update/updates/{version}/components
 system_update_list                       GET      /v1/system/update/updates

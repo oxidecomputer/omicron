@@ -215,6 +215,12 @@
               "$ref": "#/components/schemas/ProgressEventForInstallinatorSpec"
             }
           },
+          "root_execution_id": {
+            "nullable": true,
+            "description": "The root execution ID for this report.\n\nEach report has a root execution ID, which ties together all step and progress events. This is always filled out if the list of step events is non-empty.",
+            "type": "string",
+            "format": "uuid"
+          },
           "step_events": {
             "description": "A list of step events.\n\nStep events include success and failure events.",
             "type": "array",
@@ -230,6 +236,48 @@
       },
       "InstallinatorCompletionMetadata": {
         "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "disks_found": {
+                "description": "Number of disks found.",
+                "type": "integer",
+                "format": "uint",
+                "minimum": 0
+              },
+              "reason": {
+                "type": "string",
+                "enum": [
+                  "hardware_scan"
+                ]
+              }
+            },
+            "required": [
+              "disks_found",
+              "reason"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "reason": {
+                "type": "string",
+                "enum": [
+                  "control_plane_zones"
+                ]
+              },
+              "zones_to_install": {
+                "description": "Number of zone images that will be installed.",
+                "type": "integer",
+                "format": "uint",
+                "minimum": 0
+              }
+            },
+            "required": [
+              "reason",
+              "zones_to_install"
+            ]
+          },
           {
             "type": "object",
             "properties": {
@@ -366,6 +414,8 @@
         "enum": [
           "download",
           "format",
+          "scan",
+          "unpack_control_plane_artifact",
           "write"
         ]
       },
@@ -453,6 +503,10 @@
             "type": "string",
             "format": "uuid"
           },
+          "spec": {
+            "description": "The specification that this event belongs to.\n\nThis is typically the name of the type `S` for which `StepSpec` is implemented.\n\nThis can be used with `Self::from_generic` to deserialize generic metadata.",
+            "type": "string"
+          },
           "total_elapsed": {
             "description": "Total time elapsed since the start of execution.",
             "allOf": [
@@ -465,6 +519,7 @@
         "required": [
           "data",
           "execution_id",
+          "spec",
           "total_elapsed"
         ]
       },
@@ -484,6 +539,10 @@
             "type": "string",
             "format": "uuid"
           },
+          "spec": {
+            "description": "The specification that this event belongs to.\n\nThis is typically the name of the type `S` for which `StepSpec` is implemented.\n\nThis can be used with `Self::from_generic` to deserialize generic metadata.",
+            "type": "string"
+          },
           "total_elapsed": {
             "description": "Total time elapsed since the start of execution.",
             "allOf": [
@@ -496,6 +555,7 @@
         "required": [
           "data",
           "execution_id",
+          "spec",
           "total_elapsed"
         ]
       },
@@ -939,6 +999,10 @@
             "type": "string",
             "format": "uuid"
           },
+          "spec": {
+            "description": "The specification that this event belongs to.\n\nThis is typically the name of the type `S` for which `StepSpec` is implemented.\n\nThis can be used along with `Self::from_generic` to identify which specification to deserialize generic metadata against. For example:\n\n```rust,ignore if event.spec == \"MySpec\" { // event is likely generated from a MySpec engine. let event = Event::<MySpec>::from_generic(event)?; // ... } ```",
+            "type": "string"
+          },
           "total_elapsed": {
             "description": "Total time elapsed since the start of execution.",
             "allOf": [
@@ -952,6 +1016,7 @@
           "data",
           "event_index",
           "execution_id",
+          "spec",
           "total_elapsed"
         ]
       },
@@ -977,6 +1042,10 @@
             "type": "string",
             "format": "uuid"
           },
+          "spec": {
+            "description": "The specification that this event belongs to.\n\nThis is typically the name of the type `S` for which `StepSpec` is implemented.\n\nThis can be used along with `Self::from_generic` to identify which specification to deserialize generic metadata against. For example:\n\n```rust,ignore if event.spec == \"MySpec\" { // event is likely generated from a MySpec engine. let event = Event::<MySpec>::from_generic(event)?; // ... } ```",
+            "type": "string"
+          },
           "total_elapsed": {
             "description": "Total time elapsed since the start of execution.",
             "allOf": [
@@ -990,6 +1059,7 @@
           "data",
           "event_index",
           "execution_id",
+          "spec",
           "total_elapsed"
         ]
       },
@@ -1347,6 +1417,60 @@
               "message",
               "step_elapsed",
               "total_attempts"
+            ]
+          },
+          {
+            "description": "Execution aborted by an external user.\n\nThis is a terminal event: it is guaranteed that no more events will be seen after this one.",
+            "type": "object",
+            "properties": {
+              "aborted_step": {
+                "description": "Information about the step that was running at the time execution was aborted.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/StepInfoWithMetadataForGenericSpec"
+                  }
+                ]
+              },
+              "attempt": {
+                "description": "The attempt that was running at the time the step was aborted.",
+                "type": "integer",
+                "format": "uint",
+                "minimum": 0
+              },
+              "attempt_elapsed": {
+                "description": "The time it took for this attempt to complete.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/Duration"
+                  }
+                ]
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "execution_aborted"
+                ]
+              },
+              "message": {
+                "description": "A message associated with the abort.",
+                "type": "string"
+              },
+              "step_elapsed": {
+                "description": "Total time elapsed since the start of the step. Includes prior attempts.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/Duration"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "aborted_step",
+              "attempt",
+              "attempt_elapsed",
+              "kind",
+              "message",
+              "step_elapsed"
             ]
           },
           {
@@ -1786,6 +1910,60 @@
             ]
           },
           {
+            "description": "Execution aborted by an external user.\n\nThis is a terminal event: it is guaranteed that no more events will be seen after this one.",
+            "type": "object",
+            "properties": {
+              "aborted_step": {
+                "description": "Information about the step that was running at the time execution was aborted.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/StepInfoWithMetadataForInstallinatorSpec"
+                  }
+                ]
+              },
+              "attempt": {
+                "description": "The attempt that was running at the time the step was aborted.",
+                "type": "integer",
+                "format": "uint",
+                "minimum": 0
+              },
+              "attempt_elapsed": {
+                "description": "The time it took for this attempt to complete.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/Duration"
+                  }
+                ]
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "execution_aborted"
+                ]
+              },
+              "message": {
+                "description": "A message associated with the abort.",
+                "type": "string"
+              },
+              "step_elapsed": {
+                "description": "Total time elapsed since the start of the step. Includes prior attempts.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/Duration"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "aborted_step",
+              "attempt",
+              "attempt_elapsed",
+              "kind",
+              "message",
+              "step_elapsed"
+            ]
+          },
+          {
             "description": "A nested step event occurred.",
             "type": "object",
             "properties": {
@@ -2013,13 +2191,18 @@
                   "success"
                 ]
               },
+              "message": {
+                "nullable": true,
+                "description": "An optional message associated with this step.",
+                "type": "string"
+              },
               "metadata": {
-                "description": "Completion metadata associated with the step."
+                "nullable": true,
+                "description": "Optional completion metadata associated with the step."
               }
             },
             "required": [
-              "kind",
-              "metadata"
+              "kind"
             ]
           },
           {
@@ -2037,13 +2220,13 @@
                 "type": "string"
               },
               "metadata": {
-                "description": "Completion metadata associated with the step."
+                "nullable": true,
+                "description": "Optional completion metadata associated with the step."
               }
             },
             "required": [
               "kind",
-              "message",
-              "metadata"
+              "message"
             ]
           },
           {
@@ -2057,17 +2240,17 @@
                 ]
               },
               "message": {
-                "description": "Metadata associated with the step.",
+                "description": "Message associated with the skip.",
                 "type": "string"
               },
               "metadata": {
-                "description": "Skipped metadata associated with the step."
+                "nullable": true,
+                "description": "Optional metadata associated with the skip."
               }
             },
             "required": [
               "kind",
-              "message",
-              "metadata"
+              "message"
             ]
           }
         ]
@@ -2084,8 +2267,14 @@
                   "success"
                 ]
               },
+              "message": {
+                "nullable": true,
+                "description": "An optional message associated with this step.",
+                "type": "string"
+              },
               "metadata": {
-                "description": "Completion metadata associated with the step.",
+                "nullable": true,
+                "description": "Optional completion metadata associated with the step.",
                 "allOf": [
                   {
                     "$ref": "#/components/schemas/InstallinatorCompletionMetadata"
@@ -2094,8 +2283,7 @@
               }
             },
             "required": [
-              "kind",
-              "metadata"
+              "kind"
             ]
           },
           {
@@ -2113,7 +2301,8 @@
                 "type": "string"
               },
               "metadata": {
-                "description": "Completion metadata associated with the step.",
+                "nullable": true,
+                "description": "Optional completion metadata associated with the step.",
                 "allOf": [
                   {
                     "$ref": "#/components/schemas/InstallinatorCompletionMetadata"
@@ -2123,8 +2312,7 @@
             },
             "required": [
               "kind",
-              "message",
-              "metadata"
+              "message"
             ]
           },
           {
@@ -2138,21 +2326,17 @@
                 ]
               },
               "message": {
-                "description": "Metadata associated with the step.",
+                "description": "Message associated with the skip.",
                 "type": "string"
               },
               "metadata": {
-                "description": "Skipped metadata associated with the step.",
-                "type": "string",
-                "enum": [
-                  null
-                ]
+                "nullable": true,
+                "description": "Optional metadata associated with the skip."
               }
             },
             "required": [
               "kind",
-              "message",
-              "metadata"
+              "message"
             ]
           }
         ]

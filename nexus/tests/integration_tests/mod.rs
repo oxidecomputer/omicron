@@ -3,6 +3,7 @@
 //! See the driver in the parent directory for how and why this is structured
 //! the way it is.
 
+mod address_lots;
 mod authn_http;
 mod authz;
 mod basic;
@@ -15,6 +16,7 @@ mod images;
 mod initialization;
 mod instances;
 mod ip_pools;
+mod loopback_address;
 mod metrics;
 mod oximeter;
 mod pantry;
@@ -31,6 +33,7 @@ mod sleds;
 mod snapshots;
 mod ssh_keys;
 mod subnet_allocation;
+mod switch_port;
 mod system_updates;
 mod unauthorized;
 mod unauthorized_coverage;

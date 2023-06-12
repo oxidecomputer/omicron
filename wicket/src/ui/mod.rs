@@ -8,6 +8,7 @@ mod main;
 mod panes;
 mod splash;
 mod widgets;
+mod wrap;
 
 use crate::{Action, Cmd, State, Term};
 use slog::{o, Logger};

@@ -3,16 +3,24 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 //! Integration test running a producer that exports a few basic metrics.
-// Copyright 2021 Oxide Computer Company
 
-use chrono::{DateTime, Utc};
-use dropshot::{ConfigDropshot, ConfigLogging, ConfigLoggingLevel};
+// Copyright 2023 Oxide Computer Company
+
+use chrono::DateTime;
+use chrono::Utc;
+use dropshot::ConfigDropshot;
+use dropshot::ConfigLogging;
+use dropshot::ConfigLoggingLevel;
 use omicron_common::api::internal::nexus::ProducerEndpoint;
-use oximeter::{
-    types::{Cumulative, Sample},
-    Metric, MetricsError, Producer, Target,
-};
-use oximeter_producer::{Config, Server};
+use oximeter::types::Cumulative;
+use oximeter::types::Sample;
+use oximeter::Metric;
+use oximeter::MetricsError;
+use oximeter::Producer;
+use oximeter::Target;
+use oximeter_producer::Config;
+use oximeter_producer::LogConfig;
+use oximeter_producer::Server;
 use std::time::Duration;
 use uuid::Uuid;
 
@@ -86,13 +94,11 @@ impl Producer for CpuBusyProducer {
 #[tokio::main]
 async fn main() {
     let address = "[::1]:0".parse().unwrap();
-    let dropshot_config = ConfigDropshot {
-        bind_address: address,
-        request_body_max_bytes: 2048,
-        tls: None,
-    };
-    let logging_config =
-        ConfigLogging::StderrTerminal { level: ConfigLoggingLevel::Debug };
+    let dropshot =
+        ConfigDropshot { bind_address: address, request_body_max_bytes: 2048 };
+    let log = LogConfig::Config(ConfigLogging::StderrTerminal {
+        level: ConfigLoggingLevel::Debug,
+    });
     let server_info = ProducerEndpoint {
         id: Uuid::new_v4(),
         address,
@@ -102,8 +108,8 @@ async fn main() {
     let config = Config {
         server_info,
         registration_address: "[::1]:12221".parse().unwrap(),
-        dropshot_config,
-        logging_config,
+        dropshot,
+        log,
     };
     let server = Server::start(&config).await.unwrap();
     let producer = CpuBusyProducer::new(4);

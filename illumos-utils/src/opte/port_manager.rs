@@ -234,13 +234,7 @@ impl PortManager {
         };
 
         // Initialize firewall rules for the new port.
-        let mut rules = opte_firewall_rules(firewall_rules, &vni, &mac);
-
-        // TODO-remove(#2930): Nexus will plumb proper service fw rules
-        if let NetworkInterfaceKind::Service { .. } = nic.kind {
-            rules.push("dir=in priority=100 action=allow".parse().unwrap());
-        }
-
+        let rules = opte_firewall_rules(firewall_rules, &vni, &mac);
         debug!(
             self.inner.log,
             "Setting firewall rules";
@@ -275,6 +269,7 @@ impl PortManager {
                 &vnic_name,
                 Some(nic.mac),
                 None,
+                1500,
             ) {
                 slog::warn!(
                     self.inner.log,

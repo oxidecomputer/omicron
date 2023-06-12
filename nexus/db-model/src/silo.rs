@@ -19,7 +19,7 @@ impl_enum_type!(
     #[diesel(postgres_type(name = "authentication_mode"))]
     pub struct AuthenticationModeEnum;
 
-    #[derive(Copy, Clone, Debug, AsExpression, FromSqlRow, PartialEq)]
+    #[derive(Copy, Clone, Debug, AsExpression, FromSqlRow, PartialEq, Eq)]
     #[diesel(sql_type = AuthenticationModeEnum)]
     pub enum AuthenticationMode;
 
@@ -51,7 +51,7 @@ impl_enum_type!(
     #[diesel(postgres_type(name = "user_provision_type"))]
     pub struct UserProvisionTypeEnum;
 
-    #[derive(Copy, Clone, Debug, AsExpression, FromSqlRow, PartialEq)]
+    #[derive(Copy, Clone, Debug, AsExpression, FromSqlRow, PartialEq, Eq)]
     #[diesel(sql_type = UserProvisionTypeEnum)]
     pub enum UserProvisionType;
 
@@ -79,7 +79,9 @@ impl From<UserProvisionType> for shared::UserProvisionType {
 }
 
 /// Describes a silo within the database.
-#[derive(Clone, Queryable, Insertable, Debug, Resource, Selectable)]
+#[derive(
+    Clone, PartialEq, Eq, Queryable, Insertable, Debug, Resource, Selectable,
+)]
 #[diesel(table_name = silo)]
 pub struct Silo {
     #[diesel(embed)]

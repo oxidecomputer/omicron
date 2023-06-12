@@ -45,6 +45,10 @@ fn get_disks_url() -> String {
     format!("/v1/disks?project={}", PROJECT_NAME)
 }
 
+fn get_disk_url(name: &str) -> String {
+    format!("/v1/disks/{}?project={}", name, PROJECT_NAME)
+}
+
 async fn create_org_and_project(client: &ClientTestContext) -> Uuid {
     let project = create_project(client, PROJECT_NAME).await;
     project.identity.id
@@ -745,6 +749,115 @@ async fn test_cannot_snapshot_if_no_space(cptestctx: &ControlPlaneTestContext) {
     .execute()
     .await
     .expect("unexpected success creating snapshot");
+}
+
+#[nexus_test]
+async fn test_snapshot_unwind(cptestctx: &ControlPlaneTestContext) {
+    let client = &cptestctx.external_client;
+    let disk_test = DiskTest::new(&cptestctx).await;
+    populate_ip_pool(&client, "default", None).await;
+    create_org_and_project(client).await;
+    let disks_url = get_disks_url();
+
+    // Define a global image
+    let server = ServerBuilder::new().run().unwrap();
+    server.expect(
+        Expectation::matching(request::method_path("HEAD", "/image.raw"))
+            .times(1..)
+            .respond_with(
+                status_code(200).append_header(
+                    "Content-Length",
+                    format!("{}", 4096 * 1000),
+                ),
+            ),
+    );
+
+    let image_create_params = params::ImageCreate {
+        identity: IdentityMetadataCreateParams {
+            name: "alpine-edge".parse().unwrap(),
+            description: String::from(
+                "you can boot any image, as long as it's alpine",
+            ),
+        },
+        source: params::ImageSource::Url {
+            url: server.url("/image.raw").to_string(),
+        },
+        os: "alpine".to_string(),
+        version: "edge".to_string(),
+        block_size: params::BlockSize::try_from(512).unwrap(),
+    };
+
+    let images_url = format!("/v1/images?project={}", PROJECT_NAME);
+    let image =
+        NexusRequest::objects_post(client, &images_url, &image_create_params)
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute_and_parse_unwrap::<views::Image>()
+            .await;
+
+    // Create a disk from this image
+    let disk_size = ByteCount::from_gibibytes_u32(2);
+    let base_disk_name: Name = "base-disk".parse().unwrap();
+    let base_disk = params::DiskCreate {
+        identity: IdentityMetadataCreateParams {
+            name: base_disk_name.clone(),
+            description: String::from("sells rainsticks"),
+        },
+        disk_source: params::DiskSource::Image { image_id: image.identity.id },
+        size: disk_size,
+    };
+
+    let _base_disk: Disk = NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &disks_url)
+            .body(Some(&base_disk))
+            .expect_status(Some(StatusCode::CREATED)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body()
+    .unwrap();
+
+    // Set the third region's running snapshot callback so it fails
+    let zpool = &disk_test.zpools[2];
+    let dataset = &zpool.datasets[0];
+    disk_test
+        .sled_agent
+        .get_crucible_dataset(zpool.id, dataset.id)
+        .await
+        .set_creating_a_running_snapshot_should_fail()
+        .await;
+
+    // Issue snapshot request, expecting it to fail
+    let snapshots_url = format!("/v1/snapshots?project={}", PROJECT_NAME);
+
+    NexusRequest::expect_failure_with_body(
+        client,
+        StatusCode::INTERNAL_SERVER_ERROR,
+        Method::POST,
+        &snapshots_url,
+        &params::SnapshotCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "snapshot".parse().unwrap(),
+                description: String::from("a snapshot"),
+            },
+            disk: base_disk_name.clone(),
+        },
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("snapshot request succeeded");
+
+    // Delete the disk
+    NexusRequest::object_delete(client, &get_disk_url(base_disk_name.as_str()))
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("failed to delete disk");
+
+    // Assert everything was cleaned up
+    assert!(disk_test.crucible_resources_deleted().await);
 }
 
 // Test that the code that Saga nodes call is idempotent

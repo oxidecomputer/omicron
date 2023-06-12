@@ -10,13 +10,15 @@ use std::net::SocketAddrV6;
 use tokio::sync::mpsc::{self, Sender, UnboundedSender};
 use tokio::time::{interval, Duration, MissedTickBehavior};
 use wicketd_client::types::{
-    GetInventoryParams, GetInventoryResponse, IgnitionCommand, SpIdentifier,
-    SpType,
+    AbortUpdateOptions, ClearUpdateStateOptions, GetInventoryParams,
+    GetInventoryResponse, IgnitionCommand, SpIdentifier, SpType,
+    StartUpdateOptions,
 };
 
 use crate::events::EventReportMap;
+use crate::keymap::ShowPopupCmd;
 use crate::state::ComponentId;
-use crate::Event;
+use crate::{Cmd, Event};
 
 impl From<ComponentId> for SpIdentifier {
     fn from(id: ComponentId) -> Self {
@@ -35,7 +37,10 @@ impl From<ComponentId> for SpIdentifier {
 }
 
 const WICKETD_POLL_INTERVAL: Duration = Duration::from_millis(500);
-const WICKETD_TIMEOUT: Duration = Duration::from_millis(1000);
+// WICKETD_TIMEOUT used to be 1 second, but that might be too short (and in
+// particular might be responsible for
+// https://github.com/oxidecomputer/omicron/issues/3103).
+const WICKETD_TIMEOUT: Duration = Duration::from_secs(5);
 
 // Assume that these requests are periodic on the order of seconds or the
 // result of human interaction. In either case, this buffer should be plenty
@@ -46,7 +51,18 @@ const CHANNEL_CAPACITY: usize = 1000;
 #[allow(unused)]
 #[derive(Debug)]
 pub enum Request {
-    StartUpdate(ComponentId),
+    StartUpdate {
+        component_id: ComponentId,
+        options: StartUpdateOptions,
+    },
+    AbortUpdate {
+        component_id: ComponentId,
+        options: AbortUpdateOptions,
+    },
+    ClearUpdateState {
+        component_id: ComponentId,
+        options: ClearUpdateStateOptions,
+    },
     IgnitionCommand(ComponentId, IgnitionCommand),
 }
 
@@ -100,8 +116,14 @@ impl WicketdManager {
                 Some(request) = self.rx.recv() => {
                     slog::info!(self.log, "Got wicketd req: {:?}", request);
                     match request {
-                        Request::StartUpdate(component_id) => {
-                            self.start_update(component_id);
+                        Request::StartUpdate { component_id, options } => {
+                            self.start_update(component_id, options);
+                        }
+                        Request::AbortUpdate { component_id, options } => {
+                            self.abort_update(component_id, options);
+                        }
+                        Request::ClearUpdateState { component_id, options } => {
+                            self.clear_update_state(component_id, options);
                         }
                         Request::IgnitionCommand(component_id, command) => {
                             self.start_ignition_command(
@@ -120,20 +142,102 @@ impl WicketdManager {
         }
     }
 
-    fn start_update(&self, component_id: ComponentId) {
+    fn start_update(
+        &self,
+        component_id: ComponentId,
+        options: StartUpdateOptions,
+    ) {
         let log = self.log.clone();
         let addr = self.wicketd_addr;
+        let events_tx = self.events_tx.clone();
         tokio::spawn(async move {
             let update_client =
                 create_wicketd_client(&log, addr, WICKETD_TIMEOUT);
             let sp: SpIdentifier = component_id.into();
-            let res = update_client.post_start_update(sp.type_, sp.slot).await;
-            // We don't return errors or success values, as there's nobody to
-            // return them to. Instead, all updates are periodically polled
-            // and global state mutated. This allows the update pane to
-            // report current status to users in a more detailed and holistic
-            // fashion.
-            slog::info!(log, "Update response for {}: {:?}", component_id, res);
+            let response = match update_client
+                .post_start_update(sp.type_, sp.slot, &options)
+                .await
+            {
+                Ok(_) => Ok(()),
+                Err(error) => Err(error.to_string()),
+            };
+
+            slog::info!(
+                log,
+                "Update response for {}: {:?}",
+                component_id,
+                response
+            );
+            _ = events_tx.send(Event::Term(Cmd::ShowPopup(
+                ShowPopupCmd::StartUpdateResponse { component_id, response },
+            )));
+        });
+    }
+
+    fn abort_update(
+        &self,
+        component_id: ComponentId,
+        options: AbortUpdateOptions,
+    ) {
+        let log = self.log.clone();
+        let addr = self.wicketd_addr;
+        let events_tx = self.events_tx.clone();
+        tokio::spawn(async move {
+            let update_client =
+                create_wicketd_client(&log, addr, WICKETD_TIMEOUT);
+            let sp: SpIdentifier = component_id.into();
+            let response = match update_client
+                .post_abort_update(sp.type_, sp.slot, &options)
+                .await
+            {
+                Ok(_) => Ok(()),
+                Err(error) => Err(error.to_string()),
+            };
+
+            slog::info!(
+                log,
+                "Abort update state response for {}: {:?}",
+                component_id,
+                response
+            );
+            _ = events_tx.send(Event::Term(Cmd::ShowPopup(
+                ShowPopupCmd::AbortUpdateResponse { component_id, response },
+            )));
+        });
+    }
+
+    fn clear_update_state(
+        &self,
+        component_id: ComponentId,
+        options: ClearUpdateStateOptions,
+    ) {
+        let log = self.log.clone();
+        let addr = self.wicketd_addr;
+        let events_tx = self.events_tx.clone();
+        tokio::spawn(async move {
+            let update_client =
+                create_wicketd_client(&log, addr, WICKETD_TIMEOUT);
+            let sp: SpIdentifier = component_id.into();
+            let response = match update_client
+                .post_clear_update_state(sp.type_, sp.slot, &options)
+                .await
+            {
+                Ok(_) => Ok(()),
+                Err(error) => Err(error.to_string()),
+            };
+
+            slog::info!(
+                log,
+                "Clear update state response for {}: {:?}",
+                component_id,
+                response
+            );
+            _ = events_tx.send(Event::Term(Cmd::ShowPopup(
+                ShowPopupCmd::ClearUpdateStateResponse {
+                    component_id,
+                    response,
+                },
+            )));
         });
     }
 
