@@ -4,6 +4,8 @@
 
 //! Authentication for requests to the external HTTP API
 
+use super::Details;
+use super::SiloAuthnPolicy;
 use crate::authn;
 use async_trait::async_trait;
 use authn::Reason;
@@ -21,9 +23,17 @@ pub struct Authenticator<T> {
     allowed_schemes: Vec<Box<dyn HttpAuthnScheme<T>>>,
 }
 
+#[async_trait]
+pub trait AuthenticatorContext {
+    async fn silo_authn_policy_for(
+        &self,
+        actor: &authn::Actor,
+    ) -> Result<Option<SiloAuthnPolicy>, omicron_common::api::external::Error>;
+}
+
 impl<T> Authenticator<T>
 where
-    T: Send + Sync + 'static,
+    T: AuthenticatorContext + Send + Sync + 'static,
 {
     /// Build a new authenticator that allows only the specified schemes
     pub fn new(
@@ -73,10 +83,20 @@ where
                     return Err(authn::Error { reason, schemes_tried })
                 }
                 SchemeResult::Authenticated(details) => {
-                    return Ok(authn::Context {
-                        kind: authn::Kind::Authenticated(details),
-                        schemes_tried,
-                    })
+                    return match ctx.silo_authn_policy_for(&details.actor).await
+                    {
+                        Ok(silo_authn_policy) => Ok(authn::Context {
+                            kind: authn::Kind::Authenticated(
+                                details,
+                                silo_authn_policy,
+                            ),
+                            schemes_tried,
+                        }),
+                        Err(source) => Err(authn::Error {
+                            reason: Reason::LoadSiloAuthnPolicy { source },
+                            schemes_tried: schemes_tried,
+                        }),
+                    };
                 }
                 SchemeResult::NotRequested => (),
             }
@@ -111,7 +131,7 @@ pub enum SchemeResult {
     /// The client is not trying to use this authn scheme
     NotRequested,
     /// The client successfully authenticated
-    Authenticated(super::Details),
+    Authenticated(Details),
     /// The client tried and failed to authenticate
     Failed(Reason),
 }
@@ -129,6 +149,19 @@ mod test {
     use std::sync::atomic::AtomicU8;
     use std::sync::atomic::Ordering;
     use std::sync::Arc;
+
+    struct NoopAuthnContext;
+    #[async_trait]
+    impl AuthenticatorContext for NoopAuthnContext {
+        // XXX-dap TODO-coverage should we add any tests here?
+        async fn silo_authn_policy_for(
+            &self,
+            _: &authn::Actor,
+        ) -> Result<Option<SiloAuthnPolicy>, omicron_common::api::external::Error>
+        {
+            Ok(None)
+        }
+    }
 
     /// HttpAuthnScheme that we can precisely control
     #[derive(Debug)]
@@ -154,14 +187,14 @@ mod test {
     const FAIL: u8 = 2;
 
     #[async_trait]
-    impl HttpAuthnScheme<()> for GruntScheme {
+    impl HttpAuthnScheme<NoopAuthnContext> for GruntScheme {
         fn name(&self) -> authn::SchemeName {
             self.name
         }
 
         async fn authn(
             &self,
-            _ctx: &(),
+            _ctx: &NoopAuthnContext,
             _log: &slog::Logger,
             _request: &dropshot::RequestInfo,
         ) -> SchemeResult {
@@ -208,7 +241,7 @@ mod test {
             next: Arc::clone(&flag1),
             nattempts: Arc::clone(&count1),
             actor: actor1,
-        }) as Box<dyn HttpAuthnScheme<()>>;
+        }) as Box<dyn HttpAuthnScheme<NoopAuthnContext>>;
 
         let flag2 = Arc::new(AtomicU8::new(SKIP));
         let count2 = Arc::new(AtomicU8::new(0));
@@ -224,7 +257,7 @@ mod test {
             next: Arc::clone(&flag2),
             nattempts: Arc::clone(&count2),
             actor: actor2,
-        }) as Box<dyn HttpAuthnScheme<()>>;
+        }) as Box<dyn HttpAuthnScheme<NoopAuthnContext>>;
 
         let authn = Authenticator::new(vec![grunt1, grunt2]);
         let request = http::Request::builder()
@@ -239,7 +272,7 @@ mod test {
         // both grunts having been consulted.
         let ctx = authn
             .authn_request_generic(
-                &(),
+                &NoopAuthnContext,
                 &log,
                 &dropshot::RequestInfo::new(
                     &request,
@@ -261,7 +294,7 @@ mod test {
         flag1.store(OK, Ordering::SeqCst);
         let ctx = authn
             .authn_request_generic(
-                &(),
+                &NoopAuthnContext,
                 &log,
                 &dropshot::RequestInfo::new(
                     &request,
@@ -281,7 +314,7 @@ mod test {
         flag1.store(FAIL, Ordering::SeqCst);
         let error = authn
             .authn_request_generic(
-                &(),
+                &NoopAuthnContext,
                 &log,
                 &dropshot::RequestInfo::new(
                     &request,
@@ -305,7 +338,7 @@ mod test {
         flag2.store(OK, Ordering::SeqCst);
         let ctx = authn
             .authn_request_generic(
-                &(),
+                &NoopAuthnContext,
                 &log,
                 &dropshot::RequestInfo::new(
                     &request,
@@ -327,7 +360,7 @@ mod test {
         expected_count2 += 1;
         let error = authn
             .authn_request_generic(
-                &(),
+                &NoopAuthnContext,
                 &log,
                 &dropshot::RequestInfo::new(
                     &request,

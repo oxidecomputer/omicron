@@ -172,8 +172,6 @@ fn do_authz_resource(
 
                         fn conferred_roles<'a, 'b, 'c, 'd, 'e>(
                             &'a self,
-                            _opctx: &'b OpContext,
-                            _datastore: &'c DataStore,
                             _authn: &'d authn::Context,
                         ) -> BoxFuture<
                             'e,

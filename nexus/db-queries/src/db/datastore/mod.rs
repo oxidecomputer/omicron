@@ -282,8 +282,10 @@ pub async fn datastore_test(
 mod test {
     use super::*;
     use crate::authn;
+    use crate::authn::SiloAuthnPolicy;
     use crate::authz;
     use crate::db::explain::ExplainableAsync;
+    use crate::db::fixed_data::silo::DEFAULT_SILO;
     use crate::db::fixed_data::silo::SILO_ID;
     use crate::db::identity::Asset;
     use crate::db::lookup::LookupPath;
@@ -474,7 +476,11 @@ mod test {
         let silo_user_opctx = OpContext::for_background(
             logctx.log.new(o!()),
             Arc::new(authz::Authz::new(&logctx.log)),
-            authn::Context::for_test_user(silo_user_id, *SILO_ID),
+            authn::Context::for_test_user(
+                silo_user_id,
+                *SILO_ID,
+                SiloAuthnPolicy::try_from(&*DEFAULT_SILO).unwrap(),
+            ),
             Arc::clone(&datastore),
         );
         let delete = datastore

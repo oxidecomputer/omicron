@@ -28,10 +28,6 @@ allow(actor: AnyActor, action: Action, resource) if
 has_role(actor: AuthenticatedActor, role: String, resource: Resource)
 	if resource.has_role(actor, role);
 
-# In the special case of Fleets, we also check for conferred roles.
-has_role(actor: AuthenticatedActor, role: String, fleet: Fleet)
-	if fleet.has_conferred_role(actor, role);
-
 #
 # ROLES AND PERMISSIONS IN THE FLEET/SILO/PROJECT HIERARCHY
 #

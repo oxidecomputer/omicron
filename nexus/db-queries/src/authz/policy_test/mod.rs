@@ -15,6 +15,7 @@ mod resource_builder;
 mod resources;
 
 use crate::authn;
+use crate::authn::SiloAuthnPolicy;
 use crate::authz;
 use crate::context::OpContext;
 use crate::db;
@@ -107,7 +108,13 @@ async fn test_iam_roles_behavior() {
             let opctx = OpContext::for_background(
                 user_log,
                 Arc::clone(&authz),
-                authn::Context::for_test_user(user_id, main_silo_id),
+                // XXX-dap third arg below should change when we update this
+                // test
+                authn::Context::for_test_user(
+                    user_id,
+                    main_silo_id,
+                    SiloAuthnPolicy::default(),
+                ),
                 Arc::clone(&datastore),
             );
 

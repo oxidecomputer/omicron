@@ -38,7 +38,6 @@ use crate::authn;
 use crate::context::OpContext;
 use crate::db;
 use crate::db::fixed_data::FLEET_ID;
-use crate::db::lookup::LookupPath;
 use crate::db::model::KnownArtifactKind;
 use crate::db::model::SemverVersion;
 use crate::db::DataStore;
@@ -94,8 +93,6 @@ pub trait ApiResourceWithRoles: ApiResource {
     /// resource's roles.
     fn conferred_roles<'a, 'b, 'c, 'd, 'e>(
         &'a self,
-        opctx: &'b OpContext,
-        datastore: &'c DataStore,
         authn: &'d authn::Context,
         // XXX-dap use a struct
     ) -> BoxFuture<
@@ -137,60 +134,6 @@ impl<T: ApiResource + oso::PolarClass + Clone> AuthorizedResource for T {
     {
         load_roles_for_resource_tree(self, opctx, datastore, authn, roleset)
             .boxed()
-    }
-
-    fn load_conferred_roles<'a, 'b, 'c, 'd, 'e, 'f>(
-        &'a self,
-        opctx: &'b OpContext,
-        datastore: &'c DataStore,
-        authn: &'d authn::Context,
-        roleset: &'e mut RoleSet,
-    ) -> BoxFuture<'f, Result<BTreeMap<String, Vec<String>>, Error>>
-    where
-        'a: 'f,
-        'b: 'f,
-        'c: 'f,
-        'd: 'f,
-        'e: 'f,
-    {
-        async {
-            let Some(with_roles) = self.as_resource_with_roles()
-            else {
-                return Ok(BTreeMap::new())
-            };
-
-            let Some((resource_type, resource_id, mapping)) =
-                with_roles.conferred_roles(opctx, datastore, authn).await?
-            else {
-                return Ok(BTreeMap::new())
-            };
-
-            load_roles_for_resource(
-                opctx,
-                datastore,
-                authn,
-                resource_type,
-                resource_id,
-                roleset,
-            )
-            .await?;
-
-            // XXX-dap for now, just stuff them straight into roleset.
-            for (other_role, my_roles) in &mapping {
-                if roleset.has_role(resource_type, resource_id, other_role) {
-                    for my_role in my_roles {
-                        roleset.insert(
-                            self.resource_type(),
-                            with_roles.resource_id(),
-                            my_role,
-                        );
-                    }
-                }
-            }
-
-            Ok(mapping)
-        }
-        .boxed()
     }
 
     fn on_unauthorized(
@@ -249,35 +192,12 @@ impl PartialEq for Fleet {
 
 impl oso::PolarClass for Fleet {
     fn get_polar_class_builder() -> oso::ClassBuilder<Self> {
-        oso::Class::builder()
-            .with_equality_check()
-            .add_method(
-                "has_role",
-                |_: &Fleet, actor: AuthenticatedActor, role: String| {
-                    actor.has_role_resource(
-                        ResourceType::Fleet,
-                        *FLEET_ID,
-                        &role,
-                    )
-                },
-            )
-            .add_method(
-                "has_conferred_role",
-                |_: &Fleet, actor: AuthenticatedActor, role: String| {
-                    // XXX-dap check silo policy first
-                    if let Some(silo_id) = actor.silo_id() {
-                        // XXX-dap For now as a proof of concept let's say that
-                        // you need the corresponding role on the Silo.
-                        actor.has_role_resource(
-                            ResourceType::Silo,
-                            silo_id,
-                            &role,
-                        )
-                    } else {
-                        false
-                    }
-                },
-            )
+        oso::Class::builder().with_equality_check().add_method(
+            "has_role",
+            |_: &Fleet, actor: AuthenticatedActor, role: String| {
+                actor.has_role_resource(ResourceType::Fleet, *FLEET_ID, &role)
+            },
+        )
     }
 }
 
@@ -311,8 +231,6 @@ impl ApiResourceWithRoles for Fleet {
 
     fn conferred_roles<'a, 'b, 'c, 'd, 'e>(
         &'a self,
-        opctx: &'b OpContext,
-        datastore: &'c DataStore,
         authn: &'d authn::Context,
     ) -> BoxFuture<
         'e,
@@ -333,20 +251,20 @@ impl ApiResourceWithRoles for Fleet {
             // loading fleet-level roles, we also have to load an actor's
             // Silo-level roles, assuming there _is_ an actor and that this
             // actor is associated with a Silo.
+            // XXX-dap that comment belongs elsewhere
             let Some(silo_id) = authn
                 .actor()
                 .and_then(|actor| actor.silo_id())
                 else { return Ok(None); };
-
-            // XXX-dap could be cached most of the time
-            // XXX-dap this triggers an infinite loop / stack overflow because
-            // fetching the Silo here winds up doing an authz check again!
-            let (_, db_silo) = LookupPath::new(opctx, datastore)
-                .silo_id(silo_id)
-                .fetch()
-                .await?;
-            let mapped_roles = db_silo
-                .mapped_fleet_roles()?
+            let silo_authn_policy =
+                authn.silo_authn_policy().ok_or_else(|| {
+                    Error::internal_error(&format!(
+                        "actor had a Silo ({}) but no SiloAuthnPolicy",
+                        silo_id
+                    ))
+                })?;
+            let mapped_roles = silo_authn_policy
+                .mapped_fleet_roles()
                 .into_iter()
                 .map(|(silo_role, fleet_roles)| {
                     (

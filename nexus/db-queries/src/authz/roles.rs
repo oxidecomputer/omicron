@@ -70,8 +70,7 @@ impl RoleSet {
         ))
     }
 
-    // XXX-dap not pub
-    pub fn insert(
+    fn insert(
         &mut self,
         resource_type: ResourceType,
         resource_id: Uuid,
@@ -111,8 +110,8 @@ where
 
         // If roles can be conferred by another resource, load that resource's
         // roles, too.
-        if let Some((resource_type, resource_id, _)) =
-            with_roles.conferred_roles(opctx, datastore, authn).await?
+        if let Some((resource_type, resource_id, mapping)) =
+            with_roles.conferred_roles(authn).await?
         {
             load_roles_for_resource(
                 opctx,
@@ -123,6 +122,19 @@ where
                 roleset,
             )
             .await?;
+
+            // XXX-dap for now, stuff these right into the roleset
+            for (other_role, my_roles) in &mapping {
+                if roleset.has_role(resource_type, resource_id, other_role) {
+                    for my_role in my_roles {
+                        roleset.insert(
+                            resource.resource_type(),
+                            with_roles.resource_id(),
+                            my_role,
+                        );
+                    }
+                }
+            }
         }
     }
 

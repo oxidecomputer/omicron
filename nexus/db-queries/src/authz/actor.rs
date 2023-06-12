@@ -60,10 +60,6 @@ impl AuthenticatedActor {
     ) -> bool {
         self.roles.has_role(resource_type, resource_id, role)
     }
-
-    pub fn silo_id(&self) -> Option<Uuid> {
-        self.silo_id
-    }
 }
 
 impl PartialEq for AuthenticatedActor {
