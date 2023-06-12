@@ -11266,6 +11266,13 @@
             "description": "The route gateway.",
             "type": "string",
             "format": "ip"
+          },
+          "vid": {
+            "nullable": true,
+            "description": "VLAN id the gateway is reachable over.",
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
           }
         },
         "required": [
@@ -12698,6 +12705,13 @@
             "description": "The port settings object this route configuration belongs to.",
             "type": "string",
             "format": "uuid"
+          },
+          "vid": {
+            "nullable": true,
+            "description": "The VLAN identifier for the route. Use this if the gateway is reachable over an 802.1Q tagged L2 segment.",
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
           }
         },
         "required": [

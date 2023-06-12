@@ -2459,6 +2459,10 @@ pub struct SwitchPortRouteConfig {
 
     /// The route's gateway address.
     pub gw: IpNet,
+
+    /// The VLAN identifier for the route. Use this if the gateway is reachable
+    /// over an 802.1Q tagged L2 segment.
+    pub vid: Option<u16>,
 }
 
 /// A BGP peer configuration for a port settings object.

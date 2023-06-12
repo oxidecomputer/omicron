@@ -21,7 +21,7 @@ if [[ ! -f out/softnpu/softnpu ]]; then
 fi
 
 # Commit and base URL that's pinned for softnpu tools
-SIDECAR_LITE_COMMIT="b74895bce931202209a1b958be6ec3062d51742b"
+SIDECAR_LITE_COMMIT="3fff53ae549ab1348b680845693e66b224bb5d2f"
 COMMIT_URL="https://buildomat.eng.oxide.computer/public/file/oxidecomputer/sidecar-lite/release/$SIDECAR_LITE_COMMIT"
 
 # This is an ASIC administration program.

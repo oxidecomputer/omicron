@@ -359,6 +359,7 @@ pub struct SwitchPortRouteConfig {
     pub interface_name: String,
     pub dst: IpNetwork,
     pub gw: IpNetwork,
+    pub vid: Option<SqlU16>,
 }
 
 impl SwitchPortRouteConfig {
@@ -367,8 +368,9 @@ impl SwitchPortRouteConfig {
         interface_name: String,
         dst: IpNetwork,
         gw: IpNetwork,
+        vid: Option<SqlU16>,
     ) -> Self {
-        Self { port_settings_id, interface_name, dst, gw }
+        Self { port_settings_id, interface_name, dst, gw, vid }
     }
 }
 
@@ -379,6 +381,7 @@ impl Into<external::SwitchPortRouteConfig> for SwitchPortRouteConfig {
             interface_name: self.interface_name.clone(),
             dst: self.dst.into(),
             gw: self.gw.into(),
+            vid: self.vid.map(Into::into),
         }
     }
 }

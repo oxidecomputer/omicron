@@ -2397,6 +2397,7 @@ CREATE TABLE omicron.public.switch_port_settings_route_config (
     interface_name TEXT,
     dst INET,
     gw INET,
+    vid INT4,
 
     /* TODO https://github.com/oxidecomputer/omicron/issues/3013 */
     PRIMARY KEY (port_settings_id, interface_name, dst, gw)
