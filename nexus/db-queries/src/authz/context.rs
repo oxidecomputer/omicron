@@ -16,8 +16,10 @@ use omicron_common::api::external::Error;
 use omicron_common::bail_unless;
 use oso::Oso;
 use oso::OsoError;
+use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::sync::Arc;
+use futures::FutureExt;
 
 /// Server-wide authorization context
 pub struct Authz {
@@ -115,6 +117,16 @@ impl Context {
             .load_roles(opctx, &self.datastore, &self.authn, &mut roles)
             .await?;
         debug!(opctx.log, "roles"; "roles" => ?roles);
+
+        // If roles can be conferred by another resource, provide that mapping.
+        let mapping = resource
+            .load_conferred_roles(
+                opctx,
+                &self.datastore,
+                &self.authn,
+                &mut roles,
+            )
+            .await?;
         let actor = AnyActor::new(&self.authn, roles);
         let is_authn = self.authn.actor().is_some();
         match self.authz.is_allowed(&actor, action, &resource) {
@@ -175,6 +187,24 @@ pub trait AuthorizedResource: oso::ToPolar + Send + Sync + 'static {
         'c: 'f,
         'd: 'f,
         'e: 'f;
+
+    // XXX-dap do not provide deafult
+    fn load_conferred_roles<'a, 'b, 'c, 'd, 'e, 'f>(
+        &'a self,
+        _opctx: &'b OpContext,
+        _datastore: &'c DataStore,
+        _authn: &'d authn::Context,
+        _roleset: &'e mut RoleSet,
+    ) -> BoxFuture<'f, Result<BTreeMap<String, Vec<String>>, Error>>
+    where
+        'a: 'f,
+        'b: 'f,
+        'c: 'f,
+        'd: 'f,
+        'e: 'f,
+    {
+        futures::future::ready(Ok(BTreeMap::new())).boxed()
+    }
 
     /// Invoked on authz failure to determine the final authz result
     ///

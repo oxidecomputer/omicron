@@ -7,11 +7,14 @@ use crate::collection::DatastoreCollectionConfig;
 use crate::schema::{image, project, silo};
 use crate::{impl_enum_type, Image};
 use db_macros::Resource;
-use nexus_types::external_api::shared::SiloIdentityMode;
+use nexus_types::external_api::shared::{
+    FleetRole, SiloIdentityMode, SiloRole,
+};
 use nexus_types::external_api::views;
 use nexus_types::external_api::{params, shared};
 use nexus_types::identity::Resource;
 use omicron_common::api::external::Error;
+use std::collections::BTreeMap;
 use uuid::Uuid;
 
 impl_enum_type!(
@@ -139,6 +142,19 @@ impl Silo {
             mapped_fleet_roles,
         })
     }
+
+    pub fn mapped_fleet_roles(
+        &self,
+    ) -> Result<BTreeMap<SiloRole, Vec<FleetRole>>, Error> {
+        serde_json::from_value(self.mapped_fleet_roles.clone()).map_err(
+            |e| {
+                Error::internal_error(&format!(
+                "failed to deserialize mapped fleet roles from database: {:#}",
+                e
+            ))
+            },
+        )
+    }
 }
 
 impl TryFrom<Silo> for views::Silo {
@@ -164,15 +180,7 @@ impl TryFrom<Silo> for views::Silo {
             ))
         })?;
 
-        let mapped_fleet_roles = serde_json::from_value(
-            silo.mapped_fleet_roles.clone(),
-        )
-        .map_err(|e| {
-            Error::internal_error(&format!(
-                "failed to deserialize mapped fleet roles from database: {:#}",
-                e
-            ))
-        })?;
+        let mapped_fleet_roles = silo.mapped_fleet_roles()?;
 
         Ok(Self {
             identity: silo.identity(),

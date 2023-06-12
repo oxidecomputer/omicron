@@ -169,6 +169,32 @@ fn do_authz_resource(
                         fn resource_id(&self) -> Uuid {
                             self.key
                         }
+
+                        fn conferred_roles<'a, 'b, 'c, 'd, 'e>(
+                            &'a self,
+                            _opctx: &'b OpContext,
+                            _datastore: &'c DataStore,
+                            _authn: &'d authn::Context,
+                        ) -> BoxFuture<
+                            'e,
+                            Result<
+                                Option<(
+                                    ResourceType,
+                                    Uuid,
+                                    BTreeMap<String, Vec<String>>,
+                                )>,
+                                Error,
+                            >,
+                        >
+                        where
+                            'a: 'e,
+                            'b: 'e,
+                            'c: 'e,
+                            'd: 'e
+                        {
+                            futures::future::ready(Ok(None)).boxed()
+                        }
+
                     }
                 },
             )
@@ -372,13 +398,6 @@ fn do_authz_resource(
         impl ApiResource for #resource_name {
             fn parent(&self) -> Option<&dyn AuthorizedResource> {
                 Some(&self.parent)
-            }
-
-            fn extra(
-                &self,
-                _authn: &authn::Context
-            ) -> Option<(ResourceType, Uuid)> {
-                None
             }
 
             fn resource_type(&self) -> ResourceType {

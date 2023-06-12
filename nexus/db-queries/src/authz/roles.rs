@@ -70,7 +70,8 @@ impl RoleSet {
         ))
     }
 
-    fn insert(
+    // XXX-dap not pub
+    pub fn insert(
         &mut self,
         resource_type: ResourceType,
         resource_id: Uuid,
@@ -107,6 +108,22 @@ where
             roleset,
         )
         .await?;
+
+        // If roles can be conferred by another resource, load that resource's
+        // roles, too.
+        if let Some((resource_type, resource_id, _)) =
+            with_roles.conferred_roles(opctx, datastore, authn).await?
+        {
+            load_roles_for_resource(
+                opctx,
+                datastore,
+                authn,
+                resource_type,
+                resource_id,
+                roleset,
+            )
+            .await?;
+        }
     }
 
     // If this resource has a parent, the user's roles on the parent

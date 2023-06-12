@@ -4909,7 +4909,7 @@ pub async fn current_user_view(
     let handler = async {
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
         let user = nexus.silo_user_fetch_self(&opctx).await?;
-        let silo = nexus.current_silo_lookup(opctx).await?;
+        let (_, silo) = nexus.current_silo_lookup(&opctx)?.fetch().await?;
         Ok(HttpResponseOk(views::CurrentUser {
             user: user.into(),
             silo_name: silo.name().clone(),

@@ -38,6 +38,7 @@ use crate::authn;
 use crate::context::OpContext;
 use crate::db;
 use crate::db::fixed_data::FLEET_ID;
+use crate::db::lookup::LookupPath;
 use crate::db::model::KnownArtifactKind;
 use crate::db::model::SemverVersion;
 use crate::db::DataStore;
@@ -45,10 +46,12 @@ use authz_macros::authz_resource;
 use futures::future::BoxFuture;
 use futures::FutureExt;
 use lazy_static::lazy_static;
+use nexus_db_model::DatabaseString;
 use nexus_types::external_api::shared::{FleetRole, ProjectRole, SiloRole};
 use omicron_common::api::external::{Error, LookupType, ResourceType};
 use oso::PolarClass;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use uuid::Uuid;
 
 /// Describes an authz resource that corresponds to an API resource that has a
@@ -67,13 +70,6 @@ pub trait ApiResource:
     /// Otherwise, returns `None`.
     fn parent(&self) -> Option<&dyn AuthorizedResource>;
 
-    /// Returns an optional other resource whose roles should be fetched along
-    /// with this resource.  This differs from "parent".  With "parent", all of
-    /// the roles that might affect the parent will be fetched, which include
-    /// all of _its_ parents (i.e., it's recursive).  With "extra", we only
-    /// fetch this one resource's roles.
-    fn extra(&self, _authn: &authn::Context) -> Option<(ResourceType, Uuid)>;
-
     fn resource_type(&self) -> ResourceType;
     fn lookup_type(&self) -> &LookupType;
 
@@ -87,6 +83,33 @@ pub trait ApiResource:
 /// Describes an authz resource on which we allow users to assign roles
 pub trait ApiResourceWithRoles: ApiResource {
     fn resource_id(&self) -> Uuid;
+
+    /// Returns an optional other resource whose roles should be fetched along
+    /// with this resource, along with how to map that resource's roles to this
+    /// resource's roles.
+    ///
+    /// This differs from "parent".  With "parent", all of the roles that might
+    /// affect the parent will be fetched, which include all of _its_ parents
+    /// (i.e., it's recursive).  With this function, we only fetch this one
+    /// resource's roles.
+    fn conferred_roles<'a, 'b, 'c, 'd, 'e>(
+        &'a self,
+        opctx: &'b OpContext,
+        datastore: &'c DataStore,
+        authn: &'d authn::Context,
+        // XXX-dap use a struct
+    ) -> BoxFuture<
+        'e,
+        Result<
+            Option<(ResourceType, Uuid, BTreeMap<String, Vec<String>>)>,
+            Error,
+        >,
+    >
+    where
+        'a: 'e,
+        'b: 'e,
+        'c: 'e,
+        'd: 'e;
 }
 
 /// Describes the specific roles for an `ApiResourceWithRoles`
@@ -112,16 +135,60 @@ impl<T: ApiResource + oso::PolarClass + Clone> AuthorizedResource for T {
         'd: 'f,
         'e: 'f,
     {
+        load_roles_for_resource_tree(self, opctx, datastore, authn, roleset)
+            .boxed()
+    }
+
+    fn load_conferred_roles<'a, 'b, 'c, 'd, 'e, 'f>(
+        &'a self,
+        opctx: &'b OpContext,
+        datastore: &'c DataStore,
+        authn: &'d authn::Context,
+        roleset: &'e mut RoleSet,
+    ) -> BoxFuture<'f, Result<BTreeMap<String, Vec<String>>, Error>>
+    where
+        'a: 'f,
+        'b: 'f,
+        'c: 'f,
+        'd: 'f,
+        'e: 'f,
+    {
         async {
-            if let Some((extra_type, extra_id)) = self.extra(authn) {
-                load_roles_for_resource(
-                    opctx, datastore, authn, extra_type, extra_id, roleset,
-                )
-                .await?;
+            let Some(with_roles) = self.as_resource_with_roles()
+            else {
+                return Ok(BTreeMap::new())
+            };
+
+            let Some((resource_type, resource_id, mapping)) =
+                with_roles.conferred_roles(opctx, datastore, authn).await?
+            else {
+                return Ok(BTreeMap::new())
+            };
+
+            load_roles_for_resource(
+                opctx,
+                datastore,
+                authn,
+                resource_type,
+                resource_id,
+                roleset,
+            )
+            .await?;
+
+            // XXX-dap for now, just stuff them straight into roleset.
+            for (other_role, my_roles) in &mapping {
+                if roleset.has_role(resource_type, resource_id, other_role) {
+                    for my_role in my_roles {
+                        roleset.insert(
+                            self.resource_type(),
+                            with_roles.resource_id(),
+                            my_role,
+                        );
+                    }
+                }
             }
 
-            load_roles_for_resource_tree(self, opctx, datastore, authn, roleset)
-                .await
+            Ok(mapping)
         }
         .boxed()
     }
@@ -223,18 +290,6 @@ impl ApiResource for Fleet {
         None
     }
 
-    fn extra(&self, authn: &authn::Context) -> Option<(ResourceType, Uuid)> {
-        // We support operators configuring Silos such that a particular Silo
-        // level role confers a particular Fleet-level role.  So when loading
-        // fleet-level roles, we also have to load an actor's Silo-level roles,
-        // assuming there _is_ an actor and that this actor is associated with a
-        // Silo.
-        authn
-            .actor()
-            .and_then(|actor| actor.silo_id())
-            .map(|silo_id| (ResourceType::Silo, silo_id))
-    }
-
     fn resource_type(&self) -> ResourceType {
         ResourceType::Fleet
     }
@@ -252,6 +307,60 @@ impl ApiResource for Fleet {
 impl ApiResourceWithRoles for Fleet {
     fn resource_id(&self) -> Uuid {
         *FLEET_ID
+    }
+
+    fn conferred_roles<'a, 'b, 'c, 'd, 'e>(
+        &'a self,
+        opctx: &'b OpContext,
+        datastore: &'c DataStore,
+        authn: &'d authn::Context,
+    ) -> BoxFuture<
+        'e,
+        Result<
+            Option<(ResourceType, Uuid, BTreeMap<String, Vec<String>>)>,
+            Error,
+        >,
+    >
+    where
+        'a: 'e,
+        'b: 'e,
+        'c: 'e,
+        'd: 'e,
+    {
+        async {
+            // We support operators configuring Silos such that a particular
+            // Silo level role confers a particular Fleet-level role.  So when
+            // loading fleet-level roles, we also have to load an actor's
+            // Silo-level roles, assuming there _is_ an actor and that this
+            // actor is associated with a Silo.
+            let Some(silo_id) = authn
+                .actor()
+                .and_then(|actor| actor.silo_id())
+                else { return Ok(None); };
+
+            // XXX-dap could be cached most of the time
+            // XXX-dap this triggers an infinite loop / stack overflow because
+            // fetching the Silo here winds up doing an authz check again!
+            let (_, db_silo) = LookupPath::new(opctx, datastore)
+                .silo_id(silo_id)
+                .fetch()
+                .await?;
+            let mapped_roles = db_silo
+                .mapped_fleet_roles()?
+                .into_iter()
+                .map(|(silo_role, fleet_roles)| {
+                    (
+                        silo_role.to_database_string().to_string(),
+                        fleet_roles
+                            .into_iter()
+                            .map(|f| f.to_database_string().to_string())
+                            .collect(),
+                    )
+                })
+                .collect();
+            Ok(Some((ResourceType::Silo, silo_id, mapped_roles)))
+        }
+        .boxed()
     }
 }
 
