@@ -46,8 +46,9 @@ struct Args {
     #[clap(name = "SA_IP:PORT", action)]
     sled_agent_addr: SocketAddrV6,
 
-    #[clap(name = "NEXUS_IP:PORT", action)]
-    nexus_addr: SocketAddr,
+    // TODO: Update docs?
+    #[clap(name = "INTERNAL_DNS_IP:PORT", action)]
+    internal_dns_addr: SocketAddr,
 
     #[clap(long, name = "NEXUS_EXTERNAL_IP:PORT", action)]
     /// If specified, when the simulated sled agent initializes the rack, it
@@ -79,8 +80,8 @@ async fn do_run() -> Result<(), CmdError> {
     let config = Config {
         id: args.uuid,
         sim_mode: args.sim_mode,
-        nexus_address_source: NexusAddressSource::Direct {
-            address: args.nexus_addr,
+        nexus_address_source: NexusAddressSource::FromDns {
+            internal_dns_address: args.internal_dns_addr,
         },
         dropshot: ConfigDropshot {
             bind_address: args.sled_agent_addr.into(),

@@ -6,7 +6,7 @@
 
 use super::config::SimMode;
 
-use crate::nexus::NexusClient;
+use crate::nexus::LazyNexusClient;
 use futures::channel::mpsc::Receiver;
 use futures::channel::mpsc::Sender;
 use futures::lock::Mutex;
@@ -176,7 +176,7 @@ pub enum PokeMode {
 /// instances and disks.
 pub struct SimCollection<S: Simulatable> {
     /// handle to the Nexus API, used to notify about async transitions
-    nexus_client: Arc<NexusClient>,
+    lazy_nexus_client: LazyNexusClient,
     /// logger for this collection
     log: Logger,
     /// simulation mode: automatic (timer-based) or explicit (using an API)
@@ -188,12 +188,12 @@ pub struct SimCollection<S: Simulatable> {
 impl<S: Simulatable + 'static> SimCollection<S> {
     /// Returns a new collection of simulated objects.
     pub fn new(
-        nexus_client: Arc<NexusClient>,
+        lazy_nexus_client: LazyNexusClient,
         log: Logger,
         sim_mode: SimMode,
     ) -> SimCollection<S> {
         SimCollection {
-            nexus_client,
+            lazy_nexus_client,
             log,
             sim_mode,
             objects: Mutex::new(BTreeMap::new()),
@@ -258,7 +258,13 @@ impl<S: Simulatable + 'static> SimCollection<S> {
             // Notify Nexus that the object's state has changed.
             // TODO-robustness: If this fails, we need to put it on some list of
             // updates to retry later.
-            S::notify(&self.nexus_client, &id, new_state).await.unwrap();
+            S::notify(
+                &self.lazy_nexus_client.get().await.unwrap(),
+                &id,
+                new_state,
+            )
+            .await
+            .unwrap();
 
             // If the object came to rest destroyed, complete any async cleanup
             // needed now.

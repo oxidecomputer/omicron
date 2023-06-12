@@ -9,10 +9,9 @@ use super::http_entrypoints::api as http_api;
 use super::sled_agent::SledAgent;
 use super::storage::PantryServer;
 use crate::nexus::d2n_params;
-use crate::nexus::NexusClient;
+use crate::nexus::LazyNexusClient;
 use anyhow::anyhow;
 use crucible_agent_client::types::State as RegionState;
-use internal_dns::resolver::Resolver;
 use internal_dns::ServiceName;
 use nexus_client::types as NexusTypes;
 use nexus_client::types::{IpRange, Ipv4Range, Ipv6Range};
@@ -41,29 +40,6 @@ pub struct Server {
     pub pantry_server: Option<PantryServer>,
 }
 
-// Looks up the Nexus socket address with the mechanism described
-// in the configuration.
-async fn get_nexus_address(
-    config: &Config,
-    log: &Logger,
-) -> Result<SocketAddr, anyhow::Error> {
-    match config.nexus_address_source {
-        NexusAddressSource::FromDns { internal_dns_address } => {
-            let resolver = Resolver::new_from_addrs(
-                log.new(o!("component" => "DNS Resolver")),
-                vec![internal_dns_address],
-            )
-            .map_err(|error| anyhow!("creating DNS resolver: {}", error))?;
-            let address =
-                resolver.lookup_socket_v6(ServiceName::Nexus).await.map_err(
-                    |error| anyhow!("looking up Nexus address: {}", error),
-                )?;
-            Ok(SocketAddr::V6(address))
-        }
-        NexusAddressSource::Direct { address } => Ok(address),
-    }
-}
-
 impl Server {
     pub async fn start(
         config: &Config,
@@ -71,12 +47,13 @@ impl Server {
     ) -> Result<Server, anyhow::Error> {
         info!(log, "setting up sled agent server");
 
-        let nexus_address = get_nexus_address(config, log).await?;
-        let client_log = log.new(o!("component" => "NexusClient"));
-        let nexus_client = Arc::new(NexusClient::new(
-            &format!("http://{}", nexus_address),
-            client_log,
-        ));
+        let dns_address = match config.nexus_address_source {
+            NexusAddressSource::FromDns { internal_dns_address } => {
+                internal_dns_address
+            }
+        };
+        let lazy_nexus_client =
+            LazyNexusClient::new_from_addrs(log.clone(), vec![dns_address])?;
 
         let sa_log = log.new(o!(
             "component" => "SledAgent",
@@ -85,8 +62,7 @@ impl Server {
         let sled_agent = SledAgent::new_simulated_with_id(
             &config,
             sa_log,
-            nexus_address,
-            Arc::clone(&nexus_client),
+            lazy_nexus_client.clone(),
         )
         .await;
 
@@ -109,7 +85,11 @@ impl Server {
         let sa_address = http_server.local_addr();
         let notify_nexus = || async {
             debug!(log, "contacting server nexus");
-            (nexus_client
+            lazy_nexus_client
+                .get()
+                .await
+                .map_err(|e| anyhow!(e))
+                .map_err(BackoffError::transient)?
                 .sled_agent_put(
                     &config.id,
                     &NexusTypes::SledAgentStartupInfo {
@@ -129,7 +109,8 @@ impl Server {
                         .unwrap(),
                     },
                 )
-                .await)
+                .await
+                .map_err(|e| anyhow!(e))
                 .map_err(BackoffError::transient)
         };
         let log_notification_failure = |error, delay| {
@@ -223,17 +204,24 @@ async fn handoff_to_nexus(
     config: &Config,
     request: &NexusTypes::RackInitializationRequest,
 ) -> Result<(), anyhow::Error> {
-    let nexus_address = get_nexus_address(config, log).await?;
-    let nexus_client = NexusClient::new(
-        &format!("http://{}", nexus_address),
-        log.new(o!("component" => "NexusClient")),
-    );
+    let dns_address = match config.nexus_address_source {
+        NexusAddressSource::FromDns { internal_dns_address } => {
+            internal_dns_address
+        }
+    };
+    let lazy_nexus_client =
+        LazyNexusClient::new_from_addrs(log.clone(), vec![dns_address])?;
     let rack_id = uuid::uuid!("c19a698f-c6f9-4a17-ae30-20d711b8f7dc");
 
     let notify_nexus = || async {
-        nexus_client
+        lazy_nexus_client
+            .get()
+            .await
+            .map_err(|e| anyhow!(e))
+            .map_err(BackoffError::transient)?
             .rack_initialization_complete(&rack_id, &request)
             .await
+            .map_err(|e| anyhow!(e))
             .map_err(BackoffError::transient)
     };
     let log_failure = |err, _| {
@@ -354,9 +342,18 @@ pub async fn run_standalone_server(
     if let Some(nexus_external_addr) = rss_args.nexus_external_addr {
         let ip = nexus_external_addr.ip();
 
-        let NexusAddressSource::Direct { address } = config.nexus_address_source else {
-            panic!("Cannot run standalone server with Nexus Address: {:?}", config.nexus_address_source);
+        let dns_address = match config.nexus_address_source {
+            NexusAddressSource::FromDns { internal_dns_address } => {
+                internal_dns_address
+            }
         };
+        let lazy_nexus_client =
+            LazyNexusClient::new_from_addrs(log.clone(), vec![dns_address])?;
+        let address: SocketAddr = lazy_nexus_client
+            .get_addr()
+            .await
+            .expect("Failed to lookup Nexus")
+            .into();
 
         services.push(NexusTypes::ServicePutRequest {
             address: address.to_string(),

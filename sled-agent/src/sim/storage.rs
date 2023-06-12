@@ -8,7 +8,7 @@
 //! than the representation of "virtual disks" which would be presented
 //! through Nexus' external API.
 
-use crate::nexus::NexusClient;
+use crate::nexus::LazyNexusClient;
 use crate::sim::http_entrypoints_pantry::ExpectedDigest;
 use crate::sim::SledAgent;
 use anyhow::{bail, Result};
@@ -440,7 +440,7 @@ struct DiskName {
 /// Simulated representation of all storage on a sled.
 pub struct Storage {
     sled_id: Uuid,
-    nexus_client: Arc<NexusClient>,
+    lazy_nexus_client: LazyNexusClient,
     log: Logger,
     physical_disks: HashMap<DiskName, PhysicalDisk>,
     zpools: HashMap<Uuid, Zpool>,
@@ -451,13 +451,13 @@ pub struct Storage {
 impl Storage {
     pub fn new(
         sled_id: Uuid,
-        nexus_client: Arc<NexusClient>,
+        lazy_nexus_client: LazyNexusClient,
         crucible_ip: IpAddr,
         log: Logger,
     ) -> Self {
         Self {
             sled_id,
-            nexus_client,
+            lazy_nexus_client,
             log,
             physical_disks: HashMap::new(),
             zpools: HashMap::new(),
@@ -489,7 +489,10 @@ impl Storage {
             variant,
             sled_id: self.sled_id,
         };
-        self.nexus_client
+        self.lazy_nexus_client
+            .get()
+            .await
+            .expect("Failed to look up Nexus address")
             .physical_disk_put(&request)
             .await
             .expect("Failed to notify Nexus about new Physical Disk");
@@ -514,7 +517,10 @@ impl Storage {
             disk_serial,
             disk_model,
         };
-        self.nexus_client
+        self.lazy_nexus_client
+            .get()
+            .await
+            .expect("Failed to look up Nexus address")
             .zpool_put(&self.sled_id, &zpool_id, &request)
             .await
             .expect("Failed to notify Nexus about new Zpool");

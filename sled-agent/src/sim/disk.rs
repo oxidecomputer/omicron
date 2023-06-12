@@ -20,7 +20,6 @@ use omicron_common::api::internal::nexus::ProducerEndpoint;
 use oximeter_producer::Server as ProducerServer;
 use propolis_client::api::DiskAttachmentState as PropolisDiskState;
 use std::net::{Ipv6Addr, SocketAddr};
-use std::sync::Arc;
 use std::time::Duration;
 use uuid::Uuid;
 
@@ -261,7 +260,7 @@ impl Simulatable for SimDisk {
     }
 
     async fn notify(
-        nexus_client: &Arc<NexusClient>,
+        nexus_client: &NexusClient,
         id: &Uuid,
         current: Self::CurrentState,
     ) -> Result<(), Error> {

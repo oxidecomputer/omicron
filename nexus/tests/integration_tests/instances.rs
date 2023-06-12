@@ -11,7 +11,6 @@ use chrono::Utc;
 use http::method::Method;
 use http::StatusCode;
 use nexus_db_queries::context::OpContext;
-use nexus_test_interface::NexusServer;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
@@ -3055,12 +3054,13 @@ async fn test_instance_v2p_mappings(cptestctx: &ControlPlaneTestContext) {
         let sa_id = Uuid::new_v4();
         let log =
             cptestctx.logctx.log.new(o!( "sled_id" => sa_id.to_string() ));
-        let addr = cptestctx.server.get_http_server_internal_address().await;
+        let internal_dns_address =
+            *cptestctx.internal_dns.server.local_address();
         let update_directory = Utf8Path::new("/should/not/be/used");
         additional_sleds.push(
             start_sled_agent(
                 log,
-                sim::NexusAddressSource::Direct { address: addr },
+                sim::NexusAddressSource::FromDns { internal_dns_address },
                 sa_id,
                 &update_directory,
                 sim::SimMode::Explicit,

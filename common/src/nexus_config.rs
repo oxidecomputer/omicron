@@ -105,6 +105,7 @@ pub enum Database {
     },
 }
 
+/// The mechanism Nexus should use to contact the internal DNS servers.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum InternalDns {

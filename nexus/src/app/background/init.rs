@@ -174,9 +174,11 @@ pub mod test {
         let found_version = i64::from(&version.version.0);
         assert_eq!(found_version, 1);
 
-        // Verify that the DNS server is on version 1.  This should already be
-        // the case because it was configured with version 1 when the simulated
-        // sled agent started up.
+        // Verify that the DNS server is on a generation number we expect.
+        //
+        // This value is dependent on nexus_test_utils::test_setup_with_config -
+        // it should be equal to the number of calls to
+        // "populate_internal_dns()" that are made.
         let initial_dns_dropshot_server =
             &cptestctx.internal_dns.dropshot_server;
         let dns_config_client = dns_service_client::Client::new(
@@ -187,7 +189,8 @@ pub mod test {
             .dns_config_get()
             .await
             .expect("failed to get initial DNS server config");
-        assert_eq!(config.generation, 1);
+        let mut generation = 3;
+        assert_eq!(config.generation, generation);
 
         // We'll need the id of the internal DNS zone.
         let internal_dns_zone_id =
@@ -253,9 +256,11 @@ pub mod test {
         )
         .await;
 
-        // Now, write version 2 of the internal DNS configuration with one
-        // additional record.
-        write_test_dns_generation(datastore, internal_dns_zone_id).await;
+        // Now, write the next version of the internal DNS configuration with
+        // one additional record.
+        generation += 1;
+        write_test_dns_generation(datastore, internal_dns_zone_id, generation)
+            .await;
 
         // Activate the internal DNS propagation pipeline.
         nexus
@@ -267,7 +272,7 @@ pub mod test {
             &cptestctx.logctx.log,
             "initial",
             initial_dns_dropshot_server.local_addr(),
-            2,
+            generation,
         )
         .await;
 
@@ -275,7 +280,7 @@ pub mod test {
             &cptestctx.logctx.log,
             "new",
             new_dns_dropshot_server.local_addr(),
-            2,
+            generation,
         )
         .await;
     }
@@ -323,6 +328,7 @@ pub mod test {
     pub async fn write_test_dns_generation(
         datastore: &DataStore,
         internal_dns_zone_id: Uuid,
+        generation: u64,
     ) {
         type TxnError = TransactionError<()>;
         {
@@ -336,7 +342,12 @@ pub mod test {
                         diesel::insert_into(dsl::dns_version)
                             .values(DnsVersion {
                                 dns_group: DnsGroup::Internal,
-                                version: Generation(2.try_into().unwrap()),
+                                version: Generation(
+                                    i64::try_from(generation)
+                                        .unwrap()
+                                        .try_into()
+                                        .unwrap(),
+                                ),
                                 time_created: chrono::Utc::now(),
                                 creator: String::from("test suite"),
                                 comment: String::from("test suite"),

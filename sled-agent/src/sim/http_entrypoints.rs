@@ -199,7 +199,7 @@ async fn update_artifact(
     sa.updates()
         .download_artifact(
             artifact.into_inner(),
-            rqctx.context().nexus_client.as_ref(),
+            &rqctx.context().lazy_nexus_client.get().await.unwrap(),
         )
         .await
         .map_err(|e| HttpError::for_internal_error(e.to_string()))?;

@@ -8,7 +8,6 @@ use omicron_common::api::external::Error;
 use omicron_common::api::external::Generation;
 use omicron_common::api::external::ResourceType;
 use std::fmt;
-use std::sync::Arc;
 use uuid::Uuid;
 
 /// Describes Oxide API objects that can be simulated here in the sled agent
@@ -113,7 +112,7 @@ pub trait Simulatable: fmt::Debug + Send + Sync {
     /// Notifies Nexus (via `nexus_client`) about a new state (`current`) for
     /// the object identified by `id`.
     async fn notify(
-        nexus_client: &Arc<NexusClient>,
+        nexus_client: &NexusClient,
         id: &Uuid,
         current: Self::CurrentState,
     ) -> Result<(), Error>;

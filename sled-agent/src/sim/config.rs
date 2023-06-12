@@ -53,8 +53,6 @@ pub struct ConfigHardware {
 pub enum NexusAddressSource {
     /// Resolve the Nexus socket address using an internal DNS server
     FromDns { internal_dns_address: SocketAddr },
-    /// Use the directly-supplied Nexus socket address
-    Direct { address: SocketAddr },
 }
 
 /// Configuration for a sled agent

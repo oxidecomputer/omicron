@@ -6,7 +6,6 @@
 
 use camino::Utf8Path;
 use dropshot::test_util::ClientTestContext;
-use nexus_test_interface::NexusServer;
 use nexus_test_utils::resource_helpers::create_physical_disk;
 use nexus_test_utils::resource_helpers::delete_physical_disk;
 use nexus_test_utils::resource_helpers::objects_list_page_authz;
@@ -50,12 +49,13 @@ async fn test_sleds_list(cptestctx: &ControlPlaneTestContext) {
         let sa_id = Uuid::new_v4();
         let log =
             cptestctx.logctx.log.new(o!( "sled_id" => sa_id.to_string() ));
-        let addr = cptestctx.server.get_http_server_internal_address().await;
+        let internal_dns_address =
+            *cptestctx.internal_dns.server.local_address();
         let update_directory = Utf8Path::new("/should/not/be/used");
         sas.push(
             start_sled_agent(
                 log,
-                sim::NexusAddressSource::Direct { address: addr },
+                sim::NexusAddressSource::FromDns { internal_dns_address },
                 sa_id,
                 &update_directory,
                 sim::SimMode::Explicit,
