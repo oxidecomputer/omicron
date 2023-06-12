@@ -160,6 +160,9 @@ struct SledAgentInner {
     // Component of Sled Agent responsible for managing updates.
     updates: UpdateManager,
 
+    /// Component of Sled Agent responsible for managing OPTE ports.
+    port_manager: PortManager,
+
     // Other Oxide-controlled services running on this Sled.
     services: ServiceManager,
 
@@ -277,7 +280,7 @@ impl SledAgent {
         services
             .sled_agent_started(
                 svc_config,
-                port_manager,
+                port_manager.clone(),
                 *sled_address.ip(),
                 request.rack_id,
             )
@@ -291,6 +294,7 @@ impl SledAgent {
                 instances,
                 hardware,
                 updates,
+                port_manager,
                 services,
                 lazy_nexus_client,
 
@@ -682,9 +686,8 @@ impl SledAgent {
         rules: &[VpcFirewallRule],
     ) -> Result<(), Error> {
         self.inner
-            .instances
+            .port_manager
             .firewall_rules_ensure(rules)
-            .await
             .map_err(Error::from)
     }
 
@@ -693,9 +696,8 @@ impl SledAgent {
         mapping: &SetVirtualNetworkInterfaceHost,
     ) -> Result<(), Error> {
         self.inner
-            .instances
+            .port_manager
             .set_virtual_nic_host(mapping)
-            .await
             .map_err(Error::from)
     }
 
@@ -704,9 +706,8 @@ impl SledAgent {
         mapping: &SetVirtualNetworkInterfaceHost,
     ) -> Result<(), Error> {
         self.inner
-            .instances
+            .port_manager
             .unset_virtual_nic_host(mapping)
-            .await
             .map_err(Error::from)
     }
 

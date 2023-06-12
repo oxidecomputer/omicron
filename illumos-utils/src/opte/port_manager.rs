@@ -386,6 +386,13 @@ impl PortManager {
         rules: &[VpcFirewallRule],
     ) -> Result<(), Error> {
         use opte_ioctl::OpteHdl;
+
+        info!(
+            self.inner.log,
+            "Ensuring VPC firewall rules";
+            "rules" => ?&rules,
+        );
+
         let hdl = OpteHdl::open(OpteHdl::XDE_CTL)?;
         for ((_, _), port) in self.inner.ports.lock().unwrap().iter() {
             let rules = opte_firewall_rules(rules, port.vni(), port.mac());
@@ -420,6 +427,11 @@ impl PortManager {
     ) -> Result<(), Error> {
         use opte_ioctl::OpteHdl;
 
+        info!(
+            self.inner.log,
+            "Mapping virtual NIC to physical host";
+            "mapping" => ?&mapping,
+        );
         let hdl = OpteHdl::open(OpteHdl::XDE_CTL)?;
         hdl.set_v2p(&oxide_vpc::api::SetVirt2PhysReq {
             vip: mapping.virtual_ip.into(),
