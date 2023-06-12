@@ -15,8 +15,11 @@ use dropshot::{
     HttpResponseUpdatedNoContent, RequestContext, TypedBody,
 };
 use omicron_common::api::external::Error;
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 use sled_hardware::Baseboard;
 use std::sync::Arc;
+use uuid::Uuid;
 
 type BootstrapApiDescription = ApiDescription<Arc<Agent>>;
 
@@ -27,6 +30,7 @@ pub(crate) fn api() -> BootstrapApiDescription {
     ) -> Result<(), String> {
         api.register(baseboard_get)?;
         api.register(components_get)?;
+        api.register(rack_initialization_status)?;
         api.register(rack_initialize)?;
         api.register(rack_reset)?;
         api.register(sled_reset)?;
@@ -38,6 +42,52 @@ pub(crate) fn api() -> BootstrapApiDescription {
         panic!("failed to register entrypoints: {}", err);
     }
     api
+}
+
+/// Current status of any rack-level operation being performed by this bootstrap
+/// agent.
+#[derive(
+    Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema,
+)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum RackOperationStatus {
+    None,
+    Initializing {
+        id: Uuid,
+    },
+    /// `id` will be none if the rack was already initialized on startup.
+    Initialized {
+        id: Option<Uuid>,
+    },
+    InitializationFailed {
+        id: Uuid,
+        message: String,
+    },
+    InitializationPanicked {
+        id: Uuid,
+    },
+    ResetOnStartup,
+    Resetting {
+        id: Uuid,
+    },
+    /// `id` will be none if the rack was already reset on startup.
+    Reset {
+        id: Option<Uuid>,
+    },
+    ResetFailed {
+        id: Uuid,
+        message: String,
+    },
+    ResetPanicked {
+        id: Uuid,
+    },
+}
+
+#[derive(
+    Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema,
+)]
+pub struct OperationId {
+    pub id: Uuid,
 }
 
 /// Return the baseboard identity of this sled.
@@ -68,6 +118,19 @@ async fn components_get(
     Ok(HttpResponseOk(components))
 }
 
+/// Get the current status of rack initialization or reset.
+#[endpoint {
+    method = GET,
+    path = "/rack-initialize",
+}]
+async fn rack_initialization_status(
+    rqctx: RequestContext<Arc<Agent>>,
+) -> Result<HttpResponseOk<RackOperationStatus>, HttpError> {
+    let ba = rqctx.context();
+    let status = ba.initialization_reset_op_status();
+    Ok(HttpResponseOk(status))
+}
+
 /// Initializes the rack with the provided configuration.
 #[endpoint {
     method = POST,
@@ -76,11 +139,13 @@ async fn components_get(
 async fn rack_initialize(
     rqctx: RequestContext<Arc<Agent>>,
     body: TypedBody<RackInitializeRequest>,
-) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+) -> Result<HttpResponseOk<OperationId>, HttpError> {
     let ba = rqctx.context();
     let request = body.into_inner();
-    ba.rack_initialize(request).await.map_err(|e| Error::from(e))?;
-    Ok(HttpResponseUpdatedNoContent())
+    let id = ba
+        .start_rack_initialize(request)
+        .map_err(|err| HttpError::for_bad_request(None, err.to_string()))?;
+    Ok(HttpResponseOk(OperationId { id: id.0 }))
 }
 
 /// Resets the rack to an unconfigured state.
@@ -90,10 +155,12 @@ async fn rack_initialize(
 }]
 async fn rack_reset(
     rqctx: RequestContext<Arc<Agent>>,
-) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+) -> Result<HttpResponseOk<OperationId>, HttpError> {
     let ba = rqctx.context();
-    ba.rack_reset().await.map_err(|e| Error::from(e))?;
-    Ok(HttpResponseUpdatedNoContent())
+    let id = ba
+        .start_rack_reset()
+        .map_err(|err| HttpError::for_bad_request(None, err.to_string()))?;
+    Ok(HttpResponseOk(OperationId { id: id.0 }))
 }
 
 /// Resets this particular sled to an unconfigured state.

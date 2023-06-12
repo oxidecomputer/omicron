@@ -8,13 +8,12 @@ use super::config::{
     Config, BOOTSTRAP_AGENT_HTTP_PORT, BOOTSTRAP_AGENT_RACK_INIT_PORT,
 };
 use super::hardware::HardwareMonitor;
+use super::http_entrypoints::RackOperationStatus;
 use super::params::RackInitializeRequest;
 use super::params::StartSledAgentRequest;
-use super::rss_handle::RssHandle;
 use super::secret_retriever::LocalSecretRetriever;
 use super::views::SledAgentResponse;
 use crate::config::Config as SledConfig;
-use crate::config::SidecarRevision;
 use crate::ledger::{Ledger, Ledgerable};
 use crate::server::Server as SledServer;
 use crate::services::ServiceManager;
@@ -40,9 +39,17 @@ use sled_hardware::{Baseboard, HardwareManager};
 use slog::Logger;
 use std::borrow::Cow;
 use std::net::{IpAddr, Ipv6Addr, SocketAddrV6};
+use std::sync::Arc;
 use thiserror::Error;
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
+
+mod rack_ops;
+
+pub use rack_ops::ConcurrentRssAccess;
+pub use rack_ops::RackInitId;
+pub use rack_ops::RackResetId;
+use rack_ops::RssAccess;
 
 /// The number of QSFP28 ports on sidecar revisions A and B
 const SIDECAR_REV_A_B_N_QSFP28_PORTS: u8 = 32;
@@ -83,12 +90,6 @@ pub enum BootstrapError {
 
     #[error("Failed to get bootstrap address: {err}")]
     GetBootstrapAddress { err: illumos_utils::zone::GetAddressError },
-
-    #[error("RSS is already executing, and should not run concurrently")]
-    ConcurrentRSSAccess,
-
-    #[error("Failed to initialize rack: {0}")]
-    RackSetup(#[from] crate::rack_setup::service::SetupServiceError),
 
     #[error(transparent)]
     GetMacError(#[from] GetMacError),
@@ -180,7 +181,7 @@ pub struct Agent {
 
     /// Ensures that RSS (initialization or teardown) is not executed
     /// concurrently.
-    rss_access: Mutex<()>,
+    rss_access: RssAccess,
 
     sled_state: Mutex<SledAgentState>,
     storage_resources: StorageResources,
@@ -403,11 +404,32 @@ impl Agent {
         let storage_resources = hardware_monitor.storage().clone();
         let baseboard = hardware_monitor.baseboard().clone();
 
-        let agent = Agent {
+        // Wait for at least the M.2 we booted from to show up.
+        //
+        // This gives the bootstrap agent a chance to read locally-stored
+        // configs if any exist.
+        loop {
+            match storage_resources.boot_disk().await {
+                Some(disk) => {
+                    info!(ba_log, "Found boot disk M.2: {disk:?}");
+                    break;
+                }
+                None => {
+                    info!(ba_log, "Waiting for boot disk M.2...");
+                    tokio::time::sleep(core::time::Duration::from_millis(250))
+                        .await;
+                }
+            }
+        }
+
+        let paths = sled_config_paths(&storage_resources).await;
+        let maybe_ledger =
+            Ledger::<PersistentSledAgentRequest>::new(&ba_log, paths).await;
+        let make_agent = move |initialized| Agent {
             log: ba_log,
             parent_log: log,
             ip,
-            rss_access: Mutex::new(()),
+            rss_access: RssAccess::new(initialized),
             sled_state: Mutex::new(SledAgentState::Before(Some(
                 hardware_monitor,
             ))),
@@ -420,33 +442,15 @@ impl Agent {
             storage_key_requester,
             baseboard,
         };
-
-        // Wait for at least the M.2 we booted from to show up.
-        //
-        // This gives the bootstrap agent a chance to read locally-stored
-        // configs if any exist.
-        loop {
-            match agent.storage_resources.boot_disk().await {
-                Some(disk) => {
-                    info!(agent.log, "Found boot disk M.2: {disk:?}");
-                    break;
-                }
-                None => {
-                    info!(agent.log, "Waiting for boot disk M.2...");
-                    tokio::time::sleep(core::time::Duration::from_millis(250))
-                        .await;
-                }
-            }
-        }
-
-        let paths = sled_config_paths(&agent.storage_resources).await;
-        if let Some(ledger) =
-            Ledger::<PersistentSledAgentRequest>::new(&agent.log, paths).await
-        {
+        let agent = if let Some(ledger) = maybe_ledger {
+            let agent = make_agent(true);
             info!(agent.log, "Sled already configured, loading sled agent");
             let sled_request = ledger.data();
             agent.request_agent(&sled_request.request).await?;
-        }
+            agent
+        } else {
+            make_agent(false)
+        };
 
         Ok(agent)
     }
@@ -658,41 +662,24 @@ impl Agent {
         }
     }
 
-    /// Runs the rack setup service to completion
-    pub async fn rack_initialize(
-        &self,
+    /// Spawn a task to run the rack setup service.
+    pub fn start_rack_initialize(
+        self: &Arc<Self>,
         request: RackInitializeRequest,
-    ) -> Result<(), BootstrapError> {
-        // Avoid concurrent initialization and teardown.
-        let _rss_access = self
-            .rss_access
-            .try_lock()
-            .map_err(|_| BootstrapError::ConcurrentRSSAccess)?;
-
-        RssHandle::run_rss(
-            &self.parent_log,
-            request,
-            self.ip,
-            self.storage_resources.clone(),
-            match &self.sled_config.sidecar_revision {
-                SidecarRevision::Physical(_) => SIDECAR_REV_A_B_N_QSFP28_PORTS,
-                SidecarRevision::Soft(config) => config.front_port_count,
-            },
-        )
-        .await?;
-        Ok(())
+    ) -> Result<RackInitId, ConcurrentRssAccess> {
+        self.rss_access.start_initializing(self, request)
     }
 
-    /// Runs the rack setup service to completion
-    pub async fn rack_reset(&self) -> Result<(), BootstrapError> {
-        // Avoid concurrent initialization and teardown.
-        let _rss_access = self
-            .rss_access
-            .try_lock()
-            .map_err(|_| BootstrapError::ConcurrentRSSAccess)?;
+    /// Spawn a task to run rack reset.
+    pub fn start_rack_reset(
+        self: &Arc<Self>,
+    ) -> Result<RackResetId, ConcurrentRssAccess> {
+        self.rss_access.start_reset(self)
+    }
 
-        RssHandle::run_rss_reset(&self.parent_log, self.ip).await?;
-        Ok(())
+    /// Get the status of a spawned initialize or reset operation.
+    pub fn initialization_reset_op_status(&self) -> RackOperationStatus {
+        self.rss_access.operation_status()
     }
 
     // The following "_locked" functions act on global state,
