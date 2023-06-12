@@ -75,7 +75,7 @@ jobs:
           then
             TITLE+=" maghemite to ${{ steps.updated.outputs.version }}"
 
-            echo "Updated maghemite API version to ${{ steps.updated.outputs.version }}" >> body
+            echo "Updated maghemite to commit ${{ steps.updated.outputs.version }}." >> body
             echo "" >> body
           fi
 

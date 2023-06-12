@@ -75,7 +75,7 @@ jobs:
           then
             TITLE+=" dendrite to ${{ steps.updated.outputs.version }}"
 
-            echo "Updated dendrite API version to ${{ steps.updated.outputs.version }}" >> body
+            echo "Updated dendrite to commit ${{ steps.updated.outputs.version }}." >> body
             echo "" >> body
           fi
 
