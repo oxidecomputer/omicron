@@ -1,5 +1,4 @@
 API endpoints with no coverage in authz tests:
-login_saml_begin                         (get    "/login/{silo_name}/saml/{provider_name}")
 device_auth_request                      (post   "/device/auth")
 device_auth_confirm                      (post   "/device/confirm")
 device_access_token                      (post   "/device/token")

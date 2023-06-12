@@ -6,7 +6,7 @@
 
 use super::simulatable::Simulatable;
 
-use crate::common::instance::ObservedPropolisState;
+use crate::common::instance::{ObservedPropolisState, PublishedInstanceState};
 use crate::nexus::NexusClient;
 use crate::params::{InstanceMigrationSourceParams, InstanceStateRequested};
 use async_trait::async_trait;
@@ -137,7 +137,7 @@ impl SimInstanceInner {
                         // cold-booting a new VM (so that the VM appears to be
                         // starting while its Propolis process is being
                         // launched).
-                        self.state.transition(ApiInstanceState::Starting);
+                        self.state.transition(PublishedInstanceState::Starting);
                         self.queue_propolis_state(
                             PropolisInstanceState::Running,
                         );
@@ -166,10 +166,10 @@ impl SimInstanceInner {
             InstanceStateRequested::Stopped => {
                 match self.next_resting_state() {
                     ApiInstanceState::Creating => {
-                        self.state.transition(ApiInstanceState::Destroyed);
+                        self.state.transition(PublishedInstanceState::Stopped);
                     }
                     ApiInstanceState::Running => {
-                        self.state.transition(ApiInstanceState::Stopping);
+                        self.state.transition(PublishedInstanceState::Stopping);
                         self.queue_propolis_state(
                             PropolisInstanceState::Stopping,
                         );
@@ -202,7 +202,8 @@ impl SimInstanceInner {
                         != ApiInstanceState::Rebooting
                         && !self.reboot_pending()
                     {
-                        self.state.transition(ApiInstanceState::Rebooting);
+                        self.state
+                            .transition(PublishedInstanceState::Rebooting);
                         self.queue_propolis_state(
                             PropolisInstanceState::Rebooting,
                         );
@@ -293,7 +294,10 @@ impl SimInstanceInner {
             self.state.current().run_state
         } else {
             if let Some(last_state) = self.last_queued_instance_state() {
-                crate::common::instance::InstanceState::from(last_state).0
+                crate::common::instance::PublishedInstanceState::from(
+                    last_state,
+                )
+                .into()
             } else {
                 self.state.current().run_state
             }
@@ -314,7 +318,7 @@ impl SimInstanceInner {
     /// Simulates rude termination by moving the instance to the Destroyed state
     /// immediately and clearing the queue of pending state transitions.
     fn terminate(&mut self) -> InstanceRuntimeState {
-        self.state.transition(ApiInstanceState::Destroyed);
+        self.state.transition(PublishedInstanceState::Stopped);
         self.queue.clear();
         self.state.current().clone()
     }

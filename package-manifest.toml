@@ -223,10 +223,10 @@ only_for_targets.image = "standard"
 # 3. Use source.type = "manual" instead of "prebuilt"
 source.type = "prebuilt"
 source.repo = "crucible"
-source.commit = "8757b3fb55a1763382ad7111144bc60ec72af23d"
+source.commit = "c7879bc8fbf68d977eb1c983cb0bab34b1b8b805"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/crucible/image/<commit>/crucible.sha256.txt
-source.sha256 = "3593bf2eccc3dbdb5a3a5a6053f06d4768895a7a9063715fdce5c2bfe9ee1dc0"
+source.sha256 = "3ddd6121a591d64d98a0a32f5d6d986cf647a796c98a6bdec1d0357cd42fe9df"
 output.type = "zone"
 
 [package.crucible-pantry]
@@ -234,10 +234,10 @@ service_name = "crucible_pantry"
 only_for_targets.image = "standard"
 source.type = "prebuilt"
 source.repo = "crucible"
-source.commit = "8757b3fb55a1763382ad7111144bc60ec72af23d"
+source.commit = "c7879bc8fbf68d977eb1c983cb0bab34b1b8b805"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/crucible/image/<commit>/crucible-pantry.sha256.txt
-source.sha256 = "3a83266bbd70c00fd725a0a5c9264baa7d77c66997b178b292256c05208a0c85"
+source.sha256 = "fc2449dd2e6f1b0eb53cf67618c3d8ef8a79025ef4fa6f1ca36165cb5155478e"
 output.type = "zone"
 
 # Refer to
@@ -248,10 +248,10 @@ service_name = "propolis-server"
 only_for_targets.image = "standard"
 source.type = "prebuilt"
 source.repo = "propolis"
-source.commit = "78314ae5f74f951c03b0cb97b06f9bc28446bdb5"
+source.commit = "96ba33d2629b93bfb9cdb806327c16113bcf0cf3"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/propolis/image/<commit>/propolis-server.sha256.txt
-source.sha256 = "c77c597b6ce111e14a10052d35641857581e158be58f9131f56fa1baeeac2b30"
+source.sha256 = "42986a43e4ac69f5eb09e3aed4af01e0d6117254950e81b5afeddd46c127259f"
 output.type = "zone"
 
 [package.maghemite]
@@ -300,8 +300,8 @@ only_for_targets.image = "standard"
 # 2. Copy dendrite.tar.gz from dendrite/out to omicron/out
 source.type = "prebuilt"
 source.repo = "dendrite"
-source.commit = "ca7ad51924dc55112c6cc2f1346e0737f71b6487"
-source.sha256 = "ea4f0ed28108a19a78870992342720ec1eeeaef4f299f968f41b967adffa9445"
+source.commit = "9e3764239515a7bb3f09c922cfb88b1be3dade77"
+source.sha256 = "13d8ff8374ec0b5d9b681b83aef8a2d4f0aed15d0ad92dc5b04a43d850196309"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -325,8 +325,8 @@ only_for_targets.image = "standard"
 # 2. Copy the output zone image from dendrite/out to omicron/out
 source.type = "prebuilt"
 source.repo = "dendrite"
-source.commit = "ca7ad51924dc55112c6cc2f1346e0737f71b6487"
-source.sha256 = "a3bfee3802c98d206be49882d48c05ab52e764724b41ffb186000ea99265acda"
+source.commit = "9e3764239515a7bb3f09c922cfb88b1be3dade77"
+source.sha256 = "c90dedceec367f5fc8f2c585fda4be1804f59124c067dfc3632cfb7a938b2b4f"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -343,8 +343,8 @@ only_for_targets.image = "standard"
 # 2. Copy dendrite.tar.gz from dendrite/out to omicron/out/dendrite-softnpu.tar.gz
 source.type = "prebuilt"
 source.repo = "dendrite"
-source.commit = "ca7ad51924dc55112c6cc2f1346e0737f71b6487"
-source.sha256 = "4ab19e871094a25410c629f191052eeb88bbb0c6ea294f92258962af056d36f9"
+source.commit = "9e3764239515a7bb3f09c922cfb88b1be3dade77"
+source.sha256 = "60633b939e9492c6e5302d9ea4c373ffa7d652be1ca7b1f43524f4da07cf14c7"
 output.type = "zone"
 output.intermediate_only = true
 

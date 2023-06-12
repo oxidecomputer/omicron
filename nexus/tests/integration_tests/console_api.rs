@@ -189,7 +189,7 @@ async fn test_console_pages(cptestctx: &ControlPlaneTestContext) {
         testctx,
         "/projects/irrelevant-path",
         &format!(
-            "/login/{}/local?state=%2Fprojects%2Firrelevant-path",
+            "/login/{}/local?redirect_uri=%2Fprojects%2Firrelevant-path",
             cptestctx.silo_name
         ),
     )
@@ -220,7 +220,8 @@ async fn test_console_pages(cptestctx: &ControlPlaneTestContext) {
 async fn test_unauthed_console_pages(cptestctx: &ControlPlaneTestContext) {
     let testctx = &cptestctx.external_client;
 
-    let unauthed_console_paths = &["/login/irrelevant-silo/local"];
+    let unauthed_console_paths =
+        &["/login/irrelevant-silo/local", "/login/irrelevant-silo/saml/my-idp"];
 
     for path in unauthed_console_paths {
         expect_console_page(testctx, path, None).await;
@@ -467,21 +468,46 @@ async fn test_login_redirect_simple(cptestctx: &ControlPlaneTestContext) {
     // encoded path is /abc/def
     expect_redirect(
         testctx,
-        "/login?state=%2Fabc%2Fdef",
-        &format!("{}?state=%2Fabc%2Fdef", expected),
+        "/login?redirect_uri=%2Fabc%2Fdef",
+        &format!("{}?redirect_uri=%2Fabc%2Fdef", expected),
     )
     .await;
 
     // if state param comes in not URL encoded, we should still URL encode it
     expect_redirect(
         testctx,
-        "/login?state=/abc/def",
-        &format!("{}?state=%2Fabc%2Fdef", expected),
+        "/login?redirect_uri=/abc/def",
+        &format!("{}?redirect_uri=%2Fabc%2Fdef", expected),
     )
     .await;
+}
 
-    // empty state param gets dropped
-    expect_redirect(testctx, "/login?state=", &expected).await;
+// reject anything that's not a relative URI
+#[nexus_test]
+async fn test_bad_redirect_uri(cptestctx: &ControlPlaneTestContext) {
+    let testctx = &cptestctx.external_client;
+
+    let paths = [
+        "/login",
+        "/login/my-silo/local",
+        "/login/my-silo/saml/my-idp",
+        "/login/my-silo/saml/my-idp/redirect",
+    ];
+    let bad_uris = ["foo", "", "http://example.com"];
+
+    for path in paths.iter() {
+        for bad_uri in bad_uris.iter() {
+            let uri = format!("{}?redirect_uri={}", path, bad_uri);
+            let body = RequestBuilder::new(testctx, Method::GET, &uri)
+                .expect_status(Some(StatusCode::BAD_REQUEST))
+                .execute()
+                .await
+                .expect("failed to 400")
+                .parsed_body::<dropshot::HttpErrorResponseBody>()
+                .unwrap();
+            assert!(body.message.ends_with("not a relative URI"));
+        }
+    }
 }
 
 #[nexus_test]
@@ -582,10 +608,13 @@ async fn test_login_redirect_multiple_silos(
         client: &reqwest::Client,
         silo_name: &str,
         port: u16,
+        state: Option<&str>,
     ) -> Redirect {
+        let query =
+            state.map_or("".to_string(), |s| format!("?redirect_uri={}", s));
         let url = format!(
-            "http://{}.sys.{}:{}/login",
-            silo_name, DNS_ZONE_EXTERNAL_TESTING, port,
+            "http://{}.sys.{}:{}/login{}",
+            silo_name, DNS_ZONE_EXTERNAL_TESTING, port, query
         );
         let response = client
             .get(&url)
@@ -667,23 +696,64 @@ async fn test_login_redirect_multiple_silos(
 
     // Recovery silo: redirect for local username/password login
     assert_eq!(
-        make_request(&reqwest_client, cptestctx.silo_name.as_str(), port).await,
+        make_request(&reqwest_client, cptestctx.silo_name.as_str(), port, None)
+            .await,
         Redirect::Location(format!("/login/{}/local", &cptestctx.silo_name,)),
     );
+
+    // same thing, but with state param in URL
+    assert_eq!(
+        make_request(
+            &reqwest_client,
+            cptestctx.silo_name.as_str(),
+            port,
+            Some("/abc/def")
+        )
+        .await,
+        Redirect::Location(format!(
+            "/login/{}/local?redirect_uri=%2Fabc%2Fdef",
+            &cptestctx.silo_name,
+        )),
+    );
+
     // SAML with no idps: no redirect possible
     assert_eq!(
-        make_request(&reqwest_client, silo_saml0.identity.name.as_str(), port)
-            .await,
+        make_request(
+            &reqwest_client,
+            silo_saml0.identity.name.as_str(),
+            port,
+            None
+        )
+        .await,
         Redirect::Error(String::from(
             "no identity providers are configured for Silo"
         ))
     );
     // SAML with one idp: redirect to that idp
     assert_eq!(
-        make_request(&reqwest_client, silo_saml1.identity.name.as_str(), port)
-            .await,
+        make_request(
+            &reqwest_client,
+            silo_saml1.identity.name.as_str(),
+            port,
+            None
+        )
+        .await,
         Redirect::Location(format!(
             "/login/{}/saml/idp0",
+            silo_saml1.identity.name.as_str()
+        )),
+    );
+    // same thing but, with state param in URL
+    assert_eq!(
+        make_request(
+            &reqwest_client,
+            silo_saml1.identity.name.as_str(),
+            port,
+            Some("/abc/def"),
+        )
+        .await,
+        Redirect::Location(format!(
+            "/login/{}/saml/idp0?redirect_uri=%2Fabc%2Fdef",
             silo_saml1.identity.name.as_str()
         )),
     );
@@ -691,8 +761,13 @@ async fn test_login_redirect_multiple_silos(
     // This is arbitrary.  We just don't want /login to break if you add a
     // second IdP.
     assert_eq!(
-        make_request(&reqwest_client, silo_saml2.identity.name.as_str(), port)
-            .await,
+        make_request(
+            &reqwest_client,
+            silo_saml2.identity.name.as_str(),
+            port,
+            None
+        )
+        .await,
         Redirect::Location(format!(
             "/login/{}/saml/idp0",
             silo_saml2.identity.name.as_str()
@@ -701,7 +776,7 @@ async fn test_login_redirect_multiple_silos(
 
     // Bogus Silo: this currently redirects you to _some_ Silo.
     assert_matches::assert_matches!(
-        make_request(&reqwest_client, "not-a-silo", port).await,
+        make_request(&reqwest_client, "not-a-silo", port, None).await,
         Redirect::Location(_)
     );
 
@@ -731,6 +806,7 @@ async fn test_login_redirect_multiple_silos(
                 &reqwest_client,
                 silo_saml1.identity.name.as_str(),
                 port,
+                None,
             )
             .await
             {

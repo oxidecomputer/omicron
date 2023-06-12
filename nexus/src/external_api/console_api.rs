@@ -26,7 +26,7 @@ use dropshot::{
     HttpResponseFound, HttpResponseHeaders, HttpResponseSeeOther,
     HttpResponseUpdatedNoContent, Path, Query, RequestContext,
 };
-use http::{header, Response, StatusCode};
+use http::{header, Response, StatusCode, Uri};
 use hyper::Body;
 use lazy_static::lazy_static;
 use mime_guess;
@@ -36,12 +36,48 @@ use nexus_types::external_api::params;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::{DataPageParams, Error, NameOrId};
+use parse_display::Display;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_urlencoded;
 use std::num::NonZeroU32;
+use std::str::FromStr;
 use std::{collections::HashSet, ffi::OsString, path::PathBuf, sync::Arc};
 
+// -----------------------------------------------------
+// High-level overview of how login works in the console
+// -----------------------------------------------------
+//
+// There's a lot of noise in this file, so here is the big picture. A user can
+// get sent to login in two ways in the console:
+//
+// 1. Navigate an auth-gated console page (e.g., /projects) directly while
+//    logged out. This goes through `console_index_or_login_redirect` and
+//    therefore results in a redirect straight to either
+//    /login/{silo}/local?redirect_uri={} or
+//    /login/{silo}/saml/{provider}?redirect_uri={} depending on the silo's
+//    authn mode. Nexus takes the path the user was trying to hit and sticks it
+//    in a `redirect_uri` query param.
+// 2. Hit a 401 on a background API call while already in the console (for
+//    example, if session expires while in use). In that case, the console will
+//    navigate to `/login?redirect_uri={current_path}`, which will respond with
+//    a redirect to local or SAML login as above.
+//
+// Local login is very simple. We show a login form, the username and password
+// are POSTed to the API, and on success, the console pulls `redirect_uri` out
+// of the query params and navigates to that route client-side.
+//
+// SAML is more complicated. /login/{silo}/saml/{provider}?redirect_uri={} shows
+// a page with a link to /login/{silo}/saml/{provider}/redirect?redirect_uri={}
+// (note the /redirect), which redirects to the IdP  with `redirect_uri` encoded
+// in a RelayState query param). On successful login in the IdP, the IdP will
+// POST /login/{silo}/saml/{provider} with a body including that redirect_uri,
+// so that on success, we can redirect to the original target page.
+
+// -------------------------------
+// Detailed overview of SAML login
+// -------------------------------
+//
 // Silos have one or more identity providers, and an unauthenticated user will
 // be asked to authenticate to one of those below. Silo identity provider
 // selection is currently performed as a name on the /login/ path. This will
@@ -93,7 +129,7 @@ use std::{collections::HashSet, ffi::OsString, path::PathBuf, sync::Arc};
 //   https://some.idp.test/auth/saml?SAMLRequest=...&RelayState=...&SigAlg=...&Signature=...
 //
 // SAMLRequest is base64 encoded zlib compressed XML, and RelayState can be
-// anything - Nexus currently encodes the referer header so that when SAML login
+// anything - Nexus currently encodes a redirect_uri so that when SAML login
 // is successful the user can be sent back to where they were originally.
 //
 // The user will then authenticate with that IdP, and if successful will be
@@ -114,8 +150,8 @@ use std::{collections::HashSet, ffi::OsString, path::PathBuf, sync::Arc};
 //
 // The IdP's SAMLResponse will authenticate a subject, and from this external
 // subject a silo user has to be created or retrieved (depending on the Silo's
-// user provision type). After that, users will be redirected to the referer in
-// the relay state, or to `/organizations`.
+// user provision type). After that, users will be redirected to the `redirect_uri`
+// in the relay state, or to `/organizations`.
 //
 // SAML logout flow
 // ----------------
@@ -153,7 +189,7 @@ pub struct LoginToProviderPathParam {
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct RelayState {
-    pub referer: Option<String>,
+    pub redirect_uri: Option<RelativeUri>,
 }
 
 impl RelayState {
@@ -179,24 +215,41 @@ impl RelayState {
     }
 }
 
-/// Prompt user login
-///
-/// Either display a page asking a user for their credentials, or redirect them
-/// to their identity provider.
+/// SAML login console page (just a link to the IdP)
 #[endpoint {
    method = GET,
    path = "/login/{silo_name}/saml/{provider_name}",
    tags = ["login"],
+   unpublished = true,
 }]
 pub async fn login_saml_begin(
     rqctx: RequestContext<Arc<ServerContext>>,
+    _path_params: Path<LoginToProviderPathParam>,
+    _query_params: Query<LoginUrlQuery>,
+) -> Result<Response<Body>, HttpError> {
+    serve_console_index(rqctx.context()).await
+}
+
+/// Get a redirect straight to the IdP
+///
+/// Console uses this to avoid having to ask the API anything about the IdP. It
+/// already knows the IdP name from the path, so it can just link to this path
+/// and rely on Nexus to redirect to the actual IdP.
+#[endpoint {
+   method = GET,
+   path = "/login/{silo_name}/saml/{provider_name}/redirect",
+   tags = ["login"],
+   unpublished = true,
+}]
+pub async fn login_saml_redirect(
+    rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<LoginToProviderPathParam>,
+    query_params: Query<LoginUrlQuery>,
 ) -> Result<HttpResponseFound, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let nexus = &apictx.nexus;
         let path_params = path_params.into_inner();
-        let request = &rqctx.request;
 
         // Use opctx_external_authn because this request will be
         // unauthenticated.
@@ -214,42 +267,20 @@ pub async fn login_saml_begin(
             IdentityProviderType::Saml(saml_identity_provider) => {
                 // Relay state is sent to the IDP, to be sent back to the SP
                 // after a successful login.
-                let relay_state: Option<String> = if let Some(value) =
-                    request.headers().get(hyper::header::REFERER)
-                {
-                    let relay_state = RelayState {
-                        referer: {
-                            Some(
-                                value
-                                    .to_str()
-                                    .map_err(|e| {
-                                        HttpError::for_bad_request(
-                                            None,
-                                            format!(
-                                            "referer header to_str failed! {}",
-                                            e
-                                        ),
-                                        )
-                                    })?
-                                    .to_string(),
-                            )
-                        },
-                    };
-
-                    Some(relay_state.to_encoded().map_err(|e| {
+                let redirect_uri = query_params.into_inner().redirect_uri;
+                let relay_state =
+                    RelayState { redirect_uri }.to_encoded().map_err(|e| {
                         HttpError::for_internal_error(format!(
                             "encoding relay state failed: {}",
                             e
                         ))
-                    })?)
-                } else {
-                    None
-                };
+                    })?;
 
-                let sign_in_url =
-                    saml_identity_provider.sign_in_url(relay_state).map_err(
-                        |e| HttpError::for_internal_error(e.to_string()),
-                    )?;
+                let sign_in_url = saml_identity_provider
+                    .sign_in_url(Some(relay_state))
+                    .map_err(|e| {
+                        HttpError::for_internal_error(e.to_string())
+                    })?;
 
                 http_response_found(sign_in_url)
             }
@@ -300,7 +331,7 @@ pub async fn login_saml(
                 }
             };
 
-        let relay_state: Option<RelayState> =
+        let relay_state =
             if let Some(value) = relay_state_string {
                 Some(RelayState::from_encoded(value).map_err(|e| {
                     HttpError::for_internal_error(format!("{}", e))
@@ -320,7 +351,8 @@ pub async fn login_saml(
 
         let session = create_session(opctx, apictx, user).await?;
         let next_url = relay_state
-            .and_then(|r| r.referer)
+            .and_then(|r| r.redirect_uri)
+            .map(|u| u.to_string())
             .unwrap_or_else(|| "/".to_string());
         let mut response = http_response_see_other(next_url)?;
 
@@ -354,6 +386,7 @@ pub struct LoginPathParam {
 pub async fn login_local_begin(
     rqctx: RequestContext<Arc<ServerContext>>,
     _path_params: Path<LoginPathParam>,
+    _query_params: Query<LoginUrlQuery>,
 ) -> Result<Response<Body>, HttpError> {
     // TODO: figure out why instrumenting doesn't work
     // let apictx = rqctx.context();
@@ -477,25 +510,54 @@ pub struct RestPathParam {
     path: Vec<String>,
 }
 
-#[derive(Deserialize, JsonSchema)]
-pub struct StateParam {
-    state: Option<String>,
+/// This is meant as a security feature. We want to ensure we never redirect to
+/// a URI on a different host.
+#[derive(Serialize, Deserialize, Debug, JsonSchema, Clone, Display)]
+#[serde(try_from = "String")]
+#[display("{0}")]
+pub struct RelativeUri(String);
+
+impl FromStr for RelativeUri {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::try_from(s.to_string())
+    }
 }
 
-#[derive(Serialize)]
+impl TryFrom<Uri> for RelativeUri {
+    type Error = String;
+
+    fn try_from(uri: Uri) -> Result<Self, Self::Error> {
+        if uri.host().is_none() && uri.scheme().is_none() {
+            Ok(Self(uri.to_string()))
+        } else {
+            Err(format!("\"{}\" is not a relative URI", uri))
+        }
+    }
+}
+
+impl TryFrom<String> for RelativeUri {
+    type Error = String;
+
+    fn try_from(s: String) -> Result<Self, Self::Error> {
+        s.parse::<Uri>()
+            .map_err(|_| format!("\"{}\" is not a relative URI", s))
+            .and_then(|uri| Self::try_from(uri))
+    }
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
 pub struct LoginUrlQuery {
-    // TODO: give state param the correct name. In SAML it's called RelayState.
-    // If/when we support auth protocols other than SAML, we will need to have
-    // separate implementations here for each one
-    state: Option<String>,
+    redirect_uri: Option<RelativeUri>,
 }
 
 /// Generate URI to the appropriate login form for this Silo. Optional
-/// `redirect_url` represents the URL to send the user back to after successful
+/// `redirect_uri` represents the URL to send the user back to after successful
 /// login, and is included in `state` query param if present
 async fn get_login_url(
     rqctx: &RequestContext<Arc<ServerContext>>,
-    redirect_url: Option<String>,
+    redirect_uri: Option<RelativeUri>,
 ) -> Result<String, Error> {
     let nexus = &rqctx.context().nexus;
     let endpoint = nexus.endpoint_for_request(rqctx)?;
@@ -546,7 +608,7 @@ async fn get_login_url(
 
     // Stick redirect_url into the state param and URL encode it so it can be
     // used as a query string. We assume it's not already encoded.
-    let query_data = LoginUrlQuery { state: redirect_url };
+    let query_data = LoginUrlQuery { redirect_uri };
 
     Ok(match serde_urlencoded::to_string(query_data) {
         // only put the ? in front if there's something there
@@ -564,13 +626,12 @@ async fn get_login_url(
 }]
 pub async fn login_begin(
     rqctx: RequestContext<Arc<ServerContext>>,
-    query_params: Query<StateParam>,
+    query_params: Query<LoginUrlQuery>,
 ) -> Result<HttpResponseFound, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let query = query_params.into_inner();
-        let redirect_url = query.state.filter(|s| !s.trim().is_empty());
-        let login_url = get_login_url(&rqctx, redirect_url).await?;
+        let login_url = get_login_url(&rqctx, query.redirect_uri).await?;
         http_response_found(login_url)
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -591,13 +652,12 @@ pub async fn console_index_or_login_redirect(
     // otherwise redirect to idp
 
     // Put the current URI in the query string to redirect back to after login.
-    // Right now this is a relative path, which only works as long as we're
-    // using the spoof login page, which is hosted by Nexus. Once we start
-    // sending users to a real external IdP login page, this will need to be a
-    // full URL.
-    let redirect_url =
-        rqctx.request.uri().path_and_query().map(|p| p.to_string());
-    let login_url = get_login_url(&rqctx, redirect_url).await?;
+    let redirect_uri = rqctx
+        .request
+        .uri()
+        .path_and_query()
+        .map(|p| RelativeUri(p.to_string()));
+    let login_url = get_login_url(&rqctx, redirect_uri).await?;
 
     Ok(Response::builder()
         .status(StatusCode::FOUND)
@@ -792,7 +852,7 @@ fn find_file(path: &PathBuf, root_dir: &PathBuf) -> Result<PathBuf, HttpError> {
 
 #[cfg(test)]
 mod test {
-    use super::find_file;
+    use super::{find_file, RelativeUri};
     use http::StatusCode;
     use std::{env::current_dir, path::PathBuf};
 
@@ -869,5 +929,18 @@ mod test {
         let error = find_file(&PathBuf::from(path_str), &root).unwrap_err();
         assert_eq!(error.status_code, StatusCode::NOT_FOUND);
         assert_eq!(error.internal_message, "attempted to follow a symlink");
+    }
+
+    #[test]
+    fn test_relative_uri() {
+        let good = ["/", "/abc", "/abc/def"];
+        for g in good.iter() {
+            assert!(RelativeUri::try_from(g.to_string()).is_ok());
+        }
+
+        let bad = ["", "abc", "example.com", "http://example.com"];
+        for b in bad.iter() {
+            assert!(RelativeUri::try_from(b.to_string()).is_err());
+        }
     }
 }
