@@ -3599,9 +3599,9 @@ dependencies = [
 
 [[package]]
 name = "libsw"
-version = "3.2.4"
+version = "3.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "da61df73723784989cdcf88bf39d6a8e480554838fd2e5c9afe40cacc8700c33"
+checksum = "610cd929d24f634af855498b575263c44d541a0e28c21d595968a6e25fe190f9"
 dependencies = [
  "tokio",
 ]
