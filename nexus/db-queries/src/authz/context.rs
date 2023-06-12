@@ -115,7 +115,6 @@ impl Context {
             .load_roles(opctx, &self.datastore, &self.authn, &mut roles)
             .await?;
         debug!(opctx.log, "roles"; "roles" => ?roles);
-
         let actor = AnyActor::new(&self.authn, roles);
         let is_authn = self.authn.actor().is_some();
         match self.authz.is_allowed(&actor, action, &resource) {

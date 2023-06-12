@@ -91,22 +91,14 @@ pub trait ApiResourceWithRoles: ApiResource {
     /// affect the parent will be fetched, which include all of _its_ parents
     /// (i.e., it's recursive).  With this function, we only fetch this one
     /// resource's roles.
-    fn conferred_roles<'a, 'b, 'c, 'd, 'e>(
-        &'a self,
-        authn: &'d authn::Context,
+    fn conferred_roles(
+        &self,
+        authn: &authn::Context,
         // XXX-dap use a struct
-    ) -> BoxFuture<
-        'e,
-        Result<
-            Option<(ResourceType, Uuid, BTreeMap<String, Vec<String>>)>,
-            Error,
-        >,
-    >
-    where
-        'a: 'e,
-        'b: 'e,
-        'c: 'e,
-        'd: 'e;
+    ) -> Result<
+        Option<(ResourceType, Uuid, BTreeMap<String, Vec<String>>)>,
+        Error,
+    >;
 }
 
 /// Describes the specific roles for an `ApiResourceWithRoles`
@@ -229,56 +221,43 @@ impl ApiResourceWithRoles for Fleet {
         *FLEET_ID
     }
 
-    fn conferred_roles<'a, 'b, 'c, 'd, 'e>(
-        &'a self,
-        authn: &'d authn::Context,
-    ) -> BoxFuture<
-        'e,
-        Result<
-            Option<(ResourceType, Uuid, BTreeMap<String, Vec<String>>)>,
-            Error,
-        >,
-    >
-    where
-        'a: 'e,
-        'b: 'e,
-        'c: 'e,
-        'd: 'e,
-    {
-        async {
-            // We support operators configuring Silos such that a particular
-            // Silo level role confers a particular Fleet-level role.  So when
-            // loading fleet-level roles, we also have to load an actor's
-            // Silo-level roles, assuming there _is_ an actor and that this
-            // actor is associated with a Silo.
-            // XXX-dap that comment belongs elsewhere
-            let Some(silo_id) = authn
+    fn conferred_roles(
+        &self,
+        authn: &authn::Context,
+    ) -> Result<
+        Option<(ResourceType, Uuid, BTreeMap<String, Vec<String>>)>,
+        Error,
+    > {
+        // We support operators configuring Silos such that a particular
+        // Silo level role confers a particular Fleet-level role.  So when
+        // loading fleet-level roles, we also have to load an actor's
+        // Silo-level roles, assuming there _is_ an actor and that this
+        // actor is associated with a Silo.
+        // XXX-dap that comment belongs elsewhere
+        let Some(silo_id) = authn
                 .actor()
                 .and_then(|actor| actor.silo_id())
                 else { return Ok(None); };
-            let silo_authn_policy =
-                authn.silo_authn_policy().ok_or_else(|| {
-                    Error::internal_error(&format!(
-                        "actor had a Silo ({}) but no SiloAuthnPolicy",
-                        silo_id
-                    ))
-                })?;
-            let mapped_roles = silo_authn_policy
-                .mapped_fleet_roles()
-                .into_iter()
-                .map(|(silo_role, fleet_roles)| {
-                    (
-                        silo_role.to_database_string().to_string(),
-                        fleet_roles
-                            .into_iter()
-                            .map(|f| f.to_database_string().to_string())
-                            .collect(),
-                    )
-                })
-                .collect();
-            Ok(Some((ResourceType::Silo, silo_id, mapped_roles)))
-        }
-        .boxed()
+        let silo_authn_policy = authn.silo_authn_policy().ok_or_else(|| {
+            Error::internal_error(&format!(
+                "actor had a Silo ({}) but no SiloAuthnPolicy",
+                silo_id
+            ))
+        })?;
+        let mapped_roles = silo_authn_policy
+            .mapped_fleet_roles()
+            .into_iter()
+            .map(|(silo_role, fleet_roles)| {
+                (
+                    silo_role.to_database_string().to_string(),
+                    fleet_roles
+                        .into_iter()
+                        .map(|f| f.to_database_string().to_string())
+                        .collect(),
+                )
+            })
+            .collect();
+        Ok(Some((ResourceType::Silo, silo_id, mapped_roles)))
     }
 }
 

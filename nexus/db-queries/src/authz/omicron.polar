@@ -22,9 +22,6 @@ allow(actor: AnyActor, action: Action, resource) if
     has_permission(actor.authn_actor.unwrap(), action.to_perm(), resource);
 
 # Define role relationships
-#
-# This rule checks whether the actor has explicitly been granted this role on
-# this resource.
 has_role(actor: AuthenticatedActor, role: String, resource: Resource)
 	if resource.has_role(actor, role);
 

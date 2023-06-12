@@ -170,11 +170,10 @@ fn do_authz_resource(
                             self.key
                         }
 
-                        fn conferred_roles<'a, 'b, 'c, 'd, 'e>(
-                            &'a self,
-                            _authn: &'d authn::Context,
-                        ) -> BoxFuture<
-                            'e,
+                        fn conferred_roles(
+                            &self,
+                            _authn: &authn::Context,
+                        ) ->
                             Result<
                                 Option<(
                                     ResourceType,
@@ -182,15 +181,9 @@ fn do_authz_resource(
                                     BTreeMap<String, Vec<String>>,
                                 )>,
                                 Error,
-                            >,
-                        >
-                        where
-                            'a: 'e,
-                            'b: 'e,
-                            'c: 'e,
-                            'd: 'e
+                            >
                         {
-                            futures::future::ready(Ok(None)).boxed()
+                            Ok(None)
                         }
 
                     }
