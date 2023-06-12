@@ -3951,7 +3951,7 @@
     "/v1/system/identity-providers": {
       "get": {
         "tags": [
-          "system/identity-providers"
+          "system/silos"
         ],
         "summary": "List a silo's IdP's name",
         "operationId": "silo_identity_provider_list",
@@ -4020,7 +4020,7 @@
     "/v1/system/identity-providers/local/users": {
       "post": {
         "tags": [
-          "system/identity-providers"
+          "system/silos"
         ],
         "summary": "Create a user",
         "description": "Users can only be created in Silos with `provision_type` == `Fixed`. Otherwise, Silo users are just-in-time (JIT) provisioned when a user first logs in using an external Identity Provider.",
@@ -4069,7 +4069,7 @@
     "/v1/system/identity-providers/local/users/{user_id}": {
       "delete": {
         "tags": [
-          "system/identity-providers"
+          "system/silos"
         ],
         "summary": "Delete a user",
         "operationId": "local_idp_user_delete",
@@ -4110,7 +4110,7 @@
     "/v1/system/identity-providers/local/users/{user_id}/set-password": {
       "post": {
         "tags": [
-          "system/identity-providers"
+          "system/silos"
         ],
         "summary": "Set or invalidate a user's password",
         "description": "Passwords can only be updated for users in Silos with identity mode `LocalOnly`.",
@@ -4162,7 +4162,7 @@
     "/v1/system/identity-providers/saml": {
       "post": {
         "tags": [
-          "system/identity-providers"
+          "system/silos"
         ],
         "summary": "Create a SAML IdP",
         "operationId": "saml_identity_provider_create",
@@ -4210,7 +4210,7 @@
     "/v1/system/identity-providers/saml/{provider}": {
       "get": {
         "tags": [
-          "system/identity-providers"
+          "system/silos"
         ],
         "summary": "Fetch a SAML IdP",
         "operationId": "saml_identity_provider_view",
@@ -6172,7 +6172,7 @@
     "/v1/system/users": {
       "get": {
         "tags": [
-          "system/users"
+          "system/silos"
         ],
         "summary": "List built-in (system) users in a silo",
         "operationId": "silo_user_list",
@@ -6241,7 +6241,7 @@
     "/v1/system/users/{user_id}": {
       "get": {
         "tags": [
-          "system/users"
+          "system/silos"
         ],
         "summary": "Fetch a built-in (system) user",
         "operationId": "silo_user_view",
@@ -6289,7 +6289,7 @@
     "/v1/system/users-builtin": {
       "get": {
         "tags": [
-          "system/users"
+          "system/silos"
         ],
         "summary": "List built-in users",
         "operationId": "user_builtin_list",
@@ -6348,7 +6348,7 @@
     "/v1/system/users-builtin/{user}": {
       "get": {
         "tags": [
-          "system/users"
+          "system/silos"
         ],
         "summary": "Fetch a built-in user",
         "operationId": "user_builtin_view",
@@ -14488,13 +14488,6 @@
       }
     },
     {
-      "name": "system/identity-providers",
-      "description": "Identity providers manage the process of establishing, maintaining, and integrating user identity and access control.",
-      "externalDocs": {
-        "url": "http://docs.oxide.computer/api/system/identity-providers"
-      }
-    },
-    {
       "name": "system/metrics",
       "description": "Metrics provide insight into the operation of the Oxide deployment. These include telemetry on hardware and software components that can be used to understand the current state as well as to diagnose issues.",
       "externalDocs": {
@@ -14520,13 +14513,6 @@
       "description": "This includes operations related to system updates.",
       "externalDocs": {
         "url": "http://docs.oxide.computer/api/system/update"
-      }
-    },
-    {
-      "name": "system/users",
-      "description": "Operations for managing built-in (system) user accounts.",
-      "externalDocs": {
-        "url": "http://docs.oxide.computer/api/system/users"
       }
     },
     {

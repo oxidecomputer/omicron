@@ -98,12 +98,6 @@
         "url": "http://docs.oxide.computer/api/system/hardware"
       }
     },
-    "system/identity-providers": {
-      "description": "Identity providers manage the process of establishing, maintaining, and integrating user identity and access control.",
-      "external_docs": {
-        "url": "http://docs.oxide.computer/api/system/identity-providers"
-      }
-    },
     "system/metrics": {
       "description": "Metrics provide insight into the operation of the Oxide deployment. These include telemetry on hardware and software components that can be used to understand the current state as well as to diagnose issues.",
       "external_docs": {
@@ -126,12 +120,6 @@
       "description": "This includes operations related to system updates.",
       "external_docs": {
         "url": "http://docs.oxide.computer/api/system/update"
-      }
-    },
-    "system/users": {
-      "description": "Operations for managing built-in (system) user accounts.",
-      "external_docs": {
-        "url": "http://docs.oxide.computer/api/system/users"
       }
     }
   }

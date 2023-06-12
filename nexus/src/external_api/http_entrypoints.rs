@@ -629,7 +629,7 @@ async fn silo_policy_update(
 #[endpoint {
     method = GET,
     path = "/v1/system/users",
-    tags = ["system/users"],
+    tags = ["system/silos"],
 }]
 async fn silo_user_list(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -670,7 +670,7 @@ struct UserParam {
 #[endpoint {
     method = GET,
     path = "/v1/system/users/{user_id}",
-    tags = ["system/users"],
+    tags = ["system/silos"],
 }]
 async fn silo_user_view(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -697,7 +697,7 @@ async fn silo_user_view(
 #[endpoint {
     method = GET,
     path = "/v1/system/identity-providers",
-    tags = ["system/identity-providers"],
+    tags = ["system/silos"],
 }]
 async fn silo_identity_provider_list(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -734,7 +734,7 @@ async fn silo_identity_provider_list(
 #[endpoint {
     method = POST,
     path = "/v1/system/identity-providers/saml",
-    tags = ["system/identity-providers"],
+    tags = ["system/silos"],
 }]
 async fn saml_identity_provider_create(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -763,7 +763,7 @@ async fn saml_identity_provider_create(
 #[endpoint {
     method = GET,
     path = "/v1/system/identity-providers/saml/{provider}",
-    tags = ["system/identity-providers"],
+    tags = ["system/silos"],
 }]
 async fn saml_identity_provider_view(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -805,7 +805,7 @@ async fn saml_identity_provider_view(
 #[endpoint {
     method = POST,
     path = "/v1/system/identity-providers/local/users",
-    tags = ["system/identity-providers"],
+    tags = ["system/silos"],
 }]
 async fn local_idp_user_create(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -834,7 +834,7 @@ async fn local_idp_user_create(
 #[endpoint {
     method = DELETE,
     path = "/v1/system/identity-providers/local/users/{user_id}",
-    tags = ["system/identity-providers"],
+    tags = ["system/silos"],
 }]
 async fn local_idp_user_delete(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -861,7 +861,7 @@ async fn local_idp_user_delete(
 #[endpoint {
     method = POST,
     path = "/v1/system/identity-providers/local/users/{user_id}/set-password",
-    tags = ["system/identity-providers"],
+    tags = ["system/silos"],
 }]
 async fn local_idp_user_set_password(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -4838,7 +4838,7 @@ async fn group_view(
 #[endpoint {
     method = GET,
     path = "/v1/system/users-builtin",
-    tags = ["system/users"],
+    tags = ["system/silos"],
 }]
 async fn user_builtin_list(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -4870,7 +4870,7 @@ async fn user_builtin_list(
 #[endpoint {
     method = GET,
     path = "/v1/system/users-builtin/{user}",
-    tags = ["system/users"],
+    tags = ["system/silos"],
 }]
 async fn user_builtin_view(
     rqctx: RequestContext<Arc<ServerContext>>,
