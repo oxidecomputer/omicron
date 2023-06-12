@@ -163,7 +163,7 @@ impl CockroachStarterBuilder {
 
     /// Sets the listening port for the PostgreSQL and CockroachDB protocols
     ///
-    /// We always listen only on [::1].
+    /// We always listen only on `[::1]`.
     pub fn listen_port(mut self, listen_port: u16) -> Self {
         self.listen_port = listen_port;
         self
