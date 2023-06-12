@@ -25,7 +25,7 @@ use omicron_test_utils::dev::poll::wait_for_condition;
 use omicron_test_utils::dev::poll::CondCheckError;
 use oxide_client::ClientSessionExt;
 use oxide_client::ClientSilosExt;
-use oxide_client::ClientSystemExt;
+use oxide_client::ClientSystemSilosExt;
 use oxide_client::CustomDnsResolver;
 use std::io::Write;
 use std::sync::Arc;
