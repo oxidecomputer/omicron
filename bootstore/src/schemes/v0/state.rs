@@ -4,19 +4,20 @@
 
 //! State for the V0 protocol state machine
 
-use super::fsm_output::ApiOutput;
+use super::fsm::StateHandler;
+use super::fsm_output::{ApiError, ApiOutput};
+use super::messages::{Envelope, Request, RequestType};
 use super::state_learned::LearnedState;
 use super::state_learning::LearningState;
 use super::state_uninitialized::UninitializedState;
 use super::{fsm_output::Output, state_initial_member::InitialMemberState};
 use crate::{
-    trust_quorum::{
-        create_pkgs, LearnedSharePkgV0, RackSecret, SharePkgV0,
-        TrustQuorumError,
-    },
+    trust_quorum::{LearnedSharePkgV0, RackSecret, SharePkgV0},
     Sha3_256Digest,
 };
+use derive_more::From;
 use serde::{Deserialize, Serialize};
+use sha3::{Digest, Sha3_256};
 use sled_hardware::Baseboard;
 use std::collections::{BTreeMap, BTreeSet};
 use uuid::Uuid;
@@ -39,6 +40,7 @@ pub struct Config {
 }
 
 /// In memory state shared by all 4 FSM states
+#[derive(Debug)]
 pub struct FsmCommonData {
     // Unique IDs of this peer
     pub id: Baseboard,
@@ -132,7 +134,7 @@ impl FsmCommonData {
     // Round-robin peer selection
     pub fn next_peer(&self, current: &Baseboard) -> Option<Baseboard> {
         if let Some(index) = self.peers.iter().position(|x| x == current) {
-            let next_index = (index + 1) % peers.len();
+            let next_index = (index + 1) % self.peers.len();
             self.peers.iter().nth(next_index).cloned()
         } else {
             self.peers.first().cloned()
@@ -170,15 +172,17 @@ impl RackSecretState {
     pub fn combine_shares_if_necessary(
         state: &mut Option<RackSecretState>,
         from: Baseboard,
+        request_id: Uuid,
+        threshold: usize,
         share: Vec<u8>,
         share_digests: &Vec<Sha3_256Digest>,
     ) -> Result<Result<RackSecret, vsss_rs::Error>, Output> {
         match state {
-            None => Err(return ApiError::UnexpectedResponse {
+            None => Err(ApiError::UnexpectedResponse {
                 from,
-                state: self.name(),
+                state: "-",
                 request_id,
-                msg: response.name(),
+                msg: "share",
             }
             .into()),
             Some(RackSecretState::Secret(_)) => {
@@ -186,9 +190,9 @@ impl RackSecretState {
                 Err(Output::none())
             }
             Some(RackSecretState::Shares(shares)) => {
-                /// Compute and validate hash of the received key share
+                // Compute and validate hash of the received key share
                 if let Err(api_error) =
-                    validate_share(&from, &share, &self.pkg.share_digests)
+                    validate_share(&from, &share, share_digests)
                 {
                     return Err(api_error.into());
                 }
@@ -196,7 +200,7 @@ impl RackSecretState {
                 // Add the share to our current set
                 shares.insert(from, share);
 
-                if shares.len() == pkg.threshold as usize {
+                if shares.len() == threshold as usize {
                     let to_combine: Vec<_> = shares.values().cloned().collect();
                     Ok(RackSecret::combine_shares(&to_combine))
                 } else {
@@ -268,7 +272,7 @@ pub enum PersistentFsmState {
 impl From<State> for PersistentFsmState {
     fn from(value: State) -> Self {
         match value {
-            State::Uninitialized => Self::Uninitialized,
+            State::Uninitialized(_) => Self::Uninitialized,
             State::InitialMember(InitialMemberState {
                 pkg,
                 distributed_shares,
@@ -284,11 +288,11 @@ impl From<PersistentFsmState> for State {
     fn from(value: PersistentFsmState) -> Self {
         use PersistentFsmState::*;
         match value {
-            Uninitialized => Self::Uninitialized,
+            Uninitialized => Self::Uninitialized(UninitializedState {}),
             InitialMember { pkg, distributed_shares } => Self::InitialMember(
                 InitialMemberState::new(pkg, distributed_shares),
             ),
-            Learning => Self::Learning(None),
+            Learning => Self::Learning(LearningState { attempt: None }),
             Learned { pkg } => Self::Learned(LearnedState::new(pkg)),
         }
     }
@@ -301,7 +305,7 @@ impl From<PersistentFsmState> for State {
 ///   * Uninitialized -> InitialMember
 ///   * Uninitialized -> Learning -> Learned
 ///
-#[derive(Debug)]
+#[derive(Debug, From)]
 pub enum State {
     /// The peer does not yet know whether it is an initial member of the group
     /// or a learner.
@@ -327,13 +331,85 @@ pub enum State {
     Learned(LearnedState),
 }
 
+impl StateHandler for State {
+    fn handle_request(
+        self,
+        common: &mut FsmCommonData,
+        from: Baseboard,
+        request_id: Uuid,
+        request: RequestType,
+    ) -> (State, Output) {
+        match self {
+            State::Uninitialized(state) => {
+                state.handle_request(common, from, request_id, request)
+            }
+            State::InitialMember(state) => {
+                state.handle_request(common, from, request_id, request)
+            }
+            State::Learning(state) => {
+                state.handle_request(common, from, request_id, request)
+            }
+            State::Learned(state) => {
+                state.handle_request(common, from, request_id, request)
+            }
+        }
+    }
+
+    fn handle_response(
+        self,
+        common: &mut FsmCommonData,
+        from: Baseboard,
+        request_id: Uuid,
+        response: super::messages::ResponseType,
+    ) -> (State, Output) {
+        match self {
+            State::Uninitialized(state) => {
+                state.handle_response(common, from, request_id, response)
+            }
+            State::InitialMember(state) => {
+                state.handle_response(common, from, request_id, response)
+            }
+            State::Learning(state) => {
+                state.handle_response(common, from, request_id, response)
+            }
+            State::Learned(state) => {
+                state.handle_response(common, from, request_id, response)
+            }
+        }
+    }
+
+    fn tick(self, common: &mut FsmCommonData) -> (State, Output) {
+        match self {
+            State::Uninitialized(state) => state.tick(common),
+            State::InitialMember(state) => state.tick(common),
+            State::Learning(state) => state.tick(common),
+            State::Learned(state) => state.tick(common),
+        }
+    }
+}
+
 impl State {
     pub fn name(&self) -> &'static str {
         match self {
-            Self::Uninitialized => "uninitialized",
+            Self::Uninitialized(_) => "uninitialized",
             Self::InitialMember(_) => "initial_member",
             Self::Learning(_) => "learning",
             Self::Learned(_) => "learned",
         }
+    }
+}
+
+fn validate_share(
+    from: &Baseboard,
+    share: &Vec<u8>,
+    share_digests: &Vec<Sha3_256Digest>,
+) -> Result<(), ApiError> {
+    let computed_hash =
+        Sha3_256Digest(Sha3_256::digest(share).as_slice().try_into().unwrap());
+
+    if !share_digests.contains(&computed_hash) {
+        Err(ApiError::InvalidShare { from: from.clone() })
+    } else {
+        Ok(())
     }
 }

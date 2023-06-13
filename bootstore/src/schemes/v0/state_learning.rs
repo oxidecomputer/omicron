@@ -4,16 +4,13 @@
 
 //! FSM API for `State::Uninitialized`
 
-use std::collections::BTreeMap;
-
 use crate::schemes::v0::fsm_output::ApiError;
 use crate::schemes::v0::state_learned::LearnedState;
-use crate::trust_quorum::SharePkgV0;
 
 use super::fsm::StateHandler;
 use super::fsm_output::Output;
-use super::messages::{Request, RequestType, Response, ResponseType};
-use super::state::{FsmCommonData, InitialMemberState, State};
+use super::messages::{Error, RequestType, ResponseType};
+use super::state::{FsmCommonData, State, Ticks};
 use sled_hardware::Baseboard;
 use uuid::Uuid;
 
@@ -40,23 +37,36 @@ impl LearnAttempt {
 
 #[derive(Debug)]
 pub struct LearningState {
-    attempt: Option<LearnAttempt>,
+    pub attempt: Option<LearnAttempt>,
 }
 
 impl LearningState {
     fn name(&self) -> &'static str {
         "learning"
     }
+
+    /// Start a new attempt to learn our share
+    pub fn new_attempt(&mut self, common: &mut FsmCommonData) -> Output {
+        if let Some(peer) = common.peers.first() {
+            self.attempt =
+                Some(LearnAttempt { peer: peer.clone(), start: common.clock });
+
+            Output::request(peer.clone(), RequestType::Learn)
+        } else {
+            // No peers to learn from
+            Output::none()
+        }
+    }
 }
 
 impl StateHandler for LearningState {
     fn handle_request(
-        mut self,
+        self,
         common: &mut FsmCommonData,
         from: Baseboard,
         request_id: Uuid,
         request: RequestType,
-    ) -> (state, Output) {
+    ) -> (State, Output) {
         use RequestType::*;
         let output = match request {
             Init(_) => {
@@ -80,11 +90,11 @@ impl StateHandler for LearningState {
                 )
             }
         };
-        (state.into(), output)
+        (self.into(), output)
     }
 
     fn handle_response(
-        mut self,
+        self,
         common: &mut FsmCommonData,
         from: Baseboard,
         request_id: Uuid,
@@ -113,7 +123,7 @@ impl StateHandler for LearningState {
                 //
                 // TODO: We should check the rack_uuid if we add it to
                 // `RequestType::InitLearner`  and save it.
-                (LearnedState::new(pkg), Output::none())
+                (LearnedState::new(pkg).into(), Output::none())
             }
             Error(error) => {
                 let state = self.name();
@@ -133,33 +143,27 @@ impl StateHandler for LearningState {
 
     /// Check for expired learn attempts
     fn tick(mut self, common: &mut FsmCommonData) -> (State, Output) {
-        match &mut self.attempt {
-            Some(attempt) => {
+        match self.attempt.take() {
+            Some(mut attempt) => {
                 if attempt.expired(common.clock, common.config.learn_timeout) {
                     if let Some(peer) = common.next_peer(&attempt.peer) {
                         attempt.peer = peer.clone();
-                        attempt.start = self.clock;
+                        attempt.start = common.clock;
+                        self.attempt = Some(attempt);
                         (self.into(), Output::request(peer, RequestType::Learn))
                     } else {
                         // No peers to learn from
                         (self.into(), Output::none())
                     }
+                } else {
+                    // Our attempt did not expire. Put it back.
+                    self.attempt = Some(attempt);
+                    (self.into(), Output::none())
                 }
             }
             None => {
-                if let Some(peer) = self.peers.first() {
-                    let state = LearningState {
-                        attempt: Some(LearnAttempt {
-                            peer: peer.clone(),
-                            start: self.clock,
-                        }),
-                    }
-                    .into();
-                    (state, Output::request(peer.clone(), RequestType::Learn))
-                } else {
-                    // No peers to learn from
-                    (self.into(), Output::none())
-                }
+                let output = self.new_attempt(common);
+                (self.into(), output)
             }
         }
     }

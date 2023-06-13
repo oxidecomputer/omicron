@@ -6,12 +6,13 @@
 
 use std::collections::BTreeMap;
 
-use crate::trust_quorum::SharePkgV0;
+use crate::schemes::v0::state_learning::LearningState;
 
 use super::fsm::StateHandler;
-use super::fsm_output::Output;
-use super::messages::{Request, RequestType, Response, ResponseType};
-use super::state::{FsmCommonData, InitialMemberState, State};
+use super::fsm_output::{ApiError, Output};
+use super::messages::{Error, RequestType, ResponseType};
+use super::state::{FsmCommonData, State};
+use super::state_initial_member::InitialMemberState;
 use sled_hardware::Baseboard;
 use uuid::Uuid;
 
@@ -34,7 +35,7 @@ impl StateHandler for UninitializedState {
     ) -> (State, Output) {
         use RequestType::*;
         match request {
-            Init(SharePkgV0) => (
+            Init(pkg) => (
                 InitialMemberState::new(pkg, BTreeMap::new()).into(),
                 Output::persist_and_respond(
                     from,
@@ -43,7 +44,7 @@ impl StateHandler for UninitializedState {
                 ),
             ),
             InitLearner => (
-                State::Learning(None).into(),
+                State::Learning(LearningState { attempt: None }).into(),
                 Output::persist_and_respond(
                     from,
                     request_id,
@@ -67,7 +68,7 @@ impl StateHandler for UninitializedState {
         from: Baseboard,
         request_id: Uuid,
         response: ResponseType,
-    ) -> Output {
+    ) -> (State, Output) {
         // We don't handle any responses in `UninitializedState`
         // Inform the user of the FSM about unexpected messages so this can be
         // logged if desired
@@ -84,7 +85,7 @@ impl StateHandler for UninitializedState {
         )
     }
 
-    fn tick(&mut self, common: &mut FsmCommonData) -> Output {
+    fn tick(self, common: &mut FsmCommonData) -> (State, Output) {
         (self.into(), Output::none())
     }
 }

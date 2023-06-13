@@ -4,15 +4,13 @@
 
 //! FSM API for `State::Learned`
 
-use std::collections::BTreeMap;
-
 use crate::schemes::v0::fsm_output::ApiError;
-use crate::trust_quorum::SharePkgV0;
+use crate::trust_quorum::LearnedSharePkgV0;
 
 use super::fsm::StateHandler;
 use super::fsm_output::Output;
-use super::messages::{Request, RequestType, Response, ResponseType};
-use super::state::{FsmCommonData, InitialMemberState, State};
+use super::messages::{Error, RequestType, ResponseType};
+use super::state::{FsmCommonData, RackSecretState, State};
 use sled_hardware::Baseboard;
 use uuid::Uuid;
 
@@ -31,20 +29,24 @@ impl LearnedState {
     pub fn new(pkg: LearnedSharePkgV0) -> Self {
         LearnedState { pkg, rack_secret_state: None }
     }
+
+    pub fn name(&self) -> &'static str {
+        "learned"
+    }
 }
 
 impl StateHandler for LearnedState {
     fn handle_request(
-        mut self,
+        self,
         common: &mut FsmCommonData,
         from: Baseboard,
         request_id: Uuid,
         request: RequestType,
-    ) -> (state, Output) {
+    ) -> (State, Output) {
         use RequestType::*;
         let output = match request {
             Init(_) => {
-                let rack_uuid = pkg.rack_uuid;
+                let rack_uuid = self.pkg.rack_uuid;
                 Output::respond(
                     from,
                     request_id,
@@ -65,7 +67,8 @@ impl StateHandler for LearnedState {
                         Error::RackUuidMismatch {
                             expected: self.pkg.rack_uuid,
                             got: rack_uuid,
-                        },
+                        }
+                        .into(),
                     )
                 } else {
                     Output::respond(
@@ -102,16 +105,18 @@ impl StateHandler for LearnedState {
                 msg: response.name(),
             }
             .into(),
-            Share(Share) => {
+            Share(share) => {
                 let rack_secret_result =
                     match RackSecretState::combine_shares_if_necessary(
                         &mut self.rack_secret_state,
                         from,
+                        request_id,
+                        self.pkg.threshold.into(),
                         share,
                         &self.pkg.share_digests,
                     ) {
                         Ok(rack_secret_result) => rack_secret_result,
-                        Err(output) => return output,
+                        Err(output) => return (self.into(), output),
                     };
 
                 // Did computation of the rack secret succeed or fail?

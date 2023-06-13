@@ -5,7 +5,7 @@
 //! Output related types for V0 protocol state machine methods
 
 use super::messages::{
-    Envelope, Error, Msg, Request, RequestType, Response, ResponseType,
+    Envelope, Error, Request, RequestType, Response, ResponseType,
 };
 use crate::trust_quorum::{RackSecret, TrustQuorumError};
 use sled_hardware::Baseboard;
@@ -85,6 +85,12 @@ impl From<ApiError> for Output {
     }
 }
 
+impl From<Option<Result<ApiOutput, ApiError>>> for Output {
+    fn from(value: Option<Result<ApiOutput, ApiError>>) -> Self {
+        Output { persist: false, envelopes: vec![], api_output: value }
+    }
+}
+
 /// Errors returned to the FSM caller not to a peer FSM in a message
 // TODO: Use thiserror
 #[derive(Debug)]
@@ -97,11 +103,18 @@ pub enum ApiError {
 
     RackInitFailed(TrustQuorumError),
 
+    /// Peer can only be initialized when in `State::Uninitialized`
+    PeerAlreadyInitialized,
+
     /// The rack must be initialized before the rack secret can be loaded
     RackNotInitialized,
 
     /// A timeout when retreiving the rack secret
     RackSecretLoadTimeout,
+
+    // The API user tried to load a rack secret before the learner was done
+    // getting its share
+    StillLearning,
 
     /// Share digest does not match what's in our package
     InvalidShare {

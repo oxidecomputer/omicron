@@ -67,7 +67,7 @@ pub enum RequestType {
 impl RequestType {
     pub fn name(&self) -> &'static str {
         use RequestType::*;
-        match RequestType {
+        match self {
             Init(_) => "init",
             InitLearner => "init_learner",
             GetShare { .. } => "get_share",
@@ -95,8 +95,8 @@ pub enum ResponseType {
 impl ResponseType {
     pub fn name(&self) -> &'static str {
         use ResponseType::*;
-        match ResponseType {
-            InitAck(_) => "init_ack",
+        match self {
+            InitAck => "init_ack",
             Share(_) => "share",
             Pkg(_) => "pkg",
             ResponseType::Error(_) => "error",

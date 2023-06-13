@@ -7,15 +7,16 @@
 use std::collections::BTreeMap;
 
 use crate::schemes::v0::fsm_output::{ApiError, ApiOutput};
-use crate::trust_quorum::SharePkgV0;
+use crate::trust_quorum::{RackSecret, SharePkgV0};
 
-use super::fsm::{validate_share, StateHandler};
+use super::fsm::StateHandler;
 use super::fsm_output::Output;
-use super::messages::{Error, Request, RequestType, Response, ResponseType};
+use super::messages::{Envelope, Error, RequestType, Response, ResponseType};
 use super::state::{
-    FsmCommonData, InitialMemberState, RackInitState, RackSecretState,
-    RequestMetadata, ShareIdx, State,
+    FsmCommonData, RackInitState, RackSecretState, RequestMetadata, ShareIdx,
+    State,
 };
+use secrecy::ExposeSecret;
 use sled_hardware::Baseboard;
 use uuid::Uuid;
 
@@ -91,6 +92,8 @@ impl InitialMemberState {
             match RackSecretState::combine_shares_if_necessary(
                 &mut self.rack_secret_state,
                 from,
+                request_id,
+                self.pkg.threshold.into(),
                 share,
                 &self.pkg.share_digests,
             ) {
@@ -141,7 +144,7 @@ impl InitialMemberState {
         let mut persist = false;
         let mut envelopes =
             Vec::with_capacity(self.pending_learn_requests.len());
-        match pkg.decrypt_shares(rack_secret) {
+        match self.pkg.decrypt_shares(rack_secret) {
             Ok(shares) => {
                 while let Some((to, metadata)) =
                     self.pending_learn_requests.pop_first()
@@ -159,7 +162,8 @@ impl InitialMemberState {
                         // We need to pick a share to hand out and
                         // persist that fact. We find the highest currently used
                         // index and add 1 or we select index 0.
-                        let idx = distributed_shares
+                        let idx = self
+                            .distributed_shares
                             .values()
                             .max()
                             .cloned()
@@ -231,7 +235,7 @@ impl StateHandler for InitialMemberState {
         from: Baseboard,
         request_id: Uuid,
         request: RequestType,
-    ) -> (state, Output) {
+    ) -> (State, Output) {
         use RequestType::*;
         let output = match request {
             Init(new_pkg) => {
@@ -263,7 +267,8 @@ impl StateHandler for InitialMemberState {
                         Error::RackUuidMismatch {
                             expected: self.pkg.rack_uuid,
                             got: rack_uuid,
-                        },
+                        }
+                        .into(),
                     )
                 } else {
                     Output::respond(
@@ -292,7 +297,7 @@ impl StateHandler for InitialMemberState {
                         // enough we will respond to the caller.
                         self.pending_learn_requests.insert(
                             from,
-                            RequestMetadata { request_id, start: self.clock },
+                            RequestMetadata { request_id, start: common.clock },
                         );
                         common.broadcast_share_requests(
                             self.pkg.rack_uuid,
@@ -303,9 +308,9 @@ impl StateHandler for InitialMemberState {
                         // Register the request and try to collect enough
                         // shares to unlock the rack secret. When we have
                         // enough we will respond to the caller.
-                        pending_learn_requests.insert(
+                        self.pending_learn_requests.insert(
                             from,
-                            RequestMetadata { request_id, start: self.clock },
+                            RequestMetadata { request_id, start: common.clock },
                         );
                         // Start to track collecting shares by inserting ourself
                         self.rack_secret_state =
@@ -363,6 +368,9 @@ impl StateHandler for InitialMemberState {
             }
             .into(),
         };
+
+        // This is a terminal state
+        (self.into(), output)
     }
 
     ///  TODO: check for pending learn request timeouts
@@ -373,16 +381,17 @@ impl StateHandler for InitialMemberState {
             if rack_init_state
                 .timer_expired(common.clock, common.config.rack_init_timeout)
             {
-                let unacked_peers = pkg
+                let unacked_peers = self
+                    .pkg
                     .initial_membership
                     .difference(&rack_init_state.acks)
                     .cloned()
                     .collect();
                 self.rack_init_state = None;
-                (
+                return (
                     self.into(),
                     ApiError::RackInitTimeout { unacked_peers }.into(),
-                )
+                );
             }
         }
 
