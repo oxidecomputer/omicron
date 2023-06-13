@@ -107,13 +107,6 @@ mod tests {
 
     use super::*;
 
-    // This is a secret. Let's not print it outside of tests.
-    impl Debug for RackSecret {
-        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-            self.expose_secret().fmt(f)
-        }
-    }
-
     fn verify(secret: &RackSecret, shares: &[Vec<u8>]) {
         let secret2 = RackSecret::combine_shares(&shares[..3]).unwrap();
         let secret3 = RackSecret::combine_shares(&shares[1..4]).unwrap();

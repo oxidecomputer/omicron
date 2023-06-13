@@ -27,7 +27,7 @@ impl UninitializedState {
 
 impl StateHandler for UninitializedState {
     fn handle_request(
-        mut self,
+        self,
         common: &mut FsmCommonData,
         from: Baseboard,
         request_id: Uuid,
@@ -63,7 +63,7 @@ impl StateHandler for UninitializedState {
     }
 
     fn handle_response(
-        mut self,
+        self,
         _common: &mut FsmCommonData,
         from: Baseboard,
         request_id: Uuid,

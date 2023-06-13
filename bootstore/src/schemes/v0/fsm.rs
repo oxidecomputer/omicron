@@ -60,12 +60,17 @@ pub struct Fsm {
     common: FsmCommonData,
 
     // Use an option to allow taking and mutating `State` independently of `Fsm`
+    // An invariant of the Fsm is that `state` is always `Some` to API callers.
     state: Option<State>,
 }
 
 impl Fsm {
     pub fn new(id: Baseboard, config: Config, state: State) -> Fsm {
         Fsm { common: FsmCommonData::new(id, config), state: Some(state) }
+    }
+
+    pub fn state_name(&self) -> &'static str {
+        self.state.as_ref().unwrap().name()
     }
 
     /// This call is triggered locally as a result of RSS running
@@ -285,5 +290,55 @@ impl Fsm {
         );
         self.state = Some(new_state);
         output
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::schemes::v0::state_uninitialized::UninitializedState;
+
+    fn test_config() -> Config {
+        Config {
+            learn_timeout: 5,
+            rack_init_timeout: 5,
+            rack_secret_request_timeout: 5,
+        }
+    }
+
+    fn initial_members() -> BTreeSet<Baseboard> {
+        [("a", "1"), ("b", "1"), ("c", "1"), ("d", "1"), ("e", "1")]
+            .iter()
+            .map(|(id, model)| {
+                Baseboard::new_pc(id.to_string(), model.to_string())
+            })
+            .collect()
+    }
+
+    /// Test that Fsm::init_rack correctly mutates state and returns correct output
+    #[test]
+    fn init_rack() {
+        let initial_members = initial_members();
+        let mut fsm = Fsm::new(
+            initial_members.first().unwrap().clone(),
+            test_config(),
+            State::Uninitialized(UninitializedState {}),
+        );
+
+        // Tick in uninitialized state has no output
+        let output = fsm.tick();
+        assert_eq!(output, Output::none());
+        assert_eq!("uninitialized", fsm.state_name());
+
+        // Initializing a rack results in a state change of *this* FSM to `InitialMember`
+        // and results in an envelope destined for each of the other peers.
+        let rack_uuid = Uuid::new_v4();
+        let output = fsm.init_rack(rack_uuid, initial_members.clone());
+        assert_eq!("initial_member", fsm.state_name());
+
+        // We changed states, requiring persistence
+        assert_eq!(output.persist, true);
+        assert_eq!(output.envelopes.len(), 4);
+        assert_eq!(output.api_output, None);
     }
 }

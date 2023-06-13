@@ -18,20 +18,20 @@ use uuid::Uuid;
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct Identify(Baseboard);
 
-#[derive(Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Envelope {
     pub to: Baseboard,
     pub msg: Msg,
 }
 
-#[derive(From, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(From, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Msg {
     Req(Request),
     Rsp(Response),
 }
 
 /// A request sent to a peer
-#[derive(Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Request {
     // A counter to uniquely match a request to a response for a given peer
     pub id: Uuid,
@@ -40,14 +40,14 @@ pub struct Request {
 
 /// A response sent from a peer that matches a request with the same sequence
 /// number
-#[derive(Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Response {
     pub request_id: Uuid,
     pub type_: ResponseType,
 }
 
 /// A request from a peer to another peer over TCP
-#[derive(Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum RequestType {
     /// A rack initialization request informing the peer that it is a member of
     /// the initial trust quorum.
@@ -77,7 +77,7 @@ impl RequestType {
 }
 
 /// A response to a request from a peer over TCP
-#[derive(From, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(From, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ResponseType {
     /// Response to [`Request::Init`]
     InitAck,
@@ -105,7 +105,7 @@ impl ResponseType {
 }
 
 /// An error returned from a peer over TCP
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Error {
     /// The peer is already initialized as a member of the original group
     AlreadyInitialized { rack_uuid: Uuid },

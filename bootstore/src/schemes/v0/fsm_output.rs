@@ -13,6 +13,7 @@ use std::collections::BTreeSet;
 use uuid::Uuid;
 
 /// Output from a a call to [`Fsm::Handle`]
+#[derive(Debug, PartialEq, Eq)]
 pub struct Output {
     /// Possible state that needs persisting before any messages are sent
     pub persist: bool,
@@ -93,7 +94,7 @@ impl From<Option<Result<ApiOutput, ApiError>>> for Output {
 
 /// Errors returned to the FSM caller not to a peer FSM in a message
 // TODO: Use thiserror
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum ApiError {
     RackInitTimeout {
         unacked_peers: BTreeSet<Baseboard>,
@@ -153,6 +154,7 @@ pub enum ApiError {
 /// The caller of the API (aka the peer/network layer will sometimes need to get
 /// messages delivered to it, such as when rack initialization has completed. We
 /// provide this information in `Output::api_output`.
+#[derive(Debug, PartialEq, Eq)]
 pub enum ApiOutput {
     RackInitComplete,
     RackSecret(RackSecret),
