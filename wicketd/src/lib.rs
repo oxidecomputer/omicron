@@ -21,7 +21,7 @@ use mgs::make_mgs_client;
 pub(crate) use mgs::{MgsHandle, MgsManager};
 use sled_hardware::Baseboard;
 
-use dropshot::{ConfigDropshot, HttpServer};
+use dropshot::{ConfigDropshot, HandlerTaskMode, HttpServer};
 use slog::{debug, error, o, Drain};
 use std::{
     net::{SocketAddr, SocketAddrV6},
@@ -76,6 +76,7 @@ impl Server {
             // The maximum request size is set to 4 GB -- artifacts can be large and there's currently
             // no way to set a larger request size for some endpoints.
             request_body_max_bytes: 4 << 30,
+            default_handler_task_mode: HandlerTaskMode::Detached,
         };
 
         let mgs_manager = MgsManager::new(&log, args.mgs_address);
