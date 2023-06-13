@@ -315,9 +315,10 @@ mod tests {
             .collect()
     }
 
-    /// Test that Fsm::init_rack correctly mutates state and returns correct output
+    /// Test that Fsm::init_rack correctly mutates state and returns correct
+    /// output when no members ack receipt of the initialization.
     #[test]
-    fn init_rack() {
+    fn init_rack_timeout_no_members_acked() {
         let initial_members = initial_members();
         let config = test_config();
         let mut fsm = Fsm::new(
@@ -358,6 +359,50 @@ mod tests {
         let api_err = output.api_output.unwrap().unwrap_err();
         let mut expected = initial_members.clone();
         expected.pop_first().unwrap();
+        assert_eq!(
+            api_err,
+            ApiError::RackInitTimeout { unacked_peers: expected }
+        );
+    }
+
+    /// Ack one of the members and ensure the timeout occurs with the rest unacked
+    #[test]
+    fn partial_rack_init_timeout() {
+        let mut initial_members = initial_members();
+        let config = test_config();
+        let mut fsm = Fsm::new(
+            initial_members.first().unwrap().clone(),
+            config.clone(),
+            State::Uninitialized(UninitializedState {}),
+        );
+        let rack_uuid = Uuid::new_v4();
+        let mut output = fsm.init_rack(rack_uuid, initial_members.clone());
+
+        // Unpack the request to ack
+        let Envelope{to, msg: Msg::Req(Request{id, type_: RequestType::Init(pkg)})} = output.envelopes.pop().unwrap() else {
+            panic!("expected a request");
+        };
+        let from = to;
+        let request_id = id;
+
+        // Skip over ticks that won't trigger timeout
+        for _ in 0..config.rack_init_timeout {
+            assert_eq!(Output::none(), fsm.tick());
+        }
+
+        // Handle the response
+        let response = Response { request_id, type_: ResponseType::InitAck };
+        let output = fsm.handle_response(from.clone(), response);
+        assert_eq!(Output::none(), output);
+
+        // Construct the expected unacked sleds map
+        // Remove ourself, and the acked sled
+        let mut expected = initial_members.clone();
+        expected.pop_first().unwrap();
+        expected.remove(&from);
+
+        // Now timeout. There should only be unacked sleds not including the responder.
+        let api_err = fsm.tick().api_output.unwrap().unwrap_err();
         assert_eq!(
             api_err,
             ApiError::RackInitTimeout { unacked_peers: expected }
