@@ -13,6 +13,7 @@ use std::net::Ipv6Addr;
 /// Update firewall rules for a VPC
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct VpcFirewallRulesEnsureBody {
+    pub vni: external::Vni,
     pub rules: Vec<VpcFirewallRule>,
 }
 

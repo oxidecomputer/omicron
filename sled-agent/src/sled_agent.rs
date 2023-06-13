@@ -24,6 +24,7 @@ use illumos_utils::opte::PortManager;
 use omicron_common::address::{
     get_sled_address, get_switch_zone_address, Ipv6Subnet, SLED_PREFIX,
 };
+use omicron_common::api::external::Vni;
 use omicron_common::api::{
     internal::nexus::DiskRuntimeState, internal::nexus::InstanceRuntimeState,
     internal::nexus::UpdateArtifactId,
@@ -682,12 +683,12 @@ impl SledAgent {
 
     pub async fn firewall_rules_ensure(
         &self,
-        _vpc_id: Uuid,
+        vpc_vni: Vni,
         rules: &[VpcFirewallRule],
     ) -> Result<(), Error> {
         self.inner
             .port_manager
-            .firewall_rules_ensure(rules)
+            .firewall_rules_ensure(vpc_vni, rules)
             .map_err(Error::from)
     }
 
