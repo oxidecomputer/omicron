@@ -319,9 +319,10 @@ mod tests {
     #[test]
     fn init_rack() {
         let initial_members = initial_members();
+        let config = test_config();
         let mut fsm = Fsm::new(
             initial_members.first().unwrap().clone(),
-            test_config(),
+            config.clone(),
             State::Uninitialized(UninitializedState {}),
         );
 
@@ -340,5 +341,26 @@ mod tests {
         assert_eq!(output.persist, true);
         assert_eq!(output.envelopes.len(), 4);
         assert_eq!(output.api_output, None);
+
+        // We don't timeout until we reach timeout number of ticks + 1.
+        // This guarantees at least a minimum timeout if registration occurs
+        // right before a tick.
+        for _ in 0..config.rack_init_timeout {
+            assert_eq!(Output::none(), fsm.tick());
+        }
+
+        // We should timeout on the next tick, reporting that none of the peers
+        // acked.
+        let output = fsm.tick();
+        assert_eq!(output.persist, false);
+        assert_eq!(output.envelopes.len(), 0);
+
+        let api_err = output.api_output.unwrap().unwrap_err();
+        let mut expected = initial_members.clone();
+        expected.pop_first().unwrap();
+        assert_eq!(
+            api_err,
+            ApiError::RackInitTimeout { unacked_peers: expected }
+        );
     }
 }
