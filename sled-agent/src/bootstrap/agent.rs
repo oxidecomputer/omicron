@@ -46,10 +46,10 @@ use tokio::task::JoinHandle;
 
 mod rack_ops;
 
-pub use rack_ops::ConcurrentRssAccess;
 pub use rack_ops::RackInitId;
 pub use rack_ops::RackResetId;
 use rack_ops::RssAccess;
+pub use rack_ops::RssAccessError;
 
 /// The number of QSFP28 ports on sidecar revisions A and B
 const SIDECAR_REV_A_B_N_QSFP28_PORTS: u8 = 32;
@@ -666,14 +666,14 @@ impl Agent {
     pub fn start_rack_initialize(
         self: &Arc<Self>,
         request: RackInitializeRequest,
-    ) -> Result<RackInitId, ConcurrentRssAccess> {
+    ) -> Result<RackInitId, RssAccessError> {
         self.rss_access.start_initializing(self, request)
     }
 
     /// Spawn a task to run rack reset.
     pub fn start_rack_reset(
         self: &Arc<Self>,
-    ) -> Result<RackResetId, ConcurrentRssAccess> {
+    ) -> Result<RackResetId, RssAccessError> {
         self.rss_access.start_reset(self)
     }
 

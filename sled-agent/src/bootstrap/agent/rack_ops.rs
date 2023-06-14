@@ -24,7 +24,7 @@ pub struct RackInitId(pub Uuid);
 pub struct RackResetId(pub Uuid);
 
 #[derive(Debug, Clone, thiserror::Error)]
-pub enum ConcurrentRssAccess {
+pub enum RssAccessError {
     #[error("RSS is still initializating and cannot run concurrently")]
     StillInitializing,
     #[error("RSS failed to initialize: {message}")]
@@ -146,35 +146,31 @@ impl RssAccess {
         &self,
         agent: &Arc<Agent>,
         request: RackInitializeRequest,
-    ) -> Result<RackInitId, ConcurrentRssAccess> {
+    ) -> Result<RackInitId, RssAccessError> {
         let mut status = self.status.lock().unwrap();
 
         match &*status {
             RssStatus::Initializing { .. } => {
-                Err(ConcurrentRssAccess::StillInitializing)
+                Err(RssAccessError::StillInitializing)
             }
             RssStatus::InitializedOnStartup | RssStatus::Initialized { .. } => {
-                Err(ConcurrentRssAccess::AlreadyInitialized)
+                Err(RssAccessError::AlreadyInitialized)
             }
             RssStatus::InitializationFailed { err, .. } => {
-                Err(ConcurrentRssAccess::InitializationFailed {
+                Err(RssAccessError::InitializationFailed {
                     message: err.to_string(),
                 })
             }
             RssStatus::InitializationPanicked { .. } => {
-                Err(ConcurrentRssAccess::InitializationPanicked)
+                Err(RssAccessError::InitializationPanicked)
             }
 
-            RssStatus::Resetting { .. } => {
-                Err(ConcurrentRssAccess::StillResetting)
-            }
+            RssStatus::Resetting { .. } => Err(RssAccessError::StillResetting),
             RssStatus::ResetFailed { err, .. } => {
-                Err(ConcurrentRssAccess::ResetFailed {
-                    message: err.to_string(),
-                })
+                Err(RssAccessError::ResetFailed { message: err.to_string() })
             }
             RssStatus::ResetPanicked { .. } => {
-                Err(ConcurrentRssAccess::ResetPanicked)
+                Err(RssAccessError::ResetPanicked)
             }
             RssStatus::ResetOnStartup | RssStatus::Reset { .. } => {
                 let (completion_tx, completion) = oneshot::channel();
@@ -206,34 +202,30 @@ impl RssAccess {
     pub(super) fn start_reset(
         &self,
         agent: &Arc<Agent>,
-    ) -> Result<RackResetId, ConcurrentRssAccess> {
+    ) -> Result<RackResetId, RssAccessError> {
         let mut status = self.status.lock().unwrap();
 
         match &*status {
             RssStatus::Initializing { .. } => {
-                Err(ConcurrentRssAccess::StillInitializing)
+                Err(RssAccessError::StillInitializing)
             }
             RssStatus::InitializationFailed { err, .. } => {
-                Err(ConcurrentRssAccess::InitializationFailed {
+                Err(RssAccessError::InitializationFailed {
                     message: err.to_string(),
                 })
             }
             RssStatus::InitializationPanicked { .. } => {
-                Err(ConcurrentRssAccess::InitializationPanicked)
+                Err(RssAccessError::InitializationPanicked)
             }
-            RssStatus::Resetting { .. } => {
-                Err(ConcurrentRssAccess::StillResetting)
-            }
+            RssStatus::Resetting { .. } => Err(RssAccessError::StillResetting),
             RssStatus::ResetFailed { err, .. } => {
-                Err(ConcurrentRssAccess::ResetFailed {
-                    message: err.to_string(),
-                })
+                Err(RssAccessError::ResetFailed { message: err.to_string() })
             }
             RssStatus::ResetPanicked { .. } => {
-                Err(ConcurrentRssAccess::ResetPanicked)
+                Err(RssAccessError::ResetPanicked)
             }
             RssStatus::ResetOnStartup | RssStatus::Reset { .. } => {
-                Err(ConcurrentRssAccess::AlreadyReset)
+                Err(RssAccessError::AlreadyReset)
             }
             RssStatus::InitializedOnStartup | RssStatus::Initialized { .. } => {
                 let (completion_tx, completion) = oneshot::channel();
