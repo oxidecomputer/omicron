@@ -2046,6 +2046,15 @@
           "last"
         ]
       },
+      "MacAddr": {
+        "example": "ff:ff:ff:ff:ff:ff",
+        "title": "A MAC address",
+        "description": "A Media Access Control address, in EUI-48 format",
+        "type": "string",
+        "pattern": "^([0-9a-fA-F]{0,2}:){5}[0-9a-fA-F]{0,2}$",
+        "minLength": 5,
+        "maxLength": 17
+      },
       "Measurement": {
         "description": "A `Measurement` is a timestamped datum from a single metric",
         "type": "object",
@@ -2280,6 +2289,30 @@
       "PhysicalDiskPutResponse": {
         "type": "object"
       },
+      "PortFec": {
+        "description": "Switchport FEC options",
+        "type": "string",
+        "enum": [
+          "firecode",
+          "none",
+          "rs"
+        ]
+      },
+      "PortSpeed": {
+        "description": "Switchport Speed options",
+        "type": "string",
+        "enum": [
+          "speed0_g",
+          "speed1_g",
+          "speed10_g",
+          "speed25_g",
+          "speed40_g",
+          "speed50_g",
+          "speed100_g",
+          "speed200_g",
+          "speed400_g"
+        ]
+      },
       "ProducerEndpoint": {
         "description": "Information announced by a metric server, used so that clients can contact it and collect available metric data from it.",
         "type": "object",
@@ -2449,6 +2482,22 @@
           "uplink_port": {
             "description": "Switchport to use for external connectivity",
             "type": "string"
+          },
+          "uplink_port_fec": {
+            "description": "Forward Error Correction setting for the uplink port",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PortFec"
+              }
+            ]
+          },
+          "uplink_port_speed": {
+            "description": "Speed for the Switchport",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PortSpeed"
+              }
+            ]
           }
         },
         "required": [
@@ -2456,7 +2505,9 @@
           "infra_ip_first",
           "infra_ip_last",
           "uplink_ip",
-          "uplink_port"
+          "uplink_port",
+          "uplink_port_fec",
+          "uplink_port_speed"
         ]
       },
       "RecoverySiloConfig": {
@@ -2732,10 +2783,14 @@
                   "external_address": {
                     "type": "string",
                     "format": "ip"
+                  },
+                  "nic": {
+                    "$ref": "#/components/schemas/ServiceNic"
                   }
                 },
                 "required": [
-                  "external_address"
+                  "external_address",
+                  "nic"
                 ]
               },
               "type": {
@@ -2773,10 +2828,14 @@
                   "external_address": {
                     "type": "string",
                     "format": "ip"
+                  },
+                  "nic": {
+                    "$ref": "#/components/schemas/ServiceNic"
                   }
                 },
                 "required": [
-                  "external_address"
+                  "external_address",
+                  "nic"
                 ]
               },
               "type": {
@@ -2853,20 +2912,22 @@
               "content": {
                 "type": "object",
                 "properties": {
-                  "snat_cfg": {
-                    "nullable": true,
-                    "allOf": [
-                      {
-                        "$ref": "#/components/schemas/SourceNatConfig"
-                      }
-                    ]
+                  "nic": {
+                    "$ref": "#/components/schemas/ServiceNic"
+                  },
+                  "snat": {
+                    "$ref": "#/components/schemas/SourceNatConfig"
                   }
-                }
+                },
+                "required": [
+                  "nic",
+                  "snat"
+                ]
               },
               "type": {
                 "type": "string",
                 "enum": [
-                  "ntp"
+                  "boundary_ntp"
                 ]
               }
             },
@@ -2874,7 +2935,47 @@
               "content",
               "type"
             ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "internal_ntp"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
           }
+        ]
+      },
+      "ServiceNic": {
+        "description": "Describes the RSS allocated values for a service vnic",
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "ip": {
+            "type": "string",
+            "format": "ip"
+          },
+          "mac": {
+            "$ref": "#/components/schemas/MacAddr"
+          },
+          "name": {
+            "$ref": "#/components/schemas/Name"
+          }
+        },
+        "required": [
+          "id",
+          "ip",
+          "mac",
+          "name"
         ]
       },
       "ServicePutRequest": {

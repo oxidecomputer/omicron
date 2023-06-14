@@ -7,6 +7,7 @@
 use crate::external_api::params::UserId;
 use crate::external_api::shared::IpRange;
 use omicron_common::api::external::ByteCount;
+use omicron_common::api::external::MacAddr;
 use omicron_common::api::external::Name;
 use omicron_common::api::internal::shared::RackNetworkConfig;
 use omicron_common::api::internal::shared::SourceNatConfig;
@@ -174,20 +175,28 @@ pub struct DatasetPutRequest {
     pub kind: DatasetKind,
 }
 
+/// Describes the RSS allocated values for a service vnic
+#[derive(Debug, Serialize, Deserialize, JsonSchema, Clone, PartialEq, Eq)]
+pub struct ServiceNic {
+    pub id: Uuid,
+    pub name: Name,
+    pub ip: IpAddr,
+    pub mac: MacAddr,
+}
+
 /// Describes the purpose of the service.
-#[derive(
-    Debug, Serialize, Deserialize, JsonSchema, Clone, Copy, PartialEq, Eq,
-)]
+#[derive(Debug, Serialize, Deserialize, JsonSchema, Clone, PartialEq, Eq)]
 #[serde(rename_all = "snake_case", tag = "type", content = "content")]
 pub enum ServiceKind {
-    ExternalDns { external_address: IpAddr },
+    ExternalDns { external_address: IpAddr, nic: ServiceNic },
     InternalDns,
-    Nexus { external_address: IpAddr },
+    Nexus { external_address: IpAddr, nic: ServiceNic },
     Oximeter,
     Dendrite,
     Tfport,
     CruciblePantry,
-    Ntp { snat_cfg: Option<SourceNatConfig> },
+    BoundaryNtp { snat: SourceNatConfig, nic: ServiceNic },
+    InternalNtp,
 }
 
 impl fmt::Display for ServiceKind {
@@ -201,7 +210,7 @@ impl fmt::Display for ServiceKind {
             Dendrite => "dendrite",
             Tfport => "tfport",
             CruciblePantry => "crucible_pantry",
-            Ntp { .. } => "ntp",
+            BoundaryNtp { .. } | InternalNtp => "ntp",
         };
         write!(f, "{}", s)
     }

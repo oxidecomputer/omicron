@@ -9,9 +9,10 @@ use crate::external_api::shared;
 use base64::Engine;
 use chrono::{DateTime, Utc};
 use omicron_common::api::external::{
-    ByteCount, IdentityMetadataCreateParams, IdentityMetadataUpdateParams,
-    InstanceCpuCount, IpNet, Ipv4Net, Ipv6Net, Name, NameOrId,
-    RouteDestination, RouteTarget, SemverVersion,
+    AddressLotKind, ByteCount, IdentityMetadataCreateParams,
+    IdentityMetadataUpdateParams, InstanceCpuCount, IpNet, Ipv4Net, Ipv6Net,
+    Name, NameOrId, PaginationOrder, RouteDestination, RouteTarget,
+    SemverVersion,
 };
 use schemars::JsonSchema;
 use serde::{
@@ -1228,18 +1229,6 @@ pub struct AddressLotCreate {
     pub blocks: Vec<AddressLotBlockCreate>,
 }
 
-/// The kind associated with an address lot.
-#[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum AddressLotKind {
-    /// Infrastructure address lots are used for network infrastructure like
-    /// addresses assigned to rack switches.
-    Infra,
-
-    /// Pool address lots are used by IP pools.
-    Pool,
-}
-
 /// Parameters for creating an address lot block. Fist and last addresses are
 /// inclusive.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
@@ -1651,6 +1640,8 @@ pub struct ResourceMetrics {
     pub start_time: DateTime<Utc>,
     /// An exclusive end time of metrics.
     pub end_time: DateTime<Utc>,
+    /// Query result order
+    pub order: Option<PaginationOrder>,
 }
 
 // SYSTEM UPDATE

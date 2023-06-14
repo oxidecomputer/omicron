@@ -23,9 +23,11 @@ use crate::db::model::NetworkInterfaceKind;
 use crate::db::model::NetworkInterfaceUpdate;
 use crate::db::model::VpcSubnet;
 use crate::db::pagination::paginated;
+use crate::db::pool::DbConnection;
 use crate::db::queries::network_interface;
 use async_bb8_diesel::AsyncConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
+use async_bb8_diesel::PoolError;
 use chrono::Utc;
 use diesel::prelude::*;
 use omicron_common::api::external;
@@ -111,7 +113,6 @@ impl DataStore {
         opctx: &OpContext,
         interface: IncompleteNetworkInterface,
     ) -> Result<InstanceNetworkInterface, network_interface::InsertError> {
-        use db::schema::network_interface::dsl;
         if interface.kind != NetworkInterfaceKind::Instance {
             return Err(network_interface::InsertError::External(
                 Error::invalid_request(
@@ -119,21 +120,66 @@ impl DataStore {
                 ),
             ));
         }
+        self.create_network_interface_raw(opctx, interface)
+            .await
+            // Convert to `InstanceNetworkInterface` before returning; we know
+            // this is valid as we've checked the condition on-entry.
+            .map(NetworkInterface::as_instance)
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn service_create_network_interface_raw(
+        &self,
+        opctx: &OpContext,
+        interface: IncompleteNetworkInterface,
+    ) -> Result<
+        db::model::ServiceNetworkInterface,
+        network_interface::InsertError,
+    > {
+        if interface.kind != NetworkInterfaceKind::Service {
+            return Err(network_interface::InsertError::External(
+                Error::invalid_request(
+                    "expected service type network interface",
+                ),
+            ));
+        }
+        self.create_network_interface_raw(opctx, interface)
+            .await
+            // Convert to `ServiceNetworkInterface` before returning; we know
+            // this is valid as we've checked the condition on-entry.
+            .map(NetworkInterface::as_service)
+    }
+
+    async fn create_network_interface_raw(
+        &self,
+        opctx: &OpContext,
+        interface: IncompleteNetworkInterface,
+    ) -> Result<NetworkInterface, network_interface::InsertError> {
+        let conn = self
+            .pool_authorized(opctx)
+            .await
+            .map_err(network_interface::InsertError::External)?;
+        self.create_network_interface_raw_conn(conn, interface).await
+    }
+
+    pub(crate) async fn create_network_interface_raw_conn<ConnErr>(
+        &self,
+        conn: &(impl AsyncConnection<DbConnection, ConnErr> + Sync),
+        interface: IncompleteNetworkInterface,
+    ) -> Result<NetworkInterface, network_interface::InsertError>
+    where
+        ConnErr: From<diesel::result::Error> + Send + 'static,
+        PoolError: From<ConnErr>,
+    {
+        use db::schema::network_interface::dsl;
         let subnet_id = interface.subnet.identity.id;
         let query = network_interface::InsertQuery::new(interface.clone());
         VpcSubnet::insert_resource(
             subnet_id,
             diesel::insert_into(dsl::network_interface).values(query),
         )
-        .insert_and_get_result_async(
-            self.pool_authorized(opctx)
-                .await
-                .map_err(network_interface::InsertError::External)?,
-        )
+        .insert_and_get_result_async(conn)
         .await
-        // Convert to `InstanceNetworkInterface` before returning; we know
-        // this is valid as we've checked the condition on-entry.
-        .map(NetworkInterface::as_instance)
         .map_err(|e| match e {
             AsyncInsertError::CollectionNotFound => {
                 network_interface::InsertError::External(

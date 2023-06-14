@@ -205,7 +205,7 @@ impl nexus_test_interface::NexusServer for Server {
         // Perform the "handoff from RSS".
         //
         // However, RSS isn't running, so we'll do the handoff ourselves.
-        let opctx = internal_server.apictx.nexus.opctx_for_service_balancer();
+        let opctx = internal_server.apictx.nexus.opctx_for_internal_api();
 
         // Allocation of the initial Nexus's external IP is a little funny.  In
         // a real system, it'd be allocated by RSS and provided with the rack
@@ -223,8 +223,8 @@ impl nexus_test_interface::NexusServer for Server {
         let internal_services_ip_pool_ranges = services
             .iter()
             .filter_map(|s| match s.kind {
-                ServiceKind::ExternalDns { external_address }
-                | ServiceKind::Nexus { external_address } => {
+                ServiceKind::ExternalDns { external_address, .. }
+                | ServiceKind::Nexus { external_address, .. } => {
                     Some(IpRange::from(external_address))
                 }
                 _ => None,

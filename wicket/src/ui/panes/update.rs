@@ -2,6 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use std::borrow::Cow;
 use std::collections::BTreeMap;
 
 use super::{align_by, help_text, push_text_lines, Control};
@@ -34,7 +35,7 @@ use wicket_common::update_events::{
     EventBuffer, EventReport, ProgressEvent, StepOutcome, StepStatus,
     UpdateComponent,
 };
-use wicketd_client::types::SemverVersion;
+use wicketd_client::types::{RotSlot, SemverVersion};
 
 const MAX_COLUMN_WIDTH: u16 = 25;
 
@@ -811,29 +812,29 @@ impl UpdatePane {
             .map(|(id, states)| {
                 let children: Vec<_> = states
                     .iter()
-                    .map(|(component, s)| {
+                    .flat_map(|(component, s)| {
                         let target_version =
                             artifact_version(id, component, &versions);
-                        let installed_version =
-                            installed_version(id, component, inventory);
-                        let spans = vec![
-                            Span::styled(
-                                update_component_title(component),
-                                style::selected(),
-                            ),
-                            Span::styled(
-                                installed_version,
-                                style::selected_line(),
-                            ),
-                            Span::styled(target_version, style::selected()),
-                            Span::styled(s.to_string(), s.style()),
-                        ];
-                        TreeItem::new_leaf(align_by(
-                            0,
-                            MAX_COLUMN_WIDTH,
-                            self.contents_rect,
-                            spans,
-                        ))
+                        let installed_versions =
+                            all_installed_versions(id, component, inventory);
+                        let contents_rect = self.contents_rect;
+                        installed_versions.into_iter().map(move |v| {
+                            let spans = vec![
+                                Span::styled(v.title, style::selected()),
+                                Span::styled(v.version, style::selected_line()),
+                                Span::styled(
+                                    target_version.clone(),
+                                    style::selected(),
+                                ),
+                                Span::styled(s.to_string(), s.style()),
+                            ];
+                            TreeItem::new_leaf(align_by(
+                                0,
+                                MAX_COLUMN_WIDTH,
+                                contents_rect,
+                                spans,
+                            ))
+                        })
                     })
                     .collect();
                 TreeItem::new(*id, children)
@@ -1347,7 +1348,7 @@ impl UpdatePane {
                 Span::styled("STATUS", header_style),
             ],
         ))
-        .block(block.clone());
+        .block(block.clone().title("OVERVIEW (* = active)"));
         frame.render_widget(headers, self.table_headers_rect);
 
         // Need to refresh the items, as their versions/state may have changed
@@ -1414,7 +1415,7 @@ impl UpdatePane {
                     .style(header_style),
             )
             .widths(&width_constraints)
-            .block(block.clone().title("OVERVIEW"));
+            .block(block.clone().title("OVERVIEW (* = active)"));
         frame.render_widget(header_table, self.table_headers_rect);
 
         // For the selected item, draw the version table.
@@ -1422,26 +1423,28 @@ impl UpdatePane {
         let item_state = &state.update_state.items[&selected];
 
         let version_rows =
-            item_state.iter().map(|(component, update_state)| {
+            item_state.iter().flat_map(|(component, update_state)| {
                 let target_version = artifact_version(
                     &state.rack_state.selected,
                     component,
                     versions,
                 );
-                let installed_version = installed_version(
+                let installed_versions = all_installed_versions(
                     &state.rack_state.selected,
                     component,
                     inventory,
                 );
 
-                Row::new(vec![
-                    Cell::from(update_component_title(component))
-                        .style(style::selected()),
-                    Cell::from(installed_version).style(style::selected_line()),
-                    Cell::from(target_version).style(style::selected()),
-                    Cell::from(update_state.to_string())
-                        .style(update_state.style()),
-                ])
+                installed_versions.into_iter().map(move |v| {
+                    Row::new(vec![
+                        Cell::from(v.title).style(style::selected()),
+                        Cell::from(v.version).style(style::selected_line()),
+                        Cell::from(target_version.clone())
+                            .style(style::selected()),
+                        Cell::from(update_state.to_string())
+                            .style(update_state.style()),
+                    ])
+                })
             });
         let version_table =
             Table::new(version_rows).widths(&width_constraints).block(
@@ -1671,7 +1674,7 @@ impl From<&'_ State> for ForceUpdateSelectionState {
             let artifact_version =
                 artifact_version(&component_id, component, versions);
             let installed_version =
-                installed_version(&component_id, component, inventory);
+                active_installed_version(&component_id, component, inventory);
             match component {
                 UpdateComponent::Rot => {
                     assert!(
@@ -2112,7 +2115,7 @@ enum ComponentUpdateShowHelp {
     Completed,
 }
 
-fn installed_version(
+fn active_installed_version(
     id: &ComponentId,
     update_component: UpdateComponent,
     inventory: &Inventory,
@@ -2121,16 +2124,94 @@ fn installed_version(
     match update_component {
         UpdateComponent::Sp => component.map_or_else(
             || "UNKNOWN".to_string(),
-            |component| component.sp_version(),
+            |component| component.sp_version_active(),
         ),
         UpdateComponent::Rot => component.map_or_else(
             || "UNKNOWN".to_string(),
-            |component| component.rot_version(),
+            |component| match component.rot_active_slot() {
+                Some(RotSlot::A) => component.rot_version_a(),
+                Some(RotSlot::B) => component.rot_version_b(),
+                None => return "UNKNOWN".to_string(),
+            },
         ),
         UpdateComponent::Host => {
             // We currently have no way to tell what version of host software is
             // installed.
             "-----".to_string()
+        }
+    }
+}
+
+struct InstalledVersion {
+    title: Cow<'static, str>,
+    version: Cow<'static, str>,
+}
+
+fn all_installed_versions(
+    id: &ComponentId,
+    update_component: UpdateComponent,
+    inventory: &Inventory,
+) -> Vec<InstalledVersion> {
+    let base_title = update_component_title(update_component);
+    let component = inventory.get_inventory(id);
+    match update_component {
+        UpdateComponent::Sp => component.map_or_else(
+            || {
+                vec![InstalledVersion {
+                    title: base_title.into(),
+                    version: "UNKNOWN".into(),
+                }]
+            },
+            |component| {
+                vec![
+                    InstalledVersion {
+                        title: format!("{base_title}/0 *").into(),
+                        version: component.sp_version_active().into(),
+                    },
+                    InstalledVersion {
+                        title: format!("{base_title}/1").into(),
+                        version: component.sp_version_inactive().into(),
+                    },
+                ]
+            },
+        ),
+        UpdateComponent::Rot => component.map_or_else(
+            || {
+                vec![InstalledVersion {
+                    title: base_title.into(),
+                    version: "UNKNOWN".into(),
+                }]
+            },
+            |component| {
+                let Some(active) = component.rot_active_slot() else {
+                    return vec![InstalledVersion {
+                        title: base_title.into(),
+                        version: "UNKNOWN".into(),
+                    }];
+                };
+                let (active_a, active_b) = match active {
+                    RotSlot::A => (" *", ""),
+                    RotSlot::B => ("", " *"),
+                };
+                vec![
+                    InstalledVersion {
+                        title: format!("{base_title}/A{active_a}").into(),
+                        version: component.rot_version_a().into(),
+                    },
+                    InstalledVersion {
+                        title: format!("{base_title}/B{active_b}").into(),
+                        version: component.rot_version_b().into(),
+                    },
+                ]
+            },
+        ),
+        UpdateComponent::Host => {
+            // We currently have no way to tell what version of host software is
+            // installed.
+            vec![InstalledVersion {
+                title: base_title.into(),
+                version: "-----".into(),
+            }]
         }
     }
 }
@@ -2203,7 +2284,7 @@ impl Control for UpdatePane {
                 [
                     Constraint::Length(3),
                     Constraint::Length(3),
-                    Constraint::Length(4),
+                    Constraint::Length(6),
                     Constraint::Min(0),
                     Constraint::Length(3),
                 ]

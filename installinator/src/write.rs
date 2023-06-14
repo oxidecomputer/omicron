@@ -90,8 +90,8 @@ impl WriteDestination {
         Ok(Self { drives, is_host_phase_2_block_device: false })
     }
 
-    pub(crate) fn from_hardware(log: &Logger) -> Result<Self> {
-        let hardware = Hardware::scan(log)?;
+    pub(crate) async fn from_hardware(log: &Logger) -> Result<Self> {
+        let hardware = Hardware::scan(log).await?;
 
         // We want the `,raw`-suffixed path to the boot image partition, as that
         // allows us file-like access via the character device.

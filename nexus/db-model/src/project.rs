@@ -17,7 +17,14 @@ use uuid::Uuid;
 
 /// Describes a project within the database.
 #[derive(
-    Selectable, Queryable, Insertable, Debug, Resource, Serialize, Deserialize,
+    Selectable,
+    Queryable,
+    Insertable,
+    Clone,
+    Debug,
+    Resource,
+    Serialize,
+    Deserialize,
 )]
 #[diesel(table_name = project)]
 pub struct Project {
@@ -32,8 +39,17 @@ pub struct Project {
 impl Project {
     /// Creates a new database Project object.
     pub fn new(silo_id: Uuid, params: params::ProjectCreate) -> Self {
+        Self::new_with_id(Uuid::new_v4(), silo_id, params)
+    }
+
+    /// Creates a new database Project object with a specific ID.
+    pub fn new_with_id(
+        id: Uuid,
+        silo_id: Uuid,
+        params: params::ProjectCreate,
+    ) -> Self {
         Self {
-            identity: ProjectIdentity::new(Uuid::new_v4(), params.identity),
+            identity: ProjectIdentity::new(id, params.identity),
             rcgen: Generation::new(),
             silo_id,
         }
