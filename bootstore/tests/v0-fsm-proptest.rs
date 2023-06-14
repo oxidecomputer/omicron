@@ -14,7 +14,7 @@ use assert_matches::assert_matches;
 use bootstore::schemes::v0::{Config, Fsm};
 use proptest::prelude::*;
 use sled_hardware::Baseboard;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use uuid::Uuid;
 
 // Generate an individual Baseboard used as a peer id
@@ -26,8 +26,11 @@ fn arb_baseboard() -> impl Strategy<Value = Baseboard> {
 }
 
 // Generate a set of peer IDs
-fn arb_peer_ids() -> impl Strategy<Value = BTreeSet<Baseboard>> {
-    proptest::collection::btree_set(arb_baseboard(), 3..=12)
+fn arb_peer_ids(
+    min: usize,
+    max: usize,
+) -> impl Strategy<Value = BTreeSet<Baseboard>> {
+    proptest::collection::btree_set(arb_baseboard(), min..=max)
 }
 
 // Generate an FSM configuration
@@ -49,22 +52,71 @@ fn arb_config() -> impl Strategy<Value = Config> {
     )
 }
 
-// Generate test actions to drive the property based tests
-//fn arb_action() -> impl Strategy<Value = Action> {}
+// Generate a single test action to drive the property based tests
+fn arb_action(
+    rack_uuid: Uuid,
+    config: Config,
+    initial_members: BTreeSet<Baseboard>,
+) -> impl Strategy<Value = Action> {
+    // Choose an RSS sled randomly
+    any::<prop::sample::Selector>().prop_map(move |selector| {
+        Action::Initialize {
+            rss_sled: selector.select(&initial_members).clone(),
+            rack_uuid,
+            initial_members: initial_members.clone(),
+        }
+    })
+}
+
+// Generate a vector of arbitrary actions to drive the property based tests
+//
+// This vector of actions is the top level generator for our tests.
+fn arb_actions(
+    max_initial_members: usize,
+) -> impl Strategy<Value = (Vec<Action>, BTreeSet<Baseboard>, Config)> {
+    let min_initial_members = 3;
+    (arb_peer_ids(min_initial_members, max_initial_members), arb_config())
+        .prop_flat_map(|(initial_members, config)| {
+            let rack_uuid = Uuid::new_v4();
+            (
+                proptest::collection::vec(
+                    arb_action(rack_uuid, config, initial_members.clone()),
+                    1..=5,
+                ),
+                Just(initial_members),
+                Just(config),
+            )
+        })
+}
 
 // A test action to drive the test forward.
+#[derive(Debug)]
 pub enum Action {
     Initialize {
         rss_sled: Baseboard,
         rack_uuid: Uuid,
-        membership: BTreeSet<Baseboard>,
+        initial_members: BTreeSet<Baseboard>,
     },
+}
+
+// Create a set of FSMs used in a test
+fn create_peers(
+    peer_ids: BTreeSet<Baseboard>,
+    config: Config,
+) -> BTreeMap<Baseboard, Fsm> {
+    peer_ids
+        .into_iter()
+        .map(|id| (id.clone(), Fsm::new_uninitialized(id, config)))
+        .collect()
 }
 
 proptest! {
     #[test]
-    fn peer_ids(ids in arb_peer_ids()) {
-        let rack_uuid = Uuid::new_v4();
-
+    fn run((actions, initial_members, config) in arb_actions(12)) {
+        println!("{:#?}", actions);
+        let mut peers = create_peers(initial_members, config);
+        for peer in peers.values() {
+            println!("{:#?}", peer);
+        }
     }
 }

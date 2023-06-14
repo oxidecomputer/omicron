@@ -15,9 +15,9 @@ use super::messages::{
 use super::state::{
     Config, FsmCommonData, RackInitState, RackSecretState, State,
 };
-use super::state_initial_member::InitialMemberState;
-use super::state_learned::LearnedState;
-use super::state_learning::LearningState;
+use super::{
+    InitialMemberState, LearnedState, LearningState, UninitializedState,
+};
 use crate::trust_quorum::create_pkgs;
 use secrecy::ExposeSecret;
 use sled_hardware::Baseboard;
@@ -65,12 +65,28 @@ pub struct Fsm {
 }
 
 impl Fsm {
+    /// Create a new FSM. This is useful when starting from a persistent state
+    /// on disk.
     pub fn new(id: Baseboard, config: Config, state: State) -> Fsm {
         Fsm { common: FsmCommonData::new(id, config), state: Some(state) }
     }
 
+    /// Create a new FSM in `State::Uninitialized`
+    pub fn new_uninitialized(id: Baseboard, config: Config) -> Fsm {
+        let state = Some(State::Uninitialized(UninitializedState {}));
+        Fsm { common: FsmCommonData::new(id, config), state }
+    }
+
     pub fn state_name(&self) -> &'static str {
         self.state.as_ref().unwrap().name()
+    }
+
+    pub fn state(&self) -> &State {
+        self.state.as_ref().unwrap()
+    }
+
+    pub fn common_data(&self) -> &FsmCommonData {
+        &self.common
     }
 
     /// This call is triggered locally as a result of RSS running

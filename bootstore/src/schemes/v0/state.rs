@@ -32,7 +32,7 @@ pub type Ticks = usize;
 pub struct ShareIdx(pub usize);
 
 /// Configuration of the FSM
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct Config {
     pub learn_timeout: Ticks,
     pub rack_init_timeout: Ticks,
