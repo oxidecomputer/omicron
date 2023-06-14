@@ -166,6 +166,7 @@ fn make_action_registry() -> ActionRegistry {
     registry
 }
 
+#[allow(clippy::unused_async)]
 pub(super) async fn saga_generate_uuid<UserType: SagaType>(
     _: ActionContext<UserType>,
 ) -> Result<Uuid, ActionError> {

@@ -170,7 +170,7 @@ impl UpdateManager {
     }
 
     // Gets the component version information from a single zone artifact.
-    async fn component_get_zone_version(
+    fn component_get_zone_version(
         &self,
         path: &Utf8Path,
     ) -> Result<Component, Error> {
@@ -230,7 +230,7 @@ impl UpdateManager {
                 //
                 // This logic may be tweaked in the future, depending on how we
                 // bundle together zones.
-                components.push(self.component_get_zone_version(&path).await?);
+                components.push(self.component_get_zone_version(&path)?);
             } else if file_type.is_dir() && entry.file_name() == "sled-agent" {
                 // Sled Agent is the only non-zone file recognized as a component.
                 let version_path = path.join("VERSION");

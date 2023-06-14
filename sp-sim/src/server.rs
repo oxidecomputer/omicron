@@ -121,8 +121,7 @@ pub fn logger(config: &Config) -> Result<Logger> {
     Ok(log)
 }
 
-// TODO: This doesn't need to return Result anymore
-pub(crate) async fn handle_request<'a, H: SpHandler>(
+pub(crate) fn handle_request<'a, H: SpHandler>(
     handler: &mut H,
     recv: Result<(&[u8], SocketAddrV6)>,
     out: &'a mut [u8; gateway_messages::MAX_SERIALIZED_SIZE],

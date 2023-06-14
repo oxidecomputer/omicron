@@ -116,6 +116,7 @@ async fn spc_create_record_undo(
     Ok(())
 }
 
+#[allow(clippy::unused_async)]
 async fn spc_create_vpc_params(
     sagactx: NexusActionContext,
 ) -> Result<sagas::vpc_create::Params, ActionError> {
@@ -211,7 +212,7 @@ mod test {
             // ignore built-in services project
             .filter(dsl::id.ne(*SERVICES_PROJECT_ID))
             .select(Project::as_select())
-            .first_async::<Project>(datastore.pool_for_tests().await.unwrap())
+            .first_async::<Project>(datastore.pool_for_tests().unwrap())
             .await
             .optional()
             .unwrap()
@@ -229,7 +230,6 @@ mod test {
         use crate::db::schema::virtual_provisioning_collection::dsl;
 
         datastore.pool_for_tests()
-            .await
             .unwrap()
             .transaction_async(|conn| async move {
                 conn

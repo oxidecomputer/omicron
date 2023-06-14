@@ -238,7 +238,7 @@ impl Store {
 
     /// Fetches the full configuration for the current generation (including all
     /// zones and their associated DNS names)
-    pub(crate) async fn dns_config(&self) -> Result<DnsConfig, anyhow::Error> {
+    pub(crate) fn dns_config(&self) -> Result<DnsConfig, anyhow::Error> {
         let config = self.read_config()?;
         let zones = config
             .zones
@@ -879,7 +879,7 @@ mod test {
 
         // Verify the initial configuration.
         assert!(generations_with_trees(&tc.store).is_empty());
-        let config = tc.store.dns_config().await.unwrap();
+        let config = tc.store.dns_config().unwrap();
         assert_eq!(config.generation, 0);
         assert!(config.zones.is_empty());
         expect(&tc.store, "gen1_name.zone1.internal", Expect::NoZone);
@@ -1053,7 +1053,7 @@ mod test {
 
         // Initial configuration.
         assert!(generations_with_trees(&tc.store).is_empty());
-        let config = tc.store.dns_config().await.unwrap();
+        let config = tc.store.dns_config().unwrap();
         assert_eq!(config.generation, 0);
         assert!(config.zones.is_empty());
 

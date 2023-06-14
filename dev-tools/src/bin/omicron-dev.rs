@@ -31,7 +31,7 @@ async fn main() -> Result<(), anyhow::Error> {
         OmicronDb::DbWipe { ref args } => cmd_db_wipe(args).await,
         OmicronDb::ChRun { ref args } => cmd_clickhouse_run(args).await,
         OmicronDb::RunAll { ref args } => cmd_run_all(args).await,
-        OmicronDb::CertCreate { ref args } => cmd_cert_create(args).await,
+        OmicronDb::CertCreate { ref args } => cmd_cert_create(args),
     };
     if let Err(error) = result {
         fatal(CmdError::Failure(format!("{:#}", error)));
@@ -350,7 +350,7 @@ async fn cmd_run_all(args: &RunAllArgs) -> Result<(), anyhow::Error> {
     println!("omicron-dev: nexus external API:    {:?}", addr);
     println!(
         "omicron-dev: nexus internal API:    {:?}",
-        cptestctx.server.get_http_server_internal_address().await,
+        cptestctx.server.get_http_server_internal_address(),
     );
     println!(
         "omicron-dev: cockroachdb pid:       {}",
@@ -415,7 +415,7 @@ struct CertCreateArgs {
     server_names: Vec<String>,
 }
 
-async fn cmd_cert_create(args: &CertCreateArgs) -> Result<(), anyhow::Error> {
+fn cmd_cert_create(args: &CertCreateArgs) -> Result<(), anyhow::Error> {
     let cert = rcgen::generate_simple_self_signed(args.server_names.clone())
         .context("generating certificate")?;
     let cert_pem =

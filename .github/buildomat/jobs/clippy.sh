@@ -26,4 +26,4 @@ ptime -m bash ./tools/install_builder_prerequisites.sh -y
 
 banner clippy
 # See the corresponding GitHub Actions job for more about these arguments.
-ptime -m cargo clippy --all-targets -- --deny warnings --allow clippy::style
+ptime -m cargo clippy --all-targets -- --deny warnings --allow clippy::style --deny clippy::unused_async

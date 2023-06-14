@@ -373,7 +373,7 @@ impl SimInstance {
         self.inner.lock().unwrap().terminate()
     }
 
-    pub async fn put_migration_ids(
+    pub fn put_migration_ids(
         &self,
         old_runtime: &InstanceRuntimeState,
         ids: &Option<InstanceMigrationSourceParams>,

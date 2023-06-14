@@ -45,8 +45,7 @@ async fn test_authn_spoof_allowed() {
         test_name,
         authn_schemes_configured,
         HashMap::new(),
-    )
-    .await;
+    );
     let tried_spoof = vec![SPOOF_SCHEME_NAME]
         .iter()
         .map(|s| s.to_string())
@@ -132,8 +131,7 @@ async fn test_authn_session_cookie() {
             ("idle_expired".to_string(), idle_expired_session),
             ("abs_expired".to_string(), abs_expired_session),
         ]),
-    )
-    .await;
+    );
 
     let tried_cookie =
         vec![session_cookie::SESSION_COOKIE_SCHEME_NAME.to_string()];
@@ -191,8 +189,7 @@ async fn test_authn_session_cookie() {
 #[tokio::test]
 async fn test_authn_spoof_unconfigured() {
     let test_name = "test_authn_spoof_disallowed";
-    let testctx =
-        start_whoami_server(test_name, Vec::new(), HashMap::new()).await;
+    let testctx = start_whoami_server(test_name, Vec::new(), HashMap::new());
 
     let values = [
         None,
@@ -272,7 +269,7 @@ fn assert_authn_failed(
     assert_eq!(status_code, http::StatusCode::UNAUTHORIZED);
 }
 
-async fn start_whoami_server(
+fn start_whoami_server(
     test_name: &str,
     authn_schemes_configured: Vec<Box<dyn HttpAuthnScheme<WhoamiServerState>>>,
     sessions: HashMap<String, FakeSession>,

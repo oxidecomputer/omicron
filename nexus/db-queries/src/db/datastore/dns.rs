@@ -740,7 +740,6 @@ mod test {
                 .execute_async(
                     datastore
                         .pool_for_tests()
-                        .await
                         .expect("failed to get datastore connection"),
                 )
                 .await
@@ -799,7 +798,7 @@ mod test {
             HashMap::new(),
         );
         {
-            let conn = datastore.pool_for_tests().await.unwrap();
+            let conn = datastore.pool_for_tests().unwrap();
             DataStore::load_dns_data(conn, initial)
                 .await
                 .expect("failed to load initial DNS zone");
@@ -839,7 +838,7 @@ mod test {
             ]),
         );
         {
-            let conn = datastore.pool_for_tests().await.unwrap();
+            let conn = datastore.pool_for_tests().unwrap();
             DataStore::load_dns_data(conn, initial)
                 .await
                 .expect("failed to load initial DNS zone");
@@ -1015,7 +1014,7 @@ mod test {
                         zone_name: "z1.foo".to_string(),
                     },
                 ])
-                .execute_async(datastore.pool_for_tests().await.unwrap())
+                .execute_async(datastore.pool_for_tests().unwrap())
                 .await
                 .unwrap();
         }
@@ -1031,7 +1030,7 @@ mod test {
                     vi1.clone(),
                     vi2.clone(),
                 ])
-                .execute_async(datastore.pool_for_tests().await.unwrap())
+                .execute_async(datastore.pool_for_tests().unwrap())
                 .await
                 .unwrap();
         }
@@ -1131,7 +1130,7 @@ mod test {
                     )
                     .unwrap(),
                 ])
-                .execute_async(datastore.pool_for_tests().await.unwrap())
+                .execute_async(datastore.pool_for_tests().unwrap())
                 .await
                 .unwrap();
         }
@@ -1277,7 +1276,7 @@ mod test {
                         zone_name: "z1.foo".to_string(),
                     },
                 ])
-                .execute_async(datastore.pool_for_tests().await.unwrap())
+                .execute_async(datastore.pool_for_tests().unwrap())
                 .await
                 .unwrap_err();
             assert!(error
@@ -1306,7 +1305,7 @@ mod test {
                         comment: "test suite 4".to_string(),
                     },
                 ])
-                .execute_async(datastore.pool_for_tests().await.unwrap())
+                .execute_async(datastore.pool_for_tests().unwrap())
                 .await
                 .unwrap_err();
             assert!(error
@@ -1338,7 +1337,7 @@ mod test {
                     )
                     .unwrap(),
                 ])
-                .execute_async(datastore.pool_for_tests().await.unwrap())
+                .execute_async(datastore.pool_for_tests().unwrap())
                 .await
                 .unwrap_err();
             assert!(error
@@ -1459,7 +1458,7 @@ mod test {
                     dns_zone2.clone(),
                     dns_zone3.clone(),
                 ])
-                .execute_async(datastore.pool_for_tests().await.unwrap())
+                .execute_async(datastore.pool_for_tests().unwrap())
                 .await
                 .unwrap();
         }
@@ -1483,7 +1482,7 @@ mod test {
                         comment: "test suite 8".to_string(),
                     },
                 ])
-                .execute_async(datastore.pool_for_tests().await.unwrap())
+                .execute_async(datastore.pool_for_tests().unwrap())
                 .await
                 .unwrap();
         }
@@ -1512,7 +1511,7 @@ mod test {
             update.add_name(String::from("n1"), records1.clone()).unwrap();
             update.add_name(String::from("n2"), records2.clone()).unwrap();
 
-            let conn = datastore.pool_for_tests().await.unwrap();
+            let conn = datastore.pool_for_tests().unwrap();
             datastore.dns_update(&opctx, conn, update).await.unwrap();
         }
 
@@ -1545,7 +1544,7 @@ mod test {
             update.remove_name(String::from("n1")).unwrap();
             update.add_name(String::from("n1"), records12.clone()).unwrap();
 
-            let conn = datastore.pool_for_tests().await.unwrap();
+            let conn = datastore.pool_for_tests().unwrap();
             datastore.dns_update(&opctx, conn, update).await.unwrap();
         }
 
@@ -1575,7 +1574,7 @@ mod test {
             );
             update.remove_name(String::from("n1")).unwrap();
 
-            let conn = datastore.pool_for_tests().await.unwrap();
+            let conn = datastore.pool_for_tests().unwrap();
             datastore.dns_update(&opctx, conn, update).await.unwrap();
         }
 
@@ -1602,7 +1601,7 @@ mod test {
             );
             update.add_name(String::from("n1"), records2.clone()).unwrap();
 
-            let conn = datastore.pool_for_tests().await.unwrap();
+            let conn = datastore.pool_for_tests().unwrap();
             datastore.dns_update(&opctx, conn, update).await.unwrap();
         }
 
@@ -1633,8 +1632,8 @@ mod test {
             );
             update1.remove_name(String::from("n1")).unwrap();
 
-            let conn1 = datastore.pool_for_tests().await.unwrap();
-            let conn2 = datastore.pool_for_tests().await.unwrap();
+            let conn1 = datastore.pool_for_tests().unwrap();
+            let conn2 = datastore.pool_for_tests().unwrap();
             let (wait1_tx, wait1_rx) = tokio::sync::oneshot::channel();
             let (wait2_tx, wait2_rx) = tokio::sync::oneshot::channel();
 
@@ -1712,7 +1711,7 @@ mod test {
             );
             update.remove_name(String::from("n4")).unwrap();
 
-            let conn = datastore.pool_for_tests().await.unwrap();
+            let conn = datastore.pool_for_tests().unwrap();
             let error =
                 datastore.dns_update(&opctx, conn, update).await.unwrap_err();
             assert_eq!(
@@ -1737,7 +1736,7 @@ mod test {
             );
             update.add_name(String::from("n2"), records1.clone()).unwrap();
 
-            let conn = datastore.pool_for_tests().await.unwrap();
+            let conn = datastore.pool_for_tests().unwrap();
             let error =
                 datastore.dns_update(&opctx, conn, update).await.unwrap_err();
             let msg = error.to_string();

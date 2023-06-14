@@ -71,8 +71,7 @@ impl Server {
             sa_log,
             config.nexus_address,
             Arc::clone(&nexus_client),
-        )
-        .await;
+        );
 
         let dropshot_log = log.new(o!("component" => "dropshot"));
         let http_server = dropshot::HttpServerStarter::new(
@@ -182,8 +181,7 @@ impl Server {
             log.new(o!("kind" => "pantry")),
             config.storage.ip,
             sled_agent.clone(),
-        )
-        .await;
+        );
 
         // Start the internal DNS server, insert the simulated Pantry DNS
         // record

@@ -871,7 +871,7 @@ impl Instance {
 
         let running_zone = RunningZone::boot(installed_zone).await?;
         let addr_request = AddressRequest::new_static(inner.propolis_ip, None);
-        let network = running_zone.ensure_address(addr_request).await?;
+        let network = running_zone.ensure_address(addr_request)?;
         info!(inner.log, "Created address {} for zone: {}", network, zname);
 
         let gateway = inner.port_manager.underlay_ip();

@@ -442,7 +442,7 @@ impl UdpTask {
                         &mut out_buf,
                         responsiveness,
                         SpPort::One,
-                    ).await? {
+                    )? {
                         self.udp0.send_to(resp, addr).await?;
                     }
                 }
@@ -454,7 +454,7 @@ impl UdpTask {
                         &mut out_buf,
                         responsiveness,
                         SpPort::Two,
-                    ).await? {
+                    )? {
                         self.udp1.send_to(resp, addr).await?;
                     }
                 }

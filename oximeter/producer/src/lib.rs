@@ -197,7 +197,7 @@ async fn collect_endpoint(
 ) -> Result<HttpResponseOk<ProducerResults>, HttpError> {
     let registry = request_context.context();
     let producer_id = path_params.into_inner().producer_id;
-    collect(registry, producer_id).await
+    collect(registry, producer_id)
 }
 
 // TODO this seems misplaced.
@@ -220,7 +220,7 @@ pub async fn register(
 }
 
 /// Handle a request to pull available metric data from a [`ProducerRegistry`].
-pub async fn collect(
+pub fn collect(
     registry: &ProducerRegistry,
     producer_id: Uuid,
 ) -> Result<HttpResponseOk<ProducerResults>, HttpError> {

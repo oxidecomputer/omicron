@@ -168,7 +168,7 @@ async fn do_build(config: &Config) -> Result<()> {
     do_for_all_rust_packages(config, "build").await
 }
 
-async fn do_dot(config: &Config) -> Result<()> {
+fn do_dot(config: &Config) -> Result<()> {
     println!(
         "{}",
         omicron_package::dot::do_dot(&config.target, &config.package_config)?
@@ -194,7 +194,7 @@ async fn do_target(
                 switch.clone(),
             )?;
 
-            let path = get_single_target(&target_dir, name).await?;
+            let path = get_single_target(&target_dir, name)?;
             tokio::fs::write(&path, Target::from(target).to_string()).await?;
 
             replace_active_link(&name, &target_dir).await?;
@@ -224,12 +224,12 @@ async fn do_target(
             }
         }
         TargetCommand::Set => {
-            let _ = get_single_target(&target_dir, name).await?;
+            let _ = get_single_target(&target_dir, name)?;
             replace_active_link(&name, &target_dir).await?;
             println!("Set build target '{name}' as active");
         }
         TargetCommand::Delete => {
-            let path = get_single_target(&target_dir, name).await?;
+            let path = get_single_target(&target_dir, name)?;
             tokio::fs::remove_file(&path).await?;
             println!("Removed build target '{name}'");
         }
@@ -237,7 +237,7 @@ async fn do_target(
     Ok(())
 }
 
-async fn get_single_target(
+fn get_single_target(
     target_dir: impl AsRef<Path>,
     name: &str,
 ) -> Result<PathBuf> {
@@ -856,7 +856,7 @@ async fn main() -> Result<()> {
             do_target(&args.artifact_dir, &args.target, &subcommand).await?;
         }
         SubCommand::Build(BuildCommand::Dot) => {
-            do_dot(&get_config()?).await?;
+            do_dot(&get_config()?)?;
         }
         SubCommand::Build(BuildCommand::Package) => {
             do_package(&get_config()?, &args.artifact_dir).await?;

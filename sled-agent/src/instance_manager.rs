@@ -321,7 +321,7 @@ impl InstanceManager {
             .map_err(Error::from)
     }
 
-    pub async fn firewall_rules_ensure(
+    pub fn firewall_rules_ensure(
         &self,
         rules: &[VpcFirewallRule],
     ) -> Result<(), Error> {
@@ -334,7 +334,7 @@ impl InstanceManager {
         Ok(())
     }
 
-    pub async fn set_virtual_nic_host(
+    pub fn set_virtual_nic_host(
         &self,
         mapping: &SetVirtualNetworkInterfaceHost,
     ) -> Result<(), Error> {
@@ -347,7 +347,7 @@ impl InstanceManager {
         Ok(())
     }
 
-    pub async fn unset_virtual_nic_host(
+    pub fn unset_virtual_nic_host(
         &self,
         mapping: &SetVirtualNetworkInterfaceHost,
     ) -> Result<(), Error> {

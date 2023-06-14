@@ -316,8 +316,8 @@ pub async fn test_setup_with_config<N: NexusServer>(
     )
     .await;
 
-    let external_server_addr = server.get_http_server_external_address().await;
-    let internal_server_addr = server.get_http_server_internal_address().await;
+    let external_server_addr = server.get_http_server_external_address();
+    let internal_server_addr = server.get_http_server_internal_address();
 
     let testctx_external = ClientTestContext::new(
         external_server_addr,

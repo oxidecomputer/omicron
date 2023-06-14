@@ -106,7 +106,7 @@ async fn sled_role_get(
     rqctx: RequestContext<SledAgent>,
 ) -> Result<HttpResponseOk<SledRole>, HttpError> {
     let sa = rqctx.context();
-    Ok(HttpResponseOk(sa.get_role().await))
+    Ok(HttpResponseOk(sa.get_role()))
 }
 
 #[endpoint {
@@ -319,7 +319,6 @@ async fn vpc_firewall_rules_put(
     let body_args = body.into_inner();
 
     sa.firewall_rules_ensure(vpc_id, &body_args.rules[..])
-        .await
         .map_err(Error::from)?;
 
     Ok(HttpResponseUpdatedNoContent())
@@ -347,7 +346,7 @@ async fn set_v2p(
     let sa = rqctx.context();
     let body_args = body.into_inner();
 
-    sa.set_virtual_nic_host(&body_args).await.map_err(Error::from)?;
+    sa.set_virtual_nic_host(&body_args).map_err(Error::from)?;
 
     Ok(HttpResponseUpdatedNoContent())
 }
@@ -367,7 +366,7 @@ async fn del_v2p(
     let sa = rqctx.context();
     let body_args = body.into_inner();
 
-    sa.unset_virtual_nic_host(&body_args).await.map_err(Error::from)?;
+    sa.unset_virtual_nic_host(&body_args).map_err(Error::from)?;
 
     Ok(HttpResponseUpdatedNoContent())
 }

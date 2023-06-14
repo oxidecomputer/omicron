@@ -237,7 +237,7 @@ mod test {
                     SocketAddrV6::new(Ipv6Addr::LOCALHOST, 1, 0, 0),
                     ServiceKind::InternalDns,
                 ))
-                .execute_async(datastore.pool_for_tests().await.unwrap())
+                .execute_async(datastore.pool_for_tests().unwrap())
                 .await
                 .unwrap();
         }
@@ -265,7 +265,7 @@ mod test {
 
             diesel::insert_into(dsl::service)
                 .values(new_services)
-                .execute_async(datastore.pool_for_tests().await.unwrap())
+                .execute_async(datastore.pool_for_tests().unwrap())
                 .await
                 .unwrap();
         }
@@ -281,7 +281,7 @@ mod test {
             diesel::delete(
                 dsl::service.filter(dsl::kind.eq(ServiceKind::InternalDns)),
             )
-            .execute_async(datastore.pool_for_tests().await.unwrap())
+            .execute_async(datastore.pool_for_tests().unwrap())
             .await
             .unwrap();
         }

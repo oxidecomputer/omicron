@@ -86,6 +86,7 @@ impl NexusSaga for SagaInstanceDelete {
 
 // instance delete saga: action implementations
 
+#[allow(clippy::unused_async)]
 async fn sid_noop(_sagactx: NexusActionContext) -> Result<(), ActionError> {
     Ok(())
 }

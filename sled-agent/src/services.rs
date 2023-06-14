@@ -351,7 +351,7 @@ impl ServiceManager {
     /// - `sidecar_revision`: Rev of attached sidecar, if present.
     /// - `switch_zone_bootstrap_address`: The bootstrap IP to use for the switch zone.
     #[allow(clippy::too_many_arguments)]
-    pub async fn new(
+    pub fn new(
         log: Logger,
         global_zone_bootstrap_link_local_address: Ipv6Addr,
         underlay_etherstub: Etherstub,
@@ -1193,7 +1193,7 @@ impl ServiceManager {
                 bootstrap_address.to_string(),
                 request.zone.zone_type.to_string()
             );
-            running_zone.ensure_bootstrap_address(*bootstrap_address).await?;
+            running_zone.ensure_bootstrap_address(*bootstrap_address)?;
             info!(
                 self.inner.log,
                 "Forwarding bootstrap traffic via {} to {}",
@@ -1223,7 +1223,7 @@ impl ServiceManager {
             );
             let addr_request =
                 AddressRequest::new_static(IpAddr::V6(*addr), None);
-            running_zone.ensure_address(addr_request).await?;
+            running_zone.ensure_address(addr_request)?;
             info!(
                 self.inner.log,
                 "Ensuring address {} exists - OK",
@@ -2241,7 +2241,7 @@ impl ServiceManager {
                     );
                     let addr_request =
                         AddressRequest::new_static(IpAddr::V6(*addr), None);
-                    zone.ensure_address(addr_request).await?;
+                    zone.ensure_address(addr_request)?;
                     info!(
                         self.inner.log,
                         "Ensuring address {} exists - OK",
@@ -2559,7 +2559,7 @@ mod test {
     }
 
     impl TestConfig {
-        async fn new() -> Self {
+        fn new() -> Self {
             let config_dir = camino_tempfile::Utf8TempDir::new().unwrap();
             Self { config_dir }
         }
@@ -2625,7 +2625,7 @@ mod test {
         let logctx =
             omicron_test_utils::dev::test_setup_log("test_ensure_service");
         let log = logctx.log.clone();
-        let test_config = TestConfig::new().await;
+        let test_config = TestConfig::new();
         let storage_key_requester = spawn_key_manager(&log).await;
 
         let mgr = ServiceManager::new(
@@ -2641,7 +2641,6 @@ mod test {
             vec![],
             StorageManager::new(&log, storage_key_requester).await,
         )
-        .await
         .unwrap();
         test_config.override_paths(&mgr);
 
@@ -2672,7 +2671,7 @@ mod test {
             "test_ensure_service_which_already_exists",
         );
         let log = logctx.log.clone();
-        let test_config = TestConfig::new().await;
+        let test_config = TestConfig::new();
         let storage_key_requester = spawn_key_manager(&log).await;
 
         let mgr = ServiceManager::new(
@@ -2688,7 +2687,6 @@ mod test {
             vec![],
             StorageManager::new(&log, storage_key_requester).await,
         )
-        .await
         .unwrap();
         test_config.override_paths(&mgr);
 
@@ -2720,7 +2718,7 @@ mod test {
             "test_services_are_recreated_on_reboot",
         );
         let log = logctx.log.clone();
-        let test_config = TestConfig::new().await;
+        let test_config = TestConfig::new();
         let storage_key_requester = spawn_key_manager(&log).await;
 
         // First, spin up a ServiceManager, create a new service, and tear it
@@ -2738,7 +2736,6 @@ mod test {
             vec![],
             StorageManager::new(&log, storage_key_requester).await,
         )
-        .await
         .unwrap();
         test_config.override_paths(&mgr);
 
@@ -2776,7 +2773,6 @@ mod test {
             vec![],
             StorageManager::new(&log, storage_key_requester).await,
         )
-        .await
         .unwrap();
         test_config.override_paths(&mgr);
 
@@ -2805,7 +2801,7 @@ mod test {
             "test_services_do_not_persist_without_config",
         );
         let log = logctx.log.clone();
-        let test_config = TestConfig::new().await;
+        let test_config = TestConfig::new();
         let storage_key_requester = spawn_key_manager(&log).await;
 
         // First, spin up a ServiceManager, create a new service, and tear it
@@ -2823,7 +2819,6 @@ mod test {
             vec![],
             StorageManager::new(&log, storage_key_requester).await,
         )
-        .await
         .unwrap();
         test_config.override_paths(&mgr);
 
@@ -2870,7 +2865,6 @@ mod test {
             vec![],
             StorageManager::new(&log, storage_key_requester).await,
         )
-        .await
         .unwrap();
         test_config.override_paths(&mgr);
 

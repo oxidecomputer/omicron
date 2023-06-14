@@ -292,6 +292,7 @@ impl NexusSaga for SagaSnapshotCreate {
 
 // snapshot create saga: action implementations
 
+#[allow(clippy::unused_async)]
 async fn ssc_noop(_sagactx: NexusActionContext) -> Result<(), ActionError> {
     Ok(())
 }
@@ -1884,7 +1885,7 @@ mod test {
         dsl::snapshot
             .filter(dsl::time_deleted.is_null())
             .select(Snapshot::as_select())
-            .first_async::<Snapshot>(datastore.pool_for_tests().await.unwrap())
+            .first_async::<Snapshot>(datastore.pool_for_tests().unwrap())
             .await
             .optional()
             .unwrap()
@@ -1897,9 +1898,7 @@ mod test {
 
         dsl::region_snapshot
             .select(RegionSnapshot::as_select())
-            .first_async::<RegionSnapshot>(
-                datastore.pool_for_tests().await.unwrap(),
-            )
+            .first_async::<RegionSnapshot>(datastore.pool_for_tests().unwrap())
             .await
             .optional()
             .unwrap()

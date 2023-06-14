@@ -127,7 +127,7 @@ async fn dns_config_get(
     rqctx: RequestContext<Context>,
 ) -> Result<dropshot::HttpResponseOk<DnsConfig>, dropshot::HttpError> {
     let apictx = rqctx.context();
-    let config = apictx.store.dns_config().await.map_err(|e| {
+    let config = apictx.store.dns_config().map_err(|e| {
         dropshot::HttpError::for_internal_error(format!(
             "internal error: {:?}",
             e

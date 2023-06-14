@@ -524,7 +524,7 @@ impl SledAgent {
     }
 
     /// Returns whether or not the sled believes itself to be a scrimlet
-    pub async fn get_role(&self) -> SledRole {
+    pub fn get_role(&self) -> SledRole {
         if self.inner.hardware.is_scrimlet() {
             SledRole::Scrimlet
         } else {
@@ -639,6 +639,9 @@ impl SledAgent {
     /// specified.
     ///
     /// NOTE: Not yet implemented.
+    // This will probably be async when implemented? If not, remove this lint
+    // and remove `async`. For now, leave it to match the expected API.
+    #[allow(clippy::unused_async)]
     pub async fn disk_ensure(
         &self,
         _disk_id: Uuid,
@@ -676,37 +679,28 @@ impl SledAgent {
             .map_err(Error::from)
     }
 
-    pub async fn firewall_rules_ensure(
+    pub fn firewall_rules_ensure(
         &self,
         _vpc_id: Uuid,
         rules: &[VpcFirewallRule],
     ) -> Result<(), Error> {
-        self.inner
-            .instances
-            .firewall_rules_ensure(rules)
-            .await
-            .map_err(Error::from)
+        self.inner.instances.firewall_rules_ensure(rules).map_err(Error::from)
     }
 
-    pub async fn set_virtual_nic_host(
+    pub fn set_virtual_nic_host(
         &self,
         mapping: &SetVirtualNetworkInterfaceHost,
     ) -> Result<(), Error> {
-        self.inner
-            .instances
-            .set_virtual_nic_host(mapping)
-            .await
-            .map_err(Error::from)
+        self.inner.instances.set_virtual_nic_host(mapping).map_err(Error::from)
     }
 
-    pub async fn unset_virtual_nic_host(
+    pub fn unset_virtual_nic_host(
         &self,
         mapping: &SetVirtualNetworkInterfaceHost,
     ) -> Result<(), Error> {
         self.inner
             .instances
             .unset_virtual_nic_host(mapping)
-            .await
             .map_err(Error::from)
     }
 
