@@ -856,7 +856,7 @@ pub(crate) mod test {
         dsl::disk
             .filter(dsl::time_deleted.is_null())
             .select(Disk::as_select())
-            .first_async::<Disk>(datastore.pool_for_tests().await.unwrap())
+            .first_async::<Disk>(datastore.pool_for_tests().unwrap())
             .await
             .optional()
             .unwrap()
@@ -870,7 +870,7 @@ pub(crate) mod test {
         dsl::volume
             .filter(dsl::time_deleted.is_null())
             .select(Volume::as_select())
-            .first_async::<Volume>(datastore.pool_for_tests().await.unwrap())
+            .first_async::<Volume>(datastore.pool_for_tests().unwrap())
             .await
             .optional()
             .unwrap()
@@ -886,7 +886,7 @@ pub(crate) mod test {
         dsl::virtual_provisioning_resource
             .select(VirtualProvisioningResource::as_select())
             .first_async::<VirtualProvisioningResource>(
-                datastore.pool_for_tests().await.unwrap(),
+                datastore.pool_for_tests().unwrap(),
             )
             .await
             .optional()
@@ -902,7 +902,6 @@ pub(crate) mod test {
 
         datastore
             .pool_for_tests()
-            .await
             .unwrap()
             .transaction_async(|conn| async move {
                 conn.batch_execute_async(

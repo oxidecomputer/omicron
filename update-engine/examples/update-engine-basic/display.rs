@@ -39,7 +39,7 @@ async fn display_messages(
 ) -> Result<()> {
     let first_event =
         receiver.recv().await.context("at least one event is expected")?;
-    let mut state = MessageDisplayState::new(log, first_event).await?;
+    let mut state = MessageDisplayState::new(log, first_event)?;
 
     while let Some(event) = receiver.recv().await {
         state.handle_event(event)?;
@@ -57,10 +57,7 @@ pub struct MessageDisplayState {
 }
 
 impl MessageDisplayState {
-    pub(crate) async fn new(
-        log: &slog::Logger,
-        first_event: Event,
-    ) -> Result<Self> {
+    pub(crate) fn new(log: &slog::Logger, first_event: Event) -> Result<Self> {
         let log = log.new(slog::o!("component" => "MessageDisplayState"));
         let mp = MultiProgress::new();
 

@@ -434,7 +434,7 @@ impl RunningZone {
         Ok(running_zone)
     }
 
-    pub async fn ensure_address(
+    pub fn ensure_address(
         &self,
         addrtype: AddressRequest,
     ) -> Result<IpNetwork, EnsureAddressError> {
@@ -445,10 +445,10 @@ impl RunningZone {
                 std::net::IpAddr::V6(_) => "omicron6",
             },
         };
-        self.ensure_address_with_name(addrtype, name).await
+        self.ensure_address_with_name(addrtype, name)
     }
 
-    pub async fn ensure_address_with_name(
+    pub fn ensure_address_with_name(
         &self,
         addrtype: AddressRequest,
         name: &str,
@@ -466,7 +466,7 @@ impl RunningZone {
     }
 
     /// This is the API for creating a bootstrap address on the switch zone.
-    pub async fn ensure_bootstrap_address(
+    pub fn ensure_bootstrap_address(
         &self,
         address: Ipv6Addr,
     ) -> Result<(), EnsureAddressError> {

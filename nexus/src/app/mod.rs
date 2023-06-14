@@ -405,9 +405,7 @@ impl Nexus {
         Ok(())
     }
 
-    pub async fn get_external_server_address(
-        &self,
-    ) -> Option<std::net::SocketAddr> {
+    pub fn get_external_server_address(&self) -> Option<std::net::SocketAddr> {
         self.external_server
             .lock()
             .unwrap()
@@ -415,9 +413,7 @@ impl Nexus {
             .map(|server| server.local_addr())
     }
 
-    pub async fn get_internal_server_address(
-        &self,
-    ) -> Option<std::net::SocketAddr> {
+    pub fn get_internal_server_address(&self) -> Option<std::net::SocketAddr> {
         self.internal_server
             .lock()
             .unwrap()

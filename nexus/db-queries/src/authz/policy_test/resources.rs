@@ -88,7 +88,7 @@ pub async fn make_resources(
         LookupType::ById(sled_id),
     ));
 
-    make_services(&mut builder).await;
+    make_services(&mut builder);
 
     builder.new_resource(authz::PhysicalDisk::new(
         authz::FLEET,
@@ -146,7 +146,7 @@ pub async fn make_resources(
 }
 
 /// Helper for `make_resources()` that constructs some Services
-async fn make_services(builder: &mut ResourceBuilder<'_>) {
+fn make_services(builder: &mut ResourceBuilder<'_>) {
     let nexus_service_id =
         "6b1f15ee-d6b3-424c-8436-94413a0b682d".parse().unwrap();
     builder.new_resource(authz::Service::new(

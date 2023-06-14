@@ -220,8 +220,7 @@ impl HardwareMonitor {
             switch_zone_bootstrap_address,
             sled_config.switch_zone_maghemite_links.clone(),
             storage_manager.clone(),
-        )
-        .await?;
+        )?;
 
         Ok(Self::start(log, hardware, service_manager, storage_manager))
     }

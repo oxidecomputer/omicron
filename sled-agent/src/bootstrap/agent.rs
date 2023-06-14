@@ -784,7 +784,7 @@ impl Agent {
         Ok(())
     }
 
-    async fn uninstall_storage_locked(
+    fn uninstall_storage_locked(
         &self,
         _state: &tokio::sync::MutexGuard<'_, SledAgentState>,
     ) -> Result<(), BootstrapError> {
@@ -831,7 +831,7 @@ impl Agent {
             self.uninstall_zones_locked(&state).await?;
             self.uninstall_sled_local_config_locked(&state).await?;
             self.uninstall_networking_locked(&state).await?;
-            self.uninstall_storage_locked(&state).await?;
+            self.uninstall_storage_locked(&state)?;
             Ok::<(), BootstrapError>(())
         }
         .await;

@@ -211,7 +211,7 @@ async fn test_oximeter_reregistration() {
     // Restart the producer, and verify that we have _more_ data than before
     // Set up a test metric producer server
     context.producer = nexus_test_utils::start_producer_server(
-        context.server.get_http_server_internal_address().await,
+        context.server.get_http_server_internal_address(),
         nexus_test_utils::PRODUCER_UUID.parse().unwrap(),
     )
     .await
@@ -289,7 +289,7 @@ async fn test_oximeter_reregistration() {
     // Restart oximeter again, and verify that we have even more new data.
     context.oximeter = nexus_test_utils::start_oximeter(
         context.logctx.log.new(o!("component" => "oximeter")),
-        context.server.get_http_server_internal_address().await,
+        context.server.get_http_server_internal_address(),
         context.clickhouse.port(),
         oximeter_id,
     )

@@ -166,7 +166,7 @@ impl DataStore {
 
     /// For testing only. This isn't cfg(test) because nexus needs access to it.
     #[doc(hidden)]
-    pub async fn pool_for_tests(
+    pub fn pool_for_tests(
         &self,
     ) -> Result<&bb8::Pool<ConnectionManager<DbConnection>>, Error> {
         Ok(self.pool.pool())

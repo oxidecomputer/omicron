@@ -115,10 +115,10 @@ impl Runner {
                             Rpy::Event(self.current_event)
                         }
                         Cmd::Step => {
-                            self.step().await
+                            self.step()
                         }
                         Cmd::Jump => {
-                            self.jump().await
+                            self.jump()
                         }
                         Cmd::DebugState => {
                             self.debug_state()
@@ -155,7 +155,7 @@ impl Runner {
         })
     }
 
-    pub async fn step(&mut self) -> Rpy {
+    pub fn step(&mut self) -> Rpy {
         let Some(snapshot) = &self.snapshot else {
             return Rpy::Err("Please load a wicket recording".to_string());
         };
@@ -176,7 +176,7 @@ impl Runner {
         }
     }
 
-    pub async fn jump(&mut self) -> Rpy {
+    pub fn jump(&mut self) -> Rpy {
         let Some(snapshot) = &self.snapshot else {
             return Rpy::Err("Please load a wicket recording".to_string());
         };

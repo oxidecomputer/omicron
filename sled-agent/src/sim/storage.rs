@@ -535,7 +535,7 @@ impl Storage {
     }
 
     /// Adds a Dataset to the sled's simulated storage.
-    pub async fn insert_dataset(
+    pub fn insert_dataset(
         &mut self,
         zpool_id: Uuid,
         dataset_id: Uuid,
@@ -557,7 +557,7 @@ impl Storage {
         dataset.address()
     }
 
-    pub async fn get_dataset(
+    pub fn get_dataset(
         &self,
         zpool_id: Uuid,
         dataset_id: Uuid,
@@ -787,11 +787,7 @@ pub struct PantryServer {
 }
 
 impl PantryServer {
-    pub async fn new(
-        log: Logger,
-        ip: IpAddr,
-        sled_agent: Arc<SledAgent>,
-    ) -> Self {
+    pub fn new(log: Logger, ip: IpAddr, sled_agent: Arc<SledAgent>) -> Self {
         let pantry = Arc::new(Pantry::new(sled_agent));
 
         let server = dropshot::HttpServerStarter::new(

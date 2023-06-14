@@ -324,6 +324,7 @@ async fn sim_clear_migration_ids(
     Ok(())
 }
 
+#[allow(clippy::unused_async)]
 async fn sim_create_destination_state(
     sagactx: NexusActionContext,
 ) -> Result<db::model::Instance, ActionError> {
@@ -515,8 +516,7 @@ mod tests {
             let sa_id = Uuid::new_v4();
             let log =
                 cptestctx.logctx.log.new(o!("sled_id" => sa_id.to_string()));
-            let addr =
-                cptestctx.server.get_http_server_internal_address().await;
+            let addr = cptestctx.server.get_http_server_internal_address();
 
             info!(&cptestctx.logctx.log, "Adding simulated sled"; "sled_id" => %sa_id);
             let update_dir = Utf8Path::new("/should/be/unused");

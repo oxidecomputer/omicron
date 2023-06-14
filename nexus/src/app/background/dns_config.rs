@@ -220,7 +220,7 @@ mod test {
         {
             use crate::db::schema::dns_version::dsl;
             diesel::delete(dsl::dns_version.filter(dsl::version.eq(2)))
-                .execute_async(datastore.pool_for_tests().await.unwrap())
+                .execute_async(datastore.pool_for_tests().unwrap())
                 .await
                 .unwrap();
         }
@@ -237,7 +237,6 @@ mod test {
         // Similarly, wipe all of the state and verify that we handle that okay.
         datastore
             .pool_for_tests()
-            .await
             .unwrap()
             .transaction_async(|conn| async move {
                 conn.batch_execute_async(

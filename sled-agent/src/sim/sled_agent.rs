@@ -111,7 +111,7 @@ impl SledAgent {
     // TODO-cleanup should this instantiate the NexusClient it needs?
     // Should it take a Config object instead of separate id, sim_mode, etc?
     /// Constructs a simulated SledAgent with the given uuid.
-    pub async fn new_simulated_with_id(
+    pub fn new_simulated_with_id(
         config: &Config,
         log: Logger,
         nexus_address: SocketAddr,
@@ -430,7 +430,7 @@ impl SledAgent {
         let instance =
             self.instances.sim_get_cloned_object(&instance_id).await?;
 
-        instance.put_migration_ids(old_runtime, migration_ids).await
+        instance.put_migration_ids(old_runtime, migration_ids)
     }
 
     /// Idempotently ensures that the given API Disk (described by `api_disk`)
@@ -502,7 +502,7 @@ impl SledAgent {
         zpool_id: Uuid,
         dataset_id: Uuid,
     ) -> SocketAddr {
-        self.storage.lock().await.insert_dataset(zpool_id, dataset_id).await
+        self.storage.lock().await.insert_dataset(zpool_id, dataset_id)
     }
 
     /// Returns a crucible dataset within a particular zpool.
@@ -511,7 +511,7 @@ impl SledAgent {
         zpool_id: Uuid,
         dataset_id: Uuid,
     ) -> Arc<CrucibleData> {
-        self.storage.lock().await.get_dataset(zpool_id, dataset_id).await
+        self.storage.lock().await.get_dataset(zpool_id, dataset_id)
     }
 
     /// Issue a snapshot request for a Crucible disk attached to an instance.

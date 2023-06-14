@@ -254,7 +254,7 @@ impl Client {
     // returned. If the schema does not match, an Err is returned (the caller skips the sample in
     // this case). If the schema does not _exist_ in the database, Some(schema) is returned, so
     // that the caller can insert it into the database at the appropriate time.
-    async fn verify_sample_schema(
+    fn verify_sample_schema(
         &self,
         sample: &Sample,
     ) -> Result<Option<String>, Error> {
@@ -449,7 +449,7 @@ impl DbWrite for Client {
         let mut new_schema = Vec::new();
 
         for sample in samples.iter() {
-            match self.verify_sample_schema(sample).await {
+            match self.verify_sample_schema(sample) {
                 Err(_) => {
                     // Skip the sample, but otherwise do nothing. The error is logged in the above
                     // call.
@@ -705,7 +705,7 @@ mod tests {
             datum: 1,
         };
         let sample = Sample::new(&bad_name, &metric);
-        let result = client.verify_sample_schema(&sample).await;
+        let result = client.verify_sample_schema(&sample);
         assert!(matches!(result, Err(Error::SchemaMismatch { .. })));
         db.cleanup().await.expect("Failed to cleanup ClickHouse server");
     }
@@ -729,7 +729,7 @@ mod tests {
 
         // Verify that this sample is considered new, i.e., we return rows to update the timeseries
         // schema table.
-        let result = client.verify_sample_schema(&sample).await.unwrap();
+        let result = client.verify_sample_schema(&sample).unwrap();
         assert!(
             matches!(result, Some(_)),
             "When verifying a new sample, the rows to be inserted should be returned"
@@ -762,7 +762,7 @@ mod tests {
 
         // This should no longer return a new row to be inserted for the schema of this sample, as
         // any schema have been included above.
-        let result = client.verify_sample_schema(&sample).await.unwrap();
+        let result = client.verify_sample_schema(&sample).unwrap();
         assert!(
             matches!(result, None),
             "After inserting new schema, it should no longer be considered new"

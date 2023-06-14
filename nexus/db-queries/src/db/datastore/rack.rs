@@ -883,7 +883,6 @@ mod test {
                     use crate::db::schema::$table::dsl;
                     use nexus_test_utils::db::ALLOW_FULL_TABLE_SCAN_SQL;
                     db.pool_for_tests()
-                        .await
                         .unwrap()
                         .transaction_async(|conn| async move {
                             conn.batch_execute_async(ALLOW_FULL_TABLE_SCAN_SQL)

@@ -504,7 +504,7 @@ async fn test_instance_migrate(cptestctx: &ControlPlaneTestContext) {
     let other_sled_id = Uuid::new_v4();
     let _other_sa = nexus_test_utils::start_sled_agent(
         cptestctx.logctx.log.new(o!("sled_id" => other_sled_id.to_string())),
-        cptestctx.server.get_http_server_internal_address().await,
+        cptestctx.server.get_http_server_internal_address(),
         other_sled_id,
         &update_dir,
         sim::SimMode::Explicit,
@@ -589,7 +589,7 @@ async fn test_instance_migrate_v2p(cptestctx: &ControlPlaneTestContext) {
         let update_dir = Utf8Path::new("/should/be/unused");
         let sa = nexus_test_utils::start_sled_agent(
             log,
-            cptestctx.server.get_http_server_internal_address().await,
+            cptestctx.server.get_http_server_internal_address(),
             sa_id,
             &update_dir,
             omicron_sled_agent::sim::SimMode::Explicit,
@@ -3253,7 +3253,7 @@ async fn test_instance_v2p_mappings(cptestctx: &ControlPlaneTestContext) {
         let sa_id = Uuid::new_v4();
         let log =
             cptestctx.logctx.log.new(o!( "sled_id" => sa_id.to_string() ));
-        let addr = cptestctx.server.get_http_server_internal_address().await;
+        let addr = cptestctx.server.get_http_server_internal_address();
         let update_directory = Utf8Path::new("/should/not/be/used");
         additional_sleds.push(
             start_sled_agent(

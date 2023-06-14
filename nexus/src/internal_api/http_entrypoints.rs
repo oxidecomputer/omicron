@@ -402,8 +402,7 @@ async fn cpapi_metrics_collect(
 ) -> Result<HttpResponseOk<ProducerResults>, HttpError> {
     let context = request_context.context();
     let producer_id = path_params.into_inner().producer_id;
-    let handler =
-        async { collect(&context.producer_registry, producer_id).await };
+    let handler = async { collect(&context.producer_registry, producer_id) };
     context
         .internal_latencies
         .instrument_dropshot_handler(&request_context, handler)

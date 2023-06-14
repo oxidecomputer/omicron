@@ -202,7 +202,7 @@ impl super::Nexus {
 
     /// Customize the default firewall rules for a particular VPC
     /// by replacing the name `default` with the VPC's actual name.
-    pub(crate) async fn default_firewall_rules_for_vpc(
+    pub(crate) fn default_firewall_rules_for_vpc(
         &self,
         vpc_id: Uuid,
         vpc_name: Name,

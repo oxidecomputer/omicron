@@ -397,6 +397,7 @@ mod test {
         Arc::new(SagaDag::new(dag, serde_json::Value::Null))
     }
 
+    #[allow(clippy::unused_async)]
     async fn node_one(ctx: ActionContext<TestOp>) -> Result<i32, ActionError> {
         let uctx = ctx.user_data();
         uctx.n1_count.fetch_add(1, Ordering::SeqCst);
@@ -412,6 +413,7 @@ mod test {
         Ok(1)
     }
 
+    #[allow(clippy::unused_async)]
     async fn node_two(ctx: ActionContext<TestOp>) -> Result<i32, ActionError> {
         let uctx = ctx.user_data();
         uctx.n2_count.fetch_add(1, Ordering::SeqCst);

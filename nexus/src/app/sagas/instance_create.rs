@@ -1157,6 +1157,7 @@ async fn sic_delete_instance_record(
     Ok(())
 }
 
+#[allow(clippy::unused_async)]
 async fn sic_noop(_sagactx: NexusActionContext) -> Result<(), ActionError> {
     Ok(())
 }
@@ -1445,7 +1446,7 @@ pub mod test {
         dsl::instance
             .filter(dsl::time_deleted.is_null())
             .select(Instance::as_select())
-            .first_async::<Instance>(datastore.pool_for_tests().await.unwrap())
+            .first_async::<Instance>(datastore.pool_for_tests().unwrap())
             .await
             .optional()
             .unwrap()
@@ -1462,7 +1463,7 @@ pub mod test {
             .filter(dsl::kind.eq(NetworkInterfaceKind::Instance))
             .select(NetworkInterface::as_select())
             .first_async::<NetworkInterface>(
-                datastore.pool_for_tests().await.unwrap(),
+                datastore.pool_for_tests().unwrap(),
             )
             .await
             .optional()
@@ -1478,9 +1479,7 @@ pub mod test {
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::is_service.eq(false))
             .select(ExternalIp::as_select())
-            .first_async::<ExternalIp>(
-                datastore.pool_for_tests().await.unwrap(),
-            )
+            .first_async::<ExternalIp>(datastore.pool_for_tests().unwrap())
             .await
             .optional()
             .unwrap()
@@ -1495,7 +1494,6 @@ pub mod test {
 
         datastore
             .pool_for_tests()
-            .await
             .unwrap()
             .transaction_async(|conn| async move {
                 conn.batch_execute_async(
@@ -1529,7 +1527,6 @@ pub mod test {
         use crate::db::schema::virtual_provisioning_resource::dsl;
 
         datastore.pool_for_tests()
-            .await
             .unwrap()
             .transaction_async(|conn| async move {
                 conn
@@ -1557,7 +1554,6 @@ pub mod test {
 
         datastore
             .pool_for_tests()
-            .await
             .unwrap()
             .transaction_async(|conn| async move {
                 conn.batch_execute_async(
@@ -1593,7 +1589,7 @@ pub mod test {
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::name.eq(DISK_NAME))
             .select(Disk::as_select())
-            .first_async::<Disk>(datastore.pool_for_tests().await.unwrap())
+            .first_async::<Disk>(datastore.pool_for_tests().unwrap())
             .await
             .unwrap()
             .runtime_state

@@ -55,8 +55,8 @@ pub trait NexusServer {
         tls_certificates: Vec<nexus_types::internal_api::params::Certificate>,
     ) -> Self;
 
-    async fn get_http_server_external_address(&self) -> SocketAddr;
-    async fn get_http_server_internal_address(&self) -> SocketAddr;
+    fn get_http_server_external_address(&self) -> SocketAddr;
+    fn get_http_server_internal_address(&self) -> SocketAddr;
 
     async fn set_resolver(&self, resolver: internal_dns::resolver::Resolver);
 

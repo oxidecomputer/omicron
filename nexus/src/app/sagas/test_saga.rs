@@ -56,12 +56,14 @@ impl NexusSaga for SagaTest {
     }
 }
 
+#[allow(clippy::unused_async)]
 async fn ts_test_action(
     _sagactx: NexusActionContext,
 ) -> Result<(), ActionError> {
     Ok(())
 }
 
+#[allow(clippy::unused_async)]
 async fn ts_test_undo(
     _sagactx: NexusActionContext,
 ) -> Result<(), anyhow::Error> {
