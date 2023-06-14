@@ -7,6 +7,7 @@
 //! Note that the bootstrap agent also communicates over Sprockets,
 //! and has a separate interface for establishing the trust quorum.
 
+use super::agent::{RackInitId, RackResetId};
 use crate::bootstrap::agent::Agent;
 use crate::bootstrap::params::RackInitializeRequest;
 use crate::updates::Component;
@@ -19,7 +20,6 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sled_hardware::Baseboard;
 use std::sync::Arc;
-use uuid::Uuid;
 
 type BootstrapApiDescription = ApiDescription<Arc<Agent>>;
 
@@ -52,43 +52,35 @@ pub(crate) fn api() -> BootstrapApiDescription {
 #[serde(tag = "status", rename_all = "snake_case")]
 pub enum RackOperationStatus {
     Initializing {
-        id: Uuid,
+        id: RackInitId,
     },
     /// `id` will be none if the rack was already initialized on startup.
     Initialized {
-        id: Option<Uuid>,
+        id: Option<RackInitId>,
     },
     InitializationFailed {
-        id: Uuid,
+        id: RackInitId,
         message: String,
     },
     InitializationPanicked {
-        id: Uuid,
+        id: RackInitId,
     },
-    ResetOnStartup,
     Resetting {
-        id: Uuid,
+        id: RackResetId,
     },
     /// `reset_id` will be None if the rack is in an uninitialized-on-startup,
     /// or Some if it is in an uninitialized state due to a reset operation
     /// completing.
     Uninitialized {
-        reset_id: Option<Uuid>,
+        reset_id: Option<RackResetId>,
     },
     ResetFailed {
-        id: Uuid,
+        id: RackResetId,
         message: String,
     },
     ResetPanicked {
-        id: Uuid,
+        id: RackResetId,
     },
-}
-
-#[derive(
-    Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema,
-)]
-pub struct OperationId {
-    pub id: Uuid,
 }
 
 /// Return the baseboard identity of this sled.
@@ -140,13 +132,13 @@ async fn rack_initialization_status(
 async fn rack_initialize(
     rqctx: RequestContext<Arc<Agent>>,
     body: TypedBody<RackInitializeRequest>,
-) -> Result<HttpResponseOk<OperationId>, HttpError> {
+) -> Result<HttpResponseOk<RackInitId>, HttpError> {
     let ba = rqctx.context();
     let request = body.into_inner();
     let id = ba
         .start_rack_initialize(request)
         .map_err(|err| HttpError::for_bad_request(None, err.to_string()))?;
-    Ok(HttpResponseOk(OperationId { id: id.0 }))
+    Ok(HttpResponseOk(id))
 }
 
 /// Resets the rack to an unconfigured state.
@@ -156,12 +148,12 @@ async fn rack_initialize(
 }]
 async fn rack_reset(
     rqctx: RequestContext<Arc<Agent>>,
-) -> Result<HttpResponseOk<OperationId>, HttpError> {
+) -> Result<HttpResponseOk<RackResetId>, HttpError> {
     let ba = rqctx.context();
     let id = ba
         .start_rack_reset()
         .map_err(|err| HttpError::for_bad_request(None, err.to_string()))?;
-    Ok(HttpResponseOk(OperationId { id: id.0 }))
+    Ok(HttpResponseOk(id))
 }
 
 /// Resets this particular sled to an unconfigured state.

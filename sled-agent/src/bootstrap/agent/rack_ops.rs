@@ -10,6 +10,9 @@ use crate::bootstrap::params::RackInitializeRequest;
 use crate::bootstrap::rss_handle::RssHandle;
 use crate::config::SidecarRevision;
 use crate::rack_setup::service::SetupServiceError;
+use schemars::JsonSchema;
+use serde::Deserialize;
+use serde::Serialize;
 use std::mem;
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -17,10 +20,34 @@ use tokio::sync::oneshot;
 use tokio::sync::oneshot::error::TryRecvError;
 use uuid::Uuid;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    PartialOrd,
+    Ord,
+    Serialize,
+    Deserialize,
+    JsonSchema,
+)]
 pub struct RackInitId(pub Uuid);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    PartialOrd,
+    Ord,
+    Serialize,
+    Deserialize,
+    JsonSchema,
+)]
 pub struct RackResetId(pub Uuid);
 
 #[derive(Debug, Clone, thiserror::Error)]
@@ -66,6 +93,7 @@ impl RssAccess {
 
         match &mut *status {
             RssStatus::Initializing { id, completion } => {
+                let id = *id;
                 // This is our only chance to notice the initialization task has
                 // panicked: if it dropped the sending half of `completion`
                 // without reporting in.
@@ -73,38 +101,36 @@ impl RssAccess {
                     Ok(()) => {
                         // This should be unreachable, I think? But it is
                         // harmless to report the initialized state.
-                        RackOperationStatus::Initialized { id: Some(id.0) }
+                        RackOperationStatus::Initialized { id: Some(id) }
                     }
                     Err(TryRecvError::Empty) => {
                         // Initialization task is still running
-                        RackOperationStatus::Initializing { id: id.0 }
+                        RackOperationStatus::Initializing { id }
                     }
                     Err(TryRecvError::Closed) => {
                         // Initialization task has panicked!
-                        let id = *id;
                         *status = RssStatus::InitializationPanicked { id };
-                        RackOperationStatus::InitializationPanicked { id: id.0 }
+                        RackOperationStatus::InitializationPanicked { id }
                     }
                 }
             }
             RssStatus::Initialized { id } => {
-                RackOperationStatus::Initialized { id: (*id).map(|id| id.0) }
+                RackOperationStatus::Initialized { id: *id }
             }
             RssStatus::InitializationFailed { id, err } => {
                 RackOperationStatus::InitializationFailed {
-                    id: id.0,
+                    id: *id,
                     message: format!("{err:#}"),
                 }
             }
             RssStatus::InitializationPanicked { id } => {
-                RackOperationStatus::InitializationPanicked { id: id.0 }
+                RackOperationStatus::InitializationPanicked { id: *id }
             }
             RssStatus::Uninitialized { reset_id } => {
-                RackOperationStatus::Uninitialized {
-                    reset_id: (*reset_id).map(|id| id.0),
-                }
+                RackOperationStatus::Uninitialized { reset_id: *reset_id }
             }
             RssStatus::Resetting { id, completion } => {
+                let id = *id;
                 // This is our only chance to notice the initialization task has
                 // panicked: if it dropped the sending half of `completion`
                 // without reporting in.
@@ -113,29 +139,28 @@ impl RssAccess {
                         // This should be unreachable, I think? But it is
                         // harmless to report the reset state.
                         RackOperationStatus::Uninitialized {
-                            reset_id: Some(id.0),
+                            reset_id: Some(id),
                         }
                     }
                     Err(TryRecvError::Empty) => {
                         // Initialization task is still running
-                        RackOperationStatus::Resetting { id: id.0 }
+                        RackOperationStatus::Resetting { id }
                     }
                     Err(TryRecvError::Closed) => {
                         // Initialization task has panicked!
-                        let id = *id;
                         *status = RssStatus::ResetPanicked { id };
-                        RackOperationStatus::ResetPanicked { id: id.0 }
+                        RackOperationStatus::ResetPanicked { id }
                     }
                 }
             }
             RssStatus::ResetFailed { id, err } => {
                 RackOperationStatus::ResetFailed {
-                    id: id.0,
+                    id: *id,
                     message: format!("{err:#}"),
                 }
             }
             RssStatus::ResetPanicked { id } => {
-                RackOperationStatus::ResetPanicked { id: id.0 }
+                RackOperationStatus::ResetPanicked { id: *id }
             }
         }
     }

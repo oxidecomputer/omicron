@@ -105,7 +105,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/OperationId"
+                  "$ref": "#/components/schemas/RackInitId"
                 }
               }
             }
@@ -127,7 +127,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/OperationId"
+                  "$ref": "#/components/schemas/RackResetId"
                 }
               }
             }
@@ -412,18 +412,6 @@
         "description": "Password hashes must be in PHC (Password Hashing Competition) string format.  Passwords must be hashed with Argon2id.  Password hashes may be rejected if the parameters appear not to be secure enough.",
         "type": "string"
       },
-      "OperationId": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string",
-            "format": "uuid"
-          }
-        },
-        "required": [
-          "id"
-        ]
-      },
       "PortFec": {
         "description": "Switchport FEC options",
         "type": "string",
@@ -447,6 +435,10 @@
           "speed200_g",
           "speed400_g"
         ]
+      },
+      "RackInitId": {
+        "type": "string",
+        "format": "uuid"
       },
       "RackInitializeRequest": {
         "description": "Configuration for the \"rack setup service\".\n\nThe Rack Setup Service should be responsible for one-time setup actions, such as CockroachDB placement and initialization.  Without operator intervention, however, these actions need a way to be automated in our deployment.",
@@ -589,23 +581,8 @@
           {
             "type": "object",
             "properties": {
-              "status": {
-                "type": "string",
-                "enum": [
-                  "none"
-                ]
-              }
-            },
-            "required": [
-              "status"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
               "id": {
-                "type": "string",
-                "format": "uuid"
+                "$ref": "#/components/schemas/RackInitId"
               },
               "status": {
                 "type": "string",
@@ -625,8 +602,11 @@
             "properties": {
               "id": {
                 "nullable": true,
-                "type": "string",
-                "format": "uuid"
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/RackInitId"
+                  }
+                ]
               },
               "status": {
                 "type": "string",
@@ -643,8 +623,7 @@
             "type": "object",
             "properties": {
               "id": {
-                "type": "string",
-                "format": "uuid"
+                "$ref": "#/components/schemas/RackInitId"
               },
               "message": {
                 "type": "string"
@@ -666,8 +645,7 @@
             "type": "object",
             "properties": {
               "id": {
-                "type": "string",
-                "format": "uuid"
+                "$ref": "#/components/schemas/RackInitId"
               },
               "status": {
                 "type": "string",
@@ -684,23 +662,8 @@
           {
             "type": "object",
             "properties": {
-              "status": {
-                "type": "string",
-                "enum": [
-                  "reset_on_startup"
-                ]
-              }
-            },
-            "required": [
-              "status"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
               "id": {
-                "type": "string",
-                "format": "uuid"
+                "$ref": "#/components/schemas/RackResetId"
               },
               "status": {
                 "type": "string",
@@ -715,18 +678,21 @@
             ]
           },
           {
-            "description": "`id` will be none if the rack was already reset on startup.",
+            "description": "`reset_id` will be None if the rack is in an uninitialized-on-startup, or Some if it is in an uninitialized state due to a reset operation completing.",
             "type": "object",
             "properties": {
-              "id": {
+              "reset_id": {
                 "nullable": true,
-                "type": "string",
-                "format": "uuid"
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/RackResetId"
+                  }
+                ]
               },
               "status": {
                 "type": "string",
                 "enum": [
-                  "reset"
+                  "uninitialized"
                 ]
               }
             },
@@ -738,8 +704,7 @@
             "type": "object",
             "properties": {
               "id": {
-                "type": "string",
-                "format": "uuid"
+                "$ref": "#/components/schemas/RackResetId"
               },
               "message": {
                 "type": "string"
@@ -761,8 +726,7 @@
             "type": "object",
             "properties": {
               "id": {
-                "type": "string",
-                "format": "uuid"
+                "$ref": "#/components/schemas/RackResetId"
               },
               "status": {
                 "type": "string",
@@ -777,6 +741,10 @@
             ]
           }
         ]
+      },
+      "RackResetId": {
+        "type": "string",
+        "format": "uuid"
       },
       "RecoverySiloConfig": {
         "type": "object",
