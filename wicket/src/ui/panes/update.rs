@@ -1622,7 +1622,11 @@ fn progress_event_spans(
                 style::plain_text_bold(),
             ));
         }
-        // TODO: progress units
+        progress_spans.push(Span::raw(" "));
+        progress_spans.push(Span::styled(
+            progress.units.to_string(),
+            style::plain_text(),
+        ));
         // TODO: show a progress bar?
     } else {
         progress_spans

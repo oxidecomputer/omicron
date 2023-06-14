@@ -699,19 +699,26 @@
         "type": "object",
         "properties": {
           "current": {
+            "description": "The current progress.",
             "type": "integer",
             "format": "uint64",
             "minimum": 0
           },
           "total": {
             "nullable": true,
+            "description": "The total progress.",
             "type": "integer",
             "format": "uint64",
             "minimum": 0
+          },
+          "units": {
+            "description": "Progress units.",
+            "type": "string"
           }
         },
         "required": [
-          "current"
+          "current",
+          "units"
         ]
       },
       "ProgressEventForGenericSpec": {
