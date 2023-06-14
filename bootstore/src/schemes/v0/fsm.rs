@@ -379,7 +379,10 @@ mod tests {
         let mut output = fsm.init_rack(rack_uuid, initial_members.clone());
 
         // Unpack the request to ack
-        let Envelope{to, msg: Msg::Req(Request{id, type_: RequestType::Init(pkg)})} = output.envelopes.pop().unwrap() else {
+        let Envelope{
+            to, 
+            msg: Msg::Req(Request{id, type_: RequestType::Init(pkg)})
+        } = output.envelopes.pop().unwrap() else {
             panic!("expected a request");
         };
         let from = to;
@@ -407,5 +410,44 @@ mod tests {
             api_err,
             ApiError::RackInitTimeout { unacked_peers: expected }
         );
+    }
+
+    /// Ack all members and ensure rack init completes
+    #[test]
+    fn rack_init_completes() {
+        let mut initial_members = initial_members();
+        let config = test_config();
+        let mut fsm = Fsm::new(
+            initial_members.first().unwrap().clone(),
+            config.clone(),
+            State::Uninitialized(UninitializedState {}),
+        );
+        let rack_uuid = Uuid::new_v4();
+        let mut output = fsm.init_rack(rack_uuid, initial_members.clone());
+
+        let responses: Vec<_> = output.envelopes.into_iter().map(|envelope| {
+            if let Msg::Req(Request { id, .. }) = envelope.msg {
+                (envelope.to, Response { request_id: id, type_: ResponseType::InitAck })
+            } else {
+                panic!("expected a request");
+            }
+        }).collect();
+
+
+        // Handle responses
+        let num_responses = responses.len();
+        for (i, (from, response)) in responses.into_iter().enumerate() {
+            if i != num_responses - 1 {
+                // We don't expect any output as rack init is not complete
+                let output = fsm.handle_response(from, response);
+                assert_eq!(Output::none(), output);
+            } else {
+                // Rack initialization completes on processing the last response and
+                // we inform the caller.
+                let output = fsm.handle_response(from, response);
+                assert_eq!(ApiOutput::RackInitComplete, output.api_output.unwrap().unwrap());
+            }
+        }
+
     }
 }
