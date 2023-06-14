@@ -1170,7 +1170,7 @@ dependencies = [
  "anes",
  "cast",
  "ciborium",
- "clap 4.3.0",
+ "clap 4.3.3",
  "criterion-plot",
  "futures",
  "is-terminal",
@@ -3445,7 +3445,7 @@ checksum = "adcf93614601c8129ddf72e2d5633df827ba6551541c6d8c59520a371475be1f"
 dependencies = [
  "hermit-abi 0.3.1",
  "io-lifetimes",
- "rustix 0.37.7",
+ "rustix 0.37.20",
  "windows-sys 0.48.0",
 ]
 
