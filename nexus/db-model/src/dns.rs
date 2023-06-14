@@ -218,6 +218,7 @@ impl InitialDnsGroup {
         creator: &str,
         comment: &str,
         records: HashMap<String, Vec<params::DnsRecord>>,
+        generation: Generation,
     ) -> InitialDnsGroup {
         InitialDnsGroup {
             dns_group,
@@ -225,7 +226,7 @@ impl InitialDnsGroup {
             records,
             dns_zone_id: Uuid::new_v4(),
             time_created: Utc::now(),
-            version: Generation::new(),
+            version: generation,
             comment: comment.to_owned(),
             creator: creator.to_owned(),
         }

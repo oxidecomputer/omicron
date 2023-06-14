@@ -197,42 +197,49 @@ mod test {
         // The datastore from the ControlPlaneTestContext is initialized with a
         // DNS config with generation 1.
         let value = task.activate(&opctx).await;
-        assert_eq!(watcher.borrow().as_ref().unwrap().generation, 1);
-        assert_eq!(value, json!({ "generation": 1 }));
+        let mut generation = 3_u64;
+        assert_eq!(watcher.borrow().as_ref().unwrap().generation, generation);
+        assert_eq!(value, json!({ "generation": generation }));
 
-        // Now write generation 2, activate again, and verify that the update
+        // Now write the next generation, activate again, and verify that the update
         // was sent to the watcher.
         let internal_dns_zone_id =
             read_internal_dns_zone_id(&opctx, &datastore).await;
-        write_test_dns_generation(&datastore, internal_dns_zone_id, 2).await;
-        assert_eq!(watcher.borrow().as_ref().unwrap().generation, 1);
+        generation += 1;
+        write_test_dns_generation(&datastore, internal_dns_zone_id, generation)
+            .await;
+        assert_eq!(
+            watcher.borrow().as_ref().unwrap().generation,
+            generation - 1
+        );
         let value = task.activate(&opctx).await;
-        assert_eq!(watcher.borrow().as_ref().unwrap().generation, 2);
-        assert_eq!(value, json!({ "generation": 2 }));
+        assert_eq!(watcher.borrow().as_ref().unwrap().generation, generation);
+        assert_eq!(value, json!({ "generation": generation }));
 
         // Activate again and make sure it does nothing.
         let value = task.activate(&opctx).await;
-        assert_eq!(watcher.borrow().as_ref().unwrap().generation, 2);
-        assert_eq!(value, json!({ "generation": 2 }));
+        assert_eq!(watcher.borrow().as_ref().unwrap().generation, generation);
+        assert_eq!(value, json!({ "generation": generation }));
 
         // Simulate the configuration going backwards.  This should not be
         // possible, but it's easy to check that we at least don't panic.
         {
             use crate::db::schema::dns_version::dsl;
-            diesel::delete(dsl::dns_version.filter(dsl::version.eq(2)))
+            let gen = i64::try_from(generation).unwrap();
+            diesel::delete(dsl::dns_version.filter(dsl::version.eq(gen)))
                 .execute_async(datastore.pool_for_tests().await.unwrap())
                 .await
                 .unwrap();
         }
         let value = task.activate(&opctx).await;
-        assert_eq!(watcher.borrow().as_ref().unwrap().generation, 2);
-        assert_eq!(
-            value,
-            json!({
-                "error": "found latest DNS generation (1) is older \
-                    than the one we already know about (2)"
-            })
+        assert_eq!(watcher.borrow().as_ref().unwrap().generation, generation);
+        let expected = format!(
+            "found latest DNS generation ({}) is older \
+            than the one we already know about ({})",
+            generation - 1,
+            generation
         );
+        assert_eq!(value, json!({ "error": expected }));
 
         // Similarly, wipe all of the state and verify that we handle that okay.
         datastore
@@ -265,7 +272,7 @@ mod test {
             .unwrap();
 
         let _ = task.activate(&opctx).await;
-        assert_eq!(watcher.borrow().as_ref().unwrap().generation, 2);
+        assert_eq!(watcher.borrow().as_ref().unwrap().generation, generation);
 
         // Verify that a new watcher also handles this okay. (i.e., that we can
         // come up with no state in the database).

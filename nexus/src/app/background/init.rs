@@ -192,18 +192,19 @@ pub mod test {
         // Verify our going-in assumption that Nexus has written the initial
         // internal DNS configuration.  This happens during rack initialization,
         // which the test runner simulates.
+        //
+        // This value is dependent on nexus_test_utils::test_setup_with_config -
+        // it should be equal to the number of calls to
+        // "populate_internal_dns()" that are made.
+        let mut generation = 3_u64;
         let version = datastore
             .dns_group_latest_version(&opctx, DnsGroup::Internal)
             .await
             .unwrap();
         let found_version = i64::from(&version.version.0);
-        assert_eq!(found_version, 1);
+        assert_eq!(found_version, i64::try_from(generation).unwrap());
 
         // Verify that the DNS server is on a generation number we expect.
-        //
-        // This value is dependent on nexus_test_utils::test_setup_with_config -
-        // it should be equal to the number of calls to
-        // "populate_internal_dns()" that are made.
         let initial_dns_dropshot_server =
             &cptestctx.internal_dns.dropshot_server;
         let dns_config_client = dns_service_client::Client::new(
@@ -214,7 +215,6 @@ pub mod test {
             .dns_config_get()
             .await
             .expect("failed to get initial DNS server config");
-        let mut generation = 3;
         assert_eq!(config.generation, generation);
 
         // We'll need the id of the internal DNS zone.
@@ -229,7 +229,7 @@ pub mod test {
         let storage_path =
             TempDir::new().expect("Failed to create temporary directory");
         let config_store = dns_server::storage::Config {
-            keep_old_generations: 3,
+            keep_old_generations: 5,
             storage_path: storage_path
                 .path()
                 .to_string_lossy()
@@ -276,7 +276,7 @@ pub mod test {
             &cptestctx.logctx.log,
             "new",
             new_dns_dropshot_server.local_addr(),
-            1,
+            generation,
         )
         .await;
 

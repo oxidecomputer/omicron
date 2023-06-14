@@ -657,7 +657,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
         let sled_id = Uuid::parse_str(SLED_AGENT_UUID).unwrap();
         let dns = dns_server::InMemoryServer::new(&log).await.unwrap();
 
-        let SocketAddr::V6(address) = *dns.server.local_address() else {
+        let SocketAddr::V6(address) = dns.dropshot_server.local_addr() else {
             panic!("Unsupported IPv4 DNS address");
         };
         self.rack_init_builder.add_service(

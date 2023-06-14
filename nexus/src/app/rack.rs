@@ -12,6 +12,7 @@ use crate::external_api::params::CertificateCreate;
 use crate::external_api::shared::ServiceUsingCertificate;
 use crate::internal_api::params::RackInitializationRequest;
 use nexus_db_model::DnsGroup;
+use nexus_db_model::Generation;
 use nexus_db_model::InitialDnsGroup;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::datastore::DnsVersionUpdateBuilder;
@@ -143,6 +144,13 @@ impl super::Nexus {
             &self.id.to_string(),
             "rack setup",
             dns_zone.records,
+            Generation(
+                omicron_common::api::external::Generation::try_from(
+                    i64::try_from(request.internal_dns_zone_config.generation)
+                        .unwrap(),
+                )
+                .unwrap(),
+            ),
         );
 
         let external_dns = InitialDnsGroup::new(
@@ -151,6 +159,7 @@ impl super::Nexus {
             &self.id.to_string(),
             "rack setup",
             HashMap::new(),
+            Generation::new(),
         );
 
         let silo_name = &request.recovery_silo.silo_name;
