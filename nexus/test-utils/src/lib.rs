@@ -326,7 +326,8 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
         );
         self.clickhouse = Some(clickhouse);
 
-        // TODO: Use DNS, not a hard-coded config
+        // NOTE: We could pass this port information via DNS, rather than
+        // requiring it to be known before Nexus starts.
         self.config
             .pkg
             .timeseries_db
@@ -345,7 +346,8 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
         let port = dendrite.port;
         self.dendrite = Some(dendrite);
 
-        // TODO: Use DNS, not a hard-coded config
+        // NOTE: We could pass this port information via DNS, rather than
+        // requiring it to be known before Nexus starts.
         self.config
             .pkg
             .dendrite

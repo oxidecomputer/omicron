@@ -55,17 +55,16 @@ impl LazyNexusClient {
         })
     }
 
-    // TODO: Rename me, mention DNS?
-    pub fn new_from_addrs(
+    pub fn new_from_dns(
         log: Logger,
-        addrs: Vec<SocketAddr>,
+        dns_addrs: Vec<SocketAddr>,
     ) -> Result<Self, ResolveError> {
         Ok(Self {
             inner: Arc::new(Inner {
                 log: log.clone(),
                 resolver: Resolver::new_from_addrs(
                     log.new(o!("component" => "DnsResolver")),
-                    addrs,
+                    dns_addrs,
                 )?,
                 address: Mutex::new(None),
             }),

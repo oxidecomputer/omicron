@@ -129,18 +129,18 @@ impl SledAgent {
             id,
             ip: config.dropshot.bind_address.ip(),
             instances: Arc::new(SimCollection::new(
-                nexus_client.clone(),
+                Arc::clone(&nexus_client),
                 instance_log,
                 sim_mode,
             )),
             disks: Arc::new(SimCollection::new(
-                nexus_client.clone(),
+                Arc::clone(&nexus_client),
                 disk_log,
                 sim_mode,
             )),
             storage: Mutex::new(Storage::new(
                 id,
-                nexus_client.clone(),
+                Arc::clone(&nexus_client),
                 config.storage.ip,
                 storage_log,
             )),
