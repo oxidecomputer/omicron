@@ -368,7 +368,7 @@ mod tests {
     /// Ack one of the members and ensure the timeout occurs with the rest unacked
     #[test]
     fn partial_rack_init_timeout() {
-        let mut initial_members = initial_members();
+        let initial_members = initial_members();
         let config = test_config();
         let mut fsm = Fsm::new(
             initial_members.first().unwrap().clone(),
@@ -380,8 +380,8 @@ mod tests {
 
         // Unpack the request to ack
         let Envelope{
-            to, 
-            msg: Msg::Req(Request{id, type_: RequestType::Init(pkg)})
+            to,
+            msg: Msg::Req(Request{id, type_: RequestType::Init(_)})
         } = output.envelopes.pop().unwrap() else {
             panic!("expected a request");
         };
@@ -415,7 +415,7 @@ mod tests {
     /// Ack all members and ensure rack init completes
     #[test]
     fn rack_init_completes() {
-        let mut initial_members = initial_members();
+        let initial_members = initial_members();
         let config = test_config();
         let mut fsm = Fsm::new(
             initial_members.first().unwrap().clone(),
@@ -423,16 +423,25 @@ mod tests {
             State::Uninitialized(UninitializedState {}),
         );
         let rack_uuid = Uuid::new_v4();
-        let mut output = fsm.init_rack(rack_uuid, initial_members.clone());
+        let output = fsm.init_rack(rack_uuid, initial_members.clone());
 
-        let responses: Vec<_> = output.envelopes.into_iter().map(|envelope| {
-            if let Msg::Req(Request { id, .. }) = envelope.msg {
-                (envelope.to, Response { request_id: id, type_: ResponseType::InitAck })
-            } else {
-                panic!("expected a request");
-            }
-        }).collect();
-
+        let responses: Vec<_> = output
+            .envelopes
+            .into_iter()
+            .map(|envelope| {
+                if let Msg::Req(Request { id, .. }) = envelope.msg {
+                    (
+                        envelope.to,
+                        Response {
+                            request_id: id,
+                            type_: ResponseType::InitAck,
+                        },
+                    )
+                } else {
+                    panic!("expected a request");
+                }
+            })
+            .collect();
 
         // Handle responses
         let num_responses = responses.len();
@@ -445,9 +454,11 @@ mod tests {
                 // Rack initialization completes on processing the last response and
                 // we inform the caller.
                 let output = fsm.handle_response(from, response);
-                assert_eq!(ApiOutput::RackInitComplete, output.api_output.unwrap().unwrap());
+                assert_eq!(
+                    ApiOutput::RackInitComplete,
+                    output.api_output.unwrap().unwrap()
+                );
             }
         }
-
     }
 }
