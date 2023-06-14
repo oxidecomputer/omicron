@@ -54,9 +54,9 @@ pub(super) struct RssAccess {
 impl RssAccess {
     pub(super) fn new(initialized: bool) -> Self {
         let status = if initialized {
-            RssStatus::InitializedOnStartup
+            RssStatus::Initialized { id: None }
         } else {
-            RssStatus::ResetOnStartup
+            RssStatus::Uninitialized { reset_id: None }
         };
         Self { status: Arc::new(Mutex::new(status)) }
     }
@@ -65,9 +65,6 @@ impl RssAccess {
         let mut status = self.status.lock().unwrap();
 
         match &mut *status {
-            RssStatus::InitializedOnStartup => {
-                RackOperationStatus::Initialized { id: None }
-            }
             RssStatus::Initializing { id, completion } => {
                 // This is our only chance to notice the initialization task has
                 // panicked: if it dropped the sending half of `completion`
@@ -91,7 +88,7 @@ impl RssAccess {
                 }
             }
             RssStatus::Initialized { id } => {
-                RackOperationStatus::Initialized { id: Some(id.0) }
+                RackOperationStatus::Initialized { id: (*id).map(|id| id.0) }
             }
             RssStatus::InitializationFailed { id, err } => {
                 RackOperationStatus::InitializationFailed {
@@ -102,8 +99,10 @@ impl RssAccess {
             RssStatus::InitializationPanicked { id } => {
                 RackOperationStatus::InitializationPanicked { id: id.0 }
             }
-            RssStatus::ResetOnStartup => {
-                RackOperationStatus::Reset { id: None }
+            RssStatus::Uninitialized { reset_id } => {
+                RackOperationStatus::Uninitialized {
+                    reset_id: (*reset_id).map(|id| id.0),
+                }
             }
             RssStatus::Resetting { id, completion } => {
                 // This is our only chance to notice the initialization task has
@@ -113,7 +112,9 @@ impl RssAccess {
                     Ok(()) => {
                         // This should be unreachable, I think? But it is
                         // harmless to report the reset state.
-                        RackOperationStatus::Reset { id: Some(id.0) }
+                        RackOperationStatus::Uninitialized {
+                            reset_id: Some(id.0),
+                        }
                     }
                     Err(TryRecvError::Empty) => {
                         // Initialization task is still running
@@ -126,9 +127,6 @@ impl RssAccess {
                         RackOperationStatus::ResetPanicked { id: id.0 }
                     }
                 }
-            }
-            RssStatus::Reset { id } => {
-                RackOperationStatus::Reset { id: Some(id.0) }
             }
             RssStatus::ResetFailed { id, err } => {
                 RackOperationStatus::ResetFailed {
@@ -153,7 +151,7 @@ impl RssAccess {
             RssStatus::Initializing { .. } => {
                 Err(RssAccessError::StillInitializing)
             }
-            RssStatus::InitializedOnStartup | RssStatus::Initialized { .. } => {
+            RssStatus::Initialized { .. } => {
                 Err(RssAccessError::AlreadyInitialized)
             }
             RssStatus::InitializationFailed { err, .. } => {
@@ -172,7 +170,7 @@ impl RssAccess {
             RssStatus::ResetPanicked { .. } => {
                 Err(RssAccessError::ResetPanicked)
             }
-            RssStatus::ResetOnStartup | RssStatus::Reset { .. } => {
+            RssStatus::Uninitialized { .. } => {
                 let (completion_tx, completion) = oneshot::channel();
                 let id = RackInitId(Uuid::new_v4());
                 *status = RssStatus::Initializing { id, completion };
@@ -183,7 +181,7 @@ impl RssAccess {
                 tokio::spawn(async move {
                     let result = rack_initialize(&agent, request).await;
                     let new_status = match result {
-                        Ok(()) => RssStatus::Initialized { id },
+                        Ok(()) => RssStatus::Initialized { id: Some(id) },
                         Err(err) => RssStatus::InitializationFailed { id, err },
                     };
 
@@ -224,10 +222,10 @@ impl RssAccess {
             RssStatus::ResetPanicked { .. } => {
                 Err(RssAccessError::ResetPanicked)
             }
-            RssStatus::ResetOnStartup | RssStatus::Reset { .. } => {
+            RssStatus::Uninitialized { .. } => {
                 Err(RssAccessError::AlreadyReset)
             }
-            RssStatus::InitializedOnStartup | RssStatus::Initialized { .. } => {
+            RssStatus::Initialized { .. } => {
                 let (completion_tx, completion) = oneshot::channel();
                 let id = RackResetId(Uuid::new_v4());
                 *status = RssStatus::Resetting { id, completion };
@@ -238,7 +236,9 @@ impl RssAccess {
                 tokio::spawn(async move {
                     let result = rack_reset(&agent).await;
                     let new_status = match result {
-                        Ok(()) => RssStatus::Reset { id },
+                        Ok(()) => {
+                            RssStatus::Uninitialized { reset_id: Some(id) }
+                        }
                         Err(err) => RssStatus::ResetFailed { id, err },
                     };
 
@@ -256,16 +256,46 @@ impl RssAccess {
 }
 
 enum RssStatus {
-    InitializedOnStartup,
-    Initializing { id: RackInitId, completion: oneshot::Receiver<()> },
-    Initialized { id: RackInitId },
-    InitializationFailed { id: RackInitId, err: SetupServiceError },
-    InitializationPanicked { id: RackInitId },
-    ResetOnStartup,
-    Resetting { id: RackResetId, completion: oneshot::Receiver<()> },
-    Reset { id: RackResetId },
-    ResetFailed { id: RackResetId, err: SetupServiceError },
-    ResetPanicked { id: RackResetId },
+    // Our two main primary states.
+    Uninitialized {
+        // We can either be uninitialized on startup (in which case `reset_id`
+        // is None) or because a reset has completed (in which case `reset_id`
+        // is Some).
+        reset_id: Option<RackResetId>,
+    },
+    Initialized {
+        // We can either be initialized on startup (in which case `id`
+        // is None) or because initialization has completed (in which case `id`
+        // is Some).
+        id: Option<RackInitId>,
+    },
+
+    // Tranistory states (which we may be in for a long time, even on human time
+    // scales, but should eventually leave).
+    Initializing {
+        id: RackInitId,
+        completion: oneshot::Receiver<()>,
+    },
+    Resetting {
+        id: RackResetId,
+        completion: oneshot::Receiver<()>,
+    },
+
+    // Terminal failure states; these require support intervention.
+    InitializationFailed {
+        id: RackInitId,
+        err: SetupServiceError,
+    },
+    InitializationPanicked {
+        id: RackInitId,
+    },
+    ResetFailed {
+        id: RackResetId,
+        err: SetupServiceError,
+    },
+    ResetPanicked {
+        id: RackResetId,
+    },
 }
 
 async fn rack_initialize(

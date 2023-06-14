@@ -51,7 +51,6 @@ pub(crate) fn api() -> BootstrapApiDescription {
 )]
 #[serde(tag = "status", rename_all = "snake_case")]
 pub enum RackOperationStatus {
-    None,
     Initializing {
         id: Uuid,
     },
@@ -70,9 +69,11 @@ pub enum RackOperationStatus {
     Resetting {
         id: Uuid,
     },
-    /// `id` will be none if the rack was already reset on startup.
-    Reset {
-        id: Option<Uuid>,
+    /// `reset_id` will be None if the rack is in an uninitialized-on-startup,
+    /// or Some if it is in an uninitialized state due to a reset operation
+    /// completing.
+    Uninitialized {
+        reset_id: Option<Uuid>,
     },
     ResetFailed {
         id: Uuid,
