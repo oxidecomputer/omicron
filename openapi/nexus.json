@@ -101,83 +101,7 @@
         }
       }
     },
-    "/login": {
-      "post": {
-        "tags": [
-          "hidden"
-        ],
-        "operationId": "login_spoof",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SpoofLoginBody"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "204": {
-            "description": "resource updated"
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
     "/login/{silo_name}/saml/{provider_name}": {
-      "get": {
-        "tags": [
-          "login"
-        ],
-        "summary": "Prompt user login",
-        "description": "Either display a page asking a user for their credentials, or redirect them to their identity provider.",
-        "operationId": "login_saml_begin",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "provider_name",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          },
-          {
-            "in": "path",
-            "name": "silo_name",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          }
-        ],
-        "responses": {
-          "302": {
-            "description": "redirect (found)",
-            "headers": {
-              "location": {
-                "description": "HTTP \"Location\" header",
-                "style": "simple",
-                "required": true,
-                "schema": {
-                  "type": "string"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      },
       "post": {
         "tags": [
           "login"
@@ -866,6 +790,14 @@
               "type": "integer",
               "format": "uint32",
               "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "order",
+            "description": "Query result order",
+            "schema": {
+              "$ref": "#/components/schemas/PaginationOrder"
             }
           },
           {
@@ -2077,6 +2009,121 @@
         }
       }
     },
+    "/v1/ip-pools": {
+      "get": {
+        "tags": [
+          "projects"
+        ],
+        "summary": "List all IP Pools that can be used by a given project.",
+        "operationId": "project_ip_pool_list",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrIdSortMode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IpPoolResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": {
+          "required": [
+            "project"
+          ]
+        }
+      }
+    },
+    "/v1/ip-pools/{pool}": {
+      "get": {
+        "tags": [
+          "projects"
+        ],
+        "summary": "Fetch an IP pool",
+        "operationId": "project_ip_pool_view",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pool",
+            "description": "Name or ID of the IP pool",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IpPool"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/v1/login/{silo_name}/local": {
       "post": {
         "tags": [
@@ -3236,7 +3283,7 @@
     "/v1/system/hardware/disks": {
       "get": {
         "tags": [
-          "system"
+          "system/hardware"
         ],
         "summary": "List physical disks",
         "operationId": "physical_disk_list",
@@ -3295,7 +3342,7 @@
     "/v1/system/hardware/racks": {
       "get": {
         "tags": [
-          "system"
+          "system/hardware"
         ],
         "summary": "List racks",
         "operationId": "rack_list",
@@ -3354,7 +3401,7 @@
     "/v1/system/hardware/racks/{rack_id}": {
       "get": {
         "tags": [
-          "system"
+          "system/hardware"
         ],
         "summary": "Fetch a rack",
         "operationId": "rack_view",
@@ -3393,7 +3440,7 @@
     "/v1/system/hardware/sleds": {
       "get": {
         "tags": [
-          "system"
+          "system/hardware"
         ],
         "summary": "List sleds",
         "operationId": "sled_list",
@@ -3452,7 +3499,7 @@
     "/v1/system/hardware/sleds/{sled_id}": {
       "get": {
         "tags": [
-          "system"
+          "system/hardware"
         ],
         "summary": "Fetch a sled",
         "operationId": "sled_view",
@@ -3491,7 +3538,7 @@
     "/v1/system/hardware/sleds/{sled_id}/disks": {
       "get": {
         "tags": [
-          "system"
+          "system/hardware"
         ],
         "summary": "List physical disks attached to sleds",
         "operationId": "sled_physical_disk_list",
@@ -3560,7 +3607,7 @@
     "/v1/system/hardware/sleds/{sled_id}/instances": {
       "get": {
         "tags": [
-          "system"
+          "system/hardware"
         ],
         "summary": "List instances running on a given sled",
         "operationId": "sled_instance_list",
@@ -3629,7 +3676,7 @@
     "/v1/system/hardware/switch-port": {
       "get": {
         "tags": [
-          "system"
+          "system/hardware"
         ],
         "summary": "List switch ports",
         "operationId": "networking_switch_port_list",
@@ -3698,7 +3745,7 @@
     "/v1/system/hardware/switch-port/{port}/settings": {
       "post": {
         "tags": [
-          "system"
+          "system/hardware"
         ],
         "summary": "Apply switch port settings",
         "operationId": "networking_switch_port_apply_settings",
@@ -3756,7 +3803,7 @@
       },
       "delete": {
         "tags": [
-          "system"
+          "system/hardware"
         ],
         "summary": "Clear switch port settings",
         "operationId": "networking_switch_port_clear_settings",
@@ -3806,7 +3853,7 @@
     "/v1/system/hardware/switches": {
       "get": {
         "tags": [
-          "system"
+          "system/hardware"
         ],
         "summary": "List switches",
         "operationId": "switch_list",
@@ -3865,7 +3912,7 @@
     "/v1/system/hardware/switches/{switch_id}": {
       "get": {
         "tags": [
-          "system"
+          "system/hardware"
         ],
         "summary": "Fetch a switch",
         "operationId": "switch_view",
@@ -3904,7 +3951,7 @@
     "/v1/system/identity-providers": {
       "get": {
         "tags": [
-          "system"
+          "system/silos"
         ],
         "summary": "List a silo's IdP's name",
         "operationId": "silo_identity_provider_list",
@@ -3973,7 +4020,7 @@
     "/v1/system/identity-providers/local/users": {
       "post": {
         "tags": [
-          "system"
+          "system/silos"
         ],
         "summary": "Create a user",
         "description": "Users can only be created in Silos with `provision_type` == `Fixed`. Otherwise, Silo users are just-in-time (JIT) provisioned when a user first logs in using an external Identity Provider.",
@@ -4022,7 +4069,7 @@
     "/v1/system/identity-providers/local/users/{user_id}": {
       "delete": {
         "tags": [
-          "system"
+          "system/silos"
         ],
         "summary": "Delete a user",
         "operationId": "local_idp_user_delete",
@@ -4063,7 +4110,7 @@
     "/v1/system/identity-providers/local/users/{user_id}/set-password": {
       "post": {
         "tags": [
-          "system"
+          "system/silos"
         ],
         "summary": "Set or invalidate a user's password",
         "description": "Passwords can only be updated for users in Silos with identity mode `LocalOnly`.",
@@ -4115,7 +4162,7 @@
     "/v1/system/identity-providers/saml": {
       "post": {
         "tags": [
-          "system"
+          "system/silos"
         ],
         "summary": "Create a SAML IdP",
         "operationId": "saml_identity_provider_create",
@@ -4163,7 +4210,7 @@
     "/v1/system/identity-providers/saml/{provider}": {
       "get": {
         "tags": [
-          "system"
+          "system/silos"
         ],
         "summary": "Fetch a SAML IdP",
         "operationId": "saml_identity_provider_view",
@@ -4210,7 +4257,7 @@
     "/v1/system/ip-pools": {
       "get": {
         "tags": [
-          "system"
+          "system/networking"
         ],
         "summary": "List IP pools",
         "operationId": "ip_pool_list",
@@ -4267,7 +4314,7 @@
       },
       "post": {
         "tags": [
-          "system"
+          "system/networking"
         ],
         "summary": "Create an IP pool",
         "operationId": "ip_pool_create",
@@ -4304,7 +4351,7 @@
     "/v1/system/ip-pools/{pool}": {
       "get": {
         "tags": [
-          "system"
+          "system/networking"
         ],
         "summary": "Fetch an IP pool",
         "operationId": "ip_pool_view",
@@ -4340,7 +4387,7 @@
       },
       "put": {
         "tags": [
-          "system"
+          "system/networking"
         ],
         "summary": "Update an IP Pool",
         "operationId": "ip_pool_update",
@@ -4386,7 +4433,7 @@
       },
       "delete": {
         "tags": [
-          "system"
+          "system/networking"
         ],
         "summary": "Delete an IP Pool",
         "operationId": "ip_pool_delete",
@@ -4417,7 +4464,7 @@
     "/v1/system/ip-pools/{pool}/ranges": {
       "get": {
         "tags": [
-          "system"
+          "system/networking"
         ],
         "summary": "List ranges for an IP pool",
         "description": "List ranges for an IP pool. Ranges are ordered by their first address.",
@@ -4479,7 +4526,7 @@
     "/v1/system/ip-pools/{pool}/ranges/add": {
       "post": {
         "tags": [
-          "system"
+          "system/networking"
         ],
         "summary": "Add a range to an IP pool",
         "operationId": "ip_pool_range_add",
@@ -4527,7 +4574,7 @@
     "/v1/system/ip-pools/{pool}/ranges/remove": {
       "post": {
         "tags": [
-          "system"
+          "system/networking"
         ],
         "summary": "Remove a range from an IP pool",
         "operationId": "ip_pool_range_remove",
@@ -4568,7 +4615,7 @@
     "/v1/system/ip-pools-service": {
       "get": {
         "tags": [
-          "system"
+          "system/networking"
         ],
         "summary": "Fetch the IP pool used for Oxide services",
         "operationId": "ip_pool_service_view",
@@ -4595,7 +4642,7 @@
     "/v1/system/ip-pools-service/ranges": {
       "get": {
         "tags": [
-          "system"
+          "system/networking"
         ],
         "summary": "List ranges for the IP pool used for Oxide services",
         "description": "List ranges for the IP pool used for Oxide services. Ranges are ordered by their first address.",
@@ -4648,7 +4695,7 @@
     "/v1/system/ip-pools-service/ranges/add": {
       "post": {
         "tags": [
-          "system"
+          "system/networking"
         ],
         "summary": "Add a range to an IP pool used for Oxide services",
         "operationId": "ip_pool_service_range_add",
@@ -4685,7 +4732,7 @@
     "/v1/system/ip-pools-service/ranges/remove": {
       "post": {
         "tags": [
-          "system"
+          "system/networking"
         ],
         "summary": "Remove a range from an IP pool used for Oxide services",
         "operationId": "ip_pool_service_range_remove",
@@ -4715,7 +4762,7 @@
     "/v1/system/metrics/{metric_name}": {
       "get": {
         "tags": [
-          "system"
+          "system/metrics"
         ],
         "summary": "Access metrics data",
         "operationId": "system_metric",
@@ -4739,16 +4786,6 @@
           },
           {
             "in": "query",
-            "name": "id",
-            "description": "The UUID of the container being queried",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          },
-          {
-            "in": "query",
             "name": "limit",
             "description": "Maximum number of items returned by a single call",
             "schema": {
@@ -4756,6 +4793,14 @@
               "type": "integer",
               "format": "uint32",
               "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "order",
+            "description": "Query result order",
+            "schema": {
+              "$ref": "#/components/schemas/PaginationOrder"
             }
           },
           {
@@ -4774,6 +4819,16 @@
             "schema": {
               "type": "string",
               "format": "date-time"
+            }
+          },
+          {
+            "in": "query",
+            "name": "id",
+            "description": "The UUID of the container being queried",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
             }
           }
         ],
@@ -4806,7 +4861,7 @@
     "/v1/system/networking/address-lot": {
       "get": {
         "tags": [
-          "system"
+          "system/networking"
         ],
         "summary": "List address lots",
         "operationId": "networking_address_lot_list",
@@ -4863,7 +4918,7 @@
       },
       "post": {
         "tags": [
-          "system"
+          "system/networking"
         ],
         "summary": "Create an address lot",
         "operationId": "networking_address_lot_create",
@@ -4900,7 +4955,7 @@
     "/v1/system/networking/address-lot/{address_lot}": {
       "delete": {
         "tags": [
-          "system"
+          "system/networking"
         ],
         "summary": "Delete an address lot",
         "operationId": "networking_address_lot_delete",
@@ -4931,7 +4986,7 @@
     "/v1/system/networking/address-lot/{address_lot}/blocks": {
       "get": {
         "tags": [
-          "system"
+          "system/networking"
         ],
         "summary": "List the blocks in an address lot",
         "operationId": "networking_address_lot_block_list",
@@ -4999,7 +5054,7 @@
     "/v1/system/networking/loopback-address": {
       "get": {
         "tags": [
-          "system"
+          "system/networking"
         ],
         "summary": "Get loopback addresses, optionally filtering by id",
         "operationId": "networking_loopback_address_list",
@@ -5056,7 +5111,7 @@
       },
       "post": {
         "tags": [
-          "system"
+          "system/networking"
         ],
         "summary": "Create a loopback address",
         "operationId": "networking_loopback_address_create",
@@ -5093,7 +5148,7 @@
     "/v1/system/networking/loopback-address/{rack_id}/{switch_location}/{address}/{subnet_mask}": {
       "delete": {
         "tags": [
-          "system"
+          "system/networking"
         ],
         "summary": "Delete a loopback address",
         "operationId": "networking_loopback_address_delete",
@@ -5155,7 +5210,7 @@
     "/v1/system/networking/switch-port-settings": {
       "get": {
         "tags": [
-          "system"
+          "system/networking"
         ],
         "summary": "List switch port settings",
         "operationId": "networking_switch_port_settings_list",
@@ -5220,7 +5275,7 @@
       },
       "post": {
         "tags": [
-          "system"
+          "system/networking"
         ],
         "summary": "Create switch port settings",
         "operationId": "networking_switch_port_settings_create",
@@ -5255,7 +5310,7 @@
       },
       "delete": {
         "tags": [
-          "system"
+          "system/networking"
         ],
         "summary": "Delete switch port settings",
         "operationId": "networking_switch_port_settings_delete",
@@ -5285,7 +5340,7 @@
     "/v1/system/networking/switch-port-settings/{port}": {
       "get": {
         "tags": [
-          "system"
+          "system/networking"
         ],
         "summary": "Get information about a switch port",
         "operationId": "networking_switch_port_settings_view",
@@ -5475,7 +5530,7 @@
     "/v1/system/silos": {
       "get": {
         "tags": [
-          "system"
+          "system/silos"
         ],
         "summary": "List silos",
         "description": "Lists silos that are discoverable based on the current permissions.",
@@ -5533,7 +5588,7 @@
       },
       "post": {
         "tags": [
-          "system"
+          "system/silos"
         ],
         "summary": "Create a silo",
         "operationId": "silo_create",
@@ -5570,7 +5625,7 @@
     "/v1/system/silos/{silo}": {
       "get": {
         "tags": [
-          "system"
+          "system/silos"
         ],
         "summary": "Fetch a silo",
         "description": "Fetch a silo by name.",
@@ -5607,7 +5662,7 @@
       },
       "delete": {
         "tags": [
-          "system"
+          "system/silos"
         ],
         "summary": "Delete a silo",
         "description": "Delete a silo by name.",
@@ -5639,7 +5694,7 @@
     "/v1/system/silos/{silo}/policy": {
       "get": {
         "tags": [
-          "system"
+          "system/silos"
         ],
         "summary": "Fetch a silo's IAM policy",
         "operationId": "silo_policy_view",
@@ -5675,7 +5730,7 @@
       },
       "put": {
         "tags": [
-          "system"
+          "system/silos"
         ],
         "summary": "Update a silo's IAM policy",
         "operationId": "silo_policy_update",
@@ -5723,7 +5778,7 @@
     "/v1/system/update/components": {
       "get": {
         "tags": [
-          "system"
+          "system/update"
         ],
         "summary": "View version and update status of component tree",
         "operationId": "system_component_version_list",
@@ -5782,7 +5837,7 @@
     "/v1/system/update/deployments": {
       "get": {
         "tags": [
-          "system"
+          "system/update"
         ],
         "summary": "List all update deployments",
         "operationId": "update_deployments_list",
@@ -5841,7 +5896,7 @@
     "/v1/system/update/deployments/{id}": {
       "get": {
         "tags": [
-          "system"
+          "system/update"
         ],
         "summary": "Fetch a system update deployment",
         "operationId": "update_deployment_view",
@@ -5879,7 +5934,7 @@
     "/v1/system/update/refresh": {
       "post": {
         "tags": [
-          "system"
+          "system/update"
         ],
         "summary": "Refresh update data",
         "operationId": "system_update_refresh",
@@ -5899,7 +5954,7 @@
     "/v1/system/update/start": {
       "post": {
         "tags": [
-          "system"
+          "system/update"
         ],
         "summary": "Start system update",
         "operationId": "system_update_start",
@@ -5936,7 +5991,7 @@
     "/v1/system/update/stop": {
       "post": {
         "tags": [
-          "system"
+          "system/update"
         ],
         "summary": "Stop system update",
         "description": "If there is no update in progress, do nothing.",
@@ -5957,7 +6012,7 @@
     "/v1/system/update/updates": {
       "get": {
         "tags": [
-          "system"
+          "system/update"
         ],
         "summary": "List all updates",
         "operationId": "system_update_list",
@@ -6016,7 +6071,7 @@
     "/v1/system/update/updates/{version}": {
       "get": {
         "tags": [
-          "system"
+          "system/update"
         ],
         "summary": "View system update",
         "operationId": "system_update_view",
@@ -6053,7 +6108,7 @@
     "/v1/system/update/updates/{version}/components": {
       "get": {
         "tags": [
-          "system"
+          "system/update"
         ],
         "summary": "View system update component tree",
         "operationId": "system_update_components_list",
@@ -6090,7 +6145,7 @@
     "/v1/system/update/version": {
       "get": {
         "tags": [
-          "system"
+          "system/update"
         ],
         "summary": "View system version and update status",
         "operationId": "system_version",
@@ -6117,9 +6172,9 @@
     "/v1/system/users": {
       "get": {
         "tags": [
-          "system"
+          "system/silos"
         ],
-        "summary": "List users in a silo",
+        "summary": "List built-in (system) users in a silo",
         "operationId": "silo_user_list",
         "parameters": [
           {
@@ -6186,9 +6241,9 @@
     "/v1/system/users/{user_id}": {
       "get": {
         "tags": [
-          "system"
+          "system/silos"
         ],
-        "summary": "Fetch a user",
+        "summary": "Fetch a built-in (system) user",
         "operationId": "silo_user_view",
         "parameters": [
           {
@@ -6234,7 +6289,7 @@
     "/v1/system/users-builtin": {
       "get": {
         "tags": [
-          "system"
+          "system/silos"
         ],
         "summary": "List built-in users",
         "operationId": "user_builtin_list",
@@ -6293,7 +6348,7 @@
     "/v1/system/users-builtin/{user}": {
       "get": {
         "tags": [
-          "system"
+          "system/silos"
         ],
         "summary": "Fetch a built-in user",
         "operationId": "user_builtin_view",
@@ -7819,6 +7874,14 @@
             "type": "string",
             "format": "uuid"
           },
+          "kind": {
+            "description": "Desired use of `AddressLot`",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AddressLotKind"
+              }
+            ]
+          },
           "name": {
             "description": "unique, mutable, user-controlled identifier for each resource",
             "allOf": [
@@ -7841,6 +7904,7 @@
         "required": [
           "description",
           "id",
+          "kind",
           "name",
           "time_created",
           "time_modified"
@@ -12178,17 +12242,6 @@
           "destroyed"
         ]
       },
-      "SpoofLoginBody": {
-        "type": "object",
-        "properties": {
-          "username": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "username"
-        ]
-      },
       "SshKey": {
         "description": "View of an SSH Key",
         "type": "object",
@@ -14286,6 +14339,14 @@
           "write_bytes"
         ]
       },
+      "PaginationOrder": {
+        "description": "The order in which the client wants to page through the requested collection",
+        "type": "string",
+        "enum": [
+          "ascending",
+          "descending"
+        ]
+      },
       "IdSortMode": {
         "description": "Supported set of sort modes for scanning by id only.\n\nCurrently, we only support scanning in ascending order.",
         "oneOf": [
@@ -14325,168 +14386,140 @@
       "name": "disks",
       "description": "Virtual disks are used to store instance-local data which includes the operating system.",
       "externalDocs": {
-        "url": "http://oxide.computer/docs/#xxx"
-      }
-    },
-    {
-      "name": "external-networking",
-      "description": "External networking information",
-      "externalDocs": {
-        "url": "http://oxide.computer/docs/#xxx"
-      }
-    },
-    {
-      "name": "firewall",
-      "description": "Firewall operation controls the flow of network data into a VPC",
-      "externalDocs": {
-        "url": "http://oxide.computer/docs/#xxx"
-      }
-    },
-    {
-      "name": "hardware",
-      "description": "These operations pertain to hardware inventory and management. Racks are the unit of expansion of an Oxide deployment. Racks are in turn composed of sleds, switches, power supplies, and a cabled backplane.",
-      "externalDocs": {
-        "url": "http://oxide.computer/docs/#xxx"
+        "url": "http://docs.oxide.computer/api/disks"
       }
     },
     {
       "name": "hidden",
       "description": "TODO operations that will not ship to customers",
       "externalDocs": {
-        "url": "http://oxide.computer/docs/#xxx"
+        "url": "http://docs.oxide.computer/api/"
       }
     },
     {
       "name": "images",
-      "description": "Images are read-only Virtual Disks that may be used to boot Virtual Machines",
+      "description": "Images are read-only virtual disks that may be used to boot virtual machines.",
       "externalDocs": {
-        "url": "http://oxide.computer/docs/#xxx"
-      }
-    },
-    {
-      "name": "images:global",
-      "description": "Images are read-only Virtual Disks that may be used to boot Virtual Machines. These images are scoped globally.",
-      "externalDocs": {
-        "url": "http://oxide.computer/docs/#xxx"
+        "url": "http://docs.oxide.computer/api/images"
       }
     },
     {
       "name": "instances",
       "description": "Virtual machine instances are the basic unit of computation. These operations are used for provisioning, controlling, and destroying instances.",
       "externalDocs": {
-        "url": "http://oxide.computer/docs/#xxx"
+        "url": "http://docs.oxide.computer/api/instances"
       }
     },
     {
       "name": "ip-pools",
-      "description": "IP Pools contain external IP addresses that can be assigned to virtual machine Instances.",
+      "description": "IP Pools contain external IP addresses that can be assigned to virtual machine instances.",
       "externalDocs": {
-        "url": "http://oxide.computer/docs/#xxx"
+        "url": "http://docs.oxide.computer/api/ip-pools"
       }
     },
     {
       "name": "login",
       "description": "Authentication endpoints",
       "externalDocs": {
-        "url": "http://oxide.computer/docs/#xxx"
-      }
-    },
-    {
-      "name": "metrics",
-      "description": "Metrics provide insight into the operation of the Oxide deployment. These include telemetry on hardware and software components that can be used to understand the current state as well as to diagnose issues.",
-      "externalDocs": {
-        "url": "http://oxide.computer/docs/#xxx"
+        "url": "http://docs.oxide.computer/api/login"
       }
     },
     {
       "name": "policy",
       "description": "System-wide IAM policy",
       "externalDocs": {
-        "url": "http://oxide.computer/docs/#xxx"
+        "url": "http://docs.oxide.computer/api/policy"
       }
     },
     {
       "name": "projects",
       "description": "Projects are a grouping of associated resources such as instances and disks within a silo for purposes of billing and access control.",
       "externalDocs": {
-        "url": "http://oxide.computer/docs/#xxx"
+        "url": "http://docs.oxide.computer/api/projects"
       }
     },
     {
       "name": "roles",
       "description": "Roles are a component of Identity and Access Management (IAM) that allow a user or agent account access to additional permissions.",
       "externalDocs": {
-        "url": "http://oxide.computer/docs/#xxx"
-      }
-    },
-    {
-      "name": "routers",
-      "description": "Routers direct the flow of network traffic into, out of, and within a VPC via routes.",
-      "externalDocs": {
-        "url": "http://oxide.computer/docs/#xxx"
-      }
-    },
-    {
-      "name": "routes",
-      "description": "Routes define router policy.",
-      "externalDocs": {
-        "url": "http://oxide.computer/docs/#xxx"
+        "url": "http://docs.oxide.computer/api/roles"
       }
     },
     {
       "name": "sagas",
       "description": "Sagas are the abstraction used to represent multi-step operations within the Oxide deployment. These operations can be used to query saga status and report errors.",
       "externalDocs": {
-        "url": "http://oxide.computer/docs/#xxx"
+        "url": "http://docs.oxide.computer/api/sagas"
       }
     },
     {
       "name": "session",
       "description": "Information pertaining to the current session.",
       "externalDocs": {
-        "url": "http://oxide.computer/docs/#xxx"
+        "url": "http://docs.oxide.computer/api/session"
       }
     },
     {
       "name": "silos",
       "description": "Silos represent a logical partition of users and resources.",
       "externalDocs": {
-        "url": "http://oxide.computer/docs/#xxx"
+        "url": "http://docs.oxide.computer/api/silos"
       }
     },
     {
       "name": "snapshots",
-      "description": "Snapshots of Virtual Disks at a particular point in time.",
+      "description": "Snapshots of virtual disks at a particular point in time.",
       "externalDocs": {
-        "url": "http://oxide.computer/docs/#xxx"
-      }
-    },
-    {
-      "name": "subnets",
-      "description": "This tag should be moved into a generic network tag",
-      "externalDocs": {
-        "url": "http://oxide.computer/docs/#xxx"
+        "url": "http://docs.oxide.computer/api/snapshots"
       }
     },
     {
       "name": "system",
       "description": "Internal system information",
       "externalDocs": {
-        "url": "http://oxide.computer/docs/#xxx"
+        "url": "http://docs.oxide.computer/api/system"
       }
     },
     {
-      "name": "updates",
-      "description": "This tag should be moved into a operations tag",
+      "name": "system/hardware",
+      "description": "These operations pertain to hardware inventory and management. Racks are the unit of expansion of an Oxide deployment. Racks are in turn composed of sleds, switches, power supplies, and a cabled backplane.",
       "externalDocs": {
-        "url": "http://oxide.computer/docs/#xxx"
+        "url": "http://docs.oxide.computer/api/system/hardware"
+      }
+    },
+    {
+      "name": "system/metrics",
+      "description": "Metrics provide insight into the operation of the Oxide deployment. These include telemetry on hardware and software components that can be used to understand the current state as well as to diagnose issues.",
+      "externalDocs": {
+        "url": "http://docs.oxide.computer/api/system/metrics"
+      }
+    },
+    {
+      "name": "system/networking",
+      "description": "This provides rack-level network configuration.",
+      "externalDocs": {
+        "url": "http://docs.oxide.computer/api/system/networking"
+      }
+    },
+    {
+      "name": "system/silos",
+      "description": "Silos represent a logical partition of users and resources.",
+      "externalDocs": {
+        "url": "http://docs.oxide.computer/api/system/silos"
+      }
+    },
+    {
+      "name": "system/update",
+      "description": "This includes operations related to system updates.",
+      "externalDocs": {
+        "url": "http://docs.oxide.computer/api/system/update"
       }
     },
     {
       "name": "vpcs",
-      "description": "A Virtual Private Cloud (VPC) is an isolated network environment that should probaby be moved into a more generic networking tag",
+      "description": "Virtual Private Clouds (VPCs) provide isolated network environments for managing and deploying services.",
       "externalDocs": {
-        "url": "http://oxide.computer/docs/#xxx"
+        "url": "http://docs.oxide.computer/api/vpcs"
       }
     }
   ]

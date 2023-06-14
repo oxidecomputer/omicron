@@ -151,6 +151,11 @@ pub enum UpdateTerminalError {
         #[from]
         error: NestedEngineError<SpComponentUpdateSpec>,
     },
+    #[error("getting RoT caboose failed")]
+    GetRotCabooseFailed {
+        #[source]
+        error: gateway_client::Error<gateway_client::types::Error>,
+    },
     #[error("getting SP caboose failed")]
     GetSpCabooseFailed {
         #[source]

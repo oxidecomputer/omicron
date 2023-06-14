@@ -124,7 +124,6 @@ impl From<gateway_messages::SpStateV1> for SpState {
             revision: state.revision,
             hubris_archive_id: hex::encode(state.hubris_archive_id),
             base_mac_address: state.base_mac_address,
-            version: ImageVersion::from(state.version),
             power_state: PowerState::from(state.power_state),
             rot: RotState::from(state.rot),
         }
@@ -139,7 +138,6 @@ impl From<gateway_messages::SpStateV2> for SpState {
             revision: state.revision,
             hubris_archive_id: hex::encode(state.hubris_archive_id),
             base_mac_address: state.base_mac_address,
-            version: ImageVersion { epoch: 0, version: 0 }, // TODO FIXME
             power_state: PowerState::from(state.power_state),
             rot: RotState::from(state.rot),
         }
@@ -166,8 +164,19 @@ impl From<Result<gateway_messages::RotState, gateway_messages::RotError>>
                 let boot_state = state.rot_updates.boot_state;
                 Self::Enabled {
                     active: boot_state.active.into(),
-                    slot_a: boot_state.slot_a.map(Into::into),
-                    slot_b: boot_state.slot_b.map(Into::into),
+                    slot_a_sha3_256_digest: boot_state
+                        .slot_a
+                        .map(|details| hex::encode(details.digest)),
+                    slot_b_sha3_256_digest: boot_state
+                        .slot_b
+                        .map(|details| hex::encode(details.digest)),
+                    // RotState(V1) didn't have the following fields, so we make
+                    // it up as best we can. This RoT version is pre-shipping
+                    // and should only exist on (not updated recently) test
+                    // systems.
+                    persistent_boot_preference: boot_state.active.into(),
+                    pending_persistent_boot_preference: None,
+                    transient_boot_preference: None,
                 }
             }
             Err(err) => Self::CommunicationFailed { message: err.to_string() },
@@ -175,7 +184,6 @@ impl From<Result<gateway_messages::RotState, gateway_messages::RotError>>
     }
 }
 
-// TODO FIXME
 impl From<Result<gateway_messages::RotStateV2, gateway_messages::RotError>>
     for RotState
 {
@@ -186,24 +194,24 @@ impl From<Result<gateway_messages::RotStateV2, gateway_messages::RotError>>
         >,
     ) -> Self {
         match result {
-            Ok(state) => {
-                // TODO FIXME: This is wrong for RotStateV2
-                Self::Enabled {
-                    active: state.active.into(),
-                    slot_a: state.slot_a_sha3_256_digest.map(|hash| {
-                        RotImageDetails {
-                            digest: hex::encode(hash),
-                            version: ImageVersion { epoch: 0, version: 0 },
-                        }
-                    }),
-                    slot_b: state.slot_b_sha3_256_digest.map(|hash| {
-                        RotImageDetails {
-                            digest: hex::encode(hash),
-                            version: ImageVersion { epoch: 0, version: 0 },
-                        }
-                    }),
-                }
-            }
+            Ok(state) => Self::Enabled {
+                active: state.active.into(),
+                persistent_boot_preference: state
+                    .persistent_boot_preference
+                    .into(),
+                pending_persistent_boot_preference: state
+                    .pending_persistent_boot_preference
+                    .map(Into::into),
+                transient_boot_preference: state
+                    .transient_boot_preference
+                    .map(Into::into),
+                slot_a_sha3_256_digest: state
+                    .slot_a_sha3_256_digest
+                    .map(hex::encode),
+                slot_b_sha3_256_digest: state
+                    .slot_b_sha3_256_digest
+                    .map(hex::encode),
+            },
             Err(err) => Self::CommunicationFailed { message: err.to_string() },
         }
     }

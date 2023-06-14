@@ -8,6 +8,7 @@ use super::MAX_DISKS_PER_INSTANCE;
 use super::MAX_EXTERNAL_IPS_PER_INSTANCE;
 use super::MAX_NICS_PER_INSTANCE;
 use crate::app::sagas;
+use crate::app::sagas::retry_until_known_result;
 use crate::authn;
 use crate::authz;
 use crate::cidata::InstanceCiData;
@@ -19,6 +20,7 @@ use crate::external_api::params;
 use futures::future::Fuse;
 use futures::{FutureExt, SinkExt, StreamExt};
 use nexus_db_model::IpKind;
+use nexus_db_queries::authz::ApiResource;
 use nexus_db_queries::context::OpContext;
 use omicron_common::address::PROPOLIS_PORT;
 use omicron_common::api::external::http_pagination::PaginatedBy;
@@ -1240,22 +1242,27 @@ impl super::Nexus {
             })
             .map(|(_, ip)| ip)
         {
-            dpd_client
-                .ensure_nat_entry(
-                    &log,
-                    target_ip.ip,
-                    dpd_client::types::MacAddr { a: mac_address.into_array() },
-                    *target_ip.first_port,
-                    *target_ip.last_port,
-                    vni,
-                    sled_ip_address.ip(),
-                )
-                .await
-                .map_err(|e| {
-                    Error::internal_error(&format!(
-                        "failed to ensure dpd entry: {e}"
-                    ))
-                })?;
+            retry_until_known_result(log, || async {
+                dpd_client
+                    .ensure_nat_entry(
+                        &log,
+                        target_ip.ip,
+                        dpd_client::types::MacAddr {
+                            a: mac_address.into_array(),
+                        },
+                        *target_ip.first_port,
+                        *target_ip.last_port,
+                        vni,
+                        sled_ip_address.ip(),
+                    )
+                    .await
+            })
+            .await
+            .map_err(|e| {
+                Error::internal_error(&format!(
+                    "failed to ensure dpd entry: {e}"
+                ))
+            })?;
         }
 
         Ok(())
@@ -1360,18 +1367,40 @@ impl super::Nexus {
         instance_lookup: &lookup::Instance<'_>,
         action: authz::Action,
     ) -> Result<propolis_client::Client, Error> {
-        let (.., instance) = instance_lookup.fetch_for(action).await?;
-        let ip_addr = instance
-            .runtime_state
-            .propolis_ip
-            .ok_or_else(|| {
-                Error::internal_error(
-                    "instance's hypervisor IP address not found",
-                )
-            })?
-            .ip();
-        let socket_addr = SocketAddr::new(ip_addr, PROPOLIS_PORT);
-        Ok(propolis_client::Client::new(&format!("http://{}", socket_addr)))
+        let (.., authz_instance, instance) =
+            instance_lookup.fetch_for(action).await?;
+        match instance.runtime_state.state.0 {
+            InstanceState::Running
+            | InstanceState::Rebooting
+            | InstanceState::Migrating
+            | InstanceState::Repairing => {
+                let ip_addr = instance
+                    .runtime_state
+                    .propolis_ip
+                    .ok_or_else(|| {
+                        Error::internal_error(
+                            "instance's hypervisor IP address not found",
+                        )
+                    })?
+                    .ip();
+                let socket_addr = SocketAddr::new(ip_addr, PROPOLIS_PORT);
+                Ok(propolis_client::Client::new(&format!(
+                    "http://{}",
+                    socket_addr
+                )))
+            }
+            InstanceState::Creating
+            | InstanceState::Starting
+            | InstanceState::Stopping
+            | InstanceState::Stopped
+            | InstanceState::Failed => Err(Error::ServiceUnavailable {
+                internal_message: format!(
+                    "Cannot connect to hypervisor of instance in state {:?}",
+                    instance.runtime_state.state
+                ),
+            }),
+            InstanceState::Destroyed => Err(authz_instance.not_found()),
+        }
     }
 
     async fn proxy_instance_serial_ws(

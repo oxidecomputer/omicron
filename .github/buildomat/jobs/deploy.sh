@@ -4,9 +4,10 @@
 #: variety = "basic"
 #: target = "lab-opte-0.23"
 #: output_rules = [
-#:	"%/var/svc/log/oxide-sled-agent:default.log",
-#:	"%/zone/oxz_*/root/var/svc/log/oxide-*.log",
-#:	"%/zone/oxz_*/root/var/svc/log/system-illumos-*.log",
+#:  "%/var/svc/log/oxide-sled-agent:default.log",
+#:  "%/zone/oxz_*/root/var/svc/log/oxide-*.log",
+#:  "%/zone/oxz_*/root/var/svc/log/system-illumos-*.log",
+#:  "!/zone/oxz_propolis-server_*/root/var/svc/log/*.log"
 #: ]
 #: skip_clone = true
 #:
@@ -44,6 +45,11 @@ _exit_trap() {
 		standalone \
 		dump-state
 	pfexec /opt/oxide/opte/bin/opteadm list-ports
+	z_swadm link ls
+	z_swadm addr list
+	z_swadm route list
+	z_swadm arp list
+
 	PORTS=$(pfexec /opt/oxide/opte/bin/opteadm list-ports | tail +2 | awk '{ print $1; }')
 	for p in $PORTS; do
 		LAYERS=$(pfexec /opt/oxide/opte/bin/opteadm list-layers -p $p | tail +2 | awk '{ print $1; }')
@@ -67,9 +73,15 @@ _exit_trap() {
 		pfexec zlogin "$z" arp -an
 	done
 
+	pfexec zlogin softnpu cat /softnpu.log
+
 	exit $status
 }
 trap _exit_trap EXIT
+
+z_swadm () {
+	pfexec zlogin oxz_switch /opt/oxide/dendrite/bin/swadm $@
+}
 
 #
 # XXX work around 14537 (UFS should not allow directories to be unlinked) which

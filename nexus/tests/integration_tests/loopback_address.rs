@@ -10,11 +10,10 @@ use http::StatusCode;
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use nexus_test_utils_macros::nexus_test;
 use omicron_common::api::external::{
-    IdentityMetadataCreateParams, LoopbackAddress, NameOrId,
+    AddressLotKind, IdentityMetadataCreateParams, LoopbackAddress, NameOrId,
 };
 use omicron_nexus::external_api::params::{
-    AddressLotBlockCreate, AddressLotCreate, AddressLotKind,
-    LoopbackAddressCreate,
+    AddressLotBlockCreate, AddressLotCreate, LoopbackAddressCreate,
 };
 use omicron_nexus::external_api::views::Rack;
 

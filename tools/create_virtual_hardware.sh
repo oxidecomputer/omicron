@@ -132,7 +132,7 @@ function enable_softnpu {
         exit 1
     }
     zlogin softnpu pgrep softnpu || {
-        zlogin softnpu /stuff/softnpu /stuff/softnpu.toml &
+        zlogin softnpu 'RUST_LOG=debug /stuff/softnpu /stuff/softnpu.toml &> /softnpu.log &'
     }
     success "softnpu started"
 }

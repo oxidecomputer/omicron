@@ -9,14 +9,13 @@ use http::StatusCode;
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use nexus_test_utils_macros::nexus_test;
 use omicron_common::api::external::{
-    self, IdentityMetadataCreateParams, NameOrId, SwitchPort,
+    self, AddressLotKind, IdentityMetadataCreateParams, NameOrId, SwitchPort,
     SwitchPortSettingsView,
 };
 use omicron_nexus::external_api::params::{
     Address, AddressConfig, AddressLotBlockCreate, AddressLotCreate,
-    AddressLotKind, LinkConfig, LldpServiceConfig, Route, RouteConfig,
-    SwitchInterfaceConfig, SwitchInterfaceKind, SwitchPortApplySettings,
-    SwitchPortSettingsCreate,
+    LinkConfig, LldpServiceConfig, Route, RouteConfig, SwitchInterfaceConfig,
+    SwitchInterfaceKind, SwitchPortApplySettings, SwitchPortSettingsCreate,
 };
 use omicron_nexus::external_api::views::Rack;
 

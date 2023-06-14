@@ -32,7 +32,7 @@ pub mod background;
 mod certificate;
 mod device_auth;
 mod disk;
-mod external_endpoints;
+pub mod external_endpoints;
 mod external_ip;
 mod iam;
 mod image;
@@ -339,15 +339,15 @@ impl Nexus {
         &self,
         tls_enabled: bool,
     ) -> Option<rustls::ServerConfig> {
-        if !tls_enabled {
-            return None;
-        }
-
         // Wait for the background task to complete at least once.  We don't
         // care about its value.  To do this, we need our own copy of the
         // channel.
         let mut rx = self.background_tasks.external_endpoints.clone();
         let _ = rx.wait_for(|s| s.is_some()).await;
+        if !tls_enabled {
+            return None;
+        }
+
         let mut rustls_cfg = rustls::ServerConfig::builder()
             .with_safe_default_cipher_suites()
             .with_safe_default_kx_groups()
@@ -436,6 +436,16 @@ impl Nexus {
             self.log.new(o!("component" => "ServiceBalancer")),
             Arc::clone(&self.authz),
             authn::Context::internal_service_balancer(),
+            Arc::clone(&self.db_datastore),
+        )
+    }
+
+    /// Returns an [`OpContext`] used for internal API calls.
+    pub fn opctx_for_internal_api(&self) -> OpContext {
+        OpContext::for_background(
+            self.log.new(o!("component" => "InternalApi")),
+            Arc::clone(&self.authz),
+            authn::Context::internal_api(),
             Arc::clone(&self.db_datastore),
         )
     }

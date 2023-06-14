@@ -1752,8 +1752,14 @@ impl ServiceManager {
 
                     smfh.setprop(
                         "config/interfaces",
+                        // `svccfg setprop` requires a list of values to be
+                        // enclosed in `()`, and each string value to be
+                        // enclosed in `""`. Note that we do _not_ need to
+                        // escape the parentheses, since this is not passed
+                        // through a shell, but directly to `exec(2)` in the
+                        // zone.
                         format!(
-                            "\'({})\'",
+                            "({})",
                             maghemite_interfaces
                                 .iter()
                                 .map(|interface| format!(r#""{}""#, interface))
@@ -2402,6 +2408,7 @@ impl ServiceManager {
 mod test {
     use super::*;
     use crate::params::{ServiceZoneService, ZoneType};
+    use async_trait::async_trait;
     use illumos_utils::{
         dladm::{
             Etherstub, MockDladm, BOOTSTRAP_ETHERSTUB_NAME,
@@ -2409,6 +2416,10 @@ mod test {
         },
         svc,
         zone::MockZones,
+    };
+    use key_manager::{
+        KeyManager, SecretRetriever, SecretRetrieverError, SecretState,
+        StorageKeyRequester, VersionedIkm,
     };
     use std::net::Ipv6Addr;
     use std::os::unix::process::ExitStatusExt;
@@ -2436,11 +2447,21 @@ mod test {
             assert_eq!(name, EXPECTED_ZONE_NAME);
             Ok(())
         });
-        // Boot the zone
+
+        // Boot the zone.
         let boot_ctx = MockZones::boot_context();
         boot_ctx.expect().return_once(|name| {
             assert_eq!(name, EXPECTED_ZONE_NAME);
             Ok(())
+        });
+
+        // After calling `MockZones::boot`, `RunningZone::boot` will then look
+        // up the zone ID for the booted zone. This goes through
+        // `MockZone::id` to find the zone and get its ID.
+        let id_ctx = MockZones::id_context();
+        id_ctx.expect().return_once(|name| {
+            assert_eq!(name, EXPECTED_ZONE_NAME);
+            Ok(Some(1))
         });
 
         // Ensure the address exists
@@ -2453,6 +2474,7 @@ mod test {
         // Wait for the networking service.
         let wait_ctx = svc::wait_for_service_context();
         wait_ctx.expect().return_once(|_, _| Ok(()));
+
         // Import the manifest, enable the service
         let execute_ctx = illumos_utils::execute_context();
         execute_ctx.expect().times(..).returning(|_| {
@@ -2467,6 +2489,7 @@ mod test {
             Box::new(create_vnic_ctx),
             Box::new(install_ctx),
             Box::new(boot_ctx),
+            Box::new(id_ctx),
             Box::new(ensure_address_ctx),
             Box::new(wait_ctx),
             Box::new(execute_ctx),
@@ -2563,6 +2586,39 @@ mod test {
         }
     }
 
+    pub struct TestSecretRetriever {}
+
+    #[async_trait]
+    impl SecretRetriever for TestSecretRetriever {
+        async fn get_latest(
+            &self,
+        ) -> Result<VersionedIkm, SecretRetrieverError> {
+            let epoch = 0;
+            let salt = [0u8; 32];
+            let secret = [0x1d; 32];
+
+            Ok(VersionedIkm::new(epoch, salt, &secret))
+        }
+
+        async fn get(
+            &self,
+            epoch: u64,
+        ) -> Result<SecretState, SecretRetrieverError> {
+            if epoch != 0 {
+                return Err(SecretRetrieverError::NoSuchEpoch(epoch));
+            }
+            Ok(SecretState::Current(self.get_latest().await?))
+        }
+    }
+
+    async fn spawn_key_manager(log: &Logger) -> StorageKeyRequester {
+        let (mut key_manager, storage_key_requester) =
+            KeyManager::new(log, TestSecretRetriever {});
+
+        tokio::spawn(async move { key_manager.run().await });
+        storage_key_requester
+    }
+
     #[tokio::test]
     #[serial_test::serial]
     async fn test_ensure_service() {
@@ -2570,6 +2626,7 @@ mod test {
             omicron_test_utils::dev::test_setup_log("test_ensure_service");
         let log = logctx.log.clone();
         let test_config = TestConfig::new().await;
+        let storage_key_requester = spawn_key_manager(&log).await;
 
         let mgr = ServiceManager::new(
             log.clone(),
@@ -2582,7 +2639,7 @@ mod test {
             SidecarRevision::Physical("rev-test".to_string()),
             SWITCH_ZONE_BOOTSTRAP_IP,
             vec![],
-            StorageManager::new(&log).await,
+            StorageManager::new(&log, storage_key_requester).await,
         )
         .await
         .unwrap();
@@ -2616,6 +2673,7 @@ mod test {
         );
         let log = logctx.log.clone();
         let test_config = TestConfig::new().await;
+        let storage_key_requester = spawn_key_manager(&log).await;
 
         let mgr = ServiceManager::new(
             log.clone(),
@@ -2628,7 +2686,7 @@ mod test {
             SidecarRevision::Physical("rev-test".to_string()),
             SWITCH_ZONE_BOOTSTRAP_IP,
             vec![],
-            StorageManager::new(&log).await,
+            StorageManager::new(&log, storage_key_requester).await,
         )
         .await
         .unwrap();
@@ -2663,6 +2721,7 @@ mod test {
         );
         let log = logctx.log.clone();
         let test_config = TestConfig::new().await;
+        let storage_key_requester = spawn_key_manager(&log).await;
 
         // First, spin up a ServiceManager, create a new service, and tear it
         // down.
@@ -2677,7 +2736,7 @@ mod test {
             SidecarRevision::Physical("rev-test".to_string()),
             SWITCH_ZONE_BOOTSTRAP_IP,
             vec![],
-            StorageManager::new(&log).await,
+            StorageManager::new(&log, storage_key_requester).await,
         )
         .await
         .unwrap();
@@ -2702,6 +2761,7 @@ mod test {
 
         // Before we re-create the service manager - notably, using the same
         // config file! - expect that a service gets initialized.
+        let storage_key_requester = spawn_key_manager(&log).await;
         let _expectations = expect_new_service();
         let mgr = ServiceManager::new(
             logctx.log.clone(),
@@ -2714,7 +2774,7 @@ mod test {
             SidecarRevision::Physical("rev-test".to_string()),
             SWITCH_ZONE_BOOTSTRAP_IP,
             vec![],
-            StorageManager::new(&log).await,
+            StorageManager::new(&log, storage_key_requester).await,
         )
         .await
         .unwrap();
@@ -2746,6 +2806,7 @@ mod test {
         );
         let log = logctx.log.clone();
         let test_config = TestConfig::new().await;
+        let storage_key_requester = spawn_key_manager(&log).await;
 
         // First, spin up a ServiceManager, create a new service, and tear it
         // down.
@@ -2760,7 +2821,7 @@ mod test {
             SidecarRevision::Physical("rev-test".to_string()),
             SWITCH_ZONE_BOOTSTRAP_IP,
             vec![],
-            StorageManager::new(&log).await,
+            StorageManager::new(&log, storage_key_requester).await,
         )
         .await
         .unwrap();
@@ -2790,6 +2851,11 @@ mod test {
         )
         .unwrap();
 
+        // We don't really have a need to make the StorageKeyRequester `Clone`
+        // and we want to keep the channel buffer size management simple. So
+        // for tests, just create another key manager and `storage_key_requester`.
+        // They all manage the same hardcoded test secrets and will derive the same keys.
+        let storage_key_requester = spawn_key_manager(&log).await;
         // Observe that the old service is not re-initialized.
         let mgr = ServiceManager::new(
             logctx.log.clone(),
@@ -2802,7 +2868,7 @@ mod test {
             SidecarRevision::Physical("rev-test".to_string()),
             SWITCH_ZONE_BOOTSTRAP_IP,
             vec![],
-            StorageManager::new(&log).await,
+            StorageManager::new(&log, storage_key_requester).await,
         )
         .await
         .unwrap();

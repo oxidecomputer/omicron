@@ -121,32 +121,10 @@ function main
 
     HELIOS_REPO=https://pkg.oxide.computer/helios-netdev
 
-    # We have to do a bit of extra work to find the host OS hash
-    OS_HASH="unknown"
-
-    tmpd=$(mktemp -d)
-    if [[ -d "$tmpd" ]]; then
-        pkgrecv -s "$HELIOS_REPO" -d "$tmpd" --raw -m latest SUNWcs
-        if (($? == 0)); then
-            for PKGDIR in "$tmpd/SUNWcs/"*; do
-                if [[ -d "$PKGDIR" ]]; then
-                    BUILDHASH=$( \
-                        grep 'path=etc/versions/build ' \
-                        "$PKGDIR/manifest.file" | \
-                        awk '{print $2}' \
-                    )
-                    if [[ -n "$BUILDHASH" && -f "$PKGDIR/$BUILDHASH" ]]; then
-                        OS_HASH="$(awk -F- '{print $NF}' "$PKGDIR/$BUILDHASH")"
-                        break
-                    fi
-                fi
-            done
-        fi
-        rm -rf "$tmpd"
-    fi
-
     # Build an image name that includes the omicron and host OS hashes
-    IMAGE_NAME="$IMAGE_PREFIX ${GITHUB_SHA:0:7}/${OS_HASH:1:7}"
+    IMAGE_NAME="$IMAGE_PREFIX ${GITHUB_SHA:0:7}"
+    # The ${os_short_commit} token will be expanded by `helios-build`
+    IMAGE_NAME+='/${os_short_commit}'
     IMAGE_NAME+=" $(date +'%Y-%m-%d %H:%M')"
 
     ./helios-build experiment-image \

@@ -4,6 +4,7 @@
 
 //! Sleds, and the hardware and services within them.
 
+use crate::app::sagas::retry_until_known_result;
 use crate::authz;
 use crate::db;
 use crate::db::identity::Asset;
@@ -381,11 +382,16 @@ impl super::Nexus {
                         vni: nic.vni.clone(),
                     };
 
+                    let log = self.log.clone();
+
                     // This function is idempotent: calling the set_v2p ioctl with
                     // the same information is a no-op.
                     join_handles.push(tokio::spawn(futures::future::lazy(
                         move |_ctx| async move {
-                            client.set_v2p(&nic_id, &mapping).await
+                            retry_until_known_result(&log, || async {
+                                client.set_v2p(&nic_id, &mapping).await
+                            })
+                            .await
                         },
                     )));
                 }
@@ -484,11 +490,16 @@ impl super::Nexus {
                         vni: nic.vni.clone(),
                     };
 
+                    let log = self.log.clone();
+
                     // This function is idempotent: calling the set_v2p ioctl with
                     // the same information is a no-op.
                     join_handles.push(tokio::spawn(futures::future::lazy(
                         move |_ctx| async move {
-                            client.del_v2p(&nic_id, &mapping).await
+                            retry_until_known_result(&log, || async {
+                                client.del_v2p(&nic_id, &mapping).await
+                            })
+                            .await
                         },
                     )));
                 }
