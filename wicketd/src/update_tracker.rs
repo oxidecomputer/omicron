@@ -1573,23 +1573,13 @@ impl UpdateContext {
         cx: StepContext<S>,
         stage: ComponentUpdateStage,
         update_id: Uuid,
-        component: UpdateComponent,
-        component_name: &str,
+        component: &str,
     ) -> anyhow::Result<()>
     where
         S::ProgressMetadata: Default,
     {
         // How often we poll MGS for the progress of an update once it starts.
         const STATUS_POLL_FREQ: Duration = Duration::from_millis(300);
-
-        let progress_units = match component {
-            UpdateComponent::Rot => {
-                // XXX what's the correct unit for this?
-                ProgressUnits::new("flash slots scanned")
-            }
-            UpdateComponent::Sp => ProgressUnits::new("flash slots scanned"),
-            UpdateComponent::Host => ProgressUnits::new("sectors erased"),
-        };
 
         loop {
             let status = self
@@ -1614,7 +1604,11 @@ impl UpdateContext {
                                 StepProgress::with_current_and_total(
                                     progress.current as u64,
                                     progress.total as u64,
-                                    progress_units,
+                                    // The actual units here depend on the
+                                    // component being updated and are a bit
+                                    // hard to explain succinctly:
+                                    // https://github.com/oxidecomputer/omicron/pull/3267#discussion_r1229700370
+                                    ProgressUnits::new("preparation steps"),
                                     Default::default(),
                                 ),
                             )
@@ -1812,7 +1806,6 @@ impl<'a> SpComponentUpdateContext<'a> {
                             cx,
                             ComponentUpdateStage::Preparing,
                             update_id,
-                            component,
                             component_name,
                         )
                         .await
@@ -1839,7 +1832,6 @@ impl<'a> SpComponentUpdateContext<'a> {
                             cx,
                             ComponentUpdateStage::InProgress,
                             update_id,
-                            component,
                             component_name,
                         )
                         .await
