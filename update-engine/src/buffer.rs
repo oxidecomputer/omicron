@@ -1242,8 +1242,9 @@ mod tests {
     use tokio_stream::wrappers::ReceiverStream;
 
     use crate::{
-        events::StepProgress, test_utils::TestSpec, StepContext, StepSuccess,
-        UpdateEngine,
+        events::{ProgressUnits, StepProgress},
+        test_utils::TestSpec,
+        StepContext, StepSuccess, UpdateEngine,
     };
 
     use super::*;
@@ -1268,6 +1269,7 @@ mod tests {
                     cx.send_progress(StepProgress::with_current_and_total(
                         5,
                         20,
+                        ProgressUnits::BYTES,
                         Default::default(),
                     ))
                     .await;
@@ -1850,6 +1852,7 @@ mod tests {
                         .send_progress(StepProgress::with_current_and_total(
                             1,
                             3,
+                            "steps",
                             Default::default(),
                         ))
                         .await;
@@ -1872,12 +1875,14 @@ mod tests {
                         .send_progress(StepProgress::with_current_and_total(
                             2,
                             3,
+                            "steps",
                             Default::default(),
                         ))
                         .await;
 
                     cx.send_progress(StepProgress::with_current(
                         20,
+                        "units",
                         Default::default(),
                     ))
                     .await;
@@ -1915,6 +1920,7 @@ mod tests {
                 move |cx| async move {
                     cx.send_progress(StepProgress::with_current(
                         20,
+                        "units",
                         Default::default(),
                     ))
                     .await;

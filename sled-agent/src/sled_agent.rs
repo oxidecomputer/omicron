@@ -24,6 +24,7 @@ use illumos_utils::opte::PortManager;
 use omicron_common::address::{
     get_sled_address, get_switch_zone_address, Ipv6Subnet, SLED_PREFIX,
 };
+use omicron_common::api::external::Vni;
 use omicron_common::api::{
     internal::nexus::DiskRuntimeState, internal::nexus::InstanceRuntimeState,
     internal::nexus::UpdateArtifactId,
@@ -160,6 +161,9 @@ struct SledAgentInner {
     // Component of Sled Agent responsible for managing updates.
     updates: UpdateManager,
 
+    /// Component of Sled Agent responsible for managing OPTE ports.
+    port_manager: PortManager,
+
     // Other Oxide-controlled services running on this Sled.
     services: ServiceManager,
 
@@ -277,7 +281,7 @@ impl SledAgent {
         services
             .sled_agent_started(
                 svc_config,
-                port_manager,
+                port_manager.clone(),
                 *sled_address.ip(),
                 request.rack_id,
             )
@@ -291,6 +295,7 @@ impl SledAgent {
                 instances,
                 hardware,
                 updates,
+                port_manager,
                 services,
                 lazy_nexus_client,
 
@@ -678,13 +683,12 @@ impl SledAgent {
 
     pub async fn firewall_rules_ensure(
         &self,
-        _vpc_id: Uuid,
+        vpc_vni: Vni,
         rules: &[VpcFirewallRule],
     ) -> Result<(), Error> {
         self.inner
-            .instances
-            .firewall_rules_ensure(rules)
-            .await
+            .port_manager
+            .firewall_rules_ensure(vpc_vni, rules)
             .map_err(Error::from)
     }
 
@@ -693,9 +697,8 @@ impl SledAgent {
         mapping: &SetVirtualNetworkInterfaceHost,
     ) -> Result<(), Error> {
         self.inner
-            .instances
+            .port_manager
             .set_virtual_nic_host(mapping)
-            .await
             .map_err(Error::from)
     }
 
@@ -704,9 +707,8 @@ impl SledAgent {
         mapping: &SetVirtualNetworkInterfaceHost,
     ) -> Result<(), Error> {
         self.inner
-            .instances
+            .port_manager
             .unset_virtual_nic_host(mapping)
-            .await
             .map_err(Error::from)
     }
 

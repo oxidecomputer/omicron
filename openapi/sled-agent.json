@@ -2444,10 +2444,14 @@
             "items": {
               "$ref": "#/components/schemas/VpcFirewallRule"
             }
+          },
+          "vni": {
+            "$ref": "#/components/schemas/Vni"
           }
         },
         "required": [
-          "rules"
+          "rules",
+          "vni"
         ]
       },
       "ZoneType": {

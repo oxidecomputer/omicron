@@ -475,7 +475,7 @@ async fn policy_update(
 #[endpoint {
     method = GET,
     path = "/v1/system/silos",
-    tags = ["system"],
+    tags = ["system/silos"],
 }]
 async fn silo_list(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -508,7 +508,7 @@ async fn silo_list(
 #[endpoint {
     method = POST,
     path = "/v1/system/silos",
-    tags = ["system"],
+    tags = ["system/silos"],
 }]
 async fn silo_create(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -531,7 +531,7 @@ async fn silo_create(
 #[endpoint {
     method = GET,
     path = "/v1/system/silos/{silo}",
-    tags = ["system"],
+    tags = ["system/silos"],
 }]
 async fn silo_view(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -555,7 +555,7 @@ async fn silo_view(
 #[endpoint {
     method = DELETE,
     path = "/v1/system/silos/{silo}",
-    tags = ["system"],
+    tags = ["system/silos"],
 }]
 async fn silo_delete(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -577,7 +577,7 @@ async fn silo_delete(
 #[endpoint {
     method = GET,
     path = "/v1/system/silos/{silo}/policy",
-    tags = ["system"],
+    tags = ["system/silos"],
 }]
 async fn silo_policy_view(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -599,7 +599,7 @@ async fn silo_policy_view(
 #[endpoint {
     method = PUT,
     path = "/v1/system/silos/{silo}/policy",
-    tags = ["system"],
+    tags = ["system/silos"],
 }]
 async fn silo_policy_update(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -625,11 +625,11 @@ async fn silo_policy_update(
 
 // Silo-specific user endpoints
 
-/// List users in a silo
+/// List built-in (system) users in a silo
 #[endpoint {
     method = GET,
     path = "/v1/system/users",
-    tags = ["system"],
+    tags = ["system/silos"],
 }]
 async fn silo_user_list(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -666,11 +666,11 @@ struct UserParam {
     user_id: Uuid,
 }
 
-/// Fetch a user
+/// Fetch a built-in (system) user
 #[endpoint {
     method = GET,
     path = "/v1/system/users/{user_id}",
-    tags = ["system"],
+    tags = ["system/silos"],
 }]
 async fn silo_user_view(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -697,7 +697,7 @@ async fn silo_user_view(
 #[endpoint {
     method = GET,
     path = "/v1/system/identity-providers",
-    tags = ["system"],
+    tags = ["system/silos"],
 }]
 async fn silo_identity_provider_list(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -734,7 +734,7 @@ async fn silo_identity_provider_list(
 #[endpoint {
     method = POST,
     path = "/v1/system/identity-providers/saml",
-    tags = ["system"],
+    tags = ["system/silos"],
 }]
 async fn saml_identity_provider_create(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -763,7 +763,7 @@ async fn saml_identity_provider_create(
 #[endpoint {
     method = GET,
     path = "/v1/system/identity-providers/saml/{provider}",
-    tags = ["system"],
+    tags = ["system/silos"],
 }]
 async fn saml_identity_provider_view(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -805,7 +805,7 @@ async fn saml_identity_provider_view(
 #[endpoint {
     method = POST,
     path = "/v1/system/identity-providers/local/users",
-    tags = ["system"],
+    tags = ["system/silos"],
 }]
 async fn local_idp_user_create(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -834,7 +834,7 @@ async fn local_idp_user_create(
 #[endpoint {
     method = DELETE,
     path = "/v1/system/identity-providers/local/users/{user_id}",
-    tags = ["system"],
+    tags = ["system/silos"],
 }]
 async fn local_idp_user_delete(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -861,7 +861,7 @@ async fn local_idp_user_delete(
 #[endpoint {
     method = POST,
     path = "/v1/system/identity-providers/local/users/{user_id}/set-password",
-    tags = ["system"],
+    tags = ["system/silos"],
 }]
 async fn local_idp_user_set_password(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -1160,7 +1160,7 @@ async fn project_ip_pool_view(
 #[endpoint {
     method = GET,
     path = "/v1/system/ip-pools",
-    tags = ["system"],
+    tags = ["system/networking"],
 }]
 async fn ip_pool_list(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -1198,7 +1198,7 @@ pub struct IpPoolPathParam {
 #[endpoint {
     method = POST,
     path = "/v1/system/ip-pools",
-    tags = ["system"],
+    tags = ["system/networking"],
 }]
 async fn ip_pool_create(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -1219,7 +1219,7 @@ async fn ip_pool_create(
 #[endpoint {
     method = GET,
     path = "/v1/system/ip-pools/{pool}",
-    tags = ["system"],
+    tags = ["system/networking"],
 }]
 async fn ip_pool_view(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -1241,7 +1241,7 @@ async fn ip_pool_view(
 #[endpoint {
     method = DELETE,
     path = "/v1/system/ip-pools/{pool}",
-    tags = ["system"],
+    tags = ["system/networking"],
 }]
 async fn ip_pool_delete(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -1263,7 +1263,7 @@ async fn ip_pool_delete(
 #[endpoint {
     method = PUT,
     path = "/v1/system/ip-pools/{pool}",
-    tags = ["system"],
+    tags = ["system/networking"],
 }]
 async fn ip_pool_update(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -1287,7 +1287,7 @@ async fn ip_pool_update(
 #[endpoint {
     method = GET,
     path = "/v1/system/ip-pools-service",
-    tags = ["system"],
+    tags = ["system/networking"],
 }]
 async fn ip_pool_service_view(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -1310,7 +1310,7 @@ type IpPoolRangePaginationParams = PaginationParams<EmptyScanParams, IpNetwork>;
 #[endpoint {
     method = GET,
     path = "/v1/system/ip-pools/{pool}/ranges",
-    tags = ["system"],
+    tags = ["system/networking"],
 }]
 async fn ip_pool_range_list(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -1354,7 +1354,7 @@ async fn ip_pool_range_list(
 #[endpoint {
     method = POST,
     path = "/v1/system/ip-pools/{pool}/ranges/add",
-    tags = ["system"],
+    tags = ["system/networking"],
 }]
 async fn ip_pool_range_add(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -1378,7 +1378,7 @@ async fn ip_pool_range_add(
 #[endpoint {
     method = POST,
     path = "/v1/system/ip-pools/{pool}/ranges/remove",
-    tags = ["system"],
+    tags = ["system/networking"],
 }]
 async fn ip_pool_range_remove(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -1405,7 +1405,7 @@ async fn ip_pool_range_remove(
 #[endpoint {
     method = GET,
     path = "/v1/system/ip-pools-service/ranges",
-    tags = ["system"],
+    tags = ["system/networking"],
 }]
 async fn ip_pool_service_range_list(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -1446,7 +1446,7 @@ async fn ip_pool_service_range_list(
 #[endpoint {
     method = POST,
     path = "/v1/system/ip-pools-service/ranges/add",
-    tags = ["system"],
+    tags = ["system/networking"],
 }]
 async fn ip_pool_service_range_add(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -1467,7 +1467,7 @@ async fn ip_pool_service_range_add(
 #[endpoint {
     method = POST,
     path = "/v1/system/ip-pools-service/ranges/remove",
-    tags = ["system"],
+    tags = ["system/networking"],
 }]
 async fn ip_pool_service_range_remove(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -2379,7 +2379,7 @@ async fn certificate_delete(
 #[endpoint {
     method = POST,
     path = "/v1/system/networking/address-lot",
-    tags = ["system"],
+    tags = ["system/networking"],
 }]
 async fn networking_address_lot_create(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -2405,7 +2405,7 @@ async fn networking_address_lot_create(
 #[endpoint {
     method = DELETE,
     path = "/v1/system/networking/address-lot/{address_lot}",
-    tags = ["system"],
+    tags = ["system/networking"],
 }]
 async fn networking_address_lot_delete(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -2428,7 +2428,7 @@ async fn networking_address_lot_delete(
 #[endpoint {
     method = GET,
     path = "/v1/system/networking/address-lot",
-    tags = ["system"],
+    tags = ["system/networking"],
 }]
 async fn networking_address_lot_list(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -2462,7 +2462,7 @@ async fn networking_address_lot_list(
 #[endpoint {
     method = GET,
     path = "/v1/system/networking/address-lot/{address_lot}/blocks",
-    tags = ["system"],
+    tags = ["system/networking"],
 }]
 async fn networking_address_lot_block_list(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -2498,7 +2498,7 @@ async fn networking_address_lot_block_list(
 #[endpoint {
     method = POST,
     path = "/v1/system/networking/loopback-address",
-    tags = ["system"],
+    tags = ["system/networking"],
 }]
 async fn networking_loopback_address_create(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -2539,7 +2539,7 @@ pub struct LoopbackAddressPath {
 #[endpoint {
     method = DELETE,
     path = "/v1/system/networking/loopback-address/{rack_id}/{switch_location}/{address}/{subnet_mask}",
-    tags = ["system"],
+    tags = ["system/networking"],
 }]
 async fn networking_loopback_address_delete(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -2574,7 +2574,7 @@ async fn networking_loopback_address_delete(
 #[endpoint {
     method = GET,
     path = "/v1/system/networking/loopback-address",
-    tags = ["system"],
+    tags = ["system/networking"],
 }]
 async fn networking_loopback_address_list(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -2606,7 +2606,7 @@ async fn networking_loopback_address_list(
 #[endpoint {
     method = POST,
     path = "/v1/system/networking/switch-port-settings",
-    tags = ["system"],
+    tags = ["system/networking"],
 }]
 async fn networking_switch_port_settings_create(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -2629,7 +2629,7 @@ async fn networking_switch_port_settings_create(
 #[endpoint {
     method = DELETE,
     path = "/v1/system/networking/switch-port-settings",
-    tags = ["system"],
+    tags = ["system/networking"],
 }]
 async fn networking_switch_port_settings_delete(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -2650,7 +2650,7 @@ async fn networking_switch_port_settings_delete(
 #[endpoint {
     method = GET,
     path = "/v1/system/networking/switch-port-settings",
-    tags = ["system"],
+    tags = ["system/networking"],
 }]
 async fn networking_switch_port_settings_list(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -2686,7 +2686,7 @@ async fn networking_switch_port_settings_list(
 #[endpoint {
     method = GET,
     path = "/v1/system/networking/switch-port-settings/{port}",
-    tags = ["system"],
+    tags = ["system/networking"],
 }]
 async fn networking_switch_port_settings_view(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -2707,7 +2707,7 @@ async fn networking_switch_port_settings_view(
 #[endpoint {
     method = GET,
     path = "/v1/system/hardware/switch-port",
-    tags = ["system"],
+    tags = ["system/hardware"],
 }]
 async fn networking_switch_port_list(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -2739,7 +2739,7 @@ async fn networking_switch_port_list(
 #[endpoint {
     method = POST,
     path = "/v1/system/hardware/switch-port/{port}/settings",
-    tags = ["system"],
+    tags = ["system/hardware"],
 }]
 async fn networking_switch_port_apply_settings(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -2766,7 +2766,7 @@ async fn networking_switch_port_apply_settings(
 #[endpoint {
     method = DELETE,
     path = "/v1/system/hardware/switch-port/{port}/settings",
-    tags = ["system"],
+    tags = ["system/hardware"],
 }]
 async fn networking_switch_port_clear_settings(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -4097,7 +4097,7 @@ async fn vpc_router_route_update(
 #[endpoint {
     method = GET,
     path = "/v1/system/hardware/racks",
-    tags = ["system"],
+    tags = ["system/hardware"],
 }]
 async fn rack_list(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -4134,7 +4134,7 @@ struct RackPathParam {
 #[endpoint {
     method = GET,
     path = "/v1/system/hardware/racks/{rack_id}",
-    tags = ["system"],
+    tags = ["system/hardware"],
 }]
 async fn rack_view(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -4157,7 +4157,7 @@ async fn rack_view(
 #[endpoint {
     method = GET,
     path = "/v1/system/hardware/sleds",
-    tags = ["system"],
+    tags = ["system/hardware"],
 }]
 async fn sled_list(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -4187,7 +4187,7 @@ async fn sled_list(
 #[endpoint {
     method = GET,
     path = "/v1/system/hardware/sleds/{sled_id}",
-    tags = ["system"],
+    tags = ["system/hardware"],
 }]
 async fn sled_view(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -4209,7 +4209,7 @@ async fn sled_view(
 #[endpoint {
     method = GET,
     path = "/v1/system/hardware/sleds/{sled_id}/instances",
-    tags = ["system"],
+    tags = ["system/hardware"],
 }]
 async fn sled_instance_list(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -4248,7 +4248,7 @@ async fn sled_instance_list(
 #[endpoint {
     method = GET,
     path = "/v1/system/hardware/disks",
-    tags = ["system"],
+    tags = ["system/hardware"],
 }]
 async fn physical_disk_list(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -4280,7 +4280,7 @@ async fn physical_disk_list(
 #[endpoint {
     method = GET,
     path = "/v1/system/hardware/switches",
-    tags = ["system"],
+    tags = ["system/hardware"],
 }]
 async fn switch_list(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -4310,7 +4310,7 @@ async fn switch_list(
 #[endpoint {
     method = GET,
     path = "/v1/system/hardware/switches/{switch_id}",
-    tags = ["system"],
+    tags = ["system/hardware"],
  }]
 async fn switch_view(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -4337,7 +4337,7 @@ async fn switch_view(
 #[endpoint {
     method = GET,
     path = "/v1/system/hardware/sleds/{sled_id}/disks",
-    tags = ["system"],
+    tags = ["system/hardware"],
 }]
 async fn sled_physical_disk_list(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -4396,7 +4396,7 @@ struct SystemMetricsPathParam {
 #[endpoint {
      method = GET,
      path = "/v1/system/metrics/{metric_name}",
-     tags = ["system"],
+     tags = ["system/metrics"],
 }]
 async fn system_metric(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -4436,7 +4436,7 @@ async fn system_metric(
 #[endpoint {
      method = POST,
      path = "/v1/system/update/refresh",
-     tags = ["system"],
+     tags = ["system/update"],
 }]
 async fn system_update_refresh(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -4455,7 +4455,7 @@ async fn system_update_refresh(
 #[endpoint {
      method = GET,
      path = "/v1/system/update/version",
-     tags = ["system"],
+     tags = ["system/update"],
 }]
 async fn system_version(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -4492,7 +4492,7 @@ async fn system_version(
 #[endpoint {
      method = GET,
      path = "/v1/system/update/components",
-     tags = ["system"],
+     tags = ["system/update"],
 }]
 async fn system_component_version_list(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -4524,7 +4524,7 @@ async fn system_component_version_list(
 #[endpoint {
      method = GET,
      path = "/v1/system/update/updates",
-     tags = ["system"],
+     tags = ["system/update"],
 }]
 async fn system_update_list(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -4555,7 +4555,7 @@ async fn system_update_list(
 #[endpoint {
      method = GET,
      path = "/v1/system/update/updates/{version}",
-     tags = ["system"],
+     tags = ["system/update"],
 }]
 async fn system_update_view(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -4577,7 +4577,7 @@ async fn system_update_view(
 #[endpoint {
     method = GET,
     path = "/v1/system/update/updates/{version}/components",
-    tags = ["system"],
+    tags = ["system/update"],
 }]
 async fn system_update_components_list(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -4603,7 +4603,7 @@ async fn system_update_components_list(
 #[endpoint {
     method = POST,
     path = "/v1/system/update/start",
-    tags = ["system"],
+    tags = ["system/update"],
 }]
 async fn system_update_start(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -4652,7 +4652,7 @@ async fn system_update_start(
 #[endpoint {
     method = POST,
     path = "/v1/system/update/stop",
-    tags = ["system"],
+    tags = ["system/update"],
 }]
 async fn system_update_stop(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -4687,7 +4687,7 @@ async fn system_update_stop(
 #[endpoint {
      method = GET,
      path = "/v1/system/update/deployments",
-     tags = ["system"],
+     tags = ["system/update"],
 }]
 async fn update_deployments_list(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -4718,7 +4718,7 @@ async fn update_deployments_list(
 #[endpoint {
      method = GET,
      path = "/v1/system/update/deployments/{id}",
-     tags = ["system"],
+     tags = ["system/update"],
 }]
 async fn update_deployment_view(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -4838,7 +4838,7 @@ async fn group_view(
 #[endpoint {
     method = GET,
     path = "/v1/system/users-builtin",
-    tags = ["system"],
+    tags = ["system/silos"],
 }]
 async fn user_builtin_list(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -4870,7 +4870,7 @@ async fn user_builtin_list(
 #[endpoint {
     method = GET,
     path = "/v1/system/users-builtin/{user}",
-    tags = ["system"],
+    tags = ["system/silos"],
 }]
 async fn user_builtin_view(
     rqctx: RequestContext<Arc<ServerContext>>,
