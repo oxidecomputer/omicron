@@ -257,6 +257,7 @@ impl super::Nexus {
         debug!(self.log, "resolved {} rules for sleds", rules_for_sled.len());
         let sled_rules_request =
             sled_agent_client::types::VpcFirewallRulesEnsureBody {
+                vni: vpc.vni.0.into(),
                 rules: rules_for_sled,
             };
 

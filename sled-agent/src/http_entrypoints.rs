@@ -315,10 +315,10 @@ async fn vpc_firewall_rules_put(
     body: TypedBody<VpcFirewallRulesEnsureBody>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let sa = rqctx.context();
-    let vpc_id = path_params.into_inner().vpc_id;
+    let _vpc_id = path_params.into_inner().vpc_id;
     let body_args = body.into_inner();
 
-    sa.firewall_rules_ensure(vpc_id, &body_args.rules[..])
+    sa.firewall_rules_ensure(body_args.vni, &body_args.rules[..])
         .await
         .map_err(Error::from)?;
 
