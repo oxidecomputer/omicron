@@ -11,7 +11,7 @@ use super::instance::SimInstance;
 use super::storage::CrucibleData;
 use super::storage::Storage;
 
-use crate::nexus::LazyNexusClient;
+use crate::nexus::NexusClient;
 use crate::params::{
     DiskStateRequested, InstanceHardware, InstanceMigrationSourceParams,
     InstancePutStateResponse, InstanceStateRequested,
@@ -55,7 +55,8 @@ pub struct SledAgent {
     disks: Arc<SimCollection<SimDisk>>,
     storage: Mutex<Storage>,
     updates: UpdateManager,
-    pub lazy_nexus_client: LazyNexusClient,
+    nexus_address: SocketAddr,
+    pub nexus_client: Arc<NexusClient>,
     disk_id_to_region_ids: Mutex<HashMap<String, Vec<Uuid>>>,
     pub v2p_mappings: Mutex<HashMap<Uuid, Vec<SetVirtualNetworkInterfaceHost>>>,
     mock_propolis:
@@ -113,7 +114,8 @@ impl SledAgent {
     pub async fn new_simulated_with_id(
         config: &Config,
         log: Logger,
-        lazy_nexus_client: LazyNexusClient,
+        nexus_address: SocketAddr,
+        nexus_client: Arc<NexusClient>,
     ) -> Arc<SledAgent> {
         let id = config.id;
         let sim_mode = config.sim_mode;
@@ -127,23 +129,24 @@ impl SledAgent {
             id,
             ip: config.dropshot.bind_address.ip(),
             instances: Arc::new(SimCollection::new(
-                lazy_nexus_client.clone(),
+                nexus_client.clone(),
                 instance_log,
                 sim_mode,
             )),
             disks: Arc::new(SimCollection::new(
-                lazy_nexus_client.clone(),
+                nexus_client.clone(),
                 disk_log,
                 sim_mode,
             )),
             storage: Mutex::new(Storage::new(
                 id,
-                lazy_nexus_client.clone(),
+                nexus_client.clone(),
                 config.storage.ip,
                 storage_log,
             )),
             updates: UpdateManager::new(config.updates.clone()),
-            lazy_nexus_client,
+            nexus_address,
+            nexus_client,
             disk_id_to_region_ids: Mutex::new(HashMap::new()),
             v2p_mappings: Mutex::new(HashMap::new()),
             mock_propolis: Mutex::new(None),
@@ -246,13 +249,7 @@ impl SledAgent {
                 )
                 .await?;
             self.disks
-                .sim_ensure_producer(
-                    &id,
-                    (
-                        self.lazy_nexus_client.get_addr().await.unwrap().into(),
-                        id,
-                    ),
-                )
+                .sim_ensure_producer(&id, (self.nexus_address, id))
                 .await?;
         }
 

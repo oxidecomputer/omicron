@@ -797,7 +797,6 @@ mod test {
             "test suite",
             "test suite",
             HashMap::new(),
-            Generation::new(),
         );
         {
             let conn = datastore.pool_for_tests().await.unwrap();
@@ -838,7 +837,6 @@ mod test {
                 ("wendell".to_string(), wendell_records.clone()),
                 ("krabappel".to_string(), krabappel_records.clone()),
             ]),
-            Generation::new(),
         );
         {
             let conn = datastore.pool_for_tests().await.unwrap();

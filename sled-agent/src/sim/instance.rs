@@ -441,7 +441,7 @@ impl Simulatable for SimInstance {
     }
 
     async fn notify(
-        nexus_client: &NexusClient,
+        nexus_client: &Arc<NexusClient>,
         id: &Uuid,
         current: Self::CurrentState,
     ) -> Result<(), Error> {

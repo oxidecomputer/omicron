@@ -55,6 +55,7 @@ impl LazyNexusClient {
         })
     }
 
+    // TODO: Rename me, mention DNS?
     pub fn new_from_addrs(
         log: Logger,
         addrs: Vec<SocketAddr>,

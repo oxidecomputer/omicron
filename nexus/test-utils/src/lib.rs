@@ -414,7 +414,15 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                     .server
                     .local_address(),
             };
-        self.config.deployment.database = nexus_config::Database::FromDns;
+        self.config.deployment.database = nexus_config::Database::FromUrl {
+            url: self
+                .database
+                .as_ref()
+                .expect("Must start CRDB before Nexus")
+                .pg_config()
+                .clone(),
+        };
+
         let (nexus_internal, nexus_internal_addr) =
             N::start_internal(&self.config, &log).await;
 
@@ -472,7 +480,8 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             &format!("http://{}", internal_dns_address),
             log.clone(),
         );
-        let dns_config = self.rack_init_builder.internal_dns_config.build();
+        let dns_config =
+            self.rack_init_builder.internal_dns_config.clone().build();
         dns_config_client.dns_config_put(&dns_config).await.expect(
             "Failed to send initial DNS records to internal DNS server",
         );
@@ -565,14 +574,8 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
     }
 
     pub async fn start_sled(&mut self, sim_mode: sim::SimMode) {
-        let nexus_address = sim::NexusAddressSource::FromDns {
-            internal_dns_address: *self
-                .internal_dns
-                .as_ref()
-                .expect("Must initialize internal DNS server first")
-                .server
-                .local_address(),
-        };
+        let nexus_address =
+            self.nexus_internal_addr.expect("Must launch Nexus first");
 
         // Set up a single sled agent.
         let sa_id = Uuid::parse_str(SLED_AGENT_UUID).unwrap();
@@ -732,15 +735,8 @@ pub async fn test_setup_with_config<N: NexusServer>(
     builder.start_dendrite().await;
     builder.start_internal_dns().await;
     builder.start_external_dns().await;
-
-    // Give Nexus necessary information to find CRDB
-    builder.populate_internal_dns().await;
     builder.start_nexus_internal().await;
-
-    // Give the Sled Agent necessary information to find Nexus
-    builder.populate_internal_dns().await;
     builder.start_sled(sim_mode).await;
-
     builder.start_crucible_pantry().await;
 
     // Give Nexus necessary information to find the Crucible Pantry
@@ -758,7 +754,7 @@ pub async fn test_setup_with_config<N: NexusServer>(
 
 pub async fn start_sled_agent(
     log: Logger,
-    nexus_address_source: sim::NexusAddressSource,
+    nexus_address: SocketAddr,
     id: Uuid,
     update_directory: &Utf8Path,
     sim_mode: sim::SimMode,
@@ -766,7 +762,7 @@ pub async fn start_sled_agent(
     let config = sim::Config {
         id,
         sim_mode,
-        nexus_address_source,
+        nexus_address,
         dropshot: ConfigDropshot {
             bind_address: SocketAddr::new(Ipv6Addr::LOCALHOST.into(), 0),
             request_body_max_bytes: 1024 * 1024,

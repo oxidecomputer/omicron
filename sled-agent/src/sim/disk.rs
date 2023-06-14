@@ -21,6 +21,7 @@ use oximeter_producer::LogConfig;
 use oximeter_producer::Server as ProducerServer;
 use propolis_client::api::DiskAttachmentState as PropolisDiskState;
 use std::net::{Ipv6Addr, SocketAddr};
+use std::sync::Arc;
 use std::time::Duration;
 use uuid::Uuid;
 
@@ -261,7 +262,7 @@ impl Simulatable for SimDisk {
     }
 
     async fn notify(
-        nexus_client: &NexusClient,
+        nexus_client: &Arc<NexusClient>,
         id: &Uuid,
         current: Self::CurrentState,
     ) -> Result<(), Error> {

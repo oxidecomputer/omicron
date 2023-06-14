@@ -68,7 +68,7 @@ use std::net::Ipv6Addr;
 use uuid::Uuid;
 
 /// Zones that can be referenced within the internal DNS system.
-#[derive(Copy, Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ZoneVariant {
     /// This non-global zone runs an instance of Dendrite.
     ///
@@ -129,6 +129,7 @@ impl Host {
 ///
 /// This builder ensures that the constructed DNS data satisfies these
 /// assumptions.
+#[derive(Clone)]
 pub struct DnsConfigBuilder {
     /// set of hosts of type "sled" that have been configured so far, mapping
     /// each sled's unique uuid to its sole IPv6 address on the control plane
@@ -149,8 +150,6 @@ pub struct DnsConfigBuilder {
 
     /// similar to service_instances_zones, but for services that run on sleds
     service_instances_sleds: BTreeMap<ServiceName, BTreeMap<Sled, u16>>,
-
-    generation: u64,
 }
 
 /// Describes a host of type "sled" in the control plane DNS zone
@@ -172,7 +171,6 @@ impl DnsConfigBuilder {
             zones: BTreeMap::new(),
             service_instances_zones: BTreeMap::new(),
             service_instances_sleds: BTreeMap::new(),
-            generation: 1,
         }
     }
 
@@ -335,23 +333,23 @@ impl DnsConfigBuilder {
     /// Construct a complete [`DnsConfigParams`] (suitable for propagating to
     /// our DNS servers) for the control plane DNS zone described up to this
     /// point
-    pub fn build(&mut self) -> DnsConfigParams {
+    pub fn build(self) -> DnsConfigParams {
         // Assemble the set of "AAAA" records for sleds.
-        let sled_records = self.sleds.iter().map(|(sled, sled_ip)| {
+        let sled_records = self.sleds.into_iter().map(|(sled, sled_ip)| {
             let name = Host::Sled(sled.0).dns_name();
-            (name, vec![DnsRecord::Aaaa(*sled_ip)])
+            (name, vec![DnsRecord::Aaaa(sled_ip)])
         });
 
         // Assemble the set of AAAA records for zones.
-        let zone_records = self.zones.iter().map(|(zone, zone_ip)| {
+        let zone_records = self.zones.into_iter().map(|(zone, zone_ip)| {
             let name =
                 Host::Zone { id: zone.id, variant: zone.variant }.dns_name();
-            (name, vec![DnsRecord::Aaaa(*zone_ip)])
+            (name, vec![DnsRecord::Aaaa(zone_ip)])
         });
 
         // Assemble the set of SRV records, which implicitly point back at
         // zones' AAAA records.
-        let srv_records_zones = self.service_instances_zones.iter().map(
+        let srv_records_zones = self.service_instances_zones.into_iter().map(
             |(service_name, zone2port)| {
                 let name = service_name.dns_name();
                 let records = zone2port
@@ -360,7 +358,7 @@ impl DnsConfigBuilder {
                         DnsRecord::Srv(dns_service_client::types::Srv {
                             prio: 0,
                             weight: 0,
-                            port: *port,
+                            port,
                             target: format!(
                                 "{}.{}",
                                 Host::Zone {
@@ -378,7 +376,7 @@ impl DnsConfigBuilder {
             },
         );
 
-        let srv_records_sleds = self.service_instances_sleds.iter().map(
+        let srv_records_sleds = self.service_instances_sleds.into_iter().map(
             |(service_name, sled2port)| {
                 let name = service_name.dns_name();
                 let records = sled2port
@@ -387,7 +385,7 @@ impl DnsConfigBuilder {
                         DnsRecord::Srv(dns_service_client::types::Srv {
                             prio: 0,
                             weight: 0,
-                            port: *port,
+                            port,
                             target: format!(
                                 "{}.{}",
                                 Host::Sled(sled.0).dns_name(),
@@ -407,11 +405,8 @@ impl DnsConfigBuilder {
             .chain(srv_records_zones)
             .collect();
 
-        let generation = self.generation;
-        self.generation += 1;
-
         DnsConfigParams {
-            generation,
+            generation: 1,
             time_created: chrono::Utc::now(),
             zones: vec![DnsConfigZone {
                 zone_name: DNS_ZONE.to_owned(),
@@ -544,7 +539,7 @@ mod test {
             b
         };
 
-        for (label, mut builder) in [
+        for (label, builder) in [
             ("empty", builder_empty),
             ("hosts_only", builder_hosts_only),
             ("zones_only", builder_zones_only),

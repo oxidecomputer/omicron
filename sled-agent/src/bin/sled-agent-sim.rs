@@ -18,7 +18,7 @@ use omicron_common::cmd::CmdError;
 use omicron_sled_agent::sim::RssArgs;
 use omicron_sled_agent::sim::{
     run_standalone_server, Config, ConfigHardware, ConfigStorage,
-    ConfigUpdates, ConfigZpool, NexusAddressSource, SimMode,
+    ConfigUpdates, ConfigZpool, SimMode,
 };
 use std::net::SocketAddr;
 use std::net::SocketAddrV6;
@@ -49,9 +49,8 @@ struct Args {
     #[clap(name = "SA_IP:PORT", action)]
     sled_agent_addr: SocketAddrV6,
 
-    // TODO: Update docs?
-    #[clap(name = "INTERNAL_DNS_IP:PORT", action)]
-    internal_dns_addr: SocketAddr,
+    #[clap(name = "NEXUS_IP:PORT", action)]
+    nexus_addr: SocketAddr,
 
     #[clap(long, name = "NEXUS_EXTERNAL_IP:PORT", action)]
     /// If specified, when the simulated sled agent initializes the rack, it
@@ -95,9 +94,7 @@ async fn do_run() -> Result<(), CmdError> {
     let config = Config {
         id: args.uuid,
         sim_mode: args.sim_mode,
-        nexus_address_source: NexusAddressSource::FromDns {
-            internal_dns_address: args.internal_dns_addr,
-        },
+        nexus_address: args.nexus_addr,
         dropshot: ConfigDropshot {
             bind_address: args.sled_agent_addr.into(),
             request_body_max_bytes: 1024 * 1024,

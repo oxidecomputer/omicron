@@ -10,6 +10,7 @@ use camino::Utf8Path;
 use http::method::Method;
 use http::StatusCode;
 use nexus_db_queries::context::OpContext;
+use nexus_test_interface::NexusServer;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
@@ -501,10 +502,9 @@ async fn test_instance_migrate(cptestctx: &ControlPlaneTestContext) {
         nexus_test_utils::SLED_AGENT_UUID.parse().unwrap();
     let update_dir = Utf8Path::new("/should/be/unused");
     let other_sled_id = Uuid::new_v4();
-    let internal_dns_address = *cptestctx.internal_dns.server.local_address();
     let _other_sa = nexus_test_utils::start_sled_agent(
         cptestctx.logctx.log.new(o!("sled_id" => other_sled_id.to_string())),
-        sim::NexusAddressSource::FromDns { internal_dns_address },
+        cptestctx.server.get_http_server_internal_address().await,
         other_sled_id,
         &update_dir,
         sim::SimMode::Explicit,
@@ -582,7 +582,6 @@ async fn test_instance_migrate_v2p(cptestctx: &ControlPlaneTestContext) {
 
     // Create some test sleds.
     let nsleds = 3;
-    let internal_dns_address = *cptestctx.internal_dns.server.local_address();
     let mut other_sleds = Vec::with_capacity(nsleds);
     for _ in 0..nsleds {
         let sa_id = Uuid::new_v4();
@@ -590,7 +589,7 @@ async fn test_instance_migrate_v2p(cptestctx: &ControlPlaneTestContext) {
         let update_dir = Utf8Path::new("/should/be/unused");
         let sa = nexus_test_utils::start_sled_agent(
             log,
-            sim::NexusAddressSource::FromDns { internal_dns_address },
+            cptestctx.server.get_http_server_internal_address().await,
             sa_id,
             &update_dir,
             omicron_sled_agent::sim::SimMode::Explicit,
@@ -3254,13 +3253,12 @@ async fn test_instance_v2p_mappings(cptestctx: &ControlPlaneTestContext) {
         let sa_id = Uuid::new_v4();
         let log =
             cptestctx.logctx.log.new(o!( "sled_id" => sa_id.to_string() ));
-        let internal_dns_address =
-            *cptestctx.internal_dns.server.local_address();
+        let addr = cptestctx.server.get_http_server_internal_address().await;
         let update_directory = Utf8Path::new("/should/not/be/used");
         additional_sleds.push(
             start_sled_agent(
                 log,
-                sim::NexusAddressSource::FromDns { internal_dns_address },
+                addr,
                 sa_id,
                 &update_directory,
                 sim::SimMode::Explicit,

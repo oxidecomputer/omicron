@@ -479,6 +479,7 @@ mod tests {
 
     use dropshot::test_util::ClientTestContext;
     use http::{method::Method, StatusCode};
+    use nexus_test_interface::NexusServer;
     use nexus_test_utils::{
         http_testing::{AuthnMode, NexusRequest, RequestBuilder},
         resource_helpers::{create_project, object_create, populate_ip_pool},
@@ -514,16 +515,14 @@ mod tests {
             let sa_id = Uuid::new_v4();
             let log =
                 cptestctx.logctx.log.new(o!("sled_id" => sa_id.to_string()));
-            let internal_dns_address =
-                *cptestctx.internal_dns.server.local_address();
+            let addr =
+                cptestctx.server.get_http_server_internal_address().await;
 
             info!(&cptestctx.logctx.log, "Adding simulated sled"; "sled_id" => %sa_id);
             let update_dir = Utf8Path::new("/should/be/unused");
             let sa = start_sled_agent(
                 log,
-                omicron_sled_agent::sim::NexusAddressSource::FromDns {
-                    internal_dns_address,
-                },
+                addr,
                 sa_id,
                 &update_dir,
                 omicron_sled_agent::sim::SimMode::Explicit,

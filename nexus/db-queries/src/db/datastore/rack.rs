@@ -676,7 +676,7 @@ mod test {
     use crate::db::model::Sled;
     use async_bb8_diesel::AsyncSimpleConnection;
     use internal_params::DnsRecord;
-    use nexus_db_model::{DnsGroup, Generation, InitialDnsGroup};
+    use nexus_db_model::{DnsGroup, InitialDnsGroup};
     use nexus_test_utils::db::test_setup_database;
     use nexus_types::external_api::shared::SiloIdentityMode;
     use nexus_types::identity::Asset;
@@ -710,7 +710,6 @@ mod test {
                     "test suite",
                     "test suite",
                     HashMap::new(),
-                    Generation::new(),
                 ),
                 external_dns: InitialDnsGroup::new(
                     DnsGroup::External,
@@ -718,7 +717,6 @@ mod test {
                     "test suite",
                     "test suite",
                     HashMap::new(),
-                    Generation::new(),
                 ),
                 recovery_silo: external_params::SiloCreate {
                     identity: IdentityMetadataCreateParams {
@@ -1244,7 +1242,6 @@ mod test {
             "test suite",
             "initial test suite internal rev",
             HashMap::from([("nexus".to_string(), internal_records.clone())]),
-            Generation::new(),
         );
 
         let external_records =
@@ -1255,7 +1252,6 @@ mod test {
             "test suite",
             "initial test suite external rev",
             HashMap::from([("api.sys".to_string(), external_records.clone())]),
-            Generation::new(),
         );
 
         let rack = datastore
