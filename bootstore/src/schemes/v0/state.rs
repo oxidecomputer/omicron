@@ -37,6 +37,7 @@ pub struct Config {
     pub learn_timeout: Ticks,
     pub rack_init_timeout: Ticks,
     pub rack_secret_request_timeout: Ticks,
+    pub retry_timeout: Ticks,
 }
 
 /// In memory state shared by all 4 FSM states
