@@ -13,6 +13,18 @@ mod state_learned;
 mod state_learning;
 mod state_uninitialized;
 
+pub use fsm::Fsm;
+pub use fsm_output::{ApiError, ApiOutput, Output};
+pub use messages::{
+    Envelope, Error as MsgError, Msg, Request, RequestType, Response,
+    ResponseType,
+};
+pub use state::{Config, FsmCommonData, RackInitState, RackSecretState, State};
+pub use state_initial_member::InitialMemberState;
+pub use state_learned::LearnedState;
+pub use state_learning::{LearnAttempt, LearningState};
+pub use state_uninitialized::UninitializedState;
+
 /// The current version of supported messages within the v0 scheme
 ///
 /// This number should be incremented when new messages or enum variants are

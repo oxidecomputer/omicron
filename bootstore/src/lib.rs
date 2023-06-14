@@ -2,8 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-mod schemes;
-mod trust_quorum;
+pub mod schemes;
+pub mod trust_quorum;
 
 use serde::{Deserialize, Serialize};
 

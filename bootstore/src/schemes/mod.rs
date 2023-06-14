@@ -8,7 +8,7 @@
 
 use serde::{Deserialize, Serialize};
 
-mod v0;
+pub mod v0;
 
 // We keep these in a module to prevent naming conflicts
 #[allow(unused)]
