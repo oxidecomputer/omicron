@@ -204,10 +204,35 @@ pub struct Disk {
     zpool_name: ZpoolName,
 }
 
+// Helper type for describing expected datasets and their optional quota.
+#[derive(Clone, Copy, Debug)]
+struct QuotaLimitedDataset {
+    // Name for the dataset
+    name: &'static str,
+    // Optional quota, in _bytes_
+    quota: Option<usize>,
+}
+
+impl QuotaLimitedDataset {
+    // Create a new dataset with quota.
+    const fn new(name: &'static str, quota: usize) -> Self {
+        QuotaLimitedDataset { name, quota: Some(quota) }
+    }
+
+    // Create a new dataset with no quota.
+    const fn no_quota(name: &'static str) -> Self {
+        Self { name, quota: None }
+    }
+}
+
 pub const INSTALL_DATASET: &'static str = "install";
 pub const CRASH_DATASET: &'static str = "crash";
 pub const CLUSTER_DATASET: &'static str = "cluster";
 pub const CONFIG_DATASET: &'static str = "config";
+pub const DEBUG_DATASET: &'static str = "debug";
+// TODO-correctness: This value of 100GiB is a pretty wild guess, and should be
+// tuned as needed.
+pub const DEBUG_DATASET_QUOTA: usize = 100 * (1 << 30);
 
 // U.2 datasets live under the encrypted dataset and inherit encryption
 pub const ZONE_DATASET: &'static str = "crypt/zone";
@@ -216,30 +241,32 @@ pub const ZONE_DATASET: &'static str = "crypt/zone";
 pub const CRYPT_DATASET: &'static str = "crypt";
 
 const U2_EXPECTED_DATASET_COUNT: usize = 1;
-static U2_EXPECTED_DATASETS: [&'static str; U2_EXPECTED_DATASET_COUNT] = [
+static U2_EXPECTED_DATASETS: [QuotaLimitedDataset; U2_EXPECTED_DATASET_COUNT] = [
     // Stores filesystems for zones
-    ZONE_DATASET,
+    QuotaLimitedDataset::no_quota(ZONE_DATASET),
 ];
 
-const M2_EXPECTED_DATASET_COUNT: usize = 4;
-static M2_EXPECTED_DATASETS: [&'static str; M2_EXPECTED_DATASET_COUNT] = [
+const M2_EXPECTED_DATASET_COUNT: usize = 5;
+static M2_EXPECTED_DATASETS: [QuotaLimitedDataset; M2_EXPECTED_DATASET_COUNT] = [
     // Stores software images.
     //
     // Should be duplicated to both M.2s.
-    INSTALL_DATASET,
+    QuotaLimitedDataset::no_quota(INSTALL_DATASET),
     // Stores crash dumps.
-    CRASH_DATASET,
+    QuotaLimitedDataset::no_quota(CRASH_DATASET),
     // Stores cluter configuration information.
     //
     // Should be duplicated to both M.2s.
-    CLUSTER_DATASET,
+    QuotaLimitedDataset::no_quota(CLUSTER_DATASET),
     // Stores configuration data, including:
     // - What services should be launched on this sled
     // - Information about how to initialize the Sled Agent
     // - (For scrimlets) RSS setup information
     //
     // Should be duplicated to both M.2s.
-    CONFIG_DATASET,
+    QuotaLimitedDataset::no_quota(CONFIG_DATASET),
+    // Store debugging data, such as service bundles.
+    QuotaLimitedDataset::new(DEBUG_DATASET, DEBUG_DATASET_QUOTA),
 ];
 
 impl Disk {
@@ -458,6 +485,7 @@ impl Disk {
                 zoned,
                 do_format,
                 Some(encryption_details),
+                None,
             );
 
             keyfile.zero_and_unlink().await.map_err(|error| {
@@ -468,14 +496,15 @@ impl Disk {
         }
 
         for dataset in datasets.into_iter() {
-            let mountpoint = zpool_name.dataset_mountpoint(dataset);
+            let mountpoint = zpool_name.dataset_mountpoint(dataset.name);
             let encryption_details = None;
             Zfs::ensure_filesystem(
-                &format!("{}/{}", zpool_name, dataset),
+                &format!("{}/{}", zpool_name, dataset.name),
                 Mountpoint::Path(mountpoint),
                 zoned,
                 do_format,
                 encryption_details,
+                dataset.quota,
             )?;
         }
         Ok(())
