@@ -146,14 +146,12 @@ impl Silo {
     pub fn mapped_fleet_roles(
         &self,
     ) -> Result<BTreeMap<SiloRole, Vec<FleetRole>>, Error> {
-        serde_json::from_value(self.mapped_fleet_roles.clone()).map_err(
-            |e| {
-                Error::internal_error(&format!(
+        serde_json::from_value(self.mapped_fleet_roles.clone()).map_err(|e| {
+            Error::internal_error(&format!(
                 "failed to deserialize mapped fleet roles from database: {:#}",
                 e
             ))
-            },
-        )
+        })
     }
 }
 
