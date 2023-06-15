@@ -9,18 +9,18 @@ use sled_hardware::Baseboard;
 use std::collections::BTreeMap;
 
 // Named endpoints on a network
-type Source = Baseboard;
-type Destination = Baseboard;
+pub type Source = Baseboard;
+pub type Destination = Baseboard;
 
 /// A flow of messages from a source to a destination
-type FlowId = (Source, Destination);
+pub type FlowId = (Source, Destination);
 
 /// A simulation of a test network
 ///
 /// Every time a peer handles a message it may send messages. We add these
 /// messages to the network and distribute them during the test as a result
 /// of actions. We allow dropping of messages and interleaving of messages in
-/// different flows (source/dest pairs in one direction). However, since we are modeling a single
+/// different flows (source/dest pairs). However, since we are modeling a single
 /// TCP connection for each flow we do not interleave messages within the same flow.
 #[derive(Debug, Default)]
 pub struct Network {

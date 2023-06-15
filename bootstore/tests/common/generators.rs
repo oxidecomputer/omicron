@@ -11,15 +11,23 @@ use sled_hardware::Baseboard;
 use std::collections::BTreeSet;
 use uuid::Uuid;
 
-// Generate a vector of arbitrary actions to drive the property based tests
-//
-// This vector of actions is the top level generator for our tests.
-pub fn arb_actions(
+/// Input to the `run` method of our proptests
+#[derive(Debug)]
+pub struct TestInput {
+    pub actions: Vec<Action>,
+    pub initial_members: BTreeSet<Baseboard>,
+    pub config: Config,
+    pub rack_uuid: Uuid,
+}
+
+/// Generate top-level test input
+pub fn arb_test_input(
     max_initial_members: usize,
-) -> impl Strategy<Value = (Vec<Action>, BTreeSet<Baseboard>, Config)> {
+) -> impl Strategy<Value = TestInput> {
     let min_initial_members = 3;
     (arb_peer_ids(min_initial_members, max_initial_members), arb_config())
         .prop_flat_map(|(initial_members, config)| {
+            // We have to generate an intermediate tuple of strategies
             let rack_uuid = Uuid::new_v4();
             (
                 proptest::collection::vec(
@@ -28,7 +36,15 @@ pub fn arb_actions(
                 ),
                 Just(initial_members),
                 Just(config),
+                Just(rack_uuid),
             )
+        })
+        // then we map the tuple into a structure
+        .prop_map(|(actions, initial_members, config, rack_uuid)| TestInput {
+            actions,
+            initial_members,
+            config,
+            rack_uuid,
         })
 }
 
@@ -74,11 +90,9 @@ fn arb_action(
     initial_members: BTreeSet<Baseboard>,
 ) -> impl Strategy<Value = Action> {
     // Choose an RSS sled randomly
-    any::<prop::sample::Selector>().prop_map(move |selector| {
-        Action::Initialize {
-            rss_sled: selector.select(&initial_members).clone(),
-            rack_uuid,
-            initial_members: initial_members.clone(),
-        }
+    any::<prop::sample::Selector>().prop_map(move |selector| Action::RackInit {
+        rss_sled: selector.select(&initial_members).clone(),
+        rack_uuid,
+        initial_members: initial_members.clone(),
     })
 }
