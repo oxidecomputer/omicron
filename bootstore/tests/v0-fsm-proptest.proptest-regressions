@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 2fe6e96a35d1b8cbafd9e40464e7dd79eaf13e42b18597c2d9ffab54bcdbecda # shrinks to (actions, initial_members, config) = ([Initialize { rss_sled: Pc { identifier: "a", model: "0" }, rack_uuid: 4bc0e836-f63d-45e7-8087-62cafdf19c5a, initial_members: {Pc { identifier: "a", model: "0" }, Pc { identifier: "b", model: "0" }, Pc { identifier: "e", model: "0" }} }, Initialize { rss_sled: Pc { identifier: "a", model: "0" }, rack_uuid: 4bc0e836-f63d-45e7-8087-62cafdf19c5a, initial_members: {Pc { identifier: "a", model: "0" }, Pc { identifier: "b", model: "0" }, Pc { identifier: "e", model: "0" }} }], {Pc { identifier: "a", model: "0" }, Pc { identifier: "b", model: "0" }, Pc { identifier: "e", model: "0" }}, Config { learn_timeout: 6, rack_init_timeout: 6, rack_secret_request_timeout: 6, retry_timeout: 1 })

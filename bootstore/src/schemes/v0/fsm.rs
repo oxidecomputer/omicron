@@ -319,6 +319,7 @@ mod tests {
             learn_timeout: 5,
             rack_init_timeout: 5,
             rack_secret_request_timeout: 5,
+            retry_timeout: 2,
         }
     }
 
@@ -462,14 +463,13 @@ mod tests {
         // Handle responses
         let num_responses = responses.len();
         for (i, (from, response)) in responses.into_iter().enumerate() {
+            let output = fsm.handle_response(from, response);
             if i != num_responses - 1 {
                 // We don't expect any output as rack init is not complete
-                let output = fsm.handle_response(from, response);
                 assert_eq!(Output::none(), output);
             } else {
                 // Rack initialization completes on processing the last response and
                 // we inform the caller.
-                let output = fsm.handle_response(from, response);
                 assert_eq!(
                     ApiOutput::RackInitComplete,
                     output.api_output.unwrap().unwrap()

@@ -24,7 +24,7 @@ pub fn arb_actions(
             (
                 proptest::collection::vec(
                     arb_action(rack_uuid, config, initial_members.clone()),
-                    1..=5,
+                    1..=20,
                 ),
                 Just(initial_members),
                 Just(config),

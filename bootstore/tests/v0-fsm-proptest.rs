@@ -13,7 +13,11 @@
 mod common;
 
 use assert_matches::assert_matches;
-use bootstore::schemes::v0::{Config, Envelope, Fsm, Msg, Ticks};
+use bootstore::schemes::v0::{
+    ApiError, ApiOutput, Config, Envelope, Fsm, Msg, Output, Request,
+    RequestType, Response, ResponseType, Ticks,
+};
+
 use proptest::prelude::*;
 use sled_hardware::Baseboard;
 use std::collections::{BTreeMap, BTreeSet};
@@ -38,11 +42,45 @@ type FlowId = (Source, Destination);
 /// TCP connection for each flow we do not interleave messages within the same flow.
 #[derive(Debug, Default)]
 pub struct Network {
-    // Messages queued, but not yet sent.
-    unsent: BTreeMap<FlowId, Msg>,
-
     // Messages sent and "floating" in the network
-    sent: BTreeMap<FlowId, Msg>,
+    sent: BTreeMap<FlowId, Vec<Msg>>,
+
+    // Messages that have been delivered on an endpoint and are ready to be
+    // handled by the peer. They can no longer be dropped at this point and must
+    // be delivered.
+    delivered: BTreeMap<Destination, Vec<(Source, Msg)>>,
+}
+
+impl Network {
+    pub fn send(&mut self, source: &Source, envelopes: Vec<Envelope>) {
+        for envelope in envelopes {
+            let flow_id = (source.clone(), envelope.to);
+            self.sent.entry(flow_id).or_default().push(envelope.msg);
+        }
+    }
+
+    // Round robin through each flow in `self.sent` delivering one message per
+    // flow until all flows in `self.sent` are empty and all messages reside in
+    // `self.delivered`
+    pub fn deliver_all(&mut self) {
+        while !self.sent.is_empty() {
+            self.sent.retain(|(source, dest), msgs| {
+                if let Some(msg) = msgs.pop() {
+                    let value = (source.clone(), msg);
+                    self.delivered.entry(dest.clone()).or_default().push(value);
+                    true
+                } else {
+                    false
+                }
+            });
+        }
+    }
+
+    pub fn delivered(
+        &mut self,
+    ) -> &mut BTreeMap<Destination, Vec<(Source, Msg)>> {
+        &mut self.delivered
+    }
 }
 
 /// State for the running test
@@ -66,6 +104,13 @@ pub struct TestState {
 
     // A copy of the configuration at all peers
     config: Config,
+
+    // Is the rack already initialized?
+    //
+    // If initialization fails, we have to wipe all the sleds and start over. For the
+    // purposes of this test we therefore assume that initialization always succeeds
+    // if the initialization action runs.
+    rack_init_complete: bool,
 }
 
 impl TestState {
@@ -75,22 +120,124 @@ impl TestState {
             .map(|id| (id.clone(), Fsm::new_uninitialized(id, config)))
             .collect();
 
-        TestState { peers, network: Network::default(), clock: 0, config }
-    }
-
-    pub fn peer(&mut self, id: &Baseboard) -> &mut Fsm {
-        self.peers.get_mut(id).unwrap()
+        TestState {
+            peers,
+            network: Network::default(),
+            clock: 0,
+            config,
+            rack_init_complete: false,
+        }
     }
 
     /// Process a test action
-    pub fn on_action(&mut self, action: Action) {
+    pub fn on_action(&mut self, action: Action) -> Result<(), TestCaseError> {
         match action {
             Action::Initialize { rss_sled, rack_uuid, initial_members } => {
                 let output =
                     self.peer(&rss_sled).init_rack(rack_uuid, initial_members);
-                println!("{:#?}", output);
+                self.check_rack_init_api_output(&rss_sled, &output)?;
+
+                // Send the `Initialize` messages to all peers
+                self.network.send(&rss_sled, output.envelopes);
+                self.network.deliver_all();
+
+                // Handle the `Initialize` message sent to each peer
+                while let Some((destination, mut sourced_msgs)) =
+                    self.network.delivered().pop_first()
+                {
+                    // There should only be one `Initialize` message sent to each peer
+                    prop_assert_eq!(sourced_msgs.len(), 1);
+                    let (source, msg) = sourced_msgs.pop().unwrap();
+                    let output = self.peer(&destination).handle(source, msg);
+                    self.check_handle_initialize_req_output(
+                        &destination,
+                        &output,
+                    );
+
+                    // Queue the acknowledgement to the rss_sled in the network
+                    self.network.send(&destination, output.envelopes);
+                }
+
+                // Deliver all the `InitAck` messages to the rss_sleds inbox
+                self.network.deliver_all();
+
+                while let Some((destination, mut sourced_msgs)) =
+                    self.network.delivered().pop_first()
+                {
+                    // The only destination should be the rss_sled
+                    prop_assert_eq!(&rss_sled, &destination);
+                    // TODO: We only deal with initial members now. When
+                    // we have peers that will join later, we'll have to
+                    // check the actual initial members.
+                    prop_assert_eq!(sourced_msgs.len(), self.peers.len() - 1);
+
+                    let num_responses = sourced_msgs.len();
+                    for (i, (source, msg)) in
+                        sourced_msgs.into_iter().enumerate()
+                    {
+                        let output =
+                            self.peer(&destination).handle(source, msg);
+                        if i == num_responses - 1 {
+                            // Rack initialization completes on processing the
+                            // last response and we inform the caller.
+                            let expected: Output =
+                                ApiOutput::RackInitComplete.into();
+                            prop_assert_eq!(expected, output);
+                        } else {
+                            // Nothing happens until the rss_sled receives the
+                            // last `InitAck` response.
+                            prop_assert_eq!(Output::none(), output);
+                        }
+                    }
+                }
+
+                self.rack_init_complete = true;
+                Ok(())
             }
         }
+    }
+
+    fn peer(&mut self, id: &Baseboard) -> &mut Fsm {
+        self.peers.get_mut(id).unwrap()
+    }
+
+    fn all_other_peers<'a>(
+        &'a self,
+        excluded: &'a Baseboard,
+    ) -> impl Iterator<Item = &Baseboard> + 'a {
+        self.peers.keys().filter(move |id| *id != excluded)
+    }
+
+    // Validate that the output of a rack_init API request made to a given
+    // peer makes sense
+    fn check_rack_init_api_output(
+        &self,
+        rss_sled: &Baseboard,
+        output: &Output,
+    ) -> Result<(), TestCaseError> {
+        if self.rack_init_complete {
+            let expected: Output = ApiError::RackAlreadyInitialized.into();
+            prop_assert_eq!(&expected, output);
+            Ok(())
+        } else {
+            prop_assert!(output.persist);
+            prop_assert_eq!(&output.api_output, &None);
+            for (peer, envelope) in
+                self.all_other_peers(rss_sled).zip(&output.envelopes)
+            {
+                prop_assert_eq!(peer, &envelope.to);
+            }
+            Ok(())
+        }
+    }
+
+    fn check_handle_initialize_req_output(
+        &self,
+        peer_id: &Baseboard,
+        output: &Output,
+    ) -> Result<(), TestCaseError> {
+        // TODO: FILL ME IN
+        Ok(())
     }
 }
 
@@ -99,7 +246,7 @@ proptest! {
     fn run((actions, initial_members, config) in arb_actions(12)) {
         let mut state = TestState::new(initial_members, config);
         for action in actions {
-            state.on_action(action);
+            state.on_action(action)?;
         }
     }
 }
