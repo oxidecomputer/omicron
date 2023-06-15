@@ -19,7 +19,9 @@ pub use messages::{
     Envelope, Error as MsgError, Msg, Request, RequestType, Response,
     ResponseType,
 };
-pub use state::{Config, FsmCommonData, RackInitState, RackSecretState, State};
+pub use state::{
+    Config, FsmCommonData, RackInitState, RackSecretState, State, Ticks,
+};
 pub use state_initial_member::InitialMemberState;
 pub use state_learned::LearnedState;
 pub use state_learning::{LearnAttempt, LearningState};

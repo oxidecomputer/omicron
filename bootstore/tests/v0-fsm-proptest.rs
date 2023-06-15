@@ -10,111 +10,17 @@
 //! stages of action processing such as after an FSM API gets called, and after
 //! all generated messages have been delivered to the subset of reachable peers.
 
+mod common;
+
 use assert_matches::assert_matches;
-use bootstore::schemes::v0::{Config, Envelope, Fsm, Msg};
+use bootstore::schemes::v0::{Config, Envelope, Fsm, Msg, Ticks};
 use proptest::prelude::*;
 use sled_hardware::Baseboard;
 use std::collections::{BTreeMap, BTreeSet};
 use uuid::Uuid;
 
-// Generate an individual Baseboard used as a peer id
-fn arb_baseboard() -> impl Strategy<Value = Baseboard> {
-    "[a-z]".prop_map(|id| Baseboard::Pc {
-        identifier: id.to_string(),
-        model: "0".to_string(),
-    })
-}
-
-// Generate a set of peer IDs
-fn arb_peer_ids(
-    min: usize,
-    max: usize,
-) -> impl Strategy<Value = BTreeSet<Baseboard>> {
-    proptest::collection::btree_set(arb_baseboard(), min..=max)
-}
-
-// Generate an FSM configuration
-//
-// Timeouts are in "Ticks", which maps to a fixed tick timer set by higher
-// level software. The actual timing is unimportant for the protocol logic, we
-// are just concerned that the behavior is correct in regards to some abstract
-// clock.
-//
-// We ensure that `retry_timeout` is always less than the other timeouts.
-fn arb_config() -> impl Strategy<Value = Config> {
-    (5..=10_usize, 5..=20_usize, 1..=3_usize).prop_map(
-        |(learn_timeout, rack_init_timeout, retry_timeout)| Config {
-            learn_timeout,
-            rack_init_timeout,
-            rack_secret_request_timeout: rack_init_timeout,
-            retry_timeout,
-        },
-    )
-}
-
-// Generate a single test action to drive the property based tests
-fn arb_action(
-    rack_uuid: Uuid,
-    config: Config,
-    initial_members: BTreeSet<Baseboard>,
-) -> impl Strategy<Value = Action> {
-    // Choose an RSS sled randomly
-    any::<prop::sample::Selector>().prop_map(move |selector| {
-        Action::Initialize {
-            rss_sled: selector.select(&initial_members).clone(),
-            rack_uuid,
-            initial_members: initial_members.clone(),
-        }
-    })
-}
-
-// Generate a vector of arbitrary actions to drive the property based tests
-//
-// This vector of actions is the top level generator for our tests.
-fn arb_actions(
-    max_initial_members: usize,
-) -> impl Strategy<Value = (Vec<Action>, BTreeSet<Baseboard>, Config)> {
-    let min_initial_members = 3;
-    (arb_peer_ids(min_initial_members, max_initial_members), arb_config())
-        .prop_flat_map(|(initial_members, config)| {
-            let rack_uuid = Uuid::new_v4();
-            (
-                proptest::collection::vec(
-                    arb_action(rack_uuid, config, initial_members.clone()),
-                    1..=5,
-                ),
-                Just(initial_members),
-                Just(config),
-            )
-        })
-}
-
-// A test action to drive the test forward.
-#[derive(Debug)]
-pub enum Action {
-    Initialize {
-        rss_sled: Baseboard,
-        rack_uuid: Uuid,
-        initial_members: BTreeSet<Baseboard>,
-    },
-}
-
-// Create a set of FSMs used in a test
-fn create_peers(
-    peer_ids: BTreeSet<Baseboard>,
-    config: Config,
-) -> BTreeMap<Baseboard, Fsm> {
-    peer_ids
-        .into_iter()
-        .map(|id| (id.clone(), Fsm::new_uninitialized(id, config)))
-        .collect()
-}
-
-fn assert_invariants(
-    peers: &BTreeMap<Baseboard, Fsm>,
-) -> Result<(), TestCaseError> {
-    Ok(())
-}
+use common::actions::Action;
+use common::generators::arb_actions;
 
 // Named endpoints on a network
 type Source = Baseboard;
@@ -132,25 +38,59 @@ type FlowId = (Source, Destination);
 /// TCP connection for each flow we do not interleave messages within the same flow.
 #[derive(Debug, Default)]
 pub struct Network {
-    flows: BTreeMap<FlowId, Msg>,
+    // Messages queued, but not yet sent.
+    unsent: BTreeMap<FlowId, Msg>,
+
+    // Messages sent and "floating" in the network
+    sent: BTreeMap<FlowId, Msg>,
 }
 
 /// State for the running test
+///
+/// `TestState` contains the real system under test (SUT) state of the peers, as
+/// well as helper types and model state that allow making assertions about what
+/// we expect the SUT to be at any given point in test execution.
 pub struct TestState {
+    // All peers in the test
     peers: BTreeMap<Baseboard, Fsm>,
+
+    // A model of the network used for sending and receiving messages across
+    // peers
     network: Network,
+
+    // We assume all clocks tick at approximately the same rate, with a delta
+    // small enough not to matter for the tests. We don't care about real time
+    // synchronization at all. Therefore this clock, can serve as a global clock
+    // and we can ensure that on each tick, a tick callback on every FSM fires.
+    clock: Ticks,
+
+    // A copy of the configuration at all peers
+    config: Config,
 }
 
 impl TestState {
     pub fn new(peer_ids: BTreeSet<Baseboard>, config: Config) -> TestState {
-        TestState {
-            peers: create_peers(peer_ids, config),
-            network: Network::default(),
-        }
+        let peers = peer_ids
+            .into_iter()
+            .map(|id| (id.clone(), Fsm::new_uninitialized(id, config)))
+            .collect();
+
+        TestState { peers, network: Network::default(), clock: 0, config }
     }
 
     pub fn peer(&mut self, id: &Baseboard) -> &mut Fsm {
         self.peers.get_mut(id).unwrap()
+    }
+
+    /// Process a test action
+    pub fn on_action(&mut self, action: Action) {
+        match action {
+            Action::Initialize { rss_sled, rack_uuid, initial_members } => {
+                let output =
+                    self.peer(&rss_sled).init_rack(rack_uuid, initial_members);
+                println!("{:#?}", output);
+            }
+        }
     }
 }
 
@@ -159,13 +99,7 @@ proptest! {
     fn run((actions, initial_members, config) in arb_actions(12)) {
         let mut state = TestState::new(initial_members, config);
         for action in actions {
-            match action {
-                Action::Initialize { rss_sled, rack_uuid, initial_members } => {
-                    let output = state.peer(&rss_sled)
-                                      .init_rack(rack_uuid, initial_members);
-                    println!("{:#?}", output);
-                }
-            }
+            state.on_action(action);
         }
     }
 }
