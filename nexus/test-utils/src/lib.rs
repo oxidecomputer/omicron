@@ -346,7 +346,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
         let port = dendrite.port;
         self.dendrite = Some(dendrite);
 
-        let address = SocketAddrV6::new(Ipv6Addr::LOCALHOST.into(), port, 0, 0);
+        let address = SocketAddrV6::new(Ipv6Addr::LOCALHOST, port, 0, 0);
 
         // Update the configuration options for Nexus, if it's launched later.
         //
