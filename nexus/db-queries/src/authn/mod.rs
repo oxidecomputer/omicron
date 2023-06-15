@@ -253,6 +253,13 @@ pub struct SiloAuthnPolicy {
 }
 
 impl SiloAuthnPolicy {
+    #[cfg(test)]
+    pub fn new(
+        mapped_fleet_roles: BTreeMap<SiloRole, Vec<FleetRole>>,
+    ) -> SiloAuthnPolicy {
+        SiloAuthnPolicy { mapped_fleet_roles }
+    }
+
     pub fn mapped_fleet_roles(&self) -> &BTreeMap<SiloRole, Vec<FleetRole>> {
         &self.mapped_fleet_roles
     }

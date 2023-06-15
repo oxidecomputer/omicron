@@ -209,8 +209,8 @@ async fn make_silo(
         LookupType::ByName(format!("{}-silo-image", silo_name)),
     ));
 
-    // Image is a special case in that this resource is technically just a pass-through for
-    // `SiloImage` and `ProjectImage` resources.
+    // Image is a special case in that this resource is technically just a
+    // pass-through for `SiloImage` and `ProjectImage` resources.
     let image_id = Uuid::new_v4();
     builder.new_resource(authz::Image::new(
         silo.clone(),
