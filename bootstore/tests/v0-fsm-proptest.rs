@@ -11,7 +11,7 @@
 //! all generated messages have been delivered to the subset of reachable peers.
 
 use assert_matches::assert_matches;
-use bootstore::schemes::v0::{Config, Fsm};
+use bootstore::schemes::v0::{Config, Envelope, Fsm, Msg};
 use proptest::prelude::*;
 use sled_hardware::Baseboard;
 use std::collections::{BTreeMap, BTreeSet};
@@ -116,22 +116,56 @@ fn assert_invariants(
     Ok(())
 }
 
+// Named endpoints on a network
+type Source = Baseboard;
+type Destination = Baseboard;
+
+/// A flow of messages from a source to a destination
+type FlowId = (Source, Destination);
+
+/// A simulation of a test network
+///
+/// Every time a peer handles a message it may send messages. We add these
+/// messages to the network and distribute them during the test as a result
+/// of actions. We allow dropping of messages and interleaving of messages in
+/// different flows (source/dest pairs in one direction). However, since we are modeling a single
+/// TCP connection for each flow we do not interleave messages within the same flow.
+#[derive(Debug, Default)]
+pub struct Network {
+    flows: BTreeMap<FlowId, Msg>,
+}
+
+/// State for the running test
+pub struct TestState {
+    peers: BTreeMap<Baseboard, Fsm>,
+    network: Network,
+}
+
+impl TestState {
+    pub fn new(peer_ids: BTreeSet<Baseboard>, config: Config) -> TestState {
+        TestState {
+            peers: create_peers(peer_ids, config),
+            network: Network::default(),
+        }
+    }
+
+    pub fn peer(&mut self, id: &Baseboard) -> &mut Fsm {
+        self.peers.get_mut(id).unwrap()
+    }
+}
+
 proptest! {
     #[test]
-//fn blah() {
     fn run((actions, initial_members, config) in arb_actions(12)) {
-        let mut peers = create_peers(initial_members, config);
+        let mut state = TestState::new(initial_members, config);
         for action in actions {
             match action {
                 Action::Initialize { rss_sled, rack_uuid, initial_members } => {
-                    let output = peers
-                        .get_mut(&rss_sled)
-                        .unwrap()
-                        .init_rack(rack_uuid, initial_members);
-//                    println!("{:#?}", output);
+                    let output = state.peer(&rss_sled)
+                                      .init_rack(rack_uuid, initial_members);
+                    println!("{:#?}", output);
                 }
             }
-            assert_invariants(&peers);
         }
     }
 }

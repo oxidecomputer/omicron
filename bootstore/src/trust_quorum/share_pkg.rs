@@ -271,9 +271,9 @@ impl fmt::Debug for SharePkgV0 {
             .field("epoch", &self.epoch)
             .field("threshold", &self.threshold)
             .field("share", &"Share")
-            .field("share_digests", &self.share_digests)
-            .field("salt", &self.salt)
-            .field("nonce", &self.nonce)
+            .field("share_digests", &"Digests")
+            .field("salt", &hex::encode(&self.salt))
+            .field("nonce", &hex::encode(self.nonce))
             .field("encrypted_shares", &"Encrypted")
             .finish()
     }
@@ -288,7 +288,7 @@ impl fmt::Debug for LearnedSharePkgV0 {
             .field("epoch", &self.epoch)
             .field("threshold", &self.threshold)
             .field("share", &"Share")
-            .field("share_digests", &self.share_digests)
+            .field("share_digests", &"Digests")
             .finish()
     }
 }
