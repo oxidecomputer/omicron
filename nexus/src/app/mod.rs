@@ -178,13 +178,22 @@ impl Nexus {
         {
             (dpd_address.ip().to_string(), dpd_address.port())
         } else {
-            let addr = resolver
-                .lock()
-                .await
-                .lookup_socket_v6(ServiceName::Dendrite)
-                .await
-                .map_err(|e| format!("Cannot access Dendrite address: {e}"))?;
-            (addr.ip().to_string(), addr.port())
+            loop {
+                match resolver
+                    .lock()
+                    .await
+                    .lookup_socket_v6(ServiceName::Dendrite)
+                    .await
+                    .map_err(|e| format!("Cannot access Dendrite address: {e}"))
+                {
+                    Ok(addr) => break (addr.ip().to_string(), addr.port()),
+                    Err(e) => {
+                        warn!(log, "Failed to access Dendrite address: {e}");
+                        tokio::time::sleep(std::time::Duration::from_secs(1))
+                            .await;
+                    }
+                }
+            }
         };
         let dpd_client = Arc::new(dpd_client::Client::new(
             &format!("http://[{dpd_host}]:{dpd_port}"),

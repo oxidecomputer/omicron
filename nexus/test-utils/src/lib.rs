@@ -346,15 +346,20 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
         let port = dendrite.port;
         self.dendrite = Some(dendrite);
 
-        // NOTE: We could pass this port information via DNS, rather than
-        // requiring it to be known before Nexus starts.
-        self.config
-            .pkg
-            .dendrite
-            .address
-            .as_mut()
-            .expect("Tests expect an explicit dendrite address")
-            .set_port(port);
+        let address = SocketAddrV6::new(Ipv6Addr::LOCALHOST.into(), port, 0, 0);
+
+        // Update the configuration options for Nexus, if it's launched later.
+        //
+        // NOTE: If dendrite is started after Nexus, this is ignored.
+        self.config.pkg.dendrite.address = Some(address.into());
+
+        let sled_id = Uuid::parse_str(SLED_AGENT_UUID).unwrap();
+        self.rack_init_builder.add_service(
+            address,
+            ServiceKind::Dendrite,
+            internal_dns::ServiceName::Dendrite,
+            sled_id,
+        );
     }
 
     pub async fn start_oximeter(&mut self) {
@@ -525,7 +530,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                 .take()
                 .expect("Must launch internal nexus first"),
             &self.config,
-            std::mem::take(&mut self.rack_init_builder.services),
+            self.rack_init_builder.services.clone(),
             // NOTE: We should probably hand off
             // "self.rack_init_builder.datasets" here, but Nexus won't be happy
             // if we pass it right now:

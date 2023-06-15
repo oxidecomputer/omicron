@@ -173,7 +173,6 @@ impl ServerContext {
                                 1,
                             ))
                             .await;
-                            continue;
                         }
                     }
                 };
