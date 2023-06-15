@@ -400,6 +400,24 @@ impl StateHandler for InitialMemberState {
 
         (self.into(), Output::none())
     }
+
+    fn on_connect(
+        &mut self,
+        common: &mut FsmCommonData,
+        peer: Baseboard,
+    ) -> Output {
+        // TODO: Retry any necessary message sends
+        Output::none()
+    }
+
+    fn on_disconnect(
+        &mut self,
+        common: &mut FsmCommonData,
+        peer: Baseboard,
+    ) -> Output {
+        // TODO: Discard any learn requests from this peer?
+        Output::none()
+    }
 }
 
 // Send a `ResponseType::Share` message once we have recomputed the rack secret

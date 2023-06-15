@@ -167,4 +167,29 @@ impl StateHandler for LearningState {
             }
         }
     }
+
+    fn on_connect(
+        &mut self,
+        common: &mut FsmCommonData,
+        peer: Baseboard,
+    ) -> Output {
+        // TODO: If we aren't learning from anyone, try learning from this peer.
+        //
+        // This is an optimization on top of `tick`, but not needed for
+        // correctness.
+        Output::none()
+    }
+
+    fn on_disconnect(
+        &mut self,
+        common: &mut FsmCommonData,
+        peer: Baseboard,
+    ) -> Output {
+        // TODO: If we are currently learning from the peer that just
+        // disconnected then move onto the next one.
+        //
+        // This is an optimization on top of `tick`, but not needed for
+        // correctness.
+        Output::none()
+    }
 }

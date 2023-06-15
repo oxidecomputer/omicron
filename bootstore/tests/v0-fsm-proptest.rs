@@ -81,15 +81,15 @@ impl TestState {
             }
             Action::Connect(flows) => {
                 for (source, dest) in flows {
-                    self.peer_mut(&source).insert_peer(dest.clone());
-                    self.peer_mut(&dest).insert_peer(source);
+                    self.peer_mut(&source).connected(dest.clone());
+                    self.peer_mut(&dest).connected(source);
                 }
                 Ok(())
             }
             Action::Disconnect(flows) => {
                 for (source, dest) in flows {
-                    self.peer_mut(&source).remove_peer(dest.clone());
-                    self.peer_mut(&dest).remove_peer(source);
+                    self.peer_mut(&source).disconnected(dest.clone());
+                    self.peer_mut(&dest).disconnected(source);
                 }
                 Ok(())
             }

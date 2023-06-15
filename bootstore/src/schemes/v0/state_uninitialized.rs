@@ -88,4 +88,20 @@ impl StateHandler for UninitializedState {
     fn tick(self, common: &mut FsmCommonData) -> (State, Output) {
         (self.into(), Output::none())
     }
+
+    fn on_connect(
+        &mut self,
+        common: &mut FsmCommonData,
+        peer: Baseboard,
+    ) -> Output {
+        Output::none()
+    }
+
+    fn on_disconnect(
+        &mut self,
+        common: &mut FsmCommonData,
+        peer: Baseboard,
+    ) -> Output {
+        Output::none()
+    }
 }

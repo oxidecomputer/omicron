@@ -43,6 +43,34 @@ pub trait StateHandler {
     ) -> (State, Output);
 
     fn tick(self, common: &mut FsmCommonData) -> (State, Output);
+
+    /// A peer has connected.
+    ///
+    /// Outstanding requests may need to get re-sent.
+    /// Since we are using TCP at the network layer, we rely on connections
+    /// to tell us to retry rather than timeouts.
+    ///
+    /// This call can never trigger a state transition, so we don't bother
+    /// taking `self` by value.
+    fn on_connect(
+        &mut self,
+        common: &mut FsmCommonData,
+        peer: Baseboard,
+    ) -> Output;
+
+    /// A peer has disconnected.
+    ///
+    /// We can use this knowledge to assume a request won't complete. For
+    /// example, we may want to move onto the next peer immediately rather than
+    /// wait for a tick.
+    ///
+    /// This call can never trigger a state transition, so we don't bother
+    /// taking `self` by value.
+    fn on_disconnect(
+        &mut self,
+        common: &mut FsmCommonData,
+        peer: Baseboard,
+    ) -> Output;
 }
 
 /// The state machine for a [`$crate::Peer`]
@@ -139,6 +167,10 @@ impl Fsm {
                     pending_learn_requests: BTreeMap::new(),
                     rack_secret_state: None,
                 }));
+                // Note that while we could only send the envelopes to
+                // connected peers, the network layer will just drop them.
+                // We already have a copy to send on connection stored in
+                // `Rack::InitState::Running.unacked_envelopes`.
                 Output { persist: true, envelopes, api_output: None }
             }
             Err(e) => return ApiError::RackInitFailed(e).into(),
@@ -257,15 +289,17 @@ impl Fsm {
     /// A connection has been established to a specific peer.
     ///
     /// Messages may now be sent from the FSM to the peer
-    pub fn insert_peer(&mut self, peer: Baseboard) {
-        self.common.peers.insert(peer);
+    pub fn connected(&mut self, peer: Baseboard) -> Output {
+        self.common.peers.insert(peer.clone());
+        self.state.as_mut().unwrap().on_connect(&mut self.common, peer)
     }
 
     /// We have disconnected from a peer
     ///
     /// Messages will no longer be sent from the FSM to the peer
-    pub fn remove_peer(&mut self, peer: Baseboard) {
+    pub fn disconnected(&mut self, peer: Baseboard) -> Output {
         self.common.peers.remove(&peer);
+        self.state.as_mut().unwrap().on_disconnect(&mut self.common, peer)
     }
 
     /// Handle a message from a peer.
@@ -321,7 +355,6 @@ mod tests {
             learn_timeout: 5,
             rack_init_timeout: 5,
             rack_secret_request_timeout: 5,
-            retry_timeout: 2,
         }
     }
 

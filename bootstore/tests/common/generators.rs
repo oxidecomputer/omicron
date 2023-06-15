@@ -70,15 +70,12 @@ fn arb_peer_ids(
 // level software. The actual timing is unimportant for the protocol logic, we
 // are just concerned that the behavior is correct in regards to some abstract
 // clock.
-//
-// We ensure that `retry_timeout` is always less than the other timeouts.
 fn arb_config() -> impl Strategy<Value = Config> {
-    (5..=10_usize, 5..=20_usize, 1..=3_usize).prop_map(
-        |(learn_timeout, rack_init_timeout, retry_timeout)| Config {
+    (5..=10_usize, 5..=20_usize).prop_map(
+        |(learn_timeout, rack_init_timeout)| Config {
             learn_timeout,
             rack_init_timeout,
             rack_secret_request_timeout: rack_init_timeout,
-            retry_timeout,
         },
     )
 }

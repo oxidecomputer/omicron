@@ -165,4 +165,23 @@ impl StateHandler for LearnedState {
 
         (self.into(), Output::none())
     }
+
+    fn on_connect(
+        &mut self,
+        common: &mut FsmCommonData,
+        peer: Baseboard,
+    ) -> Output {
+        // TODO: If we are collecting shares, then try to get one from this peer
+        // as well.
+        Output::none()
+    }
+
+    fn on_disconnect(
+        &mut self,
+        common: &mut FsmCommonData,
+        peer: Baseboard,
+    ) -> Output {
+        // Nothing to do here
+        Output::none()
+    }
 }

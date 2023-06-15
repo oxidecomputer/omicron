@@ -37,7 +37,6 @@ pub struct Config {
     pub learn_timeout: Ticks,
     pub rack_init_timeout: Ticks,
     pub rack_secret_request_timeout: Ticks,
-    pub retry_timeout: Ticks,
 }
 
 /// In memory state shared by all 4 FSM states
@@ -427,6 +426,32 @@ impl StateHandler for State {
             State::InitialMember(state) => state.tick(common),
             State::Learning(state) => state.tick(common),
             State::Learned(state) => state.tick(common),
+        }
+    }
+
+    fn on_connect(
+        &mut self,
+        common: &mut FsmCommonData,
+        peer: Baseboard,
+    ) -> Output {
+        match self {
+            State::Uninitialized(state) => state.on_connect(common, peer),
+            State::InitialMember(state) => state.on_connect(common, peer),
+            State::Learning(state) => state.on_connect(common, peer),
+            State::Learned(state) => state.on_connect(common, peer),
+        }
+    }
+
+    fn on_disconnect(
+        &mut self,
+        common: &mut FsmCommonData,
+        peer: Baseboard,
+    ) -> Output {
+        match self {
+            State::Uninitialized(state) => state.on_disconnect(common, peer),
+            State::InitialMember(state) => state.on_disconnect(common, peer),
+            State::Learning(state) => state.on_disconnect(common, peer),
+            State::Learned(state) => state.on_disconnect(common, peer),
         }
     }
 }
