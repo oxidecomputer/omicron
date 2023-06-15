@@ -178,7 +178,6 @@ fn do_authz_resource(
                                 Option<(
                                     ResourceType,
                                     Uuid,
-                                    BTreeMap<String, Vec<String>>,
                                 )>,
                                 Error,
                             >

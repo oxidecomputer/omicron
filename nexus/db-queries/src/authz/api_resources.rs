@@ -45,12 +45,10 @@ use authz_macros::authz_resource;
 use futures::future::BoxFuture;
 use futures::FutureExt;
 use lazy_static::lazy_static;
-use nexus_db_model::DatabaseString;
 use nexus_types::external_api::shared::{FleetRole, ProjectRole, SiloRole};
 use omicron_common::api::external::{Error, LookupType, ResourceType};
 use oso::PolarClass;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
 use uuid::Uuid;
 
 /// Describes an authz resource that corresponds to an API resource that has a
@@ -94,9 +92,8 @@ pub trait ApiResourceWithRoles: ApiResource {
     fn conferred_roles(
         &self,
         authn: &authn::Context,
-        // XXX-dap use a struct
     ) -> Result<
-        Option<(ResourceType, Uuid, BTreeMap<String, Vec<String>>)>,
+        Option<(ResourceType, Uuid)>,
         Error,
     >;
 }
@@ -184,12 +181,24 @@ impl PartialEq for Fleet {
 
 impl oso::PolarClass for Fleet {
     fn get_polar_class_builder() -> oso::ClassBuilder<Self> {
-        oso::Class::builder().with_equality_check().add_method(
-            "has_role",
-            |_: &Fleet, actor: AuthenticatedActor, role: String| {
-                actor.has_role_resource(ResourceType::Fleet, *FLEET_ID, &role)
-            },
-        )
+        oso::Class::builder()
+            .with_equality_check()
+            .add_method(
+                "has_role",
+                |_: &Fleet, actor: AuthenticatedActor, role: String| {
+                    actor.has_role_resource(
+                        ResourceType::Fleet,
+                        *FLEET_ID,
+                        &role,
+                    )
+                },
+            )
+            .add_method(
+                "has_conferred_role",
+                |_: &Fleet, actor: AuthenticatedActor, role: String| {
+                    actor.has_conferred_fleet_role(&role)
+                },
+            )
     }
 }
 
@@ -224,10 +233,7 @@ impl ApiResourceWithRoles for Fleet {
     fn conferred_roles(
         &self,
         authn: &authn::Context,
-    ) -> Result<
-        Option<(ResourceType, Uuid, BTreeMap<String, Vec<String>>)>,
-        Error,
-    > {
+    ) -> Result<Option<(ResourceType, Uuid)>, Error> {
         // We support operators configuring Silos such that a particular
         // Silo level role confers a particular Fleet-level role.  So when
         // loading fleet-level roles, we also have to load an actor's
@@ -244,20 +250,11 @@ impl ApiResourceWithRoles for Fleet {
                 silo_id
             ))
         })?;
-        let mapped_roles = silo_authn_policy
-            .mapped_fleet_roles()
-            .into_iter()
-            .map(|(silo_role, fleet_roles)| {
-                (
-                    silo_role.to_database_string().to_string(),
-                    fleet_roles
-                        .into_iter()
-                        .map(|f| f.to_database_string().to_string())
-                        .collect(),
-                )
-            })
-            .collect();
-        Ok(Some((ResourceType::Silo, silo_id, mapped_roles)))
+        Ok(if silo_authn_policy.mapped_fleet_roles().is_empty() {
+            None
+        } else {
+            Some((ResourceType::Silo, silo_id))
+        })
     }
 }
 

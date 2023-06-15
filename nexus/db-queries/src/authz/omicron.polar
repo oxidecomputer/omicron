@@ -111,6 +111,10 @@ resource Fleet {
 	"modify" if "admin";
 }
 
+# For fleets specifically, roles can be conferred by roles on the user's Silo.
+has_role(actor: AuthenticatedActor, role: String, fleet: Fleet)
+	if fleet.has_conferred_role(actor, role);
+
 resource Silo {
 	permissions = [
 	    "list_children",
