@@ -49,7 +49,7 @@ pub struct FsmCommonData {
     // Configuration of the FSM
     pub config: Config,
 
-    // Unique IDs of known peers
+    // Unique IDs of connected peers
     pub peers: BTreeSet<Baseboard>,
 
     // The current time in ticks since the creation of the FSM
@@ -215,19 +215,61 @@ impl RackSecretState {
 /// Initialization state for tracking rack init on the coordinator node (the one
 /// local to RSS)
 #[derive(Debug)]
-pub struct RackInitState {
-    pub start: Ticks,
-    pub total_members: usize,
-    pub acks: BTreeSet<Baseboard>,
+pub enum RackInitState {
+    // This only exists on the RSS sled
+    Running {
+        start: Ticks,
+        total_members: usize,
+        acks: BTreeSet<Baseboard>,
+
+        // Any unacked messages will be re-sent when the destination peer
+        // connects.
+        unacked_envelopes: Vec<Envelope>,
+    },
+    Initialized,
+    Timeout,
 }
 
 impl RackInitState {
+    // Return true if we just completed rack init, false otherwise
+    pub fn on_ack(&mut self, from: Baseboard) -> bool {
+        if let RackInitState::Running {
+            total_members,
+            acks,
+            unacked_envelopes,
+            ..
+        } = self
+        {
+            unacked_envelopes.retain(|envelope| envelope.to != from);
+            acks.insert(from);
+            if acks.len() == *total_members {
+                *self = RackInitState::Initialized;
+                return true;
+            }
+        }
+        false
+    }
     pub fn timer_expired(&self, now: Ticks, timeout: Ticks) -> bool {
-        now.saturating_sub(self.start) > timeout
+        if let RackInitState::Running { start, .. } = self {
+            now.saturating_sub(*start) > timeout
+        } else {
+            false
+        }
     }
 
-    pub fn is_complete(&self) -> bool {
-        self.acks.len() == self.total_members
+    pub fn is_initialized(&self) -> bool {
+        matches!(self, RackInitState::Initialized)
+    }
+
+    pub fn unacked_peers(&self) -> BTreeSet<Baseboard> {
+        if let RackInitState::Running { unacked_envelopes, .. } = self {
+            unacked_envelopes
+                .iter()
+                .map(|envelope| envelope.to.clone())
+                .collect()
+        } else {
+            BTreeSet::new()
+        }
     }
 }
 

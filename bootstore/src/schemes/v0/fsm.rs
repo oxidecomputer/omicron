@@ -103,27 +103,17 @@ impl Fsm {
         let total_members = initial_membership.len();
         match create_pkgs(rack_uuid, initial_membership.clone()) {
             Ok(pkgs) => {
+                // We learn our pkg by iterating
+                let mut our_pkg = None;
                 let request_id = Uuid::new_v4();
-                let envelopes = pkgs
+                let envelopes: Vec<_> = pkgs
                     .expose_secret()
                     .into_iter()
                     .zip(initial_membership)
                     .filter_map(|(pkg, peer)| {
                         if peer == self.common.id {
                             // Don't send a message to ourself
-                            self.state = Some(State::InitialMember(
-                                InitialMemberState {
-                                    pkg: pkg.clone(),
-                                    distributed_shares: BTreeMap::new(),
-                                    rack_init_state: Some(RackInitState {
-                                        start: self.common.clock,
-                                        total_members,
-                                        acks: BTreeSet::from([peer]),
-                                    }),
-                                    pending_learn_requests: BTreeMap::new(),
-                                    rack_secret_state: None,
-                                },
-                            ));
+                            our_pkg = Some(pkg.clone());
                             None
                         } else {
                             Some(Envelope {
@@ -137,9 +127,21 @@ impl Fsm {
                         }
                     })
                     .collect();
+                self.state = Some(State::InitialMember(InitialMemberState {
+                    pkg: our_pkg.unwrap(),
+                    distributed_shares: BTreeMap::new(),
+                    rack_init_state: Some(RackInitState::Running {
+                        start: self.common.clock,
+                        total_members,
+                        acks: BTreeSet::from([self.common.id.clone()]),
+                        unacked_envelopes: envelopes.clone(),
+                    }),
+                    pending_learn_requests: BTreeMap::new(),
+                    rack_secret_state: None,
+                }));
                 Output { persist: true, envelopes, api_output: None }
             }
-            Err(e) => ApiError::RackInitFailed(e).into(),
+            Err(e) => return ApiError::RackInitFailed(e).into(),
         }
     }
 
@@ -252,16 +254,16 @@ impl Fsm {
         output
     }
 
-    /// A connection has been established an a peer has been learned.
-    /// This peer may or may not already be known by the FSM.
+    /// A connection has been established to a specific peer.
+    ///
+    /// Messages may now be sent from the FSM to the peer
     pub fn insert_peer(&mut self, peer: Baseboard) {
         self.common.peers.insert(peer);
     }
 
-    /// When a the upper layer sees the advertised prefix for a peer go away,
-    /// and not just a dropped connection, it will inform the FSM to remove the peer.
+    /// We have disconnected from a peer
     ///
-    /// This is a useful mechanism to prevent generating requests for failed sleds.
+    /// Messages will no longer be sent from the FSM to the peer
     pub fn remove_peer(&mut self, peer: Baseboard) {
         self.common.peers.remove(&peer);
     }

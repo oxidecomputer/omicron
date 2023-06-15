@@ -226,7 +226,8 @@ impl TestState {
 proptest! {
     #[test]
     fn run(input in arb_test_input(12)) {
-        let mut state = TestState::new(input.initial_members.clone(), input.config);
+        let mut state =
+            TestState::new(input.initial_members.clone(), input.config);
 
         // Before we run our generated actions, we want to ensure all sleds are
         // connected to the rss_sled and successfully rack init. This is a requirement
@@ -235,12 +236,12 @@ proptest! {
         let flows = state.all_other_peers(&rss_sled).cloned().map(|dest| {
             (rss_sled.clone(), dest)
         }).collect();
-        state.on_action(Action::Connect(flows));
+        state.on_action(Action::Connect(flows))?;
         state.on_action(Action::RackInit {
             rss_sled: rss_sled.clone(),
             rack_uuid: input.rack_uuid,
             initial_members: input.initial_members.clone()
-        });
+        })?;
 
         for action in input.actions {
             state.on_action(action)?;

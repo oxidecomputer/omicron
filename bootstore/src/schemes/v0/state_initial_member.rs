@@ -340,10 +340,7 @@ impl StateHandler for InitialMemberState {
         let output = match response {
             InitAck => {
                 if let Some(rack_init_state) = &mut self.rack_init_state {
-                    rack_init_state.acks.insert(from);
-                    if rack_init_state.is_complete() {
-                        // TODO: We should probably have an enum variant to indicate `Done`
-                        self.rack_init_state = None;
+                    if rack_init_state.on_ack(from) {
                         return (
                             self.into(),
                             ApiOutput::RackInitComplete.into(),
@@ -381,13 +378,8 @@ impl StateHandler for InitialMemberState {
             if rack_init_state
                 .timer_expired(common.clock, common.config.rack_init_timeout)
             {
-                let unacked_peers = self
-                    .pkg
-                    .initial_membership
-                    .difference(&rack_init_state.acks)
-                    .cloned()
-                    .collect();
-                self.rack_init_state = None;
+                let unacked_peers = rack_init_state.unacked_peers();
+                *rack_init_state = RackInitState::Timeout;
                 return (
                     self.into(),
                     ApiError::RackInitTimeout { unacked_peers }.into(),
