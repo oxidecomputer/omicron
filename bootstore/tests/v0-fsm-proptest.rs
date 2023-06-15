@@ -77,8 +77,9 @@ impl TestState {
     pub fn on_action(&mut self, action: Action) -> Result<(), TestCaseError> {
         match action {
             Action::Initialize { rss_sled, rack_uuid, initial_members } => {
-                let output =
-                    self.peer(&rss_sled).init_rack(rack_uuid, initial_members);
+                let output = self
+                    .peer_mut(&rss_sled)
+                    .init_rack(rack_uuid, initial_members);
                 self.check_rack_init_api_output(&rss_sled, &output)?;
 
                 // Send the `Initialize` messages to all peers
@@ -92,11 +93,12 @@ impl TestState {
                     // There should only be one `Initialize` message sent to each peer
                     prop_assert_eq!(sourced_msgs.len(), 1);
                     let (source, msg) = sourced_msgs.pop().unwrap();
-                    let output = self.peer(&destination).handle(source, msg);
+                    let output =
+                        self.peer_mut(&destination).handle(source, msg);
                     self.check_handle_initialize_req_output(
                         &destination,
                         &output,
-                    );
+                    )?;
 
                     // Queue the acknowledgement to the rss_sled in the network
                     self.network.send(&destination, output.envelopes);
@@ -120,7 +122,7 @@ impl TestState {
                         sourced_msgs.into_iter().enumerate()
                     {
                         let output =
-                            self.peer(&destination).handle(source, msg);
+                            self.peer_mut(&destination).handle(source, msg);
                         if i == num_responses - 1 {
                             // Rack initialization completes on processing the
                             // last response and we inform the caller.
@@ -141,7 +143,11 @@ impl TestState {
         }
     }
 
-    fn peer(&mut self, id: &Baseboard) -> &mut Fsm {
+    fn peer(&self, id: &Baseboard) -> &Fsm {
+        self.peers.get(id).unwrap()
+    }
+
+    fn peer_mut(&mut self, id: &Baseboard) -> &mut Fsm {
         self.peers.get_mut(id).unwrap()
     }
 
@@ -182,7 +188,16 @@ impl TestState {
         peer_id: &Baseboard,
         output: &Output,
     ) -> Result<(), TestCaseError> {
-        // TODO: FILL ME IN
+        // We don't currently send extra rack init messages in this test
+        prop_assert_eq!(self.peer(peer_id).state_name(), "initial_member");
+        prop_assert!(output.persist);
+        prop_assert_eq!(&output.api_output, &None);
+        prop_assert_eq!(output.envelopes.len(), 1);
+        let response_is_ack = matches!(
+            output.envelopes[0].msg,
+            Msg::Rsp(Response { request_id: _, type_: ResponseType::InitAck })
+        );
+        prop_assert!(response_is_ack);
         Ok(())
     }
 }

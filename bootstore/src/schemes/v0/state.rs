@@ -154,7 +154,7 @@ pub struct RequestMetadata {
 /// rack secret or if we have already recomputed it.
 #[derive(Debug)]
 pub enum RackSecretState {
-    // TODO: Zeroize or wrap in a Secert
+    // TODO: Zeroize or wrap in a Secret
     Shares(BTreeMap<Baseboard, Vec<u8>>),
     Secret(RackSecret),
 }
