@@ -82,6 +82,7 @@ impl TestState {
             Action::Connect(flows) => {
                 // TODO: Assert that output makes sense and dispatch it
                 for (source, dest) in flows {
+                    self.network.connected(source.clone(), dest.clone());
                     let _output =
                         self.peer_mut(&source).connected(dest.clone());
                     let _output = self.peer_mut(&dest).connected(source);

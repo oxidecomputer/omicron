@@ -38,20 +38,29 @@ pub struct Network {
 }
 
 impl Network {
-    pub fn peers_connected(&mut self, peer1: Baseboard, peer2: Baseboard) {
+    pub fn connected(&mut self, peer1: Baseboard, peer2: Baseboard) {
         self.connected.insert((peer1.clone(), peer2.clone()));
         self.connected.insert((peer2, peer1));
     }
 
-    pub fn peers_disconnected(&mut self, peer1: Baseboard, peer2: Baseboard) {
-        self.connected.remove(&(peer1.clone(), peer2.clone()));
-        self.connected.remove(&(peer2, peer1));
+    pub fn disconnected(&mut self, peer1: Baseboard, peer2: Baseboard) {
+        let flow1 = (peer1.clone(), peer2.clone());
+        let flow2 = (peer2, peer1);
+        self.connected.remove(&flow1);
+        self.connected.remove(&flow2);
+
+        // We drop all messages that are sent but not delivered for the given flow
+        self.sent.remove(&flow1);
+        self.sent.remove(&flow2);
     }
 
     pub fn send(&mut self, source: &Source, envelopes: Vec<Envelope>) {
         for envelope in envelopes {
             let flow_id = (source.clone(), envelope.to);
-            self.sent.entry(flow_id).or_default().push(envelope.msg);
+            // Only send if the peers are connected
+            if self.connected.contains(&flow_id) {
+                self.sent.entry(flow_id).or_default().push(envelope.msg);
+            }
         }
     }
 
