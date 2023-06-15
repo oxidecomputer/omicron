@@ -39,7 +39,9 @@ pub(crate) enum SetupArgs {
     /// Set the current rack configuration from a filled-in TOML template
     SetConfig,
 
-    /// Reset the configuration to its original (empty) state
+    /// Reset the configuration to its original (empty) state.
+    ///
+    /// This will also clear any set password and uploaded certificates/keys.
     ResetConfig,
 
     /// Set the password for the recovery user of the recovery silo
@@ -157,7 +159,8 @@ impl SetupArgs {
                     CertificateUploadResponse::WaitingOnKey => {
                         slog::info!(
                             log,
-                            "certificated uploaded; now upload its key"
+                            "certificate uploaded; now upload its key via \
+                             `setup upload-key`"
                         );
                     }
                     CertificateUploadResponse::CertKeyAccepted => {
@@ -193,7 +196,8 @@ impl SetupArgs {
                     CertificateUploadResponse::WaitingOnCert => {
                         slog::info!(
                             log,
-                            "key uploaded; now upload its certificate"
+                            "key uploaded; now upload its certificate via \
+                             `setup upload-cert`"
                         );
                     }
                     CertificateUploadResponse::WaitingOnKey => {
