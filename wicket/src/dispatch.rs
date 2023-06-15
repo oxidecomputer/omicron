@@ -32,7 +32,7 @@ pub fn exec() -> Result<()> {
             std::iter::once("wicket".to_owned()).chain(args),
         );
         match args {
-            ShellCommand::Upload(args) => args.exec(log, wicketd_addr),
+            ShellCommand::UploadRepo(args) => args.exec(log, wicketd_addr),
             ShellCommand::Setup(args) => args.exec(log, wicketd_addr),
         }
     } else {
@@ -51,8 +51,8 @@ pub fn exec() -> Result<()> {
 /// accepts an upload command.
 #[derive(Debug, Parser)]
 enum ShellCommand {
-    /// Upload an artifact to wicketd.
-    Upload(UploadArgs),
+    /// Upload a TUF repository to wicketd.
+    UploadRepo(UploadArgs),
     /// Interact with rack setup configuration.
     #[command(subcommand)]
     Setup(SetupArgs),
