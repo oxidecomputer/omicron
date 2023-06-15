@@ -1501,19 +1501,11 @@ pub struct SwitchPortSettingsInfoSelector {
 
 /// Select a switch port by name.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
-pub struct SwitchPortPathSelector {
-    /// A name to use when selecting switch ports.
-    pub port: Name,
-}
-
-/// Select switch ports by rack id and location.
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 pub struct SwitchPortSelector {
-    /// A rack id to use when selecting switch ports.
-    pub rack_id: Uuid,
-
-    /// A switch location to use when selecting switch ports.
-    pub switch_location: Name,
+    /// The ID of the switch in which the port is located
+    pub switch_id: Uuid,
+    /// A name to use when selecting switch ports
+    pub port: Name,
 }
 
 /// Select switch port interfaces by id.

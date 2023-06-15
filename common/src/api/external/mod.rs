@@ -712,6 +712,7 @@ pub enum ResourceType {
     Sled,
     SledInstance,
     Switch,
+    SwitchPort,
     SagaDbg,
     Snapshot,
     Volume,
@@ -724,7 +725,6 @@ pub enum ResourceType {
     MetricProducer,
     RoleBuiltin,
     UpdateArtifact,
-    SwitchPort,
     SystemUpdate,
     ComponentUpdate,
     SystemUpdateComponentUpdate,
@@ -2232,11 +2232,8 @@ pub struct SwitchPort {
     /// The id of the switch port.
     pub id: Uuid,
 
-    /// The rack this switch port belongs to.
-    pub rack_id: Uuid,
-
-    /// The switch location of this switch port.
-    pub switch_location: String,
+    /// The the switch this port is associated to
+    pub switch_id: Uuid,
 
     /// The name of this switch port.
     // TODO: possibly re-export and use the dpd_client::types::PortId here

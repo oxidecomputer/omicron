@@ -91,8 +91,7 @@ table! {
 table! {
     switch_port (id) {
         id -> Uuid,
-        rack_id -> Uuid,
-        switch_location -> Text,
+        switch_id -> Uuid,
         port_name -> Text,
         port_settings_id -> Nullable<Uuid>,
     }

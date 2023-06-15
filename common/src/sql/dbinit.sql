@@ -2275,14 +2275,14 @@ CREATE UNIQUE INDEX ON omicron.public.loopback_address (
 
 CREATE TABLE omicron.public.switch_port (
     id UUID PRIMARY KEY,
-    rack_id UUID,
-    switch_location TEXT,
-    port_name TEXT,
-    port_settings_id UUID,
+    switch_id UUID NOT NULL,
+    port_name STRING(16) NOT NULL,
+    port_settings_id UUID
+);
 
-    CONSTRAINT switch_port_rack_locaction_name_unique UNIQUE (
-        rack_id, switch_location, port_name
-    )
+CREATE UNIQUE INDEX ON omicron.public.switch_port (
+    switch_id,
+    port_name
 );
 
 /* port settings groups included from port settings objects */

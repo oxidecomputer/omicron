@@ -78,25 +78,23 @@ impl Into<external::SwitchPortGeometry> for SwitchPortGeometry {
 #[diesel(table_name = switch_port)]
 pub struct SwitchPort {
     pub id: Uuid,
-    pub rack_id: Uuid,
-    pub switch_location: String,
+    pub switch_id: Uuid,
     pub port_name: String,
     pub port_settings_id: Option<Uuid>,
 }
 
 impl SwitchPort {
-    pub fn new(
-        rack_id: Uuid,
-        switch_location: String,
-        port_name: String,
-    ) -> Self {
+    pub fn new(switch_id: Uuid, port_name: String) -> Self {
         Self {
             id: Uuid::new_v4(),
-            rack_id,
-            switch_location,
+            switch_id,
             port_name,
             port_settings_id: None,
         }
+    }
+
+    pub fn id(&self) -> Uuid {
+        self.id
     }
 }
 
@@ -104,8 +102,7 @@ impl Into<external::SwitchPort> for SwitchPort {
     fn into(self) -> external::SwitchPort {
         external::SwitchPort {
             id: self.id,
-            rack_id: self.rack_id,
-            switch_location: self.switch_location,
+            switch_id: self.switch_id,
             port_name: self.port_name,
             port_settings_id: self.port_settings_id,
         }

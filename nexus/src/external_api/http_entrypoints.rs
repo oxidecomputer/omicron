@@ -214,6 +214,10 @@ pub fn external_api() -> NexusApiDescription {
         api.register(switch_list)?;
         api.register(switch_view)?;
 
+        api.register(switch_port_list)?;
+        api.register(switch_port_apply_settings)?;
+        api.register(switch_port_clear_settings)?;
+
         api.register(user_builtin_list)?;
         api.register(user_builtin_view)?;
 
@@ -241,10 +245,6 @@ pub fn external_api() -> NexusApiDescription {
         api.register(networking_switch_port_settings_view)?;
         api.register(networking_switch_port_settings_create)?;
         api.register(networking_switch_port_settings_delete)?;
-
-        api.register(networking_switch_port_list)?;
-        api.register(networking_switch_port_apply_settings)?;
-        api.register(networking_switch_port_clear_settings)?;
 
         // Fleet-wide API operations
         api.register(silo_list)?;
@@ -2705,21 +2705,27 @@ async fn networking_switch_port_settings_view(
 /// List switch ports
 #[endpoint {
     method = GET,
-    path = "/v1/system/hardware/switch-port",
+    path = "/v1/system/hardware/switches/{switch_id}/ports",
     tags = ["system"],
 }]
-async fn networking_switch_port_list(
+async fn switch_port_list(
     rqctx: RequestContext<Arc<ServerContext>>,
-    query_params: Query<PaginatedById<params::SwitchPortPageSelector>>,
+    path_params: Path<params::SwitchPath>,
+    query_params: Query<PaginatedById>,
 ) -> Result<HttpResponseOk<ResultsPage<SwitchPort>>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let nexus = &apictx.nexus;
         let query = query_params.into_inner();
+        let path = path_params.into_inner();
         let pagparams = data_page_params_for(&rqctx, &query)?;
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let switch_lookup = nexus.switch_lookup(
+            &opctx,
+            params::SwitchSelector { switch: path.switch_id },
+        )?;
         let addrs = nexus
-            .switch_port_list(&opctx, &pagparams)
+            .switch_port_list(&opctx, switch_lookup, &pagparams)
             .await?
             .into_iter()
             .map(|p| p.into())
@@ -2737,24 +2743,29 @@ async fn networking_switch_port_list(
 /// Apply switch port settings
 #[endpoint {
     method = POST,
-    path = "/v1/system/hardware/switch-port/{port}/settings",
+    path = "/v1/system/hardware/switches/{switch_id}/ports/{port}/settings",
     tags = ["system"],
 }]
-async fn networking_switch_port_apply_settings(
+async fn switch_port_apply_settings(
     rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<params::SwitchPortPathSelector>,
-    query_params: Query<params::SwitchPortSelector>,
+    path_params: Path<params::SwitchPortSelector>,
     settings_body: TypedBody<params::SwitchPortApplySettings>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let nexus = &apictx.nexus;
-        let port = path_params.into_inner().port;
-        let query = query_params.into_inner();
+        let path = path_params.into_inner();
         let settings = settings_body.into_inner();
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let switch_port_lookup =
+            nexus.switch_port_lookup(&opctx, path.clone())?;
         nexus
-            .switch_port_apply_settings(&opctx, &port, &query, &settings)
+            .switch_port_apply_settings(
+                &opctx,
+                &switch_port_lookup,
+                &path.port,
+                &settings,
+            )
             .await?;
         Ok(HttpResponseUpdatedNoContent {})
     };
@@ -2764,21 +2775,23 @@ async fn networking_switch_port_apply_settings(
 /// Clear switch port settings
 #[endpoint {
     method = DELETE,
-    path = "/v1/system/hardware/switch-port/{port}/settings",
+    path = "/v1/system/hardware/switches/{switch_id}/ports/{port}/settings",
     tags = ["system"],
 }]
-async fn networking_switch_port_clear_settings(
+async fn switch_port_clear_settings(
     rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<params::SwitchPortPathSelector>,
-    query_params: Query<params::SwitchPortSelector>,
+    path_params: Path<params::SwitchPortSelector>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let nexus = &apictx.nexus;
-        let port = path_params.into_inner().port;
-        let query = query_params.into_inner();
+        let path = path_params.into_inner();
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        nexus.switch_port_clear_settings(&opctx, &port, &query).await?;
+        let switch_port_lookup =
+            nexus.switch_port_lookup(&opctx, path.clone())?;
+        nexus
+            .switch_port_clear_settings(&opctx, &switch_port_lookup, &path.port)
+            .await?;
         Ok(HttpResponseUpdatedNoContent {})
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await

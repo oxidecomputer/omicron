@@ -3,6 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::DataStore;
+use crate::authz;
 use crate::context::OpContext;
 use crate::db;
 use crate::db::datastore::address_lot::{
@@ -822,37 +823,31 @@ impl DataStore {
     pub async fn switch_port_create(
         &self,
         opctx: &OpContext,
-        rack_id: Uuid,
-        switch_location: Name,
+        switch_id: Uuid,
         port: Name,
     ) -> CreateResult<SwitchPort> {
         #[derive(Debug)]
         enum SwitchPortCreateError {
-            RackNotFound,
+            SwitchNotFound,
         }
         type TxnError = TransactionError<SwitchPortCreateError>;
 
         let pool = self.pool_authorized(opctx).await?;
-        let switch_port = SwitchPort::new(
-            rack_id,
-            switch_location.to_string(),
-            port.to_string(),
-        );
+        let switch_port = SwitchPort::new(switch_id, port.to_string());
 
         // TODO https://github.com/oxidecomputer/omicron/issues/2811
         // Audit external networking database transaction usage
         pool.transaction_async(|conn| async move {
-            use db::schema::rack;
-            use db::schema::rack::dsl as rack_dsl;
-            rack_dsl::rack
-                .filter(rack::id.eq(rack_id))
-                .select(rack::id)
+            use db::schema::switch::dsl as switch_dsl;
+            switch_dsl::switch
+                .filter(switch_dsl::id.eq(switch_id))
+                .select(switch_dsl::id)
                 .limit(1)
                 .first_async::<Uuid>(&conn)
                 .await
                 .map_err(|e| match e {
                     ConnectionError::Query(_) => TxnError::CustomError(
-                        SwitchPortCreateError::RackNotFound,
+                        SwitchPortCreateError::SwitchNotFound,
                     ),
                     e => e.into(),
                 })?;
@@ -870,8 +865,8 @@ impl DataStore {
         })
         .await
         .map_err(|e| match e {
-            TxnError::CustomError(SwitchPortCreateError::RackNotFound) => {
-                Error::invalid_request("rack not found")
+            TxnError::CustomError(SwitchPortCreateError::SwitchNotFound) => {
+                Error::invalid_request("switch not found")
             }
             TxnError::Pool(e) => match e {
                 PoolError::Connection(ConnectionError::Query(
@@ -880,7 +875,7 @@ impl DataStore {
                     e,
                     ErrorHandler::Conflict(
                         ResourceType::SwitchPort,
-                        &format!("{}/{}/{}", rack_id, &switch_location, &port,),
+                        &format!("{}/{}", switch_id, &port,),
                     ),
                 ),
                 _ => public_error_from_diesel_pool(e, ErrorHandler::Server),
@@ -888,11 +883,12 @@ impl DataStore {
         })
     }
 
+    // TODO: Unused?
     pub async fn switch_port_delete(
         &self,
         opctx: &OpContext,
+        switch_id: Uuid,
         portname: &external::Name,
-        params: &params::SwitchPortSelector,
     ) -> DeleteResult {
         #[derive(Debug)]
         enum SwitchPortDeleteError {
@@ -909,13 +905,9 @@ impl DataStore {
             use db::schema::switch_port;
             use db::schema::switch_port::dsl as switch_port_dsl;
 
-            let switch_location = params.switch_location.to_string();
             let port_name = portname.to_string();
             let port: SwitchPort = switch_port_dsl::switch_port
-                .filter(switch_port::rack_id.eq(params.rack_id))
-                .filter(
-                    switch_port::switch_location.eq(switch_location.clone()),
-                )
+                .filter(switch_port::switch_id.eq(switch_id))
                 .filter(switch_port::port_name.eq(port_name.clone()))
                 .select(SwitchPort::as_select())
                 .limit(1)
@@ -959,11 +951,13 @@ impl DataStore {
     pub async fn switch_port_list(
         &self,
         opctx: &OpContext,
+        authz_switch: &authz::Switch,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<SwitchPort> {
         use db::schema::switch_port::dsl;
 
         paginated(dsl::switch_port, dsl::id, pagparams)
+            .filter(dsl::switch_id.eq(authz_switch.id()))
             .select(SwitchPort::as_select())
             .load_async(self.pool_authorized(opctx).await?)
             .await
@@ -1039,22 +1033,18 @@ impl DataStore {
         Ok(())
     }
 
-    pub async fn switch_port_get_id(
+    pub async fn switch_port_view(
         &self,
         opctx: &OpContext,
-        rack_id: Uuid,
-        switch_location: Name,
+        authz_switch: &authz::Switch,
         port_name: Name,
     ) -> LookupResult<Uuid> {
         use db::schema::switch_port;
-        use db::schema::switch_port::dsl as switch_port_dsl;
+        use db::schema::switch_port::dsl;
 
         let pool = self.pool_authorized(opctx).await?;
-        let id: Uuid = switch_port_dsl::switch_port
-            .filter(switch_port::rack_id.eq(rack_id))
-            .filter(
-                switch_port::switch_location.eq(switch_location.to_string()),
-            )
+        let id: Uuid = dsl::switch_port
+            .filter(dsl::switch_id.eq(authz_switch.id()))
             .filter(switch_port::port_name.eq(port_name.to_string()))
             .select(switch_port::id)
             .limit(1)

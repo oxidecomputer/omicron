@@ -357,6 +357,19 @@ impl<'a> LookupPath<'a> {
         Switch::PrimaryKey(Root { lookup_root: self }, id)
     }
 
+    /// Select a resource of type SwitchPort, identified by its parent switch and port name
+    pub fn switch_port(
+        self,
+        switch_id: Uuid,
+        port_name: Name,
+    ) -> SwitchPort<'a> {
+        SwitchPort::PrimaryKey(
+            Root { lookup_root: self },
+            switch_id,
+            port_name.to_string(),
+        )
+    }
+
     /// Select a resource of type PhysicalDisk, identified by its id
     pub fn physical_disk(
         self,
@@ -813,6 +826,18 @@ lookup_resource! {
     lookup_by_name = false,
     soft_deletes = true,
     primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
+}
+
+lookup_resource! {
+    name = "SwitchPort",
+    ancestors = [],
+    children = [],
+    lookup_by_name = false,
+    soft_deletes = false,
+    primary_key_columns = [
+        { column_name = "switch_id", rust_type = Uuid },
+        { column_name = "port_name", rust_type = String }
+    ]
 }
 
 lookup_resource! {
