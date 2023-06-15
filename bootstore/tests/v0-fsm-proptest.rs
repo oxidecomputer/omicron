@@ -110,13 +110,28 @@ fn create_peers(
         .collect()
 }
 
+fn assert_invariants(
+    peers: &BTreeMap<Baseboard, Fsm>,
+) -> Result<(), TestCaseError> {
+    Ok(())
+}
+
 proptest! {
     #[test]
+//fn blah() {
     fn run((actions, initial_members, config) in arb_actions(12)) {
-        println!("{:#?}", actions);
         let mut peers = create_peers(initial_members, config);
-        for peer in peers.values() {
-            println!("{:#?}", peer);
+        for action in actions {
+            match action {
+                Action::Initialize { rss_sled, rack_uuid, initial_members } => {
+                    let output = peers
+                        .get_mut(&rss_sled)
+                        .unwrap()
+                        .init_rack(rack_uuid, initial_members);
+//                    println!("{:#?}", output);
+                }
+            }
+            assert_invariants(&peers);
         }
     }
 }
