@@ -116,26 +116,45 @@ impl ObservedPropolisState {
     }
 }
 
-/// Newtype to facilitate conversions from Propolis states to external API
-/// states.
-pub struct InstanceState(pub ApiInstanceState);
+/// The set of instance states that sled agent can publish to Nexus. This is
+/// a subset of the instance states Nexus knows about: the Creating and
+/// Destroyed states are reserved for Nexus to use for instances that are being
+/// created for the very first time or have been explicitly deleted.
+pub enum PublishedInstanceState {
+    Starting,
+    Running,
+    Stopping,
+    Stopped,
+    Rebooting,
+    Migrating,
+    Repairing,
+    Failed,
+}
 
-impl From<PropolisInstanceState> for InstanceState {
+impl From<PropolisInstanceState> for PublishedInstanceState {
     fn from(value: PropolisInstanceState) -> Self {
-        InstanceState(match value {
+        match value {
             // From an external perspective, the instance has already been
             // created. Creating the propolis instance is an internal detail and
             // happens every time we start the instance, so we map it to
             // "Starting" here.
             PropolisInstanceState::Creating
-            | PropolisInstanceState::Starting => ApiInstanceState::Starting,
-            PropolisInstanceState::Running => ApiInstanceState::Running,
-            PropolisInstanceState::Stopping => ApiInstanceState::Stopping,
-            PropolisInstanceState::Stopped => ApiInstanceState::Stopped,
-            PropolisInstanceState::Rebooting => ApiInstanceState::Rebooting,
-            PropolisInstanceState::Migrating => ApiInstanceState::Migrating,
-            PropolisInstanceState::Repairing => ApiInstanceState::Repairing,
-            PropolisInstanceState::Failed => ApiInstanceState::Failed,
+            | PropolisInstanceState::Starting => {
+                PublishedInstanceState::Starting
+            }
+            PropolisInstanceState::Running => PublishedInstanceState::Running,
+            PropolisInstanceState::Stopping => PublishedInstanceState::Stopping,
+            PropolisInstanceState::Stopped => PublishedInstanceState::Stopped,
+            PropolisInstanceState::Rebooting => {
+                PublishedInstanceState::Rebooting
+            }
+            PropolisInstanceState::Migrating => {
+                PublishedInstanceState::Migrating
+            }
+            PropolisInstanceState::Repairing => {
+                PublishedInstanceState::Repairing
+            }
+            PropolisInstanceState::Failed => PublishedInstanceState::Failed,
             // NOTE: This is a bit of an odd one - we intentionally do *not*
             // translate the "destroyed" propolis state to the destroyed instance
             // API state.
@@ -145,8 +164,23 @@ impl From<PropolisInstanceState> for InstanceState {
             // should be torn down. Instead, it implies that the Propolis service
             // should be stopped, but the VM could be allocated to a different
             // machine.
-            PropolisInstanceState::Destroyed => ApiInstanceState::Stopped,
-        })
+            PropolisInstanceState::Destroyed => PublishedInstanceState::Stopped,
+        }
+    }
+}
+
+impl From<PublishedInstanceState> for ApiInstanceState {
+    fn from(value: PublishedInstanceState) -> Self {
+        match value {
+            PublishedInstanceState::Starting => ApiInstanceState::Starting,
+            PublishedInstanceState::Running => ApiInstanceState::Running,
+            PublishedInstanceState::Stopping => ApiInstanceState::Stopping,
+            PublishedInstanceState::Stopped => ApiInstanceState::Stopped,
+            PublishedInstanceState::Rebooting => ApiInstanceState::Rebooting,
+            PublishedInstanceState::Migrating => ApiInstanceState::Migrating,
+            PublishedInstanceState::Repairing => ApiInstanceState::Repairing,
+            PublishedInstanceState::Failed => ApiInstanceState::Failed,
+        }
     }
 }
 
@@ -244,7 +278,7 @@ impl InstanceStates {
             None
         };
 
-        let next_state = InstanceState::from(observed.instance_state).0;
+        let next_state = PublishedInstanceState::from(observed.instance_state);
         match observed.migration_status {
             // Case 3: Update normally if there is no migration in progress or
             // the current migration is unrecognized or in flight.
@@ -294,8 +328,8 @@ impl InstanceStates {
 
     // Transitions to a new InstanceState value, updating the timestamp and
     // generation number.
-    pub(crate) fn transition(&mut self, next: ApiInstanceState) {
-        self.current.run_state = next;
+    pub(crate) fn transition(&mut self, next: PublishedInstanceState) {
+        self.current.run_state = next.into();
         self.current.gen = self.current.gen.next();
         self.current.time_updated = Utc::now();
     }

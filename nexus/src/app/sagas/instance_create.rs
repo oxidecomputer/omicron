@@ -6,6 +6,7 @@ use super::{NexusActionContext, NexusSaga, SagaInitError, ACTION_GENERATE_ID};
 use crate::app::instance::WriteBackUpdatedInstance;
 use crate::app::sagas::declare_saga_actions;
 use crate::app::sagas::disk_create::{self, SagaDiskCreate};
+use crate::app::sagas::retry_until_known_result;
 use crate::app::{
     MAX_DISKS_PER_INSTANCE, MAX_EXTERNAL_IPS_PER_INSTANCE,
     MAX_NICS_PER_INSTANCE,
@@ -145,6 +146,8 @@ impl NexusSaga for SagaInstanceCreate {
         params: &Self::Params,
         mut builder: steno::DagBuilder,
     ) -> Result<steno::Dag, SagaInitError> {
+        // Pre-create the instance ID so that it can be supplied as a constant
+        // parameter to the subsagas that create and attach devices.
         let instance_id = Uuid::new_v4();
 
         builder.append(Node::constant(
@@ -435,34 +438,23 @@ async fn sic_remove_network_config(
 
     debug!(log, "deleting nat mapping for entry: {target_ip:#?}");
 
-    let result = match target_ip.ip {
-        ipnetwork::IpNetwork::V4(network) => {
-            dpd_client
-                .nat_ipv4_delete(&network.ip(), *target_ip.first_port)
-                .await
-        }
-        ipnetwork::IpNetwork::V6(network) => {
-            dpd_client
-                .nat_ipv6_delete(&network.ip(), *target_ip.first_port)
-                .await
-        }
-    };
+    let result = retry_until_known_result(log, || async {
+        dpd_client
+            .ensure_nat_entry_deleted(log, target_ip.ip, *target_ip.first_port)
+            .await
+    })
+    .await;
+
     match result {
         Ok(_) => {
             debug!(log, "deletion of nat entry successful for: {target_ip:#?}");
             Ok(())
         }
-        Err(e) => {
-            if e.status() == Some(http::StatusCode::NOT_FOUND) {
-                debug!(log, "no nat entry found for: {target_ip:#?}");
-                Ok(())
-            } else {
-                Err(ActionError::action_failed(Error::internal_error(
-                    &format!("failed to delete nat entry via dpd: {e}"),
-                )))
-            }
-        }
+        Err(e) => Err(Error::internal_error(&format!(
+            "failed to delete nat entry via dpd: {e}"
+        ))),
     }?;
+
     Ok(())
 }
 
@@ -1658,10 +1650,21 @@ pub mod test {
         let opctx = test_opctx(&cptestctx);
 
         let params = new_test_params(&opctx, project_id);
-        let dag = create_saga_dag::<SagaInstanceCreate>(params).unwrap();
 
-        for node in dag.get_nodes() {
-            // Create a new saga for this node.
+        // Each run of the test needs to use a distinct DAG so that it has a
+        // distinct instance ID. Instead of creating a DAG and iterating over
+        // each node to turn it into a failure point, create an initial DAG to
+        // find out how many nodes there are, then iterate over possible failure
+        // points, creating a new DAG each time.
+        let dag =
+            create_saga_dag::<SagaInstanceCreate>(params.clone()).unwrap();
+        let num_nodes = dag.get_nodes().count();
+
+        for failure_index in 0..num_nodes {
+            let dag =
+                create_saga_dag::<SagaInstanceCreate>(params.clone()).unwrap();
+
+            let node = dag.get_nodes().nth(failure_index).unwrap();
             info!(
                 log,
                 "Creating new saga which will fail at index {:?}", node.index();
@@ -1680,10 +1683,15 @@ pub mod test {
                 .saga_inject_error(runnable_saga.id(), node.index())
                 .await
                 .unwrap();
-            nexus
-                .run_saga(runnable_saga)
+
+            let saga_error = nexus
+                .run_saga_raw_result(runnable_saga)
                 .await
-                .expect_err("Saga should have failed");
+                .expect("saga should have started successfully")
+                .kind
+                .expect_err("saga execution should have failed");
+
+            assert_eq!(saga_error.error_node_name, *node.name());
 
             verify_clean_slate(&cptestctx).await;
         }
@@ -1703,14 +1711,24 @@ pub mod test {
         // Build the saga DAG with the provided test parameters
         let opctx = test_opctx(&cptestctx);
 
+        // Create the DAG once to determine how many nodes it has (for iteration
+        // purposes), then recreate it in each iteration of the test. This is
+        // needed to ensure each iteration gets a distinct instance ID.
         let params = new_test_params(&opctx, project_id);
-        let dag = create_saga_dag::<SagaInstanceCreate>(params).unwrap();
+        let dag =
+            create_saga_dag::<SagaInstanceCreate>(params.clone()).unwrap();
+        let num_nodes = dag.get_nodes().count();
 
-        // The "undo_node" should always be immediately preceding the
-        // "error_node".
-        for (undo_node, error_node) in
-            dag.get_nodes().zip(dag.get_nodes().skip(1))
-        {
+        // Iterate over pairs of adjacent nodes. Inject an error into the second
+        // node, then configure the undo action for the first node to be
+        // repeated.
+        let node_indices = Vec::from_iter(0..num_nodes);
+        for indices in node_indices.windows(2) {
+            let dag =
+                create_saga_dag::<SagaInstanceCreate>(params.clone()).unwrap();
+            let undo_node = dag.get_nodes().nth(indices[0]).unwrap();
+            let error_node = dag.get_nodes().nth(indices[1]).unwrap();
+
             // Create a new saga for this node.
             info!(
                 log,
@@ -1747,10 +1765,14 @@ pub mod test {
                 .await
                 .unwrap();
 
-            nexus
-                .run_saga(runnable_saga)
+            let saga_error = nexus
+                .run_saga_raw_result(runnable_saga)
                 .await
-                .expect_err("Saga should have failed");
+                .expect("saga should have started successfully")
+                .kind
+                .expect_err("saga execution should have failed");
+
+            assert_eq!(saga_error.error_node_name, *error_node.name());
 
             verify_clean_slate(&cptestctx).await;
         }

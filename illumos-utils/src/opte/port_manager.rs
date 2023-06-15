@@ -13,6 +13,7 @@ use crate::opte::Gateway;
 use crate::opte::Port;
 use crate::opte::Vni;
 use ipnetwork::IpNetwork;
+use omicron_common::api::external;
 use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_common::api::internal::shared::NetworkInterfaceKind;
 use omicron_common::api::internal::shared::SourceNatConfig;
@@ -383,11 +384,28 @@ impl PortManager {
     #[cfg(target_os = "illumos")]
     pub fn firewall_rules_ensure(
         &self,
+        vni: external::Vni,
         rules: &[VpcFirewallRule],
     ) -> Result<(), Error> {
         use opte_ioctl::OpteHdl;
+
+        info!(
+            self.inner.log,
+            "Ensuring VPC firewall rules";
+            "vni" => ?vni,
+            "rules" => ?&rules,
+        );
+
         let hdl = OpteHdl::open(OpteHdl::XDE_CTL)?;
-        for ((_, _), port) in self.inner.ports.lock().unwrap().iter() {
+
+        let ports = self.inner.ports.lock().unwrap();
+
+        // We update VPC rules as a set so grab only
+        // the relevant ports using the VPC's VNI.
+        let vpc_ports = ports
+            .iter()
+            .filter(|((_, _), port)| u32::from(vni) == u32::from(*port.vni()));
+        for ((_, _), port) in vpc_ports {
             let rules = opte_firewall_rules(rules, port.vni(), port.mac());
             let port_name = port.name().to_string();
             info!(
@@ -407,9 +425,15 @@ impl PortManager {
     #[cfg(not(target_os = "illumos"))]
     pub fn firewall_rules_ensure(
         &self,
+        vni: external::Vni,
         rules: &[VpcFirewallRule],
     ) -> Result<(), Error> {
-        info!(self.inner.log, "Ignoring {} firewall rules", rules.len());
+        info!(
+            self.inner.log,
+            "Ensuring VPC firewall rules (ignored)";
+            "vni" => ?vni,
+            "rules" => ?&rules,
+        );
         Ok(())
     }
 
@@ -420,6 +444,11 @@ impl PortManager {
     ) -> Result<(), Error> {
         use opte_ioctl::OpteHdl;
 
+        info!(
+            self.inner.log,
+            "Mapping virtual NIC to physical host";
+            "mapping" => ?&mapping,
+        );
         let hdl = OpteHdl::open(OpteHdl::XDE_CTL)?;
         hdl.set_v2p(&oxide_vpc::api::SetVirt2PhysReq {
             vip: mapping.virtual_ip.into(),
@@ -438,9 +467,13 @@ impl PortManager {
     #[cfg(not(target_os = "illumos"))]
     pub fn set_virtual_nic_host(
         &self,
-        _mapping: &SetVirtualNetworkInterfaceHost,
+        mapping: &SetVirtualNetworkInterfaceHost,
     ) -> Result<(), Error> {
-        info!(self.inner.log, "Ignoring virtual NIC mapping");
+        info!(
+            self.inner.log,
+            "Mapping virtual NIC to physical host (ignored)";
+            "mapping" => ?&mapping,
+        );
         Ok(())
     }
 

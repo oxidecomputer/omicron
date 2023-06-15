@@ -20,7 +20,7 @@ use spec::{
     UpdateEngine,
 };
 use tokio::io::AsyncWriteExt;
-use update_engine::{StepContext, StepSuccess};
+use update_engine::{events::ProgressUnits, StepContext, StepSuccess};
 
 mod display;
 mod spec;
@@ -119,6 +119,7 @@ impl ExampleContext {
                     cx.send_progress(StepProgress::with_current_and_total(
                         num_bytes / 8,
                         num_bytes,
+                        ProgressUnits::BYTES,
                         serde_json::Value::Null,
                     ))
                     .await;
@@ -127,6 +128,7 @@ impl ExampleContext {
                     cx.send_progress(StepProgress::with_current_and_total(
                         num_bytes / 4,
                         num_bytes,
+                        ProgressUnits::BYTES,
                         serde_json::Value::Null,
                     ))
                     .await;
@@ -151,6 +153,7 @@ impl ExampleContext {
                         cx.send_progress(StepProgress::with_current_and_total(
                             num_bytes * i / 10,
                             num_bytes,
+                            ProgressUnits::BYTES,
                             serde_json::Value::Null,
                         ))
                         .await;
@@ -190,6 +193,7 @@ impl ExampleContext {
                         cx.send_progress(StepProgress::with_current_and_total(
                             current,
                             total_count as u64,
+                            ProgressUnits::BYTES,
                             Default::default(),
                         ))
                         .await;
@@ -299,6 +303,7 @@ fn register_nested_write_steps<'a>(
                         .send_progress(StepProgress::with_current_and_total(
                             index as u64,
                             destinations.len() as u64,
+                            "destinations",
                             Default::default(),
                         ))
                         .await;
@@ -321,6 +326,7 @@ fn register_nested_write_steps<'a>(
                         cx.send_progress(StepProgress::with_current_and_total(
                             total_written as u64,
                             num_bytes,
+                            ProgressUnits::BYTES,
                             (),
                         ))
                         .await;

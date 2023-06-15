@@ -51,6 +51,7 @@ parse-display.workspace = true
 paste.workspace = true
 # See omicron-rpaths for more about the "pq-sys" dependency.
 pq-sys = "*"
+progenitor-client.workspace = true
 propolis-client.workspace = true
 rand.workspace = true
 ref-cast.workspace = true

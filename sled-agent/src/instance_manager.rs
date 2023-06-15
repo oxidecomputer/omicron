@@ -7,11 +7,10 @@
 use crate::nexus::LazyNexusClient;
 use crate::params::{
     InstanceHardware, InstanceMigrationSourceParams, InstancePutStateResponse,
-    InstanceStateRequested, InstanceUnregisterResponse, VpcFirewallRule,
+    InstanceStateRequested, InstanceUnregisterResponse,
 };
 use illumos_utils::dladm::Etherstub;
 use illumos_utils::link::VnicAllocator;
-use illumos_utils::opte::params::SetVirtualNetworkInterfaceHost;
 use illumos_utils::opte::PortManager;
 use illumos_utils::vmm_reservoir;
 use omicron_common::api::external::ByteCount;
@@ -319,45 +318,6 @@ impl InstanceManager {
             .issue_snapshot_request(disk_id, snapshot_id)
             .await
             .map_err(Error::from)
-    }
-
-    pub async fn firewall_rules_ensure(
-        &self,
-        rules: &[VpcFirewallRule],
-    ) -> Result<(), Error> {
-        info!(
-            &self.inner.log,
-            "Ensuring VPC firewall rules";
-            "rules" => ?&rules,
-        );
-        self.inner.port_manager.firewall_rules_ensure(rules)?;
-        Ok(())
-    }
-
-    pub async fn set_virtual_nic_host(
-        &self,
-        mapping: &SetVirtualNetworkInterfaceHost,
-    ) -> Result<(), Error> {
-        info!(
-            &self.inner.log,
-            "Mapping virtual NIC to physical host";
-            "mapping" => ?&mapping,
-        );
-        self.inner.port_manager.set_virtual_nic_host(mapping)?;
-        Ok(())
-    }
-
-    pub async fn unset_virtual_nic_host(
-        &self,
-        mapping: &SetVirtualNetworkInterfaceHost,
-    ) -> Result<(), Error> {
-        info!(
-            &self.inner.log,
-            "Unmapping virtual NIC to physical host";
-            "mapping" => ?&mapping,
-        );
-        self.inner.port_manager.unset_virtual_nic_host(mapping)?;
-        Ok(())
     }
 
     /// Generates an instance ticket associated with this instance manager. This
