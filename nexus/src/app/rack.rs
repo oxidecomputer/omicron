@@ -124,7 +124,14 @@ impl super::Nexus {
 
         // internally ignores ObjectAlreadyExists, so will not error on repeat runs
         let _ = self.populate_mock_system_updates(&opctx).await?;
-        self.populate_switch_ports(&opctx, request.external_port_count).await?;
+        // TODO: This should be a real switch ID
+        let switch_id = Uuid::new_v4();
+        self.populate_switch_ports(
+            &opctx,
+            switch_id,
+            request.external_port_count,
+        )
+        .await?;
 
         let dns_zone = request
             .internal_dns_zone_config

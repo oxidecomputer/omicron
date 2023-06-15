@@ -181,16 +181,16 @@ impl super::Nexus {
     pub async fn populate_switch_ports(
         &self,
         opctx: &OpContext,
+        switch_id: Uuid,
         port_count: u8,
     ) -> CreateResult<()> {
         for i in 0..port_count {
             match self
                 .switch_port_create(
                     opctx,
-                    self.rack_id,
+                    switch_id,
                     // TODO https://github.com/oxidecomputer/omicron/issues/3014
                     // Populate ports for multiple switches
-                    "switch0".parse().unwrap(),
                     format!("qsfp{}", i).parse().unwrap(),
                 )
                 .await
