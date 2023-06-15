@@ -252,7 +252,6 @@ fn read_and_hash_password(log: &Logger) -> Result<PasswordHashString> {
     slog::info!(log, "hashing password...");
     let mut hasher = omicron_passwords::Hasher::default();
     let hash = hasher.create_password(&password).context("invalid password")?;
-    println!("{hash}");
 
     Ok(hash)
 }
