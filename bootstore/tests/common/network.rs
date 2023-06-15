@@ -6,7 +6,7 @@
 
 use bootstore::schemes::v0::{Envelope, Msg};
 use sled_hardware::Baseboard;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 // Named endpoints on a network
 pub type Source = Baseboard;
@@ -24,6 +24,10 @@ pub type FlowId = (Source, Destination);
 /// TCP connection for each flow we do not interleave messages within the same flow.
 #[derive(Debug, Default)]
 pub struct Network {
+    // All connected flows.
+    // There are two flows per connection, one in each direction.
+    connected: BTreeSet<FlowId>,
+
     // Messages sent and "floating" in the network
     sent: BTreeMap<FlowId, Vec<Msg>>,
 
@@ -34,6 +38,16 @@ pub struct Network {
 }
 
 impl Network {
+    pub fn peers_connected(&mut self, peer1: Baseboard, peer2: Baseboard) {
+        self.connected.insert((peer1.clone(), peer2.clone()));
+        self.connected.insert((peer2, peer1));
+    }
+
+    pub fn peers_disconnected(&mut self, peer1: Baseboard, peer2: Baseboard) {
+        self.connected.remove(&(peer1.clone(), peer2.clone()));
+        self.connected.remove(&(peer2, peer1));
+    }
+
     pub fn send(&mut self, source: &Source, envelopes: Vec<Envelope>) {
         for envelope in envelopes {
             let flow_id = (source.clone(), envelope.to);

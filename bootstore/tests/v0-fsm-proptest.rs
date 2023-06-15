@@ -80,16 +80,20 @@ impl TestState {
                 self.on_rack_init(rss_sled, rack_uuid, initial_members)
             }
             Action::Connect(flows) => {
+                // TODO: Assert that output makes sense and dispatch it
                 for (source, dest) in flows {
-                    self.peer_mut(&source).connected(dest.clone());
-                    self.peer_mut(&dest).connected(source);
+                    let _output =
+                        self.peer_mut(&source).connected(dest.clone());
+                    let _output = self.peer_mut(&dest).connected(source);
                 }
                 Ok(())
             }
             Action::Disconnect(flows) => {
+                // TODO: Assert that output makes sense and dispatch it
                 for (source, dest) in flows {
-                    self.peer_mut(&source).disconnected(dest.clone());
-                    self.peer_mut(&dest).disconnected(source);
+                    let _output =
+                        self.peer_mut(&source).disconnected(dest.clone());
+                    let _output = self.peer_mut(&dest).disconnected(source);
                 }
                 Ok(())
             }
@@ -134,7 +138,7 @@ impl TestState {
         // Deliver all the `InitAck` messages to the rss_sleds inbox
         self.network.deliver_all();
 
-        while let Some((destination, mut sourced_msgs)) =
+        while let Some((destination, sourced_msgs)) =
             self.network.delivered().pop_first()
         {
             // The only destination should be the rss_sled
