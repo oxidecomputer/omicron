@@ -43,7 +43,7 @@ pub(crate) enum SetupArgs {
     ResetConfig,
 
     /// Set the password for the recovery user of the recovery silo
-    SetPasswd,
+    SetPassword,
 
     /// Upload a certificate chain
     ///
@@ -119,7 +119,7 @@ impl SetupArgs {
                     .context("failed to clear config")?;
                 slog::info!(log, "configuration reset");
             }
-            SetupArgs::SetPasswd => {
+            SetupArgs::SetPassword => {
                 let hash = read_and_hash_password(&log)?;
                 let hash = NewPasswordHash(hash.to_string());
 
