@@ -418,7 +418,6 @@ pub async fn policy_view(
     let handler = async {
         let nexus = &apictx.nexus;
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        // XXX-dap consider doing this with cached version?
         let silo: NameOrId = opctx
             .authn
             .silo_required()
@@ -451,7 +450,6 @@ async fn policy_update(
         // This should have been validated during parsing.
         bail_unless!(nasgns <= shared::MAX_ROLE_ASSIGNMENTS_PER_RESOURCE);
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        // XXX-dap consider doing this with cached version
         let silo: NameOrId = opctx
             .authn
             .silo_required()
