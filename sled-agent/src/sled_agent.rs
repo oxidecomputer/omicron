@@ -110,13 +110,23 @@ impl From<Error> for dropshot::HttpError {
                         instance_error,
                     ) => match instance_error {
                         crate::instance::Error::Propolis(propolis_error) => {
+                            // Work around dropshot#693: HttpError::for_status
+                            // only accepts client errors and asserts on server
+                            // errors, so convert server errors by hand.
                             match propolis_error.status() {
                                 None => HttpError::for_internal_error(
                                     propolis_error.to_string(),
                                 ),
 
-                                Some(status_code) => {
+                                Some(status_code) if status_code.is_client_error() => {
                                     HttpError::for_status(None, status_code)
+                                },
+
+                                Some(status_code) => match status_code {
+                                    http::status::StatusCode::SERVICE_UNAVAILABLE =>
+                                        HttpError::for_unavail(None, propolis_error.to_string()),
+                                    _ =>
+                                        HttpError::for_internal_error(propolis_error.to_string()),
                                 }
                             }
                         }
