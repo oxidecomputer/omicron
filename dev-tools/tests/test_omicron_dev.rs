@@ -26,7 +26,7 @@ use subprocess::Redirection;
 const CMD_OMICRON_DEV: &str = env!("CARGO_BIN_EXE_omicron-dev");
 
 /// timeout used for various things that should be pretty quick
-const TIMEOUT: Duration = Duration::from_secs(30);
+const TIMEOUT: Duration = Duration::from_secs(15);
 
 fn path_to_omicron_dev() -> PathBuf {
     path_to_executable(CMD_OMICRON_DEV)

@@ -655,13 +655,6 @@ impl Nexus {
         db::lookup::LookupPath::new(opctx, &self.db_datastore)
     }
 
-    pub async fn set_resolver(
-        &self,
-        resolver: internal_dns::resolver::Resolver,
-    ) {
-        *self.resolver.lock().await = resolver;
-    }
-
     pub async fn resolver(&self) -> internal_dns::resolver::Resolver {
         let resolver = self.resolver.lock().await;
         resolver.clone()

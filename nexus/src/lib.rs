@@ -265,10 +265,6 @@ impl nexus_test_interface::NexusServer for Server {
         self.apictx.nexus.get_internal_server_address().await.unwrap()
     }
 
-    async fn set_resolver(&self, resolver: internal_dns::resolver::Resolver) {
-        self.apictx.nexus.set_resolver(resolver).await
-    }
-
     async fn upsert_crucible_dataset(
         &self,
         id: Uuid,

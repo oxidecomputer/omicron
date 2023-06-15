@@ -526,9 +526,24 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                 .expect("Must launch internal nexus first"),
             &self.config,
             std::mem::take(&mut self.rack_init_builder.services),
+            // NOTE: We should probably hand off
+            // "self.rack_init_builder.datasets" here, but Nexus won't be happy
+            // if we pass it right now:
+            //
+            // - When we "call .add_dataset(...)", we need to keep track of
+            // which zpool the dataset is coming from. For these synthetic
+            // environments, we make this value up.
+            // - When we tell Nexus about datasets, we need to provide the
+            // parent zpool UUID, which must be known to Nexus's database.
+            // - The sled agent we're creating to run alongside this test DOES
+            // create synthetic zpools on boot, but
+            //   (a) They're not the same zpools we're making up when we start
+            //   Clickhouse / CRDB (we're basically making distinct calls to
+            //   Uuid::new_v4()).
+            //   (b) These sled-agent-created zpools are registered with Nexus
+            //   asynchronously, and we're not making any effort (currently) to
+            //   wait for them to be known to Nexus.
             vec![],
-            // TODO: The zpools don't exist?
-            //            std::mem::take(&mut self.rack_init_builder.datasets),
             dns_config,
             &external_dns_zone_name,
             recovery_silo,
@@ -552,20 +567,6 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                 .log
                 .new(o!("component" => "internal client test context")),
         );
-
-        // TODO: Can we remove this?
-        // Set Nexus' shared resolver to point to the internal DNS server
-        let internal_dns_address =
-            self.internal_dns.as_ref().unwrap().server.local_address();
-        server
-            .set_resolver(
-                internal_dns::resolver::Resolver::new_from_addrs(
-                    self.logctx.log.new(o!("component" => "DnsResolver")),
-                    vec![*internal_dns_address],
-                )
-                .unwrap(),
-            )
-            .await;
 
         self.external_dns_zone_name = Some(external_dns_zone_name);
         self.external_client = Some(testctx_external);
