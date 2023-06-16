@@ -6490,6 +6490,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "rpassword"
+version = "7.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6678cf63ab3491898c0d021b493c94c9b221d91295294a2a5746eacbe5928322"
+dependencies = [
+ "libc",
+ "rtoolbox",
+ "winapi",
+]
+
+[[package]]
 name = "rsa"
 version = "0.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6509,6 +6520,16 @@ dependencies = [
  "signature 2.1.0",
  "subtle",
  "zeroize",
+]
+
+[[package]]
+name = "rtoolbox"
+version = "0.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "034e22c514f5c0cb8a10ff341b9b048b5ceb21591f31c8f44c43b960f9b3524a"
+dependencies = [
+ "libc",
+ "winapi",
 ]
 
 [[package]]
@@ -8272,9 +8293,9 @@ dependencies = [
 
 [[package]]
 name = "toml_edit"
-version = "0.19.9"
+version = "0.19.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "92d964908cec0d030b812013af25a0e57fddfadb1e066ecc6681d86253129d4f"
+checksum = "2380d56e8670370eee6566b0bfd4265f65b3f432e8c6d85623f728d4fa31f739"
 dependencies = [
  "indexmap",
  "serde",
@@ -9121,9 +9142,11 @@ dependencies = [
  "itertools",
  "libsw",
  "omicron-common 0.1.0",
+ "omicron-passwords 0.1.0",
  "once_cell",
  "proptest",
  "reqwest",
+ "rpassword",
  "semver 1.0.17",
  "serde",
  "serde_json",
@@ -9140,12 +9163,14 @@ dependencies = [
  "tokio",
  "tokio-util",
  "toml 0.7.4",
+ "toml_edit",
  "tui",
  "tui-tree-widget",
  "unicode-width",
  "update-engine",
  "wicket-common",
  "wicketd-client",
+ "zeroize",
 ]
 
 [[package]]
@@ -9189,6 +9214,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "bootstrap-agent-client",
  "buf-list",
  "bytes",
  "camino",
@@ -9211,7 +9237,9 @@ dependencies = [
  "installinator-artifact-client",
  "installinator-artifactd",
  "installinator-common",
+ "omicron-certificates",
  "omicron-common 0.1.0",
+ "omicron-passwords 0.1.0",
  "omicron-test-utils",
  "openapi-lint",
  "openapiv3",
