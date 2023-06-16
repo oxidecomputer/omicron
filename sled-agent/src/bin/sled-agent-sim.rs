@@ -17,8 +17,8 @@ use omicron_common::cmd::fatal;
 use omicron_common::cmd::CmdError;
 use omicron_sled_agent::sim::RssArgs;
 use omicron_sled_agent::sim::{
-    run_server, Config, ConfigHardware, ConfigStorage, ConfigUpdates,
-    ConfigZpool, SimMode,
+    run_standalone_server, Config, ConfigHardware, ConfigStorage,
+    ConfigUpdates, ConfigZpool, SimMode,
 };
 use std::net::SocketAddr;
 use std::net::SocketAddrV6;
@@ -137,5 +137,7 @@ async fn do_run() -> Result<(), CmdError> {
         tls_certificate,
     };
 
-    run_server(&config, &rss_args).await.map_err(CmdError::Failure)
+    run_standalone_server(&config, &rss_args)
+        .await
+        .map_err(|e| CmdError::Failure(e.to_string()))
 }

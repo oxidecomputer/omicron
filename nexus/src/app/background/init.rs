@@ -203,7 +203,7 @@ pub mod test {
         // the case because it was configured with version 1 when the simulated
         // sled agent started up.
         let initial_dns_dropshot_server =
-            &cptestctx.sled_agent.dns_dropshot_server;
+            &cptestctx.internal_dns.dropshot_server;
         let dns_config_client = dns_service_client::Client::new(
             &format!("http://{}", initial_dns_dropshot_server.local_addr()),
             cptestctx.logctx.log.clone(),
