@@ -236,9 +236,8 @@ impl RackSetupService {
 
 // The following two conversion functions translate the speed and fec types used
 // in the internal API to the types used in the dpd-client API.  The conversion
-// is done here, rather than with "impl From" at the defition, to avoid a
-// dependency from omicron-common to dpd-client.  As dpd-client depends on
-// omicron-common, that would create a circular dependency.
+// is done here, rather than with "impl From" at the definition, to avoid a
+// circualar dependency between omicron-common and dpd.
 fn convert_speed(speed: &PortSpeed) -> dpd_client::types::PortSpeed {
     match speed {
         PortSpeed::Speed0G => dpd_client::types::PortSpeed::Speed0G,
