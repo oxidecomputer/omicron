@@ -325,6 +325,9 @@ impl DatabaseString for FleetRole {
         }
     }
 
+    // WARNING: if you're considering changing this (including removing
+    // variants), be sure you've considered how Nexus will handle rows written
+    // previous to your change.
     fn from_database_string(s: &str) -> Result<Self, Self::Error> {
         match s {
             "admin" => Ok(FleetRole::Admin),
@@ -346,6 +349,9 @@ impl DatabaseString for SiloRole {
         }
     }
 
+    // WARNING: if you're considering changing this (including removing
+    // variants), be sure you've considered how Nexus will handle rows written
+    // previous to your change.
     fn from_database_string(s: &str) -> Result<Self, Self::Error> {
         match s {
             "admin" => Ok(SiloRole::Admin),
@@ -367,6 +373,9 @@ impl DatabaseString for ProjectRole {
         }
     }
 
+    // WARNING: if you're considering changing this (including removing
+    // variants), be sure you've considered how Nexus will handle rows written
+    // previous to your change.
     fn from_database_string(s: &str) -> Result<Self, Self::Error> {
         match s {
             "admin" => Ok(ProjectRole::Admin),

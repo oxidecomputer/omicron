@@ -5,7 +5,7 @@
 use super::{Generation, Project};
 use crate::collection::DatastoreCollectionConfig;
 use crate::schema::{image, project, silo};
-use crate::{impl_enum_type, Image};
+use crate::{impl_enum_type, DatabaseString, Image};
 use db_macros::Resource;
 use nexus_types::external_api::shared::{
     FleetRole, SiloIdentityMode, SiloRole,
@@ -108,6 +108,52 @@ pub struct Silo {
     pub rcgen: Generation,
 }
 
+/// Form of mapped fleet roles used when serializing to the database
+// A bunch of structures (e.g., `params::SiloCreate`, `views::Silo`,
+// `authn::SiloAuthnPolicy`) store a mapping of silo roles to a set of fleet
+// roles.  The obvious, normalized way to store this in the database involves a
+// bunch of extra tables and records.  That seems like overkill for a mapping
+// that currently has at most 3 keys, each pointing at a set of at most 3
+// entries, and that always would be updated together.  Instead, we'll store it
+// directly into the database row.  The easiest way to do that is to serialize
+// it to JSON and store it there.  This does give up some database-level
+// validation, unfortunately, but this isn't the sort of property that could
+// _only_ be validated safely at the database.
+//
+// Given this approach, we could serialize the map directly to JSON.  This
+// introduces the risk that somebody modifies the Rust structures in the
+// mapping (say, by removing one of the valid Silo roles) without realizing
+// that this could break our ability to parse existing database rows.  To avoid
+// this, we use a newtype here to translate from the Rust implementation to the
+// one that we will serialize to the database.
+//
+// WARNING: If you're considering changing anything about
+// `SerializedMappedFleetRoles`, including the `From` impl below, be sure you've
+// considered how to handle database records written prior to your change.
+// e.g., if you're removing a role, we won't be able to parse these records any
+// more.
+struct SerializedMappedFleetRoles(BTreeMap<String, BTreeSet<String>>);
+impl<'a> From<&'a BTreeMap<SiloRole, BTreeSet<FleetRole>>>
+    for SerializedMappedFleetRoles
+{
+    fn from(value: &'a BTreeMap<SiloRole, BTreeSet<FleetRole>>) -> Self {
+        SerializedMappedFleetRoles(
+            value
+                .iter()
+                .map(|(silo_role, fleet_roles)| {
+                    let silo_role_str =
+                        silo_role.to_database_string().to_string();
+                    let fleet_roles_str = fleet_roles
+                        .iter()
+                        .map(|f| f.to_database_string().to_string())
+                        .collect();
+                    (silo_role_str, fleet_roles_str)
+                })
+                .collect(),
+        )
+    }
+}
+
 impl Silo {
     /// Creates a new database Silo object.
     pub fn new(params: params::SiloCreate) -> Result<Self, Error> {
@@ -118,16 +164,15 @@ impl Silo {
         id: Uuid,
         params: params::SiloCreate,
     ) -> Result<Self, Error> {
-        // XXX-dap do we want to take some kind of care to prevent this from
-        // being accidentally modified incompatibly, similar to what we do with
-        // DnsName's DnsRecord?
-        let mapped_fleet_roles =
-            serde_json::to_value(&params.mapped_fleet_roles).map_err(|e| {
-                Error::internal_error(&format!(
-                    "failed to serialize mapped_fleet_roles: {:#}",
-                    e
-                ))
-            })?;
+        let mapped_fleet_roles = serde_json::to_value(
+            &SerializedMappedFleetRoles::from(&params.mapped_fleet_roles).0,
+        )
+        .map_err(|e| {
+            Error::internal_error(&format!(
+                "failed to serialize mapped_fleet_roles: {:#}",
+                e
+            ))
+        })?;
         Ok(Self {
             identity: SiloIdentity::new(id, params.identity),
             discoverable: params.discoverable,
