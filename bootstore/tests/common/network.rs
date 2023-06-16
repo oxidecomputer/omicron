@@ -29,6 +29,11 @@ pub struct Network {
     connected: BTreeSet<FlowId>,
 
     // Messages sent and "floating" in the network
+    //
+    // TODO: We probably want to add a "start time" to each message so that
+    // we can model transmit delays as defined in `actions::Delays`. By adding
+    // start time instead of delivery time, changes in delay rates will prevent
+    // existing packets from getting delivered out of order.
     sent: BTreeMap<FlowId, Vec<Msg>>,
 
     // Messages that have been delivered on an endpoint and are ready to be

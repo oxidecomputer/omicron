@@ -92,7 +92,7 @@ impl TestState {
             Action::Disconnect(flows) => {
                 // TODO: Assert that output makes sense and dispatch it
                 for (source, dest) in flows {
-                    self.network.disconnect(source.clone(), dest.clone());
+                    self.network.disconnected(source.clone(), dest.clone());
                     let _output =
                         self.peer_mut(&source).disconnected(dest.clone());
                     let _output = self.peer_mut(&dest).disconnected(source);

@@ -6,7 +6,7 @@
 
 use super::actions::Action;
 use bootstore::schemes::v0::{Config, Envelope, Fsm, Msg, Ticks};
-use proptest::prelude::*;
+use proptest::{prelude::*, sample::Subsequence};
 use sled_hardware::Baseboard;
 use std::collections::BTreeSet;
 use uuid::Uuid;
@@ -86,10 +86,40 @@ fn arb_action(
     config: Config,
     initial_members: BTreeSet<Baseboard>,
 ) -> impl Strategy<Value = Action> {
-    // Choose an RSS sled randomly
-    any::<prop::sample::Selector>().prop_map(move |selector| Action::RackInit {
-        rss_sled: selector.select(&initial_members).clone(),
-        rack_uuid,
-        initial_members: initial_members.clone(),
-    })
+    let init_members_vec: Vec<_> = initial_members.iter().cloned().collect();
+
+    // Consruct an even number of unique indexes to match into flows
+    // We know we always have at least 2 members so this works fine.
+    let flows = prop::collection::vec(
+        any::<prop::sample::Index>(),
+        2..=initial_members.len() / 2 * 2,
+    )
+    .prop_shuffle()
+    .prop_map(move |indexes| {
+        indexes
+            .chunks_exact(2)
+            .map(|indexes| {
+                let source = init_members_vec
+                    [indexes[0].index(init_members_vec.len())]
+                .clone();
+                let dest = init_members_vec
+                    [indexes[1].index(init_members_vec.len())]
+                .clone();
+                (source, dest)
+            })
+            .collect()
+    });
+
+    prop_oneof![
+        flows.clone().prop_map(Action::Connect),
+        flows.prop_map(Action::Disconnect),
+        // Choose an RSS sled randomly
+        any::<prop::sample::Selector>().prop_map(move |selector| {
+            Action::RackInit {
+                rss_sled: selector.select(&initial_members).clone(),
+                rack_uuid,
+                initial_members: initial_members.clone(),
+            }
+        })
+    ]
 }
