@@ -92,10 +92,7 @@ pub trait ApiResourceWithRoles: ApiResource {
     fn conferred_roles(
         &self,
         authn: &authn::Context,
-    ) -> Result<
-        Option<(ResourceType, Uuid)>,
-        Error,
-    >;
+    ) -> Result<Option<(ResourceType, Uuid)>, Error>;
 }
 
 /// Describes the specific roles for an `ApiResourceWithRoles`
@@ -181,24 +178,12 @@ impl PartialEq for Fleet {
 
 impl oso::PolarClass for Fleet {
     fn get_polar_class_builder() -> oso::ClassBuilder<Self> {
-        oso::Class::builder()
-            .with_equality_check()
-            .add_method(
-                "has_role",
-                |_: &Fleet, actor: AuthenticatedActor, role: String| {
-                    actor.has_role_resource(
-                        ResourceType::Fleet,
-                        *FLEET_ID,
-                        &role,
-                    )
-                },
-            )
-            .add_method(
-                "has_conferred_role",
-                |_: &Fleet, actor: AuthenticatedActor, role: String| {
-                    actor.has_conferred_fleet_role(&role)
-                },
-            )
+        oso::Class::builder().with_equality_check().add_method(
+            "has_role",
+            |_: &Fleet, actor: AuthenticatedActor, role: String| {
+                actor.has_role_resource(ResourceType::Fleet, *FLEET_ID, &role)
+            },
+        )
     }
 }
 

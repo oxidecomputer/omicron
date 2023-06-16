@@ -23,7 +23,7 @@ allow(actor: AnyActor, action: Action, resource) if
 
 # Define role relationships
 has_role(actor: AuthenticatedActor, role: String, resource: Resource)
-	if resource.has_role(actor, role);
+	if print("dap: has_role(role, resource)", role, resource) and resource.has_role(actor, role);
 
 #
 # ROLES AND PERMISSIONS IN THE FLEET/SILO/PROJECT HIERARCHY
@@ -112,8 +112,10 @@ resource Fleet {
 }
 
 # For fleets specifically, roles can be conferred by roles on the user's Silo.
-has_role(actor: AuthenticatedActor, role: String, fleet: Fleet)
-	if fleet.has_conferred_role(actor, role);
+has_role(actor: AuthenticatedActor, role: String, _: Fleet) if
+	silo_role in actor.confers_fleet_role(role)
+	and print("dap: conferred_role (silo_role, silo)", silo_role, actor.silo) and
+	has_role(actor, silo_role, actor.silo) and print("dap: had it!");
 
 resource Silo {
 	permissions = [

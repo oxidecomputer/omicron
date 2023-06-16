@@ -65,33 +65,37 @@ impl AuthenticatedActor {
         resource_id: Uuid,
         role: &str,
     ) -> bool {
+        // XXX-dap
+        eprintln!("dap: actor {:?} checking for {:?} on {:?} {}",
+            self,
+            role,
+            resource_type,
+            resource_id
+        );
         self.roles.has_role(resource_type, resource_id, role)
     }
 
-    /// Returns whether this actor has the given role on the Fleet by virtue of
-    /// having any role on the Silo that confers this role ont he Fleet
-    pub fn has_conferred_fleet_role(&self, fleet_role_str: &str) -> bool {
+    /// Returns the list of Silo roles that confer the given Fleet roles for
+    /// this actor's Silo
+    pub fn confers_fleet_role(&self, fleet_role_str: &str) -> Vec<String> {
         let Ok(fleet_role) = FleetRole::from_database_string(fleet_role_str)
-            else { return false; };
-        let Some(silo_id) = self.silo_id
-            else { return false; };
-        let silo_policy = self.silo_policy.as_ref().expect(
-            "expected silo policy if the actor was associated with a Silo",
-        );
-        let mapping = silo_policy.mapped_fleet_roles();
-        for (silo_role, fleet_roles) in mapping {
-            if fleet_roles.contains(&fleet_role)
-                && self.has_role_resource(
-                    ResourceType::Silo,
-                    silo_id,
-                    silo_role.to_database_string(),
-                )
-            {
-                return true;
-            }
-        }
-
-        return false;
+            else { return vec![] };
+        let Some(silo_policy) = self.silo_policy.as_ref()
+            else { return vec![] };
+        let rv = silo_policy
+            .mapped_fleet_roles()
+            .into_iter()
+            .filter_map(|(silo_role, fleet_roles)| {
+                if fleet_roles.contains(&fleet_role) {
+                    Some(silo_role.to_database_string().to_string())
+                } else {
+                    None
+                }
+            })
+            .collect();
+        // XXX-dap
+        eprintln!("dap: confers_fleet_role for {:?} = {:?}", fleet_role_str, rv);
+        rv
     }
 }
 
@@ -134,6 +138,12 @@ impl oso::PolarClass for AuthenticatedActor {
                     )
                 })
             })
+            .add_method(
+                "confers_fleet_role",
+                |a: &AuthenticatedActor, role: String| {
+                    a.confers_fleet_role(&role)
+                },
+            )
             .add_method(
                 "equals_silo_user",
                 |a: &AuthenticatedActor, u: SiloUser| a.actor_id == u.id(),
