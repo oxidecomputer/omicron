@@ -91,6 +91,12 @@ impl DataStore {
     ) -> Result<impl RunnableQuery<Silo>, Error> {
         opctx.authorize(authz::Action::CreateChild, &authz::FLEET).await?;
 
+        // If the new Silo has configuration mapping its roles to Fleet-level
+        // roles, that's effectively trying to modify the Fleet-level policy.
+        if !silo.mapped_fleet_roles()?.is_empty() {
+            opctx.authorize(authz::Action::ModifyPolicy, &authz::FLEET).await?;
+        }
+
         use db::schema::silo::dsl;
         Ok(diesel::insert_into(dsl::silo)
             .values(silo)
