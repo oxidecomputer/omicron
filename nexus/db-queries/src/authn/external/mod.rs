@@ -146,20 +146,34 @@ pub trait SiloUserSilo {
 mod test {
     use super::*;
     use anyhow::anyhow;
+    use omicron_common::api::external::Error;
     use std::sync::atomic::AtomicU8;
     use std::sync::atomic::Ordering;
     use std::sync::Arc;
 
-    struct NoopAuthnContext;
+    // We don't need much from the testing "context" object.  But it's handy to
+    // be able to inject different values for `silo_authn_policy_for()`.
+    enum TestAuthnContext {
+        PolicyFail,
+        PolicyOk,
+        PolicyNone,
+    }
+
     #[async_trait]
-    impl AuthenticatorContext for NoopAuthnContext {
-        // XXX-dap TODO-coverage should we add any tests here?
+    impl AuthenticatorContext for TestAuthnContext {
         async fn silo_authn_policy_for(
             &self,
             _: &authn::Actor,
-        ) -> Result<Option<SiloAuthnPolicy>, omicron_common::api::external::Error>
-        {
-            Ok(None)
+        ) -> Result<Option<SiloAuthnPolicy>, Error> {
+            match self {
+                TestAuthnContext::PolicyFail => {
+                    Err(Error::internal_error("injected error"))
+                }
+                TestAuthnContext::PolicyOk => {
+                    Ok(Some(SiloAuthnPolicy::default()))
+                }
+                TestAuthnContext::PolicyNone => Ok(None),
+            }
         }
     }
 
@@ -187,14 +201,14 @@ mod test {
     const FAIL: u8 = 2;
 
     #[async_trait]
-    impl HttpAuthnScheme<NoopAuthnContext> for GruntScheme {
+    impl HttpAuthnScheme<TestAuthnContext> for GruntScheme {
         fn name(&self) -> authn::SchemeName {
             self.name
         }
 
         async fn authn(
             &self,
-            _ctx: &NoopAuthnContext,
+            _ctx: &TestAuthnContext,
             _log: &slog::Logger,
             _request: &dropshot::RequestInfo,
         ) -> SchemeResult {
@@ -241,7 +255,7 @@ mod test {
             next: Arc::clone(&flag1),
             nattempts: Arc::clone(&count1),
             actor: actor1,
-        }) as Box<dyn HttpAuthnScheme<NoopAuthnContext>>;
+        }) as Box<dyn HttpAuthnScheme<TestAuthnContext>>;
 
         let flag2 = Arc::new(AtomicU8::new(SKIP));
         let count2 = Arc::new(AtomicU8::new(0));
@@ -257,7 +271,7 @@ mod test {
             next: Arc::clone(&flag2),
             nattempts: Arc::clone(&count2),
             actor: actor2,
-        }) as Box<dyn HttpAuthnScheme<NoopAuthnContext>>;
+        }) as Box<dyn HttpAuthnScheme<TestAuthnContext>>;
 
         let authn = Authenticator::new(vec![grunt1, grunt2]);
         let request = http::Request::builder()
@@ -272,7 +286,7 @@ mod test {
         // both grunts having been consulted.
         let ctx = authn
             .authn_request_generic(
-                &NoopAuthnContext,
+                &TestAuthnContext::PolicyNone,
                 &log,
                 &dropshot::RequestInfo::new(
                     &request,
@@ -294,7 +308,7 @@ mod test {
         flag1.store(OK, Ordering::SeqCst);
         let ctx = authn
             .authn_request_generic(
-                &NoopAuthnContext,
+                &TestAuthnContext::PolicyOk,
                 &log,
                 &dropshot::RequestInfo::new(
                     &request,
@@ -308,13 +322,40 @@ mod test {
         assert_eq!(ctx.actor(), Some(&actor1));
         assert_eq!(expected_count1, count1.load(Ordering::SeqCst));
         assert_eq!(expected_count2, count2.load(Ordering::SeqCst));
+        assert!(ctx.silo_authn_policy().is_some());
+
+        // As an aside, do the same thing but in a way that causes the Silo
+        // authn policy glue to fail.  We'll still have hit the grunt1 scheme.
+        let error = authn
+            .authn_request_generic(
+                &TestAuthnContext::PolicyFail,
+                &log,
+                &dropshot::RequestInfo::new(
+                    &request,
+                    "0.0.0.0:0".parse().unwrap(),
+                ),
+            )
+            .await
+            .expect_err("expected authn to fail");
+        expected_count1 += 1;
+        assert_eq!(
+            error.reason.to_string(),
+            "actor authenticated, but failed to load Silo authn policy"
+        );
+        let http_error = dropshot::HttpError::from(error);
+        assert_eq!(
+            http_error.status_code,
+            http::StatusCode::INTERNAL_SERVER_ERROR
+        );
+        assert_eq!(expected_count1, count1.load(Ordering::SeqCst));
+        assert_eq!(expected_count2, count2.load(Ordering::SeqCst));
 
         // Now let's configure grunt1 to fail authentication.  We should get
         // back an error.  grunt2 should not be consulted.
         flag1.store(FAIL, Ordering::SeqCst);
         let error = authn
             .authn_request_generic(
-                &NoopAuthnContext,
+                &TestAuthnContext::PolicyNone,
                 &log,
                 &dropshot::RequestInfo::new(
                     &request,
@@ -338,7 +379,7 @@ mod test {
         flag2.store(OK, Ordering::SeqCst);
         let ctx = authn
             .authn_request_generic(
-                &NoopAuthnContext,
+                &TestAuthnContext::PolicyNone,
                 &log,
                 &dropshot::RequestInfo::new(
                     &request,
@@ -353,6 +394,7 @@ mod test {
         assert_eq!(ctx.actor(), Some(&actor2));
         assert_eq!(expected_count1, count1.load(Ordering::SeqCst));
         assert_eq!(expected_count2, count2.load(Ordering::SeqCst));
+        assert!(ctx.silo_authn_policy().is_none());
 
         // Now configure grunt2 to fail.
         flag2.store(FAIL, Ordering::SeqCst);
@@ -360,7 +402,7 @@ mod test {
         expected_count2 += 1;
         let error = authn
             .authn_request_generic(
-                &NoopAuthnContext,
+                &TestAuthnContext::PolicyNone,
                 &log,
                 &dropshot::RequestInfo::new(
                     &request,

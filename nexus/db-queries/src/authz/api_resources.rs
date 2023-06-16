@@ -82,13 +82,20 @@ pub trait ApiResourceWithRoles: ApiResource {
     fn resource_id(&self) -> Uuid;
 
     /// Returns an optional other resource whose roles should be fetched along
-    /// with this resource, along with how to map that resource's roles to this
-    /// resource's roles.
+    /// with this resource
     ///
-    /// This differs from "parent".  With "parent", all of the roles that might
-    /// affect the parent will be fetched, which include all of _its_ parents
-    /// (i.e., it's recursive).  With this function, we only fetch this one
-    /// resource's roles.
+    /// This exists to support the behavior that Silo-level roles can confer
+    /// Fleet-level roles.  That is, it's possible to set configuration on the
+    /// Silo that means "if a person has the 'admin' role on this Silo, then
+    /// they also get the 'admin' role on the Fleet."  In order to implement
+    /// this, if such a policy exists on the user's Silo, then we have to load a
+    /// user's roles on that Silo whenever we would load the roles for the
+    /// Fleet.
+    ///
+    /// Note this differs from "parent" in that it's not recursive.  With
+    /// "parent", all of the roles that might affect the parent will be fetched,
+    /// which include all of _its_ parents.  With this function, we only fetch
+    /// this one resource's directly-attached roles.
     fn conferred_roles(
         &self,
         authn: &authn::Context,
@@ -219,12 +226,9 @@ impl ApiResourceWithRoles for Fleet {
         &self,
         authn: &authn::Context,
     ) -> Result<Option<(ResourceType, Uuid)>, Error> {
-        // We support operators configuring Silos such that a particular
-        // Silo level role confers a particular Fleet-level role.  So when
-        // loading fleet-level roles, we also have to load an actor's
-        // Silo-level roles, assuming there _is_ an actor and that this
-        // actor is associated with a Silo.
-        // XXX-dap that comment belongs elsewhere
+        // If the actor is associated with a Silo, and if that Silo has a policy
+        // that grants fleet-level roles, then we must look up the actor's
+        // Silo-level roles when looking up their roles on the Fleet.
         let Some(silo_id) = authn
                 .actor()
                 .and_then(|actor| actor.silo_id())

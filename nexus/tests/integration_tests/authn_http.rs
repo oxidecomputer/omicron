@@ -314,7 +314,6 @@ struct WhoamiServerState {
 
 #[async_trait]
 impl AuthenticatorContext for WhoamiServerState {
-    // XXX-dap TODO-coverage should we add any tests here?
     async fn silo_authn_policy_for(
         &self,
         _: &omicron_nexus::authn::Actor,
