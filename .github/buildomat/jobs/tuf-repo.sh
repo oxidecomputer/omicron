@@ -137,9 +137,9 @@ done
 
 # Fetch SP images from oxidecomputer/hubris GHA artifacts.
 HUBRIS_VERSION="1.0.0-alpha+git${HUBRIS_COMMIT:0:11}"
-run_id=$(curl "https://api.github.com/repos/oxidecomputer/hubris/actions/runs?head_sha=$HUBRIS_COMMIT" \
+run_id=$(curl --netrc "https://api.github.com/repos/oxidecomputer/hubris/actions/runs?head_sha=$HUBRIS_COMMIT" \
     | /opt/ooce/bin/jq -r '.workflow_runs[] | select(.path == ".github/workflows/dist.yml") | .id')
-artifacts=$(curl "https://api.github.com/repos/oxidecomputer/hubris/actions/runs/$run_id/artifacts")
+artifacts=$(curl --netrc "https://api.github.com/repos/oxidecomputer/hubris/actions/runs/$run_id/artifacts")
 for noun in gimlet-c psc-b sidecar-b; do
     tufaceous_kind=${noun%-?}
     tufaceous_kind=${tufaceous_kind//sidecar/switch}_sp
