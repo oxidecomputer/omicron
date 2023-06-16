@@ -44,8 +44,9 @@ impl Server {
         let client_log = log.new(o!("component" => "NexusClient"));
 
         let addr = request.sled_address();
-        let lazy_nexus_client = LazyNexusClient::new(client_log, *addr.ip())
-            .map_err(|e| e.to_string())?;
+        let lazy_nexus_client =
+            LazyNexusClient::new_from_subnet(client_log, *addr.ip())
+                .map_err(|e| e.to_string())?;
 
         let sled_agent = SledAgent::new(
             &config,

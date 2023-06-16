@@ -1164,9 +1164,11 @@ mod test {
             0xfd00, 0x1de, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
         );
         let port_manager = PortManager::new(log.new(slog::o!()), underlay_ip);
-        let lazy_nexus_client =
-            LazyNexusClient::new(log.clone(), std::net::Ipv6Addr::LOCALHOST)
-                .unwrap();
+        let lazy_nexus_client = LazyNexusClient::new_from_subnet(
+            log.clone(),
+            std::net::Ipv6Addr::LOCALHOST,
+        )
+        .unwrap();
         let instance_manager = InstanceManager::new(
             log.clone(),
             lazy_nexus_client.clone(),

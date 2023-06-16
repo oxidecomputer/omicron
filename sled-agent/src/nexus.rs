@@ -9,18 +9,18 @@ pub use nexus_client::Client as NexusClient;
 
 use internal_dns::resolver::{ResolveError, Resolver};
 use internal_dns::ServiceName;
-use omicron_common::address::NEXUS_INTERNAL_PORT;
 use slog::Logger;
 use std::future::Future;
-use std::net::Ipv6Addr;
+use std::net::{Ipv6Addr, SocketAddr, SocketAddrV6};
 use std::pin::Pin;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
 struct Inner {
     log: Logger,
     resolver: Resolver,
+    address: Mutex<Option<SocketAddrV6>>,
 }
 
 /// Wrapper around a [`NexusClient`] object, which allows deferring
@@ -39,7 +39,10 @@ pub struct LazyNexusClient {
 }
 
 impl LazyNexusClient {
-    pub fn new(log: Logger, addr: Ipv6Addr) -> Result<Self, ResolveError> {
+    pub fn new_from_subnet(
+        log: Logger,
+        addr: Ipv6Addr,
+    ) -> Result<Self, ResolveError> {
         Ok(Self {
             inner: Arc::new(Inner {
                 log: log.clone(),
@@ -47,19 +50,46 @@ impl LazyNexusClient {
                     log.new(o!("component" => "DnsResolver")),
                     addr,
                 )?,
+                address: Mutex::new(None),
+            }),
+        })
+    }
+
+    pub fn new_from_dns(
+        log: Logger,
+        dns_addrs: Vec<SocketAddr>,
+    ) -> Result<Self, ResolveError> {
+        Ok(Self {
+            inner: Arc::new(Inner {
+                log: log.clone(),
+                resolver: Resolver::new_from_addrs(
+                    log.new(o!("component" => "DnsResolver")),
+                    dns_addrs,
+                )?,
+                address: Mutex::new(None),
             }),
         })
     }
 
     pub async fn get_ip(&self) -> Result<Ipv6Addr, ResolveError> {
-        self.inner.resolver.lookup_ipv6(ServiceName::Nexus).await
+        self.get_addr().await.map(|addr| *addr.ip())
+    }
+
+    pub async fn get_addr(&self) -> Result<SocketAddrV6, ResolveError> {
+        if let Some(addr) = self.inner.address.lock().unwrap().as_ref() {
+            return Ok(*addr);
+        }
+        let addr =
+            self.inner.resolver.lookup_socket_v6(ServiceName::Nexus).await?;
+        *self.inner.address.lock().unwrap() = Some(addr);
+        Ok(addr)
     }
 
     pub async fn get(&self) -> Result<NexusClient, ResolveError> {
-        let address = self.get_ip().await?;
+        let address = self.get_addr().await?;
 
         Ok(NexusClient::new(
-            &format!("http://[{}]:{}", address, NEXUS_INTERNAL_PORT),
+            &format!("http://{address}"),
             self.inner.log.clone(),
         ))
     }
