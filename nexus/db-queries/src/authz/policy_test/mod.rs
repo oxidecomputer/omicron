@@ -34,6 +34,7 @@ use resource_builder::DynAuthorizedResource;
 use resource_builder::ResourceBuilder;
 use resource_builder::ResourceSet;
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::io::Cursor;
 use std::io::Write;
 use std::sync::Arc;
@@ -313,7 +314,6 @@ impl<W: Write> Write for StdoutTee<W> {
 /// authorization policy lives with each Silo (in the Silo's database record,
 /// more precisely).  This test exercises various combinations of that policy,
 /// plus that it's honored correctly by the authz subsystem.
-/// XXX-dap should we be using a BTreeSet of roles instead of a Vec?
 #[tokio::test]
 async fn test_conferred_roles() {
     // To start, this test looks a lot like the test above.
@@ -370,24 +370,30 @@ async fn test_conferred_roles() {
         // empty policy
         BTreeMap::new(),
         // silo admin confers fleet admin
-        BTreeMap::from([(SiloRole::Admin, vec![FleetRole::Admin])]),
+        BTreeMap::from([(SiloRole::Admin, BTreeSet::from([FleetRole::Admin]))]),
         // silo viewer confers fleet viewer
-        BTreeMap::from([(SiloRole::Viewer, vec![FleetRole::Viewer])]),
+        BTreeMap::from([(
+            SiloRole::Viewer,
+            BTreeSet::from([FleetRole::Viewer]),
+        )]),
         // silo admin confers fleet viewer (i.e., it's not hardcoded to confer
         // the same-named role)
-        BTreeMap::from([(SiloRole::Admin, vec![FleetRole::Viewer])]),
+        BTreeMap::from([(
+            SiloRole::Admin,
+            BTreeSet::from([FleetRole::Viewer]),
+        )]),
         // It's not possible to effectively test conferring multiple roles
         // because the roles we have are hierarchical, so conferring any number
         // of roles is equivalent to conferring just the most privileged of
         // them.  Still, at least make sure it doesn't panic or something.
         BTreeMap::from([(
             SiloRole::Viewer,
-            vec![FleetRole::Viewer, FleetRole::Admin],
+            BTreeSet::from([FleetRole::Viewer, FleetRole::Admin]),
         )]),
         // Different roles can be conferred different roles.
         BTreeMap::from([
-            (SiloRole::Admin, vec![FleetRole::Admin]),
-            (SiloRole::Viewer, vec![FleetRole::Viewer]),
+            (SiloRole::Admin, BTreeSet::from([FleetRole::Admin])),
+            (SiloRole::Viewer, BTreeSet::from([FleetRole::Viewer])),
         ]),
     ];
 

@@ -48,6 +48,7 @@ use omicron_common::api::external::LookupType;
 use serde::Deserialize;
 use serde::Serialize;
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use uuid::Uuid;
 
 /// Describes how the actor performing the current operation is authenticated
@@ -249,18 +250,20 @@ impl Context {
 pub struct SiloAuthnPolicy {
     /// Describes which fleet-level roles are automatically conferred by which
     /// silo-level roles.
-    mapped_fleet_roles: BTreeMap<SiloRole, Vec<FleetRole>>,
+    mapped_fleet_roles: BTreeMap<SiloRole, BTreeSet<FleetRole>>,
 }
 
 impl SiloAuthnPolicy {
     #[cfg(test)]
     pub fn new(
-        mapped_fleet_roles: BTreeMap<SiloRole, Vec<FleetRole>>,
+        mapped_fleet_roles: BTreeMap<SiloRole, BTreeSet<FleetRole>>,
     ) -> SiloAuthnPolicy {
         SiloAuthnPolicy { mapped_fleet_roles }
     }
 
-    pub fn mapped_fleet_roles(&self) -> &BTreeMap<SiloRole, Vec<FleetRole>> {
+    pub fn mapped_fleet_roles(
+        &self,
+    ) -> &BTreeMap<SiloRole, BTreeSet<FleetRole>> {
         &self.mapped_fleet_roles
     }
 }

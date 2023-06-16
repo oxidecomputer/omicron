@@ -84,7 +84,9 @@ pub struct RoleAssignment<AllowedRoles> {
     Deserialize,
     EnumIter,
     Eq,
+    Ord,
     PartialEq,
+    PartialOrd,
     Serialize,
     JsonSchema,
 )]

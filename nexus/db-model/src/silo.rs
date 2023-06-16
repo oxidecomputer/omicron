@@ -15,6 +15,7 @@ use nexus_types::external_api::{params, shared};
 use nexus_types::identity::Resource;
 use omicron_common::api::external::Error;
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use uuid::Uuid;
 
 impl_enum_type!(
@@ -145,7 +146,7 @@ impl Silo {
 
     pub fn mapped_fleet_roles(
         &self,
-    ) -> Result<BTreeMap<SiloRole, Vec<FleetRole>>, Error> {
+    ) -> Result<BTreeMap<SiloRole, BTreeSet<FleetRole>>, Error> {
         serde_json::from_value(self.mapped_fleet_roles.clone()).map_err(|e| {
             Error::internal_error(&format!(
                 "failed to deserialize mapped fleet roles from database: {:#}",

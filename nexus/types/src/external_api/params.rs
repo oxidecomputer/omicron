@@ -20,6 +20,7 @@ use serde::{
     Deserialize, Deserializer, Serialize, Serializer,
 };
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::collections::HashMap;
 use std::{net::IpAddr, str::FromStr};
 use uuid::Uuid;
@@ -305,7 +306,8 @@ pub struct SiloCreate {
     /// The default is that no Fleet roles are conferred by any Silo roles
     /// unless there's a corresponding entry in this map.
     #[serde(default)]
-    pub mapped_fleet_roles: BTreeMap<shared::SiloRole, Vec<shared::FleetRole>>,
+    pub mapped_fleet_roles:
+        BTreeMap<shared::SiloRole, BTreeSet<shared::FleetRole>>,
 }
 
 /// Create-time parameters for a `User`

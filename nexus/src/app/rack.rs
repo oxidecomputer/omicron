@@ -39,6 +39,7 @@ use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::NameOrId;
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::collections::HashMap;
 use std::net::IpAddr;
 use std::str::FromStr;
@@ -179,8 +180,10 @@ impl super::Nexus {
 
         // Administrators of the Recovery Silo are automatically made
         // administrators of the Fleet.
-        let mapped_fleet_roles =
-            BTreeMap::from([(SiloRole::Admin, vec![FleetRole::Admin])]);
+        let mapped_fleet_roles = BTreeMap::from([(
+            SiloRole::Admin,
+            BTreeSet::from([FleetRole::Admin]),
+        )]);
 
         let recovery_silo = SiloCreate {
             identity: IdentityMetadataCreateParams {
