@@ -12,6 +12,7 @@ use clap::Parser;
 use dropshot::ConfigDropshot;
 use dropshot::ConfigLogging;
 use dropshot::ConfigLoggingLevel;
+use dropshot::HandlerTaskMode;
 use nexus_client::types as NexusTypes;
 use omicron_common::cmd::fatal;
 use omicron_common::cmd::CmdError;
@@ -98,6 +99,7 @@ async fn do_run() -> Result<(), CmdError> {
         dropshot: ConfigDropshot {
             bind_address: args.sled_agent_addr.into(),
             request_body_max_bytes: 1024 * 1024,
+            default_handler_task_mode: HandlerTaskMode::Detached,
         },
         log: ConfigLogging::StderrTerminal { level: ConfigLoggingLevel::Info },
         storage: ConfigStorage {
