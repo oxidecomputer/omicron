@@ -367,32 +367,29 @@ async fn test_conferred_roles() {
     // policies.  Instead, we can use different authn:::Contexts.
     let authz = Arc::new(authz::Authz::new(&logctx.log));
     let policies = vec![
-        //// empty policy
-        //BTreeMap::new(),
-        //// silo admin confers fleet admin
-        //BTreeMap::from([(SiloRole::Admin, vec![FleetRole::Admin])]),
+        // empty policy
+        BTreeMap::new(),
+        // silo admin confers fleet admin
+        BTreeMap::from([(SiloRole::Admin, vec![FleetRole::Admin])]),
         // silo viewer confers fleet viewer
-        // XXX-dap uncomment all those
         BTreeMap::from([(SiloRole::Viewer, vec![FleetRole::Viewer])]),
-        //// silo admin confers fleet viewer (i.e., it's not hardcoded to confer
-        //// the same-named role)
-        //BTreeMap::from([(SiloRole::Admin, vec![FleetRole::Viewer])]),
-        //// It's not possible to effectively test conferring multiple roles
-        //// because the roles we have are hierarchical, so conferring any number
-        //// of roles is equivalent to conferring just the most privileged of
-        //// them.  Still, at least make sure it doesn't panic or something.
-        //BTreeMap::from([(
-        //    SiloRole::Viewer,
-        //    vec![FleetRole::Viewer, FleetRole::Admin],
-        //)]),
-        //// Different roles can be conferred different roles.
-        //BTreeMap::from([
-        //    (SiloRole::Admin, vec![FleetRole::Admin]),
-        //    (SiloRole::Viewer, vec![FleetRole::Viewer]),
-        //]),
+        // silo admin confers fleet viewer (i.e., it's not hardcoded to confer
+        // the same-named role)
+        BTreeMap::from([(SiloRole::Admin, vec![FleetRole::Viewer])]),
+        // It's not possible to effectively test conferring multiple roles
+        // because the roles we have are hierarchical, so conferring any number
+        // of roles is equivalent to conferring just the most privileged of
+        // them.  Still, at least make sure it doesn't panic or something.
+        BTreeMap::from([(
+            SiloRole::Viewer,
+            vec![FleetRole::Viewer, FleetRole::Admin],
+        )]),
+        // Different roles can be conferred different roles.
+        BTreeMap::from([
+            (SiloRole::Admin, vec![FleetRole::Admin]),
+            (SiloRole::Viewer, vec![FleetRole::Viewer]),
+        ]),
     ];
-
-    eprintln!(""); // XXX-dap
 
     let mut buffer = Vec::new();
     {
@@ -437,8 +434,6 @@ async fn test_conferred_roles() {
         "tests/output/authz-conferred-roles.out",
         &std::str::from_utf8(buffer.as_ref()).expect("non-UTF8 output"),
     );
-
-    panic!("dap!"); // XXX-dap
 
     db.cleanup().await.unwrap();
     logctx.cleanup_successful();

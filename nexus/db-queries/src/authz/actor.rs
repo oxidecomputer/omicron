@@ -65,13 +65,6 @@ impl AuthenticatedActor {
         resource_id: Uuid,
         role: &str,
     ) -> bool {
-        // XXX-dap
-        eprintln!("dap: actor {:?} checking for {:?} on {:?} {}",
-            self,
-            role,
-            resource_type,
-            resource_id
-        );
         self.roles.has_role(resource_type, resource_id, role)
     }
 
@@ -82,7 +75,7 @@ impl AuthenticatedActor {
             else { return vec![] };
         let Some(silo_policy) = self.silo_policy.as_ref()
             else { return vec![] };
-        let rv = silo_policy
+        silo_policy
             .mapped_fleet_roles()
             .into_iter()
             .filter_map(|(silo_role, fleet_roles)| {
@@ -92,10 +85,7 @@ impl AuthenticatedActor {
                     None
                 }
             })
-            .collect();
-        // XXX-dap
-        eprintln!("dap: confers_fleet_role for {:?} = {:?}", fleet_role_str, rv);
-        rv
+            .collect()
     }
 }
 
