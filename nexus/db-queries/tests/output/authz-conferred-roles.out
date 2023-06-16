@@ -6,7 +6,7 @@ resource: Fleet id "001de000-1334-4000-8000-000000000000"
   silo-collaborator                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo-viewer                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
 
-policy: {Admin: [Admin]}
+policy: {Admin: {Admin}}
 resource: Fleet id "001de000-1334-4000-8000-000000000000"
 
   USER                             Q  R LC RP  M MP CC  D
@@ -14,7 +14,7 @@ resource: Fleet id "001de000-1334-4000-8000-000000000000"
   silo-collaborator                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo-viewer                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
 
-policy: {Viewer: [Viewer]}
+policy: {Viewer: {Viewer}}
 resource: Fleet id "001de000-1334-4000-8000-000000000000"
 
   USER                             Q  R LC RP  M MP CC  D
@@ -22,7 +22,7 @@ resource: Fleet id "001de000-1334-4000-8000-000000000000"
   silo-collaborator                ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
   silo-viewer                      ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
 
-policy: {Admin: [Viewer]}
+policy: {Admin: {Viewer}}
 resource: Fleet id "001de000-1334-4000-8000-000000000000"
 
   USER                             Q  R LC RP  M MP CC  D
@@ -30,7 +30,7 @@ resource: Fleet id "001de000-1334-4000-8000-000000000000"
   silo-collaborator                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo-viewer                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
 
-policy: {Viewer: [Viewer, Admin]}
+policy: {Viewer: {Admin, Viewer}}
 resource: Fleet id "001de000-1334-4000-8000-000000000000"
 
   USER                             Q  R LC RP  M MP CC  D
@@ -38,7 +38,7 @@ resource: Fleet id "001de000-1334-4000-8000-000000000000"
   silo-collaborator                ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
   silo-viewer                      ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
 
-policy: {Admin: [Admin], Viewer: [Viewer]}
+policy: {Admin: {Admin}, Viewer: {Viewer}}
 resource: Fleet id "001de000-1334-4000-8000-000000000000"
 
   USER                             Q  R LC RP  M MP CC  D

@@ -11756,13 +11756,13 @@
           },
           "mapped_fleet_roles": {
             "description": "Mapping of which Fleet roles are conferred by each Silo role\n\nThe default is that no Fleet roles are conferred by any Silo roles unless there's a corresponding entry in this map.",
-            "default": {},
             "type": "object",
             "additionalProperties": {
               "type": "array",
               "items": {
                 "$ref": "#/components/schemas/FleetRole"
-              }
+              },
+              "uniqueItems": true
             }
           },
           "name": {
@@ -11789,6 +11789,7 @@
           "discoverable",
           "id",
           "identity_mode",
+          "mapped_fleet_roles",
           "name",
           "time_created",
           "time_modified"
@@ -11820,7 +11821,8 @@
               "type": "array",
               "items": {
                 "$ref": "#/components/schemas/FleetRole"
-              }
+              },
+              "uniqueItems": true
             }
           },
           "name": {
