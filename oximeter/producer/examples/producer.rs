@@ -11,6 +11,7 @@ use chrono::Utc;
 use dropshot::ConfigDropshot;
 use dropshot::ConfigLogging;
 use dropshot::ConfigLoggingLevel;
+use dropshot::HandlerTaskMode;
 use omicron_common::api::internal::nexus::ProducerEndpoint;
 use oximeter::types::Cumulative;
 use oximeter::types::Sample;
@@ -94,8 +95,11 @@ impl Producer for CpuBusyProducer {
 #[tokio::main]
 async fn main() {
     let address = "[::1]:0".parse().unwrap();
-    let dropshot =
-        ConfigDropshot { bind_address: address, request_body_max_bytes: 2048 };
+    let dropshot = ConfigDropshot {
+        bind_address: address,
+        request_body_max_bytes: 2048,
+        default_handler_task_mode: HandlerTaskMode::Detached,
+    };
     let log = LogConfig::Config(ConfigLogging::StderrTerminal {
         level: ConfigLoggingLevel::Debug,
     });
