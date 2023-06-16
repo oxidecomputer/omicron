@@ -38,6 +38,7 @@ use crate::storage_manager::StorageManager;
 use camino::{Utf8Path, Utf8PathBuf};
 use ddm_admin_client::{Client as DdmAdminClient, DdmError};
 use dpd_client::{types as DpdTypes, Client as DpdClient, Error as DpdError};
+use dropshot::HandlerTaskMode;
 use illumos_utils::addrobj::AddrObject;
 use illumos_utils::addrobj::IPV6_LINK_LOCAL_NAME;
 use illumos_utils::dladm::{Dladm, Etherstub, EtherstubVnic, PhysicalLink};
@@ -1327,6 +1328,8 @@ impl ServiceManager {
                                 // This has to be large enough to support:
                                 // - bulk writes to disks
                                 request_body_max_bytes: 8192 * 1024,
+                                default_handler_task_mode:
+                                    HandlerTaskMode::Detached,
                             },
                         },
                         dropshot_internal: dropshot::ConfigDropshot {
@@ -1339,6 +1342,8 @@ impl ServiceManager {
                             // certificates provided by the customer during rack
                             // setup.
                             request_body_max_bytes: 10 * 1024 * 1024,
+                            default_handler_task_mode:
+                                HandlerTaskMode::Detached,
                         },
                         internal_dns: nexus_config::InternalDns::FromSubnet {
                             subnet: Ipv6Subnet::<RACK_PREFIX>::new(
