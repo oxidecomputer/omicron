@@ -11,15 +11,21 @@ use dropshot::test_util::LogContext;
 use dropshot::ConfigDropshot;
 use dropshot::ConfigLogging;
 use dropshot::ConfigLoggingLevel;
+use dropshot::HandlerTaskMode;
 use nexus_test_interface::NexusServer;
 use nexus_types::external_api::params::UserId;
 use nexus_types::internal_api::params::Certificate;
 use nexus_types::internal_api::params::RecoverySiloConfig;
 use nexus_types::internal_api::params::ServiceKind;
+use nexus_types::internal_api::params::ServiceNic;
 use nexus_types::internal_api::params::ServicePutRequest;
+use omicron_common::address::DNS_OPTE_IPV4_SUBNET;
+use omicron_common::address::NEXUS_OPTE_IPV4_SUBNET;
+use omicron_common::api::external::MacAddr;
 use omicron_common::api::external::{IdentityMetadata, Name};
 use omicron_common::api::internal::nexus::ProducerEndpoint;
 use omicron_common::nexus_config;
+use omicron_common::nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
 use omicron_sled_agent::sim;
 use omicron_test_utils::dev;
 use oximeter_collector::Oximeter;
@@ -239,6 +245,15 @@ pub async fn test_setup_with_config<N: NexusServer>(
         address: dns_server_address_external,
         kind: ServiceKind::ExternalDns {
             external_address: external_dns_server.local_address().ip(),
+            nic: ServiceNic {
+                id: Uuid::new_v4(),
+                name: "external-dns".parse().unwrap(),
+                ip: DNS_OPTE_IPV4_SUBNET
+                    .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES as u32 + 1)
+                    .unwrap()
+                    .into(),
+                mac: MacAddr::random_system(),
+            },
         },
     };
     let nexus_service = ServicePutRequest {
@@ -261,6 +276,15 @@ pub async fn test_setup_with_config<N: NexusServer>(
                 .dropshot
                 .bind_address
                 .ip(),
+            nic: ServiceNic {
+                id: Uuid::new_v4(),
+                name: "nexus".parse().unwrap(),
+                ip: NEXUS_OPTE_IPV4_SUBNET
+                    .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES as u32 + 1)
+                    .unwrap()
+                    .into(),
+                mac: MacAddr::random_system(),
+            },
         },
     };
     let external_dns_zone_name =
@@ -370,6 +394,7 @@ pub async fn start_sled_agent(
         dropshot: ConfigDropshot {
             bind_address: SocketAddr::new(Ipv6Addr::LOCALHOST.into(), 0),
             request_body_max_bytes: 1024 * 1024,
+            default_handler_task_mode: HandlerTaskMode::Detached,
         },
         // TODO-cleanup this is unused
         log: ConfigLogging::StderrTerminal { level: ConfigLoggingLevel::Debug },
@@ -553,6 +578,7 @@ pub async fn start_dns_server(
         &dropshot::ConfigDropshot {
             bind_address: "[::1]:0".parse().unwrap(),
             request_body_max_bytes: 8 * 1024,
+            default_handler_task_mode: HandlerTaskMode::Detached,
         },
     )
     .await

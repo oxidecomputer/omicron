@@ -14,7 +14,7 @@ use crate::db::error::diesel_pool_result_optional;
 use crate::db::error::public_error_from_diesel_pool;
 use crate::db::error::ErrorHandler;
 use crate::db::error::TransactionError;
-use crate::db::fixed_data::silo::DEFAULT_SILO;
+use crate::db::fixed_data::silo::{DEFAULT_SILO, INTERNAL_SILO};
 use crate::db::identity::Resource;
 use crate::db::model::CollectionTypeProvisioned;
 use crate::db::model::Name;
@@ -59,11 +59,11 @@ impl DataStore {
     ) -> Result<(), Error> {
         opctx.authorize(authz::Action::Modify, &authz::DATABASE).await?;
 
-        debug!(opctx.log, "attempting to create built-in silo");
+        debug!(opctx.log, "attempting to create built-in silos");
 
         use db::schema::silo::dsl;
         let count = diesel::insert_into(dsl::silo)
-            .values(&*DEFAULT_SILO)
+            .values([&*DEFAULT_SILO, &*INTERNAL_SILO])
             .on_conflict(dsl::id)
             .do_nothing()
             .execute_async(self.pool_authorized(opctx).await?)
@@ -306,6 +306,7 @@ impl DataStore {
                 &params.map_name(|n| Name::ref_cast(n)),
             ),
         }
+        .filter(dsl::id.ne(INTERNAL_SILO.id()))
         .filter(dsl::time_deleted.is_null());
 
         if let Discoverability::DiscoverableOnly = discoverability {

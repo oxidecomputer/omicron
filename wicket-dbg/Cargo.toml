@@ -21,7 +21,7 @@ tui.workspace = true
 wicket.workspace = true
 
 # used only by wicket-dbg binary
-reedline = "0.19.1"
+reedline = "0.20.0"
 
 [[bin]]
 name = "wicket-dbg"

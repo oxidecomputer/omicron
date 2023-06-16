@@ -207,8 +207,8 @@ macro_rules! impl_enum_wrapper {
         }
 
         impl ::diesel::deserialize::FromSql<$diesel_type, ::diesel::pg::Pg> for $model_type {
-            fn from_sql(bytes: ::diesel::backend::RawValue<::diesel::pg::Pg>) -> ::diesel::deserialize::Result<Self> {
-                match ::diesel::backend::RawValue::<::diesel::pg::Pg>::as_bytes(&bytes) {
+            fn from_sql(bytes: <::diesel::pg::Pg as ::diesel::backend::Backend>::RawValue<'_>) -> ::diesel::deserialize::Result<Self> {
+                match <::diesel::pg::Pg as ::diesel::backend::Backend>::RawValue::<'_>::as_bytes(&bytes) {
                     $(
                     $sql_value => {
                         Ok($model_type(<$ext_type>::$enum_item))
@@ -268,8 +268,8 @@ macro_rules! impl_enum_type {
         }
 
         impl ::diesel::deserialize::FromSql<$diesel_type, ::diesel::pg::Pg> for $model_type {
-            fn from_sql(bytes: ::diesel::backend::RawValue<::diesel::pg::Pg>) -> ::diesel::deserialize::Result<Self> {
-                match ::diesel::backend::RawValue::<::diesel::pg::Pg>::as_bytes(&bytes) {
+            fn from_sql(bytes: <::diesel::pg::Pg as ::diesel::backend::Backend>::RawValue<'_>) -> ::diesel::deserialize::Result<Self> {
+                match <::diesel::pg::Pg as ::diesel::backend::Backend>::RawValue::<'_>::as_bytes(&bytes) {
                     $(
                     $sql_value => {
                         Ok($model_type::$enum_item)

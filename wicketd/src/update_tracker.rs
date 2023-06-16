@@ -57,6 +57,7 @@ use tokio::sync::oneshot;
 use tokio::sync::watch;
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
+use update_engine::events::ProgressUnits;
 use update_engine::AbortHandle;
 use update_engine::StepSpec;
 use uuid::Uuid;
@@ -1220,6 +1221,7 @@ fn define_test_steps(engine: &UpdateEngine, secs: u64) {
                                         StepProgress::with_current_and_total(
                                             sec,
                                             secs,
+                                            "seconds",
                                             serde_json::Value::Null,
                                         ),
                                     )
@@ -1490,6 +1492,7 @@ impl UpdateContext {
                     cx.send_progress(StepProgress::with_current_and_total(
                         offset,
                         total_size,
+                        ProgressUnits::BYTES,
                         Default::default(),
                     ))
                     .await;
@@ -1601,6 +1604,11 @@ impl UpdateContext {
                                 StepProgress::with_current_and_total(
                                     progress.current as u64,
                                     progress.total as u64,
+                                    // The actual units here depend on the
+                                    // component being updated and are a bit
+                                    // hard to explain succinctly:
+                                    // https://github.com/oxidecomputer/omicron/pull/3267#discussion_r1229700370
+                                    ProgressUnits::new("preparation steps"),
                                     Default::default(),
                                 ),
                             )
@@ -1631,6 +1639,7 @@ impl UpdateContext {
                                 StepProgress::with_current_and_total(
                                     bytes_received as u64,
                                     total_bytes as u64,
+                                    ProgressUnits::BYTES,
                                     Default::default(),
                                 ),
                             )

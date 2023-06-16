@@ -828,6 +828,59 @@ impl super::Nexus {
             }
         };
 
+        // Once the IDP metadata document is available, parse it into an
+        // EntityDescriptor
+        use samael::metadata::EntityDescriptor;
+        let idp_metadata: EntityDescriptor =
+            idp_metadata_document_string.parse().map_err(|e| {
+                Error::invalid_request(&format!(
+                    "idp_metadata_document_string could not be parsed as an EntityDescriptor! {}",
+                    e
+                ))
+            })?;
+
+        // Check for at least one signing key - do not accept IDPs that have
+        // none!
+        let mut found_signing_key = false;
+
+        if let Some(idp_sso_descriptors) = idp_metadata.idp_sso_descriptors {
+            for idp_sso_descriptor in &idp_sso_descriptors {
+                for key_descriptor in &idp_sso_descriptor.key_descriptors {
+                    // Key use is an optional attribute. If it's present, check
+                    // if it's "signing". If it's not present, the contained key
+                    // information could be used for either signing or
+                    // encryption.
+                    let is_signing_key =
+                        if let Some(key_use) = &key_descriptor.key_use {
+                            key_use == "signing"
+                        } else {
+                            true
+                        };
+
+                    if is_signing_key {
+                        if let Some(x509_data) =
+                            &key_descriptor.key_info.x509_data
+                        {
+                            if !x509_data.certificates.is_empty() {
+                                found_signing_key = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        } else {
+            return Err(Error::invalid_request(
+                "no md:IDPSSODescriptor section",
+            ));
+        }
+
+        if !found_signing_key {
+            return Err(Error::invalid_request(
+                "no signing key found in IDP metadata",
+            ));
+        }
+
         let provider = db::model::SamlIdentityProvider {
             identity: db::model::SamlIdentityProviderIdentity::new(
                 Uuid::new_v4(),

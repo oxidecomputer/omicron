@@ -15,12 +15,16 @@ use crate::db::collection_insert::DatastoreCollection;
 use crate::db::error::public_error_from_diesel_pool;
 use crate::db::error::ErrorHandler;
 use crate::db::error::TransactionError;
+use crate::db::fixed_data::vpc_subnet::DNS_VPC_SUBNET;
+use crate::db::fixed_data::vpc_subnet::NEXUS_VPC_SUBNET;
+use crate::db::fixed_data::vpc_subnet::NTP_VPC_SUBNET;
 use crate::db::identity::Asset;
 use crate::db::model::Dataset;
 use crate::db::model::IncompleteExternalIp;
 use crate::db::model::Rack;
 use crate::db::model::Zpool;
 use crate::db::pagination::paginated;
+use crate::db::pool::DbConnection;
 use async_bb8_diesel::AsyncConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use async_bb8_diesel::PoolError;
@@ -28,6 +32,7 @@ use chrono::Utc;
 use diesel::prelude::*;
 use diesel::upsert::excluded;
 use nexus_db_model::ExternalIp;
+use nexus_db_model::IncompleteNetworkInterface;
 use nexus_db_model::InitialDnsGroup;
 use nexus_db_model::PasswordHashString;
 use nexus_db_model::SiloUser;
@@ -41,6 +46,7 @@ use nexus_types::identity::Resource;
 use nexus_types::internal_api::params as internal_params;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
+use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
@@ -61,6 +67,78 @@ pub struct RackInit {
     pub recovery_user_id: external_params::UserId,
     pub recovery_user_password_hash: omicron_passwords::PasswordHashString,
     pub dns_update: DnsVersionUpdateBuilder,
+}
+
+/// Possible errors while trying to initialize rack
+#[derive(Debug)]
+enum RackInitError {
+    AddingIp(Error),
+    AddingNic(Error),
+    ServiceInsert(Error),
+    DatasetInsert { err: AsyncInsertError, zpool_id: Uuid },
+    RackUpdate { err: PoolError, rack_id: Uuid },
+    DnsSerialization(Error),
+    Silo(Error),
+    RoleAssignment(Error),
+}
+type TxnError = TransactionError<RackInitError>;
+
+impl From<TxnError> for Error {
+    fn from(e: TxnError) -> Self {
+        match e {
+            TxnError::CustomError(RackInitError::AddingIp(err)) => err,
+            TxnError::CustomError(RackInitError::AddingNic(err)) => err,
+            TxnError::CustomError(RackInitError::DatasetInsert {
+                err,
+                zpool_id,
+            }) => match err {
+                AsyncInsertError::CollectionNotFound => Error::ObjectNotFound {
+                    type_name: ResourceType::Zpool,
+                    lookup_type: LookupType::ById(zpool_id),
+                },
+                AsyncInsertError::DatabaseError(e) => {
+                    public_error_from_diesel_pool(e, ErrorHandler::Server)
+                }
+            },
+            TxnError::CustomError(RackInitError::ServiceInsert(err)) => {
+                Error::internal_error(&format!(
+                    "failed to insert Service record: {:#}",
+                    err
+                ))
+            }
+            TxnError::CustomError(RackInitError::RackUpdate {
+                err,
+                rack_id,
+            }) => public_error_from_diesel_pool(
+                err,
+                ErrorHandler::NotFoundByLookup(
+                    ResourceType::Rack,
+                    LookupType::ById(rack_id),
+                ),
+            ),
+            TxnError::CustomError(RackInitError::DnsSerialization(err)) => {
+                Error::internal_error(&format!(
+                    "failed to serialize initial DNS records: {:#}",
+                    err
+                ))
+            }
+            TxnError::CustomError(RackInitError::Silo(err)) => {
+                Error::internal_error(&format!(
+                    "failed to create recovery Silo: {:#}",
+                    err
+                ))
+            }
+            TxnError::CustomError(RackInitError::RoleAssignment(err)) => {
+                Error::internal_error(&format!(
+                    "failed to assign role to initial user: {:#}",
+                    err
+                ))
+            }
+            TxnError::Pool(e) => {
+                Error::internal_error(&format!("Transaction error: {}", e))
+            }
+        }
+    }
 }
 
 impl DataStore {
@@ -108,6 +186,218 @@ impl DataStore {
             })
     }
 
+    // The following methods which return a `TxnError` take a `conn` parameter
+    // which comes from the transaction created in `rack_set_initialized`.
+
+    #[allow(clippy::too_many_arguments)]
+    async fn rack_create_recovery_silo<ConnError>(
+        &self,
+        opctx: &OpContext,
+        conn: &(impl AsyncConnection<DbConnection, ConnError> + Sync),
+        log: &slog::Logger,
+        recovery_silo: external_params::SiloCreate,
+        recovery_user_id: external_params::UserId,
+        recovery_user_password_hash: omicron_passwords::PasswordHashString,
+        dns_update: DnsVersionUpdateBuilder,
+    ) -> Result<(), TxnError>
+    where
+        ConnError: From<diesel::result::Error> + Send + 'static,
+        PoolError: From<ConnError>,
+        TransactionError<Error>: From<ConnError>,
+        TxnError: From<ConnError>,
+        async_bb8_diesel::Connection<DbConnection>:
+            AsyncConnection<DbConnection, ConnError>,
+    {
+        let db_silo = self
+            .silo_create_conn(conn, opctx, opctx, recovery_silo, dns_update)
+            .await
+            .map_err(RackInitError::Silo)
+            .map_err(TxnError::CustomError)?;
+        info!(log, "Created recovery silo");
+
+        // Create the first user in the initial Recovery Silo
+        let silo_user_id = Uuid::new_v4();
+        let silo_user = SiloUser::new(
+            db_silo.id(),
+            silo_user_id,
+            recovery_user_id.as_ref().to_owned(),
+        );
+        {
+            use db::schema::silo_user::dsl;
+            diesel::insert_into(dsl::silo_user)
+                .values(silo_user)
+                .execute_async(conn)
+                .await?;
+        }
+        info!(log, "Created recovery user");
+
+        // Set that user's password.
+        let hash = SiloUserPasswordHash::new(
+            silo_user_id,
+            PasswordHashString::from(recovery_user_password_hash),
+        );
+        {
+            use db::schema::silo_user_password_hash::dsl;
+            diesel::insert_into(dsl::silo_user_password_hash)
+                .values(hash)
+                .execute_async(conn)
+                .await?;
+        }
+        info!(log, "Created recovery user's password");
+
+        // Grant that user Admin privileges on the Recovery Silo.
+        //
+        // First, fetch the current set of role assignments for the
+        // Fleet so that we can modify it.
+
+        // This is very subtle: we must generate both of these queries before we
+        // execute either of them, and we must not attempt to do any authz
+        // checks after this in the same transaction because they may deadlock
+        // with our query.
+        let authz_silo = authz::Silo::new(
+            authz::FLEET,
+            db_silo.id(),
+            LookupType::ById(db_silo.id()),
+        );
+        let (q3, q4) = Self::role_assignment_replace_visible_queries(
+            opctx,
+            &authz_silo,
+            &[shared::RoleAssignment {
+                identity_type: IdentityType::SiloUser,
+                identity_id: silo_user_id,
+                role_name: SiloRole::Admin,
+            }],
+        )
+        .await
+        .map_err(RackInitError::RoleAssignment)
+        .map_err(TxnError::CustomError)?;
+        debug!(log, "Generated role assignment queries");
+
+        q3.execute_async(conn).await?;
+        q4.execute_async(conn).await?;
+        info!(log, "Granted Silo privileges");
+
+        Ok(())
+    }
+
+    async fn rack_populate_service_records<ConnError>(
+        &self,
+        conn: &(impl AsyncConnection<DbConnection, ConnError> + Sync),
+        log: &slog::Logger,
+        service_pool: &db::model::IpPool,
+        service: internal_params::ServicePutRequest,
+    ) -> Result<(), TxnError>
+    where
+        ConnError: From<diesel::result::Error> + Send + 'static,
+        PoolError: From<ConnError>,
+    {
+        use internal_params::ServiceKind;
+
+        let service_db = db::model::Service::new(
+            service.service_id,
+            service.sled_id,
+            service.zone_id,
+            service.address,
+            service.kind.clone().into(),
+        );
+        self.service_upsert_conn(conn, service_db).await.map_err(|e| {
+            TxnError::CustomError(RackInitError::ServiceInsert(e))
+        })?;
+
+        // For services with external connectivity, we record their
+        // explicit IP allocation and create a service NIC as well.
+        let service_ip_nic = match service.kind {
+            ServiceKind::ExternalDns { external_address, ref nic }
+            | ServiceKind::Nexus { external_address, ref nic } => {
+                let db_ip = IncompleteExternalIp::for_service_explicit(
+                    Uuid::new_v4(),
+                    &db::model::Name(nic.name.clone()),
+                    &format!("{}", service.kind),
+                    service.service_id,
+                    service_pool.id(),
+                    external_address,
+                );
+                let vpc_subnet = match service.kind {
+                    ServiceKind::ExternalDns { .. } => DNS_VPC_SUBNET.clone(),
+                    ServiceKind::Nexus { .. } => NEXUS_VPC_SUBNET.clone(),
+                    _ => unreachable!(),
+                };
+                let db_nic = IncompleteNetworkInterface::new_service(
+                    nic.id,
+                    service.service_id,
+                    vpc_subnet,
+                    IdentityMetadataCreateParams {
+                        name: nic.name.clone(),
+                        description: format!("{} service vNIC", service.kind),
+                    },
+                    Some(nic.ip),
+                    Some(nic.mac),
+                )
+                .map_err(|e| {
+                    TxnError::CustomError(RackInitError::AddingNic(e))
+                })?;
+                Some((db_ip, db_nic))
+            }
+            ServiceKind::BoundaryNtp { snat, ref nic } => {
+                let db_ip = IncompleteExternalIp::for_service_explicit_snat(
+                    Uuid::new_v4(),
+                    service.service_id,
+                    service_pool.id(),
+                    snat.ip,
+                    (snat.first_port, snat.last_port),
+                );
+                let db_nic = IncompleteNetworkInterface::new_service(
+                    nic.id,
+                    service.service_id,
+                    NTP_VPC_SUBNET.clone(),
+                    IdentityMetadataCreateParams {
+                        name: nic.name.clone(),
+                        description: format!("{} service vNIC", service.kind),
+                    },
+                    Some(nic.ip),
+                    Some(nic.mac),
+                )
+                .map_err(|e| {
+                    TxnError::CustomError(RackInitError::AddingNic(e))
+                })?;
+                Some((db_ip, db_nic))
+            }
+            _ => None,
+        };
+        if let Some((db_ip, db_nic)) = service_ip_nic {
+            Self::allocate_external_ip_on_connection(conn, db_ip)
+                .await
+                .map_err(|err| {
+                    warn!(
+                        log,
+                        "Initializing Rack: Failed to allocate \
+                        IP address for {}",
+                        service.kind,
+                    );
+                    TxnError::CustomError(RackInitError::AddingIp(err))
+                })?;
+
+            self.create_network_interface_raw_conn(conn, db_nic)
+                .await
+                .map(|_| ())
+                .or_else(|e| {
+                    use db::queries::network_interface::InsertError;
+                    match e {
+                        InsertError::InterfaceAlreadyExists(
+                            _,
+                            db::model::NetworkInterfaceKind::Service,
+                        ) => Ok(()),
+                        _ => Err(TxnError::CustomError(
+                            RackInitError::AddingNic(e.into_external()),
+                        )),
+                    }
+                })?;
+        }
+
+        info!(log, "Inserted records for {} service", service.kind);
+        Ok(())
+    }
+
     /// Update a rack to mark that it has been initialized
     pub async fn rack_set_initialized(
         &self,
@@ -125,25 +415,14 @@ impl DataStore {
         let internal_dns = rack_init.internal_dns;
         let external_dns = rack_init.external_dns;
 
-        #[derive(Debug)]
-        enum RackInitError {
-            AddingIp(Error),
-            ServiceInsert(Error),
-            DatasetInsert { err: AsyncInsertError, zpool_id: Uuid },
-            RackUpdate(PoolError),
-            DnsSerialization(Error),
-            Silo(Error),
-            RoleAssignment(Error),
-        }
-        type TxnError = TransactionError<RackInitError>;
-
         let (authz_service_pool, service_pool) =
             self.ip_pools_service_lookup(&opctx).await?;
 
         // NOTE: This operation could likely be optimized with a CTE, but given
         // the low-frequency of calls, this optimization has been deferred.
         let log = opctx.log.clone();
-        self.pool_authorized(opctx)
+        let rack = self
+            .pool_authorized(opctx)
             .await?
             .transaction_async(|conn| async move {
                 // Early exit if the rack has already been initialized.
@@ -154,9 +433,10 @@ impl DataStore {
                     .await
                     .map_err(|e| {
                         warn!(log, "Initializing Rack: Rack UUID not found");
-                        TxnError::CustomError(RackInitError::RackUpdate(
-                            PoolError::from(e),
-                        ))
+                        TxnError::CustomError(RackInitError::RackUpdate {
+                            err: PoolError::from(e),
+                            rack_id,
+                        })
                     })?;
                 if rack.initialized {
                     info!(log, "Early exit: Rack already initialized");
@@ -172,70 +452,26 @@ impl DataStore {
                         opctx,
                         &authz_service_pool,
                         &range,
-                    ).await.map_err(|err| {
-                        warn!(log, "Initializing Rack: Failed to add IP pool range");
+                    )
+                    .await
+                    .map_err(|err| {
+                        warn!(
+                            log,
+                            "Initializing Rack: Failed to add IP pool range"
+                        );
                         TxnError::CustomError(RackInitError::AddingIp(err))
                     })?;
                 }
 
                 // Allocate records for all services.
                 for service in services {
-                    use internal_params::ServiceKind;
-
-                    let service_db = db::model::Service::new(
-                        service.service_id,
-                        service.sled_id,
-                        service.zone_id,
-                        service.address,
-                        service.kind.into(),
-                    );
-                    self.service_upsert_conn(&conn, service_db)
-                        .await
-                        .map_err(|e| {
-                            TxnError::CustomError(RackInitError::ServiceInsert(e))
-                        })?;
-
-                    // Record explicit IP allocation if service has one
-                    let service_ip = match service.kind {
-                        ServiceKind::ExternalDns { external_address }
-                        | ServiceKind::Nexus { external_address } => {
-                            let name = service.kind.to_string().replace('_', "-").parse().unwrap();
-                            let db_ip = IncompleteExternalIp::for_service_explicit(
-                                Uuid::new_v4(),
-                                &db::model::Name(name),
-                                &format!("{}", service.kind),
-                                service.service_id,
-                                service_pool.id(),
-                                external_address,
-                            );
-                            Some((external_address, db_ip))
-                        }
-                        ServiceKind::Ntp { snat_cfg: Some(snat) } => {
-                            let db_ip = IncompleteExternalIp::for_service_explicit_snat(
-                                Uuid::new_v4(),
-                                service.service_id,
-                                service_pool.id(),
-                                snat.ip,
-                                (snat.first_port, snat.last_port),
-                            );
-                            Some((snat.ip, db_ip))
-                        }
-                        _ => None,
-                    };
-                    if let Some((external_ip, db_ip)) = service_ip {
-                        let allocated_ip = Self::allocate_external_ip_on_connection(
-                            &conn,
-                            db_ip,
-                        ).await.map_err(|err| {
-                            warn!(
-                                log,
-                                "Initializing Rack: Failed to allocate IP address for {}",
-                                service.kind,
-                            );
-                            TxnError::CustomError(RackInitError::AddingIp(err))
-                        })?;
-                        assert_eq!(allocated_ip.ip.ip(), external_ip);
-                    }
+                    self.rack_populate_service_records(
+                        &conn,
+                        &log,
+                        &service_pool,
+                        service,
+                    )
+                    .await?;
                 }
                 info!(log, "Inserted services");
 
@@ -282,81 +518,16 @@ impl DataStore {
                 info!(log, "Populated DNS tables for external DNS");
 
                 // Create the initial Recovery Silo
-                let db_silo = self.silo_create_conn(
+                self.rack_create_recovery_silo(
+                    &opctx,
                     &conn,
-                    opctx,
-                    opctx,
+                    &log,
                     rack_init.recovery_silo,
-                    rack_init.dns_update
+                    rack_init.recovery_user_id,
+                    rack_init.recovery_user_password_hash,
+                    rack_init.dns_update,
                 )
-                    .await
-                    .map_err(RackInitError::Silo)
-                    .map_err(TxnError::CustomError)?;
-                info!(log, "Created recovery silo");
-
-                // Create the first user in the initial Recovery Silo
-                let silo_user_id = Uuid::new_v4();
-                let silo_user = SiloUser::new(
-                    db_silo.id(),
-                    silo_user_id,
-                    rack_init.recovery_user_id.as_ref().to_owned(),
-                );
-                {
-                    use db::schema::silo_user::dsl;
-                    diesel::insert_into(dsl::silo_user)
-                        .values(silo_user)
-                        .execute_async(&conn)
-                        .await?;
-                }
-                info!(log, "Created recovery user");
-
-                // Set that user's password.
-                let hash = SiloUserPasswordHash::new(
-                    silo_user_id,
-                    PasswordHashString::from(
-                        rack_init.recovery_user_password_hash
-                    )
-                );
-                {
-                    use db::schema::silo_user_password_hash::dsl;
-                    diesel::insert_into(dsl::silo_user_password_hash)
-                        .values(hash)
-                        .execute_async(&conn)
-                        .await?;
-                }
-                info!(log, "Created recovery user's password");
-
-                // Grant that user Admin privileges on the Recovery Silo.
-                //
-                // First, fetch the current set of role assignments for the
-                // Fleet so that we can modify it.
-
-                // This is very subtle: we must generate both of these queries
-                // before we execute any of them, and we must not attempt to do
-                // any authz checks after this in the same transaction because
-                // they may deadlock with our query.
-                let authz_silo = authz::Silo::new(
-                    authz::FLEET,
-                    db_silo.id(),
-                    LookupType::ById(db_silo.id())
-                );
-                let (q3, q4) = Self::role_assignment_replace_visible_queries(
-                    opctx,
-                    &authz_silo,
-                    &[shared::RoleAssignment {
-                        identity_type: IdentityType::SiloUser,
-                        identity_id: silo_user_id,
-                        role_name: SiloRole::Admin,
-                    }]
-                )
-                    .await
-                    .map_err(RackInitError::RoleAssignment)
-                    .map_err(TxnError::CustomError)?;
-                debug!(log, "Generated role assignment queries");
-
-                q3.execute_async(&conn).await?;
-                q4.execute_async(&conn).await?;
-                info!(log, "Granted Silo privileges");
+                .await?;
 
                 let rack = diesel::update(rack_dsl::rack)
                     .filter(rack_dsl::id.eq(rack_id))
@@ -368,62 +539,15 @@ impl DataStore {
                     .get_result_async::<Rack>(&conn)
                     .await
                     .map_err(|e| {
-                        TxnError::CustomError(RackInitError::RackUpdate(
-                            PoolError::from(e),
-                        ))
+                        TxnError::CustomError(RackInitError::RackUpdate {
+                            err: PoolError::from(e),
+                            rack_id,
+                        })
                     })?;
-                Ok(rack)
+                Ok::<_, TxnError>(rack)
             })
-            .await
-            .map_err(|e| match e {
-                TxnError::CustomError(RackInitError::AddingIp(err)) => err,
-                TxnError::CustomError(RackInitError::DatasetInsert {
-                    err,
-                    zpool_id,
-                }) => match err {
-                    AsyncInsertError::CollectionNotFound => {
-                        Error::ObjectNotFound {
-                            type_name: ResourceType::Zpool,
-                            lookup_type: LookupType::ById(zpool_id),
-                        }
-                    }
-                    AsyncInsertError::DatabaseError(e) => {
-                        public_error_from_diesel_pool(e, ErrorHandler::Server)
-                    }
-                },
-                TxnError::CustomError(RackInitError::ServiceInsert(err)) => {
-                    Error::internal_error(&format!(
-                        "failed to insert Service record: {:#}", err
-                    ))
-                },
-                TxnError::CustomError(RackInitError::RackUpdate(err)) => {
-                    public_error_from_diesel_pool(
-                        err,
-                        ErrorHandler::NotFoundByLookup(
-                            ResourceType::Rack,
-                            LookupType::ById(rack_id),
-                        ),
-                    )
-                }
-                TxnError::CustomError(RackInitError::DnsSerialization(err)) => {
-                    Error::internal_error(&format!(
-                        "failed to serialize initial DNS records: {:#}", err
-                    ))
-                },
-                TxnError::CustomError(RackInitError::Silo(err)) => {
-                    Error::internal_error(&format!(
-                        "failed to create recovery Silo: {:#}", err
-                    ))
-                },
-                TxnError::CustomError(RackInitError::RoleAssignment(err)) => {
-                    Error::internal_error(&format!(
-                        "failed to assign role to initial user: {:#}", err
-                    ))
-                },
-                TxnError::Pool(e) => {
-                    Error::internal_error(&format!("Transaction error: {}", e))
-                }
-            })
+            .await?;
+        Ok(rack)
     }
 
     pub async fn load_builtin_rack_data(
@@ -431,13 +555,11 @@ impl DataStore {
         opctx: &OpContext,
         rack_id: Uuid,
     ) -> Result<(), Error> {
-        use nexus_types::external_api::params;
-        use omicron_common::api::external::IdentityMetadataCreateParams;
         use omicron_common::api::external::Name;
 
         self.rack_insert(opctx, &db::model::Rack::new(rack_id)).await?;
 
-        let params = params::IpPoolCreate {
+        let params = external_params::IpPoolCreate {
             identity: IdentityMetadataCreateParams {
                 name: SERVICE_IP_POOL_NAME.parse::<Name>().unwrap(),
                 description: String::from("IP Pool for Oxide Services"),
@@ -451,7 +573,7 @@ impl DataStore {
                 _ => Err(e),
             })?;
 
-        let params = params::IpPoolCreate {
+        let params = external_params::IpPoolCreate {
             identity: IdentityMetadataCreateParams {
                 name: "default".parse::<Name>().unwrap(),
                 description: String::from("default IP pool"),
@@ -527,9 +649,16 @@ mod test {
     use nexus_test_utils::db::test_setup_database;
     use nexus_types::external_api::shared::SiloIdentityMode;
     use nexus_types::identity::Asset;
+    use nexus_types::internal_api::params::ServiceNic;
+    use omicron_common::address::{
+        DNS_OPTE_IPV4_SUBNET, NEXUS_OPTE_IPV4_SUBNET, NTP_OPTE_IPV4_SUBNET,
+    };
     use omicron_common::api::external::http_pagination::PaginatedBy;
-    use omicron_common::api::external::IdentityMetadataCreateParams;
+    use omicron_common::api::external::{
+        IdentityMetadataCreateParams, MacAddr,
+    };
     use omicron_common::api::internal::shared::SourceNatConfig;
+    use omicron_common::nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
     use omicron_test_utils::dev;
     use std::collections::HashMap;
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddrV6};
@@ -722,11 +851,12 @@ mod test {
             paste::paste! {
                 async fn [<get_all_ $table s>](db: &DataStore) -> Vec<$model> {
                     use crate::db::schema::$table::dsl;
+                    use nexus_test_utils::db::ALLOW_FULL_TABLE_SCAN_SQL;
                     db.pool_for_tests()
                         .await
                         .unwrap()
                         .transaction_async(|conn| async move {
-                            conn.batch_execute_async(nexus_test_utils::db::ALLOW_FULL_TABLE_SCAN_SQL)
+                            conn.batch_execute_async(ALLOW_FULL_TABLE_SCAN_SQL)
                                 .await
                                 .unwrap();
                             Ok::<_, crate::db::TransactionError<()>>(
@@ -741,7 +871,7 @@ mod test {
                         .unwrap()
                 }
             }
-        }
+        };
     }
 
     fn_to_get_all!(service, Service);
@@ -766,12 +896,24 @@ mod test {
         .unwrap()];
 
         let external_dns_ip = IpAddr::V4(Ipv4Addr::new(1, 2, 3, 4));
+        let external_dns_pip = DNS_OPTE_IPV4_SUBNET
+            .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES as u32 + 1)
+            .unwrap();
         let external_dns_id = Uuid::new_v4();
         let nexus_ip = IpAddr::V4(Ipv4Addr::new(1, 2, 3, 6));
+        let nexus_pip = NEXUS_OPTE_IPV4_SUBNET
+            .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES as u32 + 1)
+            .unwrap();
         let nexus_id = Uuid::new_v4();
         let ntp1_ip = IpAddr::V4(Ipv4Addr::new(1, 2, 3, 5));
+        let ntp1_pip = NTP_OPTE_IPV4_SUBNET
+            .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES as u32 + 1)
+            .unwrap();
         let ntp1_id = Uuid::new_v4();
         let ntp2_ip = IpAddr::V4(Ipv4Addr::new(1, 2, 3, 5));
+        let ntp2_pip = NTP_OPTE_IPV4_SUBNET
+            .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES as u32 + 2)
+            .unwrap();
         let ntp2_id = Uuid::new_v4();
         let ntp3_id = Uuid::new_v4();
         let services = vec![
@@ -782,6 +924,12 @@ mod test {
                 address: SocketAddrV6::new(Ipv6Addr::LOCALHOST, 123, 0, 0),
                 kind: internal_params::ServiceKind::ExternalDns {
                     external_address: external_dns_ip,
+                    nic: ServiceNic {
+                        id: Uuid::new_v4(),
+                        name: "external-dns".parse().unwrap(),
+                        ip: external_dns_pip.into(),
+                        mac: MacAddr::random_system(),
+                    },
                 },
             },
             internal_params::ServicePutRequest {
@@ -789,12 +937,18 @@ mod test {
                 sled_id: sled1.id(),
                 zone_id: Some(ntp1_id),
                 address: SocketAddrV6::new(Ipv6Addr::LOCALHOST, 9090, 0, 0),
-                kind: internal_params::ServiceKind::Ntp {
-                    snat_cfg: Some(SourceNatConfig {
+                kind: internal_params::ServiceKind::BoundaryNtp {
+                    snat: SourceNatConfig {
                         ip: ntp1_ip,
                         first_port: 16384,
                         last_port: 32767,
-                    }),
+                    },
+                    nic: ServiceNic {
+                        id: Uuid::new_v4(),
+                        name: "ntp1".parse().unwrap(),
+                        ip: ntp1_pip.into(),
+                        mac: MacAddr::random_system(),
+                    },
                 },
             },
             internal_params::ServicePutRequest {
@@ -804,6 +958,12 @@ mod test {
                 address: SocketAddrV6::new(Ipv6Addr::LOCALHOST, 456, 0, 0),
                 kind: internal_params::ServiceKind::Nexus {
                     external_address: nexus_ip,
+                    nic: ServiceNic {
+                        id: Uuid::new_v4(),
+                        name: "nexus".parse().unwrap(),
+                        ip: nexus_pip.into(),
+                        mac: MacAddr::random_system(),
+                    },
                 },
             },
             internal_params::ServicePutRequest {
@@ -811,12 +971,18 @@ mod test {
                 sled_id: sled2.id(),
                 zone_id: Some(ntp2_id),
                 address: SocketAddrV6::new(Ipv6Addr::LOCALHOST, 9090, 0, 0),
-                kind: internal_params::ServiceKind::Ntp {
-                    snat_cfg: Some(SourceNatConfig {
+                kind: internal_params::ServiceKind::BoundaryNtp {
+                    snat: SourceNatConfig {
                         ip: ntp2_ip,
                         first_port: 0,
                         last_port: 16383,
-                    }),
+                    },
+                    nic: ServiceNic {
+                        id: Uuid::new_v4(),
+                        name: "ntp2".parse().unwrap(),
+                        ip: ntp2_pip.into(),
+                        mac: MacAddr::random_system(),
+                    },
                 },
             },
             internal_params::ServicePutRequest {
@@ -824,7 +990,7 @@ mod test {
                 sled_id: sled3.id(),
                 zone_id: Some(ntp3_id),
                 address: SocketAddrV6::new(Ipv6Addr::LOCALHOST, 9090, 0, 0),
-                kind: internal_params::ServiceKind::Ntp { snat_cfg: None },
+                kind: internal_params::ServiceKind::InternalNtp,
             },
         ];
 
@@ -990,6 +1156,12 @@ mod test {
         let nexus_ip_end = Ipv4Addr::new(1, 2, 3, 5);
         let nexus_id1 = Uuid::new_v4();
         let nexus_id2 = Uuid::new_v4();
+        let nexus_pip1 = NEXUS_OPTE_IPV4_SUBNET
+            .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES as u32 + 1)
+            .unwrap();
+        let nexus_pip2 = NEXUS_OPTE_IPV4_SUBNET
+            .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES as u32 + 2)
+            .unwrap();
         let mut services = vec![
             internal_params::ServicePutRequest {
                 service_id: nexus_id1,
@@ -998,6 +1170,12 @@ mod test {
                 address: SocketAddrV6::new(Ipv6Addr::LOCALHOST, 123, 0, 0),
                 kind: internal_params::ServiceKind::Nexus {
                     external_address: IpAddr::V4(nexus_ip_start),
+                    nic: ServiceNic {
+                        id: Uuid::new_v4(),
+                        name: "nexus1".parse().unwrap(),
+                        ip: nexus_pip1.into(),
+                        mac: MacAddr::random_system(),
+                    },
                 },
             },
             internal_params::ServicePutRequest {
@@ -1007,6 +1185,12 @@ mod test {
                 address: SocketAddrV6::new(Ipv6Addr::LOCALHOST, 456, 0, 0),
                 kind: internal_params::ServiceKind::Nexus {
                     external_address: IpAddr::V4(nexus_ip_end),
+                    nic: ServiceNic {
+                        id: Uuid::new_v4(),
+                        name: "nexus2".parse().unwrap(),
+                        ip: nexus_pip2.into(),
+                        mac: MacAddr::random_system(),
+                    },
                 },
             },
         ];
@@ -1090,8 +1274,10 @@ mod test {
         // The address allocated for the service should match the input.
         assert_eq!(
             observed_external_ips[&observed_services[0].id()].ip.ip(),
-            if let internal_params::ServiceKind::Nexus { external_address } =
-                services[0].kind
+            if let internal_params::ServiceKind::Nexus {
+                external_address,
+                ..
+            } = services[0].kind
             {
                 external_address
             } else {
@@ -1100,8 +1286,10 @@ mod test {
         );
         assert_eq!(
             observed_external_ips[&observed_services[1].id()].ip.ip(),
-            if let internal_params::ServiceKind::Nexus { external_address } =
-                services[1].kind
+            if let internal_params::ServiceKind::Nexus {
+                external_address,
+                ..
+            } = services[1].kind
             {
                 external_address
             } else {
@@ -1167,6 +1355,9 @@ mod test {
         let sled = create_test_sled(&datastore).await;
 
         let nexus_ip = IpAddr::V4(Ipv4Addr::new(1, 2, 3, 4));
+        let nexus_pip = NEXUS_OPTE_IPV4_SUBNET
+            .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES as u32 + 1)
+            .unwrap();
         let nexus_id = Uuid::new_v4();
         let services = vec![internal_params::ServicePutRequest {
             service_id: nexus_id,
@@ -1175,6 +1366,12 @@ mod test {
             address: SocketAddrV6::new(Ipv6Addr::LOCALHOST, 123, 0, 0),
             kind: internal_params::ServiceKind::Nexus {
                 external_address: nexus_ip,
+                nic: ServiceNic {
+                    id: Uuid::new_v4(),
+                    name: "nexus".parse().unwrap(),
+                    ip: nexus_pip.into(),
+                    mac: MacAddr::random_system(),
+                },
             },
         }];
 
@@ -1211,7 +1408,13 @@ mod test {
         // Request two services which happen to be using the same IP address.
         let ip = IpAddr::V4(Ipv4Addr::new(1, 2, 3, 4));
         let external_dns_id = Uuid::new_v4();
+        let external_dns_pip = DNS_OPTE_IPV4_SUBNET
+            .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES as u32 + 1)
+            .unwrap();
         let nexus_id = Uuid::new_v4();
+        let nexus_pip = NEXUS_OPTE_IPV4_SUBNET
+            .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES as u32 + 1)
+            .unwrap();
 
         let services = vec![
             internal_params::ServicePutRequest {
@@ -1221,6 +1424,12 @@ mod test {
                 address: SocketAddrV6::new(Ipv6Addr::LOCALHOST, 123, 0, 0),
                 kind: internal_params::ServiceKind::ExternalDns {
                     external_address: ip,
+                    nic: ServiceNic {
+                        id: Uuid::new_v4(),
+                        name: "external-dns".parse().unwrap(),
+                        ip: external_dns_pip.into(),
+                        mac: MacAddr::random_system(),
+                    },
                 },
             },
             internal_params::ServicePutRequest {
@@ -1230,6 +1439,12 @@ mod test {
                 address: SocketAddrV6::new(Ipv6Addr::LOCALHOST, 123, 0, 0),
                 kind: internal_params::ServiceKind::Nexus {
                     external_address: ip,
+                    nic: ServiceNic {
+                        id: Uuid::new_v4(),
+                        name: "nexus".parse().unwrap(),
+                        ip: nexus_pip.into(),
+                        mac: MacAddr::random_system(),
+                    },
                 },
             },
         ];

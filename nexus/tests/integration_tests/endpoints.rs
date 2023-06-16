@@ -441,6 +441,8 @@ lazy_static! {
         };
 
     // IP Pools
+    pub static ref DEMO_IP_POOLS_PROJ_URL: String =
+        format!("/v1/ip-pools?project={}", *DEMO_PROJECT_NAME);
     pub static ref DEMO_IP_POOLS_URL: &'static str = "/v1/system/ip-pools";
     pub static ref DEMO_IP_POOL_NAME: Name = "default".parse().unwrap();
     pub static ref DEMO_IP_POOL_CREATE: params::IpPoolCreate =
@@ -450,6 +452,8 @@ lazy_static! {
                 description: String::from("an IP pool"),
             },
         };
+    pub static ref DEMO_IP_POOL_PROJ_URL: String =
+        format!("/v1/ip-pools/{}?project={}", *DEMO_IP_POOL_NAME, *DEMO_PROJECT_NAME);
     pub static ref DEMO_IP_POOL_URL: String = format!("/v1/system/ip-pools/{}", *DEMO_IP_POOL_NAME);
     pub static ref DEMO_IP_POOL_UPDATE: params::IpPoolUpdate =
         params::IpPoolUpdate {
@@ -721,6 +725,14 @@ lazy_static! {
                 ),
             ],
         },
+        VerifyEndpoint {
+            url: &DEMO_IP_POOLS_PROJ_URL,
+            visibility: Visibility::Public,
+            unprivileged_access: UnprivilegedAccess::ReadOnly,
+            allowed_methods: vec![
+                AllowedMethod::Get
+            ],
+        },
 
         // Single IP Pool endpoint
         VerifyEndpoint {
@@ -733,6 +745,14 @@ lazy_static! {
                     serde_json::to_value(&*DEMO_IP_POOL_UPDATE).unwrap()
                 ),
                 AllowedMethod::Delete,
+            ],
+        },
+        VerifyEndpoint {
+            url: &DEMO_IP_POOL_PROJ_URL,
+            visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::ReadOnly,
+            allowed_methods: vec![
+                AllowedMethod::Get
             ],
         },
 
