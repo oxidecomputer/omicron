@@ -130,6 +130,7 @@ impl InMemoryServer {
             &dropshot::ConfigDropshot {
                 bind_address: "[::1]:0".parse().unwrap(),
                 request_body_max_bytes: 4 * 1024 * 1024,
+                default_handler_task_mode: dropshot::HandlerTaskMode::Detached,
             },
         )
         .await?;

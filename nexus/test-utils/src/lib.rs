@@ -12,6 +12,7 @@ use dropshot::test_util::LogContext;
 use dropshot::ConfigDropshot;
 use dropshot::ConfigLogging;
 use dropshot::ConfigLoggingLevel;
+use dropshot::HandlerTaskMode;
 use nexus_test_interface::NexusServer;
 use nexus_types::external_api::params::UserId;
 use nexus_types::internal_api::params::Certificate;
@@ -774,6 +775,7 @@ pub async fn start_sled_agent(
         dropshot: ConfigDropshot {
             bind_address: SocketAddr::new(Ipv6Addr::LOCALHOST.into(), 0),
             request_body_max_bytes: 1024 * 1024,
+            default_handler_task_mode: HandlerTaskMode::Detached,
         },
         // TODO-cleanup this is unused
         log: ConfigLogging::StderrTerminal { level: ConfigLoggingLevel::Debug },
@@ -956,6 +958,7 @@ pub async fn start_dns_server(
         &dropshot::ConfigDropshot {
             bind_address: "[::1]:0".parse().unwrap(),
             request_body_max_bytes: 8 * 1024,
+            default_handler_task_mode: HandlerTaskMode::Detached,
         },
     )
     .await
