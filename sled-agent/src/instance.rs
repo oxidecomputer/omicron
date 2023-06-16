@@ -386,14 +386,22 @@ impl InstanceInner {
         &self,
         request: propolis_client::api::InstanceStateRequested,
     ) -> Result<(), Error> {
-        self.running_state
+        let res = self
+            .running_state
             .as_ref()
             .expect("Propolis client should be initialized before usage")
             .client
             .instance_state_put()
             .body(request)
             .send()
-            .await?;
+            .await;
+
+        if let Err(e) = &res {
+            error!(self.log, "Error from Propolis client: {:?}", e;
+                   "status" => ?e.status());
+        }
+
+        res?;
         Ok(())
     }
 
@@ -716,6 +724,7 @@ impl Instance {
             // start a migration target simply leaves the VM running untouched
             // on the source.
             if migration_params.is_none() && setup_result.is_err() {
+                error!(&inner.log, "instance setup failed: {:?}", setup_result);
                 inner.state.transition(PublishedInstanceState::Failed);
                 inner.publish_state_to_nexus().await?;
             }

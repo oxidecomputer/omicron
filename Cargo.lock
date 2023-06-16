@@ -325,6 +325,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "atomic-waker"
+version = "1.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1181e1e0d1fce796a03db1ae795d67167da795f9cf4a39c37589e85ef57f26d3"
+
+[[package]]
 name = "atty"
 version = "0.2.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1732,7 +1738,7 @@ dependencies = [
  "diesel",
  "serde",
  "usdt",
- "uuid 0.8.2",
+ "uuid 1.3.3",
  "version_check",
 ]
 
@@ -1978,7 +1984,7 @@ dependencies = [
 [[package]]
 name = "dropshot"
 version = "0.9.1-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#c719b41bc4ba46e3e9e5d85f6efffab694e0f0ff"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#fc0ffd522a78f9296f855bdf4c2703f900dfe99e"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -1986,6 +1992,7 @@ dependencies = [
  "bytes",
  "camino",
  "chrono",
+ "debug-ignore",
  "dropshot_endpoint",
  "form_urlencoded",
  "futures",
@@ -2016,12 +2023,13 @@ dependencies = [
  "usdt",
  "uuid 1.3.3",
  "version_check",
+ "waitgroup",
 ]
 
 [[package]]
 name = "dropshot_endpoint"
 version = "0.9.1-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#c719b41bc4ba46e3e9e5d85f6efffab694e0f0ff"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#fc0ffd522a78f9296f855bdf4c2703f900dfe99e"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -6482,6 +6490,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "rpassword"
+version = "7.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6678cf63ab3491898c0d021b493c94c9b221d91295294a2a5746eacbe5928322"
+dependencies = [
+ "libc",
+ "rtoolbox",
+ "winapi",
+]
+
+[[package]]
 name = "rsa"
 version = "0.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6501,6 +6520,16 @@ dependencies = [
  "signature 2.1.0",
  "subtle",
  "zeroize",
+]
+
+[[package]]
+name = "rtoolbox"
+version = "0.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "034e22c514f5c0cb8a10ff341b9b048b5ceb21591f31c8f44c43b960f9b3524a"
+dependencies = [
+ "libc",
+ "winapi",
 ]
 
 [[package]]
@@ -8264,9 +8293,9 @@ dependencies = [
 
 [[package]]
 name = "toml_edit"
-version = "0.19.9"
+version = "0.19.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "92d964908cec0d030b812013af25a0e57fddfadb1e066ecc6681d86253129d4f"
+checksum = "2380d56e8670370eee6566b0bfd4265f65b3f432e8c6d85623f728d4fa31f739"
 dependencies = [
  "indexmap",
  "serde",
@@ -8836,10 +8865,6 @@ name = "uuid"
 version = "0.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bc5cf98d8186244414c848017f0e2676b3fcb46807f6668a97dfe67359a3c4b7"
-dependencies = [
- "getrandom 0.2.8",
- "serde",
-]
 
 [[package]]
 name = "uuid"
@@ -8931,6 +8956,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9f200f5b12eb75f8c1ed65abd4b2db8a6e1b138a20de009dacee265a2498f3f6"
 dependencies = [
  "libc",
+]
+
+[[package]]
+name = "waitgroup"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d1f50000a783467e6c0200f9d10642f4bc424e39efc1b770203e88b488f79292"
+dependencies = [
+ "atomic-waker",
 ]
 
 [[package]]
@@ -9108,9 +9142,11 @@ dependencies = [
  "itertools",
  "libsw",
  "omicron-common 0.1.0",
+ "omicron-passwords 0.1.0",
  "once_cell",
  "proptest",
  "reqwest",
+ "rpassword",
  "semver 1.0.17",
  "serde",
  "serde_json",
@@ -9127,12 +9163,14 @@ dependencies = [
  "tokio",
  "tokio-util",
  "toml 0.7.4",
+ "toml_edit",
  "tui",
  "tui-tree-widget",
  "unicode-width",
  "update-engine",
  "wicket-common",
  "wicketd-client",
+ "zeroize",
 ]
 
 [[package]]
@@ -9176,6 +9214,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "bootstrap-agent-client",
  "buf-list",
  "bytes",
  "camino",
@@ -9198,7 +9237,9 @@ dependencies = [
  "installinator-artifact-client",
  "installinator-artifactd",
  "installinator-common",
+ "omicron-certificates",
  "omicron-common 0.1.0",
+ "omicron-passwords 0.1.0",
  "omicron-test-utils",
  "openapi-lint",
  "openapiv3",

@@ -20,7 +20,7 @@ fn test_wicket_ssh_force_command_like() {
     cmd.assert().success();
 
     let mut cmd = make_cmd(tempdir.path());
-    cmd.env("SSH_ORIGINAL_COMMAND", "upload --no-upload")
+    cmd.env("SSH_ORIGINAL_COMMAND", "upload-repo --no-upload")
         .write_stdin("upload-test");
     cmd.assert().success();
 }

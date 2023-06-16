@@ -5,7 +5,9 @@
 //! User provided dropshot server context
 
 use std::sync::Arc;
+use std::sync::Mutex;
 
+use crate::rss_config::CurrentRssConfig;
 use crate::update_tracker::UpdateTracker;
 use crate::MgsHandle;
 use sled_hardware::Baseboard;
@@ -16,4 +18,5 @@ pub struct ServerContext {
     pub mgs_client: gateway_client::Client,
     pub(crate) update_tracker: Arc<UpdateTracker>,
     pub(crate) baseboard: Option<Baseboard>,
+    pub(crate) rss_config: Mutex<CurrentRssConfig>,
 }
