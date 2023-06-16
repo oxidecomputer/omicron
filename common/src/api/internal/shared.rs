@@ -105,22 +105,6 @@ pub enum PortSpeed {
     Speed400G,
 }
 
-impl From<PortSpeed> for dpd_client::types::PortSpeed {
-    fn from(value: PortSpeed) -> Self {
-        match value {
-            PortSpeed::Speed0G => dpd_client::types::PortSpeed::Speed0G,
-            PortSpeed::Speed1G => dpd_client::types::PortSpeed::Speed1G,
-            PortSpeed::Speed10G => dpd_client::types::PortSpeed::Speed10G,
-            PortSpeed::Speed25G => dpd_client::types::PortSpeed::Speed25G,
-            PortSpeed::Speed40G => dpd_client::types::PortSpeed::Speed40G,
-            PortSpeed::Speed50G => dpd_client::types::PortSpeed::Speed50G,
-            PortSpeed::Speed100G => dpd_client::types::PortSpeed::Speed100G,
-            PortSpeed::Speed200G => dpd_client::types::PortSpeed::Speed200G,
-            PortSpeed::Speed400G => dpd_client::types::PortSpeed::Speed400G,
-        }
-    }
-}
-
 /// Switchport FEC options
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "snake_case")]
@@ -128,14 +112,4 @@ pub enum PortFec {
     Firecode,
     None,
     Rs,
-}
-
-impl From<PortFec> for dpd_client::types::PortFec {
-    fn from(value: PortFec) -> Self {
-        match value {
-            PortFec::Firecode => dpd_client::types::PortFec::Firecode,
-            PortFec::None => dpd_client::types::PortFec::None,
-            PortFec::Rs => dpd_client::types::PortFec::Rs,
-        }
-    }
 }
