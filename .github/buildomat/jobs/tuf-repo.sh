@@ -25,18 +25,18 @@
 #:
 #: [[publish]]
 #: series = "tuf-repo"
-#: name = "repo.zip.parta"
-#: from_output = "/work/repo.zip.parta"
+#: name = "repo-dogfood.zip.parta"
+#: from_output = "/work/repo-dogfood.zip.parta"
 #:
 #: [[publish]]
 #: series = "tuf-repo"
-#: name = "repo.zip.partb"
-#: from_output = "/work/repo.zip.partb"
+#: name = "repo-dogfood.zip.partb"
+#: from_output = "/work/repo-dogfood.zip.partb"
 #:
 #: [[publish]]
 #: series = "tuf-repo"
-#: name = "repo.zip.sha256.txt"
-#: from_output = "/work/repo.zip.sha256.txt"
+#: name = "repo-dogfood.zip.sha256.txt"
+#: from_output = "/work/repo-dogfood.zip.sha256.txt"
 #:
 
 set -o errexit
