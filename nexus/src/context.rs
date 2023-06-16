@@ -18,7 +18,7 @@ use authn::external::HttpAuthnScheme;
 use chrono::Duration;
 use internal_dns::ServiceName;
 use nexus_db_queries::context::{OpContext, OpKind};
-use omicron_common::address::{Ipv6Subnet, AZ_PREFIX, COCKROACH_PORT};
+use omicron_common::address::{Ipv6Subnet, AZ_PREFIX};
 use omicron_common::nexus_config;
 use omicron_common::postgres_config::PostgresConfigWithUrl;
 use oximeter::types::ProducerRegistry;
@@ -158,14 +158,27 @@ impl ServerContext {
             nexus_config::Database::FromUrl { url } => url.clone(),
             nexus_config::Database::FromDns => {
                 info!(log, "Accessing DB url from DNS");
-                let address = resolver
-                    .lookup_ipv6(ServiceName::Cockroach)
-                    .await
-                    .map_err(|e| format!("Failed to lookup IP: {}", e))?;
+                let address = loop {
+                    match resolver
+                        .lookup_socket_v6(ServiceName::Cockroach)
+                        .await
+                    {
+                        Ok(address) => break address,
+                        Err(e) => {
+                            warn!(
+                                log,
+                                "Failed to lookup cockroach address: {e}"
+                            );
+                            tokio::time::sleep(std::time::Duration::from_secs(
+                                1,
+                            ))
+                            .await;
+                        }
+                    }
+                };
                 info!(log, "DB address: {}", address);
                 PostgresConfigWithUrl::from_str(&format!(
-                    "postgresql://root@[{}]:{}/omicron?sslmode=disable",
-                    address, COCKROACH_PORT
+                    "postgresql://root@{address}/omicron?sslmode=disable",
                 ))
                 .map_err(|e| format!("Cannot parse Postgres URL: {}", e))?
             }
