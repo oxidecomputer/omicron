@@ -5,6 +5,7 @@
 //! Proptest generators
 
 use super::actions::Action;
+use super::network::FlowId;
 use bootstore::schemes::v0::{Config, Envelope, Fsm, Msg, Ticks};
 use proptest::{prelude::*, sample::Subsequence};
 use sled_hardware::Baseboard;
@@ -80,36 +81,42 @@ fn arb_config() -> impl Strategy<Value = Config> {
     )
 }
 
+// Generate a set of flows from one peer to another *different* peer
+fn arb_flows(
+    initial_members: Vec<Baseboard>,
+) -> impl Strategy<Value = Vec<FlowId>> + Clone {
+    prop::collection::vec(
+        any::<prop::sample::Index>(),
+        2..=initial_members.len(),
+    )
+    .prop_shuffle()
+    .prop_map(move |indexes| {
+        indexes
+            .chunks_exact(2)
+            .filter_map(|indexes| {
+                let source =
+                    &initial_members[indexes[0].index(initial_members.len())];
+                let dest =
+                    &initial_members[indexes[1].index(initial_members.len())];
+
+                // Don't create flows from a peer to itself
+                if source != dest {
+                    Some((source.clone(), dest.clone()))
+                } else {
+                    None
+                }
+            })
+            .collect()
+    })
+}
+
 // Generate a single test action to drive the property based tests
 fn arb_action(
     rack_uuid: Uuid,
     config: Config,
     initial_members: BTreeSet<Baseboard>,
 ) -> impl Strategy<Value = Action> {
-    let init_members_vec: Vec<_> = initial_members.iter().cloned().collect();
-
-    // Consruct an even number of unique indexes to match into flows
-    // We know we always have at least 2 members so this works fine.
-    let flows = prop::collection::vec(
-        any::<prop::sample::Index>(),
-        2..=initial_members.len() / 2 * 2,
-    )
-    .prop_shuffle()
-    .prop_map(move |indexes| {
-        indexes
-            .chunks_exact(2)
-            .map(|indexes| {
-                let source = init_members_vec
-                    [indexes[0].index(init_members_vec.len())]
-                .clone();
-                let dest = init_members_vec
-                    [indexes[1].index(init_members_vec.len())]
-                .clone();
-                (source, dest)
-            })
-            .collect()
-    });
-
+    let flows = arb_flows(initial_members.iter().cloned().collect::<Vec<_>>());
     prop_oneof![
         flows.clone().prop_map(Action::Connect),
         flows.prop_map(Action::Disconnect),
