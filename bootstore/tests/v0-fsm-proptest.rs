@@ -23,7 +23,7 @@ use sled_hardware::Baseboard;
 use std::collections::{BTreeMap, BTreeSet};
 use uuid::Uuid;
 
-use common::actions::Action;
+use common::actions::{Action, Delays};
 use common::generators::arb_test_input;
 use common::network::Network;
 
@@ -55,10 +55,17 @@ pub struct TestState {
     // purposes of this test we therefore assume that initialization always succeeds
     // if the initialization action runs.
     rack_init_complete: bool,
+
+    // Generated delays
+    delays: Delays,
 }
 
 impl TestState {
-    pub fn new(peer_ids: BTreeSet<Baseboard>, config: Config) -> TestState {
+    pub fn new(
+        peer_ids: BTreeSet<Baseboard>,
+        config: Config,
+        delays: Delays,
+    ) -> TestState {
         let peers = peer_ids
             .into_iter()
             .map(|id| (id.clone(), Fsm::new_uninitialized(id, config)))
@@ -70,6 +77,7 @@ impl TestState {
             clock: 0,
             config,
             rack_init_complete: false,
+            delays,
         }
     }
 
@@ -99,6 +107,16 @@ impl TestState {
                 }
                 Ok(())
             }
+            Action::Ticks(ticks) => {
+                for _ in 0..ticks {
+                    self.clock += 1;
+                    self.network.advance(self.clock);
+
+                    // TODO: Check for any delivered messages and process them.
+                    // We should add processing delays somewhere.
+                }
+                Ok(())
+            }
         }
     }
 
@@ -115,12 +133,14 @@ impl TestState {
         rack_uuid: Uuid,
         initial_members: BTreeSet<Baseboard>,
     ) -> Result<(), TestCaseError> {
+        let msg_delivery_time = self.clock + self.delays.msg_delivery;
+
         let output =
             self.peer_mut(&rss_sled).init_rack(rack_uuid, initial_members);
         self.check_rack_init_api_output(&rss_sled, &output)?;
 
         // Send the `Initialize` messages to all peers
-        self.network.send(&rss_sled, output.envelopes);
+        self.network.send(&rss_sled, output.envelopes, msg_delivery_time);
         self.network.deliver_all();
 
         // Handle the `Initialize` message sent to each peer
@@ -129,12 +149,16 @@ impl TestState {
         {
             // There should only be one `Initialize` message sent to each peer
             prop_assert_eq!(sourced_msgs.len(), 1);
-            let (source, msg) = sourced_msgs.pop().unwrap();
+            let (source, msg) = sourced_msgs.pop_front().unwrap();
             let output = self.peer_mut(&destination).handle(source, msg);
             self.check_handle_initialize_req_output(&destination, &output)?;
 
             // Queue the acknowledgement to the rss_sled in the network
-            self.network.send(&destination, output.envelopes);
+            self.network.send(
+                &destination,
+                output.envelopes,
+                msg_delivery_time,
+            );
         }
 
         // Deliver all the `InitAck` messages to the rss_sleds inbox
@@ -232,8 +256,11 @@ impl TestState {
 proptest! {
     #[test]
     fn run(input in arb_test_input(12)) {
-        let mut state =
-            TestState::new(input.initial_members.clone(), input.config);
+        let mut state = TestState::new(
+            input.initial_members.clone(),
+            input.config,
+            Delays::default()
+        );
 
         // Before we run our generated actions, we want to ensure all sleds are
         // connected to the rss_sled and successfully rack init. This is a requirement
@@ -250,6 +277,7 @@ proptest! {
         })?;
 
         for action in input.actions {
+            //println!("{:#?}", action);
             state.on_action(action)?;
         }
     }

@@ -9,8 +9,16 @@ use super::network::FlowId;
 use bootstore::schemes::v0::{Config, Envelope, Fsm, Msg, Ticks};
 use proptest::{prelude::*, sample::Subsequence};
 use sled_hardware::Baseboard;
-use std::collections::BTreeSet;
+use std::{
+    collections::BTreeSet,
+    ops::{Range, RangeInclusive},
+};
 use uuid::Uuid;
+
+// Ranges for timeout generation
+const LEARN_TIMEOUT: RangeInclusive<Ticks> = 5..=10;
+const RACK_SECRET_TIMEOUT: RangeInclusive<Ticks> = 5..=20;
+const TICKS_PER_ACTION: RangeInclusive<Ticks> = 1..=20;
 
 /// Input to the `run` method of our proptests
 #[derive(Debug)]
@@ -72,11 +80,11 @@ fn arb_peer_ids(
 // are just concerned that the behavior is correct in regards to some abstract
 // clock.
 fn arb_config() -> impl Strategy<Value = Config> {
-    (5..=10_usize, 5..=20_usize).prop_map(
-        |(learn_timeout, rack_init_timeout)| Config {
+    (LEARN_TIMEOUT, RACK_SECRET_TIMEOUT).prop_map(
+        |(learn_timeout, rack_secret_request_timeout)| Config {
             learn_timeout,
-            rack_init_timeout,
-            rack_secret_request_timeout: rack_init_timeout,
+            rack_init_timeout: rack_secret_request_timeout,
+            rack_secret_request_timeout,
         },
     )
 }
@@ -118,6 +126,7 @@ fn arb_action(
 ) -> impl Strategy<Value = Action> {
     let flows = arb_flows(initial_members.iter().cloned().collect::<Vec<_>>());
     prop_oneof![
+        (TICKS_PER_ACTION).prop_map(Action::Ticks),
         flows.clone().prop_map(Action::Connect),
         flows.prop_map(Action::Disconnect),
         // Choose an RSS sled randomly

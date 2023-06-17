@@ -22,12 +22,22 @@ use uuid::Uuid;
 #[derive(Debug)]
 pub struct Delays {
     // The time to send a message from source to destination
-    msg_delivery_time: Ticks,
+    pub msg_delivery: Ticks,
     // The time for a receiver to process a message and return a share to the
     // requester or the requester to receive a share and store it in memory.
-    share_time: Ticks,
+    pub share_processing: Ticks,
     // The time for a sled to compute the rack secret given enough shares
-    computer_rack_secret_time: Ticks,
+    pub rack_secret_computation: Ticks,
+}
+
+impl Default for Delays {
+    fn default() -> Self {
+        Delays {
+            msg_delivery: 1,
+            share_processing: 0,
+            rack_secret_computation: 1,
+        }
+    }
 }
 
 /// A test action to drive the test forward
@@ -39,7 +49,7 @@ pub enum Action {
         initial_members: BTreeSet<Baseboard>,
     },
     //    ChangeDelays(Delays),
-    //  Tick(Ticks),
+    Ticks(Ticks),
     //SledUnlock(Baseboard),
 
     // TODO: Generate these variants
