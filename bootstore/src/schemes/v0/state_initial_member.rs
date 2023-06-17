@@ -79,7 +79,8 @@ impl InitialMemberState {
         request_id: Uuid,
         share: Vec<u8>,
     ) -> Output {
-        // The RackSecret state needs this deadline to know how long to keep the secret
+        // The RackSecret state needs this deadline to know how long to keep
+        // the secret
         // TODO: Use a separate timeout for this purpose?
         let rack_secret_expiry =
             common.clock + common.config.rack_secret_request_timeout;

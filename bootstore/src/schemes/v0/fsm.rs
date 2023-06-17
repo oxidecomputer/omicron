@@ -220,7 +220,7 @@ impl Fsm {
             local_share,
             expiry,
             threshold.into(),
-            share_digests.clone(),
+            &share_digests,
         )
     }
 

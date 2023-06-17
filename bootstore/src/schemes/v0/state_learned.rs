@@ -106,31 +106,18 @@ impl StateHandler for LearnedState {
             }
             .into(),
             Share(share) => {
-                let rack_secret_result =
-                    match RackSecretState::combine_shares_if_necessary(
-                        &mut self.rack_secret_state,
-                        from,
-                        request_id,
-                        self.pkg.threshold.into(),
-                        share,
-                        &self.pkg.share_digests,
-                    ) {
-                        Ok(rack_secret_result) => rack_secret_result,
-                        Err(output) => return (self.into(), output),
-                    };
+                // The RackSecret state needs this deadline to know how long to
+                // keep the secret
+                // TODO: Use a separate timeout for this purpose?
+                let rack_secret_expiry =
+                    common.clock + common.config.rack_secret_request_timeout;
 
-                // Did computation of the rack secret succeed or fail?
-                //
-                // If we got to this point it means we at least had enough shares to try
-                // to reconstruct the rack secret.
-
-                // If we have a pending API request for the rack secret we can
-                // resolve it now.
-                common
-                    .resolve_pending_api_request(
-                        rack_secret_result.as_ref().ok(),
-                    )
-                    .into()
+                common.rack_secret_state.on_share(
+                    from,
+                    request_id,
+                    share,
+                    rack_secret_expiry,
+                )
             }
             Pkg(_) => ApiError::UnexpectedResponse {
                 from,
@@ -154,16 +141,7 @@ impl StateHandler for LearnedState {
 
     fn tick(mut self, common: &mut FsmCommonData) -> (State, Output) {
         // Check for rack secret request expiry
-        if let Some(start) = common.pending_api_rack_secret_request {
-            if common.clock.saturating_sub(start)
-                > common.config.rack_secret_request_timeout
-            {
-                common.pending_api_rack_secret_request = None;
-                return (self.into(), ApiError::RackSecretLoadTimeout.into());
-            }
-        }
-
-        (self.into(), Output::none())
+        (self.into(), common.rack_secret_state.on_tick(common.clock))
     }
 
     fn on_connect(
