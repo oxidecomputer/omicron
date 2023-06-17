@@ -1643,6 +1643,24 @@ impl ServiceManager {
                 ServiceType::Tfport { pkt_source } => {
                     info!(self.inner.log, "Setting up tfport service");
 
+                    let bootstrap_prefix =
+                        match bootstrap_name_and_address.as_ref() {
+                            Some((_, addr)) => Ipv6Addr::from(
+                                // mask out lower 64 bits to form /64 prefix
+                                u128::from(*addr) & ((u64::MAX as u128) << 64),
+                            ),
+                            None => {
+                                return Err(Error::BadServiceRequest {
+                                    service: "tfport".into(),
+                                    message: "bootstrap addr missing".into(),
+                                });
+                            }
+                        };
+
+                    smfh.setprop(
+                        "config/techport_prefix",
+                        bootstrap_prefix.to_string(),
+                    )?;
                     smfh.setprop("config/pkt_source", pkt_source)?;
                     smfh.setprop(
                         "config/host",
