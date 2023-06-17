@@ -121,6 +121,7 @@ impl TestState {
                 self.delays = delays;
                 Ok(())
             }
+            Action::LoadRackSecret(peer) => Ok(()),
         }
     }
 

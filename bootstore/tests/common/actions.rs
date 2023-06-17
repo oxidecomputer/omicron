@@ -43,6 +43,7 @@ impl Default for Delays {
 /// A test action to drive the test forward
 #[derive(Debug)]
 pub enum Action {
+    /// Call the `Fsm::init_rack` on `rss_sled`
     RackInit {
         rss_sled: Baseboard,
         rack_uuid: Uuid,
@@ -50,9 +51,9 @@ pub enum Action {
     },
     ChangeDelays(Delays),
     Ticks(Ticks),
-    //SledUnlock(Baseboard),
-
-    // TODO: Generate these variants
     Connect(Vec<FlowId>),
     Disconnect(Vec<FlowId>),
+
+    /// Call `Fsm::load_rack_secret` on the given sled
+    LoadRackSecret(Baseboard),
 }

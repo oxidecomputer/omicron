@@ -142,18 +142,22 @@ fn arb_action(
     initial_members: BTreeSet<Baseboard>,
 ) -> impl Strategy<Value = Action> {
     let flows = arb_flows(initial_members.iter().cloned().collect::<Vec<_>>());
+    let initial_members2 = initial_members.clone();
     prop_oneof![
-        (TICKS_PER_ACTION).prop_map(Action::Ticks),
-        flows.clone().prop_map(Action::Connect),
-        flows.prop_map(Action::Disconnect),
-        arb_delays().prop_map(Action::ChangeDelays),
+        100 => (TICKS_PER_ACTION).prop_map(Action::Ticks),
+        5 => flows.clone().prop_map(Action::Connect),
+        5 => flows.prop_map(Action::Disconnect),
+        20 => arb_delays().prop_map(Action::ChangeDelays),
         // Choose an RSS sled randomly
-        any::<prop::sample::Selector>().prop_map(move |selector| {
+        1 => any::<prop::sample::Selector>().prop_map(move |selector| {
             Action::RackInit {
-                rss_sled: selector.select(&initial_members).clone(),
+                rss_sled: selector.select(&initial_members2).clone(),
                 rack_uuid,
-                initial_members: initial_members.clone(),
+                initial_members: initial_members2.clone(),
             }
+        }),
+        15 => any::<prop::sample::Selector>().prop_map(move |selector| {
+            Action::LoadRackSecret(selector.select(&initial_members).clone())
         })
     ]
 }
