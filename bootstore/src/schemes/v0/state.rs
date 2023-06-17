@@ -20,7 +20,9 @@ use serde::{Deserialize, Serialize};
 use sha3::{Digest, Sha3_256};
 use sled_hardware::Baseboard;
 use std::collections::{BTreeMap, BTreeSet};
+use std::fmt::Debug;
 use uuid::Uuid;
+use zeroize::{Zeroize, ZeroizeOnDrop};
 
 /// A number of clock ticks from some unknown epoch
 pub type Ticks = usize;
@@ -42,30 +44,23 @@ pub struct Config {
 /// In memory state shared by all 4 FSM states
 #[derive(Debug)]
 pub struct FsmCommonData {
-    // Unique IDs of this peer
+    /// Unique IDs of this peer
     pub id: Baseboard,
 
-    // Configuration of the FSM
+    /// Configuration of the FSM
     pub config: Config,
 
-    // Unique IDs of connected peers
+    /// Unique IDs of connected peers
     pub peers: BTreeSet<Baseboard>,
 
-    // The current time in ticks since the creation of the FSM
+    /// The current time in ticks since the creation of the FSM
     pub clock: Ticks,
 
-    // An api caller can issue a request for a `RackSecret` with
-    // `load_rack_secret`. Sometimes we don't have the `RackSecret` recomputed
-    // and so we have to mark the request as pending until we retrieve enough
-    // shares to recompute it and return it to the caller. We keep track
-    // of the pending request here as it's valid in all FSM states except
-    // `State::Uninitialized`.
-    //
-    // The value stored inside the `Option` is the start time of the request.
-    //
-    // A caller should only issue this once. If it's issued more times, we'll
-    // overwrite the start time to extend the timeout.
-    pub pending_api_rack_secret_request: Option<Ticks>,
+    /// Any shares we are in the process of retrieving or a computed rack
+    /// secret. If no collection is ongoing and we are not holding a computed
+    /// rack secret, then the state is `Empty`. The state is always empty for
+    /// `State::Uninitialized` and `State::Learning`
+    pub rack_secret_state: RackSecretState,
 }
 
 impl FsmCommonData {
@@ -75,60 +70,8 @@ impl FsmCommonData {
             config,
             peers: BTreeSet::new(),
             clock: 0,
-            pending_api_rack_secret_request: None,
+            rack_secret_state: RackSecretState::Empty,
         }
-    }
-
-    // If there's a pending api request for the rack secret:
-    //
-    // Return the secret if there is one passed in, otherwise return an error.
-    // Return `None` if no request is pending
-    pub fn resolve_pending_api_request(
-        &mut self,
-        rack_secret: Option<&RackSecret>,
-    ) -> Option<Result<ApiOutput, ApiError>> {
-        match (rack_secret, &mut self.pending_api_rack_secret_request) {
-            (None, Some(_)) => {
-                self.pending_api_rack_secret_request = None;
-                Some(Err(ApiError::FailedToReconstructRackSecret))
-            }
-            (Some(rack_secret), Some(_)) => {
-                self.pending_api_rack_secret_request = None;
-                Some(Ok(ApiOutput::RackSecret(rack_secret.clone())))
-            }
-            (_, None) => None,
-        }
-    }
-
-    // Send a request for a share to each peer
-    pub fn broadcast_share_requests(
-        &self,
-        rack_uuid: Uuid,
-        known_shares: Option<&BTreeMap<Baseboard, Vec<u8>>>,
-    ) -> Output {
-        let known_peers = if let Some(shares) = known_shares {
-            shares.keys().cloned().collect()
-        } else {
-            BTreeSet::new()
-        };
-
-        // All broadcast requests share the same id
-        let request_id = Uuid::new_v4();
-        let envelopes = self
-            .peers
-            .difference(&known_peers)
-            .cloned()
-            .map(|to| Envelope {
-                to,
-                msg: Request {
-                    id: request_id,
-                    type_: RequestType::GetShare { rack_uuid },
-                }
-                .into(),
-            })
-            .collect();
-
-        Output { persist: false, envelopes, api_output: None }
     }
 
     // Round-robin peer selection
@@ -149,63 +92,203 @@ pub struct RequestMetadata {
     pub start: Ticks,
 }
 
-/// Whether we are in the process of learning enough shares to recompute the
-/// rack secret or if we have already recomputed it.
+#[derive(Zeroize, ZeroizeOnDrop)]
+pub struct Shares(Vec<Vec<u8>>);
+
+impl Shares {
+    fn insert(&mut self, share: Vec<u8>) {
+        self.0.push(share);
+    }
+}
+
+impl Debug for Shares {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Shares").finish()
+    }
+}
+
+/// The state of rack secret share retrieval
+///
+/// Primarily this is whether we are in the process of retrieving enough shares to
+/// recompute the rack secret or if we have already recomputed it.
 #[derive(Debug)]
 pub enum RackSecretState {
-    // TODO: Zeroize or wrap in a Secret
-    Shares(BTreeMap<Baseboard, Vec<u8>>),
-    Secret(RackSecret),
+    /// We are not currently retrieving any shares and we don't have a computed
+    /// rack secret
+    Empty,
+
+    /// We only store the shares in memory until some expiry deadline.
+    /// However, we extend this deadline each time a share is learned to enable
+    /// computation of the rack secret. If no shares are added for a while, and
+    /// we still don't have enough shares to compute the rack secret then we
+    /// drop all the shares.
+    Retrieving {
+        // We use a separate BTreeSet to track who we retrieved shares form so
+        // that we can wrap the shares with a `Secret`
+        request_id: Uuid,
+        from: BTreeSet<Baseboard>,
+        shares: Shares,
+        expiry: Ticks,
+        threshold: usize,
+        share_digests: Vec<Sha3_256Digest>,
+    },
+    /// We only store the computed secret in memory for so long after it has
+    /// been computed
+    Computed { secret: RackSecret, expiry: Ticks },
 }
 
 impl RackSecretState {
-    /// If there are enough shares *and* we are currently collecting shares
-    /// *and* the new share validates, then try to reconstruct and return the
-    /// *`RackSecret`.
+    pub fn load(
+        &mut self,
+        rack_uuid: Uuid,
+        peers: &BTreeSet<Baseboard>,
+        local_id: &Baseboard,
+        local_share: &Vec<u8>,
+        new_expiry: Ticks,
+        threshold: usize,
+        share_digests: Vec<Sha3_256Digest>,
+    ) -> Output {
+        match self {
+            RackSecretState::Empty => {
+                // Start the share retrieval process
+                let (request_id, output) =
+                    self.broadcast_share_requests(rack_uuid, peers);
+                *self = RackSecretState::Retrieving {
+                    request_id,
+                    from: BTreeSet::from([local_id.clone()]),
+                    shares: Shares(vec![local_share.clone()]),
+                    expiry: new_expiry,
+                    threshold,
+                    share_digests,
+                };
+                output
+            }
+            RackSecretState::Retrieving { expiry, .. } => {
+                // We already have a retrieval in progress.
+                // Just extend the expiry
+                *expiry = new_expiry;
+                Output::none()
+            }
+            RackSecretState::Computed { secret, expiry } => {
+                // We have the secret, so return it.
+                Output {
+                    persist: false,
+                    envelopes: vec![],
+                    api_output: Some(Ok(ApiOutput::RackSecret(secret.clone()))),
+                }
+            }
+        }
+    }
+
+    fn validate_share(
+        from: &Baseboard,
+        share: &Vec<u8>,
+        share_digests: &Vec<Sha3_256Digest>,
+    ) -> Result<(), ApiError> {
+        let computed_hash = Sha3_256Digest(
+            Sha3_256::digest(share).as_slice().try_into().unwrap(),
+        );
+
+        if !share_digests.contains(&computed_hash) {
+            Err(ApiError::InvalidShare { from: from.clone() })
+        } else {
+            Ok(())
+        }
+    }
+
+    // Send a request for a share to each peer
+    pub fn broadcast_share_requests(
+        &self,
+        rack_uuid: Uuid,
+        peers: &BTreeSet<Baseboard>,
+    ) -> (Uuid, Output) {
+        // All broadcast requests share the same id
+        let request_id = Uuid::new_v4();
+        let envelopes = peers
+            .iter()
+            .cloned()
+            .map(|to| Envelope {
+                to,
+                msg: Request {
+                    id: request_id,
+                    type_: RequestType::GetShare { rack_uuid },
+                }
+                .into(),
+            })
+            .collect();
+
+        (request_id, Output { persist: false, envelopes, api_output: None })
+    }
+
+    /// We received a share
     ///
-    /// We return the result of the share combination so that callers can
-    /// handle what is essentially a fatal error if secret reconstruction fails.
-    ///
-    /// If we are not currently collecting shares, or the share does not
-    /// validate we return an `Err(Output)` that can be directly returned to our
-    /// caller's caller.
-    pub fn combine_shares_if_necessary(
-        state: &mut Option<RackSecretState>,
+    /// Verify that the share is valid and recompute the secret if there are
+    /// enough shares.
+    pub fn on_share(
+        &mut self,
         from: Baseboard,
         request_id: Uuid,
-        threshold: usize,
         share: Vec<u8>,
-        share_digests: &Vec<Sha3_256Digest>,
-    ) -> Result<Result<RackSecret, vsss_rs::Error>, Output> {
-        match state {
-            None => Err(ApiError::UnexpectedResponse {
+        rack_secret_expiry: Ticks,
+    ) -> Output {
+        match self {
+            RackSecretState::Empty => ApiError::UnexpectedResponse {
                 from,
                 state: "-",
                 request_id,
                 msg: "share",
             }
-            .into()),
-            Some(RackSecretState::Secret(_)) => {
-                // We already have the rack secret, just drop the extra share
-                Err(Output::none())
-            }
-            Some(RackSecretState::Shares(shares)) => {
+            .into(),
+            RackSecretState::Retrieving {
+                request_id,
+                from: from_all,
+                shares,
+                expiry,
+                threshold,
+                share_digests,
+            } => {
+                // Ignore the share if we already have one from this peer
+                if from_all.contains(&from) {
+                    return Output::none();
+                }
+
                 // Compute and validate hash of the received key share
                 if let Err(api_error) =
-                    validate_share(&from, &share, share_digests)
+                    Self::validate_share(&from, &share, &share_digests)
                 {
-                    return Err(api_error.into());
+                    return api_error.into();
                 }
 
-                // Add the share to our current set
-                shares.insert(from, share);
+                // Keep track of our new valid share
+                shares.insert(share);
+                from_all.insert(from);
 
-                if shares.len() == threshold as usize {
-                    let to_combine: Vec<_> = shares.values().cloned().collect();
-                    Ok(RackSecret::combine_shares(&to_combine))
+                // If we have enough shares, try to recompute the rack secret
+                // If we fail here, this is a major problem so we report it and
+                // clear our rack secret state, as we won't be able to succeed.
+                // This error should be effectively impossible to ever hit.
+                if shares.0.len() == *threshold {
+                    match RackSecret::combine_shares(&shares.0) {
+                        Ok(secret) => {
+                            *self = RackSecretState::Computed {
+                                secret: secret.clone(),
+                                expiry: rack_secret_expiry,
+                            };
+                            ApiOutput::RackSecret(secret).into()
+                        }
+                        Err(_) => {
+                            *self = RackSecretState::Empty;
+                            ApiError::FailedToReconstructRackSecret.into()
+                        }
+                    }
                 } else {
-                    Err(Output::none())
+                    // We don't have enough shares
+                    Output::none()
                 }
+            }
+            RackSecretState::Computed { secret, .. } => {
+                // We already have the state, go ahead and return it.
+                ApiOutput::RackSecret(secret.clone()).into()
             }
         }
     }
@@ -464,20 +547,5 @@ impl State {
             Self::Learning(_) => "learning",
             Self::Learned(_) => "learned",
         }
-    }
-}
-
-fn validate_share(
-    from: &Baseboard,
-    share: &Vec<u8>,
-    share_digests: &Vec<Sha3_256Digest>,
-) -> Result<(), ApiError> {
-    let computed_hash =
-        Sha3_256Digest(Sha3_256::digest(share).as_slice().try_into().unwrap());
-
-    if !share_digests.contains(&computed_hash) {
-        Err(ApiError::InvalidShare { from: from.clone() })
-    } else {
-        Ok(())
     }
 }

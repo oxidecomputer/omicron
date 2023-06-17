@@ -8,13 +8,11 @@
 //! results. This is where the bulk of the protocol logic lives. It's
 //! written this way to enable easy testing and auditing.
 
-use super::fsm_output::{ApiError, ApiOutput, Output};
+use super::fsm_output::{ApiError, Output};
 use super::messages::{
     Envelope, Msg, Request, RequestType, Response, ResponseType,
 };
-use super::state::{
-    Config, FsmCommonData, RackInitState, RackSecretState, State,
-};
+use super::state::{Config, FsmCommonData, RackInitState, State};
 use super::{
     InitialMemberState, LearnedState, LearningState, UninitializedState,
 };
@@ -195,77 +193,35 @@ impl Fsm {
     /// if the rack secret has not already been loaded, then share retrieval
     /// will begin.
     pub fn load_rack_secret(&mut self) -> Output {
-        match self.state.as_mut().unwrap() {
+        let (rack_uuid, local_share, threshold, share_digests) = match self
+            .state
+            .as_ref()
+            .unwrap()
+        {
             // We don't allow retrieval before initialization
-            State::Uninitialized(_) => ApiError::RackNotInitialized.into(),
-            State::Learning(_) => ApiError::StillLearning.into(),
-            State::InitialMember(InitialMemberState {
-                pkg,
-                rack_secret_state,
-                ..
-            }) => {
-                match rack_secret_state {
-                    None => {
-                        self.common.pending_api_rack_secret_request =
-                            Some(self.common.clock);
-                        // Add our own share during initialization
-                        *rack_secret_state =
-                            Some(RackSecretState::Shares(BTreeMap::from([(
-                                self.common.id.clone(),
-                                pkg.share.clone(),
-                            )])));
-                        Output::none()
-                    }
-                    Some(RackSecretState::Shares(_)) => {
-                        // Refresh the start time to extend the request timeout
-                        self.common.pending_api_rack_secret_request =
-                            Some(self.common.clock);
-                        Output::none()
-                    }
-                    Some(RackSecretState::Secret(rack_secret)) => {
-                        // We already know the secret, so return it.
-                        Output {
-                            persist: false,
-                            envelopes: vec![],
-                            api_output: Some(Ok(ApiOutput::RackSecret(
-                                rack_secret.clone(),
-                            ))),
-                        }
-                    }
-                }
+            State::Uninitialized(_) => {
+                return ApiError::RackNotInitialized.into()
             }
-            State::Learned(LearnedState { pkg, rack_secret_state }) => {
-                match rack_secret_state {
-                    None => {
-                        self.common.pending_api_rack_secret_request =
-                            Some(self.common.clock);
-                        // Add our own share during initialization
-                        *rack_secret_state =
-                            Some(RackSecretState::Shares(BTreeMap::from([(
-                                self.common.id.clone(),
-                                pkg.share.clone(),
-                            )])));
-                        Output::none()
-                    }
-                    Some(RackSecretState::Shares(_)) => {
-                        // Refresh the start time to extend the request timeout
-                        self.common.pending_api_rack_secret_request =
-                            Some(self.common.clock);
-                        Output::none()
-                    }
-                    Some(RackSecretState::Secret(rack_secret)) => {
-                        // We already know the secret, so return it.
-                        Output {
-                            persist: false,
-                            envelopes: vec![],
-                            api_output: Some(Ok(ApiOutput::RackSecret(
-                                rack_secret.clone(),
-                            ))),
-                        }
-                    }
-                }
+            State::Learning(_) => return ApiError::StillLearning.into(),
+            State::InitialMember(InitialMemberState { pkg, .. }) => {
+                (pkg.rack_uuid, &pkg.share, pkg.threshold, pkg.share_digests)
             }
-        }
+            State::Learned(LearnedState { pkg, .. }) => {
+                (pkg.rack_uuid, &pkg.share, pkg.threshold, pkg.share_digests)
+            }
+        };
+        let expiry =
+            self.common.clock + self.common.config.rack_secret_request_timeout;
+
+        self.common.rack_secret_state.load(
+            rack_uuid,
+            &self.common.peers,
+            &self.common.id,
+            local_share,
+            expiry,
+            threshold.into(),
+            share_digests.clone(),
+        )
     }
 
     /// An abstraction of a timer tick.
