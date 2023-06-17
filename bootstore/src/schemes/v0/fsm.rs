@@ -163,7 +163,6 @@ impl Fsm {
                         unacked_envelopes: envelopes.clone(),
                     }),
                     pending_learn_requests: BTreeMap::new(),
-                    rack_secret_state: None,
                 }));
                 // Note that while we could only send the envelopes to
                 // connected peers, the network layer will just drop them.
@@ -204,10 +203,10 @@ impl Fsm {
             }
             State::Learning(_) => return ApiError::StillLearning.into(),
             State::InitialMember(InitialMemberState { pkg, .. }) => {
-                (pkg.rack_uuid, &pkg.share, pkg.threshold, pkg.share_digests)
+                (pkg.rack_uuid, &pkg.share, pkg.threshold, &pkg.share_digests)
             }
             State::Learned(LearnedState { pkg, .. }) => {
-                (pkg.rack_uuid, &pkg.share, pkg.threshold, pkg.share_digests)
+                (pkg.rack_uuid, &pkg.share, pkg.threshold, &pkg.share_digests)
             }
         };
         let expiry =
@@ -220,7 +219,7 @@ impl Fsm {
             local_share,
             expiry,
             threshold.into(),
-            &share_digests,
+            share_digests,
         )
     }
 
