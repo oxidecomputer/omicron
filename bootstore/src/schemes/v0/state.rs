@@ -146,7 +146,7 @@ impl RackSecretState {
         local_share: &Vec<u8>,
         new_expiry: Ticks,
         threshold: usize,
-        share_digests: Vec<Sha3_256Digest>,
+        share_digests: &Vec<Sha3_256Digest>,
     ) -> Output {
         match self {
             RackSecretState::Empty => {
@@ -159,7 +159,7 @@ impl RackSecretState {
                     shares: Shares(vec![local_share.clone()]),
                     expiry: new_expiry,
                     threshold,
-                    share_digests,
+                    share_digests: share_digests.clone(),
                 };
                 output
             }
@@ -178,6 +178,27 @@ impl RackSecretState {
                 }
             }
         }
+    }
+
+    // Did the share retrieval process timeout ?
+    pub fn on_tick(&mut self, now: Ticks) -> Output {
+        match self {
+            RackSecretState::Retrieving { expiry, .. } => {
+                if *expiry < now {
+                    *self = RackSecretState::Empty;
+                    return ApiError::RackSecretLoadTimeout.into();
+                }
+            }
+            RackSecretState::Computed { expiry, .. } => {
+                if *expiry < now {
+                    // This is just cleanup of the secret from memory
+                    // No reason to report this
+                    *self = RackSecretState::Empty;
+                }
+            }
+            RackSecretState::Empty => (),
+        }
+        Output::none()
     }
 
     fn validate_share(

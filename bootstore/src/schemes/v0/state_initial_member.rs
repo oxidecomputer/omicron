@@ -13,8 +13,7 @@ use super::fsm::StateHandler;
 use super::fsm_output::Output;
 use super::messages::{Envelope, Error, RequestType, Response, ResponseType};
 use super::state::{
-    FsmCommonData, RackInitState, RackSecretState, RequestMetadata, ShareIdx,
-    State,
+    FsmCommonData, RackInitState, RequestMetadata, ShareIdx, State,
 };
 use secrecy::ExposeSecret;
 use sled_hardware::Baseboard;
@@ -53,13 +52,6 @@ pub struct InitialMemberState {
     // Note that if we get a new `RequestType::Learn` from a peer that is already
     // pending, we will reset the start time.
     pub pending_learn_requests: BTreeMap<Baseboard, RequestMetadata>,
-
-    // In `InitialMember` or `Learned` states, it is sometimes necessary to
-    // reconstruct the rack secret.
-    //
-    // This is needed to both unlock local storage or decrypt our extra shares
-    // to hand out to learners.
-    pub rack_secret_state: Option<RackSecretState>,
 }
 
 impl InitialMemberState {
@@ -72,7 +64,6 @@ impl InitialMemberState {
             distributed_shares,
             rack_init_state: None,
             pending_learn_requests: BTreeMap::new(),
-            rack_secret_state: None,
         }
     }
 
@@ -261,48 +252,32 @@ impl StateHandler for InitialMemberState {
                 }
             }
             Learn => {
-                match &self.rack_secret_state {
-                    Some(RackSecretState::Secret(rack_secret)) => {
-                        // We already know the rack secret so respond to the
-                        // peer.
-                        send_share_response(
-                            from,
-                            request_id,
-                            &self.pkg,
-                            &mut self.distributed_shares,
-                            rack_secret,
-                        )
-                    }
-                    Some(RackSecretState::Shares(shares)) => {
-                        // Register the request and try to collect enough
-                        // shares to unlock the rack secret. When we have
-                        // enough we will respond to the caller.
-                        self.pending_learn_requests.insert(
-                            from,
-                            RequestMetadata { request_id, start: common.clock },
-                        );
-                        common.broadcast_share_requests(
-                            self.pkg.rack_uuid,
-                            Some(shares),
-                        )
-                    }
-                    None => {
-                        // Register the request and try to collect enough
-                        // shares to unlock the rack secret. When we have
-                        // enough we will respond to the caller.
-                        self.pending_learn_requests.insert(
-                            from,
-                            RequestMetadata { request_id, start: common.clock },
-                        );
-                        // Start to track collecting shares by inserting ourself
-                        self.rack_secret_state =
-                            Some(RackSecretState::Shares(BTreeMap::from([(
-                                common.id.clone(),
-                                self.pkg.share.clone(),
-                            )])));
-                        common
-                            .broadcast_share_requests(self.pkg.rack_uuid, None)
-                    }
+                let expiry =
+                    common.clock + common.config.rack_secret_request_timeout;
+                let output = common.rack_secret_state.load(
+                    self.pkg.rack_uuid,
+                    &common.peers,
+                    &common.id,
+                    &self.pkg.share,
+                    expiry,
+                    self.pkg.threshold.into(),
+                    &self.pkg.share_digests,
+                );
+
+                if let Some(Ok(ApiOutput::RackSecret(rack_secret))) =
+                    &output.api_output
+                {
+                    // We already know the rack secret so respond to the
+                    // peer.
+                    send_share_response(
+                        from,
+                        request_id,
+                        &self.pkg,
+                        &mut self.distributed_shares,
+                        rack_secret,
+                    )
+                } else {
+                    output
                 }
             }
         };
@@ -352,8 +327,6 @@ impl StateHandler for InitialMemberState {
         (self.into(), output)
     }
 
-    ///  TODO: check for pending learn request timeouts
-    ///  * rack secret expiry - so we can zero it or shares
     fn tick(mut self, common: &mut FsmCommonData) -> (State, Output) {
         // Check for rack initialization timeout
         if let Some(rack_init_state) = &mut self.rack_init_state {
@@ -369,18 +342,7 @@ impl StateHandler for InitialMemberState {
             }
         }
 
-        // Check for rack secret request timeout
-        if let Some(start) = common.pending_api_rack_secret_request {
-            // Check for rack secret request expiry
-            if common.clock.saturating_sub(start)
-                > common.config.rack_secret_request_timeout
-            {
-                common.pending_api_rack_secret_request = None;
-                return (self.into(), ApiError::RackSecretLoadTimeout.into());
-            }
-        }
-
-        (self.into(), Output::none())
+        (self.into(), common.rack_secret_state.on_tick(common.clock))
     }
 
     fn on_connect(
