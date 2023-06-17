@@ -88,50 +88,32 @@ impl InitialMemberState {
         request_id: Uuid,
         share: Vec<u8>,
     ) -> Output {
-        let rack_secret_result =
-            match RackSecretState::combine_shares_if_necessary(
-                &mut self.rack_secret_state,
-                from,
-                request_id,
-                self.pkg.threshold.into(),
-                share,
-                &self.pkg.share_digests,
-            ) {
-                Ok(rack_secret_result) => rack_secret_result,
-                Err(output) => return output,
-            };
+        // The RackSecret state needs this deadline to know how long to keep the secret
+        // TODO: Use a separate timeout for this purpose?
+        let rack_secret_expiry =
+            common.clock + common.config.rack_secret_request_timeout;
 
-        // Did computation of the rack secret succeed or fail?
-        //
-        // If we got to this point it means we at least had enough shares to try
-        // to reconstruct the rack secret.
+        let mut output = common.rack_secret_state.on_share(
+            from,
+            request_id,
+            share,
+            rack_secret_expiry,
+        );
 
-        // If we have a pending API request for the rack secret we can
-        // resolve it now.
-        let api_output = common
-            .resolve_pending_api_request(rack_secret_result.as_ref().ok());
-
-        match rack_secret_result {
-            Ok(rack_secret) => {
-                // If we have any pending peer learn requests, we
-                // can now resolve them.
-                let (persist, envelopes) =
-                    self.resolve_learn_requests(&rack_secret);
-
-                self.rack_secret_state =
-                    Some(RackSecretState::Secret(rack_secret));
-
-                Output { persist, envelopes, api_output }
-            }
-            Err(e) => {
-                // Resolve all pending learn requests with an error
-                let envelopes = self.resolve_learn_requests_with_error(
-                    Error::FailedToReconstructRackSecret,
-                );
-
-                Output { persist: false, envelopes, api_output }
-            }
+        if let Some(Ok(ApiOutput::RackSecret(rack_secret))) =
+            &mut output.api_output
+        {
+            // We have the rack secret as part of `output`. We may also
+            // have learn request that we need to resolve now.
+            //
+            // Note that we only persist if there are learn requests which
+            // cause an update to persistent state by handing out a share to the requester.
+            let (persist, envelopes) =
+                self.resolve_learn_requests(&rack_secret);
+            output.envelopes.extend_from_slice(&envelopes);
+            output.persist = persist;
         }
+        output
     }
 
     // We've just recomputed the rack secret. Now resolve any pending learn
