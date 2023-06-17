@@ -117,6 +117,10 @@ impl TestState {
                 }
                 Ok(())
             }
+            Action::ChangeDelays(delays) => {
+                self.delays = delays;
+                Ok(())
+            }
         }
     }
 
@@ -277,7 +281,7 @@ proptest! {
         })?;
 
         for action in input.actions {
-            //println!("{:#?}", action);
+            println!("{:#?}", action);
             state.on_action(action)?;
         }
     }

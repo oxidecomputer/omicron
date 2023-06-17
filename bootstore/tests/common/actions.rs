@@ -48,7 +48,7 @@ pub enum Action {
         rack_uuid: Uuid,
         initial_members: BTreeSet<Baseboard>,
     },
-    //    ChangeDelays(Delays),
+    ChangeDelays(Delays),
     Ticks(Ticks),
     //SledUnlock(Baseboard),
 

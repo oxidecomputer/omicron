@@ -4,7 +4,7 @@
 
 //! Proptest generators
 
-use super::actions::Action;
+use super::actions::{Action, Delays};
 use super::network::FlowId;
 use bootstore::schemes::v0::{Config, Envelope, Fsm, Msg, Ticks};
 use proptest::{prelude::*, sample::Subsequence};
@@ -19,6 +19,9 @@ use uuid::Uuid;
 const LEARN_TIMEOUT: RangeInclusive<Ticks> = 5..=10;
 const RACK_SECRET_TIMEOUT: RangeInclusive<Ticks> = 5..=20;
 const TICKS_PER_ACTION: RangeInclusive<Ticks> = 1..=20;
+const MSG_DELIVERY_DELAY: RangeInclusive<Ticks> = 0..=20;
+const SHARE_PROCESSING_DELAY: RangeInclusive<Ticks> = 0..=1;
+const RACK_SECRET_COMPUTATION_DELAY: RangeInclusive<Ticks> = 0..=3;
 
 /// Input to the `run` method of our proptests
 #[derive(Debug)]
@@ -118,6 +121,20 @@ fn arb_flows(
     })
 }
 
+// Generate arbitrary `Delays`
+fn arb_delays() -> impl Strategy<Value = Delays> {
+    (MSG_DELIVERY_DELAY, SHARE_PROCESSING_DELAY, RACK_SECRET_COMPUTATION_DELAY)
+        .prop_map(
+            |(msg_delivery, share_processing, rack_secret_computation)| {
+                Delays {
+                    msg_delivery,
+                    share_processing,
+                    rack_secret_computation,
+                }
+            },
+        )
+}
+
 // Generate a single test action to drive the property based tests
 fn arb_action(
     rack_uuid: Uuid,
@@ -129,6 +146,7 @@ fn arb_action(
         (TICKS_PER_ACTION).prop_map(Action::Ticks),
         flows.clone().prop_map(Action::Connect),
         flows.prop_map(Action::Disconnect),
+        arb_delays().prop_map(Action::ChangeDelays),
         // Choose an RSS sled randomly
         any::<prop::sample::Selector>().prop_map(move |selector| {
             Action::RackInit {
