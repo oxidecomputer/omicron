@@ -304,6 +304,7 @@ impl Fsm {
 mod tests {
     use super::*;
     use crate::schemes::v0::state_uninitialized::UninitializedState;
+    use crate::schemes::v0::ApiOutput;
 
     fn test_config() -> Config {
         Config {
