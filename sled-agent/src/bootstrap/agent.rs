@@ -485,6 +485,7 @@ impl Agent {
         let bootstrap_etherstub = bootstrap_etherstub()?;
         let switch_zone_bootstrap_address =
             BootstrapInterface::SwitchZone.ip(&link)?;
+
         let hardware_monitor = HardwareMonitor::new(
             &log,
             &sled_config,

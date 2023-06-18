@@ -721,9 +721,11 @@
             "type": "object",
             "properties": {
               "dns_address": {
+                "description": "The address at which the internal DNS server is reachable.",
                 "type": "string"
               },
               "http_address": {
+                "description": "The address at which the internal DNS server API is reachable.",
                 "type": "string"
               },
               "type": {

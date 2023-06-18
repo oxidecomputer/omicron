@@ -208,18 +208,6 @@ impl HardwareMonitor {
             }
         }
 
-        // If our configuration asks for synthetic zpools, insert them now.
-        if let Some(pools) = &sled_config.zpools {
-            for pool in pools {
-                info!(
-                    log,
-                    "Upserting synthetic zpool to Storage Manager: {}",
-                    pool.to_string()
-                );
-                storage_manager.upsert_synthetic_disk(pool.clone()).await;
-            }
-        }
-
         let service_manager = ServiceManager::new(
             log.clone(),
             global_zone_bootstrap_link_local_address,

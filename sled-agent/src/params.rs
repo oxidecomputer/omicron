@@ -225,7 +225,9 @@ pub enum DatasetKind {
         nic: NetworkInterface,
     },
     InternalDns {
+        /// The address at which the internal DNS server API is reachable.
         http_address: SocketAddrV6,
+        /// The address at which the internal DNS server is reachable.
         dns_address: SocketAddrV6,
     },
 }
