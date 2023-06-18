@@ -540,6 +540,9 @@ has_permission(_actor: AuthenticatedActor, "query", _resource: Database);
 # The "db-init" user is the only one with the "modify" permission.
 has_permission(USER_DB_INIT: AuthenticatedActor, "modify", _resource: Database);
 has_permission(USER_DB_INIT: AuthenticatedActor, "create_child", _resource: IpPoolList);
+# It also has "admin" on the internal silo to populate it with built-in resources.
+# TODO-completeness: actually limit to just internal silo and not all silos
+has_role(USER_DB_INIT: AuthenticatedActor, "admin", _silo: Silo);
 
 # Allow the internal API admin permissions on all silos.
 has_role(USER_INTERNAL_API: AuthenticatedActor, "admin", _silo: Silo);

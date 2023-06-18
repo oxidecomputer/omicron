@@ -30,7 +30,9 @@ use tokio::{
     io::{AsyncWrite, AsyncWriteExt},
 };
 use tufaceous_lib::ControlPlaneZoneImages;
-use update_engine::{errors::NestedEngineError, StepSpec};
+use update_engine::{
+    errors::NestedEngineError, events::ProgressUnits, StepSpec,
+};
 
 use crate::{
     async_temp_file::AsyncNamedTempFile, block_size_writer::BlockSizeBufWriter,
@@ -798,6 +800,7 @@ async fn write_artifact_impl<S: StepSpec<ProgressMetadata = ()>>(
                 cx.send_progress(StepProgress::with_current_and_total(
                     written_bytes,
                     total_bytes,
+                    ProgressUnits::BYTES,
                     (),
                 ))
                 .await;

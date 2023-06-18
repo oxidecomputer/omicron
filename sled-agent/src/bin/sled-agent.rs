@@ -119,8 +119,7 @@ async fn do_run() -> Result<(), CmdError> {
             if let Some(rss_config) = rss_config {
                 server
                     .agent()
-                    .rack_initialize(rss_config)
-                    .await
+                    .start_rack_initialize(rss_config)
                     .map_err(|e| CmdError::Failure(e.to_string()))?;
             }
 

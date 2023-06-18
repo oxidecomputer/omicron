@@ -38,6 +38,7 @@ use crate::storage_manager::StorageManager;
 use camino::{Utf8Path, Utf8PathBuf};
 use ddm_admin_client::{Client as DdmAdminClient, DdmError};
 use dpd_client::{types as DpdTypes, Client as DpdClient, Error as DpdError};
+use dropshot::HandlerTaskMode;
 use illumos_utils::addrobj::AddrObject;
 use illumos_utils::addrobj::IPV6_LINK_LOCAL_NAME;
 use illumos_utils::dladm::{Dladm, Etherstub, EtherstubVnic, PhysicalLink};
@@ -1327,6 +1328,8 @@ impl ServiceManager {
                                 // This has to be large enough to support:
                                 // - bulk writes to disks
                                 request_body_max_bytes: 8192 * 1024,
+                                default_handler_task_mode:
+                                    HandlerTaskMode::Detached,
                             },
                         },
                         dropshot_internal: dropshot::ConfigDropshot {
@@ -1339,6 +1342,8 @@ impl ServiceManager {
                             // certificates provided by the customer during rack
                             // setup.
                             request_body_max_bytes: 10 * 1024 * 1024,
+                            default_handler_task_mode:
+                                HandlerTaskMode::Detached,
                         },
                         subnet: Ipv6Subnet::<RACK_PREFIX>::new(
                             sled_info.underlay_address,
@@ -1752,8 +1757,14 @@ impl ServiceManager {
 
                     smfh.setprop(
                         "config/interfaces",
+                        // `svccfg setprop` requires a list of values to be
+                        // enclosed in `()`, and each string value to be
+                        // enclosed in `""`. Note that we do _not_ need to
+                        // escape the parentheses, since this is not passed
+                        // through a shell, but directly to `exec(2)` in the
+                        // zone.
                         format!(
-                            "\'({})\'",
+                            "({})",
                             maghemite_interfaces
                                 .iter()
                                 .map(|interface| format!(r#""{}""#, interface))
@@ -2441,11 +2452,21 @@ mod test {
             assert_eq!(name, EXPECTED_ZONE_NAME);
             Ok(())
         });
-        // Boot the zone
+
+        // Boot the zone.
         let boot_ctx = MockZones::boot_context();
         boot_ctx.expect().return_once(|name| {
             assert_eq!(name, EXPECTED_ZONE_NAME);
             Ok(())
+        });
+
+        // After calling `MockZones::boot`, `RunningZone::boot` will then look
+        // up the zone ID for the booted zone. This goes through
+        // `MockZone::id` to find the zone and get its ID.
+        let id_ctx = MockZones::id_context();
+        id_ctx.expect().return_once(|name| {
+            assert_eq!(name, EXPECTED_ZONE_NAME);
+            Ok(Some(1))
         });
 
         // Ensure the address exists
@@ -2458,6 +2479,7 @@ mod test {
         // Wait for the networking service.
         let wait_ctx = svc::wait_for_service_context();
         wait_ctx.expect().return_once(|_, _| Ok(()));
+
         // Import the manifest, enable the service
         let execute_ctx = illumos_utils::execute_context();
         execute_ctx.expect().times(..).returning(|_| {
@@ -2472,6 +2494,7 @@ mod test {
             Box::new(create_vnic_ctx),
             Box::new(install_ctx),
             Box::new(boot_ctx),
+            Box::new(id_ctx),
             Box::new(ensure_address_ctx),
             Box::new(wait_ctx),
             Box::new(execute_ctx),

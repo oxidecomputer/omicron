@@ -106,7 +106,7 @@ impl Server {
         Ok(server)
     }
 
-    pub fn agent(&self) -> &Agent {
+    pub fn agent(&self) -> &Arc<Agent> {
         &self.bootstrap_agent
     }
 

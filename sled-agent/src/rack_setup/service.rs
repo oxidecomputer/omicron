@@ -89,6 +89,7 @@ use omicron_common::address::{
     get_sled_address, CRUCIBLE_PANTRY_PORT, DENDRITE_PORT, NEXUS_INTERNAL_PORT,
     NTP_PORT, OXIMETER_PORT,
 };
+use omicron_common::api::internal::shared::{PortFec, PortSpeed};
 use omicron_common::backoff::{
     retry_notify, retry_policy_internal_service_aggressive, BackoffError,
 };
@@ -230,6 +231,32 @@ impl RackSetupService {
     /// Awaits the completion of the RSS service.
     pub async fn join(self) -> Result<(), SetupServiceError> {
         self.handle.await.expect("Rack Setup Service Task panicked")
+    }
+}
+
+// The following two conversion functions translate the speed and fec types used
+// in the internal API to the types used in the dpd-client API.  The conversion
+// is done here, rather than with "impl From" at the definition, to avoid a
+// circular dependency between omicron-common and dpd.
+fn convert_speed(speed: &PortSpeed) -> dpd_client::types::PortSpeed {
+    match speed {
+        PortSpeed::Speed0G => dpd_client::types::PortSpeed::Speed0G,
+        PortSpeed::Speed1G => dpd_client::types::PortSpeed::Speed1G,
+        PortSpeed::Speed10G => dpd_client::types::PortSpeed::Speed10G,
+        PortSpeed::Speed25G => dpd_client::types::PortSpeed::Speed25G,
+        PortSpeed::Speed40G => dpd_client::types::PortSpeed::Speed40G,
+        PortSpeed::Speed50G => dpd_client::types::PortSpeed::Speed50G,
+        PortSpeed::Speed100G => dpd_client::types::PortSpeed::Speed100G,
+        PortSpeed::Speed200G => dpd_client::types::PortSpeed::Speed200G,
+        PortSpeed::Speed400G => dpd_client::types::PortSpeed::Speed400G,
+    }
+}
+
+fn convert_fec(fec: &PortFec) -> dpd_client::types::PortFec {
+    match fec {
+        PortFec::Firecode => dpd_client::types::PortFec::Firecode,
+        PortFec::None => dpd_client::types::PortFec::None,
+        PortFec::Rs => dpd_client::types::PortFec::Rs,
     }
 }
 
@@ -594,6 +621,7 @@ impl ServiceInner {
                         ServiceType::Nexus {
                             external_ip,
                             internal_ip: _,
+                            nic,
                             ..
                         } => {
                             services.push(NexusTypes::ServicePutRequest {
@@ -609,6 +637,12 @@ impl ServiceInner {
                                 .to_string(),
                                 kind: NexusTypes::ServiceKind::Nexus {
                                     external_address: *external_ip,
+                                    nic: NexusTypes::ServiceNic {
+                                        id: nic.id,
+                                        name: nic.name.clone(),
+                                        ip: nic.ip,
+                                        mac: nic.mac,
+                                    },
                                 },
                             });
                         }
@@ -630,7 +664,7 @@ impl ServiceInner {
                         ServiceType::ExternalDns {
                             http_address,
                             dns_address,
-                            ..
+                            nic,
                         } => {
                             services.push(NexusTypes::ServicePutRequest {
                                 service_id,
@@ -639,6 +673,12 @@ impl ServiceInner {
                                 address: http_address.to_string(),
                                 kind: NexusTypes::ServiceKind::ExternalDns {
                                     external_address: dns_address.ip(),
+                                    nic: NexusTypes::ServiceNic {
+                                        id: nic.id,
+                                        name: nic.name.clone(),
+                                        ip: nic.ip,
+                                        mac: nic.mac,
+                                    },
                                 },
                             });
                         }
@@ -681,7 +721,7 @@ impl ServiceInner {
                                 kind: NexusTypes::ServiceKind::CruciblePantry,
                             });
                         }
-                        ServiceType::BoundaryNtp { snat_cfg, .. } => {
+                        ServiceType::BoundaryNtp { snat_cfg, nic, .. } => {
                             services.push(NexusTypes::ServicePutRequest {
                                 service_id,
                                 zone_id,
@@ -693,8 +733,14 @@ impl ServiceInner {
                                     0,
                                 )
                                 .to_string(),
-                                kind: NexusTypes::ServiceKind::Ntp {
-                                    snat_cfg: Some(snat_cfg.into()),
+                                kind: NexusTypes::ServiceKind::BoundaryNtp {
+                                    snat: snat_cfg.into(),
+                                    nic: NexusTypes::ServiceNic {
+                                        id: nic.id,
+                                        name: nic.name.clone(),
+                                        ip: nic.ip,
+                                        mac: nic.mac,
+                                    },
                                 },
                             });
                         }
@@ -710,9 +756,7 @@ impl ServiceInner {
                                     0,
                                 )
                                 .to_string(),
-                                kind: NexusTypes::ServiceKind::Ntp {
-                                    snat_cfg: None,
-                                },
+                                kind: NexusTypes::ServiceKind::InternalNtp,
                             });
                         }
                         details => {
@@ -1041,8 +1085,10 @@ impl ServiceInner {
                 params: LinkCreate {
                     autoneg: false,
                     kr: false,
-                    fec: rack_network_config.uplink_port_fec.clone().into(),
-                    speed: rack_network_config.uplink_port_speed.clone().into(),
+                    fec: convert_fec(&rack_network_config.uplink_port_fec),
+                    speed: convert_speed(
+                        &rack_network_config.uplink_port_speed,
+                    ),
                 },
                 addrs: vec![addr],
             };

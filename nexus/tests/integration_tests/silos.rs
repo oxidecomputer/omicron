@@ -7,7 +7,7 @@ use nexus_db_queries::context::OpContext;
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use nexus_test_utils::resource_helpers::{
     create_local_user, create_project, create_silo, grant_iam, object_create,
-    objects_list_page_authz,
+    objects_list_page_authz, projects_list,
 };
 use nexus_test_utils_macros::nexus_test;
 use omicron_common::api::external::ObjectIdentity;
@@ -163,11 +163,8 @@ async fn test_silos(cptestctx: &ControlPlaneTestContext) {
 
     // default silo project shows up in default silo
     let projects_in_default_silo =
-        NexusRequest::object_get(client, "/v1/projects")
-            .authn_as(AuthnMode::PrivilegedUser)
-            .execute_and_parse_unwrap::<dropshot::ResultsPage<Project>>()
-            .await;
-    assert_eq!(projects_in_default_silo.items.len(), 1);
+        projects_list(client, "/v1/projects", "", None).await;
+    assert_eq!(projects_in_default_silo.len(), 1);
 
     // default silo project does not show up in our silo
     let projects_in_our_silo = NexusRequest::object_get(client, "/v1/projects")
@@ -225,8 +222,7 @@ async fn test_silos(cptestctx: &ControlPlaneTestContext) {
     .expect("failed to delete test Vpc");
 
     // Verify GET /v1/projects works with built-in user auth
-    let projects =
-        objects_list_page_authz::<Project>(client, "/v1/projects").await.items;
+    let projects = projects_list(client, "/v1/projects", "", None).await;
     assert_eq!(projects.len(), 1);
     assert_eq!(projects[0].identity.name, "someproj");
 
@@ -554,7 +550,7 @@ async fn test_deleting_a_silo_deletes_the_idp(
             client,
             Method::GET,
             &format!(
-                "/login/{}/saml/{}",
+                "/login/{}/saml/{}/redirect",
                 SILO_NAME, silo_saml_idp.identity.name
             ),
         )
@@ -610,7 +606,10 @@ async fn test_saml_idp_metadata_data_valid(
         RequestBuilder::new(
             client,
             Method::GET,
-            &format!("/login/blahblah/saml/{}", silo_saml_idp.identity.name),
+            &format!(
+                "/login/blahblah/saml/{}/redirect",
+                silo_saml_idp.identity.name
+            ),
         )
         .expect_status(Some(StatusCode::FOUND)),
     )
@@ -1937,7 +1936,7 @@ async fn test_local_silo_constraints(cptestctx: &ControlPlaneTestContext) {
         client,
         StatusCode::NOT_FOUND,
         Method::GET,
-        "/login/fixed/saml/foo",
+        "/login/fixed/saml/foo/redirect",
     )
     .execute()
     .await
