@@ -9,7 +9,7 @@ use crate::dladm::Etherstub;
 use crate::link::{Link, VnicAllocator};
 use crate::opte::{Port, PortTicket};
 use crate::svc::wait_for_service;
-use crate::zone::{AddressRequest, ZONE_PREFIX};
+use crate::zone::{AddressRequest, IPADM, ZONE_PREFIX};
 use camino::{Utf8Path, Utf8PathBuf};
 use ipnetwork::IpNetwork;
 use omicron_common::backoff;
@@ -41,6 +41,12 @@ pub enum BootError {
 
     #[error("Zone booted, but timed out waiting for {service} in {zone}")]
     Timeout { service: String, zone: String },
+
+    #[error("Zone booted, but failed to find zone ID for zone {zone}")]
+    NoZoneId { zone: String },
+
+    #[error("Zone booted, but running a command experienced an error: {0}")]
+    RunCommandError(#[from] RunCommandError),
 }
 
 /// Errors returned from [`RunningZone::ensure_address`].
@@ -134,9 +140,102 @@ pub enum GetZoneError {
     },
 }
 
+// Helper module for setting up and running `zone_enter()` for subprocesses run
+// inside a non-global zone.
+#[cfg(target_os = "illumos")]
+mod zenter {
+    use libc::zoneid_t;
+    use std::ffi::c_int;
+    use std::ffi::c_uint;
+    use std::ffi::CStr;
+
+    #[link(name = "contract")]
+    extern "C" {
+        fn ct_tmpl_set_critical(fd: c_int, events: c_uint) -> c_int;
+        fn ct_tmpl_set_informative(fd: c_int, events: c_uint) -> c_int;
+        fn ct_pr_tmpl_set_fatal(fd: c_int, events: c_uint) -> c_int;
+        fn ct_pr_tmpl_set_param(fd: c_int, params: c_uint) -> c_int;
+        fn ct_tmpl_activate(fd: c_int) -> c_int;
+        fn ct_tmpl_clear(fd: c_int) -> c_int;
+    }
+
+    #[link(name = "c")]
+    extern "C" {
+        pub fn zone_enter(zid: zoneid_t) -> c_int;
+    }
+
+    // A Rust wrapper around the process contract template.
+    #[derive(Debug)]
+    pub struct Template {
+        fd: c_int,
+    }
+
+    impl Drop for Template {
+        fn drop(&mut self) {
+            self.clear();
+            // Ignore any error, since printing may interfere with `slog`'s
+            // structured output.
+            unsafe { libc::close(self.fd) };
+        }
+    }
+
+    impl Template {
+        const TEMPLATE_PATH: &[u8] = b"/system/contract/process/template\0";
+
+        // Constants related to how the contract below is managed. See
+        // `usr/src/uts/common/sys/contract/process.h` in the illumos sources
+        // for details.
+
+        // Process experienced an uncorrectable error.
+        const CT_PR_EV_HWERR: c_uint = 0x20;
+        // Only kill process group on fatal errors.
+        const CT_PR_PGRPONLY: c_uint = 0x04;
+        // Automatically detach inherited contracts.
+        const CT_PR_REGENT: c_uint = 0x08;
+
+        pub fn new() -> Result<Self, crate::ExecutionError> {
+            let path = CStr::from_bytes_with_nul(Self::TEMPLATE_PATH).unwrap();
+            let fd = unsafe { libc::open(path.as_ptr(), libc::O_RDWR) };
+            if fd < 0 {
+                let err = std::io::Error::last_os_error();
+                return Err(crate::ExecutionError::ZoneEnter { err });
+            }
+
+            // Initialize the contract template.
+            //
+            // No events are delivered, nothing is inherited, and we do not
+            // allow the contract to be orphaned.
+            //
+            // See illumos sources in `usr/src/cmd/zlogin/zlogin.c` in the
+            // implementation of `init_template()` for details.
+            if unsafe { ct_tmpl_set_critical(fd, 0) } != 0
+                || unsafe { ct_tmpl_set_informative(fd, 0) } != 0
+                || unsafe { ct_pr_tmpl_set_fatal(fd, Self::CT_PR_EV_HWERR) }
+                    != 0
+                || unsafe {
+                    ct_pr_tmpl_set_param(
+                        fd,
+                        Self::CT_PR_PGRPONLY | Self::CT_PR_REGENT,
+                    )
+                } != 0
+                || unsafe { ct_tmpl_activate(fd) } != 0
+            {
+                let err = std::io::Error::last_os_error();
+                return Err(crate::ExecutionError::ZoneEnter { err });
+            }
+            Ok(Self { fd })
+        }
+
+        pub fn clear(&self) {
+            unsafe { ct_tmpl_clear(self.fd) };
+        }
+    }
+}
+
 /// Represents a running zone.
 pub struct RunningZone {
-    running: bool,
+    // The `zoneid_t` for the zone, while it's running, or `None` if not.
+    id: Option<i32>,
     inner: InstalledZone,
 }
 
@@ -151,26 +250,88 @@ impl RunningZone {
     }
 
     /// Runs a command within the Zone, return the output.
+    //
+    // NOTE: It's important that this function is synchronous.
+    //
+    // Internally, we're setting the (thread-local) contract template before
+    // forking a child to exec the command inside the target zone. In order for
+    // that to all work correctly, that template must be set and then later
+    // cleared in the _same_ OS thread. An async method here would open the
+    // possibility that the template is set in some thread, and then cleared in
+    // another, if the task is swapped out at an await point. That would leave
+    // the first thread's template in a modified state.
+    //
+    // If we do need to make this method asynchronous, we will need to change the
+    // internals to avoid changing the thread's contract. One possible approach
+    // here would be to use `libscf` directly, rather than `exec`-ing `svccfg`
+    // directly in a forked child. That would obviate the need to work on the
+    // contract at all.
+    #[cfg(target_os = "illumos")]
     pub fn run_cmd<I, S>(&self, args: I) -> Result<String, RunCommandError>
     where
         I: IntoIterator<Item = S>,
         S: AsRef<std::ffi::OsStr>,
     {
+        use std::os::unix::process::CommandExt;
+        let Some(id) = self.id else {
+            return Err(RunCommandError {
+                zone: self.name().to_string(),
+                err: crate::ExecutionError::NotRunning,
+            });
+        };
+        let template =
+            std::sync::Arc::new(zenter::Template::new().map_err(|err| {
+                RunCommandError { zone: self.name().to_string(), err }
+            })?);
+        let tmpl = std::sync::Arc::clone(&template);
         let mut command = std::process::Command::new(crate::PFEXEC);
+        command.env_clear();
+        unsafe {
+            command.pre_exec(move || {
+                // Clear the template in the child, so that any other children
+                // it forks itself use the normal contract.
+                tmpl.clear();
 
-        let name = self.name();
-        let prefix = &[super::zone::ZLOGIN, name];
-        let suffix: Vec<_> = args.into_iter().collect();
-        let full_args = prefix
-            .iter()
-            .map(|s| std::ffi::OsStr::new(s))
-            .chain(suffix.iter().map(|a| a.as_ref()));
+                // Enter the target zone itself, in which the `exec()` call will
+                // be made.
+                if zenter::zone_enter(id) == 0 {
+                    Ok(())
+                } else {
+                    Err(std::io::Error::last_os_error())
+                }
+            });
+        }
+        let command = command.args(args);
 
-        let cmd = command.args(full_args);
-        let output = crate::execute(cmd)
-            .map_err(|err| RunCommandError { zone: name.to_string(), err })?;
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        Ok(stdout.to_string())
+        // Capture the result, and be sure to clear the template for this
+        // process itself before returning.
+        let res = crate::execute(command).map_err(|err| RunCommandError {
+            zone: self.name().to_string(),
+            err,
+        });
+        template.clear();
+        res.map(|output| String::from_utf8_lossy(&output.stdout).to_string())
+    }
+
+    /// Runs a command within the Zone, return the output.
+    #[cfg(not(target_os = "illumos"))]
+    pub fn run_cmd<I, S>(&self, args: I) -> Result<String, RunCommandError>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<std::ffi::OsStr>,
+    {
+        // NOTE: This implementation is useless, and will never work. However,
+        // it must actually call `crate::execute()` for the testing purposes.
+        // That's mocked by `mockall` to return known data, and so the command
+        // that's actually run is irrelevant.
+        let mut command = std::process::Command::new("echo");
+        let command = command.args(args);
+        crate::execute(command)
+            .map_err(|err| RunCommandError {
+                zone: self.name().to_string(),
+                err,
+            })
+            .map(|output| String::from_utf8_lossy(&output.stdout).to_string())
     }
 
     /// Boots a new zone.
@@ -196,7 +357,81 @@ impl RunningZone {
             }
         })?;
 
-        Ok(RunningZone { running: true, inner: zone })
+        // Pull the zone ID.
+        let id = Zones::id(&zone.name)
+            .await?
+            .ok_or_else(|| BootError::NoZoneId { zone: zone.name.clone() })?;
+        let site_profile_xml_exists =
+            std::path::Path::new(&zone.site_profile_xml_path()).exists();
+        let running_zone = RunningZone { id: Some(id), inner: zone };
+
+        // Make sure the control vnic has an IP MTU of 9000 inside the zone
+        const CONTROL_VNIC_MTU: usize = 9000;
+        let vnic = running_zone.inner.control_vnic.name().to_string();
+
+        // If the zone is self-assembling, then SMF service(s) inside the zone
+        // will be creating the listen address for the zone's service(s). This
+        // will create IP interfaces, and means that `create-if` here will fail
+        // due to the interface already existing. Checking the output of
+        // `show-if` is also problematic due to TOCTOU. Use the check for the
+        // existence of site.xml, which means the zone is performing this
+        // self-assembly, and skip create-if if so.
+
+        if !site_profile_xml_exists {
+            let args = vec![
+                IPADM.to_string(),
+                "create-if".to_string(),
+                "-t".to_string(),
+                vnic.clone(),
+            ];
+
+            running_zone.run_cmd(args)?;
+        } else {
+            // If the zone is self-assembling, then it's possible that the IP
+            // interface does not exist yet because it has not been brought up
+            // by the software in the zone. Run `create-if` here, but eat the
+            // error if there is one: this is safe unless the software that's
+            // part of self-assembly inside the zone is also trying to run
+            // `create-if` (instead of `create-addr`), and required for the
+            // `set-ifprop` commands below to pass.
+            let args = vec![
+                IPADM.to_string(),
+                "create-if".to_string(),
+                "-t".to_string(),
+                vnic.clone(),
+            ];
+
+            let _result = running_zone.run_cmd(args);
+        }
+
+        let commands = vec![
+            vec![
+                IPADM.to_string(),
+                "set-ifprop".to_string(),
+                "-t".to_string(),
+                "-p".to_string(),
+                format!("mtu={}", CONTROL_VNIC_MTU),
+                "-m".to_string(),
+                "ipv4".to_string(),
+                vnic.clone(),
+            ],
+            vec![
+                IPADM.to_string(),
+                "set-ifprop".to_string(),
+                "-t".to_string(),
+                "-p".to_string(),
+                format!("mtu={}", CONTROL_VNIC_MTU),
+                "-m".to_string(),
+                "ipv6".to_string(),
+                vnic,
+            ],
+        ];
+
+        for args in &commands {
+            running_zone.run_cmd(args)?;
+        }
+
+        Ok(running_zone)
     }
 
     pub async fn ensure_address(
@@ -480,7 +715,9 @@ impl RunningZone {
             });
 
         Ok(Self {
-            running: true,
+            id: zone_info.id().map(|x| {
+                x.try_into().expect("zoneid_t is expected to be an i32")
+            }),
             inner: InstalledZone {
                 log: log.new(o!("zone" => zone_name.to_string())),
                 zonepath: zone_info.path().to_path_buf().try_into()?,
@@ -512,8 +749,7 @@ impl RunningZone {
     ///
     /// Allows callers to synchronously stop a zone, and inspect an error.
     pub async fn stop(&mut self) -> Result<(), String> {
-        if self.running {
-            self.running = false;
+        if let Some(_) = self.id.take() {
             let log = self.inner.log.clone();
             let name = self.name().to_string();
             Zones::halt_and_remove_logged(&log, &name)
@@ -530,7 +766,7 @@ impl RunningZone {
 
 impl Drop for RunningZone {
     fn drop(&mut self) {
-        if self.running {
+        if let Some(_) = self.id.take() {
             let log = self.inner.log.clone();
             let name = self.name().to_string();
             tokio::task::spawn(async move {
@@ -565,7 +801,7 @@ pub enum InstallZoneError {
         err: crate::zone::AdmError,
     },
 
-    #[error("Failed to find zone image '{image}' from `{paths:?}'")]
+    #[error("Failed to find zone image '{image}' from {paths:?}")]
     ImageNotFound { image: String, paths: Vec<Utf8PathBuf> },
 }
 
@@ -705,5 +941,11 @@ impl InstalledZone {
             opte_ports,
             links,
         })
+    }
+
+    pub fn site_profile_xml_path(&self) -> Utf8PathBuf {
+        let mut path: Utf8PathBuf = self.zonepath().into();
+        path.push("root/var/svc/profile/site.xml");
+        path
     }
 }

@@ -6,6 +6,7 @@
 
 use clap::Parser;
 use omicron_common::cmd::{fatal, CmdError};
+use sled_hardware::Baseboard;
 use std::net::SocketAddrV6;
 use std::path::PathBuf;
 use wicketd::{self, run_openapi, Config, Server};
@@ -33,37 +34,9 @@ enum Args {
         #[clap(long, action)]
         mgs_address: SocketAddrV6,
 
-        #[clap(flatten)]
-        baseboard: Option<Baseboard>,
+        #[clap(long)]
+        baseboard_file: Option<PathBuf>,
     },
-}
-
-// clap's support for `flatten` on an `Option` is a little wonky - we mark all
-// of these fields as `required = false`, which has the effect of not requiring
-// them _unless_ one of them is passed, in which case all of them are required.
-#[derive(Debug, clap::Args)]
-struct Baseboard {
-    /// The identifier (serial number) of the Gimlet on which we're running
-    #[clap(long, required = false)]
-    baseboard_identifier: String,
-
-    /// The model of the Gimlet on which we're running
-    #[clap(long, required = false)]
-    baseboard_model: String,
-
-    /// The revision of the Gimlet on which we're running
-    #[clap(long, required = false)]
-    baseboard_revision: i64,
-}
-
-impl From<Baseboard> for sled_hardware::Baseboard {
-    fn from(b: Baseboard) -> Self {
-        Self::new(
-            b.baseboard_identifier,
-            b.baseboard_model,
-            b.baseboard_revision,
-        )
-    }
 }
 
 #[tokio::main]
@@ -83,17 +56,28 @@ async fn do_run() -> Result<(), CmdError> {
             address,
             artifact_address,
             mgs_address,
-            baseboard,
+            baseboard_file,
         } => {
-            let mut baseboard = baseboard.map(sled_hardware::Baseboard::from);
+            let baseboard = if let Some(baseboard_file) = baseboard_file {
+                let baseboard_file =
+                    std::fs::read_to_string(&baseboard_file)
+                        .map_err(|e| CmdError::Failure(e.to_string()))?;
+                let baseboard: Baseboard =
+                    serde_json::from_str(&baseboard_file)
+                        .map_err(|e| CmdError::Failure(e.to_string()))?;
 
-            // TODO-correctness `Baseboard::unknown()` is slated for removal
-            // after some refactoring in sled-agent, at which point we'll need a
-            // different way for sled-agent to tell us it doesn't know our
-            // baseboard.
-            if baseboard == Some(sled_hardware::Baseboard::unknown()) {
-                baseboard = None;
-            }
+                // TODO-correctness `Baseboard::unknown()` is slated for removal
+                // after some refactoring in sled-agent, at which point we'll need a
+                // different way for sled-agent to tell us it doesn't know our
+                // baseboard.
+                if matches!(baseboard, Baseboard::Unknown) {
+                    None
+                } else {
+                    Some(baseboard)
+                }
+            } else {
+                None
+            };
 
             let config = Config::from_file(&config_file_path).map_err(|e| {
                 CmdError::Failure(format!(

@@ -18,7 +18,7 @@ pub fn generate_name(prefix: &str) -> Result<Name> {
 /// the DHCP range is 100-249, and in the buildomat lab environment the network
 /// is currently private.)
 pub async fn get_system_ip_pool() -> Result<(Ipv4Addr, Ipv4Addr)> {
-    let nexus_addr = match nexus_addr().await?.ip() {
+    let nexus_addr = match nexus_addr().await? {
         IpAddr::V4(addr) => addr.octets(),
         IpAddr::V6(_) => bail!("not sure what to do about IPv6 here"),
     };

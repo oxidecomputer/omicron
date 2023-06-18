@@ -61,3 +61,55 @@ pub struct SourceNatConfig {
     /// The last port used for source NAT, also inclusive.
     pub last_port: u16,
 }
+
+/// Initial network configuration
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
+pub struct RackNetworkConfig {
+    /// Gateway address
+    pub gateway_ip: String,
+    /// First ip address to be used for configuring network infrastructure
+    pub infra_ip_first: String,
+    /// Last ip address to be used for configuring network infrastructure
+    pub infra_ip_last: String,
+    /// Switchport to use for external connectivity
+    pub uplink_port: String,
+    /// Speed for the Switchport
+    pub uplink_port_speed: PortSpeed,
+    /// Forward Error Correction setting for the uplink port
+    pub uplink_port_fec: PortFec,
+    /// IP Address to apply to switchport (must be in infra_ip pool)
+    pub uplink_ip: String,
+}
+
+/// Switchport Speed options
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum PortSpeed {
+    #[serde(alias = "0G")]
+    Speed0G,
+    #[serde(alias = "1G")]
+    Speed1G,
+    #[serde(alias = "10G")]
+    Speed10G,
+    #[serde(alias = "25G")]
+    Speed25G,
+    #[serde(alias = "40G")]
+    Speed40G,
+    #[serde(alias = "50G")]
+    Speed50G,
+    #[serde(alias = "100G")]
+    Speed100G,
+    #[serde(alias = "200G")]
+    Speed200G,
+    #[serde(alias = "400G")]
+    Speed400G,
+}
+
+/// Switchport FEC options
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum PortFec {
+    Firecode,
+    None,
+    Rs,
+}

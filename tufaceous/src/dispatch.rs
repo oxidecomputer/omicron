@@ -85,8 +85,9 @@ impl Args {
                     }
                 }
 
-                let repo =
-                    OmicronRepo::load_ignore_expiration(&log, &repo_path)?;
+                let repo = OmicronRepo::load_untrusted_ignore_expiration(
+                    &log, &repo_path,
+                )?;
                 let mut editor = repo.into_editor()?;
 
                 let new_artifact =
@@ -110,8 +111,9 @@ impl Args {
                     bail!("output path `{output_path}` must end with .zip");
                 }
 
-                let repo =
-                    OmicronRepo::load_ignore_expiration(&log, &repo_path)?;
+                let repo = OmicronRepo::load_untrusted_ignore_expiration(
+                    &log, &repo_path,
+                )?;
                 repo.archive(&output_path)?;
 
                 Ok(())
@@ -121,8 +123,8 @@ impl Args {
                 extractor.extract(&dest)?;
 
                 // Now load the repository and ensure it's valid.
-                let repo =
-                    OmicronRepo::load(&log, &dest).with_context(|| {
+                let repo = OmicronRepo::load_untrusted(&log, &dest)
+                    .with_context(|| {
                         format!(
                             "error loading extracted repository at `{dest}` \
                          (extracted files are still available)"

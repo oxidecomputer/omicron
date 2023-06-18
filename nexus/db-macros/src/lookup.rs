@@ -123,7 +123,7 @@ impl Config {
         path_authz_names.push(resource.authz_name.clone());
 
         let child_resources = input.children;
-        let parent = input.ancestors.last().map(|s| Resource::for_name(&s));
+        let parent = input.ancestors.last().map(|s| Resource::for_name(s));
         let silo_restricted = !input.visible_outside_silo
             && input.ancestors.iter().any(|s| s == "Silo");
 

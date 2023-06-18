@@ -73,48 +73,77 @@ pub enum SledMode {
 }
 
 /// Describes properties that should uniquely identify a Gimlet.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct Baseboard {
-    identifier: String,
-    model: String,
-    revision: i64,
+#[derive(
+    Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema,
+)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum Baseboard {
+    Gimlet { identifier: String, model: String, revision: i64 },
+
+    Unknown,
+
+    Pc { identifier: String, model: String },
 }
 
 impl Baseboard {
     #[allow(dead_code)]
-    pub fn new(identifier: String, model: String, revision: i64) -> Self {
-        Self { identifier, model, revision }
+    pub fn new_gimlet(
+        identifier: String,
+        model: String,
+        revision: i64,
+    ) -> Self {
+        Self::Gimlet { identifier, model, revision }
+    }
+
+    pub fn new_pc(identifier: String, model: String) -> Self {
+        Self::Pc { identifier, model }
     }
 
     // XXX This should be removed, but it requires a refactor in how devices are
     // polled.
     pub fn unknown() -> Self {
-        Self {
-            identifier: String::from("Unknown"),
-            model: String::from("Unknown"),
-            revision: 0,
+        Self::Unknown
+    }
+
+    pub fn type_string(&self) -> &str {
+        match &self {
+            Self::Gimlet { .. } => "gimlet",
+            Self::Pc { .. } => "pc",
+            Self::Unknown => "unknown",
         }
     }
 
     pub fn identifier(&self) -> &str {
-        &self.identifier
+        match &self {
+            Self::Gimlet { identifier, .. } => &identifier,
+            Self::Pc { identifier, .. } => &identifier,
+            Self::Unknown => "unknown",
+        }
     }
 
     pub fn model(&self) -> &str {
-        &self.model
+        match self {
+            Self::Gimlet { model, .. } => &model,
+            Self::Pc { model, .. } => &model,
+            Self::Unknown => "unknown",
+        }
     }
 
     pub fn revision(&self) -> i64 {
-        self.revision
+        match self {
+            Self::Gimlet { revision, .. } => *revision,
+            Self::Pc { .. } => 0,
+            Self::Unknown => 0,
+        }
     }
 }
 
 impl From<Baseboard> for nexus_client::types::Baseboard {
     fn from(b: Baseboard) -> nexus_client::types::Baseboard {
         nexus_client::types::Baseboard {
-            identifier: b.identifier,
-            model: b.model,
-            revision: b.revision,
+            serial_number: b.identifier().to_string(),
+            part_number: b.model().to_string(),
+            revision: b.revision(),
         }
     }
 }

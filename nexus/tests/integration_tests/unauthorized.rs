@@ -417,7 +417,7 @@ async fn verify_endpoint(
                     .authn_as(AuthnMode::PrivilegedUser)
                     .execute()
                     .await
-                    .unwrap_or_else(|_| panic!("Failed to GET: {uri}"))
+                    .unwrap_or_else(|e| panic!("Failed to GET: {uri}: {e}"))
                     .parsed_body::<serde_json::Value>()
                     .unwrap(),
             )

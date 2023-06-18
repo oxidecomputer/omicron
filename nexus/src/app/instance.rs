@@ -8,6 +8,7 @@ use super::MAX_DISKS_PER_INSTANCE;
 use super::MAX_EXTERNAL_IPS_PER_INSTANCE;
 use super::MAX_NICS_PER_INSTANCE;
 use crate::app::sagas;
+use crate::app::sagas::retry_until_known_result;
 use crate::authn;
 use crate::authz;
 use crate::cidata::InstanceCiData;
@@ -19,6 +20,7 @@ use crate::external_api::params;
 use futures::future::Fuse;
 use futures::{FutureExt, SinkExt, StreamExt};
 use nexus_db_model::IpKind;
+use nexus_db_queries::authz::ApiResource;
 use nexus_db_queries::context::OpContext;
 use omicron_common::address::PROPOLIS_PORT;
 use omicron_common::api::external::http_pagination::PaginatedBy;
@@ -35,20 +37,21 @@ use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::Vni;
 use omicron_common::api::internal::nexus;
+use propolis_client::support::tungstenite::protocol::frame::coding::CloseCode;
+use propolis_client::support::tungstenite::protocol::CloseFrame;
+use propolis_client::support::tungstenite::Message as WebSocketMessage;
+use propolis_client::support::WebSocketStream;
 use sled_agent_client::types::InstanceMigrationSourceParams;
 use sled_agent_client::types::InstancePutMigrationIdsBody;
 use sled_agent_client::types::InstancePutStateBody;
 use sled_agent_client::types::InstanceStateRequested;
 use sled_agent_client::types::SourceNatConfig;
 use sled_agent_client::Client as SledAgentClient;
+use slog::Logger;
 use std::net::SocketAddr;
+use std::str::FromStr;
 use std::sync::Arc;
 use tokio::io::{AsyncRead, AsyncWrite};
-use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
-use tokio_tungstenite::tungstenite::protocol::CloseFrame;
-use tokio_tungstenite::tungstenite::protocol::Role as WebSocketRole;
-use tokio_tungstenite::tungstenite::Message as WebSocketMessage;
-use tokio_tungstenite::WebSocketStream;
 use uuid::Uuid;
 
 const MAX_KEYS_PER_INSTANCE: u32 = 8;
@@ -900,7 +903,10 @@ impl super::Nexus {
             .disk_lookup(
                 opctx,
                 params::DiskSelector {
-                    project: Some(authz_project.id().into()),
+                    project: match disk {
+                        NameOrId::Name(_) => Some(authz_project.id().into()),
+                        NameOrId::Id(_) => None,
+                    },
                     disk,
                 },
             )?
@@ -957,7 +963,10 @@ impl super::Nexus {
             .disk_lookup(
                 opctx,
                 params::DiskSelector {
-                    project: Some(authz_project.id().into()),
+                    project: match disk {
+                        NameOrId::Name(_) => Some(authz_project.id().into()),
+                        NameOrId::Id(_) => None,
+                    },
                     disk,
                 },
             )?
@@ -987,6 +996,7 @@ impl super::Nexus {
     /// Instance.
     pub async fn notify_instance_updated(
         &self,
+        opctx: &OpContext,
         id: &Uuid,
         new_runtime_state: &nexus::InstanceRuntimeState,
     ) -> Result<(), Error> {
@@ -995,6 +1005,49 @@ impl super::Nexus {
         slog::debug!(log, "received new runtime state from sled agent";
                      "instance_id" => %id,
                      "runtime_state" => ?new_runtime_state);
+
+        // If the new state has a newer Propolis ID generation than the current
+        // instance state in CRDB, notify interested parties of this change.
+        //
+        // The synchronization rules here are as follows:
+        //
+        // - Sled agents own an instance's runtime state while an instance is
+        //   running on a sled. Each sled agent prevents concurrent conflicting
+        //   Propolis identifier updates from being sent until previous updates
+        //   are processed.
+        // - Operations that can dispatch an instance to a brand-new sled (e.g.
+        //   live migration) can only start if the appropriate instance runtime
+        //   state fields are cleared in CRDB. For example, while a live
+        //   migration is in progress, the instance's `migration_id` field will
+        //   be non-NULL, and a new migration cannot start until it is cleared.
+        //   This routine must notify recipients before writing new records
+        //   back to CRDB so that these "locks" remain held until all
+        //   notifications have been sent. Otherwise, Nexus might allow new
+        //   operations to proceed that will produce system updates that might
+        //   race with this one.
+        // - This work is not done in a saga. The presumption is instead that
+        //   if any of these operations fail, the entire update will fail, and
+        //   sled agent will retry the update. Unwinding on failure isn't needed
+        //   because (a) any partially-applied configuration is correct
+        //   configuration, (b) if the instance is migrating, it can't migrate
+        //   again until this routine successfully updates configuration and
+        //   writes an update back to CRDB, and (c) sled agent won't process any
+        //   new instance state changes (e.g. a change that stops an instance)
+        //   until this state change is successfully committed.
+        let (.., db_instance) = LookupPath::new(&opctx, &self.db_datastore)
+            .instance_id(*id)
+            .fetch_for(authz::Action::Read)
+            .await?;
+
+        if new_runtime_state.propolis_gen > *db_instance.runtime().propolis_gen
+        {
+            self.handle_instance_propolis_gen_change(
+                opctx,
+                new_runtime_state,
+                &db_instance,
+            )
+            .await?;
+        }
 
         let result = self
             .db_datastore
@@ -1046,6 +1099,175 @@ impl super::Nexus {
         }
     }
 
+    async fn handle_instance_propolis_gen_change(
+        &self,
+        opctx: &OpContext,
+        new_runtime: &nexus::InstanceRuntimeState,
+        db_instance: &nexus_db_model::Instance,
+    ) -> Result<(), Error> {
+        let log = &self.log;
+        let instance_id = db_instance.id();
+
+        info!(log,
+              "updating configuration after Propolis generation change";
+              "instance_id" => %instance_id,
+              "new_sled_id" => %new_runtime.sled_id,
+              "old_sled_id" => %db_instance.runtime().sled_id);
+
+        // Push updated V2P mappings to all interested sleds. This needs to be
+        // done irrespective of whether the sled ID actually changed, because
+        // merely creating the target Propolis on the target sled will create
+        // XDE devices for its NICs, and creating an XDE device for a virtual IP
+        // creates a V2P mapping that maps that IP to that sled. This is fine if
+        // migration succeeded, but if it failed, the instance is running on the
+        // source sled, and the incorrect mapping needs to be replaced.
+        //
+        // TODO(#3107): When XDE no longer creates mappings implicitly, this
+        // can be restricted to cases where an instance's sled has actually
+        // changed.
+        self.create_instance_v2p_mappings(
+            opctx,
+            instance_id,
+            new_runtime.sled_id,
+        )
+        .await?;
+
+        let (.., sled) = LookupPath::new(opctx, &self.db_datastore)
+            .sled_id(new_runtime.sled_id)
+            .fetch()
+            .await?;
+
+        self.instance_ensure_dpd_config(
+            opctx,
+            db_instance.id(),
+            &sled.address(),
+            None,
+        )
+        .await?;
+
+        Ok(())
+    }
+
+    /// Ensures that the Dendrite configuration for the supplied instance is
+    /// up-to-date.
+    ///
+    /// # Parameters
+    ///
+    /// - `opctx`: An operation context that grants read and list-children
+    ///   permissions on the identified instance.
+    /// - `instance_id`: The ID of the instance to act on.
+    /// - `sled_ip_address`: The internal IP address assigned to the sled's
+    ///   sled agent.
+    /// - `ip_index_filter`: An optional filter on the index into the instance's
+    ///   external IP array.
+    ///   - If this is `Some(n)`, this routine configures DPD state for only the
+    ///     Nth external IP in the collection returned from CRDB. The caller is
+    ///     responsible for ensuring that the IP collection has stable indices
+    ///     when making this call.
+    ///   - If this is `None`, this routine configures DPD for all external
+    ///     IPs.
+    pub(crate) async fn instance_ensure_dpd_config(
+        &self,
+        opctx: &OpContext,
+        instance_id: Uuid,
+        sled_ip_address: &std::net::SocketAddrV6,
+        ip_index_filter: Option<usize>,
+    ) -> Result<(), Error> {
+        let log = &self.log;
+        let dpd_client = &self.dpd_client;
+
+        info!(log, "looking up instance's primary network interface";
+              "instance_id" => %instance_id);
+
+        let (.., authz_instance) = LookupPath::new(opctx, &self.db_datastore)
+            .instance_id(instance_id)
+            .lookup_for(authz::Action::ListChildren)
+            .await?;
+
+        // All external IPs map to the primary network interface, so find that
+        // interface. If there is no such interface, there's no way to route
+        // traffic destined to those IPs, so there's nothing to configure and
+        // it's safe to return early.
+        let network_interface = match self
+            .db_datastore
+            .derive_guest_network_interface_info(&opctx, &authz_instance)
+            .await?
+            .into_iter()
+            .find(|interface| interface.primary)
+        {
+            Some(interface) => interface,
+            None => {
+                info!(log, "Instance has no primary network interface";
+                      "instance_id" => %instance_id);
+                return Ok(());
+            }
+        };
+
+        let mac_address =
+            macaddr::MacAddr6::from_str(&network_interface.mac.to_string())
+                .map_err(|e| {
+                    Error::internal_error(&format!(
+                        "failed to convert mac address: {e}"
+                    ))
+                })?;
+
+        let vni: u32 = network_interface.vni.into();
+
+        info!(log, "looking up instance's external IPs";
+              "instance_id" => %instance_id);
+
+        let ips = self
+            .db_datastore
+            .instance_lookup_external_ips(&opctx, instance_id)
+            .await?;
+
+        if let Some(wanted_index) = ip_index_filter {
+            if let None = ips.get(wanted_index) {
+                return Err(Error::internal_error(&format!(
+                    "failed to find external ip address at index: {}",
+                    wanted_index
+                )));
+            }
+        }
+
+        for target_ip in ips
+            .iter()
+            .enumerate()
+            .filter(|(index, _)| {
+                if let Some(wanted_index) = ip_index_filter {
+                    *index == wanted_index
+                } else {
+                    true
+                }
+            })
+            .map(|(_, ip)| ip)
+        {
+            retry_until_known_result(log, || async {
+                dpd_client
+                    .ensure_nat_entry(
+                        &log,
+                        target_ip.ip,
+                        dpd_client::types::MacAddr {
+                            a: mac_address.into_array(),
+                        },
+                        *target_ip.first_port,
+                        *target_ip.last_port,
+                        vni,
+                        sled_ip_address.ip(),
+                    )
+                    .await
+            })
+            .await
+            .map_err(|e| {
+                Error::internal_error(&format!(
+                    "failed to ensure dpd entry: {e}"
+                ))
+            })?;
+        }
+
+        Ok(())
+    }
+
     /// Returns the requested range of serial console output bytes,
     /// provided they are still in the propolis-server's cache.
     pub(crate) async fn instance_serial_console_data(
@@ -1071,7 +1293,7 @@ impl super::Nexus {
             .await
             .map_err(|_| {
                 Error::internal_error(
-                    "failed to connect to instance's propolis server",
+                    "websocket connection to instance's serial port failed",
                 )
             })?
             .into_inner();
@@ -1083,35 +1305,61 @@ impl super::Nexus {
 
     pub(crate) async fn instance_serial_console_stream(
         &self,
-        conn: dropshot::WebsocketConnection,
+        mut client_stream: WebSocketStream<impl AsyncRead + AsyncWrite + Unpin>,
         instance_lookup: &lookup::Instance<'_>,
-        params: &params::InstanceSerialConsoleRequest,
+        params: &params::InstanceSerialConsoleStreamRequest,
     ) -> Result<(), Error> {
-        let client = self
+        let client = match self
             .propolis_client_for_instance(
                 instance_lookup,
                 authz::Action::Modify,
             )
-            .await?;
+            .await
+        {
+            Ok(x) => x,
+            Err(e) => {
+                let _ = client_stream
+                    .close(Some(CloseFrame {
+                        code: CloseCode::Error,
+                        reason: e.to_string().into(),
+                    }))
+                    .await
+                    .is_ok();
+                return Err(e);
+            }
+        };
+
         let mut req = client.instance_serial();
-        if let Some(from_start) = params.from_start {
-            req = req.from_start(from_start);
-        } else if let Some(most_recent) = params.most_recent {
+        if let Some(most_recent) = params.most_recent {
             req = req.most_recent(most_recent);
         }
-        let propolis_upgraded = req
-            .send()
-            .await
-            .map_err(|_| {
-                Error::internal_error(
-                    "failed to connect to instance's propolis server",
+        match req.send().await {
+            Ok(response) => {
+                let propolis_upgraded = response.into_inner();
+                let log = self.log.clone();
+                Self::proxy_instance_serial_ws(
+                    client_stream,
+                    propolis_upgraded,
+                    Some(log),
                 )
-            })?
-            .into_inner();
-
-        Self::proxy_instance_serial_ws(conn.into_inner(), propolis_upgraded)
-            .await
-            .map_err(|e| Error::internal_error(&format!("{}", e)))
+                .await
+                .map_err(|e| Error::internal_error(&format!("{}", e)))
+            }
+            Err(e) => {
+                let message = format!(
+                    "websocket connection to instance's serial port failed: {}",
+                    e
+                );
+                let _ = client_stream
+                    .close(Some(CloseFrame {
+                        code: CloseCode::Error,
+                        reason: message.clone().into(),
+                    }))
+                    .await
+                    .is_ok();
+                Err(Error::internal_error(&message))
+            }
+        }
     }
 
     async fn propolis_client_for_instance(
@@ -1119,59 +1367,100 @@ impl super::Nexus {
         instance_lookup: &lookup::Instance<'_>,
         action: authz::Action,
     ) -> Result<propolis_client::Client, Error> {
-        let (.., instance) = instance_lookup.fetch_for(action).await?;
-        let ip_addr = instance
-            .runtime_state
-            .propolis_ip
-            .ok_or_else(|| {
-                Error::internal_error(
-                    "instance's propolis server ip address not found",
-                )
-            })?
-            .ip();
-        let socket_addr = SocketAddr::new(ip_addr, PROPOLIS_PORT);
-        Ok(propolis_client::Client::new(&format!("http://{}", socket_addr)))
+        let (.., authz_instance, instance) =
+            instance_lookup.fetch_for(action).await?;
+        match instance.runtime_state.state.0 {
+            InstanceState::Running
+            | InstanceState::Rebooting
+            | InstanceState::Migrating
+            | InstanceState::Repairing => {
+                let ip_addr = instance
+                    .runtime_state
+                    .propolis_ip
+                    .ok_or_else(|| {
+                        Error::internal_error(
+                            "instance's hypervisor IP address not found",
+                        )
+                    })?
+                    .ip();
+                let socket_addr = SocketAddr::new(ip_addr, PROPOLIS_PORT);
+                Ok(propolis_client::Client::new(&format!(
+                    "http://{}",
+                    socket_addr
+                )))
+            }
+            InstanceState::Creating
+            | InstanceState::Starting
+            | InstanceState::Stopping
+            | InstanceState::Stopped
+            | InstanceState::Failed => Err(Error::ServiceUnavailable {
+                internal_message: format!(
+                    "Cannot connect to hypervisor of instance in state {:?}",
+                    instance.runtime_state.state
+                ),
+            }),
+            InstanceState::Destroyed => Err(authz_instance.not_found()),
+        }
     }
 
     async fn proxy_instance_serial_ws(
-        client_upgraded: impl AsyncRead + AsyncWrite + Unpin,
-        propolis_upgraded: impl AsyncRead + AsyncWrite + Unpin,
-    ) -> Result<(), tokio_tungstenite::tungstenite::Error> {
-        let (mut propolis_sink, mut propolis_stream) =
-            WebSocketStream::from_raw_socket(
+        client_stream: WebSocketStream<impl AsyncRead + AsyncWrite + Unpin>,
+        propolis_upgraded: impl AsyncRead + AsyncWrite + Unpin + Send + 'static,
+        log: Option<Logger>,
+    ) -> Result<(), propolis_client::support::tungstenite::Error> {
+        let mut propolis_conn =
+            propolis_client::support::InstanceSerialConsoleHelper::new(
                 propolis_upgraded,
-                WebSocketRole::Client,
-                None,
+                log,
             )
-            .await
-            .split();
-        let (mut nexus_sink, mut nexus_stream) =
-            WebSocketStream::from_raw_socket(
-                client_upgraded,
-                WebSocketRole::Server,
-                None,
-            )
-            .await
-            .split();
+            .await;
+
+        let (mut nexus_sink, mut nexus_stream) = client_stream.split();
 
         let mut buffered_output = None;
         let mut buffered_input = None;
         loop {
-            let (nexus_read, propolis_write) = match buffered_input.take() {
-                None => (nexus_stream.next().fuse(), Fuse::terminated()),
-                Some(msg) => {
-                    (Fuse::terminated(), propolis_sink.send(msg).fuse())
+            let nexus_read;
+            let nexus_write;
+            let propolis_read;
+            let propolis_write;
+            match buffered_input.take() {
+                None => {
+                    nexus_read = nexus_stream.next().fuse();
+                    propolis_write = Fuse::terminated();
+                    match buffered_output.take() {
+                        None => {
+                            nexus_write = Fuse::terminated();
+                            propolis_read = propolis_conn.recv().fuse();
+                        }
+                        Some(msg) => {
+                            nexus_write = nexus_sink.send(msg).fuse();
+                            propolis_read = Fuse::terminated();
+                        }
+                    }
                 }
-            };
-            let (nexus_write, propolis_read) = match buffered_output.take() {
-                None => (Fuse::terminated(), propolis_stream.next().fuse()),
-                Some(msg) => (nexus_sink.send(msg).fuse(), Fuse::terminated()),
+                Some(msg) => {
+                    nexus_read = Fuse::terminated();
+                    propolis_write = propolis_conn.send(msg).fuse();
+                    match buffered_output.take() {
+                        // can't propolis_read simultaneously due to a
+                        // &mut propolis_conn being taken above
+                        None => {
+                            nexus_write = Fuse::terminated();
+                            propolis_read = Fuse::terminated();
+                        }
+                        Some(msg) => {
+                            nexus_write = nexus_sink.send(msg).fuse();
+                            propolis_read = Fuse::terminated();
+                        }
+                    }
+                }
             };
             tokio::select! {
                 msg = nexus_read => {
                     match msg {
                         None => {
-                            propolis_sink.send(WebSocketMessage::Close(Some(CloseFrame {
+                            propolis_conn.send(WebSocketMessage::Close(Some(CloseFrame {
                                 code: CloseCode::Abnormal,
                                 reason: std::borrow::Cow::from(
                                     "nexus: websocket connection to client closed unexpectedly"
@@ -1180,7 +1469,7 @@ impl super::Nexus {
                             break;
                         }
                         Some(Err(e)) => {
-                            propolis_sink.send(WebSocketMessage::Close(Some(CloseFrame {
+                            propolis_conn.send(WebSocketMessage::Close(Some(CloseFrame {
                                 code: CloseCode::Error,
                                 reason: std::borrow::Cow::from(
                                     format!("nexus: error in websocket connection to client: {}", e)
@@ -1189,7 +1478,7 @@ impl super::Nexus {
                             return Err(e);
                         }
                         Some(Ok(WebSocketMessage::Close(details))) => {
-                            propolis_sink.send(WebSocketMessage::Close(details)).await?;
+                            propolis_conn.send(WebSocketMessage::Close(details)).await?;
                             break;
                         }
                         Some(Ok(WebSocketMessage::Text(_text))) => {
@@ -1211,7 +1500,7 @@ impl super::Nexus {
                             nexus_sink.send(WebSocketMessage::Close(Some(CloseFrame {
                                 code: CloseCode::Abnormal,
                                 reason: std::borrow::Cow::from(
-                                    "nexus: websocket connection to propolis closed unexpectedly"
+                                    "nexus: websocket connection to serial port closed unexpectedly"
                                 ),
                             }))).await?;
                             break;
@@ -1220,7 +1509,7 @@ impl super::Nexus {
                             nexus_sink.send(WebSocketMessage::Close(Some(CloseFrame {
                                 code: CloseCode::Error,
                                 reason: std::borrow::Cow::from(
-                                    format!("nexus: error in websocket connection to propolis: {}", e)
+                                    format!("nexus: error in websocket connection to serial port: {}", e)
                                 ),
                             }))).await?;
                             return Err(e);
@@ -1229,11 +1518,11 @@ impl super::Nexus {
                             nexus_sink.send(WebSocketMessage::Close(details)).await?;
                             break;
                         }
-                        Some(Ok(WebSocketMessage::Text(_text))) => {
-                            // TODO: deserialize a json payload, specifying:
-                            //  - event: "migration"
-                            //  - address: the address of the new propolis-server
-                            //  - offset: what byte offset to start from (the last one sent from old propolis)
+                        Some(Ok(WebSocketMessage::Text(_json))) => {
+                            // connecting to new propolis-server is handled
+                            // within InstanceSerialConsoleHelper already.
+                            // we might consider sending the nexus client
+                            // an informational event for UX polish.
                         }
                         Some(Ok(WebSocketMessage::Binary(data))) => {
                             buffered_output = Some(WebSocketMessage::Binary(data))
@@ -1254,23 +1543,28 @@ impl super::Nexus {
 #[cfg(test)]
 mod tests {
     use super::super::Nexus;
+    use super::{CloseCode, CloseFrame, WebSocketMessage, WebSocketStream};
     use core::time::Duration;
     use futures::{SinkExt, StreamExt};
-    use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
-    use tokio_tungstenite::tungstenite::protocol::CloseFrame;
-    use tokio_tungstenite::tungstenite::protocol::Role;
-    use tokio_tungstenite::tungstenite::Message;
-    use tokio_tungstenite::WebSocketStream;
+    use propolis_client::support::tungstenite::protocol::Role;
 
     #[tokio::test]
     async fn test_serial_console_stream_proxying() {
         let (nexus_client_conn, nexus_server_conn) = tokio::io::duplex(1024);
         let (propolis_client_conn, propolis_server_conn) =
             tokio::io::duplex(1024);
+
         let jh = tokio::spawn(async move {
-            Nexus::proxy_instance_serial_ws(
+            let nexus_client_stream = WebSocketStream::from_raw_socket(
                 nexus_server_conn,
+                Role::Server,
+                None,
+            )
+            .await;
+            Nexus::proxy_instance_serial_ws(
+                nexus_client_stream,
                 propolis_client_conn,
+                None,
             )
             .await
         });
@@ -1287,17 +1581,17 @@ mod tests {
         )
         .await;
 
-        let sent = Message::Binary(vec![1, 2, 3, 42, 5]);
+        let sent = WebSocketMessage::Binary(vec![1, 2, 3, 42, 5]);
         nexus_client_ws.send(sent.clone()).await.unwrap();
         let received = propolis_server_ws.next().await.unwrap().unwrap();
         assert_eq!(sent, received);
 
-        let sent = Message::Binary(vec![6, 7, 8, 90]);
+        let sent = WebSocketMessage::Binary(vec![6, 7, 8, 90]);
         propolis_server_ws.send(sent.clone()).await.unwrap();
         let received = nexus_client_ws.next().await.unwrap().unwrap();
         assert_eq!(sent, received);
 
-        let sent = Message::Close(Some(CloseFrame {
+        let sent = WebSocketMessage::Close(Some(CloseFrame {
             code: CloseCode::Normal,
             reason: std::borrow::Cow::from("test done"),
         }));

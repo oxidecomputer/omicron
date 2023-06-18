@@ -31,7 +31,6 @@ pub mod server;
 mod services;
 mod sled_agent;
 mod smf_helper;
-pub mod sp;
 pub(crate) mod storage;
 mod storage_manager;
 mod updates;

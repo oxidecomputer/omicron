@@ -59,12 +59,12 @@ async fn test_rack_initialization(cptestctx: &ControlPlaneTestContext) {
     // provide when setting up the rack (when setting up the
     // ControlPlaneTestContext).  We use the status code to verify a successful
     // login.
-    let login_url = format!("/login/{}/local", cptestctx.silo_name);
+    let login_url = format!("/v1/login/{}/local", cptestctx.silo_name);
     let username = cptestctx.user_name.clone();
     let password: params::Password = TEST_SUITE_PASSWORD.parse().unwrap();
     let _ = RequestBuilder::new(&client, Method::POST, &login_url)
         .body(Some(&params::UsernamePasswordCredentials { username, password }))
-        .expect_status(Some(StatusCode::SEE_OTHER))
+        .expect_status(Some(StatusCode::NO_CONTENT))
         .execute()
         .await
         .expect("failed to log in");

@@ -7,7 +7,7 @@ use dns_service_client::{
     types::{DnsConfigParams, DnsConfigZone, DnsRecord, Srv},
     Client,
 };
-use dropshot::test_util::LogContext;
+use dropshot::{test_util::LogContext, HandlerTaskMode};
 use omicron_test_utils::dev::test_setup_log;
 use slog::o;
 use std::{collections::HashMap, net::Ipv4Addr, net::Ipv6Addr};
@@ -397,7 +397,7 @@ fn test_config(
     let config_dropshot = dropshot::ConfigDropshot {
         bind_address: "[::1]:0".to_string().parse().unwrap(),
         request_body_max_bytes: 1024,
-        ..Default::default()
+        default_handler_task_mode: HandlerTaskMode::Detached,
     };
 
     Ok((tmp_dir, config_storage, config_dropshot, logctx))

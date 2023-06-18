@@ -58,7 +58,7 @@
 mod buffer;
 mod context;
 mod engine;
-mod errors;
+pub mod errors;
 pub mod events;
 mod macros;
 mod spec;

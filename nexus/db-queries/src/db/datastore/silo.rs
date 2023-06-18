@@ -14,7 +14,7 @@ use crate::db::error::diesel_pool_result_optional;
 use crate::db::error::public_error_from_diesel_pool;
 use crate::db::error::ErrorHandler;
 use crate::db::error::TransactionError;
-use crate::db::fixed_data::silo::DEFAULT_SILO;
+use crate::db::fixed_data::silo::{DEFAULT_SILO, INTERNAL_SILO};
 use crate::db::identity::Resource;
 use crate::db::model::CollectionTypeProvisioned;
 use crate::db::model::Name;
@@ -27,6 +27,8 @@ use async_bb8_diesel::AsyncRunQueryDsl;
 use async_bb8_diesel::PoolError;
 use chrono::Utc;
 use diesel::prelude::*;
+use nexus_db_model::Certificate;
+use nexus_db_model::ServiceKind;
 use nexus_types::external_api::params;
 use nexus_types::external_api::shared;
 use omicron_common::api::external::http_pagination::PaginatedBy;
@@ -40,6 +42,14 @@ use omicron_common::api::external::ResourceType;
 use ref_cast::RefCast;
 use uuid::Uuid;
 
+/// Filter a "silo_list" query based on silos' discoverability
+pub enum Discoverability {
+    /// Show all Silos
+    All,
+    /// Show only discoverable Silos
+    DiscoverableOnly,
+}
+
 impl DataStore {
     /// Load built-in silos into the database
     pub async fn load_builtin_silos(
@@ -48,11 +58,11 @@ impl DataStore {
     ) -> Result<(), Error> {
         opctx.authorize(authz::Action::Modify, &authz::DATABASE).await?;
 
-        debug!(opctx.log, "attempting to create built-in silo");
+        debug!(opctx.log, "attempting to create built-in silos");
 
         use db::schema::silo::dsl;
         let count = diesel::insert_into(dsl::silo)
-            .values(&*DEFAULT_SILO)
+            .values([&*DEFAULT_SILO, &*INTERNAL_SILO])
             .on_conflict(dsl::id)
             .do_nothing()
             .execute_async(self.pool_authorized(opctx).await?)
@@ -227,6 +237,27 @@ impl DataStore {
                 insert_new_query.execute_async(&conn).await?;
             }
 
+            let certificates = new_silo_params
+                .tls_certificates
+                .into_iter()
+                .map(|c| {
+                    Certificate::new(
+                        silo.id(),
+                        Uuid::new_v4(),
+                        ServiceKind::Nexus,
+                        c,
+                    )
+                })
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(Error::from)?;
+            {
+                use db::schema::certificate::dsl;
+                diesel::insert_into(dsl::certificate)
+                    .values(certificates)
+                    .execute_async(&conn)
+                    .await?;
+            }
+
             self.dns_update(nexus_opctx, &conn, dns_update).await?;
 
             Ok(silo)
@@ -261,11 +292,12 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         pagparams: &PaginatedBy<'_>,
+        discoverability: Discoverability,
     ) -> ListResultVec<Silo> {
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
 
         use db::schema::silo::dsl;
-        match pagparams {
+        let mut query = match pagparams {
             PaginatedBy::Id(params) => paginated(dsl::silo, dsl::id, &params),
             PaginatedBy::Name(params) => paginated(
                 dsl::silo,
@@ -273,12 +305,18 @@ impl DataStore {
                 &params.map_name(|n| Name::ref_cast(n)),
             ),
         }
-        .filter(dsl::time_deleted.is_null())
-        .filter(dsl::discoverable.eq(true))
-        .select(Silo::as_select())
-        .load_async::<Silo>(self.pool_authorized(opctx).await?)
-        .await
-        .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+        .filter(dsl::id.ne(INTERNAL_SILO.id()))
+        .filter(dsl::time_deleted.is_null());
+
+        if let Discoverability::DiscoverableOnly = discoverability {
+            query = query.filter(dsl::discoverable.eq(true));
+        }
+
+        query
+            .select(Silo::as_select())
+            .load_async::<Silo>(self.pool_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
     pub async fn silo_delete(
@@ -473,6 +511,21 @@ impl DataStore {
             opctx.log,
             "deleted {} silo saml IdPs for silo {}", updated_rows, id
         );
+
+        // delete certificates
+        use db::schema::certificate::dsl as cert_dsl;
+
+        let updated_rows = diesel::update(cert_dsl::certificate)
+            .filter(cert_dsl::silo_id.eq(id))
+            .filter(cert_dsl::time_deleted.is_null())
+            .set(cert_dsl::time_deleted.eq(Utc::now()))
+            .execute_async(self.pool_authorized(opctx).await?)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(e, ErrorHandler::Server)
+            })?;
+
+        debug!(opctx.log, "deleted {} silo IdPs for silo {}", updated_rows, id);
 
         Ok(())
     }

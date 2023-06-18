@@ -22,6 +22,13 @@
         <mdui:Logo height="32" width="32" xml:lang="en">https://idp.example.org/myicon.png</mdui:Logo>
       </mdui:UIInfo>
     </md:Extensions>
+    <md:KeyDescriptor use="signing">
+      <ds:KeyInfo xmlns:ds="http://www.w3.org/2000/09/xmldsig#">
+        <ds:X509Data>
+          <ds:X509Certificate>MIIB0DCCAXagAwIBAgIUfvG7FgnAf1y/b0t1bJxqTJxrsA0wCgYIKoZIzj0EAwIwRjELMAkGA1UEBhMCVVMxCzAJBgNVBAgTAkNBMRYwFAYDVQQHEw1TYW4gRnJhbmNpc2NvMRIwEAYDVQQDEwlzYW1sLnRlc3QwHhcNMjMwNjA2MTgwMzAwWhcNMjgwNjA0MTgwMzAwWjBGMQswCQYDVQQGEwJVUzELMAkGA1UECBMCQ0ExFjAUBgNVBAcTDVNhbiBGcmFuY2lzY28xEjAQBgNVBAMTCXNhbWwudGVzdDBZMBMGByqGSM49AgEGCCqGSM49AwEHA0IABKd/VM8rcnguEezFNLH2XoCF46tc/9qacSrwPT17BACE6Qi2ptPRi7EJbJ2Ba5rCPKoRvVkW4Ra6N0NjbrmM6yqjQjBAMA4GA1UdDwEB/wQEAwIBBjAPBgNVHRMBAf8EBTADAQH/MB0GA1UdDgQWBBTnBe8+9wrmtOst71d7sjOSQYDDPDAKBggqhkjOPQQDAgNIADBFAiB9u01tz7C8p2W/9P39h5uf8efnYwTWmv+2m1/mvkLsygIhANTcN0dUHioQzz5C0smWnm1PhTXmxICpQzKjAxVhVavn</ds:X509Certificate>
+        </ds:X509Data>
+      </ds:KeyInfo>
+    </md:KeyDescriptor>
     <md:SingleSignOnService Binding="urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect" Location="https://idp.example.org/SAML2/SSO/Redirect"/>
     <md:SingleSignOnService Binding="urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST" Location="https://idp.example.org/SAML2/SSO/POST"/>
   </md:IDPSSODescriptor>
