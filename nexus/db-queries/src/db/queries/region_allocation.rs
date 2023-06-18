@@ -76,9 +76,9 @@ impl OldRegions {
 /// A subquery to find datasets which could be used for provisioning regions.
 ///
 /// We only consider datasets which are already allocated as "Crucible".
-/// This implicitly distinguishes between "M.2s" and "U.2s" -- Nexus need
-/// to determine during dataset provisioning which devices should be considered
-/// for usage as Crucible storage.
+/// This implicitly distinguishes between "M.2s" and "U.2s" -- Nexus needs to
+/// determine during dataset provisioning which devices should be considered for
+/// usage as Crucible storage.
 #[derive(Subquery, QueryId)]
 #[subquery(name = candidate_datasets)]
 struct CandidateDatasets {
