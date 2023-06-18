@@ -101,6 +101,9 @@ enum Command {
         component: String,
         /// If provided, set the active slot
         set_slot: Option<u16>,
+        /// If setting the slot, should that choice be made persistent?
+        #[clap(requires = "set_slot")]
+        persist: bool,
     },
 
     /// Get or set startup options on an SP.
@@ -406,13 +409,14 @@ async fn main() -> Result<()> {
         Command::IgnitionCommand { sp, command } => {
             client.ignition_command(sp.type_, sp.slot, command).await?;
         }
-        Command::ComponentActiveSlot { sp, component, set_slot } => {
+        Command::ComponentActiveSlot { sp, component, set_slot, persist } => {
             if let Some(slot) = set_slot {
                 client
                     .sp_component_active_slot_set(
                         sp.type_,
                         sp.slot,
                         &component,
+                        persist,
                         &SpComponentFirmwareSlot { slot },
                     )
                     .await?;
@@ -660,6 +664,14 @@ async fn update(
                     bail!("different update failed ({id:?}, code {code})");
                 }
                 bail!("update failed (code {code})");
+            }
+            SpUpdateStatus::RotError { id, message } => {
+                if id != update_id {
+                    bail!(
+                        "different update failed ({id:?}, rot error {message})"
+                    );
+                }
+                bail!("update failed (rot error {message})");
             }
         }
         tokio::time::sleep(Duration::from_secs(1)).await;

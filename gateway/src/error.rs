@@ -5,6 +5,7 @@
 //! Error handling facilities for the management gateway.
 
 use crate::management_switch::SpIdentifier;
+use anyhow::anyhow;
 use dropshot::HttpError;
 use gateway_messages::SpError;
 pub use gateway_sp_comms::error::CommunicationError;
@@ -51,7 +52,7 @@ impl From<SpCommsError> for HttpError {
         match err {
             SpCommsError::SpDoesNotExist(_) => HttpError::for_bad_request(
                 Some("InvalidSp".to_string()),
-                err.to_string(),
+                format!("{:#}", anyhow!(err)),
             ),
             SpCommsError::SpCommunicationFailed(
                 CommunicationError::SpError(
@@ -59,13 +60,13 @@ impl From<SpCommsError> for HttpError {
                 ),
             ) => HttpError::for_bad_request(
                 Some("SerialConsoleAttached".to_string()),
-                err.to_string(),
+                format!("{:#}", anyhow!(err)),
             ),
             SpCommsError::SpCommunicationFailed(
                 CommunicationError::SpError(SpError::RequestUnsupportedForSp),
             ) => HttpError::for_bad_request(
                 Some("RequestUnsupportedForSp".to_string()),
-                err.to_string(),
+                format!("{:#}", anyhow!(err)),
             ),
             SpCommsError::SpCommunicationFailed(
                 CommunicationError::SpError(
@@ -73,18 +74,18 @@ impl From<SpCommsError> for HttpError {
                 ),
             ) => HttpError::for_bad_request(
                 Some("RequestUnsupportedForComponent".to_string()),
-                err.to_string(),
+                format!("{:#}", anyhow!(err)),
             ),
             SpCommsError::SpCommunicationFailed(
                 CommunicationError::SpError(SpError::InvalidSlotForComponent),
             ) => HttpError::for_bad_request(
                 Some("InvalidSlotForComponent".to_string()),
-                err.to_string(),
+                format!("{:#}", anyhow!(err)),
             ),
             SpCommsError::UpdateFailed(UpdateError::ImageTooLarge) => {
                 HttpError::for_bad_request(
                     Some("ImageTooLarge".to_string()),
-                    err.to_string(),
+                    format!("{:#}", anyhow!(err)),
                 )
             }
             SpCommsError::UpdateFailed(UpdateError::Communication(
@@ -92,7 +93,7 @@ impl From<SpCommsError> for HttpError {
             )) => http_err_with_message(
                 http::StatusCode::SERVICE_UNAVAILABLE,
                 "UpdateSlotBusy",
-                err.to_string(),
+                format!("{:#}", anyhow!(err)),
             ),
             SpCommsError::UpdateFailed(UpdateError::Communication(
                 CommunicationError::SpError(SpError::UpdateInProgress {
@@ -101,37 +102,37 @@ impl From<SpCommsError> for HttpError {
             )) => http_err_with_message(
                 http::StatusCode::SERVICE_UNAVAILABLE,
                 "UpdateInProgress",
-                err.to_string(),
+                format!("{:#}", anyhow!(err)),
             ),
             SpCommsError::DiscoveryNotYetComplete => http_err_with_message(
                 http::StatusCode::SERVICE_UNAVAILABLE,
                 "DiscoveryNotYetComplete",
-                err.to_string(),
+                format!("{:#}", anyhow!(err)),
             ),
             SpCommsError::SpAddressUnknown(_) => http_err_with_message(
                 http::StatusCode::SERVICE_UNAVAILABLE,
                 "SpAddressUnknown",
-                err.to_string(),
+                format!("{:#}", anyhow!(err)),
             ),
             SpCommsError::DiscoveryFailed { .. } => http_err_with_message(
                 http::StatusCode::SERVICE_UNAVAILABLE,
                 "DiscoveryFailed ",
-                err.to_string(),
+                format!("{:#}", anyhow!(err)),
             ),
             SpCommsError::Timeout { .. } => http_err_with_message(
                 http::StatusCode::SERVICE_UNAVAILABLE,
                 "Timeout ",
-                err.to_string(),
+                format!("{:#}", anyhow!(err)),
             ),
             SpCommsError::SpCommunicationFailed(_) => http_err_with_message(
                 http::StatusCode::SERVICE_UNAVAILABLE,
                 "SpCommunicationFailed",
-                err.to_string(),
+                format!("{:#}", anyhow!(err)),
             ),
             SpCommsError::UpdateFailed(_) => http_err_with_message(
                 http::StatusCode::SERVICE_UNAVAILABLE,
                 "UpdateFailed",
-                err.to_string(),
+                format!("{:#}", anyhow!(err)),
             ),
         }
     }

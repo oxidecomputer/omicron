@@ -4,7 +4,7 @@
 
 //! Plan generation for "where should services be initialized".
 
-use crate::bootstrap::params::SledAgentRequest;
+use crate::bootstrap::params::StartSledAgentRequest;
 use crate::ledger::{Ledger, Ledgerable};
 use crate::params::{
     DatasetEnsureRequest, ServiceType, ServiceZoneRequest, ServiceZoneService,
@@ -232,7 +232,7 @@ impl Plan {
         log: &Logger,
         config: &Config,
         storage: &StorageResources,
-        sleds: &HashMap<SocketAddrV6, SledAgentRequest>,
+        sleds: &HashMap<SocketAddrV6, StartSledAgentRequest>,
     ) -> Result<Self, PlanError> {
         let reserved_rack_subnet = ReservedRackSubnet::new(config.az_subnet());
         let dns_subnets = reserved_rack_subnet.get_dns_subnets();
@@ -349,6 +349,15 @@ impl Plan {
                             internal_ip: address,
                             external_ip,
                             nic,
+                            // Tell Nexus to use TLS if and only if the caller
+                            // provided TLS certificates.  This effectively
+                            // determines the status of TLS for the lifetime of
+                            // the rack.  In production-like deployments, we'd
+                            // always expect TLS to be enabled.  It's only in
+                            // development that it might not be.
+                            external_tls: !config
+                                .external_certificates
+                                .is_empty(),
                         },
                     }],
                 })

@@ -9,7 +9,7 @@
 use std::net::SocketAddrV6;
 
 use anyhow::{anyhow, Result};
-use dropshot::HttpServer;
+use dropshot::{HandlerTaskMode, HttpServer};
 
 use crate::{
     context::ServerContext,
@@ -54,7 +54,7 @@ impl ArtifactServer {
             // https://github.com/oxidecomputer/dropshot/pull/618 lands and is
             // available in omicron.
             request_body_max_bytes: 4 * 1024 * 1024,
-            ..Default::default()
+            default_handler_task_mode: HandlerTaskMode::Detached,
         };
 
         let api = crate::http_entrypoints::api();

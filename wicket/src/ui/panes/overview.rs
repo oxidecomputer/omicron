@@ -5,12 +5,13 @@
 use std::collections::BTreeMap;
 
 use super::help_text;
+use super::ComputedScrollOffset;
 use super::Control;
 use crate::state::{ComponentId, ALL_COMPONENT_IDS};
 use crate::ui::defaults::colors::*;
 use crate::ui::defaults::style;
-use crate::ui::panes::compute_scroll_offset;
 use crate::ui::widgets::IgnitionPopup;
+use crate::ui::widgets::PopupScrollKind;
 use crate::ui::widgets::{BoxConnector, BoxConnectorKind, Rack};
 use crate::{Action, Cmd, Frame, State};
 use tui::layout::{Constraint, Direction, Layout, Rect};
@@ -65,13 +66,19 @@ impl Control for OverviewPane {
                 }
             }
             Cmd::Exit => {
-                // Transition to the rack view. `Exit` makes sense here
-                // because we are exiting a subview of the rack.
-                if !self.rack_view_selected {
+                if self.inventory_view.popup.is_some() {
+                    // If we're showing a popup, pass this event through so we
+                    // can close it.
+                    self.inventory_view.on(state, cmd)
+                } else if !self.rack_view_selected {
+                    // Otherwise, transition to the rack view. `Exit` makes
+                    // sense here because we are exiting a subview of the rack.
                     self.rack_view_selected = true;
                     Some(Action::Redraw)
                 } else {
-                    self.inventory_view.on(state, cmd)
+                    // We're already on the rack view - there's nowhere to exit
+                    // to, so this is a no-op.
+                    None
                 }
             }
             _ => self.dispatch(state, cmd),
@@ -157,7 +164,7 @@ impl Control for RackView {
             "OXIDE RACK",
             component_style,
         )]))
-        .block(border.clone().title("<ENTER>"));
+        .block(border.clone());
         frame.render_widget(title_bar, chunks[0]);
 
         // Draw the pane border
@@ -207,7 +214,7 @@ impl InventoryView {
     pub fn new() -> InventoryView {
         InventoryView {
             help: vec![
-                ("Rack View", "<ENTER>"),
+                ("Rack View", "<ESC>"),
                 ("Switch Component", "<LEFT/RIGHT>"),
                 ("Scroll", "<UP/DOWN>"),
                 ("Ignition", "<I>"),
@@ -226,13 +233,17 @@ impl InventoryView {
         state: &State,
         frame: &mut Frame<'_>,
     ) {
-        let popup = self.ignition.popup(state.rack_state.selected);
         let full_screen = Rect {
             width: state.screen_width,
             height: state.screen_height,
             x: 0,
             y: 0,
         };
+
+        let popup_builder =
+            self.ignition.to_popup_builder(state.rack_state.selected);
+        // Scrolling in the ignition popup is always disabled.
+        let popup = popup_builder.build(full_screen, PopupScrollKind::Disabled);
         frame.render_widget(popup, full_screen);
     }
 
@@ -309,7 +320,7 @@ impl Control for InventoryView {
                 component_style,
             ),
         ]))
-        .block(block.clone().title("<ENTER>"));
+        .block(block.clone());
         frame.render_widget(title_bar, chunks[0]);
 
         // Draw the contents
@@ -326,11 +337,12 @@ impl Control for InventoryView {
         };
 
         let scroll_offset = self.scroll_offsets.get_mut(&component_id).unwrap();
-        let y_offset = compute_scroll_offset(
+        let y_offset = ComputedScrollOffset::new(
             *scroll_offset,
             text.height(),
             chunks[1].height as usize,
-        );
+        )
+        .into_offset();
         *scroll_offset = y_offset as usize;
 
         let inventory = Paragraph::new(text)

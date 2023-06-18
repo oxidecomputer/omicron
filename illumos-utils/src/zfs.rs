@@ -6,11 +6,13 @@
 
 use crate::{execute, PFEXEC};
 use camino::Utf8PathBuf;
+use omicron_common::disk::DiskIdentity;
 use std::fmt;
 
 pub const ZONE_ZFS_RAMDISK_DATASET_MOUNTPOINT: &str = "/zone";
 pub const ZONE_ZFS_RAMDISK_DATASET: &str = "rpool/zone";
 const ZFS: &str = "/usr/sbin/zfs";
+pub const KEYPATH_ROOT: &str = "/var/run/oxide/";
 
 /// Error returned by [`Zfs::list_datasets`].
 #[derive(thiserror::Error, Debug)]
@@ -40,6 +42,9 @@ enum EnsureFilesystemErrorRaw {
 
     #[error("Unexpected output from ZFS commands: {0}")]
     Output(String),
+
+    #[error("Failed to mount encrypted filesystem: {0}")]
+    MountEncryptedFsFailed(crate::ExecutionError),
 }
 
 /// Error returned by [`Zfs::ensure_filesystem`].
@@ -104,6 +109,35 @@ impl fmt::Display for Mountpoint {
     }
 }
 
+/// This is the path for an encryption key used by ZFS
+#[derive(Debug, Clone)]
+pub struct Keypath(pub Utf8PathBuf);
+
+impl fmt::Display for Keypath {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl From<&DiskIdentity> for Keypath {
+    fn from(id: &DiskIdentity) -> Self {
+        let filename = format!(
+            "{}-{}-{}-zfs-aes-256-gcm.key",
+            id.vendor, id.serial, id.model
+        );
+        let mut path = Utf8PathBuf::new();
+        path.push(KEYPATH_ROOT);
+        path.push(filename);
+        Keypath(path)
+    }
+}
+
+#[derive(Debug)]
+pub struct EncryptionDetails {
+    pub keypath: Keypath,
+    pub epoch: u64,
+}
+
 #[cfg_attr(any(test, feature = "testing"), mockall::automock, allow(dead_code))]
 impl Zfs {
     /// Lists all datasets within a pool or existing dataset.
@@ -142,22 +176,22 @@ impl Zfs {
         mountpoint: Mountpoint,
         zoned: bool,
         do_format: bool,
+        encryption_details: Option<EncryptionDetails>,
     ) -> Result<(), EnsureFilesystemError> {
-        // If the dataset exists, we're done.
-        let mut command = std::process::Command::new(ZFS);
-        let cmd = command.args(&["list", "-Hpo", "name,type,mountpoint", name]);
-        // If the list command returns any valid output, validate it.
-        if let Ok(output) = execute(cmd) {
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            let values: Vec<&str> = stdout.trim().split('\t').collect();
-            if values != &[name, "filesystem", &mountpoint.to_string()] {
-                return Err(EnsureFilesystemError {
-                    name: name.to_string(),
-                    mountpoint,
-                    err: EnsureFilesystemErrorRaw::Output(stdout.to_string()),
-                });
+        let (exists, mounted) = Self::dataset_exists(name, &mountpoint)?;
+        if exists {
+            if encryption_details.is_none() {
+                // If the dataset exists, we're done. Unencrypted datasets are
+                // automatically mounted.
+                return Ok(());
+            } else {
+                if mounted {
+                    // The dataset exists and is mounted
+                    return Ok(());
+                }
+                // We need to load the encryption key and mount the filesystem
+                return Self::mount_encrypted_dataset(name, &mountpoint);
             }
-            return Ok(());
         }
 
         if !do_format {
@@ -174,6 +208,20 @@ impl Zfs {
         if zoned {
             cmd.args(&["-o", "zoned=on"]);
         }
+        if let Some(details) = encryption_details {
+            let keyloc = format!("keylocation=file://{}", details.keypath);
+            let epoch = format!("oxide:epoch={}", details.epoch);
+            cmd.args(&[
+                "-o",
+                "encryption=aes-256-gcm",
+                "-o",
+                "keyformat=raw",
+                "-o",
+                &keyloc,
+                "-o",
+                &epoch,
+            ]);
+        }
         cmd.args(&["-o", &format!("mountpoint={}", mountpoint), name]);
         execute(cmd).map_err(|err| EnsureFilesystemError {
             name: name.to_string(),
@@ -181,6 +229,51 @@ impl Zfs {
             err: err.into(),
         })?;
         Ok(())
+    }
+
+    fn mount_encrypted_dataset(
+        name: &str,
+        mountpoint: &Mountpoint,
+    ) -> Result<(), EnsureFilesystemError> {
+        let mut command = std::process::Command::new(PFEXEC);
+        let cmd = command.args(&[ZFS, "mount", "-l", name]);
+        execute(cmd).map_err(|err| EnsureFilesystemError {
+            name: name.to_string(),
+            mountpoint: mountpoint.clone(),
+            err: EnsureFilesystemErrorRaw::MountEncryptedFsFailed(err),
+        })?;
+        Ok(())
+    }
+
+    // Return (true, mounted) if the dataset exists, (false, false) otherwise,
+    // where mounted is if the dataset is mounted.
+    fn dataset_exists(
+        name: &str,
+        mountpoint: &Mountpoint,
+    ) -> Result<(bool, bool), EnsureFilesystemError> {
+        let mut command = std::process::Command::new(ZFS);
+        let cmd = command.args(&[
+            "list",
+            "-Hpo",
+            "name,type,mountpoint,mounted",
+            name,
+        ]);
+        // If the list command returns any valid output, validate it.
+        if let Ok(output) = execute(cmd) {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let values: Vec<&str> = stdout.trim().split('\t').collect();
+            if &values[..3] != &[name, "filesystem", &mountpoint.to_string()] {
+                return Err(EnsureFilesystemError {
+                    name: name.to_string(),
+                    mountpoint: mountpoint.clone(),
+                    err: EnsureFilesystemErrorRaw::Output(stdout.to_string()),
+                });
+            }
+            let mounted = values[3] == "yes";
+            Ok((true, mounted))
+        } else {
+            Ok((false, false))
+        }
     }
 
     pub fn set_oxide_value(

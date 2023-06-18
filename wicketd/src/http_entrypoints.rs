@@ -6,7 +6,8 @@
 
 use crate::mgs::GetInventoryError;
 use crate::mgs::GetInventoryResponse;
-use crate::update_events::EventReport;
+use crate::mgs::MgsHandle;
+use crate::RackV1Inventory;
 use dropshot::endpoint;
 use dropshot::ApiDescription;
 use dropshot::HttpError;
@@ -21,13 +22,20 @@ use gateway_client::types::IgnitionCommand;
 use gateway_client::types::SpIdentifier;
 use gateway_client::types::SpType;
 use http::StatusCode;
+use omicron_common::address;
 use omicron_common::api::external::SemverVersion;
+use omicron_common::api::internal::shared::RackNetworkConfig;
 use omicron_common::update::ArtifactId;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
+use sled_hardware::Baseboard;
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
+use std::time::Duration;
 use uuid::Uuid;
+use wicket_common::rack_setup::PutRssUserConfigInsensitive;
+use wicket_common::update_events::EventReport;
 
 use crate::ServerContext;
 
@@ -38,11 +46,19 @@ pub fn api() -> WicketdApiDescription {
     fn register_endpoints(
         api: &mut WicketdApiDescription,
     ) -> Result<(), String> {
+        api.register(get_rss_config)?;
+        api.register(put_rss_config)?;
+        api.register(put_rss_config_recovery_user_password_hash)?;
+        api.register(post_rss_config_cert)?;
+        api.register(post_rss_config_key)?;
+        api.register(delete_rss_config)?;
         api.register(get_inventory)?;
         api.register(put_repository)?;
-        api.register(get_artifacts)?;
+        api.register(get_artifacts_and_event_reports)?;
+        api.register(get_baseboard)?;
         api.register(post_start_update)?;
-        api.register(get_update_all)?;
+        api.register(post_abort_update)?;
+        api.register(post_clear_update_state)?;
         api.register(get_update_sp)?;
         api.register(post_ignition_command)?;
         Ok(())
@@ -53,6 +69,216 @@ pub fn api() -> WicketdApiDescription {
         panic!("failed to register entrypoints: {}", err);
     }
     api
+}
+
+#[derive(
+    Clone,
+    Debug,
+    Serialize,
+    Deserialize,
+    JsonSchema,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+)]
+pub struct BootstrapSledDescription {
+    pub id: SpIdentifier,
+    pub serial_number: String,
+    pub model: String,
+    pub revision: u32,
+}
+
+// This is the subset of `RackInitializeRequest` that the user fills in in clear
+// text (e.g., via an uploaded config file).
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct CurrentRssUserConfigInsensitive {
+    pub bootstrap_sleds: BTreeSet<BootstrapSledDescription>,
+    pub ntp_servers: Vec<String>,
+    pub dns_servers: Vec<String>,
+    pub internal_services_ip_pool_ranges: Vec<address::IpRange>,
+    pub external_dns_zone_name: String,
+    pub rack_network_config: Option<RackNetworkConfig>,
+}
+
+// This is a summary of the subset of `RackInitializeRequest` that is sensitive;
+// we only report a summary instead of returning actual data.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct CurrentRssUserConfigSensitive {
+    pub num_external_certificates: usize,
+    pub recovery_silo_password_set: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct CurrentRssUserConfig {
+    pub sensitive: CurrentRssUserConfigSensitive,
+    pub insensitive: CurrentRssUserConfigInsensitive,
+}
+
+// Get the current inventory or return a 503 Unavailable.
+async fn inventory_or_unavail(
+    mgs_handle: &MgsHandle,
+) -> Result<RackV1Inventory, HttpError> {
+    match mgs_handle.get_inventory(Vec::new()).await {
+        Ok(GetInventoryResponse::Response { inventory, .. }) => Ok(inventory),
+        Ok(GetInventoryResponse::Unavailable) => Err(HttpError::for_unavail(
+            None,
+            "Rack inventory not yet available".into(),
+        )),
+        Err(GetInventoryError::ShutdownInProgress) => {
+            Err(HttpError::for_unavail(None, "Server is shutting down".into()))
+        }
+        Err(GetInventoryError::InvalidSpIdentifier) => {
+            // We didn't provide any SP identifiers to refresh, so they can't be
+            // invalid.
+            unreachable!()
+        }
+    }
+}
+
+/// Get the current status of the user-provided (or system-default-provided, in
+/// some cases) RSS configuration.
+#[endpoint {
+    method = GET,
+    path = "/rss-config"
+}]
+async fn get_rss_config(
+    rqctx: RequestContext<ServerContext>,
+) -> Result<HttpResponseOk<CurrentRssUserConfig>, HttpError> {
+    let ctx = rqctx.context();
+
+    // We can't run RSS if we don't have an inventory from MGS yet; we always
+    // need to fill in the bootstrap sleds first.
+    let inventory = inventory_or_unavail(&ctx.mgs_handle).await?;
+
+    let mut config = ctx.rss_config.lock().unwrap();
+    config.populate_available_bootstrap_sleds_from_inventory(&inventory);
+
+    Ok(HttpResponseOk((&*config).into()))
+}
+
+/// Update (a subset of) the current RSS configuration.
+///
+/// Sensitive values (certificates and password hash) are not set through this
+/// endpoint.
+#[endpoint {
+    method = PUT,
+    path = "/rss-config"
+}]
+async fn put_rss_config(
+    rqctx: RequestContext<ServerContext>,
+    body: TypedBody<PutRssUserConfigInsensitive>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let ctx = rqctx.context();
+
+    // We can't run RSS if we don't have an inventory from MGS yet; we always
+    // need to fill in the bootstrap sleds first.
+    let inventory = inventory_or_unavail(&ctx.mgs_handle).await?;
+
+    let mut config = ctx.rss_config.lock().unwrap();
+    config.populate_available_bootstrap_sleds_from_inventory(&inventory);
+    config
+        .update(body.into_inner(), ctx.baseboard.as_ref())
+        .map_err(|err| HttpError::for_bad_request(None, err))?;
+
+    Ok(HttpResponseUpdatedNoContent())
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum CertificateUploadResponse {
+    /// The key has been uploaded, but we're waiting on its corresponding
+    /// certificate chain.
+    WaitingOnCert,
+    /// The cert chain has been uploaded, but we're waiting on its corresponding
+    /// private key.
+    WaitingOnKey,
+    /// A cert chain and its key have been accepted.
+    CertKeyAccepted,
+    /// A cert chain and its key are valid, but have already been uploaded.
+    CertKeyDuplicateIgnored,
+}
+
+/// Add an external certificate.
+///
+/// This must be paired with its private key. They may be posted in either
+/// order, but one cannot post two certs in a row (or two keys in a row).
+#[endpoint {
+    method = POST,
+    path = "/rss-config/cert"
+}]
+async fn post_rss_config_cert(
+    rqctx: RequestContext<ServerContext>,
+    body: TypedBody<Vec<u8>>,
+) -> Result<HttpResponseOk<CertificateUploadResponse>, HttpError> {
+    let ctx = rqctx.context();
+
+    let mut config = ctx.rss_config.lock().unwrap();
+    let response = config
+        .push_cert(body.into_inner())
+        .map_err(|err| HttpError::for_bad_request(None, err))?;
+
+    Ok(HttpResponseOk(response))
+}
+
+/// Add the private key of an external certificate.
+///
+/// This must be paired with its certificate. They may be posted in either
+/// order, but one cannot post two keys in a row (or two certs in a row).
+#[endpoint {
+    method = POST,
+    path = "/rss-config/key"
+}]
+async fn post_rss_config_key(
+    rqctx: RequestContext<ServerContext>,
+    body: TypedBody<Vec<u8>>,
+) -> Result<HttpResponseOk<CertificateUploadResponse>, HttpError> {
+    let ctx = rqctx.context();
+
+    let mut config = ctx.rss_config.lock().unwrap();
+    let response = config
+        .push_key(body.into_inner())
+        .map_err(|err| HttpError::for_bad_request(None, err))?;
+
+    Ok(HttpResponseOk(response))
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct PutRssRecoveryUserPasswordHash {
+    pub hash: omicron_passwords::NewPasswordHash,
+}
+
+/// Update the RSS config recovery silo user password hash.
+#[endpoint {
+    method = PUT,
+    path = "/rss-config/recovery-user-password-hash"
+}]
+async fn put_rss_config_recovery_user_password_hash(
+    rqctx: RequestContext<ServerContext>,
+    body: TypedBody<PutRssRecoveryUserPasswordHash>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let ctx = rqctx.context();
+
+    let mut config = ctx.rss_config.lock().unwrap();
+    config.set_recovery_user_password_hash(body.into_inner().hash);
+
+    Ok(HttpResponseUpdatedNoContent())
+}
+
+/// Reset all RSS configuration to their default values.
+#[endpoint {
+    method = DELETE,
+    path = "/rss-config"
+}]
+async fn delete_rss_config(
+    rqctx: RequestContext<ServerContext>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let ctx = rqctx.context();
+
+    let mut config = ctx.rss_config.lock().unwrap();
+    *config = Default::default();
+
+    Ok(HttpResponseUpdatedNoContent())
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
@@ -108,9 +334,8 @@ async fn put_repository(
 
     // TODO: do we need to return more information with the response?
 
-    rqctx
-        .artifact_store
-        .put_repository(body.into_stream().try_collect().await?)?;
+    let bytes = body.into_stream().try_collect().await?;
+    rqctx.update_tracker.put_repository(bytes).await?;
 
     Ok(HttpResponseUpdatedNoContent())
 }
@@ -119,25 +344,120 @@ async fn put_repository(
 /// all artifacts currently held by wicketd.
 #[derive(Clone, Debug, JsonSchema, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub struct GetArtifactsResponse {
+pub struct GetArtifactsAndEventReportsResponse {
     pub system_version: Option<SemverVersion>,
     pub artifacts: Vec<ArtifactId>,
+    pub event_reports: BTreeMap<SpType, BTreeMap<u32, EventReport>>,
 }
 
-/// An endpoint used to report all available artifacts.
+/// An endpoint used to report all available artifacts and event reports.
 ///
 /// The order of the returned artifacts is unspecified, and may change between
 /// calls even if the total set of artifacts has not.
 #[endpoint {
     method = GET,
-    path = "/artifacts",
+    path = "/artifacts-and-event-reports",
 }]
-async fn get_artifacts(
+async fn get_artifacts_and_event_reports(
     rqctx: RequestContext<ServerContext>,
-) -> Result<HttpResponseOk<GetArtifactsResponse>, HttpError> {
-    let (system_version, artifacts) =
-        rqctx.context().artifact_store.system_version_and_artifact_ids();
-    Ok(HttpResponseOk(GetArtifactsResponse { system_version, artifacts }))
+) -> Result<HttpResponseOk<GetArtifactsAndEventReportsResponse>, HttpError> {
+    let response =
+        rqctx.context().update_tracker.artifacts_and_event_reports().await;
+    Ok(HttpResponseOk(response))
+}
+
+#[derive(Clone, Debug, JsonSchema, Deserialize)]
+pub(crate) struct StartUpdateOptions {
+    /// If passed in, fails the update with a simulated error.
+    pub(crate) test_error: Option<UpdateTestError>,
+
+    /// If passed in, creates a test step that lasts these many seconds long.
+    ///
+    /// This is used for testing.
+    pub(crate) test_step_seconds: Option<u64>,
+
+    /// If true, skip the check on the current RoT version and always update it
+    /// regardless of whether the update appears to be neeeded.
+    #[allow(dead_code)] // TODO actually use this
+    pub(crate) skip_rot_version_check: bool,
+
+    /// If true, skip the check on the current SP version and always update it
+    /// regardless of whether the update appears to be neeeded.
+    pub(crate) skip_sp_version_check: bool,
+}
+
+#[derive(Clone, Debug, JsonSchema, Deserialize)]
+pub(crate) struct ClearUpdateStateOptions {
+    /// If passed in, fails the clear update state operation with a simulated
+    /// error.
+    pub(crate) test_error: Option<UpdateTestError>,
+}
+
+#[derive(Clone, Debug, JsonSchema, Deserialize)]
+pub(crate) struct AbortUpdateOptions {
+    /// The message to abort the update with.
+    pub(crate) message: String,
+
+    /// If passed in, fails the force cancel update operation with a simulated
+    /// error.
+    pub(crate) test_error: Option<UpdateTestError>,
+}
+
+#[derive(Copy, Clone, Debug, JsonSchema, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case", tag = "kind", content = "content")]
+pub(crate) enum UpdateTestError {
+    /// Simulate an error where the operation fails to complete.
+    Fail,
+
+    /// Simulate an issue where the operation times out.
+    Timeout {
+        /// The number of seconds to time out after.
+        secs: u64,
+    },
+}
+
+impl UpdateTestError {
+    pub(crate) async fn into_http_error(
+        self,
+        log: &slog::Logger,
+        reason: &str,
+    ) -> HttpError {
+        match self {
+            UpdateTestError::Fail => HttpError::for_bad_request(
+                None,
+                format!("Simulated failure while {reason}"),
+            ),
+            UpdateTestError::Timeout { secs } => {
+                slog::info!(log, "Simulating timeout while {reason}");
+                // 15 seconds should be enough to cause a timeout.
+                tokio::time::sleep(Duration::from_secs(secs)).await;
+                HttpError::for_bad_request(
+                    None,
+                    "XXX request should time out before this is hit".into(),
+                )
+            }
+        }
+    }
+}
+
+#[derive(Clone, Debug, JsonSchema, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub struct GetBaseboardResponse {
+    pub baseboard: Option<Baseboard>,
+}
+
+/// Report the configured baseboard details
+#[endpoint {
+    method = GET,
+    path = "/baseboard",
+}]
+async fn get_baseboard(
+    rqctx: RequestContext<ServerContext>,
+) -> Result<HttpResponseOk<GetBaseboardResponse>, HttpError> {
+    let rqctx = rqctx.context();
+    Ok(HttpResponseOk(GetBaseboardResponse {
+        baseboard: rqctx.baseboard.clone(),
+    }))
 }
 
 /// An endpoint to start updating a sled.
@@ -148,23 +468,11 @@ async fn get_artifacts(
 async fn post_start_update(
     rqctx: RequestContext<ServerContext>,
     target: Path<SpIdentifier>,
+    opts: TypedBody<StartUpdateOptions>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let log = &rqctx.log;
     let rqctx = rqctx.context();
     let target = target.into_inner();
-
-    // Do we have a plan with which we can apply updates (i.e., has a valid TUF
-    // repository been uploaded)?
-    let plan = rqctx.artifact_store.current_plan().ok_or_else(|| {
-        // TODO-correctness `for_bad_request` is a little questionable because
-        // the problem isn't this request specifically, but that we haven't
-        // gotten request yet with a valid TUF repository. `for_unavail` might
-        // be more accurate, but `for_unavail` doesn't give us away to give the
-        // client a meaningful error.
-        HttpError::for_bad_request(
-            None,
-            "upload a valid TUF repository first".to_string(),
-        )
-    })?;
 
     // Can we update the target SP? We refuse to update if:
     //
@@ -240,6 +548,11 @@ async fn post_start_update(
         }
     }
 
+    let opts = opts.into_inner();
+    if let Some(test_error) = opts.test_error {
+        return Err(test_error.into_http_error(log, "starting update").await);
+    }
+
     // All pre-flight update checks look OK: start the update.
     //
     // Generate an ID for this update; the update tracker will send it to the
@@ -247,31 +560,10 @@ async fn post_start_update(
     // back to our artifact server with its progress reports.
     let update_id = Uuid::new_v4();
 
-    match rqctx.update_tracker.start(target, plan, update_id).await {
+    match rqctx.update_tracker.start(target, update_id, opts).await {
         Ok(()) => Ok(HttpResponseUpdatedNoContent {}),
         Err(err) => Err(err.to_http_error()),
     }
-}
-
-/// The response to a `get_update_all` call: the list of all updates (in-flight
-/// or completed) known by wicketd.
-#[derive(Clone, Debug, JsonSchema, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub struct EventReportAll {
-    pub sps: BTreeMap<SpType, BTreeMap<u32, EventReport>>,
-}
-
-/// An endpoint to get the status of all updates being performed or recently
-/// completed on all SPs.
-#[endpoint {
-    method = GET,
-    path = "/update",
-}]
-async fn get_update_all(
-    rqctx: RequestContext<ServerContext>,
-) -> Result<HttpResponseOk<EventReportAll>, HttpError> {
-    let sps = rqctx.context().update_tracker.event_report_all().await;
-    Ok(HttpResponseOk(EventReportAll { sps }))
 }
 
 /// An endpoint to get the status of any update being performed or recently
@@ -287,6 +579,66 @@ async fn get_update_sp(
     let event_report =
         rqctx.context().update_tracker.event_report(target.into_inner()).await;
     Ok(HttpResponseOk(event_report))
+}
+
+/// Forcibly cancels a running update.
+///
+/// This is a potentially dangerous operation, but one that is sometimes
+/// required. A machine reset might be required after this operation completes.
+#[endpoint {
+    method = POST,
+    path = "/abort-update/{type}/{slot}",
+}]
+async fn post_abort_update(
+    rqctx: RequestContext<ServerContext>,
+    target: Path<SpIdentifier>,
+    opts: TypedBody<AbortUpdateOptions>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let log = &rqctx.log;
+    let target = target.into_inner();
+
+    let opts = opts.into_inner();
+    if let Some(test_error) = opts.test_error {
+        return Err(test_error.into_http_error(log, "aborting update").await);
+    }
+
+    match rqctx
+        .context()
+        .update_tracker
+        .abort_update(target, opts.message)
+        .await
+    {
+        Ok(()) => Ok(HttpResponseUpdatedNoContent {}),
+        Err(err) => Err(err.to_http_error()),
+    }
+}
+
+/// Resets update state for a sled.
+///
+/// Use this to clear update state after a failed update.
+#[endpoint {
+    method = POST,
+    path = "/clear-update-state/{type}/{slot}",
+}]
+async fn post_clear_update_state(
+    rqctx: RequestContext<ServerContext>,
+    target: Path<SpIdentifier>,
+    opts: TypedBody<ClearUpdateStateOptions>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let log = &rqctx.log;
+    let target = target.into_inner();
+
+    let opts = opts.into_inner();
+    if let Some(test_error) = opts.test_error {
+        return Err(test_error
+            .into_http_error(log, "clearing update state")
+            .await);
+    }
+
+    match rqctx.context().update_tracker.clear_update_state(target).await {
+        Ok(()) => Ok(HttpResponseUpdatedNoContent {}),
+        Err(err) => Err(err.to_http_error()),
+    }
 }
 
 #[derive(Serialize, Deserialize, JsonSchema)]

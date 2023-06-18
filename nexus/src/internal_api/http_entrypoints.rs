@@ -24,6 +24,8 @@ use dropshot::RequestContext;
 use dropshot::ResultsPage;
 use dropshot::TypedBody;
 use hyper::Body;
+use nexus_types::internal_api::params::SwitchPutRequest;
+use nexus_types::internal_api::params::SwitchPutResponse;
 use nexus_types::internal_api::views::to_list;
 use nexus_types::internal_api::views::Saga;
 use omicron_common::api::external::http_pagination::data_page_params_for;
@@ -47,6 +49,7 @@ type NexusApiDescription = ApiDescription<Arc<ServerContext>>;
 pub fn internal_api() -> NexusApiDescription {
     fn register_endpoints(api: &mut NexusApiDescription) -> Result<(), String> {
         api.register(sled_agent_put)?;
+        api.register(switch_put)?;
         api.register(rack_initialization_complete)?;
         api.register(physical_disk_put)?;
         api.register(physical_disk_delete)?;
@@ -128,6 +131,32 @@ async fn rack_initialization_complete(
     nexus.rack_initialize(&opctx, path.rack_id, request).await?;
 
     Ok(HttpResponseUpdatedNoContent())
+}
+
+/// Path parameters for Switch requests.
+#[derive(Deserialize, JsonSchema)]
+struct SwitchPathParam {
+    switch_id: Uuid,
+}
+
+#[endpoint {
+    method = PUT,
+    path = "/switch/{switch_id}",
+}]
+async fn switch_put(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<SwitchPathParam>,
+    body: TypedBody<SwitchPutRequest>,
+) -> Result<HttpResponseOk<SwitchPutResponse>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let switch = body.into_inner();
+        nexus.switch_upsert(path.switch_id, switch).await?;
+        Ok(HttpResponseOk(SwitchPutResponse {}))
+    };
+    apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
 /// Report that a physical disk for the specified sled has come online.
@@ -221,8 +250,11 @@ async fn cpapi_instances_put(
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
     let new_state = new_runtime_state.into_inner();
+    let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
     let handler = async {
-        nexus.notify_instance_updated(&path.instance_id, &new_state).await?;
+        nexus
+            .notify_instance_updated(&opctx, &path.instance_id, &new_state)
+            .await?;
         Ok(HttpResponseUpdatedNoContent())
     };
     apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await

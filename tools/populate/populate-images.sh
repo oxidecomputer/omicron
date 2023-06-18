@@ -8,7 +8,7 @@
 set -eu
 CATACOMB_TUNNEL="${CATACOMB_TUNNEL:-"[fd00:1122:3344:101::1]:54321"}"
 echo "Populating debian"
-oxide api /system/images --method POST --input - <<EOF
+oxide api /v1/images --method POST --input - <<EOF
 {
   "name": "debian",
   "description": "debian",
@@ -25,7 +25,7 @@ oxide api /system/images --method POST --input - <<EOF
 EOF
 
 echo "Populating ubuntu"
-oxide api /system/images --method POST --input - <<EOF
+oxide api /v1/images --method POST --input - <<EOF
 {
   "name": "ubuntu",
   "description": "Ubuntu",
@@ -42,7 +42,7 @@ oxide api /system/images --method POST --input - <<EOF
 EOF
 
 echo "Populating fedora"
-oxide api /system/images --method POST --input - <<EOF
+oxide api /v1/images --method POST --input - <<EOF
 {
   "name": "fedora",
   "description": "fedora",
@@ -59,7 +59,7 @@ oxide api /system/images --method POST --input - <<EOF
 EOF
 
 echo "Populating debian-nocloud"
-oxide api /system/images --method POST --input - <<EOF
+oxide api /v1/images --method POST --input - <<EOF
 {
   "name": "debian-nocloud",
   "description": "debian nocloud",
@@ -76,7 +76,7 @@ oxide api /system/images --method POST --input - <<EOF
 EOF
 
 echo "Populating ubuntu-iso"
-oxide api /system/images --method POST --input - <<EOF
+oxide api /v1/images --method POST --input - <<EOF
 {
   "name": "ubuntu-nocloud-iso",
   "description": "ubuntu nocloud iso",
@@ -93,7 +93,7 @@ oxide api /system/images --method POST --input - <<EOF
 EOF
 
 echo "Populating windows"
-oxide api /system/images --method POST --input - <<EOF
+oxide api /v1/images --method POST --input - <<EOF
 {
   "name": "windows-server-2022",
   "description": "Windows Server 2022",

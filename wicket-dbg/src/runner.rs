@@ -13,7 +13,6 @@ use crossterm::terminal::{
 };
 use slog::Logger;
 use std::collections::BTreeSet;
-use std::io::stdout;
 use std::time::Duration;
 use tokio::fs::read;
 use tokio::sync::{
@@ -21,8 +20,6 @@ use tokio::sync::{
     oneshot,
 };
 use tokio::time::sleep;
-use tui::backend::CrosstermBackend;
-use tui::Terminal;
 use wicket::{Event, RunnerCore, Screen, Snapshot, State, TICK_INTERVAL};
 
 // Max speedup/slowdown factor for playback rate
@@ -65,13 +62,7 @@ pub struct Runner {
 
 impl Runner {
     pub fn new(log: Logger) -> (Runner, RunnerHandle) {
-        let backend = CrosstermBackend::new(stdout());
-        let core = RunnerCore {
-            screen: Screen::new(&log),
-            state: State::new(),
-            terminal: Terminal::new(backend).unwrap(),
-            log,
-        };
+        let core = RunnerCore::new(log);
         // We only allow one request at a time
         let (tx, rx) = mpsc::channel(1);
         let (event_tx, event_rx) = mpsc::channel(1);

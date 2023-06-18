@@ -35,13 +35,17 @@ snafu.workspace = true
 toml.workspace = true
 uuid.workspace = true
 
+bootstrap-agent-client.workspace = true
 gateway-client.workspace = true
 installinator-artifactd.workspace = true
 installinator-common.workspace = true
+omicron-certificates.workspace = true
 omicron-common.workspace = true
+omicron-passwords.workspace = true
 sled-hardware.workspace = true
 tufaceous-lib.workspace = true
 update-engine.workspace = true
+wicket-common.workspace = true
 
 [[bin]]
 name = "wicketd"

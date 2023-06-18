@@ -57,7 +57,7 @@
 use super::config::SetupServiceConfig as Config;
 use crate::bootstrap::config::BOOTSTRAP_AGENT_HTTP_PORT;
 use crate::bootstrap::params::BootstrapAddressDiscovery;
-use crate::bootstrap::params::SledAgentRequest;
+use crate::bootstrap::params::StartSledAgentRequest;
 use crate::bootstrap::rss_handle::BootstrapAgentHandle;
 use crate::ledger::{Ledger, Ledgerable};
 use crate::nexus::d2n_params;
@@ -69,20 +69,27 @@ use crate::rack_setup::plan::service::{
     Plan as ServicePlan, PlanError as ServicePlanError,
 };
 use crate::rack_setup::plan::sled::{
-    generate_rack_secret, Plan as SledPlan, PlanError as SledPlanError,
+    Plan as SledPlan, PlanError as SledPlanError,
 };
 use crate::storage_manager::StorageResources;
 use camino::Utf8PathBuf;
 use ddm_admin_client::{Client as DdmAdminClient, DdmError};
+use dpd_client::types::{
+    LinkCreate, LinkId, LinkSettings, PortId, PortSettings, RouteSettingsV4,
+};
+use dpd_client::Client as DpdClient;
+use dpd_client::Ipv4Cidr;
 use internal_dns::resolver::{DnsError, Resolver as DnsResolver};
 use internal_dns::ServiceName;
 use nexus_client::{
     types as NexusTypes, Client as NexusClient, Error as NexusError,
 };
+use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::{
     get_sled_address, CRUCIBLE_PANTRY_PORT, DENDRITE_PORT, NEXUS_INTERNAL_PORT,
     NTP_PORT, OXIMETER_PORT,
 };
+use omicron_common::api::internal::shared::{PortFec, PortSpeed};
 use omicron_common::backoff::{
     retry_notify, retry_policy_internal_service_aggressive, BackoffError,
 };
@@ -92,11 +99,14 @@ use sled_agent_client::{
 };
 use sled_hardware::underlay::BootstrapInterface;
 use slog::Logger;
-use sprockets_host::Ed25519Certificate;
 use std::collections::{HashMap, HashSet};
 use std::iter;
+use std::net::IpAddr;
+use std::net::Ipv4Addr;
 use std::net::{Ipv6Addr, SocketAddr, SocketAddrV6};
 use thiserror::Error;
+
+static BOUNDARY_SERVICES_ADDR: &str = "fd00:99::1";
 
 /// Describes errors which may occur while operating the setup service.
 #[derive(Error, Debug)]
@@ -143,12 +153,18 @@ pub enum SetupServiceError {
 
     #[error("Failed to access DNS servers: {0}")]
     Dns(#[from] DnsError),
+
+    #[error("Error during request to Dendrite: {0}")]
+    Dendrite(String),
+
+    #[error("Error during DNS lookup: {0}")]
+    DnsResolver(#[from] internal_dns::resolver::ResolveError),
 }
 
 // The workload / information allocated to a single sled.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 struct SledAllocation {
-    initialization_request: SledAgentRequest,
+    initialization_request: StartSledAgentRequest,
 }
 
 /// The interface to the Rack Setup Service.
@@ -172,11 +188,7 @@ impl RackSetupService {
         config: Config,
         storage_resources: StorageResources,
         local_bootstrap_agent: BootstrapAgentHandle,
-        // TODO-cleanup: We should be collecting the device ID certs of all
-        // trust quorum members over the management network. Currently we don't
-        // have a management network, so we hard-code the list of members and
-        // accept it as a parameter instead.
-        member_device_id_certs: Vec<Ed25519Certificate>,
+        external_port_count: u8,
     ) -> Self {
         let handle = tokio::task::spawn(async move {
             let svc = ServiceInner::new(log.clone());
@@ -185,7 +197,7 @@ impl RackSetupService {
                     &config,
                     &storage_resources,
                     local_bootstrap_agent,
-                    &member_device_id_certs,
+                    external_port_count,
                 )
                 .await
             {
@@ -219,6 +231,32 @@ impl RackSetupService {
     /// Awaits the completion of the RSS service.
     pub async fn join(self) -> Result<(), SetupServiceError> {
         self.handle.await.expect("Rack Setup Service Task panicked")
+    }
+}
+
+// The following two conversion functions translate the speed and fec types used
+// in the internal API to the types used in the dpd-client API.  The conversion
+// is done here, rather than with "impl From" at the definition, to avoid a
+// circular dependency between omicron-common and dpd.
+fn convert_speed(speed: &PortSpeed) -> dpd_client::types::PortSpeed {
+    match speed {
+        PortSpeed::Speed0G => dpd_client::types::PortSpeed::Speed0G,
+        PortSpeed::Speed1G => dpd_client::types::PortSpeed::Speed1G,
+        PortSpeed::Speed10G => dpd_client::types::PortSpeed::Speed10G,
+        PortSpeed::Speed25G => dpd_client::types::PortSpeed::Speed25G,
+        PortSpeed::Speed40G => dpd_client::types::PortSpeed::Speed40G,
+        PortSpeed::Speed50G => dpd_client::types::PortSpeed::Speed50G,
+        PortSpeed::Speed100G => dpd_client::types::PortSpeed::Speed100G,
+        PortSpeed::Speed200G => dpd_client::types::PortSpeed::Speed200G,
+        PortSpeed::Speed400G => dpd_client::types::PortSpeed::Speed400G,
+    }
+}
+
+fn convert_fec(fec: &PortFec) -> dpd_client::types::PortFec {
+    match fec {
+        PortFec::Firecode => dpd_client::types::PortFec::Firecode,
+        PortFec::None => dpd_client::types::PortFec::None,
+        PortFec::Rs => dpd_client::types::PortFec::Rs,
     }
 }
 
@@ -522,6 +560,7 @@ impl ServiceInner {
         config: &Config,
         sled_plan: &SledPlan,
         service_plan: &ServicePlan,
+        external_port_count: u8,
     ) -> Result<(), SetupServiceError> {
         info!(self.log, "Handing off control to Nexus");
 
@@ -585,6 +624,7 @@ impl ServiceInner {
                         ServiceType::Nexus {
                             external_ip,
                             internal_ip: _,
+                            nic,
                             ..
                         } => {
                             services.push(NexusTypes::ServicePutRequest {
@@ -600,6 +640,12 @@ impl ServiceInner {
                                 .to_string(),
                                 kind: NexusTypes::ServiceKind::Nexus {
                                     external_address: *external_ip,
+                                    nic: NexusTypes::ServiceNic {
+                                        id: nic.id,
+                                        name: nic.name.clone(),
+                                        ip: nic.ip,
+                                        mac: nic.mac,
+                                    },
                                 },
                             });
                         }
@@ -618,33 +664,33 @@ impl ServiceInner {
                                 kind: NexusTypes::ServiceKind::Dendrite,
                             });
                         }
-                        ServiceType::ExternalDns { http_address, .. } => {
-                            services.push(NexusTypes::ServicePutRequest {
-                                service_id,
-                                zone_id,
-                                sled_id,
-                                address: http_address.to_string(),
-                                kind:
-                                    NexusTypes::ServiceKind::ExternalDnsConfig,
-                            });
-                        }
-                        ServiceType::InternalDns {
+                        ServiceType::ExternalDns {
                             http_address,
                             dns_address,
+                            nic,
                         } => {
                             services.push(NexusTypes::ServicePutRequest {
                                 service_id,
                                 zone_id,
                                 sled_id,
                                 address: http_address.to_string(),
-                                kind:
-                                    NexusTypes::ServiceKind::InternalDnsConfig,
+                                kind: NexusTypes::ServiceKind::ExternalDns {
+                                    external_address: dns_address.ip(),
+                                    nic: NexusTypes::ServiceNic {
+                                        id: nic.id,
+                                        name: nic.name.clone(),
+                                        ip: nic.ip,
+                                        mac: nic.mac,
+                                    },
+                                },
                             });
+                        }
+                        ServiceType::InternalDns { http_address, .. } => {
                             services.push(NexusTypes::ServicePutRequest {
                                 service_id,
                                 zone_id,
                                 sled_id,
-                                address: dns_address.to_string(),
+                                address: http_address.to_string(),
                                 kind: NexusTypes::ServiceKind::InternalDns,
                             });
                         }
@@ -678,8 +724,7 @@ impl ServiceInner {
                                 kind: NexusTypes::ServiceKind::CruciblePantry,
                             });
                         }
-                        ServiceType::BoundaryNtp { .. }
-                        | ServiceType::InternalNtp { .. } => {
+                        ServiceType::BoundaryNtp { snat_cfg, nic, .. } => {
                             services.push(NexusTypes::ServicePutRequest {
                                 service_id,
                                 zone_id,
@@ -691,7 +736,30 @@ impl ServiceInner {
                                     0,
                                 )
                                 .to_string(),
-                                kind: NexusTypes::ServiceKind::Ntp,
+                                kind: NexusTypes::ServiceKind::BoundaryNtp {
+                                    snat: snat_cfg.into(),
+                                    nic: NexusTypes::ServiceNic {
+                                        id: nic.id,
+                                        name: nic.name.clone(),
+                                        ip: nic.ip,
+                                        mac: nic.mac,
+                                    },
+                                },
+                            });
+                        }
+                        ServiceType::InternalNtp { .. } => {
+                            services.push(NexusTypes::ServicePutRequest {
+                                service_id,
+                                zone_id,
+                                sled_id,
+                                address: SocketAddrV6::new(
+                                    zone.addresses[0],
+                                    NTP_PORT,
+                                    0,
+                                    0,
+                                )
+                                .to_string(),
+                                kind: NexusTypes::ServiceKind::InternalNtp,
                             });
                         }
                         details => {
@@ -721,20 +789,35 @@ impl ServiceInner {
             .into_iter()
             .map(Into::into)
             .collect();
+
+        let rack_network_config = match &config.rack_network_config {
+            Some(config) => {
+                let value = NexusTypes::RackNetworkConfig {
+                    gateway_ip: config.gateway_ip.clone(),
+                    infra_ip_first: config.infra_ip_first.clone(),
+                    infra_ip_last: config.infra_ip_last.clone(),
+                    uplink_ip: config.uplink_ip.clone(),
+                    uplink_port: config.uplink_port.clone(),
+                    uplink_port_speed: config.uplink_port_speed.clone().into(),
+                    uplink_port_fec: config.uplink_port_fec.clone().into(),
+                };
+                Some(value)
+            }
+            None => None,
+        };
+
+        info!(self.log, "rack_network_config: {:#?}", rack_network_config);
+
         let request = NexusTypes::RackInitializationRequest {
             services,
             datasets,
             internal_services_ip_pool_ranges,
-            // TODO(https://github.com/oxidecomputer/omicron/issues/1959): Plumb
-            // these paths through RSS's API.
-            //
-            // These certificates CAN be updated through Nexus' HTTP API, but
-            // should be bootstrapped during the rack setup process to avoid
-            // the need for unencrypted communication.
-            certs: vec![],
+            certs: config.external_certificates.clone(),
             internal_dns_zone_config: d2n_params(&service_plan.dns_config),
             external_dns_zone_name: config.external_dns_zone_name.clone(),
             recovery_silo: config.recovery_silo.clone(),
+            external_port_count,
+            rack_network_config,
         };
 
         let notify_nexus = || async {
@@ -811,7 +894,7 @@ impl ServiceInner {
         config: &Config,
         storage_resources: &StorageResources,
         local_bootstrap_agent: BootstrapAgentHandle,
-        member_device_id_certs: &[Ed25519Certificate],
+        external_port_count: u8,
     ) -> Result<(), SetupServiceError> {
         info!(self.log, "Injecting RSS configuration: {:#?}", config);
 
@@ -849,7 +932,13 @@ impl ServiceInner {
             let service_plan = ServicePlan::load(&self.log, storage_resources)
                 .await?
                 .expect("Service plan should exist if completed marker exists");
-            self.handoff_to_nexus(&config, &sled_plan, &service_plan).await?;
+            self.handoff_to_nexus(
+                &config,
+                &sled_plan,
+                &service_plan,
+                external_port_count,
+            )
+            .await?;
             return Ok(());
         } else {
             info!(self.log, "RSS configuration has not been fully applied yet",);
@@ -900,44 +989,13 @@ impl ServiceInner {
         };
         let config = &plan.config;
 
-        // Generate our rack secret, unless we're in the single-sled case.
-        let mut maybe_rack_secret_shares = generate_rack_secret(
-            config.rack_secret_threshold,
-            member_device_id_certs,
-            &self.log,
-        )?;
-
-        // Confirm that the returned iterator (if we got one) is the length we
-        // expect.
-        if let Some(rack_secret_shares) = maybe_rack_secret_shares.as_ref() {
-            // TODO-cleanup Asserting here seems fine as long as
-            // `member_device_id_certs` is hard-coded from a config file, but
-            // once we start collecting them over the management network we
-            // should probably attach them at the type level to the bootstrap
-            // addrs, which would remove the need for this assertion.
-            assert_eq!(
-                rack_secret_shares.len(),
-                plan.sleds.len(),
-                concat!(
-                    "Number of trust quorum members does not match ",
-                    "number of sleds in the plan"
-                )
-            );
-        }
-
         // Forward the sled initialization requests to our sled-agent.
         local_bootstrap_agent
             .initialize_sleds(
                 plan.sleds
                     .iter()
                     .map(move |(bootstrap_addr, initialization_request)| {
-                        (
-                            *bootstrap_addr,
-                            initialization_request.clone(),
-                            maybe_rack_secret_shares
-                                .as_mut()
-                                .map(|shares| shares.next().unwrap()),
-                        )
+                        (*bootstrap_addr, initialization_request.clone())
                     })
                     .collect(),
             )
@@ -970,6 +1028,131 @@ impl ServiceInner {
         // Set up internal DNS services first and write the initial
         // DNS configuration to the internal DNS servers.
         self.initialize_dns(&service_plan).await?;
+
+        // Initialize rack network before NTP comes online, otherwise boundary
+        // services will not be available and NTP will fail to sync
+        info!(self.log, "Checking for Rack Network Configuration");
+        if let Some(rack_network_config) = &config.rack_network_config {
+            info!(self.log, "Initializing Rack Network");
+            info!(self.log, "Looking up address for Dendrite");
+            let resolver = DnsResolver::new_from_subnet(
+                self.log.new(o!("component" => "DnsResolver")),
+                config.az_subnet(),
+            )?;
+
+            let dpd_addr = resolver
+                .lookup_socket_v6(internal_dns::ServiceName::Dendrite)
+                .await?;
+
+            let dpd = DpdClient::new(
+                &format!("http://[{}]:{}", dpd_addr.ip(), dpd_addr.port()),
+                dpd_client::ClientState {
+                    tag: "sled-agent".to_string(),
+                    log: self.log.new(o!(
+                        "component" => "DpdClient"
+                    )),
+                },
+            );
+
+            info!(self.log, "Building Rack Network Configuration");
+            // TODO - https://github.com/oxidecomputer/omicron/issues/3278
+            // dynamically determine where boundary services address should be configured
+            let body = dpd_client::types::Ipv6Entry {
+                addr: BOUNDARY_SERVICES_ADDR.parse().map_err(|e| {
+                    SetupServiceError::BadConfig(format!(
+                        "failed to parse `BOUNDARY_SERVICES_ADDR` as `Ipv6Addr`: {e}"
+                    ))
+                })?,
+                tag: "rss".into(),
+            };
+
+            let mut dpd_port_settings = PortSettings {
+                tag: "rss".into(),
+                links: HashMap::new(),
+                v4_routes: HashMap::new(),
+                v6_routes: HashMap::new(),
+            };
+
+            // TODO handle breakouts
+            // https://github.com/oxidecomputer/omicron/issues/3062
+            let link_id = LinkId(0);
+            let addr: IpAddr = rack_network_config.uplink_ip.parse()
+                .map_err(|e| {
+                    SetupServiceError::BadConfig(format!(
+                    "unable to parse rack_network_config.uplink_up as IpAddr: {e}"))
+                })?;
+
+            let link_settings = LinkSettings {
+                // TODO Allow user to configure link properties
+                // https://github.com/oxidecomputer/omicron/issues/3061
+                params: LinkCreate {
+                    autoneg: false,
+                    kr: false,
+                    fec: convert_fec(&rack_network_config.uplink_port_fec),
+                    speed: convert_speed(
+                        &rack_network_config.uplink_port_speed,
+                    ),
+                },
+                addrs: vec![addr],
+            };
+
+            dpd_port_settings.links.insert(link_id.to_string(), link_settings);
+
+            let port_id: PortId = rack_network_config.uplink_port.parse()
+                .map_err(|e| SetupServiceError::BadConfig(
+                        format!("could not use value provided to rack_network_config.uplink_port as PortID: {e}")
+                ))?;
+
+            let nexthop: Option<Ipv4Addr> = Some(rack_network_config.gateway_ip.parse()
+                .map_err(|e| SetupServiceError::BadConfig(
+                        format!("unable to parse rack_network_config.gateway_ip as Ipv4Addr: {e}")
+                ))?);
+
+            dpd_port_settings.v4_routes.insert(
+                Ipv4Cidr { prefix: "0.0.0.0".parse().unwrap(), prefix_len: 0 }
+                    .to_string(),
+                RouteSettingsV4 { link_id: link_id.0, nexthop },
+            );
+
+            loop {
+                info!(self.log, "Checking dendrite uptime");
+                match dpd.dpd_uptime().await {
+                    Ok(uptime) => {
+                        info!(self.log, "Dendrite online"; "uptime" => uptime.to_string());
+                        break;
+                    }
+                    Err(e) => {
+                        info!(self.log, "Unable to check Dendrite uptime"; "reason" => format!("{e}"));
+                    }
+                }
+                info!(self.log, "Waiting for dendrite to come online");
+                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+            }
+
+            info!(self.log, "Configuring boundary services loopback address on switch"; "config" => format!("{body:#?}"));
+            dpd.loopback_ipv6_create(&body).await.map_err(|e| {
+                SetupServiceError::Dendrite(format!(
+                    "unable to create inital switch loopback address: {e}"
+                ))
+            })?;
+
+            info!(self.log, "Configuring default uplink on switch"; "config" => format!("{dpd_port_settings:#?}"));
+            dpd.port_settings_apply(&port_id, &dpd_port_settings)
+                .await
+                .map_err(|e| {
+                    SetupServiceError::Dendrite(format!(
+                    "unable to apply initial uplink port configuration: {e}"
+                ))
+                })?;
+
+            info!(self.log, "advertising boundary services loopback address");
+            let mut ddmd_addr = dpd_addr;
+            ddmd_addr.set_port(8000);
+            let ddmd_client = DdmAdminClient::new(&self.log, ddmd_addr)?;
+            ddmd_client.advertise_prefix(Ipv6Subnet::new(
+                BOUNDARY_SERVICES_ADDR.parse().unwrap(),
+            ));
+        }
 
         // Next start up the NTP services.
         // Note we also specify internal DNS services again because it
@@ -1062,7 +1245,13 @@ impl ServiceInner {
 
         // At this point, even if we reboot, we must not try to manage sleds,
         // services, or DNS records.
-        self.handoff_to_nexus(&config, &plan, &service_plan).await?;
+        self.handoff_to_nexus(
+            &config,
+            &plan,
+            &service_plan,
+            external_port_count,
+        )
+        .await?;
 
         // TODO Questions to consider:
         // - What if a sled comes online *right after* this setup? How does

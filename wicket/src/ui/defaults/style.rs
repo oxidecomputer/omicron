@@ -6,6 +6,7 @@
 
 use super::colors::*;
 use tui::style::Color;
+use tui::style::Modifier;
 use tui::style::Style;
 
 pub fn selected() -> Style {
@@ -29,7 +30,7 @@ pub fn help_function() -> Style {
 }
 
 pub fn help_keys() -> Style {
-    Style::default().fg(TUI_PURPLE_DIM)
+    selected_line()
 }
 
 pub fn divider() -> Style {
@@ -56,16 +57,36 @@ pub fn plain_text() -> Style {
     Style::default().bg(TUI_BLACK).fg(OX_OFF_WHITE)
 }
 
+pub fn plain_text_bold() -> Style {
+    plain_text().add_modifier(Modifier::BOLD)
+}
+
 pub fn successful_update() -> Style {
     selected()
+}
+
+pub fn successful_update_bold() -> Style {
+    successful_update().add_modifier(Modifier::BOLD)
 }
 
 pub fn failed_update() -> Style {
     Style::default().fg(OX_RED)
 }
 
+pub fn failed_update_bold() -> Style {
+    failed_update().add_modifier(Modifier::BOLD)
+}
+
 pub fn start_update() -> Style {
     Style::default().fg(OX_YELLOW)
+}
+
+pub fn warning_update() -> Style {
+    Style::default().fg(OX_YELLOW)
+}
+
+pub fn warning_update_bold() -> Style {
+    warning_update().add_modifier(Modifier::BOLD)
 }
 
 pub fn line(active: bool) -> Style {
@@ -90,6 +111,10 @@ pub fn header(active: bool) -> Style {
 
 pub fn popup_highlight() -> Style {
     Style::default().fg(TUI_PURPLE)
+}
+
+pub fn bold() -> Style {
+    Style::default().add_modifier(Modifier::BOLD)
 }
 
 pub fn faded_background() -> Style {

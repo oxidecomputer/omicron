@@ -15,6 +15,8 @@ use crate::db::error::diesel_pool_result_optional;
 use crate::db::error::public_error_from_diesel_pool;
 use crate::db::error::ErrorHandler;
 use crate::db::error::TransactionError;
+use crate::db::fixed_data::project::SERVICES_PROJECT;
+use crate::db::fixed_data::silo::INTERNAL_SILO_ID;
 use crate::db::identity::Resource;
 use crate::db::model::CollectionTypeProvisioned;
 use crate::db::model::Name;
@@ -93,6 +95,37 @@ macro_rules! generate_fn_to_ensure_none_in_project {
 }
 
 impl DataStore {
+    /// Load built-in projects into the database
+    pub async fn load_builtin_projects(
+        &self,
+        opctx: &OpContext,
+    ) -> Result<(), Error> {
+        opctx.authorize(authz::Action::Modify, &authz::DATABASE).await?;
+
+        debug!(opctx.log, "attempting to create built-in projects");
+
+        let (authz_silo,) = db::lookup::LookupPath::new(&opctx, self)
+            .silo_id(*INTERNAL_SILO_ID)
+            .lookup_for(authz::Action::CreateChild)
+            .await?;
+
+        self.project_create_in_silo(
+            opctx,
+            SERVICES_PROJECT.clone(),
+            &authz_silo,
+        )
+        .await
+        .map(|_| ())
+        .or_else(|e| match e {
+            Error::ObjectAlreadyExists { .. } => Ok(()),
+            _ => Err(e),
+        })?;
+
+        info!(opctx.log, "created built-in services project");
+
+        Ok(())
+    }
+
     /// Create a project
     pub async fn project_create(
         &self,
@@ -103,7 +136,17 @@ impl DataStore {
             .authn
             .silo_required()
             .internal_context("creating a Project")?;
-        opctx.authorize(authz::Action::CreateChild, &authz_silo).await?;
+        self.project_create_in_silo(opctx, project, &authz_silo).await
+    }
+
+    /// Create a project in the given silo.
+    async fn project_create_in_silo(
+        &self,
+        opctx: &OpContext,
+        project: Project,
+        authz_silo: &authz::Silo,
+    ) -> CreateResult<(authz::Project, Project)> {
+        opctx.authorize(authz::Action::CreateChild, authz_silo).await?;
 
         let silo_id = authz_silo.id();
         let authz_silo_inner = authz_silo.clone();
@@ -285,5 +328,34 @@ impl DataStore {
                     ErrorHandler::NotFoundByResource(authz_project),
                 )
             })
+    }
+
+    /// List IP Pools accessible to a project
+    pub async fn project_ip_pools_list(
+        &self,
+        opctx: &OpContext,
+        authz_project: &authz::Project,
+        pagparams: &PaginatedBy<'_>,
+    ) -> ListResultVec<db::model::IpPool> {
+        use db::schema::ip_pool::dsl;
+        opctx.authorize(authz::Action::ListChildren, authz_project).await?;
+        match pagparams {
+            PaginatedBy::Id(pagparams) => {
+                paginated(dsl::ip_pool, dsl::id, pagparams)
+            }
+            PaginatedBy::Name(pagparams) => paginated(
+                dsl::ip_pool,
+                dsl::name,
+                &pagparams.map_name(|n| Name::ref_cast(n)),
+            ),
+        }
+        // TODO(2148, 2056): filter only pools accessible by the given
+        // project, once specific projects for pools are implemented
+        .filter(dsl::internal.eq(false))
+        .filter(dsl::time_deleted.is_null())
+        .select(db::model::IpPool::as_select())
+        .get_results_async(self.pool_authorized(opctx).await?)
+        .await
+        .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 }

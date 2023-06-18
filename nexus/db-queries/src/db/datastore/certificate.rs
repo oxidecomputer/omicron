@@ -21,6 +21,7 @@ use nexus_types::identity::Resource;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DeleteResult;
+use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::ResourceType;
 use ref_cast::RefCast;
@@ -34,7 +35,12 @@ impl DataStore {
     ) -> CreateResult<Certificate> {
         use db::schema::certificate::dsl;
 
-        opctx.authorize(authz::Action::CreateChild, &authz::FLEET).await?;
+        let authz_silo = opctx
+            .authn
+            .silo_required()
+            .internal_context("creating a Certificate")?;
+        let authz_cert_list = authz::SiloCertificateList::new(authz_silo);
+        opctx.authorize(authz::Action::CreateChild, &authz_cert_list).await?;
 
         let name = certificate.name().clone();
         diesel::insert_into(dsl::certificate)
@@ -61,10 +67,25 @@ impl DataStore {
         opctx: &OpContext,
         kind: Option<ServiceKind>,
         pagparams: &PaginatedBy<'_>,
+        silo_only: bool,
     ) -> ListResultVec<Certificate> {
         use db::schema::certificate::dsl;
 
-        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
+        let silo = if silo_only {
+            let authz_silo = opctx
+                .authn
+                .silo_required()
+                .internal_context("listing Certificates")?;
+            let silo_id = authz_silo.id();
+            let authz_cert_list = authz::SiloCertificateList::new(authz_silo);
+            opctx
+                .authorize(authz::Action::ListChildren, &authz_cert_list)
+                .await?;
+            Some(silo_id)
+        } else {
+            opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
+            None
+        };
 
         let query;
         match pagparams {
@@ -84,6 +105,12 @@ impl DataStore {
 
         let query = if let Some(kind) = kind {
             query.filter(dsl::service.eq(kind))
+        } else {
+            query
+        };
+
+        let query = if let Some(silo_id) = silo {
+            query.filter(dsl::silo_id.eq(silo_id))
         } else {
             query
         };

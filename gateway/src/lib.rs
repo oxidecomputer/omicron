@@ -27,6 +27,7 @@ pub use management_switch::SwitchPortConfig;
 pub use management_switch::SwitchPortDescription;
 
 use dropshot::ConfigDropshot;
+use dropshot::HandlerTaskMode;
 use slog::debug;
 use slog::error;
 use slog::info;
@@ -93,7 +94,7 @@ fn start_dropshot_server(
     let dropshot = ConfigDropshot {
         bind_address: SocketAddr::V6(addr),
         request_body_max_bytes,
-        ..Default::default()
+        default_handler_task_mode: HandlerTaskMode::Detached,
     };
     let http_server_starter = dropshot::HttpServerStarter::new(
         &dropshot,

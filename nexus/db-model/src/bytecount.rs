@@ -4,7 +4,7 @@
 
 use super::BlockSize;
 use anyhow::bail;
-use diesel::backend::{Backend, RawValue};
+use diesel::backend::Backend;
 use diesel::deserialize::{self, FromSql};
 use diesel::pg::Pg;
 use diesel::serialize::{self, ToSql};
@@ -46,7 +46,7 @@ where
     DB: Backend,
     i64: FromSql<sql_types::BigInt, DB>,
 {
-    fn from_sql(bytes: RawValue<DB>) -> deserialize::Result<Self> {
+    fn from_sql(bytes: DB::RawValue<'_>) -> deserialize::Result<Self> {
         external::ByteCount::try_from(i64::from_sql(bytes)?)
             .map(ByteCount)
             .map_err(|e| e.into())

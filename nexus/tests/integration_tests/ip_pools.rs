@@ -11,12 +11,17 @@ use http::StatusCode;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
-use nexus_test_utils::resource_helpers::create_instance;
 use nexus_test_utils::resource_helpers::create_project;
 use nexus_test_utils::resource_helpers::objects_list_page_authz;
+use nexus_test_utils::resource_helpers::{
+    create_instance, create_instance_with,
+};
 use nexus_test_utils_macros::nexus_test;
-use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::IdentityMetadataUpdateParams;
+use omicron_common::api::external::{IdentityMetadataCreateParams, Name};
+use omicron_nexus::external_api::params::ExternalIpCreate;
+use omicron_nexus::external_api::params::InstanceDiskAttachment;
+use omicron_nexus::external_api::params::InstanceNetworkInterfaceAttachment;
 use omicron_nexus::external_api::params::IpPoolCreate;
 use omicron_nexus::external_api::params::IpPoolUpdate;
 use omicron_nexus::external_api::shared::IpRange;
@@ -26,6 +31,7 @@ use omicron_nexus::external_api::views::IpPool;
 use omicron_nexus::external_api::views::IpPoolRange;
 use omicron_nexus::TestInterfaces;
 use sled_agent_client::TestInterfaces as SledTestInterfaces;
+use std::collections::HashSet;
 
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
@@ -549,6 +555,175 @@ async fn test_ip_pool_range_pagination(cptestctx: &ControlPlaneTestContext) {
         expected_ranges.iter().zip(actual_ranges)
     {
         assert_ranges_eq(expected_range, actual_range);
+    }
+}
+
+#[nexus_test]
+async fn test_ip_pool_list_usable_by_project(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let scoped_ip_pools_url = "/v1/ip-pools";
+    let ip_pools_url = "/v1/system/ip-pools";
+    let mypool_name = "mypool";
+    let default_ip_pool_add_range_url =
+        format!("{}/default/ranges/add", ip_pools_url);
+    let mypool_ip_pool_add_range_url =
+        format!("{}/{}/ranges/add", ip_pools_url, mypool_name);
+    let service_ip_pool_add_range_url =
+        "/v1/system/ip-pools-service/ranges/add".to_string();
+
+    // Add an IP range to the default pool
+    let default_range = IpRange::V4(
+        Ipv4Range::new(
+            std::net::Ipv4Addr::new(10, 0, 0, 1),
+            std::net::Ipv4Addr::new(10, 0, 0, 2),
+        )
+        .unwrap(),
+    );
+    let created_range: IpPoolRange = NexusRequest::objects_post(
+        client,
+        &default_ip_pool_add_range_url,
+        &default_range,
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body()
+    .unwrap();
+    assert_eq!(
+        default_range.first_address(),
+        created_range.range.first_address()
+    );
+    assert_eq!(
+        default_range.last_address(),
+        created_range.range.last_address()
+    );
+
+    // Create an org and project, and then try to make an instance with an IP from
+    // each range to which the project is expected have access.
+
+    const PROJECT_NAME: &str = "myproj";
+    const INSTANCE_NAME: &str = "myinst";
+    create_project(client, PROJECT_NAME).await;
+
+    // TODO: give this project explicit access when such functionality exists
+    let params = IpPoolCreate {
+        identity: IdentityMetadataCreateParams {
+            name: String::from(mypool_name).parse().unwrap(),
+            description: String::from("right on cue"),
+        },
+    };
+    NexusRequest::objects_post(client, ip_pools_url, &params)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap();
+
+    // Add an IP range to mypool
+    let mypool_range = IpRange::V4(
+        Ipv4Range::new(
+            std::net::Ipv4Addr::new(10, 0, 0, 51),
+            std::net::Ipv4Addr::new(10, 0, 0, 52),
+        )
+        .unwrap(),
+    );
+    let created_range: IpPoolRange = NexusRequest::objects_post(
+        client,
+        &mypool_ip_pool_add_range_url,
+        &mypool_range,
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body()
+    .unwrap();
+    assert_eq!(
+        mypool_range.first_address(),
+        created_range.range.first_address()
+    );
+    assert_eq!(mypool_range.last_address(), created_range.range.last_address());
+
+    // add a service range we *don't* expect to see in the results
+    let service_range = IpRange::V4(
+        Ipv4Range::new(
+            std::net::Ipv4Addr::new(10, 0, 0, 101),
+            std::net::Ipv4Addr::new(10, 0, 0, 102),
+        )
+        .unwrap(),
+    );
+
+    let created_range: IpPoolRange = NexusRequest::objects_post(
+        client,
+        &service_ip_pool_add_range_url,
+        &service_range,
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body()
+    .unwrap();
+    assert_eq!(
+        service_range.first_address(),
+        created_range.range.first_address()
+    );
+    assert_eq!(
+        service_range.last_address(),
+        created_range.range.last_address()
+    );
+
+    // TODO: add non-service, ip pools that the project *can't* use, when that
+    // functionality is implemented in the future (i.e. a "notmypool")
+
+    let list_url = format!("{}?project={}", scoped_ip_pools_url, PROJECT_NAME);
+    let list = NexusRequest::iter_collection_authn::<IpPool>(
+        client, &list_url, "", None,
+    )
+    .await
+    .expect("Failed to list IP Pools")
+    .all_items;
+
+    // default and mypool
+    assert_eq!(list.len(), 2);
+    let pool_names: HashSet<String> =
+        list.iter().map(|pool| pool.identity.name.to_string()).collect();
+    let expected_names: HashSet<String> =
+        ["default", "mypool"].into_iter().map(|s| s.to_string()).collect();
+    assert_eq!(pool_names, expected_names);
+
+    // ensure we can view each pool returned
+    for pool_name in &pool_names {
+        let view_pool_url = format!(
+            "{}/{}?project={}",
+            scoped_ip_pools_url, pool_name, PROJECT_NAME
+        );
+        let pool: IpPool = NexusRequest::object_get(client, &view_pool_url)
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute()
+            .await
+            .unwrap()
+            .parsed_body()
+            .unwrap();
+        assert_eq!(pool.identity.name.as_str(), pool_name.as_str());
+    }
+
+    // ensure we can successfully create an instance with each of the pools we
+    // should be able to access
+    for pool_name in pool_names {
+        let instance_name = format!("{}-{}", INSTANCE_NAME, pool_name);
+        let pool_name = Some(Name::try_from(pool_name).unwrap());
+        create_instance_with(
+            client,
+            PROJECT_NAME,
+            &instance_name,
+            &InstanceNetworkInterfaceAttachment::Default,
+            Vec::<InstanceDiskAttachment>::new(),
+            vec![ExternalIpCreate::Ephemeral { pool_name }],
+        )
+        .await;
     }
 }
 

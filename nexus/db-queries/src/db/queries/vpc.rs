@@ -25,6 +25,14 @@ use ipnetwork::IpNetwork;
 use omicron_common::api::external;
 use uuid::Uuid;
 
+#[derive(Debug)]
+enum VniSubquery {
+    /// Attempt to insert VPC with a fixed VNI.
+    Fixed(i32),
+    /// Use a `NextItem` sub-query to pick the next available VNI.
+    Next(NextVni),
+}
+
 /// A query used to insert a candidate VPC into the database.
 ///
 /// This query mostly just inserts the data provided in the `IncompleteVpc`
@@ -32,13 +40,31 @@ use uuid::Uuid;
 /// one be available.
 #[derive(Debug)]
 pub struct InsertVpcQuery {
-    vpc: IncompleteVpc,
-    vni_subquery: NextVni,
+    pub(crate) vpc: IncompleteVpc,
+    vni_subquery: VniSubquery,
 }
 
 impl InsertVpcQuery {
     pub fn new(vpc: IncompleteVpc) -> Self {
         let vni_subquery = NextVni::new(vpc.vni);
+        Self { vpc, vni_subquery: VniSubquery::Next(vni_subquery) }
+    }
+
+    pub fn new_system(mut vpc: IncompleteVpc, vni: Option<Vni>) -> Self {
+        let vni_subquery = match vni {
+            // If an explicit VNI was provided, we want to use it.
+            Some(vni) => {
+                vpc.vni = vni;
+                // Ok to unwrap here since the `Vni` type guarantees we fit
+                VniSubquery::Fixed(i32::try_from(u32::from(vni.0)).unwrap())
+            }
+            // Otherwise, starting from a random seed, use a query to
+            // select the next available system VNI.
+            None => {
+                vpc.vni = Vni(external::Vni::random_system());
+                VniSubquery::Next(NextVni::new_system(vpc.vni))
+            }
+        };
         Self { vpc, vni_subquery }
     }
 }
@@ -118,9 +144,17 @@ impl QueryFragment<Pg> for InsertVpcQuery {
         out.push_identifier(dsl::dns_name::NAME)?;
         out.push_sql(", ");
 
-        out.push_sql("(");
-        self.vni_subquery.walk_ast(out.reborrow())?;
-        out.push_sql(") AS ");
+        match &self.vni_subquery {
+            VniSubquery::Fixed(vni) => {
+                out.push_bind_param::<sql_types::Int4, i32>(vni)?;
+            }
+            VniSubquery::Next(vni_subquery) => {
+                out.push_sql("(");
+                vni_subquery.walk_ast(out.reborrow())?;
+                out.push_sql(")");
+            }
+        }
+        out.push_sql(" AS ");
         out.push_identifier(dsl::vni::NAME)?;
         out.push_sql(", ");
 
@@ -218,6 +252,22 @@ impl NextVni {
         let max_shift = i64::from(external::Vni::MAX_VNI - base_u32);
         let min_shift = i64::from(
             -i32::try_from(base_u32 - external::Vni::MIN_GUEST_VNI)
+                .expect("Expected a valid VNI at this point"),
+        );
+        let generator =
+            DefaultShiftGenerator { base: vni, max_shift, min_shift };
+        let inner = NextItem::new_unscoped(generator);
+        Self { inner }
+    }
+
+    /// Returns a query fragment to select an available VNI from the Oxide-reserved space.
+    fn new_system(vni: Vni) -> Self {
+        let base_u32 = u32::from(vni.0);
+        // System VNI's are in the range [0, 1024) so adjust appropriately.
+        let max_shift =
+            i64::from((external::Vni::MIN_GUEST_VNI - 1) - base_u32);
+        let min_shift = i64::from(
+            -i32::try_from(base_u32)
                 .expect("Expected a valid VNI at this point"),
         );
         let generator =

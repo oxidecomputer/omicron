@@ -12,7 +12,6 @@ use omicron_sled_agent::bootstrap::{
     config::Config as BootstrapConfig, server as bootstrap_server,
 };
 use omicron_sled_agent::rack_setup::config::SetupServiceConfig as RssConfig;
-use omicron_sled_agent::sp::SimSpConfig;
 use omicron_sled_agent::{config::Config as SledConfig, server as sled_server};
 use uuid::Uuid;
 
@@ -91,20 +90,6 @@ async fn do_run() -> Result<(), CmdError> {
             } else {
                 None
             };
-            let sp_config_path = {
-                let mut sp_config_path = config_path.clone();
-                sp_config_path.pop();
-                sp_config_path.push("config-sp.toml");
-                sp_config_path
-            };
-            let sp_config = if sp_config_path.exists() {
-                Some(
-                    SimSpConfig::from_file(sp_config_path)
-                        .map_err(|e| CmdError::Failure(e.to_string()))?,
-                )
-            } else {
-                None
-            };
 
             // Derive the bootstrap addresses from the data link's MAC address.
             let link = config
@@ -117,7 +102,6 @@ async fn do_run() -> Result<(), CmdError> {
                 link,
                 log: config.log.clone(),
                 updates: config.updates.clone(),
-                sp_config,
             };
 
             // TODO: It's a little silly to pass the config this way - namely,
@@ -135,8 +119,7 @@ async fn do_run() -> Result<(), CmdError> {
             if let Some(rss_config) = rss_config {
                 server
                     .agent()
-                    .rack_initialize(rss_config)
-                    .await
+                    .start_rack_initialize(rss_config)
                     .map_err(|e| CmdError::Failure(e.to_string()))?;
             }
 

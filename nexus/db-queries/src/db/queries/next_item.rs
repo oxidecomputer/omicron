@@ -592,7 +592,7 @@ mod tests {
         let log = logctx.log.new(o!());
         let mut db = test_setup_database(&log).await;
         let cfg = crate::db::Config { url: db.pg_config().clone() };
-        let pool = Arc::new(crate::db::Pool::new(&cfg));
+        let pool = Arc::new(crate::db::Pool::new(&logctx.log, &cfg));
 
         // We're going to operate on a separate table, for simplicity.
         setup_test_schema(&pool).await;
