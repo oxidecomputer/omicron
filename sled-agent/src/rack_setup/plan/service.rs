@@ -286,7 +286,6 @@ impl Plan {
                 let http_port = omicron_common::address::DNS_HTTP_PORT;
                 let http_address =
                     SocketAddrV6::new(internal_ip, http_port, 0, 0);
-                let dns_port = omicron_common::address::DNS_PORT;
                 let id = Uuid::new_v4();
                 let zone = dns_builder.host_zone(id, internal_ip).unwrap();
                 dns_builder
@@ -298,17 +297,14 @@ impl Plan {
                     .unwrap();
                 let (nic, external_ip) =
                     svc_port_builder.next_dns(id, &mut services_ip_pool)?;
+                let dns_port = omicron_common::address::DNS_PORT;
+                let dns_address = SocketAddr::new(external_ip, dns_port);
                 request.datasets.push(DatasetEnsureBody {
                     id,
                     zpool_id: u2_zpools[0],
                     dataset_kind: crate::params::DatasetKind::ExternalDns {
-                        http_address: SocketAddrV6::new(
-                            internal_ip,
-                            http_port,
-                            0,
-                            0,
-                        ),
-                        dns_address: SocketAddr::new(external_ip, dns_port),
+                        http_address,
+                        dns_address,
                         nic,
                     },
                     address: http_address,
@@ -452,6 +448,7 @@ impl Plan {
             if idx < dns_subnets.len() {
                 let dns_subnet = &dns_subnets[idx];
                 let dns_ip = dns_subnet.dns_address().ip();
+                let dns_address = SocketAddrV6::new(dns_ip, DNS_PORT, 0, 0);
                 let http_address =
                     SocketAddrV6::new(dns_ip, DNS_HTTP_PORT, 0, 0);
                 let id = Uuid::new_v4();
@@ -467,13 +464,8 @@ impl Plan {
                     id,
                     zpool_id: u2_zpools[0],
                     dataset_kind: crate::params::DatasetKind::InternalDns {
-                        http_address: SocketAddrV6::new(
-                            dns_ip,
-                            DNS_HTTP_PORT,
-                            0,
-                            0,
-                        ),
-                        dns_address: SocketAddrV6::new(dns_ip, DNS_PORT, 0, 0),
+                        http_address,
+                        dns_address,
                     },
                     address: http_address,
                     gz_address: Some(dns_subnet.gz_address().ip()),
