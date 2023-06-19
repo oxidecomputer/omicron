@@ -111,9 +111,22 @@ impl TestState {
                 for _ in 0..ticks {
                     self.clock += 1;
                     self.network.advance(self.clock);
-
-                    // TODO: Check for any delivered messages and process them.
-                    // We should add processing delays somewhere.
+                    let delivery_time = self.clock + self.delays.msg_delivery;
+                    while let Some((destination, mut sourced_msgs)) =
+                        self.network.delivered().pop_first()
+                    {
+                        for (source, msg) in sourced_msgs.drain(..) {
+                            let output = self
+                                .peer_mut(&destination)
+                                .handle(source.clone(), msg);
+                            // TODO: verify output
+                            self.network.send(
+                                &source,
+                                output.envelopes,
+                                delivery_time,
+                            );
+                        }
+                    }
                 }
                 Ok(())
             }
@@ -121,7 +134,13 @@ impl TestState {
                 self.delays = delays;
                 Ok(())
             }
-            Action::LoadRackSecret(peer) => Ok(()),
+            Action::LoadRackSecret(peer) => {
+                // TODO: Verify output
+                let output = self.peer_mut(&peer).load_rack_secret();
+                let msg_delivery_time = self.clock + self.delays.msg_delivery;
+                self.network.send(&peer, output.envelopes, msg_delivery_time);
+                Ok(())
+            }
         }
     }
 
@@ -143,6 +162,14 @@ impl TestState {
         let output =
             self.peer_mut(&rss_sled).init_rack(rack_uuid, initial_members);
         self.check_rack_init_api_output(&rss_sled, &output)?;
+
+        if self.rack_init_complete {
+            // We already initialized the rack and verified an error
+            // in `self.check_rack_init_api_output` above.
+            // Just return here, as there is nothing left to do and the following code
+            // is only meant for test startup.
+            return Ok(());
+        }
 
         // Send the `Initialize` messages to all peers
         self.network.send(&rss_sled, output.envelopes, msg_delivery_time);
@@ -282,7 +309,7 @@ proptest! {
         })?;
 
         for action in input.actions {
-            println!("{:#?}", action);
+            //println!("{:#?}", action);
             state.on_action(action)?;
         }
     }

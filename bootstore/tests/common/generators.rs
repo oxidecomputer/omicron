@@ -20,8 +20,6 @@ const LEARN_TIMEOUT: RangeInclusive<Ticks> = 5..=10;
 const RACK_SECRET_TIMEOUT: RangeInclusive<Ticks> = 5..=20;
 const TICKS_PER_ACTION: RangeInclusive<Ticks> = 1..=20;
 const MSG_DELIVERY_DELAY: RangeInclusive<Ticks> = 0..=20;
-const SHARE_PROCESSING_DELAY: RangeInclusive<Ticks> = 0..=1;
-const RACK_SECRET_COMPUTATION_DELAY: RangeInclusive<Ticks> = 0..=3;
 
 /// Input to the `run` method of our proptests
 #[derive(Debug)]
@@ -123,16 +121,7 @@ fn arb_flows(
 
 // Generate arbitrary `Delays`
 fn arb_delays() -> impl Strategy<Value = Delays> {
-    (MSG_DELIVERY_DELAY, SHARE_PROCESSING_DELAY, RACK_SECRET_COMPUTATION_DELAY)
-        .prop_map(
-            |(msg_delivery, share_processing, rack_secret_computation)| {
-                Delays {
-                    msg_delivery,
-                    share_processing,
-                    rack_secret_computation,
-                }
-            },
-        )
+    MSG_DELIVERY_DELAY.prop_map(|msg_delivery| Delays { msg_delivery })
 }
 
 // Generate a single test action to drive the property based tests

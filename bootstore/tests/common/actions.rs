@@ -23,20 +23,11 @@ use uuid::Uuid;
 pub struct Delays {
     // The time to send a message from source to destination
     pub msg_delivery: Ticks,
-    // The time for a receiver to process a message and return a share to the
-    // requester or the requester to receive a share and store it in memory.
-    pub share_processing: Ticks,
-    // The time for a sled to compute the rack secret given enough shares
-    pub rack_secret_computation: Ticks,
 }
 
 impl Default for Delays {
     fn default() -> Self {
-        Delays {
-            msg_delivery: 1,
-            share_processing: 0,
-            rack_secret_computation: 1,
-        }
+        Delays { msg_delivery: 1 }
     }
 }
 
