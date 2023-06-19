@@ -38,7 +38,7 @@ impl LearnedState {
 impl StateHandler for LearnedState {
     fn handle_request(
         self,
-        common: &mut FsmCommonData,
+        _common: &mut FsmCommonData,
         from: Baseboard,
         request_id: Uuid,
         request: RequestType,
@@ -90,7 +90,7 @@ impl StateHandler for LearnedState {
     }
 
     fn handle_response(
-        mut self,
+        self,
         common: &mut FsmCommonData,
         from: Baseboard,
         request_id: Uuid,
@@ -139,7 +139,7 @@ impl StateHandler for LearnedState {
         (self.into(), output)
     }
 
-    fn tick(mut self, common: &mut FsmCommonData) -> (State, Output) {
+    fn tick(self, common: &mut FsmCommonData) -> (State, Output) {
         // Check for rack secret request expiry
         (self.into(), common.rack_secret_state.on_tick(common.clock))
     }

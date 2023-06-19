@@ -169,7 +169,7 @@ impl RackSecretState {
                 *expiry = new_expiry;
                 Output::none()
             }
-            RackSecretState::Computed { secret, expiry } => {
+            RackSecretState::Computed { secret, .. } => {
                 // We have the secret, so return it.
                 Output {
                     persist: false,
@@ -261,12 +261,11 @@ impl RackSecretState {
             }
             .into(),
             RackSecretState::Retrieving {
-                request_id,
                 from: from_all,
                 shares,
-                expiry,
                 threshold,
                 share_digests,
+                ..
             } => {
                 // Ignore the share if we already have one from this peer
                 if from_all.contains(&from) {
@@ -395,7 +394,7 @@ impl From<PersistentFsmState> for PersistentState {
                 (1 + distributed_shares.len()).try_into().unwrap()
             }
             Learning => 1,
-            Learned => 2,
+            Learned { .. } => 2,
         };
         PersistentState { version, fsm_state }
     }
