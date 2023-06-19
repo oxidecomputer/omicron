@@ -950,9 +950,9 @@ dependencies = [
 
 [[package]]
 name = "clap"
-version = "4.3.3"
+version = "4.3.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ca8f255e4b8027970e78db75e78831229c9815fdbfa67eb1a1b777a62e24b4a0"
+checksum = "80672091db20273a15cf9fdd4e47ed43b5091ec9841bf4c6145c9dfbbcae09ed"
 dependencies = [
  "clap_builder",
  "clap_derive 4.3.2",
@@ -961,9 +961,9 @@ dependencies = [
 
 [[package]]
 name = "clap_builder"
-version = "4.3.3"
+version = "4.3.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "acd4f3c17c83b0ba34ffbc4f8bbd74f079413f747f84a6f89292f138057e36ab"
+checksum = "c1458a1df40e1e2afebb7ab60ce55c1fa8f431146205aa5f4887e0b111c27636"
 dependencies = [
  "anstream",
  "anstyle",
@@ -1176,7 +1176,7 @@ dependencies = [
  "anes",
  "cast",
  "ciborium",
- "clap 4.3.3",
+ "clap 4.3.4",
  "criterion-plot",
  "futures",
  "is-terminal",
@@ -1872,7 +1872,7 @@ dependencies = [
  "anyhow",
  "camino",
  "chrono",
- "clap 4.3.3",
+ "clap 4.3.4",
  "dns-service-client 0.1.0",
  "dropshot",
  "expectorate",
@@ -2550,7 +2550,7 @@ name = "gateway-cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "clap 4.3.3",
+ "clap 4.3.4",
  "futures",
  "gateway-client",
  "gateway-messages",
@@ -3244,7 +3244,7 @@ dependencies = [
  "buf-list",
  "bytes",
  "camino",
- "clap 4.3.3",
+ "clap 4.3.4",
  "ddm-admin-client",
  "display-error-chain",
  "futures",
@@ -3306,7 +3306,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "camino",
- "clap 4.3.3",
+ "clap 4.3.4",
  "dropshot",
  "expectorate",
  "hyper",
@@ -4483,7 +4483,7 @@ name = "omicron-deploy"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "clap 4.3.3",
+ "clap 4.3.4",
  "crossbeam",
  "omicron-package",
  "omicron-sled-agent",
@@ -4502,7 +4502,7 @@ dependencies = [
  "anyhow",
  "camino",
  "camino-tempfile",
- "clap 4.3.3",
+ "clap 4.3.4",
  "dropshot",
  "expectorate",
  "futures",
@@ -4533,7 +4533,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "ciborium",
- "clap 4.3.3",
+ "clap 4.3.4",
  "crucible-smf",
  "dropshot",
  "expectorate",
@@ -4582,7 +4582,7 @@ dependencies = [
  "bb8",
  "camino",
  "chrono",
- "clap 4.3.3",
+ "clap 4.3.4",
  "cookie",
  "criterion",
  "crucible-agent-client",
@@ -4680,7 +4680,7 @@ name = "omicron-package"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "clap 4.3.3",
+ "clap 4.3.4",
  "expectorate",
  "futures",
  "hex",
@@ -4755,7 +4755,7 @@ dependencies = [
  "camino-tempfile",
  "cfg-if 1.0.0",
  "chrono",
- "clap 4.3.3",
+ "clap 4.3.4",
  "crucible-agent-client",
  "crucible-client-types",
  "ddm-admin-client",
@@ -5121,7 +5121,7 @@ dependencies = [
 name = "oximeter-collector"
 version = "0.1.0"
 dependencies = [
- "clap 4.3.3",
+ "clap 4.3.4",
  "dropshot",
  "expectorate",
  "futures",
@@ -5153,7 +5153,7 @@ dependencies = [
  "async-trait",
  "bytes",
  "chrono",
- "clap 4.3.3",
+ "clap 4.3.4",
  "dropshot",
  "itertools",
  "omicron-test-utils",
@@ -5982,7 +5982,7 @@ dependencies = [
  "bytes",
  "cfg-if 1.0.0",
  "chrono",
- "clap 4.3.3",
+ "clap 4.3.4",
  "const_format",
  "dropshot",
  "enum-iterator",
@@ -7578,7 +7578,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
- "clap 4.3.3",
+ "clap 4.3.4",
  "dropshot",
  "futures",
  "gateway-messages",
@@ -8496,7 +8496,7 @@ dependencies = [
  "assert_cmd",
  "camino",
  "chrono",
- "clap 4.3.3",
+ "clap 4.3.4",
  "console",
  "datatest-stable",
  "fs-err",
@@ -9130,7 +9130,7 @@ dependencies = [
  "buf-list",
  "camino",
  "ciborium",
- "clap 4.3.3",
+ "clap 4.3.4",
  "crossterm 0.26.1",
  "futures",
  "hex",
@@ -9192,7 +9192,7 @@ dependencies = [
  "bytes",
  "camino",
  "ciborium",
- "clap 4.3.3",
+ "clap 4.3.4",
  "crossterm 0.26.1",
  "reedline",
  "serde",
@@ -9216,7 +9216,7 @@ dependencies = [
  "bytes",
  "camino",
  "camino-tempfile",
- "clap 4.3.3",
+ "clap 4.3.4",
  "debug-ignore",
  "display-error-chain",
  "dropshot",
