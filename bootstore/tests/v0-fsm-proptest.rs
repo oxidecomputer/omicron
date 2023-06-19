@@ -346,6 +346,16 @@ impl TestState {
                 // This macro doesn't allow direct embedding of `matches!`
                 prop_assert!(is_get_share);
             }
+        } else {
+            // We already had the rack secret computed. We should never get an error
+            // when trying to load a rack secret.
+            prop_assert_eq!(
+                prev_model.rack_secret_state,
+                ModelRackSecretState::Computed
+            );
+            let actual_rack_secret_computed =
+                matches!(output.api_output, Some(Ok(ApiOutput::RackSecret(_))));
+            prop_assert!(actual_rack_secret_computed);
         }
 
         Ok(())
