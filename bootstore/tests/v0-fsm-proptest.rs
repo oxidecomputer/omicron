@@ -25,59 +25,8 @@ use uuid::Uuid;
 
 use common::actions::{Action, Delays};
 use common::generators::arb_test_input;
+use common::model::Model;
 use common::network::Network;
-
-// A simplified version of `State::RackSecretState`
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ModelRackSecretState {
-    Empty,
-    Retrieving,
-    Computed,
-}
-
-// A simplified version of a peer `FSM`
-#[derive(Debug, Clone)]
-pub struct PeerModel {
-    rack_secret_state: ModelRackSecretState,
-}
-
-impl PeerModel {
-    pub fn new() -> PeerModel {
-        PeerModel { rack_secret_state: ModelRackSecretState::Empty }
-    }
-
-    // Change the `ModelRackSecretState` as neccessary
-    pub fn load_rack_secret(&mut self) {
-        if let ModelRackSecretState::Empty = self.rack_secret_state {
-            self.rack_secret_state = ModelRackSecretState::Retrieving
-        }
-    }
-
-    pub fn rack_secret_computed(&mut self) {
-        self.rack_secret_state = ModelRackSecretState::Computed;
-    }
-
-    pub fn rack_secret_expired(&mut self) {
-        self.rack_secret_state = ModelRackSecretState::Empty;
-    }
-}
-
-// The set of all `PeerModel`s for a test
-pub struct PeerModels {
-    models: BTreeMap<Baseboard, PeerModel>,
-}
-
-impl PeerModels {
-    pub fn get_mut(&mut self, peer_id: &Baseboard) -> &mut PeerModel {
-        // We ensure models always exist for each peer via test generation, so
-        // unwrap is always safe.
-        self.models.get_mut(peer_id).unwrap()
-    }
-
-    pub fn get(&self, peer_id: &Baseboard) -> &PeerModel {
-        self.models.get(peer_id).unwrap()
-    }
-}
 
 /// State for the running test
 ///
@@ -111,8 +60,10 @@ pub struct TestState {
     // Generated delays
     delays: Delays,
 
-    // Models of peer behavior, used for asserting that output and messages are correct
-    peer_models: PeerModels,
+    // Model of system behavior
+    //
+    // Used for asserting that output and messages match what we expect
+    model: Model,
 }
 
 impl TestState {
@@ -127,9 +78,7 @@ impl TestState {
             .map(|id| (id.clone(), Fsm::new_uninitialized(id, config)))
             .collect();
 
-        let models =
-            peer_ids.into_iter().map(|id| (id, PeerModel::new())).collect();
-        let peer_models = PeerModels { models };
+        let model = Model::new(config, peer_ids);
 
         TestState {
             peers,
@@ -138,12 +87,13 @@ impl TestState {
             config,
             rack_init_complete: false,
             delays,
-            peer_models,
+            model,
         }
     }
 
     /// Process a test action
     pub fn on_action(&mut self, action: Action) -> Result<(), TestCaseError> {
+        let expected = self.model.on_action(action.clone());
         match action {
             Action::RackInit { rss_sled, rack_uuid, initial_members } => {
                 self.on_rack_init(rss_sled, rack_uuid, initial_members)
@@ -177,16 +127,34 @@ impl TestState {
                         self.network.delivered().pop_first()
                     {
                         for (source, msg) in sourced_msgs.drain(..) {
+                            // Handle the delivered message
                             let output = self
                                 .peer_mut(&destination)
-                                .handle(source.clone(), msg);
-                            // TODO: verify output
+                                .handle(source.clone(), msg.clone());
+
+                            // Verify that the handler did the right thing
+                            self.check_handled_msg_output(
+                                &destination,
+                                &source,
+                                &msg,
+                                &output,
+                            )?;
+
+                            // Send any resulting messages over the network
                             self.network.send(
                                 &source,
                                 output.envelopes,
                                 delivery_time,
                             );
                         }
+                    }
+
+                    // Handle ticks at each peer. This can only result in
+                    // timeouts. We never send messages on ticks, as there are
+                    // no conventional retries.
+                    for (peer_id, fsm) in &mut self.peers {
+                        // TODO: validate any timeouts
+                        let output = fsm.tick();
                     }
                 }
                 Ok(())
@@ -307,6 +275,49 @@ impl TestState {
         self.peers.keys().filter(move |id| *id != excluded)
     }
 
+    // Validate that the output from handling a message at a given peer makes sense
+    fn check_handled_msg_output(
+        &self,
+        destination: &Baseboard,
+        source: &Baseboard,
+        msg: &Msg,
+        output: &Output,
+    ) -> Result<(), TestCaseError> {
+        match msg {
+            Msg::Req(Request {
+                id,
+                type_: RequestType::GetShare { rack_uuid },
+            }) => {
+                prop_assert_eq!(output.envelopes.len(), 1);
+                // Ensure that the response is sent to the requester
+                // and is of the righ type
+                let envelope = output.envelopes.first().unwrap();
+                prop_assert_eq!(&envelope.to, source);
+                let is_share_rsp = matches!(
+                    envelope.msg,
+                    Msg::Rsp(Response {
+                        request_id: id,
+                        type_: ResponseType::Share(_)
+                    })
+                );
+                prop_assert!(is_share_rsp);
+                Ok(())
+            }
+            Msg::Req(Request { id, type_: RequestType::Learn }) => {
+                // TODO: Cover learn requests
+                Ok(())
+            }
+            Msg::Req(_) => {
+                // We don't care about Init or InitLearner requests
+                Ok(())
+            }
+            Msg::Rsp(_) => {
+                // TODO: fill in
+                Ok(())
+            }
+        }
+    }
+
     // Validate that the output of `Fsm::load_rack_secret` made to a given peer
     // makes sense.
     fn check_load_rack_secret_api_output(
@@ -326,6 +337,9 @@ impl TestState {
             // We only send requests if we haven't already sent them
             if prev_model.rack_secret_state == ModelRackSecretState::Retrieving
             {
+                if output.envelopes.len() == 1 {
+                    println!("{:#?}", output.envelopes.first());
+                }
                 prop_assert_eq!(output.envelopes.len(), 0);
                 return Ok(());
             }
