@@ -26,6 +26,7 @@ const MSG_DELIVERY_DELAY: RangeInclusive<Ticks> = 0..=20;
 pub struct TestInput {
     pub actions: Vec<Action>,
     pub initial_members: BTreeSet<Baseboard>,
+    pub learners: BTreeSet<Baseboard>,
     pub config: Config,
     pub rack_uuid: Uuid,
 }
@@ -33,10 +34,15 @@ pub struct TestInput {
 /// Generate top-level test input
 pub fn arb_test_input(
     max_initial_members: usize,
+    max_learners: usize,
 ) -> impl Strategy<Value = TestInput> {
     let min_initial_members = 3;
-    (arb_peer_ids(min_initial_members, max_initial_members), arb_config())
-        .prop_flat_map(|(initial_members, config)| {
+    (
+        arb_peer_ids(min_initial_members, max_initial_members),
+        arb_learner_ids(max_learners),
+        arb_config(),
+    )
+        .prop_flat_map(|(initial_members, learners, config)| {
             // We have to generate an intermediate tuple of strategies
             let rack_uuid = Uuid::new_v4();
             (
@@ -45,17 +51,23 @@ pub fn arb_test_input(
                     1..=20,
                 ),
                 Just(initial_members),
+                Just(learners),
                 Just(config),
                 Just(rack_uuid),
             )
         })
         // then we map the tuple into a structure
-        .prop_map(|(actions, initial_members, config, rack_uuid)| TestInput {
-            actions,
-            initial_members,
-            config,
-            rack_uuid,
-        })
+        .prop_map(
+            |(actions, initial_members, learners, config, rack_uuid)| {
+                TestInput {
+                    actions,
+                    initial_members,
+                    learners,
+                    config,
+                    rack_uuid,
+                }
+            },
+        )
 }
 
 // Generate an individual Baseboard used as a peer id
@@ -66,12 +78,26 @@ fn arb_baseboard() -> impl Strategy<Value = Baseboard> {
     })
 }
 
-// Generate a set of peer IDs
+// Generate a set of peer IDs for initial members
 fn arb_peer_ids(
     min: usize,
     max: usize,
 ) -> impl Strategy<Value = BTreeSet<Baseboard>> {
     proptest::collection::btree_set(arb_baseboard(), min..=max)
+}
+
+// Generate a set of peer IDs for learners
+//
+// We want to generate more of these than initial members so we can attempt
+// to exhaust all the extra shares for a given sled.
+fn arb_learner_ids(max: usize) -> impl Strategy<Value = BTreeSet<Baseboard>> {
+    proptest::collection::btree_set(
+        "learner-[a-z][a-z]".prop_map(|id| Baseboard::Pc {
+            identifier: id.to_string(),
+            model: "0".to_string(),
+        }),
+        0..max,
+    )
 }
 
 // Generate an FSM configuration

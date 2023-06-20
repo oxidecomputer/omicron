@@ -610,10 +610,13 @@ fn ensure_all_envelopes_contain_get_share(
     Ok(())
 }
 
+const MAX_INITIAL_MEMBERS: usize = 12;
+const MAX_LEARNERS: usize = 10;
+
 proptest! {
     #![proptest_config(ProptestConfig {max_shrink_iters: 10000, ..ProptestConfig::default()})]
     #[test]
-    fn run(input in arb_test_input(12)) {
+    fn run(input in arb_test_input(MAX_INITIAL_MEMBERS, MAX_LEARNERS)) {
         let mut state = TestState::new(
             input.initial_members.clone(),
             input.config,
