@@ -1171,15 +1171,15 @@
         "description": "Switchport Speed options",
         "type": "string",
         "enum": [
-          "0G",
-          "1G",
-          "10G",
-          "25G",
-          "40G",
-          "50G",
-          "100G",
-          "200G",
-          "400G"
+          "speed0_g",
+          "speed1_g",
+          "speed10_g",
+          "speed25_g",
+          "speed40_g",
+          "speed50_g",
+          "speed100_g",
+          "speed200_g",
+          "speed400_g"
         ]
       },
       "PowerState": {
