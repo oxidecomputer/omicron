@@ -531,7 +531,10 @@ impl ServiceManager {
         // These will fail if the disks aren't attached.
         // Should we have a retry loop here? Kinda like we have with the switch
         // / NTP zone?
-        self.load_services().await?;
+        self.load_services().await.map_err(|e| {
+            error!(self.inner.log, "failed to launch services"; "error" => e.to_string());
+            e
+        })?;
 
         Ok(())
     }

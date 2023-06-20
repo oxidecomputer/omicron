@@ -7,8 +7,8 @@
 use crate::bootstrap::params::StartSledAgentRequest;
 use crate::ledger::{Ledger, Ledgerable};
 use crate::params::{
-    DatasetKind, DatasetRequest, ServiceType, ServiceZoneRequest,
-    ServiceZoneService, ZoneType,
+    DatasetRequest, ServiceType, ServiceZoneRequest, ServiceZoneService,
+    ZoneType,
 };
 use crate::rack_setup::config::SetupServiceConfig as Config;
 use crate::storage::dataset::DatasetName;
@@ -286,7 +286,6 @@ impl Plan {
                 let http_port = omicron_common::address::DNS_HTTP_PORT;
                 let http_address =
                     SocketAddrV6::new(internal_ip, http_port, 0, 0);
-                let dns_port = omicron_common::address::DNS_PORT;
                 let id = Uuid::new_v4();
                 let zone = dns_builder.host_zone(id, internal_ip).unwrap();
                 dns_builder
@@ -298,28 +297,23 @@ impl Plan {
                     .unwrap();
                 let (nic, external_ip) =
                     svc_port_builder.next_dns(id, &mut services_ip_pool)?;
+                let dns_port = omicron_common::address::DNS_PORT;
+                let dns_address = SocketAddr::new(external_ip, dns_port);
+                let dataset_kind = crate::params::DatasetKind::ExternalDns;
+                let dataset_name =
+                    DatasetName::new(u2_zpools[0].clone(), dataset_kind);
+
                 request.services.push(ServiceZoneRequest {
                     id,
                     zone_type: ZoneType::ExternalDns,
                     addresses: vec![*http_address.ip()],
-                    dataset: Some(DatasetRequest {
-                        id: Uuid::new_v4(),
-                        name: DatasetName::new(
-                            u2_zpools[0].clone(),
-                            DatasetKind::ExternalDns,
-                        ),
-                    }),
+                    dataset: Some(DatasetRequest { id, name: dataset_name }),
                     gz_addresses: vec![],
                     services: vec![ServiceZoneService {
-                        id: Uuid::new_v4(),
+                        id,
                         details: ServiceType::ExternalDns {
-                            http_address: SocketAddrV6::new(
-                                internal_ip,
-                                http_port,
-                                0,
-                                0,
-                            ),
-                            dns_address: SocketAddr::new(external_ip, dns_port),
+                            http_address,
+                            dns_address,
                             nic,
                         },
                     }],
@@ -489,6 +483,9 @@ impl Plan {
             if idx < dns_subnets.len() {
                 let dns_subnet = &dns_subnets[idx];
                 let ip = dns_subnet.dns_address().ip();
+                let http_address = SocketAddrV6::new(ip, DNS_HTTP_PORT, 0, 0);
+                let dns_address = SocketAddrV6::new(ip, DNS_PORT, 0, 0);
+
                 let id = Uuid::new_v4();
                 let zone = dns_builder.host_zone(id, ip).unwrap();
                 dns_builder
@@ -498,28 +495,22 @@ impl Plan {
                         DNS_HTTP_PORT,
                     )
                     .unwrap();
+                let dataset_name = DatasetName::new(
+                    u2_zpools[0].clone(),
+                    crate::params::DatasetKind::InternalDns,
+                );
+
                 request.services.push(ServiceZoneRequest {
                     id,
                     zone_type: ZoneType::InternalDns,
                     addresses: vec![ip],
-                    dataset: Some(DatasetRequest {
-                        id,
-                        name: DatasetName::new(
-                            u2_zpools[0].clone(),
-                            crate::params::DatasetKind::InternalDns,
-                        ),
-                    }),
+                    dataset: Some(DatasetRequest { id, name: dataset_name }),
                     gz_addresses: vec![dns_subnet.gz_address().ip()],
                     services: vec![ServiceZoneService {
                         id,
                         details: ServiceType::InternalDns {
-                            http_address: SocketAddrV6::new(
-                                ip,
-                                DNS_HTTP_PORT,
-                                0,
-                                0,
-                            ),
-                            dns_address: SocketAddrV6::new(ip, DNS_PORT, 0, 0),
+                            http_address,
+                            dns_address,
                         },
                     }],
                 });
