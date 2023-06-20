@@ -192,7 +192,8 @@ impl Model {
 
                         self.get_peer_mut(&peer_id).rack_secret_state =
                             ModelRackSecretState::Retrieving {
-                                received: BTreeSet::new(),
+                                // Make sure to add ourself
+                                received: BTreeSet::from([peer_id.clone()]),
                                 expiry,
                                 threshold: self.threshold,
                             };
