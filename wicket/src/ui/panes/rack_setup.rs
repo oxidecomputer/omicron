@@ -3,19 +3,27 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::help_text;
+use super::push_text_lines;
 use super::ComputedScrollOffset;
+use crate::keymap::ShowPopupCmd;
+use crate::state::RackSetupState;
 use crate::ui::defaults::colors;
 use crate::ui::defaults::style;
 use crate::ui::widgets::BoxConnector;
 use crate::ui::widgets::BoxConnectorKind;
+use crate::ui::widgets::ButtonText;
+use crate::ui::widgets::PopupBuilder;
+use crate::ui::widgets::PopupScrollKind;
 use crate::Action;
 use crate::Cmd;
 use crate::Control;
+use crate::Frame;
 use crate::State;
 use std::borrow::Cow;
 use tui::layout::Constraint;
 use tui::layout::Direction;
 use tui::layout::Layout;
+use tui::layout::Rect;
 use tui::style::Style;
 use tui::text::Span;
 use tui::text::Spans;
@@ -28,6 +36,50 @@ use wicketd_client::types::Baseboard;
 use wicketd_client::types::CurrentRssUserConfig;
 use wicketd_client::types::IpRange;
 
+#[derive(Debug)]
+enum Popup {
+    RackSetup(PopupKind),
+    RackReset(PopupKind),
+}
+
+impl Popup {
+    fn kind_mut(&mut self) -> &mut PopupKind {
+        match self {
+            Self::RackSetup(kind) | Self::RackReset(kind) => kind,
+        }
+    }
+}
+
+#[derive(Debug)]
+enum PopupKind {
+    Prompting,
+    Waiting,
+    Failed { message: String, scroll_kind: PopupScrollKind },
+}
+
+impl PopupKind {
+    fn is_scrollable(&self) -> bool {
+        match self {
+            PopupKind::Prompting | PopupKind::Waiting => false,
+            PopupKind::Failed { .. } => true,
+        }
+    }
+
+    fn scroll_up(&mut self) {
+        match self {
+            PopupKind::Prompting | PopupKind::Waiting => (),
+            PopupKind::Failed { scroll_kind, .. } => scroll_kind.scroll_up(),
+        }
+    }
+
+    fn scroll_down(&mut self) {
+        match self {
+            PopupKind::Prompting | PopupKind::Waiting => (),
+            PopupKind::Failed { scroll_kind, .. } => scroll_kind.scroll_down(),
+        }
+    }
+}
+
 /// `RackSetupPane` shows the current rack setup configuration and allows
 /// triggering the rack setup process.
 ///
@@ -35,17 +87,264 @@ use wicketd_client::types::IpRange;
 /// externally by running `wicket setup ...`. This should change in the future.
 pub struct RackSetupPane {
     help: Vec<(&'static str, &'static str)>,
+    rack_uninitialized_help: Vec<(&'static str, &'static str)>,
+    rack_initialized_help: Vec<(&'static str, &'static str)>,
     scroll_offset: usize,
+
+    popup: Option<Popup>,
 }
 
 impl Default for RackSetupPane {
     fn default() -> Self {
-        Self { help: vec![("Scroll", "<UP/DOWN>")], scroll_offset: 0 }
+        Self {
+            help: vec![("Scroll", "<UP/DOWN>")],
+            rack_uninitialized_help: vec![
+                ("Scoll", "<UP/DOWN>"),
+                ("Start Rack Setup", "<Ctrl-Alt-S>"),
+            ],
+            rack_initialized_help: vec![
+                ("Scoll", "<UP/DOWN>"),
+                ("Start Rack Reset", "<Ctrl-Alt-R>"),
+            ],
+            scroll_offset: 0,
+            popup: None,
+        }
+    }
+}
+
+impl RackSetupPane {
+    fn handle_cmd_in_popup(
+        &mut self,
+        _state: &mut State,
+        cmd: Cmd,
+    ) -> Option<Action> {
+        let popup = self.popup.as_mut().unwrap();
+
+        // Handle up or down commands here.
+        let kind = popup.kind_mut();
+        if kind.is_scrollable() {
+            match cmd {
+                Cmd::Up => {
+                    kind.scroll_up();
+                    return Some(Action::Redraw);
+                }
+                Cmd::Down => {
+                    kind.scroll_down();
+                    return Some(Action::Redraw);
+                }
+                _ => {}
+            }
+        }
+
+        match (kind, cmd) {
+            (PopupKind::Prompting, Cmd::No)
+            | (PopupKind::Failed { .. }, Cmd::Exit) => {
+                self.popup = None;
+                Some(Action::Redraw)
+            }
+            (PopupKind::Prompting, Cmd::Yes) => {
+                // TODO: actually trigger RSS or reset
+                *popup.kind_mut() = PopupKind::Waiting;
+                Some(Action::Redraw)
+            }
+            (
+                PopupKind::Waiting,
+                Cmd::ShowPopup(ShowPopupCmd::StartRackSetupResponse(response)),
+            ) => {
+                // We should be blocked in `Waiting` until this shows up, so we
+                // should only be able to see this command if we're in the "rack
+                // setup" popup. Confirm that.
+                assert!(matches!(popup, Popup::RackSetup(_)));
+                match response {
+                    Ok(()) => {
+                        self.popup = None;
+                    }
+                    Err(message) => {
+                        *popup.kind_mut() = PopupKind::Failed {
+                            message,
+                            scroll_kind: PopupScrollKind::Enabled { offset: 0 },
+                        };
+                    }
+                }
+                Some(Action::Redraw)
+            }
+            (
+                PopupKind::Waiting,
+                Cmd::ShowPopup(ShowPopupCmd::StartRackResetResponse(response)),
+            ) => {
+                // We should be blocked in `Waiting` until this shows up, so we
+                // should only be able to see this command if we're in the "rack
+                // reset" popup. Confirm that.
+                assert!(matches!(popup, Popup::RackReset(_)));
+                match response {
+                    Ok(()) => {
+                        self.popup = None;
+                    }
+                    Err(message) => {
+                        *popup.kind_mut() = PopupKind::Failed {
+                            message,
+                            scroll_kind: PopupScrollKind::Enabled { offset: 0 },
+                        };
+                    }
+                }
+                Some(Action::Redraw)
+            }
+            _ => None,
+        }
+    }
+}
+
+fn draw_rack_setup_popup(
+    state: &State,
+    frame: &mut Frame<'_>,
+    kind: &mut PopupKind,
+) {
+    let header;
+    let body;
+    let buttons;
+    let current_scroll_kind;
+
+    match kind {
+        PopupKind::Prompting => {
+            header = Spans::from(vec![Span::styled(
+                "Start Rack Setup",
+                style::header(true),
+            )]);
+            body = Text::from(vec![Spans::from(vec![Span::styled(
+                "Would you like to begin rack setup?",
+                style::plain_text(),
+            )])]);
+            buttons =
+                vec![ButtonText::new("Yes", "Y"), ButtonText::new("No", "N")];
+            current_scroll_kind = None;
+        }
+        PopupKind::Waiting => {
+            header = Spans::from(vec![Span::styled(
+                "Start Rack Setup",
+                style::header(true),
+            )]);
+            body = Text::from(vec![Spans::from(vec![Span::styled(
+                "Waiting for rack setup to start",
+                style::plain_text(),
+            )])]);
+            buttons = vec![];
+            current_scroll_kind = None;
+        }
+        PopupKind::Failed { message, scroll_kind } => {
+            header = Spans::from(vec![Span::styled(
+                "Start Rack Setup Failed",
+                style::failed_update(),
+            )]);
+            let mut failed_body = Text::default();
+            let prefix = vec![Span::styled("Message: ", style::selected())];
+            push_text_lines(message, prefix, &mut failed_body.lines);
+            body = failed_body;
+            buttons = vec![ButtonText::new("Close", "Esc")];
+            current_scroll_kind = Some(scroll_kind);
+        }
+    }
+
+    let full_screen = Rect {
+        width: state.screen_width,
+        height: state.screen_height,
+        x: 0,
+        y: 0,
+    };
+
+    let popup_builder = PopupBuilder { header, body, buttons };
+    let popup = popup_builder.build(
+        full_screen,
+        current_scroll_kind
+            .as_ref()
+            .map(|k| **k)
+            .unwrap_or(PopupScrollKind::Disabled),
+    );
+    let actual_scroll_kind = popup.actual_scroll_kind();
+    frame.render_widget(popup, full_screen);
+
+    if let Some(current_scroll_kind) = current_scroll_kind {
+        *current_scroll_kind = actual_scroll_kind;
+    }
+}
+
+fn draw_rack_reset_popup(
+    state: &State,
+    frame: &mut Frame<'_>,
+    kind: &mut PopupKind,
+) {
+    let header;
+    let body;
+    let buttons;
+    let current_scroll_kind;
+
+    match kind {
+        PopupKind::Prompting => {
+            header = Spans::from(vec![Span::styled(
+                "Rack Reset (DESTRUCTIVE!)",
+                style::header(true),
+            )]);
+            body = Text::from(vec![Spans::from(vec![Span::styled(
+                "Would you like to reset the rack to an uninitialized state?",
+                style::plain_text(),
+            )])]);
+            buttons =
+                vec![ButtonText::new("Yes", "Y"), ButtonText::new("No", "N")];
+            current_scroll_kind = None;
+        }
+        PopupKind::Waiting => {
+            header = Spans::from(vec![Span::styled(
+                "Rack Reset",
+                style::header(true),
+            )]);
+            body = Text::from(vec![Spans::from(vec![Span::styled(
+                "Waiting for rack reset to start",
+                style::plain_text(),
+            )])]);
+            buttons = vec![];
+            current_scroll_kind = None;
+        }
+        PopupKind::Failed { message, scroll_kind } => {
+            header = Spans::from(vec![Span::styled(
+                "Rack Reset Failed",
+                style::failed_update(),
+            )]);
+            let mut failed_body = Text::default();
+            let prefix = vec![Span::styled("Message: ", style::selected())];
+            push_text_lines(message, prefix, &mut failed_body.lines);
+            body = failed_body;
+            buttons = vec![ButtonText::new("Close", "Esc")];
+            current_scroll_kind = Some(scroll_kind);
+        }
+    }
+
+    let full_screen = Rect {
+        width: state.screen_width,
+        height: state.screen_height,
+        x: 0,
+        y: 0,
+    };
+
+    let popup_builder = PopupBuilder { header, body, buttons };
+    let popup = popup_builder.build(
+        full_screen,
+        current_scroll_kind
+            .as_ref()
+            .map(|k| **k)
+            .unwrap_or(PopupScrollKind::Disabled),
+    );
+    let actual_scroll_kind = popup.actual_scroll_kind();
+    frame.render_widget(popup, full_screen);
+
+    if let Some(current_scroll_kind) = current_scroll_kind {
+        *current_scroll_kind = actual_scroll_kind;
     }
 }
 
 impl Control for RackSetupPane {
-    fn on(&mut self, _state: &mut State, cmd: Cmd) -> Option<Action> {
+    fn on(&mut self, state: &mut State, cmd: Cmd) -> Option<Action> {
+        if self.popup.is_some() {
+            return self.handle_cmd_in_popup(state, cmd);
+        }
         match cmd {
             Cmd::Up => {
                 self.scroll_offset = self.scroll_offset.saturating_sub(1);
@@ -55,6 +354,20 @@ impl Control for RackSetupPane {
                 self.scroll_offset += 1;
                 Some(Action::Redraw)
             }
+            Cmd::StartRackSetup => match state.rack_setup_state.as_ref() {
+                Some(RackSetupState::Uninitialized) => {
+                    self.popup = Some(Popup::RackSetup(PopupKind::Prompting));
+                    Some(Action::Redraw)
+                }
+                Some(RackSetupState::Initialized) | None => None,
+            },
+            Cmd::ResetState => match state.rack_setup_state.as_ref() {
+                Some(RackSetupState::Initialized) => {
+                    self.popup = Some(Popup::RackReset(PopupKind::Prompting));
+                    Some(Action::Redraw)
+                }
+                Some(RackSetupState::Uninitialized) | None => None,
+            },
             _ => None,
         }
     }
@@ -62,7 +375,7 @@ impl Control for RackSetupPane {
     fn draw(
         &mut self,
         state: &State,
-        frame: &mut crate::Frame<'_>,
+        frame: &mut Frame<'_>,
         rect: tui::layout::Rect,
         active: bool,
     ) {
@@ -113,7 +426,14 @@ impl Control for RackSetupPane {
         frame.render_widget(inventory, chunks[1]);
 
         // Draw the help bar
-        let help = help_text(&self.help).block(block.clone());
+        let help = match state.rack_setup_state.as_ref() {
+            Some(RackSetupState::Uninitialized) => {
+                &self.rack_uninitialized_help
+            }
+            Some(RackSetupState::Initialized) => &self.rack_initialized_help,
+            None => &self.help,
+        };
+        let help = help_text(help).block(block.clone());
         frame.render_widget(help, chunks[2]);
 
         // Make sure the top and bottom bars connect
@@ -121,6 +441,17 @@ impl Control for RackSetupPane {
             BoxConnector::new(BoxConnectorKind::Bottom),
             chunks[1],
         );
+
+        if let Some(popup) = self.popup.as_mut() {
+            match popup {
+                Popup::RackSetup(kind) => {
+                    draw_rack_setup_popup(state, frame, kind);
+                }
+                Popup::RackReset(kind) => {
+                    draw_rack_reset_popup(state, frame, kind);
+                }
+            }
+        }
     }
 }
 

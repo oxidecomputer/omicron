@@ -7,6 +7,7 @@
 mod force_update;
 mod inventory;
 mod rack;
+mod rack_setup;
 mod status;
 mod update;
 
@@ -16,6 +17,7 @@ pub use inventory::{
     ALL_COMPONENT_IDS,
 };
 pub use rack::{KnightRiderMode, RackState};
+pub use rack_setup::RackSetupState;
 pub use status::{Liveness, ServiceStatus};
 pub use update::{
     update_component_title, RackUpdateState, UpdateItemState,
@@ -39,6 +41,7 @@ pub struct State {
     pub update_state: RackUpdateState,
     pub force_update_state: ForceUpdateState,
     pub rss_config: Option<CurrentRssUserConfig>,
+    pub rack_setup_state: Option<RackSetupState>,
 }
 
 impl State {
@@ -52,6 +55,7 @@ impl State {
             update_state: RackUpdateState::new(),
             force_update_state: ForceUpdateState::default(),
             rss_config: None,
+            rack_setup_state: None,
         }
     }
 }
