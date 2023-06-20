@@ -132,10 +132,6 @@ pub enum Error {
     /// A timeout that occurred while trying to recompute the rack secret
     TimeoutWaitingForShares,
 
-    /// We could not reconstruct the rack secret even after retrieving enough
-    /// valid shares.
-    FailedToReconstructRackSecret,
-
     /// A request was received with a rack UUID that does not match this peer
     RackUuidMismatch { expected: Uuid, got: Uuid },
 }

@@ -105,7 +105,7 @@ impl TestState {
         let expected = self.model.on_action(action.clone());
         match action {
             Action::RackInit { rss_sled, rack_uuid, initial_members } => {
-                self.on_rack_init(rss_sled, rack_uuid, initial_members)
+                self.on_rack_init(rss_sled, rack_uuid, initial_members)?;
             }
             Action::Connect(flows) => {
                 let mut sourced_envelopes =
@@ -134,8 +134,6 @@ impl TestState {
                     sourced_envelopes,
                     expected,
                 )?;
-
-                Ok(())
             }
             Action::Disconnect(flows) => {
                 // TODO: Assert that output makes sense and dispatch it
@@ -145,7 +143,6 @@ impl TestState {
                         self.peer_mut(&source).disconnected(dest.clone());
                     let _output = self.peer_mut(&dest).disconnected(source);
                 }
-                Ok(())
             }
             Action::Ticks(ticks) => {
                 for _ in 0..ticks {
@@ -190,11 +187,9 @@ impl TestState {
                         )?;
                     }
                 }
-                Ok(())
             }
             Action::ChangeDelays(delays) => {
                 self.delays = delays;
-                Ok(())
             }
             Action::LoadRackSecret(peer) => {
                 let output = self.peer_mut(&peer).load_rack_secret();
@@ -203,9 +198,10 @@ impl TestState {
                 )?;
                 let msg_delivery_time = self.clock + self.delays.msg_delivery;
                 self.network.send(&peer, output.envelopes, msg_delivery_time);
-                Ok(())
             }
         }
+        self.check_invariants()?;
+        Ok(())
     }
 
     // Handle an `Action::RackInit`
@@ -305,6 +301,45 @@ impl TestState {
         self.peers.keys().filter(move |id| *id != excluded)
     }
 
+    // After each action is run we ensure that global invariants hold
+    //
+    // Some of these invariants are to make sure our test environment is correct
+    // and not specific to the FSMs themselves.
+    fn check_invariants(&self) -> Result<(), TestCaseError> {
+        let clock = self.peers.first_key_value().unwrap().1.common_data().clock;
+        let mut connected_peers_per_sled = BTreeMap::new();
+        for (peer_id, peer) in &self.peers {
+            // Ensure that the clock at each sled is identical
+            prop_assert_eq!(clock, peer.common_data().clock);
+            connected_peers_per_sled
+                .insert(peer_id.clone(), peer.common_data().peers.clone());
+
+            // Ensure that we don't hold onto any expired secret state
+            // We expire at expiry + 1 to allow *at least* the number of ticks to complete
+            match &peer.common_data().rack_secret_state {
+                RackSecretState::Empty => (),
+                RackSecretState::Retrieving { expiry, .. } => {
+                    prop_assert!(clock <= *expiry);
+                }
+                RackSecretState::Computed { expiry, .. } => {
+                    prop_assert!(clock <= *expiry);
+                }
+            }
+        }
+
+        // Ensure that sleds see mutual connectivity.
+        for (source, connected_to) in &connected_peers_per_sled {
+            for dest in connected_to {
+                prop_assert!(connected_peers_per_sled
+                    .get(dest)
+                    .unwrap()
+                    .contains(source));
+            }
+        }
+
+        Ok(())
+    }
+
     // Verify that the envelopes sent by peers when they become connected to
     // other peers match what the model expects.
     fn check_envelopes_sent_on_connect(
@@ -378,8 +413,21 @@ impl TestState {
                 // We don't care about Init or InitLearner requests
                 Ok(())
             }
+            Msg::Rsp(Response {
+                request_id,
+                type_: ResponseType::Error(error),
+            }) => {
+                // TODO: Ensure error response is valid when we can
+                Ok(())
+            }
             Msg::Rsp(_) => {
-                // TODO: fill in
+                // Responses can always be delivered late and so it's sometimes
+                // impossible to compare them to either model or real peer
+                // FSM state. The only non-error messages we care about for
+                // this test are `Share` responses, and we already ensure that
+                // they get sent over the network when a `GetShare` request is
+                // received. As such we don't test them here, given the problems
+                // with knowing when the response is appropriate.
                 Ok(())
             }
         }

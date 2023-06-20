@@ -11,13 +11,10 @@ use crate::trust_quorum::{RackSecret, SharePkgV0};
 
 use super::fsm::StateHandler;
 use super::fsm_output::Output;
-use super::messages::{
-    Envelope, Error, Request, RequestType, Response, ResponseType,
-};
+use super::messages::{Envelope, Error, RequestType, Response, ResponseType};
 use super::state::{
     FsmCommonData, RackInitState, RequestMetadata, ShareIdx, State,
 };
-use super::RackSecretState;
 use secrecy::ExposeSecret;
 use sled_hardware::Baseboard;
 use uuid::Uuid;
