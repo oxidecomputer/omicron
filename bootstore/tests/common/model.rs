@@ -110,9 +110,9 @@ impl Model {
                     flows.insert((dest, source));
                 }
 
-                // Determine if any `GetShare` messages need to be sent. This
-                // is the case if we a peer is currently retrieving shares and
-                // hasn't received one from the newly connected peer.
+                // Determine if any `GetShare` messages need to be sent. This is
+                // the case if a peer is currently retrieving shares and hasn't
+                // received one from the newly connected peer.
                 let expected = flows
                     .difference(&self.connected)
                     .filter_map(|(source, destination)| {

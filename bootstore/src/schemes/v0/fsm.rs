@@ -245,8 +245,16 @@ impl Fsm {
     ///
     /// Messages may now be sent from the FSM to the peer
     pub fn connected(&mut self, peer: Baseboard) -> Output {
-        self.common.peers.insert(peer.clone());
-        self.state.as_mut().unwrap().on_connect(&mut self.common, peer)
+        let output = self
+            .state
+            .as_mut()
+            .unwrap()
+            .on_connect(&mut self.common, peer.clone());
+        // We specifically add the connected peers *after* calling
+        // `State::on_connect` so that the specific state can send any necessary
+        // messages to newly connected peers.
+        self.common.peers.insert(peer);
+        output
     }
 
     /// We have disconnected from a peer

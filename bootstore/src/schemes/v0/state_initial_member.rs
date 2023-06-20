@@ -11,10 +11,13 @@ use crate::trust_quorum::{RackSecret, SharePkgV0};
 
 use super::fsm::StateHandler;
 use super::fsm_output::Output;
-use super::messages::{Envelope, Error, RequestType, Response, ResponseType};
+use super::messages::{
+    Envelope, Error, Request, RequestType, Response, ResponseType,
+};
 use super::state::{
     FsmCommonData, RackInitState, RequestMetadata, ShareIdx, State,
 };
+use super::RackSecretState;
 use secrecy::ExposeSecret;
 use sled_hardware::Baseboard;
 use uuid::Uuid;
@@ -351,7 +354,25 @@ impl StateHandler for InitialMemberState {
         common: &mut FsmCommonData,
         peer: Baseboard,
     ) -> Output {
-        // TODO: Retry any necessary message sends
+        if let RackSecretState::Retrieving { request_id, from, .. } =
+            &common.rack_secret_state
+        {
+            // We don't have a share from the peer and we weren't previously
+            // connected to the peer.
+            if !from.contains(&peer) && !common.peers.contains(&peer) {
+                let request = Request {
+                    id: *request_id,
+                    type_: RequestType::GetShare {
+                        rack_uuid: self.pkg.rack_uuid,
+                    },
+                };
+                return Output {
+                    persist: false,
+                    envelopes: vec![Envelope { to: peer, msg: request.into() }],
+                    api_output: None,
+                };
+            }
+        }
         Output::none()
     }
 

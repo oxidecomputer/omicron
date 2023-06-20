@@ -99,13 +99,33 @@ impl TestState {
                 self.on_rack_init(rss_sled, rack_uuid, initial_members)
             }
             Action::Connect(flows) => {
-                // TODO: Assert that output makes sense and dispatch it
+                let mut sourced_envelopes =
+                    BTreeMap::<Baseboard, Vec<Envelope>>::new();
                 for (source, dest) in flows {
                     self.network.connected(source.clone(), dest.clone());
-                    let _output =
-                        self.peer_mut(&source).connected(dest.clone());
-                    let _output = self.peer_mut(&dest).connected(source);
+
+                    let output = self.peer_mut(&source).connected(dest.clone());
+                    prop_assert_eq!(output.api_output, None);
+                    prop_assert_eq!(output.persist, false);
+                    sourced_envelopes
+                        .entry(source.clone())
+                        .or_default()
+                        .extend(output.envelopes);
+
+                    let output = self.peer_mut(&dest).connected(source);
+                    prop_assert_eq!(output.api_output, None);
+                    prop_assert_eq!(output.persist, false);
+                    sourced_envelopes
+                        .entry(dest)
+                        .or_default()
+                        .extend(output.envelopes);
                 }
+
+                self.check_envelopes_sent_on_connect(
+                    sourced_envelopes,
+                    expected,
+                )?;
+
                 Ok(())
             }
             Action::Disconnect(flows) => {
@@ -272,6 +292,43 @@ impl TestState {
         self.peers.keys().filter(move |id| *id != excluded)
     }
 
+    // Verify that the envelopes sent by peers when they become connected to
+    // other peers match what the model expects.
+    fn check_envelopes_sent_on_connect(
+        &self,
+        envelopes: BTreeMap<Baseboard, Vec<Envelope>>,
+        expected: Vec<ExpectedOutput>,
+    ) -> Result<(), TestCaseError> {
+        for (_, envelopes) in &envelopes {
+            ensure_all_envelopes_contain_get_share(&envelopes)?;
+        }
+        // Collect all the actual unique (source, dest) pairs
+        let actual = envelopes.into_iter().fold(
+            BTreeSet::new(),
+            |mut acc, (source, envelopes)| {
+                for envelope in envelopes {
+                    acc.insert((source.clone(), envelope.to));
+                }
+                acc
+            },
+        );
+
+        // Collect all the expected unique (source, dest) pairs
+        let expected: BTreeSet<_> = expected
+            .into_iter()
+            .filter_map(|e| {
+                if let ExpectedOutput::GetShare { source, destination } = e {
+                    Some((source, destination))
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        prop_assert_eq!(expected, actual);
+        Ok(())
+    }
+
     // Validate that the output from handling a message at a given peer makes sense
     fn check_handled_msg_output(
         &self,
@@ -355,16 +412,7 @@ impl TestState {
                 }
 
                 // Ensure that all messages are `RequestType::GetShare`
-                for envelope in &output.envelopes {
-                    let is_get_share = matches!(
-                        envelope.msg,
-                        Msg::Req(Request {
-                            type_: RequestType::GetShare { .. },
-                            ..
-                        })
-                    );
-                    prop_assert!(is_get_share);
-                }
+                ensure_all_envelopes_contain_get_share(&output.envelopes)?;
 
                 // Ensure the requests when to the same destinations as the
                 // model expected
@@ -451,6 +499,20 @@ impl TestState {
         prop_assert!(response_is_ack);
         Ok(())
     }
+}
+
+// Ensure all messages are of `RequestType::GetShare`
+fn ensure_all_envelopes_contain_get_share(
+    envelopes: &Vec<Envelope>,
+) -> Result<(), TestCaseError> {
+    for envelope in envelopes {
+        let is_get_share = matches!(
+            envelope.msg,
+            Msg::Req(Request { type_: RequestType::GetShare { .. }, .. })
+        );
+        prop_assert!(is_get_share);
+    }
+    Ok(())
 }
 
 proptest! {
