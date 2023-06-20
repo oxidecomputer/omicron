@@ -305,6 +305,28 @@
             "$ref": "#/components/responses/Error"
           }
         }
+      },
+      "delete": {
+        "summary": "Run rack reset.",
+        "operationId": "post_run_rack_reset",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RackResetId"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
       }
     },
     "/rack-setup/config": {

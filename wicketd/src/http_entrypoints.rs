@@ -10,6 +10,7 @@ use crate::mgs::MgsHandle;
 use crate::RackV1Inventory;
 use bootstrap_agent_client::types::RackInitId;
 use bootstrap_agent_client::types::RackOperationStatus;
+use bootstrap_agent_client::types::RackResetId;
 use dropshot::endpoint;
 use dropshot::ApiDescription;
 use dropshot::HttpError;
@@ -58,6 +59,7 @@ pub fn api() -> WicketdApiDescription {
         api.register(delete_rss_config)?;
         api.register(get_rack_setup_state)?;
         api.register(post_run_rack_setup)?;
+        api.register(post_run_rack_reset)?;
         api.register(get_inventory)?;
         api.register(put_repository)?;
         api.register(get_artifacts_and_event_reports)?;
@@ -450,6 +452,53 @@ async fn post_run_rack_setup(
         .into_inner();
 
     Ok(HttpResponseOk(init_id))
+}
+
+/// Run rack reset.
+#[endpoint {
+    method = DELETE,
+    path = "/rack-setup"
+}]
+async fn post_run_rack_reset(
+    rqctx: RequestContext<ServerContext>,
+) -> Result<HttpResponseOk<RackResetId>, HttpError> {
+    let ctx = rqctx.context();
+
+    let sled_agent_addr = ctx
+        .bootstrap_agent_addr()
+        .map_err(|err| HttpError::for_bad_request(None, format!("{err:#}")))?;
+
+    slog::info!(ctx.log, "Sending RSS reset request to {}", sled_agent_addr);
+    let client = bootstrap_agent_client::Client::new(
+        &format!("http://{}", sled_agent_addr),
+        ctx.log.new(slog::o!("component" => "bootstrap client")),
+    );
+
+    let reset_id = client
+        .rack_reset()
+        .await
+        .map_err(|err| {
+            use bootstrap_agent_client::Error as BaError;
+            match err {
+                BaError::CommunicationError(err) => {
+                    let message =
+                        format!("Failed to send rack reset request: {err}");
+                    HttpError {
+                        status_code: http::StatusCode::SERVICE_UNAVAILABLE,
+                        error_code: None,
+                        external_message: message.clone(),
+                        internal_message: message,
+                    }
+                }
+                other => HttpError::for_bad_request(
+                    None,
+                    format!("Rack setup request failed: {other}"),
+                ),
+            }
+        })?
+        .into_inner();
+
+    Ok(HttpResponseOk(reset_id))
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
