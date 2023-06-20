@@ -10,7 +10,7 @@ use bootstore::schemes::v0::{Config, Ticks};
 use sled_hardware::Baseboard;
 use uuid::Uuid;
 
-use super::{actions::Action, network::FlowId};
+use super::{generators::Action, network::FlowId};
 
 // A simplified version of `State::RackSecretState`
 #[derive(Debug, Clone, PartialEq, Eq)]

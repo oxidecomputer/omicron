@@ -4,7 +4,6 @@
 
 //! Code shared among integration tests
 
-pub mod actions;
 pub mod generators;
 pub mod model;
 pub mod network;

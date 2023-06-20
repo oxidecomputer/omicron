@@ -23,8 +23,7 @@ use sled_hardware::Baseboard;
 use std::collections::{BTreeMap, BTreeSet};
 use uuid::Uuid;
 
-use common::actions::{Action, Delays};
-use common::generators::arb_test_input;
+use common::generators::{arb_test_input, Action, Delays};
 use common::model::{ExpectedOutput, Model, ModelRackSecretState, PeerModel};
 use common::network::Network;
 
@@ -49,8 +48,8 @@ pub struct TestState {
 
     // We assume all clocks tick at approximately the same rate, with a delta
     // small enough not to matter for the tests. We don't care about real time
-    // synchronization at all. Therefore this clock, can serve as a global clock
-    // and we can ensure that on each tick, a tick callback on every FSM fires.
+    // synchronization at all. Therefore, this clock can serve as a global clock
+    // and we can ensure that on each tick a tick callback on every FSM fires.
     clock: Ticks,
 
     // A copy of the configuration at all peers
@@ -272,9 +271,6 @@ impl TestState {
         {
             // The only destination should be the rss_sled
             prop_assert_eq!(&rss_sled, &destination);
-            // TODO: We only deal with initial members now. When
-            // we have peers that will join later, we'll have to
-            // check the actual initial members.
             prop_assert_eq!(sourced_msgs.len(), self.initial_members.len() - 1);
 
             let num_responses = sourced_msgs.len();

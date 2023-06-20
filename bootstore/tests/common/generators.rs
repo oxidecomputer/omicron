@@ -4,7 +4,6 @@
 
 //! Proptest generators
 
-use super::actions::{Action, Delays};
 use super::network::FlowId;
 use bootstore::schemes::v0::{Config, Envelope, Fsm, Msg, Ticks};
 use proptest::{prelude::*, sample::Subsequence};
@@ -29,6 +28,45 @@ pub struct TestInput {
     pub learners: BTreeSet<Baseboard>,
     pub config: Config,
     pub rack_uuid: Uuid,
+}
+
+// Certain operations take different amounts of time to complete, and messages
+// take some duration to deliver. We can parameterize how long operations
+// and message delivery take without being overly prescriptive by adopting a
+// certain tick behavior at each point in the test run.
+//
+// While we could get complex and map different delivery times to different
+// network flows, and have operations take different amounts of time at
+// different sleds, we keep things relatively simple for now by having the tick
+// behavior affect all flows and sleds equally.
+#[derive(Debug, Clone)]
+pub struct Delays {
+    // The time to send a message from source to destination
+    pub msg_delivery: Ticks,
+}
+
+impl Default for Delays {
+    fn default() -> Self {
+        Delays { msg_delivery: 1 }
+    }
+}
+
+/// A test action to drive the test forward
+#[derive(Debug, Clone)]
+pub enum Action {
+    /// Call the `Fsm::init_rack` on `rss_sled`
+    RackInit {
+        rss_sled: Baseboard,
+        rack_uuid: Uuid,
+        initial_members: BTreeSet<Baseboard>,
+    },
+    ChangeDelays(Delays),
+    Ticks(Ticks),
+    Connect(Vec<FlowId>),
+    Disconnect(Vec<FlowId>),
+
+    /// Call `Fsm::load_rack_secret` on the given sled
+    LoadRackSecret(Baseboard),
 }
 
 /// Generate top-level test input

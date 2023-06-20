@@ -225,14 +225,12 @@ impl Fsm {
 
     /// An abstraction of a timer tick.
     ///
-    /// Ticks mutate state and can result in message retries.
+    /// Ticks mutate state and can result in timeouts.
     ///
-    /// Each tick represents some abstract duration of time.
-    /// Timeouts are represented by number of ticks in this module, which
-    /// allows for deterministic property based tests in a straightforward manner.
-    /// On each tick, the current duration since start is passed in. We only
-    /// deal in relative time needed for timeouts, and not absolute time. This
-    /// strategy allows for deterministic property based tests.
+    /// Each tick represents some abstract duration of time. Timeouts are
+    /// represented by number of ticks, which allows for deterministic property
+    /// based test implementation in a straightforward manner.  We only deal in
+    /// relative time needed for timeouts, and not absolute time.
     pub fn tick(&mut self) -> Output {
         self.common.clock += 1;
         let state = self.state.take().unwrap();
