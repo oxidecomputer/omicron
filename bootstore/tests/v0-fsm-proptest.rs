@@ -92,6 +92,15 @@ impl TestState {
     }
 
     /// Process a test action
+    ///
+    /// This is the primary test callback and it performs the following tasks:
+    ///  * Update the model state
+    ///  * Update the actual state of affected peer FSMs
+    ///  * Perform any other state updates such as network deliveries
+    ///  * Ensure that any output from the peer FSMs is correct such that:
+    ///    * It's valid for the given action
+    ///    * It matches what the model expected
+    ///  * Ensure global invariants of the system under test and test state
     pub fn on_action(&mut self, action: Action) -> Result<(), TestCaseError> {
         let expected = self.model.on_action(action.clone());
         match action {
@@ -171,10 +180,14 @@ impl TestState {
 
                     // Handle ticks at each peer. This can only result in
                     // timeouts. We never send messages on ticks, as there are
-                    // no conventional retries.
+                    // no conventional retries. Instead of retries, we send
+                    // any necessary messages on new connections, since we are
+                    // modeling the network as TCP streams.
                     for (peer_id, fsm) in &mut self.peers {
-                        // TODO: validate any timeouts
                         let output = fsm.tick();
+                        check_for_timeouts(
+                            self.clock, peer_id, output, &expected,
+                        )?;
                     }
                 }
                 Ok(())
@@ -499,6 +512,40 @@ impl TestState {
         prop_assert!(response_is_ack);
         Ok(())
     }
+}
+
+// Ensure that the model state's expected timeouts matches actual timeouts
+// reported by peers.
+fn check_for_timeouts(
+    clock: Ticks,
+    peer_id: &Baseboard,
+    output: Output,
+    expected: &Vec<ExpectedOutput>,
+) -> Result<(), TestCaseError> {
+    let expected_timeout = expected
+        .iter()
+        .find(|e| {
+            if let ExpectedOutput::RackSecretTimeout(
+                expected_peer_id,
+                timeout_tick,
+            ) = e
+            {
+                if *timeout_tick == clock && peer_id == expected_peer_id {
+                    true
+                } else {
+                    false
+                }
+            } else {
+                false
+            }
+        })
+        .is_some();
+
+    let actual_timeout =
+        matches!(output.api_output, Some(Err(ApiError::RackSecretLoadTimeout)));
+
+    prop_assert_eq!(expected_timeout, actual_timeout);
+    Ok(())
 }
 
 // Ensure all messages are of `RequestType::GetShare`

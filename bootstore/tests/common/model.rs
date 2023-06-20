@@ -31,6 +31,12 @@ pub enum ModelRackSecretState {
     },
 }
 
+impl ModelRackSecretState {
+    pub fn is_empty(&self) -> bool {
+        self == &ModelRackSecretState::Empty
+    }
+}
+
 // A simplified version of a peer `FSM`
 #[derive(Debug, Clone)]
 pub struct PeerModel {
@@ -48,7 +54,9 @@ impl PeerModel {
 // the same `Action`.
 pub enum ExpectedOutput {
     RackSecretLoaded(Baseboard),
-    RackSecretTimeout(Baseboard),
+    // We return which peer had a timeout and the tick value at which it would
+    // have timed out.
+    RackSecretTimeout(Baseboard, Ticks),
     GetShare { source: Baseboard, destination: Baseboard },
 }
 
@@ -155,6 +163,7 @@ impl Model {
                                 expected.push(
                                     ExpectedOutput::RackSecretTimeout(
                                         peer_id.clone(),
+                                        expiry + 1,
                                     ),
                                 );
                                 model.rack_secret_state =
@@ -177,11 +186,11 @@ impl Model {
                 vec![]
             }
             Action::LoadRackSecret(peer_id) => {
-                match self.get_peer(&peer_id).rack_secret_state {
-                    ModelRackSecretState::Empty => {
+                // We do this outside the match because of borrow checking rules
+                let expected =
+                    if self.get_peer(&peer_id).rack_secret_state.is_empty() {
                         // We expect a share to be sent to all connected peers
-                        let expected = self
-                            .connected
+                        self.connected
                             .iter()
                             .filter_map(|(source, destination)| {
                                 if source == &peer_id {
@@ -193,24 +202,32 @@ impl Model {
                                     None
                                 }
                             })
-                            .collect();
+                            .collect()
+                    } else {
+                        vec![]
+                    };
+                let new_expiry =
+                    self.clock + self.config.rack_secret_request_timeout;
+                let threshold = self.threshold;
 
+                match &mut self.get_peer_mut(&peer_id).rack_secret_state {
+                    state @ ModelRackSecretState::Empty => {
                         // Transition our model state to "Retrieving"
-                        let expiry = self.clock
-                            + self.config.rack_secret_request_timeout;
-
-                        self.get_peer_mut(&peer_id).rack_secret_state =
-                            ModelRackSecretState::Retrieving {
-                                // Make sure to add ourself
-                                received: BTreeSet::from([peer_id.clone()]),
-                                expiry,
-                                threshold: self.threshold,
-                            };
+                        *state = ModelRackSecretState::Retrieving {
+                            // Make sure to add ourself
+                            received: BTreeSet::from([peer_id.clone()]),
+                            expiry: new_expiry,
+                            threshold,
+                        };
 
                         // Return any expected `GetShare` messages
                         expected
                     }
-                    ModelRackSecretState::Retrieving { .. } => vec![],
+                    ModelRackSecretState::Retrieving { expiry, .. } => {
+                        // We extend the timeout on a reload
+                        *expiry = new_expiry;
+                        expected
+                    }
                     ModelRackSecretState::Computed { .. } => {
                         vec![ExpectedOutput::RackSecretLoaded(peer_id)]
                     }
