@@ -75,7 +75,9 @@ pub enum Cmd {
     /// Force cancel an update.
     AbortUpdate,
 
-    /// Reset update state.
+    /// Reset screen-specific state (e.g., clearing the state for a
+    /// completed/failed update, or resetting the rack from the rack setup
+    /// screen).
     ResetState,
 
     /// Begin rack setup.
