@@ -26,7 +26,6 @@ use omicron_common::api::internal::shared::RackNetworkConfig;
 use sled_hardware::Baseboard;
 use std::collections::BTreeSet;
 use std::net::Ipv6Addr;
-use std::net::SocketAddrV6;
 use wicket_common::rack_setup::PutRssUserConfigInsensitive;
 
 // TODO-correctness For now, we always use the same rack subnet when running
@@ -37,10 +36,6 @@ const RACK_SUBNET: Ipv6Addr =
 
 const RECOVERY_SILO_NAME: &str = "recovery";
 const RECOVERY_SILO_USERNAME: &str = "recovery";
-
-// Port on which the bootstrap agent dropshot server within sled-agent is
-// listening.
-const BOOTSTRAP_AGENT_HTTP_PORT: u16 = 80;
 
 #[derive(Default)]
 struct PartialCertificate {
@@ -68,13 +63,6 @@ pub(crate) struct CurrentRssConfig {
     // both parts, we validate it and promote it to be a member of
     // external_certificates.
     partial_external_certificate: PartialCertificate,
-}
-
-/// Structure containing the full request needed to start RSS and information
-/// about the sled-agent to which we should send that request.
-pub(crate) struct StartRssRequest {
-    pub(crate) sled_agent_addr: SocketAddrV6,
-    pub(crate) request: RackInitializeRequest,
 }
 
 impl CurrentRssConfig {
@@ -111,8 +99,7 @@ impl CurrentRssConfig {
     pub(crate) fn start_rss_request(
         &self,
         bootstrap_peers: &BootstrapPeers,
-        our_baseboard: Option<&Baseboard>,
-    ) -> Result<StartRssRequest> {
+    ) -> Result<RackInitializeRequest> {
         // Basic "client-side" checks.
         if self.bootstrap_sleds.is_empty() {
             bail!("bootstrap_sleds is empty (have you uploaded a config?)");
@@ -145,7 +132,6 @@ impl CurrentRssConfig {
 
         let known_bootstrap_sleds = bootstrap_peers.sleds();
         let mut bootstrap_ips = Vec::new();
-        let mut our_bootstrap_ip = None;
         for sled in &self.bootstrap_sleds {
             let Some(ip) = known_bootstrap_sleds.get(&sled.baseboard).copied()
             else {
@@ -156,27 +142,7 @@ impl CurrentRssConfig {
                 );
             };
             bootstrap_ips.push(ip);
-
-            if Some(&sled.baseboard) == our_baseboard {
-                our_bootstrap_ip = Some(ip);
-            }
         }
-
-        // If we know our own baseboard, make sure we also know our own IP. If
-        // we don't know our own baseboard, pick any arbitrary bootstrap IP as
-        // the sled we choose to run RSS.
-        let sled_agent_ip = match (our_baseboard, our_bootstrap_ip) {
-            (Some(_), Some(ip)) => ip,
-            (Some(baseboard), None) => {
-                bail!("IP address not known for our own sled ({baseboard:?})");
-            }
-            (None, _) => {
-                // We know self.bootstrap_sleds is nonempty, and we inserted one
-                // IP into `bootstrap_ips` for each element, so we know there is
-                // at least one IP in this vec.
-                bootstrap_ips[0]
-            }
-        };
 
         // Convert between internal and progenitor types.
         let user_password_hash = bootstrap_agent_client::types::NewPasswordHash(
@@ -221,15 +187,7 @@ impl CurrentRssConfig {
             rack_network_config: Some(rack_network_config.clone()),
         };
 
-        Ok(StartRssRequest {
-            sled_agent_addr: SocketAddrV6::new(
-                sled_agent_ip,
-                BOOTSTRAP_AGENT_HTTP_PORT,
-                0,
-                0,
-            ),
-            request,
-        })
+        Ok(request)
     }
 
     pub(crate) fn set_recovery_user_password_hash(
