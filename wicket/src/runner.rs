@@ -151,6 +151,10 @@ impl RunnerCore {
                 self.state.rss_config = Some(config);
                 self.screen.draw(&self.state, &mut self.terminal)?;
             }
+            Event::RackSetupStatus(result) => {
+                self.state.rack_setup_state = result;
+                self.screen.draw(&self.state, &mut self.terminal)?;
+            }
             Event::Shutdown => return Ok(true),
         }
         Ok(false)
