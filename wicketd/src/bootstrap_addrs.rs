@@ -30,7 +30,6 @@ impl Drop for BootstrapPeers {
     }
 }
 
-#[allow(dead_code)] // TODO REMOVE
 impl BootstrapPeers {
     pub(crate) fn new(log: &Logger) -> Self {
         let log = log.new(slog::o!("component" => "BootstrapPeers"));
@@ -130,10 +129,9 @@ async fn possible_sled_agent_addrs(
     ddm_client: &DdmAdminClient,
     log: &Logger,
 ) -> impl Iterator<Item = Ipv6Addr> {
-    // TODO: Should we use `backoff` here instead of a loop/sleep? We're talking
-    // to a service's admin interface on localhost within our own switch zone,
-    // and we're only asking for its current state. Backoff should be
-    // unnecessary, I think?
+    // We're talking to a service's admin interface on localhost within our own
+    // switch zone, and we're only asking for its current state. We use a retry
+    // in a loop instead of `backoff`.
     const RETRY: Duration = Duration::from_secs(5);
 
     loop {
