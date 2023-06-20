@@ -19,7 +19,7 @@ use uuid::Uuid;
 // network flows, and have operations take different amounts of time at
 // different sleds, we keep things relatively simple for now by having the tick
 // behavior affect all flows and sleds equally.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Delays {
     // The time to send a message from source to destination
     pub msg_delivery: Ticks,
@@ -32,7 +32,7 @@ impl Default for Delays {
 }
 
 /// A test action to drive the test forward
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Action {
     /// Call the `Fsm::init_rack` on `rss_sled`
     RackInit {

@@ -14,8 +14,8 @@ mod common;
 
 use assert_matches::assert_matches;
 use bootstore::schemes::v0::{
-    ApiError, ApiOutput, Config, Envelope, Fsm, Msg, Output, Request,
-    RequestType, Response, ResponseType, Ticks,
+    ApiError, ApiOutput, Config, Envelope, Fsm, Msg, Output, RackSecretState,
+    Request, RequestType, Response, ResponseType, State, Ticks,
 };
 
 use proptest::prelude::*;
@@ -25,7 +25,7 @@ use uuid::Uuid;
 
 use common::actions::{Action, Delays};
 use common::generators::arb_test_input;
-use common::model::Model;
+use common::model::{ExpectedOutput, Model, ModelRackSecretState, PeerModel};
 use common::network::Network;
 
 /// State for the running test
@@ -164,12 +164,9 @@ impl TestState {
                 Ok(())
             }
             Action::LoadRackSecret(peer) => {
-                let model = self.peer_models.get_mut(&peer);
-                let prev_model = model.clone();
-                model.load_rack_secret();
                 let output = self.peer_mut(&peer).load_rack_secret();
                 self.check_load_rack_secret_api_output(
-                    &peer, &output, prev_model,
+                    &peer, &output, expected,
                 )?;
                 let msg_delivery_time = self.clock + self.delays.msg_delivery;
                 self.network.send(&peer, output.envelopes, msg_delivery_time);
@@ -324,52 +321,89 @@ impl TestState {
         &self,
         peer_id: &Baseboard,
         output: &Output,
-        prev_model: PeerModel,
+        expected: Vec<ExpectedOutput>,
     ) -> Result<(), TestCaseError> {
-        //        println!("{:#?}", output);
         let peer_state = self.peer(peer_id).state();
         let peer_common_data = self.peer(peer_id).common_data();
 
-        // If we have envelopes to send, these are `GetShare` requests,
-        // because we don't yet have the rack secret. We only send requests
-        // to connected peers.
-        if output.api_output.is_none() {
-            // We only send requests if we haven't already sent them
-            if prev_model.rack_secret_state == ModelRackSecretState::Retrieving
-            {
-                if output.envelopes.len() == 1 {
-                    println!("{:#?}", output.envelopes.first());
+        // Ensure that our model state, and what the model expects matches
+        // our system under test.
+        let model = self.model.get_peer(peer_id);
+        match &model.rack_secret_state {
+            ModelRackSecretState::Empty => {
+                prop_assert_eq!(output.envelopes.len(), 0);
+                prop_assert!(output.api_output.is_none());
+                if !matches!(
+                    peer_common_data.rack_secret_state,
+                    RackSecretState::Empty
+                ) {
+                    prop_assert!(false, "Rack secret state should be empty");
+                }
+            }
+            ModelRackSecretState::Retrieving { received, .. } => {
+                prop_assert!(output.api_output.is_none());
+                if let RackSecretState::Retrieving { from, .. } =
+                    &peer_common_data.rack_secret_state
+                {
+                    // We have learned shares from the same peers as the model
+                    prop_assert_eq!(from, received);
+                } else {
+                    prop_assert!(
+                        false,
+                        "rack secret state not retrieving shares"
+                    );
+                }
+
+                // Ensure that all messages are `RequestType::GetShare`
+                for envelope in &output.envelopes {
+                    let is_get_share = matches!(
+                        envelope.msg,
+                        Msg::Req(Request {
+                            type_: RequestType::GetShare { .. },
+                            ..
+                        })
+                    );
+                    prop_assert!(is_get_share);
+                }
+
+                // Ensure the requests when to the same destinations as the
+                // model expected
+                let expected_dest: BTreeSet<_> = expected
+                    .iter()
+                    .filter_map(|e| {
+                        if let ExpectedOutput::GetShare {
+                            source,
+                            destination,
+                            ..
+                        } = e
+                        {
+                            Some(destination.clone())
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+                let actual_dest: BTreeSet<_> =
+                    output.envelopes.iter().cloned().map(|e| e.to).collect();
+                prop_assert_eq!(expected_dest, actual_dest);
+            }
+            ModelRackSecretState::Computed { .. } => {
+                let returned_rack_secret = matches!(
+                    output.api_output,
+                    Some(Ok(ApiOutput::RackSecret(_)))
+                );
+                prop_assert!(returned_rack_secret);
+                if !matches!(
+                    peer_common_data.rack_secret_state,
+                    RackSecretState::Computed { .. },
+                ) {
+                    prop_assert!(
+                        false,
+                        "Rack secret state should already be computed"
+                    );
                 }
                 prop_assert_eq!(output.envelopes.len(), 0);
-                return Ok(());
             }
-
-            prop_assert_eq!(
-                output.envelopes.len(),
-                peer_common_data.peers.len()
-            );
-            for envelope in &output.envelopes {
-                prop_assert!(peer_common_data.peers.contains(&envelope.to));
-                let is_get_share = matches!(
-                    envelope.msg,
-                    Msg::Req(Request {
-                        type_: RequestType::GetShare { .. },
-                        ..
-                    })
-                );
-                // This macro doesn't allow direct embedding of `matches!`
-                prop_assert!(is_get_share);
-            }
-        } else {
-            // We already had the rack secret computed. We should never get an error
-            // when trying to load a rack secret.
-            prop_assert_eq!(
-                prev_model.rack_secret_state,
-                ModelRackSecretState::Computed
-            );
-            let actual_rack_secret_computed =
-                matches!(output.api_output, Some(Ok(ApiOutput::RackSecret(_))));
-            prop_assert!(actual_rack_secret_computed);
         }
 
         Ok(())

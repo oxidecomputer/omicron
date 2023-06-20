@@ -4,10 +4,11 @@
 
 //! Model state for bootstore peers
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
-use bootstore::schemes::v0::Config;
+use bootstore::schemes::v0::{Config, Ticks};
 use sled_hardware::Baseboard;
+use uuid::Uuid;
 
 use super::{actions::Action, network::FlowId};
 
@@ -33,7 +34,7 @@ pub enum ModelRackSecretState {
 // A simplified version of a peer `FSM`
 #[derive(Debug, Clone)]
 pub struct PeerModel {
-    rack_secret_state: ModelRackSecretState,
+    pub rack_secret_state: ModelRackSecretState,
 }
 
 impl PeerModel {
@@ -55,13 +56,16 @@ pub enum ExpectedOutput {
 pub struct Model {
     config: Config,
     clock: Ticks,
-    rack_uuid: Option<RackUuid>,
+    rack_uuid: Option<Uuid>,
     peers: BTreeMap<Baseboard, PeerModel>,
     connected: BTreeSet<FlowId>,
+    threshold: usize,
 }
 
 impl Model {
     pub fn new(config: Config, initial_members: BTreeSet<Baseboard>) -> Model {
+        // This is the calculation done in bootstore/src/trust_quorum/share_pkg.rs
+        let threshold = initial_members.len() / 2 + 1;
         let peers = initial_members
             .into_iter()
             .map(|id| (id, PeerModel::new()))
@@ -73,6 +77,7 @@ impl Model {
             rack_uuid: None,
             peers,
             connected: BTreeSet::new(),
+            threshold,
         }
     }
 
@@ -98,29 +103,30 @@ impl Model {
                 vec![]
             }
             Action::Connect(flows) => {
+                let flows: BTreeSet<_> = flows.into_iter().collect();
                 // Determine if any `GetShare` messages need to be sent. This
                 // is the case if we a peer is currently retrieving shares and
                 // hasn't received one from the newly connected peer.
                 let expected = flows
                     .difference(&self.connected)
                     .filter_map(|(source, destination)| {
-                        let peer = self.peers.get(source);
-                        if let Some(ModelRackSecretState::Retrieving {
+                        let peer = self.peers.get(source).unwrap();
+                        if let ModelRackSecretState::Retrieving {
                             received,
                             ..
-                        }) = peer.rack_secret_state
+                        } = &peer.rack_secret_state
                         {
-                            if !received.contains(dest) {
-                                return Some(ExpectedOutput::GetShareRetry {
-                                    source,
-                                    destination,
+                            if !received.contains(destination) {
+                                return Some(ExpectedOutput::GetShare {
+                                    source: source.clone(),
+                                    destination: destination.clone(),
                                 });
                             }
                         }
                         None
                     })
                     .collect();
-                self.connected.extend(&flows);
+                self.connected.extend(flows);
                 expected
             }
             Action::Disconnect(flows) => {
@@ -130,16 +136,16 @@ impl Model {
                 vec![]
             }
             Action::Ticks(ticks) => {
-                let expected = vec![];
+                let mut expected = vec![];
                 self.clock += ticks;
                 // Check for any expired rack secret loads
-                for (peer_id, model) in self.peers {
+                for (peer_id, model) in &mut self.peers {
                     match model.rack_secret_state {
                         ModelRackSecretState::Retrieving { expiry, .. } => {
                             if expiry < self.clock {
                                 expected.push(
                                     ExpectedOutput::RackSecretTimeout(
-                                        peer.clone(),
+                                        peer_id.clone(),
                                     ),
                                 );
                                 model.rack_secret_state =
@@ -162,18 +168,37 @@ impl Model {
                 vec![]
             }
             Action::LoadRackSecret(peer_id) => {
-                let model = self.get_peer_mut(&peer_id);
-                match model.rack_secret_state {
+                match self.get_peer(&peer_id).rack_secret_state {
                     ModelRackSecretState::Empty => {
-                        // We expect a share  to be sent to all connected peers
+                        // We expect a share to be sent to all connected peers
+                        let expected = self
+                            .connected
+                            .iter()
+                            .filter_map(|(source, destination)| {
+                                if source == &peer_id {
+                                    Some(ExpectedOutput::GetShare {
+                                        source: source.clone(),
+                                        destination: destination.clone(),
+                                    })
+                                } else {
+                                    None
+                                }
+                            })
+                            .collect();
+
+                        // Transition our model state to "Retrieving"
                         let expiry = self.clock
                             + self.config.rack_secret_request_timeout;
-                        *model.rack_secret_state =
+
+                        self.get_peer_mut(&peer_id).rack_secret_state =
                             ModelRackSecretState::Retrieving {
                                 received: BTreeSet::new(),
                                 expiry,
-                                threshold,
+                                threshold: self.threshold,
                             };
+
+                        // Return any expected `GetShare` messages
+                        expected
                     }
                     ModelRackSecretState::Retrieving { .. } => vec![],
                     ModelRackSecretState::Computed { .. } => {
