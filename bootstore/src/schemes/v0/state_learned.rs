@@ -149,9 +149,7 @@ impl StateHandler for LearnedState {
         common: &mut FsmCommonData,
         peer: Baseboard,
     ) -> Output {
-        // TODO: If we are collecting shares, then try to get one from this peer
-        // as well.
-        Output::none()
+        common.on_connect(peer, self.pkg.rack_uuid)
     }
 
     fn on_disconnect(

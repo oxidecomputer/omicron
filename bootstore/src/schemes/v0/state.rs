@@ -83,6 +83,28 @@ impl FsmCommonData {
             self.peers.first().cloned()
         }
     }
+
+    // Send a `GetShare` request to the newly connected peer if necessary
+    pub fn on_connect(&self, peer: Baseboard, rack_uuid: Uuid) -> Output {
+        if let RackSecretState::Retrieving { request_id, from, .. } =
+            &self.rack_secret_state
+        {
+            // We don't have a share from the peer and we weren't previously
+            // connected to the peer.
+            if !from.contains(&peer) && !self.peers.contains(&peer) {
+                let request = Request {
+                    id: *request_id,
+                    type_: RequestType::GetShare { rack_uuid },
+                };
+                return Output {
+                    persist: false,
+                    envelopes: vec![Envelope { to: peer, msg: request.into() }],
+                    api_output: None,
+                };
+            }
+        }
+        Output::none()
+    }
 }
 
 /// Metadata associated with a request that is keyed by `Baseboard`

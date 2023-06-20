@@ -354,26 +354,7 @@ impl StateHandler for InitialMemberState {
         common: &mut FsmCommonData,
         peer: Baseboard,
     ) -> Output {
-        if let RackSecretState::Retrieving { request_id, from, .. } =
-            &common.rack_secret_state
-        {
-            // We don't have a share from the peer and we weren't previously
-            // connected to the peer.
-            if !from.contains(&peer) && !common.peers.contains(&peer) {
-                let request = Request {
-                    id: *request_id,
-                    type_: RequestType::GetShare {
-                        rack_uuid: self.pkg.rack_uuid,
-                    },
-                };
-                return Output {
-                    persist: false,
-                    envelopes: vec![Envelope { to: peer, msg: request.into() }],
-                    api_output: None,
-                };
-            }
-        }
-        Output::none()
+        common.on_connect(peer, self.pkg.rack_uuid)
     }
 
     fn on_disconnect(
