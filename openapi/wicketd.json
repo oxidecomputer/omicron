@@ -107,6 +107,30 @@
         }
       }
     },
+    "/bootstrap-sleds": {
+      "get": {
+        "summary": "Get wicketd's current view of all sleds visible on the bootstrap network.",
+        "operationId": "get_bootstrap_sleds",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BootstrapSledIps"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/clear-update-state/{type}/{slot}": {
       "post": {
         "summary": "Resets update state for a sled.",
@@ -664,26 +688,52 @@
       "BootstrapSledDescription": {
         "type": "object",
         "properties": {
+          "baseboard": {
+            "$ref": "#/components/schemas/Baseboard"
+          },
+          "bootstrap_ip": {
+            "nullable": true,
+            "description": "The sled's bootstrap address, if the host is on and we've discovered it on the bootstrap network.",
+            "type": "string",
+            "format": "ipv6"
+          },
           "id": {
             "$ref": "#/components/schemas/SpIdentifier"
-          },
-          "model": {
-            "type": "string"
-          },
-          "revision": {
-            "type": "integer",
-            "format": "uint32",
-            "minimum": 0
-          },
-          "serial_number": {
-            "type": "string"
           }
         },
         "required": [
-          "id",
-          "model",
-          "revision",
-          "serial_number"
+          "baseboard",
+          "id"
+        ]
+      },
+      "BootstrapSledIp": {
+        "type": "object",
+        "properties": {
+          "baseboard": {
+            "$ref": "#/components/schemas/Baseboard"
+          },
+          "ip": {
+            "type": "string",
+            "format": "ipv6"
+          }
+        },
+        "required": [
+          "baseboard",
+          "ip"
+        ]
+      },
+      "BootstrapSledIps": {
+        "type": "object",
+        "properties": {
+          "sleds": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BootstrapSledIp"
+            }
+          }
+        },
+        "required": [
+          "sleds"
         ]
       },
       "CertificateUploadResponse": {
