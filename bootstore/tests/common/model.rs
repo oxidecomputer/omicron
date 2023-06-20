@@ -66,16 +66,24 @@ pub struct Model {
     clock: Ticks,
     rack_uuid: Option<Uuid>,
     peers: BTreeMap<Baseboard, PeerModel>,
+    initial_members: BTreeSet<Baseboard>,
+    learners: BTreeSet<Baseboard>,
     connected: BTreeSet<FlowId>,
     threshold: usize,
 }
 
 impl Model {
-    pub fn new(config: Config, initial_members: BTreeSet<Baseboard>) -> Model {
+    pub fn new(
+        config: Config,
+        initial_members: BTreeSet<Baseboard>,
+        learners: BTreeSet<Baseboard>,
+    ) -> Model {
         // This is the calculation done in bootstore/src/trust_quorum/share_pkg.rs
         let threshold = initial_members.len() / 2 + 1;
         let peers = initial_members
-            .into_iter()
+            .iter()
+            .chain(learners.iter())
+            .cloned()
             .map(|id| (id, PeerModel::new()))
             .collect();
 
@@ -84,6 +92,8 @@ impl Model {
             clock: 0,
             rack_uuid: None,
             peers,
+            initial_members,
+            learners,
             connected: BTreeSet::new(),
             threshold,
         }

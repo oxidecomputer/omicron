@@ -37,6 +37,12 @@ pub struct TestState {
     // All peers in the test
     peers: BTreeMap<Baseboard, Fsm>,
 
+    // IDs of all initial members
+    initial_members: BTreeSet<Baseboard>,
+
+    // IDs of all learners
+    learners: BTreeSet<Baseboard>,
+
     // A model of the network used for sending and receiving messages across
     // peers
     network: Network,
@@ -68,20 +74,25 @@ pub struct TestState {
 
 impl TestState {
     pub fn new(
-        peer_ids: BTreeSet<Baseboard>,
+        initial_members: BTreeSet<Baseboard>,
+        learners: BTreeSet<Baseboard>,
         config: Config,
         delays: Delays,
     ) -> TestState {
-        let peers = peer_ids
+        let peers = initial_members
             .iter()
+            .chain(learners.iter())
             .cloned()
             .map(|id| (id.clone(), Fsm::new_uninitialized(id, config)))
             .collect();
 
-        let model = Model::new(config, peer_ids);
+        let model =
+            Model::new(config, initial_members.clone(), learners.clone());
 
         TestState {
             peers,
+            initial_members,
+            learners,
             network: Network::default(),
             clock: 0,
             config,
@@ -264,7 +275,7 @@ impl TestState {
             // TODO: We only deal with initial members now. When
             // we have peers that will join later, we'll have to
             // check the actual initial members.
-            prop_assert_eq!(sourced_msgs.len(), self.peers.len() - 1);
+            prop_assert_eq!(sourced_msgs.len(), self.initial_members.len() - 1);
 
             let num_responses = sourced_msgs.len();
             for (i, (source, msg)) in sourced_msgs.into_iter().enumerate() {
@@ -294,11 +305,11 @@ impl TestState {
         self.peers.get_mut(id).unwrap()
     }
 
-    fn all_other_peers<'a>(
+    fn all_other_initial_members<'a>(
         &'a self,
         excluded: &'a Baseboard,
     ) -> impl Iterator<Item = &Baseboard> + 'a {
-        self.peers.keys().filter(move |id| *id != excluded)
+        self.initial_members.iter().filter(move |id| *id != excluded)
     }
 
     // After each action is run we ensure that global invariants hold
@@ -533,7 +544,7 @@ impl TestState {
             prop_assert!(output.persist);
             prop_assert_eq!(&output.api_output, &None);
             for (peer, envelope) in
-                self.all_other_peers(rss_sled).zip(&output.envelopes)
+                self.all_other_initial_members(rss_sled).zip(&output.envelopes)
             {
                 prop_assert_eq!(peer, &envelope.to);
             }
@@ -619,6 +630,7 @@ proptest! {
     fn run(input in arb_test_input(MAX_INITIAL_MEMBERS, MAX_LEARNERS)) {
         let mut state = TestState::new(
             input.initial_members.clone(),
+            input.learners,
             input.config,
             Delays::default()
         );
@@ -627,7 +639,7 @@ proptest! {
         // connected to the rss_sled and successfully rack init. This is a requirement
         // monitored by humans on the real rack, so let's just do it.
         let rss_sled = input.initial_members.first().clone().unwrap();
-        let flows = state.all_other_peers(&rss_sled).cloned().map(|dest| {
+        let flows = state.all_other_initial_members(&rss_sled).cloned().map(|dest| {
             (rss_sled.clone(), dest)
         }).collect();
         state.on_action(Action::Connect(flows))?;
