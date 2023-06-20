@@ -299,16 +299,38 @@ impl Plan {
                     svc_port_builder.next_dns(id, &mut services_ip_pool)?;
                 let dns_port = omicron_common::address::DNS_PORT;
                 let dns_address = SocketAddr::new(external_ip, dns_port);
+                let dataset_kind = crate::params::DatasetKind::ExternalDns {
+                    http_address,
+                    dns_address,
+                    nic: nic.clone(),
+                };
+
                 request.datasets.push(DatasetEnsureBody {
                     id,
                     zpool_id: u2_zpools[0],
-                    dataset_kind: crate::params::DatasetKind::ExternalDns {
-                        http_address,
-                        dns_address,
-                        nic,
-                    },
+                    dataset_kind: dataset_kind.clone(),
                     address: http_address,
                     gz_address: None,
+                });
+                request.services.push(ServiceZoneRequest {
+                    id,
+                    zone_type: ZoneType::ExternalDns,
+                    addresses: vec![internal_ip],
+                    dataset: Some(crate::storage::dataset::DatasetName::new(
+                        illumos_utils::zpool::ZpoolName::new_external(
+                            u2_zpools[0],
+                        ),
+                        dataset_kind,
+                    )),
+                    gz_addresses: vec![],
+                    services: vec![ServiceZoneService {
+                        id,
+                        details: ServiceType::ExternalDns {
+                            http_address,
+                            dns_address,
+                            nic,
+                        },
+                    }],
                 });
             }
 
