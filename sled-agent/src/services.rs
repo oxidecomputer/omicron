@@ -565,7 +565,11 @@ impl ServiceManager {
             .map_err(|_| "already set".to_string())
             .expect("Sled Agent should only start once");
 
-        self.load_non_storage_services().await?;
+        self.load_non_storage_services().await.map_err(|e| {
+            error!(self.inner.log, "failed to launch non-storage services"; "error" => e.to_string());
+            e
+        })?;
+
         // TODO(https://github.com/oxidecomputer/omicron/issues/2973):
         // These will fail if the disks aren't attached.
         // Should we have a retry loop here? Kinda like we have with the switch
@@ -573,7 +577,10 @@ impl ServiceManager {
         //
         // NOTE: We could totally do the same thing with
         // "load_non_storage_services".
-        self.load_storage_services().await?;
+        self.load_storage_services().await.map_err(|e| {
+            error!(self.inner.log, "failed to launch storage services"; "error" => e.to_string());
+            e
+        })?;
 
         Ok(())
     }
