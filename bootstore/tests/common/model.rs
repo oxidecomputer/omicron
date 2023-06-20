@@ -102,8 +102,14 @@ impl Model {
                 }
                 vec![]
             }
-            Action::Connect(flows) => {
-                let flows: BTreeSet<_> = flows.into_iter().collect();
+            Action::Connect(flows_vec) => {
+                // Make sure flows go in both directions
+                let mut flows = BTreeSet::new();
+                for (source, dest) in flows_vec {
+                    flows.insert((source.clone(), dest.clone()));
+                    flows.insert((dest, source));
+                }
+
                 // Determine if any `GetShare` messages need to be sent. This
                 // is the case if we a peer is currently retrieving shares and
                 // hasn't received one from the newly connected peer.
@@ -130,8 +136,11 @@ impl Model {
                 expected
             }
             Action::Disconnect(flows) => {
-                for flow in flows {
-                    self.connected.remove(&flow);
+                for (source, dest) in flows {
+                    // We ensure that connections are known to both sides in
+                    // all cases
+                    self.connected.remove(&(source.clone(), dest.clone()));
+                    self.connected.remove(&(dest, source));
                 }
                 vec![]
             }
