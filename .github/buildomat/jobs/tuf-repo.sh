@@ -145,7 +145,7 @@ for noun in gimlet-c psc-b sidecar-b; do
     tufaceous_kind=${tufaceous_kind//sidecar/switch}_sp
     job_name=dist-ubuntu-latest-$noun
     url=$(/opt/ooce/bin/jq --arg name "$job_name" -r '.artifacts[] | select(.name == $name) | .archive_download_url' <<<"$artifacts")
-    curl -L -o /work/$job_name.zip "$url"
+    curl --netrc -L -o /work/$job_name.zip "$url"
     cat >>/work/manifest.toml <<EOF
 [artifact.$tufaceous_kind]
 name = "$tufaceous_kind"
