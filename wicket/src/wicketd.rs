@@ -64,6 +64,8 @@ pub enum Request {
         options: ClearUpdateStateOptions,
     },
     IgnitionCommand(ComponentId, IgnitionCommand),
+    StartRackSetup,
+    StartRackReset,
 }
 
 pub struct WicketdHandle {
@@ -133,6 +135,12 @@ impl WicketdManager {
                                 command,
                                 poll_interval_now_tx.clone(),
                             );
+                        }
+                        Request::StartRackSetup => {
+                            self.start_rack_initialization();
+                        }
+                        Request::StartRackReset => {
+                            self.start_rack_reset();
                         }
                     }
                 }
@@ -269,6 +277,42 @@ impl WicketdManager {
             // means either someone else has already queued up an inventory poll
             // or the polling task has died).
             _ = poll_inventory_now.try_send(sp);
+        });
+    }
+
+    fn start_rack_initialization(&self) {
+        let log = self.log.clone();
+        let addr = self.wicketd_addr;
+        let events_tx = self.events_tx.clone();
+        tokio::spawn(async move {
+            let client = create_wicketd_client(&log, addr, WICKETD_TIMEOUT);
+            let response = match client.post_run_rack_setup().await {
+                Ok(_) => Ok(()),
+                Err(error) => Err(error.to_string()),
+            };
+
+            slog::info!(log, "Start rack setup response: {:?}", response);
+            _ = events_tx.send(Event::Term(Cmd::ShowPopup(
+                ShowPopupCmd::StartRackSetupResponse(response),
+            )));
+        });
+    }
+
+    fn start_rack_reset(&self) {
+        let log = self.log.clone();
+        let addr = self.wicketd_addr;
+        let events_tx = self.events_tx.clone();
+        tokio::spawn(async move {
+            let client = create_wicketd_client(&log, addr, WICKETD_TIMEOUT);
+            let response = match client.post_run_rack_reset().await {
+                Ok(_) => Ok(()),
+                Err(error) => Err(error.to_string()),
+            };
+
+            slog::info!(log, "Start rack setup response: {:?}", response);
+            _ = events_tx.send(Event::Term(Cmd::ShowPopup(
+                ShowPopupCmd::StartRackResetResponse(response),
+            )));
         });
     }
 

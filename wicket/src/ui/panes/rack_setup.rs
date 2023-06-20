@@ -174,14 +174,13 @@ impl RackSetupPane {
                 Some(Action::Redraw)
             }
             (Popup::RackSetup(kind @ PopupKind::Prompting), Cmd::Yes) => {
-                // TODO: actually trigger RSS
                 *kind = PopupKind::Waiting;
-                Some(Action::Redraw)
+                Some(Action::StartRackSetup)
             }
             (Popup::RackReset(kind @ PopupKind::Prompting), Cmd::Yes) => {
                 // TODO: actually trigger rack reset
                 *kind = PopupKind::Waiting;
-                Some(Action::Redraw)
+                Some(Action::StartRackReset)
             }
             (
                 Popup::RackSetup(kind @ PopupKind::Waiting),
@@ -650,7 +649,7 @@ fn rss_config_text<'a>(
             Span::styled("Uninitialized", ok_style)
         }
         Ok(RackOperationStatus::Initialized { .. }) => {
-            Span::styled("Uninitialized", ok_style)
+            Span::styled("Initialized", ok_style)
         }
         Ok(RackOperationStatus::Initializing { .. }) => {
             Span::styled("Initializing", warn_style)
