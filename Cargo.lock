@@ -9217,6 +9217,7 @@ dependencies = [
  "camino",
  "camino-tempfile",
  "clap 4.3.4",
+ "ddm-admin-client",
  "debug-ignore",
  "display-error-chain",
  "dropshot",
