@@ -40,7 +40,7 @@ impl MainScreen {
         let sidebar_ordered_panes = vec![
             ("overview", Box::new(OverviewPane::new()) as Box<dyn Control>),
             ("update", Box::new(UpdatePane::new(log))),
-            ("rack setup", Box::new(RackSetupPane::default())),
+            ("rack setup", Box::<RackSetupPane>::default()),
         ];
         let sidebar_keys: Vec<_> =
             sidebar_ordered_panes.iter().map(|&(title, _)| title).collect();

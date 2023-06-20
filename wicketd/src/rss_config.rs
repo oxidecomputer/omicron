@@ -184,7 +184,7 @@ impl CurrentRssConfig {
                 user_name: UserId(RECOVERY_SILO_USERNAME.into()),
                 user_password_hash,
             },
-            rack_network_config: Some(rack_network_config.clone()),
+            rack_network_config: Some(rack_network_config),
         };
 
         Ok(request)
