@@ -37,6 +37,7 @@ progenitor::generate_api!(
         Ipv4Range = { derives = [ PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize ] },
         Ipv6Range = { derives = [ PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize ] },
         IpRange = { derives = [ PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize ] },
+        Baseboard = { derives = [ PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize ] },
         BootstrapSledDescription = { derives = [ PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize ] },
         RackNetworkConfig = { derives = [ PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize ] },
         CurrentRssUserConfigInsensitive = { derives = [ PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize ] },
