@@ -32,6 +32,7 @@ use serde::Serialize;
 use sled_hardware::Baseboard;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
+use std::net::Ipv6Addr;
 use std::time::Duration;
 use uuid::Uuid;
 use wicket_common::rack_setup::PutRssUserConfigInsensitive;
@@ -46,6 +47,7 @@ pub fn api() -> WicketdApiDescription {
     fn register_endpoints(
         api: &mut WicketdApiDescription,
     ) -> Result<(), String> {
+        api.register(get_bootstrap_sleds)?;
         api.register(get_rss_config)?;
         api.register(put_rss_config)?;
         api.register(put_rss_config_recovery_user_password_hash)?;
@@ -82,11 +84,63 @@ pub fn api() -> WicketdApiDescription {
     PartialOrd,
     Ord,
 )]
+pub struct BootstrapSledIp {
+    pub baseboard: Baseboard,
+    pub ip: Ipv6Addr,
+}
+
+#[derive(
+    Clone,
+    Debug,
+    Serialize,
+    Deserialize,
+    JsonSchema,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+)]
+pub struct BootstrapSledIps {
+    pub sleds: Vec<BootstrapSledIp>,
+}
+
+/// Get wicketd's current view of all sleds visible on the bootstrap network.
+#[endpoint {
+    method = GET,
+    path = "/bootstrap-sleds"
+}]
+async fn get_bootstrap_sleds(
+    rqctx: RequestContext<ServerContext>,
+) -> Result<HttpResponseOk<BootstrapSledIps>, HttpError> {
+    let ctx = rqctx.context();
+
+    let sleds = ctx
+        .bootstrap_peers
+        .sleds()
+        .into_iter()
+        .map(|(baseboard, ip)| BootstrapSledIp { baseboard, ip })
+        .collect();
+
+    Ok(HttpResponseOk(BootstrapSledIps { sleds }))
+}
+
+#[derive(
+    Clone,
+    Debug,
+    Serialize,
+    Deserialize,
+    JsonSchema,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+)]
 pub struct BootstrapSledDescription {
     pub id: SpIdentifier,
-    pub serial_number: String,
-    pub model: String,
-    pub revision: u32,
+    pub baseboard: Baseboard,
+    /// The sled's bootstrap address, if the host is on and we've discovered it
+    /// on the bootstrap network.
+    pub bootstrap_ip: Option<Ipv6Addr>,
 }
 
 // This is the subset of `RackInitializeRequest` that the user fills in in clear
@@ -152,7 +206,10 @@ async fn get_rss_config(
     let inventory = inventory_or_unavail(&ctx.mgs_handle).await?;
 
     let mut config = ctx.rss_config.lock().unwrap();
-    config.populate_available_bootstrap_sleds_from_inventory(&inventory);
+    config.populate_available_bootstrap_sleds_from_inventory(
+        &inventory,
+        &ctx.bootstrap_peers,
+    );
 
     Ok(HttpResponseOk((&*config).into()))
 }
@@ -176,7 +233,10 @@ async fn put_rss_config(
     let inventory = inventory_or_unavail(&ctx.mgs_handle).await?;
 
     let mut config = ctx.rss_config.lock().unwrap();
-    config.populate_available_bootstrap_sleds_from_inventory(&inventory);
+    config.populate_available_bootstrap_sleds_from_inventory(
+        &inventory,
+        &ctx.bootstrap_peers,
+    );
     config
         .update(body.into_inner(), ctx.baseboard.as_ref())
         .map_err(|err| HttpError::for_bad_request(None, err))?;

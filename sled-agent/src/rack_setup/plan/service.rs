@@ -317,6 +317,7 @@ impl Plan {
                     address: http_address,
                     gz_address: None,
                 });
+                /*
                 request.services.push(ServiceZoneRequest {
                     id,
                     zone_type: ZoneType::ExternalDns,
@@ -332,6 +333,7 @@ impl Plan {
                         },
                     }],
                 });
+                */
             }
 
             // The first enumerated sleds get assigned the responsibility

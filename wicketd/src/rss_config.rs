@@ -4,6 +4,7 @@
 
 //! Support for user-provided RSS configuration options.
 
+use crate::bootstrap_addrs::BootstrapPeers;
 use crate::http_entrypoints::BootstrapSledDescription;
 use crate::http_entrypoints::CertificateUploadResponse;
 use crate::http_entrypoints::CurrentRssUserConfig;
@@ -51,7 +52,10 @@ impl CurrentRssConfig {
     pub(crate) fn populate_available_bootstrap_sleds_from_inventory(
         &mut self,
         inventory: &RackV1Inventory,
+        bootstrap_peers: &BootstrapPeers,
     ) {
+        let bootstrap_sleds = bootstrap_peers.sleds();
+
         self.inventory = inventory
             .sps
             .iter()
@@ -60,11 +64,16 @@ impl CurrentRssConfig {
                     return None;
                 }
                 let state = sp.state.as_ref()?;
+                let baseboard = Baseboard::new_gimlet(
+                    state.serial_number.clone(),
+                    state.model.clone(),
+                    state.revision.into(),
+                );
+                let bootstrap_ip = bootstrap_sleds.get(&baseboard).copied();
                 Some(BootstrapSledDescription {
                     id: sp.id,
-                    serial_number: state.serial_number.clone(),
-                    model: state.model.clone(),
-                    revision: state.revision,
+                    baseboard,
+                    bootstrap_ip,
                 })
             })
             .collect();
@@ -148,17 +157,12 @@ impl CurrentRssConfig {
 
         // First, confirm we have ourself in the inventory _and_ the user didn't
         // remove us from the list.
-        if let Some(Baseboard::Gimlet { identifier, model, revision }) =
-            our_baseboard
-        {
+        if let Some(our_baseboard @ Baseboard::Gimlet { .. }) = our_baseboard {
             let our_slot = self
                 .inventory
                 .iter()
                 .find_map(|sled| {
-                    if &sled.serial_number == identifier
-                        && &sled.model == model
-                        && i64::from(sled.revision) == *revision
-                    {
+                    if sled.baseboard == *our_baseboard {
                         Some(sled.id.slot)
                     } else {
                         None
@@ -167,13 +171,13 @@ impl CurrentRssConfig {
                 .ok_or_else(|| {
                     format!(
                         "Inventory is missing the scrimlet where wicketd is \
-                         running ({identifier}, model {model} rev {revision})",
+                         running ({our_baseboard:?})",
                     )
                 })?;
             if !value.bootstrap_sleds.contains(&our_slot) {
                 return Err(format!(
                     "Cannot remove the scrimlet where wicketd is running \
-                     (sled {our_slot}: {identifier}, model {model} rev {revision}) \
+                     (sled {our_slot}: {our_baseboard:?}) \
                      from bootstrap_sleds"
                 ));
             }
