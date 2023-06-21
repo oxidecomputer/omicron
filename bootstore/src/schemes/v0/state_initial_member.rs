@@ -7,7 +7,7 @@
 use std::collections::BTreeMap;
 
 use crate::schemes::v0::fsm_output::{ApiError, ApiOutput};
-use crate::trust_quorum::{RackSecret, SharePkgV0};
+use crate::trust_quorum::{LearnedSharePkgV0, RackSecret, SharePkgV0};
 
 use super::fsm::StateHandler;
 use super::fsm_output::Output;
@@ -15,7 +15,7 @@ use super::messages::{Envelope, Error, RequestType, Response, ResponseType};
 use super::state::{
     FsmCommonData, RackInitState, RequestMetadata, ShareIdx, State,
 };
-use secrecy::ExposeSecret;
+use secrecy::{ExposeSecret, Secret};
 use sled_hardware::Baseboard;
 use uuid::Uuid;
 
@@ -123,54 +123,22 @@ impl InitialMemberState {
                 while let Some((to, metadata)) =
                     self.pending_learn_requests.pop_first()
                 {
-                    if let Some(idx) = self.distributed_shares.get(&to) {
-                        // The share was already handed out to this
-                        // peer. Give back the same one.
-                        let share = shares.expose_secret()[idx.0].clone();
-                        let msg = Response {
-                            request_id: metadata.request_id,
-                            type_: ResponseType::Share(share),
-                        };
-                        envelopes.push(Envelope { to, msg: msg.into() });
-                    } else {
-                        // We need to pick a share to hand out and
-                        // persist that fact. We find the highest currently used
-                        // index and add 1 or we select index 0.
-                        let idx = self
-                            .distributed_shares
-                            .values()
-                            .max()
-                            .cloned()
-                            .map(|idx| idx.0 + 1)
-                            .unwrap_or(0);
+                    let Output {
+                        persist: persist_once,
+                        envelopes: envelopes_once,
+                        ..
+                    } = send_share_response(
+                        to.clone(),
+                        metadata.request_id,
+                        &self.pkg,
+                        &mut self.distributed_shares,
+                        &shares,
+                    );
 
-                        match shares.expose_secret().get(idx) {
-                            Some(share) => {
-                                // We have a share to hand out. Let's mark it as used.
-                                self.distributed_shares
-                                    .insert(to.clone(), ShareIdx(idx));
-                                let msg = Response {
-                                    request_id: metadata.request_id,
-                                    type_: ResponseType::Share(share.clone()),
-                                };
-                                envelopes
-                                    .push(Envelope { to, msg: msg.into() });
-
-                                // We just handed out a new share Ensure we
-                                // perist this state
-                                persist = true
-                            }
-                            None => {
-                                // We're fresh out of shares
-                                let msg = Response {
-                                    request_id: metadata.request_id,
-                                    type_: Error::CannotSpareAShare.into(),
-                                };
-                                envelopes
-                                    .push(Envelope { to, msg: msg.into() });
-                            }
-                        }
+                    if persist_once {
+                        persist = true;
                     }
+                    envelopes.extend(envelopes_once);
                 }
             }
             Err(_) => {
@@ -225,14 +193,6 @@ impl StateHandler for InitialMemberState {
                     )
                 }
             }
-            InitLearner => {
-                let rack_uuid = self.pkg.rack_uuid;
-                Output::respond(
-                    from,
-                    request_id,
-                    Error::AlreadyInitialized { rack_uuid }.into(),
-                )
-            }
             GetShare { rack_uuid } => {
                 if rack_uuid != self.pkg.rack_uuid {
                     Output::respond(
@@ -270,7 +230,7 @@ impl StateHandler for InitialMemberState {
                 {
                     // We already know the rack secret so respond to the
                     // peer.
-                    send_share_response(
+                    decrypt_and_send_share_response(
                         from,
                         request_id,
                         &self.pkg,
@@ -278,6 +238,9 @@ impl StateHandler for InitialMemberState {
                         rack_secret,
                     )
                 } else {
+                    let expiry = common.clock + common.config.learn_timeout;
+                    self.pending_learn_requests
+                        .insert(from, RequestMetadata { request_id, expiry });
                     output
                 }
             }
@@ -342,6 +305,8 @@ impl StateHandler for InitialMemberState {
                 );
             }
         }
+        self.pending_learn_requests
+            .retain(|_, metadata| metadata.expiry >= common.clock);
 
         (self.into(), common.rack_secret_state.on_tick(common.clock))
     }
@@ -356,16 +321,18 @@ impl StateHandler for InitialMemberState {
 
     fn on_disconnect(
         &mut self,
-        common: &mut FsmCommonData,
-        peer: Baseboard,
+        _common: &mut FsmCommonData,
+        _peer: Baseboard,
     ) -> Output {
         // TODO: Discard any learn requests from this peer?
+        // The will expire anyway on timeout, but they may eat a share if the
+        //timeout doesn't occur
         Output::none()
     }
 }
 
 // Send a `ResponseType::Share` message once we have recomputed the rack secret
-fn send_share_response(
+fn decrypt_and_send_share_response(
     from: Baseboard,
     request_id: Uuid,
     pkg: &SharePkgV0,
@@ -373,44 +340,72 @@ fn send_share_response(
     rack_secret: &RackSecret,
 ) -> Output {
     match pkg.decrypt_shares(rack_secret) {
-        Ok(shares) => {
-            if let Some(idx) = distributed_shares.get(&from) {
-                // The share was already handed out to this
-                // peer. Give back the same one.
-                let share = shares.expose_secret()[idx.0].clone();
-                Output::respond(from, request_id, ResponseType::Share(share))
-            } else {
-                // We need to pick a share to hand out and
-                // persist that fact. We find the highest currently used
-                // index and add 1 or we select index 0.
-                let idx = distributed_shares
-                    .values()
-                    .max()
-                    .cloned()
-                    .map(|idx| idx.0 + 1)
-                    .unwrap_or(0);
-
-                match shares.expose_secret().get(idx) {
-                    Some(share) => {
-                        distributed_shares.insert(from.clone(), ShareIdx(idx));
-                        Output::persist_and_respond(
-                            from,
-                            request_id,
-                            ResponseType::Share(share.clone()),
-                        )
-                    }
-                    None => Output::respond(
-                        from,
-                        request_id,
-                        Error::CannotSpareAShare.into(),
-                    ),
-                }
-            }
-        }
+        Ok(shares) => send_share_response(
+            from,
+            request_id,
+            pkg,
+            distributed_shares,
+            &shares,
+        ),
         Err(_) => Output::respond(
             from,
             request_id,
             Error::FailedToDecryptShares.into(),
         ),
+    }
+}
+
+fn send_share_response(
+    from: Baseboard,
+    request_id: Uuid,
+    pkg: &SharePkgV0,
+    distributed_shares: &mut BTreeMap<Baseboard, ShareIdx>,
+    shares: &Secret<Vec<Vec<u8>>>,
+) -> Output {
+    if let Some(idx) = distributed_shares.get(&from) {
+        // The share was already handed out to this
+        // peer. Give back the same one.
+        let share = shares.expose_secret()[idx.0].clone();
+        let learned_pkg = LearnedSharePkgV0 {
+            rack_uuid: pkg.rack_uuid,
+            epoch: pkg.epoch,
+            threshold: pkg.threshold,
+            share: share.clone(),
+            share_digests: pkg.share_digests.clone(),
+        };
+        Output::respond(from, request_id, ResponseType::Pkg(learned_pkg))
+    } else {
+        // We need to pick a share to hand out and
+        // persist that fact. We find the highest currently used
+        // index and add 1 or we select index 0.
+        let idx = distributed_shares
+            .values()
+            .max()
+            .cloned()
+            .map(|idx| idx.0 + 1)
+            .unwrap_or(0);
+
+        match shares.expose_secret().get(idx) {
+            Some(share) => {
+                distributed_shares.insert(from.clone(), ShareIdx(idx));
+                let learned_pkg = LearnedSharePkgV0 {
+                    rack_uuid: pkg.rack_uuid,
+                    epoch: pkg.epoch,
+                    threshold: pkg.threshold,
+                    share: share.clone(),
+                    share_digests: pkg.share_digests.clone(),
+                };
+                Output::persist_and_respond(
+                    from,
+                    request_id,
+                    ResponseType::Pkg(learned_pkg),
+                )
+            }
+            None => Output::respond(
+                from,
+                request_id,
+                Error::CannotSpareAShare.into(),
+            ),
+        }
     }
 }

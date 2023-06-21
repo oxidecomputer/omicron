@@ -6,8 +6,6 @@
 
 use std::collections::BTreeMap;
 
-use crate::schemes::v0::state_learning::LearningState;
-
 use super::fsm::StateHandler;
 use super::fsm_output::{ApiError, Output};
 use super::messages::{Error, RequestType, ResponseType};
@@ -28,7 +26,7 @@ impl UninitializedState {
 impl StateHandler for UninitializedState {
     fn handle_request(
         self,
-        common: &mut FsmCommonData,
+        _common: &mut FsmCommonData,
         from: Baseboard,
         request_id: Uuid,
         request: RequestType,
@@ -37,14 +35,6 @@ impl StateHandler for UninitializedState {
         match request {
             Init(pkg) => (
                 InitialMemberState::new(pkg, BTreeMap::new()).into(),
-                Output::persist_and_respond(
-                    from,
-                    request_id,
-                    ResponseType::InitAck,
-                ),
-            ),
-            InitLearner => (
-                State::Learning(LearningState { attempt: None }).into(),
                 Output::persist_and_respond(
                     from,
                     request_id,
@@ -85,22 +75,22 @@ impl StateHandler for UninitializedState {
         )
     }
 
-    fn tick(self, common: &mut FsmCommonData) -> (State, Output) {
+    fn tick(self, _common: &mut FsmCommonData) -> (State, Output) {
         (self.into(), Output::none())
     }
 
     fn on_connect(
         &mut self,
-        common: &mut FsmCommonData,
-        peer: Baseboard,
+        _common: &mut FsmCommonData,
+        _peer: Baseboard,
     ) -> Output {
         Output::none()
     }
 
     fn on_disconnect(
         &mut self,
-        common: &mut FsmCommonData,
-        peer: Baseboard,
+        _common: &mut FsmCommonData,
+        _peer: Baseboard,
     ) -> Output {
         Output::none()
     }

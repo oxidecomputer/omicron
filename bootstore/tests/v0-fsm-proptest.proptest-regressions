@@ -1,7 +1,0 @@
-# Seeds for failure cases proptest has generated in the past. It is
-# automatically read and these particular cases re-run before any
-# novel cases are generated.
-#
-# It is recommended to check this file in to source control so that
-# everyone who runs the test benefits from these saved cases.
-cc 24ab5c208a9fe8656862e29e671e664fbef949368637bbd1047c4191ff038a59 # shrinks to input = TestInput { actions: [Connect([(Pc { identifier: "c", model: "0" }, Pc { identifier: "learner-am", model: "0" })]), LoadRackSecret(Pc { identifier: "c", model: "0" }), Ticks(16), Ticks(7), ChangeDelays(Delays { msg_delivery: 0 })], initial_members: {Pc { identifier: "a", model: "0" }, Pc { identifier: "b", model: "0" }, Pc { identifier: "c", model: "0" }}, learners: {Pc { identifier: "learner-am", model: "0" }}, config: Config { learn_timeout: 5, rack_init_timeout: 14, rack_secret_request_timeout: 14 }, rack_uuid: 79234109-7346-48e4-8934-ef4c9541a422 }

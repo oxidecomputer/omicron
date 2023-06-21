@@ -12,11 +12,9 @@
 
 mod common;
 
-use assert_matches::assert_matches;
 use bootstore::schemes::v0::{
-    ApiError, ApiOutput, Config, Envelope, Fsm, Msg, MsgError, Output,
-    RackSecretState, Request, RequestType, Response, ResponseType, State,
-    Ticks,
+    ApiError, ApiOutput, Config, Envelope, Fsm, Msg, Output, RackSecretState,
+    Request, RequestType, Response, ResponseType, Ticks,
 };
 
 use proptest::prelude::*;
@@ -25,10 +23,10 @@ use std::collections::{BTreeMap, BTreeSet};
 use uuid::Uuid;
 
 use common::generators::{arb_test_input, Action, Delays};
-use common::model::{
-    ExpectedOutput, Model, ModelRackSecretState, ModelState, PeerModel,
-};
+use common::model::{ExpectedMsg, ExpectedOutput, Model, ModelState};
 use common::network::Network;
+
+use crate::common::model::{ExpectedApiError, ExpectedApiOutput};
 
 /// State for the running test
 ///
@@ -42,9 +40,6 @@ pub struct TestState {
     // IDs of all initial members
     initial_members: BTreeSet<Baseboard>,
 
-    // IDs of all learners
-    learners: BTreeSet<Baseboard>,
-
     // A model of the network used for sending and receiving messages across
     // peers
     network: Network,
@@ -54,9 +49,6 @@ pub struct TestState {
     // synchronization at all. Therefore, this clock can serve as a global clock
     // and we can ensure that on each tick a tick callback on every FSM fires.
     clock: Ticks,
-
-    // A copy of the configuration at all peers
-    config: Config,
 
     // Is the rack already initialized?
     //
@@ -94,10 +86,8 @@ impl TestState {
         TestState {
             peers,
             initial_members,
-            learners,
             network: Network::default(),
             clock: 0,
-            config,
             rack_init_complete: false,
             delays,
             model,
@@ -115,46 +105,45 @@ impl TestState {
     ///    * It matches what the model expected
     ///  * Ensure global invariants of the system under test and test state
     pub fn on_action(&mut self, action: Action) -> Result<(), TestCaseError> {
-        let expected = self.model.on_action(action.clone());
+        let delivery_time = self.clock + self.delays.msg_delivery;
         match action {
             Action::RackInit { rss_sled, rack_uuid, initial_members } => {
+                self.model.on_rack_init(rack_uuid);
                 self.on_rack_init(rss_sled, rack_uuid, initial_members)?;
             }
             Action::Connect(flows) => {
-                let mut sourced_envelopes =
-                    BTreeMap::<Baseboard, Vec<Envelope>>::new();
                 for (source, dest) in flows {
                     self.network.connected(source.clone(), dest.clone());
 
+                    // Feed the model and fsm for source->dest
+                    let expected = self.model.on_connect(&source, dest.clone());
                     let output = self.peer_mut(&source).connected(dest.clone());
-                    prop_assert_eq!(output.api_output, None);
-                    prop_assert_eq!(output.persist, false);
-                    sourced_envelopes
-                        .entry(source.clone())
-                        .or_default()
-                        .extend(output.envelopes);
+                    check_connect_output(expected, &output)?;
+                    self.network.send(&source, output.envelopes, delivery_time);
 
+                    // Feed the model and fsm for dest->source
+                    let expected = self.model.on_connect(&dest, source.clone());
                     let output = self.peer_mut(&dest).connected(source);
-                    prop_assert_eq!(output.api_output, None);
-                    prop_assert_eq!(output.persist, false);
-                    sourced_envelopes
-                        .entry(dest)
-                        .or_default()
-                        .extend(output.envelopes);
+                    check_connect_output(expected, &output)?;
+                    self.network.send(&dest, output.envelopes, delivery_time);
                 }
-
-                self.check_envelopes_sent_on_connect(
-                    sourced_envelopes,
-                    expected,
-                )?;
             }
             Action::Disconnect(flows) => {
-                // TODO: Assert that output makes sense and dispatch it
                 for (source, dest) in flows {
                     self.network.disconnected(source.clone(), dest.clone());
-                    let _output =
+
+                    // source -> dest
+                    let expected = self.model.on_disconnect(&source, &dest);
+                    let output =
                         self.peer_mut(&source).disconnected(dest.clone());
-                    let _output = self.peer_mut(&dest).disconnected(source);
+                    check_disconnect_output(expected, &output)?;
+                    self.network.send(&source, output.envelopes, delivery_time);
+
+                    // dest -> source
+                    let expected = self.model.on_disconnect(&dest, &source);
+                    let output = self.peer_mut(&dest).disconnected(source);
+                    check_disconnect_output(expected, &output)?;
+                    self.network.send(&dest, output.envelopes, delivery_time);
                 }
             }
             Action::Ticks(ticks) => {
@@ -162,26 +151,30 @@ impl TestState {
                     self.clock += 1;
                     self.network.advance(self.clock);
                     let delivery_time = self.clock + self.delays.msg_delivery;
+
+                    // We arbitrarily decide to deliver messages before ticks
                     while let Some((destination, mut sourced_msgs)) =
                         self.network.delivered().pop_first()
                     {
                         for (source, msg) in sourced_msgs.drain(..) {
+                            // Handle the delivered message in the model
+                            let expected = self.model.handle_msg(
+                                &source,
+                                &destination,
+                                msg.clone(),
+                            );
+
                             // Handle the delivered message
                             let output = self
                                 .peer_mut(&destination)
                                 .handle(source.clone(), msg.clone());
 
                             // Verify that the handler did the right thing
-                            self.check_handled_msg_output(
-                                &destination,
-                                &source,
-                                &msg,
-                                &output,
-                            )?;
+                            check_handled_msg_output(expected, &output)?;
 
                             // Send any resulting messages over the network
                             self.network.send(
-                                &source,
+                                &destination,
                                 output.envelopes,
                                 delivery_time,
                             );
@@ -189,15 +182,16 @@ impl TestState {
                     }
 
                     // Handle ticks at each peer. This can only result in
-                    // timeouts. We never send messages on ticks, as there are
-                    // no conventional retries. Instead of retries, we send
-                    // any necessary messages on new connections, since we are
-                    // modeling the network as TCP streams.
+                    // timeouts or learn requests.
                     for (peer_id, fsm) in &mut self.peers {
+                        let expected = self.model.on_tick(peer_id);
                         let output = fsm.tick();
-                        check_for_timeouts(
-                            self.clock, peer_id, output, &expected,
-                        )?;
+                        check_tick_output(expected, &output)?;
+                        self.network.send(
+                            peer_id,
+                            output.envelopes,
+                            delivery_time,
+                        );
                     }
                 }
             }
@@ -205,10 +199,18 @@ impl TestState {
                 self.delays = delays;
             }
             Action::LoadRackSecret(peer) => {
+                let expected = self.model.load_rack_secret(&peer);
                 let output = self.peer_mut(&peer).load_rack_secret();
-                self.check_load_rack_secret_api_output(
-                    &peer, &output, expected,
-                )?;
+                check_load_rack_secret_output(expected, &output)?;
+
+                let msg_delivery_time = self.clock + self.delays.msg_delivery;
+                self.network.send(&peer, output.envelopes, msg_delivery_time);
+            }
+            Action::InitLearner(peer) => {
+                let expected = self.model.init_learner(&peer);
+                let output = self.peer_mut(&peer).init_learner();
+                check_init_learner_output(expected, &output)?;
+
                 let msg_delivery_time = self.clock + self.delays.msg_delivery;
                 self.network.send(&peer, output.envelopes, msg_delivery_time);
             }
@@ -321,6 +323,8 @@ impl TestState {
         for (peer_id, peer) in &self.peers {
             // Ensure that the clock at each sled is identical
             prop_assert_eq!(clock, peer.common_data().clock);
+
+            // Keep track of connectivity for later check
             connected_peers_per_sled
                 .insert(peer_id.clone(), peer.common_data().peers.clone());
 
@@ -341,10 +345,10 @@ impl TestState {
                 ModelState::Uninitialized => {
                     prop_assert_eq!(peer.state_name(), "uninitialized")
                 }
-                ModelState::InitialMember => {
+                ModelState::InitialMember { .. } => {
                     prop_assert_eq!(peer.state_name(), "initial_member")
                 }
-                ModelState::Learning => {
+                ModelState::Learning { .. } => {
                     prop_assert_eq!(peer.state_name(), "learning")
                 }
                 ModelState::Learned => {
@@ -360,201 +364,6 @@ impl TestState {
                     .get(dest)
                     .unwrap()
                     .contains(source));
-            }
-        }
-
-        Ok(())
-    }
-
-    // Verify that the envelopes sent by peers when they become connected to
-    // other peers match what the model expects.
-    fn check_envelopes_sent_on_connect(
-        &self,
-        envelopes: BTreeMap<Baseboard, Vec<Envelope>>,
-        expected: Vec<ExpectedOutput>,
-    ) -> Result<(), TestCaseError> {
-        for (_, envelopes) in &envelopes {
-            ensure_all_envelopes_contain_get_share(&envelopes)?;
-        }
-        // Collect all the actual unique (source, dest) pairs
-        let actual = envelopes.into_iter().fold(
-            BTreeSet::new(),
-            |mut acc, (source, envelopes)| {
-                for envelope in envelopes {
-                    acc.insert((source.clone(), envelope.to));
-                }
-                acc
-            },
-        );
-
-        // Collect all the expected unique (source, dest) pairs
-        let expected: BTreeSet<_> = expected
-            .into_iter()
-            .filter_map(|e| {
-                if let ExpectedOutput::GetShare { source, destination } = e {
-                    Some((source, destination))
-                } else {
-                    None
-                }
-            })
-            .collect();
-
-        prop_assert_eq!(expected, actual);
-        Ok(())
-    }
-
-    // Validate that the output from handling a message at a given peer makes sense
-    fn check_handled_msg_output(
-        &self,
-        destination: &Baseboard,
-        source: &Baseboard,
-        msg: &Msg,
-        output: &Output,
-    ) -> Result<(), TestCaseError> {
-        match msg {
-            Msg::Req(Request {
-                id,
-                type_: RequestType::GetShare { rack_uuid },
-            }) => {
-                prop_assert_eq!(output.envelopes.len(), 1);
-                // Ensure that the response is sent to the requester
-                // and is of the right type
-                let envelope = output.envelopes.first().unwrap();
-                prop_assert_eq!(&envelope.to, source);
-                let Msg::Rsp(Response { request_id: id, type_ }) =
-                    &envelope.msg
-                else {
-                    panic!("Msg must be a response");
-                };
-                match self.model.get_peer(destination).state {
-                    ModelState::Uninitialized => {
-                        let matches = matches!(
-                            type_,
-                            ResponseType::Error(MsgError::NotInitialized)
-                        );
-                        prop_assert!(matches);
-                    }
-                    ModelState::Learning => {
-                        let matches = matches!(
-                            type_,
-                            ResponseType::Error(MsgError::StillLearning)
-                        );
-                        prop_assert!(matches);
-                    }
-                    ModelState::InitialMember | ModelState::Learned => {
-                        let matches = matches!(type_, ResponseType::Share(_));
-                        prop_assert!(matches);
-                    }
-                }
-                Ok(())
-            }
-            Msg::Req(Request { id, type_: RequestType::Learn }) => {
-                // TODO: Cover learn requests
-                Ok(())
-            }
-            Msg::Req(_) => {
-                // We don't care about Init or InitLearner requests
-                Ok(())
-            }
-            Msg::Rsp(Response {
-                request_id,
-                type_: ResponseType::Error(error),
-            }) => {
-                // TODO: Ensure error response is valid when we can
-                Ok(())
-            }
-            Msg::Rsp(_) => {
-                // Responses can always be delivered late and so it's sometimes
-                // impossible to compare them to either model or real peer
-                // FSM state. The only non-error messages we care about for
-                // this test are `Share` responses, and we already ensure that
-                // they get sent over the network when a `GetShare` request is
-                // received. As such we don't test them here, given the problems
-                // with knowing when the response is appropriate.
-                Ok(())
-            }
-        }
-    }
-
-    // Validate that the output of `Fsm::load_rack_secret` made to a given peer
-    // makes sense.
-    fn check_load_rack_secret_api_output(
-        &self,
-        peer_id: &Baseboard,
-        output: &Output,
-        expected: Vec<ExpectedOutput>,
-    ) -> Result<(), TestCaseError> {
-        let peer_state = self.peer(peer_id).state();
-        let peer_common_data = self.peer(peer_id).common_data();
-
-        // Ensure that our model state, and what the model expects matches
-        // our system under test.
-        let model = self.model.get_peer(peer_id);
-        match &model.rack_secret_state {
-            ModelRackSecretState::Empty => {
-                prop_assert_eq!(output.envelopes.len(), 0);
-                prop_assert!(output.api_output.is_none());
-                if !matches!(
-                    peer_common_data.rack_secret_state,
-                    RackSecretState::Empty
-                ) {
-                    prop_assert!(false, "Rack secret state should be empty");
-                }
-            }
-            ModelRackSecretState::Retrieving { received, .. } => {
-                prop_assert!(output.api_output.is_none());
-                if let RackSecretState::Retrieving { from, .. } =
-                    &peer_common_data.rack_secret_state
-                {
-                    // We have learned shares from the same peers as the model
-                    prop_assert_eq!(from, received);
-                } else {
-                    prop_assert!(
-                        false,
-                        "rack secret state not retrieving shares"
-                    );
-                }
-
-                // Ensure that all messages are `RequestType::GetShare`
-                ensure_all_envelopes_contain_get_share(&output.envelopes)?;
-
-                // Ensure the requests when to the same destinations as the
-                // model expected
-                let expected_dest: BTreeSet<_> = expected
-                    .iter()
-                    .filter_map(|e| {
-                        if let ExpectedOutput::GetShare {
-                            source,
-                            destination,
-                            ..
-                        } = e
-                        {
-                            Some(destination.clone())
-                        } else {
-                            None
-                        }
-                    })
-                    .collect();
-                let actual_dest: BTreeSet<_> =
-                    output.envelopes.iter().cloned().map(|e| e.to).collect();
-                prop_assert_eq!(expected_dest, actual_dest);
-            }
-            ModelRackSecretState::Computed { .. } => {
-                let returned_rack_secret = matches!(
-                    output.api_output,
-                    Some(Ok(ApiOutput::RackSecret(_)))
-                );
-                prop_assert!(returned_rack_secret);
-                if !matches!(
-                    peer_common_data.rack_secret_state,
-                    RackSecretState::Computed { .. },
-                ) {
-                    prop_assert!(
-                        false,
-                        "Rack secret state should already be computed"
-                    );
-                }
-                prop_assert_eq!(output.envelopes.len(), 0);
             }
         }
 
@@ -605,51 +414,285 @@ impl TestState {
     }
 }
 
-// Ensure that the model state's expected timeouts matches actual timeouts
-// reported by peers.
-fn check_for_timeouts(
-    clock: Ticks,
-    peer_id: &Baseboard,
-    output: Output,
-    expected: &Vec<ExpectedOutput>,
+fn check_disconnect_output(
+    expected: Option<ExpectedMsg>,
+    output: &Output,
 ) -> Result<(), TestCaseError> {
-    let expected_timeout = expected
-        .iter()
-        .find(|e| {
-            if let ExpectedOutput::RackSecretTimeout(
-                expected_peer_id,
-                timeout_tick,
-            ) = e
-            {
-                if *timeout_tick == clock && peer_id == expected_peer_id {
-                    true
-                } else {
-                    false
-                }
-            } else {
-                false
-            }
-        })
-        .is_some();
-
-    let actual_timeout =
-        matches!(output.api_output, Some(Err(ApiError::RackSecretLoadTimeout)));
-
-    prop_assert_eq!(expected_timeout, actual_timeout);
+    prop_assert_eq!(&output.api_output, &None);
+    prop_assert_eq!(output.persist, false);
+    if let Some(ExpectedMsg::Learn { destination }) = expected {
+        prop_assert_eq!(1, output.envelopes.len());
+        let Envelope { to, msg } = output.envelopes.first().unwrap();
+        prop_assert_eq!(&destination, to);
+        let matches =
+            matches!(msg, Msg::Req(Request { type_: RequestType::Learn, .. }));
+        prop_assert!(matches);
+    } else {
+        prop_assert_eq!(0, output.envelopes.len());
+    }
     Ok(())
 }
 
-// Ensure all messages are of `RequestType::GetShare`
-fn ensure_all_envelopes_contain_get_share(
-    envelopes: &Vec<Envelope>,
+// Verify that the envelopes sent by peers when they become connected to
+// other peers match what the model expects.
+//
+// There should only be at most either a single `Learn` or `GetShare`
+// request
+fn check_connect_output(
+    expected: Option<ExpectedMsg>,
+    output: &Output,
 ) -> Result<(), TestCaseError> {
-    for envelope in envelopes {
-        let is_get_share = matches!(
-            envelope.msg,
-            Msg::Req(Request { type_: RequestType::GetShare { .. }, .. })
-        );
-        prop_assert!(is_get_share);
+    prop_assert_eq!(&output.api_output, &None);
+    prop_assert_eq!(output.persist, false);
+    match expected {
+        Some(ExpectedMsg::GetShare) => {
+            prop_assert_eq!(output.envelopes.len(), 1);
+            let matches = matches!(
+                output.envelopes.first().unwrap().msg,
+                Msg::Req(Request { type_: RequestType::GetShare { .. }, .. })
+            );
+            prop_assert!(matches);
+        }
+        Some(ExpectedMsg::Learn { destination }) => {
+            prop_assert_eq!(output.envelopes.len(), 1);
+            let Envelope { to, msg } = output.envelopes.first().unwrap();
+            prop_assert_eq!(&destination, to);
+            let matches = matches!(
+                msg,
+                Msg::Req(Request { type_: RequestType::Learn, .. })
+            );
+            prop_assert!(matches);
+        }
+        Some(_) => prop_assert!(false, "ExpectedMsg makes no sense"),
+        None => {
+            prop_assert_eq!(output.envelopes.len(), 0);
+        }
     }
+
+    Ok(())
+}
+
+// Validate that the output from handling a message at a given peer makes sense
+fn check_handled_msg_output(
+    expected: ExpectedOutput,
+    output: &Output,
+) -> Result<(), TestCaseError> {
+    prop_assert_eq!(expected.persist, output.persist);
+
+    // Verify that any expected api output matches actual output
+    match expected.api_output {
+        None => prop_assert!(output.api_output.is_none()),
+        Some(Ok(ExpectedApiOutput::RackSecretLoaded)) => {
+            let matches =
+                matches!(output.api_output, Some(Ok(ApiOutput::RackSecret(_))));
+            prop_assert!(matches);
+        }
+        Some(Err(ExpectedApiError::UnexpectedResponse)) => {
+            let matches = matches!(
+                output.api_output,
+                Some(Err(ApiError::UnexpectedResponse { .. }))
+            );
+            prop_assert!(matches);
+        }
+        Some(Err(ExpectedApiError::ErrorResponseReceived)) => {
+            let matches = matches!(
+                output.api_output,
+                Some(Err(ApiError::ErrorResponseReceived { .. }))
+            );
+            prop_assert!(matches);
+        }
+        Some(Err(_)) => {
+            prop_assert!(false, "ExpectedApiError makes no sense")
+        }
+    }
+
+    // Verify that any expected messages match actual messages in envelopes
+    if expected.msg.is_none() {
+        prop_assert!(output.envelopes.is_empty());
+        return Ok(());
+    }
+
+    match expected.msg.unwrap() {
+        ExpectedMsg::BroadcastGetShare(to) => {
+            // Ensure that a `GetShare` request is sent to all connected peers
+            prop_assert_eq!(to.len(), output.envelopes.len());
+            for envelope in &output.envelopes {
+                prop_assert!(to.contains(&envelope.to));
+                let matches = matches!(
+                    envelope.msg,
+                    Msg::Req(Request {
+                        type_: RequestType::GetShare { .. },
+                        ..
+                    })
+                );
+                prop_assert!(matches);
+            }
+        }
+        ExpectedMsg::Pkg => {
+            prop_assert_eq!(output.envelopes.len(), 1);
+            let matches = matches!(
+                output.envelopes.first().unwrap().msg,
+                Msg::Rsp(Response { type_: ResponseType::Pkg(_), .. })
+            );
+            prop_assert!(matches);
+        }
+        ExpectedMsg::Error => {
+            prop_assert_eq!(output.envelopes.len(), 1);
+            let matches = matches!(
+                output.envelopes.first().unwrap().msg,
+                Msg::Rsp(Response { type_: ResponseType::Error(_), .. })
+            );
+            prop_assert!(matches);
+        }
+        ExpectedMsg::Share => {
+            prop_assert_eq!(output.envelopes.len(), 1);
+            let matches = matches!(
+                output.envelopes.first().unwrap().msg,
+                Msg::Rsp(Response { type_: ResponseType::Share(_), .. })
+            );
+            prop_assert!(matches);
+        }
+        ExpectedMsg::BroadcastPkg(to) => {
+            // Ensure that a `Pkg` response is sent to all pending learners
+            prop_assert_eq!(to.len(), output.envelopes.len());
+            for envelope in &output.envelopes {
+                prop_assert!(to.contains(&envelope.to));
+                let matches = matches!(
+                    envelope.msg,
+                    Msg::Rsp(Response { type_: ResponseType::Pkg(_), .. })
+                );
+                prop_assert!(matches);
+            }
+        }
+        _ => prop_assert!(false, "ExpectedMsg makes no sense"),
+    }
+
+    Ok(())
+}
+
+fn check_init_learner_output(
+    expected: ExpectedOutput,
+    output: &Output,
+) -> Result<(), TestCaseError> {
+    let already_init: ExpectedOutput =
+        ExpectedApiError::PeerAlreadyInitialized.into();
+    if already_init == expected {
+        prop_assert!(output.envelopes.is_empty());
+        let matches = matches!(
+            output.api_output,
+            Some(Err(ApiError::PeerAlreadyInitialized))
+        );
+        prop_assert!(matches);
+    } else {
+        // We expect a learn request or no request of there are no connected peers
+        prop_assert!(output.persist);
+        prop_assert_eq!(&output.api_output, &None);
+        match expected.msg {
+            Some(ExpectedMsg::Learn { destination }) => {
+                prop_assert_eq!(1, output.envelopes.len());
+                let Envelope { to, msg } = output.envelopes.first().unwrap();
+                prop_assert_eq!(&destination, to);
+                let matches = matches!(
+                    msg,
+                    Msg::Req(Request { type_: RequestType::Learn, .. })
+                );
+                prop_assert!(matches);
+            }
+            Some(_) => prop_assert!(false, "ExpectedMsg makes no sense"),
+            None => prop_assert!(output.envelopes.is_empty()),
+        }
+    }
+    Ok(())
+}
+
+// Validate that the output of `Fsm::load_rack_secret` made to a given peer
+// makes sense.
+fn check_load_rack_secret_output(
+    expected: ExpectedOutput,
+    output: &Output,
+) -> Result<(), TestCaseError> {
+    match expected.api_output {
+        Some(Ok(ExpectedApiOutput::RackSecretLoaded)) => {
+            let matches =
+                matches!(output.api_output, Some(Ok(ApiOutput::RackSecret(_))));
+            prop_assert!(matches);
+        }
+        Some(Err(ExpectedApiError::RackNotInitialized)) => {
+            let matches = matches!(
+                output.api_output,
+                Some(Err(ApiError::RackNotInitialized))
+            );
+            prop_assert!(matches);
+        }
+        Some(Err(ExpectedApiError::StillLearning)) => {
+            let matches = matches!(
+                output.api_output,
+                Some(Err(ApiError::RackNotInitialized))
+            );
+            prop_assert!(matches);
+        }
+        Some(Err(_)) => {
+            prop_assert!(false, "ExpectedApiError makes no sense");
+        }
+        None => {
+            if let Some(ExpectedMsg::BroadcastGetShare(to)) = expected.msg {
+                // Ensure that a `GetShare` is sent to all connected peers
+                prop_assert_eq!(to.len(), output.envelopes.len());
+                for envelope in &output.envelopes {
+                    prop_assert!(to.contains(&envelope.to));
+                    let matches = matches!(
+                        envelope.msg,
+                        Msg::Req(Request {
+                            type_: RequestType::GetShare { .. },
+                            ..
+                        })
+                    );
+                    prop_assert!(matches);
+                }
+            } else {
+                prop_assert!(output.envelopes.is_empty());
+            }
+        }
+    }
+    Ok(())
+}
+
+fn check_tick_output(
+    expected: ExpectedOutput,
+    output: &Output,
+) -> Result<(), TestCaseError> {
+    prop_assert_eq!(output.persist, false);
+
+    match expected.msg {
+        Some(ExpectedMsg::Learn { destination }) => {
+            prop_assert_eq!(&output.api_output, &None);
+            prop_assert_eq!(1, output.envelopes.len());
+            let Envelope { to, msg } = output.envelopes.first().unwrap();
+            prop_assert_eq!(&destination, to);
+            let matches = matches!(
+                msg,
+                Msg::Req(Request { type_: RequestType::Learn, .. })
+            );
+            prop_assert!(matches);
+        }
+        Some(_) => prop_assert!(false, "ExpectedMsg makes no sense"),
+        None => {
+            prop_assert!(output.envelopes.is_empty());
+
+            // We can only get a RackSecretTimeout if there are no expected
+            // messages
+            if let Some(Err(ExpectedApiError::RackSecretTimeout)) =
+                expected.api_output
+            {
+                let matches = matches!(
+                    output.api_output,
+                    Some(Err(ApiError::RackSecretLoadTimeout))
+                );
+                prop_assert!(matches);
+            }
+        }
+    }
+
     Ok(())
 }
 
@@ -682,7 +725,7 @@ proptest! {
         })?;
 
         for action in input.actions {
-            //println!("{:#?}", action);
+//            println!("{:#?}", action);
             state.on_action(action)?;
         }
     }

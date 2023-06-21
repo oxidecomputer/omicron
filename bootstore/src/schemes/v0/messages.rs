@@ -53,9 +53,6 @@ pub enum RequestType {
     /// the initial trust quorum.
     Init(SharePkgV0),
 
-    /// Initialize a peer as a Learner
-    InitLearner,
-
     /// Request a share from a remote peer
     GetShare { rack_uuid: Uuid },
 
@@ -69,7 +66,6 @@ impl RequestType {
         use RequestType::*;
         match self {
             Init(_) => "init",
-            InitLearner => "init_learner",
             GetShare { .. } => "get_share",
             Learn => "learn",
         }
@@ -128,9 +124,6 @@ pub enum Error {
 
     /// Shares to hand to learners cannot be decrypted
     FailedToDecryptShares,
-
-    /// A timeout that occurred while trying to recompute the rack secret
-    TimeoutWaitingForShares,
 
     /// A request was received with a rack UUID that does not match this peer
     RackUuidMismatch { expected: Uuid, got: Uuid },

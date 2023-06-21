@@ -5,20 +5,19 @@
 //! Proptest generators
 
 use super::network::FlowId;
-use bootstore::schemes::v0::{Config, Envelope, Fsm, Msg, Ticks};
-use proptest::{prelude::*, sample::Subsequence};
+use bootstore::schemes::v0::{Config, Ticks};
+use proptest::prelude::*;
 use sled_hardware::Baseboard;
-use std::{
-    collections::BTreeSet,
-    ops::{Range, RangeInclusive},
-};
+use std::collections::BTreeSet;
+use std::ops::RangeInclusive;
 use uuid::Uuid;
 
 // Ranges for timeout generation
 const LEARN_TIMEOUT: RangeInclusive<Ticks> = 5..=10;
-const RACK_SECRET_TIMEOUT: RangeInclusive<Ticks> = 5..=20;
+const RACK_SECRET_TIMEOUT: RangeInclusive<Ticks> = 20..=50;
 const TICKS_PER_ACTION: RangeInclusive<Ticks> = 1..=20;
 const MSG_DELIVERY_DELAY: RangeInclusive<Ticks> = 0..=20;
+const MAX_ACTIONS: usize = 1000;
 
 /// Input to the `run` method of our proptests
 #[derive(Debug)]
@@ -67,6 +66,9 @@ pub enum Action {
 
     /// Call `Fsm::load_rack_secret` on the given sled
     LoadRackSecret(Baseboard),
+
+    // Initialize a learner
+    InitLearner(Baseboard),
 }
 
 /// Generate top-level test input
@@ -87,11 +89,10 @@ pub fn arb_test_input(
                 proptest::collection::vec(
                     arb_action(
                         rack_uuid,
-                        config,
                         initial_members.clone(),
                         learners.clone(),
                     ),
-                    1..=20,
+                    1..=MAX_ACTIONS,
                 ),
                 Just(initial_members),
                 Just(learners),
@@ -130,9 +131,6 @@ fn arb_peer_ids(
 }
 
 // Generate a set of peer IDs for learners
-//
-// We want to generate more of these than initial members so we can attempt
-// to exhaust all the extra shares for a given sled.
 fn arb_learner_ids(max: usize) -> impl Strategy<Value = BTreeSet<Baseboard>> {
     proptest::collection::btree_set(
         "learner-[a-z][a-z]".prop_map(|id| Baseboard::Pc {
@@ -196,7 +194,6 @@ fn arb_delays() -> impl Strategy<Value = Delays> {
 // Generate a single test action to drive the property based tests
 fn arb_action(
     rack_uuid: Uuid,
-    config: Config,
     initial_members: BTreeSet<Baseboard>,
     learners: BTreeSet<Baseboard>,
 ) -> impl Strategy<Value = Action> {
@@ -219,6 +216,13 @@ fn arb_action(
         }),
         15 => any::<prop::sample::Selector>().prop_map(move |selector| {
             Action::LoadRackSecret(selector.select(&initial_members).clone())
+        }),
+        10 => any::<prop::sample::Selector>().prop_map(move |selector| {
+            // If there are no learners just issue a tick
+            selector.try_select(&learners).map_or(
+                Action::Ticks(1),
+                |peer| Action::InitLearner(peer.clone())
+            )
         })
     ]
 }

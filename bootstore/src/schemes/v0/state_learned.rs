@@ -53,12 +53,6 @@ impl StateHandler for LearnedState {
                     Error::AlreadyLearned { rack_uuid }.into(),
                 )
             }
-            InitLearner => {
-                // Idempotent, since we already learned
-                // TODO: Should we send a rack_uuid with this messsage
-                // and check it ?
-                Output::respond(from, request_id, ResponseType::InitAck)
-            }
             GetShare { rack_uuid } => {
                 if rack_uuid != self.pkg.rack_uuid {
                     Output::respond(
@@ -154,8 +148,8 @@ impl StateHandler for LearnedState {
 
     fn on_disconnect(
         &mut self,
-        common: &mut FsmCommonData,
-        peer: Baseboard,
+        _common: &mut FsmCommonData,
+        _peer: Baseboard,
     ) -> Output {
         // Nothing to do here
         Output::none()

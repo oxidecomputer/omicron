@@ -23,7 +23,7 @@ use uuid::Uuid;
 /// FSM having received a `ResponseType::Pkg`, then the `LearnAttempt` will be
 /// cancelled, and the next peer in order known to the FSM will be contacted in
 /// a new attempt.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LearnAttempt {
     pub peer: Baseboard,
     pub start: Ticks,
@@ -31,7 +31,7 @@ pub struct LearnAttempt {
 
 impl LearnAttempt {
     pub fn expired(&self, now: Ticks, timeout: Ticks) -> bool {
-        now.saturating_sub(self.start) >= timeout
+        now.saturating_sub(self.start) > timeout
     }
 }
 
@@ -62,7 +62,7 @@ impl LearningState {
 impl StateHandler for LearningState {
     fn handle_request(
         self,
-        common: &mut FsmCommonData,
+        _common: &mut FsmCommonData,
         from: Baseboard,
         request_id: Uuid,
         request: RequestType,
@@ -71,12 +71,6 @@ impl StateHandler for LearningState {
         let output = match request {
             Init(_) => {
                 Output::respond(from, request_id, Error::AlreadyLearning.into())
-            }
-            InitLearner => {
-                // Idempotent, since we are already learning
-                // TODO: Should we send a rack_uuid with this messsage
-                // and check it ?
-                Output::respond(from, request_id, ResponseType::InitAck)
             }
             GetShare { .. } => {
                 Output::respond(from, request_id, Error::StillLearning.into())
@@ -95,7 +89,7 @@ impl StateHandler for LearningState {
 
     fn handle_response(
         self,
-        common: &mut FsmCommonData,
+        _common: &mut FsmCommonData,
         from: Baseboard,
         request_id: Uuid,
         response: ResponseType,
@@ -120,10 +114,7 @@ impl StateHandler for LearningState {
                 //
                 // It doesn't matter who we received the response from, as it
                 // must have been a peer we asked.
-                //
-                // TODO: We should check the rack_uuid if we add it to
-                // `RequestType::InitLearner`  and save it.
-                (LearnedState::new(pkg).into(), Output::none())
+                (LearnedState::new(pkg).into(), Output::persist())
             }
             Error(error) => {
                 let state = self.name();
@@ -161,10 +152,7 @@ impl StateHandler for LearningState {
                     (self.into(), Output::none())
                 }
             }
-            None => {
-                let output = self.new_attempt(common);
-                (self.into(), output)
-            }
+            None => (self.into(), Output::none()),
         }
     }
 
@@ -173,11 +161,13 @@ impl StateHandler for LearningState {
         common: &mut FsmCommonData,
         peer: Baseboard,
     ) -> Output {
-        // TODO: If we aren't learning from anyone, try learning from this peer.
-        //
-        // This is an optimization on top of `tick`, but not needed for
-        // correctness.
-        Output::none()
+        if self.attempt.is_none() {
+            self.attempt =
+                Some(LearnAttempt { peer: peer.clone(), start: common.clock });
+            Output::request(peer, RequestType::Learn)
+        } else {
+            Output::none()
+        }
     }
 
     fn on_disconnect(
@@ -185,11 +175,17 @@ impl StateHandler for LearningState {
         common: &mut FsmCommonData,
         peer: Baseboard,
     ) -> Output {
-        // TODO: If we are currently learning from the peer that just
-        // disconnected then move onto the next one.
-        //
-        // This is an optimization on top of `tick`, but not needed for
-        // correctness.
+        if let Some(attempt) = &mut self.attempt {
+            // We are currently trying to learn from the peer that just disconnected.
+            // Move onto the next peer.
+            if attempt.peer == peer {
+                if let Some(peer) = common.next_peer(&attempt.peer) {
+                    attempt.peer = peer.clone();
+                    attempt.start = common.clock;
+                    return Output::request(peer, RequestType::Learn);
+                }
+            }
+        }
         Output::none()
     }
 }

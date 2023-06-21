@@ -181,8 +181,10 @@ impl Fsm {
         };
 
         let mut state = LearningState { attempt: None };
-        let output = state.new_attempt(&mut self.common);
+        let mut output = state.new_attempt(&mut self.common);
         self.state = Some(State::Learning(state).into());
+        // We changed state into a learner, so persist this knowledge
+        output.persist = true;
         output
     }
 

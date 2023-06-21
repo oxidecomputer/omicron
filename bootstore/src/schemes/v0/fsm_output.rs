@@ -30,6 +30,10 @@ impl Output {
         Output { persist: false, envelopes: vec![], api_output: None }
     }
 
+    pub fn persist() -> Output {
+        Output { persist: true, envelopes: vec![], api_output: None }
+    }
+
     // Send a request directly to a peer
     pub fn request(to: Baseboard, type_: RequestType) -> Output {
         let request = Request { id: Uuid::new_v4(), type_ };
@@ -125,14 +129,6 @@ pub enum ApiError {
     /// We could not reconstruct the rack secret even after retrieving enough
     /// valid shares.
     FailedToReconstructRackSecret,
-
-    /// Unexpected response received
-    UnexpectedRequest {
-        from: Baseboard,
-        state: &'static str,
-        request_id: Uuid,
-        msg: &'static str,
-    },
 
     /// Unexpected response received
     UnexpectedResponse {

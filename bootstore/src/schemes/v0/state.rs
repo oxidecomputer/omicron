@@ -111,7 +111,7 @@ impl FsmCommonData {
 #[derive(Debug)]
 pub struct RequestMetadata {
     pub request_id: Uuid,
-    pub start: Ticks,
+    pub expiry: Ticks,
 }
 
 #[derive(Zeroize, ZeroizeOnDrop)]
@@ -328,9 +328,10 @@ impl RackSecretState {
                     Output::none()
                 }
             }
-            RackSecretState::Computed { secret, .. } => {
-                // We already have the state, go ahead and return it.
-                ApiOutput::RackSecret(secret.clone()).into()
+            RackSecretState::Computed { .. } => {
+                // This is just a late share response. We've already informed
+                // the API caller and satisfied any pending learn requests.
+                Output::none()
             }
         }
     }
