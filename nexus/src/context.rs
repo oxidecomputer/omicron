@@ -137,7 +137,11 @@ impl ServerContext {
         let resolver = match config.deployment.internal_dns {
             nexus_config::InternalDns::FromSubnet { subnet } => {
                 let az_subnet = Ipv6Subnet::<AZ_PREFIX>::new(subnet.net().ip());
-                info!(log, "Setting up resolver on subnet: {:?}", az_subnet);
+                info!(
+                    log,
+                    "Setting up resolver using DNS servers for subnet: {:?}",
+                    az_subnet
+                );
                 internal_dns::resolver::Resolver::new_from_subnet(
                     log.new(o!("component" => "DnsResolver")),
                     az_subnet,
@@ -145,6 +149,11 @@ impl ServerContext {
                 .map_err(|e| format!("Failed to create DNS resolver: {}", e))?
             }
             nexus_config::InternalDns::FromAddress { address } => {
+                info!(
+                    log,
+                    "Setting up resolver using DNS address: {:?}", address
+                );
+
                 internal_dns::resolver::Resolver::new_from_addrs(
                     log.new(o!("component" => "DnsResolver")),
                     vec![address],

@@ -180,7 +180,7 @@ impl Server {
         })
     }
 
-    /// Starts the pantry service and add it to the DNS config builder
+    /// Starts the pantry service
     pub async fn start_pantry(&mut self) -> &PantryServer {
         // Create the simulated Pantry
         let pantry_server = PantryServer::new(

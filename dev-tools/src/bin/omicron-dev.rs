@@ -365,6 +365,14 @@ async fn cmd_run_all(args: &RunAllArgs) -> Result<(), anyhow::Error> {
         cptestctx.database.temp_dir().display()
     );
     println!(
+        "omicron-dev: internal DNS HTTP:     http://{}",
+        cptestctx.internal_dns.dropshot_server.local_addr()
+    );
+    println!(
+        "omicron-dev: internal DNS:          {}",
+        cptestctx.internal_dns.server.local_address()
+    );
+    println!(
         "omicron-dev: external DNS name:     {}",
         cptestctx.external_dns_zone_name,
     );

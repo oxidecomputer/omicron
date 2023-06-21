@@ -4,4 +4,5 @@
 
 // Copyright 2023 Oxide Computer Company
 
+pub mod rack_setup;
 pub mod update_events;
