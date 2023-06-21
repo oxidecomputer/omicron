@@ -2189,7 +2189,7 @@ impl ServiceManager {
                             )?;
 
                             // Add the underlay address.
-                            smfh.setprop(
+                            smfh.addpropvalue(
                                 "config/address",
                                 &format!("[{address}]:{MGS_PORT}"),
                             )?;
