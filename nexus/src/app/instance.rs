@@ -40,6 +40,8 @@ use omicron_common::api::internal::nexus;
 use propolis_client::support::tungstenite::protocol::frame::coding::CloseCode;
 use propolis_client::support::tungstenite::protocol::CloseFrame;
 use propolis_client::support::tungstenite::Message as WebSocketMessage;
+use propolis_client::support::InstanceSerialConsoleHelper;
+use propolis_client::support::WSClientOffset;
 use propolis_client::support::WebSocketStream;
 use sled_agent_client::types::InstanceMigrationSourceParams;
 use sled_agent_client::types::InstancePutMigrationIdsBody;
@@ -47,7 +49,6 @@ use sled_agent_client::types::InstancePutStateBody;
 use sled_agent_client::types::InstanceStateRequested;
 use sled_agent_client::types::SourceNatConfig;
 use sled_agent_client::Client as SledAgentClient;
-use slog::Logger;
 use std::net::SocketAddr;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -1309,25 +1310,6 @@ impl super::Nexus {
         instance_lookup: &lookup::Instance<'_>,
         params: &params::InstanceSerialConsoleStreamRequest,
     ) -> Result<(), Error> {
-        let client = match self
-            .propolis_client_for_instance(
-                instance_lookup,
-                authz::Action::Modify,
-            )
-            .await
-        {
-            Ok(x) => x,
-            Err(e) => {
-                let _ = client_stream
-                    .close(Some(CloseFrame {
-                        code: CloseCode::Error,
-                        reason: e.to_string().into(),
-                    }))
-                    .await
-                    .is_ok();
-                return Err(e);
-            }
-        };
         let client_addr = match self
             .propolis_addr_for_instance(instance_lookup, authz::Action::Modify)
             .await
@@ -1345,20 +1327,22 @@ impl super::Nexus {
             }
         };
 
-        let mut req = client.instance_serial();
-        if let Some(most_recent) = params.most_recent {
-            req = req.most_recent(most_recent);
-        }
-        match req.send().await {
-            Ok(response) => {
-                let log = self.log.clone();
-                Self::proxy_instance_serial_ws(
-                    client_stream,
-                    client_addr,
-                    Some(log),
-                )
-                .await
-                .map_err(|e| Error::internal_error(&format!("{}", e)))
+        let offset = match params.most_recent {
+            Some(most_recent) => WSClientOffset::MostRecent(most_recent),
+            None => WSClientOffset::FromStart(0),
+        };
+
+        match propolis_client::support::InstanceSerialConsoleHelper::new(
+            client_addr,
+            offset,
+            Some(self.log.clone()),
+        )
+        .await
+        {
+            Ok(propolis_conn) => {
+                Self::proxy_instance_serial_ws(client_stream, propolis_conn)
+                    .await
+                    .map_err(|e| Error::internal_error(&format!("{}", e)))
             }
             Err(e) => {
                 let message = format!(
@@ -1457,17 +1441,8 @@ impl super::Nexus {
 
     async fn proxy_instance_serial_ws(
         client_stream: WebSocketStream<impl AsyncRead + AsyncWrite + Unpin>,
-        propolis_addr: SocketAddr,
-        log: Option<Logger>,
+        mut propolis_conn: InstanceSerialConsoleHelper,
     ) -> Result<(), propolis_client::support::tungstenite::Error> {
-        let mut propolis_conn =
-            propolis_client::support::InstanceSerialConsoleHelper::new(
-                propolis_addr,
-                propolis_client::support::WSClientOffset::FromStart(0),
-                log,
-            )
-            .await?;
-
         let (mut nexus_sink, mut nexus_stream) = client_stream.split();
 
         let mut buffered_output = None;
@@ -1605,12 +1580,27 @@ mod tests {
     use core::time::Duration;
     use futures::{SinkExt, StreamExt};
     use propolis_client::support::tungstenite::protocol::Role;
+    use propolis_client::support::{
+        InstanceSerialConsoleHelper, WSClientOffset,
+    };
+    use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 
     #[tokio::test]
     async fn test_serial_console_stream_proxying() {
         let (nexus_client_conn, nexus_server_conn) = tokio::io::duplex(1024);
         let (propolis_client_conn, propolis_server_conn) =
             tokio::io::duplex(1024);
+        // The address doesn't matter -- it's just a key to look up the connection with.
+        let address =
+            SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(0, 0, 0, 0), 0));
+        let propolis_conn = InstanceSerialConsoleHelper::new_test(
+            [(address, propolis_client_conn)],
+            address,
+            WSClientOffset::FromStart(0),
+            None,
+        )
+        .await
+        .unwrap();
 
         let jh = tokio::spawn(async move {
             let nexus_client_stream = WebSocketStream::from_raw_socket(
@@ -1619,12 +1609,8 @@ mod tests {
                 None,
             )
             .await;
-            Nexus::proxy_instance_serial_ws(
-                nexus_client_stream,
-                propolis_client_conn,
-                None,
-            )
-            .await
+            Nexus::proxy_instance_serial_ws(nexus_client_stream, propolis_conn)
+                .await
         });
         let mut nexus_client_ws = WebSocketStream::from_raw_socket(
             nexus_client_conn,
