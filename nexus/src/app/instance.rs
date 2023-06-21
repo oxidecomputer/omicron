@@ -1328,6 +1328,22 @@ impl super::Nexus {
                 return Err(e);
             }
         };
+        let client_addr = match self
+            .propolis_addr_for_instance(instance_lookup, authz::Action::Modify)
+            .await
+        {
+            Ok(x) => x,
+            Err(e) => {
+                let _ = client_stream
+                    .close(Some(CloseFrame {
+                        code: CloseCode::Error,
+                        reason: e.to_string().into(),
+                    }))
+                    .await
+                    .is_ok();
+                return Err(e);
+            }
+        };
 
         let mut req = client.instance_serial();
         if let Some(most_recent) = params.most_recent {
@@ -1335,11 +1351,10 @@ impl super::Nexus {
         }
         match req.send().await {
             Ok(response) => {
-                let propolis_upgraded = response.into_inner();
                 let log = self.log.clone();
                 Self::proxy_instance_serial_ws(
                     client_stream,
-                    propolis_upgraded,
+                    client_addr,
                     Some(log),
                 )
                 .await
@@ -1359,6 +1374,43 @@ impl super::Nexus {
                     .is_ok();
                 Err(Error::internal_error(&message))
             }
+        }
+    }
+
+    async fn propolis_addr_for_instance(
+        &self,
+        instance_lookup: &lookup::Instance<'_>,
+        action: authz::Action,
+    ) -> Result<SocketAddr, Error> {
+        let (.., authz_instance, instance) =
+            instance_lookup.fetch_for(action).await?;
+        match instance.runtime_state.state.0 {
+            InstanceState::Running
+            | InstanceState::Rebooting
+            | InstanceState::Migrating
+            | InstanceState::Repairing => {
+                let ip_addr = instance
+                    .runtime_state
+                    .propolis_ip
+                    .ok_or_else(|| {
+                        Error::internal_error(
+                            "instance's hypervisor IP address not found",
+                        )
+                    })?
+                    .ip();
+                Ok(SocketAddr::new(ip_addr, PROPOLIS_PORT))
+            }
+            InstanceState::Creating
+            | InstanceState::Starting
+            | InstanceState::Stopping
+            | InstanceState::Stopped
+            | InstanceState::Failed => Err(Error::ServiceUnavailable {
+                internal_message: format!(
+                    "Cannot connect to hypervisor of instance in state {:?}",
+                    instance.runtime_state.state
+                ),
+            }),
+            InstanceState::Destroyed => Err(authz_instance.not_found()),
         }
     }
 
@@ -1405,12 +1457,13 @@ impl super::Nexus {
 
     async fn proxy_instance_serial_ws(
         client_stream: WebSocketStream<impl AsyncRead + AsyncWrite + Unpin>,
-        propolis_upgraded: impl AsyncRead + AsyncWrite + Unpin + Send + 'static,
+        propolis_addr: SocketAddr,
         log: Option<Logger>,
     ) -> Result<(), propolis_client::support::tungstenite::Error> {
         let mut propolis_conn =
             propolis_client::support::InstanceSerialConsoleHelper::new(
-                propolis_upgraded,
+                propolis_addr,
+                propolis_client::support::WSClientOffset::FromStart(0),
                 log,
             )
             .await;
