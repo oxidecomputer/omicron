@@ -428,12 +428,16 @@ impl ServiceManager {
 
     pub async fn load_services(&self) -> Result<(), Error> {
         let log = &self.inner.log;
+        let ledger_paths = self.all_service_ledgers().await;
+        info!(log, "Loading services from: {ledger_paths:?}");
+
         let mut existing_zones = self.inner.zones.lock().await;
         let Some(ledger) = Ledger::<AllZoneRequests>::new(
             log,
-            self.all_service_ledgers().await,
+            ledger_paths,
         )
         .await else {
+            info!(log, "Loading services - No services detected");
             return Ok(());
         };
         let services = ledger.data();

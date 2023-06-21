@@ -218,7 +218,7 @@ impl SledAgent {
             "component" => "SledAgent",
             "sled_id" => request.id.to_string(),
         ));
-        info!(&log, "created sled agent");
+        info!(&log, "SledAgent::new(..) staring");
 
         let etherstub = Dladm::ensure_etherstub(
             illumos_utils::dladm::UNDERLAY_ETHERSTUB_NAME,
@@ -266,7 +266,7 @@ impl SledAgent {
         match config.vmm_reservoir_percentage {
             Some(sz) if sz > 0 && sz < 100 => {
                 instances.set_reservoir_size(&hardware, sz).map_err(|e| {
-                    warn!(log, "Failed to set VMM reservoir size: {e}");
+                    error!(log, "Failed to set VMM reservoir size: {e}");
                     e
                 })?;
             }
