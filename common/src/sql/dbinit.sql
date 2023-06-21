@@ -186,6 +186,9 @@ CREATE INDEX ON omicron.public.switch (
  */
 
 CREATE TYPE omicron.public.service_kind AS ENUM (
+  'crucible',
+  'cockroach',
+  'clickhouse',
   'crucible_pantry',
   'dendrite',
   'external_dns',

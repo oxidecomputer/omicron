@@ -720,10 +720,58 @@ impl ServiceInner {
                                 kind: NexusTypes::ServiceKind::InternalNtp,
                             });
                         }
-                        details => {
+                        ServiceType::Clickhouse => {
+                            services.push(NexusTypes::ServicePutRequest {
+                                service_id,
+                                zone_id,
+                                sled_id,
+                                address: SocketAddrV6::new(
+                                    zone.addresses[0],
+                                    CLICKHOUSE_PORT,
+                                    0,
+                                    0,
+                                )
+                                .to_string(),
+                                kind: NexusTypes::ServiceKind::Clickhouse,
+                            });
+                        }
+                        ServiceType::Crucible => {
+                            services.push(NexusTypes::ServicePutRequest {
+                                service_id,
+                                zone_id,
+                                sled_id,
+                                address: SocketAddrV6::new(
+                                    zone.addresses[0],
+                                    CRUCIBLE_PORT,
+                                    0,
+                                    0,
+                                )
+                                .to_string(),
+                                kind: NexusTypes::ServiceKind::Crucible,
+                            });
+                        }
+                        ServiceType::CockroachDb => {
+                            services.push(NexusTypes::ServicePutRequest {
+                                service_id,
+                                zone_id,
+                                sled_id,
+                                address: SocketAddrV6::new(
+                                    zone.addresses[0],
+                                    COCKROACH_PORT,
+                                    0,
+                                    0,
+                                )
+                                .to_string(),
+                                kind: NexusTypes::ServiceKind::Cockroach,
+                            });
+                        }
+                        ServiceType::ManagementGatewayService
+                        | ServiceType::Wicketd { .. }
+                        | ServiceType::Maghemite { .. }
+                        | ServiceType::Tfport { .. } => {
                             return Err(SetupServiceError::BadConfig(format!(
                                 "RSS should not request service of type: {}",
-                                details
+                                svc.details
                             )));
                         }
                     }

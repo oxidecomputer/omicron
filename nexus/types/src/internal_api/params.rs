@@ -175,13 +175,16 @@ pub struct ServiceNic {
 #[derive(Debug, Serialize, Deserialize, JsonSchema, Clone, PartialEq, Eq)]
 #[serde(rename_all = "snake_case", tag = "type", content = "content")]
 pub enum ServiceKind {
+    Clickhouse,
+    Cockroach,
+    Crucible,
+    CruciblePantry,
     ExternalDns { external_address: IpAddr, nic: ServiceNic },
     InternalDns,
     Nexus { external_address: IpAddr, nic: ServiceNic },
     Oximeter,
     Dendrite,
     Tfport,
-    CruciblePantry,
     BoundaryNtp { snat: SourceNatConfig, nic: ServiceNic },
     InternalNtp,
 }
@@ -190,6 +193,9 @@ impl fmt::Display for ServiceKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         use ServiceKind::*;
         let s = match self {
+            Clickhouse => "clickhouse",
+            Cockroach => "cockroach",
+            Crucible => "crucible",
             ExternalDns { .. } => "external_dns",
             InternalDns => "internal_dns",
             Nexus { .. } => "nexus",
