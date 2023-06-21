@@ -947,6 +947,7 @@ CREATE TABLE omicron.public.disk (
      */
     attach_instance_id UUID,
     state_generation INT NOT NULL,
+    slot INT2 CHECK (slot >= 0 AND slot < 8),
     time_state_updated TIMESTAMPTZ NOT NULL,
 
     /* Disk configuration */

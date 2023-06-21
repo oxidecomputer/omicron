@@ -44,6 +44,16 @@ pub struct Disk {
     #[diesel(embed)]
     pub runtime_state: DiskRuntimeState,
 
+    /// The PCI slot (within the bank of slots reserved to disks) to which this
+    /// disk should be attached if its attached instance is started, or None
+    /// if there is no such assignment.
+    ///
+    /// Slot assignments are managed entirely in Nexus and aren't modified by
+    /// runtime state changes in the sled agent, so this field is part of the
+    /// "main" disk struct and not the runtime state (even though the attachment
+    /// state and slot assignment will often change together).
+    pub slot: Option<i16>,
+
     /// size of the Disk
     #[diesel(column_name = size_bytes)]
     pub size: ByteCount,
@@ -95,6 +105,7 @@ impl Disk {
             project_id,
             volume_id,
             runtime_state: runtime_initial,
+            slot: None,
             size: params.size.into(),
             block_size,
             create_snapshot_id,

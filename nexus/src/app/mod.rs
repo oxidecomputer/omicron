@@ -66,7 +66,7 @@ pub mod sagas;
 // TODO: When referring to API types, we should try to include
 // the prefix unless it is unambiguous.
 
-pub(crate) const MAX_DISKS_PER_INSTANCE: u32 = 8;
+pub(crate) use nexus_db_queries::db::queries::disk::MAX_DISKS_PER_INSTANCE;
 
 pub(crate) const MAX_NICS_PER_INSTANCE: usize = 8;
 

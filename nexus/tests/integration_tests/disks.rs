@@ -34,6 +34,7 @@ use omicron_common::api::external::Instance;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::NameOrId;
 use omicron_nexus::db::fixed_data::{silo::SILO_ID, FLEET_ID};
+use omicron_nexus::db::lookup::LookupPath;
 use omicron_nexus::TestInterfaces as _;
 use omicron_nexus::{external_api::params, Nexus};
 use oximeter::types::Datum;
@@ -349,6 +350,115 @@ async fn test_disk_create_disk_that_already_exists_fails(
     let disks = disks_list(&client, &disks_url).await;
     assert_eq!(disks.len(), 1);
     disks_eq(&disks[0], &disk);
+}
+
+#[nexus_test]
+async fn test_disk_slot_assignment(cptestctx: &ControlPlaneTestContext) {
+    let client = &cptestctx.external_client;
+    DiskTest::new(&cptestctx).await;
+    create_org_and_project(client).await;
+    let nexus = &cptestctx.server.apictx().nexus;
+
+    let disk_names = ["a", "b", "c", "d"];
+    let mut disks = Vec::new();
+    for name in disk_names {
+        let disk = create_disk(&client, PROJECT_NAME, name).await;
+        disks.push(disk);
+    }
+
+    // Create an instance to which to attach the disks, then force it to stop
+    // to allow disks to be attached. There should be no disks attached
+    // initially.
+    let instance = create_instance(&client, PROJECT_NAME, INSTANCE_NAME).await;
+    let instance_id = &instance.identity.id;
+    let instance_next =
+        set_instance_state(&client, INSTANCE_NAME, "stop").await;
+    instance_simulate(nexus, &instance_next.identity.id).await;
+    let url_instance_disks =
+        get_instance_disks_url(instance.identity.name.as_str());
+    let listed_disks = disks_list(&client, &url_instance_disks).await;
+    assert_eq!(listed_disks.len(), 0);
+
+    let url_instance_attach_disk =
+        get_disk_attach_url(&instance.identity.id.into());
+
+    async fn get_disk_slot(
+        ctx: &ControlPlaneTestContext,
+        disk_id: Uuid,
+    ) -> i16 {
+        let apictx = &ctx.server.apictx();
+        let nexus = &apictx.nexus;
+        let datastore = nexus.datastore();
+        let opctx =
+            OpContext::for_tests(ctx.logctx.log.new(o!()), datastore.clone());
+
+        let (.., db_disk) = LookupPath::new(&opctx, &datastore)
+            .disk_id(disk_id)
+            .fetch()
+            .await
+            .unwrap_or_else(|_| panic!("test disk {:?} should exist", disk_id));
+
+        db_disk.slot.expect("test disk should be attached")
+    }
+
+    // Slots are assigned serially as disks are attached.
+    for (expected_slot, disk) in disks.iter().enumerate() {
+        let attached_disk = disk_post(
+            client,
+            &url_instance_attach_disk,
+            disk.identity.name.clone(),
+        )
+        .await;
+
+        assert_eq!(attached_disk.identity.name, disk.identity.name);
+        assert_eq!(attached_disk.identity.id, disk.identity.id);
+        assert_eq!(attached_disk.state, DiskState::Attached(*instance_id));
+
+        assert_eq!(
+            get_disk_slot(cptestctx, attached_disk.identity.id).await,
+            expected_slot as i16
+        );
+    }
+
+    // Detach disks 1 and 2 and reattach them in reverse order. Verify that
+    // this inverts their slots but leaves the other disks alone.
+    let url_instance_detach_disk =
+        get_disk_detach_url(&instance.identity.id.into());
+    disk_post(
+        client,
+        &url_instance_detach_disk,
+        disks[1].identity.name.clone(),
+    )
+    .await;
+    disk_post(
+        client,
+        &url_instance_detach_disk,
+        disks[2].identity.name.clone(),
+    )
+    .await;
+
+    disk_post(
+        client,
+        &url_instance_attach_disk,
+        disks[2].identity.name.clone(),
+    )
+    .await;
+    disk_post(
+        client,
+        &url_instance_attach_disk,
+        disks[1].identity.name.clone(),
+    )
+    .await;
+
+    // The slice here is constructed so that slice[x] yields the index of the
+    // disk that should be assigned to slot x.
+    for (expected_slot, disk_index) in [0, 2, 1, 3].iter().enumerate() {
+        assert_eq!(
+            get_disk_slot(cptestctx, disks[*disk_index as usize].identity.id)
+                .await,
+            expected_slot as i16
+        );
+    }
 }
 
 #[nexus_test]

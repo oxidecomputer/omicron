@@ -625,12 +625,30 @@ impl super::Nexus {
             .await?;
 
         let mut disk_reqs = vec![];
-        for (i, disk) in disks.iter().enumerate() {
+        for disk in &disks {
+            // Disks that are attached to an instance should always have a slot
+            // assignment, but if for some reason this one doesn't, return an
+            // error instead of taking down the whole process.
+            let slot = match disk.slot {
+                Some(s) => s,
+                None => {
+                    error!(self.log, "attached disk has no PCI slot assignment";
+                       "disk_id" => %disk.id(),
+                       "disk_name" => disk.name().to_string(),
+                       "instance" => ?disk.runtime_state.attach_instance_id);
+
+                    return Err(Error::internal_error(&format!(
+                        "disk {} is attached but has no PCI slot assignment",
+                        disk.id()
+                    )));
+                }
+            };
+
             let volume =
                 self.db_datastore.volume_checkout(disk.volume_id).await?;
             disk_reqs.push(sled_agent_client::types::DiskRequest {
                 name: disk.name().to_string(),
-                slot: sled_agent_client::types::Slot(i as u8),
+                slot: sled_agent_client::types::Slot(slot as u8),
                 read_only: false,
                 device: "nvme".to_string(),
                 volume_construction_request: serde_json::from_str(
