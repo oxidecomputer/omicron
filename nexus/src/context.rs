@@ -149,6 +149,11 @@ impl ServerContext {
                 .map_err(|e| format!("Failed to create DNS resolver: {}", e))?
             }
             nexus_config::InternalDns::FromAddress { address } => {
+                info!(
+                    log,
+                    "Setting up resolver using DNS address: {:?}", address
+                );
+
                 internal_dns::resolver::Resolver::new_from_addrs(
                     log.new(o!("component" => "DnsResolver")),
                     vec![address],
