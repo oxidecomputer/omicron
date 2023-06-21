@@ -186,6 +186,9 @@ CREATE INDEX ON omicron.public.switch (
  */
 
 CREATE TYPE omicron.public.service_kind AS ENUM (
+  'crucible',
+  'cockroach',
+  'clickhouse',
   'crucible_pantry',
   'dendrite',
   'external_dns',
@@ -385,7 +388,9 @@ CREATE TABLE omicron.public.Zpool (
 CREATE TYPE omicron.public.dataset_kind AS ENUM (
   'crucible',
   'cockroach',
-  'clickhouse'
+  'clickhouse',
+  'external_dns',
+  'internal_dns'
 );
 
 /*
