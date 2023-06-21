@@ -12,7 +12,7 @@ use uuid::Uuid;
 
 use super::{generators::Action, network::FlowId};
 
-// A simplified version of `State::RackSecretState`
+// A simplified version of `state::RackSecretState`
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ModelRackSecretState {
     Empty,
@@ -37,15 +37,28 @@ impl ModelRackSecretState {
     }
 }
 
+// A simplified version of `state::State`
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ModelState {
+    Uninitialized,
+    InitialMember,
+    Learning,
+    Learned,
+}
+
 // A simplified version of a peer `FSM`
 #[derive(Debug, Clone)]
 pub struct PeerModel {
+    pub state: ModelState,
     pub rack_secret_state: ModelRackSecretState,
 }
 
 impl PeerModel {
     pub fn new() -> PeerModel {
-        PeerModel { rack_secret_state: ModelRackSecretState::Empty }
+        PeerModel {
+            rack_secret_state: ModelRackSecretState::Empty,
+            state: ModelState::Uninitialized,
+        }
     }
 }
 
@@ -117,6 +130,10 @@ impl Model {
             Action::RackInit { rack_uuid, .. } => {
                 if self.rack_uuid.is_none() {
                     self.rack_uuid = Some(rack_uuid);
+                    for peer_id in &self.initial_members {
+                        self.peers.get_mut(peer_id).unwrap().state =
+                            ModelState::InitialMember;
+                    }
                 }
                 vec![]
             }

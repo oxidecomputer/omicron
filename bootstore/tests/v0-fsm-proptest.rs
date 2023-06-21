@@ -14,8 +14,9 @@ mod common;
 
 use assert_matches::assert_matches;
 use bootstore::schemes::v0::{
-    ApiError, ApiOutput, Config, Envelope, Fsm, Msg, Output, RackSecretState,
-    Request, RequestType, Response, ResponseType, State, Ticks,
+    ApiError, ApiOutput, Config, Envelope, Fsm, Msg, MsgError, Output,
+    RackSecretState, Request, RequestType, Response, ResponseType, State,
+    Ticks,
 };
 
 use proptest::prelude::*;
@@ -24,7 +25,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use uuid::Uuid;
 
 use common::generators::{arb_test_input, Action, Delays};
-use common::model::{ExpectedOutput, Model, ModelRackSecretState, PeerModel};
+use common::model::{
+    ExpectedOutput, Model, ModelRackSecretState, ModelState, PeerModel,
+};
 use common::network::Network;
 
 /// State for the running test
@@ -332,6 +335,22 @@ impl TestState {
                     prop_assert!(clock <= *expiry);
                 }
             }
+
+            // Ensure the peer is in the same state as the model
+            match self.model.get_peer(peer_id).state {
+                ModelState::Uninitialized => {
+                    prop_assert_eq!(peer.state_name(), "uninitialized")
+                }
+                ModelState::InitialMember => {
+                    prop_assert_eq!(peer.state_name(), "initial_member")
+                }
+                ModelState::Learning => {
+                    prop_assert_eq!(peer.state_name(), "learning")
+                }
+                ModelState::Learned => {
+                    prop_assert_eq!(peer.state_name(), "learned")
+                }
+            }
         }
 
         // Ensure that sleds see mutual connectivity.
@@ -399,17 +418,34 @@ impl TestState {
             }) => {
                 prop_assert_eq!(output.envelopes.len(), 1);
                 // Ensure that the response is sent to the requester
-                // and is of the righ type
+                // and is of the right type
                 let envelope = output.envelopes.first().unwrap();
                 prop_assert_eq!(&envelope.to, source);
-                let is_share_rsp = matches!(
-                    envelope.msg,
-                    Msg::Rsp(Response {
-                        request_id: id,
-                        type_: ResponseType::Share(_)
-                    })
-                );
-                prop_assert!(is_share_rsp);
+                let Msg::Rsp(Response { request_id: id, type_ }) =
+                    &envelope.msg
+                else {
+                    panic!("Msg must be a response");
+                };
+                match self.model.get_peer(destination).state {
+                    ModelState::Uninitialized => {
+                        let matches = matches!(
+                            type_,
+                            ResponseType::Error(MsgError::NotInitialized)
+                        );
+                        prop_assert!(matches);
+                    }
+                    ModelState::Learning => {
+                        let matches = matches!(
+                            type_,
+                            ResponseType::Error(MsgError::StillLearning)
+                        );
+                        prop_assert!(matches);
+                    }
+                    ModelState::InitialMember | ModelState::Learned => {
+                        let matches = matches!(type_, ResponseType::Share(_));
+                        prop_assert!(matches);
+                    }
+                }
                 Ok(())
             }
             Msg::Req(Request { id, type_: RequestType::Learn }) => {
@@ -621,7 +657,7 @@ const MAX_INITIAL_MEMBERS: usize = 12;
 const MAX_LEARNERS: usize = 10;
 
 proptest! {
-    #![proptest_config(ProptestConfig {max_shrink_iters: 10000, ..ProptestConfig::default()})]
+    #![proptest_config(ProptestConfig {max_shrink_iters: 100000, ..ProptestConfig::default()})]
     #[test]
     fn run(input in arb_test_input(MAX_INITIAL_MEMBERS, MAX_LEARNERS)) {
         let mut state = TestState::new(

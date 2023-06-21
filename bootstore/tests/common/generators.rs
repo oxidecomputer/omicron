@@ -85,7 +85,12 @@ pub fn arb_test_input(
             let rack_uuid = Uuid::new_v4();
             (
                 proptest::collection::vec(
-                    arb_action(rack_uuid, config, initial_members.clone()),
+                    arb_action(
+                        rack_uuid,
+                        config,
+                        initial_members.clone(),
+                        learners.clone(),
+                    ),
                     1..=20,
                 ),
                 Just(initial_members),
@@ -193,8 +198,11 @@ fn arb_action(
     rack_uuid: Uuid,
     config: Config,
     initial_members: BTreeSet<Baseboard>,
+    learners: BTreeSet<Baseboard>,
 ) -> impl Strategy<Value = Action> {
-    let flows = arb_flows(initial_members.iter().cloned().collect::<Vec<_>>());
+    let peers: Vec<_> =
+        initial_members.iter().chain(learners.iter()).cloned().collect();
+    let flows = arb_flows(peers);
     let initial_members2 = initial_members.clone();
     prop_oneof![
         100 => (TICKS_PER_ACTION).prop_map(Action::Ticks),
