@@ -1466,7 +1466,7 @@ impl super::Nexus {
                 propolis_client::support::WSClientOffset::FromStart(0),
                 log,
             )
-            .await;
+            .await?;
 
         let (mut nexus_sink, mut nexus_stream) = client_stream.split();
 
@@ -1548,40 +1548,45 @@ impl super::Nexus {
                     result?;
                 }
                 msg = propolis_read => {
-                    match msg {
-                        None => {
-                            nexus_sink.send(WebSocketMessage::Close(Some(CloseFrame {
-                                code: CloseCode::Abnormal,
-                                reason: std::borrow::Cow::from(
-                                    "nexus: websocket connection to serial port closed unexpectedly"
-                                ),
-                            }))).await?;
-                            break;
+                    if let Some(msg) = msg {
+                        let msg = match msg {
+                            Ok(msg) => msg.process().await, // msg.process isn't cancel-safe
+                            Err(error) => Err(error),
+                        };
+                        match msg {
+                            Err(e) => {
+                                nexus_sink.send(WebSocketMessage::Close(Some(CloseFrame {
+                                    code: CloseCode::Error,
+                                    reason: std::borrow::Cow::from(
+                                        format!("nexus: error in websocket connection to serial port: {}", e)
+                                    ),
+                                }))).await?;
+                                return Err(e);
+                            }
+                            Ok(WebSocketMessage::Close(details)) => {
+                                nexus_sink.send(WebSocketMessage::Close(details)).await?;
+                                break;
+                            }
+                            Ok(WebSocketMessage::Text(_json)) => {
+                                // connecting to new propolis-server is handled
+                                // within InstanceSerialConsoleHelper already.
+                                // we might consider sending the nexus client
+                                // an informational event for UX polish.
+                            }
+                            Ok(WebSocketMessage::Binary(data)) => {
+                                buffered_output = Some(WebSocketMessage::Binary(data))
+                            }
+                            // Frame won't exist at this level, and ping reply is handled by tungstenite
+                            Ok(WebSocketMessage::Frame(_) | WebSocketMessage::Ping(_) | WebSocketMessage::Pong(_)) => {}
                         }
-                        Some(Err(e)) => {
-                            nexus_sink.send(WebSocketMessage::Close(Some(CloseFrame {
-                                code: CloseCode::Error,
-                                reason: std::borrow::Cow::from(
-                                    format!("nexus: error in websocket connection to serial port: {}", e)
-                                ),
-                            }))).await?;
-                            return Err(e);
-                        }
-                        Some(Ok(WebSocketMessage::Close(details))) => {
-                            nexus_sink.send(WebSocketMessage::Close(details)).await?;
-                            break;
-                        }
-                        Some(Ok(WebSocketMessage::Text(_json))) => {
-                            // connecting to new propolis-server is handled
-                            // within InstanceSerialConsoleHelper already.
-                            // we might consider sending the nexus client
-                            // an informational event for UX polish.
-                        }
-                        Some(Ok(WebSocketMessage::Binary(data))) => {
-                            buffered_output = Some(WebSocketMessage::Binary(data))
-                        }
-                        // Frame won't exist at this level, and ping reply is handled by tungstenite
-                        Some(Ok(WebSocketMessage::Frame(_) | WebSocketMessage::Ping(_) | WebSocketMessage::Pong(_))) => {}
+                    } else {
+                        nexus_sink.send(WebSocketMessage::Close(Some(CloseFrame {
+                            code: CloseCode::Abnormal,
+                            reason: std::borrow::Cow::from(
+                                "nexus: websocket connection to serial port closed unexpectedly"
+                            ),
+                        }))).await?;
+                        break;
                     }
                 }
                 result = propolis_write => {
