@@ -3174,6 +3174,7 @@ dependencies = [
  "oxide-vpc",
  "schemars",
  "serde",
+ "serde_json",
  "slog",
  "smf",
  "thiserror",

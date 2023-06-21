@@ -665,10 +665,6 @@ impl TryFrom<ServiceZoneService>
 }
 
 /// Used to request that the Sled initialize multiple services.
-///
-/// This may be used to record that certain sleds are responsible for
-/// launching services which may not be associated with a dataset, such
-/// as Nexus.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 pub struct ServiceEnsureBody {
     pub services: Vec<ServiceZoneRequest>,
