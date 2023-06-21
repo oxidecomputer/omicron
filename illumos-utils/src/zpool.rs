@@ -7,7 +7,7 @@
 use crate::{execute, ExecutionError, PFEXEC};
 use camino::{Utf8Path, Utf8PathBuf};
 use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::fmt;
 use std::str::FromStr;
 use uuid::Uuid;
@@ -271,9 +271,7 @@ impl Zpool {
     }
 }
 
-#[derive(
-    Copy, Clone, Debug, Hash, PartialEq, Eq, JsonSchema, Serialize, Deserialize,
-)]
+#[derive(Copy, Clone, Debug, Hash, PartialEq, Eq, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ZpoolKind {
     // This zpool is used for external storage (u.2)
@@ -286,12 +284,37 @@ pub enum ZpoolKind {
 ///
 /// This expects that the format will be: `ox{i,p}_<UUID>` - we parse the prefix
 /// when reading the structure, and validate that the UUID can be utilized.
-#[derive(
-    Clone, Debug, Hash, PartialEq, Eq, JsonSchema, Serialize, Deserialize,
-)]
+#[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub struct ZpoolName {
     id: Uuid,
     kind: ZpoolKind,
+}
+
+/// Custom JsonSchema implementation to encode the constraints on Name.
+impl JsonSchema for ZpoolName {
+    fn schema_name() -> String {
+        "ZpoolName".to_string()
+    }
+    fn json_schema(
+        _: &mut schemars::gen::SchemaGenerator,
+    ) -> schemars::schema::Schema {
+        schemars::schema::SchemaObject {
+            metadata: Some(Box::new(schemars::schema::Metadata {
+                title: Some(
+                    "The name of a Zpool".to_string(),
+                ),
+                description: Some(
+                    "Zpool names are of the format ox{i,p}_<UUID>. They are either \
+                     Internal or External, and should be unique"
+                        .to_string(),
+                ),
+                ..Default::default()
+            })),
+            instance_type: Some(schemars::schema::InstanceType::String.into()),
+            ..Default::default()
+        }
+        .into()
+    }
 }
 
 impl ZpoolName {
@@ -324,6 +347,25 @@ impl ZpoolName {
         path.push(self.id().to_string());
         path.push(dataset);
         path
+    }
+}
+
+impl<'de> Deserialize<'de> for ZpoolName {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        ZpoolName::from_str(&s).map_err(serde::de::Error::custom)
+    }
+}
+
+impl Serialize for ZpoolName {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(&self.to_string())
     }
 }
 
@@ -361,13 +403,78 @@ mod test {
 
     #[test]
     fn test_parse_zpool_name_json() {
-        let _zpool_name: ZpoolName = serde_json::from_str(
-            r#"{
-            "id": "d462a7f7-b628-40fe-80ff-4e4189e2d62b",
-            "kind": "external"
-        }"#,
-        )
-        .expect("Could not parse ZpoolName from Json Object");
+        #[derive(Serialize, Deserialize, JsonSchema)]
+        struct TestDataset {
+            pool_name: ZpoolName,
+        }
+
+        // Confirm that we can convert from a JSON string to a a ZpoolName
+        let json_string =
+            r#"{"pool_name":"oxi_d462a7f7-b628-40fe-80ff-4e4189e2d62b"}"#;
+        let dataset: TestDataset = serde_json::from_str(json_string)
+            .expect("Could not parse ZpoolName from Json Object");
+        assert!(matches!(dataset.pool_name.kind, ZpoolKind::Internal));
+
+        // Confirm we can go the other way (ZpoolName to JSON string) too.
+        let j = serde_json::to_string(&dataset)
+            .expect("Cannot convert back to JSON string");
+        assert_eq!(j, json_string);
+    }
+
+    fn toml_string(s: &str) -> String {
+        format!("zpool_name = \"{}\"", s)
+    }
+
+    fn parse_name(s: &str) -> Result<ZpoolName, toml::de::Error> {
+        toml_string(s)
+            .parse::<toml::Value>()
+            .expect("Cannot parse as TOML value")
+            .get("zpool_name")
+            .expect("Missing key")
+            .clone()
+            .try_into::<ZpoolName>()
+    }
+
+    #[test]
+    fn test_parse_external_zpool_name() {
+        let uuid: Uuid =
+            "d462a7f7-b628-40fe-80ff-4e4189e2d62b".parse().unwrap();
+        let good_name = format!("{}{}", ZPOOL_EXTERNAL_PREFIX, uuid);
+
+        let name = parse_name(&good_name).expect("Cannot parse as ZpoolName");
+        assert_eq!(uuid, name.id());
+        assert_eq!(ZpoolKind::External, name.kind());
+    }
+
+    #[test]
+    fn test_parse_internal_zpool_name() {
+        let uuid: Uuid =
+            "d462a7f7-b628-40fe-80ff-4e4189e2d62b".parse().unwrap();
+        let good_name = format!("{}{}", ZPOOL_INTERNAL_PREFIX, uuid);
+
+        let name = parse_name(&good_name).expect("Cannot parse as ZpoolName");
+        assert_eq!(uuid, name.id());
+        assert_eq!(ZpoolKind::Internal, name.kind());
+    }
+
+    #[test]
+    fn test_parse_bad_zpool_names() {
+        let bad_names = vec![
+            // Nonsense string
+            "this string is GARBAGE",
+            // Missing prefix
+            "d462a7f7-b628-40fe-80ff-4e4189e2d62b",
+            // Underscores
+            "oxp_d462a7f7_b628_40fe_80ff_4e4189e2d62b",
+        ];
+
+        for bad_name in &bad_names {
+            assert!(
+                parse_name(&bad_name).is_err(),
+                "Parsing {} should fail",
+                bad_name
+            );
+        }
     }
 
     #[test]

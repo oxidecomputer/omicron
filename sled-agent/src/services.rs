@@ -511,7 +511,7 @@ impl ServiceManager {
         underlay_address: Ipv6Addr,
         rack_id: Uuid,
     ) -> Result<(), Error> {
-        debug!(&self.inner.log, "sled agent started"; "underlay_address" => underlay_address.to_string());
+        info!(&self.inner.log, "sled agent started"; "underlay_address" => underlay_address.to_string());
         self.inner
             .sled_info
             .set(SledAgentInfo {

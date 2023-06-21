@@ -2479,29 +2479,10 @@
           "id"
         ]
       },
-      "ZpoolKind": {
-        "type": "string",
-        "enum": [
-          "external",
-          "internal"
-        ]
-      },
       "ZpoolName": {
-        "description": "A wrapper around a zpool name.\n\nThis expects that the format will be: `ox{i,p}_<UUID>` - we parse the prefix when reading the structure, and validate that the UUID can be utilized.",
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "kind": {
-            "$ref": "#/components/schemas/ZpoolKind"
-          }
-        },
-        "required": [
-          "id",
-          "kind"
-        ]
+        "title": "The name of a Zpool",
+        "description": "Zpool names are of the format ox{i,p}_<UUID>. They are either Internal or External, and should be unique",
+        "type": "string"
       }
     }
   }

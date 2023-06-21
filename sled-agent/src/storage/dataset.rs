@@ -3,7 +3,6 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::params::DatasetKind;
-use illumos_utils::zpool::ZpoolKind;
 use illumos_utils::zpool::ZpoolName;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -38,22 +37,10 @@ impl DatasetName {
 
 impl From<DatasetName> for sled_agent_client::types::DatasetName {
     fn from(n: DatasetName) -> Self {
-        let id = n.pool().id();
-
-        // NOTE: Ideally, this translation would live alongside the definitions
-        // of ZpoolKind and ZpoolName, but they're currently in illumos-utils,
-        // which has no dependency on sled_agent_client.
-        let kind = match n.pool().kind() {
-            ZpoolKind::External => {
-                sled_agent_client::types::ZpoolKind::External
-            }
-            ZpoolKind::Internal => {
-                sled_agent_client::types::ZpoolKind::Internal
-            }
-        };
-        let pool_name = sled_agent_client::types::ZpoolName { id, kind };
-
-        Self { pool_name, kind: n.dataset().clone().into() }
+        Self {
+            pool_name: n.pool().to_string().into(),
+            kind: n.dataset().clone().into(),
+        }
     }
 }
 
