@@ -98,7 +98,7 @@ use uuid::Uuid;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
-    #[error("Failed to initilize CockroachDb: {err}")]
+    #[error("Failed to initialize CockroachDb: {err}")]
     CockroachInit {
         #[source]
         err: RunCommandError,

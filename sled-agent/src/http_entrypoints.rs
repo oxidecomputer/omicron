@@ -131,12 +131,7 @@ async fn filesystem_put(
     Ok(HttpResponseUpdatedNoContent())
 }
 
-/// Initializes a CockroachDB cluster, calling:
-///
-/// <https://www.cockroachlabs.com/docs/stable/cockroach-init.html>
-///
-/// and also populating the contents of the filesystem with preliminary
-/// tables.
+/// Initializes a CockroachDB cluster
 #[endpoint {
     method = POST,
     path = "/cockroachdb",
