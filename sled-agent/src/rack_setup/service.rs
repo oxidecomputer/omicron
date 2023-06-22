@@ -282,7 +282,7 @@ impl ServiceInner {
         ServiceInner { log }
     }
 
-    async fn initialize_services(
+    async fn initialize_services_on_sled(
         &self,
         sled_address: SocketAddrV6,
         services: &Vec<ServiceZoneRequest>,
@@ -331,20 +331,25 @@ impl ServiceInner {
         Ok(())
     }
 
-    // Configure the internal DNS servers with the initial DNS data
-    async fn initialize_dns(
+    // Ensure that all services of a particular type are running.
+    //
+    // This is useful in a rack-setup context, where initial boot ordering
+    // can matter for first-time-setup.
+    //
+    // Note that after first-time setup, the initialization order of
+    // services should not matter.
+    async fn ensure_all_services_of_type(
         &self,
         service_plan: &ServicePlan,
+        zone_types: &HashSet<std::mem::Discriminant<ZoneType>>,
     ) -> Result<(), SetupServiceError> {
-        let log = &self.log;
-        // Start up the internal DNS services
         futures::future::join_all(service_plan.services.iter().map(
             |(sled_address, services_request)| async move {
                 let services: Vec<_> = services_request
                     .services
                     .iter()
                     .filter_map(|service| {
-                        if matches!(service.zone_type, ZoneType::InternalDns,) {
+                        if zone_types.contains(&std::mem::discriminant(&service.zone_type)) {
                             Some(service.clone())
                         } else {
                             None
@@ -352,7 +357,7 @@ impl ServiceInner {
                     })
                     .collect();
                 if !services.is_empty() {
-                    self.initialize_services(*sled_address, &services).await?;
+                    self.initialize_services_on_sled(*sled_address, &services).await?;
                 }
                 Ok(())
             },
@@ -360,6 +365,15 @@ impl ServiceInner {
         .await
         .into_iter()
         .collect::<Result<_, SetupServiceError>>()?;
+        Ok(())
+    }
+
+    // Configure the internal DNS servers with the initial DNS data
+    async fn initialize_internal_dns_records(
+        &self,
+        service_plan: &ServicePlan,
+    ) -> Result<(), SetupServiceError> {
+        let log = &self.log;
 
         // Determine the list of DNS servers that are supposed to exist based on
         // the service plan that has just been deployed.
@@ -1049,7 +1063,10 @@ impl ServiceInner {
 
         // Set up internal DNS services first and write the initial
         // DNS configuration to the internal DNS servers.
-        self.initialize_dns(&service_plan).await?;
+        let mut zone_types = HashSet::new();
+        zone_types.insert(std::mem::discriminant(&ZoneType::InternalDns));
+        self.ensure_all_services_of_type(&service_plan, &zone_types).await?;
+        self.initialize_internal_dns_records(&service_plan).await?;
 
         // Initialize rack network before NTP comes online, otherwise boundary
         // services will not be available and NTP will fail to sync
@@ -1179,41 +1196,22 @@ impl ServiceInner {
         // Next start up the NTP services.
         // Note we also specify internal DNS services again because it
         // can ony be additive.
-        futures::future::join_all(service_plan.services.iter().map(
-            |(sled_address, services_request)| async move {
-                let services: Vec<_> = services_request
-                    .services
-                    .iter()
-                    .filter_map(|svc| {
-                        if matches!(
-                            svc.zone_type,
-                            ZoneType::InternalDns | ZoneType::Ntp
-                        ) {
-                            Some(svc.clone())
-                        } else {
-                            None
-                        }
-                    })
-                    .collect();
-                if !services.is_empty() {
-                    self.initialize_services(*sled_address, &services).await?;
-                }
-                Ok(())
-            },
-        ))
-        .await
-        .into_iter()
-        .collect::<Result<_, SetupServiceError>>()?;
+        zone_types.insert(std::mem::discriminant(&ZoneType::Ntp));
+        self.ensure_all_services_of_type(&service_plan, &zone_types).await?;
 
         // Wait until time is synchronized on all sleds before proceeding.
         self.wait_for_timesync(&sled_addresses).await?;
 
         info!(self.log, "Finished setting up Internal DNS and NTP");
 
+        // Wait until Cockroach has been initialized before running Nexus.
+        zone_types.insert(std::mem::discriminant(&ZoneType::CockroachDb));
+        self.ensure_all_services_of_type(&service_plan, &zone_types).await?;
+
         // Issue service initialization requests.
         futures::future::join_all(service_plan.services.iter().map(
             |(sled_address, services_request)| async move {
-                // With the current implementation of "initialize_services",
+                // With the current implementation of "initialize_services_on_sled",
                 // we must provide the set of *all* services that should be
                 // executing on a sled.
                 //
@@ -1221,7 +1219,7 @@ impl ServiceInner {
                 // they are already running - this is fine, however, as the
                 // receiving sled agent doesn't modify the already-running
                 // service.
-                self.initialize_services(
+                self.initialize_services_on_sled(
                     *sled_address,
                     &services_request.services,
                 )
