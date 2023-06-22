@@ -246,9 +246,6 @@ impl DataStore {
         info!(log, "Created recovery user's password");
 
         // Grant that user Admin privileges on the Recovery Silo.
-        //
-        // First, fetch the current set of role assignments for the
-        // Fleet so that we can modify it.
 
         // This is very subtle: we must generate both of these queries before we
         // execute either of them, and we must not attempt to do any authz
@@ -259,7 +256,7 @@ impl DataStore {
             db_silo.id(),
             LookupType::ById(db_silo.id()),
         );
-        let (q3, q4) = Self::role_assignment_replace_visible_queries(
+        let (q1, q2) = Self::role_assignment_replace_visible_queries(
             opctx,
             &authz_silo,
             &[shared::RoleAssignment {
@@ -273,8 +270,8 @@ impl DataStore {
         .map_err(TxnError::CustomError)?;
         debug!(log, "Generated role assignment queries");
 
-        q3.execute_async(conn).await?;
-        q4.execute_async(conn).await?;
+        q1.execute_async(conn).await?;
+        q2.execute_async(conn).await?;
         info!(log, "Granted Silo privileges");
 
         Ok(())

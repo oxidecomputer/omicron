@@ -170,7 +170,7 @@ fn do_authz_resource(
                             self.key
                         }
 
-                        fn conferred_roles(
+                        fn conferred_roles_by(
                             &self,
                             _authn: &authn::Context,
                         ) ->

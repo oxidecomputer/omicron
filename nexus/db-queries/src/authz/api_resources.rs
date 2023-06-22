@@ -96,7 +96,7 @@ pub trait ApiResourceWithRoles: ApiResource {
     /// "parent", all of the roles that might affect the parent will be fetched,
     /// which include all of _its_ parents.  With this function, we only fetch
     /// this one resource's directly-attached roles.
-    fn conferred_roles(
+    fn conferred_roles_by(
         &self,
         authn: &authn::Context,
     ) -> Result<Option<(ResourceType, Uuid)>, Error>;
@@ -222,7 +222,7 @@ impl ApiResourceWithRoles for Fleet {
         *FLEET_ID
     }
 
-    fn conferred_roles(
+    fn conferred_roles_by(
         &self,
         authn: &authn::Context,
     ) -> Result<Option<(ResourceType, Uuid)>, Error> {

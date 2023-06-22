@@ -565,13 +565,7 @@ mod tests {
             // We'll use this to construct an input to `from_database_string()`
             // that was not emitted by any of the variants'
             // `to_database_string()` functions.
-            match (maxlen, serialized.len()) {
-                (None, newlen) => maxlen = Some(newlen),
-                (Some(oldlen), newlen) if newlen > oldlen => {
-                    maxlen = Some(newlen)
-                }
-                _ => (),
-            }
+            maxlen = maxlen.max(Some(serialized.len()));
         }
 
         // Check that `from_database_string()` fails when given input that

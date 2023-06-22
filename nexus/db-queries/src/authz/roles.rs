@@ -111,7 +111,7 @@ where
         // If roles can be conferred by another resource, load that resource's
         // roles, too.
         if let Some((resource_type, resource_id)) =
-            with_roles.conferred_roles(authn)?
+            with_roles.conferred_roles_by(authn)?
         {
             load_roles_for_resource(
                 opctx,
