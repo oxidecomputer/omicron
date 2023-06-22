@@ -75,8 +75,13 @@ pub enum Cmd {
     /// Force cancel an update.
     AbortUpdate,
 
-    /// Reset update state.
-    ClearUpdateState,
+    /// Reset screen-specific state (e.g., clearing the state for a
+    /// completed/failed update, or resetting the rack from the rack setup
+    /// screen).
+    ResetState,
+
+    /// Begin rack setup.
+    StartRackSetup,
 
     /// Goto top of list/screen/etc...
     GotoTop,
@@ -135,6 +140,12 @@ pub enum ShowPopupCmd {
         component_id: ComponentId,
         response: Result<(), String>,
     },
+
+    /// A response to a rack-setup request.
+    StartRackSetupResponse(Result<(), String>),
+
+    /// A response to a rack-reset request.
+    StartRackResetResponse(Result<(), String>),
 }
 
 /// We allow certain multi-key sequences, and explicitly enumerate the starting
@@ -207,7 +218,13 @@ impl KeyHandler {
                 if event.modifiers
                     == KeyModifiers::CONTROL | KeyModifiers::ALT =>
             {
-                Cmd::ClearUpdateState
+                Cmd::ResetState
+            }
+            KeyCode::Char('s')
+                if event.modifiers
+                    == KeyModifiers::CONTROL | KeyModifiers::ALT =>
+            {
+                Cmd::StartRackSetup
             }
             KeyCode::Char('n') => Cmd::No,
             KeyCode::Char('k') if event.modifiers == KeyModifiers::CONTROL => {

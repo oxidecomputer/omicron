@@ -232,7 +232,7 @@ fn read_and_hash_password(log: &Logger) -> Result<PasswordHashString> {
     let pass1 = rpassword::prompt_password(
         "Password for recovery user of recovery silo: ",
     )
-    .context("failed to read password")?;
+    .context("failed to read password (do you need to use `ssh -t`?)")?;
     let pass1 = Zeroizing::new(pass1);
 
     let pass2 = rpassword::prompt_password(

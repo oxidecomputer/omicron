@@ -260,25 +260,65 @@
         }
       }
     },
-    "/repository": {
-      "put": {
-        "summary": "Upload a TUF repository to the server.",
-        "description": "At any given time, wicketd will keep at most one TUF repository in memory. Any previously-uploaded repositories will be discarded.",
-        "operationId": "put_repository",
-        "requestBody": {
-          "content": {
-            "application/octet-stream": {
-              "schema": {
-                "type": "string",
-                "format": "binary"
+    "/rack-setup": {
+      "get": {
+        "summary": "Query current state of rack setup.",
+        "operationId": "get_rack_setup_state",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RackOperationStatus"
+                }
               }
             }
           },
-          "required": true
-        },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "post": {
+        "summary": "Run rack setup.",
+        "description": "Will return an error if not all of the rack setup configuration has been populated.",
+        "operationId": "post_run_rack_setup",
         "responses": {
-          "204": {
-            "description": "resource updated"
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RackInitId"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "summary": "Run rack reset.",
+        "operationId": "post_run_rack_reset",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RackResetId"
+                }
+              }
+            }
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -289,7 +329,7 @@
         }
       }
     },
-    "/rss-config": {
+    "/rack-setup/config": {
       "get": {
         "summary": "Get the current status of the user-provided (or system-default-provided, in",
         "description": "some cases) RSS configuration.",
@@ -355,7 +395,7 @@
         }
       }
     },
-    "/rss-config/cert": {
+    "/rack-setup/config/cert": {
       "post": {
         "summary": "Add an external certificate.",
         "description": "This must be paired with its private key. They may be posted in either order, but one cannot post two certs in a row (or two keys in a row).",
@@ -396,7 +436,7 @@
         }
       }
     },
-    "/rss-config/key": {
+    "/rack-setup/config/key": {
       "post": {
         "summary": "Add the private key of an external certificate.",
         "description": "This must be paired with its certificate. They may be posted in either order, but one cannot post two keys in a row (or two certs in a row).",
@@ -437,7 +477,7 @@
         }
       }
     },
-    "/rss-config/recovery-user-password-hash": {
+    "/rack-setup/config/recovery-user-password-hash": {
       "put": {
         "summary": "Update the RSS config recovery silo user password hash.",
         "operationId": "put_rss_config_recovery_user_password_hash",
@@ -446,6 +486,35 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/PutRssRecoveryUserPasswordHash"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/repository": {
+      "put": {
+        "summary": "Upload a TUF repository to the server.",
+        "description": "At any given time, wicketd will keep at most one TUF repository in memory. Any previously-uploaded repositories will be discarded.",
+        "operationId": "put_repository",
+        "requestBody": {
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
               }
             }
           },
@@ -1702,6 +1771,10 @@
           "rack_network_config"
         ]
       },
+      "RackInitId": {
+        "type": "string",
+        "format": "uuid"
+      },
       "RackNetworkConfig": {
         "description": "Initial network configuration",
         "type": "object",
@@ -1752,6 +1825,177 @@
           "uplink_port_fec",
           "uplink_port_speed"
         ]
+      },
+      "RackOperationStatus": {
+        "description": "Current status of any rack-level operation being performed by this bootstrap agent.",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "$ref": "#/components/schemas/RackInitId"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "initializing"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "status"
+            ]
+          },
+          {
+            "description": "`id` will be none if the rack was already initialized on startup.",
+            "type": "object",
+            "properties": {
+              "id": {
+                "nullable": true,
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/RackInitId"
+                  }
+                ]
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "initialized"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "$ref": "#/components/schemas/RackInitId"
+              },
+              "message": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "initialization_failed"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "message",
+              "status"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "$ref": "#/components/schemas/RackInitId"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "initialization_panicked"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "status"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "$ref": "#/components/schemas/RackResetId"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "resetting"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "status"
+            ]
+          },
+          {
+            "description": "`reset_id` will be None if the rack is in an uninitialized-on-startup, or Some if it is in an uninitialized state due to a reset operation completing.",
+            "type": "object",
+            "properties": {
+              "reset_id": {
+                "nullable": true,
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/RackResetId"
+                  }
+                ]
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "uninitialized"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "$ref": "#/components/schemas/RackResetId"
+              },
+              "message": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "reset_failed"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "message",
+              "status"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "$ref": "#/components/schemas/RackResetId"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "reset_panicked"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "status"
+            ]
+          }
+        ]
+      },
+      "RackResetId": {
+        "type": "string",
+        "format": "uuid"
       },
       "RackV1Inventory": {
         "description": "The current state of the v1 Rack as known to wicketd",

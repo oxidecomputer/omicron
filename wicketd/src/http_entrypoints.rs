@@ -8,6 +8,9 @@ use crate::mgs::GetInventoryError;
 use crate::mgs::GetInventoryResponse;
 use crate::mgs::MgsHandle;
 use crate::RackV1Inventory;
+use bootstrap_agent_client::types::RackInitId;
+use bootstrap_agent_client::types::RackOperationStatus;
+use bootstrap_agent_client::types::RackResetId;
 use dropshot::endpoint;
 use dropshot::ApiDescription;
 use dropshot::HttpError;
@@ -54,6 +57,9 @@ pub fn api() -> WicketdApiDescription {
         api.register(post_rss_config_cert)?;
         api.register(post_rss_config_key)?;
         api.register(delete_rss_config)?;
+        api.register(get_rack_setup_state)?;
+        api.register(post_run_rack_setup)?;
+        api.register(post_run_rack_reset)?;
         api.register(get_inventory)?;
         api.register(put_repository)?;
         api.register(get_artifacts_and_event_reports)?;
@@ -194,7 +200,7 @@ async fn inventory_or_unavail(
 /// some cases) RSS configuration.
 #[endpoint {
     method = GET,
-    path = "/rss-config"
+    path = "/rack-setup/config"
 }]
 async fn get_rss_config(
     rqctx: RequestContext<ServerContext>,
@@ -220,7 +226,7 @@ async fn get_rss_config(
 /// endpoint.
 #[endpoint {
     method = PUT,
-    path = "/rss-config"
+    path = "/rack-setup/config"
 }]
 async fn put_rss_config(
     rqctx: RequestContext<ServerContext>,
@@ -265,7 +271,7 @@ pub enum CertificateUploadResponse {
 /// order, but one cannot post two certs in a row (or two keys in a row).
 #[endpoint {
     method = POST,
-    path = "/rss-config/cert"
+    path = "/rack-setup/config/cert"
 }]
 async fn post_rss_config_cert(
     rqctx: RequestContext<ServerContext>,
@@ -287,7 +293,7 @@ async fn post_rss_config_cert(
 /// order, but one cannot post two keys in a row (or two certs in a row).
 #[endpoint {
     method = POST,
-    path = "/rss-config/key"
+    path = "/rack-setup/config/key"
 }]
 async fn post_rss_config_key(
     rqctx: RequestContext<ServerContext>,
@@ -311,7 +317,7 @@ pub struct PutRssRecoveryUserPasswordHash {
 /// Update the RSS config recovery silo user password hash.
 #[endpoint {
     method = PUT,
-    path = "/rss-config/recovery-user-password-hash"
+    path = "/rack-setup/config/recovery-user-password-hash"
 }]
 async fn put_rss_config_recovery_user_password_hash(
     rqctx: RequestContext<ServerContext>,
@@ -328,7 +334,7 @@ async fn put_rss_config_recovery_user_password_hash(
 /// Reset all RSS configuration to their default values.
 #[endpoint {
     method = DELETE,
-    path = "/rss-config"
+    path = "/rack-setup/config"
 }]
 async fn delete_rss_config(
     rqctx: RequestContext<ServerContext>,
@@ -339,6 +345,160 @@ async fn delete_rss_config(
     *config = Default::default();
 
     Ok(HttpResponseUpdatedNoContent())
+}
+
+/// Query current state of rack setup.
+#[endpoint {
+    method = GET,
+    path = "/rack-setup"
+}]
+async fn get_rack_setup_state(
+    rqctx: RequestContext<ServerContext>,
+) -> Result<HttpResponseOk<RackOperationStatus>, HttpError> {
+    let ctx = rqctx.context();
+
+    let sled_agent_addr = ctx
+        .bootstrap_agent_addr()
+        .map_err(|err| HttpError::for_bad_request(None, format!("{err:#}")))?;
+
+    let client = bootstrap_agent_client::Client::new(
+        &format!("http://{}", sled_agent_addr),
+        ctx.log.new(slog::o!("component" => "bootstrap client")),
+    );
+
+    let op_status = client
+        .rack_initialization_status()
+        .await
+        .map_err(|err| {
+            use bootstrap_agent_client::Error as BaError;
+            match err {
+                BaError::CommunicationError(err) => {
+                    let message =
+                        format!("Failed to send rack setup request: {err}");
+                    HttpError {
+                        status_code: http::StatusCode::SERVICE_UNAVAILABLE,
+                        error_code: None,
+                        external_message: message.clone(),
+                        internal_message: message,
+                    }
+                }
+                other => HttpError::for_bad_request(
+                    None,
+                    format!("Rack setup request failed: {other}"),
+                ),
+            }
+        })?
+        .into_inner();
+
+    Ok(HttpResponseOk(op_status))
+}
+
+/// Run rack setup.
+///
+/// Will return an error if not all of the rack setup configuration has been
+/// populated.
+#[endpoint {
+    method = POST,
+    path = "/rack-setup"
+}]
+async fn post_run_rack_setup(
+    rqctx: RequestContext<ServerContext>,
+) -> Result<HttpResponseOk<RackInitId>, HttpError> {
+    let ctx = rqctx.context();
+
+    let sled_agent_addr = ctx
+        .bootstrap_agent_addr()
+        .map_err(|err| HttpError::for_bad_request(None, format!("{err:#}")))?;
+
+    let request = {
+        let config = ctx.rss_config.lock().unwrap();
+        config.start_rss_request(&ctx.bootstrap_peers).map_err(|err| {
+            HttpError::for_bad_request(None, format!("{err:#}"))
+        })?
+    };
+
+    slog::info!(
+        ctx.log,
+        "Sending RSS initialize request to {}",
+        sled_agent_addr
+    );
+    let client = bootstrap_agent_client::Client::new(
+        &format!("http://{}", sled_agent_addr),
+        ctx.log.new(slog::o!("component" => "bootstrap client")),
+    );
+
+    let init_id = client
+        .rack_initialize(&request)
+        .await
+        .map_err(|err| {
+            use bootstrap_agent_client::Error as BaError;
+            match err {
+                BaError::CommunicationError(err) => {
+                    let message =
+                        format!("Failed to send rack setup request: {err}");
+                    HttpError {
+                        status_code: http::StatusCode::SERVICE_UNAVAILABLE,
+                        error_code: None,
+                        external_message: message.clone(),
+                        internal_message: message,
+                    }
+                }
+                other => HttpError::for_bad_request(
+                    None,
+                    format!("Rack setup request failed: {other}"),
+                ),
+            }
+        })?
+        .into_inner();
+
+    Ok(HttpResponseOk(init_id))
+}
+
+/// Run rack reset.
+#[endpoint {
+    method = DELETE,
+    path = "/rack-setup"
+}]
+async fn post_run_rack_reset(
+    rqctx: RequestContext<ServerContext>,
+) -> Result<HttpResponseOk<RackResetId>, HttpError> {
+    let ctx = rqctx.context();
+
+    let sled_agent_addr = ctx
+        .bootstrap_agent_addr()
+        .map_err(|err| HttpError::for_bad_request(None, format!("{err:#}")))?;
+
+    slog::info!(ctx.log, "Sending RSS reset request to {}", sled_agent_addr);
+    let client = bootstrap_agent_client::Client::new(
+        &format!("http://{}", sled_agent_addr),
+        ctx.log.new(slog::o!("component" => "bootstrap client")),
+    );
+
+    let reset_id = client
+        .rack_reset()
+        .await
+        .map_err(|err| {
+            use bootstrap_agent_client::Error as BaError;
+            match err {
+                BaError::CommunicationError(err) => {
+                    let message =
+                        format!("Failed to send rack reset request: {err}");
+                    HttpError {
+                        status_code: http::StatusCode::SERVICE_UNAVAILABLE,
+                        error_code: None,
+                        external_message: message.clone(),
+                        internal_message: message,
+                    }
+                }
+                other => HttpError::for_bad_request(
+                    None,
+                    format!("Rack setup request failed: {other}"),
+                ),
+            }
+        })?
+        .into_inner();
+
+    Ok(HttpResponseOk(reset_id))
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
