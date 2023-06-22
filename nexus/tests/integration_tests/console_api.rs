@@ -24,13 +24,12 @@ use nexus_test_utils::{
 use nexus_test_utils_macros::nexus_test;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_nexus::authn::{USER_TEST_PRIVILEGED, USER_TEST_UNPRIVILEGED};
-use omicron_nexus::authz::SiloRole;
 use omicron_nexus::db::fixed_data::silo::DEFAULT_SILO;
 use omicron_nexus::db::identity::{Asset, Resource};
 use omicron_nexus::external_api::params::{
     self, ProjectCreate, UsernamePasswordCredentials,
 };
-use omicron_nexus::external_api::shared::SiloIdentityMode;
+use omicron_nexus::external_api::shared::{SiloIdentityMode, SiloRole};
 use omicron_nexus::external_api::{shared, views};
 use omicron_sled_agent::sim;
 use omicron_test_utils::dev::poll::{wait_for_condition, CondCheckError};
