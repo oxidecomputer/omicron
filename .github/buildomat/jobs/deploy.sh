@@ -39,7 +39,7 @@ _exit_trap() {
 	pfexec netstat -rncva
 	pfexec netstat -anu
 	pfexec arp -an
-	pfexec ./out/softnpu/scadm \
+	pfexec RUST_BACKTRACE=1 ./out/softnpu/scadm \
 		--server /opt/oxide/softnpu/stuff/server \
 		--client /opt/oxide/softnpu/stuff/client \
 		standalone \
