@@ -85,8 +85,8 @@ pub struct ControlPlaneTestContext<N> {
     pub dendrite: dev::dendrite::DendriteInstance,
 
     pub external_dns_zone_name: String,
-    pub external_dns: dns_server::InMemoryServer,
-    pub internal_dns: dns_server::InMemoryServer,
+    pub external_dns: dns_server::TransientServer,
+    pub internal_dns: dns_server::TransientServer,
     pub silo_name: Name,
     pub user_name: UserId,
 }
@@ -234,8 +234,8 @@ pub struct ControlPlaneTestContextBuilder<'a, N: NexusServer> {
     nexus_internal_addr: Option<SocketAddr>,
 
     pub external_dns_zone_name: Option<String>,
-    pub external_dns: Option<dns_server::InMemoryServer>,
-    pub internal_dns: Option<dns_server::InMemoryServer>,
+    pub external_dns: Option<dns_server::TransientServer>,
+    pub internal_dns: Option<dns_server::TransientServer>,
 
     pub silo_name: Option<Name>,
     pub user_name: Option<UserId>,
@@ -419,7 +419,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                     .internal_dns
                     .as_ref()
                     .expect("Must initialize internal DNS server first")
-                    .server
+                    .dns_server
                     .local_address(),
             };
         self.config.deployment.database = nexus_config::Database::FromUrl {
@@ -634,9 +634,9 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
         let log = self.logctx.log.new(o!("component" => "external_dns_server"));
         let sled_id = Uuid::parse_str(SLED_AGENT_UUID).unwrap();
 
-        let dns = dns_server::InMemoryServer::new(&log).await.unwrap();
+        let dns = dns_server::TransientServer::new(&log).await.unwrap();
 
-        let SocketAddr::V6(dns_address) = *dns.server.local_address() else {
+        let SocketAddr::V6(dns_address) = *dns.dns_server.local_address() else {
             panic!("Unsupported IPv4 DNS address");
         };
         let SocketAddr::V6(dropshot_address) = dns.dropshot_server.local_addr() else {
@@ -667,7 +667,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
     pub async fn start_internal_dns(&mut self) {
         let log = self.logctx.log.new(o!("component" => "internal_dns_server"));
         let sled_id = Uuid::parse_str(SLED_AGENT_UUID).unwrap();
-        let dns = dns_server::InMemoryServer::new(&log).await.unwrap();
+        let dns = dns_server::TransientServer::new(&log).await.unwrap();
 
         let SocketAddr::V6(address) = dns.dropshot_server.local_addr() else {
             panic!("Unsupported IPv4 DNS address");

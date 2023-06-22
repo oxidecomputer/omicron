@@ -92,19 +92,19 @@ pub async fn start_servers(
     Ok((dns_server, dropshot_server))
 }
 
-/// An in-memory DNS server running on localhost.
+/// An DNS server running on localhost, using a temporary directory for storage.
 ///
 /// Intended to be used for testing only.
-pub struct InMemoryServer {
+pub struct TransientServer {
     /// Server storage dir
     pub storage_dir: tempfile::TempDir,
     /// DNS server
-    pub server: dns_server::ServerHandle,
+    pub dns_server: dns_server::ServerHandle,
     /// Dropshot server
     pub dropshot_server: dropshot::HttpServer<http_server::Context>,
 }
 
-impl InMemoryServer {
+impl TransientServer {
     pub async fn new(log: &slog::Logger) -> Result<Self, anyhow::Error> {
         let storage_dir = tempfile::tempdir()?;
 
@@ -123,7 +123,7 @@ impl InMemoryServer {
         )
         .context("initializing DNS storage")?;
 
-        let (server, dropshot_server) = start_servers(
+        let (dns_server, dropshot_server) = start_servers(
             dns_log,
             store,
             &dns_server::Config { bind_address: "[::1]:0".parse().unwrap() },
@@ -134,7 +134,7 @@ impl InMemoryServer {
             },
         )
         .await?;
-        Ok(Self { storage_dir, server, dropshot_server })
+        Ok(Self { storage_dir, dns_server, dropshot_server })
     }
 
     pub async fn initialize_with_config(
@@ -156,7 +156,7 @@ impl InMemoryServer {
     pub async fn resolver(&self) -> Result<TokioAsyncResolver, anyhow::Error> {
         let mut resolver_config = ResolverConfig::new();
         resolver_config.add_name_server(NameServerConfig {
-            socket_addr: *self.server.local_address(),
+            socket_addr: *self.dns_server.local_address(),
             protocol: Protocol::Udp,
             tls_dns_name: None,
             trust_nx_responses: false,
