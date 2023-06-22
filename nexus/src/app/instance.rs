@@ -1403,40 +1403,9 @@ impl super::Nexus {
         instance_lookup: &lookup::Instance<'_>,
         action: authz::Action,
     ) -> Result<propolis_client::Client, Error> {
-        let (.., authz_instance, instance) =
-            instance_lookup.fetch_for(action).await?;
-        match instance.runtime_state.state.0 {
-            InstanceState::Running
-            | InstanceState::Rebooting
-            | InstanceState::Migrating
-            | InstanceState::Repairing => {
-                let ip_addr = instance
-                    .runtime_state
-                    .propolis_ip
-                    .ok_or_else(|| {
-                        Error::internal_error(
-                            "instance's hypervisor IP address not found",
-                        )
-                    })?
-                    .ip();
-                let socket_addr = SocketAddr::new(ip_addr, PROPOLIS_PORT);
-                Ok(propolis_client::Client::new(&format!(
-                    "http://{}",
-                    socket_addr
-                )))
-            }
-            InstanceState::Creating
-            | InstanceState::Starting
-            | InstanceState::Stopping
-            | InstanceState::Stopped
-            | InstanceState::Failed => Err(Error::ServiceUnavailable {
-                internal_message: format!(
-                    "Cannot connect to hypervisor of instance in state {:?}",
-                    instance.runtime_state.state
-                ),
-            }),
-            InstanceState::Destroyed => Err(authz_instance.not_found()),
-        }
+        let client_addr =
+            self.propolis_addr_for_instance(instance_lookup, action).await?;
+        Ok(propolis_client::Client::new(&format!("http://{}", client_addr)))
     }
 
     async fn proxy_instance_serial_ws(
