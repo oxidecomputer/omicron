@@ -349,7 +349,9 @@ impl ServiceInner {
                     .services
                     .iter()
                     .filter_map(|service| {
-                        if zone_types.contains(&std::mem::discriminant(&service.zone_type)) {
+                        if zone_types.contains(&std::mem::discriminant(
+                            &service.zone_type,
+                        )) {
                             Some(service.clone())
                         } else {
                             None
@@ -357,7 +359,8 @@ impl ServiceInner {
                     })
                     .collect();
                 if !services.is_empty() {
-                    self.initialize_services_on_sled(*sled_address, &services).await?;
+                    self.initialize_services_on_sled(*sled_address, &services)
+                        .await?;
                 }
                 Ok(())
             },
