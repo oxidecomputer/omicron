@@ -147,6 +147,14 @@ impl RunnerCore {
                 );
                 self.screen.draw(&self.state, &mut self.terminal)?;
             }
+            Event::RssConfig(config) => {
+                self.state.rss_config = Some(config);
+                self.screen.draw(&self.state, &mut self.terminal)?;
+            }
+            Event::RackSetupStatus(result) => {
+                self.state.rack_setup_state = result;
+                self.screen.draw(&self.state, &mut self.terminal)?;
+            }
             Event::Shutdown => return Ok(true),
         }
         Ok(false)
@@ -238,6 +246,20 @@ impl RunnerCore {
                             ignition_command,
                         ),
                     )?;
+                }
+            }
+            Action::StartRackSetup => {
+                if let Some(wicketd) = wicketd {
+                    wicketd
+                        .tx
+                        .blocking_send(wicketd::Request::StartRackSetup)?;
+                }
+            }
+            Action::StartRackReset => {
+                if let Some(wicketd) = wicketd {
+                    wicketd
+                        .tx
+                        .blocking_send(wicketd::Request::StartRackReset)?;
                 }
             }
         }
