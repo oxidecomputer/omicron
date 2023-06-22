@@ -4,13 +4,15 @@
 
 //! Plan generation for "where should services be initialized".
 
-use crate::bootstrap::params::SledAgentRequest;
+use crate::bootstrap::params::StartSledAgentRequest;
+use crate::ledger::{Ledger, Ledgerable};
 use crate::params::{
     DatasetEnsureBody, ServiceType, ServiceZoneRequest, ServiceZoneService,
     ZoneType,
 };
 use crate::rack_setup::config::SetupServiceConfig as Config;
-use camino::{Utf8Path, Utf8PathBuf};
+use crate::storage_manager::StorageResources;
+use camino::Utf8PathBuf;
 use dns_service_client::types::DnsConfigParams;
 use internal_dns::{ServiceName, DNS_ZONE};
 use omicron_common::address::{
@@ -61,11 +63,6 @@ const PANTRY_COUNT: usize = 1;
 // when Nexus provisions external DNS zones.
 const EXTERNAL_DNS_COUNT: usize = 1;
 
-fn rss_service_plan_path() -> Utf8PathBuf {
-    Utf8Path::new(omicron_common::OMICRON_CONFIG_PATH)
-        .join("rss-service-plan.toml")
-}
-
 /// Describes errors which may occur while generating a plan for services.
 #[derive(Error, Debug)]
 pub enum PlanError {
@@ -76,8 +73,8 @@ pub enum PlanError {
         err: std::io::Error,
     },
 
-    #[error("Cannot deserialize TOML file at {path}: {err}")]
-    Toml { path: Utf8PathBuf, err: toml::de::Error },
+    #[error("Failed to access ledger: {0}")]
+    Ledger(#[from] crate::ledger::Error),
 
     #[error("Error making HTTP request to Sled Agent: {0}")]
     SledApi(#[from] SledAgentError<SledAgentTypes::Error>),
@@ -103,35 +100,39 @@ pub struct SledRequest {
     pub services: Vec<ServiceZoneRequest>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Plan {
     pub services: HashMap<SocketAddrV6, SledRequest>,
     pub dns_config: DnsConfigParams,
 }
 
+impl Ledgerable for Plan {
+    fn is_newer_than(&self, _other: &Self) -> bool {
+        true
+    }
+    fn generation_bump(&mut self) {}
+}
+const RSS_SERVICE_PLAN_FILENAME: &str = "rss-service-plan.toml";
+
 impl Plan {
-    pub async fn load(log: &Logger) -> Result<Option<Plan>, PlanError> {
+    pub async fn load(
+        log: &Logger,
+        storage: &StorageResources,
+    ) -> Result<Option<Plan>, PlanError> {
+        let paths: Vec<Utf8PathBuf> = storage
+            .all_m2_mountpoints(sled_hardware::disk::CONFIG_DATASET)
+            .await
+            .into_iter()
+            .map(|p| p.join(RSS_SERVICE_PLAN_FILENAME))
+            .collect();
+
         // If we already created a plan for this RSS to allocate
         // services to sleds, re-use that existing plan.
-        let rss_service_plan_path = rss_service_plan_path();
-        if rss_service_plan_path.exists() {
-            info!(log, "RSS plan already created, loading from file");
+        let ledger = Ledger::<Self>::new(log, paths.clone()).await;
 
-            let plan: Self = toml::from_str(
-                &tokio::fs::read_to_string(&rss_service_plan_path)
-                    .await
-                    .map_err(|err| PlanError::Io {
-                        message: format!(
-                            "Loading RSS plan {rss_service_plan_path:?}"
-                        ),
-                        err,
-                    })?,
-            )
-            .map_err(|err| PlanError::Toml {
-                path: rss_service_plan_path,
-                err,
-            })?;
-            Ok(Some(plan))
+        if let Some(ledger) = ledger {
+            info!(log, "RSS plan already created, loading from file");
+            Ok(Some(ledger.data().clone()))
         } else {
             Ok(None)
         }
@@ -226,7 +227,8 @@ impl Plan {
     pub async fn create(
         log: &Logger,
         config: &Config,
-        sleds: &HashMap<SocketAddrV6, SledAgentRequest>,
+        storage: &StorageResources,
+        sleds: &HashMap<SocketAddrV6, StartSledAgentRequest>,
     ) -> Result<Self, PlanError> {
         let reserved_rack_subnet = ReservedRackSubnet::new(config.az_subnet());
         let dns_subnets = reserved_rack_subnet.get_dns_subnets();
@@ -343,6 +345,15 @@ impl Plan {
                             internal_ip: address,
                             external_ip,
                             nic,
+                            // Tell Nexus to use TLS if and only if the caller
+                            // provided TLS certificates.  This effectively
+                            // determines the status of TLS for the lifetime of
+                            // the rack.  In production-like deployments, we'd
+                            // always expect TLS to be enabled.  It's only in
+                            // development that it might not be.
+                            external_tls: !config
+                                .external_certificates
+                                .is_empty(),
                         },
                     }],
                 })
@@ -573,23 +584,15 @@ impl Plan {
         let plan = Self { services, dns_config };
 
         // Once we've constructed a plan, write it down to durable storage.
-        let serialized_plan =
-            toml::Value::try_from(&plan).unwrap_or_else(|e| {
-                panic!("Cannot serialize configuration: {:#?}: {}", plan, e)
-            });
-        let plan_str = toml::to_string(&serialized_plan)
-            .expect("Cannot turn config to string");
-
-        info!(log, "Plan serialized as: {}", plan_str);
-        let path = rss_service_plan_path();
-        tokio::fs::write(&path, plan_str).await.map_err(|err| {
-            PlanError::Io {
-                message: format!("Storing RSS service plan to {path:?}"),
-                err,
-            }
-        })?;
+        let paths: Vec<Utf8PathBuf> = storage
+            .all_m2_mountpoints(sled_hardware::disk::CONFIG_DATASET)
+            .await
+            .into_iter()
+            .map(|p| p.join(RSS_SERVICE_PLAN_FILENAME))
+            .collect();
+        let mut ledger = Ledger::<Self>::new_with(log, paths, plan.clone());
+        ledger.commit().await?;
         info!(log, "Service plan written to storage");
-
         Ok(plan)
     }
 }

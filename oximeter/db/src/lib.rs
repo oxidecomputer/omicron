@@ -79,6 +79,9 @@ pub enum Error {
 
     #[error("Invalid timeseries name")]
     InvalidTimeseriesName,
+
+    #[error("Query must resolve to a single timeseries if limit is specified")]
+    InvalidLimitQuery,
 }
 
 /// A timeseries name.

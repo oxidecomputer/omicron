@@ -300,7 +300,7 @@ async fn start_whoami_server(
     TestContext::new(
         whoami_api,
         server_state,
-        &config.deployment.dropshot_external,
+        &config.deployment.dropshot_external.dropshot,
         Some(logctx),
         log,
     )

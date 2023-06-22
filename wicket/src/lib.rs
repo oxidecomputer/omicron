@@ -10,6 +10,7 @@ use std::time::Duration;
 mod dispatch;
 mod events;
 mod keymap;
+mod rack_setup;
 mod runner;
 mod state;
 mod ui;

@@ -213,6 +213,29 @@ impl Zpool {
         }
     }
 
+    pub fn export(name: &ZpoolName) -> Result<(), Error> {
+        let mut cmd = std::process::Command::new(PFEXEC);
+        cmd.env_clear();
+        cmd.env("LC_ALL", "C.UTF-8");
+        cmd.arg(ZPOOL).arg("export").arg(&name.to_string());
+        execute(&mut cmd)?;
+
+        Ok(())
+    }
+
+    /// `zpool set failmode=continue <name>`
+    pub fn set_failmode_continue(name: &ZpoolName) -> Result<(), Error> {
+        let mut cmd = std::process::Command::new(PFEXEC);
+        cmd.env_clear();
+        cmd.env("LC_ALL", "C.UTF-8");
+        cmd.arg(ZPOOL)
+            .arg("set")
+            .arg("failmode=continue")
+            .arg(&name.to_string());
+        execute(&mut cmd)?;
+        Ok(())
+    }
+
     pub fn list() -> Result<Vec<ZpoolName>, ListError> {
         let mut command = std::process::Command::new(ZPOOL);
         let cmd = command.args(&["list", "-Hpo", "name"]);

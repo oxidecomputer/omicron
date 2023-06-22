@@ -2,19 +2,20 @@
 #:
 #: name = "helios / deploy"
 #: variety = "basic"
-#: target = "lab-opte-0.22"
+#: target = "lab-opte-0.23"
 #: output_rules = [
-#:	"%/var/svc/log/oxide-sled-agent:default.log",
-#:	"%/zone/oxz_*/root/var/svc/log/oxide-*.log",
-#:	"%/zone/oxz_*/root/var/svc/log/system-illumos-*.log",
+#:  "%/var/svc/log/oxide-sled-agent:default.log",
+#:  "%/zone/oxz_*/root/var/svc/log/oxide-*.log",
+#:  "%/zone/oxz_*/root/var/svc/log/system-illumos-*.log",
+#:  "!/zone/oxz_propolis-server_*/root/var/svc/log/*.log"
 #: ]
 #: skip_clone = true
 #:
 #: [dependencies.package]
 #: job = "helios / package"
 #:
-#: [dependencies.build-end-to-end-tests]
-#: job = "helios / build-end-to-end-tests"
+#: [dependencies.ci-tools]
+#: job = "helios / CI tools"
 
 set -o errexit
 set -o pipefail
@@ -44,6 +45,11 @@ _exit_trap() {
 		standalone \
 		dump-state
 	pfexec /opt/oxide/opte/bin/opteadm list-ports
+	z_swadm link ls
+	z_swadm addr list
+	z_swadm route list
+	z_swadm arp list
+
 	PORTS=$(pfexec /opt/oxide/opte/bin/opteadm list-ports | tail +2 | awk '{ print $1; }')
 	for p in $PORTS; do
 		LAYERS=$(pfexec /opt/oxide/opte/bin/opteadm list-layers -p $p | tail +2 | awk '{ print $1; }')
@@ -67,9 +73,15 @@ _exit_trap() {
 		pfexec zlogin "$z" arp -an
 	done
 
+	pfexec zlogin softnpu cat /softnpu.log
+
 	exit $status
 }
 trap _exit_trap EXIT
+
+z_swadm () {
+	pfexec zlogin oxz_switch /opt/oxide/dendrite/bin/swadm $@
+}
 
 #
 # XXX work around 14537 (UFS should not allow directories to be unlinked) which
@@ -111,13 +123,6 @@ fi
 #
 pfexec /sbin/zfs create -o mountpoint=/zone rpool/zone
 
-#
-# The sled agent will ostensibly write things into /var/oxide, so make that a
-# tmpfs as well:
-#
-pfexec mkdir -p /var/oxide
-pfexec mount -F tmpfs -O swap /var/oxide
-
 pfexec mkdir /opt/oxide/work
 pfexec chown build:build /opt/oxide/work
 cd /opt/oxide/work
@@ -125,12 +130,61 @@ cd /opt/oxide/work
 ptime -m tar xvzf /input/package/work/package.tar.gz
 cp /input/package/work/zones/* out/
 mkdir tests
-for p in /input/build-end-to-end-tests/work/*.gz; do
+for p in /input/ci-tools/work/end-to-end-tests/*.gz; do
 	ptime -m gunzip < "$p" > "tests/$(basename "${p%.gz}")"
 	chmod a+x "tests/$(basename "${p%.gz}")"
 done
 
 ptime -m pfexec ./tools/create_virtual_hardware.sh
+
+#
+# Generate a self-signed certificate to use as the initial TLS certificate for
+# the recovery Silo.  Its DNS name is determined by the silo name and the
+# delegated external DNS name, both of which are in the RSS config file.  In a
+# real system, the certificate would come from the customer during initial rack
+# setup on the technician port.
+#
+tar xf out/omicron-sled-agent.tar pkg/config-rss.toml
+SILO_NAME="$(sed -n 's/silo_name = "\(.*\)"/\1/p' pkg/config-rss.toml)"
+EXTERNAL_DNS_DOMAIN="$(sed -n 's/external_dns_zone_name = "\(.*\)"/\1/p' pkg/config-rss.toml)"
+rm -f pkg/config-rss.toml
+
+#
+# By default, OpenSSL creates self-signed certificates with "CA:true".  The TLS
+# implementation used by reqwest rejects endpoint certificates that are also CA
+# certificates.  So in order to use the certificate, we need one without
+# "CA:true".  There doesn't seem to be a way to do this on the command line.
+# Instead, we must override the system configuration with our own configuration
+# file.  There's virtually nothing in it.
+#
+TLS_NAME="$SILO_NAME.sys.$EXTERNAL_DNS_DOMAIN"
+openssl req \
+    -newkey rsa:4096 \
+    -x509 \
+    -sha256 \
+    -days 3 \
+    -nodes \
+    -out "pkg/initial-tls-cert.pem" \
+    -keyout "pkg/initial-tls-key.pem" \
+    -subj "/CN=$TLS_NAME" \
+    -addext "subjectAltName=DNS:$TLS_NAME" \
+    -addext "basicConstraints=critical,CA:FALSE" \
+    -config /dev/stdin <<EOF
+[req]
+prompt = no
+distinguished_name = req_distinguished_name
+
+[req_distinguished_name]
+EOF
+tar rvf out/omicron-sled-agent.tar \
+    pkg/initial-tls-cert.pem \
+    pkg/initial-tls-key.pem
+rm -f pkg/initial-tls-cert.pem pkg/initial-tls-key.pem
+rmdir pkg
+# The actual end-to-end tests need the certificate.  This is where that file
+# will end up once installed.
+E2E_TLS_CERT="/opt/oxide/sled-agent/pkg/initial-tls-cert.pem"
+
 
 #
 # Image-related tests use images served by catacomb. The lab network is
@@ -148,46 +202,12 @@ pfexec curl -sSfL -o /var/svc/manifest/site/tcpproxy.xml \
 pfexec svccfg import /var/svc/manifest/site/tcpproxy.xml
 
 #
-# This OMICRON_NO_UNINSTALL hack here is so that there is no implicit uninstall
-# before the install.  This doesn't work right now because, above, we made
-# /var/oxide a file system so you can't remove it (EBUSY) like a regular
-# directory.  The lab-netdev target is a ramdisk system that is always cleared
+# The lab-netdev target is a ramdisk system that is always cleared
 # out between runs, so it has not had any state yet that requires
 # uninstallation.
 #
 OMICRON_NO_UNINSTALL=1 \
     ptime -m pfexec ./target/release/omicron-package -t test install
-
-# NOTE: this command configures proxy arp for softnpu. This is needed if you want to be
-# able to reach instances from the same L2 network segment.
-# Keep consistent with `get_system_ip_pool` in `end-to-end-tests`.
-IP_POOL_START="192.168.1.50"
-IP_POOL_END="192.168.1.90"
-# `dladm` won't return leading zeroes but `scadm` expects them, use sed to add any missing zeroes
-SOFTNPU_MAC=$(dladm show-vnic sc0_1 -p -o macaddress | sed -E 's/[ :]/&0/g; s/0([^:]{2}(:|$))/\1/g')
-pfexec ./out/softnpu/scadm \
-	--server /opt/oxide/softnpu/stuff/server \
-	--client /opt/oxide/softnpu/stuff/client \
-	standalone \
-	add-proxy-arp $IP_POOL_START $IP_POOL_END $SOFTNPU_MAC
-
-# We also need to configure proxy arp for any services which use OPTE for external connectivity (e.g. Nexus)
-tar xf out/omicron-sled-agent.tar pkg/config-rss.toml
-SERVICE_IP_POOL_START="$(sed -n 's/first = "\(.*\)"/\1/p' pkg/config-rss.toml)"
-SERVICE_IP_POOL_END="$(sed -n 's/last = "\(.*\)"/\1/p' pkg/config-rss.toml)"
-rm -r pkg
-
-pfexec ./out/softnpu/scadm \
-	--server /opt/oxide/softnpu/stuff/server \
-	--client /opt/oxide/softnpu/stuff/client \
-	standalone \
-	add-proxy-arp $SERVICE_IP_POOL_START $SERVICE_IP_POOL_END $SOFTNPU_MAC
-
-pfexec ./out/softnpu/scadm \
-	--server /opt/oxide/softnpu/stuff/server \
-	--client /opt/oxide/softnpu/stuff/client \
-	standalone \
-	dump-state
 
 # Wait for switch zone to come up so that we can configure it
 retry=0
@@ -208,13 +228,44 @@ done
 # to use it as the default gateway.
 # NOTE: Keep in sync with $[SERVICE_]IP_POOL_{START,END}
 export GATEWAY_IP=192.168.1.199
-export GATEWAY_MAC=$(dladm show-phys -m -p -o ADDRESS | head -n 1)
 pfexec ipadm create-addr -T static -a $GATEWAY_IP/24 igb0/sidehatch
 
 # NOTE: this script configures softnpu's "rack network" settings using swadm
 ./tools/scrimlet/softnpu-init.sh
 
+# NOTE: this command configures proxy arp for softnpu. This is needed if you want to be
+# able to reach instances from the same L2 network segment.
+# Keep consistent with `get_system_ip_pool` in `end-to-end-tests`.
+IP_POOL_START="192.168.1.50"
+IP_POOL_END="192.168.1.90"
+# `dladm` won't return leading zeroes but `scadm` expects them, use sed to add any missing zeroes
+SOFTNPU_MAC=$(dladm show-vnic sc0_1 -p -o macaddress | sed -E 's/[ :]/&0/g; s/0([^:]{2}(:|$))/\1/g')
+pfexec ./out/softnpu/scadm \
+	--server /opt/oxide/softnpu/stuff/server \
+	--client /opt/oxide/softnpu/stuff/client \
+	standalone \
+	add-proxy-arp $IP_POOL_START $IP_POOL_END $SOFTNPU_MAC
+
+# We also need to configure proxy arp for any services which use OPTE for external connectivity (e.g. Nexus)
+tar xf out/omicron-sled-agent.tar pkg/config-rss.toml
+SERVICE_IP_POOL_START="$(sed -n 's/^first = "\(.*\)"/\1/p' pkg/config-rss.toml)"
+SERVICE_IP_POOL_END="$(sed -n 's/^last = "\(.*\)"/\1/p' pkg/config-rss.toml)"
+rm -r pkg
+
+pfexec ./out/softnpu/scadm \
+	--server /opt/oxide/softnpu/stuff/server \
+	--client /opt/oxide/softnpu/stuff/client \
+	standalone \
+	add-proxy-arp $SERVICE_IP_POOL_START $SERVICE_IP_POOL_END $SOFTNPU_MAC
+
+pfexec ./out/softnpu/scadm \
+	--server /opt/oxide/softnpu/stuff/server \
+	--client /opt/oxide/softnpu/stuff/client \
+	standalone \
+	dump-state
+
 export RUST_BACKTRACE=1
+export E2E_TLS_CERT
 ./tests/bootstrap
 
 rm ./tests/bootstrap

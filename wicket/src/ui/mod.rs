@@ -8,6 +8,7 @@ mod main;
 mod panes;
 mod splash;
 mod widgets;
+mod wrap;
 
 use crate::{Action, Cmd, State, Term};
 use slog::{o, Logger};
@@ -18,6 +19,7 @@ use splash::SplashScreen;
 
 pub use controls::Control;
 pub use panes::OverviewPane;
+pub use panes::RackSetupPane;
 pub use panes::UpdatePane;
 
 /// The primary display representation. It's sole purpose is to dispatch

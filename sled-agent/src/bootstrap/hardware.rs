@@ -6,9 +6,10 @@
 
 use crate::config::{Config as SledConfig, SledMode as SledModeConfig};
 use crate::services::ServiceManager;
-use crate::storage_manager::StorageManager;
+use crate::storage_manager::{StorageManager, StorageResources};
 use illumos_utils::dladm::{Etherstub, EtherstubVnic};
-use sled_hardware::{DendriteAsic, HardwareManager, SledMode};
+use key_manager::StorageKeyRequester;
+use sled_hardware::{Baseboard, DendriteAsic, HardwareManager, SledMode};
 use slog::Logger;
 use std::net::Ipv6Addr;
 use thiserror::Error;
@@ -123,6 +124,10 @@ impl HardwareMonitorWorker {
                 warn!(self.log, "Failed to deactivate switch: {e}");
             }
         }
+
+        self.storage
+            .ensure_using_exactly_these_disks(self.hardware.disks())
+            .await;
     }
 }
 
@@ -136,11 +141,14 @@ pub(crate) struct HardwareMonitor {
     handle: JoinHandle<
         Result<(HardwareManager, ServiceManager, StorageManager), Error>,
     >,
+    storage_resources: StorageResources,
+    baseboard: Baseboard,
 }
 
 impl HardwareMonitor {
     // Spawns a new task which monitors for hardware and launches the switch
     // zone if the necessary Tofino drivers are detected.
+    #[allow(clippy::too_many_arguments)]
     pub async fn new(
         log: &Logger,
         sled_config: &SledConfig,
@@ -149,6 +157,7 @@ impl HardwareMonitor {
         underlay_etherstub_vnic: EtherstubVnic,
         bootstrap_etherstub: Etherstub,
         switch_zone_bootstrap_address: Ipv6Addr,
+        storage_key_requester: StorageKeyRequester,
     ) -> Result<Self, Error> {
         // Combine the `sled_mode` config with the build-time
         // switch type to determine the actual sled mode.
@@ -184,7 +193,20 @@ impl HardwareMonitor {
         let hardware = HardwareManager::new(log, sled_mode)
             .map_err(|e| Error::Hardware(e))?;
 
-        let storage_manager = StorageManager::new(&log).await;
+        let storage_manager =
+            StorageManager::new(&log, storage_key_requester).await;
+
+        // If our configuration asks for synthetic zpools, insert them now.
+        if let Some(pools) = &sled_config.zpools {
+            for pool in pools {
+                info!(
+                    log,
+                    "Upserting synthetic zpool to Storage Manager: {}",
+                    pool.to_string()
+                );
+                storage_manager.upsert_synthetic_disk(pool.clone()).await;
+            }
+        }
 
         let service_manager = ServiceManager::new(
             log.clone(),
@@ -212,6 +234,8 @@ impl HardwareMonitor {
         storage: StorageManager,
     ) -> Self {
         let (exit_tx, exit_rx) = oneshot::channel();
+        let storage_resources = storage.resources().clone();
+        let baseboard = hardware.baseboard();
         let worker = HardwareMonitorWorker::new(
             log.clone(),
             exit_rx,
@@ -221,7 +245,15 @@ impl HardwareMonitor {
         );
         let handle = tokio::spawn(async move { worker.run().await });
 
-        Self { exit_tx, handle }
+        Self { exit_tx, handle, storage_resources, baseboard }
+    }
+
+    pub fn storage(&self) -> &StorageResources {
+        &self.storage_resources
+    }
+
+    pub fn baseboard(&self) -> &Baseboard {
+        &self.baseboard
     }
 
     // Stops the task from executing

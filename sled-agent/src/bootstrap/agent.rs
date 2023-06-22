@@ -4,27 +4,22 @@
 
 //! Bootstrap-related APIs.
 
-use super::client::Client as BootstrapAgentClient;
 use super::config::{
-    Config, BOOTSTRAP_AGENT_HTTP_PORT, BOOTSTRAP_AGENT_SPROCKETS_PORT,
+    Config, BOOTSTRAP_AGENT_HTTP_PORT, BOOTSTRAP_AGENT_RACK_INIT_PORT,
 };
 use super::hardware::HardwareMonitor;
+use super::http_entrypoints::RackOperationStatus;
 use super::params::RackInitializeRequest;
-use super::params::SledAgentRequest;
-use super::rss_handle::RssHandle;
-use super::server::TrustQuorumMembership;
-use super::trust_quorum::{
-    RackSecret, SerializableShareDistribution, ShareDistribution,
-    TrustQuorumError,
-};
+use super::params::StartSledAgentRequest;
+use super::secret_retriever::LocalSecretRetriever;
 use super::views::SledAgentResponse;
 use crate::config::Config as SledConfig;
+use crate::ledger::{Ledger, Ledgerable};
 use crate::server::Server as SledServer;
 use crate::services::ServiceManager;
-use crate::sp::SpHandle;
-use crate::storage_manager::StorageManager;
+use crate::storage_manager::{StorageManager, StorageResources};
 use crate::updates::UpdateManager;
-use camino::{Utf8Path, Utf8PathBuf};
+use camino::Utf8PathBuf;
 use ddm_admin_client::{Client as DdmAdminClient, DdmError};
 use futures::stream::{self, StreamExt, TryStreamExt};
 use illumos_utils::addrobj::AddrObject;
@@ -35,21 +30,29 @@ use illumos_utils::zfs::{
 };
 use illumos_utils::zone::Zones;
 use illumos_utils::{execute, PFEXEC};
+use key_manager::{KeyManager, StorageKeyRequester};
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::api::external::Error as ExternalError;
-use omicron_common::backoff::{
-    retry_notify, retry_policy_internal_service_aggressive, BackoffError,
-};
 use serde::{Deserialize, Serialize};
 use sled_hardware::underlay::BootstrapInterface;
-use sled_hardware::HardwareManager;
+use sled_hardware::{Baseboard, HardwareManager};
 use slog::Logger;
 use std::borrow::Cow;
-use std::collections::HashSet;
 use std::net::{IpAddr, Ipv6Addr, SocketAddrV6};
 use std::sync::Arc;
 use thiserror::Error;
 use tokio::sync::Mutex;
+use tokio::task::JoinHandle;
+
+mod rack_ops;
+
+pub use rack_ops::RackInitId;
+pub use rack_ops::RackResetId;
+use rack_ops::RssAccess;
+pub use rack_ops::RssAccessError;
+
+/// The number of QSFP28 ports on sidecar revisions A and B
+const SIDECAR_REV_A_B_N_QSFP28_PORTS: u8 = 32;
 
 /// Describes errors which may occur while operating the bootstrap service.
 #[derive(Error, Debug)]
@@ -73,14 +76,11 @@ pub enum BootstrapError {
     #[error("Error monitoring hardware: {0}")]
     Hardware(#[from] crate::bootstrap::hardware::Error),
 
+    #[error("Failed to access ledger: {0}")]
+    Ledger(#[from] crate::ledger::Error),
+
     #[error("Error managing sled agent: {0}")]
     SledError(String),
-
-    #[error("Error deserializing toml from {path}: {err}")]
-    Toml { path: Utf8PathBuf, err: toml::de::Error },
-
-    #[error(transparent)]
-    TrustQuorum(#[from] TrustQuorumError),
 
     #[error("Error collecting peer addresses: {0}")]
     PeerAddresses(String),
@@ -90,12 +90,6 @@ pub enum BootstrapError {
 
     #[error("Failed to get bootstrap address: {err}")]
     GetBootstrapAddress { err: illumos_utils::zone::GetAddressError },
-
-    #[error("RSS is already executing, and should not run concurrently")]
-    ConcurrentRSSAccess,
-
-    #[error("Failed to initialize rack: {0}")]
-    RackSetup(#[from] crate::rack_setup::service::SetupServiceError),
 
     #[error(transparent)]
     GetMacError(#[from] GetMacError),
@@ -187,24 +181,31 @@ pub struct Agent {
 
     /// Ensures that RSS (initialization or teardown) is not executed
     /// concurrently.
-    rss_access: Mutex<()>,
-
-    /// Our share of the rack secret, if we have one.
-    share: Mutex<Option<ShareDistribution>>,
+    rss_access: RssAccess,
 
     sled_state: Mutex<SledAgentState>,
+    storage_resources: StorageResources,
     config: Config,
     sled_config: SledConfig,
-    sp: Option<SpHandle>,
     ddmd_client: DdmAdminClient,
 
     global_zone_bootstrap_link_local_address: Ipv6Addr,
+
+    // We maintain the handle just to show ownership, but don't use it
+    // as the KeyManager task should run forever
+    #[allow(unused)]
+    key_manager_handle: JoinHandle<()>,
+
+    // We maintain a copy of the `StorageKeyRequester` so we can pass it through
+    // from the `HardwareManager` to the `StorageManager` when the `HardwareManger`
+    // gets recreated.
+    storage_key_requester: StorageKeyRequester,
+
+    /// Our sled's baseboard identity.
+    baseboard: Baseboard,
 }
 
-fn get_sled_agent_request_path() -> Utf8PathBuf {
-    Utf8Path::new(omicron_common::OMICRON_CONFIG_PATH)
-        .join("sled-agent-request.toml")
-}
+const SLED_AGENT_REQUEST_FILE: &str = "sled-agent-request.toml";
 
 // Deletes all state which may be left-over from a previous execution of the
 // Sled Agent.
@@ -261,37 +262,45 @@ async fn cleanup_all_old_global_state(
     Ok(())
 }
 
+async fn sled_config_paths(storage: &StorageResources) -> Vec<Utf8PathBuf> {
+    storage
+        .all_m2_mountpoints(sled_hardware::disk::CONFIG_DATASET)
+        .await
+        .into_iter()
+        .map(|p| p.join(SLED_AGENT_REQUEST_FILE))
+        .collect()
+}
+
 impl Agent {
     pub async fn new(
         log: Logger,
         config: Config,
         sled_config: SledConfig,
-        sp: Option<SpHandle>,
-    ) -> Result<(Self, TrustQuorumMembership), BootstrapError> {
+    ) -> Result<Self, BootstrapError> {
         let ba_log = log.new(o!(
             "component" => "BootstrapAgent",
         ));
         let link = config.link.clone();
         let ip = BootstrapInterface::GlobalZone.ip(&link)?;
 
-        // We expect this directory to exist - ensure that it does, before any
-        // subsequent operations which may write configs here.
+        // We expect this directory to exist for Key Management
+        // It's purposefully in the ramdisk and files only exist long enough
+        // to create and mount encrypted datasets.
         info!(
-            log, "Ensuring config directory exists";
-            "path" => omicron_common::OMICRON_CONFIG_PATH,
+            log, "Ensuring zfs key directory exists";
+            "path" => sled_hardware::disk::KEYPATH_ROOT,
         );
-        tokio::fs::create_dir_all(omicron_common::OMICRON_CONFIG_PATH)
+        tokio::fs::create_dir_all(sled_hardware::disk::KEYPATH_ROOT)
             .await
             .map_err(|err| BootstrapError::Io {
                 message: format!(
-                    "Creating config directory {}",
-                    omicron_common::OMICRON_CONFIG_PATH
+                    "Creating zfs key directory {}",
+                    sled_hardware::disk::KEYPATH_ROOT
                 ),
                 err,
             })?;
 
         let bootstrap_etherstub = bootstrap_etherstub()?;
-
         let bootstrap_etherstub_vnic = Dladm::ensure_etherstub_vnic(
             &bootstrap_etherstub,
         )
@@ -340,6 +349,7 @@ impl Agent {
         // currently part of the ramdisk.
         let zoned = true;
         let do_format = true;
+        let encryption_details = None;
         Zfs::ensure_filesystem(
             ZONE_ZFS_RAMDISK_DATASET,
             Mountpoint::Path(Utf8PathBuf::from(
@@ -347,6 +357,7 @@ impl Agent {
             )),
             zoned,
             do_format,
+            encryption_details,
         )?;
 
         // Before we start monitoring for hardware, ensure we're running from a
@@ -370,73 +381,120 @@ impl Agent {
         ]);
         execute(cmd).map_err(|e| BootstrapError::EnablingRouting(e))?;
 
+        // Spawn the `KeyManager` which is needed by the the StorageManager to
+        // retrieve encryption keys.
+        let (mut key_manager, storage_key_requester) =
+            KeyManager::new(&log, LocalSecretRetriever {});
+
+        let handle = tokio::spawn(async move { key_manager.run().await });
+
         // Begin monitoring for hardware to handle tasks like initialization of
         // the switch zone.
         info!(log, "Bootstrap Agent monitoring for hardware");
 
-        let agent = Agent {
+        let hardware_monitor = Self::hardware_monitor(
+            &ba_log,
+            &config.link,
+            &sled_config,
+            global_zone_bootstrap_link_local_address,
+            storage_key_requester.clone(),
+        )
+        .await?;
+
+        let storage_resources = hardware_monitor.storage().clone();
+        let baseboard = hardware_monitor.baseboard().clone();
+
+        // Wait for at least the M.2 we booted from to show up.
+        //
+        // This gives the bootstrap agent a chance to read locally-stored
+        // configs if any exist.
+        loop {
+            match storage_resources.boot_disk().await {
+                Some(disk) => {
+                    info!(ba_log, "Found boot disk M.2: {disk:?}");
+                    break;
+                }
+                None => {
+                    info!(ba_log, "Waiting for boot disk M.2...");
+                    tokio::time::sleep(core::time::Duration::from_millis(250))
+                        .await;
+                }
+            }
+        }
+
+        let paths = sled_config_paths(&storage_resources).await;
+        let maybe_ledger =
+            Ledger::<PersistentSledAgentRequest>::new(&ba_log, paths).await;
+        let make_agent = move |initialized| Agent {
             log: ba_log,
             parent_log: log,
             ip,
-            rss_access: Mutex::new(()),
-            share: Mutex::new(None),
-            sled_state: Mutex::new(SledAgentState::Before(None)),
+            rss_access: RssAccess::new(initialized),
+            sled_state: Mutex::new(SledAgentState::Before(Some(
+                hardware_monitor,
+            ))),
+            storage_resources,
             config: config.clone(),
             sled_config,
-            sp,
             ddmd_client,
             global_zone_bootstrap_link_local_address,
+            key_manager_handle: handle,
+            storage_key_requester,
+            baseboard,
         };
-
-        let hardware_monitor = agent.start_hardware_monitor().await?;
-        *agent.sled_state.lock().await =
-            SledAgentState::Before(Some(hardware_monitor));
-
-        let request_path = get_sled_agent_request_path();
-        let trust_quorum = if request_path.exists() {
+        let agent = if let Some(ledger) = maybe_ledger {
+            let agent = make_agent(true);
             info!(agent.log, "Sled already configured, loading sled agent");
-            let sled_request: PersistentSledAgentRequest = toml::from_str(
-                &tokio::fs::read_to_string(&request_path).await.map_err(
-                    |err| BootstrapError::Io {
-                        message: format!(
-                            "Reading subnet path from {request_path:?}"
-                        ),
-                        err,
-                    },
-                )?,
-            )
-            .map_err(|err| BootstrapError::Toml { path: request_path, err })?;
-
-            let trust_quorum_share =
-                sled_request.trust_quorum_share.map(ShareDistribution::from);
+            let sled_request = ledger.data();
+            agent.request_agent(&sled_request.request).await?;
             agent
-                .request_agent(&sled_request.request, &trust_quorum_share)
-                .await?;
-            TrustQuorumMembership::Known(Arc::new(trust_quorum_share))
         } else {
-            TrustQuorumMembership::Uninitialized
+            make_agent(false)
         };
 
-        Ok((agent, trust_quorum))
+        Ok(agent)
+    }
+
+    pub fn baseboard(&self) -> &Baseboard {
+        &self.baseboard
     }
 
     async fn start_hardware_monitor(
         &self,
+    ) -> Result<HardwareMonitor, BootstrapError> {
+        Self::hardware_monitor(
+            &self.log,
+            &self.config.link,
+            &self.sled_config,
+            self.global_zone_bootstrap_link_local_address,
+            self.storage_key_requester.clone(),
+        )
+        .await
+    }
+
+    async fn hardware_monitor(
+        log: &Logger,
+        link: &illumos_utils::dladm::PhysicalLink,
+        sled_config: &SledConfig,
+        global_zone_bootstrap_link_local_address: Ipv6Addr,
+        storage_key_requester: StorageKeyRequester,
     ) -> Result<HardwareMonitor, BootstrapError> {
         let underlay_etherstub = underlay_etherstub()?;
         let underlay_etherstub_vnic =
             underlay_etherstub_vnic(&underlay_etherstub)?;
         let bootstrap_etherstub = bootstrap_etherstub()?;
         let switch_zone_bootstrap_address =
-            BootstrapInterface::SwitchZone.ip(&self.config.link)?;
+            BootstrapInterface::SwitchZone.ip(&link)?;
+
         let hardware_monitor = HardwareMonitor::new(
-            &self.log,
-            &self.sled_config,
-            self.global_zone_bootstrap_link_local_address,
+            &log,
+            &sled_config,
+            global_zone_bootstrap_link_local_address,
             underlay_etherstub,
             underlay_etherstub_vnic,
             bootstrap_etherstub,
             switch_zone_bootstrap_address,
+            storage_key_requester,
         )
         .await?;
         Ok(hardware_monitor)
@@ -449,8 +507,7 @@ impl Agent {
     /// - Thie method returns an error for different requests
     pub async fn request_agent(
         &self,
-        request: &SledAgentRequest,
-        trust_quorum_share: &Option<ShareDistribution>,
+        request: &StartSledAgentRequest,
     ) -> Result<SledAgentResponse, BootstrapError> {
         info!(&self.log, "Loading Sled Agent: {:?}", request);
 
@@ -461,10 +518,8 @@ impl Agent {
         match &mut *state {
             // We have not previously initialized a sled agent.
             SledAgentState::Before(hardware_monitor) => {
-                if let Some(share) = trust_quorum_share.clone() {
-                    self.establish_sled_quorum(share.clone()).await?;
-                    *self.share.lock().await = Some(share);
-                }
+                // TODO(AJS): Re-insert trust quorum rack secret reconstruction
+                // and key-gen/disk-unlock here
 
                 // Stop the bootstrap agent from monitoring for hardware, and
                 // pass control of service management to the sled agent.
@@ -544,27 +599,15 @@ impl Agent {
 
                 // Record this request so the sled agent can be automatically
                 // initialized on the next boot.
-                //
-                // danger handling: `serialized_request` contains our trust quorum
-                // share; we do not log it and only write it to the designated path.
-                let serialized_request = PersistentSledAgentRequest {
-                    request: Cow::Borrowed(request),
-                    trust_quorum_share: trust_quorum_share
-                        .clone()
-                        .map(Into::into),
-                }
-                .danger_serialize_as_toml()
-                .expect("Cannot serialize request");
-
-                let path = get_sled_agent_request_path();
-                tokio::fs::write(&path, &serialized_request).await.map_err(
-                    |err| BootstrapError::Io {
-                        message: format!(
-                            "Recording Sled Agent request to {path:?}"
-                        ),
-                        err,
+                let paths = sled_config_paths(&self.storage_resources).await;
+                let mut ledger = Ledger::new_with(
+                    &self.log,
+                    paths,
+                    PersistentSledAgentRequest {
+                        request: Cow::Borrowed(request),
                     },
-                )?;
+                );
+                ledger.commit().await?;
 
                 // This is the point-of-no-return, where we're committed to the
                 // sled agent starting.
@@ -606,195 +649,37 @@ impl Agent {
                     return Err(BootstrapError::SledError(err_str));
                 }
 
+                // TODO(AJS): Re-implement this check described by the comment below?
+                //
                 // Bail out if this request includes a trust quorum share that
                 // doesn't match ours. TODO-correctness Do we need to handle a
                 // partially-initialized rack where we may have a share from a
                 // previously-started-but-not-completed init process? If rerunning
                 // it produces different shares this check will fail.
-                if *trust_quorum_share != *self.share.lock().await {
-                    let err_str = concat!(
-                        "Sled Agent already running with",
-                        " a different trust quorum share"
-                    )
-                    .to_string();
-                    return Err(BootstrapError::SledError(err_str));
-                }
 
                 return Ok(SledAgentResponse { id: server.id() });
             }
         }
     }
 
-    /// Communicates with peers, sharing secrets, until the rack has been
-    /// sufficiently unlocked.
-    async fn establish_sled_quorum(
-        &self,
-        share: ShareDistribution,
-    ) -> Result<RackSecret, BootstrapError> {
-        let ddm_admin_client = DdmAdminClient::localhost(&self.log)?;
-        let rack_secret = retry_notify(
-            retry_policy_internal_service_aggressive(),
-            || async {
-                let other_agents = {
-                    // Manually build up a `HashSet` instead of `.collect()`ing
-                    // so we can log if we see any duplicates.
-                    let mut addrs = HashSet::new();
-                    for addr in ddm_admin_client
-                        .derive_bootstrap_addrs_from_prefixes(&[BootstrapInterface::GlobalZone])
-                        .await
-                        .map_err(BootstrapError::DdmError)
-                        .map_err(|err| BackoffError::transient(err))?
-                    {
-                        // We should never see duplicates; that would mean
-                        // maghemite thinks two different sleds have the same
-                        // bootstrap address!
-                        if !addrs.insert(addr) {
-                            let msg = format!("Duplicate peer addresses received from ddmd: {addr}");
-                            error!(&self.log, "{}", msg);
-                            return Err(BackoffError::permanent(
-                                BootstrapError::PeerAddresses(msg),
-                            ));
-                        }
-                    }
-                    addrs
-                };
-                info!(
-                    &self.log,
-                    "Bootstrap: Communicating with peers: {:?}", other_agents
-                );
-
-                // "-1" to account for ourselves.
-                if other_agents.len() < share.threshold - 1 {
-                    warn!(
-                        &self.log,
-                        "Not enough peers to start establishing quorum"
-                    );
-                    return Err(BackoffError::transient(
-                        BootstrapError::TrustQuorum(
-                            TrustQuorumError::NotEnoughPeers,
-                        ),
-                    ));
-                }
-                info!(
-                    &self.log,
-                    "Bootstrap: Enough peers to start share transfer"
-                );
-
-                // Retrieve verified rack_secret shares from a quorum of agents
-                let other_agents: Vec<BootstrapAgentClient> = other_agents
-                    .into_iter()
-                    .map(|addr| {
-                        let addr = SocketAddrV6::new(
-                            addr,
-                            BOOTSTRAP_AGENT_SPROCKETS_PORT,
-                            0,
-                            0,
-                        );
-                        BootstrapAgentClient::new(
-                            addr,
-                            &self.sp,
-                            &share.member_device_id_certs,
-                            self.log.new(o!(
-                                "BootstrapAgentClient" => addr.to_string()),
-                            ),
-                        )
-                    })
-                    .collect();
-
-                // TODO: Parallelize this and keep track of whose shares we've
-                // already retrieved and don't resend. See
-                // https://github.com/oxidecomputer/omicron/issues/514
-                let mut shares = vec![share.share.clone()];
-                for agent in &other_agents {
-                    let share = agent.request_share().await
-                        .map_err(|e| {
-                            info!(&self.log, "Bootstrap: failed to retreive share from peer: {:?}", e);
-                            BackoffError::transient(
-                                BootstrapError::TrustQuorum(e.into()),
-                            )
-                        })?;
-                    info!(
-                        &self.log,
-                        "Bootstrap: retreived share from peer: {}",
-                        agent.addr()
-                    );
-                    shares.push(share);
-                }
-                let rack_secret = RackSecret::combine_shares(
-                    share.threshold,
-                    share.total_shares(),
-                    &shares,
-                )
-                .map_err(|e| {
-                    warn!(
-                        &self.log,
-                        "Bootstrap: failed to construct rack secret: {:?}", e
-                    );
-                    // TODO: We probably need to actually write an error
-                    // handling routine that gives up in some cases based on
-                    // the error returned from `RackSecret::combine_shares`.
-                    // See https://github.com/oxidecomputer/omicron/issues/516
-                    BackoffError::transient(
-                        BootstrapError::TrustQuorum(
-                            TrustQuorumError::RackSecretConstructionFailed(e),
-                        ),
-                    )
-                })?;
-                info!(self.log, "RackSecret computed from shares.");
-                Ok(rack_secret)
-            },
-            |error, duration| {
-                warn!(
-                    self.log,
-                    "Failed to unlock sleds (will retry after {:?}: {:#}",
-                    duration,
-                    error,
-                )
-            },
-        )
-        .await?;
-
-        Ok(rack_secret)
-    }
-
-    /// Runs the rack setup service to completion
-    pub async fn rack_initialize(
-        &self,
+    /// Spawn a task to run the rack setup service.
+    pub fn start_rack_initialize(
+        self: &Arc<Self>,
         request: RackInitializeRequest,
-    ) -> Result<(), BootstrapError> {
-        // Avoid concurrent initialization and teardown.
-        let _rss_access = self
-            .rss_access
-            .try_lock()
-            .map_err(|_| BootstrapError::ConcurrentRSSAccess)?;
-
-        RssHandle::run_rss(
-            &self.parent_log,
-            request,
-            self.ip,
-            self.sp.clone(),
-            // TODO-cleanup: Remove this arg once RSS can discover the trust
-            // quorum members over the management network.
-            self.config
-                .sp_config
-                .as_ref()
-                .map(|sp_config| sp_config.trust_quorum_members.clone())
-                .unwrap_or_default(),
-        )
-        .await?;
-        Ok(())
+    ) -> Result<RackInitId, RssAccessError> {
+        self.rss_access.start_initializing(self, request)
     }
 
-    /// Runs the rack setup service to completion
-    pub async fn rack_reset(&self) -> Result<(), BootstrapError> {
-        // Avoid concurrent initialization and teardown.
-        let _rss_access = self
-            .rss_access
-            .try_lock()
-            .map_err(|_| BootstrapError::ConcurrentRSSAccess)?;
+    /// Spawn a task to run rack reset.
+    pub fn start_rack_reset(
+        self: &Arc<Self>,
+    ) -> Result<RackResetId, RssAccessError> {
+        self.rss_access.start_reset(self)
+    }
 
-        RssHandle::run_rss_reset(&self.parent_log, self.ip, None).await?;
-        Ok(())
+    /// Get the status of a spawned initialize or reset operation.
+    pub fn initialization_reset_op_status(&self) -> RackOperationStatus {
+        self.rss_access.operation_status()
     }
 
     // The following "_locked" functions act on global state,
@@ -827,28 +712,39 @@ impl Agent {
         &self,
         _state: &tokio::sync::MutexGuard<'_, SledAgentState>,
     ) -> Result<(), BootstrapError> {
-        tokio::fs::remove_dir_all(omicron_common::OMICRON_CONFIG_PATH)
+        let config_dirs = self
+            .storage_resources
+            .all_m2_mountpoints(sled_hardware::disk::CONFIG_DATASET)
             .await
-            .or_else(|err| match err.kind() {
-                std::io::ErrorKind::NotFound => Ok(()),
-                _ => Err(err),
-            })
-            .map_err(|err| BootstrapError::Io {
-                message: format!(
-                    "Deleting {}",
-                    omicron_common::OMICRON_CONFIG_PATH
-                ),
-                err,
-            })?;
-        tokio::fs::create_dir_all(omicron_common::OMICRON_CONFIG_PATH)
-            .await
-            .map_err(|err| BootstrapError::Io {
-                message: format!(
-                    "Creating config directory {}",
-                    omicron_common::OMICRON_CONFIG_PATH
-                ),
-                err,
-            })?;
+            .into_iter();
+
+        for dir in config_dirs {
+            for entry in dir.read_dir_utf8().map_err(|err| {
+                BootstrapError::Io { message: format!("Deleting {dir}"), err }
+            })? {
+                let entry = entry.map_err(|err| BootstrapError::Io {
+                    message: format!("Deleting {dir}"),
+                    err,
+                })?;
+
+                let path = entry.path();
+                let file_type =
+                    entry.file_type().map_err(|err| BootstrapError::Io {
+                        message: format!("Deleting {path}"),
+                        err,
+                    })?;
+
+                if file_type.is_dir() {
+                    tokio::fs::remove_dir_all(path).await
+                } else {
+                    tokio::fs::remove_file(path).await
+                }
+                .map_err(|err| BootstrapError::Io {
+                    message: format!("Deleting {path}"),
+                    err,
+                })?;
+            }
+        }
         Ok(())
     }
 
@@ -954,9 +850,10 @@ impl Agent {
         Ok(components)
     }
 
-    /// The GZ address used by the bootstrap agent for Sprockets.
-    pub fn sprockets_address(&self) -> SocketAddrV6 {
-        SocketAddrV6::new(self.ip, BOOTSTRAP_AGENT_SPROCKETS_PORT, 0, 0)
+    /// The GZ address used by the bootstrap agent for rack initialization by
+    /// bootstrap agent running local to RSS on a scrimlet.
+    pub fn rack_init_address(&self) -> SocketAddrV6 {
+        SocketAddrV6::new(self.ip, BOOTSTRAP_AGENT_RACK_INIT_PORT, 0, 0)
     }
 
     /// The address used by the bootstrap agent to serve a dropshot interface.
@@ -965,66 +862,51 @@ impl Agent {
     }
 }
 
-// We intentionally DO NOT derive `Debug` or `Serialize`; both provide avenues
-// by which we may accidentally log the contents of our trust quorum share.
-#[derive(Deserialize, PartialEq)]
+#[derive(Clone, Serialize, Deserialize, PartialEq)]
 struct PersistentSledAgentRequest<'a> {
-    request: Cow<'a, SledAgentRequest>,
-    trust_quorum_share: Option<SerializableShareDistribution>,
+    request: Cow<'a, StartSledAgentRequest>,
 }
 
-impl PersistentSledAgentRequest<'_> {
-    /// On success, the returned string will contain our raw
-    /// `trust_quorum_share`. This method is named `danger_*` to remind the
-    /// caller that they must not log this string.
-    fn danger_serialize_as_toml(&self) -> Result<String, toml::ser::Error> {
-        #[derive(Serialize)]
-        #[serde(remote = "PersistentSledAgentRequest")]
-        struct PersistentSledAgentRequestDef<'a> {
-            request: Cow<'a, SledAgentRequest>,
-            trust_quorum_share: Option<SerializableShareDistribution>,
-        }
-
-        let mut out = String::with_capacity(128);
-        let serializer = toml::Serializer::new(&mut out);
-        PersistentSledAgentRequestDef::serialize(self, serializer)?;
-        Ok(out)
+impl<'a> Ledgerable for PersistentSledAgentRequest<'a> {
+    fn is_newer_than(&self, _other: &Self) -> bool {
+        true
     }
+    fn generation_bump(&mut self) {}
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use omicron_test_utils::dev::test_setup_log;
     use uuid::Uuid;
 
-    #[test]
-    fn persistent_sled_agent_request_serialization_round_trips() {
-        let secret = RackSecret::new();
-        let (mut shares, verifier) = secret.split(2, 4).unwrap();
+    #[tokio::test]
+    async fn persistent_sled_agent_request_serialization() {
+        let logctx =
+            test_setup_log("persistent_sled_agent_request_serialization");
+        let log = &logctx.log;
 
         let request = PersistentSledAgentRequest {
-            request: Cow::Owned(SledAgentRequest {
+            request: Cow::Owned(StartSledAgentRequest {
                 id: Uuid::new_v4(),
                 rack_id: Uuid::new_v4(),
                 ntp_servers: vec![String::from("test.pool.example.com")],
                 dns_servers: vec![String::from("1.1.1.1")],
                 subnet: Ipv6Subnet::new(Ipv6Addr::LOCALHOST),
             }),
-            trust_quorum_share: Some(
-                ShareDistribution {
-                    threshold: 2,
-                    verifier,
-                    share: shares.pop().unwrap(),
-                    member_device_id_certs: vec![],
-                }
-                .into(),
-            ),
         };
 
-        let serialized = request.danger_serialize_as_toml().unwrap();
-        let deserialized: PersistentSledAgentRequest =
-            toml::from_str(&serialized).unwrap();
+        let tempdir = camino_tempfile::Utf8TempDir::new().unwrap();
+        let paths = vec![tempdir.path().join("test-file")];
 
-        assert!(request == deserialized, "serialization round trip failed");
+        let mut ledger = Ledger::new_with(log, paths.clone(), request.clone());
+        ledger.commit().await.expect("Failed to write to ledger");
+
+        let ledger = Ledger::<PersistentSledAgentRequest>::new(log, paths)
+            .await
+            .expect("Failt to read request");
+
+        assert!(&request == ledger.data(), "serialization round trip failed");
+        logctx.cleanup_successful();
     }
 }

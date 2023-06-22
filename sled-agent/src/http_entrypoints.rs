@@ -65,9 +65,26 @@ async fn services_put(
     rqctx: RequestContext<SledAgent>,
     body: TypedBody<ServiceEnsureBody>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-    let sa = rqctx.context();
+    let sa = rqctx.context().clone();
     let body_args = body.into_inner();
-    sa.services_ensure(body_args).await.map_err(|e| Error::from(e))?;
+
+    // Spawn a separate task to run `services_ensure`: cancellation of this
+    // endpoint's future (as might happen if the client abandons the request or
+    // times out) could result in leaving zones partially configured and the
+    // in-memory state of the service manager invalid. See:
+    // oxidecomputer/omicron#3098.
+    match tokio::spawn(async move { sa.services_ensure(body_args).await }).await
+    {
+        Ok(result) => result.map_err(|e| Error::from(e))?,
+
+        Err(e) => {
+            return Err(HttpError::for_internal_error(format!(
+                "unexpected failure awaiting \"services_ensure\": {:#}",
+                e
+            )));
+        }
+    }
+
     Ok(HttpResponseUpdatedNoContent())
 }
 
@@ -151,9 +168,7 @@ async fn instance_register(
     let instance_id = path_params.into_inner().instance_id;
     let body_args = body.into_inner();
     Ok(HttpResponseOk(
-        sa.instance_ensure_registered(instance_id, body_args.initial)
-            .await
-            .map_err(Error::from)?,
+        sa.instance_ensure_registered(instance_id, body_args.initial).await?,
     ))
 }
 
@@ -167,11 +182,7 @@ async fn instance_unregister(
 ) -> Result<HttpResponseOk<InstanceUnregisterResponse>, HttpError> {
     let sa = rqctx.context();
     let instance_id = path_params.into_inner().instance_id;
-    Ok(HttpResponseOk(
-        sa.instance_ensure_unregistered(instance_id)
-            .await
-            .map_err(Error::from)?,
-    ))
+    Ok(HttpResponseOk(sa.instance_ensure_unregistered(instance_id).await?))
 }
 
 #[endpoint {
@@ -187,9 +198,7 @@ async fn instance_put_state(
     let instance_id = path_params.into_inner().instance_id;
     let body_args = body.into_inner();
     Ok(HttpResponseOk(
-        sa.instance_ensure_state(instance_id, body_args.state)
-            .await
-            .map_err(Error::from)?,
+        sa.instance_ensure_state(instance_id, body_args.state).await?,
     ))
 }
 
@@ -211,8 +220,7 @@ async fn instance_put_migration_ids(
             &body_args.old_runtime,
             &body_args.migration_params,
         )
-        .await
-        .map_err(Error::from)?,
+        .await?,
     ))
 }
 
@@ -317,10 +325,10 @@ async fn vpc_firewall_rules_put(
     body: TypedBody<VpcFirewallRulesEnsureBody>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let sa = rqctx.context();
-    let vpc_id = path_params.into_inner().vpc_id;
+    let _vpc_id = path_params.into_inner().vpc_id;
     let body_args = body.into_inner();
 
-    sa.firewall_rules_ensure(vpc_id, &body_args.rules[..])
+    sa.firewall_rules_ensure(body_args.vni, &body_args.rules[..])
         .await
         .map_err(Error::from)?;
 

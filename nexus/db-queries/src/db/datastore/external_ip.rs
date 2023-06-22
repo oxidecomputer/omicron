@@ -73,10 +73,36 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         ip_id: Uuid,
+        name: &Name,
+        description: &str,
+        service_id: Uuid,
     ) -> CreateResult<ExternalIp> {
         let (.., pool) = self.ip_pools_service_lookup(opctx).await?;
 
-        let data = IncompleteExternalIp::for_service(ip_id, pool.id());
+        let data = IncompleteExternalIp::for_service(
+            ip_id,
+            name,
+            description,
+            service_id,
+            pool.id(),
+        );
+        self.allocate_external_ip(opctx, data).await
+    }
+
+    /// Allocates an SNAT IP address for internal service usage.
+    pub async fn allocate_service_snat_ip(
+        &self,
+        opctx: &OpContext,
+        ip_id: Uuid,
+        service_id: Uuid,
+    ) -> CreateResult<ExternalIp> {
+        let (.., pool) = self.ip_pools_service_lookup(opctx).await?;
+
+        let data = IncompleteExternalIp::for_service_snat(
+            ip_id,
+            service_id,
+            pool.id(),
+        );
         self.allocate_external_ip(opctx, data).await
     }
 
@@ -123,7 +149,7 @@ impl DataStore {
         })
     }
 
-    /// Allocates an explicit IP address for an internal service.
+    /// Allocates an explicit Floating IP address for an internal service.
     ///
     /// Unlike the other IP allocation requests, this does not search for an
     /// available IP address, it asks for one explicitly.
@@ -131,11 +157,43 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         ip_id: Uuid,
+        name: &Name,
+        description: &str,
+        service_id: Uuid,
         ip: IpAddr,
     ) -> CreateResult<ExternalIp> {
         let (.., pool) = self.ip_pools_service_lookup(opctx).await?;
-        let data =
-            IncompleteExternalIp::for_service_explicit(ip_id, pool.id(), ip);
+        let data = IncompleteExternalIp::for_service_explicit(
+            ip_id,
+            name,
+            description,
+            service_id,
+            pool.id(),
+            ip,
+        );
+        self.allocate_external_ip(opctx, data).await
+    }
+
+    /// Allocates an explicit SNAT IP address for an internal service.
+    ///
+    /// Unlike the other IP allocation requests, this does not search for an
+    /// available IP address, it asks for one explicitly.
+    pub async fn allocate_explicit_service_snat_ip(
+        &self,
+        opctx: &OpContext,
+        ip_id: Uuid,
+        service_id: Uuid,
+        ip: IpAddr,
+        port_range: (u16, u16),
+    ) -> CreateResult<ExternalIp> {
+        let (.., pool) = self.ip_pools_service_lookup(opctx).await?;
+        let data = IncompleteExternalIp::for_service_explicit_snat(
+            ip_id,
+            service_id,
+            pool.id(),
+            ip,
+            port_range,
+        );
         self.allocate_external_ip(opctx, data).await
     }
 
@@ -186,7 +244,8 @@ impl DataStore {
         let now = Utc::now();
         diesel::update(dsl::external_ip)
             .filter(dsl::time_deleted.is_null())
-            .filter(dsl::instance_id.eq(instance_id))
+            .filter(dsl::is_service.eq(false))
+            .filter(dsl::parent_id.eq(instance_id))
             .filter(dsl::kind.ne(IpKind::Floating))
             .set(dsl::time_deleted.eq(now))
             .execute_async(self.pool_authorized(opctx).await?)
@@ -202,7 +261,8 @@ impl DataStore {
     ) -> LookupResult<Vec<ExternalIp>> {
         use db::schema::external_ip::dsl;
         dsl::external_ip
-            .filter(dsl::instance_id.eq(instance_id))
+            .filter(dsl::is_service.eq(false))
+            .filter(dsl::parent_id.eq(instance_id))
             .filter(dsl::time_deleted.is_null())
             .select(ExternalIp::as_select())
             .get_results_async(self.pool_authorized(opctx).await?)

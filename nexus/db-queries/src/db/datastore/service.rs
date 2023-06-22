@@ -16,7 +16,10 @@ use crate::db::identity::Asset;
 use crate::db::model::Service;
 use crate::db::model::Sled;
 use crate::db::pagination::paginated;
+use crate::db::pool::DbConnection;
+use async_bb8_diesel::AsyncConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
+use async_bb8_diesel::PoolError;
 use chrono::Utc;
 use diesel::prelude::*;
 use diesel::upsert::excluded;
@@ -36,23 +39,39 @@ impl DataStore {
         opctx: &OpContext,
         service: Service,
     ) -> CreateResult<Service> {
+        let conn = self.pool_authorized(opctx).await?;
+        self.service_upsert_conn(conn, service).await
+    }
+
+    /// Stores a new service in the database (using an existing db connection).
+    pub(crate) async fn service_upsert_conn<ConnError>(
+        &self,
+        conn: &(impl AsyncConnection<DbConnection, ConnError> + Sync),
+        service: Service,
+    ) -> CreateResult<Service>
+    where
+        ConnError: From<diesel::result::Error> + Send + 'static,
+        PoolError: From<ConnError>,
+    {
         use db::schema::service::dsl;
 
+        let service_id = service.id();
         let sled_id = service.sled_id;
         Sled::insert_resource(
             sled_id,
             diesel::insert_into(dsl::service)
-                .values(service.clone())
+                .values(service)
                 .on_conflict(dsl::id)
                 .do_update()
                 .set((
                     dsl::time_modified.eq(Utc::now()),
                     dsl::sled_id.eq(excluded(dsl::sled_id)),
                     dsl::ip.eq(excluded(dsl::ip)),
+                    dsl::port.eq(excluded(dsl::port)),
                     dsl::kind.eq(excluded(dsl::kind)),
                 )),
         )
-        .insert_and_get_result_async(self.pool_authorized(opctx).await?)
+        .insert_and_get_result_async(conn)
         .await
         .map_err(|e| match e {
             AsyncInsertError::CollectionNotFound => Error::ObjectNotFound {
@@ -64,7 +83,7 @@ impl DataStore {
                     e,
                     ErrorHandler::Conflict(
                         ResourceType::Service,
-                        &service.id().to_string(),
+                        &service_id.to_string(),
                     ),
                 )
             }

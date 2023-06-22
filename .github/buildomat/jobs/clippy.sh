@@ -3,7 +3,7 @@
 #: name = "clippy (helios)"
 #: variety = "basic"
 #: target = "helios-latest"
-#: rust_toolchain = "1.68.2"
+#: rust_toolchain = "1.70.0"
 #: output_rules = []
 
 # Run clippy on illumos (not just other systems) because a bunch of our code
@@ -16,8 +16,11 @@ set -o xtrace
 cargo --version
 rustc --version
 
-# Put tools on our PATH to satisfy install_builder_prerequisites.
-export PATH="$PATH:$PWD/out/cockroachdb/bin:$PWD/out/clickhouse:$PWD/out/dendrite-stub/bin"
+#
+# Set up our PATH for use with this workspace.
+#
+source ./env.sh
+
 banner prerequisites
 ptime -m bash ./tools/install_builder_prerequisites.sh -y
 

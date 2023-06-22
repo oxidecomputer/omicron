@@ -19,6 +19,11 @@ progenitor::generate_api!(
     post_hook = (|log: &slog::Logger, result: &Result<_, _>| {
         slog::debug!(log, "client response"; "result" => ?result);
     }),
+    replace = {
+        MacAddr = omicron_common::api::external::MacAddr,
+        Name = omicron_common::api::external::Name,
+        NewPasswordHash = omicron_passwords::NewPasswordHash,
+    }
 );
 
 impl omicron_common::api::external::ClientError for types::Error {
@@ -257,5 +262,67 @@ impl From<omicron_common::address::Ipv4Range> for types::Ipv4Range {
 impl From<omicron_common::address::Ipv6Range> for types::Ipv6Range {
     fn from(r: omicron_common::address::Ipv6Range) -> Self {
         Self { first: r.first, last: r.last }
+    }
+}
+
+impl From<&omicron_common::api::internal::shared::SourceNatConfig>
+    for types::SourceNatConfig
+{
+    fn from(
+        r: &omicron_common::api::internal::shared::SourceNatConfig,
+    ) -> Self {
+        Self { ip: r.ip, first_port: r.first_port, last_port: r.last_port }
+    }
+}
+
+impl From<omicron_common::api::internal::shared::PortSpeed>
+    for types::PortSpeed
+{
+    fn from(value: omicron_common::api::internal::shared::PortSpeed) -> Self {
+        match value {
+            omicron_common::api::internal::shared::PortSpeed::Speed0G => {
+                types::PortSpeed::Speed0G
+            }
+            omicron_common::api::internal::shared::PortSpeed::Speed1G => {
+                types::PortSpeed::Speed1G
+            }
+            omicron_common::api::internal::shared::PortSpeed::Speed10G => {
+                types::PortSpeed::Speed10G
+            }
+            omicron_common::api::internal::shared::PortSpeed::Speed25G => {
+                types::PortSpeed::Speed25G
+            }
+            omicron_common::api::internal::shared::PortSpeed::Speed40G => {
+                types::PortSpeed::Speed40G
+            }
+            omicron_common::api::internal::shared::PortSpeed::Speed50G => {
+                types::PortSpeed::Speed50G
+            }
+            omicron_common::api::internal::shared::PortSpeed::Speed100G => {
+                types::PortSpeed::Speed100G
+            }
+            omicron_common::api::internal::shared::PortSpeed::Speed200G => {
+                types::PortSpeed::Speed200G
+            }
+            omicron_common::api::internal::shared::PortSpeed::Speed400G => {
+                types::PortSpeed::Speed400G
+            }
+        }
+    }
+}
+
+impl From<omicron_common::api::internal::shared::PortFec> for types::PortFec {
+    fn from(value: omicron_common::api::internal::shared::PortFec) -> Self {
+        match value {
+            omicron_common::api::internal::shared::PortFec::Firecode => {
+                types::PortFec::Firecode
+            }
+            omicron_common::api::internal::shared::PortFec::None => {
+                types::PortFec::None
+            }
+            omicron_common::api::internal::shared::PortFec::Rs => {
+                types::PortFec::Rs
+            }
+        }
     }
 }

@@ -65,9 +65,9 @@ authz-macros.workspace = true
 db-macros.workspace = true
 nexus-defaults.workspace = true
 nexus-db-model.workspace = true
-nexus-passwords.workspace = true
 nexus-types.workspace = true
 omicron-common.workspace = true
+omicron-passwords.workspace = true
 oximeter.workspace = true
 
 [dev-dependencies]

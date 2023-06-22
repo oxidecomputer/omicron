@@ -2,38 +2,44 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use chrono::Utc;
 use dropshot::test_util::ClientTestContext;
 use dropshot::ResultsPage;
 use nexus_test_utils::resource_helpers::objects_list_page_authz;
+use nexus_test_utils::ControlPlaneTestContext;
 use oximeter::types::Datum;
 use oximeter::types::Measurement;
+use uuid::Uuid;
 
-pub async fn query_for_metrics_until_they_exist(
+pub async fn query_for_metrics(
     client: &ClientTestContext,
     path: &str,
 ) -> ResultsPage<Measurement> {
-    loop {
-        let measurements: ResultsPage<Measurement> =
-            objects_list_page_authz(client, path).await;
-
-        if !measurements.items.is_empty() {
-            return measurements;
-        }
-        tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
-    }
-}
-
-pub async fn query_for_latest_metric(
-    client: &ClientTestContext,
-    path: &str,
-) -> i64 {
     let measurements: ResultsPage<Measurement> =
         objects_list_page_authz(client, path).await;
+    assert!(!measurements.items.is_empty());
+    measurements
+}
 
-    // prevent more confusing 'attempt to subtract with overflow' on next line
-    assert!(measurements.items.len() > 0, "Expected at least one measurement");
+pub async fn get_latest_system_metric(
+    cptestctx: &ControlPlaneTestContext<omicron_nexus::Server>,
+    metric_name: &str,
+    resource_id: Uuid,
+) -> i64 {
+    let client = &cptestctx.external_client;
+    let url = format!(
+        "/v1/system/metrics/{metric_name}?start_time={:?}&end_time={:?}&id={:?}&order=descending&limit=1", 
+        cptestctx.start_time,
+        Utc::now(),
+        resource_id,
+    );
+    let measurements: ResultsPage<Measurement> =
+        objects_list_page_authz(client, &url).await;
 
-    let item = &measurements.items[measurements.items.len() - 1];
+    // prevent more confusing error on next line
+    assert!(measurements.items.len() == 1, "Expected exactly one measurement");
+
+    let item = &measurements.items[0];
     let datum = match item.datum() {
         Datum::I64(c) => c,
         _ => panic!("Unexpected datum type {:?}", item.datum()),

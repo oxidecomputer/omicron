@@ -23,24 +23,44 @@ guide at xref:how-to-run.adoc[].
 
 == Installing Prerequisites
 
-Prerequisite software may be installed with the following script:
+First, set up your environment to include executables that will be installed shortly:
+
+[source,text]
+----
+$ source env.sh
+----
+
+Then install prerequisite software with the following script:
 
 [source,text]
 ----
 $ ./tools/install_builder_prerequisites.sh
 ----
 
+You need to do this once per workspace and potentially again each time you fetch new changes.  If the script reports any PATH problems, you'll need to correct those before proceeding.
+
 == Running
 
-To **run Omicron** you need to run four programs:
+To run anything, you'll need to set up your environment as before:
+
+[source,text]
+----
+$ source env.sh
+----
+
+You don't need to do this again if you just did it.  But you'll need to do it each time you start a new shell session to work in this workspace.
+
+To **run Omicron** you need to run several programs:
 
 * a CockroachDB cluster.  For development, you can use the `omicron-dev` tool in this repository to start a single-node CockroachDB cluster **that will delete the database when you shut it down.**
 * a ClickHouse server. You should use the `omicron-dev` tool for this as well, see below, and as with CockroachDB,
 the database files will be deleted when you stop the program.
 * `nexus`: the guts of the control plane
 * `sled-agent-sim`: a simulator for the component that manages a single sled
+* an `external-dns` server
+* `oximeter`, which collects metrics from control plane components
 
-The easiest way to start the required databases is to use the built-in `omicron-dev` tool.  This tool assumes that the `cockroach` and `clickhouse` executables are on your PATH, and match the versions above.
+You can run these by hand, but it's easier to use `omicron-dev run-all`.  See below for more on both options.
 
 === Quick start
 
@@ -174,3 +194,27 @@ Once everything is up and running, you can use the system in a few ways:
 
 * Use the browser-based console.  The Nexus log output will show what IP address and port it's listening on.  This is also configured in the config file.  If you're using the defaults, you can reach the console at `http://127.0.0.1:12220/projects`.  Depending on the environment where you're running this, you may need an ssh tunnel or the like to reach this from your browser.
 * Use the xref:cli.adoc[`oxide` CLI].
+
+== Running with TLS
+
+When you run the above, you will wind up with Nexus listening on HTTP (with no TLS) on its external address.  This is convenient for debugging, but not representative of a real system.  If you want to run it with TLS, you need to tweak the above procedure slightly:
+
+1. You'll need to use the "Running the pieces by hand" section.  `omicron-dev run-all` does not currently provide a way to do this (because it doesn't have a way to specify a certificate to be used during rack initialization).
+2. Acquire a TLS certificate.  The easiest approach is to use `omicron-dev cert-create` to create a self-signed certificate.  However you get one, it should be valid for the domain corresponding to your recovery Silo.  When you run the pieces by hand, this would be `demo-silo.sys.oxide-dev.test`.  If you want a certificate you can use for multiple Silos, make it a wildcard certificate.  Here's an example:
++
+[source,text]
+----
+$ cargo run --bin=omicron-dev -- cert-create demo- '*.sys.oxide-dev.test'
+wrote certificate to demo-cert.pem
+wrote private key to demo-key.pem
+----
+3. Modify your Nexus configuration file to include `tls = true`.  See `./nexus/examples/config.toml` for an example.  This property is present but commented-out in that file.  If you're running on standard port 80 (which is not usually the case in development), you may also want to change the `deployment.dropshot_external.bind_address` port to 443.
+4. When you run `sled-agent-sim`, pass the `--rss-tls-cert` and `--rss-tls-key` options as well.  These should refer to the files created by `omicron-dev cert-create` above.  (They can be any PEM-formatted x509 certificate and associated private key.)
+5. Usually at this point you'll be using a self-signed certificate for a domain that's not publicly resolvable with DNS.  This makes it hard to use standard clients.  Fortunately, `curl` does have flags to make this easy.  Continuing with this example, assuming your Nexus HTTPS server is listening on 127.0.0.1:12220 and your Silo's DNS name is `demo-silo.sys.oxide-dev.test`:
++
+[source,text]
+----
+$ curl -i --resolve test-suite-silo.sys.oxide-dev.test:12220:127.0.0.1 --cacert /path/to/your/certificate.pem https://test-suite-silo.sys.oxide-dev.test:12220
+----
++
+The Oxide CLI does not https://github.com/oxidecomputer/oxide.rs/issues/193[yet] support this so it's a little unwieldy to use a local TLS server this way.

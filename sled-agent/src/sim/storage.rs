@@ -17,6 +17,7 @@ use crucible_agent_client::types::{
     CreateRegion, Region, RegionId, RunningSnapshot, Snapshot, State,
 };
 use crucible_client_types::VolumeConstructionRequest;
+use dropshot::HandlerTaskMode;
 use dropshot::HttpError;
 use futures::lock::Mutex;
 use nexus_client::types::{
@@ -37,6 +38,7 @@ struct CrucibleDataInner {
     snapshots: HashMap<Uuid, Vec<Snapshot>>,
     running_snapshots: HashMap<Uuid, HashMap<String, RunningSnapshot>>,
     on_create: Option<CreateCallback>,
+    creating_a_running_snapshot_should_fail: bool,
     next_port: u16,
 }
 
@@ -47,6 +49,7 @@ impl CrucibleDataInner {
             snapshots: HashMap::new(),
             running_snapshots: HashMap::new(),
             on_create: None,
+            creating_a_running_snapshot_should_fail: false,
             next_port: crucible_port,
         }
     }
@@ -175,11 +178,19 @@ impl CrucibleDataInner {
         Ok(())
     }
 
+    fn set_creating_a_running_snapshot_should_fail(&mut self) {
+        self.creating_a_running_snapshot_should_fail = true;
+    }
+
     fn create_running_snapshot(
         &mut self,
         id: &RegionId,
         name: &str,
     ) -> Result<RunningSnapshot> {
+        if self.creating_a_running_snapshot_should_fail {
+            bail!("failure creating running snapshot");
+        }
+
         let id = Uuid::from_str(&id.0).unwrap();
 
         let map =
@@ -306,6 +317,10 @@ impl CrucibleData {
         name: &str,
     ) -> Result<()> {
         self.inner.lock().await.delete_snapshot(id, name)
+    }
+
+    pub async fn set_creating_a_running_snapshot_should_fail(&self) {
+        self.inner.lock().await.set_creating_a_running_snapshot_should_fail();
     }
 
     pub async fn create_running_snapshot(
@@ -786,7 +801,7 @@ impl PantryServer {
                 // This has to be large enough to support:
                 // - bulk writes into disks
                 request_body_max_bytes: 8192 * 1024,
-                ..Default::default()
+                default_handler_task_mode: HandlerTaskMode::Detached,
             },
             super::http_entrypoints_pantry::api(),
             pantry.clone(),

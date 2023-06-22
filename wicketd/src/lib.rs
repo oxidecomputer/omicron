@@ -3,17 +3,19 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 mod artifacts;
+mod bootstrap_addrs;
 mod config;
 mod context;
 mod http_entrypoints;
 mod installinator_progress;
 mod inventory;
 pub mod mgs;
-mod update_events;
+mod rss_config;
 mod update_tracker;
 
 use anyhow::{anyhow, Result};
 use artifacts::{WicketdArtifactServer, WicketdArtifactStore};
+use bootstrap_addrs::BootstrapPeers;
 pub use config::Config;
 pub(crate) use context::ServerContext;
 pub use installinator_progress::{IprUpdateTracker, RunningUpdateState};
@@ -22,10 +24,13 @@ use mgs::make_mgs_client;
 pub(crate) use mgs::{MgsHandle, MgsManager};
 use sled_hardware::Baseboard;
 
-use dropshot::{ConfigDropshot, HttpServer};
+use dropshot::{ConfigDropshot, HandlerTaskMode, HttpServer};
 use slog::{debug, error, o, Drain};
-use std::net::{SocketAddr, SocketAddrV6};
-use update_tracker::UpdateTracker;
+use std::{
+    net::{SocketAddr, SocketAddrV6},
+    sync::Arc,
+};
+pub use update_tracker::{StartUpdateError, UpdateTracker};
 
 /// Run the OpenAPI generator for the API; which emits the OpenAPI spec
 /// to stdout.
@@ -51,6 +56,7 @@ pub struct Server {
     pub wicketd_server: HttpServer<ServerContext>,
     pub artifact_server: HttpServer<installinator_artifactd::ServerContext>,
     pub artifact_store: WicketdArtifactStore,
+    pub update_tracker: Arc<UpdateTracker>,
     pub ipr_update_tracker: IprUpdateTracker,
 }
 
@@ -73,7 +79,7 @@ impl Server {
             // The maximum request size is set to 4 GB -- artifacts can be large and there's currently
             // no way to set a larger request size for some endpoints.
             request_body_max_bytes: 4 << 30,
-            ..Default::default()
+            default_handler_task_mode: HandlerTaskMode::Detached,
         };
 
         let mgs_manager = MgsManager::new(&log, args.mgs_address);
@@ -86,14 +92,17 @@ impl Server {
             crate::installinator_progress::new(&log);
 
         let store = WicketdArtifactStore::new(&log);
-        let update_tracker = UpdateTracker::new(
+        let update_tracker = Arc::new(UpdateTracker::new(
             args.mgs_address,
             &log,
+            store.clone(),
             ipr_update_tracker.clone(),
-        );
+        ));
+
+        let bootstrap_peers = BootstrapPeers::new(&log);
 
         let wicketd_server = {
-            let log = log.new(o!("component" => "dropshot (wicketd)"));
+            let ds_log = log.new(o!("component" => "dropshot (wicketd)"));
             let mgs_client = make_mgs_client(log.clone(), args.mgs_address);
             dropshot::HttpServerStarter::new(
                 &dropshot_config,
@@ -101,11 +110,13 @@ impl Server {
                 ServerContext {
                     mgs_handle,
                     mgs_client,
-                    artifact_store: store.clone(),
-                    update_tracker,
+                    log: log.clone(),
+                    bootstrap_peers,
+                    update_tracker: update_tracker.clone(),
                     baseboard: args.baseboard,
+                    rss_config: Default::default(),
                 },
-                &log,
+                &ds_log,
             )
             .map_err(|err| format!("initializing http server: {}", err))?
             .start()
@@ -127,6 +138,7 @@ impl Server {
             wicketd_server,
             artifact_server,
             artifact_store: store,
+            update_tracker,
             ipr_update_tracker,
         })
     }

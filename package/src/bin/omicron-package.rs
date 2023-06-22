@@ -569,7 +569,7 @@ fn uninstall_all_omicron_datasets(config: &Config) -> Result<()> {
     let datasets = match zfs::get_all_omicron_datasets_for_delete() {
         Err(e) => {
             warn!(config.log, "Failed to get omicron datasets: {}", e);
-            return Ok(());
+            return Err(e);
         }
         Ok(datasets) => datasets,
     };
@@ -604,13 +604,6 @@ fn uninstall_all_packages(config: &Config) {
             .run(smf::AdmSelection::ByPattern(&[&package.service_name]));
         let _ = smf::Config::delete().force().run(&package.service_name);
     }
-}
-
-fn uninstall_omicron_config() {
-    // Once all packages have been removed, also remove any locally-stored
-    // configuration.
-    remove_all_unless_already_removed(omicron_common::OMICRON_CONFIG_PATH)
-        .unwrap();
 }
 
 fn remove_file_unless_already_removed<P: AsRef<Path>>(path: P) -> Result<()> {
@@ -671,8 +664,6 @@ async fn do_deactivate(config: &Config) -> Result<()> {
 
 async fn do_uninstall(config: &Config) -> Result<()> {
     do_deactivate(config).await?;
-    info!(config.log, "Uninstalling Omicron configuration");
-    uninstall_omicron_config();
     info!(config.log, "Removing datasets");
     uninstall_all_omicron_datasets(config)?;
     Ok(())

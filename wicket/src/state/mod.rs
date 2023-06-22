@@ -4,20 +4,26 @@
 
 //! The global state manipulated by wicket.
 
+mod force_update;
 mod inventory;
 mod rack;
 mod status;
 mod update;
 
+pub use force_update::ForceUpdateState;
 pub use inventory::{
     Component, ComponentId, Inventory, ParsableComponentId, PowerState, Sp,
     ALL_COMPONENT_IDS,
 };
 pub use rack::{KnightRiderMode, RackState};
 pub use status::{Liveness, ServiceStatus};
-pub use update::{update_component_title, RackUpdateState, UpdateState};
+pub use update::{
+    update_component_title, RackUpdateState, UpdateItemState,
+    UpdateRunningState,
+};
 
 use serde::{Deserialize, Serialize};
+use wicketd_client::types::{CurrentRssUserConfig, RackOperationStatus};
 
 /// The global state of wicket
 ///
@@ -31,6 +37,9 @@ pub struct State {
     pub rack_state: RackState,
     pub service_status: ServiceStatus,
     pub update_state: RackUpdateState,
+    pub force_update_state: ForceUpdateState,
+    pub rss_config: Option<CurrentRssUserConfig>,
+    pub rack_setup_state: Result<RackOperationStatus, String>,
 }
 
 impl State {
@@ -42,6 +51,9 @@ impl State {
             rack_state: RackState::new(),
             service_status: ServiceStatus::new(),
             update_state: RackUpdateState::new(),
+            force_update_state: ForceUpdateState::default(),
+            rss_config: None,
+            rack_setup_state: Err("status not yet polled from wicketd".into()),
         }
     }
 }

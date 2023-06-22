@@ -4,7 +4,7 @@
 
 //! Sled agent implementation
 
-use crate::bootstrap::params::SledAgentRequest;
+use crate::bootstrap::params::StartSledAgentRequest;
 use crate::config::Config;
 use crate::instance_manager::InstanceManager;
 use crate::nexus::{LazyNexusClient, NexusRequestQueue};
@@ -24,6 +24,7 @@ use illumos_utils::opte::PortManager;
 use omicron_common::address::{
     get_sled_address, get_switch_zone_address, Ipv6Subnet, SLED_PREFIX,
 };
+use omicron_common::api::external::Vni;
 use omicron_common::api::{
     internal::nexus::DiskRuntimeState, internal::nexus::InstanceRuntimeState,
     internal::nexus::UpdateArtifactId,
@@ -109,13 +110,23 @@ impl From<Error> for dropshot::HttpError {
                         instance_error,
                     ) => match instance_error {
                         crate::instance::Error::Propolis(propolis_error) => {
+                            // Work around dropshot#693: HttpError::for_status
+                            // only accepts client errors and asserts on server
+                            // errors, so convert server errors by hand.
                             match propolis_error.status() {
                                 None => HttpError::for_internal_error(
                                     propolis_error.to_string(),
                                 ),
 
-                                Some(status_code) => {
+                                Some(status_code) if status_code.is_client_error() => {
                                     HttpError::for_status(None, status_code)
+                                },
+
+                                Some(status_code) => match status_code {
+                                    http::status::StatusCode::SERVICE_UNAVAILABLE =>
+                                        HttpError::for_unavail(None, propolis_error.to_string()),
+                                    _ =>
+                                        HttpError::for_internal_error(propolis_error.to_string()),
                                 }
                             }
                         }
@@ -160,6 +171,9 @@ struct SledAgentInner {
     // Component of Sled Agent responsible for managing updates.
     updates: UpdateManager,
 
+    /// Component of Sled Agent responsible for managing OPTE ports.
+    port_manager: PortManager,
+
     // Other Oxide-controlled services running on this Sled.
     services: ServiceManager,
 
@@ -191,7 +205,7 @@ impl SledAgent {
         config: &Config,
         log: Logger,
         lazy_nexus_client: LazyNexusClient,
-        request: SledAgentRequest,
+        request: StartSledAgentRequest,
         services: ServiceManager,
         storage: StorageManager,
     ) -> Result<SledAgent, Error> {
@@ -238,16 +252,9 @@ impl SledAgent {
                 sled_id: request.id,
             })
             .await?;
-        if let Some(pools) = &config.zpools {
-            for pool in pools {
-                info!(
-                    log,
-                    "Sled Agent upserting zpool to Storage Manager: {}",
-                    pool.to_string()
-                );
-                storage.upsert_synthetic_disk(pool.clone()).await;
-            }
-        }
+
+        let hardware = HardwareManager::new(&parent_log, services.sled_mode())
+            .map_err(|e| Error::Hardware(e))?;
 
         let instances = InstanceManager::new(
             parent_log.clone(),
@@ -256,8 +263,23 @@ impl SledAgent {
             port_manager.clone(),
         )?;
 
-        let hardware = HardwareManager::new(&parent_log, services.sled_mode())
-            .map_err(|e| Error::Hardware(e))?;
+        match config.vmm_reservoir_percentage {
+            Some(sz) if sz > 0 && sz < 100 => {
+                instances.set_reservoir_size(&hardware, sz).map_err(|e| {
+                    warn!(log, "Failed to set VMM reservoir size: {e}");
+                    e
+                })?;
+            }
+            Some(sz) if sz == 0 => {
+                warn!(log, "Not using VMM reservoir (size 0 bytes requested)");
+            }
+            None => {
+                warn!(log, "Not using VMM reservoir");
+            }
+            Some(sz) => {
+                panic!("invalid requested VMM reservoir percentage: {}", sz);
+            }
+        }
 
         let update_config = ConfigUpdates {
             zone_artifact_path: Utf8PathBuf::from("/opt/oxide"),
@@ -269,7 +291,7 @@ impl SledAgent {
         services
             .sled_agent_started(
                 svc_config,
-                port_manager,
+                port_manager.clone(),
                 *sled_address.ip(),
                 request.rack_id,
             )
@@ -283,6 +305,7 @@ impl SledAgent {
                 instances,
                 hardware,
                 updates,
+                port_manager,
                 services,
                 lazy_nexus_client,
 
@@ -418,6 +441,7 @@ impl SledAgent {
             self.inner.hardware.online_processor_count();
         let usable_physical_ram =
             self.inner.hardware.usable_physical_ram_bytes();
+        let reservoir_size = self.inner.instances.reservoir_size();
 
         let log = log.clone();
         let fut = async move {
@@ -454,6 +478,9 @@ impl SledAgent {
                             usable_hardware_threads,
                             usable_physical_ram: nexus_client::types::ByteCount(
                                 usable_physical_ram,
+                            ),
+                            reservoir_size: nexus_client::types::ByteCount(
+                                reservoir_size.to_bytes(),
                             ),
                         },
                     )
@@ -671,13 +698,12 @@ impl SledAgent {
 
     pub async fn firewall_rules_ensure(
         &self,
-        _vpc_id: Uuid,
+        vpc_vni: Vni,
         rules: &[VpcFirewallRule],
     ) -> Result<(), Error> {
         self.inner
-            .instances
-            .firewall_rules_ensure(rules)
-            .await
+            .port_manager
+            .firewall_rules_ensure(vpc_vni, rules)
             .map_err(Error::from)
     }
 
@@ -686,9 +712,8 @@ impl SledAgent {
         mapping: &SetVirtualNetworkInterfaceHost,
     ) -> Result<(), Error> {
         self.inner
-            .instances
+            .port_manager
             .set_virtual_nic_host(mapping)
-            .await
             .map_err(Error::from)
     }
 
@@ -697,9 +722,8 @@ impl SledAgent {
         mapping: &SetVirtualNetworkInterfaceHost,
     ) -> Result<(), Error> {
         self.inner
-            .instances
+            .port_manager
             .unset_virtual_nic_host(mapping)
-            .await
             .map_err(Error::from)
     }
 

@@ -2,8 +2,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::process::Command;
-
 use anyhow::anyhow;
 use anyhow::ensure;
 use anyhow::Context;
@@ -15,26 +13,15 @@ use sled_hardware::SledMode;
 use slog::info;
 use slog::Logger;
 
-const DISKINFO_PATH: &str = "/usr/bin/diskinfo";
-
 pub struct Hardware {
     m2_disks: Vec<Disk>,
 }
 
 impl Hardware {
-    pub fn scan(log: &Logger) -> Result<Self> {
+    pub async fn scan(log: &Logger) -> Result<Self> {
         let is_gimlet = sled_hardware::is_gimlet()
             .context("failed to detect whether host is a gimlet")?;
         ensure!(is_gimlet, "hardware scan only supported on gimlets");
-
-        // Workaround https://github.com/oxidecomputer/stlouis/issues/395:
-        // `Disk::new()` below expects the `...:wd,raw` whole disk minor node to
-        // exist, but it doesn't always; running `diskinfo` ahead of time forces
-        // it to show up.
-        let status = Command::new(DISKINFO_PATH)
-            .status()
-            .with_context(|| format!("failed to run `{DISKINFO_PATH}`"))?;
-        ensure!(status.success(), "{DISKINFO_PATH} failed: {status}");
 
         let hardware =
             HardwareManager::new(log, SledMode::Auto).map_err(|err| {
@@ -50,27 +37,23 @@ impl Hardware {
             "num_disks" => disks.len(),
         );
 
-        let m2_disks = disks
-            .into_iter()
-            .filter_map(|disk| {
-                // Skip U.2 disks
-                match disk.variant() {
-                    DiskVariant::U2 => {
-                        info!(
-                            log, "ignoring U.2 disk";
-                            "path" => disk.devfs_path().as_str(),
-                        );
-                        return None;
-                    }
-                    DiskVariant::M2 => (),
+        let mut m2_disks = vec![];
+        for disk in disks {
+            match disk.variant() {
+                DiskVariant::U2 => {
+                    info!(
+                        log, "ignoring U.2 disk";
+                        "path" => disk.devfs_path().as_str(),
+                    );
                 }
-
-                Some(
-                    Disk::new(log, disk)
-                        .context("failed to instantiate Disk handle for M.2"),
-                )
-            })
-            .collect::<Result<Vec<_>>>()?;
+                DiskVariant::M2 => {
+                    let disk = Disk::new(log, disk, None)
+                        .await
+                        .context("failed to instantiate Disk handle for M.2")?;
+                    m2_disks.push(disk);
+                }
+            }
+        }
 
         Ok(Self { m2_disks })
     }

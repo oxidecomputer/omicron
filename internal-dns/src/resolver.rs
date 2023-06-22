@@ -191,6 +191,7 @@ mod test {
     use anyhow::Context;
     use assert_matches::assert_matches;
     use dns_service_client::types::DnsConfigParams;
+    use dropshot::HandlerTaskMode;
     use omicron_test_utils::dev::test_setup_log;
     use slog::{o, Logger};
     use std::collections::HashMap;
@@ -243,7 +244,7 @@ mod test {
                 &dropshot::ConfigDropshot {
                     bind_address: "[::1]:0".parse().unwrap(),
                     request_body_max_bytes: 8 * 1024,
-                    ..Default::default()
+                    default_handler_task_mode: HandlerTaskMode::Detached,
                 },
             )
             .await

@@ -4,14 +4,28 @@
 
 use camino::{Utf8Path, Utf8PathBuf};
 use illumos_utils::fstyp::Fstyp;
+use illumos_utils::zfs::EncryptionDetails;
+use illumos_utils::zfs::Keypath;
 use illumos_utils::zfs::Mountpoint;
 use illumos_utils::zfs::Zfs;
 use illumos_utils::zpool::Zpool;
 use illumos_utils::zpool::ZpoolKind;
 use illumos_utils::zpool::ZpoolName;
+use key_manager::StorageKeyRequester;
+use omicron_common::disk::DiskIdentity;
 use slog::Logger;
 use slog::{info, warn};
+use tokio::fs::{remove_file, File};
+use tokio::io::{AsyncSeekExt, AsyncWriteExt, SeekFrom};
 use uuid::Uuid;
+
+/// This path is intentionally on a `tmpfs` to prevent copy-on-write behavior
+/// and to ensure it goes away on power off.
+///
+/// We want minimize the time the key files are in memory, and so we rederive
+/// the keys and recreate the files on demand when creating and mounting
+/// encrypted filesystems. We then zero them and unlink them.
+pub const KEYPATH_ROOT: &str = "/var/run/oxide/";
 
 cfg_if::cfg_if! {
     if #[cfg(target_os = "illumos")] {
@@ -41,6 +55,12 @@ pub enum DiskError {
     CannotFormatMissingDevPath { path: Utf8PathBuf },
     #[error("Formatting M.2 devices is not yet implemented")]
     CannotFormatM2NotImplemented,
+    #[error("KeyManager error: {0}")]
+    KeyManager(#[from] key_manager::Error),
+    #[error("Missing StorageKeyRequester when creating U.2 disk")]
+    MissingStorageKeyRequester,
+    #[error("Encrypted filesystem '{0}' missing 'oxide:epoch' property")]
+    CannotParseEpochProperty(String),
 }
 
 /// A partition (or 'slice') of a disk.
@@ -64,14 +84,6 @@ pub struct DiskPaths {
     pub devfs_path: Utf8PathBuf,
     // Optional path to the disk under "/dev/dsk".
     pub dev_path: Option<Utf8PathBuf>,
-}
-
-/// Uniquely identifies a disk.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct DiskIdentity {
-    pub vendor: String,
-    pub serial: String,
-    pub model: String,
 }
 
 impl DiskPaths {
@@ -171,6 +183,10 @@ impl UnparsedDisk {
     pub fn identity(&self) -> &DiskIdentity {
         &self.identity
     }
+
+    pub fn is_boot_disk(&self) -> bool {
+        self.is_boot_disk
+    }
 }
 
 /// A physical disk conforming to the expected partition layout.
@@ -188,12 +204,16 @@ pub struct Disk {
     zpool_name: ZpoolName,
 }
 
-pub const FACTORY_DATASET: &'static str = "factory";
 pub const INSTALL_DATASET: &'static str = "install";
 pub const CRASH_DATASET: &'static str = "crash";
 pub const CLUSTER_DATASET: &'static str = "cluster";
 pub const CONFIG_DATASET: &'static str = "config";
-pub const ZONE_DATASET: &'static str = "zone";
+
+// U.2 datasets live under the encrypted dataset and inherit encryption
+pub const ZONE_DATASET: &'static str = "crypt/zone";
+
+// This is the root dataset for all U.2 drives. Encryption is inherited.
+pub const CRYPT_DATASET: &'static str = "crypt";
 
 const U2_EXPECTED_DATASET_COUNT: usize = 1;
 static U2_EXPECTED_DATASETS: [&'static str; U2_EXPECTED_DATASET_COUNT] = [
@@ -201,10 +221,8 @@ static U2_EXPECTED_DATASETS: [&'static str; U2_EXPECTED_DATASET_COUNT] = [
     ZONE_DATASET,
 ];
 
-const M2_EXPECTED_DATASET_COUNT: usize = 5;
+const M2_EXPECTED_DATASET_COUNT: usize = 4;
 static M2_EXPECTED_DATASETS: [&'static str; M2_EXPECTED_DATASET_COUNT] = [
-    // Stores a "factory install" set of software
-    FACTORY_DATASET,
     // Stores software images.
     //
     // Should be duplicated to both M.2s.
@@ -225,9 +243,17 @@ static M2_EXPECTED_DATASETS: [&'static str; M2_EXPECTED_DATASET_COUNT] = [
 ];
 
 impl Disk {
-    pub fn new(
+    /// Create a new Disk
+    ///
+    /// WARNING: In all cases where a U.2 is a possible `DiskVariant`, a
+    /// `StorageKeyRequester` must be passed so that disk encryption can
+    /// be used. The `StorageManager` for the sled-agent  always has a
+    /// `StorageKeyRequester` available, and so the only place we should pass
+    /// `None` is for the M.2s touched by the Installinator.
+    pub async fn new(
         log: &Logger,
         unparsed_disk: UnparsedDisk,
+        key_requester: Option<&StorageKeyRequester>,
     ) -> Result<Self, DiskError> {
         let paths = &unparsed_disk.paths;
         let variant = unparsed_disk.variant;
@@ -246,7 +272,13 @@ impl Disk {
         )?;
 
         let zpool_name = Self::ensure_zpool_exists(log, variant, &zpool_path)?;
-        Self::ensure_zpool_ready(log, &zpool_name)?;
+        Self::ensure_zpool_ready(
+            log,
+            &zpool_name,
+            &unparsed_disk.identity,
+            key_requester,
+        )
+        .await?;
 
         Ok(Self {
             paths: unparsed_disk.paths,
@@ -259,12 +291,21 @@ impl Disk {
         })
     }
 
-    pub fn ensure_zpool_ready(
+    pub async fn ensure_zpool_ready(
         log: &Logger,
         zpool_name: &ZpoolName,
+        disk_identity: &DiskIdentity,
+        key_requester: Option<&StorageKeyRequester>,
     ) -> Result<(), DiskError> {
         Self::ensure_zpool_imported(log, &zpool_name)?;
-        Self::ensure_zpool_has_datasets(&zpool_name)?;
+        Self::ensure_zpool_failmode_is_continue(log, &zpool_name)?;
+        Self::ensure_zpool_has_datasets(
+            log,
+            &zpool_name,
+            disk_identity,
+            key_requester,
+        )
+        .await?;
         Ok(())
     }
 
@@ -320,25 +361,121 @@ impl Disk {
         Ok(())
     }
 
-    // Ensure that the zpool contains all the datasets we would like it to
-    // contain.
-    fn ensure_zpool_has_datasets(
+    fn ensure_zpool_failmode_is_continue(
+        log: &Logger,
         zpool_name: &ZpoolName,
     ) -> Result<(), DiskError> {
-        let datasets = match zpool_name.kind().into() {
-            DiskVariant::M2 => M2_EXPECTED_DATASETS.iter(),
-            DiskVariant::U2 => U2_EXPECTED_DATASETS.iter(),
+        // Ensure failmode is set to `continue`. See
+        // https://github.com/oxidecomputer/omicron/issues/2766 for details. The
+        // short version is, each pool is only backed by one vdev. There is no
+        // recovery if one starts breaking, so if connectivity to one dies it's
+        // actively harmful to try to wait for it to come back; we'll be waiting
+        // forever and get stuck. We'd rather get the errors so we can deal with
+        // them ourselves.
+        Zpool::set_failmode_continue(&zpool_name).map_err(|e| {
+            warn!(
+                log,
+                "Failed to set failmode=continue on zpool {zpool_name}: {e}"
+            );
+            DiskError::ZpoolImport(e)
+        })?;
+        Ok(())
+    }
+
+    // Ensure that the zpool contains all the datasets we would like it to
+    // contain.
+    async fn ensure_zpool_has_datasets(
+        log: &Logger,
+        zpool_name: &ZpoolName,
+        disk_identity: &DiskIdentity,
+        key_requester: Option<&StorageKeyRequester>,
+    ) -> Result<(), DiskError> {
+        let (root, datasets) = match zpool_name.kind().into() {
+            DiskVariant::M2 => (None, M2_EXPECTED_DATASETS.iter()),
+            DiskVariant::U2 => {
+                (Some(CRYPT_DATASET), U2_EXPECTED_DATASETS.iter())
+            }
         };
+
+        let zoned = false;
+        let do_format = true;
+
+        // Ensure the root encrypted filesystem exists
+        // Datasets below this in the hierarchy will inherit encryption
+        if let Some(dataset) = root {
+            let Some(key_requester) = key_requester else {
+                return Err(DiskError::MissingStorageKeyRequester);
+            };
+            let mountpoint = zpool_name.dataset_mountpoint(dataset);
+            let keypath: Keypath = disk_identity.into();
+
+            let epoch =
+                if let Ok(epoch_str) = Zfs::get_oxide_value(dataset, "epoch") {
+                    if let Ok(epoch) = epoch_str.parse::<u64>() {
+                        epoch
+                    } else {
+                        return Err(DiskError::CannotParseEpochProperty(
+                            dataset.to_string(),
+                        ));
+                    }
+                } else {
+                    // We got an error trying to call `Zfs::get_oxide_value`
+                    // which indicates that the dataset doesn't exist or there
+                    // was a problem  running the command.
+                    //
+                    // Note that `Zfs::get_oxide_value` will succeed even if
+                    // the epoch is missing. `epoch_str` will show up as a dash
+                    // (`-`) and will not parse into a `u64`. So we don't have
+                    // to worry about that case here as it is handled above.
+                    //
+                    // If the error indicated that the command failed for some
+                    // other reason, but the dataset actually existed, we will
+                    // try to create the dataset below and that will fail. So
+                    // there is no harm in just loading the latest secret here.
+                    key_requester.load_latest_secret().await?
+                };
+
+            let key =
+                key_requester.get_key(epoch, disk_identity.clone()).await?;
+
+            let mut keyfile =
+                KeyFile::create(keypath.clone(), key.expose_secret(), log)
+                    .await
+                    .map_err(|error| DiskError::IoError {
+                        path: keypath.0.clone(),
+                        error,
+                    })?;
+
+            let encryption_details = EncryptionDetails { keypath, epoch };
+
+            info!(
+                log,
+                "Ensuring encryted filesystem: {} for epoch {}", dataset, epoch
+            );
+            let result = Zfs::ensure_filesystem(
+                &format!("{}/{}", zpool_name, dataset),
+                Mountpoint::Path(mountpoint),
+                zoned,
+                do_format,
+                Some(encryption_details),
+            );
+
+            keyfile.zero_and_unlink().await.map_err(|error| {
+                DiskError::IoError { path: keyfile.path().0.clone(), error }
+            })?;
+
+            result?;
+        }
+
         for dataset in datasets.into_iter() {
             let mountpoint = zpool_name.dataset_mountpoint(dataset);
-
-            let zoned = false;
-            let do_format = true;
+            let encryption_details = None;
             Zfs::ensure_filesystem(
                 &format!("{}/{}", zpool_name, dataset),
                 Mountpoint::Path(mountpoint),
                 zoned,
                 do_format,
+                encryption_details,
             )?;
         }
         Ok(())
@@ -393,6 +530,56 @@ impl From<ZpoolKind> for DiskVariant {
             ZpoolKind::External => DiskVariant::U2,
             ZpoolKind::Internal => DiskVariant::M2,
         }
+    }
+}
+
+/// A file that wraps a zfs encryption key.
+///
+/// We put this in a RAM backed filesystem and zero and delete it when we are
+/// done with it. Unfortunately we cannot do this inside `Drop` because there is no
+/// equivalent async drop.
+pub struct KeyFile {
+    path: Keypath,
+    file: File,
+    log: Logger,
+}
+
+impl KeyFile {
+    pub async fn create(
+        path: Keypath,
+        key: &[u8; 32],
+        log: &Logger,
+    ) -> std::io::Result<KeyFile> {
+        // TODO: fix this to not truncate
+        // We want to overwrite any existing contents.
+        // If we truncate we may leave dirty pages around
+        // containing secrets.
+        let mut file = tokio::fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .open(&path.0)
+            .await?;
+        file.write_all(key).await?;
+        info!(log, "Created keyfile {}", path);
+        Ok(KeyFile { path, file, log: log.clone() })
+    }
+
+    /// These keyfiles live on a tmpfs and we zero the file so the data doesn't
+    /// linger on the page in memory.
+    ///
+    /// It'd be nice to `impl Drop for `KeyFile` and then call `zero`
+    /// from within the drop handler, but async `Drop` isn't supported.
+    pub async fn zero_and_unlink(&mut self) -> std::io::Result<()> {
+        let zeroes = [0u8; 32];
+        let _ = self.file.seek(SeekFrom::Start(0)).await?;
+        self.file.write_all(&zeroes).await?;
+        info!(self.log, "Zeroed and unlinked keyfile {}", self.path);
+        remove_file(&self.path().0).await?;
+        Ok(())
+    }
+
+    pub fn path(&self) -> &Keypath {
+        &self.path
     }
 }
 

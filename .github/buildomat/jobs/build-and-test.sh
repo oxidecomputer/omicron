@@ -3,7 +3,7 @@
 #: name = "build-and-test (helios)"
 #: variety = "basic"
 #: target = "helios-latest"
-#: rust_toolchain = "1.68.2"
+#: rust_toolchain = "1.70.0"
 #: output_rules = [
 #:	"/var/tmp/omicron_tmp/*",
 #:	"!/var/tmp/omicron_tmp/crdb-base*",
@@ -26,10 +26,9 @@ echo "tests will store output in $TEST_TMPDIR" >&2
 mkdir "$TEST_TMPDIR"
 
 #
-# Put "./cockroachdb/bin" and "./clickhouse" on the PATH for the test
-# suite.
+# Set up our PATH for the test suite.
 #
-export PATH="$PATH:$PWD/out/cockroachdb/bin:$PWD/out/clickhouse:$PWD/out/dendrite-stub/bin"
+source ./env.sh
 
 banner prerequisites
 ptime -m bash ./tools/install_builder_prerequisites.sh -y

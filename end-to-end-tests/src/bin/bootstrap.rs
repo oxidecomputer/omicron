@@ -5,7 +5,9 @@ use omicron_test_utils::dev::poll::{wait_for_condition, CondCheckError};
 use oxide_client::types::{
     ByteCount, DiskCreate, DiskSource, IpRange, Ipv4Range,
 };
-use oxide_client::{ClientDisksExt, ClientProjectsExt, ClientSystemExt};
+use oxide_client::{
+    ClientDisksExt, ClientProjectsExt, ClientSystemNetworkingExt,
+};
 use std::time::Duration;
 
 #[tokio::main]
@@ -27,9 +29,10 @@ async fn main() -> Result<()> {
     )
     .await?;
 
+    let (first, last) = get_system_ip_pool().await?;
+
     // ===== CREATE IP POOL ===== //
     eprintln!("creating IP pool...");
-    let (first, last) = get_system_ip_pool().await?;
     client
         .ip_pool_range_add()
         .pool("default")

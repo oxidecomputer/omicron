@@ -4,10 +4,9 @@
 
 //! Tests basic instance support in the API
 
-use super::metrics::query_for_latest_metric;
+use super::metrics::get_latest_system_metric;
 
 use camino::Utf8Path;
-use chrono::Utc;
 use http::method::Method;
 use http::StatusCode;
 use nexus_db_queries::context::OpContext;
@@ -36,6 +35,7 @@ use omicron_common::api::external::InstanceNetworkInterface;
 use omicron_common::api::external::InstanceState;
 use omicron_common::api::external::Ipv4Net;
 use omicron_common::api::external::Name;
+use omicron_common::api::external::Vni;
 use omicron_nexus::authz::SiloRole;
 use omicron_nexus::db::fixed_data::silo::SILO_ID;
 use omicron_nexus::db::lookup::LookupPath;
@@ -491,6 +491,233 @@ async fn test_instances_create_reboot_halt(
 }
 
 #[nexus_test]
+async fn test_instance_migrate(cptestctx: &ControlPlaneTestContext) {
+    let client = &cptestctx.external_client;
+    let apictx = &cptestctx.server.apictx();
+    let nexus = &apictx.nexus;
+    let instance_name = "bird-ecology";
+
+    // Create a second sled to migrate to/from.
+    let default_sled_id: Uuid =
+        nexus_test_utils::SLED_AGENT_UUID.parse().unwrap();
+    let update_dir = Utf8Path::new("/should/be/unused");
+    let other_sled_id = Uuid::new_v4();
+    let _other_sa = nexus_test_utils::start_sled_agent(
+        cptestctx.logctx.log.new(o!("sled_id" => other_sled_id.to_string())),
+        cptestctx.server.get_http_server_internal_address().await,
+        other_sled_id,
+        &update_dir,
+        sim::SimMode::Explicit,
+    )
+    .await
+    .unwrap();
+
+    create_org_and_project(&client).await;
+    let instance_url = get_instance_url(instance_name);
+
+    // Explicitly create an instance with no disks. Simulated sled agent assumes
+    // that disks are co-located with their instances.
+    let instance = nexus_test_utils::resource_helpers::create_instance_with(
+        client,
+        PROJECT_NAME,
+        instance_name,
+        &params::InstanceNetworkInterfaceAttachment::Default,
+        Vec::<params::InstanceDiskAttachment>::new(),
+        Vec::<params::ExternalIpCreate>::new(),
+    )
+    .await;
+    let instance_id = instance.identity.id;
+
+    // Poke the instance into an active state.
+    instance_simulate(nexus, &instance_id).await;
+    let instance_next = instance_get(&client, &instance_url).await;
+    assert_eq!(instance_next.runtime.run_state, InstanceState::Running);
+
+    let original_sled = nexus.instance_sled_id(&instance_id).await.unwrap();
+    let dst_sled_id = if original_sled == default_sled_id {
+        other_sled_id
+    } else {
+        default_sled_id
+    };
+
+    let migrate_url =
+        format!("/v1/instances/{}/migrate", &instance_id.to_string());
+    let _ = NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &migrate_url)
+            .body(Some(&params::InstanceMigrate { dst_sled_id }))
+            .expect_status(Some(StatusCode::OK)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body::<Instance>()
+    .unwrap();
+
+    let current_sled = nexus.instance_sled_id(&instance_id).await.unwrap();
+    assert_eq!(current_sled, original_sled);
+
+    // Explicitly simulate the migration action on the target. Simulated
+    // migrations always succeed. The state transition on the target is
+    // sufficient to move the instance back into a Running state (strictly
+    // speaking no further updates from the source are required if the target
+    // successfully takes over).
+    instance_simulate_on_sled(cptestctx, nexus, dst_sled_id, instance_id).await;
+    let instance = instance_get(&client, &instance_url).await;
+    assert_eq!(instance.runtime.run_state, InstanceState::Running);
+
+    let current_sled = nexus.instance_sled_id(&instance_id).await.unwrap();
+    assert_eq!(current_sled, dst_sled_id);
+}
+
+#[nexus_test]
+async fn test_instance_migrate_v2p(cptestctx: &ControlPlaneTestContext) {
+    let client = &cptestctx.external_client;
+    let apictx = &cptestctx.server.apictx();
+    let nexus = &apictx.nexus;
+    let datastore = nexus.datastore();
+    let opctx =
+        OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
+    let instance_name = "desert-locust";
+
+    // Create some test sleds.
+    let nsleds = 3;
+    let mut other_sleds = Vec::with_capacity(nsleds);
+    for _ in 0..nsleds {
+        let sa_id = Uuid::new_v4();
+        let log = cptestctx.logctx.log.new(o!("sled_id" => sa_id.to_string()));
+        let update_dir = Utf8Path::new("/should/be/unused");
+        let sa = nexus_test_utils::start_sled_agent(
+            log,
+            cptestctx.server.get_http_server_internal_address().await,
+            sa_id,
+            &update_dir,
+            omicron_sled_agent::sim::SimMode::Explicit,
+        )
+        .await
+        .unwrap();
+
+        other_sleds.push((sa_id, sa));
+    }
+
+    // Set up the project and test instance.
+    populate_ip_pool(&client, "default", None).await;
+    create_project(client, PROJECT_NAME).await;
+    let instance = nexus_test_utils::resource_helpers::create_instance_with(
+        client,
+        PROJECT_NAME,
+        instance_name,
+        &params::InstanceNetworkInterfaceAttachment::Default,
+        // Omit disks: simulated sled agent assumes that disks are always co-
+        // located with their instances.
+        Vec::<params::InstanceDiskAttachment>::new(),
+        Vec::<params::ExternalIpCreate>::new(),
+    )
+    .await;
+    let instance_id = instance.identity.id;
+
+    // The default configuration gives one NIC.
+    let nics_url = format!("/v1/network-interfaces?instance={}", instance_id);
+    let nics =
+        objects_list_page_authz::<InstanceNetworkInterface>(client, &nics_url)
+            .await
+            .items;
+    assert_eq!(nics.len(), 1);
+
+    // Poke the instance into an active state.
+    instance_simulate(nexus, &instance_id).await;
+    let instance_url = get_instance_url(instance_name);
+    let instance_next = instance_get(&client, &instance_url).await;
+    assert_eq!(instance_next.runtime.run_state, InstanceState::Running);
+
+    // Ensure that all of the V2P information is correct.
+    let (.., authz_instance) = LookupPath::new(&opctx, &datastore)
+        .instance_id(instance_id)
+        .lookup_for(nexus_db_queries::authz::Action::Read)
+        .await
+        .unwrap();
+    let guest_nics = datastore
+        .derive_guest_network_interface_info(&opctx, &authz_instance)
+        .await
+        .unwrap();
+    let original_sled_id = nexus.instance_sled_id(&instance_id).await.unwrap();
+
+    let mut sled_agents = vec![cptestctx.sled_agent.sled_agent.clone()];
+    sled_agents.extend(other_sleds.iter().map(|tup| tup.1.sled_agent.clone()));
+    for sled_agent in &sled_agents {
+        // Starting the instance should have programmed V2P mappings to all the
+        // sleds except the one where the instance is running.
+        //
+        // TODO(#3107): In practice, the instance's sled also has V2P mappings, but
+        // these are established during VMM setup (i.e. as part of creating the
+        // instance's OPTE ports) instead of being established by explicit calls
+        // from Nexus. Simulated sled agent handles the latter calls but does
+        // not currently update any mappings during simulated instance creation,
+        // so the check below verifies that no mappings exist on the instance's
+        // own sled instead of checking for a real mapping. Once Nexus programs
+        // all mappings explicitly (without skipping the instance's current
+        // sled) this bifurcation should be removed.
+        if sled_agent.id != original_sled_id {
+            assert_sled_v2p_mappings(
+                sled_agent,
+                &nics[0],
+                guest_nics[0].vni.clone().into(),
+            )
+            .await;
+        } else {
+            assert!(sled_agent.v2p_mappings.lock().await.is_empty());
+        }
+    }
+
+    let dst_sled_id = if original_sled_id == cptestctx.sled_agent.sled_agent.id
+    {
+        other_sleds[0].0
+    } else {
+        cptestctx.sled_agent.sled_agent.id
+    };
+
+    // Kick off migration and simulate its completion on the target.
+    let migrate_url =
+        format!("/v1/instances/{}/migrate", &instance_id.to_string());
+    let _ = NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &migrate_url)
+            .body(Some(&params::InstanceMigrate { dst_sled_id }))
+            .expect_status(Some(StatusCode::OK)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body::<Instance>()
+    .unwrap();
+
+    instance_simulate_on_sled(cptestctx, nexus, dst_sled_id, instance_id).await;
+    let instance = instance_get(&client, &instance_url).await;
+    assert_eq!(instance.runtime.run_state, InstanceState::Running);
+    let current_sled = nexus.instance_sled_id(&instance_id).await.unwrap();
+    assert_eq!(current_sled, dst_sled_id);
+
+    for sled_agent in &sled_agents {
+        // Completing migration published a sled ID update that should have
+        // programmed new V2P mappings to all sleds other than the destination
+        // sled.
+        //
+        // TODO(#3107): As above, the destination sled's mappings are not
+        // updated here because Nexus presumes that the instance's new sled
+        // agent will have updated any mappings there. Remove this bifurcation
+        // when Nexus programs all mappings explicitly.
+        if sled_agent.id != dst_sled_id {
+            assert_sled_v2p_mappings(
+                sled_agent,
+                &nics[0],
+                guest_nics[0].vni.clone().into(),
+            )
+            .await;
+        }
+    }
+}
+
+#[nexus_test]
 async fn test_instance_metrics(cptestctx: &ControlPlaneTestContext) {
     // Normally, Nexus is not registered as a producer for tests.
     // Turn this bit on so we can also test some metrics from Nexus itself.
@@ -516,38 +743,23 @@ async fn test_instance_metrics(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(virtual_provisioning_collection.cpus_provisioned, 0);
     assert_eq!(virtual_provisioning_collection.ram_provisioned.to_bytes(), 0);
 
-    // Query the view of these metrics stored within Clickhouse
-    let metric_url = |metric_type: &str, id: Uuid| {
-        format!(
-            "/v1/system/metrics/{metric_type}?start_time={:?}&end_time={:?}&id={id}",
-            Utc::now() - chrono::Duration::seconds(30),
-            Utc::now() + chrono::Duration::seconds(30),
-        )
-    };
     oximeter.force_collect().await;
     for id in &[*SILO_ID, project_id] {
         assert_eq!(
-            query_for_latest_metric(
-                client,
-                &metric_url("virtual_disk_space_provisioned", *id),
+            get_latest_system_metric(
+                cptestctx,
+                "virtual_disk_space_provisioned",
+                *id,
             )
             .await,
             0
         );
         assert_eq!(
-            query_for_latest_metric(
-                client,
-                &metric_url("cpus_provisioned", *id),
-            )
-            .await,
+            get_latest_system_metric(cptestctx, "cpus_provisioned", *id).await,
             0
         );
         assert_eq!(
-            query_for_latest_metric(
-                client,
-                &metric_url("ram_provisioned", *id),
-            )
-            .await,
+            get_latest_system_metric(cptestctx, "ram_provisioned", *id).await,
             0
         );
     }
@@ -594,27 +806,20 @@ async fn test_instance_metrics(cptestctx: &ControlPlaneTestContext) {
     oximeter.force_collect().await;
     for id in &[*SILO_ID, project_id] {
         assert_eq!(
-            query_for_latest_metric(
-                client,
-                &metric_url("virtual_disk_space_provisioned", *id),
+            get_latest_system_metric(
+                cptestctx,
+                "virtual_disk_space_provisioned",
+                *id,
             )
             .await,
             0
         );
         assert_eq!(
-            query_for_latest_metric(
-                client,
-                &metric_url("cpus_provisioned", *id),
-            )
-            .await,
+            get_latest_system_metric(cptestctx, "cpus_provisioned", *id).await,
             expected_cpus
         );
         assert_eq!(
-            query_for_latest_metric(
-                client,
-                &metric_url("ram_provisioned", *id),
-            )
-            .await,
+            get_latest_system_metric(cptestctx, "ram_provisioned", *id).await,
             expected_ram
         );
     }
@@ -635,27 +840,20 @@ async fn test_instance_metrics(cptestctx: &ControlPlaneTestContext) {
     oximeter.force_collect().await;
     for id in &[*SILO_ID, project_id] {
         assert_eq!(
-            query_for_latest_metric(
-                client,
-                &metric_url("virtual_disk_space_provisioned", *id),
+            get_latest_system_metric(
+                cptestctx,
+                "virtual_disk_space_provisioned",
+                *id,
             )
             .await,
             0
         );
         assert_eq!(
-            query_for_latest_metric(
-                client,
-                &metric_url("cpus_provisioned", *id),
-            )
-            .await,
+            get_latest_system_metric(cptestctx, "cpus_provisioned", *id).await,
             0
         );
         assert_eq!(
-            query_for_latest_metric(
-                client,
-                &metric_url("ram_provisioned", *id),
-            )
-            .await,
+            get_latest_system_metric(cptestctx, "ram_provisioned", *id).await,
             0
         );
     }
@@ -3110,22 +3308,17 @@ async fn test_instance_v2p_mappings(cptestctx: &ControlPlaneTestContext) {
     sled_agents.push(&cptestctx.sled_agent.sled_agent);
 
     for sled_agent in &sled_agents {
-        let v2p_mappings = sled_agent.v2p_mappings.lock().await;
+        // TODO(#3107) Remove this bifurcation when Nexus programs all mappings
+        // itself.
         if sled_agent.id != db_instance.runtime().sled_id {
-            assert!(!v2p_mappings.is_empty());
-            assert_eq!(
-                v2p_mappings.get(&nics[0].identity.id).unwrap().len(),
-                1
-            );
-
-            // Confirm that OPTE was passed the correct information
-            let mapping = &v2p_mappings.get(&nics[0].identity.id).unwrap()[0];
-            assert_eq!(mapping.virtual_ip, nics[0].ip);
-            assert_eq!(mapping.virtual_mac, nics[0].mac);
-            assert_eq!(mapping.physical_host_ip, sled_agent.ip);
-            assert_eq!(mapping.vni, guest_nics[0].vni.clone().into());
+            assert_sled_v2p_mappings(
+                sled_agent,
+                &nics[0],
+                guest_nics[0].vni.clone().into(),
+            )
+            .await;
         } else {
-            assert!(v2p_mappings.is_empty());
+            assert!(sled_agent.v2p_mappings.lock().await.is_empty());
         }
     }
 
@@ -3230,6 +3423,24 @@ fn instances_eq(instance1: &Instance, instance2: &Instance) {
     );
 }
 
+/// Asserts that supplied sled agent's most recent V2P mapping data for the
+/// supplied guest network interface has properties that match the properties
+/// stored in the interface itself.
+async fn assert_sled_v2p_mappings(
+    sled_agent: &Arc<SledAgent>,
+    nic: &InstanceNetworkInterface,
+    vni: Vni,
+) {
+    let v2p_mappings = sled_agent.v2p_mappings.lock().await;
+    assert!(!v2p_mappings.is_empty());
+
+    let mapping = v2p_mappings.get(&nic.identity.id).unwrap().last().unwrap();
+    assert_eq!(mapping.virtual_ip, nic.ip);
+    assert_eq!(mapping.virtual_mac, nic.mac);
+    assert_eq!(mapping.physical_host_ip, sled_agent.ip);
+    assert_eq!(mapping.vni, vni);
+}
+
 /// Simulate completion of an ongoing instance state transition.  To do this, we
 /// have to look up the instance, then get the sled agent associated with that
 /// instance, and then tell it to finish simulating whatever async transition is
@@ -3237,4 +3448,19 @@ fn instances_eq(instance1: &Instance, instance2: &Instance) {
 pub async fn instance_simulate(nexus: &Arc<Nexus>, id: &Uuid) {
     let sa = nexus.instance_sled_by_id(id).await.unwrap();
     sa.instance_finish_transition(*id).await;
+}
+
+/// Simulates state transitions for the incarnation of the instance on the
+/// supplied sled (which may not be the sled ID currently stored in the
+/// instance's CRDB record).
+async fn instance_simulate_on_sled(
+    cptestctx: &ControlPlaneTestContext,
+    nexus: &Arc<Nexus>,
+    sled_id: Uuid,
+    instance_id: Uuid,
+) {
+    info!(&cptestctx.logctx.log, "Poking simulated instance on sled";
+          "instance_id" => %instance_id, "sled_id" => %sled_id);
+    let sa = nexus.sled_client(&sled_id).await.unwrap();
+    sa.instance_finish_transition(instance_id).await;
 }

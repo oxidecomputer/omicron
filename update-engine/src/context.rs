@@ -4,18 +4,21 @@
 
 // Copyright 2023 Oxide Computer Company
 
-use std::fmt;
 use std::marker::PhantomData;
+use std::sync::Mutex;
+use std::{collections::HashMap, fmt};
 
 use derive_where::derive_where;
 use futures::FutureExt;
 use tokio::sync::{mpsc, oneshot};
 
+use crate::errors::NestedEngineError;
 use crate::{
     errors::ExecutionError,
     events::{Event, EventReport, StepEventKind, StepProgress},
     NestedError, NestedSpec, StepSpec, UpdateEngine,
 };
+use crate::{EventBuffer, ExecutionId};
 
 /// Context for a step's execution function.
 ///
@@ -31,6 +34,10 @@ pub struct StepContext<S: StepSpec> {
     log: slog::Logger,
     payload_sender: mpsc::Sender<StepContextPayload<S>>,
     token: StepHandleToken<S>,
+    // This is keyed by root execution ID in case there are multiple nested
+    // events taking place. Each `NestedEventBuffer` tracks one such execution
+    // ID.
+    nested_buffers: Mutex<HashMap<ExecutionId, NestedEventBuffer>>,
 }
 
 impl<S: StepSpec> StepContext<S> {
@@ -38,7 +45,12 @@ impl<S: StepSpec> StepContext<S> {
         log: &slog::Logger,
         payload_sender: mpsc::Sender<StepContextPayload<S>>,
     ) -> Self {
-        Self { log: log.clone(), payload_sender, token: StepHandleToken::new() }
+        Self {
+            log: log.clone(),
+            payload_sender,
+            token: StepHandleToken::new(),
+            nested_buffers: Default::default(),
+        }
     }
 
     /// Sends a progress update to the update engine.
@@ -58,30 +70,81 @@ impl<S: StepSpec> StepContext<S> {
     pub async fn send_nested_report<S2: StepSpec>(
         &self,
         report: EventReport<S2>,
-    ) -> Result<(), NestedError> {
+    ) -> Result<(), NestedEngineError<NestedSpec>> {
         let mut res = Ok(());
-        for event in report.step_events {
-            if let StepEventKind::ExecutionFailed { message, causes, .. } =
-                &event.kind
-            {
-                res = Err(NestedError::new(message.clone(), causes.clone()));
+        let delta_report = if let Some(id) = report.root_execution_id {
+            let mut nested_buffers = self.nested_buffers.lock().unwrap();
+            Some(nested_buffers.entry(id).or_default().add_event_report(report))
+        } else {
+            // If there's no root execution ID set, report is expected to be
+            // empty. However, report is untrusted data so we can't assert on
+            // it. Instead, log this.
+            if !report.step_events.is_empty() {
+                slog::warn!(
+                    self.log,
+                    "received non-empty report with empty root execution ID";
+                    "report" => ?report,
+                );
+            }
+            None
+        };
+
+        if let Some(delta_report) = delta_report {
+            for event in delta_report.step_events {
+                match &event.kind {
+                    StepEventKind::ExecutionFailed {
+                        failed_step,
+                        message,
+                        causes,
+                        ..
+                    } => {
+                        res = Err(NestedEngineError::StepFailed {
+                            component: failed_step.info.component.clone(),
+                            id: failed_step.info.id.clone(),
+                            description: failed_step.info.description.clone(),
+                            error: NestedError::new(
+                                message.clone(),
+                                causes.clone(),
+                            ),
+                        });
+                    }
+                    StepEventKind::ExecutionAborted {
+                        aborted_step,
+                        message,
+                        ..
+                    } => {
+                        res = Err(NestedEngineError::Aborted {
+                            component: aborted_step.info.component.clone(),
+                            id: aborted_step.info.id.clone(),
+                            description: aborted_step.info.description.clone(),
+                            message: message.clone(),
+                        });
+                    }
+                    StepEventKind::NoStepsDefined
+                    | StepEventKind::ExecutionStarted { .. }
+                    | StepEventKind::AttemptRetry { .. }
+                    | StepEventKind::ProgressReset { .. }
+                    | StepEventKind::StepCompleted { .. }
+                    | StepEventKind::ExecutionCompleted { .. }
+                    // Note: we do not care about nested failures or aborts.
+                    // That's because the parent step might have restarted
+                    // nested engines. Only top-level failures or aborts matter.
+                    | StepEventKind::Nested { .. }
+                    | StepEventKind::Unknown => {}
+                }
+
+                self.payload_sender
+                    .send(StepContextPayload::Nested(Event::Step(event)))
+                    .await
+                    .expect("our code always keeps the receiver open");
             }
 
-            self.payload_sender
-                .send(StepContextPayload::Nested(Event::Step(
-                    event.into_generic(),
-                )))
-                .await
-                .expect("our code always keeps the receiver open");
-        }
-
-        for event in report.progress_events {
-            self.payload_sender
-                .send(StepContextPayload::Nested(Event::Progress(
-                    event.into_generic(),
-                )))
-                .await
-                .expect("our code always keeps the receiver open");
+            for event in delta_report.progress_events {
+                self.payload_sender
+                    .send(StepContextPayload::Nested(Event::Progress(event)))
+                    .await
+                    .expect("our code always keeps the receiver open");
+            }
         }
 
         res
@@ -94,16 +157,17 @@ impl<S: StepSpec> StepContext<S> {
     pub async fn with_nested_engine<'a, 'this, F, S2>(
         &'this self,
         engine_fn: F,
-    ) -> Result<CompletionContext<S2>, S2::Error>
+    ) -> Result<CompletionContext<S2>, NestedEngineError<S2>>
     where
         'this: 'a,
         F: FnOnce(&mut UpdateEngine<'a, S2>) -> Result<(), S2::Error> + Send,
-        S2: StepSpec,
+        S2: StepSpec + 'a,
     {
         let (sender, mut receiver) = mpsc::channel(128);
         let mut engine = UpdateEngine::new(&self.log, sender);
         // Create the engine's steps.
-        (engine_fn)(&mut engine)?;
+        (engine_fn)(&mut engine)
+            .map_err(|error| NestedEngineError::Creation { error })?;
 
         // Now run the engine.
         let engine = engine.execute();
@@ -122,8 +186,11 @@ impl<S: StepSpec> StepContext<S> {
                         Err(ExecutionError::EventSendError(_)) => {
                             unreachable!("we always keep the receiver open")
                         }
-                        Err(ExecutionError::StepFailed { error, .. }) => {
-                            result = Some(Err(error));
+                        Err(ExecutionError::StepFailed { component, id, description, error }) => {
+                            result = Some(Err(NestedEngineError::StepFailed { component, id, description, error }));
+                        }
+                        Err(ExecutionError::Aborted { component, id, description, message }) => {
+                            result = Some(Err(NestedEngineError::Aborted { component, id, description, message }));
                         }
                     }
                 }
@@ -153,6 +220,31 @@ impl<S: StepSpec> StepContext<S> {
     /// Retrieves a token used to fetch the value out of a [`StepHandle`].
     pub fn token(&self) -> &StepHandleToken<S> {
         &self.token
+    }
+}
+
+/// Tracker for [`StepContext::add_nested_report`].
+///
+/// Nested event reports might contain events already seen in prior runs:
+/// `NestedEventBuffer` deduplicates those events such that only deltas are sent
+/// over the channel.
+#[derive(Debug, Default)]
+struct NestedEventBuffer {
+    buffer: EventBuffer<NestedSpec>,
+    last_seen: Option<usize>,
+}
+
+impl NestedEventBuffer {
+    /// Adds an event report to the buffer, and generates a corresponding event
+    /// report that can be used to send data upstream.
+    fn add_event_report<S: StepSpec>(
+        &mut self,
+        report: EventReport<S>,
+    ) -> EventReport<NestedSpec> {
+        self.buffer.add_event_report(report.into_generic());
+        let ret = self.buffer.generate_report_since(self.last_seen);
+        self.last_seen = ret.last_seen;
+        ret
     }
 }
 

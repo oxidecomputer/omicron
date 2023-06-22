@@ -9,6 +9,8 @@ extern crate diesel;
 #[macro_use]
 extern crate newtype_derive;
 
+mod address_lot;
+mod bgp;
 mod block_size;
 mod bytecount;
 mod certificate;
@@ -23,7 +25,6 @@ mod disk_state;
 mod dns;
 mod external_ip;
 mod generation;
-mod global_image;
 mod identity_provider;
 mod image;
 mod instance;
@@ -37,13 +38,14 @@ mod l4_port_range;
 mod macaddr;
 mod name;
 mod network_interface;
-mod nexus_service;
 mod oximeter_info;
 mod physical_disk;
 mod physical_disk_kind;
 mod producer_endpoint;
 mod project;
 mod semver_version;
+mod switch_interface;
+mod switch_port;
 mod system_update;
 // These actually represent subqueries, not real table.
 // However, they must be defined in the same crate as our tables
@@ -63,10 +65,12 @@ mod silo_group;
 mod silo_user;
 mod silo_user_password_hash;
 mod sled;
+mod sled_instance;
 mod sled_resource;
 mod sled_resource_kind;
 mod snapshot;
 mod ssh_key;
+mod switch;
 mod unsigned;
 mod update_artifact;
 mod user_builtin;
@@ -91,6 +95,8 @@ mod db {
 
 pub use self::macaddr::*;
 pub use self::unsigned::*;
+pub use address_lot::*;
+pub use bgp::*;
 pub use block_size::*;
 pub use bytecount::*;
 pub use certificate::*;
@@ -105,7 +111,6 @@ pub use disk_state::*;
 pub use dns::*;
 pub use external_ip::*;
 pub use generation::*;
-pub use global_image::*;
 pub use identity_provider::*;
 pub use image::*;
 pub use instance::*;
@@ -118,7 +123,6 @@ pub use ipv6net::*;
 pub use l4_port_range::*;
 pub use name::*;
 pub use network_interface::*;
-pub use nexus_service::*;
 pub use oximeter_info::*;
 pub use physical_disk::*;
 pub use physical_disk_kind::*;
@@ -137,10 +141,14 @@ pub use silo_group::*;
 pub use silo_user::*;
 pub use silo_user_password_hash::*;
 pub use sled::*;
+pub use sled_instance::*;
 pub use sled_resource::*;
 pub use sled_resource_kind::*;
 pub use snapshot::*;
 pub use ssh_key::*;
+pub use switch::*;
+pub use switch_interface::*;
+pub use switch_port::*;
 pub use system_update::*;
 pub use update_artifact::*;
 pub use user_builtin::*;
@@ -199,8 +207,8 @@ macro_rules! impl_enum_wrapper {
         }
 
         impl ::diesel::deserialize::FromSql<$diesel_type, ::diesel::pg::Pg> for $model_type {
-            fn from_sql(bytes: ::diesel::backend::RawValue<::diesel::pg::Pg>) -> ::diesel::deserialize::Result<Self> {
-                match ::diesel::backend::RawValue::<::diesel::pg::Pg>::as_bytes(&bytes) {
+            fn from_sql(bytes: <::diesel::pg::Pg as ::diesel::backend::Backend>::RawValue<'_>) -> ::diesel::deserialize::Result<Self> {
+                match <::diesel::pg::Pg as ::diesel::backend::Backend>::RawValue::<'_>::as_bytes(&bytes) {
                     $(
                     $sql_value => {
                         Ok($model_type(<$ext_type>::$enum_item))
@@ -260,8 +268,8 @@ macro_rules! impl_enum_type {
         }
 
         impl ::diesel::deserialize::FromSql<$diesel_type, ::diesel::pg::Pg> for $model_type {
-            fn from_sql(bytes: ::diesel::backend::RawValue<::diesel::pg::Pg>) -> ::diesel::deserialize::Result<Self> {
-                match ::diesel::backend::RawValue::<::diesel::pg::Pg>::as_bytes(&bytes) {
+            fn from_sql(bytes: <::diesel::pg::Pg as ::diesel::backend::Backend>::RawValue<'_>) -> ::diesel::deserialize::Result<Self> {
+                match <::diesel::pg::Pg as ::diesel::backend::Backend>::RawValue::<'_>::as_bytes(&bytes) {
                     $(
                     $sql_value => {
                         Ok($model_type::$enum_item)

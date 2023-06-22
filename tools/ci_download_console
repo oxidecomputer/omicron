@@ -45,7 +45,6 @@ function main
 	fi
 
 	mkdir -p "$DOWNLOAD_DIR"
-	mkdir -p "$DEST_DIR"
 
 	if [ "$DO_DOWNLOAD" == "true" ]; then
 	echo "Downloading..."
@@ -61,6 +60,10 @@ function main
 		fi
 
 	fi
+
+	# clear out existing console assets
+	rm -rf "$DEST_DIR"
+	mkdir -p "$DEST_DIR"
 
 	# Unpack the tarball into a local directory
 	do_untar "$TARBALL_FILE" "$DEST_DIR"

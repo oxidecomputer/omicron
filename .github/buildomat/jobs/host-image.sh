@@ -3,7 +3,7 @@
 #: name = "helios / build OS image"
 #: variety = "basic"
 #: target = "helios-latest"
-#: rust_toolchain = "1.68.2"
+#: rust_toolchain = "1.70.0"
 #: output_rules = [
 #:	"=/work/helios/image/output/os.tar.gz",
 #: ]
@@ -42,17 +42,16 @@ rustc --version
 
 TOP=$PWD
 
-source "$TOP/tools/helios_version"
 source "$TOP/tools/include/force-git-over-https.sh"
 
 # Checkout helios at a pinned commit into /work/helios
 git clone https://github.com/oxidecomputer/helios.git /work/helios
 cd /work/helios
-git checkout "$COMMIT"
 
 # TODO: Consider importing zones here too?
 
 cd "$TOP"
 ./tools/build-host-image.sh -B \
+    -S /input/package/work/zones/switch-asic.tar.gz \
     /work/helios \
     /input/package/work/global-zone-packages.tar.gz

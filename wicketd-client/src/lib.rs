@@ -33,20 +33,33 @@ progenitor::generate_api!(
         RotInventory = { derives = [ PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize]},
         RotSlot = { derives = [ PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize]},
         ImageVersion = { derives = [ PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize]},
-        UpdateComponent = { derives = [ Copy, PartialEq, Eq, PartialOrd, Ord ] },
+        StartUpdateOptions = { derives = [ Serialize, Deserialize, Default ]},
+        Ipv4Range = { derives = [ PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize ] },
+        Ipv6Range = { derives = [ PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize ] },
+        IpRange = { derives = [ PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize ] },
+        Baseboard = { derives = [ PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize ] },
+        BootstrapSledDescription = { derives = [ PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize ] },
+        RackInitId = { derives = [ PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize ] },
+        RackResetId = { derives = [ PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize ] },
+        RackOperationStatus = { derives = [ PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize ] },
+        RackNetworkConfig = { derives = [ PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize ] },
+        CurrentRssUserConfigInsensitive = { derives = [ PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize ] },
+        CurrentRssUserConfigSensitive = { derives = [ PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize ] },
+        CurrentRssUserConfig = { derives = [ PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize ] },
     },
     replace = {
         Duration = std::time::Duration,
-        ProgressEventForGenericSpec = update_engine::events::ProgressEvent<update_engine::NestedSpec>,
+        PutRssUserConfigInsensitive = wicket_common::rack_setup::PutRssUserConfigInsensitive,
+        EventReportForWicketdEngineSpec = wicket_common::update_events::EventReport,
+        StepEventForWicketdEngineSpec = wicket_common::update_events::StepEvent,
+        ProgressEventForWicketdEngineSpec = wicket_common::update_events::ProgressEvent,
         StepEventForGenericSpec = update_engine::events::StepEvent<update_engine::NestedSpec>,
-        ProgressReport = installinator_common::ProgressReport,
+        ProgressEventForGenericSpec = update_engine::events::ProgressEvent<update_engine::NestedSpec>,
         StepEventForInstallinatorSpec = installinator_common::StepEvent,
         ProgressEventForInstallinatorSpec = installinator_common::ProgressEvent,
         M2Slot = installinator_common::M2Slot,
     }
 );
 
-pub type EventReport = types::EventReportForWicketdEngineSpec;
-pub type ProgressEventKind = types::ProgressEventKindForWicketdEngineSpec;
-pub type StepEventKind = types::StepEventKindForWicketdEngineSpec;
-pub type StepInfoWithMetadata = types::StepInfoWithMetadataForWicketdEngineSpec;
+/// A type alias for errors returned by this crate.
+pub type ClientError = crate::Error<crate::types::Error>;

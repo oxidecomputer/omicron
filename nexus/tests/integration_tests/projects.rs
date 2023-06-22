@@ -11,7 +11,7 @@ use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::resource_helpers::{
     create_disk, create_project, create_vpc, object_create, populate_ip_pool,
-    project_get, DiskTest,
+    project_get, projects_list, DiskTest,
 };
 use nexus_test_utils_macros::nexus_test;
 use omicron_common::api::external::ByteCount;
@@ -44,15 +44,7 @@ async fn test_projects(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(project.identity.name, p2_name);
 
     // Verify the list of Projects.
-    let projects = NexusRequest::iter_collection_authn::<Project>(
-        &client,
-        "/v1/projects",
-        "",
-        None,
-    )
-    .await
-    .expect("failed to list projects")
-    .all_items;
+    let projects = projects_list(&client, "/v1/projects", "", None).await;
     assert_eq!(projects.len(), 2);
     // alphabetical order for now
     assert_eq!(projects[0].identity.name, p2_name);

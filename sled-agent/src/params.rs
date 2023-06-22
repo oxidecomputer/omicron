@@ -316,6 +316,8 @@ pub enum ServiceType {
         external_ip: IpAddr,
         /// The service vNIC providing external connectivity using OPTE.
         nic: NetworkInterface,
+        /// Whether Nexus's external endpoint should use TLS
+        external_tls: bool,
     },
     ExternalDns {
         /// The address at which the external DNS server API is reachable.
@@ -431,8 +433,13 @@ impl TryFrom<ServiceType> for sled_agent_client::types::ServiceType {
         use ServiceType as St;
 
         match s {
-            St::Nexus { internal_ip, external_ip, nic } => {
-                Ok(AutoSt::Nexus { internal_ip, external_ip, nic: nic.into() })
+            St::Nexus { internal_ip, external_ip, nic, external_tls } => {
+                Ok(AutoSt::Nexus {
+                    internal_ip,
+                    external_ip,
+                    nic: nic.into(),
+                    external_tls,
+                })
             }
             St::ExternalDns { http_address, dns_address, nic } => {
                 Ok(AutoSt::ExternalDns {

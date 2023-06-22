@@ -1,0 +1,22 @@
+# Reflector configuration (oxidecompuer/reflector)
+
+# When any of the listeners configured below activate, run .github/workflows/update-maghemite.yml targeting main
+
+workflow = "update-maghemite.yml"
+branch = "main"
+
+# Request an installation token when running this workflow
+
+requires_token = true
+
+# Debounce values are used to batch together multiple pushes that occur in a relatively short
+# timeframe
+
+[[on]]
+repository = "oxidecomputer/maghemite"
+paths = [
+  "**",
+]
+
+# Wait one hour for binary builds to complete
+debounce = 3600
