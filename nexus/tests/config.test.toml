@@ -51,6 +51,10 @@ request_body_max_bytes = 8388608
 bind_address = "127.0.0.1:0"
 request_body_max_bytes = 8388608
 
+#
+# NOTE: for the test suite, the internal DNS address will be replaced with one
+# that's started by the test runner.
+#
 [deployment.internal_dns]
 type = "from_subnet"
 subnet.net = "fd00:1122:3344:0100::/56"

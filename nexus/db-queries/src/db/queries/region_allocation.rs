@@ -74,6 +74,11 @@ impl OldRegions {
 }
 
 /// A subquery to find datasets which could be used for provisioning regions.
+///
+/// We only consider datasets which are already allocated as "Crucible".
+/// This implicitly distinguishes between "M.2s" and "U.2s" -- Nexus needs to
+/// determine during dataset provisioning which devices should be considered for
+/// usage as Crucible storage.
 #[derive(Subquery, QueryId)]
 #[subquery(name = candidate_datasets)]
 struct CandidateDatasets {
@@ -214,13 +219,14 @@ struct OldPoolUsage {
 }
 
 impl OldPoolUsage {
-    fn new() -> Self {
+    fn new(candidate_zpools: &CandidateZpools) -> Self {
         use crate::db::schema::dataset::dsl as dataset_dsl;
         Self {
             query: Box::new(
                 dataset_dsl::dataset
                     .inner_join(
-                        candidate_zpools::dsl::candidate_zpools
+                        candidate_zpools
+                            .query_source()
                             .on(dataset_dsl::pool_id
                                 .eq(candidate_zpools::dsl::id)),
                     )
@@ -473,7 +479,7 @@ impl RegionAllocate {
             extent_count,
         );
         let proposed_changes = ProposedChanges::new(&candidate_regions);
-        let old_pool_usage = OldPoolUsage::new();
+        let old_pool_usage = OldPoolUsage::new(&candidate_zpools);
         let zpool_size_delta = ZpoolSizeDelta::new(&proposed_changes);
         let proposed_datasets_fit =
             ProposedDatasetsFit::new(&old_pool_usage, &zpool_size_delta);

@@ -3,16 +3,19 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 mod artifacts;
+mod bootstrap_addrs;
 mod config;
 mod context;
 mod http_entrypoints;
 mod installinator_progress;
 mod inventory;
 pub mod mgs;
+mod rss_config;
 mod update_tracker;
 
 use anyhow::{anyhow, Result};
 use artifacts::{WicketdArtifactServer, WicketdArtifactStore};
+use bootstrap_addrs::BootstrapPeers;
 pub use config::Config;
 pub(crate) use context::ServerContext;
 pub use installinator_progress::{IprUpdateTracker, RunningUpdateState};
@@ -96,8 +99,10 @@ impl Server {
             ipr_update_tracker.clone(),
         ));
 
+        let bootstrap_peers = BootstrapPeers::new(&log);
+
         let wicketd_server = {
-            let log = log.new(o!("component" => "dropshot (wicketd)"));
+            let ds_log = log.new(o!("component" => "dropshot (wicketd)"));
             let mgs_client = make_mgs_client(log.clone(), args.mgs_address);
             dropshot::HttpServerStarter::new(
                 &dropshot_config,
@@ -105,10 +110,13 @@ impl Server {
                 ServerContext {
                     mgs_handle,
                     mgs_client,
+                    log: log.clone(),
+                    bootstrap_peers,
                     update_tracker: update_tracker.clone(),
                     baseboard: args.baseboard,
+                    rss_config: Default::default(),
                 },
-                &log,
+                &ds_log,
             )
             .map_err(|err| format!("initializing http server: {}", err))?
             .start()
