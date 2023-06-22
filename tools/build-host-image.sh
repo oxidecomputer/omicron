@@ -60,9 +60,7 @@ function main
     HELIOS_PATH=$1
     GLOBAL_ZONE_TARBALL_PATH=$2
 
-    # Read expected helios commit into $COMMIT
     TOOLS_DIR="$(pwd)/$(dirname $0)"
-    source "$TOOLS_DIR/helios_version"
 
     # Grab the opte version
     OPTE_VER=$(cat "$TOOLS_DIR/opte_version")
@@ -87,21 +85,6 @@ function main
 
     # Move to the helios checkout
     cd $HELIOS_PATH
-
-    # Unless the user passed -f, check that the helios commit matches the one we
-    # have specified in `tools/helios_version`
-    if [ "x$FORCE" == "x" ]; then
-        CURRENT_COMMIT=$(git rev-parse HEAD)
-        if [ "x$COMMIT" != "x$CURRENT_COMMIT" ]; then
-            echo "WARNING: omicron/tools/helios_version specifies helios commit"
-            echo "  $COMMIT"
-            echo "but you have"
-            echo "  $CURRENT_COMMIT"
-            echo "Either check out the expected commit or pass -f to this"
-            echo "script to disable this check."
-            exit 1
-        fi
-    fi
 
     # Create the "./helios-build" command, which lets us build images
     gmake setup
