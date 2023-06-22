@@ -5,6 +5,9 @@ version = "0.1.0"
 edition = "2021"
 license = "MPL-2.0"
 
+[features]
+machine-non-gimlet = []
+
 [dependencies]
 anyhow.workspace = true
 camino.workspace = true
@@ -32,3 +35,4 @@ libefi-illumos = { git = "https://github.com/oxidecomputer/libefi-illumos", bran
 illumos-utils = { workspace = true, features = ["testing"] }
 omicron-test-utils.workspace = true
 serial_test.workspace = true
+

@@ -62,6 +62,9 @@ const GIMLET_ROOT_NODE_NAME: &str = "Oxide,Gimlet";
 
 /// Return true if the host system is an Oxide Gimlet.
 pub fn is_gimlet() -> anyhow::Result<bool> {
+    if cfg!(feature = "machine-non-gimlet") {
+        return Ok(false);
+    }
     let mut device_info = DevInfo::new()?;
     let mut node_walker = device_info.walk_node();
     let Some(root) = node_walker.next().transpose()? else {
