@@ -366,9 +366,9 @@ fn validate_rack_network_config(
     // TODO Add client side checks on `rack_network_config` contents.
 
     bootstrap_agent_client::types::RackNetworkConfig {
-        gateway_ip: config.gateway_ip.clone(),
-        infra_ip_first: config.infra_ip_first.clone(),
-        infra_ip_last: config.infra_ip_last.clone(),
+        gateway_ip: config.gateway_ip,
+        infra_ip_first: config.infra_ip_first,
+        infra_ip_last: config.infra_ip_last,
         uplink_port: config.uplink_port.clone(),
         uplink_port_speed: match config.uplink_port_speed {
             PortSpeed::Speed0G => BaPortSpeed::Speed0G,
@@ -386,7 +386,7 @@ fn validate_rack_network_config(
             PortFec::None => BaPortFec::None,
             PortFec::Rs => BaPortFec::Rs,
         },
-        uplink_ip: config.uplink_ip.clone(),
+        uplink_ip: config.uplink_ip,
         uplink_vid: config.uplink_vid,
     }
 }
