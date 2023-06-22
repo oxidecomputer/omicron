@@ -11,15 +11,23 @@ LISTEN_PORT="$(svcprop -c -p config/listen_port "${SMF_FMRI}")"
 DATASTORE="$(svcprop -c -p config/store "${SMF_FMRI}")"
 DATALINK="$(svcprop -c -p config/datalink "${SMF_FMRI}")"
 GATEWAY="$(svcprop -c -p config/gateway "${SMF_FMRI}")"
-JOIN_ADDRS="$(svcprop -c -p config/join_addrs "${SMF_FMRI}")"
 
 if [[ $DATALINK == unknown ]] || [[ $GATEWAY == unknown ]]; then
     printf 'ERROR: missing datalink or gateway\n' >&2
     exit "$SMF_EXIT_ERR_CONFIG"
 fi
 
-if [[ $JOIN_ADDRS == unknown ]]; then
-    printf 'ERROR: missing join_addrs\n' >&2
+# We need to tell CockroachDB the DNS names or IP addresses of the other nodes
+# in the cluster.  Look these up in internal DNS.  Per the recommendations in
+# the CockroachDB docs, we choose at most five addresses.  Providing more
+# addresses just increases the time for the cluster to stabilize.
+JOIN_ADDRS="$(
+    dig +short -t SRV _cockroach._tcp.control-plane.oxide.internal | \
+    awk '{print $4}' | \
+    head -n 5)"
+
+if [[ -z "$JOIN_ADDRS" ]]; then
+    printf 'ERROR: found no addresses for other CockroachDB nodes\n' >&2
     exit "$SMF_EXIT_ERR_CONFIG"
 fi
 

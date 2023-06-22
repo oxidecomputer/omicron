@@ -127,8 +127,14 @@ impl Resolver {
     ) -> Result<Vec<Ipv6Addr>, ResolveError> {
         let name = format!("{}.{}", srv.dns_name(), DNS_ZONE);
         debug!(self.log, "lookup_ipv6 srv"; "dns_name" => &name);
-        let response = self.inner.ipv6_lookup(&name).await?;
-        let addresses = response.iter().map(|a| *a).collect::<Vec<_>>();
+        let response = self.inner.srv_lookup(&name).await?;
+        let addresses = response
+            .ip_iter()
+            .filter_map(|addr| match addr {
+                IpAddr::V4(_) => None,
+                IpAddr::V6(addr) => Some(addr),
+            })
+            .collect();
         Ok(addresses)
     }
 

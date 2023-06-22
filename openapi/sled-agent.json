@@ -12,8 +12,7 @@
   "paths": {
     "/cockroachdb": {
       "post": {
-        "summary": "Initializes a CockroachDB cluster, calling:",
-        "description": "<https://www.cockroachlabs.com/docs/stable/cockroach-init.html>\nand also populating the contents of the filesystem with preliminary tables.",
+        "summary": "Initializes a CockroachDB cluster",
         "operationId": "cockroachdb_init",
         "responses": {
           "204": {

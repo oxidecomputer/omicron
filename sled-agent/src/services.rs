@@ -1016,6 +1016,32 @@ impl ServiceManager {
                 let Some(info) = self.inner.sled_info.get() else {
                     return Err(Error::SledAgentNotReady);
                 };
+
+                // List the nameservers themselves from the nameservers so that
+                // we can configure DNS in the zone.  We do this by configuring
+                // the dns/install SMF service in the zone's SMF profile.  Note
+                // that we're supplying values for an existing property group on
+                // the SMF service, not defining a new property group, nor
+                // configuring the default instance.  We do also need to enable
+                // the default instance, though.
+                let all_nameservers = info
+                    .resolver
+                    .lookup_all_ipv6(internal_dns::ServiceName::InternalDns)
+                    .await?;
+                let mut dns_config_builder =
+                    PropertyGroupBuilder::new("install_props");
+                for ns_addr in &all_nameservers {
+                    dns_config_builder = dns_config_builder.add_property(
+                        "nameserver",
+                        "net_address",
+                        &ns_addr.to_string(),
+                    );
+                }
+                let dns_install = ServiceBuilder::new("network/dns/install")
+                    .add_property_group(dns_config_builder)
+                    .add_instance(ServiceInstanceBuilder::new("default"));
+
+                // Configure the CockroachDB service.
                 let datalink = installed_zone.get_control_vnic_name();
                 let gateway = &info.underlay_address.to_string();
                 assert_eq!(request.zone.addresses.len(), 1);
@@ -1026,33 +1052,21 @@ impl ServiceManager {
                 let listen_addr = &address.ip().to_string();
                 let listen_port = &address.port().to_string();
 
-                // Look up all cockroachdb addresses stored in internal DNS.
-                let all_crdb_addresses = info
-                    .resolver
-                    .lookup_all_ipv6(internal_dns::ServiceName::Cockroach)
-                    .await?
-                    .into_iter()
-                    .map(|addr| {
-                        SocketAddr::new(IpAddr::V6(addr), COCKROACH_PORT)
-                            .to_string()
-                    })
-                    .collect::<Vec<String>>()
-                    .join(",");
-
-                let config = PropertyGroupBuilder::new("config")
+                let cockroachdb_config = PropertyGroupBuilder::new("config")
                     .add_property("datalink", "astring", datalink)
                     .add_property("gateway", "astring", gateway)
                     .add_property("listen_addr", "astring", listen_addr)
                     .add_property("listen_port", "astring", listen_port)
-                    .add_property("store", "astring", "/data")
-                    .add_property("join_addrs", "astring", &all_crdb_addresses);
-
-                let profile = ProfileBuilder::new("omicron").add_service(
+                    .add_property("store", "astring", "/data");
+                let cockroachdb_service =
                     ServiceBuilder::new("oxide/cockroachdb").add_instance(
                         ServiceInstanceBuilder::new("default")
-                            .add_property_group(config),
-                    ),
-                );
+                            .add_property_group(cockroachdb_config),
+                    );
+
+                let profile = ProfileBuilder::new("omicron")
+                    .add_service(cockroachdb_service)
+                    .add_service(dns_install);
                 profile
                     .add_to_zone(&self.inner.log, &installed_zone)
                     .await

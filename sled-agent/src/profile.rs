@@ -58,15 +58,28 @@ impl Display for ProfileBuilder {
 pub struct ServiceBuilder {
     name: String,
     instances: Vec<ServiceInstanceBuilder>,
+    property_groups: Vec<PropertyGroupBuilder>,
 }
 
 impl ServiceBuilder {
     pub fn new(name: &str) -> Self {
-        Self { name: name.to_string(), instances: vec![] }
+        Self {
+            name: name.to_string(),
+            instances: vec![],
+            property_groups: vec![],
+        }
     }
 
     pub fn add_instance(mut self, instance: ServiceInstanceBuilder) -> Self {
         self.instances.push(instance);
+        self
+    }
+
+    pub fn add_property_group(
+        mut self,
+        property_group: PropertyGroupBuilder,
+    ) -> Self {
+        self.property_groups.push(property_group);
         self
     }
 }
@@ -79,6 +92,10 @@ impl Display for ServiceBuilder {
 "#,
             name = self.name
         )?;
+
+        for property_group in &self.property_groups {
+            write!(f, "{}", property_group)?;
+        }
 
         for instance in &self.instances {
             write!(f, "{}", instance)?;
@@ -227,6 +244,27 @@ mod tests {
     }
 
     #[test]
+    fn test_service_property_group() {
+        let builder = ProfileBuilder::new("myprofile").add_service(
+            ServiceBuilder::new("myservice").add_property_group(
+                PropertyGroupBuilder::new("mypg")
+                    .add_property("myprop", "astring", "myvalue"),
+            ),
+        );
+        assert_eq!(
+            format!("{}", builder),
+            r#"<!DOCTYPE service_bundle SYSTEM "/usr/share/lib/xml/dtd/service_bundle.dtd.1">
+<service_bundle type="profile" name="myprofile">
+  <service version="1" type="service" name="myservice">
+      <property_group type="application" name="mypg">
+        <propval type="astring" name="myprop" value="myvalue"/>
+      </property_group>
+  </service>
+</service_bundle>"#,
+        );
+    }
+
+    #[test]
     fn test_instance() {
         let builder = ProfileBuilder::new("myprofile").add_service(
             ServiceBuilder::new("myservice")
@@ -294,24 +332,34 @@ mod tests {
     #[test]
     fn test_multiple() {
         let builder = ProfileBuilder::new("myprofile").add_service(
-            ServiceBuilder::new("myservice").add_instance(
-                ServiceInstanceBuilder::new("default")
-                    .add_property_group(
-                        PropertyGroupBuilder::new("mypg")
-                            .add_property("prop", "type", "value")
-                            .add_property("prop2", "type", "value2"),
-                    )
-                    .add_property_group(
-                        PropertyGroupBuilder::new("mypg2")
-                            .add_property("prop3", "type", "value3"),
-                    ),
-            ),
+            ServiceBuilder::new("myservice")
+                .add_instance(
+                    ServiceInstanceBuilder::new("default")
+                        .add_property_group(
+                            PropertyGroupBuilder::new("mypg")
+                                .add_property("prop", "type", "value")
+                                .add_property("prop2", "type", "value2"),
+                        )
+                        .add_property_group(
+                            PropertyGroupBuilder::new("mypg2")
+                                .add_property("prop3", "type", "value3"),
+                        ),
+                )
+                .add_property_group(
+                    PropertyGroupBuilder::new("mypgsvc")
+                        .add_property("prop", "astring", "valuesvc")
+                        .add_property("prop", "astring", "value2svc"),
+                ),
         );
         assert_eq!(
             format!("{}", builder),
             r#"<!DOCTYPE service_bundle SYSTEM "/usr/share/lib/xml/dtd/service_bundle.dtd.1">
 <service_bundle type="profile" name="myprofile">
   <service version="1" type="service" name="myservice">
+      <property_group type="application" name="mypgsvc">
+        <propval type="astring" name="prop" value="valuesvc"/>
+        <propval type="astring" name="prop" value="value2svc"/>
+      </property_group>
     <instance enabled="true" name="default">
       <property_group type="application" name="mypg">
         <propval type="type" name="prop" value="value"/>
