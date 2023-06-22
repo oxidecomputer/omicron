@@ -381,7 +381,7 @@ impl Into<external::SwitchPortRouteConfig> for SwitchPortRouteConfig {
             interface_name: self.interface_name.clone(),
             dst: self.dst.into(),
             gw: self.gw.into(),
-            vid: self.vid.map(Into::into),
+            vlan_id: self.vid.map(Into::into),
         }
     }
 }
