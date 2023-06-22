@@ -949,7 +949,7 @@ impl UpdatePane {
                 }
             }
             Cmd::AbortUpdate => self.handle_abort_update(state),
-            Cmd::ClearUpdateState => self.handle_clear_update_state(state),
+            Cmd::ResetState => self.handle_clear_update_state(state),
             Cmd::GotoTop => {
                 let id_state = self
                     .component_state

@@ -137,15 +137,15 @@ done
 
 # Fetch SP images from oxidecomputer/hubris GHA artifacts.
 HUBRIS_VERSION="1.0.0-alpha+git${HUBRIS_COMMIT:0:11}"
-run_id=$(curl --netrc "https://api.github.com/repos/oxidecomputer/hubris/actions/runs?head_sha=$HUBRIS_COMMIT" \
+run_id=$(curl --netrc -fsS "https://api.github.com/repos/oxidecomputer/hubris/actions/runs?head_sha=$HUBRIS_COMMIT" \
     | /opt/ooce/bin/jq -r '.workflow_runs[] | select(.path == ".github/workflows/dist.yml") | .id')
-artifacts=$(curl --netrc "https://api.github.com/repos/oxidecomputer/hubris/actions/runs/$run_id/artifacts")
+artifacts=$(curl --netrc -fsS "https://api.github.com/repos/oxidecomputer/hubris/actions/runs/$run_id/artifacts")
 for noun in gimlet-c psc-b sidecar-b; do
     tufaceous_kind=${noun%-?}
     tufaceous_kind=${tufaceous_kind//sidecar/switch}_sp
     job_name=dist-ubuntu-latest-$noun
     url=$(/opt/ooce/bin/jq --arg name "$job_name" -r '.artifacts[] | select(.name == $name) | .archive_download_url' <<<"$artifacts")
-    curl -L -o /work/$job_name.zip "$url"
+    curl --netrc -fsSL -o /work/$job_name.zip "$url"
     cat >>/work/manifest.toml <<EOF
 [artifact.$tufaceous_kind]
 name = "$tufaceous_kind"

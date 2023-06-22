@@ -280,7 +280,7 @@ pub async fn run_standalone_server(
     info!(log, "sled agent started successfully");
 
     // Start the Internal DNS server
-    let dns = dns_server::InMemoryServer::new(&log).await?;
+    let dns = dns_server::TransientServer::new(&log).await?;
     let mut dns_config_builder = internal_dns::DnsConfigBuilder::new();
 
     // Start the Crucible Pantry
@@ -378,6 +378,9 @@ pub async fn run_standalone_server(
             sled_id: config.id,
             zone_id: Some(Uuid::new_v4()),
         });
+
+        internal_services_ip_pool_ranges
+            .push(IpRange::V6(Ipv6Range { first: ip, last: ip }));
     }
 
     let recovery_silo = NexusTypes::RecoverySiloConfig {

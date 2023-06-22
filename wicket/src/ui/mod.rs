@@ -19,6 +19,7 @@ use splash::SplashScreen;
 
 pub use controls::Control;
 pub use panes::OverviewPane;
+pub use panes::RackSetupPane;
 pub use panes::UpdatePane;
 
 /// The primary display representation. It's sole purpose is to dispatch

@@ -4,6 +4,7 @@
 
 //! A popup dialog box widget
 
+use serde::{Deserialize, Serialize};
 use tui::{
     buffer::Buffer,
     layout::{Constraint, Direction, Layout, Rect},
@@ -289,7 +290,9 @@ impl Widget for Popup<'_> {
 }
 
 /// Scroll kind for a popup.
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[derive(
+    Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize,
+)]
 pub enum PopupScrollKind {
     /// Scrolling is disabled.
     #[default]

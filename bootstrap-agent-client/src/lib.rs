@@ -4,9 +4,21 @@
 
 //! Interface for making API requests to a Bootstrap Agent
 
-use omicron_common::generate_logging_api;
-
-generate_logging_api!("../openapi/bootstrap-agent.json");
+progenitor::generate_api!(
+    spec = "../openapi/bootstrap-agent.json",
+    inner_type = slog::Logger,
+    pre_hook = (|log: &slog::Logger, request: &reqwest::Request| {
+        slog::debug!(log, "client request";
+            "method" => %request.method(),
+            "uri" => %request.url(),
+            "body" => ?&request.body(),
+        );
+    }),
+    post_hook = (|log: &slog::Logger, result: &Result<_, _>| {
+        slog::debug!(log, "client response"; "result" => ?result);
+    }),
+    derives = [schemars::JsonSchema],
+);
 
 impl omicron_common::api::external::ClientError for types::Error {
     fn message(&self) -> String {
