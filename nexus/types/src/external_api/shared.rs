@@ -4,11 +4,13 @@
 
 //! Types that are used as both views and params
 
+use parse_display::FromStr;
 use schemars::JsonSchema;
 use serde::de::Error as _;
 use serde::Deserialize;
 use serde::Deserializer;
 use serde::Serialize;
+use strum::EnumIter;
 use uuid::Uuid;
 
 pub use omicron_common::address::{IpRange, Ipv4Range, Ipv6Range};
@@ -73,6 +75,68 @@ pub struct RoleAssignment<AllowedRoles> {
     pub identity_type: IdentityType,
     pub identity_id: Uuid,
     pub role_name: AllowedRoles,
+}
+
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Deserialize,
+    EnumIter,
+    Eq,
+    Ord,
+    PartialEq,
+    PartialOrd,
+    Serialize,
+    JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum FleetRole {
+    Admin,
+    Collaborator,
+    Viewer,
+    // There are other Fleet roles, but they are not externally-visible and so
+    // they do not show up in this enum.
+}
+
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Deserialize,
+    EnumIter,
+    Eq,
+    FromStr,
+    Ord,
+    PartialOrd,
+    PartialEq,
+    Serialize,
+    JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum SiloRole {
+    Admin,
+    Collaborator,
+    Viewer,
+}
+
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Deserialize,
+    EnumIter,
+    Eq,
+    FromStr,
+    PartialEq,
+    Serialize,
+    JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum ProjectRole {
+    Admin,
+    Collaborator,
+    Viewer,
 }
 
 /// Describes what kind of identity is described by an id

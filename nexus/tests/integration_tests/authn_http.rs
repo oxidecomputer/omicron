@@ -23,6 +23,7 @@ use omicron_nexus::authn::external::session_cookie;
 use omicron_nexus::authn::external::spoof;
 use omicron_nexus::authn::external::spoof::HttpAuthnSpoof;
 use omicron_nexus::authn::external::spoof::SPOOF_SCHEME_NAME;
+use omicron_nexus::authn::external::AuthenticatorContext;
 use omicron_nexus::authn::external::HttpAuthnScheme;
 use omicron_nexus::authn::external::SiloUserSilo;
 use omicron_nexus::db::fixed_data::silo::SILO_ID;
@@ -309,6 +310,19 @@ async fn start_whoami_server(
 struct WhoamiServerState {
     authn: omicron_nexus::authn::external::Authenticator<WhoamiServerState>,
     sessions: Mutex<HashMap<String, FakeSession>>,
+}
+
+#[async_trait]
+impl AuthenticatorContext for WhoamiServerState {
+    async fn silo_authn_policy_for(
+        &self,
+        _: &omicron_nexus::authn::Actor,
+    ) -> Result<
+        Option<omicron_nexus::authn::SiloAuthnPolicy>,
+        omicron_common::api::external::Error,
+    > {
+        Ok(None)
+    }
 }
 
 #[async_trait]

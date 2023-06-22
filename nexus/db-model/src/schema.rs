@@ -495,6 +495,8 @@ table! {
         authentication_mode -> crate::AuthenticationModeEnum,
         user_provision_type -> crate::UserProvisionTypeEnum,
 
+        mapped_fleet_roles -> Jsonb,
+
         rcgen -> Int8,
     }
 }
