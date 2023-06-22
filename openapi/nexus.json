@@ -8385,25 +8385,15 @@
         "type": "object",
         "properties": {
           "cert": {
-            "description": "PEM file containing public certificate chain",
-            "type": "array",
-            "items": {
-              "type": "integer",
-              "format": "uint8",
-              "minimum": 0
-            }
+            "description": "PEM-formatted string containing public certificate chain",
+            "type": "string"
           },
           "description": {
             "type": "string"
           },
           "key": {
-            "description": "PEM file containing private key",
-            "type": "array",
-            "items": {
-              "type": "integer",
-              "format": "uint8",
-              "minimum": 0
-            }
+            "description": "PEM-formatted string containing private key",
+            "type": "string"
           },
           "name": {
             "$ref": "#/components/schemas/Name"

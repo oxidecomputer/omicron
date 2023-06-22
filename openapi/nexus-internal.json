@@ -847,20 +847,10 @@
         "type": "object",
         "properties": {
           "cert": {
-            "type": "array",
-            "items": {
-              "type": "integer",
-              "format": "uint8",
-              "minimum": 0
-            }
+            "type": "string"
           },
           "key": {
-            "type": "array",
-            "items": {
-              "type": "integer",
-              "format": "uint8",
-              "minimum": 0
-            }
+            "type": "string"
           }
         },
         "required": [
