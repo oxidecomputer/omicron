@@ -2435,6 +2435,105 @@
         }
       }
     },
+    "/v1/metrics/{metric_name}": {
+      "get": {
+        "tags": [
+          "metrics"
+        ],
+        "summary": "Access metrics data",
+        "operationId": "silo_metric",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "metric_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SystemMetricName"
+            }
+          },
+          {
+            "in": "query",
+            "name": "end_time",
+            "description": "An exclusive end time of metrics.",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "order",
+            "description": "Query result order",
+            "schema": {
+              "$ref": "#/components/schemas/PaginationOrder"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "start_time",
+            "description": "An inclusive start time of metrics.",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project_id",
+            "description": "A project ID. If unspecified, get aggregrate metrics across all projects in current silo.",
+            "schema": {
+              "nullable": true,
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeasurementResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": {
+          "required": [
+            "end_time",
+            "start_time"
+          ]
+        }
+      }
+    },
     "/v1/network-interfaces": {
       "get": {
         "tags": [
@@ -4823,10 +4922,10 @@
           },
           {
             "in": "query",
-            "name": "id",
-            "description": "The UUID of the container being queried",
-            "required": true,
+            "name": "silo_id",
+            "description": "A silo ID. If unspecified, get aggregrate metrics across all silos.",
             "schema": {
+              "nullable": true,
               "type": "string",
               "format": "uuid"
             }
@@ -14422,6 +14521,13 @@
       "description": "Authentication endpoints",
       "externalDocs": {
         "url": "http://docs.oxide.computer/api/login"
+      }
+    },
+    {
+      "name": "metrics",
+      "description": "Silo-scoped metrics",
+      "externalDocs": {
+        "url": "http://docs.oxide.computer/api/metrics"
       }
     },
     {
