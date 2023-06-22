@@ -12,6 +12,7 @@ use anyhow::anyhow;
 use anyhow::bail;
 use anyhow::Result;
 use sled_hardware::Baseboard;
+use slog::info;
 use std::net::Ipv6Addr;
 use std::net::SocketAddrV6;
 use std::sync::Arc;
@@ -39,26 +40,30 @@ impl ServerContext {
     }
 
     fn bootstrap_agent_ip(&self) -> Result<Ipv6Addr> {
-        let mut any_bootstrap_ip = None;
+        let mut any_bootstrap_peer = None;
         for (baseboard, ip) in self.bootstrap_peers.sleds() {
-            if self.baseboard == Some(baseboard) {
+            if self.baseboard.as_ref() == Some(&baseboard) {
                 return Ok(ip);
             }
-            any_bootstrap_ip = Some(ip);
+            any_bootstrap_peer = Some((baseboard, ip));
         }
 
         // If we get past the loop above, we did not find a match for our
         // baseboard in our list of peers. If we know our own baseboard, this is
-        // an error: we didn't found ourself. If we don't know our own
+        // an error: we didn't find ourself. If we don't know our own
         // baseboard, we can pick any IP.
-        // If we know our own baseboard, make sure we also know our own IP. If
-        // we don't know our own baseboard, pick any arbitrary bootstrap IP as
-        // the sled we choose to run RSS.
         if let Some(baseboard) = self.baseboard.as_ref() {
             bail!("IP address not known for our own sled ({baseboard:?})");
         } else {
-            any_bootstrap_ip
-                .ok_or_else(|| anyhow!("no bootstrap agent peers found"))
+            let (baseboard, ip) = any_bootstrap_peer
+                .ok_or_else(|| anyhow!("no bootstrap agent peers found"))?;
+            info!(
+                self.log,
+                "Baseboard unknown; choosing arbitrary bootstrap peer as 'our' sled-agent";
+                "peer_baseboard" => ?baseboard,
+                "peer_ip" => %ip,
+            );
+            Ok(ip)
         }
     }
 }
