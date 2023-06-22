@@ -178,7 +178,6 @@ impl RackSetupPane {
                 Some(Action::StartRackSetup)
             }
             (Popup::RackReset(kind @ PopupKind::Prompting), Cmd::Yes) => {
-                // TODO: actually trigger rack reset
                 *kind = PopupKind::Waiting;
                 Some(Action::StartRackReset)
             }
