@@ -42,13 +42,11 @@ rustc --version
 
 TOP=$PWD
 
-source "$TOP/tools/helios_version"
 source "$TOP/tools/include/force-git-over-https.sh"
 
 # Checkout helios at a pinned commit into /work/helios
 git clone https://github.com/oxidecomputer/helios.git /work/helios
 cd /work/helios
-git checkout "$COMMIT"
 
 cd "$TOP"
 ./tools/build-host-image.sh -R \
