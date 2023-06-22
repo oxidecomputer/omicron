@@ -102,7 +102,7 @@ impl Server {
         let bootstrap_peers = BootstrapPeers::new(&log);
 
         let wicketd_server = {
-            let log = log.new(o!("component" => "dropshot (wicketd)"));
+            let ds_log = log.new(o!("component" => "dropshot (wicketd)"));
             let mgs_client = make_mgs_client(log.clone(), args.mgs_address);
             dropshot::HttpServerStarter::new(
                 &dropshot_config,
@@ -110,12 +110,13 @@ impl Server {
                 ServerContext {
                     mgs_handle,
                     mgs_client,
+                    log: log.clone(),
                     bootstrap_peers,
                     update_tracker: update_tracker.clone(),
                     baseboard: args.baseboard,
                     rss_config: Default::default(),
                 },
-                &log,
+                &ds_log,
             )
             .map_err(|err| format!("initializing http server: {}", err))?
             .start()

@@ -11,14 +11,31 @@ use crate::http_entrypoints::CurrentRssUserConfig;
 use crate::http_entrypoints::CurrentRssUserConfigInsensitive;
 use crate::http_entrypoints::CurrentRssUserConfigSensitive;
 use crate::RackV1Inventory;
+use anyhow::bail;
+use anyhow::Result;
+use bootstrap_agent_client::types::BootstrapAddressDiscovery;
 use bootstrap_agent_client::types::Certificate;
+use bootstrap_agent_client::types::Name;
+use bootstrap_agent_client::types::RackInitializeRequest;
+use bootstrap_agent_client::types::RecoverySiloConfig;
+use bootstrap_agent_client::types::UserId;
 use gateway_client::types::SpType;
 use omicron_certificates::CertificateValidator;
 use omicron_common::address;
 use omicron_common::api::internal::shared::RackNetworkConfig;
 use sled_hardware::Baseboard;
 use std::collections::BTreeSet;
+use std::net::Ipv6Addr;
 use wicket_common::rack_setup::PutRssUserConfigInsensitive;
+
+// TODO-correctness For now, we always use the same rack subnet when running
+// RSS. When we get to multirack, this will be wrong, but there are many other
+// RSS-related things that need to change then too.
+const RACK_SUBNET: Ipv6Addr =
+    Ipv6Addr::new(0xfd00, 0x1122, 0x3344, 0x0100, 0, 0, 0, 0);
+
+const RECOVERY_SILO_NAME: &str = "recovery";
+const RECOVERY_SILO_USERNAME: &str = "recovery";
 
 #[derive(Default)]
 struct PartialCertificate {
@@ -77,6 +94,100 @@ impl CurrentRssConfig {
                 })
             })
             .collect();
+    }
+
+    pub(crate) fn start_rss_request(
+        &self,
+        bootstrap_peers: &BootstrapPeers,
+    ) -> Result<RackInitializeRequest> {
+        // Basic "client-side" checks.
+        if self.bootstrap_sleds.is_empty() {
+            bail!("bootstrap_sleds is empty (have you uploaded a config?)");
+        }
+        if self.ntp_servers.is_empty() {
+            bail!("at least one NTP server is required");
+        }
+        if self.dns_servers.is_empty() {
+            bail!("at least one DNS server is required");
+        }
+        if self.internal_services_ip_pool_ranges.is_empty() {
+            bail!("at least one internal services IP pool range is required");
+        }
+        if self.external_dns_zone_name.is_empty() {
+            bail!("external dns zone name is required");
+        }
+        if self.external_certificates.is_empty() {
+            bail!("at least one certificate/key pair is required");
+        }
+        let Some(recovery_silo_password_hash)
+            = self.recovery_silo_password_hash.as_ref()
+        else {
+            bail!("recovery password not yet set");
+        };
+        let Some(rack_network_config) = self.rack_network_config.as_ref() else {
+            bail!("rack network config not set (have you uploaded a config?)");
+        };
+        let rack_network_config =
+            validate_rack_network_config(rack_network_config);
+
+        let known_bootstrap_sleds = bootstrap_peers.sleds();
+        let mut bootstrap_ips = Vec::new();
+        for sled in &self.bootstrap_sleds {
+            let Some(ip) = known_bootstrap_sleds.get(&sled.baseboard).copied()
+            else {
+                bail!(
+                    "IP address not (yet?) known for sled {} ({:?})",
+                    sled.id.slot,
+                    sled.baseboard,
+                );
+            };
+            bootstrap_ips.push(ip);
+        }
+
+        // Convert between internal and progenitor types.
+        let user_password_hash = bootstrap_agent_client::types::NewPasswordHash(
+            recovery_silo_password_hash.to_string(),
+        );
+        let internal_services_ip_pool_ranges = self
+            .internal_services_ip_pool_ranges
+            .iter()
+            .map(|pool| {
+                use bootstrap_agent_client::types::IpRange;
+                use bootstrap_agent_client::types::Ipv4Range;
+                use bootstrap_agent_client::types::Ipv6Range;
+                match pool {
+                    address::IpRange::V4(range) => IpRange::V4(Ipv4Range {
+                        first: range.first,
+                        last: range.last,
+                    }),
+                    address::IpRange::V6(range) => IpRange::V6(Ipv6Range {
+                        first: range.first,
+                        last: range.last,
+                    }),
+                }
+            })
+            .collect();
+
+        let request = RackInitializeRequest {
+            rack_subnet: RACK_SUBNET,
+            bootstrap_discovery: BootstrapAddressDiscovery::OnlyThese(
+                bootstrap_ips,
+            ),
+            rack_secret_threshold: 1, // TODO REMOVE?
+            ntp_servers: self.ntp_servers.clone(),
+            dns_servers: self.dns_servers.clone(),
+            internal_services_ip_pool_ranges,
+            external_dns_zone_name: self.external_dns_zone_name.clone(),
+            external_certificates: self.external_certificates.clone(),
+            recovery_silo: RecoverySiloConfig {
+                silo_name: Name::try_from(RECOVERY_SILO_NAME).unwrap(),
+                user_name: UserId(RECOVERY_SILO_USERNAME.into()),
+                user_password_hash,
+            },
+            rack_network_config: Some(rack_network_config),
+        };
+
+        Ok(request)
     }
 
     pub(crate) fn set_recovery_user_password_hash(
@@ -239,5 +350,40 @@ impl From<&'_ CurrentRssConfig> for CurrentRssUserConfig {
                 rack_network_config: rss.rack_network_config.clone(),
             },
         }
+    }
+}
+
+fn validate_rack_network_config(
+    config: &RackNetworkConfig,
+) -> bootstrap_agent_client::types::RackNetworkConfig {
+    use bootstrap_agent_client::types::PortFec as BaPortFec;
+    use bootstrap_agent_client::types::PortSpeed as BaPortSpeed;
+    use omicron_common::api::internal::shared::PortFec;
+    use omicron_common::api::internal::shared::PortSpeed;
+
+    // TODO Add client side checks on `rack_network_config` contents.
+
+    bootstrap_agent_client::types::RackNetworkConfig {
+        gateway_ip: config.gateway_ip.clone(),
+        infra_ip_first: config.infra_ip_first.clone(),
+        infra_ip_last: config.infra_ip_last.clone(),
+        uplink_port: config.uplink_port.clone(),
+        uplink_port_speed: match config.uplink_port_speed {
+            PortSpeed::Speed0G => BaPortSpeed::Speed0G,
+            PortSpeed::Speed1G => BaPortSpeed::Speed1G,
+            PortSpeed::Speed10G => BaPortSpeed::Speed10G,
+            PortSpeed::Speed25G => BaPortSpeed::Speed25G,
+            PortSpeed::Speed40G => BaPortSpeed::Speed40G,
+            PortSpeed::Speed50G => BaPortSpeed::Speed50G,
+            PortSpeed::Speed100G => BaPortSpeed::Speed100G,
+            PortSpeed::Speed200G => BaPortSpeed::Speed200G,
+            PortSpeed::Speed400G => BaPortSpeed::Speed400G,
+        },
+        uplink_port_fec: match config.uplink_port_fec {
+            PortFec::Firecode => BaPortFec::Firecode,
+            PortFec::None => BaPortFec::None,
+            PortFec::Rs => BaPortFec::Rs,
+        },
+        uplink_ip: config.uplink_ip.clone(),
     }
 }
