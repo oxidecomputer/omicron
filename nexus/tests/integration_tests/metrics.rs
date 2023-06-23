@@ -21,17 +21,21 @@ pub async fn query_for_metrics(
     measurements
 }
 
-pub async fn get_latest_system_metric(
+pub async fn get_latest_silo_metric(
     cptestctx: &ControlPlaneTestContext<omicron_nexus::Server>,
     metric_name: &str,
-    resource_id: Uuid,
+    project_id: Option<Uuid>,
 ) -> i64 {
     let client = &cptestctx.external_client;
+    let id_param = match project_id {
+        Some(id) => format!("&project_id={}", id),
+        None => "".to_string(),
+    };
     let url = format!(
-        "/v1/system/metrics/{metric_name}?start_time={:?}&end_time={:?}&id={:?}&order=descending&limit=1", 
+        "/v1/metrics/{metric_name}?start_time={:?}&end_time={:?}&order=descending&limit=1{}", 
         cptestctx.start_time,
         Utc::now(),
-        resource_id,
+        id_param,
     );
     let measurements: ResultsPage<Measurement> =
         objects_list_page_authz(client, &url).await;

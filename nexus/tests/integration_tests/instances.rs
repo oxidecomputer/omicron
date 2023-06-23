@@ -4,7 +4,7 @@
 
 //! Tests basic instance support in the API
 
-use super::metrics::get_latest_system_metric;
+use super::metrics::get_latest_silo_metric;
 
 use camino::Utf8Path;
 use http::method::Method;
@@ -37,7 +37,6 @@ use omicron_common::api::external::Ipv4Net;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::Vni;
 use omicron_nexus::authz::SiloRole;
-use omicron_nexus::db::fixed_data::silo::SILO_ID;
 use omicron_nexus::db::lookup::LookupPath;
 use omicron_nexus::external_api::shared::IpKind;
 use omicron_nexus::external_api::shared::IpRange;
@@ -744,9 +743,9 @@ async fn test_instance_metrics(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(virtual_provisioning_collection.ram_provisioned.to_bytes(), 0);
 
     oximeter.force_collect().await;
-    for id in &[*SILO_ID, project_id] {
+    for id in &[None, Some(project_id)] {
         assert_eq!(
-            get_latest_system_metric(
+            get_latest_silo_metric(
                 cptestctx,
                 "virtual_disk_space_provisioned",
                 *id,
@@ -755,11 +754,11 @@ async fn test_instance_metrics(cptestctx: &ControlPlaneTestContext) {
             0
         );
         assert_eq!(
-            get_latest_system_metric(cptestctx, "cpus_provisioned", *id).await,
+            get_latest_silo_metric(cptestctx, "cpus_provisioned", *id).await,
             0
         );
         assert_eq!(
-            get_latest_system_metric(cptestctx, "ram_provisioned", *id).await,
+            get_latest_silo_metric(cptestctx, "ram_provisioned", *id).await,
             0
         );
     }
@@ -804,9 +803,9 @@ async fn test_instance_metrics(cptestctx: &ControlPlaneTestContext) {
         expected_ram
     );
     oximeter.force_collect().await;
-    for id in &[*SILO_ID, project_id] {
+    for id in &[None, Some(project_id)] {
         assert_eq!(
-            get_latest_system_metric(
+            get_latest_silo_metric(
                 cptestctx,
                 "virtual_disk_space_provisioned",
                 *id,
@@ -815,11 +814,11 @@ async fn test_instance_metrics(cptestctx: &ControlPlaneTestContext) {
             0
         );
         assert_eq!(
-            get_latest_system_metric(cptestctx, "cpus_provisioned", *id).await,
+            get_latest_silo_metric(cptestctx, "cpus_provisioned", *id).await,
             expected_cpus
         );
         assert_eq!(
-            get_latest_system_metric(cptestctx, "ram_provisioned", *id).await,
+            get_latest_silo_metric(cptestctx, "ram_provisioned", *id).await,
             expected_ram
         );
     }
@@ -838,9 +837,9 @@ async fn test_instance_metrics(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(virtual_provisioning_collection.cpus_provisioned, 0);
     assert_eq!(virtual_provisioning_collection.ram_provisioned.to_bytes(), 0);
     oximeter.force_collect().await;
-    for id in &[*SILO_ID, project_id] {
+    for id in &[None, Some(project_id)] {
         assert_eq!(
-            get_latest_system_metric(
+            get_latest_silo_metric(
                 cptestctx,
                 "virtual_disk_space_provisioned",
                 *id,
@@ -849,11 +848,11 @@ async fn test_instance_metrics(cptestctx: &ControlPlaneTestContext) {
             0
         );
         assert_eq!(
-            get_latest_system_metric(cptestctx, "cpus_provisioned", *id).await,
+            get_latest_silo_metric(cptestctx, "cpus_provisioned", *id).await,
             0
         );
         assert_eq!(
-            get_latest_system_metric(cptestctx, "ram_provisioned", *id).await,
+            get_latest_silo_metric(cptestctx, "ram_provisioned", *id).await,
             0
         );
     }
