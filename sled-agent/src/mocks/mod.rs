@@ -22,6 +22,7 @@ type Result<T> = std::result::Result<
 mock! {
     pub NexusClient {
         pub fn new(server_addr: &str, log: Logger) -> Self;
+        pub fn new_with_client(server_addr: &str, client: reqwest::Client, log: Logger) -> Self;
         pub fn client(&self) -> reqwest::Client;
         pub fn baseurl(&self) -> &'static str;
         pub async fn sled_agent_put(

@@ -13,14 +13,13 @@ use slog::Logger;
 use std::future::Future;
 use std::net::{Ipv6Addr, SocketAddr, SocketAddrV6};
 use std::pin::Pin;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
 struct Inner {
     log: Logger,
-    resolver: Resolver,
-    address: Mutex<Option<SocketAddrV6>>,
+    resolver: Arc<Resolver>,
 }
 
 /// Wrapper around a [`NexusClient`] object, which allows deferring
@@ -46,11 +45,10 @@ impl LazyNexusClient {
         Ok(Self {
             inner: Arc::new(Inner {
                 log: log.clone(),
-                resolver: Resolver::new_from_ip(
+                resolver: Arc::new(Resolver::new_from_ip(
                     log.new(o!("component" => "DnsResolver")),
                     addr,
-                )?,
-                address: Mutex::new(None),
+                )?),
             }),
         })
     }
@@ -62,11 +60,10 @@ impl LazyNexusClient {
         Ok(Self {
             inner: Arc::new(Inner {
                 log: log.clone(),
-                resolver: Resolver::new_from_addrs(
+                resolver: Arc::new(Resolver::new_from_addrs(
                     log.new(o!("component" => "DnsResolver")),
                     dns_addrs,
-                )?,
-                address: Mutex::new(None),
+                )?),
             }),
         })
     }
@@ -76,20 +73,23 @@ impl LazyNexusClient {
     }
 
     pub async fn get_addr(&self) -> Result<SocketAddrV6, ResolveError> {
-        if let Some(addr) = self.inner.address.lock().unwrap().as_ref() {
-            return Ok(*addr);
-        }
         let addr =
             self.inner.resolver.lookup_socket_v6(ServiceName::Nexus).await?;
-        *self.inner.address.lock().unwrap() = Some(addr);
         Ok(addr)
     }
 
     pub async fn get(&self) -> Result<NexusClient, ResolveError> {
-        let address = self.get_addr().await?;
+        let dns_name = ServiceName::Nexus.srv_name();
 
-        Ok(NexusClient::new(
-            &format!("http://{address}"),
+        let client = reqwest::ClientBuilder::new()
+            .dns_resolver(self.inner.resolver.clone())
+            .build()
+            // TODO:
+            .expect("Failed to build client");
+
+        Ok(NexusClient::new_with_client(
+            &format!("http://{dns_name}"),
+            client,
             self.inner.log.clone(),
         ))
     }

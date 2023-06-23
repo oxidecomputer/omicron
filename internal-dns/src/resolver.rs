@@ -2,12 +2,13 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::DNS_ZONE;
+use hyper::client::connect::dns::Name;
 use omicron_common::address::{
     Ipv6Subnet, ReservedRackSubnet, AZ_PREFIX, DNS_PORT,
 };
 use slog::{debug, info};
 use std::net::{IpAddr, Ipv6Addr, SocketAddr, SocketAddrV6};
+use std::sync::Arc;
 use trust_dns_proto::rr::record_type::RecordType;
 use trust_dns_resolver::config::{
     NameServerConfig, Protocol, ResolverConfig, ResolverOpts,
@@ -21,19 +22,36 @@ pub enum ResolveError {
     #[error(transparent)]
     Resolve(#[from] trust_dns_resolver::error::ResolveError),
 
-    #[error("Record not found for SRV key: {}", .0.dns_name())]
-    NotFound(crate::ServiceName),
+    #[error("Record not found for SRV key: {0}")]
+    NotFound(String),
 
     #[error("Record not found for {0}")]
     NotFoundByString(String),
+}
+
+struct Inner {
+    log: slog::Logger,
+    resolver: TokioAsyncResolver,
 }
 
 /// A wrapper around a DNS resolver, providing a way to conveniently
 /// look up IP addresses of services based on their SRV keys.
 #[derive(Clone)]
 pub struct Resolver {
-    log: slog::Logger,
-    inner: Box<TokioAsyncResolver>,
+    inner: Arc<Inner>,
+}
+
+type BoxError = Box<dyn std::error::Error + Send + Sync>;
+
+impl reqwest::dns::Resolve for Resolver {
+    fn resolve(&self, name: Name) -> reqwest::dns::Resolving {
+        let this = self.clone();
+        Box::pin(async move {
+            this.lookup_sockets_v6_raw(name.as_str())
+                .await
+                .map_err(|err| -> BoxError { Box::new(err) } )
+        })
+    }
 }
 
 impl Resolver {
@@ -53,10 +71,10 @@ impl Resolver {
                 bind_addr: None,
             });
         }
-        let inner =
-            Box::new(TokioAsyncResolver::tokio(rc, ResolverOpts::default())?);
+        let resolver =
+            TokioAsyncResolver::tokio(rc, ResolverOpts::default())?;
 
-        Ok(Self { inner, log })
+        Ok(Self { inner: Arc::new(Inner { log, resolver })})
     }
 
     /// Convenience wrapper for [`Resolver::new_from_addrs`] that determines
@@ -111,13 +129,13 @@ impl Resolver {
         &self,
         srv: crate::ServiceName,
     ) -> Result<Ipv6Addr, ResolveError> {
-        let name = format!("{}.{}", srv.dns_name(), DNS_ZONE);
-        debug!(self.log, "lookup_ipv6 srv"; "dns_name" => &name);
-        let response = self.inner.ipv6_lookup(&name).await?;
+        let name = srv.srv_name();
+        debug!(self.inner.log, "lookup_ipv6 srv"; "dns_name" => &name);
+        let response = self.inner.resolver.ipv6_lookup(&name).await?;
         let address = response
             .iter()
             .next()
-            .ok_or_else(|| ResolveError::NotFound(srv))?;
+            .ok_or_else(|| ResolveError::NotFound(name))?;
         Ok(*address)
     }
 
@@ -127,20 +145,20 @@ impl Resolver {
         &self,
         srv: crate::ServiceName,
     ) -> Result<SocketAddrV6, ResolveError> {
-        let name = format!("{}.{}", srv.dns_name(), DNS_ZONE);
-        debug!(self.log, "lookup_socket_v6 srv"; "dns_name" => &name);
-        let response = self.inner.lookup(&name, RecordType::SRV).await?;
+        let name = srv.srv_name();
+        debug!(self.inner.log, "lookup_socket_v6 srv"; "dns_name" => &name);
+        let response = self.inner.resolver.lookup(&name, RecordType::SRV).await?;
 
         let rdata = response
             .iter()
             .next()
-            .ok_or_else(|| ResolveError::NotFound(srv))?;
+            .ok_or_else(|| ResolveError::NotFound(name.to_string()))?;
 
         Ok(match rdata {
             trust_dns_proto::rr::record_data::RData::SRV(srv) => {
                 let name = srv.target();
                 let response =
-                    self.inner.ipv6_lookup(&name.to_string()).await?;
+                    self.inner.resolver.ipv6_lookup(&name.to_string()).await?;
 
                 let address = response.iter().next().ok_or_else(|| {
                     ResolveError::NotFoundByString(name.to_string())
@@ -157,17 +175,55 @@ impl Resolver {
         })
     }
 
+    pub async fn lookup_sockets_v6_raw(
+        &self,
+        name: &str,
+    ) -> Result<Box<dyn Iterator<Item = SocketAddr> + Send>, ResolveError> {
+        debug!(self.inner.log, "lookup_socket_v6 srv"; "dns_name" => &name);
+        let response = self.inner.resolver.lookup(name, RecordType::SRV).await?;
+
+        let rdata = response
+            .into_iter()
+            .next()
+            .ok_or_else(|| ResolveError::NotFound(name.to_string()))?;
+
+        Ok(match rdata {
+            trust_dns_proto::rr::record_data::RData::SRV(srv) => {
+                let name = srv.target();
+                let port = srv.port();
+                Box::new(
+                    self
+                        .inner
+                        .resolver
+                        .ipv6_lookup(&name.to_string())
+                        .await?
+                        .into_iter()
+                        .map(move |ip| {
+                            SocketAddr::V6(SocketAddrV6::new(ip, port, 0, 0))
+                        })
+                )
+            }
+
+            _ => {
+                return Err(ResolveError::Resolve(
+                    "SRV query did not return SRV RData!".into(),
+                ));
+            }
+        })
+    }
+
+
     pub async fn lookup_ip(
         &self,
         srv: crate::ServiceName,
     ) -> Result<IpAddr, ResolveError> {
-        let name = format!("{}.{}", srv.dns_name(), DNS_ZONE);
-        debug!(self.log, "lookup srv"; "dns_name" => &name);
-        let response = self.inner.lookup_ip(&name).await?;
+        let name = srv.srv_name();
+        debug!(self.inner.log, "lookup srv"; "dns_name" => &name);
+        let response = self.inner.resolver.lookup_ip(&name).await?;
         let address = response
             .iter()
             .next()
-            .ok_or_else(|| ResolveError::NotFound(srv))?;
+            .ok_or_else(|| ResolveError::NotFound(name))?;
         Ok(address)
     }
 }

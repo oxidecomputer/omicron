@@ -84,4 +84,8 @@ impl ServiceName {
             }
         }
     }
+
+    pub fn srv_name(&self) -> String {
+        format!("{}.{DNS_ZONE}", self.dns_name())
+    }
 }
