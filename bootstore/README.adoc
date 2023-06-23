@@ -1,0 +1,95 @@
+:showtitle:
+:toc: left
+:icons: font
+
+= Bootstore
+
+The bootstore is the crate that implements the Oxide trust quroum protocol.
+The bootstore is named the bootstore because it provides the necessary storage
+required to unlock the rack secret via the trust quorum protocol and boot the
+rack.
+
+We plan to incrementally improve the bootstore to be more full featured and
+secure over time. Each implementation is referred to as a `Scheme`. Schemes are
+each described by a zero-sized struct that can be debug printed as necessary.
+You can see a the scheme description, represented as `V0Scheme`, for trust
+quorum version 0 in link:./src/schemes/v0/mod.rs[].
+
+
+== Rack Secret Generation and Share distribution
+
+For the time being the generation of the `RackSecret`, its splitting into key
+shares, and its distribution packages for use by the trust quorum scheme V0,
+all live under the link:./src/trust_quorum[] directory. We anticipate that
+the `RackSecret` generation algorithms will remain the same across all schemes
+for the foreseeable future. This will not be the case for the `packages` that
+distribute key shares and metadata to different sleds, and so we version these.
+We may  decide to move these 'packages` into the specific scheme subdirectories
+because of this, but that is not done in the current code as written. The
+code is divided across a somewhat artificial line of protocol, provided in the
+schemes, and data, provided by the packages.
+
+While not yet done, the rack secret will be used as input key material to the
+link:./key-manager[] so that disks can be decrypted across sleds to allow the
+rack to boot.
+
+Thus while the schemes to distribute key shares, and rotate and reconstruct
+the rack secret evolve to become more secure over time, the code using the rack
+secret can be kept consistent as it is just fed the same shape of input key
+material with each iteration.
+
+
+== Scheme V0
+
+Only link:./src/schemes/v0/[Scheme V0] of the bootstore trust quorum protocol
+is implemented so far. The protocol itself is fully implemented and tested via
+generative, property based tests. The protocol code is structured as a state
+machine that mutates state and returns messages to send via its user API. It
+also informs the caller when the state must be persisted. Importantly, all code
+for the scheme v0 protocol is deterministic, apart from UUID generation, and
+performs no I/O. This allows us to write proptery based tests that simulate an
+entire cluster of sleds operating in concert and ensure that any test failures
+shrink correctly.
+
+=== Future work
+
+The code that implements network IO is not currently written. It will be a thin
+shim of async code on top of the v0 `Fsm`. For this protocol to work, peer sled
+bootstrap addresses will be discovered via DDM, and persistent TCP connections
+established using a "downstream" strategy, where sleds with higher ip addresses
+connect to those with lower IP addresses. The first thing peers do when they
+connect to each other is exchange `Hello` messages to identify the scheme and
+protocol version. This is described in link:./src/schemes/mod.rs[], although
+it is not relevant to the FSM which operates solely inside the V0 scheme.
+After protocol negotiation each sides sends an `Identify` message as described
+in link:./src/schemes/v0/messages.rs[]. This servers to inform each sled the
+identity of its peer. The `Baseboard` serves as the unique identity for a peer
+and does not change over the lifetime of a sled. This message is only sent over
+the network links and is used by the networking layer to map TCP connections
+to peer IDs. The protocol FSM itself, however, is agnostic to the network layer
+other than knowing it uses reliable stream based communication. As such protocol
+messages are only addressed via `Baseboard` and then routed appropriately by the
+network layer.
+
+The persistence of FSM state, shares, and metadata is also not yet implemented.
+We anticipate making the `PersistentState` or a serialized version of
+it `Ledgerable` and reusing the `Ledger` code  in link:../sled-agent/src/
+ledger.rs[]. For this to work, we'll have to extract the ledger code from sled-
+agent and put it in `omicron-common`.
+
+Once the network layer and persistence are implemented, the bootstore itself
+will be complete for scheme v0. We will then need to plug it into the bootstrap
+agent so that that sleds can communicate and recompute a rack secret. To decrypt
+the drives, we will need to create a `KeyRetriever` (see link:../key-manager/
+src/lib.rs[]) and plug that into `KeyManager` construction in the bootstrap
+agent. And of course, RSS will have to trigger the bootstore to generate the
+rack secret and and distribute the key share packages in the first place.
+
+The prvious 3 paragraphs describe future work, although smaller and simpler than
+the bootstore protocol itself. The remainder of this section will discuss the v0 Scheme.
+
+=== Threat Model and Security Goals
+
+=== State Machine Flow
+
+=== Testing strategy
