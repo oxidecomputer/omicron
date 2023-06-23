@@ -1,0 +1,203 @@
+:showtitle:
+:toc: left
+:icons: font
+
+= Running Omicron on a bench gimlet (Non-Simulated)
+
+These instructions are intended to run Omicron on a gimlet on a bench, which is
+an actual gimlet, but with nothing other than power connected to the backplane.
+For this to work, we require two K.2 cards each with a network connection to a
+
+
+One network will be used for connecting to the host OS running on the gimlet,
+and one network will be used for connecting to Nexus as well as allow
+instances running on Omicron to connect to the outside.
+
+== Overview
+
+For setting up a build system, follow the instructions in xref:how-to-run.adoc[How to Run].
+
+You will need to compile Omicron somewhere else, then copy the files over
+to the gimlet.
+
+== Building for bench gimlet
+
+Custom modifications till we make a better solution:
+In the sled-hardware/src/underlay.rs file,
+Change the function to always take the `Ok(XDE_VNIC_NAMES..` path, this basically
+short circuits the code that will return `cxgbe#` on a real gimlet, which we
+don't want in this case.
+
+[source,text]
+----
+pub fn find_chelsio_links() -> Result<Vec<PhysicalLink>, Error> {
+    /*
+    if is_gimlet().map_err(Error::SystemDetection)? {
+        Dladm::list_physical().map_err(Error::FindLinks).map(|links| {
+            links
+                .into_iter()
+                .filter(|link| link.0.starts_with(CHELSIO_LINK_PREFIX))
+                .collect()
+        })
+    } else {
+        */
+    Ok(XDE_VNIC_NAMES
+        .into_iter()
+        .map(|name| PhysicalLink(name.to_string()))
+        .collect())
+    // }
+}
+----
+
+Then, build your omicron repo:
+[source,text]
+----
+cargo build --release
+----
+
+=== Gimet non-gimlet configuration changes
+
+Update these two sections of`smf/seld-agent/non-gimlet/config-rss.toml` with the appropriate network information.  These values are for gimlet-sn21:
+
+[source,text]
+----
+[[internal_services_ip_pool_ranges]]
+first = "172.20.24.11"
+last = "172.20.24.15"
+----
+
+And this section as well
+[source,text]
+----
+[[internal_services_ip_pool_ranges]]
+first = "172.20.24.10"          <--- first address of pool used for internal services (like Nexus)
+last = "172.20.24.15"           <--- last address of pool used for internal services
+
+# Configuration to bring up boundary services and make nexus reachable from the outside
+[rack_network_config]
+gateway_ip = "172.20.24.1"    <--- ip address of your default gateway / router
+infra_ip_first = "172.120.24.20" <--- first address of pool used for rack networking
+infra_ip_last = "172.20.24.50"  <--- last address of pool used for rack networking
+uplink_port = "qsfp0"           <--- for "softnpu" environments, this will always be "qsfp0"
+uplink_port_speed = "1G"       <--- uplink interface speed
+uplink_ip = "172.20.24.20"      <--- address to assign to the uplink port
+----
+
+Update this section of your `smf/sled-agent/$MACHINE/config.toml`:
+[source,text]
+----
+# An optional data link from which we extract a MAC address.
+# This is used as a unique identifier for the bootstrap address.
+#
+# If empty, this will be equivalent to the first result from:
+# $ dladm show-phys -p -o LINK
+data_link = "rge1"
+----
+
+Next, setup your omicron package target.  I'm using the name "sn21" for my target:
+[source,text]
+----
+./target/release/omicron-package -t sn21 target create -i standard -m non-gimlet -s softnpu
+----
+
+Then make the packages:
+[source,text]
+----
+./target/release/omicron-package --target sn21 package
+----
+
+Once completed, copy these files over to the gimlet:
+[source,text]
+----
+rsync --delete -Paz tools out \
+  ./target/release/omicron-package package-manifest.toml \
+  --exclude /out/downloads/netstack.* \
+  --exclude *.p5p \
+  root@gimlet-sn21:/tmp/omicron
+----
+
+This includes the `tools` directory as we make use of a few scripts.
+
+== On the gimlet.
+
+After copying your Omicron packages over, setup the system with "virtual hardware".
+In my example, the `rge1` is the network interface the gimlet will be using.
+All commands on the gimlet are run as root.
+
+[source,text]
+----
+cd /tmp
+$ PHYSICAL_LINK=rge1 ./tools/create_virtual_hardware.sh
+----
+
+== Install Omicron
+Next, we install Omicron
+
+[source,console]
+----
+cd /tmp
+./omicron-package -t sn21 install
+----
+
+You should start seeing zones appear, and you can monitor the sled-agent log
+for progress with `tail -f $(svcs -L sled-agent)`.  It will take a few seconds
+for the sled-agent service to start.
+
+Watch for the oxz_switch zone to appear, and give it an additional 20/30 seconds
+to come online.  Then, run this command to setup softnpu.
+The gateway IP is the I.P. address of the gateway for the omicron network.
+The gateway MAC is the mac address of the gateway.
+
+[source,console]
+----
+export GATEWAY_IP=172.20.24.1
+export GATEWAY_MAC=aa:0:4:0:ca:fe
+tools/scrimlet/softnpu-init.sh
+----
+
+=== Additional configuration after starting Omicron
+
+Internal services that require external connectivity (e.g. Nexus, Boundary NTP,
+External DNS) do so via OPTE. When using SoftNPU we'll need to configure Proxy ARP for
+the services IP Pool.  Use the values from your [rack_network_config] section of
+the config-rss.toml you setup above.
+
+[source,console]
+----
+# dladm won't return leading zeroes but `scadm` expects them
+# Look at your `dladm show-vnic sc0_1 -p -o macaddress` output, get the mac address
+# and add any leading zeros to octets that require it.
+
+export SOFTNPU_MAC=a8:e1:de:01:70:1d
+
+/opt/oxide/softnpu/stuff/scadm \
+  --server /opt/oxide/softnpu/stuff/server \
+  --client /opt/oxide/softnpu/stuff/client \
+  standalone \
+  add-proxy-arp \
+  $SERVICE_IP_POOL_START \
+  $SERVICE_IP_POOL_END \
+  $SOFTNPU_MAC
+----
+
+You'll also need to configure Proxy ARP.  The ip pool start and ip pool end also
+come from your config-rss.toml
+[source,console]
+----
+export SOFTNPU_MAC=a8:e1:de:01:70:1d
+
+opt/oxide/softnpu/stuff/scadm \
+  --server /opt/oxide/softnpu/stuff/server \
+  --client /opt/oxide/softnpu/stuff/client \
+  standalone \
+  add-proxy-arp \
+  $IP_POOL_START \
+  $IP_POOL_END \
+  $SOFTNPU_MAC
+----
+
+== Wait for nexus
+
+The final step is to wait for all zones to start and Nexus to come online.
+When it does, you should be able to see a login page at:
+http://172.20.24.12/
