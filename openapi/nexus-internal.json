@@ -2498,6 +2498,13 @@
                 "$ref": "#/components/schemas/PortSpeed"
               }
             ]
+          },
+          "uplink_vid": {
+            "nullable": true,
+            "description": "VLAN id to use for uplink",
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
           }
         },
         "required": [

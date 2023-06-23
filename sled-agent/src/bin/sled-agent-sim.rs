@@ -67,6 +67,11 @@ struct Args {
     /// Nexus to publish DNS names to external DNS.
     rss_external_dns_internal_addr: Option<SocketAddrV6>,
 
+    #[clap(long, name = "INTERNAL_DNS_INTERNAL_IP:PORT", action)]
+    /// If specified, the sled agent will create a DNS server exposing the
+    /// following socket address for the DNS interface.
+    rss_internal_dns_dns_addr: Option<SocketAddrV6>,
+
     #[clap(long, name = "TLS_CERT_PEM_FILE", action)]
     /// If this flag and TLS_KEY_PEM_FILE are specified, when the simulated sled
     /// agent initializes the rack, the specified certificate and private keys
@@ -136,6 +141,7 @@ async fn do_run() -> Result<(), CmdError> {
     let rss_args = RssArgs {
         nexus_external_addr: args.rss_nexus_external_addr,
         external_dns_internal_addr: args.rss_external_dns_internal_addr,
+        internal_dns_dns_addr: args.rss_internal_dns_dns_addr,
         tls_certificate,
     };
 

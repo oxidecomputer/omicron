@@ -8,8 +8,6 @@ use super::dns::DnsVersionUpdateBuilder;
 use super::DataStore;
 use super::SERVICE_IP_POOL_NAME;
 use crate::authz;
-use crate::authz::FleetRole;
-use crate::authz::SiloRole;
 use crate::context::OpContext;
 use crate::db;
 use crate::db::collection_insert::AsyncInsertError;
@@ -43,6 +41,7 @@ use nexus_types::external_api::params as external_params;
 use nexus_types::external_api::shared;
 use nexus_types::external_api::shared::IdentityType;
 use nexus_types::external_api::shared::IpRange;
+use nexus_types::external_api::shared::SiloRole;
 use nexus_types::identity::Resource;
 use nexus_types::internal_api::params as internal_params;
 use omicron_common::api::external::DataPageParams;
@@ -246,48 +245,18 @@ impl DataStore {
         }
         info!(log, "Created recovery user's password");
 
-        // Grant that user "Fleet Admin" privileges and Admin privileges
-        // on the Recovery Silo.
-        //
-        // First, fetch the current set of role assignments for the
-        // Fleet so that we can modify it.
-        let old_fleet_role_asgns = self
-            .role_assignment_fetch_visible_conn(opctx, &authz::FLEET, conn)
-            .await
-            .map_err(RackInitError::RoleAssignment)
-            .map_err(TxnError::CustomError)?
-            .into_iter()
-            .map(|r| r.try_into())
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(RackInitError::RoleAssignment)
-            .map_err(TxnError::CustomError)?;
-        let new_fleet_role_asgns = old_fleet_role_asgns
-            .into_iter()
-            .chain(std::iter::once(shared::RoleAssignment {
-                identity_type: IdentityType::SiloUser,
-                identity_id: silo_user_id,
-                role_name: FleetRole::Admin,
-            }))
-            .collect::<Vec<_>>();
+        // Grant that user Admin privileges on the Recovery Silo.
 
-        // This is very subtle: we must generate both of these pairs of
-        // queries before we execute any of them, and we must not
-        // attempt to do any authz checks after this in the same
-        // transaction because they may deadlock with our query.
-        let (q1, q2) = Self::role_assignment_replace_visible_queries(
-            opctx,
-            &authz::FLEET,
-            &new_fleet_role_asgns,
-        )
-        .await
-        .map_err(RackInitError::RoleAssignment)
-        .map_err(TxnError::CustomError)?;
+        // This is very subtle: we must generate both of these queries before we
+        // execute either of them, and we must not attempt to do any authz
+        // checks after this in the same transaction because they may deadlock
+        // with our query.
         let authz_silo = authz::Silo::new(
             authz::FLEET,
             db_silo.id(),
             LookupType::ById(db_silo.id()),
         );
-        let (q3, q4) = Self::role_assignment_replace_visible_queries(
+        let (q1, q2) = Self::role_assignment_replace_visible_queries(
             opctx,
             &authz_silo,
             &[shared::RoleAssignment {
@@ -303,9 +272,6 @@ impl DataStore {
 
         q1.execute_async(conn).await?;
         q2.execute_async(conn).await?;
-        info!(log, "Granted Fleet privileges");
-        q3.execute_async(conn).await?;
-        q4.execute_async(conn).await?;
         info!(log, "Granted Silo privileges");
 
         Ok(())
@@ -727,6 +693,7 @@ mod test {
                     identity_mode: SiloIdentityMode::LocalOnly,
                     admin_group_name: None,
                     tls_certificates: vec![],
+                    mapped_fleet_roles: Default::default(),
                 },
                 recovery_user_id: "test-user".parse().unwrap(),
                 // empty string password

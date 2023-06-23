@@ -49,6 +49,7 @@ pub mod storage;
 
 use anyhow::{anyhow, Context};
 use slog::o;
+use std::net::SocketAddr;
 use trust_dns_resolver::config::NameServerConfig;
 use trust_dns_resolver::config::Protocol;
 use trust_dns_resolver::config::ResolverConfig;
@@ -106,6 +107,13 @@ pub struct TransientServer {
 
 impl TransientServer {
     pub async fn new(log: &slog::Logger) -> Result<Self, anyhow::Error> {
+        Self::new_with_address(log, "[::1]:0".parse().unwrap()).await
+    }
+
+    pub async fn new_with_address(
+        log: &slog::Logger,
+        dns_bind_address: SocketAddr,
+    ) -> Result<Self, anyhow::Error> {
         let storage_dir = tempfile::tempdir()?;
 
         let dns_log = log.new(o!("kind" => "dns"));
@@ -126,7 +134,7 @@ impl TransientServer {
         let (dns_server, dropshot_server) = start_servers(
             dns_log,
             store,
-            &dns_server::Config { bind_address: "[::1]:0".parse().unwrap() },
+            &dns_server::Config { bind_address: dns_bind_address },
             &dropshot::ConfigDropshot {
                 bind_address: "[::1]:0".parse().unwrap(),
                 request_body_max_bytes: 4 * 1024 * 1024,

@@ -56,7 +56,7 @@ request_body_max_bytes = 1048576
 # If you're using `omicron-dev run-all`, this is value is overwritten
 # by the address / port created after starting the Internal DNS server.
 type = "from_address"
-address = "[::1]:5353"
+address = "[::1]:3535"
 
 [deployment.database]
 # URL for connecting to the database

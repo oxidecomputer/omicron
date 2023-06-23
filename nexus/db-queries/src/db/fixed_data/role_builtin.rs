@@ -75,8 +75,8 @@ lazy_static! {
 #[cfg(test)]
 mod test {
     use super::BUILTIN_ROLES;
-    use crate::authz;
     use crate::db::model::DatabaseString;
+    use nexus_types::external_api::shared::{FleetRole, ProjectRole, SiloRole};
     use omicron_common::api::external::ResourceType;
     use strum::IntoEnumIterator;
 
@@ -86,9 +86,9 @@ mod test {
         // resource must have a corresponding entry in BUILTIN_ROLES above.
         // The reverse is not necessarily true because we have some internal
         // roles that are not exposed to end users.
-        check_public_roles::<authz::FleetRole>(ResourceType::Fleet);
-        check_public_roles::<authz::SiloRole>(ResourceType::Silo);
-        check_public_roles::<authz::ProjectRole>(ResourceType::Project);
+        check_public_roles::<FleetRole>(ResourceType::Fleet);
+        check_public_roles::<SiloRole>(ResourceType::Silo);
+        check_public_roles::<ProjectRole>(ResourceType::Project);
     }
 
     fn check_public_roles<T>(resource_type: ResourceType)

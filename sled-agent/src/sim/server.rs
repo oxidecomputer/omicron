@@ -241,6 +241,8 @@ pub struct RssArgs {
     /// Specify the (internal) address of an external DNS server so that Nexus
     /// will know about it and keep it up to date
     pub external_dns_internal_addr: Option<SocketAddrV6>,
+    /// Specify the (dns) address of an internal DNS server
+    pub internal_dns_dns_addr: Option<SocketAddrV6>,
     /// Specify a certificate and associated private key for the initial Silo's
     /// initial TLS certificates
     pub tls_certificate: Option<NexusTypes::Certificate>,
@@ -280,7 +282,11 @@ pub async fn run_standalone_server(
     info!(log, "sled agent started successfully");
 
     // Start the Internal DNS server
-    let dns = dns_server::TransientServer::new(&log).await?;
+    let dns = if let Some(addr) = rss_args.internal_dns_dns_addr {
+        dns_server::TransientServer::new_with_address(&log, addr.into()).await?
+    } else {
+        dns_server::TransientServer::new(&log).await?
+    };
     let mut dns_config_builder = internal_dns::DnsConfigBuilder::new();
 
     // Start the Crucible Pantry
