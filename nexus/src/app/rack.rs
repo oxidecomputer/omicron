@@ -438,7 +438,9 @@ impl super::Nexus {
                     ))
                 })?;
 
-            let route = Route { dst, gw };
+            let vid = rack_network_config.uplink_vid;
+
+            let route = Route { dst, gw, vid };
 
             port_settings_params.routes.insert(
                 "phy0".to_string(),

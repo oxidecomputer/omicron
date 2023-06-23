@@ -821,6 +821,7 @@ impl ServiceInner {
                     uplink_port: config.uplink_port.clone(),
                     uplink_port_speed: config.uplink_port_speed.clone().into(),
                     uplink_port_fec: config.uplink_port_fec.clone().into(),
+                    uplink_vid: config.uplink_vid,
                 };
                 Some(value)
             }
@@ -1132,7 +1133,11 @@ impl ServiceInner {
             dpd_port_settings.v4_routes.insert(
                 Ipv4Cidr { prefix: "0.0.0.0".parse().unwrap(), prefix_len: 0 }
                     .to_string(),
-                RouteSettingsV4 { link_id: link_id.0, nexthop },
+                RouteSettingsV4 {
+                    link_id: link_id.0,
+                    vid: rack_network_config.uplink_vid,
+                    nexthop,
+                },
             );
 
             loop {

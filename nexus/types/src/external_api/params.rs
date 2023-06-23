@@ -1418,6 +1418,9 @@ pub struct Route {
 
     /// The route gateway.
     pub gw: IpAddr,
+
+    /// VLAN id the gateway is reachable over.
+    pub vid: Option<u16>,
 }
 
 /// A BGP peer configuration for an interface. Includes the set of announcements
