@@ -40,6 +40,8 @@ use omicron_common::api::internal::nexus;
 use propolis_client::support::tungstenite::protocol::frame::coding::CloseCode;
 use propolis_client::support::tungstenite::protocol::CloseFrame;
 use propolis_client::support::tungstenite::Message as WebSocketMessage;
+use propolis_client::support::InstanceSerialConsoleHelper;
+use propolis_client::support::WSClientOffset;
 use propolis_client::support::WebSocketStream;
 use sled_agent_client::types::InstanceMigrationSourceParams;
 use sled_agent_client::types::InstancePutMigrationIdsBody;
@@ -47,7 +49,6 @@ use sled_agent_client::types::InstancePutStateBody;
 use sled_agent_client::types::InstanceStateRequested;
 use sled_agent_client::types::SourceNatConfig;
 use sled_agent_client::Client as SledAgentClient;
-use slog::Logger;
 use std::net::SocketAddr;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -1309,11 +1310,8 @@ impl super::Nexus {
         instance_lookup: &lookup::Instance<'_>,
         params: &params::InstanceSerialConsoleStreamRequest,
     ) -> Result<(), Error> {
-        let client = match self
-            .propolis_client_for_instance(
-                instance_lookup,
-                authz::Action::Modify,
-            )
+        let client_addr = match self
+            .propolis_addr_for_instance(instance_lookup, authz::Action::Modify)
             .await
         {
             Ok(x) => x,
@@ -1329,21 +1327,22 @@ impl super::Nexus {
             }
         };
 
-        let mut req = client.instance_serial();
-        if let Some(most_recent) = params.most_recent {
-            req = req.most_recent(most_recent);
-        }
-        match req.send().await {
-            Ok(response) => {
-                let propolis_upgraded = response.into_inner();
-                let log = self.log.clone();
-                Self::proxy_instance_serial_ws(
-                    client_stream,
-                    propolis_upgraded,
-                    Some(log),
-                )
-                .await
-                .map_err(|e| Error::internal_error(&format!("{}", e)))
+        let offset = match params.most_recent {
+            Some(most_recent) => WSClientOffset::MostRecent(most_recent),
+            None => WSClientOffset::FromStart(0),
+        };
+
+        match propolis_client::support::InstanceSerialConsoleHelper::new(
+            client_addr,
+            offset,
+            Some(self.log.clone()),
+        )
+        .await
+        {
+            Ok(propolis_conn) => {
+                Self::proxy_instance_serial_ws(client_stream, propolis_conn)
+                    .await
+                    .map_err(|e| Error::internal_error(&format!("{}", e)))
             }
             Err(e) => {
                 let message = format!(
@@ -1362,11 +1361,11 @@ impl super::Nexus {
         }
     }
 
-    async fn propolis_client_for_instance(
+    async fn propolis_addr_for_instance(
         &self,
         instance_lookup: &lookup::Instance<'_>,
         action: authz::Action,
-    ) -> Result<propolis_client::Client, Error> {
+    ) -> Result<SocketAddr, Error> {
         let (.., authz_instance, instance) =
             instance_lookup.fetch_for(action).await?;
         match instance.runtime_state.state.0 {
@@ -1383,11 +1382,7 @@ impl super::Nexus {
                         )
                     })?
                     .ip();
-                let socket_addr = SocketAddr::new(ip_addr, PROPOLIS_PORT);
-                Ok(propolis_client::Client::new(&format!(
-                    "http://{}",
-                    socket_addr
-                )))
+                Ok(SocketAddr::new(ip_addr, PROPOLIS_PORT))
             }
             InstanceState::Creating
             | InstanceState::Starting
@@ -1403,18 +1398,20 @@ impl super::Nexus {
         }
     }
 
+    async fn propolis_client_for_instance(
+        &self,
+        instance_lookup: &lookup::Instance<'_>,
+        action: authz::Action,
+    ) -> Result<propolis_client::Client, Error> {
+        let client_addr =
+            self.propolis_addr_for_instance(instance_lookup, action).await?;
+        Ok(propolis_client::Client::new(&format!("http://{}", client_addr)))
+    }
+
     async fn proxy_instance_serial_ws(
         client_stream: WebSocketStream<impl AsyncRead + AsyncWrite + Unpin>,
-        propolis_upgraded: impl AsyncRead + AsyncWrite + Unpin + Send + 'static,
-        log: Option<Logger>,
+        mut propolis_conn: InstanceSerialConsoleHelper,
     ) -> Result<(), propolis_client::support::tungstenite::Error> {
-        let mut propolis_conn =
-            propolis_client::support::InstanceSerialConsoleHelper::new(
-                propolis_upgraded,
-                log,
-            )
-            .await;
-
         let (mut nexus_sink, mut nexus_stream) = client_stream.split();
 
         let mut buffered_output = None;
@@ -1495,40 +1492,45 @@ impl super::Nexus {
                     result?;
                 }
                 msg = propolis_read => {
-                    match msg {
-                        None => {
-                            nexus_sink.send(WebSocketMessage::Close(Some(CloseFrame {
-                                code: CloseCode::Abnormal,
-                                reason: std::borrow::Cow::from(
-                                    "nexus: websocket connection to serial port closed unexpectedly"
-                                ),
-                            }))).await?;
-                            break;
+                    if let Some(msg) = msg {
+                        let msg = match msg {
+                            Ok(msg) => msg.process().await, // msg.process isn't cancel-safe
+                            Err(error) => Err(error),
+                        };
+                        match msg {
+                            Err(e) => {
+                                nexus_sink.send(WebSocketMessage::Close(Some(CloseFrame {
+                                    code: CloseCode::Error,
+                                    reason: std::borrow::Cow::from(
+                                        format!("nexus: error in websocket connection to serial port: {}", e)
+                                    ),
+                                }))).await?;
+                                return Err(e);
+                            }
+                            Ok(WebSocketMessage::Close(details)) => {
+                                nexus_sink.send(WebSocketMessage::Close(details)).await?;
+                                break;
+                            }
+                            Ok(WebSocketMessage::Text(_json)) => {
+                                // connecting to new propolis-server is handled
+                                // within InstanceSerialConsoleHelper already.
+                                // we might consider sending the nexus client
+                                // an informational event for UX polish.
+                            }
+                            Ok(WebSocketMessage::Binary(data)) => {
+                                buffered_output = Some(WebSocketMessage::Binary(data))
+                            }
+                            // Frame won't exist at this level, and ping reply is handled by tungstenite
+                            Ok(WebSocketMessage::Frame(_) | WebSocketMessage::Ping(_) | WebSocketMessage::Pong(_)) => {}
                         }
-                        Some(Err(e)) => {
-                            nexus_sink.send(WebSocketMessage::Close(Some(CloseFrame {
-                                code: CloseCode::Error,
-                                reason: std::borrow::Cow::from(
-                                    format!("nexus: error in websocket connection to serial port: {}", e)
-                                ),
-                            }))).await?;
-                            return Err(e);
-                        }
-                        Some(Ok(WebSocketMessage::Close(details))) => {
-                            nexus_sink.send(WebSocketMessage::Close(details)).await?;
-                            break;
-                        }
-                        Some(Ok(WebSocketMessage::Text(_json))) => {
-                            // connecting to new propolis-server is handled
-                            // within InstanceSerialConsoleHelper already.
-                            // we might consider sending the nexus client
-                            // an informational event for UX polish.
-                        }
-                        Some(Ok(WebSocketMessage::Binary(data))) => {
-                            buffered_output = Some(WebSocketMessage::Binary(data))
-                        }
-                        // Frame won't exist at this level, and ping reply is handled by tungstenite
-                        Some(Ok(WebSocketMessage::Frame(_) | WebSocketMessage::Ping(_) | WebSocketMessage::Pong(_))) => {}
+                    } else {
+                        nexus_sink.send(WebSocketMessage::Close(Some(CloseFrame {
+                            code: CloseCode::Abnormal,
+                            reason: std::borrow::Cow::from(
+                                "nexus: websocket connection to serial port closed unexpectedly"
+                            ),
+                        }))).await?;
+                        break;
                     }
                 }
                 result = propolis_write => {
@@ -1547,12 +1549,27 @@ mod tests {
     use core::time::Duration;
     use futures::{SinkExt, StreamExt};
     use propolis_client::support::tungstenite::protocol::Role;
+    use propolis_client::support::{
+        InstanceSerialConsoleHelper, WSClientOffset,
+    };
+    use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 
     #[tokio::test]
     async fn test_serial_console_stream_proxying() {
         let (nexus_client_conn, nexus_server_conn) = tokio::io::duplex(1024);
         let (propolis_client_conn, propolis_server_conn) =
             tokio::io::duplex(1024);
+        // The address doesn't matter -- it's just a key to look up the connection with.
+        let address =
+            SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(0, 0, 0, 0), 0));
+        let propolis_conn = InstanceSerialConsoleHelper::new_test(
+            [(address, propolis_client_conn)],
+            address,
+            WSClientOffset::FromStart(0),
+            None,
+        )
+        .await
+        .unwrap();
 
         let jh = tokio::spawn(async move {
             let nexus_client_stream = WebSocketStream::from_raw_socket(
@@ -1561,12 +1578,8 @@ mod tests {
                 None,
             )
             .await;
-            Nexus::proxy_instance_serial_ws(
-                nexus_client_stream,
-                propolis_client_conn,
-                None,
-            )
-            .await
+            Nexus::proxy_instance_serial_ws(nexus_client_stream, propolis_conn)
+                .await
         });
         let mut nexus_client_ws = WebSocketStream::from_raw_socket(
             nexus_client_conn,
