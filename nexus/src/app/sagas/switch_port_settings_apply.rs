@@ -172,7 +172,11 @@ pub(crate) fn api_to_dpd_port_settings(
                 dpd_port_settings.v4_routes.insert(
                     Ipv4Cidr { prefix: n.ip(), prefix_len: n.prefix() }
                         .to_string(),
-                    RouteSettingsV4 { link_id: link_id.0, nexthop: Some(gw) },
+                    RouteSettingsV4 {
+                        link_id: link_id.0,
+                        nexthop: Some(gw),
+                        vid: r.vid.map(Into::into),
+                    },
                 );
             }
             IpNetwork::V6(n) => {
@@ -187,7 +191,11 @@ pub(crate) fn api_to_dpd_port_settings(
                 dpd_port_settings.v6_routes.insert(
                     Ipv6Cidr { prefix: n.ip(), prefix_len: n.prefix() }
                         .to_string(),
-                    RouteSettingsV6 { link_id: link_id.0, nexthop: Some(gw) },
+                    RouteSettingsV6 {
+                        link_id: link_id.0,
+                        nexthop: Some(gw),
+                        vid: r.vid.map(Into::into),
+                    },
                 );
             }
         }

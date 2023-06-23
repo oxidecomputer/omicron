@@ -25,7 +25,9 @@ use nexus_types::external_api::params::{
     AddressLotCreate, LoopbackAddressCreate, Route, SiloCreate,
     SwitchPortSettingsCreate,
 };
+use nexus_types::external_api::shared::FleetRole;
 use nexus_types::external_api::shared::SiloIdentityMode;
+use nexus_types::external_api::shared::SiloRole;
 use nexus_types::internal_api::params::DnsRecord;
 use omicron_common::api::external::AddressLotKind;
 use omicron_common::api::external::DataPageParams;
@@ -36,6 +38,8 @@ use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::NameOrId;
+use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::collections::HashMap;
 use std::net::IpAddr;
 use std::str::FromStr;
@@ -175,6 +179,13 @@ impl super::Nexus {
         );
         dns_update.add_name(silo_dns_name(silo_name), dns_records)?;
 
+        // Administrators of the Recovery Silo are automatically made
+        // administrators of the Fleet.
+        let mapped_fleet_roles = BTreeMap::from([(
+            SiloRole::Admin,
+            BTreeSet::from([FleetRole::Admin]),
+        )]);
+
         let recovery_silo = SiloCreate {
             identity: IdentityMetadataCreateParams {
                 name: request.recovery_silo.silo_name,
@@ -184,6 +195,7 @@ impl super::Nexus {
             identity_mode: SiloIdentityMode::LocalOnly,
             admin_group_name: None,
             tls_certificates,
+            mapped_fleet_roles,
         };
 
         self.db_datastore
@@ -426,7 +438,9 @@ impl super::Nexus {
                     ))
                 })?;
 
-            let route = Route { dst, gw };
+            let vid = rack_network_config.uplink_vid;
+
+            let route = Route { dst, gw, vid };
 
             port_settings_params.routes.insert(
                 "phy0".to_string(),

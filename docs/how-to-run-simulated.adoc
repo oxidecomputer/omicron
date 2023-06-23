@@ -178,7 +178,7 @@ $ cargo run --bin=dns-server -- --config-file dns-server/examples/config.toml --
 +
 [source,text]
 ----
-$ cargo run --bin=sled-agent-sim -- $(uuidgen) [::1]:12345 [::1]:12221 --rss-nexus-external-addr 127.0.0.1:12220 --rss-external-dns-internal-addr [::1]:5353
+$ cargo run --bin=sled-agent-sim -- $(uuidgen) [::1]:12345 [::1]:12221 --rss-nexus-external-addr 127.0.0.1:12220 --rss-external-dns-internal-addr [::1]:5353 --rss-internal-dns-dns-addr [::1]:3535
 ----
 
 . `oximeter` is similar to `nexus`, requiring a configuration file. You can use `oximeter/collector/config.toml`, and the whole thing can be run with:

@@ -245,6 +245,7 @@ impl DataStore {
                         interface_name.clone(),
                         route.dst.into(),
                         route.gw.into(),
+                        route.vid.map(Into::into),
                     ));
                 }
             }

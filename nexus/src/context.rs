@@ -18,6 +18,7 @@ use authn::external::HttpAuthnScheme;
 use chrono::Duration;
 use internal_dns::ServiceName;
 use nexus_db_queries::context::{OpContext, OpKind};
+use nexus_db_queries::db::lookup::LookupPath;
 use omicron_common::address::{Ipv6Subnet, AZ_PREFIX};
 use omicron_common::nexus_config;
 use omicron_common::postgres_config::PostgresConfigWithUrl;
@@ -309,6 +310,31 @@ where
         OpKind::Saga,
     )
     .expect("infallible")
+}
+
+#[async_trait]
+impl authn::external::AuthenticatorContext for ServerContext {
+    async fn silo_authn_policy_for(
+        &self,
+        actor: &authn::Actor,
+    ) -> Result<
+        Option<authn::SiloAuthnPolicy>,
+        omicron_common::api::external::Error,
+    > {
+        let Some(silo_id) = actor.silo_id() else { return Ok(None) };
+
+        // TODO-performance In general, this could almost always use a
+        // nexus_db_model::Silo from the ExternalEndpoints subsystem instead of
+        // doing an explicit database lookup here.  However, that's potentially
+        // out of date (e.g., immediately after creating a Silo), so we'd have
+        // to fallback to an explicit lookup.
+        let opctx = self.nexus.opctx_external_authn();
+        let datastore = self.nexus.datastore();
+        let (_, db_silo) =
+            LookupPath::new(opctx, datastore).silo_id(silo_id).fetch().await?;
+        let silo_authn_policy = authn::SiloAuthnPolicy::try_from(&db_silo)?;
+        Ok(Some(silo_authn_policy))
+    }
 }
 
 #[async_trait]
