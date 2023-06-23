@@ -47,7 +47,13 @@ impl Certificate {
         params: params::CertificateCreate,
     ) -> Result<Self, CertificateError> {
         let validator = CertificateValidator::default();
-        validator.validate(params.cert.as_bytes(), params.key.as_bytes())?;
+
+        // TODO-security: Could we have a hostname here to pass to `validate()`?
+        validator.validate(
+            params.cert.as_bytes(),
+            &params.key.as_bytes(),
+            None,
+        )?;
 
         Ok(Self::new_unvalidated(silo_id, id, service, params))
     }

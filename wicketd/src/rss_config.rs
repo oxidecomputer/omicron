@@ -13,6 +13,7 @@ use crate::http_entrypoints::CurrentRssUserConfigSensitive;
 use crate::RackV1Inventory;
 use anyhow::anyhow;
 use anyhow::bail;
+use anyhow::Context;
 use anyhow::Result;
 use bootstrap_agent_client::types::BootstrapAddressDiscovery;
 use bootstrap_agent_client::types::Certificate;
@@ -121,6 +122,28 @@ impl CurrentRssConfig {
         if self.external_certificates.is_empty() {
             bail!("at least one certificate/key pair is required");
         }
+
+        // When certs were uploaded we might not have known our external DNS
+        // name, so we skipped validating hostnames. We now _do_ know our
+        // external DNS name, so repeat validation with that hostname.
+        let mut cert_validator = CertificateValidator::default();
+        cert_validator.danger_disable_expiration_validation();
+
+        // This _requires_ all certs have wildcard entries; see
+        // https://github.com/oxidecomputer/omicron/issues/3163. We could check
+        // for only `recover.sys.{}` instead if we only want these certs to be
+        // usable for the recovery silo.
+        let silo_hostname = format!("*.sys.{}", self.external_dns_zone_name);
+        for (i, pair) in self.external_certificates.iter().enumerate() {
+            cert_validator
+                .validate(&pair.cert, &pair.key, Some(&silo_hostname))
+                .with_context(|| {
+                    let i = i + 1;
+                    let tot = self.external_certificates.len();
+                    format!("certificate {i} of {tot} is invalid")
+                })?;
+        }
+
         let Some(recovery_silo_password_hash)
             = self.recovery_silo_password_hash.as_ref()
         else {
@@ -242,8 +265,10 @@ impl CurrentRssConfig {
         // will have to do that.
         validator.danger_disable_expiration_validation();
 
+        // We may not have the hostname yet, so pass `None` here: we'll
+        // revalidate later.
         validator
-            .validate(cert.as_bytes(), key.as_bytes())
+            .validate(cert.as_bytes(), key.as_bytes(), None)
             .map_err(|err| err.to_string())?;
 
         // Cert and key appear to be valid; steal them out of
