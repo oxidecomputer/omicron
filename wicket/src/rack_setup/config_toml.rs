@@ -262,6 +262,7 @@ mod tests {
                     PortFec::Rs => InternalPortFec::Rs,
                 },
                 uplink_ip: rnc.uplink_ip,
+                uplink_vid: rnc.uplink_vid,
             },
         }
     }
@@ -306,6 +307,7 @@ mod tests {
                 uplink_port_speed: PortSpeed::Speed400G,
                 uplink_port_fec: PortFec::Firecode,
                 uplink_port: "port0".into(),
+                uplink_vid: None,
             }),
         };
         let template = TomlTemplate::populate(&config).to_string();

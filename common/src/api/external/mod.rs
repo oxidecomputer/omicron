@@ -2437,10 +2437,10 @@ pub struct SwitchVlanInterfaceConfig {
     /// belongs to.
     pub interface_config_id: Uuid,
 
-    /// The virtual network id (VID) that distinguishes this interface and is
-    /// used for producing and consuming 802.1Q Ethernet tags. This field has a
-    /// maximum value of 4095 as 802.1Q tags are twelve bits.
-    pub vid: u16,
+    /// The virtual network id for this interface that is used for producing and
+    /// consuming 802.1Q Ethernet tags. This field has a maximum value of 4095
+    /// as 802.1Q tags are twelve bits.
+    pub vlan_id: u16,
 }
 
 /// A route configuration for a port settings object.
@@ -2459,6 +2459,10 @@ pub struct SwitchPortRouteConfig {
 
     /// The route's gateway address.
     pub gw: IpNet,
+
+    /// The VLAN identifier for the route. Use this if the gateway is reachable
+    /// over an 802.1Q tagged L2 segment.
+    pub vlan_id: Option<u16>,
 }
 
 /// A BGP peer configuration for a port settings object.

@@ -79,6 +79,8 @@ pub struct RackNetworkConfig {
     pub uplink_port_fec: PortFec,
     /// IP Address to apply to switchport (must be in infra_ip pool)
     pub uplink_ip: String,
+    /// VLAN id to use for uplink
+    pub uplink_vid: Option<u16>,
 }
 
 /// Switchport Speed options
