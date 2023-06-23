@@ -151,5 +151,69 @@ for long.
 
 === State Machine Flow
 
+Here we get into the meat of what currently exists. The higher level bootstore
+software, such as that that implements the network and persistence layers and
+provides an async API for use by the bootstrap agent drives the protocol through
+the v0 `Fsm` API methods in :link./src/schemes/v0/fsm.rs[]. There are not many
+methods, and each serves a purpose for use by software to be written later. The
+overall flow will look something like the following at initial rack setup time:
+
+. Bootstrap agent uses DDM to learn addresses of peers.
+. The bootstore establishes a timeout per `Tick` and calls the `Fsm::tick`
+callback on every timer tick.
+. Bootstrap agent informs the bootstore about peers so TCP connections can be
+established on the bootstrap network
+. Bootstrap agent informs the higher level bootstore API on the same sled as RSS
+to initialize the rack with initial membership chosen by the wicket user.
+. The bootstore calls `FSM::init_rack` and gets back an `Output`
+. The output informs the bootstore to persist the local state to the M.2s and send the
+messages to peers addressed by their `Baseboard` in `Envelopes`.
+. Peers receive messages over TCP channels and respond according to the protocol
+. The rack is initialized
+. The bootstrap agent storage manager on each peer asks the `KeyManager` to unlock its
+disks, which results in a call to the `RackSecretKeyRetriever` which eventually
+triggers a call to `Fsm::load_rack_secret`, which returns another `Output`
+containing messages since the shares need to be retrieved from peers.
+. Messages make their way back to the bootstore and it handles them with `Fsm::handle`, and this again
+returns an `Output`.
+. Eventually, the `Output` contains an `ApiOutput::RackSecret` which contains
+the rack secret and the higher level request from the KeyManager can be
+satisifed.
+
+The above is a relatively happy path, and in some cases peers can get
+disconnected and connected, timeouts can occur, and messages can be
+retransmitted as needed on reconnection. In worse cases, rack initialization may
+timeout. In this case RSS reset must be used to clear all the M.2 drives and try
+again. To prevent problems with a lingering sled that does not come back online
+to be cleared, that sled should be pulled. However, if it remains in the rack it
+will have a different `rack_uuid` and so errors will be triggered when it tries
+to talk to other sleds  in the new, successfully initialized trust quorum.
+
+Later on, we may wish to add a sled to a rack, most likely to replace a failed
+one. In order to do this the bootstrap agent will have to be instructed to
+trigger a call to the bootstore to inform the new sled that it is a "learning"
+member. This will result in a call to `Fsm::init_learner`, which will trigger
+a flow of  messages that allow the new sled to learn a key share from one of
+the other initial members. Each of the initial members keeps a set of encrypted
+"extra" key shares for this purpose that can be decrypted via  key that is also
+derived from the rack secret. The flow looks something like this:
+
+```mermaid
+
+sequenceDiagram
+    title Bootloader Update
+    participant L as Learner
+    participant Im1 as InitialMember_1
+    participant Im2 as InitialMember_2
+    L->>Im1: Learn
+    Im1->>Im2: GetShare
+    Im2->>Im1: Share
+    Note over Im1: Decrypt extra shares
+    Im1->>L: KeyShare
+
+```
+
+Learners will rotate through known peers until they find one that has a share.
+
 
 === Testing strategy
