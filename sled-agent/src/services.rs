@@ -258,6 +258,9 @@ const BUNDLE_DIRECTORY: &str = "bundle";
 // The directory for zone bundles.
 const ZONE_BUNDLE_DIRECTORY: &str = "zone";
 
+// The name for zone bundle metadata files.
+const ZONE_BUNDLE_METADATA_FILENAME: &str = "metadata.toml";
+
 // A wrapper around `ZoneRequest`, which allows it to be serialized
 // to a toml file.
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
@@ -2005,7 +2008,11 @@ impl ServiceManager {
 
         // Write the metadata file itself, in TOML format.
         let contents = toml::to_string(&zone_metadata)?;
-        insert_data(&mut builder, "metadata", contents.as_bytes())?;
+        insert_data(
+            &mut builder,
+            ZONE_BUNDLE_METADATA_FILENAME,
+            contents.as_bytes(),
+        )?;
         debug!(
             log,
             "wrote zone bundle metadata";
@@ -2113,8 +2120,9 @@ impl ServiceManager {
             // Copy any log files, current and rotated, into the tarball as
             // well.
             //
-            // Saftey: This is a log file, so we're sure it's a single, normal
-            // file and thus has a name.
+            // Safety: This pathbuf was retrieved by locating an existing file
+            // on the filesystem, so we're sure it has a name and the unwrap is
+            // safe.
             debug!(
                 log,
                 "appending current log file to zone bundle";
@@ -2232,7 +2240,7 @@ impl ServiceManager {
             .find(|entry| {
                 entry
                     .path()
-                    .map(|p| p.to_str() == Some("metadata"))
+                    .map(|p| p.to_str() == Some(ZONE_BUNDLE_METADATA_FILENAME))
                     .unwrap_or(false)
             })
         else {

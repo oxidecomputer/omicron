@@ -880,6 +880,9 @@ impl RunningZone {
         // The rotated log files should have the same prefix as the current, but
         // with an index appended. We'll search the parent directory for
         // matching names, skipping the current file.
+        //
+        // See https://illumos.org/man/8/logadm for details on the naming
+        // conventions around these files.
         let dir = current_log_file.parent().unwrap();
         let mut rotated_files = Vec::new();
         for entry in dir.read_dir_utf8()? {

@@ -28,7 +28,7 @@ fn parse_log_level(s: &str) -> anyhow::Result<Level> {
 
 /// Operate on sled agent zone bundles.
 ///
-/// Zoneb bundles are the collected state of a service zone. This includes
+/// Zone bundles are the collected state of a service zone. This includes
 /// information about the processes running in the zone, and the system on which
 /// they're running.
 #[derive(Clone, Debug, Parser)]
@@ -107,7 +107,12 @@ async fn main() -> anyhow::Result<()> {
                 .context("failed to list zone bundles")?
                 .into_inner();
             for bundle in bundles {
-                println!("{}/{}", bundle.id.zone_name, bundle.id.bundle_id);
+                println!(
+                    "{}/{} {}",
+                    bundle.id.zone_name,
+                    bundle.id.bundle_id,
+                    bundle.time_created
+                );
             }
         }
         Cmd::Create { zone_name } => {

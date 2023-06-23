@@ -149,7 +149,7 @@ impl From<Error> for dropshot::HttpError {
                     HttpError::for_unavail(None, inner.to_string())
                 }
                 crate::services::BundleError::NoSuchZone { .. } => {
-                    HttpError::for_bad_request(None, inner.to_string())
+                    HttpError::for_not_found(None, inner.to_string())
                 }
                 _ => HttpError::for_internal_error(err.to_string()),
             },
