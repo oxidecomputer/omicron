@@ -28,7 +28,7 @@ Usage: $0 [OPTIONS] <ARTIFACT> <REPO> <COMMIT>
 Options:
     -o <ORG>    Org containing the repository. [default: $ORG]
     -s <SERIES> The series artifact was published to. [default: $SERIES]
-    -n          Disable artifact validation.
+    -f          Disable artifact validation.
     -O <OUTDIR> Directory to output artifact to. [default: $OUTDIR]
     -h          Print help and exit
 
@@ -36,7 +36,7 @@ By default, this script expects a SHA256 hash to be published alongside
 the artifact with the same name but with a '.sha256.txt' suffix. This hash
 is used to validate the downloaded artifact as well as to check if we can
 skip downloading the artifact if it already exists locally. To disable this
-behavior, pass the -n flag.
+behavior, pass the -f flag.
 
 Note that if hash validation is disabled, we'll always download the artifact
 even if it already exists locally.
@@ -52,11 +52,11 @@ function validate_file_hash() {
 function main() {
     # Parse flags
     local opt
-    while getopts "o:s:nO:h" opt; do
+    while getopts "o:s:fO:h" opt; do
         case $opt in
             o) ORG="$OPTARG" ;;
             s) SERIES="$OPTARG" ;;
-            n) CHECK_HASH=false ;;
+            f) CHECK_HASH=false ;;
             O) OUTDIR="$OPTARG" ;;
 
             h)
