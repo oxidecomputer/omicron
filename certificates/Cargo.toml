@@ -7,5 +7,10 @@ license = "MPL-2.0"
 [dependencies]
 openssl.workspace = true
 thiserror.workspace = true
+trust-dns-proto.workspace = true
 
 omicron-common.workspace = true
+
+[dev-dependencies]
+omicron-test-utils.workspace = true
+rcgen.workspace = true

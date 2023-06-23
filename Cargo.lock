@@ -4689,8 +4689,11 @@ name = "omicron-certificates"
 version = "0.1.0"
 dependencies = [
  "omicron-common 0.1.0",
+ "omicron-test-utils",
  "openssl",
+ "rcgen",
  "thiserror",
+ "trust-dns-proto",
 ]
 
 [[package]]
