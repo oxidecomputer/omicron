@@ -646,6 +646,17 @@ impl ServiceManager {
         }
     }
 
+    fn bootstrap_to_techport(addr: Ipv6Addr) -> Ipv6Addr {
+        // flip the last bit of the first octet
+        // fdb0:<id>::suffix -> fdb1:<id>::<suffix>
+        Ipv6Addr::from(u128::from(addr) | (1 << 112))
+    }
+
+    fn bootstrap_addr_to_prefix(addr: Ipv6Addr) -> Ipv6Addr {
+        // mask out lower 64 bits to form /64 prefix
+        Ipv6Addr::from(u128::from(addr) & ((u64::MAX as u128) << 64))
+    }
+
     // Check the services intended to run in the zone to determine whether any
     // physical links or vnics need to be mapped into the zone when it is
     // created. Returns a list of links, plus whether or not they need link
@@ -1643,11 +1654,10 @@ impl ServiceManager {
                 ServiceType::Tfport { pkt_source } => {
                     info!(self.inner.log, "Setting up tfport service");
 
-                    let bootstrap_prefix =
+                    let techport_prefix =
                         match bootstrap_name_and_address.as_ref() {
-                            Some((_, addr)) => Ipv6Addr::from(
-                                // mask out lower 64 bits to form /64 prefix
-                                u128::from(*addr) & ((u64::MAX as u128) << 64),
+                            Some((_, addr)) => Self::bootstrap_addr_to_prefix(
+                                Self::bootstrap_to_techport(*addr),
                             ),
                             None => {
                                 return Err(Error::BadServiceRequest {
@@ -1659,7 +1669,7 @@ impl ServiceManager {
 
                     smfh.setprop(
                         "config/techport_prefix",
-                        bootstrap_prefix.to_string(),
+                        techport_prefix.to_string(),
                     )?;
                     smfh.setprop("config/pkt_source", pkt_source)?;
                     smfh.setprop(
