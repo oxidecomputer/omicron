@@ -385,5 +385,6 @@ fn validate_rack_network_config(
             PortFec::Rs => BaPortFec::Rs,
         },
         uplink_ip: config.uplink_ip.clone(),
+        uplink_vid: config.uplink_vid,
     }
 }
