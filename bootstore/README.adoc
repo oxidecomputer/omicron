@@ -90,6 +90,66 @@ the bootstore protocol itself. The remainder of this section will discuss the v0
 
 === Threat Model and Security Goals
 
+The trust quorum v0 scheme is limited in capability by the fact that a lot of
+the lower level software required for remote attestation and trusted transport
+is not yet complete. Our threat model is quite weak as a result and will be
+described in terms of what an attacker can and cannot do to break our system.
+
+Our primary security goal of the v0 scheme is to prevent an attacker from
+gaining useful information off of U.2 drives stolen in a "casual" manner. By
+casual manner, we mean that an attacker walks up to a rack and pulls out a
+few U.2 drives from one or more sleds or steals 1 or 2 sleds in their entirety
+including U.2 and M.2 storage devices. An attacker takes these home, but is
+unable to decrypt the U.2 drives to recover useful information.
+
+We meet this goal by having the M.2 devices on each sled store individual, and
+unique, key shares that can be used to reconstruct a rack secret when `K` shares
+are combined from the devices on `K` independent sleds. `K` is fixed at `N/2
++ 1` of the initial members of the rack cluster during setup time such that if
+there are 16 sleds in the rack, 9 M.2 devices from different sleds will have to
+be stolen to reconstruct the secret. The online trust quorum protocol operating
+over the bootstrap network serves to retrieve shares and reconstruct the rack
+secret, and then the `KeyManger` uses the rack secret as input key material to
+derive individual disk encryption keys for the U.2 drives.
+
+Importantly, because we operate the online protocol over unencrypted TCP
+channels, an attacker on the bootstrap network may passively sniff data and
+recover the rack secret. Additionally, because sleds cannot securely attest to
+each other yet, an active attacker can participate in the protocol and recover
+the rack secret at will as long as they are on the bootstrap network. There is
+no authentication mechanism required to participate in the v0 scheme.
+
+To re-iterate, our protocol only protects against offline attacks by an attacker
+with limited access to stolen hardware. The online protocol is quite insecure as
+a result of urgency. One may ask then: why deliver this subsystem at all? There
+are quite a few reasons for the v0 scheme. The primary reason is that we know
+that we want to encrypt control plane and customer data on U.2 drives in the
+future via ZFS encryption. We also do not want to force a complete wipe of an
+existing customer's implementation, even if it is just test data for a prototype
+project. Since ZFS does not allow encrypting datasets after the fact and we
+setup our zpools and datsets at rack setup time, we must enable encryption and
+provide a key for each dataset on day 1. The question then becomes where do we
+get the input key material from. We essentially had 4 options:
+
+ . Hardcode it - this is what is currently committed as the
+`LocalSecretRetreiver`
+ . Store random values constructed at RSS time on the M.2s and use them locally
+ . Derive keys from VPD data unique to a sled
+ . Build a simplified trust quorum scheme over untrusted channels on the
+bootstrap network
+
+Option 1 is the absolute bare minimum to enable ZFS encryption. Options 2 and
+3 don't really protect from casual physical attacks as M.2 drives and entire
+sleds are almost as easily stolen as U.2 drives, and VPD data is not secret. We
+therefore opted to build out the v0 scheme to satisfy our casual access offline
+attack model. It's important to note, that this threat model for offline access
+is identical to the full-fledged trust quorum as currently designed. It's just
+that the online portion is woefully insecure. However, by building out version
+0 early on we can gain experience operating in the shared secret model while
+protecting against some attacks. We do not anticipate staying in the v0 scheme
+for long.
+
 === State Machine Flow
+
 
 === Testing strategy
