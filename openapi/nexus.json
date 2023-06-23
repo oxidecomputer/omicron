@@ -14431,7 +14431,7 @@
       "name": "hidden",
       "description": "TODO operations that will not ship to customers",
       "externalDocs": {
-        "url": "http://docs.oxide.computer/api/"
+        "url": "http://docs.oxide.computer/api"
       }
     },
     {
@@ -14446,13 +14446,6 @@
       "description": "Virtual machine instances are the basic unit of computation. These operations are used for provisioning, controlling, and destroying instances.",
       "externalDocs": {
         "url": "http://docs.oxide.computer/api/instances"
-      }
-    },
-    {
-      "name": "ip-pools",
-      "description": "IP Pools contain external IP addresses that can be assigned to virtual machine instances.",
-      "externalDocs": {
-        "url": "http://docs.oxide.computer/api/ip-pools"
       }
     },
     {
@@ -14484,13 +14477,6 @@
       }
     },
     {
-      "name": "sagas",
-      "description": "Sagas are the abstraction used to represent multi-step operations within the Oxide deployment. These operations can be used to query saga status and report errors.",
-      "externalDocs": {
-        "url": "http://docs.oxide.computer/api/sagas"
-      }
-    },
-    {
       "name": "session",
       "description": "Information pertaining to the current session.",
       "externalDocs": {
@@ -14512,45 +14498,38 @@
       }
     },
     {
-      "name": "system",
-      "description": "Internal system information",
-      "externalDocs": {
-        "url": "http://docs.oxide.computer/api/system"
-      }
-    },
-    {
       "name": "system/hardware",
       "description": "These operations pertain to hardware inventory and management. Racks are the unit of expansion of an Oxide deployment. Racks are in turn composed of sleds, switches, power supplies, and a cabled backplane.",
       "externalDocs": {
-        "url": "http://docs.oxide.computer/api/system/hardware"
+        "url": "http://docs.oxide.computer/api/system-hardware"
       }
     },
     {
       "name": "system/metrics",
       "description": "Metrics provide insight into the operation of the Oxide deployment. These include telemetry on hardware and software components that can be used to understand the current state as well as to diagnose issues.",
       "externalDocs": {
-        "url": "http://docs.oxide.computer/api/system/metrics"
+        "url": "http://docs.oxide.computer/api/system-metrics"
       }
     },
     {
       "name": "system/networking",
       "description": "This provides rack-level network configuration.",
       "externalDocs": {
-        "url": "http://docs.oxide.computer/api/system/networking"
+        "url": "http://docs.oxide.computer/api/system-networking"
       }
     },
     {
       "name": "system/silos",
       "description": "Silos represent a logical partition of users and resources.",
       "externalDocs": {
-        "url": "http://docs.oxide.computer/api/system/silos"
+        "url": "http://docs.oxide.computer/api/system-silos"
       }
     },
     {
       "name": "system/update",
       "description": "This includes operations related to system updates.",
       "externalDocs": {
-        "url": "http://docs.oxide.computer/api/system/update"
+        "url": "http://docs.oxide.computer/api/system-update"
       }
     },
     {
