@@ -4,10 +4,10 @@
 
 = Bootstore
 
-The bootstore is the crate that implements the Oxide trust quroum protocol.
-The bootstore is named the bootstore because it provides the necessary storage
-required to unlock the rack secret via the trust quorum protocol and boot the
-rack.
+The bootstore is the crate that implements the Oxide trust quroum protocol. The
+bootstore is named the bootstore because it provides the necessary key share
+storage required to unlock the rack secret via the trust quorum protocol and
+boot the rack.
 
 We plan to incrementally improve the bootstore to be more full featured and
 secure over time. Each implementation is referred to as a `Scheme`. Schemes are
@@ -24,17 +24,17 @@ all live under the link:./src/trust_quorum[] directory. We anticipate that
 the `RackSecret` generation algorithms will remain the same across all schemes
 for the foreseeable future. This will not be the case for the `packages` that
 distribute key shares and metadata to different sleds, and so we version these.
-We may  decide to move these 'packages` into the specific scheme subdirectories
+We may  decide to move these "packages" into the specific scheme subdirectories
 because of this, but that is not done in the current code as written. The
 code is divided across a somewhat artificial line of protocol, provided in the
 schemes, and data, provided by the packages.
 
 While not yet done, the rack secret will be used as input key material to the
-link:./key-manager[] so that disks can be decrypted across sleds to allow the
+link:../key-manager[] so that disks can be decrypted across sleds to allow the
 rack to boot.
 
-Thus while the schemes to distribute key shares, and rotate and reconstruct
-the rack secret evolve to become more secure over time, the code using the rack
+Thus while the schemes to distribute key shares and rotate and reconstruct the
+rack secret evolve to become more secure over time, the code using the rack
 secret can be kept consistent as it is just fed the same shape of input key
 material with each iteration.
 
@@ -67,7 +67,7 @@ identity of its peer. The `Baseboard` serves as the unique identity for a peer
 and does not change over the lifetime of a sled. This message is only sent over
 the network links and is used by the networking layer to map TCP connections
 to peer IDs. The protocol FSM itself, however, is agnostic to the network layer
-other than knowing it uses reliable stream based communication. As such protocol
+other than knowing it uses reliable stream based communication. Protocol
 messages are only addressed via `Baseboard` and then routed appropriately by the
 network layer.
 
@@ -75,18 +75,20 @@ The persistence of FSM state, shares, and metadata is also not yet implemented.
 We anticipate making the `PersistentState` or a serialized version of
 it `Ledgerable` and reusing the `Ledger` code in 
 link:../sled-agent/src/ledger.rs[]. For this to work, we'll have to extract the
-ledger code from sled- agent and put it in `omicron-common`.
+ledger code from `sled-agent` and put it in `omicron-common`.
 
 Once the network layer and persistence are implemented, the bootstore itself
 will be complete for scheme v0. We will then need to plug it into the bootstrap
 agent so that that sleds can communicate and recompute a rack secret. To decrypt
-the drives, we will need to create a `KeyRetriever` (see link:../key-manager/
-src/lib.rs[]) and plug that into `KeyManager` construction in the bootstrap
-agent. And of course, RSS will have to trigger the bootstore to generate the
-rack secret and and distribute the key share packages in the first place.
+the drives, we will need to create a `KeyRetriever` 
+(see link:../key-manager/src/lib.rs[]) and plug that into `KeyManager` 
+construction in the bootstrap agent. And of course, RSS will have to trigger the
+bootstore to generate the rack secret and and distribute the key share packages
+in the first place.
 
-The prvious 3 paragraphs describe future work, although smaller and simpler than
-the bootstore protocol itself. The remainder of this section will discuss the v0 Scheme.
+The previous 3 paragraphs describe future work, although smaller and simpler
+than the bootstore protocol itself (hopefully). The remainder of this section
+will discuss the v0 Scheme.
 
 === Threat Model and Security Goals
 
@@ -147,7 +149,8 @@ is identical to the full-fledged trust quorum as currently designed. It's just
 that the online portion is woefully insecure. However, by building out version
 0 early on we can gain experience operating in the shared secret model while
 protecting against some attacks. We do not anticipate staying in the v0 scheme
-for long.
+for long. We will upgrade out of this scheme and rotate our rack secret and
+encryption keys to become more secure over time.
 
 === State Machine Flow
 
@@ -195,7 +198,7 @@ trigger a call to the bootstore to inform the new sled that it is a "learning"
 member. This will result in a call to `Fsm::init_learner`, which will trigger
 a flow of  messages that allow the new sled to learn a key share from one of
 the other initial members. Each of the initial members keeps a set of encrypted
-"extra" key shares for this purpose that can be decrypted via  key that is also
+"extra" key shares for this purpose that can be decrypted via a key that is also
 derived from the rack secret. The flow looks something like this:
 
 ```mermaid
@@ -232,7 +235,7 @@ such as `Action` can be found in link:./tests/common/generators.rs[].
 Inside link:./tests/v0-fsm-proptest.rs[] there is a `TestState::on_action`
 callback that gets called with each generated action to drive the test forward.
 We match on and interpret these actions. For each discrete step we call the
-appropriate model method, which return the expected output of the actual FSM
+appropriate model method, which returns the expected output of the actual FSM
 method. We then call the FSM method and compare the outputs. After these step
 specific checks we call `TestState::check_invariants()` which contains checks
 that must hold after every step through the protocol in the global system.
@@ -257,7 +260,7 @@ Notably, since, rack initialization must succeed for anything to work, we always
 connect all initial members to the "rss_sled" and deliver all messages so all
 initial_members are ready to participate in the trust quorum, before we start
 running generated actions. You can see this inside the `run` test function
-at the bottom of `v0-fsm-proptests.rs`. Without this, we'd be arbitrarily,
+at the bottom of `v0-fsm-proptests.rs`. Without this, we'd be arbitrarily
 wiping sleds a lot due to setup failure, which isn't really a useful test.
 However, because of this "cheat" during property testing, there are also some
 individual unit tests to cover rack initialization failures in `fsm.rs`.
