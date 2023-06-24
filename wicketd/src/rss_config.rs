@@ -39,8 +39,8 @@ const RECOVERY_SILO_USERNAME: &str = "recovery";
 
 #[derive(Default)]
 struct PartialCertificate {
-    cert: Option<Vec<u8>>,
-    key: Option<Vec<u8>>,
+    cert: Option<String>,
+    key: Option<String>,
 }
 
 /// An analogue to `RackInitializeRequest`, but with optional fields to allow
@@ -199,7 +199,7 @@ impl CurrentRssConfig {
 
     pub(crate) fn push_cert(
         &mut self,
-        cert: Vec<u8>,
+        cert: String,
     ) -> Result<CertificateUploadResponse, String> {
         self.partial_external_certificate.cert = Some(cert);
         self.maybe_promote_external_certificate()
@@ -207,7 +207,7 @@ impl CurrentRssConfig {
 
     pub(crate) fn push_key(
         &mut self,
-        key: Vec<u8>,
+        key: String,
     ) -> Result<CertificateUploadResponse, String> {
         self.partial_external_certificate.key = Some(key);
         self.maybe_promote_external_certificate()
@@ -240,7 +240,9 @@ impl CurrentRssConfig {
         // will have to do that.
         validator.danger_disable_expiration_validation();
 
-        validator.validate(cert, key).map_err(|err| err.to_string())?;
+        validator
+            .validate(cert.as_bytes(), key.as_bytes())
+            .map_err(|err| err.to_string())?;
 
         // Cert and key appear to be valid; steal them out of
         // `partial_external_certificate` and promote them to

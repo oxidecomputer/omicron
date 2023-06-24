@@ -275,7 +275,7 @@ pub enum CertificateUploadResponse {
 }]
 async fn post_rss_config_cert(
     rqctx: RequestContext<ServerContext>,
-    body: TypedBody<Vec<u8>>,
+    body: TypedBody<String>,
 ) -> Result<HttpResponseOk<CertificateUploadResponse>, HttpError> {
     let ctx = rqctx.context();
 
@@ -297,7 +297,7 @@ async fn post_rss_config_cert(
 }]
 async fn post_rss_config_key(
     rqctx: RequestContext<ServerContext>,
-    body: TypedBody<Vec<u8>>,
+    body: TypedBody<String>,
 ) -> Result<HttpResponseOk<CertificateUploadResponse>, HttpError> {
     let ctx = rqctx.context();
 
