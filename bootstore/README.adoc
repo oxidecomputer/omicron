@@ -73,9 +73,9 @@ network layer.
 
 The persistence of FSM state, shares, and metadata is also not yet implemented.
 We anticipate making the `PersistentState` or a serialized version of
-it `Ledgerable` and reusing the `Ledger` code  in link:../sled-agent/src/
-ledger.rs[]. For this to work, we'll have to extract the ledger code from sled-
-agent and put it in `omicron-common`.
+it `Ledgerable` and reusing the `Ledger` code in 
+link:../sled-agent/src/ledger.rs[]. For this to work, we'll have to extract the
+ledger code from sled- agent and put it in `omicron-common`.
 
 Once the network layer and persistence are implemented, the bootstore itself
 will be complete for scheme v0. We will then need to plug it into the bootstrap
@@ -154,7 +154,7 @@ for long.
 Here we get into the meat of what currently exists. The higher level bootstore
 software, such as that that implements the network and persistence layers and
 provides an async API for use by the bootstrap agent drives the protocol through
-the v0 `Fsm` API methods in :link./src/schemes/v0/fsm.rs[]. There are not many
+the v0 `Fsm` API methods in link:./src/schemes/v0/fsm.rs[]. There are not many
 methods, and each serves a purpose for use by software to be written later. The
 overall flow will look something like the following at initial rack setup time:
 
@@ -215,5 +215,66 @@ sequenceDiagram
 
 Learners will rotate through known peers until they find one that has a share.
 
-
 === Testing strategy
+
+The primary method of testing is generative testing via 
+https://proptest-rs.github.io/proptest/intro.html[proptest]. While this is
+tradionally called "property based testing", this code doesn't particularly
+have a set of nameable properties it is validating. Since the code is stateful,
+we instead create a simplified `Model` of an entire rack in 
+link:./tests/common/model.rs[] that behaves  in similar, testable ways to the
+real FSMs interacting with each other. We then generate a set of `Actions` by
+implementing a `Strategy` for proptest to use that allows it to generate input
+to our system, and "shrink" the input to a minimum, debuggable test case when
+there is an error. The generators for these strategies and the generated types
+such as `Action` can be found in link:./tests/common/generators.rs[].
+
+Inside link:./tests/v0-fsm-proptest.rs[] there is a `TestState::on_action`
+callback that gets called with each generated action to drive the test forward.
+We match on and interpret these actions. For each discrete step we call the
+appropriate model method, which return the expected output of the actual FSM
+method. We then call the FSM method and compare the outputs. After these step
+specific checks we call `TestState::check_invariants()` which contains checks
+that must hold after every step through the protocol in the global system.
+Surely, we can add more of these :)
+
+Now, an astute reader may recognize that each `Output` returned by `Fsm` methods
+may contain messages that must be delivered to other peers. We can't just drop
+these on the floor. So we must instead model a
+link:./tests/common/network.rs[network] that allows delivery of messages to
+peers. Each output message gets put in a queue representing it "floating" in
+the network. And because message delivery takes time, we also generate network
+delays in terms of ticks. When a tick callback fires, if the network delay is
+up and the connection is still valid we deliver the message to the appropriate
+peer FSM via calling it's `handle` method. We also, as always, call the model's
+version of this method first so both the model and real FSMs are updated in
+lockstep. In this manner we can fully simulate arbitrary histories of message
+flows between peers and ensure the behavior of the system as a whole is what we
+expect. For good measure we also generate network connect and disconnects, and
+learner additions to the system.
+
+Notably, since, rack initialization must succeed for anything to work, we always
+connect all initial members to the "rss_sled" and deliver all messages so all
+initial_members are ready to participate in the trust quorum, before we start
+running generated actions. You can see this inside the `run` test function
+at the bottom of `v0-fsm-proptests.rs`. Without this, we'd be arbitrarily,
+wiping sleds a lot due to setup failure, which isn't really a useful test.
+However, because of this "cheat" during property testing, there are also some
+individual unit tests to cover rack initialization failures in `fsm.rs`.
+
+It is almost certainly useful for any reader/reviewer to go ahead and run the proptest with
+
+```
+cargo test -p bootstore --test v0-fsm-proptest -- --nocapture
+```
+
+If you uncomment the `println!` in the `run` function you will see all generated
+actions. Its important to note that each proptest run will run multiple
+instances of our test. So while our test is currently configured to generate
+up to 1000 actions, there can be dozes of tests run. It's also useful to modify
+code or the model to try to break the test in certain ways and then watch
+it shrink to give you the failing history. If you do this just remember that
+the history only makes sense because before the actions are run rack init has
+completed *and* the rss_sled is connected to all other initial members.
+
+HAVE FUN!
