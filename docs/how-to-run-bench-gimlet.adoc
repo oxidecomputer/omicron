@@ -20,9 +20,45 @@ For setting up a build system, follow the instructions in xref:how-to-run.adoc[H
 You will need to compile Omicron somewhere else, then copy the files over
 to the gimlet.
 
-== Building for bench gimlet
+== Making a helios image for your bench gimlet:
 
-Custom modifications till we make a better solution:
+To run Omicron, you require a helios image on your gimlet constructed with
+some required libraries.  If your gimlet is lacking these, you will need to
+make and install a special build on your gimlet.
+To do that:
+Clone the helios repo: https://github.com/oxidecomputer/helios.git
+Check the helios repo README, as things may have changed.
+
+First, run gmake setup:
+[source,text]
+----
+cd helios
+gmake setup
+----
+
+Once that finishes, you are ready to build your helios image.  Below is and
+example command used to build the image for gimlet-sn21.
+The optional `-P` argument arranges for anything in that directory to be laid
+on top of the base image, which we presently use to, say, add in the
+sled-agent SMF manifest and binaries etc.  For example if you `mkdir /tmp/proto`
+and create `/tmp/proto/usr/bin/blah` then passing the `-P /tmp/proto` to your
+build command would make `/tmp/proto/usr/bin/blah` appear in the image at
+`/usr/bin/blah`
+
+[source,text]
+----
+ds=$(TZ=US/Pacific date +%Y%m%d-%H%M%S)
+./helios-build experiment-image -N "gimlet-sn21-$ds" -p helios-netdev=https://pkg.oxide.computer/helios-netdev -o "/net/catacomb/data/staff/dock/gimlet-sn21/os-$ds" -F optever=0.23 -B -P alanproto
+----
+
+The `-F optever=0.23` is subject to change.
+Once this image is built, you must install it on your gimlet.
+
+== Building Omicron for a bench gimlet
+
+To build Omicron for bench-gimlets, custom modifications to the source are
+required (till we make a better solution)
+
 In the sled-hardware/src/underlay.rs file,
 Change the function to always take the `Ok(XDE_VNIC_NAMES..` path, this basically
 short circuits the code that will return `cxgbe#` on a real gimlet, which we
