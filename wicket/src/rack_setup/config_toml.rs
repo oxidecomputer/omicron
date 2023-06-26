@@ -169,10 +169,10 @@ fn populate_network_table(
 ) {
     // Helper function to serialize enums into their appropriate string
     // representations.
-    fn enum_to_toml_string<T: Serialize>(value: &T) -> Cow<'static, str> {
+    fn enum_to_toml_string<T: Serialize>(value: &T) -> String {
         let value = toml::Value::try_from(value).unwrap();
         match value {
-            toml::Value::String(s) => Cow::from(s),
+            toml::Value::String(s) => s,
             other => {
                 panic!("improper use of enum_to_toml_string: got {other:?}");
             }
@@ -184,16 +184,16 @@ fn populate_network_table(
     };
 
     for (property, value) in [
-        ("gateway_ip", Cow::from(&config.gateway_ip)),
-        ("infra_ip_first", Cow::from(&config.infra_ip_first)),
-        ("infra_ip_last", Cow::from(&config.infra_ip_last)),
-        ("uplink_port", Cow::from(&config.uplink_port)),
+        ("gateway_ip", config.gateway_ip.to_string()),
+        ("infra_ip_first", config.infra_ip_first.to_string()),
+        ("infra_ip_last", config.infra_ip_last.to_string()),
+        ("uplink_port", config.uplink_port.to_string()),
         ("uplink_port_speed", enum_to_toml_string(&config.uplink_port_speed)),
         ("uplink_port_fec", enum_to_toml_string(&config.uplink_port_fec)),
-        ("uplink_ip", Cow::from(&config.uplink_ip)),
+        ("uplink_ip", config.uplink_ip.to_string()),
     ] {
         *table.get_mut(property).unwrap().as_value_mut().unwrap() =
-            Value::String(Formatted::new(value.into_owned()));
+            Value::String(Formatted::new(value));
     }
 }
 
@@ -201,6 +201,7 @@ fn populate_network_table(
 mod tests {
     use super::*;
     use omicron_common::api::internal::shared::RackNetworkConfig as InternalRackNetworkConfig;
+    use std::net::Ipv4Addr;
     use std::net::Ipv6Addr;
     use wicket_common::rack_setup::PutRssUserConfigInsensitive;
     use wicketd_client::types::Baseboard;
@@ -300,10 +301,10 @@ mod tests {
             )],
             ntp_servers: vec!["ntp1.com".into(), "ntp2.com".into()],
             rack_network_config: Some(RackNetworkConfig {
-                gateway_ip: "1.2.3.4".into(),
-                infra_ip_first: "2.3.4.5".into(),
-                infra_ip_last: "3.4.5.6".into(),
-                uplink_ip: "4.5.6.7".into(),
+                gateway_ip: Ipv4Addr::new(1, 2, 3, 4),
+                infra_ip_first: Ipv4Addr::new(2, 3, 4, 5),
+                infra_ip_last: Ipv4Addr::new(3, 4, 5, 6),
+                uplink_ip: Ipv4Addr::new(4, 5, 6, 7),
                 uplink_port_speed: PortSpeed::Speed400G,
                 uplink_port_fec: PortFec::Firecode,
                 uplink_port: "port0".into(),

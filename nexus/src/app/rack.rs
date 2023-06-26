@@ -263,24 +263,8 @@ impl super::Nexus {
 
             let kind = AddressLotKind::Infra;
 
-            let first_address = IpAddr::from_str(
-                &rack_network_config.infra_ip_first,
-            )
-            .map_err(|e| {
-                Error::internal_error(&format!(
-                    "encountered error while parsing `infra_ip_first`: {e}"
-                ))
-            })?;
-
-            let last_address = IpAddr::from_str(
-                &rack_network_config.infra_ip_last,
-            )
-            .map_err(|e| {
-                Error::internal_error(&format!(
-                    "encountered error while parsing `infra_ip_last`: {e}"
-                ))
-            })?;
-
+            let first_address = IpAddr::V4(rack_network_config.infra_ip_first);
+            let last_address = IpAddr::V4(rack_network_config.infra_ip_last);
             let ipv4_block =
                 AddressLotBlockCreate { first_address, last_address };
 
@@ -431,15 +415,8 @@ impl super::Nexus {
                 ))
             })?;
 
-            let gw = IpAddr::from_str(&rack_network_config.gateway_ip)
-                .map_err(|e| {
-                    Error::internal_error(&format!(
-                        "failed to parse provided default gateway address: {e}"
-                    ))
-                })?;
-
+            let gw = IpAddr::V4(rack_network_config.gateway_ip);
             let vid = rack_network_config.uplink_vid;
-
             let route = Route { dst, gw, vid };
 
             port_settings_params.routes.insert(

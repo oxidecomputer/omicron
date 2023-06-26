@@ -149,8 +149,8 @@ pub async fn create_ip_pool(
 pub async fn create_certificate(
     client: &ClientTestContext,
     cert_name: &str,
-    cert: Vec<u8>,
-    key: Vec<u8>,
+    cert: String,
+    key: String,
 ) -> Certificate {
     let url = "/v1/certificates".to_string();
     object_create(
