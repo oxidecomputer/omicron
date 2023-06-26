@@ -7,7 +7,6 @@
 //! This is used for various authz-related tests.
 //! THERE ARE NO TESTS IN THIS FILE.
 
-use crate::integration_tests::certificates::CertificateChain;
 use crate::integration_tests::unauthorized::HTTP_SERVER;
 use chrono::Utc;
 use http::method::Method;
@@ -35,6 +34,7 @@ use omicron_nexus::external_api::params;
 use omicron_nexus::external_api::shared;
 use omicron_nexus::external_api::shared::IpRange;
 use omicron_nexus::external_api::shared::Ipv4Range;
+use omicron_test_utils::certificates::CertificateChain;
 use std::net::IpAddr;
 use std::net::Ipv4Addr;
 use std::str::FromStr;
