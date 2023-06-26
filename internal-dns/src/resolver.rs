@@ -236,7 +236,7 @@ mod test {
     use anyhow::Context;
     use assert_matches::assert_matches;
     use dns_service_client::types::DnsConfigParams;
-    use dropshot::HandlerTaskMode;
+    use dropshot::{endpoint, ApiDescription, HandlerTaskMode, HttpError, HttpResponseOk, RequestContext};
     use omicron_test_utils::dev::test_setup_log;
     use slog::{o, Logger};
     use std::collections::HashMap;
@@ -569,6 +569,218 @@ mod test {
         assert_eq!(found_ip, ip2);
 
         dns_server.cleanup_successful();
+        logctx.cleanup_successful();
+    }
+
+    // What follows is a "test endpoint" to validate that the integration of
+    // the DNS server, resolver, and progenitor all work together correctly.
+
+    #[endpoint {
+        method = GET,
+        path = "/test",
+    }]
+    async fn test_endpoint(
+        rqctx: RequestContext<u32>,
+    ) -> Result<HttpResponseOk<u32>, HttpError> {
+        Ok(HttpResponseOk(*rqctx.context()))
+    }
+
+    fn api() -> ApiDescription<u32> {
+        let mut api = ApiDescription::new();
+        api.register(test_endpoint).unwrap();
+        api
+    }
+
+    progenitor::generate_api!(
+        spec = "tests/output/test-server.json",
+        inner_type = slog::Logger,
+        pre_hook = (|log: &slog::Logger, request: &reqwest::Request| {
+            slog::debug!(log, "client request";
+                "method" => %request.method(),
+                "uri" => %request.url(),
+                "body" => ?&request.body(),
+            );
+        }),
+        post_hook = (|log: &slog::Logger, result: &Result<_, _>| {
+            slog::debug!(log, "client response"; "result" => ?result);
+        }),
+    );
+
+    // Verify that we have an up-to-date representation
+    // of this server's API as JSON.
+    //
+    // We'll need this to be up-to-date to have a reliable
+    // Progenitor client.
+    fn expect_openapi_json_valid_for_test_server() {
+        let api = api();
+        let openapi = api.openapi("Test Server", "v0.1.0");
+        let mut output = std::io::Cursor::new(Vec::new());
+        openapi.write(&mut output).unwrap();
+        expectorate::assert_contents(
+            "tests/output/test-server.json",
+            std::str::from_utf8(&output.into_inner()).unwrap(),
+        );
+    }
+
+    fn start_test_server(log: slog::Logger, label: u32) -> dropshot::HttpServer<u32> {
+        let config_dropshot = dropshot::ConfigDropshot {
+            bind_address: "[::1]:0".parse().unwrap(),
+            ..Default::default()
+        };
+        dropshot::HttpServerStarter::new(
+            &config_dropshot,
+            api(),
+            label,
+            &log,
+        ).unwrap().start()
+    }
+
+    #[tokio::test]
+    async fn resolver_can_be_used_with_progenitor_client() {
+        let logctx = test_setup_log("resolver_can_be_used_with_progenitor_client");
+
+        // Confirm that we can create a progenitor client for this server.
+        expect_openapi_json_valid_for_test_server();
+
+        // Next, create a DNS server, and a corresponding resolver.
+        let dns_server = DnsServer::create(&logctx.log).await;
+        let resolver = Resolver::new_from_addrs(
+            logctx.log.clone(),
+            vec![dns_server.dns_server.local_address().clone()],
+        ).unwrap();
+
+        // Start a test server, but don't register it with the DNS server (yet).
+        let label = 1234;
+        let server = start_test_server(logctx.log.clone(), label);
+        let ip = match server.local_addr().ip() {
+            std::net::IpAddr::V6(ip) => ip,
+            _ => panic!("Expected IPv6"),
+        };
+        let port = server.local_addr().port();
+
+        // Use the resolver -- referencing our DNS server -- in the construction
+        // of a progenitor client.
+        //
+        // We'll use the SRV record for Nexus, even though it's just our
+        // standalone test server.
+        let dns_name = crate::ServiceName::Nexus.srv_name();
+        let reqwest_client = reqwest::ClientBuilder::new()
+            .dns_resolver(resolver.clone().into())
+            .build()
+            .expect("Failed to build client");
+
+        // NOTE: We explicitly pass the port here, before DNS resolution,
+        // because the DNS support in reqwest does not actually use the ports
+        // returned by the resolver.
+        let client = Client::new_with_client(
+            &format!("http://{dns_name}:{port}"),
+            reqwest_client,
+            logctx.log.clone(),
+        );
+
+        // The DNS server is running, but has no records. Expect a failure.
+        let err = client.test_endpoint().await.unwrap_err();
+        assert!(
+            err.to_string().contains("no record found"),
+            "Unexpected Error (expected 'no record found'): {err}",
+        );
+
+        // Add a record for the new service.
+        let mut dns_config = DnsConfigBuilder::new();
+        let zone = dns_config.host_zone(Uuid::new_v4(), ip).unwrap();
+        dns_config
+            .service_backend_zone(ServiceName::Nexus, &zone, port)
+            .unwrap();
+        let dns_config = dns_config.build();
+        dns_server.update(&dns_config).await.unwrap();
+
+        // Confirm that we can access this record manually.
+        let found_ip = resolver
+            .lookup_ipv6(ServiceName::Nexus)
+            .await
+            .expect("Should have been able to look up IP address");
+        assert_eq!(found_ip, ip);
+
+        // Confirm that the progenitor client can access this record too.
+        let value = client.test_endpoint().await.unwrap();
+        assert_eq!(value.into_inner(), label);
+
+        server.close().await.expect("Failed to stop test server");
+        dns_server.cleanup_successful();
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn resolver_can_access_backup_dns_server() {
+        let logctx = test_setup_log("resolver_can_access_backup_dns_server");
+
+        // Confirm that we can create a progenitor client for this server.
+        expect_openapi_json_valid_for_test_server();
+
+        // Create DNS servers, and a corresponding resolver.
+        let dns_server1 = DnsServer::create(&logctx.log).await;
+        let dns_server2 = DnsServer::create(&logctx.log).await;
+        let resolver = Resolver::new_from_addrs(
+            logctx.log.clone(),
+            vec![
+                dns_server1.dns_server.local_address().clone(),
+                dns_server2.dns_server.local_address().clone(),
+            ],
+        ).unwrap();
+
+        // Start a test server, but don't register it with the DNS server (yet).
+        let label = 1234;
+        let server = start_test_server(logctx.log.clone(), label);
+        let ip = match server.local_addr().ip() {
+            std::net::IpAddr::V6(ip) => ip,
+            _ => panic!("Expected IPv6"),
+        };
+        let port = server.local_addr().port();
+
+        // Use the resolver -- referencing our DNS server -- in the construction
+        // of a progenitor client.
+        //
+        // We'll use the SRV record for Nexus, even though it's just our
+        // standalone test server.
+        let dns_name = crate::ServiceName::Nexus.srv_name();
+        let reqwest_client = reqwest::ClientBuilder::new()
+            .dns_resolver(resolver.clone().into())
+            .build()
+            .expect("Failed to build client");
+
+        // NOTE: We explicitly pass the port here, before DNS resolution,
+        // because the DNS support in reqwest does not actually use the ports
+        // returned by the resolver.
+        let client = Client::new_with_client(
+            &format!("http://{dns_name}:{port}"),
+            reqwest_client,
+            logctx.log.clone(),
+        );
+
+        // The DNS server is running, but has no records. Expect a failure.
+        let err = client.test_endpoint().await.unwrap_err();
+        assert!(
+            err.to_string().contains("no record found"),
+            "Unexpected Error (expected 'no record found'): {err}",
+        );
+
+        // Add a record for the new service, but only to the second DNS server.
+        let mut dns_config = DnsConfigBuilder::new();
+        let zone = dns_config.host_zone(Uuid::new_v4(), ip).unwrap();
+        dns_config
+            .service_backend_zone(ServiceName::Nexus, &zone, port)
+            .unwrap();
+        let dns_config = dns_config.build();
+        dns_server2.update(&dns_config).await.unwrap();
+
+        // Confirm that the progenitor client can access this record,
+        // even though the first DNS server doesn't know about it.
+        let value = client.test_endpoint().await.unwrap();
+        assert_eq!(value.into_inner(), label);
+
+        server.close().await.expect("Failed to stop test server");
+        dns_server1.cleanup_successful();
+        dns_server2.cleanup_successful();
         logctx.cleanup_successful();
     }
 }
