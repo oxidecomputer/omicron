@@ -416,6 +416,15 @@ mod test {
     async fn ensure_instance() {
         let logctx = test_setup_log("ensure_instance");
         let log = &logctx.log;
+
+        let nexus_client_ctx =
+            crate::mocks::MockNexusClient::new_with_client_context();
+        nexus_client_ctx.expect().returning(|_, _, _| {
+            let mut mock = crate::mocks::MockNexusClient::default();
+            mock.expect_clone()
+                .returning(|| crate::mocks::MockNexusClient::default());
+            mock
+        });
         let nexus_client =
             NexusClientWithResolver::new(&log, std::net::Ipv6Addr::LOCALHOST)
                 .unwrap();
@@ -532,6 +541,15 @@ mod test {
     async fn ensure_instance_state_repeatedly() {
         let logctx = test_setup_log("ensure_instance_repeatedly");
         let log = &logctx.log;
+
+        let nexus_client_ctx =
+            crate::mocks::MockNexusClient::new_with_client_context();
+        nexus_client_ctx.expect().returning(|_, _, _| {
+            let mut mock = crate::mocks::MockNexusClient::default();
+            mock.expect_clone()
+                .returning(|| crate::mocks::MockNexusClient::default());
+            mock
+        });
         let nexus_client =
             NexusClientWithResolver::new(&log, std::net::Ipv6Addr::LOCALHOST)
                 .unwrap();
