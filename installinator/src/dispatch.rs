@@ -358,8 +358,10 @@ async fn scan_hardware_with_retries(
 ) -> Result<StepResult<WriteDestination, InstallinatorSpec>> {
     // Scanning for our disks is inherently racy: we have to wait for the disks
     // to attach. This should take milliseconds in general; we'll set a hard cap
-    // at retrying for ~30 seconds.
-    const HARDWARE_RETRIES: usize = 60;
+    // at retrying for ~10 seconds. (In practice if we're failing, this will
+    // take much longer than 10 seconds, because each failed attempt takes a
+    // nontrivial amount of time.)
+    const HARDWARE_RETRIES: usize = 20;
     const HARDWARE_RETRY_DELAY: Duration = Duration::from_millis(500);
 
     let mut retry = 0;
@@ -372,8 +374,10 @@ async fn scan_hardware_with_retries(
             Err(error) => {
                 if retry < HARDWARE_RETRIES {
                     warn!(
-                        log, "hardware scan failed; will retry after {:?}",
-                        HARDWARE_RETRY_DELAY;
+                        log,
+                        "hardware scan failed; will retry after {:?} \
+                         (attempt {} of {})",
+                        HARDWARE_RETRY_DELAY, retry + 1, HARDWARE_RETRIES;
                         "err" => #%error,
                     );
                     cx.send_progress(StepProgress::retry(format!(
