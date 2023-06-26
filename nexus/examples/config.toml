@@ -44,7 +44,7 @@ request_body_max_bytes = 1048576
 # initialization.  If you're using this config file, you're probably running a
 # simulated system.  In that case, the initial certificate is provided to the
 # simulated sled agent (acting as RSS) via command-line arguments.
-tls = true
+#tls = true
 
 [deployment.dropshot_internal]
 # IP Address and TCP port on which to listen for the internal API
