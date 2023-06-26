@@ -6,7 +6,10 @@
 
 use illumos_utils::running_zone::InstalledZone;
 use slog::Logger;
-use std::fmt::{Display, Formatter};
+use std::{
+    collections::BTreeMap,
+    fmt::{Display, Formatter},
+};
 
 pub struct ProfileBuilder {
     name: String,
@@ -155,20 +158,38 @@ impl Display for ServiceInstanceBuilder {
 
 pub struct PropertyGroupBuilder {
     name: String,
-    properties: Vec<Property>,
+    /// names of the properties that were added, in the order they were added
+    properties_seen: Vec<String>,
+    /// type for each property, by name
+    property_types: BTreeMap<String, String>,
+    /// values seen for each property, by name
+    property_values: BTreeMap<String, Vec<String>>,
 }
 
 impl PropertyGroupBuilder {
     pub fn new(name: &str) -> Self {
-        Self { name: name.to_string(), properties: vec![] }
+        Self {
+            name: name.to_string(),
+            properties_seen: vec![],
+            property_types: BTreeMap::new(),
+            property_values: BTreeMap::new(),
+        }
     }
 
     pub fn add_property(mut self, name: &str, ty: &str, value: &str) -> Self {
-        self.properties.push(Property {
-            name: name.to_string(),
-            ty: ty.to_string(),
-            value: value.to_string(),
-        });
+        if self
+            .property_types
+            .insert(name.to_string(), ty.to_string())
+            .is_none()
+        {
+            self.properties_seen.push(name.to_string());
+        }
+
+        let values = self
+            .property_values
+            .entry(name.to_string())
+            .or_insert_with(Vec::new);
+        values.push(value.to_string());
         self
     }
 }
@@ -181,34 +202,33 @@ impl Display for PropertyGroupBuilder {
 "#,
             name = self.name
         )?;
-        for property in &self.properties {
-            write!(f, "{}", property)?;
-        }
-        write!(
-            f,
-            r#"      </property_group>
-"#
-        )?;
-        Ok(())
-    }
-}
-
-pub struct Property {
-    name: String,
-    ty: String,
-    value: String,
-}
-
-impl Display for Property {
-    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
-        write!(
-            f,
-            r#"        <propval type="{ty}" name="{name}" value="{value}"/>
+        for property_name in &self.properties_seen {
+            let ty = self.property_types.get(property_name).unwrap();
+            let values = self.property_values.get(property_name).unwrap();
+            if values.len() == 1 {
+                write!(
+                    f,
+                    r#"        <propval type="{ty}" name="{name}" value="{value}"/>
 "#,
-            name = self.name,
-            ty = self.ty,
-            value = self.value
-        )?;
+                    name = property_name,
+                    value = &values[0],
+                )?;
+            } else {
+                write!(
+                    f,
+                    r#"        <property type="{ty}" name="{name}">
+"#,
+                    name = property_name,
+                )?;
+                write!(f, "          <{ty}_list>\n")?;
+                for v in values {
+                    write!(f, "            <value_node value={:?} />\n", v,)?;
+                }
+                write!(f, "          </{ty}_list>\n")?;
+                write!(f, "        </property>\n")?;
+            }
+        }
+        write!(f, "      </property_group>\n")?;
         Ok(())
     }
 }
@@ -357,8 +377,12 @@ mod tests {
 <service_bundle type="profile" name="myprofile">
   <service version="1" type="service" name="myservice">
       <property_group type="application" name="mypgsvc">
-        <propval type="astring" name="prop" value="valuesvc"/>
-        <propval type="astring" name="prop" value="value2svc"/>
+        <property type="astring" name="prop">
+          <astring_list>
+            <value_node value="valuesvc" />
+            <value_node value="value2svc" />
+          </astring_list>
+        </property>
       </property_group>
     <instance enabled="true" name="default">
       <property_group type="application" name="mypg">
