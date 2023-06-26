@@ -29,10 +29,24 @@ impl NexusClientWithResolver {
         log: &Logger,
         sled_agent_address: Ipv6Addr,
     ) -> Result<Self, ResolveError> {
-        let resolver = Arc::new(Resolver::new_from_ip(
+        let resolver = Resolver::new_from_ip(
             log.new(o!("component" => "DnsResolver")),
             sled_agent_address,
-        )?);
+        )?;
+
+        Ok(Self::new_from_resolver_with_port(
+            log,
+            resolver,
+            NEXUS_INTERNAL_PORT,
+        ))
+    }
+
+    pub fn new_from_resolver_with_port(
+        log: &Logger,
+        resolver: Resolver,
+        port: u16,
+    ) -> Self {
+        let resolver = Arc::new(resolver);
 
         let client = reqwest::ClientBuilder::new()
             .dns_resolver(resolver.clone())
@@ -40,14 +54,14 @@ impl NexusClientWithResolver {
             .expect("Failed to build client");
 
         let dns_name = ServiceName::Nexus.srv_name();
-        Ok(Self {
+        Self {
             client: NexusClient::new_with_client(
-                &format!("http://{dns_name}:{NEXUS_INTERNAL_PORT}"),
+                &format!("http://{dns_name}:{port}"),
                 client,
                 log.new(o!("component" => "NexusClient")),
             ),
             resolver,
-        })
+        }
     }
 
     /// Access the progenitor-based Nexus Client.

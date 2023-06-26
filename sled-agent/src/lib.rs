@@ -36,9 +36,6 @@ mod storage_manager;
 mod updates;
 
 #[cfg(test)]
-mod mocks;
-
-#[cfg(test)]
 mod fakes;
 
 #[macro_use]
