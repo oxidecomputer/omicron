@@ -336,10 +336,15 @@ impl InstallOpts {
             )
             .register();
 
-        engine.execute().await.context("failed to execute installinator")?;
+        // Wait for both the engine to complete and all progress reports to be
+        // sent, then possibly return an error to our caller if either failed
+        // (but we want both to run to completion first, e.g. so that an engine
+        // failure is still reported to wicketd).
+        let (engine_result, progress_result) =
+            tokio::join!(engine.execute(), progress_handle);
 
-        // Wait for all progress reports to be sent.
-        progress_handle.await.context("progress reporter to complete")?;
+        engine_result.context("failed to execute installinator")?;
+        progress_result.context("progress reporter failed")?;
 
         if self.stay_alive {
             loop {
