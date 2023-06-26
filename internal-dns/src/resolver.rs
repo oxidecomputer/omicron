@@ -49,7 +49,7 @@ impl reqwest::dns::Resolve for Resolver {
         Box::pin(async move {
             this.lookup_sockets_v6_raw(name.as_str())
                 .await
-                .map_err(|err| -> BoxError { Box::new(err) } )
+                .map_err(|err| -> BoxError { Box::new(err) })
         })
     }
 }
@@ -71,10 +71,9 @@ impl Resolver {
                 bind_addr: None,
             });
         }
-        let resolver =
-            TokioAsyncResolver::tokio(rc, ResolverOpts::default())?;
+        let resolver = TokioAsyncResolver::tokio(rc, ResolverOpts::default())?;
 
-        Ok(Self { inner: Arc::new(Inner { log, resolver })})
+        Ok(Self { inner: Arc::new(Inner { log, resolver }) })
     }
 
     /// Convenience wrapper for [`Resolver::new_from_addrs`] that determines
@@ -147,7 +146,8 @@ impl Resolver {
     ) -> Result<SocketAddrV6, ResolveError> {
         let name = srv.srv_name();
         debug!(self.inner.log, "lookup_socket_v6 srv"; "dns_name" => &name);
-        let response = self.inner.resolver.lookup(&name, RecordType::SRV).await?;
+        let response =
+            self.inner.resolver.lookup(&name, RecordType::SRV).await?;
 
         let rdata = response
             .iter()
@@ -180,7 +180,8 @@ impl Resolver {
         name: &str,
     ) -> Result<Box<dyn Iterator<Item = SocketAddr> + Send>, ResolveError> {
         debug!(self.inner.log, "lookup_socket_v6 srv"; "dns_name" => &name);
-        let response = self.inner.resolver.lookup(name, RecordType::SRV).await?;
+        let response =
+            self.inner.resolver.lookup(name, RecordType::SRV).await?;
 
         let rdata = response
             .into_iter()
@@ -192,15 +193,14 @@ impl Resolver {
                 let name = srv.target();
                 let port = srv.port();
                 Box::new(
-                    self
-                        .inner
+                    self.inner
                         .resolver
                         .ipv6_lookup(&name.to_string())
                         .await?
                         .into_iter()
                         .map(move |ip| {
                             SocketAddr::V6(SocketAddrV6::new(ip, port, 0, 0))
-                        })
+                        }),
                 )
             }
 
@@ -211,7 +211,6 @@ impl Resolver {
             }
         })
     }
-
 
     pub async fn lookup_ip(
         &self,
@@ -236,7 +235,10 @@ mod test {
     use anyhow::Context;
     use assert_matches::assert_matches;
     use dns_service_client::types::DnsConfigParams;
-    use dropshot::{endpoint, ApiDescription, HandlerTaskMode, HttpError, HttpResponseOk, RequestContext};
+    use dropshot::{
+        endpoint, ApiDescription, HandlerTaskMode, HttpError, HttpResponseOk,
+        RequestContext,
+    };
     use omicron_test_utils::dev::test_setup_log;
     use slog::{o, Logger};
     use std::collections::HashMap;
@@ -622,22 +624,23 @@ mod test {
         );
     }
 
-    fn start_test_server(log: slog::Logger, label: u32) -> dropshot::HttpServer<u32> {
+    fn start_test_server(
+        log: slog::Logger,
+        label: u32,
+    ) -> dropshot::HttpServer<u32> {
         let config_dropshot = dropshot::ConfigDropshot {
             bind_address: "[::1]:0".parse().unwrap(),
             ..Default::default()
         };
-        dropshot::HttpServerStarter::new(
-            &config_dropshot,
-            api(),
-            label,
-            &log,
-        ).unwrap().start()
+        dropshot::HttpServerStarter::new(&config_dropshot, api(), label, &log)
+            .unwrap()
+            .start()
     }
 
     #[tokio::test]
     async fn resolver_can_be_used_with_progenitor_client() {
-        let logctx = test_setup_log("resolver_can_be_used_with_progenitor_client");
+        let logctx =
+            test_setup_log("resolver_can_be_used_with_progenitor_client");
 
         // Confirm that we can create a progenitor client for this server.
         expect_openapi_json_valid_for_test_server();
@@ -646,8 +649,9 @@ mod test {
         let dns_server = DnsServer::create(&logctx.log).await;
         let resolver = Resolver::new_from_addrs(
             logctx.log.clone(),
-            vec![dns_server.dns_server.local_address().clone()],
-        ).unwrap();
+            vec![*dns_server.dns_server.local_address()],
+        )
+        .unwrap();
 
         // Start a test server, but don't register it with the DNS server (yet).
         let label = 1234;
@@ -723,10 +727,11 @@ mod test {
         let resolver = Resolver::new_from_addrs(
             logctx.log.clone(),
             vec![
-                dns_server1.dns_server.local_address().clone(),
-                dns_server2.dns_server.local_address().clone(),
+                *dns_server1.dns_server.local_address(),
+                *dns_server2.dns_server.local_address(),
             ],
-        ).unwrap();
+        )
+        .unwrap();
 
         // Start a test server, but don't register it with the DNS server (yet).
         let label = 1234;

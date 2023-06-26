@@ -8,7 +8,7 @@ use super::config::Config;
 use super::http_entrypoints::api as http_api;
 use super::sled_agent::SledAgent;
 use crate::bootstrap::params::StartSledAgentRequest;
-use crate::nexus::LazyNexusClient;
+use crate::nexus::NexusClientWithResolver;
 use crate::services::ServiceManager;
 use crate::storage_manager::StorageManager;
 use slog::Logger;
@@ -41,17 +41,15 @@ impl Server {
     ) -> Result<Server, String> {
         info!(log, "setting up sled agent server");
 
-        let client_log = log.new(o!("component" => "NexusClient"));
-
-        let addr = request.sled_address();
-        let lazy_nexus_client =
-            LazyNexusClient::new_from_subnet(client_log, *addr.ip())
+        let sled_address = request.sled_address();
+        let nexus_client =
+            NexusClientWithResolver::new(&log, *sled_address.ip())
                 .map_err(|e| e.to_string())?;
 
         let sled_agent = SledAgent::new(
             &config,
             log.clone(),
-            lazy_nexus_client.clone(),
+            nexus_client,
             request,
             services,
             storage,
@@ -61,7 +59,7 @@ impl Server {
 
         let mut dropshot_config = dropshot::ConfigDropshot::default();
         dropshot_config.request_body_max_bytes = 1024 * 1024;
-        dropshot_config.bind_address = SocketAddr::V6(addr);
+        dropshot_config.bind_address = SocketAddr::V6(sled_address);
         let dropshot_log = log.new(o!("component" => "dropshot (SledAgent)"));
         let http_server = dropshot::HttpServerStarter::new(
             &dropshot_config,

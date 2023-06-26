@@ -9,7 +9,7 @@ use crate::common::instance::{
     PublishedInstanceState,
 };
 use crate::instance_manager::InstanceTicket;
-use crate::nexus::LazyNexusClient;
+use crate::nexus::NexusClientWithResolver;
 use crate::params::{
     InstanceHardware, InstanceMigrationSourceParams,
     InstanceMigrationTargetParams, InstanceStateRequested, VpcFirewallRule,
@@ -235,7 +235,7 @@ struct InstanceInner {
     running_state: Option<RunningState>,
 
     // Connection to Nexus
-    lazy_nexus_client: LazyNexusClient,
+    nexus_client: NexusClientWithResolver,
 
     // Object representing membership in the "instance manager".
     instance_ticket: InstanceTicket,
@@ -266,10 +266,8 @@ impl InstanceInner {
                     "state" => ?state,
                 );
 
-                self.lazy_nexus_client
-                    .get()
-                    .await
-                    .map_err(|e| backoff::BackoffError::transient(e.into()))?
+                self.nexus_client
+                    .client()
                     .cpapi_instances_put(self.id(), &state.into())
                     .await
                     .map_err(|err| -> backoff::BackoffError<Error> {
@@ -574,7 +572,7 @@ mockall::mock! {
             initial: InstanceHardware,
             vnic_allocator: VnicAllocator<Etherstub>,
             port_manager: PortManager,
-            lazy_nexus_client: LazyNexusClient,
+            nexus_client: NexusClientWithResolver,
         ) -> Result<Self, Error>;
         pub async fn current_state(&self) -> InstanceRuntimeState;
         pub async fn put_state(
@@ -611,7 +609,7 @@ impl Instance {
     /// lengths, otherwise the UUID would be used instead).
     /// * `port_manager`: Handle to the object responsible for managing OPTE
     /// ports.
-    /// * `lazy_nexus_client`: Connection to Nexus, used for sending notifications.
+    /// * `nexus_client`: Connection to Nexus, used for sending notifications.
     // TODO: This arg list is getting a little long; can we clean this up?
     #[allow(clippy::too_many_arguments)]
     pub fn new(
@@ -621,7 +619,7 @@ impl Instance {
         initial: InstanceHardware,
         vnic_allocator: VnicAllocator<Etherstub>,
         port_manager: PortManager,
-        lazy_nexus_client: LazyNexusClient,
+        nexus_client: NexusClientWithResolver,
     ) -> Result<Self, Error> {
         info!(log, "Instance::new w/initial HW: {:?}", initial);
         let instance = InstanceInner {
@@ -651,7 +649,7 @@ impl Instance {
             cloud_init_bytes: initial.cloud_init_bytes,
             state: InstanceStates::new(initial.runtime),
             running_state: None,
-            lazy_nexus_client,
+            nexus_client,
             instance_ticket: ticket,
         };
 
@@ -946,7 +944,20 @@ impl Instance {
             &format!("config/server_addr={}", server_addr),
         ])?;
 
-        let metric_addr = inner.lazy_nexus_client.get_ip().await.unwrap();
+        // TODO: We should not be using the resolver here to lookup the Nexus IP
+        // address. It would be preferable for Propolis, and through Propolis,
+        // Oximeter, to access the Nexus internal interface using a progenitor
+        // resolver that relies on a DNS resolver.
+        //
+        // - With the current implementation: if Nexus' IP address changes, this
+        // breaks.
+        // - With a DNS resolver: the metric producer would be able to continue
+        // sending requests to new servers as they arise.
+        let metric_addr = inner
+            .nexus_client
+            .resolver()
+            .lookup_ipv6(internal_dns::ServiceName::Nexus)
+            .await?;
         info!(
             inner.log,
             "Setting metric address property address [{}]:{}",
@@ -1087,7 +1098,7 @@ impl Instance {
 mod test {
     use super::*;
     use crate::instance_manager::InstanceManager;
-    use crate::nexus::LazyNexusClient;
+    use crate::nexus::NexusClientWithResolver;
     use crate::params::InstanceStateRequested;
     use chrono::Utc;
     use illumos_utils::dladm::Etherstub;
@@ -1164,14 +1175,12 @@ mod test {
             0xfd00, 0x1de, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
         );
         let port_manager = PortManager::new(log.new(slog::o!()), underlay_ip);
-        let lazy_nexus_client = LazyNexusClient::new_from_subnet(
-            log.clone(),
-            std::net::Ipv6Addr::LOCALHOST,
-        )
-        .unwrap();
+        let nexus_client =
+            NexusClientWithResolver::new(&log, std::net::Ipv6Addr::LOCALHOST)
+                .unwrap();
         let instance_manager = InstanceManager::new(
             log.clone(),
-            lazy_nexus_client.clone(),
+            nexus_client.clone(),
             Etherstub("mylink".to_string()),
             port_manager.clone(),
         )
@@ -1184,7 +1193,7 @@ mod test {
             new_initial_instance(),
             vnic_allocator,
             port_manager,
-            lazy_nexus_client,
+            nexus_client,
         )
         .unwrap();
 

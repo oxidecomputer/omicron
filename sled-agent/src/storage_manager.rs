@@ -4,7 +4,7 @@
 
 //! Management of sled-local storage.
 
-use crate::nexus::LazyNexusClient;
+use crate::nexus::NexusClientWithResolver;
 use crate::params::DatasetKind;
 use crate::storage::dataset::DatasetName;
 use camino::Utf8PathBuf;
@@ -279,7 +279,7 @@ impl StorageResources {
 
 /// Describes the access to the underlay used by the StorageManager.
 pub struct UnderlayAccess {
-    pub lazy_nexus_client: LazyNexusClient,
+    pub nexus_client: NexusClientWithResolver,
     pub sled_id: Uuid,
 }
 
@@ -374,15 +374,10 @@ impl StorageWorker {
                     return Err(backoff::BackoffError::transient(Error::UnderlayNotInitialized.to_string()));
                 };
                 let sled_id = underlay.sled_id;
-                let lazy_nexus_client = underlay.lazy_nexus_client.clone();
+                let nexus_client = underlay.nexus_client.client().clone();
                 drop(underlay_guard);
 
-                lazy_nexus_client
-                    .get()
-                    .await
-                    .map_err(|e| {
-                        backoff::BackoffError::transient(e.to_string())
-                    })?
+                nexus_client
                     .zpool_put(&sled_id, &pool_id, &zpool_request)
                     .await
                     .map_err(|e| {
@@ -693,12 +688,8 @@ impl StorageWorker {
                     return Err(backoff::BackoffError::transient(Error::UnderlayNotInitialized.to_string()));
                 };
                 let sled_id = underlay.sled_id;
-                let lazy_nexus_client = underlay.lazy_nexus_client.clone();
+                let nexus_client = underlay.nexus_client.client().clone();
                 drop(underlay_guard);
-
-                let nexus = lazy_nexus_client.get().await.map_err(|e| {
-                    backoff::BackoffError::transient(e.to_string())
-                })?;
 
                 match &disk {
                     NotifyDiskRequest::Add { identity, variant } => {
@@ -712,9 +703,12 @@ impl StorageWorker {
                             },
                             sled_id,
                         };
-                        nexus.physical_disk_put(&request).await.map_err(
-                            |e| backoff::BackoffError::transient(e.to_string()),
-                        )?;
+                        nexus_client
+                            .physical_disk_put(&request)
+                            .await
+                            .map_err(|e| {
+                                backoff::BackoffError::transient(e.to_string())
+                            })?;
                     }
                     NotifyDiskRequest::Remove(disk_identity) => {
                         let request = PhysicalDiskDeleteRequest {
@@ -723,9 +717,12 @@ impl StorageWorker {
                             vendor: disk_identity.vendor.clone(),
                             sled_id,
                         };
-                        nexus.physical_disk_delete(&request).await.map_err(
-                            |e| backoff::BackoffError::transient(e.to_string()),
-                        )?;
+                        nexus_client
+                            .physical_disk_delete(&request)
+                            .await
+                            .map_err(|e| {
+                                backoff::BackoffError::transient(e.to_string())
+                            })?;
                     }
                 }
                 Ok(())

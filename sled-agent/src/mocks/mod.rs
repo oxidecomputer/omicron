@@ -66,4 +66,8 @@ mock! {
             request: &RackInitializationRequest,
         ) -> Result<()>;
     }
+
+    impl Clone for NexusClient {
+        fn clone(&self) -> Self;
+    }
 }

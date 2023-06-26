@@ -9,89 +9,63 @@ pub use nexus_client::Client as NexusClient;
 
 use internal_dns::resolver::{ResolveError, Resolver};
 use internal_dns::ServiceName;
+use omicron_common::address::NEXUS_INTERNAL_PORT;
 use slog::Logger;
 use std::future::Future;
-use std::net::{Ipv6Addr, SocketAddr, SocketAddrV6};
+use std::net::Ipv6Addr;
 use std::pin::Pin;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
-struct Inner {
-    log: Logger,
+/// A thin wrapper over a progenitor-generated NexusClient.
+///
+/// Also attaches the "DNS resolver" for historical reasons.
+#[derive(Clone)]
+pub struct NexusClientWithResolver {
+    client: NexusClient,
     resolver: Arc<Resolver>,
 }
 
-/// Wrapper around a [`NexusClient`] object, which allows deferring
-/// the DNS lookup until accessed.
-///
-/// Without the assistance of OS-level DNS lookups, the [`NexusClient`]
-/// interface requires knowledge of the target service IP address.
-/// For some services, like Nexus, this can be painful, as the IP address
-/// may not have even been allocated when the Sled Agent starts.
-///
-/// This structure allows clients to access the client on-demand, performing
-/// the DNS lookup only once it is actually needed.
-#[derive(Clone)]
-pub struct LazyNexusClient {
-    inner: Arc<Inner>,
-}
-
-impl LazyNexusClient {
-    pub fn new_from_subnet(
-        log: Logger,
-        addr: Ipv6Addr,
+impl NexusClientWithResolver {
+    pub fn new(
+        log: &Logger,
+        sled_agent_address: Ipv6Addr,
     ) -> Result<Self, ResolveError> {
-        Ok(Self {
-            inner: Arc::new(Inner {
-                log: log.clone(),
-                resolver: Arc::new(Resolver::new_from_ip(
-                    log.new(o!("component" => "DnsResolver")),
-                    addr,
-                )?),
-            }),
-        })
-    }
-
-    pub fn new_from_dns(
-        log: Logger,
-        dns_addrs: Vec<SocketAddr>,
-    ) -> Result<Self, ResolveError> {
-        Ok(Self {
-            inner: Arc::new(Inner {
-                log: log.clone(),
-                resolver: Arc::new(Resolver::new_from_addrs(
-                    log.new(o!("component" => "DnsResolver")),
-                    dns_addrs,
-                )?),
-            }),
-        })
-    }
-
-    pub async fn get_ip(&self) -> Result<Ipv6Addr, ResolveError> {
-        self.get_addr().await.map(|addr| *addr.ip())
-    }
-
-    pub async fn get_addr(&self) -> Result<SocketAddrV6, ResolveError> {
-        let addr =
-            self.inner.resolver.lookup_socket_v6(ServiceName::Nexus).await?;
-        Ok(addr)
-    }
-
-    pub async fn get(&self) -> Result<NexusClient, ResolveError> {
-        let dns_name = ServiceName::Nexus.srv_name();
+        let resolver = Arc::new(Resolver::new_from_ip(
+            log.new(o!("component" => "DnsResolver")),
+            sled_agent_address,
+        )?);
 
         let client = reqwest::ClientBuilder::new()
-            .dns_resolver(self.inner.resolver.clone())
+            .dns_resolver(resolver.clone())
             .build()
-            // TODO:
             .expect("Failed to build client");
 
-        Ok(NexusClient::new_with_client(
-            &format!("http://{dns_name}"),
-            client,
-            self.inner.log.clone(),
-        ))
+        let dns_name = ServiceName::Nexus.srv_name();
+        Ok(Self {
+            client: NexusClient::new_with_client(
+                &format!("http://{dns_name}:{NEXUS_INTERNAL_PORT}"),
+                client,
+                log.new(o!("component" => "NexusClient")),
+            ),
+            resolver,
+        })
+    }
+
+    /// Access the progenitor-based Nexus Client.
+    pub fn client(&self) -> &NexusClient {
+        &self.client
+    }
+
+    /// Access the DNS resolver used by the Nexus Client.
+    ///
+    /// WARNING: If you're using this resolver to access an IP address of
+    /// another service, be aware that it might change if that service moves
+    /// around! Be cautious when accessing and persisting IP addresses of other
+    /// services.
+    pub fn resolver(&self) -> &Arc<Resolver> {
+        &self.resolver
     }
 }
 
