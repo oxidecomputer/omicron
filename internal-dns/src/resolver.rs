@@ -43,6 +43,8 @@ pub struct Resolver {
 
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
+// By implementing this trait, [Resolver] can be used as an argument to
+// [reqwest::ClientBuilder::dns_resolver].
 impl reqwest::dns::Resolve for Resolver {
     fn resolve(&self, name: Name) -> reqwest::dns::Resolving {
         let this = self.clone();
@@ -175,11 +177,15 @@ impl Resolver {
         })
     }
 
-    pub async fn lookup_sockets_v6_raw(
+    // Returns an iterator of SocketAddrs for the specified SRV name.
+    //
+    // Acts on a raw string for compatibility with the reqwest::dns::Resolve
+    // trait, rather than a strongly-typed service name.
+    async fn lookup_sockets_v6_raw(
         &self,
         name: &str,
     ) -> Result<Box<dyn Iterator<Item = SocketAddr> + Send>, ResolveError> {
-        debug!(self.inner.log, "lookup_socket_v6 srv"; "dns_name" => &name);
+        debug!(self.inner.log, "lookup_sockets_v6_raw srv"; "dns_name" => &name);
         let response =
             self.inner.resolver.lookup(name, RecordType::SRV).await?;
 
