@@ -709,19 +709,27 @@ fn rss_config_text<'a>(
             "External DNS zone name: ",
             Cow::from(insensitive.external_dns_zone_name.as_str()),
         ),
-        ("Gateway IP: ", net_config.map_or("", |c| &c.gateway_ip).into()),
+        (
+            "Gateway IP: ",
+            net_config.map_or("".into(), |c| c.gateway_ip.to_string().into()),
+        ),
         (
             "Infrastructure first IP: ",
-            net_config.map_or("", |c| &c.infra_ip_first).into(),
+            net_config
+                .map_or("".into(), |c| c.infra_ip_first.to_string().into()),
         ),
         (
             "Infrastructure last IP: ",
-            net_config.map_or("", |c| &c.infra_ip_last).into(),
+            net_config
+                .map_or("".into(), |c| c.infra_ip_last.to_string().into()),
         ),
         ("Uplink port: ", net_config.map_or("", |c| &c.uplink_port).into()),
         ("Uplink port speed: ", uplink_port_speed),
         ("Uplink port FEC: ", uplink_port_fec),
-        ("Uplink IP: ", net_config.map_or("", |c| &c.uplink_ip).into()),
+        (
+            "Uplink IP: ",
+            net_config.map_or("".into(), |c| c.uplink_ip.to_string().into()),
+        ),
     ] {
         spans.push(Spans::from(vec![
             Span::styled(label, label_style),

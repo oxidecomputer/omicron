@@ -520,19 +520,23 @@
         "properties": {
           "gateway_ip": {
             "description": "Gateway address",
-            "type": "string"
+            "type": "string",
+            "format": "ipv4"
           },
           "infra_ip_first": {
             "description": "First ip address to be used for configuring network infrastructure",
-            "type": "string"
+            "type": "string",
+            "format": "ipv4"
           },
           "infra_ip_last": {
             "description": "Last ip address to be used for configuring network infrastructure",
-            "type": "string"
+            "type": "string",
+            "format": "ipv4"
           },
           "uplink_ip": {
             "description": "IP Address to apply to switchport (must be in infra_ip pool)",
-            "type": "string"
+            "type": "string",
+            "format": "ipv4"
           },
           "uplink_port": {
             "description": "Switchport to use for external connectivity",
