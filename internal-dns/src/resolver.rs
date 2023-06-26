@@ -57,6 +57,7 @@ impl reqwest::dns::Resolve for Resolver {
 }
 
 impl Resolver {
+    /// Construct a new DNS resolver from specific DNS server addresses.
     pub fn new_from_addrs(
         log: slog::Logger,
         dns_addrs: Vec<SocketAddr>,
@@ -78,7 +79,7 @@ impl Resolver {
         Ok(Self { inner: Arc::new(Inner { log, resolver }) })
     }
 
-    /// Convenience wrapper for [`Resolver::new_from_addrs`] that determines
+    /// Convenience wrapper for [`Resolver::new_from_subnet`] that determines
     /// the subnet based on a provided IP address and then uses the DNS
     /// resolvers for that subnet.
     pub fn new_from_ip(
@@ -111,6 +112,14 @@ impl Resolver {
             .collect()
     }
 
+    /// Create a DNS resolver using the implied DNS servers within this subnet.
+    ///
+    /// The addresses of the DNS servers are inferred within an Availability
+    /// Zone's subnet: normally, each rack within an AZ (/48) gets a unique
+    /// subnet (/56), but the FIRST /56 is reserved for internal DNS servers.
+    ///
+    /// For more details on this "reserved" rack subnet, refer to
+    /// [omicron_common::address::ReservedRackSubnet].
     pub fn new_from_subnet(
         log: slog::Logger,
         subnet: Ipv6Subnet<AZ_PREFIX>,
