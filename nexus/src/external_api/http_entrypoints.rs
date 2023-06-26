@@ -4411,22 +4411,26 @@ async fn system_metric(
     pag_params: Query<
         PaginationParams<params::ResourceMetrics, params::ResourceMetrics>,
     >,
-    other_params: Query<SystemMetricParams>,
+    other_params: Query<params::OptionalSiloSelector>,
 ) -> Result<HttpResponseOk<ResultsPage<oximeter_db::Measurement>>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let nexus = &apictx.nexus;
         let metric_name = path_params.into_inner().metric_name;
-        let silo_id = other_params.into_inner().silo_id;
         let pagination = pag_params.into_inner();
         let limit = rqctx.page_limit(&pagination)?;
 
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let silo_lookup = match other_params.into_inner().silo {
+            Some(silo) => Some(nexus.silo_lookup(&opctx, silo)?),
+            _ => None,
+        };
+
         let result = nexus
-            .system_metric_lookup(
+            .system_metric_list(
                 &opctx,
                 metric_name,
-                silo_id,
+                silo_lookup,
                 pagination,
                 limit,
             )
@@ -4449,22 +4453,31 @@ async fn silo_metric(
     pag_params: Query<
         PaginationParams<params::ResourceMetrics, params::ResourceMetrics>,
     >,
-    other_params: Query<SiloMetricParams>,
+    other_params: Query<params::OptionalProjectSelector>,
 ) -> Result<HttpResponseOk<ResultsPage<oximeter_db::Measurement>>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let nexus = &apictx.nexus;
         let metric_name = path_params.into_inner().metric_name;
-        let project_id = other_params.into_inner().project_id;
+
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let project_lookup = match other_params.into_inner().project {
+            Some(project) => {
+                let project_selector = params::ProjectSelector { project };
+                Some(nexus.project_lookup(&opctx, project_selector)?)
+            }
+            _ => None,
+        };
+
         let pagination = pag_params.into_inner();
         let limit = rqctx.page_limit(&pagination)?;
 
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
         let result = nexus
-            .silo_metric_lookup(
+            .silo_metric_list(
                 &opctx,
                 metric_name,
-                project_id,
+                project_lookup,
                 pagination,
                 limit,
             )

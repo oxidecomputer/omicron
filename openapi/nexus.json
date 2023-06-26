@@ -2499,12 +2499,10 @@
           },
           {
             "in": "query",
-            "name": "project_id",
-            "description": "A project ID. If unspecified, get aggregrate metrics across all projects in current silo.",
+            "name": "project",
+            "description": "Name or ID of the project",
             "schema": {
-              "nullable": true,
-              "type": "string",
-              "format": "uuid"
+              "$ref": "#/components/schemas/NameOrId"
             }
           }
         ],
@@ -4922,12 +4920,10 @@
           },
           {
             "in": "query",
-            "name": "silo_id",
-            "description": "A silo ID. If unspecified, get aggregrate metrics across all silos.",
+            "name": "silo",
+            "description": "Name or ID of the silo",
             "schema": {
-              "nullable": true,
-              "type": "string",
-              "format": "uuid"
+              "$ref": "#/components/schemas/NameOrId"
             }
           }
         ],
