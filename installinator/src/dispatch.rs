@@ -17,7 +17,7 @@ use omicron_common::{
     api::internal::nexus::KnownArtifactKind,
     update::{ArtifactHashId, ArtifactKind},
 };
-use slog::Drain;
+use slog::{error, warn, Drain};
 use tufaceous_lib::ControlPlaneZoneImages;
 use update_engine::StepResult;
 
@@ -371,6 +371,11 @@ async fn scan_hardware_with_retries(
             Ok(destination) => break Ok(destination),
             Err(error) => {
                 if retry < HARDWARE_RETRIES {
+                    warn!(
+                        log, "hardware scan failed; will retry after {:?}",
+                        HARDWARE_RETRY_DELAY;
+                        "err" => #%error,
+                    );
                     cx.send_progress(StepProgress::retry(format!(
                         "hardware scan {retry} failed: {error:#}"
                     )))
@@ -379,6 +384,10 @@ async fn scan_hardware_with_retries(
                     tokio::time::sleep(HARDWARE_RETRY_DELAY).await;
                     continue;
                 } else {
+                    error!(
+                        log, "hardware scan failed (retries exhausted)";
+                        "err" => #%error,
+                    );
                     break Err(error);
                 }
             }
