@@ -337,9 +337,11 @@ impl InstallOpts {
             .register();
 
         // Wait for both the engine to complete and all progress reports to be
-        // sent, then possibly return an error to our caller if either failed
-        // (but we want both to run to completion first, e.g. so that an engine
-        // failure is still reported to wicketd).
+        // sent, then possibly return an error to our caller if either failed.
+        // We intentionally do not use `try_join!` here: we want both futures to
+        // complete, _then_ we will check for failures from either, so any
+        // errors from the engine that need to be reported to wicketd are
+        // reported before we return.
         let (engine_result, progress_result) =
             tokio::join!(engine.execute(), progress_handle);
 
