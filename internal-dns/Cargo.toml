@@ -7,12 +7,16 @@ license = "MPL-2.0"
 [dependencies]
 anyhow.workspace = true
 assert_matches.workspace = true
+backoff.workspace = true
 chrono.workspace = true
+clap.workspace = true
 dns-service-client.workspace = true
+dropshot.workspace = true
 futures.workspace = true
 omicron-common.workspace = true
 slog.workspace = true
 thiserror.workspace = true
+tokio.workspace = true
 trust-dns-proto.workspace = true
 trust-dns-resolver.workspace = true
 uuid.workspace = true

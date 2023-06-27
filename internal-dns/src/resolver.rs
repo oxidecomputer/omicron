@@ -70,6 +70,15 @@ impl Resolver {
         Self::new_from_subnet(log, subnet)
     }
 
+    /// Return a resolver that uses the system configuration (usually
+    /// /etc/resolv.conf) for the underlying nameservers.
+    pub fn new_with_resolver(
+        log: slog::Logger,
+        tokio_resolver: TokioAsyncResolver,
+    ) -> Self {
+        Resolver { log, inner: Box::new(tokio_resolver) }
+    }
+
     // TODO-correctness This function and its callers make assumptions about how
     // many internal DNS servers there are on the subnet and where they are.  Is
     // that okay?  It would seem more flexible not to assume this.  Instead, we
@@ -176,7 +185,15 @@ impl Resolver {
             self.inner.ipv6_lookup(target.clone()).await
         });
         let results = futures::future::try_join_all(futures).await?;
-        Ok(results.into_iter().flat_map(|ipv6| ipv6.into_iter()).collect())
+        let results = results
+            .into_iter()
+            .flat_map(|ipv6| ipv6.into_iter())
+            .collect::<Vec<_>>();
+        if results.is_empty() {
+            Err(ResolveError::NotFound(srv))
+        } else {
+            Ok(results)
+        }
     }
 
     pub async fn lookup_ip(

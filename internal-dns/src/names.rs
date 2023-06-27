@@ -14,7 +14,7 @@ pub const DNS_ZONE: &str = "control-plane.oxide.internal";
 pub const DNS_ZONE_EXTERNAL_TESTING: &str = "oxide-dev.test";
 
 /// Names of services within the control plane
-#[derive(Clone, Debug, Hash, Eq, Ord, PartialEq, PartialOrd)]
+#[derive(Clone, Copy, Debug, Hash, Eq, Ord, PartialEq, PartialOrd)]
 pub enum ServiceName {
     Clickhouse,
     Cockroach,

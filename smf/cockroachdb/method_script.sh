@@ -25,10 +25,7 @@ route get -inet6 default -inet6 "$GATEWAY" || route add -inet6 default -inet6 "$
 # in the cluster.  Look these up in internal DNS.  Per the recommendations in
 # the CockroachDB docs, we choose at most five addresses.  Providing more
 # addresses just increases the time for the cluster to stabilize.
-JOIN_ADDRS="$(
-    dig +short -t SRV _cockroach._tcp.control-plane.oxide.internal | \
-    awk '{print $4}' | \
-    head -n 5)"
+JOIN_ADDRS="$(/opt/oxide/internal-dns/bin/dnswait cockroach | head -n 5)"
 
 if [[ -z "$JOIN_ADDRS" ]]; then
     printf 'ERROR: found no addresses for other CockroachDB nodes\n' >&2
