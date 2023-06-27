@@ -7,6 +7,7 @@
 mod fsm;
 mod fsm_output;
 mod messages;
+mod peer;
 mod state;
 mod state_initial_member;
 mod state_learned;
