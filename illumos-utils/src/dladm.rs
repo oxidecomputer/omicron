@@ -526,3 +526,129 @@ impl Dladm {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::process::{FakeExecutor, Input, OutputExt, StaticHandler};
+    use omicron_test_utils::dev;
+    use std::process::Output;
+
+    #[test]
+    fn ensure_new_etherstub() {
+        let logctx = dev::test_setup_log("ensure_new_etherstub");
+
+        let mut handler = StaticHandler::new();
+        handler.expect_fail(format!("{PFEXEC} {DLADM} show-etherstub mystub1"));
+        handler
+            .expect_ok(format!("{PFEXEC} {DLADM} create-etherstub -t mystub1"));
+
+        let executor = FakeExecutor::new(logctx.log.clone());
+        executor.set_static_handler(handler);
+
+        let etherstub =
+            Dladm::ensure_etherstub(&executor.as_executor(), "mystub1")
+                .expect("Failed to ensure etherstub");
+        assert_eq!(etherstub.0, "mystub1");
+
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn ensure_existing_etherstub() {
+        let logctx = dev::test_setup_log("ensure_existing_etherstub");
+
+        let mut handler = StaticHandler::new();
+        handler.expect_ok(format!("{PFEXEC} {DLADM} show-etherstub mystub1"));
+        let executor = FakeExecutor::new(logctx.log.clone());
+        executor.set_static_handler(handler);
+
+        let etherstub =
+            Dladm::ensure_etherstub(&executor.as_executor(), "mystub1")
+                .expect("Failed to ensure etherstub");
+        assert_eq!(etherstub.0, "mystub1");
+
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn ensure_existing_etherstub_vnic() {
+        let logctx = dev::test_setup_log("ensure_existing_etherstub_vnic");
+
+        let mut handler = StaticHandler::new();
+        handler.expect_ok(format!(
+            "{PFEXEC} {DLADM} show-etherstub {UNDERLAY_ETHERSTUB_NAME}"
+        ));
+        handler.expect_ok(format!(
+            "{PFEXEC} {DLADM} show-vnic {UNDERLAY_ETHERSTUB_VNIC_NAME}"
+        ));
+        let executor = FakeExecutor::new(logctx.log.clone());
+        executor.set_static_handler(handler);
+
+        let executor = &executor.as_executor();
+        let etherstub =
+            Dladm::ensure_etherstub(executor, UNDERLAY_ETHERSTUB_NAME)
+                .expect("Failed to ensure etherstub");
+        let _vnic = Dladm::ensure_etherstub_vnic(executor, &etherstub)
+            .expect("Failed to ensure etherstub VNIC");
+
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn ensure_new_etherstub_vnic() {
+        let logctx = dev::test_setup_log("ensure_new_etherstub_vnic");
+
+        let mut handler = StaticHandler::new();
+        handler.expect_ok(format!(
+            "{PFEXEC} {DLADM} show-etherstub {UNDERLAY_ETHERSTUB_NAME}"
+        ));
+        handler.expect_fail(format!(
+            "{PFEXEC} {DLADM} show-vnic {UNDERLAY_ETHERSTUB_VNIC_NAME}"
+        ));
+        handler.expect_ok(format!(
+            "{PFEXEC} {DLADM} create-vnic -t -l {UNDERLAY_ETHERSTUB_NAME} \
+            -p mtu=9000 {UNDERLAY_ETHERSTUB_VNIC_NAME}"
+        ));
+        handler.expect_ok(format!(
+            "{PFEXEC} {DLADM} set-linkprop -t -p mtu=9000 \
+            {UNDERLAY_ETHERSTUB_VNIC_NAME}"
+        ));
+        let executor = FakeExecutor::new(logctx.log.clone());
+        executor.set_static_handler(handler);
+
+        let executor = &executor.as_executor();
+        let etherstub =
+            Dladm::ensure_etherstub(executor, UNDERLAY_ETHERSTUB_NAME)
+                .expect("Failed to ensure etherstub");
+        let _vnic = Dladm::ensure_etherstub_vnic(executor, &etherstub)
+            .expect("Failed to ensure etherstub VNIC");
+
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn only_parse_oxide_vnics() {
+        let logctx = dev::test_setup_log("only_parse_oxide_vnics");
+
+        let mut handler = StaticHandler::new();
+        handler.expect(
+            Input::shell(format!("{PFEXEC} {DLADM} show-vnic -p -o LINK")),
+            Output::success().set_stdout(
+                "oxVnic\nvopteVnic\nInvalid\noxBootstrapVnic\nInvalid",
+            ),
+        );
+        let executor = FakeExecutor::new(logctx.log.clone());
+        executor.set_static_handler(handler);
+
+        let executor = &executor.as_executor();
+        let vnics = Dladm::get_vnics(executor).expect("Failed to get VNICs");
+
+        assert_eq!(vnics[0], "oxVnic");
+        assert_eq!(vnics[1], "vopteVnic");
+        assert_eq!(vnics[2], "oxBootstrapVnic");
+        assert_eq!(vnics.len(), 3);
+
+        logctx.cleanup_successful();
+    }
+}

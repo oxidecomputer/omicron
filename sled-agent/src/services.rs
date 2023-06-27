@@ -2429,8 +2429,8 @@ mod test {
     use async_trait::async_trait;
     use illumos_utils::{
         dladm::{
-            Etherstub, BOOTSTRAP_ETHERSTUB_NAME,
-            UNDERLAY_ETHERSTUB_NAME, UNDERLAY_ETHERSTUB_VNIC_NAME,
+            Etherstub, BOOTSTRAP_ETHERSTUB_NAME, UNDERLAY_ETHERSTUB_NAME,
+            UNDERLAY_ETHERSTUB_VNIC_NAME,
         },
         process::FakeExecutor,
         svc,
