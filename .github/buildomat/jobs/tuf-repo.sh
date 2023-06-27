@@ -44,14 +44,12 @@ set -o pipefail
 set -o xtrace
 
 TOP=$PWD
+VERSION=$(< /input/package/work/version.txt)
 
 source "$TOP/tools/dvt_dock_version"
 DVT_DOCK_COMMIT=$COMMIT
 source "$TOP/tools/hubris_version"
 HUBRIS_COMMIT=$COMMIT
-
-COMMIT=$(git rev-parse HEAD)
-VERSION="1.0.0-alpha+git${COMMIT:0:11}"
 
 ptime -m gunzip < /input/ci-tools/work/tufaceous.gz > /work/tufaceous
 chmod a+x /work/tufaceous
