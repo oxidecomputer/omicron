@@ -1415,8 +1415,13 @@ impl super::Nexus {
     ) -> Result<(), propolis_client::support::tungstenite::Error> {
         let (mut nexus_sink, mut nexus_stream) = client_stream.split();
 
-        let mut buffered_output = None;
+        // buffered_input is Some if there's a websocket message waiting to be
+        // sent from the client to propolis.
         let mut buffered_input = None;
+        // buffered_output is Some if there's a websocket message waiting to be
+        // sent from propolis to the client.
+        let mut buffered_output = None;
+
         loop {
             let nexus_read;
             let nexus_reserve;
@@ -1425,10 +1430,12 @@ impl super::Nexus {
 
             if buffered_input.is_some() {
                 // We already have a buffered input -- do not read any further
-                // input from nexus.
+                // messages from the client.
                 nexus_read = Fuse::terminated();
                 propolis_reserve = propolis_conn.reserve().fuse();
                 if buffered_output.is_some() {
+                    // We already have a buffered output -- do not read any
+                    // further messages from propolis.
                     nexus_reserve = nexus_sink.reserve().fuse();
                     propolis_read = Fuse::terminated();
                 } else {
@@ -1441,8 +1448,10 @@ impl super::Nexus {
                 nexus_read = nexus_stream.next().fuse();
                 propolis_reserve = Fuse::terminated();
                 if buffered_output.is_some() {
+                    // We already have a buffered output -- do not read any
+                    // further messages from propolis.
                     nexus_reserve = nexus_sink.reserve().fuse();
-                    propolis_read = propolis_conn.recv().fuse();
+                    propolis_read = Fuse::terminated();
                 } else {
                     nexus_reserve = Fuse::terminated();
                     propolis_read = propolis_conn.recv().fuse();
@@ -1478,6 +1487,10 @@ impl super::Nexus {
                             // TODO: json payloads specifying client-sent metadata?
                         }
                         Some(Ok(WebSocketMessage::Binary(data))) => {
+                            debug_assert!(
+                                buffered_input.is_none(),
+                                "attempted to drop buffered_input message ({buffered_input:?})",
+                            );
                             buffered_input = Some(WebSocketMessage::Binary(data))
                         }
                         // Frame won't exist at this level, and ping reply is handled by tungstenite
@@ -1518,6 +1531,10 @@ impl super::Nexus {
                                 // an informational event for UX polish.
                             }
                             Ok(WebSocketMessage::Binary(data)) => {
+                                debug_assert!(
+                                    buffered_output.is_none(),
+                                    "attempted to drop buffered_output message ({buffered_output:?})",
+                                );
                                 buffered_output = Some(WebSocketMessage::Binary(data))
                             }
                             // Frame won't exist at this level, and ping reply is handled by tungstenite
@@ -1601,22 +1618,30 @@ mod tests {
         )
         .await;
 
-        slog::info!(logctx.log, "sending message to nexus client");
-        let sent = WebSocketMessage::Binary(vec![1, 2, 3, 42, 5]);
-        nexus_client_ws.send(sent.clone()).await.unwrap();
+        slog::info!(logctx.log, "sending messages to nexus client");
+        let sent1 = WebSocketMessage::Binary(vec![1, 2, 3, 42, 5]);
+        nexus_client_ws.send(sent1.clone()).await.unwrap();
+        let sent2 = WebSocketMessage::Binary(vec![5, 42, 3, 2, 1]);
+        nexus_client_ws.send(sent2.clone()).await.unwrap();
         slog::info!(
             logctx.log,
-            "message sent, receiving it via propolis server"
+            "messages sent, receiving them via propolis server"
         );
-        let received = propolis_server_ws.next().await.unwrap().unwrap();
-        assert_eq!(sent, received);
+        let received1 = propolis_server_ws.next().await.unwrap().unwrap();
+        assert_eq!(sent1, received1);
+        let received2 = propolis_server_ws.next().await.unwrap().unwrap();
+        assert_eq!(sent2, received2);
 
-        slog::info!(logctx.log, "sending message to propolis server");
-        let sent = WebSocketMessage::Binary(vec![6, 7, 8, 90]);
-        propolis_server_ws.send(sent.clone()).await.unwrap();
-        slog::info!(logctx.log, "message sent, receiving it via nexus client");
-        let received = nexus_client_ws.next().await.unwrap().unwrap();
-        assert_eq!(sent, received);
+        slog::info!(logctx.log, "sending messages to propolis server");
+        let sent3 = WebSocketMessage::Binary(vec![6, 7, 8, 90]);
+        propolis_server_ws.send(sent3.clone()).await.unwrap();
+        let sent4 = WebSocketMessage::Binary(vec![90, 8, 7, 6]);
+        propolis_server_ws.send(sent4.clone()).await.unwrap();
+        slog::info!(logctx.log, "messages sent, receiving it via nexus client");
+        let received3 = nexus_client_ws.next().await.unwrap().unwrap();
+        assert_eq!(sent3, received3);
+        let received4 = nexus_client_ws.next().await.unwrap().unwrap();
+        assert_eq!(sent4, received4);
 
         slog::info!(logctx.log, "sending close message to nexus client");
         let sent = WebSocketMessage::Close(Some(CloseFrame {
