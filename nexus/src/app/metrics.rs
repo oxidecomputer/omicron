@@ -25,15 +25,12 @@ impl super::Nexus {
         pagination: PaginationParams<ResourceMetrics, ResourceMetrics>,
         limit: NonZeroU32,
     ) -> Result<dropshot::ResultsPage<Measurement>, Error> {
-        // TODO: check fleet read and/or fleet list children
+        // must be a fleet reader to use this path at all
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
 
         let resource_id = match silo_lookup {
-            // If silo is specified, make sure it exists and the current user
-            // can read it
-            // TODO: are we fetching here, and if so, do we need to?
             Some(silo_lookup) => {
-                // TODO: what should this perm check be? silo read, fleet read,
-                // fleet list children?
+                // Make sure silo exists and current user can read it
                 let (.., authz_silo) =
                     silo_lookup.lookup_for(authz::Action::Read).await?;
                 authz_silo.id()
@@ -67,28 +64,27 @@ impl super::Nexus {
         pagination: PaginationParams<ResourceMetrics, ResourceMetrics>,
         limit: NonZeroU32,
     ) -> Result<dropshot::ResultsPage<Measurement>, Error> {
-        let current_silo =
+        let authz_silo =
             opctx.authn.silo_required().internal_context("listing metrics")?;
+        // must be a silo reader to use this path at all
+        opctx.authorize(authz::Action::Read, &authz_silo).await?;
 
         let resource_id = match project_lookup {
-            // If project is specified, make sure it exists and the current user
-            // can read it
-            // TODO: are we fetching here, and if so, do we need to?
             Some(project_lookup) => {
+                // make sure project exists and current user can read it
                 let (.., authz_project) =
                     project_lookup.lookup_for(authz::Action::Read).await?;
                 authz_project.id()
             }
             // if no project specified, scope to current silo
-            // TODO: check a permission here, like silo read
-            _ => current_silo.id(),
+            _ => authz_silo.id(),
         };
 
         let timeseries = match metric_name {
             SystemMetricName::VirtualDiskSpaceProvisioned
             | SystemMetricName::CpusProvisioned
             | SystemMetricName::RamProvisioned => {
-                opctx.authorize(authz::Action::Read, &current_silo).await?;
+                opctx.authorize(authz::Action::Read, &authz_silo).await?;
                 format!("collection_target:{metric_name}")
             }
         };
