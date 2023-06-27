@@ -1017,13 +1017,17 @@ impl ServiceManager {
                     return Err(Error::SledAgentNotReady);
                 };
 
-                // List the nameservers themselves from the nameservers so that
-                // we can configure DNS in the zone.  We do this by configuring
-                // the dns/install SMF service in the zone's SMF profile.  Note
-                // that we're supplying values for an existing property group on
-                // the SMF service, not defining a new property group, nor
-                // configuring the default instance.  We do also need to enable
-                // the default instance, though.
+                // We want to configure the dns/install SMF service inside the
+                // zone with the list of DNS nameservers.  This will cause
+                // /etc/resolv.conf to be populated inside the zone.  To do
+                // this, we need the full list of nameservers.  Fortunately, the
+                // nameservers provide a DNS name for the full list of
+                // nameservers.
+                //
+                // Note that when we configure the dns/install service, we're
+                // supplying values for an existing property group on the SMF
+                // *service*.  We're not creating a new property group, nor are
+                // we configuring a property group on the instance.t by default.
                 let all_nameservers = info
                     .resolver
                     .lookup_all_ipv6(internal_dns::ServiceName::InternalDns)
@@ -1039,6 +1043,10 @@ impl ServiceManager {
                 }
                 let dns_install = ServiceBuilder::new("network/dns/install")
                     .add_property_group(dns_config_builder)
+                    // We do need to enable the default instance of the
+                    // dns/install service.  It's enough to just mention it
+                    // here, as the ServiceInstanceBuilder always enables the
+                    // instance being added.
                     .add_instance(ServiceInstanceBuilder::new("default"));
 
                 // Configure the CockroachDB service.

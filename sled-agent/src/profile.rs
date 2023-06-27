@@ -177,6 +177,19 @@ impl PropertyGroupBuilder {
     }
 
     pub fn add_property(mut self, name: &str, ty: &str, value: &str) -> Self {
+        // The data structures here are oriented around a few goals:
+        //
+        // - Properties will be written out in the order that they were added.
+        //   This does not affect correctness but is a nicer developer
+        //   experience than writing them out alphabetically or in some other
+        //   arbitrary order.  This tends to keep related properties together,
+        //   since the code that adds them in the first place tends to do so in
+        //   a logical way.
+        //
+        // - We support multi-valued properties using the `<property>` syntax.
+        //
+        // - If there's only one value for a property, we use the more concise
+        //   `<propval>` syntax.
         if self
             .property_types
             .insert(name.to_string(), ty.to_string())
