@@ -8,6 +8,7 @@ license = "MPL-2.0"
 openssl.workspace = true
 thiserror.workspace = true
 trust-dns-proto.workspace = true
+x509-parser.workspace = true
 
 omicron-common.workspace = true
 
