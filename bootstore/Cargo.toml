@@ -9,8 +9,9 @@ license = "MPL-2.0"
 path = "../rpaths"
 
 [dependencies]
-bcs.workspace = true
+bytes.workspace = true
 chacha20poly1305.workspace = true
+ciborium.workspace = true
 curve25519-dalek.workspace = true
 derive_more.workspace = true
 hex.workspace = true
@@ -38,3 +39,5 @@ pq-sys = "*"
 assert_matches.workspace = true
 omicron-test-utils.workspace = true
 proptest.workspace = true
+slog-async.workspace = true
+slog-term.workspace = true
