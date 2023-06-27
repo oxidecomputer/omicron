@@ -11,6 +11,7 @@ use crate::http_entrypoints::CurrentRssUserConfig;
 use crate::http_entrypoints::CurrentRssUserConfigInsensitive;
 use crate::http_entrypoints::CurrentRssUserConfigSensitive;
 use crate::RackV1Inventory;
+use anyhow::anyhow;
 use anyhow::bail;
 use anyhow::Result;
 use bootstrap_agent_client::types::BootstrapAddressDiscovery;
@@ -22,6 +23,7 @@ use bootstrap_agent_client::types::UserId;
 use gateway_client::types::SpType;
 use omicron_certificates::CertificateValidator;
 use omicron_common::address;
+use omicron_common::address::Ipv4Range;
 use omicron_common::api::internal::shared::RackNetworkConfig;
 use sled_hardware::Baseboard;
 use std::collections::BTreeSet;
@@ -39,8 +41,8 @@ const RECOVERY_SILO_USERNAME: &str = "recovery";
 
 #[derive(Default)]
 struct PartialCertificate {
-    cert: Option<Vec<u8>>,
-    key: Option<Vec<u8>>,
+    cert: Option<String>,
+    key: Option<String>,
 }
 
 /// An analogue to `RackInitializeRequest`, but with optional fields to allow
@@ -128,7 +130,7 @@ impl CurrentRssConfig {
             bail!("rack network config not set (have you uploaded a config?)");
         };
         let rack_network_config =
-            validate_rack_network_config(rack_network_config);
+            validate_rack_network_config(rack_network_config)?;
 
         let known_bootstrap_sleds = bootstrap_peers.sleds();
         let mut bootstrap_ips = Vec::new();
@@ -199,7 +201,7 @@ impl CurrentRssConfig {
 
     pub(crate) fn push_cert(
         &mut self,
-        cert: Vec<u8>,
+        cert: String,
     ) -> Result<CertificateUploadResponse, String> {
         self.partial_external_certificate.cert = Some(cert);
         self.maybe_promote_external_certificate()
@@ -207,7 +209,7 @@ impl CurrentRssConfig {
 
     pub(crate) fn push_key(
         &mut self,
-        key: Vec<u8>,
+        key: String,
     ) -> Result<CertificateUploadResponse, String> {
         self.partial_external_certificate.key = Some(key);
         self.maybe_promote_external_certificate()
@@ -240,7 +242,9 @@ impl CurrentRssConfig {
         // will have to do that.
         validator.danger_disable_expiration_validation();
 
-        validator.validate(cert, key).map_err(|err| err.to_string())?;
+        validator
+            .validate(cert.as_bytes(), key.as_bytes())
+            .map_err(|err| err.to_string())?;
 
         // Cert and key appear to be valid; steal them out of
         // `partial_external_certificate` and promote them to
@@ -355,18 +359,36 @@ impl From<&'_ CurrentRssConfig> for CurrentRssUserConfig {
 
 fn validate_rack_network_config(
     config: &RackNetworkConfig,
-) -> bootstrap_agent_client::types::RackNetworkConfig {
+) -> Result<bootstrap_agent_client::types::RackNetworkConfig> {
     use bootstrap_agent_client::types::PortFec as BaPortFec;
     use bootstrap_agent_client::types::PortSpeed as BaPortSpeed;
     use omicron_common::api::internal::shared::PortFec;
     use omicron_common::api::internal::shared::PortSpeed;
 
-    // TODO Add client side checks on `rack_network_config` contents.
+    // Make sure `infra_ip_first`..`infra_ip_last` is a well-defined range...
+    let infra_ip_range =
+        Ipv4Range::new(config.infra_ip_first, config.infra_ip_last).map_err(
+            |s: String| {
+                anyhow!("invalid `infra_ip_first`, `infra_ip_last` range: {s}")
+            },
+        )?;
 
-    bootstrap_agent_client::types::RackNetworkConfig {
-        gateway_ip: config.gateway_ip.clone(),
-        infra_ip_first: config.infra_ip_first.clone(),
-        infra_ip_last: config.infra_ip_last.clone(),
+    // ... and that it contains `uplink_ip`.
+    if config.uplink_ip < infra_ip_range.first
+        || config.uplink_ip > infra_ip_range.last
+    {
+        bail!(
+            "`uplink_ip` must be in the range defined by `infra_ip_first` \
+             and `infra_ip_last`"
+        );
+    }
+
+    // TODO Add more client side checks on `rack_network_config` contents?
+
+    Ok(bootstrap_agent_client::types::RackNetworkConfig {
+        gateway_ip: config.gateway_ip,
+        infra_ip_first: config.infra_ip_first,
+        infra_ip_last: config.infra_ip_last,
         uplink_port: config.uplink_port.clone(),
         uplink_port_speed: match config.uplink_port_speed {
             PortSpeed::Speed0G => BaPortSpeed::Speed0G,
@@ -384,7 +406,7 @@ fn validate_rack_network_config(
             PortFec::None => BaPortFec::None,
             PortFec::Rs => BaPortFec::Rs,
         },
-        uplink_ip: config.uplink_ip.clone(),
+        uplink_ip: config.uplink_ip,
         uplink_vid: config.uplink_vid,
-    }
+    })
 }
