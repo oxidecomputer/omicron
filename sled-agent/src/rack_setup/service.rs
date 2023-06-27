@@ -103,7 +103,6 @@ use slog::Logger;
 use std::collections::{HashMap, HashSet};
 use std::iter;
 use std::net::IpAddr;
-use std::net::Ipv4Addr;
 use std::net::{Ipv6Addr, SocketAddr, SocketAddrV6};
 use thiserror::Error;
 
@@ -832,13 +831,14 @@ impl ServiceInner {
         let rack_network_config = match &config.rack_network_config {
             Some(config) => {
                 let value = NexusTypes::RackNetworkConfig {
-                    gateway_ip: config.gateway_ip.clone(),
-                    infra_ip_first: config.infra_ip_first.clone(),
-                    infra_ip_last: config.infra_ip_last.clone(),
-                    uplink_ip: config.uplink_ip.clone(),
+                    gateway_ip: config.gateway_ip,
+                    infra_ip_first: config.infra_ip_first,
+                    infra_ip_last: config.infra_ip_last,
+                    uplink_ip: config.uplink_ip,
                     uplink_port: config.uplink_port.clone(),
                     uplink_port_speed: config.uplink_port_speed.clone().into(),
                     uplink_port_fec: config.uplink_port_fec.clone().into(),
+                    uplink_vid: config.uplink_vid,
                 };
                 Some(value)
             }
@@ -1118,11 +1118,7 @@ impl ServiceInner {
             // TODO handle breakouts
             // https://github.com/oxidecomputer/omicron/issues/3062
             let link_id = LinkId(0);
-            let addr: IpAddr = rack_network_config.uplink_ip.parse()
-                .map_err(|e| {
-                    SetupServiceError::BadConfig(format!(
-                    "unable to parse rack_network_config.uplink_up as IpAddr: {e}"))
-                })?;
+            let addr = IpAddr::V4(rack_network_config.uplink_ip);
 
             let link_settings = LinkSettings {
                 // TODO Allow user to configure link properties
@@ -1145,15 +1141,16 @@ impl ServiceInner {
                         format!("could not use value provided to rack_network_config.uplink_port as PortID: {e}")
                 ))?;
 
-            let nexthop: Option<Ipv4Addr> = Some(rack_network_config.gateway_ip.parse()
-                .map_err(|e| SetupServiceError::BadConfig(
-                        format!("unable to parse rack_network_config.gateway_ip as Ipv4Addr: {e}")
-                ))?);
+            let nexthop = Some(rack_network_config.gateway_ip);
 
             dpd_port_settings.v4_routes.insert(
                 Ipv4Cidr { prefix: "0.0.0.0".parse().unwrap(), prefix_len: 0 }
                     .to_string(),
-                RouteSettingsV4 { link_id: link_id.0, nexthop },
+                RouteSettingsV4 {
+                    link_id: link_id.0,
+                    vid: rack_network_config.uplink_vid,
+                    nexthop,
+                },
             );
 
             loop {

@@ -10,7 +10,8 @@ use std::fs::File;
 use std::time::{Duration, SystemTime};
 use wicket_common::update_events::EventReport;
 use wicketd_client::types::{
-    ArtifactId, IgnitionCommand, RackV1Inventory, SemverVersion,
+    ArtifactId, CurrentRssUserConfig, IgnitionCommand, RackOperationStatus,
+    RackV1Inventory, SemverVersion,
 };
 
 /// Event report type returned by the get_artifacts_and_event_reports API call.
@@ -33,6 +34,12 @@ pub enum Event {
         artifacts: Vec<ArtifactId>,
         event_reports: EventReportMap,
     },
+
+    /// The current RSS configuration.
+    RssConfig(CurrentRssUserConfig),
+
+    /// The current state of rack initialization.
+    RackSetupStatus(Result<RackOperationStatus, String>),
 
     /// The tick of a Timer
     /// This can be used to draw a frame to the terminal
@@ -69,6 +76,8 @@ pub enum Action {
     AbortUpdate(ComponentId),
     ClearUpdateState(ComponentId),
     Ignition(ComponentId, IgnitionCommand),
+    StartRackSetup,
+    StartRackReset,
 }
 
 impl Action {
@@ -82,7 +91,9 @@ impl Action {
             | Action::StartUpdate(_)
             | Action::AbortUpdate(_)
             | Action::ClearUpdateState(_)
-            | Action::Ignition(_, _) => true,
+            | Action::Ignition(_, _)
+            | Action::StartRackSetup
+            | Action::StartRackReset => true,
         }
     }
 }

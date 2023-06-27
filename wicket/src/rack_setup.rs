@@ -136,9 +136,9 @@ impl SetupArgs {
             }
             SetupArgs::UploadCert => {
                 slog::info!(log, "reading cert from stdin...");
-                let mut cert = Vec::new();
+                let mut cert = String::new();
                 io::stdin()
-                    .read_to_end(&mut cert)
+                    .read_to_string(&mut cert)
                     .context("failed to read certificate from stdin")?;
 
                 slog::info!(log, "uploading cert to wicketd...");
@@ -180,9 +180,9 @@ impl SetupArgs {
             }
             SetupArgs::UploadKey => {
                 slog::info!(log, "reading key from stdin...");
-                let mut key = Zeroizing::new(Vec::new());
+                let mut key = Zeroizing::new(String::new());
                 io::stdin()
-                    .read_to_end(&mut key)
+                    .read_to_string(&mut key)
                     .context("failed to read key from stdin")?;
 
                 slog::info!(log, "uploading key to wicketd...");
@@ -232,7 +232,7 @@ fn read_and_hash_password(log: &Logger) -> Result<PasswordHashString> {
     let pass1 = rpassword::prompt_password(
         "Password for recovery user of recovery silo: ",
     )
-    .context("failed to read password")?;
+    .context("failed to read password (do you need to use `ssh -t`?)")?;
     let pass1 = Zeroizing::new(pass1);
 
     let pass2 = rpassword::prompt_password(

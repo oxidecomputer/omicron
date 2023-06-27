@@ -31,6 +31,7 @@ use nexus_db_model::Certificate;
 use nexus_db_model::ServiceKind;
 use nexus_types::external_api::params;
 use nexus_types::external_api::shared;
+use nexus_types::external_api::shared::SiloRole;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
@@ -89,6 +90,12 @@ impl DataStore {
         silo: Silo,
     ) -> Result<impl RunnableQuery<Silo>, Error> {
         opctx.authorize(authz::Action::CreateChild, &authz::FLEET).await?;
+
+        // If the new Silo has configuration mapping its roles to Fleet-level
+        // roles, that's effectively trying to modify the Fleet-level policy.
+        if !silo.mapped_fleet_roles()?.is_empty() {
+            opctx.authorize(authz::Action::ModifyPolicy, &authz::FLEET).await?;
+        }
 
         use db::schema::silo::dsl;
         Ok(diesel::insert_into(dsl::silo)
@@ -154,7 +161,7 @@ impl DataStore {
 
         let silo_create_query = Self::silo_create_query(
             opctx,
-            db::model::Silo::new_with_id(silo_id, new_silo_params.clone()),
+            db::model::Silo::new_with_id(silo_id, new_silo_params.clone())?,
         )
         .await?;
 
@@ -188,7 +195,7 @@ impl DataStore {
                     role_assignments: vec![shared::RoleAssignment {
                         identity_type: shared::IdentityType::SiloGroup,
                         identity_id: silo_group_id,
-                        role_name: authz::SiloRole::Admin,
+                        role_name: SiloRole::Admin,
                     }],
                 };
 
