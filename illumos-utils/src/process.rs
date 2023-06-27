@@ -12,17 +12,14 @@ use std::str::from_utf8;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
-// NOTE: Is the "counter as ID" misleading?
-//
-// It's not actually possible to make an incrementing counter avoid the race of
-// "log, do operation, log again" without making executing processes serialized
-// (which seems bad).
-//
-// We could make this a UUID, but I don't like how hard-to-read those can be
-// when trying to quickly parse logs.
-
+/// Describes the commonly-used "safe-to-reference" type describing the
+/// Executor as a trait object.
 pub type BoxedExecutor = Arc<dyn Executor>;
 
+/// Describes an "executor", which can run [Command]s and return a response.
+///
+/// - In production, this is usually simply a [HostExecutor].
+/// - Under test, this can be customized, and a [FakeExecutor] may be used.
 pub trait Executor: Send + Sync {
     fn execute(&self, command: &mut Command) -> Result<Output, ExecutionError>;
 }
@@ -63,6 +60,7 @@ fn log_output(log: &Logger, id: u64, output: &Output) {
     }
 }
 
+/// Wrapper around the input of a [std::process::Command] as strings.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Input {
     pub program: String,
@@ -79,6 +77,8 @@ impl Input {
         }
     }
 
+    /// Short-hand for a whitespace-separated string, which can be provided
+    /// "like a shell command".
     pub fn shell<S: AsRef<str>>(input: S) -> Self {
         let mut args = input.as_ref().split_whitespace();
 
@@ -97,6 +97,10 @@ impl std::fmt::Display for Input {
         }
         Ok(())
     }
+}
+
+fn os_str_to_string(s: &std::ffi::OsStr) -> String {
+    s.to_string_lossy().to_string()
 }
 
 impl From<&Command> for Input {
@@ -122,9 +126,11 @@ impl From<&Command> for Input {
     }
 }
 
+/// Convenience functions for usage in tests, to perform common operations
+/// with minimal boilerplate.
 pub trait OutputExt: Sized {
     fn success() -> Self;
-    fn silent_failure() -> Self;
+    fn failure() -> Self;
     fn set_stdout<S: AsRef<str>>(self, stdout: S) -> Self;
     fn set_stderr<S: AsRef<str>>(self, stderr: S) -> Self;
 }
@@ -138,7 +144,7 @@ impl OutputExt for Output {
         }
     }
 
-    fn silent_failure() -> Self {
+    fn failure() -> Self {
         Output {
             status: ExitStatus::from_raw(-1),
             stdout: vec![],
@@ -157,14 +163,11 @@ impl OutputExt for Output {
     }
 }
 
+/// Describes a fully-completed command.
 #[derive(Clone)]
 pub struct CompletedCommand {
     pub input: Input,
     pub output: Output,
-}
-
-fn os_str_to_string(s: &std::ffi::OsStr) -> String {
-    s.to_string_lossy().to_string()
 }
 
 impl CompletedCommand {
@@ -173,6 +176,10 @@ impl CompletedCommand {
     }
 }
 
+/// A handler that may be used for setting inputs/outputs to the executor
+/// when these commands are known ahead-of-time.
+///
+/// See: [FakeExecutor::set_static_handler] for usage.
 pub struct StaticHandler {
     expected: Vec<(Input, Output)>,
     index: usize,
@@ -192,7 +199,7 @@ impl StaticHandler {
     }
 
     pub fn expect_fail<S: AsRef<str>>(&mut self, input: S) {
-        self.expect(Input::shell(input), Output::silent_failure())
+        self.expect(Input::shell(input), Output::failure())
     }
 
     fn execute(&mut self, command: &Command) -> Output {
@@ -220,6 +227,7 @@ impl Drop for StaticHandler {
 
 pub type ExecutorFn = Box<dyn FnMut(&Command) -> Output + Send + Sync>;
 
+/// An executor which can expect certain inputs, and respond with specific outputs.
 pub struct FakeExecutor {
     log: Logger,
     counter: AtomicU64,
@@ -237,16 +245,19 @@ impl FakeExecutor {
         })
     }
 
+    /// Set the request handler to an arbitrary function.
     pub fn set_handler(&self, f: ExecutorFn) {
         *self.handler.lock().unwrap() = f;
     }
 
+    /// Set the request handler to a static set of inputs and outputs.
     pub fn set_static_handler(&self, mut handler: StaticHandler) {
         self.set_handler(Box::new(move |cmd| -> Output {
             handler.execute(cmd)
         }));
     }
 
+    /// Perform some type coercion to access a commonly-used trait object.
     pub fn as_executor(self: Arc<Self>) -> BoxedExecutor {
         self
     }
@@ -264,7 +275,7 @@ impl Executor for FakeExecutor {
         // Call our handler function with the caller-provided function.
         let output = self.handler.lock().unwrap()(command);
 
-        // TODO: De-duplicate this with the RealExecutor
+        // TODO: De-duplicate this with the HostExecutor
         if !output.status.success() {
             return Err(ExecutionError::CommandFailure(Box::new(
                 FailureInfo {
@@ -288,12 +299,12 @@ impl Executor for FakeExecutor {
     }
 }
 
-pub struct RealExecutor {
+pub struct HostExecutor {
     log: slog::Logger,
     counter: std::sync::atomic::AtomicU64,
 }
 
-impl RealExecutor {
+impl HostExecutor {
     pub fn new(log: Logger) -> Arc<Self> {
         Arc::new(Self { log, counter: AtomicU64::new(0) })
     }
@@ -303,7 +314,7 @@ impl RealExecutor {
     }
 }
 
-impl Executor for RealExecutor {
+impl Executor for HostExecutor {
     fn execute(&self, command: &mut Command) -> Result<Output, ExecutionError> {
         let id = self.counter.fetch_add(1, Ordering::SeqCst);
         log_command(&self.log, id, command);

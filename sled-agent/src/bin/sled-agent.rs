@@ -6,7 +6,7 @@
 
 use camino::Utf8PathBuf;
 use clap::{Parser, Subcommand};
-use illumos_utils::process::RealExecutor;
+use illumos_utils::process::HostExecutor;
 use omicron_common::cmd::fatal;
 use omicron_common::cmd::CmdError;
 use omicron_sled_agent::bootstrap::{
@@ -96,7 +96,7 @@ async fn do_run() -> Result<(), CmdError> {
                 .log
                 .to_logger("sled-agent")
                 .map_err(|e| CmdError::Failure(e.to_string()))?;
-            let executor = RealExecutor::new(log).as_executor();
+            let executor = HostExecutor::new(log).as_executor();
 
             // Derive the bootstrap addresses from the data link's MAC address.
             let link = config

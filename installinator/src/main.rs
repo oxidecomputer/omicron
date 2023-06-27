@@ -5,14 +5,14 @@
 use std::error::Error;
 
 use clap::Parser;
-use illumos_utils::process::RealExecutor;
+use illumos_utils::process::HostExecutor;
 use installinator::InstallinatorApp;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     let app = InstallinatorApp::parse();
     let log = InstallinatorApp::setup_log("/tmp/installinator.log")?;
-    let executor = RealExecutor::new(log.clone()).as_executor();
+    let executor = HostExecutor::new(log.clone()).as_executor();
     app.exec(&log, &executor).await?;
     Ok(())
 }
