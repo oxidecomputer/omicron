@@ -2,6 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use chrono::DateTime;
+use chrono::Utc;
 use omicron_common::api::internal::nexus::{
     DiskRuntimeState, InstanceRuntimeState,
 };
@@ -655,4 +657,57 @@ pub enum SledRole {
     /// The sled is attached to the network switch, and has additional
     /// responsibilities.
     Scrimlet,
+}
+
+/// An identifier for a zone bundle.
+#[derive(
+    Clone,
+    Debug,
+    Deserialize,
+    Eq,
+    Hash,
+    JsonSchema,
+    Ord,
+    PartialEq,
+    PartialOrd,
+    Serialize,
+)]
+pub struct ZoneBundleId {
+    /// The name of the zone this bundle is derived from.
+    pub zone_name: String,
+    /// The ID for this bundle itself.
+    pub bundle_id: Uuid,
+}
+
+/// Metadata about a zone bundle.
+#[derive(
+    Clone,
+    Debug,
+    Deserialize,
+    Eq,
+    Hash,
+    JsonSchema,
+    Ord,
+    PartialEq,
+    PartialOrd,
+    Serialize,
+)]
+pub struct ZoneBundleMetadata {
+    /// Identifier for this zone bundle
+    pub id: ZoneBundleId,
+    /// The time at which this zone bundle was created.
+    pub time_created: DateTime<Utc>,
+}
+
+impl ZoneBundleMetadata {
+    /// Create a new set of metadata for the provided zone.
+    pub(crate) fn new(zone_name: &str) -> Self {
+        Self {
+            id: ZoneBundleId {
+                zone_name: zone_name.to_string(),
+                bundle_id: Uuid::new_v4(),
+            },
+            time_created: Utc::now(),
+        }
+    }
 }

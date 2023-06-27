@@ -33,8 +33,8 @@ impl SetupServiceConfig {
         if let Some(parent) = path.parent() {
             let cert_path = parent.join("initial-tls-cert.pem");
             let key_path = parent.join("initial-tls-key.pem");
-            let cert_bytes = std::fs::read(&cert_path);
-            let key_bytes = std::fs::read(&key_path);
+            let cert_bytes = std::fs::read_to_string(&cert_path);
+            let key_bytes = std::fs::read_to_string(&key_path);
             match (cert_bytes, key_bytes) {
                 (Ok(cert), Ok(key)) => {
                     raw_config
@@ -222,9 +222,7 @@ mod test {
             .expect("failed to read generated config with certificate");
         assert_eq!(read_cfg.external_certificates.len(), 1);
         let cert = read_cfg.external_certificates.iter().next().unwrap();
-        let key_pem = std::str::from_utf8(&cert.key)
-            .expect("generated PEM was not UTF-8");
-        let _ = rcgen::KeyPair::from_pem(&key_pem)
+        let _ = rcgen::KeyPair::from_pem(&cert.key)
             .expect("generated PEM did not parse as KeyPair");
     }
 }
