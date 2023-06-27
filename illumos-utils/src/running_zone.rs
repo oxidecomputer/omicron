@@ -8,6 +8,7 @@ use crate::addrobj::AddrObject;
 use crate::dladm::Etherstub;
 use crate::link::{Link, VnicAllocator};
 use crate::opte::{Port, PortTicket};
+use crate::process::{BoxedExecutor, ExecutionError};
 use crate::svc::wait_for_service;
 use crate::zone::{AddressRequest, IPADM, ZONE_PREFIX};
 use camino::{Utf8Path, Utf8PathBuf};
@@ -30,7 +31,7 @@ use crate::zone::Zones;
 pub struct RunCommandError {
     zone: String,
     #[source]
-    err: crate::ExecutionError,
+    err: ExecutionError,
 }
 
 /// Errors returned from [`RunningZone::boot`].
@@ -66,7 +67,7 @@ pub enum EnsureAddressError {
     GetAddressesError(#[from] crate::zone::GetAddressesError),
 
     #[error("Failed ensuring link-local address in {zone}: {err}")]
-    LinkLocal { zone: String, err: crate::ExecutionError },
+    LinkLocal { zone: String, err: ExecutionError },
 
     #[error("Failed to find non-link-local address in {zone}")]
     NoDhcpV6Addr { zone: String },
@@ -193,12 +194,12 @@ mod zenter {
         // Automatically detach inherited contracts.
         const CT_PR_REGENT: c_uint = 0x08;
 
-        pub fn new() -> Result<Self, crate::ExecutionError> {
+        pub fn new() -> Result<Self, ExecutionError> {
             let path = CStr::from_bytes_with_nul(Self::TEMPLATE_PATH).unwrap();
             let fd = unsafe { libc::open(path.as_ptr(), libc::O_RDWR) };
             if fd < 0 {
                 let err = std::io::Error::last_os_error();
-                return Err(crate::ExecutionError::ZoneEnter { err });
+                return Err(ExecutionError::ZoneEnter { err });
             }
 
             // Initialize the contract template.
@@ -221,7 +222,7 @@ mod zenter {
                 || unsafe { ct_tmpl_activate(fd) } != 0
             {
                 let err = std::io::Error::last_os_error();
-                return Err(crate::ExecutionError::ZoneEnter { err });
+                return Err(ExecutionError::ZoneEnter { err });
             }
             Ok(Self { fd })
         }
@@ -276,7 +277,7 @@ impl RunningZone {
         let Some(id) = self.id else {
             return Err(RunCommandError {
                 zone: self.name().to_string(),
-                err: crate::ExecutionError::NotRunning,
+                err: ExecutionError::NotRunning,
             });
         };
         let template =
@@ -284,7 +285,7 @@ impl RunningZone {
                 RunCommandError { zone: self.name().to_string(), err }
             })?);
         let tmpl = std::sync::Arc::clone(&template);
-        let mut command = std::process::Command::new(crate::PFEXEC);
+        let mut command = std::process::Command::new(crate::process::PFEXEC);
         command.env_clear();
         unsafe {
             command.pre_exec(move || {
@@ -305,9 +306,8 @@ impl RunningZone {
 
         // Capture the result, and be sure to clear the template for this
         // process itself before returning.
-        let res = crate::execute(command).map_err(|err| RunCommandError {
-            zone: self.name().to_string(),
-            err,
+        let res = self.inner.executor.execute(command).map_err(|err| {
+            RunCommandError { zone: self.name().to_string(), err }
         });
         template.clear();
         res.map(|output| String::from_utf8_lossy(&output.stdout).to_string())
@@ -321,12 +321,14 @@ impl RunningZone {
         S: AsRef<std::ffi::OsStr>,
     {
         // NOTE: This implementation is useless, and will never work. However,
-        // it must actually call `crate::execute()` for the testing purposes.
+        // it must actually call `execute()` for the testing purposes.
         // That's mocked by `mockall` to return known data, and so the command
         // that's actually run is irrelevant.
         let mut command = std::process::Command::new("echo");
         let command = command.args(args);
-        crate::execute(command)
+        self.inner
+            .executor
+            .execute(command)
             .map_err(|err| RunCommandError {
                 zone: self.name().to_string(),
                 err,
@@ -460,8 +462,12 @@ impl RunningZone {
                 zone: self.inner.name.clone(),
                 err,
             })?;
-        let network =
-            Zones::ensure_address(Some(&self.inner.name), &addrobj, addrtype)?;
+        let network = Zones::ensure_address(
+            &self.inner.executor,
+            Some(&self.inner.name),
+            &addrobj,
+            addrtype,
+        )?;
         Ok(network)
     }
 
@@ -487,8 +493,12 @@ impl RunningZone {
                     err,
                 }
             })?;
-        let _ =
-            Zones::ensure_address(Some(&self.inner.name), &addrobj, addrtype)?;
+        let _ = Zones::ensure_address(
+            &self.inner.executor,
+            Some(&self.inner.name),
+            &addrobj,
+            addrtype,
+        )?;
         Ok(())
     }
 
@@ -515,8 +525,12 @@ impl RunningZone {
             })?;
         let zone = Some(self.inner.name.as_ref());
         if let IpAddr::V4(gateway) = port.gateway().ip() {
-            let addr =
-                Zones::ensure_address(zone, &addrobj, AddressRequest::Dhcp)?;
+            let addr = Zones::ensure_address(
+                &self.inner.executor,
+                zone,
+                &addrobj,
+                AddressRequest::Dhcp,
+            )?;
             // TODO-remove(#2931): OPTE's DHCP "server" returns the list of routes
             // to add via option 121 (Classless Static Route). The illumos DHCP
             // client currently does not support this option, so we add the routes
@@ -544,12 +558,15 @@ impl RunningZone {
         } else {
             // If the port is using IPv6 addressing we still want it to use
             // DHCP(v6) which requires first creating a link-local address.
-            Zones::ensure_has_link_local_v6_address(zone, &addrobj).map_err(
-                |err| EnsureAddressError::LinkLocal {
-                    zone: self.inner.name.clone(),
-                    err,
-                },
-            )?;
+            Zones::ensure_has_link_local_v6_address(
+                &self.inner.executor,
+                zone,
+                &addrobj,
+            )
+            .map_err(|err| EnsureAddressError::LinkLocal {
+                zone: self.inner.name.clone(),
+                err,
+            })?;
 
             // Unlike DHCPv4, there's no blocking `ipadm` call we can
             // make as it just happens in the background. So we just poll
@@ -559,12 +576,16 @@ impl RunningZone {
                 || async {
                     // Grab all the address on the addrobj. There should
                     // always be at least one (the link-local we added)
-                    let addrs = Zones::get_all_addresses(zone, &addrobj)
-                        .map_err(|e| {
-                            backoff::BackoffError::permanent(
-                                EnsureAddressError::from(e),
-                            )
-                        })?;
+                    let addrs = Zones::get_all_addresses(
+                        &self.inner.executor,
+                        zone,
+                        &addrobj,
+                    )
+                    .map_err(|e| {
+                        backoff::BackoffError::permanent(
+                            EnsureAddressError::from(e),
+                        )
+                    })?;
 
                     // Ipv6Addr::is_unicast_link_local is sadly not stable
                     let is_ll =
@@ -655,6 +676,7 @@ impl RunningZone {
     /// address on the zone.
     pub async fn get(
         log: &Logger,
+        executor: &BoxedExecutor,
         vnic_allocator: &VnicAllocator<Etherstub>,
         zone_prefix: &str,
         addrtype: AddressRequest,
@@ -679,22 +701,19 @@ impl RunningZone {
         }
 
         let zone_name = zone_info.name();
-        let vnic_name =
-            Zones::get_control_interface(zone_name).map_err(|err| {
-                GetZoneError::ControlInterface {
-                    name: zone_name.to_string(),
-                    err,
-                }
+        let vnic_name = Zones::get_control_interface(executor, zone_name)
+            .map_err(|err| GetZoneError::ControlInterface {
+                name: zone_name.to_string(),
+                err,
             })?;
         let addrobj = AddrObject::new_control(&vnic_name).map_err(|err| {
             GetZoneError::AddrObject { name: zone_name.to_string(), err }
         })?;
-        Zones::ensure_address(Some(zone_name), &addrobj, addrtype).map_err(
-            |err| GetZoneError::EnsureAddress {
+        Zones::ensure_address(executor, Some(zone_name), &addrobj, addrtype)
+            .map_err(|err| GetZoneError::EnsureAddress {
                 name: zone_name.to_string(),
                 err,
-            },
-        )?;
+            })?;
 
         let control_vnic = vnic_allocator
             .wrap_existing(vnic_name)
@@ -703,16 +722,17 @@ impl RunningZone {
         // The bootstrap address for a running zone never changes,
         // so there's no need to call `Zones::ensure_address`.
         // Currently, only the switch zone has a bootstrap interface.
-        let bootstrap_vnic = Zones::get_bootstrap_interface(zone_name)
-            .map_err(|err| GetZoneError::BootstrapInterface {
-                name: zone_name.to_string(),
-                err,
-            })?
-            .map(|name| {
-                vnic_allocator
-                    .wrap_existing(name)
-                    .expect("Failed to wrap valid bootstrap VNIC")
-            });
+        let bootstrap_vnic =
+            Zones::get_bootstrap_interface(executor, zone_name)
+                .map_err(|err| GetZoneError::BootstrapInterface {
+                    name: zone_name.to_string(),
+                    err,
+                })?
+                .map(|name| {
+                    vnic_allocator
+                        .wrap_existing(name)
+                        .expect("Failed to wrap valid bootstrap VNIC")
+                });
 
         Ok(Self {
             id: zone_info.id().map(|x| {
@@ -720,6 +740,7 @@ impl RunningZone {
             }),
             inner: InstalledZone {
                 log: log.new(o!("zone" => zone_name.to_string())),
+                executor: executor.clone(),
                 zonepath: zone_info.path().to_path_buf().try_into()?,
                 name: zone_name.to_string(),
                 control_vnic,
@@ -808,6 +829,8 @@ pub enum InstallZoneError {
 pub struct InstalledZone {
     log: Logger,
 
+    executor: BoxedExecutor,
+
     // Filesystem path of the zone
     zonepath: Utf8PathBuf,
 
@@ -863,6 +886,7 @@ impl InstalledZone {
     #[allow(clippy::too_many_arguments)]
     pub async fn install(
         log: &Logger,
+        executor: &BoxedExecutor,
         underlay_vnic_allocator: &VnicAllocator<Etherstub>,
         zone_root_path: &Utf8Path,
         zone_image_paths: &[Utf8PathBuf],
@@ -934,6 +958,7 @@ impl InstalledZone {
 
         Ok(InstalledZone {
             log: log.new(o!("zone" => full_zone_name.clone())),
+            executor: executor.clone(),
             zonepath: zone_root_path.join(&full_zone_name),
             name: full_zone_name,
             control_vnic,

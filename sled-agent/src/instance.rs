@@ -20,6 +20,7 @@ use futures::lock::{Mutex, MutexGuard};
 use illumos_utils::dladm::Etherstub;
 use illumos_utils::link::VnicAllocator;
 use illumos_utils::opte::PortManager;
+use illumos_utils::process::BoxedExecutor;
 use illumos_utils::running_zone::{
     InstalledZone, RunCommandError, RunningZone,
 };
@@ -202,6 +203,8 @@ struct PropolisSetup {
 
 struct InstanceInner {
     log: Logger,
+
+    executor: BoxedExecutor,
 
     // Properties visible to Propolis
     properties: propolis_client::api::InstanceProperties,
@@ -567,6 +570,7 @@ mockall::mock! {
         #[allow(clippy::too_many_arguments)]
         pub fn new(
             log: Logger,
+            executor: &BoxedExecutor,
             id: Uuid,
             ticket: InstanceTicket,
             initial: InstanceHardware,
@@ -614,6 +618,7 @@ impl Instance {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         log: Logger,
+        executor: &BoxedExecutor,
         id: Uuid,
         ticket: InstanceTicket,
         initial: InstanceHardware,
@@ -624,6 +629,7 @@ impl Instance {
         info!(log, "Instance::new w/initial HW: {:?}", initial);
         let instance = InstanceInner {
             log: log.new(o!("instance_id" => id.to_string())),
+            executor: executor.clone(),
             // NOTE: Mostly lies.
             properties: propolis_client::api::InstanceProperties {
                 id,
@@ -854,6 +860,7 @@ impl Instance {
         let root = camino::Utf8Path::new(ZONE_ZFS_RAMDISK_DATASET_MOUNTPOINT);
         let installed_zone = InstalledZone::install(
             &inner.log,
+            &inner.executor,
             &inner.vnic_allocator,
             &root,
             &["/opt/oxide".into()],
@@ -1104,6 +1111,7 @@ mod test {
     use chrono::Utc;
     use illumos_utils::dladm::Etherstub;
     use illumos_utils::opte::PortManager;
+    use illumos_utils::process::FakeExecutor;
     use omicron_common::api::external::{
         ByteCount, Generation, InstanceCpuCount, InstanceState,
     };
@@ -1157,8 +1165,13 @@ mod test {
     async fn transition_before_start() {
         let logctx = test_setup_log("transition_before_start");
         let log = &logctx.log;
-        let vnic_allocator =
-            VnicAllocator::new("Test", Etherstub("mylink".to_string()));
+
+        let executor = &FakeExecutor::new(log.clone()).as_executor();
+        let vnic_allocator = VnicAllocator::new(
+            executor,
+            "Test",
+            Etherstub("mylink".to_string()),
+        );
         let underlay_ip = std::net::Ipv6Addr::new(
             0xfd00, 0x1de, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
         );
@@ -1189,6 +1202,7 @@ mod test {
 
         let instance_manager = InstanceManager::new(
             log.clone(),
+            executor,
             nexus_client_with_resolver.clone(),
             Etherstub("mylink".to_string()),
             port_manager.clone(),
@@ -1197,6 +1211,7 @@ mod test {
 
         let inst = Instance::new(
             log.clone(),
+            executor,
             test_uuid(),
             instance_manager.test_instance_ticket(test_uuid()),
             new_initial_instance(),

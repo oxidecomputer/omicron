@@ -4,7 +4,7 @@
 
 //! Utilities for managing Zpools.
 
-use crate::{execute, ExecutionError, PFEXEC};
+use crate::process::{BoxedExecutor, ExecutionError, PFEXEC};
 use camino::{Utf8Path, Utf8PathBuf};
 use schemars::JsonSchema;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -23,7 +23,7 @@ pub struct ParseError(String);
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
     #[error("Zpool execution error: {0}")]
-    Execution(#[from] crate::ExecutionError),
+    Execution(#[from] ExecutionError),
 
     #[error(transparent)]
     Parse(#[from] ParseError),
@@ -167,14 +167,18 @@ pub struct Zpool {}
 
 #[cfg_attr(any(test, feature = "testing"), mockall::automock, allow(dead_code))]
 impl Zpool {
-    pub fn create(name: ZpoolName, vdev: &Utf8Path) -> Result<(), CreateError> {
+    pub fn create(
+        executor: &BoxedExecutor,
+        name: ZpoolName,
+        vdev: &Utf8Path,
+    ) -> Result<(), CreateError> {
         let mut cmd = std::process::Command::new(PFEXEC);
         cmd.env_clear();
         cmd.env("LC_ALL", "C.UTF-8");
         cmd.arg(ZPOOL).arg("create");
         cmd.arg(&name.to_string());
         cmd.arg(vdev);
-        execute(&mut cmd).map_err(Error::from)?;
+        executor.execute(&mut cmd).map_err(Error::from)?;
 
         // Ensure that this zpool has the encryption feature enabled
         let mut cmd = std::process::Command::new(PFEXEC);
@@ -184,18 +188,21 @@ impl Zpool {
             .arg("set")
             .arg("feature@encryption=enabled")
             .arg(&name.to_string());
-        execute(&mut cmd).map_err(Error::from)?;
+        executor.execute(&mut cmd).map_err(Error::from)?;
 
         Ok(())
     }
 
-    pub fn import(name: ZpoolName) -> Result<(), Error> {
+    pub fn import(
+        executor: &BoxedExecutor,
+        name: ZpoolName,
+    ) -> Result<(), Error> {
         let mut cmd = std::process::Command::new(PFEXEC);
         cmd.env_clear();
         cmd.env("LC_ALL", "C.UTF-8");
         cmd.arg(ZPOOL).arg("import").arg("-f");
         cmd.arg(&name.to_string());
-        match execute(&mut cmd) {
+        match executor.execute(&mut cmd) {
             Ok(_) => Ok(()),
             Err(ExecutionError::CommandFailure(err_info)) => {
                 // I'd really prefer to match on a specific error code, but the
@@ -213,18 +220,24 @@ impl Zpool {
         }
     }
 
-    pub fn export(name: &ZpoolName) -> Result<(), Error> {
+    pub fn export(
+        executor: &BoxedExecutor,
+        name: &ZpoolName,
+    ) -> Result<(), Error> {
         let mut cmd = std::process::Command::new(PFEXEC);
         cmd.env_clear();
         cmd.env("LC_ALL", "C.UTF-8");
         cmd.arg(ZPOOL).arg("export").arg(&name.to_string());
-        execute(&mut cmd)?;
+        executor.execute(&mut cmd)?;
 
         Ok(())
     }
 
     /// `zpool set failmode=continue <name>`
-    pub fn set_failmode_continue(name: &ZpoolName) -> Result<(), Error> {
+    pub fn set_failmode_continue(
+        executor: &BoxedExecutor,
+        name: &ZpoolName,
+    ) -> Result<(), Error> {
         let mut cmd = std::process::Command::new(PFEXEC);
         cmd.env_clear();
         cmd.env("LC_ALL", "C.UTF-8");
@@ -232,15 +245,15 @@ impl Zpool {
             .arg("set")
             .arg("failmode=continue")
             .arg(&name.to_string());
-        execute(&mut cmd)?;
+        executor.execute(&mut cmd)?;
         Ok(())
     }
 
-    pub fn list() -> Result<Vec<ZpoolName>, ListError> {
+    pub fn list(executor: &BoxedExecutor) -> Result<Vec<ZpoolName>, ListError> {
         let mut command = std::process::Command::new(ZPOOL);
         let cmd = command.args(&["list", "-Hpo", "name"]);
 
-        let output = execute(cmd).map_err(Error::from)?;
+        let output = executor.execute(cmd).map_err(Error::from)?;
         let stdout = String::from_utf8_lossy(&output.stdout);
         let zpool = stdout
             .lines()
@@ -250,7 +263,10 @@ impl Zpool {
     }
 
     #[cfg_attr(test, allow(dead_code))]
-    pub fn get_info(name: &str) -> Result<ZpoolInfo, GetInfoError> {
+    pub fn get_info(
+        executor: &BoxedExecutor,
+        name: &str,
+    ) -> Result<ZpoolInfo, GetInfoError> {
         let mut command = std::process::Command::new(ZPOOL);
         let cmd = command.args(&[
             "list",
@@ -259,7 +275,7 @@ impl Zpool {
             name,
         ]);
 
-        let output = execute(cmd).map_err(|err| GetInfoError {
+        let output = executor.execute(cmd).map_err(|err| GetInfoError {
             name: name.to_string(),
             err: err.into(),
         })?;

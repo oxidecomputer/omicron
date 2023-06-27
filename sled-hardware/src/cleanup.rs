@@ -13,31 +13,37 @@ use illumos_utils::dladm::UNDERLAY_ETHERSTUB_NAME;
 use illumos_utils::dladm::UNDERLAY_ETHERSTUB_VNIC_NAME;
 use illumos_utils::link::LinkKind;
 use illumos_utils::opte;
+use illumos_utils::process::{BoxedExecutor, ExecutionError, PFEXEC};
 use illumos_utils::zone::IPADM;
-use illumos_utils::ExecutionError;
-use illumos_utils::{execute, PFEXEC};
 use slog::warn;
 use slog::Logger;
 use std::process::Command;
 
-pub fn delete_underlay_addresses(log: &Logger) -> Result<(), Error> {
+pub fn delete_underlay_addresses(
+    log: &Logger,
+    executor: &BoxedExecutor,
+) -> Result<(), Error> {
     let underlay_prefix = format!("{}/", UNDERLAY_ETHERSTUB_VNIC_NAME);
-    delete_addresses_matching_prefixes(log, &[underlay_prefix])
+    delete_addresses_matching_prefixes(log, executor, &[underlay_prefix])
 }
 
-pub fn delete_bootstrap_addresses(log: &Logger) -> Result<(), Error> {
+pub fn delete_bootstrap_addresses(
+    log: &Logger,
+    executor: &BoxedExecutor,
+) -> Result<(), Error> {
     let bootstrap_prefix = format!("{}/", BOOTSTRAP_ETHERSTUB_VNIC_NAME);
-    delete_addresses_matching_prefixes(log, &[bootstrap_prefix])
+    delete_addresses_matching_prefixes(log, executor, &[bootstrap_prefix])
 }
 
 fn delete_addresses_matching_prefixes(
     log: &Logger,
+    executor: &BoxedExecutor,
     prefixes: &[String],
 ) -> Result<(), Error> {
     use std::io::BufRead;
     let mut cmd = Command::new(PFEXEC);
     let cmd = cmd.args(&[IPADM, "show-addr", "-p", "-o", "ADDROBJ"]);
-    let output = execute(cmd)?;
+    let output = executor.execute(cmd)?;
 
     // `ipadm show-addr` can return multiple addresses with the same name, but
     // multiple values. Collecting to a set ensures that only a single name is
@@ -57,34 +63,41 @@ fn delete_addresses_matching_prefixes(
             );
             let mut cmd = Command::new(PFEXEC);
             let cmd = cmd.args(&[IPADM, "delete-addr", addrobj.as_str()]);
-            execute(cmd)?;
+            executor.execute(cmd)?;
         }
     }
     Ok(())
 }
 
 /// Delete the etherstub and underlay VNIC used for interzone communication
-pub fn delete_etherstub(log: &Logger) -> Result<(), ExecutionError> {
+pub fn delete_etherstub(
+    log: &Logger,
+    executor: &BoxedExecutor,
+) -> Result<(), ExecutionError> {
     warn!(log, "Deleting Omicron underlay VNIC"; "vnic_name" => UNDERLAY_ETHERSTUB_VNIC_NAME);
-    Dladm::delete_etherstub_vnic(UNDERLAY_ETHERSTUB_VNIC_NAME)?;
+    Dladm::delete_etherstub_vnic(executor, UNDERLAY_ETHERSTUB_VNIC_NAME)?;
     warn!(log, "Deleting Omicron underlay etherstub"; "stub_name" => UNDERLAY_ETHERSTUB_NAME);
-    Dladm::delete_etherstub(UNDERLAY_ETHERSTUB_NAME)?;
+    Dladm::delete_etherstub(executor, UNDERLAY_ETHERSTUB_NAME)?;
     warn!(log, "Deleting Omicron bootstrap VNIC"; "vnic_name" => BOOTSTRAP_ETHERSTUB_VNIC_NAME);
-    Dladm::delete_etherstub_vnic(BOOTSTRAP_ETHERSTUB_VNIC_NAME)?;
+    Dladm::delete_etherstub_vnic(executor, BOOTSTRAP_ETHERSTUB_VNIC_NAME)?;
     warn!(log, "Deleting Omicron bootstrap etherstub"; "stub_name" => BOOTSTRAP_ETHERSTUB_NAME);
-    Dladm::delete_etherstub(BOOTSTRAP_ETHERSTUB_NAME)?;
+    Dladm::delete_etherstub(executor, BOOTSTRAP_ETHERSTUB_NAME)?;
     Ok(())
 }
 
 /// Delete all VNICs that can be managed by the control plane.
 ///
 /// These are currently those that match the prefix `ox` or `vopte`.
-pub async fn delete_omicron_vnics(log: &Logger) -> Result<(), Error> {
-    let vnics = Dladm::get_vnics()?;
+pub async fn delete_omicron_vnics(
+    log: &Logger,
+    executor: &BoxedExecutor,
+) -> Result<(), Error> {
+    let vnics = Dladm::get_vnics(executor)?;
     stream::iter(vnics)
         .zip(stream::iter(std::iter::repeat(log.clone())))
         .map(Ok::<_, illumos_utils::dladm::DeleteVnicError>)
         .try_for_each_concurrent(None, |(vnic, log)| async {
+            let executor = executor.clone();
             tokio::task::spawn_blocking(move || {
                 warn!(
                   log,
@@ -92,7 +105,7 @@ pub async fn delete_omicron_vnics(log: &Logger) -> Result<(), Error> {
                     "vnic_name" => &vnic,
                     "vnic_kind" => ?LinkKind::from_name(&vnic).unwrap(),
                 );
-                Dladm::delete_vnic(&vnic)
+                Dladm::delete_vnic(&executor, &vnic)
             })
             .await
             .unwrap()
@@ -101,11 +114,14 @@ pub async fn delete_omicron_vnics(log: &Logger) -> Result<(), Error> {
     Ok(())
 }
 
-pub async fn cleanup_networking_resources(log: &Logger) -> Result<(), Error> {
-    delete_underlay_addresses(log)?;
-    delete_bootstrap_addresses(log)?;
-    delete_omicron_vnics(log).await?;
-    delete_etherstub(log)?;
+pub async fn cleanup_networking_resources(
+    log: &Logger,
+    executor: &BoxedExecutor,
+) -> Result<(), Error> {
+    delete_underlay_addresses(log, executor)?;
+    delete_bootstrap_addresses(log, executor)?;
+    delete_omicron_vnics(log, executor).await?;
+    delete_etherstub(log, executor)?;
     opte::delete_all_xde_devices(log)?;
 
     Ok(())

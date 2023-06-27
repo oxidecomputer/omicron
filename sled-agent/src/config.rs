@@ -11,6 +11,7 @@ use illumos_utils::dladm::Dladm;
 use illumos_utils::dladm::FindPhysicalLinkError;
 use illumos_utils::dladm::PhysicalLink;
 use illumos_utils::dladm::CHELSIO_LINK_PREFIX;
+use illumos_utils::process::BoxedExecutor;
 use illumos_utils::zpool::ZpoolName;
 use omicron_common::vlan::VlanID;
 use serde::Deserialize;
@@ -115,12 +116,15 @@ impl Config {
         Ok(config)
     }
 
-    pub fn get_link(&self) -> Result<PhysicalLink, ConfigError> {
+    pub fn get_link(
+        &self,
+        executor: &BoxedExecutor,
+    ) -> Result<PhysicalLink, ConfigError> {
         if let Some(link) = self.data_link.as_ref() {
             Ok(link.clone())
         } else {
             if is_gimlet().map_err(ConfigError::SystemDetection)? {
-                Dladm::list_physical()
+                Dladm::list_physical(executor)
                     .map_err(ConfigError::FindLinks)?
                     .into_iter()
                     .find(|link| link.0.starts_with(CHELSIO_LINK_PREFIX))
@@ -130,7 +134,7 @@ impl Config {
                         )
                     })
             } else {
-                Dladm::find_physical().map_err(ConfigError::FindLinks)
+                Dladm::find_physical(executor).map_err(ConfigError::FindLinks)
             }
         }
     }

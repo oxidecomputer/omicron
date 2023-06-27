@@ -14,7 +14,7 @@ use std::net::{IpAddr, Ipv6Addr};
 
 use crate::addrobj::AddrObject;
 use crate::dladm::{EtherstubVnic, VNIC_PREFIX_BOOTSTRAP, VNIC_PREFIX_CONTROL};
-use crate::{execute, PFEXEC};
+use crate::process::{BoxedExecutor, ExecutionError, PFEXEC};
 use omicron_common::address::SLED_PREFIX;
 
 const DLADM: &str = "/usr/sbin/dladm";
@@ -30,7 +30,7 @@ pub const PROPOLIS_ZONE_PREFIX: &str = "oxz_propolis-server_";
 #[derive(thiserror::Error, Debug)]
 enum Error {
     #[error("Zone execution error: {0}")]
-    Execution(#[from] crate::ExecutionError),
+    Execution(#[from] ExecutionError),
 
     #[error(transparent)]
     AddrObject(#[from] crate::addrobj::ParseError),
@@ -68,7 +68,7 @@ pub struct DeleteAddressError {
     zone: String,
     addrobj: AddrObject,
     #[source]
-    err: crate::ExecutionError,
+    err: ExecutionError,
 }
 
 /// Errors from [`Zones::get_control_interface`].
@@ -79,7 +79,7 @@ pub enum GetControlInterfaceError {
     Execution {
         zone: String,
         #[source]
-        err: crate::ExecutionError,
+        err: ExecutionError,
     },
 
     #[error("VNIC starting with 'oxControl' not found in {zone}")]
@@ -94,7 +94,7 @@ pub enum GetBootstrapInterfaceError {
     Execution {
         zone: String,
         #[source]
-        err: crate::ExecutionError,
+        err: ExecutionError,
     },
 
     #[error("VNIC starting with 'oxBootstrap' not found in {zone}")]
@@ -415,6 +415,7 @@ impl Zones {
 
     /// Returns the name of the VNIC used to communicate with the control plane.
     pub fn get_control_interface(
+        executor: &BoxedExecutor,
         zone: &str,
     ) -> Result<String, GetControlInterfaceError> {
         let mut command = std::process::Command::new(PFEXEC);
@@ -427,7 +428,7 @@ impl Zones {
             "-o",
             "LINK",
         ]);
-        let output = execute(cmd).map_err(|err| {
+        let output = executor.execute(cmd).map_err(|err| {
             GetControlInterfaceError::Execution { zone: zone.to_string(), err }
         })?;
         String::from_utf8_lossy(&output.stdout)
@@ -446,6 +447,7 @@ impl Zones {
 
     /// Returns the name of the VNIC used to communicate with the bootstrap network.
     pub fn get_bootstrap_interface(
+        executor: &BoxedExecutor,
         zone: &str,
     ) -> Result<Option<String>, GetBootstrapInterfaceError> {
         let mut command = std::process::Command::new(PFEXEC);
@@ -458,7 +460,7 @@ impl Zones {
             "-o",
             "LINK",
         ]);
-        let output = execute(cmd).map_err(|err| {
+        let output = executor.execute(cmd).map_err(|err| {
             GetBootstrapInterfaceError::Execution {
                 zone: zone.to_string(),
                 err,
@@ -493,12 +495,13 @@ impl Zones {
     /// If `None` is supplied, the address is queried from the Global Zone.
     #[allow(clippy::needless_lifetimes)]
     pub fn ensure_address<'a>(
+        executor: &BoxedExecutor,
         zone: Option<&'a str>,
         addrobj: &AddrObject,
         addrtype: AddressRequest,
     ) -> Result<IpNetwork, EnsureAddressError> {
         |zone, addrobj, addrtype| -> Result<IpNetwork, anyhow::Error> {
-            match Self::get_address_impl(zone, addrobj) {
+            match Self::get_address_impl(executor, zone, addrobj) {
                 Ok(addr) => {
                     if let AddressRequest::Static(expected_addr) = addrtype {
                         // If the address is static, we need to validate that it
@@ -506,18 +509,20 @@ impl Zones {
                         if addr != expected_addr {
                             // If the address doesn't match, try removing the old
                             // value before using the new one.
-                            Self::delete_address(zone, addrobj)
+                            Self::delete_address(executor, zone, addrobj)
                                 .map_err(|e| anyhow!(e))?;
                             return Self::create_address(
-                                zone, addrobj, addrtype,
+                                executor, zone, addrobj, addrtype,
                             )
                             .map_err(|e| anyhow!(e));
                         }
                     }
                     Ok(addr)
                 }
-                Err(_) => Self::create_address(zone, addrobj, addrtype)
-                    .map_err(|e| anyhow!(e)),
+                Err(_) => {
+                    Self::create_address(executor, zone, addrobj, addrtype)
+                        .map_err(|e| anyhow!(e))
+                }
             }
         }(zone, addrobj, addrtype)
         .map_err(|err| EnsureAddressError {
@@ -534,13 +539,16 @@ impl Zones {
     /// If `None` is supplied, the address is queried from the Global Zone.
     #[allow(clippy::needless_lifetimes)]
     pub fn get_address<'a>(
+        executor: &BoxedExecutor,
         zone: Option<&'a str>,
         addrobj: &AddrObject,
     ) -> Result<IpNetwork, GetAddressError> {
-        Self::get_address_impl(zone, addrobj).map_err(|err| GetAddressError {
-            zone: zone.unwrap_or("global").to_string(),
-            name: addrobj.clone(),
-            err: anyhow!(err),
+        Self::get_address_impl(executor, zone, addrobj).map_err(|err| {
+            GetAddressError {
+                zone: zone.unwrap_or("global").to_string(),
+                name: addrobj.clone(),
+                err: anyhow!(err),
+            }
         })
     }
 
@@ -550,6 +558,7 @@ impl Zones {
     /// If `None` is supplied, the address is queried from the Global Zone.
     #[allow(clippy::needless_lifetimes)]
     fn get_address_impl<'a>(
+        executor: &BoxedExecutor,
         zone: Option<&'a str>,
         addrobj: &AddrObject,
     ) -> Result<IpNetwork, Error> {
@@ -564,7 +573,7 @@ impl Zones {
         args.extend(&[IPADM, "show-addr", "-p", "-o", "ADDR", &addrobj_str]);
 
         let cmd = command.args(args);
-        let output = execute(cmd)?;
+        let output = executor.execute(cmd)?;
         String::from_utf8_lossy(&output.stdout)
             .lines()
             .find_map(|s| parse_ip_network(s).ok())
@@ -577,6 +586,7 @@ impl Zones {
     /// If `None` is supplied, the address is queried from the Global Zone.
     #[allow(clippy::needless_lifetimes)]
     pub fn get_all_addresses<'a>(
+        executor: &BoxedExecutor,
         zone: Option<&'a str>,
         addrobj: &AddrObject,
     ) -> Result<Vec<IpNetwork>, GetAddressesError> {
@@ -591,11 +601,12 @@ impl Zones {
         args.extend(&[IPADM, "show-addr", "-p", "-o", "ADDR", &addrobj_str]);
 
         let cmd = command.args(args);
-        let output = execute(cmd).map_err(|err| GetAddressesError {
-            zone: zone.unwrap_or("global").to_string(),
-            name: addrobj.clone(),
-            err: err.into(),
-        })?;
+        let output =
+            executor.execute(cmd).map_err(|err| GetAddressesError {
+                zone: zone.unwrap_or("global").to_string(),
+                name: addrobj.clone(),
+                err: err.into(),
+            })?;
         Ok(String::from_utf8_lossy(&output.stdout)
             .lines()
             .filter_map(|s| s.parse().ok())
@@ -608,6 +619,7 @@ impl Zones {
     /// run the command in the Global zone.
     #[allow(clippy::needless_lifetimes)]
     fn has_link_local_v6_address<'a>(
+        executor: &BoxedExecutor,
         zone: Option<&'a str>,
         addrobj: &AddrObject,
     ) -> Result<(), Error> {
@@ -622,7 +634,7 @@ impl Zones {
 
         let args = prefix.iter().chain(show_addr_args);
         let cmd = command.args(args);
-        let output = execute(cmd)?;
+        let output = executor.execute(cmd)?;
         if let Some(_) = String::from_utf8_lossy(&output.stdout)
             .lines()
             .find(|s| s.trim() == "addrconf")
@@ -637,10 +649,11 @@ impl Zones {
     // Does NOT check if the address already exists.
     #[allow(clippy::needless_lifetimes)]
     fn create_address_internal<'a>(
+        executor: &BoxedExecutor,
         zone: Option<&'a str>,
         addrobj: &AddrObject,
         addrtype: AddressRequest,
-    ) -> Result<(), crate::ExecutionError> {
+    ) -> Result<(), ExecutionError> {
         let mut command = std::process::Command::new(PFEXEC);
         let mut args = vec![];
         if let Some(zone) = zone {
@@ -667,13 +680,14 @@ impl Zones {
         args.push(addrobj.to_string());
 
         let cmd = command.args(args);
-        execute(cmd)?;
+        executor.execute(cmd)?;
 
         Ok(())
     }
 
     #[allow(clippy::needless_lifetimes)]
     pub fn delete_address<'a>(
+        executor: &BoxedExecutor,
         zone: Option<&'a str>,
         addrobj: &AddrObject,
     ) -> Result<(), DeleteAddressError> {
@@ -689,7 +703,7 @@ impl Zones {
         args.push(addrobj.to_string());
 
         let cmd = command.args(args);
-        execute(cmd).map_err(|err| DeleteAddressError {
+        executor.execute(cmd).map_err(|err| DeleteAddressError {
             zone: zone.unwrap_or("global").to_string(),
             addrobj: addrobj.clone(),
             err,
@@ -706,10 +720,13 @@ impl Zones {
     /// <https://ry.goodwu.net/tinkering/a-day-in-the-life-of-an-ipv6-address-on-illumos/>
     #[allow(clippy::needless_lifetimes)]
     pub fn ensure_has_link_local_v6_address<'a>(
+        executor: &BoxedExecutor,
         zone: Option<&'a str>,
         addrobj: &AddrObject,
-    ) -> Result<(), crate::ExecutionError> {
-        if let Ok(()) = Self::has_link_local_v6_address(zone, &addrobj) {
+    ) -> Result<(), ExecutionError> {
+        if let Ok(()) =
+            Self::has_link_local_v6_address(executor, zone, &addrobj)
+        {
             return Ok(());
         }
 
@@ -730,7 +747,7 @@ impl Zones {
         let args = prefix.iter().chain(create_addr_args);
 
         let cmd = command.args(args);
-        execute(cmd)?;
+        executor.execute(cmd)?;
         Ok(())
     }
 
@@ -740,6 +757,7 @@ impl Zones {
     // (which exists pre-RSS), but we should remove all uses of it other than
     // the bootstrap agent.
     pub fn ensure_has_global_zone_v6_address(
+        executor: &BoxedExecutor,
         link: EtherstubVnic,
         address: Ipv6Addr,
         name: &str,
@@ -750,6 +768,7 @@ impl Zones {
             let gz_link_local_addrobj = AddrObject::link_local(&link.0)
                 .map_err(|err| anyhow!(err))?;
             Self::ensure_has_link_local_v6_address(
+                executor,
                 None,
                 &gz_link_local_addrobj,
             )
@@ -762,6 +781,7 @@ impl Zones {
             // this sled itself are within the underlay or bootstrap prefix.
             // Anything else must be routed through Sidecar.
             Self::ensure_address(
+                executor,
                 None,
                 &gz_link_local_addrobj
                     .on_same_interface(name)
@@ -802,6 +822,7 @@ impl Zones {
     // Creates an IP address within a Zone.
     #[allow(clippy::needless_lifetimes)]
     fn create_address<'a>(
+        executor: &BoxedExecutor,
         zone: Option<&'a str>,
         addrobj: &AddrObject,
         addrtype: AddressRequest,
@@ -821,6 +842,7 @@ impl Zones {
                         let link_local_addrobj =
                             addrobj.link_local_on_same_interface()?;
                         Self::ensure_has_link_local_v6_address(
+                            executor,
                             Some(zone),
                             &link_local_addrobj,
                         )?;
@@ -830,9 +852,8 @@ impl Zones {
         };
 
         // Actually perform address allocation.
-        Self::create_address_internal(zone, addrobj, addrtype)?;
-
-        Self::get_address_impl(zone, addrobj)
+        Self::create_address_internal(executor, zone, addrobj, addrtype)?;
+        Self::get_address_impl(executor, zone, addrobj)
     }
 }
 

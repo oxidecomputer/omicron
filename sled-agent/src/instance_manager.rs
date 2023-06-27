@@ -12,6 +12,7 @@ use crate::params::{
 use illumos_utils::dladm::Etherstub;
 use illumos_utils::link::VnicAllocator;
 use illumos_utils::opte::PortManager;
+use illumos_utils::process::BoxedExecutor;
 use illumos_utils::vmm_reservoir;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
@@ -45,6 +46,7 @@ pub enum Error {
 
 struct InstanceManagerInternal {
     log: Logger,
+    executor: BoxedExecutor,
     nexus_client: NexusClientWithResolver,
 
     /// Last set size of the VMM reservoir (in bytes)
@@ -69,6 +71,7 @@ impl InstanceManager {
     /// Initializes a new [`InstanceManager`] object.
     pub fn new(
         log: Logger,
+        executor: &BoxedExecutor,
         nexus_client: NexusClientWithResolver,
         etherstub: Etherstub,
         port_manager: PortManager,
@@ -76,12 +79,15 @@ impl InstanceManager {
         Ok(InstanceManager {
             inner: Arc::new(InstanceManagerInternal {
                 log: log.new(o!("component" => "InstanceManager")),
+                executor: executor.clone(),
                 nexus_client,
 
                 // no reservoir size set on startup
                 reservoir_size: Mutex::new(ByteCount::from_kibibytes_u32(0)),
                 instances: Mutex::new(BTreeMap::new()),
-                vnic_allocator: VnicAllocator::new("Instance", etherstub),
+                vnic_allocator: VnicAllocator::new(
+                    executor, "Instance", etherstub,
+                ),
                 port_manager,
             }),
         })
@@ -199,6 +205,7 @@ impl InstanceManager {
                     InstanceTicket::new(instance_id, self.inner.clone());
                 let instance = Instance::new(
                     instance_log,
+                    &self.inner.executor,
                     instance_id,
                     ticket,
                     initial_hardware,
@@ -367,6 +374,7 @@ mod test {
     use crate::params::InstanceStateRequested;
     use chrono::Utc;
     use illumos_utils::dladm::Etherstub;
+    use illumos_utils::process::FakeExecutor;
     use illumos_utils::{dladm::MockDladm, zone::MockZones};
     use omicron_common::api::external::{
         ByteCount, Generation, InstanceCpuCount, InstanceState,
@@ -440,6 +448,8 @@ mod test {
             nexus_server.local_addr().port(),
         );
 
+        let executor = FakeExecutor::new(log.clone()).as_executor();
+
         // Creation of the instance manager incurs some "global" system
         // checks: cleanup of existing zones + vnics.
 
@@ -447,7 +457,7 @@ mod test {
         zones_get_ctx.expect().return_once(|| Ok(vec![]));
 
         let dladm_get_vnics_ctx = MockDladm::get_vnics_context();
-        dladm_get_vnics_ctx.expect().return_once(|| Ok(vec![]));
+        dladm_get_vnics_ctx.expect().return_once(|_| Ok(vec![]));
 
         let port_manager = PortManager::new(
             log.clone(),
@@ -457,6 +467,7 @@ mod test {
         );
         let im = InstanceManager::new(
             log.clone(),
+            &executor,
             nexus_client,
             Etherstub("mylink".to_string()),
             port_manager,
@@ -483,7 +494,7 @@ mod test {
         // Expect one call to new() that produces an instance that expects to be
         // cloned once. The clone should expect to ask to be put into the
         // Running state.
-        instance_new_ctx.expect().return_once(move |_, _, t, _, _, _, _| {
+        instance_new_ctx.expect().return_once(move |_, _, _, t, _, _, _, _| {
             let mut inst = MockInstance::default();
 
             // Move the instance ticket out to the test, since the mock instance
@@ -575,13 +586,15 @@ mod test {
             nexus_server.local_addr().port(),
         );
 
+        let executor = FakeExecutor::new(log.clone()).as_executor();
+
         // Instance Manager creation.
 
         let zones_get_ctx = MockZones::get_context();
         zones_get_ctx.expect().return_once(|| Ok(vec![]));
 
         let dladm_get_vnics_ctx = MockDladm::get_vnics_context();
-        dladm_get_vnics_ctx.expect().return_once(|| Ok(vec![]));
+        dladm_get_vnics_ctx.expect().return_once(|_| Ok(vec![]));
 
         let port_manager = PortManager::new(
             log.clone(),
@@ -591,6 +604,7 @@ mod test {
         );
         let im = InstanceManager::new(
             log.clone(),
+            &executor,
             nexus_client,
             Etherstub("mylink".to_string()),
             port_manager,
@@ -601,7 +615,7 @@ mod test {
         let ticket_clone = ticket.clone();
         let instance_new_ctx = MockInstance::new_context();
         let mut seq = mockall::Sequence::new();
-        instance_new_ctx.expect().return_once(move |_, _, t, _, _, _, _| {
+        instance_new_ctx.expect().return_once(move |_, _, _, t, _, _, _, _| {
             let mut inst = MockInstance::default();
             let mut ticket_guard = ticket_clone.lock().unwrap();
             *ticket_guard = Some(t);

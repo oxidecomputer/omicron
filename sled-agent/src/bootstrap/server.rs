@@ -14,6 +14,7 @@ use super::views::ResponseEnvelope;
 use crate::bootstrap::http_entrypoints::api as http_api;
 use crate::bootstrap::maghemite;
 use crate::config::Config as SledConfig;
+use illumos_utils::process::BoxedExecutor;
 use sled_hardware::underlay;
 use slog::Drain;
 use slog::Logger;
@@ -36,6 +37,7 @@ pub struct Server {
 
 impl Server {
     pub async fn start(
+        executor: &BoxedExecutor,
         config: Config,
         sled_config: SledConfig,
     ) -> Result<Self, String> {
@@ -54,7 +56,7 @@ impl Server {
         }
 
         // Find address objects to pass to maghemite.
-        let mg_addr_objs = underlay::find_nics().map_err(|err| {
+        let mg_addr_objs = underlay::find_nics(executor).map_err(|err| {
             format!("Failed to find address objects for maghemite: {err}")
         })?;
         if mg_addr_objs.is_empty() {
@@ -70,7 +72,7 @@ impl Server {
 
         info!(log, "setting up bootstrap agent server");
         let bootstrap_agent =
-            Agent::new(log.clone(), config.clone(), sled_config)
+            Agent::new(log.clone(), executor, config.clone(), sled_config)
                 .await
                 .map_err(|e| e.to_string())?;
         let bootstrap_agent = Arc::new(bootstrap_agent);

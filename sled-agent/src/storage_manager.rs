@@ -11,6 +11,7 @@ use camino::Utf8PathBuf;
 use futures::stream::FuturesOrdered;
 use futures::FutureExt;
 use futures::StreamExt;
+use illumos_utils::process::BoxedExecutor;
 use illumos_utils::zpool::{ZpoolKind, ZpoolName};
 use illumos_utils::{zfs::Mountpoint, zpool::ZpoolInfo};
 use key_manager::StorageKeyRequester;
@@ -139,8 +140,12 @@ impl Pool {
     /// Queries for an existing Zpool by name.
     ///
     /// Returns Ok if the pool exists.
-    fn new(name: ZpoolName, parent: DiskIdentity) -> Result<Pool, Error> {
-        let info = Zpool::get_info(&name.to_string())?;
+    fn new(
+        executor: &BoxedExecutor,
+        name: ZpoolName,
+        parent: DiskIdentity,
+    ) -> Result<Pool, Error> {
+        let info = Zpool::get_info(executor, &name.to_string())?;
         Ok(Pool { name, info, parent })
     }
 
@@ -286,6 +291,7 @@ pub struct UnderlayAccess {
 // A worker that starts zones for pools as they are received.
 struct StorageWorker {
     log: Logger,
+    executor: BoxedExecutor,
     nexus_notifications: FuturesOrdered<NotifyFut>,
     rx: mpsc::Receiver<StorageWorkerRequest>,
     underlay: Arc<Mutex<Option<UnderlayAccess>>>,
@@ -316,6 +322,7 @@ impl StorageWorker {
         let do_format = true;
         let encryption_details = None;
         Zfs::ensure_filesystem(
+            &self.executor,
             &dataset_name.full(),
             Mountpoint::Path(Utf8PathBuf::from("/data")),
             zoned,
@@ -323,7 +330,9 @@ impl StorageWorker {
             encryption_details,
         )?;
         // Ensure the dataset has a usable UUID.
-        if let Ok(id_str) = Zfs::get_oxide_value(&fs_name, "uuid") {
+        if let Ok(id_str) =
+            Zfs::get_oxide_value(&self.executor, &fs_name, "uuid")
+        {
             if let Ok(id) = id_str.parse::<Uuid>() {
                 if id != dataset_id {
                     return Err(Error::UuidMismatch {
@@ -335,7 +344,12 @@ impl StorageWorker {
                 return Ok(());
             }
         }
-        Zfs::set_oxide_value(&fs_name, "uuid", &dataset_id.to_string())?;
+        Zfs::set_oxide_value(
+            &self.executor,
+            &fs_name,
+            "uuid",
+            &dataset_id.to_string(),
+        )?;
         Ok(())
     }
 
@@ -425,6 +439,7 @@ impl StorageWorker {
         for disk in unparsed_disks.into_iter() {
             match sled_hardware::Disk::new(
                 &self.log,
+                &self.executor,
                 disk,
                 Some(&self.key_requester),
             )
@@ -524,6 +539,7 @@ impl StorageWorker {
         // Ensure the disk conforms to an expected partition layout.
         let disk = sled_hardware::Disk::new(
             &self.log,
+            &self.executor,
             disk,
             Some(&self.key_requester),
         )
@@ -556,6 +572,7 @@ impl StorageWorker {
         };
         sled_hardware::Disk::ensure_zpool_ready(
             &self.log,
+            &self.executor,
             &zpool_name,
             &synthetic_id,
             Some(&self.key_requester),
@@ -757,7 +774,7 @@ impl StorageWorker {
         pool_name: &ZpoolName,
     ) -> Result<(), Error> {
         let mut pools = resources.pools.lock().await;
-        let zpool = Pool::new(pool_name.clone(), parent)?;
+        let zpool = Pool::new(&self.executor, pool_name.clone(), parent)?;
 
         let pool = match pools.entry(pool_name.id()) {
             hash_map::Entry::Occupied(mut entry) => {
@@ -894,7 +911,11 @@ pub struct StorageManager {
 
 impl StorageManager {
     /// Creates a new [`StorageManager`] which should manage local storage.
-    pub async fn new(log: &Logger, key_requester: StorageKeyRequester) -> Self {
+    pub async fn new(
+        log: &Logger,
+        executor: &BoxedExecutor,
+        key_requester: StorageKeyRequester,
+    ) -> Self {
         let log = log.new(o!("component" => "StorageManager"));
         let resources = StorageResources {
             disks: Arc::new(Mutex::new(HashMap::new())),
@@ -902,6 +923,7 @@ impl StorageManager {
         };
         let (tx, rx) = mpsc::channel(30);
 
+        let executor = executor.clone();
         StorageManager {
             inner: Arc::new(StorageManagerInner {
                 log: log.clone(),
@@ -910,6 +932,7 @@ impl StorageManager {
                 task: tokio::task::spawn(async move {
                     let mut worker = StorageWorker {
                         log,
+                        executor,
                         nexus_notifications: FuturesOrdered::new(),
                         rx,
                         underlay: Arc::new(Mutex::new(None)),

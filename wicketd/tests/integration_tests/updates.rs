@@ -11,6 +11,7 @@ use camino_tempfile::Utf8TempDir;
 use clap::Parser;
 use gateway_messages::SpPort;
 use gateway_test_utils::setup as gateway_setup;
+use illumos_utils::process::FakeExecutor;
 use installinator::HOST_PHASE_2_FILE_NAME;
 use omicron_common::{
     api::internal::nexus::KnownArtifactKind,
@@ -239,7 +240,8 @@ async fn test_installinator_fetch() {
     ])
     .expect("installinator args parsed successfully");
 
-    args.exec(&log.new(slog::o!("crate" => "installinator")))
+    let executor = FakeExecutor::new(log.clone()).as_executor();
+    args.exec(&log.new(slog::o!("crate" => "installinator")), &executor)
         .await
         .expect("installinator succeeded");
 

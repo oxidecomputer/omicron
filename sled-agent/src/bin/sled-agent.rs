@@ -6,6 +6,7 @@
 
 use camino::Utf8PathBuf;
 use clap::{Parser, Subcommand};
+use illumos_utils::process::RealExecutor;
 use omicron_common::cmd::fatal;
 use omicron_common::cmd::CmdError;
 use omicron_sled_agent::bootstrap::{
@@ -91,9 +92,15 @@ async fn do_run() -> Result<(), CmdError> {
                 None
             };
 
+            let log = config
+                .log
+                .to_logger("sled-agent")
+                .map_err(|e| CmdError::Failure(e.to_string()))?;
+            let executor = RealExecutor::new(log).as_executor();
+
             // Derive the bootstrap addresses from the data link's MAC address.
             let link = config
-                .get_link()
+                .get_link(&executor)
                 .map_err(|e| CmdError::Failure(e.to_string()))?;
 
             // Configure and run the Bootstrap server.
@@ -107,10 +114,13 @@ async fn do_run() -> Result<(), CmdError> {
             // TODO: It's a little silly to pass the config this way - namely,
             // that we construct the bootstrap config from `config`, but then
             // pass it separately just so the sled agent can ingest it later on.
-            let server =
-                bootstrap_server::Server::start(bootstrap_config, config)
-                    .await
-                    .map_err(CmdError::Failure)?;
+            let server = bootstrap_server::Server::start(
+                &executor,
+                bootstrap_config,
+                config,
+            )
+            .await
+            .map_err(CmdError::Failure)?;
 
             // If requested, automatically supply the RSS configuration.
             //

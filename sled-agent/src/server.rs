@@ -11,6 +11,7 @@ use crate::bootstrap::params::StartSledAgentRequest;
 use crate::nexus::NexusClientWithResolver;
 use crate::services::ServiceManager;
 use crate::storage_manager::StorageManager;
+use illumos_utils::process::BoxedExecutor;
 use slog::Logger;
 use std::net::SocketAddr;
 use uuid::Uuid;
@@ -35,6 +36,7 @@ impl Server {
     pub async fn start(
         config: &Config,
         log: Logger,
+        executor: &BoxedExecutor,
         request: StartSledAgentRequest,
         services: ServiceManager,
         storage: StorageManager,
@@ -49,6 +51,7 @@ impl Server {
         let sled_agent = SledAgent::new(
             &config,
             log.clone(),
+            executor,
             nexus_client,
             request,
             services,

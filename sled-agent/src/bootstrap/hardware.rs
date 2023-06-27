@@ -8,6 +8,7 @@ use crate::config::{Config as SledConfig, SledMode as SledModeConfig};
 use crate::services::ServiceManager;
 use crate::storage_manager::{StorageManager, StorageResources};
 use illumos_utils::dladm::{Etherstub, EtherstubVnic};
+use illumos_utils::process::BoxedExecutor;
 use key_manager::StorageKeyRequester;
 use sled_hardware::{Baseboard, DendriteAsic, HardwareManager, SledMode};
 use slog::Logger;
@@ -151,6 +152,7 @@ impl HardwareMonitor {
     #[allow(clippy::too_many_arguments)]
     pub async fn new(
         log: &Logger,
+        executor: &BoxedExecutor,
         sled_config: &SledConfig,
         global_zone_bootstrap_link_local_address: Ipv6Addr,
         underlay_etherstub: Etherstub,
@@ -194,7 +196,7 @@ impl HardwareMonitor {
             .map_err(|e| Error::Hardware(e))?;
 
         let storage_manager =
-            StorageManager::new(&log, storage_key_requester).await;
+            StorageManager::new(&log, executor, storage_key_requester).await;
 
         // If our configuration asks for synthetic zpools, insert them now.
         if let Some(pools) = &sled_config.zpools {
@@ -210,6 +212,7 @@ impl HardwareMonitor {
 
         let service_manager = ServiceManager::new(
             log.clone(),
+            executor,
             global_zone_bootstrap_link_local_address,
             underlay_etherstub.clone(),
             underlay_etherstub_vnic.clone(),

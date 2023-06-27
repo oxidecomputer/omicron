@@ -44,11 +44,11 @@ use illumos_utils::addrobj::IPV6_LINK_LOCAL_NAME;
 use illumos_utils::dladm::{Dladm, Etherstub, EtherstubVnic, PhysicalLink};
 use illumos_utils::link::{Link, VnicAllocator};
 use illumos_utils::opte::{Port, PortManager, PortTicket};
+use illumos_utils::process::{BoxedExecutor, PFEXEC};
 use illumos_utils::running_zone::{InstalledZone, RunningZone};
 use illumos_utils::zfs::ZONE_ZFS_RAMDISK_DATASET_MOUNTPOINT;
 use illumos_utils::zone::AddressRequest;
 use illumos_utils::zone::Zones;
-use illumos_utils::{execute, PFEXEC};
 use internal_dns::resolver::Resolver;
 use itertools::Itertools;
 use omicron_common::address::Ipv6Subnet;
@@ -171,7 +171,7 @@ pub enum Error {
     NtpZoneNotReady,
 
     #[error("Execution error: {0}")]
-    ExecutionError(#[from] illumos_utils::ExecutionError),
+    ExecutionError(#[from] illumos_utils::process::ExecutionError),
 
     #[error("Error resolving DNS name: {0}")]
     ResolveError(#[from] internal_dns::resolver::ResolveError),
@@ -297,6 +297,7 @@ enum SledLocalZone {
 /// Manages miscellaneous Sled-local services.
 pub struct ServiceManagerInner {
     log: Logger,
+    executor: BoxedExecutor,
     global_zone_bootstrap_link_local_address: Ipv6Addr,
     switch_zone: Mutex<SledLocalZone>,
     sled_mode: SledMode,
@@ -354,6 +355,7 @@ impl ServiceManager {
     #[allow(clippy::too_many_arguments)]
     pub async fn new(
         log: Logger,
+        executor: &BoxedExecutor,
         global_zone_bootstrap_link_local_address: Ipv6Addr,
         underlay_etherstub: Etherstub,
         underlay_vnic: EtherstubVnic,
@@ -370,6 +372,7 @@ impl ServiceManager {
         let mgr = Self {
             inner: Arc::new(ServiceManagerInner {
                 log: log.clone(),
+                executor: executor.clone(),
                 global_zone_bootstrap_link_local_address,
                 // TODO(https://github.com/oxidecomputer/omicron/issues/725):
                 // Load the switch zone if it already exists?
@@ -382,11 +385,13 @@ impl ServiceManager {
                 zones: Mutex::new(vec![]),
                 dataset_zones: Mutex::new(vec![]),
                 underlay_vnic_allocator: VnicAllocator::new(
+                    executor,
                     "Service",
                     underlay_etherstub,
                 ),
                 underlay_vnic,
                 bootstrap_vnic_allocator: VnicAllocator::new(
+                    executor,
                     "Bootstrap",
                     bootstrap_etherstub,
                 ),
@@ -662,7 +667,7 @@ impl ServiceManager {
                     // The tfport service requires a MAC device to/from which sidecar
                     // packets may be multiplexed.  If the link isn't present, don't
                     // bother trying to start the zone.
-                    match Dladm::verify_link(pkt_source) {
+                    match Dladm::verify_link(&self.inner.executor, pkt_source) {
                         Ok(link) => {
                             // It's important that tfpkt does **not** receive a
                             // link local address! See: https://github.com/oxidecomputer/stlouis/issues/391
@@ -679,7 +684,10 @@ impl ServiceManager {
                     // If on a non-gimlet, sled-agent can be configured to map
                     // links into the switch zone. Validate those links here.
                     for link in &self.inner.switch_zone_maghemite_links {
-                        match Dladm::verify_link(&link.to_string()) {
+                        match Dladm::verify_link(
+                            &self.inner.executor,
+                            &link.to_string(),
+                        ) {
                             Ok(link) => {
                                 // Link local addresses should be created in the
                                 // zone so that maghemite can listen on them.
@@ -950,6 +958,7 @@ impl ServiceManager {
 
         let installed_zone = InstalledZone::install(
             &self.inner.log,
+            &self.inner.executor,
             &self.inner.underlay_vnic_allocator,
             &request.root,
             zone_image_paths.as_slice(),
@@ -1178,6 +1187,7 @@ impl ServiceManager {
                     IPV6_LINK_LOCAL_NAME
                 );
                 Zones::ensure_has_link_local_v6_address(
+                    &self.inner.executor,
                     Some(running_zone.name()),
                     &AddrObject::new(link.name(), IPV6_LINK_LOCAL_NAME)
                         .unwrap(),
@@ -1243,6 +1253,7 @@ impl ServiceManager {
             let addr_name =
                 request.zone.zone_type.to_string().replace(&['-', '_'][..], "");
             Zones::ensure_has_global_zone_v6_address(
+                &self.inner.executor,
                 self.inner.underlay_vnic.clone(),
                 addr,
                 &addr_name,
@@ -2009,7 +2020,7 @@ impl ServiceManager {
                 &format!("{}", now.as_secs()),
                 &file.as_str(),
             ]);
-            match execute(cmd) {
+            match self.inner.executor.execute(cmd) {
                 Err(e) => {
                     warn!(self.inner.log, "Updating {} failed: {}", &file, e);
                 }
@@ -2421,6 +2432,7 @@ mod test {
             Etherstub, MockDladm, BOOTSTRAP_ETHERSTUB_NAME,
             UNDERLAY_ETHERSTUB_NAME, UNDERLAY_ETHERSTUB_VNIC_NAME,
         },
+        process::FakeExecutor,
         svc,
         zone::MockZones,
     };
@@ -2429,7 +2441,6 @@ mod test {
         StorageKeyRequester, VersionedIkm,
     };
     use std::net::Ipv6Addr;
-    use std::os::unix::process::ExitStatusExt;
     use uuid::Uuid;
 
     // Just placeholders. Not used.
@@ -2443,7 +2454,7 @@ mod test {
         // Create a VNIC
         let create_vnic_ctx = MockDladm::create_vnic_context();
         create_vnic_ctx.expect().return_once(
-            |physical_link: &Etherstub, _, _, _, _| {
+            |_, physical_link: &Etherstub, _, _, _, _| {
                 assert_eq!(&physical_link.0, &UNDERLAY_ETHERSTUB_NAME);
                 Ok(())
             },
@@ -2473,7 +2484,7 @@ mod test {
 
         // Ensure the address exists
         let ensure_address_ctx = MockZones::ensure_address_context();
-        ensure_address_ctx.expect().return_once(|_, _, _| {
+        ensure_address_ctx.expect().return_once(|_, _, _, _| {
             Ok(ipnetwork::IpNetwork::new(IpAddr::V6(Ipv6Addr::LOCALHOST), 64)
                 .unwrap())
         });
@@ -2482,16 +2493,6 @@ mod test {
         let wait_ctx = svc::wait_for_service_context();
         wait_ctx.expect().return_once(|_, _| Ok(()));
 
-        // Import the manifest, enable the service
-        let execute_ctx = illumos_utils::execute_context();
-        execute_ctx.expect().times(..).returning(|_| {
-            Ok(std::process::Output {
-                status: std::process::ExitStatus::from_raw(0),
-                stdout: vec![],
-                stderr: vec![],
-            })
-        });
-
         vec![
             Box::new(create_vnic_ctx),
             Box::new(install_ctx),
@@ -2499,7 +2500,6 @@ mod test {
             Box::new(id_ctx),
             Box::new(ensure_address_ctx),
             Box::new(wait_ctx),
-            Box::new(execute_ctx),
         ]
     }
 
@@ -2555,7 +2555,7 @@ mod test {
             Ok(())
         });
         let delete_vnic_ctx = MockDladm::delete_vnic_context();
-        delete_vnic_ctx.expect().returning(|_| Ok(()));
+        delete_vnic_ctx.expect().returning(|_, _| Ok(()));
 
         // Explicitly drop the service manager
         drop(mgr);
@@ -2634,9 +2634,11 @@ mod test {
         let log = logctx.log.clone();
         let test_config = TestConfig::new().await;
         let storage_key_requester = spawn_key_manager(&log).await;
+        let executor = FakeExecutor::new(log.clone()).as_executor();
 
         let mgr = ServiceManager::new(
             log.clone(),
+            &executor,
             GLOBAL_ZONE_BOOTSTRAP_IP,
             Etherstub(UNDERLAY_ETHERSTUB_NAME.to_string()),
             EtherstubVnic(UNDERLAY_ETHERSTUB_VNIC_NAME.to_string()),
@@ -2646,7 +2648,7 @@ mod test {
             SidecarRevision::Physical("rev-test".to_string()),
             SWITCH_ZONE_BOOTSTRAP_IP,
             vec![],
-            StorageManager::new(&log, storage_key_requester).await,
+            StorageManager::new(&log, &executor, storage_key_requester).await,
         )
         .await
         .unwrap();
@@ -2681,9 +2683,11 @@ mod test {
         let log = logctx.log.clone();
         let test_config = TestConfig::new().await;
         let storage_key_requester = spawn_key_manager(&log).await;
+        let executor = FakeExecutor::new(log.clone()).as_executor();
 
         let mgr = ServiceManager::new(
             log.clone(),
+            &executor,
             GLOBAL_ZONE_BOOTSTRAP_IP,
             Etherstub(UNDERLAY_ETHERSTUB_NAME.to_string()),
             EtherstubVnic(UNDERLAY_ETHERSTUB_VNIC_NAME.to_string()),
@@ -2693,7 +2697,7 @@ mod test {
             SidecarRevision::Physical("rev-test".to_string()),
             SWITCH_ZONE_BOOTSTRAP_IP,
             vec![],
-            StorageManager::new(&log, storage_key_requester).await,
+            StorageManager::new(&log, &executor, storage_key_requester).await,
         )
         .await
         .unwrap();
@@ -2729,11 +2733,13 @@ mod test {
         let log = logctx.log.clone();
         let test_config = TestConfig::new().await;
         let storage_key_requester = spawn_key_manager(&log).await;
+        let executor = FakeExecutor::new(log.clone()).as_executor();
 
         // First, spin up a ServiceManager, create a new service, and tear it
         // down.
         let mgr = ServiceManager::new(
             logctx.log.clone(),
+            &executor,
             GLOBAL_ZONE_BOOTSTRAP_IP,
             Etherstub(UNDERLAY_ETHERSTUB_NAME.to_string()),
             EtherstubVnic(UNDERLAY_ETHERSTUB_VNIC_NAME.to_string()),
@@ -2743,7 +2749,7 @@ mod test {
             SidecarRevision::Physical("rev-test".to_string()),
             SWITCH_ZONE_BOOTSTRAP_IP,
             vec![],
-            StorageManager::new(&log, storage_key_requester).await,
+            StorageManager::new(&log, &executor, storage_key_requester).await,
         )
         .await
         .unwrap();
@@ -2772,6 +2778,7 @@ mod test {
         let _expectations = expect_new_service();
         let mgr = ServiceManager::new(
             logctx.log.clone(),
+            &executor,
             GLOBAL_ZONE_BOOTSTRAP_IP,
             Etherstub(UNDERLAY_ETHERSTUB_NAME.to_string()),
             EtherstubVnic(UNDERLAY_ETHERSTUB_VNIC_NAME.to_string()),
@@ -2781,7 +2788,7 @@ mod test {
             SidecarRevision::Physical("rev-test".to_string()),
             SWITCH_ZONE_BOOTSTRAP_IP,
             vec![],
-            StorageManager::new(&log, storage_key_requester).await,
+            StorageManager::new(&log, &executor, storage_key_requester).await,
         )
         .await
         .unwrap();
@@ -2814,11 +2821,13 @@ mod test {
         let log = logctx.log.clone();
         let test_config = TestConfig::new().await;
         let storage_key_requester = spawn_key_manager(&log).await;
+        let executor = FakeExecutor::new(log.clone()).as_executor();
 
         // First, spin up a ServiceManager, create a new service, and tear it
         // down.
         let mgr = ServiceManager::new(
             logctx.log.clone(),
+            &executor,
             GLOBAL_ZONE_BOOTSTRAP_IP,
             Etherstub(UNDERLAY_ETHERSTUB_NAME.to_string()),
             EtherstubVnic(UNDERLAY_ETHERSTUB_VNIC_NAME.to_string()),
@@ -2828,7 +2837,7 @@ mod test {
             SidecarRevision::Physical("rev-test".to_string()),
             SWITCH_ZONE_BOOTSTRAP_IP,
             vec![],
-            StorageManager::new(&log, storage_key_requester).await,
+            StorageManager::new(&log, &executor, storage_key_requester).await,
         )
         .await
         .unwrap();
@@ -2866,6 +2875,7 @@ mod test {
         // Observe that the old service is not re-initialized.
         let mgr = ServiceManager::new(
             logctx.log.clone(),
+            &executor,
             GLOBAL_ZONE_BOOTSTRAP_IP,
             Etherstub(UNDERLAY_ETHERSTUB_NAME.to_string()),
             EtherstubVnic(UNDERLAY_ETHERSTUB_VNIC_NAME.to_string()),
@@ -2875,7 +2885,7 @@ mod test {
             SidecarRevision::Physical("rev-test".to_string()),
             SWITCH_ZONE_BOOTSTRAP_IP,
             vec![],
-            StorageManager::new(&log, storage_key_requester).await,
+            StorageManager::new(&log, &executor, storage_key_requester).await,
         )
         .await
         .unwrap();

@@ -21,6 +21,7 @@ use camino::Utf8PathBuf;
 use dropshot::HttpError;
 use illumos_utils::opte::params::SetVirtualNetworkInterfaceHost;
 use illumos_utils::opte::PortManager;
+use illumos_utils::process::BoxedExecutor;
 use omicron_common::address::{
     get_sled_address, get_switch_zone_address, Ipv6Subnet, SLED_PREFIX,
 };
@@ -50,7 +51,7 @@ pub enum Error {
     Config(#[from] crate::config::ConfigError),
 
     #[error("Failed to acquire etherstub: {0}")]
-    Etherstub(illumos_utils::ExecutionError),
+    Etherstub(illumos_utils::process::ExecutionError),
 
     #[error("Failed to acquire etherstub VNIC: {0}")]
     EtherstubVnic(illumos_utils::dladm::CreateVnicError),
@@ -59,7 +60,7 @@ pub enum Error {
     Bootstrap(#[from] crate::bootstrap::agent::BootstrapError),
 
     #[error("Failed to remove Omicron address: {0}")]
-    DeleteAddress(#[from] illumos_utils::ExecutionError),
+    DeleteAddress(#[from] illumos_utils::process::ExecutionError),
 
     #[error("Failed to operate on underlay device: {0}")]
     Underlay(#[from] underlay::Error),
@@ -204,6 +205,7 @@ impl SledAgent {
     pub async fn new(
         config: &Config,
         log: Logger,
+        executor: &BoxedExecutor,
         nexus_client: NexusClientWithResolver,
         request: StartSledAgentRequest,
         services: ServiceManager,
@@ -221,15 +223,17 @@ impl SledAgent {
         info!(&log, "created sled agent");
 
         let etherstub = Dladm::ensure_etherstub(
+            executor,
             illumos_utils::dladm::UNDERLAY_ETHERSTUB_NAME,
         )
         .map_err(|e| Error::Etherstub(e))?;
-        let etherstub_vnic = Dladm::ensure_etherstub_vnic(&etherstub)
+        let etherstub_vnic = Dladm::ensure_etherstub_vnic(executor, &etherstub)
             .map_err(|e| Error::EtherstubVnic(e))?;
 
         // Ensure the global zone has a functioning IPv6 address.
         let sled_address = request.sled_address();
         Zones::ensure_has_global_zone_v6_address(
+            executor,
             etherstub_vnic.clone(),
             *sled_address.ip(),
             "sled6",
@@ -237,7 +241,7 @@ impl SledAgent {
         .map_err(|err| Error::SledSubnet { err })?;
 
         // Initialize the xde kernel driver with the underlay devices.
-        let underlay_nics = underlay::find_nics()?;
+        let underlay_nics = underlay::find_nics(executor)?;
         illumos_utils::opte::initialize_xde_driver(&log, &underlay_nics)?;
 
         // Create the PortManager to manage all the OPTE ports on the sled.
@@ -258,6 +262,7 @@ impl SledAgent {
 
         let instances = InstanceManager::new(
             parent_log.clone(),
+            executor,
             nexus_client.clone(),
             etherstub.clone(),
             port_manager.clone(),

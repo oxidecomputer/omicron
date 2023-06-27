@@ -4,7 +4,7 @@
 
 //! Utilities for poking at ZFS.
 
-use crate::{execute, PFEXEC};
+use crate::process::{BoxedExecutor, ExecutionError, PFEXEC};
 use camino::Utf8PathBuf;
 use omicron_common::disk::DiskIdentity;
 use std::fmt;
@@ -20,7 +20,7 @@ pub const KEYPATH_ROOT: &str = "/var/run/oxide/";
 pub struct ListDatasetsError {
     name: String,
     #[source]
-    err: crate::ExecutionError,
+    err: ExecutionError,
 }
 
 /// Error returned by [`Zfs::destroy_dataset`].
@@ -29,13 +29,13 @@ pub struct ListDatasetsError {
 pub struct DestroyDatasetError {
     name: String,
     #[source]
-    err: crate::ExecutionError,
+    err: ExecutionError,
 }
 
 #[derive(thiserror::Error, Debug)]
 enum EnsureFilesystemErrorRaw {
     #[error("ZFS execution error: {0}")]
-    Execution(#[from] crate::ExecutionError),
+    Execution(#[from] ExecutionError),
 
     #[error("Filesystem does not exist, and formatting was not requested")]
     NotFoundNotFormatted,
@@ -44,7 +44,7 @@ enum EnsureFilesystemErrorRaw {
     Output(String),
 
     #[error("Failed to mount encrypted filesystem: {0}")]
-    MountEncryptedFsFailed(crate::ExecutionError),
+    MountEncryptedFsFailed(ExecutionError),
 }
 
 /// Error returned by [`Zfs::ensure_filesystem`].
@@ -68,13 +68,13 @@ pub struct SetValueError {
     filesystem: String,
     name: String,
     value: String,
-    err: crate::ExecutionError,
+    err: ExecutionError,
 }
 
 #[derive(thiserror::Error, Debug)]
 enum GetValueErrorRaw {
     #[error(transparent)]
-    Execution(#[from] crate::ExecutionError),
+    Execution(#[from] ExecutionError),
 
     #[error("No value found with that name")]
     MissingValue,
@@ -141,11 +141,15 @@ pub struct EncryptionDetails {
 #[cfg_attr(any(test, feature = "testing"), mockall::automock, allow(dead_code))]
 impl Zfs {
     /// Lists all datasets within a pool or existing dataset.
-    pub fn list_datasets(name: &str) -> Result<Vec<String>, ListDatasetsError> {
+    pub fn list_datasets(
+        executor: &BoxedExecutor,
+        name: &str,
+    ) -> Result<Vec<String>, ListDatasetsError> {
         let mut command = std::process::Command::new(ZFS);
         let cmd = command.args(&["list", "-d", "1", "-rHpo", "name", name]);
 
-        let output = execute(cmd)
+        let output = executor
+            .execute(cmd)
             .map_err(|err| ListDatasetsError { name: name.to_string(), err })?;
         let stdout = String::from_utf8_lossy(&output.stdout);
         let filesystems: Vec<String> = stdout
@@ -160,10 +164,13 @@ impl Zfs {
     }
 
     /// Destroys a dataset.
-    pub fn destroy_dataset(name: &str) -> Result<(), DestroyDatasetError> {
+    pub fn destroy_dataset(
+        executor: &BoxedExecutor,
+        name: &str,
+    ) -> Result<(), DestroyDatasetError> {
         let mut command = std::process::Command::new(PFEXEC);
         let cmd = command.args(&[ZFS, "destroy", "-r", name]);
-        execute(cmd).map_err(|err| DestroyDatasetError {
+        executor.execute(cmd).map_err(|err| DestroyDatasetError {
             name: name.to_string(),
             err,
         })?;
@@ -172,13 +179,15 @@ impl Zfs {
 
     /// Creates a new ZFS filesystem named `name`, unless one already exists.
     pub fn ensure_filesystem(
+        executor: &BoxedExecutor,
         name: &str,
         mountpoint: Mountpoint,
         zoned: bool,
         do_format: bool,
         encryption_details: Option<EncryptionDetails>,
     ) -> Result<(), EnsureFilesystemError> {
-        let (exists, mounted) = Self::dataset_exists(name, &mountpoint)?;
+        let (exists, mounted) =
+            Self::dataset_exists(executor, name, &mountpoint)?;
         if exists {
             if encryption_details.is_none() {
                 // If the dataset exists, we're done. Unencrypted datasets are
@@ -190,7 +199,11 @@ impl Zfs {
                     return Ok(());
                 }
                 // We need to load the encryption key and mount the filesystem
-                return Self::mount_encrypted_dataset(name, &mountpoint);
+                return Self::mount_encrypted_dataset(
+                    executor,
+                    name,
+                    &mountpoint,
+                );
             }
         }
 
@@ -223,7 +236,7 @@ impl Zfs {
             ]);
         }
         cmd.args(&["-o", &format!("mountpoint={}", mountpoint), name]);
-        execute(cmd).map_err(|err| EnsureFilesystemError {
+        executor.execute(cmd).map_err(|err| EnsureFilesystemError {
             name: name.to_string(),
             mountpoint,
             err: err.into(),
@@ -232,12 +245,13 @@ impl Zfs {
     }
 
     fn mount_encrypted_dataset(
+        executor: &BoxedExecutor,
         name: &str,
         mountpoint: &Mountpoint,
     ) -> Result<(), EnsureFilesystemError> {
         let mut command = std::process::Command::new(PFEXEC);
         let cmd = command.args(&[ZFS, "mount", "-l", name]);
-        execute(cmd).map_err(|err| EnsureFilesystemError {
+        executor.execute(cmd).map_err(|err| EnsureFilesystemError {
             name: name.to_string(),
             mountpoint: mountpoint.clone(),
             err: EnsureFilesystemErrorRaw::MountEncryptedFsFailed(err),
@@ -248,6 +262,7 @@ impl Zfs {
     // Return (true, mounted) if the dataset exists, (false, false) otherwise,
     // where mounted is if the dataset is mounted.
     fn dataset_exists(
+        executor: &BoxedExecutor,
         name: &str,
         mountpoint: &Mountpoint,
     ) -> Result<(bool, bool), EnsureFilesystemError> {
@@ -259,7 +274,7 @@ impl Zfs {
             name,
         ]);
         // If the list command returns any valid output, validate it.
-        if let Ok(output) = execute(cmd) {
+        if let Ok(output) = executor.execute(cmd) {
             let stdout = String::from_utf8_lossy(&output.stdout);
             let values: Vec<&str> = stdout.trim().split('\t').collect();
             if &values[..3] != &[name, "filesystem", &mountpoint.to_string()] {
@@ -277,14 +292,21 @@ impl Zfs {
     }
 
     pub fn set_oxide_value(
+        executor: &BoxedExecutor,
         filesystem_name: &str,
         name: &str,
         value: &str,
     ) -> Result<(), SetValueError> {
-        Zfs::set_value(filesystem_name, &format!("oxide:{}", name), value)
+        Zfs::set_value(
+            executor,
+            filesystem_name,
+            &format!("oxide:{}", name),
+            value,
+        )
     }
 
     fn set_value(
+        executor: &BoxedExecutor,
         filesystem_name: &str,
         name: &str,
         value: &str,
@@ -292,7 +314,7 @@ impl Zfs {
         let mut command = std::process::Command::new(PFEXEC);
         let value_arg = format!("{}={}", name, value);
         let cmd = command.args(&[ZFS, "set", &value_arg, filesystem_name]);
-        execute(cmd).map_err(|err| SetValueError {
+        executor.execute(cmd).map_err(|err| SetValueError {
             filesystem: filesystem_name.to_string(),
             name: name.to_string(),
             value: value.to_string(),
@@ -302,20 +324,22 @@ impl Zfs {
     }
 
     pub fn get_oxide_value(
+        executor: &BoxedExecutor,
         filesystem_name: &str,
         name: &str,
     ) -> Result<String, GetValueError> {
-        Zfs::get_value(filesystem_name, &format!("oxide:{}", name))
+        Zfs::get_value(executor, filesystem_name, &format!("oxide:{}", name))
     }
 
     fn get_value(
+        executor: &BoxedExecutor,
         filesystem_name: &str,
         name: &str,
     ) -> Result<String, GetValueError> {
         let mut command = std::process::Command::new(PFEXEC);
         let cmd =
             command.args(&[ZFS, "get", "-Ho", "value", &name, filesystem_name]);
-        let output = execute(cmd).map_err(|err| GetValueError {
+        let output = executor.execute(cmd).map_err(|err| GetValueError {
             filesystem: filesystem_name.to_string(),
             name: name.to_string(),
             err: err.into(),
@@ -334,17 +358,19 @@ impl Zfs {
 }
 
 /// Returns all datasets managed by Omicron
-pub fn get_all_omicron_datasets_for_delete() -> anyhow::Result<Vec<String>> {
+pub fn get_all_omicron_datasets_for_delete(
+    executor: &BoxedExecutor,
+) -> anyhow::Result<Vec<String>> {
     let mut datasets = vec![];
 
     // Collect all datasets within Oxide zpools.
     //
     // This includes cockroachdb, clickhouse, and crucible datasets.
-    let zpools = crate::zpool::Zpool::list()?;
+    let zpools = crate::zpool::Zpool::list(executor)?;
     for pool in &zpools {
         let internal = pool.kind() == crate::zpool::ZpoolKind::Internal;
         let pool = pool.to_string();
-        for dataset in &Zfs::list_datasets(&pool)? {
+        for dataset in &Zfs::list_datasets(executor, &pool)? {
             // Avoid erasing crashdump datasets on internal pools
             if dataset == "crash" && internal {
                 continue;
@@ -356,7 +382,8 @@ pub fn get_all_omicron_datasets_for_delete() -> anyhow::Result<Vec<String>> {
 
     // Collect all datasets for ramdisk-based Oxide zones,
     // if any exist.
-    if let Ok(ramdisk_datasets) = Zfs::list_datasets(&ZONE_ZFS_RAMDISK_DATASET)
+    if let Ok(ramdisk_datasets) =
+        Zfs::list_datasets(executor, &ZONE_ZFS_RAMDISK_DATASET)
     {
         for dataset in &ramdisk_datasets {
             datasets.push(format!("{}/{dataset}", ZONE_ZFS_RAMDISK_DATASET));

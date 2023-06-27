@@ -24,12 +24,12 @@ use ddm_admin_client::{Client as DdmAdminClient, DdmError};
 use futures::stream::{self, StreamExt, TryStreamExt};
 use illumos_utils::addrobj::AddrObject;
 use illumos_utils::dladm::{Dladm, Etherstub, EtherstubVnic, GetMacError};
+use illumos_utils::process::{BoxedExecutor, PFEXEC};
 use illumos_utils::zfs::{
     self, Mountpoint, Zfs, ZONE_ZFS_RAMDISK_DATASET,
     ZONE_ZFS_RAMDISK_DATASET_MOUNTPOINT,
 };
 use illumos_utils::zone::Zones;
-use illumos_utils::{execute, PFEXEC};
 use key_manager::{KeyManager, StorageKeyRequester};
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::api::external::Error as ExternalError;
@@ -68,7 +68,7 @@ pub enum BootstrapError {
     Cleanup(anyhow::Error),
 
     #[error("Failed to enable routing: {0}")]
-    EnablingRouting(illumos_utils::ExecutionError),
+    EnablingRouting(illumos_utils::process::ExecutionError),
 
     #[error("Error contacting ddmd: {0}")]
     DdmError(#[from] DdmError),
@@ -137,20 +137,26 @@ enum SledAgentState {
     After(SledServer),
 }
 
-fn underlay_etherstub() -> Result<Etherstub, BootstrapError> {
-    Dladm::ensure_etherstub(illumos_utils::dladm::UNDERLAY_ETHERSTUB_NAME)
-        .map_err(|e| {
-            BootstrapError::SledError(format!(
-                "Can't access etherstub device: {}",
-                e
-            ))
-        })
+fn underlay_etherstub(
+    executor: &BoxedExecutor,
+) -> Result<Etherstub, BootstrapError> {
+    Dladm::ensure_etherstub(
+        executor,
+        illumos_utils::dladm::UNDERLAY_ETHERSTUB_NAME,
+    )
+    .map_err(|e| {
+        BootstrapError::SledError(format!(
+            "Can't access etherstub device: {}",
+            e
+        ))
+    })
 }
 
 fn underlay_etherstub_vnic(
+    executor: &BoxedExecutor,
     underlay_etherstub: &Etherstub,
 ) -> Result<EtherstubVnic, BootstrapError> {
-    Dladm::ensure_etherstub_vnic(&underlay_etherstub).map_err(|e| {
+    Dladm::ensure_etherstub_vnic(executor, &underlay_etherstub).map_err(|e| {
         BootstrapError::SledError(format!(
             "Can't access etherstub VNIC device: {}",
             e
@@ -158,14 +164,19 @@ fn underlay_etherstub_vnic(
     })
 }
 
-fn bootstrap_etherstub() -> Result<Etherstub, BootstrapError> {
-    Dladm::ensure_etherstub(illumos_utils::dladm::BOOTSTRAP_ETHERSTUB_NAME)
-        .map_err(|e| {
-            BootstrapError::SledError(format!(
-                "Can't access etherstub device: {}",
-                e
-            ))
-        })
+fn bootstrap_etherstub(
+    executor: &BoxedExecutor,
+) -> Result<Etherstub, BootstrapError> {
+    Dladm::ensure_etherstub(
+        executor,
+        illumos_utils::dladm::BOOTSTRAP_ETHERSTUB_NAME,
+    )
+    .map_err(|e| {
+        BootstrapError::SledError(format!(
+            "Can't access etherstub device: {}",
+            e
+        ))
+    })
 }
 
 /// The entity responsible for bootstrapping an Oxide rack.
@@ -175,6 +186,9 @@ pub struct Agent {
     /// Store the parent log - without "component = BootstrapAgent" - so
     /// other launched components can set their own value.
     parent_log: Logger,
+
+    /// The sink for running "std::process::Command"
+    executor: BoxedExecutor,
 
     /// Bootstrap network address.
     ip: Ipv6Addr,
@@ -215,6 +229,7 @@ const SLED_AGENT_REQUEST_FILE: &str = "sled-agent-request.toml";
 // known clean slate" is easier to work with.
 async fn cleanup_all_old_global_state(
     log: &Logger,
+    executor: &BoxedExecutor,
 ) -> Result<(), BootstrapError> {
     // Identify all existing zones which should be managed by the Sled
     // Agent.
@@ -246,7 +261,7 @@ async fn cleanup_all_old_global_state(
     // Note that we don't currently delete the VNICs in any particular
     // order. That should be OK, since we're definitely deleting the guest
     // VNICs before the xde devices, which is the main constraint.
-    sled_hardware::cleanup::delete_omicron_vnics(&log)
+    sled_hardware::cleanup::delete_omicron_vnics(&log, executor)
         .await
         .map_err(|err| BootstrapError::Cleanup(err))?;
 
@@ -274,6 +289,7 @@ async fn sled_config_paths(storage: &StorageResources) -> Vec<Utf8PathBuf> {
 impl Agent {
     pub async fn new(
         log: Logger,
+        executor: &BoxedExecutor,
         config: Config,
         sled_config: SledConfig,
     ) -> Result<Self, BootstrapError> {
@@ -281,7 +297,7 @@ impl Agent {
             "component" => "BootstrapAgent",
         ));
         let link = config.link.clone();
-        let ip = BootstrapInterface::GlobalZone.ip(&link)?;
+        let ip = BootstrapInterface::GlobalZone.ip(executor, &link)?;
 
         // We expect this directory to exist for Key Management
         // It's purposefully in the ramdisk and files only exist long enough
@@ -300,18 +316,18 @@ impl Agent {
                 err,
             })?;
 
-        let bootstrap_etherstub = bootstrap_etherstub()?;
-        let bootstrap_etherstub_vnic = Dladm::ensure_etherstub_vnic(
-            &bootstrap_etherstub,
-        )
-        .map_err(|e| {
-            BootstrapError::SledError(format!(
-                "Can't access etherstub VNIC device: {}",
-                e
-            ))
-        })?;
+        let bootstrap_etherstub = bootstrap_etherstub(executor)?;
+        let bootstrap_etherstub_vnic =
+            Dladm::ensure_etherstub_vnic(executor, &bootstrap_etherstub)
+                .map_err(|e| {
+                    BootstrapError::SledError(format!(
+                        "Can't access etherstub VNIC device: {}",
+                        e
+                    ))
+                })?;
 
         Zones::ensure_has_global_zone_v6_address(
+            executor,
             bootstrap_etherstub_vnic.clone(),
             ip,
             "bootstrap6",
@@ -319,6 +335,7 @@ impl Agent {
         .map_err(|err| BootstrapError::BootstrapAddress { err })?;
 
         let global_zone_bootstrap_link_local_address = Zones::get_address(
+            executor,
             None,
             // AddrObject::link_local() can only fail if the interface name is
             // malformed, but we just got it from `Dladm`, so we know it's
@@ -351,6 +368,7 @@ impl Agent {
         let do_format = true;
         let encryption_details = None;
         Zfs::ensure_filesystem(
+            executor,
             ZONE_ZFS_RAMDISK_DATASET,
             Mountpoint::Path(Utf8PathBuf::from(
                 ZONE_ZFS_RAMDISK_DATASET_MOUNTPOINT,
@@ -364,7 +382,7 @@ impl Agent {
         // predictable state.
         //
         // This means all VNICs, zones, etc.
-        cleanup_all_old_global_state(&log).await?;
+        cleanup_all_old_global_state(&log, executor).await?;
 
         // Ipv6 forwarding must be enabled to route traffic between zones,
         // including the switch zone which we may launch below if we find we're
@@ -379,7 +397,9 @@ impl Agent {
             "ipv6-forwarding",
             "-u",
         ]);
-        execute(cmd).map_err(|e| BootstrapError::EnablingRouting(e))?;
+        executor
+            .execute(cmd)
+            .map_err(|e| BootstrapError::EnablingRouting(e))?;
 
         // Spawn the `KeyManager` which is needed by the the StorageManager to
         // retrieve encryption keys.
@@ -394,6 +414,7 @@ impl Agent {
 
         let hardware_monitor = Self::hardware_monitor(
             &ba_log,
+            executor,
             &config.link,
             &sled_config,
             global_zone_bootstrap_link_local_address,
@@ -428,6 +449,7 @@ impl Agent {
         let make_agent = move |initialized| Agent {
             log: ba_log,
             parent_log: log,
+            executor: executor.clone(),
             ip,
             rss_access: RssAccess::new(initialized),
             sled_state: Mutex::new(SledAgentState::Before(Some(
@@ -464,6 +486,7 @@ impl Agent {
     ) -> Result<HardwareMonitor, BootstrapError> {
         Self::hardware_monitor(
             &self.log,
+            &self.executor,
             &self.config.link,
             &self.sled_config,
             self.global_zone_bootstrap_link_local_address,
@@ -474,20 +497,22 @@ impl Agent {
 
     async fn hardware_monitor(
         log: &Logger,
+        executor: &BoxedExecutor,
         link: &illumos_utils::dladm::PhysicalLink,
         sled_config: &SledConfig,
         global_zone_bootstrap_link_local_address: Ipv6Addr,
         storage_key_requester: StorageKeyRequester,
     ) -> Result<HardwareMonitor, BootstrapError> {
-        let underlay_etherstub = underlay_etherstub()?;
+        let underlay_etherstub = underlay_etherstub(executor)?;
         let underlay_etherstub_vnic =
-            underlay_etherstub_vnic(&underlay_etherstub)?;
-        let bootstrap_etherstub = bootstrap_etherstub()?;
+            underlay_etherstub_vnic(executor, &underlay_etherstub)?;
+        let bootstrap_etherstub = bootstrap_etherstub(executor)?;
         let switch_zone_bootstrap_address =
-            BootstrapInterface::SwitchZone.ip(&link)?;
+            BootstrapInterface::SwitchZone.ip(executor, &link)?;
 
         let hardware_monitor = HardwareMonitor::new(
             &log,
+            executor,
             &sled_config,
             global_zone_bootstrap_link_local_address,
             underlay_etherstub,
@@ -585,6 +610,7 @@ impl Agent {
                 let server = SledServer::start(
                     &self.sled_config,
                     self.parent_log.clone(),
+                    &self.executor,
                     request.clone(),
                     services.clone(),
                     storage.clone(),
@@ -762,9 +788,12 @@ impl Agent {
         // these addresses would delete "cxgbe0/ll", and could render
         // the sled inaccessible via a local interface.
 
-        sled_hardware::cleanup::delete_underlay_addresses(&self.log)
-            .map_err(BootstrapError::Cleanup)?;
-        sled_hardware::cleanup::delete_omicron_vnics(&self.log)
+        sled_hardware::cleanup::delete_underlay_addresses(
+            &self.log,
+            &self.executor,
+        )
+        .map_err(BootstrapError::Cleanup)?;
+        sled_hardware::cleanup::delete_omicron_vnics(&self.log, &self.executor)
             .await
             .map_err(BootstrapError::Cleanup)?;
         illumos_utils::opte::delete_all_xde_devices(&self.log)?;
@@ -775,11 +804,11 @@ impl Agent {
         &self,
         _state: &tokio::sync::MutexGuard<'_, SledAgentState>,
     ) -> Result<(), BootstrapError> {
-        let datasets = zfs::get_all_omicron_datasets_for_delete()
+        let datasets = zfs::get_all_omicron_datasets_for_delete(&self.executor)
             .map_err(BootstrapError::ZfsDatasetsList)?;
         for dataset in &datasets {
             info!(self.log, "Removing dataset: {dataset}");
-            zfs::Zfs::destroy_dataset(dataset)?;
+            zfs::Zfs::destroy_dataset(&self.executor, dataset)?;
         }
 
         Ok(())
