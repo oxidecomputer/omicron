@@ -745,10 +745,10 @@ pub struct CertificateCreate {
     /// common identifying metadata
     #[serde(flatten)]
     pub identity: IdentityMetadataCreateParams,
-    /// PEM file containing public certificate chain
-    pub cert: Vec<u8>,
-    /// PEM file containing private key
-    pub key: Vec<u8>,
+    /// PEM-formatted string containing public certificate chain
+    pub cert: String,
+    /// PEM-formatted string containing private key
+    pub key: String,
     /// The service using this certificate
     pub service: shared::ServiceUsingCertificate,
 }

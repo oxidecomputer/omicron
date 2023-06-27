@@ -306,7 +306,7 @@ mod test {
             Box::new(NexusServer {}),
         );
         let nexus_client = NexusClient::new(
-            &format!("http://{}", nexus_server.local_addr().to_string()),
+            &format!("http://{}", nexus_server.local_addr()),
             log.clone(),
         );
 

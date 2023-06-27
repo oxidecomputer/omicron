@@ -7,7 +7,7 @@
 use crate::api::external;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use std::net::IpAddr;
+use std::net::{IpAddr, Ipv4Addr};
 use uuid::Uuid;
 
 /// The type of network interface
@@ -66,11 +66,11 @@ pub struct SourceNatConfig {
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
 pub struct RackNetworkConfig {
     /// Gateway address
-    pub gateway_ip: String,
+    pub gateway_ip: Ipv4Addr,
     /// First ip address to be used for configuring network infrastructure
-    pub infra_ip_first: String,
+    pub infra_ip_first: Ipv4Addr,
     /// Last ip address to be used for configuring network infrastructure
-    pub infra_ip_last: String,
+    pub infra_ip_last: Ipv4Addr,
     /// Switchport to use for external connectivity
     pub uplink_port: String,
     /// Speed for the Switchport
@@ -78,7 +78,7 @@ pub struct RackNetworkConfig {
     /// Forward Error Correction setting for the uplink port
     pub uplink_port_fec: PortFec,
     /// IP Address to apply to switchport (must be in infra_ip pool)
-    pub uplink_ip: String,
+    pub uplink_ip: Ipv4Addr,
     /// VLAN id to use for uplink
     pub uplink_vid: Option<u16>,
 }

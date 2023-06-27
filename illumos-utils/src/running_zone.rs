@@ -13,6 +13,7 @@ use crate::zone::{AddressRequest, IPADM, ZONE_PREFIX};
 use camino::{Utf8Path, Utf8PathBuf};
 use ipnetwork::IpNetwork;
 use omicron_common::backoff;
+use slog::error;
 use slog::info;
 use slog::o;
 use slog::warn;
@@ -23,6 +24,16 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use crate::zone::MockZones as Zones;
 #[cfg(not(any(test, feature = "testing")))]
 use crate::zone::Zones;
+
+/// Errors returned from methods for fetching SMF services and log files
+#[derive(thiserror::Error, Debug)]
+pub enum ServiceError {
+    #[error("I/O error")]
+    Io(#[from] std::io::Error),
+
+    #[error("Failed to run a command")]
+    RunCommand(#[from] RunCommandError),
+}
 
 /// Errors returned from [`RunningZone::run_cmd`].
 #[derive(thiserror::Error, Debug)]
@@ -762,6 +773,128 @@ impl RunningZone {
     pub fn links(&self) -> &Vec<Link> {
         &self.inner.links
     }
+
+    /// Return the running processes associated with all the SMF services this
+    /// zone is intended to run.
+    pub fn service_processes(
+        &self,
+    ) -> Result<Vec<ServiceProcess>, ServiceError> {
+        let service_names = self.service_names()?;
+        let mut services = Vec::with_capacity(service_names.len());
+        for service_name in service_names.into_iter() {
+            let output = self.run_cmd(["ptree", "-s", &service_name])?;
+
+            // All Oxide SMF services currently run a single binary, though it
+            // may be run in a contract via `ctrun`. We don't care about that
+            // binary, but any others we _do_ want to collect data from.
+            for line in output.lines() {
+                if line.contains("ctrun") {
+                    continue;
+                }
+                let line = line.trim();
+                let mut parts = line.split_ascii_whitespace();
+
+                // The first two parts should be the PID and the process binary
+                // path, respectively.
+                let Some(pid_s) = parts.next() else {
+                    error!(
+                        self.inner.log,
+                        "failed to get service PID from ptree output";
+                        "service" => &service_name,
+                    );
+                    continue;
+                };
+                let Ok(pid) = pid_s.parse() else {
+                    error!(
+                        self.inner.log,
+                        "failed to parse service PID from ptree output";
+                        "service" => &service_name,
+                        "pid" => pid_s,
+                    );
+                    continue;
+                };
+                let Some(path) = parts.next() else {
+                    error!(
+                        self.inner.log,
+                        "failed to get service binary from ptree output";
+                        "service" => &service_name,
+                    );
+                    continue;
+                };
+                let binary = Utf8PathBuf::from(path);
+
+                // Fetch any log files for this SMF service.
+                let Some((log_file, rotated_log_files)) = self.service_log_files(&service_name)? else {
+                    error!(
+                        self.inner.log,
+                        "failed to find log files for existing service";
+                        "service_name" => &service_name,
+                    );
+                    continue;
+                };
+
+                services.push(ServiceProcess {
+                    service_name: service_name.clone(),
+                    binary,
+                    pid,
+                    log_file,
+                    rotated_log_files,
+                });
+            }
+        }
+        Ok(services)
+    }
+
+    /// Return the names of the Oxide SMF services this zone is intended to run.
+    pub fn service_names(&self) -> Result<Vec<String>, ServiceError> {
+        const NEEDLES: [&str; 2] = ["/oxide", "/system/illumos"];
+        let output = self.run_cmd(&["svcs", "-H", "-o", "fmri"])?;
+        Ok(output
+            .lines()
+            .filter(|line| NEEDLES.iter().any(|needle| line.contains(needle)))
+            .map(|line| line.trim().to_string())
+            .collect())
+    }
+
+    /// Return any SMF log files associated with the named service.
+    ///
+    /// Given a named service, this returns a tuple of the latest or current log
+    /// file, and an array of any rotated log files. If the service does not
+    /// exist, or there are no log files, `None` is returned.
+    pub fn service_log_files(
+        &self,
+        name: &str,
+    ) -> Result<Option<(Utf8PathBuf, Vec<Utf8PathBuf>)>, ServiceError> {
+        let output = self.run_cmd(&["svcs", "-L", name])?;
+        let mut lines = output.lines();
+        let Some(current) = lines.next() else {
+            return Ok(None);
+        };
+        // We need to prepend the zonepath root to get the path in the GZ. We
+        // can do this with `join()`, but that will _replace_ the path if the
+        // second one is absolute. So trim any prefixed `/` from each path.
+        let root = self.root();
+        let current_log_file =
+            root.join(current.trim().trim_start_matches('/'));
+
+        // The rotated log files should have the same prefix as the current, but
+        // with an index appended. We'll search the parent directory for
+        // matching names, skipping the current file.
+        //
+        // See https://illumos.org/man/8/logadm for details on the naming
+        // conventions around these files.
+        let dir = current_log_file.parent().unwrap();
+        let mut rotated_files = Vec::new();
+        for entry in dir.read_dir_utf8()? {
+            let entry = entry?;
+            let path = entry.path();
+            if path != current_log_file && path.starts_with(&current_log_file) {
+                rotated_files
+                    .push(root.join(path.strip_prefix("/").unwrap_or(path)));
+            }
+        }
+        Ok(Some((current_log_file, rotated_files)))
+    }
 }
 
 impl Drop for RunningZone {
@@ -781,6 +914,21 @@ impl Drop for RunningZone {
             });
         }
     }
+}
+
+/// A process running in the zone associated with an SMF service.
+#[derive(Clone, Debug)]
+pub struct ServiceProcess {
+    /// The name of the SMF service.
+    pub service_name: String,
+    /// The path of the binary in the process image.
+    pub binary: Utf8PathBuf,
+    /// The PID of the process.
+    pub pid: u32,
+    /// The path for the current log file.
+    pub log_file: Utf8PathBuf,
+    /// The paths for any rotated log files.
+    pub rotated_log_files: Vec<Utf8PathBuf>,
 }
 
 /// Errors returned from [`InstalledZone::install`].
@@ -817,7 +965,7 @@ pub struct InstalledZone {
     // NIC used for control plane communication.
     control_vnic: Link,
 
-    // Nic used for bootstrap network communication
+    // NIC used for bootstrap network communication
     bootstrap_vnic: Option<Link>,
 
     // OPTE devices for the guest network interfaces

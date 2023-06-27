@@ -186,7 +186,7 @@ version = "0.1.0"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.18",
+ "syn 2.0.20",
 ]
 
 [[package]]
@@ -196,7 +196,7 @@ source = "git+https://github.com/oxidecomputer/omicron?branch=main#bd6c62807fbb2
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.18",
+ "syn 2.0.20",
 ]
 
 [[package]]
@@ -301,7 +301,7 @@ checksum = "16e62a023e7c117e27523144c5d2459f4397fcc3cab0085af8e2224f643a0193"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.18",
+ "syn 2.0.20",
 ]
 
 [[package]]
@@ -312,7 +312,7 @@ checksum = "b9ccdd8f2a161be9bd5c023df56f1b2a0bd1d83872ae53b71a84a12c9bf6e842"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.18",
+ "syn 2.0.20",
 ]
 
 [[package]]
@@ -350,7 +350,7 @@ dependencies = [
  "quote",
  "serde",
  "serde_tokenstream 0.2.0",
- "syn 2.0.18",
+ "syn 2.0.20",
 ]
 
 [[package]]
@@ -458,7 +458,7 @@ dependencies = [
 [[package]]
 name = "bhyve_api"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=96ba33d2629b93bfb9cdb806327c16113bcf0cf3#96ba33d2629b93bfb9cdb806327c16113bcf0cf3"
+source = "git+https://github.com/oxidecomputer/propolis?rev=04a275736e9f3316de6bf2a4077d03acfa4e2cdf#04a275736e9f3316de6bf2a4077d03acfa4e2cdf"
 dependencies = [
  "bhyve_api_sys",
  "libc",
@@ -468,7 +468,7 @@ dependencies = [
 [[package]]
 name = "bhyve_api_sys"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=96ba33d2629b93bfb9cdb806327c16113bcf0cf3#96ba33d2629b93bfb9cdb806327c16113bcf0cf3"
+source = "git+https://github.com/oxidecomputer/propolis?rev=04a275736e9f3316de6bf2a4077d03acfa4e2cdf#04a275736e9f3316de6bf2a4077d03acfa4e2cdf"
 dependencies = [
  "libc",
  "num_enum",
@@ -502,7 +502,7 @@ dependencies = [
  "regex",
  "rustc-hash",
  "shlex",
- "syn 2.0.18",
+ "syn 2.0.20",
  "which",
 ]
 
@@ -655,7 +655,7 @@ dependencies = [
  "sha3",
  "slog",
  "thiserror",
- "uuid 1.3.3",
+ "uuid",
  "vsss-rs",
  "zeroize",
 ]
@@ -674,7 +674,7 @@ dependencies = [
  "schemars",
  "serde",
  "slog",
- "uuid 1.3.3",
+ "uuid",
 ]
 
 [[package]]
@@ -778,6 +778,16 @@ checksum = "d2ab15a83d13f75dbd86f082bdefd160b628476ef58d3b900a0ef74e001bb097"
 dependencies = [
  "camino",
  "tempfile",
+]
+
+[[package]]
+name = "cancel-safe-futures"
+version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/cancel-safe-futures?rev=c15ea7069dc547434ee772f08ce040f71db9b453#c15ea7069dc547434ee772f08ce040f71db9b453"
+dependencies = [
+ "futures-core",
+ "futures-sink",
+ "futures-util",
 ]
 
 [[package]]
@@ -942,7 +952,7 @@ dependencies = [
  "bitflags 1.3.2",
  "clap_derive 3.2.18",
  "clap_lex 0.2.4",
- "indexmap",
+ "indexmap 1.9.3",
  "once_cell",
  "strsim 0.10.0",
  "termcolor",
@@ -995,7 +1005,7 @@ dependencies = [
  "heck 0.4.1",
  "proc-macro2",
  "quote",
- "syn 2.0.18",
+ "syn 2.0.20",
 ]
 
 [[package]]
@@ -1325,7 +1335,7 @@ dependencies = [
 [[package]]
 name = "crucible-agent-client"
 version = "0.0.1"
-source = "git+https://github.com/oxidecomputer/crucible?rev=c7879bc8fbf68d977eb1c983cb0bab34b1b8b805#c7879bc8fbf68d977eb1c983cb0bab34b1b8b805"
+source = "git+https://github.com/oxidecomputer/crucible?rev=df7e274edf0a1df287770e9567b27676f3ae4cc5#df7e274edf0a1df287770e9567b27676f3ae4cc5"
 dependencies = [
  "anyhow",
  "chrono",
@@ -1340,19 +1350,19 @@ dependencies = [
 [[package]]
 name = "crucible-client-types"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/crucible?rev=c7879bc8fbf68d977eb1c983cb0bab34b1b8b805#c7879bc8fbf68d977eb1c983cb0bab34b1b8b805"
+source = "git+https://github.com/oxidecomputer/crucible?rev=df7e274edf0a1df287770e9567b27676f3ae4cc5#df7e274edf0a1df287770e9567b27676f3ae4cc5"
 dependencies = [
  "base64 0.21.2",
  "schemars",
  "serde",
  "serde_json",
- "uuid 1.3.3",
+ "uuid",
 ]
 
 [[package]]
 name = "crucible-pantry-client"
 version = "0.0.1"
-source = "git+https://github.com/oxidecomputer/crucible?rev=c7879bc8fbf68d977eb1c983cb0bab34b1b8b805#c7879bc8fbf68d977eb1c983cb0bab34b1b8b805"
+source = "git+https://github.com/oxidecomputer/crucible?rev=df7e274edf0a1df287770e9567b27676f3ae4cc5#df7e274edf0a1df287770e9567b27676f3ae4cc5"
 dependencies = [
  "anyhow",
  "chrono",
@@ -1362,13 +1372,13 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
- "uuid 1.3.3",
+ "uuid",
 ]
 
 [[package]]
 name = "crucible-smf"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/crucible?rev=c7879bc8fbf68d977eb1c983cb0bab34b1b8b805#c7879bc8fbf68d977eb1c983cb0bab34b1b8b805"
+source = "git+https://github.com/oxidecomputer/crucible?rev=df7e274edf0a1df287770e9567b27676f3ae4cc5#df7e274edf0a1df287770e9567b27676f3ae4cc5"
 dependencies = [
  "libc",
  "num-derive",
@@ -1536,7 +1546,7 @@ dependencies = [
  "proc-macro2",
  "quote",
  "strsim 0.10.0",
- "syn 2.0.18",
+ "syn 2.0.20",
 ]
 
 [[package]]
@@ -1558,7 +1568,7 @@ checksum = "7bfb82b62b1b8a2a9808fb4caf844ede819a76cfc23b2827d7f94eefb49551eb"
 dependencies = [
  "darling_core 0.20.0",
  "quote",
- "syn 2.0.18",
+ "syn 2.0.20",
 ]
 
 [[package]]
@@ -1601,7 +1611,7 @@ dependencies = [
  "rustfmt-wrapper",
  "serde",
  "serde_tokenstream 0.2.0",
- "syn 2.0.18",
+ "syn 2.0.20",
 ]
 
 [[package]]
@@ -1654,7 +1664,7 @@ dependencies = [
  "proc-macro-error",
  "proc-macro2",
  "quote",
- "syn 2.0.18",
+ "syn 2.0.20",
 ]
 
 [[package]]
@@ -1665,7 +1675,7 @@ checksum = "5bc1955a640c4464859ae700fbe48e666da6fdce99ce5fe1acd08dd295889d10"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.18",
+ "syn 2.0.20",
 ]
 
 [[package]]
@@ -1728,18 +1738,18 @@ dependencies = [
  "pq-sys",
  "r2d2",
  "serde_json",
- "uuid 1.3.3",
+ "uuid",
 ]
 
 [[package]]
 name = "diesel-dtrace"
 version = "0.2.0"
-source = "git+https://github.com/oxidecomputer/diesel-dtrace?branch=main#a592a05fc536f67abbffc195ad68376bca1bd3ed"
+source = "git+https://github.com/oxidecomputer/diesel-dtrace?branch=main#2778b2ae2222bd80fd4ddb6199f208576a59c32e"
 dependencies = [
  "diesel",
  "serde",
  "usdt",
- "uuid 1.3.3",
+ "uuid",
  "version_check",
 ]
 
@@ -1752,7 +1762,7 @@ dependencies = [
  "diesel_table_macro_syntax",
  "proc-macro2",
  "quote",
- "syn 2.0.18",
+ "syn 2.0.20",
 ]
 
 [[package]]
@@ -1761,7 +1771,7 @@ version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fc5557efc453706fed5e4fa85006fe9817c224c3f480a34c7e5959fd700921c5"
 dependencies = [
- "syn 2.0.18",
+ "syn 2.0.20",
 ]
 
 [[package]]
@@ -1847,7 +1857,7 @@ checksum = "7e1a8646b2c125eeb9a84ef0faa6d2d102ea0d5da60b824ade2743263117b848"
 [[package]]
 name = "dladm"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=96ba33d2629b93bfb9cdb806327c16113bcf0cf3#96ba33d2629b93bfb9cdb806327c16113bcf0cf3"
+source = "git+https://github.com/oxidecomputer/propolis?rev=04a275736e9f3316de6bf2a4077d03acfa4e2cdf#04a275736e9f3316de6bf2a4077d03acfa4e2cdf"
 dependencies = [
  "libc",
  "num_enum",
@@ -1900,7 +1910,7 @@ dependencies = [
  "trust-dns-proto",
  "trust-dns-resolver",
  "trust-dns-server",
- "uuid 1.3.3",
+ "uuid",
 ]
 
 [[package]]
@@ -1916,7 +1926,7 @@ dependencies = [
  "serde",
  "serde_json",
  "slog",
- "uuid 1.3.3",
+ "uuid",
 ]
 
 [[package]]
@@ -1933,7 +1943,7 @@ dependencies = [
  "serde",
  "serde_json",
  "slog",
- "uuid 1.3.3",
+ "uuid",
 ]
 
 [[package]]
@@ -1980,13 +1990,13 @@ dependencies = [
  "serde_json",
  "slog",
  "toml 0.7.4",
- "uuid 1.3.3",
+ "uuid",
 ]
 
 [[package]]
 name = "dropshot"
 version = "0.9.1-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#fc0ffd522a78f9296f855bdf4c2703f900dfe99e"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#31f7ab94596b135ce761b1480413b753bdb29d1c"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -2001,7 +2011,7 @@ dependencies = [
  "hostname",
  "http",
  "hyper",
- "indexmap",
+ "indexmap 1.9.3",
  "openapiv3",
  "paste",
  "percent-encoding",
@@ -2023,7 +2033,7 @@ dependencies = [
  "tokio-rustls",
  "toml 0.7.4",
  "usdt",
- "uuid 1.3.3",
+ "uuid",
  "version_check",
  "waitgroup",
 ]
@@ -2031,13 +2041,13 @@ dependencies = [
 [[package]]
 name = "dropshot_endpoint"
 version = "0.9.1-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#fc0ffd522a78f9296f855bdf4c2703f900dfe99e"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#31f7ab94596b135ce761b1480413b753bdb29d1c"
 dependencies = [
  "proc-macro2",
  "quote",
  "serde",
  "serde_tokenstream 0.2.0",
- "syn 2.0.18",
+ "syn 2.0.20",
 ]
 
 [[package]]
@@ -2150,7 +2160,7 @@ dependencies = [
  "tokio",
  "toml 0.7.4",
  "trust-dns-resolver",
- "uuid 1.3.3",
+ "uuid",
 ]
 
 [[package]]
@@ -2188,7 +2198,7 @@ checksum = "eecf8589574ce9b895052fa12d69af7a233f99e6107f5cb8dd1044f2a17bfdcb"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.18",
+ "syn 2.0.20",
 ]
 
 [[package]]
@@ -2214,6 +2224,12 @@ dependencies = [
  "log",
  "termcolor",
 ]
+
+[[package]]
+name = "equivalent"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "88bffebc5d80432c9b140ee17875ff173a8ab62faad5b257da912bd2f6c1c0a1"
 
 [[package]]
 name = "erased-serde"
@@ -2505,7 +2521,7 @@ checksum = "89ca545a94061b6365f2c7355b4b32bd20df3ff95f02da9329b34ccc3bd6ee72"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.18",
+ "syn 2.0.20",
 ]
 
 [[package]]
@@ -2568,7 +2584,7 @@ dependencies = [
  "termios",
  "tokio",
  "tokio-tungstenite 0.18.0",
- "uuid 1.3.3",
+ "uuid",
 ]
 
 [[package]]
@@ -2584,7 +2600,7 @@ dependencies = [
  "serde",
  "serde_json",
  "slog",
- "uuid 1.3.3",
+ "uuid",
 ]
 
 [[package]]
@@ -2598,7 +2614,7 @@ dependencies = [
  "serde_repr",
  "smoltcp 0.9.1",
  "static_assertions",
- "uuid 1.3.3",
+ "uuid",
  "zerocopy 0.6.1",
 ]
 
@@ -2627,7 +2643,7 @@ dependencies = [
  "tlvc",
  "tokio",
  "usdt",
- "uuid 1.3.3",
+ "uuid",
  "version_check",
  "zip",
 ]
@@ -2644,7 +2660,7 @@ dependencies = [
  "slog",
  "sp-sim",
  "tokio",
- "uuid 1.3.3",
+ "uuid",
 ]
 
 [[package]]
@@ -2747,7 +2763,7 @@ dependencies = [
  "futures-sink",
  "futures-util",
  "http",
- "indexmap",
+ "indexmap 1.9.3",
  "slab",
  "tokio",
  "tokio-util",
@@ -2786,6 +2802,12 @@ checksum = "43a3c133739dddd0d2990f9a4bdf8eb4b21ef50e4851ca85ab661199821d510e"
 dependencies = [
  "ahash 0.8.3",
 ]
+
+[[package]]
+name = "hashbrown"
+version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2c6201b9ff9fd90a5a3bac2e56a830d0caa509576f0e503818ee82c181b3437a"
 
 [[package]]
 name = "headers"
@@ -2940,6 +2962,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "http-range"
+version = "0.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "21dec9db110f5f872ed9699c3ecf50cf16f423502706ba5c72462e28d3157573"
+
+[[package]]
 name = "httparse"
 version = "1.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3079,6 +3107,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "hyper-staticfile"
+version = "0.9.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "318ca89e4827e7fe4ddd2824f52337239796ae8ecc761a663324407dc3d8d7e7"
+dependencies = [
+ "futures-util",
+ "http",
+ "http-range",
+ "httpdate",
+ "hyper",
+ "mime_guess",
+ "percent-encoding",
+ "rand 0.8.5",
+ "tokio",
+ "url",
+ "winapi",
+]
+
+[[package]]
 name = "hyper-tls"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3181,7 +3228,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "toml 0.7.4",
- "uuid 1.3.3",
+ "uuid",
  "zone",
 ]
 
@@ -3205,6 +3252,16 @@ dependencies = [
  "autocfg",
  "hashbrown 0.12.3",
  "serde",
+]
+
+[[package]]
+name = "indexmap"
+version = "2.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d5477fe2230a79769d8dc68e0eabf5437907c0457a5614a9e8dddb67f65eb65d"
+dependencies = [
+ "equivalent",
+ "hashbrown 0.14.0",
 ]
 
 [[package]]
@@ -3282,7 +3339,7 @@ dependencies = [
  "toml 0.7.4",
  "tufaceous-lib",
  "update-engine",
- "uuid 1.3.3",
+ "uuid",
 ]
 
 [[package]]
@@ -3298,7 +3355,7 @@ dependencies = [
  "serde_json",
  "slog",
  "update-engine",
- "uuid 1.3.3",
+ "uuid",
 ]
 
 [[package]]
@@ -3323,7 +3380,7 @@ dependencies = [
  "slog",
  "subprocess",
  "tokio",
- "uuid 1.3.3",
+ "uuid",
 ]
 
 [[package]]
@@ -3377,7 +3434,7 @@ dependencies = [
  "tokio",
  "trust-dns-proto",
  "trust-dns-resolver",
- "uuid 1.3.3",
+ "uuid",
 ]
 
 [[package]]
@@ -3395,7 +3452,7 @@ dependencies = [
  "thiserror",
  "trust-dns-proto",
  "trust-dns-resolver",
- "uuid 1.3.3",
+ "uuid",
 ]
 
 [[package]]
@@ -3420,7 +3477,7 @@ dependencies = [
  "serde",
  "test-strategy",
  "thiserror",
- "uuid 1.3.3",
+ "uuid",
 ]
 
 [[package]]
@@ -3564,9 +3621,9 @@ checksum = "830d08ce1d1d941e6b30645f1a0eb5643013d835ce3779a5fc208261dbe10f55"
 
 [[package]]
 name = "libc"
-version = "0.2.146"
+version = "0.2.147"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f92be4933c13fd498862a9e02a3055f8a8d9c039ce33db97306fd5a6caa7f29b"
+checksum = "b4668fb0ea861c1df094127ac5f1da3409a82116a4ba74fca2e58ef927159bb3"
 
 [[package]]
 name = "libdlpi-sys"
@@ -3581,7 +3638,7 @@ dependencies = [
  "libc",
  "libefi-sys",
  "thiserror",
- "uuid 1.3.3",
+ "uuid",
 ]
 
 [[package]]
@@ -3959,7 +4016,7 @@ dependencies = [
  "serde",
  "serde_json",
  "slog",
- "uuid 1.3.3",
+ "uuid",
 ]
 
 [[package]]
@@ -3978,7 +4035,7 @@ dependencies = [
  "serde",
  "serde_json",
  "slog",
- "uuid 1.3.3",
+ "uuid",
 ]
 
 [[package]]
@@ -4013,7 +4070,7 @@ dependencies = [
  "steno",
  "strum",
  "thiserror",
- "uuid 1.3.3",
+ "uuid",
 ]
 
 [[package]]
@@ -4092,7 +4149,7 @@ dependencies = [
  "tokio-postgres",
  "toml 0.7.4",
  "usdt",
- "uuid 1.3.3",
+ "uuid",
 ]
 
 [[package]]
@@ -4116,7 +4173,7 @@ dependencies = [
  "nexus-types",
  "omicron-common 0.1.0",
  "slog",
- "uuid 1.3.3",
+ "uuid",
 ]
 
 [[package]]
@@ -4156,7 +4213,7 @@ dependencies = [
  "tokio",
  "trust-dns-proto",
  "trust-dns-resolver",
- "uuid 1.3.3",
+ "uuid",
 ]
 
 [[package]]
@@ -4165,7 +4222,7 @@ version = "0.1.0"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.18",
+ "syn 2.0.20",
 ]
 
 [[package]]
@@ -4190,7 +4247,7 @@ dependencies = [
  "serde_json",
  "steno",
  "strum",
- "uuid 1.3.3",
+ "uuid",
 ]
 
 [[package]]
@@ -4380,7 +4437,7 @@ checksum = "ea86265d3d3dcb6a27fc51bd29a4bf387fae9d2986b823079d4986af253eb439"
 dependencies = [
  "crc32fast",
  "hashbrown 0.13.2",
- "indexmap",
+ "indexmap 1.9.3",
  "memchr",
 ]
 
@@ -4445,7 +4502,7 @@ dependencies = [
  "tokio",
  "tokio-postgres",
  "toml 0.7.4",
- "uuid 1.3.3",
+ "uuid",
 ]
 
 [[package]]
@@ -4484,7 +4541,7 @@ dependencies = [
  "tokio",
  "tokio-postgres",
  "toml 0.7.4",
- "uuid 1.3.3",
+ "uuid",
 ]
 
 [[package]]
@@ -4575,7 +4632,7 @@ dependencies = [
  "tokio-tungstenite 0.18.0",
  "tokio-util",
  "toml 0.7.4",
- "uuid 1.3.3",
+ "uuid",
 ]
 
 [[package]]
@@ -4590,6 +4647,7 @@ dependencies = [
  "base64 0.21.2",
  "bb8",
  "camino",
+ "cancel-safe-futures",
  "chrono",
  "clap 4.3.4",
  "cookie",
@@ -4681,7 +4739,7 @@ dependencies = [
  "tough",
  "trust-dns-resolver",
  "usdt",
- "uuid 1.3.3",
+ "uuid",
 ]
 
 [[package]]
@@ -4777,6 +4835,7 @@ dependencies = [
  "futures",
  "http",
  "hyper",
+ "hyper-staticfile",
  "illumos-utils",
  "internal-dns 0.1.0",
  "ipnetwork",
@@ -4823,7 +4882,7 @@ dependencies = [
  "tokio",
  "tokio-tungstenite 0.18.0",
  "toml 0.7.4",
- "uuid 1.3.3",
+ "uuid",
  "zone",
 ]
 
@@ -4898,7 +4957,7 @@ version = "0.3.0"
 source = "git+https://github.com/oxidecomputer/openapi-lint?branch=main#c2ac10b65f6a39519c1e7ac808575b679b5ed93c"
 dependencies = [
  "heck 0.4.1",
- "indexmap",
+ "indexmap 1.9.3",
  "lazy_static",
  "openapiv3",
  "regex",
@@ -4910,7 +4969,7 @@ version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7b1a9f106eb0a780abd17ba9fca8e0843e3461630bcbe2af0ad4d5d3ba4e9aa4"
 dependencies = [
- "indexmap",
+ "indexmap 1.9.3",
  "serde",
  "serde_json",
 ]
@@ -5068,7 +5127,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "trust-dns-resolver",
- "uuid 1.3.3",
+ "uuid",
 ]
 
 [[package]]
@@ -5096,7 +5155,7 @@ dependencies = [
  "serde",
  "thiserror",
  "trybuild",
- "uuid 1.3.3",
+ "uuid",
 ]
 
 [[package]]
@@ -5111,7 +5170,7 @@ dependencies = [
  "schemars",
  "serde",
  "thiserror",
- "uuid 1.3.3",
+ "uuid",
 ]
 
 [[package]]
@@ -5124,7 +5183,7 @@ dependencies = [
  "reqwest",
  "serde",
  "slog",
- "uuid 1.3.3",
+ "uuid",
 ]
 
 [[package]]
@@ -5152,7 +5211,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "toml 0.7.4",
- "uuid 1.3.3",
+ "uuid",
 ]
 
 [[package]]
@@ -5179,7 +5238,7 @@ dependencies = [
  "slog-term",
  "thiserror",
  "tokio",
- "uuid 1.3.3",
+ "uuid",
 ]
 
 [[package]]
@@ -5192,7 +5251,7 @@ dependencies = [
  "http",
  "oximeter 0.1.0",
  "tokio",
- "uuid 1.3.3",
+ "uuid",
 ]
 
 [[package]]
@@ -5201,7 +5260,7 @@ version = "0.1.0"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.18",
+ "syn 2.0.20",
 ]
 
 [[package]]
@@ -5211,7 +5270,7 @@ source = "git+https://github.com/oxidecomputer/omicron?branch=main#bd6c62807fbb2
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.18",
+ "syn 2.0.20",
 ]
 
 [[package]]
@@ -5230,7 +5289,7 @@ dependencies = [
  "slog-dtrace",
  "thiserror",
  "tokio",
- "uuid 1.3.3",
+ "uuid",
 ]
 
 [[package]]
@@ -5250,7 +5309,7 @@ dependencies = [
  "slog-dtrace",
  "thiserror",
  "tokio",
- "uuid 1.3.3",
+ "uuid",
 ]
 
 [[package]]
@@ -5506,7 +5565,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4dd7d28ee937e54fe3080c91faa1c3a46c06de6252988a7f4592ba2310ef22a4"
 dependencies = [
  "fixedbitset",
- "indexmap",
+ "indexmap 1.9.3",
  "serde",
  "serde_derive",
 ]
@@ -5716,7 +5775,7 @@ dependencies = [
  "postgres-protocol",
  "serde",
  "serde_json",
- "uuid 1.3.3",
+ "uuid",
 ]
 
 [[package]]
@@ -5815,7 +5874,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1ceca8aaf45b5c46ec7ed39fff75f57290368c1846d33d24a122ca81416ab058"
 dependencies = [
  "proc-macro2",
- "syn 2.0.18",
+ "syn 2.0.20",
 ]
 
 [[package]]
@@ -5854,9 +5913,9 @@ dependencies = [
 
 [[package]]
 name = "proc-macro2"
-version = "1.0.60"
+version = "1.0.63"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dec2b086b7a862cf4de201096214fa870344cf922b2b30c167badb3af3195406"
+checksum = "7b368fba921b0dce7e60f5e04ec15e565b3303972b42bcfde1d0713b881959eb"
 dependencies = [
  "unicode-ident",
 ]
@@ -5864,7 +5923,7 @@ dependencies = [
 [[package]]
 name = "progenitor"
 version = "0.3.0"
-source = "git+https://github.com/oxidecomputer/progenitor?branch=main#dcdc0446693f461057251ed08c245c3e67df5986"
+source = "git+https://github.com/oxidecomputer/progenitor?branch=main#945063e0fa41245748932595f3f3ead8af424956"
 dependencies = [
  "progenitor-client",
  "progenitor-impl",
@@ -5875,7 +5934,7 @@ dependencies = [
 [[package]]
 name = "progenitor-client"
 version = "0.3.0"
-source = "git+https://github.com/oxidecomputer/progenitor?branch=main#dcdc0446693f461057251ed08c245c3e67df5986"
+source = "git+https://github.com/oxidecomputer/progenitor?branch=main#945063e0fa41245748932595f3f3ead8af424956"
 dependencies = [
  "bytes",
  "futures-core",
@@ -5889,12 +5948,12 @@ dependencies = [
 [[package]]
 name = "progenitor-impl"
 version = "0.3.0"
-source = "git+https://github.com/oxidecomputer/progenitor?branch=main#dcdc0446693f461057251ed08c245c3e67df5986"
+source = "git+https://github.com/oxidecomputer/progenitor?branch=main#945063e0fa41245748932595f3f3ead8af424956"
 dependencies = [
  "getopts",
  "heck 0.4.1",
  "http",
- "indexmap",
+ "indexmap 1.9.3",
  "openapiv3",
  "proc-macro2",
  "quote",
@@ -5902,7 +5961,7 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
- "syn 2.0.18",
+ "syn 2.0.20",
  "thiserror",
  "typify",
  "unicode-ident",
@@ -5911,7 +5970,7 @@ dependencies = [
 [[package]]
 name = "progenitor-macro"
 version = "0.3.0"
-source = "git+https://github.com/oxidecomputer/progenitor?branch=main#dcdc0446693f461057251ed08c245c3e67df5986"
+source = "git+https://github.com/oxidecomputer/progenitor?branch=main#945063e0fa41245748932595f3f3ead8af424956"
 dependencies = [
  "openapiv3",
  "proc-macro2",
@@ -5922,13 +5981,13 @@ dependencies = [
  "serde_json",
  "serde_tokenstream 0.2.0",
  "serde_yaml",
- "syn 2.0.18",
+ "syn 2.0.20",
 ]
 
 [[package]]
 name = "propolis"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=96ba33d2629b93bfb9cdb806327c16113bcf0cf3#96ba33d2629b93bfb9cdb806327c16113bcf0cf3"
+source = "git+https://github.com/oxidecomputer/propolis?rev=04a275736e9f3316de6bf2a4077d03acfa4e2cdf#04a275736e9f3316de6bf2a4077d03acfa4e2cdf"
 dependencies = [
  "anyhow",
  "bhyve_api",
@@ -5951,15 +6010,16 @@ dependencies = [
  "thiserror",
  "tokio",
  "usdt",
- "uuid 1.3.3",
+ "uuid",
  "viona_api",
 ]
 
 [[package]]
 name = "propolis-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=96ba33d2629b93bfb9cdb806327c16113bcf0cf3#96ba33d2629b93bfb9cdb806327c16113bcf0cf3"
+source = "git+https://github.com/oxidecomputer/propolis?rev=04a275736e9f3316de6bf2a4077d03acfa4e2cdf#04a275736e9f3316de6bf2a4077d03acfa4e2cdf"
 dependencies = [
+ "async-trait",
  "base64 0.21.2",
  "crucible-client-types",
  "futures",
@@ -5975,13 +6035,13 @@ dependencies = [
  "thiserror",
  "tokio",
  "tokio-tungstenite 0.17.2",
- "uuid 1.3.3",
+ "uuid",
 ]
 
 [[package]]
 name = "propolis-server"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=96ba33d2629b93bfb9cdb806327c16113bcf0cf3#96ba33d2629b93bfb9cdb806327c16113bcf0cf3"
+source = "git+https://github.com/oxidecomputer/propolis?rev=04a275736e9f3316de6bf2a4077d03acfa4e2cdf#04a275736e9f3316de6bf2a4077d03acfa4e2cdf"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6027,13 +6087,13 @@ dependencies = [
  "tokio-util",
  "toml 0.5.11",
  "usdt",
- "uuid 1.3.3",
+ "uuid",
 ]
 
 [[package]]
 name = "propolis-server-config"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=96ba33d2629b93bfb9cdb806327c16113bcf0cf3#96ba33d2629b93bfb9cdb806327c16113bcf0cf3"
+source = "git+https://github.com/oxidecomputer/propolis?rev=04a275736e9f3316de6bf2a4077d03acfa4e2cdf#04a275736e9f3316de6bf2a4077d03acfa4e2cdf"
 dependencies = [
  "serde",
  "serde_derive",
@@ -6044,7 +6104,7 @@ dependencies = [
 [[package]]
 name = "propolis_types"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=96ba33d2629b93bfb9cdb806327c16113bcf0cf3#96ba33d2629b93bfb9cdb806327c16113bcf0cf3"
+source = "git+https://github.com/oxidecomputer/propolis?rev=04a275736e9f3316de6bf2a4077d03acfa4e2cdf#04a275736e9f3316de6bf2a4077d03acfa4e2cdf"
 dependencies = [
  "schemars",
  "serde",
@@ -6339,7 +6399,7 @@ checksum = "8d2275aab483050ab2a7364c1a46604865ee7d6906684e08db0f090acf74f9e7"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.18",
+ "syn 2.0.20",
 ]
 
 [[package]]
@@ -6821,7 +6881,7 @@ dependencies = [
  "serde",
  "snafu",
  "url",
- "uuid 1.3.3",
+ "uuid",
 ]
 
 [[package]]
@@ -6863,8 +6923,7 @@ dependencies = [
  "schemars_derive",
  "serde",
  "serde_json",
- "uuid 0.8.2",
- "uuid 1.3.3",
+ "uuid",
 ]
 
 [[package]]
@@ -7010,7 +7069,7 @@ checksum = "d9735b638ccc51c28bf6914d90a2e9725b377144fc612c49a611fddd1b631d68"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.18",
+ "syn 2.0.20",
 ]
 
 [[package]]
@@ -7035,9 +7094,9 @@ dependencies = [
 
 [[package]]
 name = "serde_json"
-version = "1.0.97"
+version = "1.0.99"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bdf3bf93142acad5821c99197022e170842cdbc1c30482b98750c688c640842a"
+checksum = "46266871c240a00b8f503b877622fe33430b3c7d963bdc0f2adc511e54a1eae3"
 dependencies = [
  "itoa",
  "ryu",
@@ -7075,9 +7134,9 @@ dependencies = [
 
 [[package]]
 name = "serde_spanned"
-version = "0.6.2"
+version = "0.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "93107647184f6027e3b7dcb2e11034cf95ffa1e3a682c67951963ac69c1c007d"
+checksum = "96426c9936fd7a0124915f9185ea1d20aa9445cc9821142f0a73bc9207a2e186"
 dependencies = [
  "serde",
 ]
@@ -7102,7 +7161,7 @@ dependencies = [
  "proc-macro2",
  "quote",
  "serde",
- "syn 2.0.18",
+ "syn 2.0.20",
 ]
 
 [[package]]
@@ -7126,7 +7185,7 @@ dependencies = [
  "base64 0.13.1",
  "chrono",
  "hex",
- "indexmap",
+ "indexmap 1.9.3",
  "serde",
  "serde_json",
  "serde_with_macros",
@@ -7142,7 +7201,7 @@ dependencies = [
  "darling 0.20.0",
  "proc-macro2",
  "quote",
- "syn 2.0.18",
+ "syn 2.0.20",
 ]
 
 [[package]]
@@ -7151,7 +7210,7 @@ version = "0.9.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f82e6c8c047aa50a7328632d067bcae6ef38772a79e28daf32f735e0e4f3dd10"
 dependencies = [
- "indexmap",
+ "indexmap 1.9.3",
  "itoa",
  "ryu",
  "serde",
@@ -7359,7 +7418,7 @@ dependencies = [
  "reqwest",
  "serde",
  "slog",
- "uuid 1.3.3",
+ "uuid",
 ]
 
 [[package]]
@@ -7386,7 +7445,7 @@ dependencies = [
  "thiserror",
  "tofino",
  "tokio",
- "uuid 1.3.3",
+ "uuid",
 ]
 
 [[package]]
@@ -7687,7 +7746,7 @@ dependencies = [
  "slog",
  "thiserror",
  "tokio",
- "uuid 1.3.3",
+ "uuid",
 ]
 
 [[package]]
@@ -7833,9 +7892,9 @@ dependencies = [
 
 [[package]]
 name = "syn"
-version = "2.0.18"
+version = "2.0.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "32d41677bcbe24c20c52e7c70b0d8db04134c5d1066bf98662e2871ad200ea3e"
+checksum = "fcb8d4cebc40aa517dfb69618fa647a346562e67228e2236ae0042ee6ac14775"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -7985,7 +8044,7 @@ checksum = "f9456a42c5b0d803c8cd86e73dd7cc9edd429499f37a3550d286d5e86720569f"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.18",
+ "syn 2.0.20",
 ]
 
 [[package]]
@@ -8172,7 +8231,7 @@ checksum = "630bdcf245f78637c13ec01ffae6187cca34625e8c63150d424b59e55af2675e"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.18",
+ "syn 2.0.20",
 ]
 
 [[package]]
@@ -8211,9 +8270,9 @@ dependencies = [
 
 [[package]]
 name = "tokio-rustls"
-version = "0.24.0"
+version = "0.24.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e0d409377ff5b1e3ca6437aa86c1eb7d40c134bfec254e44c830defa92669db5"
+checksum = "c28327cf380ac148141087fbfb9de9d7bd4e84ab5d2c28fbc911d753de8a7081"
 dependencies = [
  "rustls",
  "tokio",
@@ -8291,20 +8350,20 @@ dependencies = [
 
 [[package]]
 name = "toml_datetime"
-version = "0.6.2"
+version = "0.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5a76a9312f5ba4c2dec6b9161fdf25d87ad8a09256ccea5a556fef03c706a10f"
+checksum = "7cda73e2f1397b1262d6dfdcef8aafae14d1de7748d66822d3bfeeb6d03e5e4b"
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "toml_edit"
-version = "0.19.10"
+version = "0.19.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2380d56e8670370eee6566b0bfd4265f65b3f432e8c6d85623f728d4fa31f739"
+checksum = "266f016b7f039eec8a1a80dfe6156b633d208b9fccca5e4db1d6775b0c4e34a7"
 dependencies = [
- "indexmap",
+ "indexmap 2.0.0",
  "serde",
  "serde_spanned",
  "toml_datetime",
@@ -8623,7 +8682,7 @@ checksum = "497961ef93d974e23eb6f433eb5fe1b7930b659f06d12dec6fc44a8f554c0bba"
 [[package]]
 name = "typify"
 version = "0.0.13"
-source = "git+https://github.com/oxidecomputer/typify#ab78614353f242f60dba979f9da3207a0039d05d"
+source = "git+https://github.com/oxidecomputer/typify#fdfed7c5786e7f415ea618161c8f41912f670209"
 dependencies = [
  "typify-impl",
  "typify-macro",
@@ -8632,7 +8691,7 @@ dependencies = [
 [[package]]
 name = "typify-impl"
 version = "0.0.13"
-source = "git+https://github.com/oxidecomputer/typify#ab78614353f242f60dba979f9da3207a0039d05d"
+source = "git+https://github.com/oxidecomputer/typify#fdfed7c5786e7f415ea618161c8f41912f670209"
 dependencies = [
  "heck 0.4.1",
  "log",
@@ -8641,7 +8700,7 @@ dependencies = [
  "regress",
  "schemars",
  "serde_json",
- "syn 2.0.18",
+ "syn 2.0.20",
  "thiserror",
  "unicode-ident",
 ]
@@ -8649,7 +8708,7 @@ dependencies = [
 [[package]]
 name = "typify-macro"
 version = "0.0.13"
-source = "git+https://github.com/oxidecomputer/typify#ab78614353f242f60dba979f9da3207a0039d05d"
+source = "git+https://github.com/oxidecomputer/typify#fdfed7c5786e7f415ea618161c8f41912f670209"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -8657,7 +8716,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_tokenstream 0.2.0",
- "syn 2.0.18",
+ "syn 2.0.20",
  "typify-impl",
 ]
 
@@ -8766,7 +8825,7 @@ dependencies = [
  "derive-where",
  "either",
  "futures",
- "indexmap",
+ "indexmap 1.9.3",
  "indicatif",
  "linear-map",
  "omicron-test-utils",
@@ -8780,7 +8839,7 @@ dependencies = [
  "slog",
  "tokio",
  "tokio-stream",
- "uuid 1.3.3",
+ "uuid",
 ]
 
 [[package]]
@@ -8869,15 +8928,9 @@ checksum = "711b9620af191e0cdc7468a8d14e709c3dcdb115b36f838e601583af800a370a"
 
 [[package]]
 name = "uuid"
-version = "0.8.2"
+version = "1.3.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bc5cf98d8186244414c848017f0e2676b3fcb46807f6668a97dfe67359a3c4b7"
-
-[[package]]
-name = "uuid"
-version = "1.3.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "345444e32442451b267fc254ae85a209c64be56d2890e601a0c37ff0c3c5ecd2"
+checksum = "0fa2982af2eec27de306107c027578ff7f423d65f7250e40ce0fea8f45248b81"
 dependencies = [
  "getrandom 0.2.8",
  "serde",
@@ -8904,7 +8957,7 @@ checksum = "49874b5167b65d7193b8aba1567f5c7d93d001cafc34600cee003eda787e483f"
 [[package]]
 name = "viona_api"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=96ba33d2629b93bfb9cdb806327c16113bcf0cf3#96ba33d2629b93bfb9cdb806327c16113bcf0cf3"
+source = "git+https://github.com/oxidecomputer/propolis?rev=04a275736e9f3316de6bf2a4077d03acfa4e2cdf#04a275736e9f3316de6bf2a4077d03acfa4e2cdf"
 dependencies = [
  "libc",
  "num_enum",
@@ -8914,7 +8967,7 @@ dependencies = [
 [[package]]
 name = "viona_api_sys"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=96ba33d2629b93bfb9cdb806327c16113bcf0cf3#96ba33d2629b93bfb9cdb806327c16113bcf0cf3"
+source = "git+https://github.com/oxidecomputer/propolis?rev=04a275736e9f3316de6bf2a4077d03acfa4e2cdf#04a275736e9f3316de6bf2a4077d03acfa4e2cdf"
 dependencies = [
  "libc",
 ]
@@ -9145,7 +9198,7 @@ dependencies = [
  "futures",
  "hex",
  "humantime",
- "indexmap",
+ "indexmap 1.9.3",
  "itertools",
  "libsw",
  "omicron-common 0.1.0",
@@ -9271,7 +9324,7 @@ dependencies = [
  "tufaceous",
  "tufaceous-lib",
  "update-engine",
- "uuid 1.3.3",
+ "uuid",
  "wicket-common",
  "wicketd-client",
 ]
@@ -9290,7 +9343,7 @@ dependencies = [
  "serde_json",
  "slog",
  "update-engine",
- "uuid 1.3.3",
+ "uuid",
  "wicket-common",
 ]
 
