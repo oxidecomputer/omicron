@@ -36,7 +36,6 @@ use omicron_common::api::external::InstanceState;
 use omicron_common::api::external::Ipv4Net;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::Vni;
-use omicron_nexus::authz::SiloRole;
 use omicron_nexus::db::fixed_data::silo::SILO_ID;
 use omicron_nexus::db::lookup::LookupPath;
 use omicron_nexus::external_api::shared::IpKind;
@@ -58,6 +57,7 @@ use dropshot::{HttpErrorResponseBody, ResultsPage};
 use nexus_test_utils::identity_eq;
 use nexus_test_utils::resource_helpers::{create_instance, create_project};
 use nexus_test_utils_macros::nexus_test;
+use omicron_nexus::external_api::shared::SiloRole;
 use omicron_sled_agent::sim;
 
 type ControlPlaneTestContext =

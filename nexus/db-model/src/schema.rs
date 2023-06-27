@@ -185,11 +185,12 @@ table! {
 }
 
 table! {
-    switch_port_settings_route_config (port_settings_id, interface_name, dst, gw) {
+    switch_port_settings_route_config (port_settings_id, interface_name, dst, gw, vid) {
         port_settings_id -> Uuid,
         interface_name -> Text,
         dst -> Inet,
         gw -> Inet,
+        vid -> Nullable<Int4>,
     }
 }
 
@@ -494,6 +495,8 @@ table! {
         discoverable -> Bool,
         authentication_mode -> crate::AuthenticationModeEnum,
         user_provision_type -> crate::UserProvisionTypeEnum,
+
+        mapped_fleet_roles -> Jsonb,
 
         rcgen -> Int8,
     }

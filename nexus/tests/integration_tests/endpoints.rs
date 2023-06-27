@@ -29,7 +29,6 @@ use omicron_common::api::external::RouteTarget;
 use omicron_common::api::external::SemverVersion;
 use omicron_common::api::external::VpcFirewallRuleUpdateParams;
 use omicron_nexus::authn;
-use omicron_nexus::authz;
 use omicron_nexus::db::fixed_data::silo::DEFAULT_SILO;
 use omicron_nexus::db::identity::Resource;
 use omicron_nexus::external_api::params;
@@ -74,6 +73,7 @@ lazy_static! {
             identity_mode: shared::SiloIdentityMode::SamlJit,
             admin_group_name: None,
             tls_certificates: vec![],
+            mapped_fleet_roles: Default::default(),
         };
     // Use the default Silo for testing the local IdP
     pub static ref DEMO_SILO_USERS_CREATE_URL: String = format!(
@@ -711,7 +711,7 @@ lazy_static! {
                 AllowedMethod::Get,
                 AllowedMethod::Put(
                     serde_json::to_value(
-                        &shared::Policy::<authz::FleetRole> {
+                        &shared::Policy::<shared::FleetRole> {
                             role_assignments: vec![]
                         }
                     ).unwrap()
@@ -869,7 +869,7 @@ lazy_static! {
                 AllowedMethod::Get,
                 AllowedMethod::Put(
                     serde_json::to_value(
-                        &shared::Policy::<authz::SiloRole> {
+                        &shared::Policy::<shared::SiloRole> {
                             role_assignments: vec![]
                         }
                     ).unwrap()
@@ -884,7 +884,7 @@ lazy_static! {
                 AllowedMethod::Get,
                 AllowedMethod::Put(
                     serde_json::to_value(
-                        &shared::Policy::<authz::SiloRole> {
+                        &shared::Policy::<shared::SiloRole> {
                             role_assignments: vec![]
                         }
                     ).unwrap()
@@ -1018,7 +1018,7 @@ lazy_static! {
                 AllowedMethod::Get,
                 AllowedMethod::Put(
                     serde_json::to_value(
-                        &shared::Policy::<authz::ProjectRole> {
+                        &shared::Policy::<shared::ProjectRole> {
                             role_assignments: vec![]
                         }
                     ).unwrap()

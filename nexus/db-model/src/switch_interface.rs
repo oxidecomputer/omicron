@@ -82,7 +82,7 @@ impl Into<external::SwitchVlanInterfaceConfig> for SwitchVlanInterfaceConfig {
     fn into(self) -> external::SwitchVlanInterfaceConfig {
         external::SwitchVlanInterfaceConfig {
             interface_config_id: self.interface_config_id,
-            vid: self.vid.into(),
+            vlan_id: self.vid.into(),
         }
     }
 }

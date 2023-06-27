@@ -507,6 +507,149 @@
         }
       }
     },
+    "/zones": {
+      "get": {
+        "summary": "List the zones that are currently managed by the sled agent.",
+        "operationId": "zones_list",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Array_of_String",
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/zones/{zone_name}/bundles": {
+      "get": {
+        "summary": "List the zone bundles that are current available for a zone.",
+        "operationId": "zone_bundle_list",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "zone_name",
+            "description": "The name of the zone.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Array_of_ZoneBundleMetadata",
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ZoneBundleMetadata"
+                  }
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "post": {
+        "summary": "Ask the sled agent to create a zone bundle.",
+        "operationId": "zone_bundle_create",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "zone_name",
+            "description": "The name of the zone.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ZoneBundleMetadata"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/zones/{zone_name}/bundles/{bundle_id}": {
+      "get": {
+        "summary": "Fetch the binary content of a single zone bundle.",
+        "operationId": "zone_bundle_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "bundle_id",
+            "description": "The ID for this bundle itself.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "zone_name",
+            "description": "The name of the zone this bundle is derived from.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "*/*": {
+                "schema": {}
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/zpools": {
       "get": {
         "operationId": "zpools_get",
@@ -2452,6 +2595,48 @@
         "required": [
           "rules",
           "vni"
+        ]
+      },
+      "ZoneBundleId": {
+        "description": "An identifier for a zone bundle.",
+        "type": "object",
+        "properties": {
+          "bundle_id": {
+            "description": "The ID for this bundle itself.",
+            "type": "string",
+            "format": "uuid"
+          },
+          "zone_name": {
+            "description": "The name of the zone this bundle is derived from.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "bundle_id",
+          "zone_name"
+        ]
+      },
+      "ZoneBundleMetadata": {
+        "description": "Metadata about a zone bundle.",
+        "type": "object",
+        "properties": {
+          "id": {
+            "description": "Identifier for this zone bundle",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ZoneBundleId"
+              }
+            ]
+          },
+          "time_created": {
+            "description": "The time at which this zone bundle was created.",
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "time_created"
         ]
       },
       "ZoneType": {

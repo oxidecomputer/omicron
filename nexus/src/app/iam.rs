@@ -28,7 +28,7 @@ impl super::Nexus {
     pub async fn fleet_fetch_policy(
         &self,
         opctx: &OpContext,
-    ) -> LookupResult<shared::Policy<authz::FleetRole>> {
+    ) -> LookupResult<shared::Policy<shared::FleetRole>> {
         let role_assignments = self
             .db_datastore
             .role_assignment_fetch_visible(opctx, &authz::FLEET)
@@ -43,8 +43,8 @@ impl super::Nexus {
     pub async fn fleet_update_policy(
         &self,
         opctx: &OpContext,
-        policy: &shared::Policy<authz::FleetRole>,
-    ) -> UpdateResult<shared::Policy<authz::FleetRole>> {
+        policy: &shared::Policy<shared::FleetRole>,
+    ) -> UpdateResult<shared::Policy<shared::FleetRole>> {
         let role_assignments = self
             .db_datastore
             .role_assignment_replace_visible(
@@ -121,20 +121,6 @@ impl super::Nexus {
             .fetch()
             .await?;
         Ok(db_silo_user)
-    }
-
-    /// Fetch the currently-authenticated Silo user's Silo
-    pub async fn silo_user_fetch_silo(
-        &self,
-        opctx: &OpContext,
-    ) -> LookupResult<db::model::Silo> {
-        let authz_silo = opctx
-            .authn
-            .silo_required()
-            .internal_context("loading current user's silo")?;
-        let silo_id = authz_silo.id().into();
-        let (.., db_silo) = self.silo_lookup(&opctx, silo_id)?.fetch().await?;
-        Ok(db_silo)
     }
 
     pub async fn silo_user_fetch_groups_for_self(

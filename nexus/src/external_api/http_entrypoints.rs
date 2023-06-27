@@ -370,7 +370,7 @@ pub fn external_api() -> NexusApiDescription {
 }]
 async fn system_policy_view(
     rqctx: RequestContext<Arc<ServerContext>>,
-) -> Result<HttpResponseOk<shared::Policy<authz::FleetRole>>, HttpError> {
+) -> Result<HttpResponseOk<shared::Policy<shared::FleetRole>>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let nexus = &apictx.nexus;
@@ -395,8 +395,8 @@ struct ByIdPathParams {
 }]
 async fn system_policy_update(
     rqctx: RequestContext<Arc<ServerContext>>,
-    new_policy: TypedBody<shared::Policy<authz::FleetRole>>,
-) -> Result<HttpResponseOk<shared::Policy<authz::FleetRole>>, HttpError> {
+    new_policy: TypedBody<shared::Policy<shared::FleetRole>>,
+) -> Result<HttpResponseOk<shared::Policy<shared::FleetRole>>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let nexus = &apictx.nexus;
@@ -419,7 +419,7 @@ async fn system_policy_update(
  }]
 pub async fn policy_view(
     rqctx: RequestContext<Arc<ServerContext>>,
-) -> Result<HttpResponseOk<shared::Policy<authz::SiloRole>>, HttpError> {
+) -> Result<HttpResponseOk<shared::Policy<shared::SiloRole>>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let nexus = &apictx.nexus;
@@ -446,8 +446,8 @@ pub async fn policy_view(
 }]
 async fn policy_update(
     rqctx: RequestContext<Arc<ServerContext>>,
-    new_policy: TypedBody<shared::Policy<authz::SiloRole>>,
-) -> Result<HttpResponseOk<shared::Policy<authz::SiloRole>>, HttpError> {
+    new_policy: TypedBody<shared::Policy<shared::SiloRole>>,
+) -> Result<HttpResponseOk<shared::Policy<shared::SiloRole>>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let nexus = &apictx.nexus;
@@ -583,7 +583,7 @@ async fn silo_delete(
 async fn silo_policy_view(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::SiloPath>,
-) -> Result<HttpResponseOk<shared::Policy<authz::SiloRole>>, HttpError> {
+) -> Result<HttpResponseOk<shared::Policy<shared::SiloRole>>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
@@ -605,8 +605,8 @@ async fn silo_policy_view(
 async fn silo_policy_update(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::SiloPath>,
-    new_policy: TypedBody<shared::Policy<authz::SiloRole>>,
-) -> Result<HttpResponseOk<shared::Policy<authz::SiloRole>>, HttpError> {
+    new_policy: TypedBody<shared::Policy<shared::SiloRole>>,
+) -> Result<HttpResponseOk<shared::Policy<shared::SiloRole>>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let new_policy = new_policy.into_inner();
@@ -1034,7 +1034,7 @@ async fn project_update(
 async fn project_policy_view(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::ProjectPath>,
-) -> Result<HttpResponseOk<shared::Policy<authz::ProjectRole>>, HttpError> {
+) -> Result<HttpResponseOk<shared::Policy<shared::ProjectRole>>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
@@ -1059,8 +1059,8 @@ async fn project_policy_view(
 async fn project_policy_update(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::ProjectPath>,
-    new_policy: TypedBody<shared::Policy<authz::ProjectRole>>,
-) -> Result<HttpResponseOk<shared::Policy<authz::ProjectRole>>, HttpError> {
+    new_policy: TypedBody<shared::Policy<shared::ProjectRole>>,
+) -> Result<HttpResponseOk<shared::Policy<shared::ProjectRole>>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
@@ -5047,7 +5047,7 @@ pub async fn current_user_view(
     let handler = async {
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
         let user = nexus.silo_user_fetch_self(&opctx).await?;
-        let silo = nexus.silo_user_fetch_silo(&opctx).await?;
+        let (_, silo) = nexus.current_silo_lookup(&opctx)?.fetch().await?;
         Ok(HttpResponseOk(views::CurrentUser {
             user: user.into(),
             silo_name: silo.name().clone(),
