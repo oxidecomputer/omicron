@@ -105,7 +105,7 @@ setup_hint = "Run `./tools/ci_download_clickhouse` to download the necessary bin
 service_name = "cockroachdb"
 only_for_targets.image = "standard"
 source.type = "composite"
-source.packages = [ "cockroachdb-service.tar.gz", "dnswait.tar.gz" ]
+source.packages = [ "cockroachdb-service.tar.gz", "internal-dns-cli.tar.gz" ]
 output.type = "zone"
 
 [package.cockroachdb-service]
@@ -122,8 +122,8 @@ output.type = "zone"
 output.intermediate_only = true
 setup_hint = "Run `./tools/ci_download_cockroachdb` to download the necessary binaries"
 
-[package.internal-dns]
-service_name = "internal_dns_binaries"
+[package.internal-dns-cli]
+service_name = "internal_dns_cli"
 only_for_targets.image = "standard"
 source.type = "local"
 source.rust.binary_names = ["dnswait"]
@@ -132,14 +132,14 @@ source.paths = []
 output.type = "zone"
 output.intermediate_only = true
 
-[package.internal-dns-service]
+[package.internal-dns]
 service_name = "internal_dns"
 only_for_targets.image = "standard"
 source.type = "composite"
 source.packages = [ "dns-server.tar.gz", "internal-dns-customizations.tar.gz" ]
 output.type = "zone"
 
-[package.external-dns-service]
+[package.external-dns]
 service_name = "external_dns"
 only_for_targets.image = "standard"
 source.type = "composite"

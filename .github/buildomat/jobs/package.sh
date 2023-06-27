@@ -81,8 +81,8 @@ zones=(
 	out/cockroachdb.tar.gz
 	out/crucible-pantry.tar.gz
 	out/crucible.tar.gz
-	out/external-dns-service.tar.gz
-	out/internal-dns-service.tar.gz
+	out/external-dns.tar.gz
+	out/internal-dns.tar.gz
 	out/omicron-nexus.tar.gz
 	out/oximeter-collector.tar.gz
 	out/propolis-server.tar.gz
