@@ -136,7 +136,11 @@ impl CurrentRssConfig {
         let silo_hostname = format!("*.sys.{}", self.external_dns_zone_name);
         for (i, pair) in self.external_certificates.iter().enumerate() {
             cert_validator
-                .validate(&pair.cert, &pair.key, Some(&silo_hostname))
+                .validate(
+                    pair.cert.as_bytes(),
+                    pair.key.as_bytes(),
+                    Some(&silo_hostname),
+                )
                 .with_context(|| {
                     let i = i + 1;
                     let tot = self.external_certificates.len();
