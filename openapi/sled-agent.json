@@ -2621,9 +2621,15 @@
         "type": "object",
         "properties": {
           "id": {
-            "$ref": "#/components/schemas/ZoneBundleId"
+            "description": "Identifier for this zone bundle",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ZoneBundleId"
+              }
+            ]
           },
           "time_created": {
+            "description": "The time at which this zone bundle was created.",
             "type": "string",
             "format": "date-time"
           }
