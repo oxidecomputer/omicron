@@ -289,66 +289,94 @@ async fn test_db_run() {
     let exec =
         Exec::cmd("bash").arg("-c").arg(cmdstr).stderr(Redirection::Merge);
     let dbrun = run_db_run(exec, true);
-    let (client, connection) = dbrun
-        .listen_config
-        .connect(tokio_postgres::NoTls)
-        .await
-        .expect("failed to connect to newly setup database");
-    let conn_task = tokio::spawn(connection);
+    let test_task = async {
+        let (client, connection) = dbrun
+            .listen_config
+            .connect(tokio_postgres::NoTls)
+            .await
+            .context("failed to connect to newly setup database")?;
+        let conn_task = tokio::spawn(connection);
 
-    assert!(has_omicron_schema(&client).await);
+        anyhow::ensure!(
+            has_omicron_schema(&client).await,
+            "Missing Omicron schema"
+        );
 
-    // Now run db-populate.  It should fail because the database is already
-    // populated.
-    eprintln!("running db-populate");
-    let populate_result = Exec::cmd(&cmd_path)
-        .arg("db-populate")
-        .arg("--database-url")
-        .arg(&dbrun.listen_config_url)
-        .stdout(Redirection::Pipe)
-        .stderr(Redirection::Pipe)
-        .capture()
-        .expect("failed to run db-populate");
-    eprintln!("exit status: {:?}", populate_result.exit_status);
-    eprintln!("stdout: {:?}", populate_result.stdout_str());
-    eprintln!("stdout: {:?}", populate_result.stderr_str());
-    assert!(matches!(populate_result.exit_status, ExitStatus::Exited(1)));
-    assert!(populate_result
-        .stderr_str()
-        .contains("database \"omicron\" already exists"));
-    assert!(has_omicron_schema(&client).await);
+        // Now run db-populate.  It should fail because the database is already
+        // populated.
+        eprintln!("running db-populate");
+        let populate_result = Exec::cmd(&cmd_path)
+            .arg("db-populate")
+            .arg("--database-url")
+            .arg(&dbrun.listen_config_url)
+            .stdout(Redirection::Pipe)
+            .stderr(Redirection::Pipe)
+            .capture()
+            .context("failed to run db-populate")?;
+        eprintln!("exit status: {:?}", populate_result.exit_status);
+        eprintln!("stdout: {:?}", populate_result.stdout_str());
+        eprintln!("stdout: {:?}", populate_result.stderr_str());
+        anyhow::ensure!(
+            matches!(populate_result.exit_status, ExitStatus::Exited(1)),
+            "db-populate did not exit cleanly"
+        );
+        anyhow::ensure!(
+            populate_result
+                .stderr_str()
+                .contains("database \"omicron\" already exists"),
+            "db-populate did not fail when DB was already populated",
+        );
+        anyhow::ensure!(
+            has_omicron_schema(&client).await,
+            "Missing Omicron schema"
+        );
 
-    // Try again, but with the --wipe flag.
-    eprintln!("running db-populate --wipe");
-    let populate_result = Exec::cmd(&cmd_path)
-        .arg("db-populate")
-        .arg("--wipe")
-        .arg("--database-url")
-        .arg(&dbrun.listen_config_url)
-        .capture()
-        .expect("failed to run db-populate");
-    assert!(matches!(populate_result.exit_status, ExitStatus::Exited(0)));
-    assert!(has_omicron_schema(&client).await);
+        // Try again, but with the --wipe flag.
+        eprintln!("running db-populate --wipe");
+        let populate_result = Exec::cmd(&cmd_path)
+            .arg("db-populate")
+            .arg("--wipe")
+            .arg("--database-url")
+            .arg(&dbrun.listen_config_url)
+            .capture()
+            .context("failed to run db-populate")?;
+        anyhow::ensure!(
+            matches!(populate_result.exit_status, ExitStatus::Exited(0)),
+            "db-populate did not exit cleanly"
+        );
+        anyhow::ensure!(
+            has_omicron_schema(&client).await,
+            "Missing Omicron schema"
+        );
 
-    // Now run db-wipe.  This should work.
-    eprintln!("running db-wipe");
-    let wipe_result = Exec::cmd(&cmd_path)
-        .arg("db-wipe")
-        .arg("--database-url")
-        .arg(&dbrun.listen_config_url)
-        .capture()
-        .expect("failed to run db-wipe");
-    assert!(matches!(wipe_result.exit_status, ExitStatus::Exited(0)));
-    assert!(!has_omicron_schema(&client).await);
+        // Now run db-wipe.  This should work.
+        eprintln!("running db-wipe");
+        let wipe_result = Exec::cmd(&cmd_path)
+            .arg("db-wipe")
+            .arg("--database-url")
+            .arg(&dbrun.listen_config_url)
+            .capture()
+            .context("failed to run db-wipe")?;
+        anyhow::ensure!(
+            matches!(wipe_result.exit_status, ExitStatus::Exited(0)),
+            "db-wipe did not exit cleanly",
+        );
+        anyhow::ensure!(
+            !has_omicron_schema(&client).await,
+            "Missing Omicron schema"
+        );
 
-    // The rest of the populate()/wipe() behavior is tested elsewhere.
+        // The rest of the populate()/wipe() behavior is tested elsewhere.
 
-    drop(client);
-    conn_task
-        .await
-        .expect("failed to join on connection")
-        .expect("connection failed with an error");
-    eprintln!("cleaned up connection");
+        drop(client);
+        conn_task
+            .await
+            .context("failed to join on connection")?
+            .context("connection failed with an error")?;
+        eprintln!("cleaned up connection");
+        Ok(())
+    };
+    let res = test_task.await;
 
     // Figure out what process group our child processes are in.  (That won't be
     // the child's pid because the immediate shell will be in our process group,
@@ -369,6 +397,7 @@ async fn test_db_run() {
     );
     eprintln!("wait result: {:?}", wait);
     assert!(matches!(wait, subprocess::ExitStatus::Exited(0)));
+    res.expect("test task failed");
 }
 
 // Exercises the normal use case of `omicron-dev run-all`: everything starts up,
@@ -388,25 +417,35 @@ async fn test_run_all() {
         Exec::cmd("bash").arg("-c").arg(cmdstr).stderr(Redirection::Merge);
     let runall = run_run_all(exec);
 
-    // Make sure we can connect to CockroachDB.
-    let (client, connection) = runall
-        .postgres_config
-        .connect(tokio_postgres::NoTls)
-        .await
-        .expect("failed to connect to newly setup database");
-    let conn_task = tokio::spawn(connection);
-    assert!(has_omicron_schema(&client).await);
-    drop(client);
-    conn_task
-        .await
-        .expect("failed to join on connection")
-        .expect("connection failed with an error");
-    eprintln!("cleaned up connection");
+    let test_task = async {
+        // Make sure we can connect to CockroachDB.
+        let (client, connection) = runall
+            .postgres_config
+            .connect(tokio_postgres::NoTls)
+            .await
+            .context("failed to connect to newly setup database")?;
+        let conn_task = tokio::spawn(connection);
+        anyhow::ensure!(
+            has_omicron_schema(&client).await,
+            "Missing Omicron schema"
+        );
+        drop(client);
+        conn_task
+            .await
+            .context("failed to join on connection")?
+            .context("connection failed with an error")?;
+        eprintln!("cleaned up connection");
 
-    // Make sure we can connect to Nexus.
-    let client =
-        oxide_client::Client::new(&format!("http://{}", runall.external_url));
-    let _ = client.logout().send().await.unwrap();
+        // Make sure we can connect to Nexus.
+        let client = oxide_client::Client::new(&format!(
+            "http://{}",
+            runall.external_url
+        ));
+        let _ =
+            client.logout().send().await.context("Nexus failed to start")?;
+        Ok(())
+    };
+    let res = test_task.await;
 
     // Figure out what process group our child processes are in.  (That won't be
     // the child's pid because the immediate shell will be in our process group,
@@ -427,6 +466,9 @@ async fn test_run_all() {
     );
     eprintln!("wait result: {:?}", wait);
     assert!(matches!(wait, subprocess::ExitStatus::Exited(0)));
+
+    // Unwrap the caught errors we are actually trying to test.
+    res.expect("failed to run test");
 }
 
 // Exercises the unusual case of `omicron-dev db-run` where the database shuts
