@@ -1,0 +1,11 @@
+[package]
+name = "caboose-util"
+version = "0.1.0"
+edition = "2021"
+license = "MPL-2.0"
+
+[dependencies]
+anyhow.workspace = true
+hubtools.workspace = true
+tlvc.workspace = true
+tlvc-text.workspace = true
