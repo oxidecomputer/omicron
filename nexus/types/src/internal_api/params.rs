@@ -239,8 +239,8 @@ pub struct DatasetCreateRequest {
 
 #[derive(Clone, Serialize, Deserialize, JsonSchema)]
 pub struct Certificate {
-    pub cert: Vec<u8>,
-    pub key: Vec<u8>,
+    pub cert: String,
+    pub key: String,
 }
 
 impl std::fmt::Debug for Certificate {
