@@ -29,7 +29,6 @@ pub enum Error {
 /// Wraps 'fstyp' command.
 pub struct Fstyp {}
 
-#[cfg_attr(test, mockall::automock)]
 impl Fstyp {
     /// Executes the 'fstyp' command and parses the name of a zpool from it, if
     /// one exists.

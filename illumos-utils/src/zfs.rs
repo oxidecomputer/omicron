@@ -138,7 +138,6 @@ pub struct EncryptionDetails {
     pub epoch: u64,
 }
 
-#[cfg_attr(any(test, feature = "testing"), mockall::automock, allow(dead_code))]
 impl Zfs {
     /// Lists all datasets within a pool or existing dataset.
     pub fn list_datasets(

@@ -375,7 +375,7 @@ mod test {
     use chrono::Utc;
     use illumos_utils::dladm::Etherstub;
     use illumos_utils::process::FakeExecutor;
-    use illumos_utils::{dladm::MockDladm, zone::MockZones};
+    use illumos_utils::zone::MockZones;
     use omicron_common::api::external::{
         ByteCount, Generation, InstanceCpuCount, InstanceState,
     };
@@ -455,9 +455,6 @@ mod test {
 
         let zones_get_ctx = MockZones::get_context();
         zones_get_ctx.expect().return_once(|| Ok(vec![]));
-
-        let dladm_get_vnics_ctx = MockDladm::get_vnics_context();
-        dladm_get_vnics_ctx.expect().return_once(|_| Ok(vec![]));
 
         let port_manager = PortManager::new(
             log.clone(),
@@ -592,9 +589,6 @@ mod test {
 
         let zones_get_ctx = MockZones::get_context();
         zones_get_ctx.expect().return_once(|| Ok(vec![]));
-
-        let dladm_get_vnics_ctx = MockDladm::get_vnics_context();
-        dladm_get_vnics_ctx.expect().return_once(|_| Ok(vec![]));
 
         let port_manager = PortManager::new(
             log.clone(),

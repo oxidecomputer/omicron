@@ -165,7 +165,6 @@ impl FromStr for ZpoolInfo {
 /// Wraps commands for interacting with ZFS pools.
 pub struct Zpool {}
 
-#[cfg_attr(any(test, feature = "testing"), mockall::automock, allow(dead_code))]
 impl Zpool {
     pub fn create(
         executor: &BoxedExecutor,

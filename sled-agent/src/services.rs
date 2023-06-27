@@ -2429,7 +2429,7 @@ mod test {
     use async_trait::async_trait;
     use illumos_utils::{
         dladm::{
-            Etherstub, MockDladm, BOOTSTRAP_ETHERSTUB_NAME,
+            Etherstub, BOOTSTRAP_ETHERSTUB_NAME,
             UNDERLAY_ETHERSTUB_NAME, UNDERLAY_ETHERSTUB_VNIC_NAME,
         },
         process::FakeExecutor,
@@ -2451,14 +2451,6 @@ mod test {
 
     // Returns the expectations for a new service to be created.
     fn expect_new_service() -> Vec<Box<dyn std::any::Any>> {
-        // Create a VNIC
-        let create_vnic_ctx = MockDladm::create_vnic_context();
-        create_vnic_ctx.expect().return_once(
-            |_, physical_link: &Etherstub, _, _, _, _| {
-                assert_eq!(&physical_link.0, &UNDERLAY_ETHERSTUB_NAME);
-                Ok(())
-            },
-        );
         // Install the Omicron Zone
         let install_ctx = MockZones::install_omicron_zone_context();
         install_ctx.expect().return_once(|_, _, name, _, _, _, _, _, _| {
@@ -2494,7 +2486,6 @@ mod test {
         wait_ctx.expect().return_once(|_, _| Ok(()));
 
         vec![
-            Box::new(create_vnic_ctx),
             Box::new(install_ctx),
             Box::new(boot_ctx),
             Box::new(id_ctx),
@@ -2554,9 +2545,6 @@ mod test {
             assert_eq!(name, EXPECTED_ZONE_NAME);
             Ok(())
         });
-        let delete_vnic_ctx = MockDladm::delete_vnic_context();
-        delete_vnic_ctx.expect().returning(|_, _| Ok(()));
-
         // Explicitly drop the service manager
         drop(mgr);
     }

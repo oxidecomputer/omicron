@@ -19,6 +19,7 @@ use crate::storage_manager::{self, StorageManager};
 use crate::updates::{ConfigUpdates, UpdateManager};
 use camino::Utf8PathBuf;
 use dropshot::HttpError;
+use illumos_utils::dladm::Dladm;
 use illumos_utils::opte::params::SetVirtualNetworkInterfaceHost;
 use illumos_utils::opte::PortManager;
 use illumos_utils::process::BoxedExecutor;
@@ -41,9 +42,9 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 #[cfg(not(test))]
-use illumos_utils::{dladm::Dladm, zone::Zones};
+use illumos_utils::zone::Zones;
 #[cfg(test)]
-use illumos_utils::{dladm::MockDladm as Dladm, zone::MockZones as Zones};
+use illumos_utils::zone::MockZones as Zones;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {

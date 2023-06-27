@@ -12,8 +12,8 @@ use futures::stream::FuturesOrdered;
 use futures::FutureExt;
 use futures::StreamExt;
 use illumos_utils::process::BoxedExecutor;
-use illumos_utils::zpool::{ZpoolKind, ZpoolName};
-use illumos_utils::{zfs::Mountpoint, zpool::ZpoolInfo};
+use illumos_utils::zpool::{Zpool, ZpoolInfo, ZpoolKind, ZpoolName};
+use illumos_utils::zfs::{Mountpoint, Zfs};
 use key_manager::StorageKeyRequester;
 use nexus_client::types::PhysicalDiskDeleteRequest;
 use nexus_client::types::PhysicalDiskKind;
@@ -32,11 +32,6 @@ use std::sync::Arc;
 use tokio::sync::{mpsc, oneshot, Mutex};
 use tokio::task::JoinHandle;
 use uuid::Uuid;
-
-#[cfg(test)]
-use illumos_utils::{zfs::MockZfs as Zfs, zpool::MockZpool as Zpool};
-#[cfg(not(test))]
-use illumos_utils::{zfs::Zfs, zpool::Zpool};
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
