@@ -458,7 +458,7 @@ dependencies = [
 [[package]]
 name = "bhyve_api"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=54dc09da004b46b17819fd80dff8a295c15eb294#54dc09da004b46b17819fd80dff8a295c15eb294"
+source = "git+https://github.com/oxidecomputer/propolis?rev=04a275736e9f3316de6bf2a4077d03acfa4e2cdf#04a275736e9f3316de6bf2a4077d03acfa4e2cdf"
 dependencies = [
  "bhyve_api_sys",
  "libc",
@@ -468,7 +468,7 @@ dependencies = [
 [[package]]
 name = "bhyve_api_sys"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=54dc09da004b46b17819fd80dff8a295c15eb294#54dc09da004b46b17819fd80dff8a295c15eb294"
+source = "git+https://github.com/oxidecomputer/propolis?rev=04a275736e9f3316de6bf2a4077d03acfa4e2cdf#04a275736e9f3316de6bf2a4077d03acfa4e2cdf"
 dependencies = [
  "libc",
  "num_enum",
@@ -778,6 +778,16 @@ checksum = "d2ab15a83d13f75dbd86f082bdefd160b628476ef58d3b900a0ef74e001bb097"
 dependencies = [
  "camino",
  "tempfile",
+]
+
+[[package]]
+name = "cancel-safe-futures"
+version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/cancel-safe-futures?rev=c15ea7069dc547434ee772f08ce040f71db9b453#c15ea7069dc547434ee772f08ce040f71db9b453"
+dependencies = [
+ "futures-core",
+ "futures-sink",
+ "futures-util",
 ]
 
 [[package]]
@@ -1847,7 +1857,7 @@ checksum = "7e1a8646b2c125eeb9a84ef0faa6d2d102ea0d5da60b824ade2743263117b848"
 [[package]]
 name = "dladm"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=54dc09da004b46b17819fd80dff8a295c15eb294#54dc09da004b46b17819fd80dff8a295c15eb294"
+source = "git+https://github.com/oxidecomputer/propolis?rev=04a275736e9f3316de6bf2a4077d03acfa4e2cdf#04a275736e9f3316de6bf2a4077d03acfa4e2cdf"
 dependencies = [
  "libc",
  "num_enum",
@@ -4631,6 +4641,7 @@ dependencies = [
  "base64 0.21.2",
  "bb8",
  "camino",
+ "cancel-safe-futures",
  "chrono",
  "clap 4.3.4",
  "cookie",
@@ -5969,7 +5980,7 @@ dependencies = [
 [[package]]
 name = "propolis"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=54dc09da004b46b17819fd80dff8a295c15eb294#54dc09da004b46b17819fd80dff8a295c15eb294"
+source = "git+https://github.com/oxidecomputer/propolis?rev=04a275736e9f3316de6bf2a4077d03acfa4e2cdf#04a275736e9f3316de6bf2a4077d03acfa4e2cdf"
 dependencies = [
  "anyhow",
  "bhyve_api",
@@ -5999,7 +6010,7 @@ dependencies = [
 [[package]]
 name = "propolis-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=54dc09da004b46b17819fd80dff8a295c15eb294#54dc09da004b46b17819fd80dff8a295c15eb294"
+source = "git+https://github.com/oxidecomputer/propolis?rev=04a275736e9f3316de6bf2a4077d03acfa4e2cdf#04a275736e9f3316de6bf2a4077d03acfa4e2cdf"
 dependencies = [
  "async-trait",
  "base64 0.21.2",
@@ -6023,7 +6034,7 @@ dependencies = [
 [[package]]
 name = "propolis-server"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=54dc09da004b46b17819fd80dff8a295c15eb294#54dc09da004b46b17819fd80dff8a295c15eb294"
+source = "git+https://github.com/oxidecomputer/propolis?rev=04a275736e9f3316de6bf2a4077d03acfa4e2cdf#04a275736e9f3316de6bf2a4077d03acfa4e2cdf"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6075,7 +6086,7 @@ dependencies = [
 [[package]]
 name = "propolis-server-config"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=54dc09da004b46b17819fd80dff8a295c15eb294#54dc09da004b46b17819fd80dff8a295c15eb294"
+source = "git+https://github.com/oxidecomputer/propolis?rev=04a275736e9f3316de6bf2a4077d03acfa4e2cdf#04a275736e9f3316de6bf2a4077d03acfa4e2cdf"
 dependencies = [
  "serde",
  "serde_derive",
@@ -6086,7 +6097,7 @@ dependencies = [
 [[package]]
 name = "propolis_types"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=54dc09da004b46b17819fd80dff8a295c15eb294#54dc09da004b46b17819fd80dff8a295c15eb294"
+source = "git+https://github.com/oxidecomputer/propolis?rev=04a275736e9f3316de6bf2a4077d03acfa4e2cdf#04a275736e9f3316de6bf2a4077d03acfa4e2cdf"
 dependencies = [
  "schemars",
  "serde",
@@ -8939,7 +8950,7 @@ checksum = "49874b5167b65d7193b8aba1567f5c7d93d001cafc34600cee003eda787e483f"
 [[package]]
 name = "viona_api"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=54dc09da004b46b17819fd80dff8a295c15eb294#54dc09da004b46b17819fd80dff8a295c15eb294"
+source = "git+https://github.com/oxidecomputer/propolis?rev=04a275736e9f3316de6bf2a4077d03acfa4e2cdf#04a275736e9f3316de6bf2a4077d03acfa4e2cdf"
 dependencies = [
  "libc",
  "num_enum",
@@ -8949,7 +8960,7 @@ dependencies = [
 [[package]]
 name = "viona_api_sys"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=54dc09da004b46b17819fd80dff8a295c15eb294#54dc09da004b46b17819fd80dff8a295c15eb294"
+source = "git+https://github.com/oxidecomputer/propolis?rev=04a275736e9f3316de6bf2a4077d03acfa4e2cdf#04a275736e9f3316de6bf2a4077d03acfa4e2cdf"
 dependencies = [
  "libc",
 ]

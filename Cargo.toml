@@ -137,6 +137,7 @@ bytes = "1.4.0"
 bytesize = "1.2.0"
 camino = "1.1"
 camino-tempfile = "1.0.2"
+cancel-safe-futures = { git = "https://github.com/oxidecomputer/cancel-safe-futures", rev = "c15ea7069dc547434ee772f08ce040f71db9b453" }
 chacha20poly1305 = "0.10.1"
 ciborium = "0.2.1"
 cfg-if = "1.0"
@@ -258,9 +259,9 @@ pretty-hex = "0.3.0"
 proc-macro2 = "1.0"
 progenitor = { git = "https://github.com/oxidecomputer/progenitor", branch = "main" }
 progenitor-client = { git = "https://github.com/oxidecomputer/progenitor", branch = "main" }
-bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "54dc09da004b46b17819fd80dff8a295c15eb294" }
-propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "54dc09da004b46b17819fd80dff8a295c15eb294", features = [ "generated-migration" ] }
-propolis-server = { git = "https://github.com/oxidecomputer/propolis", rev = "54dc09da004b46b17819fd80dff8a295c15eb294", default-features = false, features = ["mock-only"] }
+bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "04a275736e9f3316de6bf2a4077d03acfa4e2cdf" }
+propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "04a275736e9f3316de6bf2a4077d03acfa4e2cdf", features = [ "generated-migration" ] }
+propolis-server = { git = "https://github.com/oxidecomputer/propolis", rev = "04a275736e9f3316de6bf2a4077d03acfa4e2cdf", default-features = false, features = ["mock-only"] }
 #propolis-server = { path = "../propolis/bin/propolis-server" }
 proptest = "1.2.0"
 quote = "1.0"
