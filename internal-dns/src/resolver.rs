@@ -130,6 +130,27 @@ impl Resolver {
         Ok(*address)
     }
 
+    /// Returns the targets of the SRV records for a DNS name
+    ///
+    /// The returned values are generally other DNS names that themselves would
+    /// need to be looked up to find A/AAAA records.
+    pub async fn lookup_srv(
+        &self,
+        srv: crate::ServiceName,
+    ) -> Result<Vec<String>, ResolveError> {
+        let name = format!("{}.{}", srv.dns_name(), DNS_ZONE);
+        trace!(self.log, "lookup_srv"; "dns_name" => &name);
+        let response = self.inner.srv_lookup(&name).await?;
+        debug!(
+            self.log,
+            "lookup_srv";
+            "dns_name" => &name,
+            "response" => ?response
+        );
+
+        Ok(response.into_iter().map(|srv| srv.target().to_string()).collect())
+    }
+
     pub async fn lookup_all_ipv6(
         &self,
         srv: crate::ServiceName,

@@ -32,16 +32,12 @@ struct Opt {
 #[value(rename_all = "kebab-case")]
 enum ServiceName {
     Cockroach,
-    CruciblePantry,
 }
 
 impl From<ServiceName> for internal_dns::ServiceName {
     fn from(value: ServiceName) -> Self {
         match value {
             ServiceName::Cockroach => internal_dns::ServiceName::Cockroach,
-            ServiceName::CruciblePantry => {
-                internal_dns::ServiceName::CruciblePantry
-            }
         }
     }
 }
@@ -74,15 +70,13 @@ async fn main() -> Result<()> {
         omicron_common::backoff::retry_policy_internal_service(),
         || async {
             let dns_name = internal_dns::ServiceName::from(opt.srv_name);
-            resolver.lookup_all_ipv6(dns_name).await.map_err(
-                |error| match error {
-                    ResolveError::Resolve(_)
-                    | ResolveError::NotFound(_)
-                    | ResolveError::NotFoundByString(_) => {
-                        omicron_common::backoff::BackoffError::transient(error)
-                    }
-                },
-            )
+            resolver.lookup_srv(dns_name).await.map_err(|error| match error {
+                ResolveError::Resolve(_)
+                | ResolveError::NotFound(_)
+                | ResolveError::NotFoundByString(_) => {
+                    omicron_common::backoff::BackoffError::transient(error)
+                }
+            })
         },
         |error, delay| {
             warn!(
