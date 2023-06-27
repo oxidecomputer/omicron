@@ -714,16 +714,18 @@ impl ServiceManager {
                     // The tfport service requires a MAC device to/from which sidecar
                     // packets may be multiplexed.  If the link isn't present, don't
                     // bother trying to start the zone.
-                    match Dladm::verify_link(pkt_source) {
-                        Ok(link) => {
-                            // It's important that tfpkt does **not** receive a
-                            // link local address! See: https://github.com/oxidecomputer/stlouis/issues/391
-                            links.push((link, false));
-                        }
-                        Err(_) => {
-                            return Err(Error::MissingDevice {
-                                device: pkt_source.to_string(),
-                            });
+                    if let Some(pkt_source) = pkt_source {
+                        match Dladm::verify_link(pkt_source) {
+                            Ok(link) => {
+                                // It's important that tfpkt does **not** receive a
+                                // link local address! See: https://github.com/oxidecomputer/stlouis/issues/391
+                                links.push((link, false));
+                            }
+                            Err(_) => {
+                                return Err(Error::MissingDevice {
+                                    device: pkt_source.to_string(),
+                                });
+                            }
                         }
                     }
                 }
@@ -1727,7 +1729,9 @@ impl ServiceManager {
                         "config/techport_prefix",
                         techport_prefix.to_string(),
                     )?;
-                    smfh.setprop("config/pkt_source", pkt_source)?;
+                    if let Some(pkt_source) = pkt_source {
+                        smfh.setprop("config/pkt_source", pkt_source)?;
+                    }
                     smfh.setprop(
                         "config/host",
                         &format!("[{}]", Ipv6Addr::LOCALHOST),
@@ -2646,7 +2650,9 @@ impl ServiceManager {
                 vec![
                     ServiceType::Dendrite { asic: DendriteAsic::TofinoAsic },
                     ServiceType::ManagementGatewayService,
-                    ServiceType::Tfport { pkt_source: "tfpkt0".to_string() },
+                    ServiceType::Tfport {
+                        pkt_source: Some("tfpkt0".to_string()),
+                    },
                     ServiceType::Wicketd { baseboard },
                     ServiceType::Maghemite { mode: "transit".to_string() },
                 ]
@@ -2668,6 +2674,7 @@ impl ServiceManager {
                 vec![
                     ServiceType::Dendrite { asic },
                     ServiceType::ManagementGatewayService,
+                    ServiceType::Tfport { pkt_source: None },
                     ServiceType::Wicketd { baseboard },
                     ServiceType::Maghemite { mode: "transit".to_string() },
                     ServiceType::SpSim,

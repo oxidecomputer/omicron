@@ -309,7 +309,7 @@ pub enum ServiceType {
     },
     #[serde(skip)]
     Tfport {
-        pkt_source: String,
+        pkt_source: Option<String>,
     },
     #[serde(skip)]
     Maghemite {

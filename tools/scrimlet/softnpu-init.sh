@@ -18,9 +18,9 @@ z_swadm () {
 }
 
 # Configure route to the "sled"
-z_swadm route add fd00:1122:3344:0101::/64 rear0/0 fe80::aae1:deff:fe00:1
+# z_swadm route add fd00:1122:3344:0101::/64 rear0/0 fe80::aae1:deff:fe00:1
 # Create NDP entry for the "sled"
-z_swadm arp add fe80::aae1:deff:fe00:1 a8:e1:de:00:00:01
+# z_swadm arp add fe80::aae1:deff:fe00:1 a8:e1:de:00:00:01
 
 # Configure upstream network gateway ARP entry
 z_swadm arp add "$GATEWAY_IP" "$GATEWAY_MAC"

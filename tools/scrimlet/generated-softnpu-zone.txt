@@ -1,0 +1,35 @@
+create
+set brand=omicron1
+set zonepath=/softnpu-zone
+set ip-type=exclusive
+set autoboot=false
+add fs
+    set dir=/stuff
+    set special=/opt/oxide/softnpu/stuff
+    set type=lofs
+end
+add net
+    set physical=qsfp0
+end
+add net
+    set physical=softnpuqsfp0_0
+end
+add net
+    set physical=qsfp1
+end
+add net
+    set physical=softnpuqsfp1_0
+end
+add net
+    set physical=rear0
+end
+add net
+    set physical=softnpurear0_0
+end
+add net
+    set physical=rear1
+end
+add net
+    set physical=softnpurear1_0
+end
+commit
