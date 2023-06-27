@@ -123,7 +123,7 @@ output.intermediate_only = true
 setup_hint = "Run `./tools/ci_download_cockroachdb` to download the necessary binaries"
 
 [package.internal-dns-cli]
-service_name = "internal_dns_cli"
+service_name = "internal-dns-cli"
 only_for_targets.image = "standard"
 source.type = "local"
 source.rust.binary_names = ["dnswait"]
