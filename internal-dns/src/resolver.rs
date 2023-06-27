@@ -6,7 +6,7 @@ use crate::DNS_ZONE;
 use omicron_common::address::{
     Ipv6Subnet, ReservedRackSubnet, AZ_PREFIX, DNS_PORT,
 };
-use slog::{debug, info};
+use slog::{debug, info, trace};
 use std::net::{IpAddr, Ipv6Addr, SocketAddr, SocketAddrV6};
 use trust_dns_proto::rr::record_type::RecordType;
 use trust_dns_resolver::config::{
@@ -126,16 +126,57 @@ impl Resolver {
         srv: crate::ServiceName,
     ) -> Result<Vec<Ipv6Addr>, ResolveError> {
         let name = format!("{}.{}", srv.dns_name(), DNS_ZONE);
-        debug!(self.log, "lookup_ipv6 srv"; "dns_name" => &name);
+        trace!(self.log, "lookup_all_ipv6 srv"; "dns_name" => &name);
         let response = self.inner.srv_lookup(&name).await?;
-        let addresses = response
+        debug!(
+            self.log,
+            "lookup_ipv6 srv";
+            "dns_name" => &name,
+            "response" => ?response
+        );
+
+        // SRV records have a target, which is itself another DNS name that
+        // needs to be looked up in order to get to the actual IP addresses.
+        // Many DNS servers return these IP addresses directly in the response
+        // to the SRV query as Additional records.  Ours does not.  See
+        // omicron#3434.  So we need to do another round of lookups separately.
+        //
+        // According to the docs` for
+        // `trust_dns_resolver::lookup::SrvLookup::ip_iter()`, it sounds like
+        // trust-dns would have done this for us.  It doesn't.  See
+        // bluejekyll/trust-dns#1980.
+        //
+        // So if we have gotten any IPs, then we assume that one of the above
+        // issues has been addressed and so we have all the IPs and we're done.
+        // Otherwise, explicitly do the extra lookups.
+        let addresses: Vec<Ipv6Addr> = response
             .ip_iter()
             .filter_map(|addr| match addr {
                 IpAddr::V4(_) => None,
                 IpAddr::V6(addr) => Some(addr),
             })
             .collect();
-        Ok(addresses)
+        if !addresses.is_empty() {
+            return Ok(addresses);
+        }
+
+        // What do we do if some of these queries succeed while others fail?  We
+        // may have some addresses, but the list might be incomplete.  That
+        // might be okay for some use cases but not others.  For now, we do the
+        // simple thing.  In the future, we'll want a more cueball-like resolver
+        // interface that better deals with these cases.
+        let log = &self.log;
+        let futures = response.iter().map(|srv| async {
+            let target = srv.target();
+            trace!(
+                log,
+                "lookup_all_ipv6: looking up SRV target";
+                "name" => ?target,
+            );
+            self.inner.ipv6_lookup(target.clone()).await
+        });
+        let results = futures::future::try_join_all(futures).await?;
+        Ok(results.into_iter().flat_map(|ipv6| ipv6.into_iter()).collect())
     }
 
     pub async fn lookup_ip(
@@ -443,6 +484,17 @@ mod test {
             .await
             .expect("Should have been able to look up IP address");
         assert!(cockroach_addrs.iter().any(|addr| addr.ip() == &ip));
+
+        // Look up all the Cockroach addresses.
+        let mut ips =
+            resolver.lookup_all_ipv6(ServiceName::Cockroach).await.expect(
+                "Should have been able to look up all CockroachDB addresses",
+            );
+        ips.sort();
+        assert_eq!(
+            ips,
+            cockroach_addrs.iter().map(|s| *s.ip()).collect::<Vec<_>>()
+        );
 
         // Look up Clickhouse
         let ip = resolver
