@@ -57,7 +57,6 @@ async fn main() -> Result<()> {
     .to_logger("dnswait")
     .context("creating log")?;
 
-    let dns_name = internal_dns::ServiceName::from(opt.srv_name);
     let resolver = if opt.nameserver_addresses.is_empty() {
         info!(&log, "using system configuration");
         let async_resolver =
@@ -74,6 +73,7 @@ async fn main() -> Result<()> {
     let result = omicron_common::backoff::retry_notify(
         omicron_common::backoff::retry_policy_internal_service(),
         || async {
+            let dns_name = internal_dns::ServiceName::from(opt.srv_name);
             resolver.lookup_all_ipv6(dns_name).await.map_err(
                 |error| match error {
                     ResolveError::Resolve(_)
