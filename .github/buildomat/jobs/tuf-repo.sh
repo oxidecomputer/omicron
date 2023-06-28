@@ -4,8 +4,9 @@
 #: variety = "basic"
 #: target = "helios-latest"
 #: output_rules = [
-#:	"=/work/manifest.toml",
+#:	"=/work/manifest*.toml",
 #:	"=/work/repo-dogfood.zip*",
+#:	"=/work/repo-pvt1.zip*",
 #: ]
 #: access_repos = [
 #:	"oxidecomputer/dvt-dock",
@@ -24,19 +25,34 @@
 #: job = "helios / build trampoline OS image"
 #:
 #: [[publish]]
-#: series = "tuf-repo"
-#: name = "repo-dogfood.zip.parta"
+#: series = "dogfood"
+#: name = "repo.zip.parta"
 #: from_output = "/work/repo-dogfood.zip.parta"
 #:
 #: [[publish]]
-#: series = "tuf-repo"
-#: name = "repo-dogfood.zip.partb"
+#: series = "dogfood"
+#: name = "repo.zip.partb"
 #: from_output = "/work/repo-dogfood.zip.partb"
 #:
 #: [[publish]]
-#: series = "tuf-repo"
-#: name = "repo-dogfood.zip.sha256.txt"
+#: series = "dogfood"
+#: name = "repo.zip.sha256.txt"
 #: from_output = "/work/repo-dogfood.zip.sha256.txt"
+#:
+#: [[publish]]
+#: series = "pvt1"
+#: name = "repo.zip.parta"
+#: from_output = "/work/repo-pvt1.zip.parta"
+#:
+#: [[publish]]
+#: series = "pvt1"
+#: name = "repo.zip.partb"
+#: from_output = "/work/repo-pvt1.zip.partb"
+#:
+#: [[publish]]
+#: series = "pvt1"
+#: name = "repo.zip.sha256.txt"
+#: from_output = "/work/repo-pvt1.zip.sha256.txt"
 #:
 
 set -o errexit
@@ -111,21 +127,38 @@ done
 source "$TOP/tools/dvt_dock_version"
 git clone https://github.com/oxidecomputer/dvt-dock.git /work/dvt-dock
 (cd /work/dvt-dock; git checkout "$COMMIT")
+# Fetch SP images from oxidecomputer/hubris GHA artifacts.
+source "$TOP/tools/hubris_version"
+run_id=$(curl --netrc -fsS "https://api.github.com/repos/oxidecomputer/hubris/actions/runs?head_sha=$COMMIT" \
+    | /opt/ooce/bin/jq -r '.workflow_runs[] | select(.path == ".github/workflows/dist.yml") | .id')
+hubris_artifacts=$(curl --netrc -fsS "https://api.github.com/repos/oxidecomputer/hubris/actions/runs/$run_id/artifacts")
 
-for noun in gimlet psc sidecar; do
-    tufaceous_kind=${noun//sidecar/switch}_rot
-    hubris_kind=${noun}-rot
-    path_a="/work/dvt-dock/staging/build-$hubris_kind-image-a-cert-dev.zip"
-    path_b="/work/dvt-dock/staging/build-$hubris_kind-image-b-cert-dev.zip"
-    version_a=$(/work/caboose-util read-version "$path_a")
-    version_b=$(/work/caboose-util read-version "$path_b")
-    if [[ "$version_a" != "$version_b" ]]; then
-        echo "version mismatch:"
-        echo "  $path_a: $version_a"
-        echo "  $path_b: $version_b"
-        exit 1
-    fi
-    cat >>/work/manifest.toml <<EOF
+add_hubris_artifacts() {
+    series="$1"
+    shift
+
+    manifest=/work/manifest-$series.toml
+    cp /work/manifest.toml "$manifest"
+
+    # ROT images from dvt-dock
+    for noun in "$@"; do
+        # tufaceous_kind: gimlet-c => gimlet_rot
+        # hubris_kind: gimlet-c => gimlet-rot
+        noun=${noun%-?}
+        tufaceous_kind=${noun//sidecar/switch}_rot
+        hubris_kind=${noun}-rot
+        path_a="/work/dvt-dock/staging/build-$hubris_kind-image-a-cert-dev.zip"
+        path_b="/work/dvt-dock/staging/build-$hubris_kind-image-b-cert-dev.zip"
+        version_a=$(/work/caboose-util read-version "$path_a")
+        version_b=$(/work/caboose-util read-version "$path_b")
+        if [[ "$version_a" != "$version_b" ]]; then
+            echo "version mismatch:"
+            echo "  $path_a: $version_a"
+            echo "  $path_b: $version_b"
+            exit 1
+        fi
+
+        cat >>"$manifest" <<EOF
 [artifact.$tufaceous_kind]
 name = "$tufaceous_kind"
 version = "$version_a"
@@ -138,23 +171,23 @@ path = "$path_a"
 kind = "file"
 path = "$path_b"
 EOF
-done
+    done
 
-# Fetch SP images from oxidecomputer/hubris GHA artifacts.
-source "$TOP/tools/hubris_version"
-run_id=$(curl --netrc -fsS "https://api.github.com/repos/oxidecomputer/hubris/actions/runs?head_sha=$COMMIT" \
-    | /opt/ooce/bin/jq -r '.workflow_runs[] | select(.path == ".github/workflows/dist.yml") | .id')
-artifacts=$(curl --netrc -fsS "https://api.github.com/repos/oxidecomputer/hubris/actions/runs/$run_id/artifacts")
-for noun in gimlet-c psc-b sidecar-b; do
-    tufaceous_kind=${noun%-?}
-    tufaceous_kind=${tufaceous_kind//sidecar/switch}_sp
-    job_name=dist-ubuntu-latest-$noun
-    url=$(/opt/ooce/bin/jq --arg name "$job_name" -r '.artifacts[] | select(.name == $name) | .archive_download_url' <<<"$artifacts")
-    curl --netrc -fsSL -o $job_name.zip "$url"
-    unzip $job_name.zip
-    path="$PWD/build-$noun-image-default.zip"
-    version=$(/work/caboose-util read-version "$path")
-    cat >>/work/manifest.toml <<EOF
+    # SP images from hubris
+    for noun in "$@"; do
+        # tufaceous_kind: gimlet-c => gimlet_sp
+        # job_name: gimlet-c => dist-ubuntu-latest-gimlet-c
+        tufaceous_kind=${noun%-?}
+        tufaceous_kind=${tufaceous_kind//sidecar/switch}_sp
+        job_name=dist-ubuntu-latest-$noun
+        if ! [[ -f "$job_name.zip" ]]; then
+            url=$(/opt/ooce/bin/jq --arg name "$job_name" -r '.artifacts[] | select(.name == $name) | .archive_download_url' <<<"$hubris_artifacts")
+            curl --netrc -fsSL -o "$job_name.zip" "$url"
+            unzip "$job_name.zip"
+        fi
+        path="$PWD/build-$noun-image-default.zip"
+        version=$(/work/caboose-util read-version "$path")
+        cat >>"$manifest" <<EOF
 [artifact.$tufaceous_kind]
 name = "$tufaceous_kind"
 version = "$version"
@@ -162,16 +195,22 @@ version = "$version"
 kind = "file"
 path = "$path"
 EOF
+    done
+}
+
+add_hubris_artifacts dogfood gimlet-c psc-b sidecar-b
+add_hubris_artifacts pvt1 gimlet-d psc-b sidecar-c
+
+for series in dogfood pvt1; do
+    /work/tufaceous assemble --no-generate-key /work/manifest-$series.toml /work/repo-$series.zip
+    digest -a sha256 /work/repo-$series.zip > /work/repo-$series.zip.sha256.txt
+
+    #
+    # XXX: Buildomat currently does not support uploads greater than 1 GiB. This is
+    # an awful temporary hack which we need to strip out the moment it does.
+    #
+    split -a 1 -b 1024m /work/repo-$series.zip /work/repo-$series.zip.part
+    rm /work/repo-$series.zip
+    # Ensure the build doesn't fail if the repo gets smaller than 1 GiB.
+    touch /work/repo-$series.zip.partb
 done
-
-/work/tufaceous assemble --no-generate-key /work/manifest.toml /work/repo-dogfood.zip
-digest -a sha256 /work/repo-dogfood.zip > /work/repo-dogfood.zip.sha256.txt
-
-#
-# XXX: Buildomat currently does not support uploads greater than 1 GiB. This is
-# an awful temporary hack which we need to strip out the moment it does.
-#
-split -a 1 -b 1024m /work/repo-dogfood.zip /work/repo-dogfood.zip.part
-rm /work/repo-dogfood.zip
-# Ensure the build doesn't fail if the repo gets smaller than 1 GiB.
-touch /work/repo-dogfood.zip.partb
