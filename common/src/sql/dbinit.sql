@@ -562,6 +562,8 @@ CREATE TABLE omicron.public.silo (
     authentication_mode omicron.public.authentication_mode NOT NULL,
     user_provision_type omicron.public.user_provision_type NOT NULL,
 
+    mapped_fleet_roles JSONB NOT NULL,
+
     /* child resource generation number, per RFD 192 */
     rcgen INT NOT NULL
 );
@@ -2397,6 +2399,7 @@ CREATE TABLE omicron.public.switch_port_settings_route_config (
     interface_name TEXT,
     dst INET,
     gw INET,
+    vid INT4,
 
     /* TODO https://github.com/oxidecomputer/omicron/issues/3013 */
     PRIMARY KEY (port_settings_id, interface_name, dst, gw)

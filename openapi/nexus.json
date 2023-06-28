@@ -8385,25 +8385,15 @@
         "type": "object",
         "properties": {
           "cert": {
-            "description": "PEM file containing public certificate chain",
-            "type": "array",
-            "items": {
-              "type": "integer",
-              "format": "uint8",
-              "minimum": 0
-            }
+            "description": "PEM-formatted string containing public certificate chain",
+            "type": "string"
           },
           "description": {
             "type": "string"
           },
           "key": {
-            "description": "PEM file containing private key",
-            "type": "array",
-            "items": {
-              "type": "integer",
-              "format": "uint8",
-              "minimum": 0
-            }
+            "description": "PEM-formatted string containing private key",
+            "type": "string"
           },
           "name": {
             "$ref": "#/components/schemas/Name"
@@ -11266,6 +11256,13 @@
             "description": "The route gateway.",
             "type": "string",
             "format": "ip"
+          },
+          "vid": {
+            "nullable": true,
+            "description": "VLAN id the gateway is reachable over.",
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
           }
         },
         "required": [
@@ -11822,6 +11819,17 @@
               }
             ]
           },
+          "mapped_fleet_roles": {
+            "description": "Mapping of which Fleet roles are conferred by each Silo role\n\nThe default is that no Fleet roles are conferred by any Silo roles unless there's a corresponding entry in this map.",
+            "type": "object",
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "$ref": "#/components/schemas/FleetRole"
+              },
+              "uniqueItems": true
+            }
+          },
           "name": {
             "description": "unique, mutable, user-controlled identifier for each resource",
             "allOf": [
@@ -11846,6 +11854,7 @@
           "discoverable",
           "id",
           "identity_mode",
+          "mapped_fleet_roles",
           "name",
           "time_created",
           "time_modified"
@@ -11868,6 +11877,18 @@
           },
           "identity_mode": {
             "$ref": "#/components/schemas/SiloIdentityMode"
+          },
+          "mapped_fleet_roles": {
+            "description": "Mapping of which Fleet roles are conferred by each Silo role\n\nThe default is that no Fleet roles are conferred by any Silo roles unless there's a corresponding entry in this map.",
+            "default": {},
+            "type": "object",
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "$ref": "#/components/schemas/FleetRole"
+              },
+              "uniqueItems": true
+            }
           },
           "name": {
             "$ref": "#/components/schemas/Name"
@@ -12698,6 +12719,13 @@
             "description": "The port settings object this route configuration belongs to.",
             "type": "string",
             "format": "uuid"
+          },
+          "vlan_id": {
+            "nullable": true,
+            "description": "The VLAN identifier for the route. Use this if the gateway is reachable over an 802.1Q tagged L2 segment.",
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
           }
         },
         "required": [
@@ -12975,8 +13003,8 @@
             "type": "string",
             "format": "uuid"
           },
-          "vid": {
-            "description": "The virtual network id (VID) that distinguishes this interface and is used for producing and consuming 802.1Q Ethernet tags. This field has a maximum value of 4095 as 802.1Q tags are twelve bits.",
+          "vlan_id": {
+            "description": "The virtual network id for this interface that is used for producing and consuming 802.1Q Ethernet tags. This field has a maximum value of 4095 as 802.1Q tags are twelve bits.",
             "type": "integer",
             "format": "uint16",
             "minimum": 0
@@ -12984,7 +13012,7 @@
         },
         "required": [
           "interface_config_id",
-          "vid"
+          "vlan_id"
         ]
       },
       "SystemUpdate": {
@@ -14393,7 +14421,7 @@
       "name": "hidden",
       "description": "TODO operations that will not ship to customers",
       "externalDocs": {
-        "url": "http://docs.oxide.computer/api/"
+        "url": "http://docs.oxide.computer/api"
       }
     },
     {
@@ -14408,13 +14436,6 @@
       "description": "Virtual machine instances are the basic unit of computation. These operations are used for provisioning, controlling, and destroying instances.",
       "externalDocs": {
         "url": "http://docs.oxide.computer/api/instances"
-      }
-    },
-    {
-      "name": "ip-pools",
-      "description": "IP Pools contain external IP addresses that can be assigned to virtual machine instances.",
-      "externalDocs": {
-        "url": "http://docs.oxide.computer/api/ip-pools"
       }
     },
     {
@@ -14446,13 +14467,6 @@
       }
     },
     {
-      "name": "sagas",
-      "description": "Sagas are the abstraction used to represent multi-step operations within the Oxide deployment. These operations can be used to query saga status and report errors.",
-      "externalDocs": {
-        "url": "http://docs.oxide.computer/api/sagas"
-      }
-    },
-    {
       "name": "session",
       "description": "Information pertaining to the current session.",
       "externalDocs": {
@@ -14474,45 +14488,38 @@
       }
     },
     {
-      "name": "system",
-      "description": "Internal system information",
-      "externalDocs": {
-        "url": "http://docs.oxide.computer/api/system"
-      }
-    },
-    {
       "name": "system/hardware",
       "description": "These operations pertain to hardware inventory and management. Racks are the unit of expansion of an Oxide deployment. Racks are in turn composed of sleds, switches, power supplies, and a cabled backplane.",
       "externalDocs": {
-        "url": "http://docs.oxide.computer/api/system/hardware"
+        "url": "http://docs.oxide.computer/api/system-hardware"
       }
     },
     {
       "name": "system/metrics",
       "description": "Metrics provide insight into the operation of the Oxide deployment. These include telemetry on hardware and software components that can be used to understand the current state as well as to diagnose issues.",
       "externalDocs": {
-        "url": "http://docs.oxide.computer/api/system/metrics"
+        "url": "http://docs.oxide.computer/api/system-metrics"
       }
     },
     {
       "name": "system/networking",
       "description": "This provides rack-level network configuration.",
       "externalDocs": {
-        "url": "http://docs.oxide.computer/api/system/networking"
+        "url": "http://docs.oxide.computer/api/system-networking"
       }
     },
     {
       "name": "system/silos",
       "description": "Silos represent a logical partition of users and resources.",
       "externalDocs": {
-        "url": "http://docs.oxide.computer/api/system/silos"
+        "url": "http://docs.oxide.computer/api/system-silos"
       }
     },
     {
       "name": "system/update",
       "description": "This includes operations related to system updates.",
       "externalDocs": {
-        "url": "http://docs.oxide.computer/api/system/update"
+        "url": "http://docs.oxide.computer/api/system-update"
       }
     },
     {

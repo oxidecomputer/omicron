@@ -12,7 +12,8 @@ use crate::params::{
     DatasetKind, DiskStateRequested, InstanceHardware,
     InstanceMigrationSourceParams, InstancePutStateResponse,
     InstanceStateRequested, InstanceUnregisterResponse, ServiceEnsureBody,
-    ServiceZoneService, SledRole, TimeSync, VpcFirewallRule, Zpool,
+    ServiceZoneService, SledRole, TimeSync, VpcFirewallRule,
+    ZoneBundleMetadata, Zpool,
 };
 use crate::services::{self, ServiceManager};
 use crate::storage_manager::{self, StorageManager};
@@ -141,7 +142,17 @@ impl From<Error> for dropshot::HttpError {
                     e => HttpError::for_internal_error(e.to_string()),
                 }
             }
-
+            crate::sled_agent::Error::Services(
+                crate::services::Error::Bundle(ref inner),
+            ) => match inner {
+                crate::services::BundleError::NoStorage => {
+                    HttpError::for_unavail(None, inner.to_string())
+                }
+                crate::services::BundleError::NoSuchZone { .. } => {
+                    HttpError::for_not_found(None, inner.to_string())
+                }
+                _ => HttpError::for_internal_error(err.to_string()),
+            },
             e => HttpError::for_internal_error(e.to_string()),
         }
     }
@@ -518,6 +529,40 @@ impl SledAgent {
             .unwrap_or_else(|err| {
                 panic!("Failed to send future to request queue: {err}");
             });
+    }
+
+    /// List zone bundles for the provided zone.
+    pub async fn list_zone_bundles(
+        &self,
+        name: &str,
+    ) -> Result<Vec<ZoneBundleMetadata>, Error> {
+        self.inner.services.list_zone_bundles(name).await.map_err(Error::from)
+    }
+
+    /// Create a zone bundle for the provided zone.
+    pub async fn create_zone_bundle(
+        &self,
+        name: &str,
+    ) -> Result<ZoneBundleMetadata, Error> {
+        self.inner.services.create_zone_bundle(name).await.map_err(Error::from)
+    }
+
+    /// Fetch the path to a zone bundle.
+    pub async fn get_zone_bundle_path(
+        &self,
+        name: &str,
+        id: &Uuid,
+    ) -> Result<Option<Utf8PathBuf>, Error> {
+        self.inner
+            .services
+            .get_zone_bundle_path(name, id)
+            .await
+            .map_err(Error::from)
+    }
+
+    /// List the zones that the sled agent is currently managing.
+    pub async fn zones_list(&self) -> Result<Vec<String>, Error> {
+        self.inner.services.list_all_zones().await.map_err(Error::from)
     }
 
     /// Ensures that particular services should be initialized.

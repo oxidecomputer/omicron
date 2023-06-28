@@ -831,6 +831,7 @@ mod test {
             identity_mode,
             admin_group_name: None,
             tls_certificates: vec![],
+            mapped_fleet_roles: Default::default(),
         };
 
         if let Some(silo_id) = silo_id {
@@ -838,6 +839,7 @@ mod test {
         } else {
             Silo::new(params)
         }
+        .unwrap()
     }
 
     fn create_certificate(
@@ -859,8 +861,8 @@ mod test {
                 name: namestr.parse().unwrap(),
                 description: String::new(),
             },
-            cert: cert_pem.into_bytes(),
-            key: key_pem.into_bytes(),
+            cert: cert_pem,
+            key: key_pem,
             service: shared::ServiceUsingCertificate::ExternalApi,
         }
     }
