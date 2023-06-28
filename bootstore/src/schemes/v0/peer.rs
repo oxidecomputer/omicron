@@ -11,7 +11,7 @@ use crate::trust_quorum::RackSecret;
 use bytes::Buf;
 use derive_more::From;
 use serde::Serialize;
-use slog::{info, o, warn, Logger};
+use slog::{debug, info, o, warn, Logger};
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::Cursor;
 use std::net::{SocketAddr, SocketAddrV6};
@@ -79,15 +79,17 @@ enum HandshakeError {
 async fn perform_handshake(
     sock: TcpStream,
     local_peer_id: &Baseboard,
+    local_addr: SocketAddrV6,
     write_buf: &mut [u8],
     read_buf: &mut [u8],
-) -> Result<(OwnedReadHalf, OwnedWriteHalf, Baseboard), HandshakeError> {
+    log: &Logger,
+) -> Result<(OwnedReadHalf, OwnedWriteHalf, Identify), HandshakeError> {
     let (mut read_sock, mut write_sock) = sock.into_split();
 
     // Serialize and write the handshake messages into `write_buf`
     Hello::default().serialize_into(write_buf).unwrap();
     let identify_size = write_framed(
-        &Identify(local_peer_id.clone()),
+        &Identify { id: local_peer_id.clone(), addr: local_addr },
         &mut write_buf[Hello::serialized_size()..],
     )
     .unwrap();
@@ -113,6 +115,7 @@ async fn perform_handshake(
                 return Err(HandshakeError::Timeout);
             }
             _ = write_sock.write_buf(&mut buf), if buf.has_remaining() => {
+                    debug!(log, "Handshake writing");
             }
             res  = read_sock.read(&mut read_buf[total_read..end]) => {
                 let n = res?;
@@ -121,6 +124,7 @@ async fn perform_handshake(
                     continue;
                 }
                 if total_read == initial_read {
+                    debug!(log, "Handshake done with initial_read");
                     let hello =
                         Hello::from_bytes(&read_buf[..Hello::serialized_size()]).unwrap();
                     if hello.scheme != 0 {
@@ -135,11 +139,11 @@ async fn perform_handshake(
                             .unwrap(),
                     );
                 } else {
-                    total_read += n;
                     if total_read == end {
+                        debug!(log, "Identify len = {}", identify_len);
                         let identify: Identify =
-                            bcs::from_bytes(&read_buf[total_read..end])?;
-                        return Ok((read_sock, write_sock, identify.0));
+                            bcs::from_bytes(&read_buf[initial_read..end])?;
+                        return Ok((read_sock, write_sock, identify));
                     }
                 }
             }
@@ -150,6 +154,7 @@ async fn perform_handshake(
 // Spawn a task that maintains a client connection to a peer
 async fn spawn_client(
     my_peer_id: Baseboard,
+    my_addr: SocketAddrV6,
     addr: SocketAddrV6,
     log: &Logger,
     main_tx: mpsc::Sender<ConnToMainMsg>,
@@ -175,28 +180,31 @@ async fn spawn_client(
                 }
             };
 
-            let (read_sock, write_sock, remote_peer_id) =
-                match perform_handshake(
-                    sock,
-                    &my_peer_id,
-                    &mut write_buf,
-                    &mut read_buf,
-                )
-                .await
-                {
-                    Ok(val) => val,
-                    Err(e) => {
-                        warn!(log, "Handshake error: {:?}", e; "addr" => addr.to_string());
-                        sleep(CONNECTION_RETRY_TIMEOUT).await;
-                        continue;
-                    }
-                };
+            info!(log, "Connected to peer"; "addr" => addr.to_string());
+
+            let (read_sock, write_sock, identify) = match perform_handshake(
+                sock,
+                &my_peer_id,
+                my_addr,
+                &mut write_buf,
+                &mut read_buf,
+                &log,
+            )
+            .await
+            {
+                Ok(val) => val,
+                Err(e) => {
+                    warn!(log, "Handshake error: {:?}", e; "addr" => addr.to_string());
+                    sleep(CONNECTION_RETRY_TIMEOUT).await;
+                    continue;
+                }
+            };
 
             // Inform the main task that we have connected to a peer
             main_tx
                 .send(ConnToMainMsg::Connected {
                     addr: addr.clone(),
-                    peer_id: remote_peer_id.clone(),
+                    peer_id: identify.id.clone(),
                 })
                 .await;
 
@@ -226,6 +234,7 @@ async fn spawn_client(
 // Spawn a task that handles accepted connections from a peer
 async fn spawn_server(
     my_peer_id: Baseboard,
+    my_addr: SocketAddrV6,
     addr: SocketAddrV6,
     sock: TcpStream,
     main_tx: mpsc::Sender<ConnToMainMsg>,
@@ -239,11 +248,13 @@ async fn spawn_server(
         let mut write_buf = vec![0u8; CONN_BUF_SIZE];
         let mut read_buf = vec![0u8; CONN_BUF_SIZE];
 
-        let (read_sock, write_sock, remote_peer_id) = match perform_handshake(
+        let (read_sock, write_sock, identify) = match perform_handshake(
             sock,
             &my_peer_id,
+            my_addr,
             &mut write_buf,
             &mut read_buf,
+            &log,
         )
         .await
         {
@@ -259,14 +270,14 @@ async fn spawn_server(
         // Inform the main task that we have connected to a peer
         main_tx
             .send(ConnToMainMsg::Connected {
-                addr: addr.clone(),
-                peer_id: remote_peer_id.clone(),
+                addr: identify.addr.clone(),
+                peer_id: identify.id.clone(),
             })
             .await;
 
         // Test loopy
         loop {
-            info!(log, "Still connected to addr: {}", addr);
+            info!(log, "Still connected to addr: {}", identify.addr.clone());
             sleep(CONNECTION_RETRY_TIMEOUT).await;
         }
     });
@@ -340,6 +351,8 @@ pub struct Peer {
 
     // Connections that have not yet completed handshakes via `Hello` and
     // `Identify` messages.
+    //
+    // We only store the connecting side, not accepting side here.
     negotiating_connections: BTreeMap<SocketAddrV6, PeerConnHandle>,
 
     // Active connections participating in scheme v0
@@ -397,6 +410,7 @@ impl Peer {
         let (conn_tx, conn_rx) = mpsc::channel(128);
         let fsm =
             Fsm::new_uninitialized(config.id.clone(), config.clone().into());
+        let id_str = config.id.to_string();
         (
             Peer {
                 config,
@@ -407,7 +421,8 @@ impl Peer {
                 rx,
                 init_responder: None,
                 rack_secret_responder: None,
-                log: log.new(o!("component" => "bootstore")),
+                log: log
+                    .new(o!("component" => "bootstore", "peer_id" => id_str)),
                 conn_rx,
                 conn_tx,
             },
@@ -434,14 +449,15 @@ impl Peer {
                             // Remove any existing connection
                             // TODO: Log if a peer with a lower address connects?
                             self.remove_peer(addr).await;
+                            info!(self.log, "Accepted connection from {}", addr.to_string());
                             let handle = spawn_server(
                                 self.config.id.clone(),
+                                self.config.addr.clone(),
                                 addr.clone(),
                                 sock,
                                 self.conn_tx.clone(),
                                 &self.log
                             ).await;
-                            self.negotiating_connections.insert(addr, handle);
                         },
                         Err(err) => {}
                     }
@@ -480,6 +496,7 @@ impl Peer {
                             self.handle_output(output);
                         }
                         PeerApiRequest::PeerAddresses(peers) => {
+                            info!(self.log, "Updated Peer Addresses: {:?}", peers);
                             self.manage_connections(peers).await;
                         }
                     }
@@ -514,6 +531,7 @@ impl Peer {
             if addr < self.config.addr {
                 let handle = spawn_client(
                     self.config.id.clone(),
+                    self.config.addr.clone(),
                     addr.clone(),
                     &self.log,
                     self.conn_tx.clone(),
@@ -550,4 +568,63 @@ impl Peer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use slog::Drain;
+
+    fn initial_members() -> BTreeSet<Baseboard> {
+        [("a", "1"), ("b", "1"), ("c", "1")]
+            .iter()
+            .map(|(id, model)| {
+                Baseboard::new_pc(id.to_string(), model.to_string())
+            })
+            .collect()
+    }
+
+    fn initial_config() -> Vec<Config> {
+        initial_members()
+            .into_iter()
+            .enumerate()
+            .map(|(i, id)| Config {
+                id,
+                addr: format!("[::1]:3333{}", i).parse().unwrap(),
+                time_per_tick: Duration::from_millis(20),
+                learn_timeout: Duration::from_secs(5),
+                rack_init_timeout: Duration::from_secs(10),
+                rack_secret_request_timeout: Duration::from_secs(5),
+            })
+            .collect()
+    }
+
+    fn log() -> slog::Logger {
+        let decorator = slog_term::TermDecorator::new().build();
+        let drain = slog_term::FullFormat::new(decorator).build().fuse();
+        let drain = slog_async::Async::new(drain).build().fuse();
+        slog::Logger::root(drain, o!())
+    }
+
+    #[tokio::test]
+    async fn basic_3_peers() {
+        let log = log();
+        let config = initial_config();
+        let (mut peer0, handle0) = Peer::new(config[0].clone(), &log);
+        let (mut peer1, handle1) = Peer::new(config[1].clone(), &log);
+        let (mut peer2, handle2) = Peer::new(config[2].clone(), &log);
+
+        tokio::spawn(async move {
+            peer0.run().await;
+        });
+        tokio::spawn(async move {
+            peer1.run().await;
+        });
+        tokio::spawn(async move {
+            peer2.run().await;
+        });
+
+        let addrs: BTreeSet<_> =
+            config.iter().map(|c| c.addr.clone()).collect();
+        for peer in [handle0, handle1, handle2] {
+            peer.tx.send(PeerApiRequest::PeerAddresses(addrs.clone())).await;
+        }
+
+        sleep(Duration::from_secs(2)).await;
+    }
 }

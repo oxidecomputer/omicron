@@ -39,3 +39,5 @@ pq-sys = "*"
 assert_matches.workspace = true
 omicron-test-utils.workspace = true
 proptest.workspace = true
+slog-async.workspace = true
+slog-term.workspace = true

@@ -8,6 +8,7 @@ use crate::trust_quorum::{LearnedSharePkgV0, SharePkgV0};
 use derive_more::From;
 use serde::{Deserialize, Serialize};
 use sled_hardware::Baseboard;
+use std::net::SocketAddrV6;
 use uuid::Uuid;
 
 /// The first thing a peer does after connecting or accepting is to identify
@@ -15,8 +16,14 @@ use uuid::Uuid;
 ///
 /// This message is interpreted at the peer (network) level, and not at the FSM level,
 /// because it is used to associate IP addresses with [`Baseboard`]s.
+///
+/// Note that we include the address, which is totally spoofable here, so we can
+/// test on localhost with multiple ports instead of different IPs.
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
-pub struct Identify(pub Baseboard);
+pub struct Identify {
+    pub id: Baseboard,
+    pub addr: SocketAddrV6,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Envelope {
