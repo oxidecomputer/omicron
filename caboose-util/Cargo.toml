@@ -7,5 +7,3 @@ license = "MPL-2.0"
 [dependencies]
 anyhow.workspace = true
 hubtools.workspace = true
-tlvc.workspace = true
-tlvc-text.workspace = true

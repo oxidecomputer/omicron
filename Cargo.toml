@@ -326,8 +326,6 @@ termios = "0.3"
 textwrap = "0.16.0"
 test-strategy = "0.2.1"
 thiserror = "1.0"
-tlvc = { git = "https://github.com/oxidecomputer/tlvc.git" }
-tlvc-text = { git = "https://github.com/oxidecomputer/tlvc.git" }
 tofino = { git = "http://github.com/oxidecomputer/tofino", branch = "main" }
 tokio = "1.28"
 tokio-postgres = { version = "0.7", features = [ "with-chrono-0_4", "with-uuid-1" ] }
