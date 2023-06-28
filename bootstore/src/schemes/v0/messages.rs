@@ -16,7 +16,7 @@ use uuid::Uuid;
 /// This message is interpreted at the peer (network) level, and not at the FSM level,
 /// because it is used to associate IP addresses with [`Baseboard`]s.
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
-pub struct Identify(Baseboard);
+pub struct Identify(pub Baseboard);
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Envelope {
