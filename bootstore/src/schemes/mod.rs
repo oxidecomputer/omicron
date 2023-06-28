@@ -6,8 +6,6 @@
 //!
 //! Contains code shared by all schemes
 
-use serde::{Deserialize, Serialize};
-
 pub mod v0;
 
 // We keep these in a module to prevent naming conflicts

@@ -14,10 +14,10 @@ use serde::Serialize;
 use slog::{info, o, warn, Logger};
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::Cursor;
-use std::net::SocketAddrV6;
+use std::net::{SocketAddr, SocketAddrV6};
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf, ReadHalf, WriteHalf};
+use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
@@ -158,11 +158,11 @@ async fn spawn_client(
     let (tx, rx) = mpsc::channel(2);
     let log = log.clone();
 
-    // Create a write buffer, and read buffer
-    let mut write_buf = vec![0u8; CONN_BUF_SIZE];
-    let mut read_buf = vec![0u8; CONN_BUF_SIZE];
-
     let handle = tokio::spawn(async move {
+        // Create a write buffer and read buffer
+        let mut write_buf = vec![0u8; CONN_BUF_SIZE];
+        let mut read_buf = vec![0u8; CONN_BUF_SIZE];
+
         loop {
             let sock = match TcpStream::connect(addr).await {
                 Ok(sock) => sock,
@@ -224,26 +224,72 @@ async fn spawn_client(
 }
 
 // Spawn a task that handles accepted connections from a peer
-async fn spawn_server(addr: SocketAddrV6, sock: TcpStream) -> PeerConnHandle {
+async fn spawn_server(
+    my_peer_id: Baseboard,
+    addr: SocketAddrV6,
+    sock: TcpStream,
+    main_tx: mpsc::Sender<ConnToMainMsg>,
+    log: &Logger,
+) -> PeerConnHandle {
+    // Create a channel for sending `MainToConnMsg`s to this connection task
     let (tx, rx) = mpsc::channel(2);
-    let addr2 = addr.clone();
-    let handle = tokio::spawn(async move {});
+    let log = log.clone();
+    let handle = tokio::spawn(async move {
+        // Create a write buffer and read buffer
+        let mut write_buf = vec![0u8; CONN_BUF_SIZE];
+        let mut read_buf = vec![0u8; CONN_BUF_SIZE];
+
+        let (read_sock, write_sock, remote_peer_id) = match perform_handshake(
+            sock,
+            &my_peer_id,
+            &mut write_buf,
+            &mut read_buf,
+        )
+        .await
+        {
+            Ok(val) => val,
+            Err(e) => {
+                warn!(log, "Handshake error: {:?}", e; "addr" => addr.to_string());
+                main_tx.send(ConnToMainMsg::FailedHandshake { addr }).await;
+                // This is a server so we just bail and wait for a new connection
+                return;
+            }
+        };
+
+        // Inform the main task that we have connected to a peer
+        main_tx
+            .send(ConnToMainMsg::Connected {
+                addr: addr.clone(),
+                peer_id: remote_peer_id.clone(),
+            })
+            .await;
+
+        // Test loopy
+        loop {
+            info!(log, "Still connected to addr: {}", addr);
+            sleep(CONNECTION_RETRY_TIMEOUT).await;
+        }
+    });
     PeerConnHandle { handle, tx, addr }
 }
 
 // Messages sent from connection managing tasks to the main peer task
+#[derive(Debug, PartialEq)]
 enum ConnToMainMsg {
     Connected { addr: SocketAddrV6, peer_id: Baseboard },
     Disconnected { peer_id: Baseboard },
     Forward(Envelope),
+    FailedHandshake { addr: SocketAddrV6 },
 }
 
+#[derive(Debug, PartialEq)]
 enum MainToConnMsg {
     Close,
     Msg(Msg),
 }
 
 // An error response from a `PeerRequest`
+#[derive(Debug, PartialEq)]
 pub enum PeerRequestError {
     // An `Init_` or `LoadRackSecret` request is already outstanding
     // We only allow one at a time.
@@ -379,9 +425,26 @@ impl Peer {
         loop {
             tokio::select! {
                 res = listener.accept() => {
-                    // If we already have a connection, we log this, abort the
-                    // existing connection task, and add the new one.
-                    //let (sock, addr) = res?;
+                    match res {
+                        Ok((sock, addr)) => {
+                            let SocketAddr::V6(addr) = addr else {
+                                warn!(self.log, "Got connection from IPv4 address {}", addr);
+                                continue;
+                            };
+                            // Remove any existing connection
+                            // TODO: Log if a peer with a lower address connects?
+                            self.remove_peer(addr).await;
+                            let handle = spawn_server(
+                                self.config.id.clone(),
+                                addr.clone(),
+                                sock,
+                                self.conn_tx.clone(),
+                                &self.log
+                            ).await;
+                            self.negotiating_connections.insert(addr, handle);
+                        },
+                        Err(err) => {}
+                    }
                 }
                 Some(request) = self.rx.recv() => {
                     match request {
@@ -421,6 +484,9 @@ impl Peer {
                         }
                     }
                 }
+                Some(msg) = self.conn_rx.recv() => {
+                    println!("{:?}", msg);
+                }
                 _ = interval.tick() => {
                     let output = self.fsm.tick();
                     self.handle_output(output);
@@ -444,37 +510,38 @@ impl Peer {
         self.peers = peers;
 
         // Start a new client for each peer that has an addr < self.config.addr
-        for peer in new_peers {
-            if peer < self.config.addr {
+        for addr in new_peers {
+            if addr < self.config.addr {
                 let handle = spawn_client(
                     self.config.id.clone(),
-                    self.config.addr.clone(),
+                    addr.clone(),
                     &self.log,
                     self.conn_tx.clone(),
                 )
                 .await;
-                self.negotiating_connections
-                    .insert(handle.addr.clone(), handle);
+                self.negotiating_connections.insert(addr, handle);
             }
         }
 
         // Remove each peer that we no longer need a connection to
-        for peer in peers_to_remove {
-            if let Some(handle) = self.negotiating_connections.remove(&peer) {
-                // The connection has not yet completed its handshake
+        for addr in peers_to_remove {
+            self.remove_peer(addr).await;
+        }
+    }
+
+    async fn remove_peer(&mut self, addr: SocketAddrV6) {
+        if let Some(handle) = self.negotiating_connections.remove(&addr) {
+            // The connection has not yet completed its handshake
+            let _ = handle.tx.send(MainToConnMsg::Close).await;
+        } else {
+            // Do we have an established connection?
+            if let Some((id, handle)) =
+                self.connections.iter().find(|(_, handle)| handle.addr == addr)
+            {
                 let _ = handle.tx.send(MainToConnMsg::Close).await;
-            } else {
-                // Do we have an established connection?
-                if let Some((id, handle)) = self
-                    .connections
-                    .iter()
-                    .find(|(_, handle)| handle.addr == peer)
-                {
-                    let _ = handle.tx.send(MainToConnMsg::Close).await;
-                    // probably a better way to avoid borrock issues
-                    let id = id.clone();
-                    self.connections.remove(&id);
-                }
+                // probably a better way to avoid borrock issues
+                let id = id.clone();
+                self.connections.remove(&id);
             }
         }
     }
