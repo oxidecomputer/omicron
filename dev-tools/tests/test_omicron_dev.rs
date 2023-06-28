@@ -297,10 +297,7 @@ async fn test_db_run() {
             .context("failed to connect to newly setup database")?;
         let conn_task = tokio::spawn(connection);
 
-        anyhow::ensure!(
-            has_omicron_schema(&client).await,
-            "Missing Omicron schema"
-        );
+        anyhow::ensure!(has_omicron_schema(&client).await);
 
         // Now run db-populate.  It should fail because the database is already
         // populated.
@@ -316,20 +313,14 @@ async fn test_db_run() {
         eprintln!("exit status: {:?}", populate_result.exit_status);
         eprintln!("stdout: {:?}", populate_result.stdout_str());
         eprintln!("stdout: {:?}", populate_result.stderr_str());
-        anyhow::ensure!(
-            matches!(populate_result.exit_status, ExitStatus::Exited(1)),
-            "db-populate did not exit cleanly"
-        );
-        anyhow::ensure!(
-            populate_result
-                .stderr_str()
-                .contains("database \"omicron\" already exists"),
-            "db-populate did not fail when DB was already populated",
-        );
-        anyhow::ensure!(
-            has_omicron_schema(&client).await,
-            "Missing Omicron schema"
-        );
+        anyhow::ensure!(matches!(
+            populate_result.exit_status,
+            ExitStatus::Exited(1)
+        ));
+        anyhow::ensure!(populate_result
+            .stderr_str()
+            .contains("database \"omicron\" already exists"),);
+        anyhow::ensure!(has_omicron_schema(&client).await);
 
         // Try again, but with the --wipe flag.
         eprintln!("running db-populate --wipe");
@@ -340,14 +331,11 @@ async fn test_db_run() {
             .arg(&dbrun.listen_config_url)
             .capture()
             .context("failed to run db-populate")?;
-        anyhow::ensure!(
-            matches!(populate_result.exit_status, ExitStatus::Exited(0)),
-            "db-populate did not exit cleanly"
-        );
-        anyhow::ensure!(
-            has_omicron_schema(&client).await,
-            "Missing Omicron schema"
-        );
+        anyhow::ensure!(matches!(
+            populate_result.exit_status,
+            ExitStatus::Exited(0)
+        ));
+        anyhow::ensure!(has_omicron_schema(&client).await);
 
         // Now run db-wipe.  This should work.
         eprintln!("running db-wipe");
@@ -357,14 +345,11 @@ async fn test_db_run() {
             .arg(&dbrun.listen_config_url)
             .capture()
             .context("failed to run db-wipe")?;
-        anyhow::ensure!(
-            matches!(wipe_result.exit_status, ExitStatus::Exited(0)),
-            "db-wipe did not exit cleanly",
-        );
-        anyhow::ensure!(
-            !has_omicron_schema(&client).await,
-            "Missing Omicron schema"
-        );
+        anyhow::ensure!(matches!(
+            wipe_result.exit_status,
+            ExitStatus::Exited(0)
+        ));
+        anyhow::ensure!(!has_omicron_schema(&client).await);
 
         // The rest of the populate()/wipe() behavior is tested elsewhere.
 
@@ -425,10 +410,7 @@ async fn test_run_all() {
             .await
             .context("failed to connect to newly setup database")?;
         let conn_task = tokio::spawn(connection);
-        anyhow::ensure!(
-            has_omicron_schema(&client).await,
-            "Missing Omicron schema"
-        );
+        anyhow::ensure!(has_omicron_schema(&client).await);
         drop(client);
         conn_task
             .await
@@ -442,7 +424,9 @@ async fn test_run_all() {
             runall.external_url
         ));
         let _ =
-            client.logout().send().await.context("Nexus failed to start")?;
+            client.logout().send().await.context(
+                "Unexpectedly failed to reach Nexus at logout endpoint",
+            )?;
         Ok(())
     };
     let res = test_task.await;
