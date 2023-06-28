@@ -290,6 +290,8 @@ pub struct ZpoolName {
     kind: ZpoolKind,
 }
 
+const ZPOOL_NAME_REGEX: &str = r"^ox[ip]_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$";
+
 /// Custom JsonSchema implementation to encode the constraints on Name.
 impl JsonSchema for ZpoolName {
     fn schema_name() -> String {
@@ -311,6 +313,10 @@ impl JsonSchema for ZpoolName {
                 ..Default::default()
             })),
             instance_type: Some(schemars::schema::InstanceType::String.into()),
+            string: Some(Box::new(schemars::schema::StringValidation {
+                pattern: Some(ZPOOL_NAME_REGEX.to_owned()),
+                ..Default::default()
+            })),
             ..Default::default()
         }
         .into()
@@ -400,6 +406,50 @@ impl fmt::Display for ZpoolName {
 #[cfg(test)]
 mod test {
     use super::*;
+
+    #[test]
+    fn test_zpool_name_regex() {
+        let valid = [
+            "oxi_d462a7f7-b628-40fe-80ff-4e4189e2d62b",
+            "oxp_d462a7f7-b628-40fe-80ff-4e4189e2d62b",
+        ];
+
+        let invalid = [
+            "",
+            // Whitespace
+            " oxp_d462a7f7-b628-40fe-80ff-4e4189e2d62b",
+            "oxp_d462a7f7-b628-40fe-80ff-4e4189e2d62b ",
+            // Case sensitivity
+            "oxp_D462A7F7-b628-40fe-80ff-4e4189e2d62b",
+            // Bad prefix
+            "ox_d462a7f7-b628-40fe-80ff-4e4189e2d62b",
+            "oxa_d462a7f7-b628-40fe-80ff-4e4189e2d62b",
+            "oxi-d462a7f7-b628-40fe-80ff-4e4189e2d62b",
+            "oxp-d462a7f7-b628-40fe-80ff-4e4189e2d62b",
+            // Missing Prefix
+            "d462a7f7-b628-40fe-80ff-4e4189e2d62b",
+            // Bad UUIDs (Not following UUIDv4 format)
+            "oxi_d462a7f7-b628-30fe-80ff-4e4189e2d62b",
+            "oxi_d462a7f7-b628-40fe-c0ff-4e4189e2d62b",
+        ];
+
+        let r = regress::Regex::new(ZPOOL_NAME_REGEX)
+            .expect("validation regex is valid");
+        for input in valid {
+            let m = r
+                .find(input)
+                .unwrap_or_else(|| panic!("input {input} did not match regex"));
+            assert_eq!(m.start(), 0, "input {input} did not match start");
+            assert_eq!(m.end(), input.len(), "input {input} did not match end");
+        }
+
+        for input in invalid {
+            assert!(
+                r.find(input).is_none(),
+                "invalid input {input} should not match validation regex"
+            );
+        }
+    }
 
     #[test]
     fn test_parse_zpool_name_json() {

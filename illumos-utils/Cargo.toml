@@ -34,6 +34,7 @@ opte-ioctl.workspace = true
 
 [dev-dependencies]
 mockall.workspace = true
+regress.workspace = true
 serde_json.workspace = true
 toml.workspace = true
 

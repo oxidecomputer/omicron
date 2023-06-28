@@ -3221,6 +3221,7 @@ dependencies = [
  "omicron-common 0.1.0",
  "opte-ioctl",
  "oxide-vpc",
+ "regress",
  "schemars",
  "serde",
  "serde_json",
