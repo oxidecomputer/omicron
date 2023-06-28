@@ -86,6 +86,7 @@ use nexus_client::{
     types as NexusTypes, Client as NexusClient, Error as NexusError,
 };
 use omicron_common::address::Ipv6Subnet;
+use omicron_common::address::DDMD_PORT;
 use omicron_common::address::MGS_PORT;
 use omicron_common::address::{
     get_sled_address, CRUCIBLE_PANTRY_PORT, DENDRITE_PORT, NEXUS_INTERNAL_PORT,
@@ -1187,10 +1188,9 @@ impl ServiceInner {
                 })?;
 
             info!(self.log, "advertising boundary services loopback address");
-            // TODO - Should ddmd port be a constant?
             let zone_addr =
                 switch_mgmt_addrs.get(&rack_network_config.switch).unwrap();
-            let ddmd_addr = SocketAddrV6::new(*zone_addr, 8000, 0, 0);
+            let ddmd_addr = SocketAddrV6::new(*zone_addr, DDMD_PORT, 0, 0);
             let ddmd_client = DdmAdminClient::new(&self.log, ddmd_addr)?;
             ddmd_client.advertise_prefix(Ipv6Subnet::new(
                 BOUNDARY_SERVICES_ADDR.parse().unwrap(),
