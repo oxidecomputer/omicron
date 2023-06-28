@@ -361,12 +361,13 @@ impl Agent {
         // Before we start creating zones, we need to ensure that the
         // necessary ZFS and Zone resources are ready.
         //
-        // TODO(https://github.com/oxidecomputer/omicron/issues/1934):
+        // TODO(https://github.com/oxidecomputer/omicron/issues/2888):
         // We should carefully consider which dataset this is using; it's
         // currently part of the ramdisk.
         let zoned = true;
         let do_format = true;
         let encryption_details = None;
+        let quota = None;
         Zfs::ensure_filesystem(
             executor,
             ZONE_ZFS_RAMDISK_DATASET,
@@ -376,6 +377,7 @@ impl Agent {
             zoned,
             do_format,
             encryption_details,
+            quota,
         )?;
 
         // Before we start monitoring for hardware, ensure we're running from a

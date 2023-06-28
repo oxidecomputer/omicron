@@ -861,8 +861,8 @@ mod test {
                 name: namestr.parse().unwrap(),
                 description: String::new(),
             },
-            cert: cert_pem.into_bytes(),
-            key: key_pem.into_bytes(),
+            cert: cert_pem,
+            key: key_pem,
             service: shared::ServiceUsingCertificate::ExternalApi,
         }
     }

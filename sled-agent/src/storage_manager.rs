@@ -316,6 +316,7 @@ impl StorageWorker {
         let fs_name = &dataset_name.full();
         let do_format = true;
         let encryption_details = None;
+        let quota = None;
         Zfs::ensure_filesystem(
             &self.executor,
             &dataset_name.full(),
@@ -323,6 +324,7 @@ impl StorageWorker {
             zoned,
             do_format,
             encryption_details,
+            quota,
         )?;
         // Ensure the dataset has a usable UUID.
         if let Ok(id_str) =

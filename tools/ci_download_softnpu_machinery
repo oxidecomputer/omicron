@@ -7,34 +7,46 @@
 #   - the sidecar-lite precompiled P4 program
 #
 
+set -euo pipefail
 
-# This is the softnpu ASIC emulator
-if [[ ! -f out/softnpu/softnpu ]]; then
-    echo "fetching softnpu"
-    # This comes from a separate repo from the below artifacts,
-    SOFTNPU_COMMIT="88f5f1334364e5580fe778c44ac0746a35927351"
-    COMMIT_URL="https://buildomat.eng.oxide.computer/public/file/oxidecomputer/softnpu/image/$SOFTNPU_COMMIT"
-    curl -OL "$COMMIT_URL/softnpu"
-    chmod +x softnpu
-    mkdir -p out/softnpu
-    mv softnpu out/softnpu/
-fi
+TOOLS_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 
-# Commit and base URL that's pinned for softnpu tools
-SIDECAR_LITE_COMMIT="3fff53ae549ab1348b680845693e66b224bb5d2f"
-COMMIT_URL="https://buildomat.eng.oxide.computer/public/file/oxidecomputer/sidecar-lite/release/$SIDECAR_LITE_COMMIT"
+OUT_DIR="out/softnpu"
+
+# Pinned commit for softnpu ASIC simulator
+SOFTNPU_REPO="softnpu"
+SOFTNPU_COMMIT="88f5f1334364e5580fe778c44ac0746a35927351"
+
+# Pinned commit for softnpu tools
+SIDECAR_LITE_REPO="sidecar-lite"
+SIDECAR_LITE_SERIES="release"
+SIDECAR_LITE_COMMIT="56abef043a9e2ba0363fea82528d7a9e86d3c0b0"
+
+# This is the softnpu ASIC simulator
+echo "fetching softnpu"
+mkdir -p out/softnpu
+$TOOLS_DIR/ensure_buildomat_artifact.sh \
+    -O $OUT_DIR \
+    "softnpu" \
+    "$SOFTNPU_REPO" \
+    "$SOFTNPU_COMMIT"
+chmod +x $OUT_DIR/softnpu
 
 # This is an ASIC administration program.
-if [[ ! -f out/softnpu/scadm ]]; then
-    echo "fetching scadm"
-    curl -OL "$COMMIT_URL/scadm"
-    chmod +x scadm
-    mv scadm out/softnpu/
-fi
+echo "fetching scadm"
+$TOOLS_DIR/ensure_buildomat_artifact.sh \
+    -O $OUT_DIR \
+    -s "$SIDECAR_LITE_SERIES" \
+    "scadm" \
+    "$SIDECAR_LITE_REPO" \
+    "$SIDECAR_LITE_COMMIT"
+chmod +x $OUT_DIR/scadm
 
 # Fetch the pre-compiled sidecar_lite p4 program
-if [[ ! -f out/softnpu/libsidecar_lite.so ]]; then
-    echo "fetching libsidecar_lite.so"
-    curl -OL "$COMMIT_URL/libsidecar_lite.so"
-    mv libsidecar_lite.so out/softnpu/
-fi
+echo "fetching libsidecar_lite.so"
+$TOOLS_DIR/ensure_buildomat_artifact.sh \
+    -O $OUT_DIR \
+    -s "$SIDECAR_LITE_SERIES" \
+    "libsidecar_lite.so" \
+    "$SIDECAR_LITE_REPO" \
+    "$SIDECAR_LITE_COMMIT"
