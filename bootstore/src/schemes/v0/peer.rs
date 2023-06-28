@@ -42,9 +42,9 @@ pub struct Config {
 
 // A handle to a task managing a connection to a peer
 struct PeerConnHandle {
-    handle: JoinHandle<()>,
-    tx: mpsc::Sender<MainToConnMsg>,
-    addr: SocketAddrV6,
+    pub handle: JoinHandle<()>,
+    pub tx: mpsc::Sender<MainToConnMsg>,
+    pub addr: SocketAddrV6,
 }
 
 // Serialize and write `msg` into `buf`, prefixed by a 4-byte big-endian size header
@@ -152,6 +152,7 @@ async fn spawn_client(
     my_peer_id: Baseboard,
     addr: SocketAddrV6,
     log: &Logger,
+    main_tx: mpsc::Sender<ConnToMainMsg>,
 ) -> PeerConnHandle {
     // Create a channel for sending `MainToConnMsg`s to this connection task
     let (tx, rx) = mpsc::channel(2);
@@ -190,6 +191,14 @@ async fn spawn_client(
                         continue;
                     }
                 };
+
+            // Inform the main task that we have connected to a peer
+            main_tx
+                .send(ConnToMainMsg::Connected {
+                    addr: addr.clone(),
+                    peer_id: remote_peer_id.clone(),
+                })
+                .await;
 
             // Test loopy
             loop {
@@ -425,6 +434,48 @@ impl Peer {
     async fn manage_connections(&mut self, peers: BTreeSet<SocketAddrV6>) {
         if peers == self.peers {
             return;
+        }
+
+        let peers_to_remove: BTreeSet<_> =
+            self.peers.difference(&peers).cloned().collect();
+        let new_peers: BTreeSet<_> =
+            peers.difference(&self.peers).cloned().collect();
+
+        self.peers = peers;
+
+        // Start a new client for each peer that has an addr < self.config.addr
+        for peer in new_peers {
+            if peer < self.config.addr {
+                let handle = spawn_client(
+                    self.config.id.clone(),
+                    self.config.addr.clone(),
+                    &self.log,
+                    self.conn_tx.clone(),
+                )
+                .await;
+                self.negotiating_connections
+                    .insert(handle.addr.clone(), handle);
+            }
+        }
+
+        // Remove each peer that we no longer need a connection to
+        for peer in peers_to_remove {
+            if let Some(handle) = self.negotiating_connections.remove(&peer) {
+                // The connection has not yet completed its handshake
+                let _ = handle.tx.send(MainToConnMsg::Close).await;
+            } else {
+                // Do we have an established connection?
+                if let Some((id, handle)) = self
+                    .connections
+                    .iter()
+                    .find(|(_, handle)| handle.addr == peer)
+                {
+                    let _ = handle.tx.send(MainToConnMsg::Close).await;
+                    // probably a better way to avoid borrock issues
+                    let id = id.clone();
+                    self.connections.remove(&id);
+                }
+            }
         }
     }
 }
