@@ -17,7 +17,7 @@ use omicron_common::{
     api::internal::nexus::KnownArtifactKind,
     update::{ArtifactHashId, ArtifactKind},
 };
-use slog::Drain;
+use slog::{error, warn, Drain};
 use tufaceous_lib::ControlPlaneZoneImages;
 use update_engine::StepResult;
 
@@ -336,10 +336,17 @@ impl InstallOpts {
             )
             .register();
 
-        engine.execute().await.context("failed to execute installinator")?;
+        // Wait for both the engine to complete and all progress reports to be
+        // sent, then possibly return an error to our caller if either failed.
+        // We intentionally do not use `try_join!` here: we want both futures to
+        // complete, _then_ we will check for failures from either, so any
+        // errors from the engine that need to be reported to wicketd are
+        // reported before we return.
+        let (engine_result, progress_result) =
+            tokio::join!(engine.execute(), progress_handle);
 
-        // Wait for all progress reports to be sent.
-        progress_handle.await.context("progress reporter to complete")?;
+        engine_result.context("failed to execute installinator")?;
+        progress_result.context("progress reporter failed")?;
 
         if self.stay_alive {
             loop {
@@ -358,8 +365,10 @@ async fn scan_hardware_with_retries(
 ) -> Result<StepResult<WriteDestination, InstallinatorSpec>> {
     // Scanning for our disks is inherently racy: we have to wait for the disks
     // to attach. This should take milliseconds in general; we'll set a hard cap
-    // at retrying for ~30 seconds.
-    const HARDWARE_RETRIES: usize = 60;
+    // at retrying for ~10 seconds. (In practice if we're failing, this will
+    // take much longer than 10 seconds, because each failed attempt takes a
+    // nontrivial amount of time.)
+    const HARDWARE_RETRIES: usize = 20;
     const HARDWARE_RETRY_DELAY: Duration = Duration::from_millis(500);
 
     let mut retry = 0;
@@ -371,6 +380,13 @@ async fn scan_hardware_with_retries(
             Ok(destination) => break Ok(destination),
             Err(error) => {
                 if retry < HARDWARE_RETRIES {
+                    warn!(
+                        log,
+                        "hardware scan failed; will retry after {:?} \
+                         (attempt {} of {})",
+                        HARDWARE_RETRY_DELAY, retry + 1, HARDWARE_RETRIES;
+                        "err" => #%error,
+                    );
                     cx.send_progress(StepProgress::retry(format!(
                         "hardware scan {retry} failed: {error:#}"
                     )))
@@ -379,6 +395,10 @@ async fn scan_hardware_with_retries(
                     tokio::time::sleep(HARDWARE_RETRY_DELAY).await;
                     continue;
                 } else {
+                    error!(
+                        log, "hardware scan failed (retries exhausted)";
+                        "err" => #%error,
+                    );
                     break Err(error);
                 }
             }

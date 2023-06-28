@@ -19,7 +19,7 @@ use chrono::Duration;
 use internal_dns::ServiceName;
 use nexus_db_queries::context::{OpContext, OpKind};
 use nexus_db_queries::db::lookup::LookupPath;
-use omicron_common::address::{Ipv6Subnet, AZ_PREFIX, COCKROACH_PORT};
+use omicron_common::address::{Ipv6Subnet, AZ_PREFIX};
 use omicron_common::nexus_config;
 use omicron_common::postgres_config::PostgresConfigWithUrl;
 use oximeter::types::ProducerRegistry;
@@ -135,28 +135,60 @@ impl ServerContext {
         // nexus in dev for everyone
 
         // Set up DNS Client
-        let az_subnet =
-            Ipv6Subnet::<AZ_PREFIX>::new(config.deployment.subnet.net().ip());
-        info!(log, "Setting up resolver on subnet: {:?}", az_subnet);
-        let resolver = internal_dns::resolver::Resolver::new_from_subnet(
-            log.new(o!("component" => "DnsResolver")),
-            az_subnet,
-        )
-        .map_err(|e| format!("Failed to create DNS resolver: {}", e))?;
+        let resolver = match config.deployment.internal_dns {
+            nexus_config::InternalDns::FromSubnet { subnet } => {
+                let az_subnet = Ipv6Subnet::<AZ_PREFIX>::new(subnet.net().ip());
+                info!(
+                    log,
+                    "Setting up resolver using DNS servers for subnet: {:?}",
+                    az_subnet
+                );
+                internal_dns::resolver::Resolver::new_from_subnet(
+                    log.new(o!("component" => "DnsResolver")),
+                    az_subnet,
+                )
+                .map_err(|e| format!("Failed to create DNS resolver: {}", e))?
+            }
+            nexus_config::InternalDns::FromAddress { address } => {
+                info!(
+                    log,
+                    "Setting up resolver using DNS address: {:?}", address
+                );
+
+                internal_dns::resolver::Resolver::new_from_addrs(
+                    log.new(o!("component" => "DnsResolver")),
+                    vec![address],
+                )
+                .map_err(|e| format!("Failed to create DNS resolver: {}", e))?
+            }
+        };
 
         // Set up DB pool
         let url = match &config.deployment.database {
             nexus_config::Database::FromUrl { url } => url.clone(),
             nexus_config::Database::FromDns => {
                 info!(log, "Accessing DB url from DNS");
-                let address = resolver
-                    .lookup_ipv6(ServiceName::Cockroach)
-                    .await
-                    .map_err(|e| format!("Failed to lookup IP: {}", e))?;
+                let address = loop {
+                    match resolver
+                        .lookup_socket_v6(ServiceName::Cockroach)
+                        .await
+                    {
+                        Ok(address) => break address,
+                        Err(e) => {
+                            warn!(
+                                log,
+                                "Failed to lookup cockroach address: {e}"
+                            );
+                            tokio::time::sleep(std::time::Duration::from_secs(
+                                1,
+                            ))
+                            .await;
+                        }
+                    }
+                };
                 info!(log, "DB address: {}", address);
                 PostgresConfigWithUrl::from_str(&format!(
-                    "postgresql://root@[{}]:{}/omicron?sslmode=disable",
-                    address, COCKROACH_PORT
+                    "postgresql://root@{address}/omicron?sslmode=disable",
                 ))
                 .map_err(|e| format!("Cannot parse Postgres URL: {}", e))?
             }

@@ -558,6 +558,20 @@ impl Storage {
         dataset.address()
     }
 
+    pub fn get_all_zpools(&self) -> Vec<Uuid> {
+        self.zpools.keys().cloned().collect()
+    }
+
+    pub fn get_all_datasets(&self, zpool_id: Uuid) -> Vec<(Uuid, SocketAddr)> {
+        let zpool = self.zpools.get(&zpool_id).expect("Zpool does not exist");
+
+        zpool
+            .datasets
+            .iter()
+            .map(|(id, server)| (*id, server.address()))
+            .collect()
+    }
+
     pub async fn get_dataset(
         &self,
         zpool_id: Uuid,

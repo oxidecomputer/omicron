@@ -76,10 +76,13 @@ omicron-dev: services are running.
 omicron-dev: nexus external API:    127.0.0.1:12220
 omicron-dev: nexus internal API:    [::1]:12221
 omicron-dev: cockroachdb pid:       7180
-omicron-dev: cockroachdb:           postgresql://root@127.0.0.1:54649/omicron?sslmode=disable
+omicron-dev: cockroachdb:           postgresql://root@[::]:54649/omicron?sslmode=disable
 omicron-dev: cockroachdb directory: /dangerzone/omicron_tmp/.tmpB8FNBT
+omicron-dev: internal DNS HTTP:     http://[::1]:33652
+omicron-dev: internal DNS:          [::1]:37503
+omicron-dev: external DNS name:     oxide-dev.test
+omicron-dev: external DNS HTTP:     http://[::1]:38374
 omicron-dev: external DNS:          [::1]:54342
-omicron-dev: external DNS HTTP:     [::1]:38374
 ----
 +
 . If you use CTRL-C to shut this down, it will gracefully terminate CockroachDB and remove the temporary directory:
@@ -175,7 +178,7 @@ $ cargo run --bin=dns-server -- --config-file dns-server/examples/config.toml --
 +
 [source,text]
 ----
-$ cargo run --bin=sled-agent-sim -- $(uuidgen) [::1]:12345 [::1]:12221 --rss-nexus-external-addr 127.0.0.1:12220 --rss-external-dns-internal-addr [::1]:5353
+$ cargo run --bin=sled-agent-sim -- $(uuidgen) [::1]:12345 [::1]:12221 --rss-nexus-external-addr 127.0.0.1:12220 --rss-external-dns-internal-addr [::1]:5353 --rss-internal-dns-dns-addr [::1]:3535
 ----
 
 . `oximeter` is similar to `nexus`, requiring a configuration file. You can use `oximeter/collector/config.toml`, and the whole thing can be run with:

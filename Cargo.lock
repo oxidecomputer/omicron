@@ -458,7 +458,7 @@ dependencies = [
 [[package]]
 name = "bhyve_api"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=54dc09da004b46b17819fd80dff8a295c15eb294#54dc09da004b46b17819fd80dff8a295c15eb294"
+source = "git+https://github.com/oxidecomputer/propolis?rev=04a275736e9f3316de6bf2a4077d03acfa4e2cdf#04a275736e9f3316de6bf2a4077d03acfa4e2cdf"
 dependencies = [
  "bhyve_api_sys",
  "libc",
@@ -468,7 +468,7 @@ dependencies = [
 [[package]]
 name = "bhyve_api_sys"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=54dc09da004b46b17819fd80dff8a295c15eb294#54dc09da004b46b17819fd80dff8a295c15eb294"
+source = "git+https://github.com/oxidecomputer/propolis?rev=04a275736e9f3316de6bf2a4077d03acfa4e2cdf#04a275736e9f3316de6bf2a4077d03acfa4e2cdf"
 dependencies = [
  "libc",
  "num_enum",
@@ -762,6 +762,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "caboose-util"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "hubtools",
+]
+
+[[package]]
 name = "camino"
 version = "1.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -778,6 +786,16 @@ checksum = "d2ab15a83d13f75dbd86f082bdefd160b628476ef58d3b900a0ef74e001bb097"
 dependencies = [
  "camino",
  "tempfile",
+]
+
+[[package]]
+name = "cancel-safe-futures"
+version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/cancel-safe-futures?rev=c15ea7069dc547434ee772f08ce040f71db9b453#c15ea7069dc547434ee772f08ce040f71db9b453"
+dependencies = [
+ "futures-core",
+ "futures-sink",
+ "futures-util",
 ]
 
 [[package]]
@@ -951,9 +969,9 @@ dependencies = [
 
 [[package]]
 name = "clap"
-version = "4.3.4"
+version = "4.3.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "80672091db20273a15cf9fdd4e47ed43b5091ec9841bf4c6145c9dfbbcae09ed"
+checksum = "d9394150f5b4273a1763355bd1c2ec54cc5a2593f790587bcd6b2c947cfa9211"
 dependencies = [
  "clap_builder",
  "clap_derive 4.3.2",
@@ -962,9 +980,9 @@ dependencies = [
 
 [[package]]
 name = "clap_builder"
-version = "4.3.4"
+version = "4.3.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c1458a1df40e1e2afebb7ab60ce55c1fa8f431146205aa5f4887e0b111c27636"
+checksum = "9a78fbdd3cc2914ddf37ba444114bc7765bbdcb55ec9cbe6fa054f0137400717"
 dependencies = [
  "anstream",
  "anstyle",
@@ -1177,7 +1195,7 @@ dependencies = [
  "anes",
  "cast",
  "ciborium",
- "clap 4.3.4",
+ "clap 4.3.8",
  "criterion-plot",
  "futures",
  "is-terminal",
@@ -1847,7 +1865,7 @@ checksum = "7e1a8646b2c125eeb9a84ef0faa6d2d102ea0d5da60b824ade2743263117b848"
 [[package]]
 name = "dladm"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=54dc09da004b46b17819fd80dff8a295c15eb294#54dc09da004b46b17819fd80dff8a295c15eb294"
+source = "git+https://github.com/oxidecomputer/propolis?rev=04a275736e9f3316de6bf2a4077d03acfa4e2cdf#04a275736e9f3316de6bf2a4077d03acfa4e2cdf"
 dependencies = [
  "libc",
  "num_enum",
@@ -1873,7 +1891,7 @@ dependencies = [
  "anyhow",
  "camino",
  "chrono",
- "clap 4.3.4",
+ "clap 4.3.8",
  "dns-service-client 0.1.0",
  "dropshot",
  "expectorate",
@@ -1892,6 +1910,7 @@ dependencies = [
  "slog-term",
  "subprocess",
  "tempdir",
+ "tempfile",
  "thiserror",
  "tokio",
  "toml 0.7.4",
@@ -2557,7 +2576,7 @@ name = "gateway-cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "clap 4.3.4",
+ "clap 4.3.8",
  "futures",
  "gateway-client",
  "gateway-messages",
@@ -3292,7 +3311,7 @@ dependencies = [
  "buf-list",
  "bytes",
  "camino",
- "clap 4.3.4",
+ "clap 4.3.8",
  "ddm-admin-client",
  "display-error-chain",
  "futures",
@@ -3354,7 +3373,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "camino",
- "clap 4.3.4",
+ "clap 4.3.8",
  "dropshot",
  "expectorate",
  "hyper",
@@ -4172,6 +4191,7 @@ dependencies = [
  "chrono",
  "crucible-agent-client",
  "dns-server",
+ "dns-service-client 0.1.0",
  "dropshot",
  "headers",
  "http",
@@ -4533,7 +4553,7 @@ name = "omicron-deploy"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "clap 4.3.4",
+ "clap 4.3.8",
  "crossbeam",
  "omicron-package",
  "omicron-sled-agent",
@@ -4552,7 +4572,7 @@ dependencies = [
  "anyhow",
  "camino",
  "camino-tempfile",
- "clap 4.3.4",
+ "clap 4.3.8",
  "dropshot",
  "expectorate",
  "futures",
@@ -4583,7 +4603,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "ciborium",
- "clap 4.3.4",
+ "clap 4.3.8",
  "crucible-smf",
  "dropshot",
  "expectorate",
@@ -4631,8 +4651,9 @@ dependencies = [
  "base64 0.21.2",
  "bb8",
  "camino",
+ "cancel-safe-futures",
  "chrono",
- "clap 4.3.4",
+ "clap 4.3.8",
  "cookie",
  "criterion",
  "crucible-agent-client",
@@ -4730,7 +4751,7 @@ name = "omicron-package"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "clap 4.3.4",
+ "clap 4.3.8",
  "expectorate",
  "futures",
  "hex",
@@ -4805,7 +4826,7 @@ dependencies = [
  "camino-tempfile",
  "cfg-if 1.0.0",
  "chrono",
- "clap 4.3.4",
+ "clap 4.3.8",
  "crucible-agent-client",
  "crucible-client-types",
  "ddm-admin-client",
@@ -5172,7 +5193,7 @@ dependencies = [
 name = "oximeter-collector"
 version = "0.1.0"
 dependencies = [
- "clap 4.3.4",
+ "clap 4.3.8",
  "dropshot",
  "expectorate",
  "futures",
@@ -5204,7 +5225,7 @@ dependencies = [
  "async-trait",
  "bytes",
  "chrono",
- "clap 4.3.4",
+ "clap 4.3.8",
  "dropshot",
  "itertools",
  "omicron-test-utils",
@@ -5969,7 +5990,7 @@ dependencies = [
 [[package]]
 name = "propolis"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=54dc09da004b46b17819fd80dff8a295c15eb294#54dc09da004b46b17819fd80dff8a295c15eb294"
+source = "git+https://github.com/oxidecomputer/propolis?rev=04a275736e9f3316de6bf2a4077d03acfa4e2cdf#04a275736e9f3316de6bf2a4077d03acfa4e2cdf"
 dependencies = [
  "anyhow",
  "bhyve_api",
@@ -5999,7 +6020,7 @@ dependencies = [
 [[package]]
 name = "propolis-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=54dc09da004b46b17819fd80dff8a295c15eb294#54dc09da004b46b17819fd80dff8a295c15eb294"
+source = "git+https://github.com/oxidecomputer/propolis?rev=04a275736e9f3316de6bf2a4077d03acfa4e2cdf#04a275736e9f3316de6bf2a4077d03acfa4e2cdf"
 dependencies = [
  "async-trait",
  "base64 0.21.2",
@@ -6023,7 +6044,7 @@ dependencies = [
 [[package]]
 name = "propolis-server"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=54dc09da004b46b17819fd80dff8a295c15eb294#54dc09da004b46b17819fd80dff8a295c15eb294"
+source = "git+https://github.com/oxidecomputer/propolis?rev=04a275736e9f3316de6bf2a4077d03acfa4e2cdf#04a275736e9f3316de6bf2a4077d03acfa4e2cdf"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6034,7 +6055,7 @@ dependencies = [
  "bytes",
  "cfg-if 1.0.0",
  "chrono",
- "clap 4.3.4",
+ "clap 4.3.8",
  "const_format",
  "dropshot",
  "enum-iterator",
@@ -6075,7 +6096,7 @@ dependencies = [
 [[package]]
 name = "propolis-server-config"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=54dc09da004b46b17819fd80dff8a295c15eb294#54dc09da004b46b17819fd80dff8a295c15eb294"
+source = "git+https://github.com/oxidecomputer/propolis?rev=04a275736e9f3316de6bf2a4077d03acfa4e2cdf#04a275736e9f3316de6bf2a4077d03acfa4e2cdf"
 dependencies = [
  "serde",
  "serde_derive",
@@ -6086,7 +6107,7 @@ dependencies = [
 [[package]]
 name = "propolis_types"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=54dc09da004b46b17819fd80dff8a295c15eb294#54dc09da004b46b17819fd80dff8a295c15eb294"
+source = "git+https://github.com/oxidecomputer/propolis?rev=04a275736e9f3316de6bf2a4077d03acfa4e2cdf#04a275736e9f3316de6bf2a4077d03acfa4e2cdf"
 dependencies = [
  "schemars",
  "serde",
@@ -7629,7 +7650,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
- "clap 4.3.4",
+ "clap 4.3.8",
  "dropshot",
  "futures",
  "gateway-messages",
@@ -8547,7 +8568,7 @@ dependencies = [
  "assert_cmd",
  "camino",
  "chrono",
- "clap 4.3.4",
+ "clap 4.3.8",
  "console",
  "datatest-stable",
  "fs-err",
@@ -8939,7 +8960,7 @@ checksum = "49874b5167b65d7193b8aba1567f5c7d93d001cafc34600cee003eda787e483f"
 [[package]]
 name = "viona_api"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=54dc09da004b46b17819fd80dff8a295c15eb294#54dc09da004b46b17819fd80dff8a295c15eb294"
+source = "git+https://github.com/oxidecomputer/propolis?rev=04a275736e9f3316de6bf2a4077d03acfa4e2cdf#04a275736e9f3316de6bf2a4077d03acfa4e2cdf"
 dependencies = [
  "libc",
  "num_enum",
@@ -8949,7 +8970,7 @@ dependencies = [
 [[package]]
 name = "viona_api_sys"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=54dc09da004b46b17819fd80dff8a295c15eb294#54dc09da004b46b17819fd80dff8a295c15eb294"
+source = "git+https://github.com/oxidecomputer/propolis?rev=04a275736e9f3316de6bf2a4077d03acfa4e2cdf#04a275736e9f3316de6bf2a4077d03acfa4e2cdf"
 dependencies = [
  "libc",
 ]
@@ -9175,7 +9196,7 @@ dependencies = [
  "buf-list",
  "camino",
  "ciborium",
- "clap 4.3.4",
+ "clap 4.3.8",
  "crossterm 0.26.1",
  "futures",
  "hex",
@@ -9237,7 +9258,7 @@ dependencies = [
  "bytes",
  "camino",
  "ciborium",
- "clap 4.3.4",
+ "clap 4.3.8",
  "crossterm 0.26.1",
  "reedline",
  "serde",
@@ -9261,7 +9282,7 @@ dependencies = [
  "bytes",
  "camino",
  "camino-tempfile",
- "clap 4.3.4",
+ "clap 4.3.8",
  "ddm-admin-client",
  "debug-ignore",
  "display-error-chain",

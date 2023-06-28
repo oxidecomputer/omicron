@@ -393,8 +393,10 @@ async fn test_silo_certificates() {
     // that was created when that Silo was created.  We'll use this session to
     // create the other Silos and their users.
     let resolver = Arc::new(
-        CustomDnsResolver::new(*cptestctx.external_dns_server.local_address())
-            .unwrap(),
+        CustomDnsResolver::new(
+            *cptestctx.external_dns.dns_server.local_address(),
+        )
+        .unwrap(),
     );
     let session_token = oxide_client::login(
         silo1.reqwest_client().dns_resolver(resolver.clone()),

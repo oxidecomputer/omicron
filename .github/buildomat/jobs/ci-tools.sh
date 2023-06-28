@@ -6,6 +6,7 @@
 #: rust_toolchain = "1.70.0"
 #: output_rules = [
 #:	"=/work/end-to-end-tests/*.gz",
+#:	"=/work/caboose-util.gz",
 #:	"=/work/tufaceous.gz",
 #: ]
 
@@ -36,6 +37,13 @@ for p in target/debug/bootstrap $(/opt/ooce/bin/jq -r 'select(.profile.test) | .
 	# shellcheck disable=SC2094
 	ptime -m gzip < "$p" > /work/end-to-end-tests/"$(basename "$p").gz"
 done
+
+########## caboose-util ##########
+
+banner caboose-util
+
+ptime -m cargo build --locked -p caboose-util --release
+ptime -m gzip < target/release/caboose-util > /work/caboose-util.gz
 
 ########## tufaceous ##########
 
