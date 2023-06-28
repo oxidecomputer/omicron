@@ -230,224 +230,326 @@ impl Plan {
         storage: &StorageResources,
         sleds: &HashMap<SocketAddrV6, StartSledAgentRequest>,
     ) -> Result<Self, PlanError> {
+        let mut dns_builder = internal_dns::DnsConfigBuilder::new();
+        let mut services_ip_pool = config
+            .internal_services_ip_pool_ranges
+            .iter()
+            .flat_map(|range| range.iter());
+        let mut svc_port_builder = ServicePortBuilder::new();
+
+        // Load the information we need about each Sled to be able to allocate
+        // components on it.
+        let mut sled_info = {
+            let result: Result<Vec<SledInfo>, PlanError> =
+                futures::future::try_join_all(sleds.values().map(
+                    |sled_request| async {
+                        let subnet = sled_request.subnet;
+                        let sled_address = get_sled_address(subnet);
+                        let u2_zpools =
+                            Self::get_u2_zpools_from_sled(log, sled_address)
+                                .await?;
+                        let is_scrimlet =
+                            Self::is_sled_scrimlet(log, sled_address).await?;
+                        Ok(SledInfo {
+                            sled_id: sled_request.id,
+                            subnet,
+                            sled_address,
+                            u2_zpools,
+                            is_scrimlet,
+                            addr_alloc: AddressBumpAllocator::new(subnet),
+                            request: Default::default(),
+                        })
+                    },
+                ))
+                .await;
+            result?
+        };
+
+        // Scrimlets get DNS records for running Dendrite.
+        let scrimlets: Vec<_> =
+            sled_info.iter().filter(|s| s.is_scrimlet).collect();
+        if scrimlets.is_empty() {
+            return Err(PlanError::SledInitialization(
+                "No scrimlets observed".to_string(),
+            ));
+        }
+        for sled in scrimlets {
+            let address = get_switch_zone_address(sled.subnet);
+            let zone =
+                dns_builder.host_dendrite(sled.sled_id, address).unwrap();
+            dns_builder
+                .service_backend_zone(
+                    ServiceName::Dendrite,
+                    &zone,
+                    DENDRITE_PORT,
+                )
+                .unwrap();
+        }
+
+        // We'll stripe most services across all available Sleds, round-robin
+        // style.  In development and CI, this might only be one Sled.
+        let mut sled_allocator = (0..sled_info.len()).cycle();
+
+        // Provision internal DNS zones, striping across Sleds.
         let reserved_rack_subnet = ReservedRackSubnet::new(config.az_subnet());
         let dns_subnets = reserved_rack_subnet.get_dns_subnets();
-
-        let mut allocations = vec![];
-        let mut dns_builder = internal_dns::DnsConfigBuilder::new();
-
         let rack_dns_servers = dns_subnets
             .clone()
             .into_iter()
             .map(|dns_subnet| dns_subnet.dns_address().ip().to_string())
             .collect::<Vec<String>>();
+        for dns_subnet in &dns_subnets {
+            let ip = dns_subnet.dns_address().ip();
+            let sled = {
+                let which_sled = sled_allocator.next().unwrap();
+                &mut sled_info[which_sled]
+            };
+            let http_address = SocketAddrV6::new(ip, DNS_HTTP_PORT, 0, 0);
+            let dns_address = SocketAddrV6::new(ip, DNS_PORT, 0, 0);
 
-        let mut services_ip_pool = config
-            .internal_services_ip_pool_ranges
-            .iter()
-            .flat_map(|range| range.iter());
+            let id = Uuid::new_v4();
+            let zone = dns_builder.host_zone(id, ip).unwrap();
+            dns_builder
+                .service_backend_zone(
+                    ServiceName::InternalDns,
+                    &zone,
+                    DNS_HTTP_PORT,
+                )
+                .unwrap();
+            let dataset_name = DatasetName::new(
+                sled.u2_zpools[0].clone(),
+                crate::params::DatasetKind::InternalDns,
+            );
 
-        let mut boundary_ntp_servers = vec![];
-        let mut seen_any_scrimlet = false;
-
-        let mut svc_port_builder = ServicePortBuilder::new();
-
-        for (idx, (_bootstrap_address, sled_request)) in
-            sleds.iter().enumerate()
-        {
-            let subnet = sled_request.subnet;
-            let sled_address = get_sled_address(subnet);
-            let u2_zpools =
-                Self::get_u2_zpools_from_sled(log, sled_address).await?;
-            let is_scrimlet = Self::is_sled_scrimlet(log, sled_address).await?;
-
-            let mut addr_alloc = AddressBumpAllocator::new(subnet);
-            let mut request = SledRequest::default();
-
-            // Scrimlets get DNS records for running dendrite
-            if is_scrimlet {
-                let address = get_switch_zone_address(subnet);
-                let zone = dns_builder
-                    .host_dendrite(sled_request.id, address)
-                    .unwrap();
-                dns_builder
-                    .service_backend_zone(
-                        ServiceName::Dendrite,
-                        &zone,
-                        DENDRITE_PORT,
-                    )
-                    .unwrap();
-                seen_any_scrimlet = true;
-            }
-
-            // TODO(https://github.com/oxidecomputer/omicron/issues/732): Remove
-            if idx < EXTERNAL_DNS_COUNT {
-                let internal_ip = addr_alloc.next().expect("Not enough addrs");
-                let http_port = omicron_common::address::DNS_HTTP_PORT;
-                let http_address =
-                    SocketAddrV6::new(internal_ip, http_port, 0, 0);
-                let id = Uuid::new_v4();
-                let zone = dns_builder.host_zone(id, internal_ip).unwrap();
-                dns_builder
-                    .service_backend_zone(
-                        ServiceName::ExternalDns,
-                        &zone,
-                        http_port,
-                    )
-                    .unwrap();
-                let (nic, external_ip) =
-                    svc_port_builder.next_dns(id, &mut services_ip_pool)?;
-                let dns_port = omicron_common::address::DNS_PORT;
-                let dns_address = SocketAddr::new(external_ip, dns_port);
-                let dataset_kind = crate::params::DatasetKind::ExternalDns;
-                let dataset_name =
-                    DatasetName::new(u2_zpools[0].clone(), dataset_kind);
-
-                request.services.push(ServiceZoneRequest {
+            sled.request.services.push(ServiceZoneRequest {
+                id,
+                zone_type: ZoneType::InternalDns,
+                addresses: vec![ip],
+                dataset: Some(DatasetRequest { id, name: dataset_name }),
+                gz_addresses: vec![dns_subnet.gz_address().ip()],
+                services: vec![ServiceZoneService {
                     id,
-                    zone_type: ZoneType::ExternalDns,
-                    addresses: vec![*http_address.ip()],
-                    dataset: Some(DatasetRequest { id, name: dataset_name }),
-                    gz_addresses: vec![],
-                    services: vec![ServiceZoneService {
-                        id,
-                        details: ServiceType::ExternalDns {
-                            http_address,
-                            dns_address,
-                            nic,
-                        },
-                    }],
-                });
-            }
+                    details: ServiceType::InternalDns {
+                        http_address,
+                        dns_address,
+                    },
+                }],
+            });
+        }
 
-            // The first enumerated sleds get assigned the responsibility
-            // of hosting Nexus.
-            if idx < NEXUS_COUNT {
-                let id = Uuid::new_v4();
-                let address = addr_alloc.next().expect("Not enough addrs");
-                let zone = dns_builder.host_zone(id, address).unwrap();
-                dns_builder
-                    .service_backend_zone(
-                        ServiceName::Nexus,
-                        &zone,
-                        omicron_common::address::NEXUS_INTERNAL_PORT,
-                    )
-                    .unwrap();
-                let (nic, external_ip) =
-                    svc_port_builder.next_nexus(id, &mut services_ip_pool)?;
-                request.services.push(ServiceZoneRequest {
+        // Provision CockroachDB zones, continuing to stripe across Sleds.
+        for _ in 0..CRDB_COUNT {
+            let sled = {
+                let which_sled = sled_allocator.next().unwrap();
+                &mut sled_info[which_sled]
+            };
+            let id = Uuid::new_v4();
+            let ip = sled.addr_alloc.next().expect("Not enough addrs");
+            let port = omicron_common::address::COCKROACH_PORT;
+            let zone = dns_builder.host_zone(id, ip).unwrap();
+            dns_builder
+                .service_backend_zone(ServiceName::Cockroach, &zone, port)
+                .unwrap();
+            sled.request.services.push(ServiceZoneRequest {
+                id,
+                zone_type: ZoneType::CockroachDb,
+                addresses: vec![ip],
+                dataset: Some(DatasetRequest {
                     id,
-                    zone_type: ZoneType::Nexus,
-                    addresses: vec![address],
-                    dataset: None,
-                    gz_addresses: vec![],
-                    services: vec![ServiceZoneService {
-                        id,
-                        details: ServiceType::Nexus {
-                            internal_ip: address,
-                            external_ip,
-                            nic,
-                            // Tell Nexus to use TLS if and only if the caller
-                            // provided TLS certificates.  This effectively
-                            // determines the status of TLS for the lifetime of
-                            // the rack.  In production-like deployments, we'd
-                            // always expect TLS to be enabled.  It's only in
-                            // development that it might not be.
-                            external_tls: !config
-                                .external_certificates
-                                .is_empty(),
-                        },
-                    }],
-                })
-            }
-
-            // TODO(https://github.com/oxidecomputer/omicron/issues/732): Remove
-            if idx < OXIMETER_COUNT {
-                let id = Uuid::new_v4();
-                let address = addr_alloc.next().expect("Not enough addrs");
-                let zone = dns_builder.host_zone(id, address).unwrap();
-                dns_builder
-                    .service_backend_zone(
-                        ServiceName::Oximeter,
-                        &zone,
-                        omicron_common::address::OXIMETER_PORT,
-                    )
-                    .unwrap();
-                request.services.push(ServiceZoneRequest {
+                    name: DatasetName::new(
+                        sled.u2_zpools[0].clone(),
+                        crate::params::DatasetKind::CockroachDb,
+                    ),
+                }),
+                gz_addresses: vec![],
+                services: vec![ServiceZoneService {
                     id,
-                    zone_type: ZoneType::Oximeter,
-                    addresses: vec![address],
-                    dataset: None,
-                    gz_addresses: vec![],
-                    services: vec![ServiceZoneService {
-                        id,
-                        details: ServiceType::Oximeter,
-                    }],
-                })
-            }
+                    details: ServiceType::CockroachDb,
+                }],
+            });
+        }
 
-            // The first enumerated sleds host the CRDB datasets, using
-            // zpools described from the underlying config file.
-            if idx < CRDB_COUNT {
-                let id = Uuid::new_v4();
-                let ip = addr_alloc.next().expect("Not enough addrs");
-                let port = omicron_common::address::COCKROACH_PORT;
-                let zone = dns_builder.host_zone(id, ip).unwrap();
-                dns_builder
-                    .service_backend_zone(ServiceName::Cockroach, &zone, port)
-                    .unwrap();
-                request.services.push(ServiceZoneRequest {
+        // Provision Nexus zones, continuing to stripe across sleds.
+        for _ in 0..NEXUS_COUNT {
+            let sled = {
+                let which_sled = sled_allocator.next().unwrap();
+                &mut sled_info[which_sled]
+            };
+            let id = Uuid::new_v4();
+            let address = sled.addr_alloc.next().expect("Not enough addrs");
+            let zone = dns_builder.host_zone(id, address).unwrap();
+            dns_builder
+                .service_backend_zone(
+                    ServiceName::Nexus,
+                    &zone,
+                    omicron_common::address::NEXUS_INTERNAL_PORT,
+                )
+                .unwrap();
+            let (nic, external_ip) =
+                svc_port_builder.next_nexus(id, &mut services_ip_pool)?;
+            sled.request.services.push(ServiceZoneRequest {
+                id,
+                zone_type: ZoneType::Nexus,
+                addresses: vec![address],
+                dataset: None,
+                gz_addresses: vec![],
+                services: vec![ServiceZoneService {
                     id,
-                    zone_type: ZoneType::CockroachDb,
-                    addresses: vec![ip],
-                    dataset: Some(DatasetRequest {
-                        id,
-                        name: DatasetName::new(
-                            u2_zpools[0].clone(),
-                            crate::params::DatasetKind::CockroachDb,
-                        ),
-                    }),
-                    gz_addresses: vec![],
-                    services: vec![ServiceZoneService {
-                        id,
-                        details: ServiceType::CockroachDb,
-                    }],
-                });
-            }
+                    details: ServiceType::Nexus {
+                        internal_ip: address,
+                        external_ip,
+                        nic,
+                        // Tell Nexus to use TLS if and only if the caller
+                        // provided TLS certificates.  This effectively
+                        // determines the status of TLS for the lifetime of
+                        // the rack.  In production-like deployments, we'd
+                        // always expect TLS to be enabled.  It's only in
+                        // development that it might not be.
+                        external_tls: !config.external_certificates.is_empty(),
+                    },
+                }],
+            })
+        }
 
-            // TODO(https://github.com/oxidecomputer/omicron/issues/732): Remove
-            if idx < CLICKHOUSE_COUNT {
-                let id = Uuid::new_v4();
-                let ip = addr_alloc.next().expect("Not enough addrs");
-                let port = omicron_common::address::CLICKHOUSE_PORT;
-                let zone = dns_builder.host_zone(id, ip).unwrap();
-                dns_builder
-                    .service_backend_zone(ServiceName::Clickhouse, &zone, port)
-                    .unwrap();
-                request.services.push(ServiceZoneRequest {
+        // Provision external DNS zones, continuing to stripe across sleds.
+        // TODO(https://github.com/oxidecomputer/omicron/issues/732): Remove
+        for _ in 0..EXTERNAL_DNS_COUNT {
+            let sled = {
+                let which_sled = sled_allocator.next().unwrap();
+                &mut sled_info[which_sled]
+            };
+            let internal_ip = sled.addr_alloc.next().expect("Not enough addrs");
+            let http_port = omicron_common::address::DNS_HTTP_PORT;
+            let http_address = SocketAddrV6::new(internal_ip, http_port, 0, 0);
+            let id = Uuid::new_v4();
+            let zone = dns_builder.host_zone(id, internal_ip).unwrap();
+            dns_builder
+                .service_backend_zone(
+                    ServiceName::ExternalDns,
+                    &zone,
+                    http_port,
+                )
+                .unwrap();
+            let (nic, external_ip) =
+                svc_port_builder.next_dns(id, &mut services_ip_pool)?;
+            let dns_port = omicron_common::address::DNS_PORT;
+            let dns_address = SocketAddr::new(external_ip, dns_port);
+            let dataset_kind = crate::params::DatasetKind::ExternalDns;
+            let dataset_name =
+                DatasetName::new(sled.u2_zpools[0].clone(), dataset_kind);
+
+            sled.request.services.push(ServiceZoneRequest {
+                id,
+                zone_type: ZoneType::ExternalDns,
+                addresses: vec![*http_address.ip()],
+                dataset: Some(DatasetRequest { id, name: dataset_name }),
+                gz_addresses: vec![],
+                services: vec![ServiceZoneService {
                     id,
-                    zone_type: ZoneType::Clickhouse,
-                    addresses: vec![ip],
-                    dataset: Some(DatasetRequest {
-                        id,
-                        name: DatasetName::new(
-                            u2_zpools[0].clone(),
-                            crate::params::DatasetKind::Clickhouse,
-                        ),
-                    }),
-                    gz_addresses: vec![],
-                    services: vec![ServiceZoneService {
-                        id,
-                        details: ServiceType::Clickhouse,
-                    }],
-                });
-            }
+                    details: ServiceType::ExternalDns {
+                        http_address,
+                        dns_address,
+                        nic,
+                    },
+                }],
+            });
+        }
 
-            // Each zpool gets a crucible zone.
-            //
-            // TODO(https://github.com/oxidecomputer/omicron/issues/732): Remove
-            for pool in &u2_zpools {
-                let ip = addr_alloc.next().expect("Not enough addrs");
+        // Provision Oximeter zones, continuing to stripe across sleds.
+        // TODO(https://github.com/oxidecomputer/omicron/issues/732): Remove
+        for _ in 0..OXIMETER_COUNT {
+            let sled = {
+                let which_sled = sled_allocator.next().unwrap();
+                &mut sled_info[which_sled]
+            };
+            let id = Uuid::new_v4();
+            let address = sled.addr_alloc.next().expect("Not enough addrs");
+            let zone = dns_builder.host_zone(id, address).unwrap();
+            dns_builder
+                .service_backend_zone(
+                    ServiceName::Oximeter,
+                    &zone,
+                    omicron_common::address::OXIMETER_PORT,
+                )
+                .unwrap();
+            sled.request.services.push(ServiceZoneRequest {
+                id,
+                zone_type: ZoneType::Oximeter,
+                addresses: vec![address],
+                dataset: None,
+                gz_addresses: vec![],
+                services: vec![ServiceZoneService {
+                    id,
+                    details: ServiceType::Oximeter,
+                }],
+            })
+        }
+
+        // Provision Clickhouse zones, continuing to stripe across sleds.
+        // TODO(https://github.com/oxidecomputer/omicron/issues/732): Remove
+        for _ in 0..CLICKHOUSE_COUNT {
+            let sled = {
+                let which_sled = sled_allocator.next().unwrap();
+                &mut sled_info[which_sled]
+            };
+            let id = Uuid::new_v4();
+            let ip = sled.addr_alloc.next().expect("Not enough addrs");
+            let port = omicron_common::address::CLICKHOUSE_PORT;
+            let zone = dns_builder.host_zone(id, ip).unwrap();
+            dns_builder
+                .service_backend_zone(ServiceName::Clickhouse, &zone, port)
+                .unwrap();
+            sled.request.services.push(ServiceZoneRequest {
+                id,
+                zone_type: ZoneType::Clickhouse,
+                addresses: vec![ip],
+                dataset: Some(DatasetRequest {
+                    id,
+                    name: DatasetName::new(
+                        sled.u2_zpools[0].clone(),
+                        crate::params::DatasetKind::Clickhouse,
+                    ),
+                }),
+                gz_addresses: vec![],
+                services: vec![ServiceZoneService {
+                    id,
+                    details: ServiceType::Clickhouse,
+                }],
+            });
+        }
+
+        // Provision Crucible Pantry zones, continuing to stripe across sleds.
+        // TODO(https://github.com/oxidecomputer/omicron/issues/732): Remove
+        for _ in 0..PANTRY_COUNT {
+            let sled = {
+                let which_sled = sled_allocator.next().unwrap();
+                &mut sled_info[which_sled]
+            };
+            let address = sled.addr_alloc.next().expect("Not enough addrs");
+            let port = omicron_common::address::CRUCIBLE_PANTRY_PORT;
+            let id = Uuid::new_v4();
+            let zone = dns_builder.host_zone(id, address).unwrap();
+            dns_builder
+                .service_backend_zone(ServiceName::CruciblePantry, &zone, port)
+                .unwrap();
+            sled.request.services.push(ServiceZoneRequest {
+                id,
+                zone_type: ZoneType::CruciblePantry,
+                addresses: vec![address],
+                dataset: None,
+                gz_addresses: vec![],
+                services: vec![ServiceZoneService {
+                    id,
+                    details: ServiceType::CruciblePantry,
+                }],
+            })
+        }
+
+        // Provision a Crucible zone on every zpool on every Sled.
+        // TODO(https://github.com/oxidecomputer/omicron/issues/732): Remove
+        for sled in sled_info.iter_mut() {
+            for pool in &sled.u2_zpools {
+                let ip = sled.addr_alloc.next().expect("Not enough addrs");
                 let port = omicron_common::address::CRUCIBLE_PORT;
                 let id = Uuid::new_v4();
                 let zone = dns_builder.host_zone(id, ip).unwrap();
@@ -459,7 +561,7 @@ impl Plan {
                     )
                     .unwrap();
 
-                request.services.push(ServiceZoneRequest {
+                sled.request.services.push(ServiceZoneRequest {
                     id,
                     zone_type: ZoneType::Crucible,
                     addresses: vec![ip],
@@ -477,138 +579,64 @@ impl Plan {
                     }],
                 });
             }
+        }
 
-            // The first enumerated sleds get assigned the additional
-            // responsibility of being internal DNS servers.
-            if idx < dns_subnets.len() {
-                let dns_subnet = &dns_subnets[idx];
-                let ip = dns_subnet.dns_address().ip();
-                let http_address = SocketAddrV6::new(ip, DNS_HTTP_PORT, 0, 0);
-                let dns_address = SocketAddrV6::new(ip, DNS_PORT, 0, 0);
+        // All sleds get an NTP server, but the first few are nominated as
+        // boundary servers, responsible for communicating with the external
+        // network.
+        let mut boundary_ntp_servers = vec![];
+        for (idx, sled) in sled_info.iter_mut().enumerate() {
+            let id = Uuid::new_v4();
+            let address = sled.addr_alloc.next().expect("Not enough addrs");
+            let zone = dns_builder.host_zone(id, address).unwrap();
 
-                let id = Uuid::new_v4();
-                let zone = dns_builder.host_zone(id, ip).unwrap();
-                dns_builder
-                    .service_backend_zone(
-                        ServiceName::InternalDns,
-                        &zone,
-                        DNS_HTTP_PORT,
-                    )
-                    .unwrap();
-                let dataset_name = DatasetName::new(
-                    u2_zpools[0].clone(),
-                    crate::params::DatasetKind::InternalDns,
-                );
-
-                request.services.push(ServiceZoneRequest {
-                    id,
-                    zone_type: ZoneType::InternalDns,
-                    addresses: vec![ip],
-                    dataset: Some(DatasetRequest { id, name: dataset_name }),
-                    gz_addresses: vec![dns_subnet.gz_address().ip()],
-                    services: vec![ServiceZoneService {
+            let (services, svcname) = if idx < BOUNDARY_NTP_COUNT {
+                boundary_ntp_servers.push(format!("{}.host.{}", id, DNS_ZONE));
+                let (nic, snat_cfg) =
+                    svc_port_builder.next_snat(id, &mut services_ip_pool)?;
+                (
+                    vec![ServiceZoneService {
                         id,
-                        details: ServiceType::InternalDns {
-                            http_address,
-                            dns_address,
+                        details: ServiceType::BoundaryNtp {
+                            ntp_servers: config.ntp_servers.clone(),
+                            dns_servers: config.dns_servers.clone(),
+                            domain: None,
+                            nic,
+                            snat_cfg,
                         },
                     }],
-                });
-            }
-
-            // TODO(https://github.com/oxidecomputer/omicron/issues/732): Remove
-            if idx < PANTRY_COUNT {
-                let address = addr_alloc.next().expect("Not enough addrs");
-                let port = omicron_common::address::CRUCIBLE_PANTRY_PORT;
-                let id = Uuid::new_v4();
-                let zone = dns_builder.host_zone(id, address).unwrap();
-                dns_builder
-                    .service_backend_zone(
-                        ServiceName::CruciblePantry,
-                        &zone,
-                        port,
-                    )
-                    .unwrap();
-                request.services.push(ServiceZoneRequest {
-                    id,
-                    zone_type: ZoneType::CruciblePantry,
-                    addresses: vec![address],
-                    dataset: None,
-                    gz_addresses: vec![],
-                    services: vec![ServiceZoneService {
+                    ServiceName::BoundaryNtp,
+                )
+            } else {
+                (
+                    vec![ServiceZoneService {
                         id,
-                        details: ServiceType::CruciblePantry,
+                        details: ServiceType::InternalNtp {
+                            ntp_servers: boundary_ntp_servers.clone(),
+                            dns_servers: rack_dns_servers.clone(),
+                            domain: None,
+                        },
                     }],
-                })
-            }
+                    ServiceName::InternalNtp,
+                )
+            };
 
-            // All sleds get an NTP server, but the first few are nominated as
-            // boundary servers, responsible for communicating with the external
-            // network.
-            {
-                let id = Uuid::new_v4();
-                let address = addr_alloc.next().expect("Not enough addrs");
-                let zone = dns_builder.host_zone(id, address).unwrap();
+            dns_builder.service_backend_zone(svcname, &zone, NTP_PORT).unwrap();
 
-                let (services, svcname) = if idx < BOUNDARY_NTP_COUNT {
-                    boundary_ntp_servers
-                        .push(format!("{}.host.{}", id, DNS_ZONE));
-                    let (nic, snat_cfg) = svc_port_builder
-                        .next_snat(id, &mut services_ip_pool)?;
-                    (
-                        vec![ServiceZoneService {
-                            id,
-                            details: ServiceType::BoundaryNtp {
-                                ntp_servers: config.ntp_servers.clone(),
-                                dns_servers: config.dns_servers.clone(),
-                                domain: None,
-                                nic,
-                                snat_cfg,
-                            },
-                        }],
-                        ServiceName::BoundaryNtp,
-                    )
-                } else {
-                    (
-                        vec![ServiceZoneService {
-                            id,
-                            details: ServiceType::InternalNtp {
-                                ntp_servers: boundary_ntp_servers.clone(),
-                                dns_servers: rack_dns_servers.clone(),
-                                domain: None,
-                            },
-                        }],
-                        ServiceName::InternalNtp,
-                    )
-                };
-
-                dns_builder
-                    .service_backend_zone(svcname, &zone, NTP_PORT)
-                    .unwrap();
-
-                request.services.push(ServiceZoneRequest {
-                    id,
-                    zone_type: ZoneType::Ntp,
-                    addresses: vec![address],
-                    dataset: None,
-                    gz_addresses: vec![],
-                    services,
-                });
-            }
-
-            allocations.push((sled_address, request));
+            sled.request.services.push(ServiceZoneRequest {
+                id,
+                zone_type: ZoneType::Ntp,
+                addresses: vec![address],
+                dataset: None,
+                gz_addresses: vec![],
+                services,
+            });
         }
 
-        if !seen_any_scrimlet {
-            return Err(PlanError::SledInitialization(
-                "No scrimlets observed".to_string(),
-            ));
-        }
-
-        let mut services = std::collections::HashMap::new();
-        for (addr, allocation) in allocations {
-            services.insert(addr, allocation);
-        }
+        let services: HashMap<_, _> = sled_info
+            .into_iter()
+            .map(|sled_info| (sled_info.sled_address, sled_info.request))
+            .collect();
 
         let dns_config = dns_builder.build();
         let plan = Self { services, dns_config };
@@ -645,6 +673,24 @@ impl AddressBumpAllocator {
         self.last_addr = Ipv6Addr::from(segments);
         Some(self.last_addr)
     }
+}
+
+/// Wraps up the information used to allocate components to a Sled
+struct SledInfo {
+    /// unique id for the sled agent
+    sled_id: Uuid,
+    /// the sled's unique IPv6 subnet
+    subnet: Ipv6Subnet<SLED_PREFIX>,
+    /// the address of the Sled Agent on the sled's subnet
+    sled_address: SocketAddrV6,
+    /// the list of zpools on the Sled
+    u2_zpools: Vec<ZpoolName>,
+    /// whether this Sled is a scrimlet
+    is_scrimlet: bool,
+    /// allocator for addresses in this Sled's subnet
+    addr_alloc: AddressBumpAllocator,
+    /// under-construction list of services being deployed to a Sled
+    request: SledRequest,
 }
 
 struct ServicePortBuilder {
