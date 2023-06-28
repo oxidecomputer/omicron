@@ -228,7 +228,7 @@ impl SledAgent {
             "component" => "SledAgent",
             "sled_id" => request.id.to_string(),
         ));
-        info!(&log, "SledAgent::new(..) staring");
+        info!(&log, "SledAgent::new(..) starting");
 
         let etherstub = Dladm::ensure_etherstub(
             illumos_utils::dladm::UNDERLAY_ETHERSTUB_NAME,
