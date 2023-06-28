@@ -129,6 +129,7 @@ impl Host {
 ///
 /// This builder ensures that the constructed DNS data satisfies these
 /// assumptions.
+#[derive(Clone)]
 pub struct DnsConfigBuilder {
     /// set of hosts of type "sled" that have been configured so far, mapping
     /// each sled's unique uuid to its sole IPv6 address on the control plane

@@ -135,14 +135,33 @@ impl ServerContext {
         // nexus in dev for everyone
 
         // Set up DNS Client
-        let az_subnet =
-            Ipv6Subnet::<AZ_PREFIX>::new(config.deployment.subnet.net().ip());
-        info!(log, "Setting up resolver on subnet: {:?}", az_subnet);
-        let resolver = internal_dns::resolver::Resolver::new_from_subnet(
-            log.new(o!("component" => "DnsResolver")),
-            az_subnet,
-        )
-        .map_err(|e| format!("Failed to create DNS resolver: {}", e))?;
+        let resolver = match config.deployment.internal_dns {
+            nexus_config::InternalDns::FromSubnet { subnet } => {
+                let az_subnet = Ipv6Subnet::<AZ_PREFIX>::new(subnet.net().ip());
+                info!(
+                    log,
+                    "Setting up resolver using DNS servers for subnet: {:?}",
+                    az_subnet
+                );
+                internal_dns::resolver::Resolver::new_from_subnet(
+                    log.new(o!("component" => "DnsResolver")),
+                    az_subnet,
+                )
+                .map_err(|e| format!("Failed to create DNS resolver: {}", e))?
+            }
+            nexus_config::InternalDns::FromAddress { address } => {
+                info!(
+                    log,
+                    "Setting up resolver using DNS address: {:?}", address
+                );
+
+                internal_dns::resolver::Resolver::new_from_addrs(
+                    log.new(o!("component" => "DnsResolver")),
+                    vec![address],
+                )
+                .map_err(|e| format!("Failed to create DNS resolver: {}", e))?
+            }
+        };
 
         // Set up DB pool
         let url = match &config.deployment.database {
