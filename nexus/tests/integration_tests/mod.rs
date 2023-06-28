@@ -13,6 +13,7 @@ mod console_api;
 mod device_auth;
 mod disks;
 mod images;
+mod initialization;
 mod instances;
 mod ip_pools;
 mod loopback_address;

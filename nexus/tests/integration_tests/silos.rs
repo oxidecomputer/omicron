@@ -2146,7 +2146,10 @@ pub async fn verify_silo_dns_name(
     wait_for_condition(
         || async {
             let found = match cptestctx
-                .external_dns_resolver
+                .external_dns
+                .resolver()
+                .await
+                .expect("Failed to create external DNS resolver")
                 .ipv4_lookup(&dns_name)
                 .await
             {

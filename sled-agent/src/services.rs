@@ -1380,9 +1380,11 @@ impl ServiceManager {
                             default_handler_task_mode:
                                 HandlerTaskMode::Detached,
                         },
-                        subnet: Ipv6Subnet::<RACK_PREFIX>::new(
-                            sled_info.underlay_address,
-                        ),
+                        internal_dns: nexus_config::InternalDns::FromSubnet {
+                            subnet: Ipv6Subnet::<RACK_PREFIX>::new(
+                                sled_info.underlay_address,
+                            ),
+                        },
                         database: nexus_config::Database::FromDns,
                     };
 
