@@ -3,7 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::{BlockSize, ByteCount, DiskState, Generation};
-use crate::schema::disk;
+use crate::{schema::disk, unsigned::SqlU8};
 use chrono::{DateTime, Utc};
 use db_macros::Resource;
 use nexus_types::external_api::params;
@@ -52,7 +52,7 @@ pub struct Disk {
     /// runtime state changes in the sled agent, so this field is part of the
     /// "main" disk struct and not the runtime state (even though the attachment
     /// state and slot assignment will often change together).
-    pub slot: Option<i16>,
+    pub slot: Option<SqlU8>,
 
     /// size of the Disk
     #[diesel(column_name = size_bytes)]

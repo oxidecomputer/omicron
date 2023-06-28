@@ -648,7 +648,7 @@ impl super::Nexus {
                 self.db_datastore.volume_checkout(disk.volume_id).await?;
             disk_reqs.push(sled_agent_client::types::DiskRequest {
                 name: disk.name().to_string(),
-                slot: sled_agent_client::types::Slot(slot as u8),
+                slot: sled_agent_client::types::Slot(slot.0),
                 read_only: false,
                 device: "nvme".to_string(),
                 volume_construction_request: serde_json::from_str(

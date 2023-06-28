@@ -382,10 +382,7 @@ async fn test_disk_slot_assignment(cptestctx: &ControlPlaneTestContext) {
     let url_instance_attach_disk =
         get_disk_attach_url(&instance.identity.id.into());
 
-    async fn get_disk_slot(
-        ctx: &ControlPlaneTestContext,
-        disk_id: Uuid,
-    ) -> i16 {
+    async fn get_disk_slot(ctx: &ControlPlaneTestContext, disk_id: Uuid) -> u8 {
         let apictx = &ctx.server.apictx();
         let nexus = &apictx.nexus;
         let datastore = nexus.datastore();
@@ -398,7 +395,7 @@ async fn test_disk_slot_assignment(cptestctx: &ControlPlaneTestContext) {
             .await
             .unwrap_or_else(|_| panic!("test disk {:?} should exist", disk_id));
 
-        db_disk.slot.expect("test disk should be attached")
+        db_disk.slot.expect("test disk should be attached").0
     }
 
     // Slots are assigned serially as disks are attached.
@@ -416,7 +413,7 @@ async fn test_disk_slot_assignment(cptestctx: &ControlPlaneTestContext) {
 
         assert_eq!(
             get_disk_slot(cptestctx, attached_disk.identity.id).await,
-            expected_slot as i16
+            expected_slot as u8
         );
     }
 
@@ -456,7 +453,7 @@ async fn test_disk_slot_assignment(cptestctx: &ControlPlaneTestContext) {
         assert_eq!(
             get_disk_slot(cptestctx, disks[*disk_index as usize].identity.id)
                 .await,
-            expected_slot as i16
+            expected_slot as u8
         );
     }
 }
