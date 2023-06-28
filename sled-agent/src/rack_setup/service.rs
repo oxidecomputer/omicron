@@ -340,7 +340,7 @@ impl ServiceInner {
     async fn ensure_all_services_of_type(
         &self,
         service_plan: &ServicePlan,
-        zone_types: &HashSet<std::mem::Discriminant<ZoneType>>,
+        zone_types: &HashSet<ZoneType>,
     ) -> Result<(), SetupServiceError> {
         futures::future::join_all(service_plan.services.iter().map(
             |(sled_address, services_request)| async move {
@@ -348,9 +348,7 @@ impl ServiceInner {
                     .services
                     .iter()
                     .filter_map(|service| {
-                        if zone_types.contains(&std::mem::discriminant(
-                            &service.zone_type,
-                        )) {
+                        if zone_types.contains(&service.zone_type) {
                             Some(service.clone())
                         } else {
                             None
@@ -1067,7 +1065,7 @@ impl ServiceInner {
         // Set up internal DNS services first and write the initial
         // DNS configuration to the internal DNS servers.
         let mut zone_types = HashSet::new();
-        zone_types.insert(std::mem::discriminant(&ZoneType::InternalDns));
+        zone_types.insert(ZoneType::InternalDns);
         self.ensure_all_services_of_type(&service_plan, &zone_types).await?;
         self.initialize_internal_dns_records(&service_plan).await?;
 
@@ -1196,7 +1194,7 @@ impl ServiceInner {
         // Next start up the NTP services.
         // Note we also specify internal DNS services again because it
         // can ony be additive.
-        zone_types.insert(std::mem::discriminant(&ZoneType::Ntp));
+        zone_types.insert(ZoneType::Ntp);
         self.ensure_all_services_of_type(&service_plan, &zone_types).await?;
 
         // Wait until time is synchronized on all sleds before proceeding.
@@ -1205,7 +1203,7 @@ impl ServiceInner {
         info!(self.log, "Finished setting up Internal DNS and NTP");
 
         // Wait until Cockroach has been initialized before running Nexus.
-        zone_types.insert(std::mem::discriminant(&ZoneType::CockroachDb));
+        zone_types.insert(ZoneType::CockroachDb);
         self.ensure_all_services_of_type(&service_plan, &zone_types).await?;
 
         // Issue service initialization requests.
