@@ -6,21 +6,28 @@
 
 These instructions are intended to run Omicron on a gimlet on a bench, which is
 an actual gimlet, but with nothing other than power connected to the backplane.
-For this to work, we require two K.2 cards each with a network connection to a
 
+In examples used here, we had two K.2 cards each with a network connection to a
+different network.  This is not a requirement for running a bench gimlet.  Some
+examples will be different depending on if you have one or two network interfaces.
 
-One network will be used for connecting to the host OS running on the gimlet,
-and one network will be used for connecting to Nexus as well as allow
-instances running on Omicron to connect to the outside.
+If you're okay with the omicron ip pools (both internal services & instances)
+existing on the same L2 segment with the network used to access the gimlet, then
+just one NIC is fine.  That's basically the setup described in the main how-to-run doc.
+
+In our examples, one network will be used for connecting to the host OS running
+on the gimlet, and the second network will be used for connecting to Nexus as well
+as allow instances running on Omicron to connect to the outside.
 
 == Overview
 
-For setting up a build system, follow the instructions in xref:how-to-run.adoc[How to Run].
+For setting up a build system, follow the instructions in
+xref:how-to-run.adoc[How to Run].
 
 You will need to compile Omicron somewhere else, then copy the files over
 to the gimlet.
 
-== Making a helios image for your bench gimlet:
+== A helios image for your bench gimlet
 
 To run Omicron, you require a helios image on your gimlet constructed with
 some required libraries.  If your gimlet is lacking these, you will need to
@@ -36,8 +43,9 @@ cd helios
 gmake setup
 ----
 
-Once that finishes, you are ready to build your helios image.  Below is and
+Once that finishes, you are ready to build your helios image.  Below is an
 example command used to build the image for gimlet-sn21.
+
 The optional `-P` argument arranges for anything in that directory to be laid
 on top of the base image, which we presently use to, say, add in the
 sled-agent SMF manifest and binaries etc.  For example if you `mkdir /tmp/proto`
@@ -45,10 +53,19 @@ and create `/tmp/proto/usr/bin/blah` then passing the `-P /tmp/proto` to your
 build command would make `/tmp/proto/usr/bin/blah` appear in the image at
 `/usr/bin/blah`
 
+You should update `-N` (name of your image) and `-o` (output location of build
+files) for your setup and needs.
+
 [source,text]
 ----
 ds=$(TZ=US/Pacific date +%Y%m%d-%H%M%S)
-./helios-build experiment-image -N "gimlet-sn21-$ds" -p helios-netdev=https://pkg.oxide.computer/helios-netdev -o "/net/catacomb/data/staff/dock/gimlet-sn21/os-$ds" -F optever=0.23 -B -P alanproto
+./helios-build experiment-image \
+  -N "gimlet-sn21-$ds" \
+  -p helios-netdev=https://pkg.oxide.computer/helios-netdev \
+  -o "/net/catacomb/data/staff/dock/gimlet-sn21/os-$ds" \
+  -F optever=0.23 \
+  -B \
+  -P alanproto
 ----
 
 The `-F optever=0.23` is subject to change.
@@ -93,26 +110,28 @@ cargo build --release
 
 === Gimet non-gimlet configuration changes
 
-Update these two sections of`smf/seld-agent/non-gimlet/config-rss.toml` with the appropriate network information.  These values are for gimlet-sn21:
+These changes are how we tell Nexus/Omicron what I.P. addresses it will use
+for internal services that require external network access, and what addresses
+we use for ingress and egress of network traffic from virtual machines we
+create.
 
-[source,text]
-----
-[[internal_services_ip_pool_ranges]]
-first = "172.20.24.11"
-last = "172.20.24.15"
-----
+Update these two sections of `smf/seld-agent/non-gimlet/config-rss.toml` with
+the appropriate network information.  These values are for gimlet-sn21:
 
-And this section as well
 [source,text]
 ----
 [[internal_services_ip_pool_ranges]]
 first = "172.20.24.10"          <--- first address of pool used for internal services (like Nexus)
 last = "172.20.24.15"           <--- last address of pool used for internal services
+----
 
+And this section as well
+[source,text]
+----
 # Configuration to bring up boundary services and make nexus reachable from the outside
 [rack_network_config]
 gateway_ip = "172.20.24.1"    <--- ip address of your default gateway / router
-infra_ip_first = "172.120.24.20" <--- first address of pool used for rack networking
+infra_ip_first = "172.20.24.20" <--- first address of pool used for rack networking
 infra_ip_last = "172.20.24.50"  <--- last address of pool used for rack networking
 uplink_port = "qsfp0"           <--- for "softnpu" environments, this will always be "qsfp0"
 uplink_port_speed = "1G"       <--- uplink interface speed
@@ -147,7 +166,7 @@ Once completed, copy these files over to the gimlet:
 ----
 rsync --delete -Paz tools out \
   ./target/release/omicron-package package-manifest.toml \
-  --exclude /out/downloads/netstack.* \
+  --exclude /out/downloads \
   --exclude *.p5p \
   root@gimlet-sn21:/tmp/omicron
 ----
@@ -181,8 +200,13 @@ for the sled-agent service to start.
 
 Watch for the oxz_switch zone to appear, and give it an additional 20/30 seconds
 to come online.  Then, run this command to setup softnpu.
-The gateway IP is the I.P. address of the gateway for the omicron network.
-The gateway MAC is the mac address of the gateway.
+The GATEWAY_IP is the I.P. address of the gateway for the network we are
+using for Omicron/Nexus.  This will be the same as what you set in the
+config-rss.toml file.
+The GATEWAY_MAC is the mac address of the gateway.
+If you are only using one network for both the gimlet and Omicron/Nexus, then
+you don't have to set either of these, as the `softnpu-init.sh` script will
+figure out what the correct values are.
 
 [source,console]
 ----
@@ -195,14 +219,19 @@ tools/scrimlet/softnpu-init.sh
 
 Internal services that require external connectivity (e.g. Nexus, Boundary NTP,
 External DNS) do so via OPTE. When using SoftNPU we'll need to configure Proxy ARP for
-the services IP Pool.  Use the values from your [rack_network_config] section of
-the config-rss.toml you setup above.
+the services IP Pool.  Use the values from the [internal_services_ip_pool_ranges]
+section of the config-rss.toml you setup above, specifically
+SERVICE_IP_POOL_START is [[internal_services_ip_pool_ranges]] first
+SERVICE_IP_POOL_END   is [[internal_services_ip_pool_ranges]] last
+
+The SOFTNPU_MAC value should be the same as the example below, as that mac
+is created as part of the `softnpu-init.sh` script.
 
 [source,console]
 ----
 # dladm won't return leading zeroes but `scadm` expects them
-# Look at your `dladm show-vnic sc0_1 -p -o macaddress` output, get the mac address
-# and add any leading zeros to octets that require it.
+# Look at your `dladm show-vnic sc0_1 -p -o macaddress` output, get the mac
+# address and add any leading zeros to octets that require it.
 
 export SOFTNPU_MAC=a8:e1:de:01:70:1d
 
@@ -216,8 +245,10 @@ export SOFTNPU_MAC=a8:e1:de:01:70:1d
   $SOFTNPU_MAC
 ----
 
-You'll also need to configure Proxy ARP.  The ip pool start and ip pool end also
-come from your config-rss.toml
+You'll also need to configure Proxy ARP.
+The ip pool start and ip pool end also come from your config-rss.toml
+`IP_POOL_START` is [rack_network_config] infra_ip_first
+`IP_POOL_END`   is [rack_network_config] infra_ip_last
 [source,console]
 ----
 export SOFTNPU_MAC=a8:e1:de:01:70:1d
@@ -232,8 +263,10 @@ opt/oxide/softnpu/stuff/scadm \
   $SOFTNPU_MAC
 ----
 
-== Wait for nexus
+== Wait for Nexus
 
 The final step is to wait for all zones to start and Nexus to come online.
-When it does, you should be able to see a login page at:
-http://172.20.24.12/
+When it does, you should be able to see a login page in an address from the
+range you specified in `[internal_services_ip_pool_ranges]`.  Typically
+the second or third address is where nexus will land.
+For gimlet-sn21 this was: http://172.20.24.12/
