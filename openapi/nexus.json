@@ -10546,6 +10546,10 @@
             "type": "string",
             "format": "uuid"
           },
+          "ip_pool_id": {
+            "type": "string",
+            "format": "uuid"
+          },
           "range": {
             "$ref": "#/components/schemas/IpRange"
           },
@@ -10556,6 +10560,7 @@
         },
         "required": [
           "id",
+          "ip_pool_id",
           "range",
           "time_created"
         ]
