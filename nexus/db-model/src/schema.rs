@@ -21,6 +21,7 @@ table! {
         attach_instance_id -> Nullable<Uuid>,
         state_generation -> Int8,
         time_state_updated -> Timestamptz,
+        slot -> Nullable<Int2>,
         size_bytes -> Int8,
         block_size -> crate::BlockSizeEnum,
         origin_snapshot -> Nullable<Uuid>,

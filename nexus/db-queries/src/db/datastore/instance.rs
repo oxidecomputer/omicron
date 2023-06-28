@@ -285,6 +285,7 @@ impl DataStore {
             diesel::update(disk::dsl::disk).set((
                 disk::dsl::disk_state.eq(detached_label),
                 disk::dsl::attach_instance_id.eq(Option::<Uuid>::None),
+                disk::dsl::slot.eq(Option::<i16>::None),
             )),
         )
         .detach_and_get_result_async(self.pool_authorized(opctx).await?)

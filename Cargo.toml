@@ -3,6 +3,7 @@ members = [
     "api_identity",
     "bootstore",
     "bootstrap-agent-client",
+    "caboose-util",
     "certificates",
     "common",
     "ddm-admin-client",
@@ -63,6 +64,7 @@ members = [
 
 default-members = [
     "bootstrap-agent-client",
+    "caboose-util",
     "certificates",
     "common",
     "ddm-admin-client",
@@ -182,10 +184,11 @@ hex-literal = "0.3.4"
 hkdf = "0.12.3"
 http = "0.2.9"
 httptest = "0.15.4"
-hyper-rustls = "0.24.0"
-hyper = "0.14"
-hyper-staticfile = "0.9.5"
+hubtools = { git = "https://github.com/oxidecomputer/hubtools.git" }
 humantime = "2.1.0"
+hyper = "0.14"
+hyper-rustls = "0.24.0"
+hyper-staticfile = "0.9.5"
 illumos-utils = { path = "illumos-utils" }
 indexmap = "1.9.3"
 indicatif = { version = "0.17.5", features = ["rayon"] }

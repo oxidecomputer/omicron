@@ -27,6 +27,7 @@ use omicron_common::address::Ipv4Range;
 use omicron_common::api::internal::shared::RackNetworkConfig;
 use sled_hardware::Baseboard;
 use std::collections::BTreeSet;
+use std::mem;
 use std::net::Ipv6Addr;
 use wicket_common::rack_setup::PutRssUserConfigInsensitive;
 
@@ -68,7 +69,7 @@ pub(crate) struct CurrentRssConfig {
 }
 
 impl CurrentRssConfig {
-    pub(crate) fn populate_available_bootstrap_sleds_from_inventory(
+    pub(crate) fn update_with_inventory_and_bootstrap_peers(
         &mut self,
         inventory: &RackV1Inventory,
         bootstrap_peers: &BootstrapPeers,
@@ -94,6 +95,18 @@ impl CurrentRssConfig {
                     baseboard,
                     bootstrap_ip,
                 })
+            })
+            .collect();
+
+        // If the user has already uploaded a config specifying bootstrap_sleds,
+        // also update our knowledge of those sleds' bootstrap addresses.
+        let our_bootstrap_sleds = mem::take(&mut self.bootstrap_sleds);
+        self.bootstrap_sleds = our_bootstrap_sleds
+            .into_iter()
+            .map(|mut sled_desc| {
+                sled_desc.bootstrap_ip =
+                    bootstrap_sleds.get(&sled_desc.baseboard).copied();
+                sled_desc
             })
             .collect();
     }
