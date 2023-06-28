@@ -6,6 +6,7 @@ use crate::params::DatasetKind;
 use illumos_utils::zpool::ZpoolName;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use std::str::FromStr;
 
 #[derive(
     Debug, PartialEq, Eq, Hash, Serialize, Deserialize, Clone, JsonSchema,
@@ -38,7 +39,10 @@ impl DatasetName {
 impl From<DatasetName> for sled_agent_client::types::DatasetName {
     fn from(n: DatasetName) -> Self {
         Self {
-            pool_name: n.pool().to_string().into(),
+            pool_name: sled_agent_client::types::ZpoolName::from_str(
+                &n.pool().to_string(),
+            )
+            .unwrap(),
             kind: n.dataset().clone().into(),
         }
     }
