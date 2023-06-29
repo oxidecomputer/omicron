@@ -41,22 +41,23 @@ pub struct Config {
 }
 
 // A handle to a task managing a connection to a peer
-//
-// TODO: Probably need to add a unique atomic id so we can differentiate
-// messages from instances of old peer tasks that have been cancelled
 struct PeerConnHandle {
     pub handle: JoinHandle<()>,
     pub tx: mpsc::Sender<MainToConnMsg>,
     pub addr: SocketAddrV6,
+    // This is used to differentiate stale `ConnToMainMsg`s from cancelled tasks
+    // with the same addr from each other
+    pub unique_id: u64,
 }
 
 // A handle to a task of an accepted socket, pre-handshake
-// TODO: Probably need to add a unique atomic id so we can differentiate
-// messages from instances of old peer tasks that have been cancelled
 struct AcceptedConnHandle {
     pub handle: JoinHandle<()>,
     pub tx: mpsc::Sender<MainToConnMsg>,
     pub addr: SocketAddrV6,
+    // This is used to differentiate stale `ConnToMainMsg`s from cancelled tasks
+    // with the same addr from each other
+    pub unique_id: u64,
 }
 
 // Serialize and write `msg` into `buf`, prefixed by a 4-byte big-endian size header
@@ -174,6 +175,7 @@ async fn perform_handshake(
 
 // Spawn a task that maintains a client connection to a peer
 async fn spawn_client(
+    unique_id: u64,
     my_peer_id: Baseboard,
     my_addr: SocketAddrV6,
     addr: SocketAddrV6,
@@ -223,9 +225,12 @@ async fn spawn_client(
 
             // Inform the main task that we have connected to a peer
             main_tx
-                .send(ConnToMainMsg::ConnectedClient {
-                    addr: addr.clone(),
-                    peer_id: identify.id.clone(),
+                .send(ConnToMainMsg {
+                    handle_unique_id: unique_id,
+                    msg: ConnToMainMsgInner::ConnectedClient {
+                        addr: addr.clone(),
+                        peer_id: identify.id.clone(),
+                    },
                 })
                 .await;
 
@@ -249,11 +254,12 @@ async fn spawn_client(
             */
         }
     });
-    PeerConnHandle { handle, tx, addr }
+    PeerConnHandle { handle, tx, addr, unique_id }
 }
 
 // Spawn a task that handles accepted connections from a peer
 async fn spawn_server(
+    unique_id: u64,
     my_peer_id: Baseboard,
     my_addr: SocketAddrV6,
     addr: SocketAddrV6,
@@ -285,7 +291,10 @@ async fn spawn_server(
                 // This is a server so we bail and wait for a new connection
                 // We must inform the main task so it can clean up any metadata.
                 main_tx
-                    .send(ConnToMainMsg::FailedServerHandshake { addr })
+                    .send(ConnToMainMsg {
+                        handle_unique_id: unique_id,
+                        msg: ConnToMainMsgInner::FailedServerHandshake { addr },
+                    })
                     .await;
                 return;
             }
@@ -293,10 +302,13 @@ async fn spawn_server(
 
         // Inform the main task that we have connected to a peer
         main_tx
-            .send(ConnToMainMsg::ConnectedServer {
-                accepted_addr: addr,
-                addr: identify.addr.clone(),
-                peer_id: identify.id.clone(),
+            .send(ConnToMainMsg {
+                handle_unique_id: unique_id,
+                msg: ConnToMainMsgInner::ConnectedServer {
+                    accepted_addr: addr,
+                    addr: identify.addr.clone(),
+                    peer_id: identify.id.clone(),
+                },
             })
             .await;
 
@@ -306,12 +318,22 @@ async fn spawn_server(
             sleep(CONNECTION_RETRY_TIMEOUT).await;
         }
     });
-    AcceptedConnHandle { handle, tx, addr }
+    AcceptedConnHandle { handle, tx, addr, unique_id }
 }
 
 // Messages sent from connection managing tasks to the main peer task
+//
+// We include `handle_unique_id` to differentiate which task they come from so
+// we can exclude requests from tasks that have been cancelled or have been told
+// to shutdown.
 #[derive(Debug, PartialEq)]
-enum ConnToMainMsg {
+struct ConnToMainMsg {
+    handle_unique_id: u64,
+    msg: ConnToMainMsgInner,
+}
+
+#[derive(Debug, PartialEq)]
+enum ConnToMainMsgInner {
     ConnectedServer {
         accepted_addr: SocketAddrV6,
         addr: SocketAddrV6,
@@ -411,6 +433,7 @@ pub struct Peer {
     fsm: Fsm,
     peers: BTreeSet<SocketAddrV6>,
     stats: Stats,
+    handle_unique_id_counter: u64,
 
     // Connections that have been accepted, but where negotiation has not
     // finished At this point, we only know the client port of the connection,
@@ -487,6 +510,7 @@ impl Peer {
                 fsm,
                 peers: BTreeSet::new(),
                 stats: Stats::default(),
+                handle_unique_id_counter: 0,
                 accepted_connections: BTreeMap::new(),
                 negotiating_connections: BTreeMap::new(),
                 connections: BTreeMap::new(),
@@ -511,110 +535,136 @@ impl Peer {
         let listener = TcpListener::bind(&self.config.addr).await.unwrap();
         loop {
             tokio::select! {
-                res = listener.accept() => {
-                    match res {
-                        Ok((sock, addr)) => {
-                            let SocketAddr::V6(addr) = addr else {
-                                warn!(self.log, "Got connection from IPv4 address {}", addr);
-                                continue;
-                            };
-                            // TODO: Log if a peer with a lower address connects?
-                            // Remove any existing connection
-                            self.remove_accepted_connection(&addr).await;
-                            info!(self.log, "Accepted connection from {}", addr);
-                            let handle = spawn_server(
-                                self.config.id.clone(),
-                                self.config.addr.clone(),
-                                addr.clone(),
-                                sock,
-                                self.conn_tx.clone(),
-                                &self.log
-                            ).await;
-                            self.accepted_connections.insert(addr, handle);
-                        },
-                        Err(err) => {}
-                    }
-                }
+                res = listener.accept() => self.on_accept(res).await,
                 Some(request) = self.rx.recv() => {
-                    match request {
-                        PeerApiRequest::InitRack {
-                            rack_uuid,
-                            initial_membership,
-                            responder
-                        } => {
-                            if self.init_responder.is_some() {
-                                let _ = responder.send(Err(PeerRequestError::RequestAlreadyPending));
-                                continue;
-                            }
-                            self.init_responder = Some(responder);
-                            let output = self.fsm.init_rack(rack_uuid, initial_membership);
-                            self.handle_output(output);
-                        }
-                        PeerApiRequest::InitLearner{responder} => {
-                            if self.init_responder.is_some() {
-                                let _ = responder.send(Err(PeerRequestError::RequestAlreadyPending));
-                                continue;
-                            }
-                            self.init_responder = Some(responder);
-                            let output = self.fsm.init_learner();
-                            self.handle_output(output);
-                        }
-                        PeerApiRequest::LoadRackSecret{responder} => {
-                            if self.rack_secret_responder.is_some() {
-                                let _ = responder.send(Err(PeerRequestError::RequestAlreadyPending));
-                                continue;
-                            }
-                            self.rack_secret_responder = Some(responder);
-                            let output = self.fsm.load_rack_secret();
-                            self.handle_output(output);
-                        }
-                        PeerApiRequest::PeerAddresses(peers) => {
-                            info!(self.log, "Updated Peer Addresses: {:?}", peers);
-                            self.manage_connections(peers).await;
-                        }
-                    }
+                    self.on_api_request(request).await;
                 }
-                Some(msg) = self.conn_rx.recv() => {
-                    match msg {
-                        ConnToMainMsg::ConnectedServer{accepted_addr, addr, peer_id} => {
-                            let Some(accepted_handle) =
-                                self.accepted_connections.remove(&accepted_addr) else
-                            {
-                                warn!(
-                                    self.log,
-                                    "Missing AcceptedConnHandle";
-                                    "accepted_addr" => accepted_addr.to_string(),
-                                    "addr" => addr.to_string(),
-                                    "remote_peer_id" => peer_id.to_string()
-                                );
-                                panic!("Missing AcceptedConnHandle");
-                            };
-                            // Gracefully close any old tasks for this peer if they exist
-                            self.remove_established_connection(&peer_id);
-
-                            // Move from `accepted_connections` to `connections`
-                            let handle = PeerConnHandle {
-                                handle: accepted_handle.handle,
-                                tx: accepted_handle.tx,
-                                addr
-                            };
-                            self.connections.insert(peer_id, handle);
-                        }
-                        ConnToMainMsg::ConnectedClient{addr, peer_id} => {
-                        }
-                        ConnToMainMsg::Disconnected{peer_id: Baseboard} => {
-                        }
-                        ConnToMainMsg::Forward(envelope) => {
-                        }
-                        ConnToMainMsg::FailedServerHandshake {addr: SocketAddrV6} => {
-                        }
-                    }
-                }
+                Some(msg) = self.conn_rx.recv() => self.on_conn_msg(msg).await,
                 _ = interval.tick() => {
                     let output = self.fsm.tick();
                     self.handle_output(output);
                 }
             }
+        }
+    }
+
+    // Handle an accepted connection
+    async fn on_accept(
+        &mut self,
+        res: Result<(TcpStream, SocketAddr), std::io::Error>,
+    ) {
+        match res {
+            Ok((sock, addr)) => {
+                let SocketAddr::V6(addr) = addr else {
+                    warn!(self.log, "Got connection from IPv4 address {}", addr);
+                    return;
+                };
+                // TODO: Log if a peer with a lower address connects?
+                // Remove any existing connection
+                self.remove_accepted_connection(&addr).await;
+                info!(self.log, "Accepted connection from {}", addr);
+                self.handle_unique_id_counter += 1;
+                let handle = spawn_server(
+                    self.handle_unique_id_counter,
+                    self.config.id.clone(),
+                    self.config.addr.clone(),
+                    addr.clone(),
+                    sock,
+                    self.conn_tx.clone(),
+                    &self.log,
+                )
+                .await;
+                self.accepted_connections.insert(addr, handle);
+            }
+            Err(err) => {}
+        }
+    }
+
+    // Handle API requests from the `PeerHandle`
+    async fn on_api_request(&mut self, request: PeerApiRequest) {
+        match request {
+            PeerApiRequest::InitRack {
+                rack_uuid,
+                initial_membership,
+                responder,
+            } => {
+                if self.init_responder.is_some() {
+                    let _ = responder
+                        .send(Err(PeerRequestError::RequestAlreadyPending));
+                    return;
+                }
+                self.init_responder = Some(responder);
+                let output = self.fsm.init_rack(rack_uuid, initial_membership);
+                self.handle_output(output);
+            }
+            PeerApiRequest::InitLearner { responder } => {
+                if self.init_responder.is_some() {
+                    let _ = responder
+                        .send(Err(PeerRequestError::RequestAlreadyPending));
+                    return;
+                }
+                self.init_responder = Some(responder);
+                let output = self.fsm.init_learner();
+                self.handle_output(output);
+            }
+            PeerApiRequest::LoadRackSecret { responder } => {
+                if self.rack_secret_responder.is_some() {
+                    let _ = responder
+                        .send(Err(PeerRequestError::RequestAlreadyPending));
+                    return;
+                }
+                self.rack_secret_responder = Some(responder);
+                let output = self.fsm.load_rack_secret();
+                self.handle_output(output);
+            }
+            PeerApiRequest::PeerAddresses(peers) => {
+                info!(self.log, "Updated Peer Addresses: {:?}", peers);
+                self.manage_connections(peers).await;
+            }
+        }
+    }
+
+    // Handle messages from connection management tasks
+    async fn on_conn_msg(&mut self, msg: ConnToMainMsg) {
+        let unique_id = msg.handle_unique_id;
+        match msg.msg {
+            ConnToMainMsgInner::ConnectedServer {
+                accepted_addr,
+                addr,
+                peer_id,
+            } => {
+                // Do we need to worry about checking unique_id here? Is it even
+                // possible to have a race?
+                let Some(accepted_handle) =
+                   self.accepted_connections.remove(&accepted_addr) else
+                {
+                    warn!(
+                        self.log,
+                        "Missing AcceptedConnHandle";
+                        "accepted_addr" => accepted_addr.to_string(),
+                        "addr" => addr.to_string(),
+                        "remote_peer_id" => peer_id.to_string()
+                    );
+                    panic!("Missing AcceptedConnHandle");
+                };
+                // Gracefully close any old tasks for this peer if they exist
+                self.remove_established_connection(&peer_id);
+
+                // Move from `accepted_connections` to `connections`
+                let handle = PeerConnHandle {
+                    handle: accepted_handle.handle,
+                    tx: accepted_handle.tx,
+                    addr,
+                    unique_id: accepted_handle.unique_id,
+                };
+                self.connections.insert(peer_id, handle);
+            }
+            ConnToMainMsgInner::ConnectedClient { addr, peer_id } => {}
+            ConnToMainMsgInner::Disconnected { peer_id: Baseboard } => {}
+            ConnToMainMsgInner::Forward(envelope) => {}
+            ConnToMainMsgInner::FailedServerHandshake {
+                addr: SocketAddrV6,
+            } => {}
         }
     }
 
@@ -635,7 +685,9 @@ impl Peer {
         // Start a new client for each peer that has an addr < self.config.addr
         for addr in new_peers {
             if addr < self.config.addr {
+                self.handle_unique_id_counter += 1;
                 let handle = spawn_client(
+                    self.handle_unique_id_counter,
                     self.config.id.clone(),
                     self.config.addr.clone(),
                     addr.clone(),
