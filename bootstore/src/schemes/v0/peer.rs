@@ -27,6 +27,7 @@ use uuid::Uuid;
 const CONNECTION_RETRY_TIMEOUT: Duration = Duration::from_secs(1);
 const CONN_BUF_SIZE: usize = 512 * 1024;
 const KEEPALIVE_TIMEOUT: Duration = Duration::from_secs(10);
+const FRAME_HEADER_SIZE: usize = 4;
 
 use sled_hardware::Baseboard;
 
@@ -48,27 +49,29 @@ struct PeerConnHandle {
 }
 
 // Serialize and write `msg` into `buf`, prefixed by a 4-byte big-endian size header
+//
+// Return the total amount of data written into `buf` including the 4-byte header
 fn write_framed<T: Serialize + ?Sized>(
     msg: &T,
     buf: &mut [u8],
-) -> Result<usize, bcs::Error> {
-    let size = bcs::serialized_size(msg)?;
-    if size + 4 > buf.len() {
-        return Err(bcs::Error::ExceededMaxLen(size + 4));
-    }
-    let size: u32 = size.try_into().unwrap();
-    buf[0..4].copy_from_slice(&size.to_be_bytes());
-    bcs::serialize_into(&mut &mut buf[4..], msg).map(|_| size as usize)
+) -> Result<usize, ciborium::ser::Error<std::io::Error>> {
+    let mut cursor = Cursor::new(&mut buf[FRAME_HEADER_SIZE..]);
+    ciborium::into_writer(msg, &mut cursor)?;
+    let size: u32 = cursor.position().try_into().unwrap();
+    buf[0..FRAME_HEADER_SIZE].copy_from_slice(&size.to_be_bytes());
+
+    Ok(size as usize + FRAME_HEADER_SIZE)
 }
 
 // Decode the 4-byte big-endian frame size header
-fn read_frame_size(buf: [u8; 4]) -> usize {
+fn read_frame_size(buf: [u8; FRAME_HEADER_SIZE]) -> usize {
     u32::from_be_bytes(buf) as usize
 }
 
 #[derive(Debug, From)]
 enum HandshakeError {
-    Bcs(bcs::Error),
+    Serialization(ciborium::ser::Error<std::io::Error>),
+    Deserialization(ciborium::de::Error<std::io::Error>),
     Io(tokio::io::Error),
     UnsupportedScheme,
     UnsupportedVersion,
@@ -93,13 +96,19 @@ async fn perform_handshake(
         &mut write_buf[Hello::serialized_size()..],
     )
     .unwrap();
+    println!(
+        "written = {:?}",
+        &hex::encode(
+            &write_buf[Hello::serialized_size() + 4..][..identify_size - 4]
+        )
+    );
 
     let handshake_start = Instant::now();
     let mut buf =
         Cursor::new(&write_buf[..Hello::serialized_size() + identify_size]);
 
     // Read `Hello` and the frame size of `Identify`
-    let initial_read = Hello::serialized_size() + 4;
+    let initial_read = Hello::serialized_size() + FRAME_HEADER_SIZE;
 
     let mut total_read = 0;
     let mut identify_len = 0;
@@ -141,8 +150,9 @@ async fn perform_handshake(
                 } else {
                     if total_read == end {
                         debug!(log, "Identify len = {}", identify_len);
+                        println!("{:?}", &hex::encode(&read_buf[initial_read..end]));
                         let identify: Identify =
-                            bcs::from_bytes(&read_buf[initial_read..end])?;
+                            ciborium::from_reader(&read_buf[initial_read..end])?;
                         return Ok((read_sock, write_sock, identify));
                     }
                 }
@@ -625,6 +635,6 @@ mod tests {
             peer.tx.send(PeerApiRequest::PeerAddresses(addrs.clone())).await;
         }
 
-        sleep(Duration::from_secs(2)).await;
+        sleep(Duration::from_secs(10)).await;
     }
 }

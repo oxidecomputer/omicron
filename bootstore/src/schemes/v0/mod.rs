@@ -48,7 +48,7 @@ pub struct V0Scheme {
     trust_quorum_transport: Tcp,
     trusted_group_membership: No,
     shamir_curve: Curve25519,
-    message_serialization: Bcs,
+    message_serialization: Ciborium,
     message_framing_header: U32BigEndian,
     message_signing: No,
 }

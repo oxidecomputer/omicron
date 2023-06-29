@@ -30,7 +30,7 @@ pub mod params {
     pub struct Curve25519;
 
     #[derive(Default, Debug, Clone, Copy)]
-    pub struct Bcs;
+    pub struct Ciborium;
 
     #[derive(Default, Debug, Clone, Copy)]
     pub struct U32BigEndian;
