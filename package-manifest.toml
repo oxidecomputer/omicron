@@ -104,6 +104,13 @@ setup_hint = "Run `./tools/ci_download_clickhouse` to download the necessary bin
 [package.cockroachdb]
 service_name = "cockroachdb"
 only_for_targets.image = "standard"
+source.type = "composite"
+source.packages = [ "cockroachdb-service.tar.gz", "internal-dns-cli.tar.gz" ]
+output.type = "zone"
+
+[package.cockroachdb-service]
+service_name = "cockroachdb-service"
+only_for_targets.image = "standard"
 source.type = "local"
 source.paths = [
   { from = "out/cockroachdb", to = "/opt/oxide/cockroachdb" },
@@ -112,7 +119,18 @@ source.paths = [
   { from = "smf/cockroachdb/method_script.sh", to = "/opt/oxide/lib/svc/manifest/cockroachdb.sh" },
 ]
 output.type = "zone"
+output.intermediate_only = true
 setup_hint = "Run `./tools/ci_download_cockroachdb` to download the necessary binaries"
+
+[package.internal-dns-cli]
+service_name = "internal-dns-cli"
+only_for_targets.image = "standard"
+source.type = "local"
+source.rust.binary_names = ["dnswait"]
+source.rust.release = true
+source.paths = []
+output.type = "zone"
+output.intermediate_only = true
 
 [package.internal-dns]
 service_name = "internal_dns"

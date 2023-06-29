@@ -32,6 +32,7 @@ type SledApiDescription = ApiDescription<SledAgent>;
 pub fn api() -> SledApiDescription {
     fn register_endpoints(api: &mut SledApiDescription) -> Result<(), String> {
         api.register(disk_put)?;
+        api.register(cockroachdb_init)?;
         api.register(instance_issue_disk_snapshot_request)?;
         api.register(instance_put_migration_ids)?;
         api.register(instance_put_state)?;
@@ -201,6 +202,19 @@ async fn sled_role_get(
 ) -> Result<HttpResponseOk<SledRole>, HttpError> {
     let sa = rqctx.context();
     Ok(HttpResponseOk(sa.get_role().await))
+}
+
+/// Initializes a CockroachDB cluster
+#[endpoint {
+    method = POST,
+    path = "/cockroachdb",
+}]
+async fn cockroachdb_init(
+    rqctx: RequestContext<SledAgent>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let sa = rqctx.context();
+    sa.cockroachdb_initialize().await?;
+    Ok(HttpResponseUpdatedNoContent())
 }
 
 /// Path parameters for Instance requests (sled agent API)

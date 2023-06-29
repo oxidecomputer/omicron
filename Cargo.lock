@@ -3462,6 +3462,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "internal-dns-cli"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap 4.3.8",
+ "dropshot",
+ "internal-dns 0.1.0",
+ "omicron-common 0.1.0",
+ "slog",
+ "tokio",
+ "trust-dns-resolver",
+]
+
+[[package]]
 name = "io-lifetimes"
 version = "1.0.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"

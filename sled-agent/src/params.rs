@@ -518,6 +518,8 @@ impl From<DatasetRequest> for sled_agent_client::types::DatasetRequest {
 )]
 pub struct ServiceZoneRequest {
     // The UUID of the zone to be initialized.
+    // TODO: Should this be removed? If we have UUIDs on the services, what's
+    // the point of this?
     pub id: Uuid,
     // The type of the zone to be created.
     pub zone_type: ZoneType,

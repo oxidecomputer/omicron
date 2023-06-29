@@ -10,6 +10,23 @@
     "version": "0.0.1"
   },
   "paths": {
+    "/cockroachdb": {
+      "post": {
+        "summary": "Initializes a CockroachDB cluster",
+        "operationId": "cockroachdb_init",
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/disks/{disk_id}": {
       "put": {
         "operationId": "disk_put",
