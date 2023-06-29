@@ -54,6 +54,10 @@ OPERATION ID                             METHOD   URL PATH
 login_local                              POST     /v1/login/{silo_name}/local
 login_saml                               POST     /login/{silo_name}/saml/{provider_name}
 
+API operations found with tag "metrics"
+OPERATION ID                             METHOD   URL PATH
+silo_metric                              GET      /v1/metrics/{metric_name}
+
 API operations found with tag "policy"
 OPERATION ID                             METHOD   URL PATH
 system_policy_update                     PUT      /v1/system/policy
