@@ -12,6 +12,7 @@ use toml_edit::Array;
 use toml_edit::Document;
 use toml_edit::Formatted;
 use toml_edit::InlineTable;
+use toml_edit::Item;
 use toml_edit::Table;
 use toml_edit::Value;
 use wicketd_client::types::BootstrapSledDescription;
@@ -183,38 +184,71 @@ fn populate_network_table(
         return;
     };
 
-    // TODO: Allow multiple uplinks for wicket configuration
-    println!("table: {table:#?}");
     for (property, value) in [
         ("infra_ip_first", config.infra_ip_first.to_string()),
         ("infra_ip_last", config.infra_ip_last.to_string()),
     ] {
-        println!("property: {property:#?}, value: {value:#?}");
         *table.get_mut(property).unwrap().as_value_mut().unwrap() =
             Value::String(Formatted::new(value));
     }
-    *table.get_mut("uplinks").unwrap().as_array_mut().unwrap() = config
-        .uplinks
-        .iter()
-        .map(|cfg| {
-            let mut uplink = InlineTable::new();
-            for (property, value) in [
-                ("switch", cfg.switch.to_string()),
-                ("gateway_ip", cfg.gateway_ip.to_string()),
-                ("uplink_port", cfg.uplink_port.to_string()),
-                (
-                    "uplink_port_speed",
-                    enum_to_toml_string(&cfg.uplink_port_speed),
-                ),
-                ("uplink_port_fec", enum_to_toml_string(&cfg.uplink_port_fec)),
-                ("uplink_ip", cfg.uplink_ip.to_string()),
-            ] {
-                println!("property: {property:#?}, value: {value:#?}");
-                uplink.insert(property, Value::String(Formatted::new(value)));
-            }
-            uplink
-        })
-        .collect();
+
+    // If `config.uplinks` is empty, we'll leave the template uplinks in place;
+    // otherwise, replace it with the user's uplinks.
+    if !config.uplinks.is_empty() {
+        *table.get_mut("uplinks").unwrap().as_array_of_tables_mut().unwrap() =
+            config
+                .uplinks
+                .iter()
+                .map(|cfg| {
+                    let mut uplink = Table::new();
+                    let mut last_key = None;
+                    for (property, value) in [
+                        ("switch", cfg.switch.to_string()),
+                        ("gateway_ip", cfg.gateway_ip.to_string()),
+                        ("uplink_port", cfg.uplink_port.to_string()),
+                        (
+                            "uplink_port_speed",
+                            enum_to_toml_string(&cfg.uplink_port_speed),
+                        ),
+                        (
+                            "uplink_port_fec",
+                            enum_to_toml_string(&cfg.uplink_port_fec),
+                        ),
+                        ("uplink_ip", cfg.uplink_ip.to_string()),
+                    ] {
+                        uplink.insert(
+                            property,
+                            Item::Value(Value::String(Formatted::new(value))),
+                        );
+                        last_key = Some(property);
+                    }
+
+                    if let Some(uplink_vid) = cfg.uplink_vid {
+                        uplink.insert(
+                            "uplink_vid",
+                            Item::Value(Value::Integer(Formatted::new(
+                                i64::from(uplink_vid),
+                            ))),
+                        );
+                    } else {
+                        // Unwraps: We know `last_key` is `Some(_)`, because we
+                        // set it in every iteration of the loop above, and we
+                        // know it's present in `uplink` because we set it to
+                        // the `property` we just inserted.
+                        let last = uplink.get_mut(last_key.unwrap()).unwrap();
+
+                        // Every item we insert is an `Item::Value`, so we can
+                        // unwrap this conversion.
+                        last.as_value_mut()
+                            .unwrap()
+                            .decor_mut()
+                            .set_suffix("\n# uplink_vid =");
+                    }
+
+                    uplink
+                })
+                .collect();
+    }
 }
 
 #[cfg(test)]
