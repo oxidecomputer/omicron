@@ -4,8 +4,8 @@
 
 use std::time::Duration;
 
-use anyhow::{Context, Result};
-use buf_list::Cursor;
+use anyhow::{bail, Context, Result};
+use buf_list::{BufList, Cursor};
 use camino::{Utf8Path, Utf8PathBuf};
 use clap::{Args, Parser, Subcommand};
 use installinator_common::{
@@ -15,8 +15,9 @@ use installinator_common::{
 };
 use omicron_common::{
     api::internal::nexus::KnownArtifactKind,
-    update::{ArtifactHashId, ArtifactKind},
+    update::{ArtifactHash, ArtifactHashId, ArtifactKind},
 };
+use sha2::{Digest, Sha256};
 use slog::{error, warn, Drain};
 use tufaceous_lib::ControlPlaneZoneImages;
 use update_engine::StepResult;
@@ -203,6 +204,13 @@ impl InstallOpts {
                         fetch_artifact(&cx, &host_phase_2_id, discovery, log)
                             .await?;
 
+                    check_downloaded_artifact_hash(
+                        "host phase 2",
+                        host_phase_2_artifact.artifact.clone(),
+                        host_phase_2_id.hash,
+                    )
+                    .await?;
+
                     let address = host_phase_2_artifact.addr;
 
                     StepSuccess::new(host_phase_2_artifact)
@@ -230,6 +238,13 @@ impl InstallOpts {
                     let control_plane_artifact =
                         fetch_artifact(&cx, &control_plane_id, discovery, log)
                             .await?;
+
+                    check_downloaded_artifact_hash(
+                        "control plane",
+                        control_plane_artifact.artifact.clone(),
+                        control_plane_id.hash,
+                    )
+                    .await?;
 
                     let address = control_plane_artifact.addr;
 
@@ -357,6 +372,31 @@ impl InstallOpts {
 
         Ok(())
     }
+}
+
+async fn check_downloaded_artifact_hash(
+    name: &'static str,
+    data: BufList,
+    expected_hash: ArtifactHash,
+) -> Result<()> {
+    tokio::task::spawn_blocking(move || {
+        let mut hasher = Sha256::new();
+        for chunk in data.iter() {
+            hasher.update(chunk);
+        }
+        let computed_hash = ArtifactHash(hasher.finalize().into());
+        if expected_hash != computed_hash {
+            bail!(
+                "downloaded {name} checksum failure: \
+                 expected {} but calculated {}",
+                hex::encode(&expected_hash),
+                hex::encode(&computed_hash)
+            );
+        }
+        Ok(())
+    })
+    .await
+    .unwrap()
 }
 
 async fn scan_hardware_with_retries(
