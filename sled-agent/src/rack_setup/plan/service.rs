@@ -288,7 +288,9 @@ impl Plan {
         }
 
         // We'll stripe most services across all available Sleds, round-robin
-        // style.  In development and CI, this might only be one Sled.
+        // style.  In development and CI, this might only be one Sled.  We'll
+        // only report `NotEnoughSleds` below if there are zero Sleds or if we
+        // ran out of zpools on the available Sleds.
         let mut sled_allocator = (0..sled_info.len()).cycle();
 
         // Provision internal DNS zones, striping across Sleds.
@@ -302,7 +304,8 @@ impl Plan {
         for dns_subnet in &dns_subnets {
             let ip = dns_subnet.dns_address().ip();
             let sled = {
-                let which_sled = sled_allocator.next().unwrap();
+                let which_sled =
+                    sled_allocator.next().ok_or(PlanError::NotEnoughSleds)?;
                 &mut sled_info[which_sled]
             };
             let http_address = SocketAddrV6::new(ip, DNS_HTTP_PORT, 0, 0);
@@ -339,7 +342,8 @@ impl Plan {
         // Provision CockroachDB zones, continuing to stripe across Sleds.
         for _ in 0..CRDB_COUNT {
             let sled = {
-                let which_sled = sled_allocator.next().unwrap();
+                let which_sled =
+                    sled_allocator.next().ok_or(PlanError::NotEnoughSleds)?;
                 &mut sled_info[which_sled]
             };
             let id = Uuid::new_v4();
@@ -367,7 +371,8 @@ impl Plan {
         // Provision Nexus zones, continuing to stripe across sleds.
         for _ in 0..NEXUS_COUNT {
             let sled = {
-                let which_sled = sled_allocator.next().unwrap();
+                let which_sled =
+                    sled_allocator.next().ok_or(PlanError::NotEnoughSleds)?;
                 &mut sled_info[which_sled]
             };
             let id = Uuid::new_v4();
@@ -410,7 +415,8 @@ impl Plan {
         // TODO(https://github.com/oxidecomputer/omicron/issues/732): Remove
         for _ in 0..EXTERNAL_DNS_COUNT {
             let sled = {
-                let which_sled = sled_allocator.next().unwrap();
+                let which_sled =
+                    sled_allocator.next().ok_or(PlanError::NotEnoughSleds)?;
                 &mut sled_info[which_sled]
             };
             let internal_ip = sled.addr_alloc.next().expect("Not enough addrs");
@@ -453,7 +459,8 @@ impl Plan {
         // TODO(https://github.com/oxidecomputer/omicron/issues/732): Remove
         for _ in 0..OXIMETER_COUNT {
             let sled = {
-                let which_sled = sled_allocator.next().unwrap();
+                let which_sled =
+                    sled_allocator.next().ok_or(PlanError::NotEnoughSleds)?;
                 &mut sled_info[which_sled]
             };
             let id = Uuid::new_v4();
@@ -483,7 +490,8 @@ impl Plan {
         // TODO(https://github.com/oxidecomputer/omicron/issues/732): Remove
         for _ in 0..CLICKHOUSE_COUNT {
             let sled = {
-                let which_sled = sled_allocator.next().unwrap();
+                let which_sled =
+                    sled_allocator.next().ok_or(PlanError::NotEnoughSleds)?;
                 &mut sled_info[which_sled]
             };
             let id = Uuid::new_v4();
@@ -512,7 +520,8 @@ impl Plan {
         // TODO(https://github.com/oxidecomputer/omicron/issues/732): Remove
         for _ in 0..PANTRY_COUNT {
             let sled = {
-                let which_sled = sled_allocator.next().unwrap();
+                let which_sled =
+                    sled_allocator.next().ok_or(PlanError::NotEnoughSleds)?;
                 &mut sled_info[which_sled]
             };
             let address = sled.addr_alloc.next().expect("Not enough addrs");
