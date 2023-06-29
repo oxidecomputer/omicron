@@ -7,8 +7,8 @@
 use crate::bootstrap::params::StartSledAgentRequest;
 use crate::ledger::{Ledger, Ledgerable};
 use crate::params::{
-    DatasetRequest, ServiceType, ServiceZoneRequest, ServiceZoneService,
-    ZoneType,
+    DatasetKind, DatasetRequest, ServiceType, ServiceZoneRequest,
+    ServiceZoneService, ZoneType,
 };
 use crate::rack_setup::config::SetupServiceConfig as Config;
 use crate::storage::dataset::DatasetName;
@@ -89,6 +89,9 @@ pub enum PlanError {
 
     #[error("Failed to construct an HTTP client: {0}")]
     HttpClient(reqwest::Error),
+
+    #[error("Ran out of sleds / U2 storage pools")]
+    NotEnoughSleds,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
@@ -250,15 +253,13 @@ impl Plan {
                                 .await?;
                         let is_scrimlet =
                             Self::is_sled_scrimlet(log, sled_address).await?;
-                        Ok(SledInfo {
-                            sled_id: sled_request.id,
+                        Ok(SledInfo::new(
+                            sled_request.id,
                             subnet,
                             sled_address,
                             u2_zpools,
                             is_scrimlet,
-                            addr_alloc: AddressBumpAllocator::new(subnet),
-                            request: Default::default(),
-                        })
+                        ))
                     },
                 ))
                 .await;
@@ -316,10 +317,8 @@ impl Plan {
                     DNS_HTTP_PORT,
                 )
                 .unwrap();
-            let dataset_name = DatasetName::new(
-                sled.u2_zpools[0].clone(),
-                crate::params::DatasetKind::InternalDns,
-            );
+            let dataset_name =
+                sled.alloc_from_u2_zpool(DatasetKind::InternalDns)?;
 
             sled.request.services.push(ServiceZoneRequest {
                 id,
@@ -350,17 +349,13 @@ impl Plan {
             dns_builder
                 .service_backend_zone(ServiceName::Cockroach, &zone, port)
                 .unwrap();
+            let dataset_name =
+                sled.alloc_from_u2_zpool(DatasetKind::CockroachDb)?;
             sled.request.services.push(ServiceZoneRequest {
                 id,
                 zone_type: ZoneType::CockroachDb,
                 addresses: vec![ip],
-                dataset: Some(DatasetRequest {
-                    id,
-                    name: DatasetName::new(
-                        sled.u2_zpools[0].clone(),
-                        crate::params::DatasetKind::CockroachDb,
-                    ),
-                }),
+                dataset: Some(DatasetRequest { id, name: dataset_name }),
                 gz_addresses: vec![],
                 services: vec![ServiceZoneService {
                     id,
@@ -434,9 +429,8 @@ impl Plan {
                 svc_port_builder.next_dns(id, &mut services_ip_pool)?;
             let dns_port = omicron_common::address::DNS_PORT;
             let dns_address = SocketAddr::new(external_ip, dns_port);
-            let dataset_kind = crate::params::DatasetKind::ExternalDns;
-            let dataset_name =
-                DatasetName::new(sled.u2_zpools[0].clone(), dataset_kind);
+            let dataset_kind = DatasetKind::ExternalDns;
+            let dataset_name = sled.alloc_from_u2_zpool(dataset_kind)?;
 
             sled.request.services.push(ServiceZoneRequest {
                 id,
@@ -499,17 +493,13 @@ impl Plan {
             dns_builder
                 .service_backend_zone(ServiceName::Clickhouse, &zone, port)
                 .unwrap();
+            let dataset_name =
+                sled.alloc_from_u2_zpool(DatasetKind::Clickhouse)?;
             sled.request.services.push(ServiceZoneRequest {
                 id,
                 zone_type: ZoneType::Clickhouse,
                 addresses: vec![ip],
-                dataset: Some(DatasetRequest {
-                    id,
-                    name: DatasetName::new(
-                        sled.u2_zpools[0].clone(),
-                        crate::params::DatasetKind::Clickhouse,
-                    ),
-                }),
+                dataset: Some(DatasetRequest { id, name: dataset_name }),
                 gz_addresses: vec![],
                 services: vec![ServiceZoneService {
                     id,
@@ -569,7 +559,7 @@ impl Plan {
                         id,
                         name: DatasetName::new(
                             pool.clone(),
-                            crate::params::DatasetKind::Crucible,
+                            DatasetKind::Crucible,
                         ),
                     }),
                     gz_addresses: vec![],
@@ -685,12 +675,67 @@ struct SledInfo {
     sled_address: SocketAddrV6,
     /// the list of zpools on the Sled
     u2_zpools: Vec<ZpoolName>,
+    /// spreads components across a Sled's zpools
+    u2_zpool_allocators:
+        HashMap<DatasetKind, Box<dyn Iterator<Item = usize> + Send + Sync>>,
     /// whether this Sled is a scrimlet
     is_scrimlet: bool,
     /// allocator for addresses in this Sled's subnet
     addr_alloc: AddressBumpAllocator,
     /// under-construction list of services being deployed to a Sled
     request: SledRequest,
+}
+
+impl SledInfo {
+    fn new(
+        sled_id: Uuid,
+        subnet: Ipv6Subnet<SLED_PREFIX>,
+        sled_address: SocketAddrV6,
+        u2_zpools: Vec<ZpoolName>,
+        is_scrimlet: bool,
+    ) -> SledInfo {
+        SledInfo {
+            sled_id,
+            subnet,
+            sled_address,
+            u2_zpools,
+            u2_zpool_allocators: HashMap::new(),
+            is_scrimlet,
+            addr_alloc: AddressBumpAllocator::new(subnet),
+            request: Default::default(),
+        }
+    }
+
+    /// Allocates a dataset of the specified type from one of the U.2 pools on
+    /// this Sled
+    fn alloc_from_u2_zpool(
+        &mut self,
+        kind: DatasetKind,
+    ) -> Result<DatasetName, PlanError> {
+        // We have two goals here:
+        //
+        // - For datasets of different types, they should be able to use the
+        //   same pool.
+        //
+        // - For datasets of the same type, they must be on separate pools.  We
+        //   want to fail explicitly if we can't do that (which might happen if
+        //   we've tried to allocate more datasets than we have pools).  Sled
+        //   Agent does not support having multiple datasets of some types
+        //   (e.g., cockroachdb) on the same pool.
+        //
+        // To achieve this, we maintain one iterator per dataset kind that
+        // enumerates the valid zpool indexes.
+        let allocator = self
+            .u2_zpool_allocators
+            .entry(kind.clone())
+            .or_insert_with(|| Box::new(0..self.u2_zpools.len()));
+        match allocator.next() {
+            None => Err(PlanError::NotEnoughSleds),
+            Some(which_zpool) => {
+                Ok(DatasetName::new(self.u2_zpools[which_zpool].clone(), kind))
+            }
+        }
+    }
 }
 
 struct ServicePortBuilder {
