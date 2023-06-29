@@ -28,11 +28,6 @@ bootstrap_sleds = []
 
 # TODO: docs on network config
 [rack_network_config]
-gateway_ip = ""
 infra_ip_first = ""
 infra_ip_last = ""
-uplink_port = ""
-uplink_port_speed = ""
-uplink_port_fec = ""
-uplink_ip = ""
-switch = "switch0"
+uplinks = []

@@ -69,12 +69,18 @@ pub struct SourceNatConfig {
 /// Initial network configuration
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
 pub struct RackNetworkConfig {
-    /// Gateway address
-    pub gateway_ip: Ipv4Addr,
     /// First ip address to be used for configuring network infrastructure
     pub infra_ip_first: Ipv4Addr,
     /// Last ip address to be used for configuring network infrastructure
     pub infra_ip_last: Ipv4Addr,
+    /// Uplinks for connecting the rack to external networks
+    pub uplinks: Vec<UplinkConfig>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
+pub struct UplinkConfig {
+    /// Gateway address
+    pub gateway_ip: Ipv4Addr,
     /// Switch to use for uplink
     pub switch: SwitchLocation,
     /// Switchport to use for external connectivity

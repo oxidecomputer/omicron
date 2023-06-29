@@ -376,9 +376,15 @@ fn validate_rack_network_config(
     use bootstrap_agent_client::types::PortFec as BaPortFec;
     use bootstrap_agent_client::types::PortSpeed as BaPortSpeed;
     use bootstrap_agent_client::types::SwitchLocation as BaSwitchLocation;
+    use bootstrap_agent_client::types::UplinkConfig as BaUplinkConfig;
     use omicron_common::api::internal::shared::PortFec;
     use omicron_common::api::internal::shared::PortSpeed;
     use omicron_common::api::internal::shared::SwitchLocation;
+
+    // Ensure that there is at least one uplink
+    if config.uplinks.is_empty() {
+        return Err(anyhow!("Must have at least one uplink configured"));
+    }
 
     // Make sure `infra_ip_first`..`infra_ip_last` is a well-defined range...
     let infra_ip_range =
@@ -388,44 +394,52 @@ fn validate_rack_network_config(
             },
         )?;
 
-    // ... and that it contains `uplink_ip`.
-    if config.uplink_ip < infra_ip_range.first
-        || config.uplink_ip > infra_ip_range.last
-    {
-        bail!(
-            "`uplink_ip` must be in the range defined by `infra_ip_first` \
-             and `infra_ip_last`"
-        );
+    // iterate through each UplinkConfig
+    for uplink_config in &config.uplinks {
+        // ... and check that it contains `uplink_ip`.
+        if uplink_config.uplink_ip < infra_ip_range.first
+            || uplink_config.uplink_ip > infra_ip_range.last
+        {
+            bail!(
+                "`uplink_ip` must be in the range defined by `infra_ip_first` \
+                and `infra_ip_last`"
+            );
+        }
     }
-
     // TODO Add more client side checks on `rack_network_config` contents?
 
     Ok(bootstrap_agent_client::types::RackNetworkConfig {
-        gateway_ip: config.gateway_ip,
         infra_ip_first: config.infra_ip_first,
         infra_ip_last: config.infra_ip_last,
-        uplink_port: config.uplink_port.clone(),
-        uplink_port_speed: match config.uplink_port_speed {
-            PortSpeed::Speed0G => BaPortSpeed::Speed0G,
-            PortSpeed::Speed1G => BaPortSpeed::Speed1G,
-            PortSpeed::Speed10G => BaPortSpeed::Speed10G,
-            PortSpeed::Speed25G => BaPortSpeed::Speed25G,
-            PortSpeed::Speed40G => BaPortSpeed::Speed40G,
-            PortSpeed::Speed50G => BaPortSpeed::Speed50G,
-            PortSpeed::Speed100G => BaPortSpeed::Speed100G,
-            PortSpeed::Speed200G => BaPortSpeed::Speed200G,
-            PortSpeed::Speed400G => BaPortSpeed::Speed400G,
-        },
-        uplink_port_fec: match config.uplink_port_fec {
-            PortFec::Firecode => BaPortFec::Firecode,
-            PortFec::None => BaPortFec::None,
-            PortFec::Rs => BaPortFec::Rs,
-        },
-        uplink_ip: config.uplink_ip,
-        uplink_vid: config.uplink_vid,
-        switch: match config.switch {
-            SwitchLocation::Switch0 => BaSwitchLocation::Switch0,
-            SwitchLocation::Switch1 => BaSwitchLocation::Switch1,
-        },
+        uplinks: config
+            .uplinks
+            .iter()
+            .map(|config| BaUplinkConfig {
+                gateway_ip: config.gateway_ip,
+                switch: match config.switch {
+                    SwitchLocation::Switch0 => BaSwitchLocation::Switch0,
+                    SwitchLocation::Switch1 => BaSwitchLocation::Switch1,
+                },
+                uplink_ip: config.uplink_ip,
+                uplink_port: config.uplink_port.clone(),
+                uplink_port_speed: match config.uplink_port_speed {
+                    PortSpeed::Speed0G => BaPortSpeed::Speed0G,
+                    PortSpeed::Speed1G => BaPortSpeed::Speed1G,
+                    PortSpeed::Speed10G => BaPortSpeed::Speed10G,
+                    PortSpeed::Speed25G => BaPortSpeed::Speed25G,
+                    PortSpeed::Speed40G => BaPortSpeed::Speed40G,
+                    PortSpeed::Speed50G => BaPortSpeed::Speed50G,
+                    PortSpeed::Speed100G => BaPortSpeed::Speed100G,
+                    PortSpeed::Speed200G => BaPortSpeed::Speed200G,
+                    PortSpeed::Speed400G => BaPortSpeed::Speed400G,
+                },
+                uplink_port_fec: match config.uplink_port_fec {
+                    PortFec::Firecode => BaPortFec::Firecode,
+                    PortFec::None => BaPortFec::None,
+                    PortFec::Rs => BaPortFec::Rs,
+                },
+                uplink_vid: config.uplink_vid,
+            })
+            .collect(),
     })
 }
