@@ -74,6 +74,7 @@ use crate::rack_setup::plan::sled::{
 use crate::storage_manager::StorageResources;
 use camino::Utf8PathBuf;
 use ddm_admin_client::{Client as DdmAdminClient, DdmError};
+use dpd_client::types::Ipv6Entry;
 use dpd_client::types::{
     LinkCreate, LinkId, LinkSettings, PortId, PortSettings, RouteSettingsV4,
 };
@@ -94,6 +95,7 @@ use omicron_common::address::{
 };
 use omicron_common::api::internal::shared::ExternalPortDiscovery;
 use omicron_common::api::internal::shared::SwitchLocation;
+use omicron_common::api::internal::shared::UplinkConfig;
 use omicron_common::api::internal::shared::{PortFec, PortSpeed};
 use omicron_common::backoff::{
     retry_notify, retry_policy_internal_service_aggressive, BackoffError,
@@ -812,15 +814,27 @@ impl ServiceInner {
         let rack_network_config = match &config.rack_network_config {
             Some(config) => {
                 let value = NexusTypes::RackNetworkConfig {
-                    gateway_ip: config.gateway_ip,
                     infra_ip_first: config.infra_ip_first,
                     infra_ip_last: config.infra_ip_last,
-                    switch: config.switch.clone().into(),
-                    uplink_ip: config.uplink_ip,
-                    uplink_port: config.uplink_port.clone(),
-                    uplink_port_speed: config.uplink_port_speed.clone().into(),
-                    uplink_port_fec: config.uplink_port_fec.clone().into(),
-                    uplink_vid: config.uplink_vid,
+                    uplinks: config
+                        .uplinks
+                        .iter()
+                        .map(|config| NexusTypes::UplinkConfig {
+                            gateway_ip: config.gateway_ip,
+                            switch: config.switch.clone().into(),
+                            uplink_ip: config.uplink_ip,
+                            uplink_port: config.uplink_port.clone(),
+                            uplink_port_speed: config
+                                .uplink_port_speed
+                                .clone()
+                                .into(),
+                            uplink_port_fec: config
+                                .uplink_port_fec
+                                .clone()
+                                .into(),
+                            uplink_vid: config.uplink_vid,
+                        })
+                        .collect(),
                 };
                 Some(value)
             }
@@ -1069,132 +1083,54 @@ impl ServiceInner {
         info!(self.log, "Checking for Rack Network Configuration");
         if let Some(rack_network_config) = &config.rack_network_config {
             info!(self.log, "Initializing Rack Network");
-            let dpd_clients: HashMap<SwitchLocation, DpdClient> =
-                switch_mgmt_addrs
-                    .iter()
-                    .map(|(location, addr)| {
-                        (
-                            location.clone(),
-                            DpdClient::new(
-                                &format!("http://[{}]:{}", addr, DENDRITE_PORT),
-                                dpd_client::ClientState {
-                                    tag: "rss".to_string(),
-                                    log: self
-                                        .log
-                                        .new(o!("component" => "DpdClient")),
-                                },
-                            ),
-                        )
-                    })
-                    .collect();
+            let dpd_clients = self.initialize_dpd_clients(&switch_mgmt_addrs);
 
-            // Configure the switch requested by the user
-            // Raise error if requested switch is not found
-            let dpd = dpd_clients
-                .get(&rack_network_config.switch)
+            for uplink_config in &rack_network_config.uplinks {
+                // Configure the switch requested by the user
+                // Raise error if requested switch is not found
+                let dpd = dpd_clients
+                .get(&uplink_config.switch)
                 .ok_or_else(|| {
                     SetupServiceError::BadConfig(format!(
                         "Switch requested by rack network config not found: {:#?}",
-                        rack_network_config.switch
+                        uplink_config.switch
                     ))
                 })?;
 
-            info!(self.log, "Building Rack Network Configuration");
-            // TODO - https://github.com/oxidecomputer/omicron/issues/3278
-            // dynamically determine where boundary services address should be configured
-            let body = dpd_client::types::Ipv6Entry {
-                addr: BOUNDARY_SERVICES_ADDR.parse().map_err(|e| {
-                    SetupServiceError::BadConfig(format!(
-                        "failed to parse `BOUNDARY_SERVICES_ADDR` as `Ipv6Addr`: {e}"
-                    ))
-                })?,
-                tag: "rss".into(),
-            };
+                let (ipv6_entry, dpd_port_settings, port_id) =
+                    self.build_uplink_config(uplink_config)?;
 
-            let mut dpd_port_settings = PortSettings {
-                tag: "rss".into(),
-                links: HashMap::new(),
-                v4_routes: HashMap::new(),
-                v6_routes: HashMap::new(),
-            };
+                self.wait_for_dendrite(dpd).await;
 
-            // TODO handle breakouts
-            // https://github.com/oxidecomputer/omicron/issues/3062
-            let link_id = LinkId(0);
-            let addr = IpAddr::V4(rack_network_config.uplink_ip);
-
-            let link_settings = LinkSettings {
-                // TODO Allow user to configure link properties
-                // https://github.com/oxidecomputer/omicron/issues/3061
-                params: LinkCreate {
-                    autoneg: false,
-                    kr: false,
-                    fec: convert_fec(&rack_network_config.uplink_port_fec),
-                    speed: convert_speed(
-                        &rack_network_config.uplink_port_speed,
-                    ),
-                },
-                addrs: vec![addr],
-            };
-
-            dpd_port_settings.links.insert(link_id.to_string(), link_settings);
-
-            let port_id: PortId = rack_network_config.uplink_port.parse()
-                .map_err(|e| SetupServiceError::BadConfig(
-                        format!("could not use value provided to rack_network_config.uplink_port as PortID: {e}")
-                ))?;
-
-            let nexthop = Some(rack_network_config.gateway_ip);
-
-            dpd_port_settings.v4_routes.insert(
-                Ipv4Cidr { prefix: "0.0.0.0".parse().unwrap(), prefix_len: 0 }
-                    .to_string(),
-                RouteSettingsV4 {
-                    link_id: link_id.0,
-                    vid: rack_network_config.uplink_vid,
-                    nexthop,
-                },
-            );
-
-            loop {
-                info!(self.log, "Checking dendrite uptime");
-                match dpd.dpd_uptime().await {
-                    Ok(uptime) => {
-                        info!(self.log, "Dendrite online"; "uptime" => uptime.to_string());
-                        break;
-                    }
-                    Err(e) => {
-                        info!(self.log, "Unable to check Dendrite uptime"; "reason" => format!("{e}"));
-                    }
-                }
-                info!(self.log, "Waiting for dendrite to come online");
-                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-            }
-
-            info!(self.log, "Configuring boundary services loopback address on switch"; "config" => format!("{body:#?}"));
-            dpd.loopback_ipv6_create(&body).await.map_err(|e| {
-                SetupServiceError::Dendrite(format!(
-                    "unable to create inital switch loopback address: {e}"
-                ))
-            })?;
-
-            info!(self.log, "Configuring default uplink on switch"; "config" => format!("{dpd_port_settings:#?}"));
-            dpd.port_settings_apply(&port_id, &dpd_port_settings)
-                .await
-                .map_err(|e| {
+                info!(self.log, "Configuring boundary services loopback address on switch"; "config" => format!("{ipv6_entry:#?}"));
+                dpd.loopback_ipv6_create(&ipv6_entry).await.map_err(|e| {
                     SetupServiceError::Dendrite(format!(
+                        "unable to create inital switch loopback address: {e}"
+                    ))
+                })?;
+
+                info!(self.log, "Configuring default uplink on switch"; "config" => format!("{dpd_port_settings:#?}"));
+                dpd.port_settings_apply(&port_id, &dpd_port_settings)
+                    .await
+                    .map_err(|e| {
+                        SetupServiceError::Dendrite(format!(
                     "unable to apply initial uplink port configuration: {e}"
                 ))
-                })?;
+                    })?;
 
-            info!(self.log, "advertising boundary services loopback address");
-            let zone_addr =
-                switch_mgmt_addrs.get(&rack_network_config.switch).unwrap();
-            let ddmd_addr = SocketAddrV6::new(*zone_addr, DDMD_PORT, 0, 0);
-            let ddmd_client = DdmAdminClient::new(&self.log, ddmd_addr)?;
-            ddmd_client.advertise_prefix(Ipv6Subnet::new(
-                BOUNDARY_SERVICES_ADDR.parse().unwrap(),
-            ));
+                info!(
+                    self.log,
+                    "advertising boundary services loopback address"
+                );
+                let zone_addr =
+                    switch_mgmt_addrs.get(&uplink_config.switch).unwrap();
+
+                let ddmd_addr = SocketAddrV6::new(*zone_addr, DDMD_PORT, 0, 0);
+                let ddmd_client = DdmAdminClient::new(&self.log, ddmd_addr)?;
+                ddmd_client.advertise_prefix(Ipv6Subnet::new(
+                    BOUNDARY_SERVICES_ADDR.parse().unwrap(),
+                ));
+            }
         }
 
         // Next start up the NTP services.
@@ -1303,6 +1239,27 @@ impl ServiceInner {
         Ok(())
     }
 
+    fn initialize_dpd_clients(
+        &self,
+        switch_mgmt_addrs: &HashMap<SwitchLocation, Ipv6Addr>,
+    ) -> HashMap<SwitchLocation, DpdClient> {
+        switch_mgmt_addrs
+            .iter()
+            .map(|(location, addr)| {
+                (
+                    location.clone(),
+                    DpdClient::new(
+                        &format!("http://[{}]:{}", addr, DENDRITE_PORT),
+                        dpd_client::ClientState {
+                            tag: "rss".to_string(),
+                            log: self.log.new(o!("component" => "DpdClient")),
+                        },
+                    ),
+                )
+            })
+            .collect()
+    }
+
     // Query MGS servers in each switch zone to determine which switch slot they are managing.
     // This logic does not handle an event where there are multiple racks. Is that ok?
     async fn map_switch_zone_addrs(
@@ -1355,8 +1312,75 @@ impl ServiceInner {
         }
         switch_zone_addrs
     }
-}
 
+    fn build_uplink_config(
+        &self,
+        uplink_config: &UplinkConfig,
+    ) -> Result<(Ipv6Entry, PortSettings, PortId), SetupServiceError> {
+        info!(self.log, "Building Uplink Configuration");
+        let ipv6_entry = Ipv6Entry {
+            addr: BOUNDARY_SERVICES_ADDR.parse().map_err(|e| {
+                SetupServiceError::BadConfig(format!(
+                "failed to parse `BOUNDARY_SERVICES_ADDR` as `Ipv6Addr`: {e}"
+            ))
+            })?,
+            tag: "rss".into(),
+        };
+        let mut dpd_port_settings = PortSettings {
+            tag: "rss".into(),
+            links: HashMap::new(),
+            v4_routes: HashMap::new(),
+            v6_routes: HashMap::new(),
+        };
+        let link_id = LinkId(0);
+        let addr = IpAddr::V4(uplink_config.uplink_ip);
+        let link_settings = LinkSettings {
+            // TODO Allow user to configure link properties
+            // https://github.com/oxidecomputer/omicron/issues/3061
+            params: LinkCreate {
+                autoneg: false,
+                kr: false,
+                fec: convert_fec(&uplink_config.uplink_port_fec),
+                speed: convert_speed(&uplink_config.uplink_port_speed),
+            },
+            addrs: vec![addr],
+        };
+        dpd_port_settings.links.insert(link_id.to_string(), link_settings);
+        let port_id: PortId = uplink_config
+            .uplink_port
+            .parse()
+            .map_err(|e| SetupServiceError::BadConfig(
+            format!("could not use value provided to rack_network_config.uplink_port as PortID: {e}")))?;
+        let nexthop = Some(uplink_config.gateway_ip);
+        dpd_port_settings.v4_routes.insert(
+            Ipv4Cidr { prefix: "0.0.0.0".parse().unwrap(), prefix_len: 0 }
+                .to_string(),
+            RouteSettingsV4 {
+                link_id: link_id.0,
+                vid: uplink_config.uplink_vid,
+                nexthop,
+            },
+        );
+        Ok((ipv6_entry, dpd_port_settings, port_id))
+    }
+
+    async fn wait_for_dendrite(&self, dpd: &DpdClient) {
+        loop {
+            info!(self.log, "Checking dendrite uptime");
+            match dpd.dpd_uptime().await {
+                Ok(uptime) => {
+                    info!(self.log, "Dendrite online"; "uptime" => uptime.to_string());
+                    break;
+                }
+                Err(e) => {
+                    info!(self.log, "Unable to check Dendrite uptime"; "reason" => format!("{e}"));
+                }
+            }
+            info!(self.log, "Waiting for dendrite to come online");
+            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+        }
+    }
+}
 /// Scan the DNS configuration in the service plan to find
 /// the addresses of the switch zones
 fn switch_zone_addresses(service_plan: &ServicePlan) -> Vec<Ipv6Addr> {

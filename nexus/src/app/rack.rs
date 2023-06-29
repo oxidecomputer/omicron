@@ -374,140 +374,140 @@ impl super::Nexus {
                     _ => Err(e),
                 },
             }?;
-
-            let switch = rack_network_config.switch.to_string();
-            let switch_location = Name::from_str(&switch).map_err(|e| {
-                Error::internal_error(&format!(
-                    "unable to use {switch} as Name: {e}"
-                ))
-            })?;
-
-            let loopback_address_params = LoopbackAddressCreate {
-                address_lot: NameOrId::Name(address_lot_name.clone()),
-                rack_id,
-                switch_location: switch_location.clone(),
-                address: first_address,
-                mask: 64,
-            };
-
-            let address_lot_lookup = self
-                .address_lot_lookup(
-                    &opctx,
-                    loopback_address_params.address_lot.clone(),
-                )
-                .map_err(|e| {
+            for (idx, uplink_config) in
+                rack_network_config.uplinks.iter().enumerate()
+            {
+                let switch = uplink_config.switch.to_string();
+                let switch_location = Name::from_str(&switch).map_err(|e| {
                     Error::internal_error(&format!(
-                        "unable to lookup infra address_lot: {e}"
+                        "unable to use {switch} as Name: {e}"
                     ))
                 })?;
 
-            let (.., authz_address_lot) = address_lot_lookup
+                let loopback_address_params = LoopbackAddressCreate {
+                    address_lot: NameOrId::Name(address_lot_name.clone()),
+                    rack_id,
+                    switch_location: switch_location.clone(),
+                    address: first_address,
+                    mask: 64,
+                };
+
+                let address_lot_lookup = self
+                    .address_lot_lookup(
+                        &opctx,
+                        loopback_address_params.address_lot.clone(),
+                    )
+                    .map_err(|e| {
+                        Error::internal_error(&format!(
+                            "unable to lookup infra address_lot: {e}"
+                        ))
+                    })?;
+
+                let (.., authz_address_lot) = address_lot_lookup
                 .lookup_for(authz::Action::Modify)
                 .await
                 .map_err(|e| {
                     Error::internal_error(&format!("unable to retrieve authz_address_lot for infra address_lot: {e}"))
                 })?;
 
-            if self
-                .loopback_address_lookup(
-                    &opctx,
-                    rack_id,
-                    switch_location.into(),
-                    ipnetwork::IpNetwork::new(
-                        loopback_address_params.address,
-                        loopback_address_params.mask,
-                    )
-                    .map_err(|_| {
-                        Error::invalid_request("invalid loopback address")
-                    })?
-                    .into(),
-                )?
-                .lookup_for(authz::Action::Read)
-                .await
-                .is_err()
-            {
-                self.db_datastore
-                    .loopback_address_create(
-                        opctx,
-                        &loopback_address_params,
-                        None,
-                        &authz_address_lot,
-                    )
-                    .await?;
-            }
+                if self
+                    .loopback_address_lookup(
+                        &opctx,
+                        rack_id,
+                        switch_location.into(),
+                        ipnetwork::IpNetwork::new(
+                            loopback_address_params.address,
+                            loopback_address_params.mask,
+                        )
+                        .map_err(|_| {
+                            Error::invalid_request("invalid loopback address")
+                        })?
+                        .into(),
+                    )?
+                    .lookup_for(authz::Action::Read)
+                    .await
+                    .is_err()
+                {
+                    self.db_datastore
+                        .loopback_address_create(
+                            opctx,
+                            &loopback_address_params,
+                            None,
+                            &authz_address_lot,
+                        )
+                        .await?;
+                }
+                let uplink_name = format!("default-uplink{idx}");
+                let name = Name::from_str(&uplink_name).map_err(|e| {
+                    Error::internal_error(&format!(
+                        "unable to use {uplink_name} as `Name`: {e}"
+                    ))
+                })?;
 
-            let name = Name::from_str("default-uplink").map_err(|e| {
-                Error::internal_error(&format!(
-                    "unable to use `default-uplink` as `Name`: {e}"
-                ))
-            })?;
+                let identity = IdentityMetadataCreateParams {
+                    name: name.clone(),
+                    description: "initial uplink configuration".to_string(),
+                };
 
-            let identity = IdentityMetadataCreateParams {
-                name: name.clone(),
-                description: "initial uplink configuration".to_string(),
-            };
+                let port_config = SwitchPortConfig {
+                    geometry: nexus_types::external_api::params::SwitchPortGeometry::Qsfp28x1,
+                };
 
-            let port_config = SwitchPortConfig {
-                geometry:
-                nexus_types::external_api::params::SwitchPortGeometry::Qsfp28x1,
-            };
+                let mut port_settings_params = SwitchPortSettingsCreate {
+                    identity,
+                    port_config,
+                    groups: vec![],
+                    links: HashMap::new(),
+                    interfaces: HashMap::new(),
+                    routes: HashMap::new(),
+                    bgp_peers: HashMap::new(),
+                    addresses: HashMap::new(),
+                };
 
-            let mut port_settings_params = SwitchPortSettingsCreate {
-                identity,
-                port_config,
-                groups: vec![],
-                links: HashMap::new(),
-                interfaces: HashMap::new(),
-                routes: HashMap::new(),
-                bgp_peers: HashMap::new(),
-                addresses: HashMap::new(),
-            };
-
-            let uplink_address = IpNet::from_str(&format!(
-                "{}/32",
-                rack_network_config.uplink_ip
-            ))
-                .map_err(|e| Error::internal_error(&format!(
+                let uplink_address = IpNet::from_str(&format!("{}/32", uplink_config.uplink_ip))
+                    .map_err(|e| Error::internal_error(&format!(
                     "failed to parse value provided for `rack_network_config.uplink_ip` as `IpNet`: {e}"
                 )))?;
 
-            let address = Address {
-                address_lot: NameOrId::Name(address_lot_name),
-                address: uplink_address,
-            };
-            port_settings_params.addresses.insert(
-                "phy0".to_string(),
-                AddressConfig { addresses: vec![address] },
-            );
+                let address = Address {
+                    address_lot: NameOrId::Name(address_lot_name.clone()),
+                    address: uplink_address,
+                };
+                port_settings_params.addresses.insert(
+                    "phy0".to_string(),
+                    AddressConfig { addresses: vec![address] },
+                );
 
-            let dst = IpNet::from_str("0.0.0.0/0").map_err(|e| {
-                Error::internal_error(&format!(
-                    "failed to parse provided default route CIDR: {e}"
-                ))
-            })?;
+                let dst = IpNet::from_str("0.0.0.0/0").map_err(|e| {
+                    Error::internal_error(&format!(
+                        "failed to parse provided default route CIDR: {e}"
+                    ))
+                })?;
 
-            let gw = IpAddr::V4(rack_network_config.gateway_ip);
-            let vid = rack_network_config.uplink_vid;
-            let route = Route { dst, gw, vid };
+                let gw = IpAddr::V4(uplink_config.gateway_ip);
+                let vid = uplink_config.uplink_vid;
+                let route = Route { dst, gw, vid };
 
-            port_settings_params.routes.insert(
-                "phy0".to_string(),
-                RouteConfig { routes: vec![route] },
-            );
+                port_settings_params.routes.insert(
+                    "phy0".to_string(),
+                    RouteConfig { routes: vec![route] },
+                );
 
-            if self
-                .db_datastore
-                .switch_port_settings_get(opctx, &name.into())
-                .await
-                .is_err()
-            {
-                self.db_datastore
-                    .switch_port_settings_create(opctx, &port_settings_params)
-                    .await?;
-            }
-
-            // TODO - https://github.com/oxidecomputer/omicron/issues/3277
-            // record port speed
+                if self
+                    .db_datastore
+                    .switch_port_settings_get(opctx, &name.into())
+                    .await
+                    .is_err()
+                {
+                    self.db_datastore
+                        .switch_port_settings_create(
+                            opctx,
+                            &port_settings_params,
+                        )
+                        .await?;
+                }
+            } // TODO - https://github.com/oxidecomputer/omicron/issues/3277
+              // record port speed
         };
 
         Ok(())

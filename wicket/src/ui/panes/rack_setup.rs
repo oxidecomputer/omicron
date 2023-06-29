@@ -697,10 +697,14 @@ fn rss_config_text<'a>(
     ]));
 
     let net_config = insensitive.rack_network_config.as_ref();
-    let uplink_port_speed = net_config
-        .map_or(Cow::default(), |c| c.uplink_port_speed.to_string().into());
-    let uplink_port_fec = net_config
-        .map_or(Cow::default(), |c| c.uplink_port_fec.to_string().into());
+    let uplink_port_speed = net_config.map_or(Cow::default(), |c| {
+        // TODO: Allow multiple uplinks for wicket configuration
+        c.uplinks[0].uplink_port_speed.to_string().into()
+    });
+    let uplink_port_fec = net_config.map_or(Cow::default(), |c| {
+        // TODO: Allow multiple uplinks for wicket configuration
+        c.uplinks[0].uplink_port_fec.to_string().into()
+    });
 
     // List of single-line values, each of which may or may not be set; if it's
     // set we show its value, and if not we show "Not set" in bad_style.
@@ -711,7 +715,10 @@ fn rss_config_text<'a>(
         ),
         (
             "Gateway IP: ",
-            net_config.map_or("".into(), |c| c.gateway_ip.to_string().into()),
+            net_config.map_or("".into(), |c| {
+                // TODO: Allow multiple uplinks for wicket configuration
+                c.uplinks[0].gateway_ip.to_string().into()
+            }),
         ),
         (
             "Infrastructure first IP: ",
@@ -723,12 +730,19 @@ fn rss_config_text<'a>(
             net_config
                 .map_or("".into(), |c| c.infra_ip_last.to_string().into()),
         ),
-        ("Uplink port: ", net_config.map_or("", |c| &c.uplink_port).into()),
+        (
+            "Uplink port: ",
+            // TODO: Allow multiple uplinks for wicket configuration
+            net_config.map_or("", |c| &c.uplinks[0].uplink_port).into(),
+        ),
         ("Uplink port speed: ", uplink_port_speed),
         ("Uplink port FEC: ", uplink_port_fec),
         (
             "Uplink IP: ",
-            net_config.map_or("".into(), |c| c.uplink_ip.to_string().into()),
+            net_config.map_or("".into(), |c| {
+                // TODO: Allow multiple uplinks for wicket configuration
+                c.uplinks[0].uplink_ip.to_string().into()
+            }),
         ),
     ] {
         spans.push(Spans::from(vec![

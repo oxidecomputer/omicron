@@ -59,9 +59,10 @@ user_password_hash = "$argon2id$v=19$m=98304,t=13,p=1$RUlWc0ZxaHo0WFdrN0N6ZQ$S8p
 
 # Configuration to bring up boundary services and make nexus reachable from the outside
 [rack_network_config]
-gateway_ip = "192.168.1.199"
 infra_ip_first = "192.168.1.30"
 infra_ip_last = "192.168.1.50"
+[[rack_network_config.uplinks]]
+gateway_ip = "192.168.1.199"
 switch = "switch0"
 uplink_port = "qsfp0"
 uplink_port_speed = "40G"
