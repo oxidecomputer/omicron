@@ -13,7 +13,7 @@ use derive_more::From;
 use serde::Serialize;
 use sled_hardware::Baseboard;
 use slog::{debug, info, o, warn, Logger};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::io::Cursor;
 use std::net::{SocketAddr, SocketAddrV6};
 use std::time::Duration;
@@ -29,6 +29,7 @@ const CONNECTION_RETRY_TIMEOUT: Duration = Duration::from_secs(1);
 const CONN_BUF_SIZE: usize = 512 * 1024;
 const KEEPALIVE_TIMEOUT: Duration = Duration::from_secs(10);
 const FRAME_HEADER_SIZE: usize = 4;
+const MSG_WRITE_QUEUE_CAPACITY: usize = 5;
 
 #[derive(Debug, Clone)]
 pub struct Config {
@@ -98,9 +99,10 @@ async fn perform_handshake(
     sock: TcpStream,
     local_peer_id: &Baseboard,
     local_addr: SocketAddrV6,
-    read_buf: &mut [u8],
     log: &Logger,
 ) -> Result<(OwnedReadHalf, OwnedWriteHalf, Identify), HandshakeError> {
+    // Enough to hold the `Hello` and `Identify` messages
+    let mut read_buf = [0u8; 128];
     let (mut read_sock, mut write_sock) = sock.into_split();
 
     // Serialize and write the handshake messages into `write_buf`
@@ -143,7 +145,7 @@ async fn perform_handshake(
                     write_sock.write_buf(&mut identify_cursor).await;
                 }
             }
-            res  = read_sock.read(&mut read_buf[total_read..end]), if identify.is_none() => {
+            res = read_sock.read(&mut read_buf[total_read..end]), if identify.is_none() => {
                 let n = res?;
                 total_read += n;
                 if total_read < initial_read {
@@ -189,8 +191,6 @@ async fn spawn_client(
     let log = log.clone();
 
     let handle = tokio::spawn(async move {
-        let mut read_buf = vec![0u8; CONN_BUF_SIZE];
-
         loop {
             let sock = match TcpStream::connect(addr).await {
                 Ok(sock) => sock,
@@ -209,7 +209,6 @@ async fn spawn_client(
                 sock,
                 &my_peer_id,
                 my_addr,
-                &mut read_buf,
                 &log,
             )
             .await
@@ -221,6 +220,8 @@ async fn spawn_client(
                     continue;
                 }
             };
+
+            let log = log.new(o!("remote_peer_id" => identify.id.to_string()));
 
             // Inform the main task that we have connected to a peer
             main_tx
@@ -242,28 +243,149 @@ async fn spawn_client(
                 );
                 sleep(CONNECTION_RETRY_TIMEOUT).await;
             }
-
-            /*loop {
-                tokio::select! {
-                    Some(msg) = rx.recv() => {
-                        match msg {
-                            MainToConnMsg::Close => return;
-                            MainToConnMsg::Msg(msg) => {
-                            }
-                        }
-                    }
-
-                    // Read some data from the receive side
-
-                    // Write some data
-                    _ = write_sock.write_buf(&mut buf), if buf.has_remaining() => {
-                    }
-                }
-            }
-            */
         }
     });
     PeerConnHandle { handle, tx, addr, unique_id }
+}
+
+// Established connection management code running in its own task
+struct EstablishedConn {
+    peer_id: Baseboard,
+    unique_id: u64,
+    write_sock: OwnedWriteHalf,
+    read_sock: OwnedReadHalf,
+    main_tx: mpsc::Sender<ConnToMainMsg>,
+    rx: mpsc::Receiver<MainToConnMsg>,
+    log: Logger,
+}
+
+impl EstablishedConn {
+    // Run the main loop of the connection
+    //
+    // Return `None` if the task should shutdown
+    // Return `Some(rx)` if a new connection should be spun up
+    async fn run(mut self) -> Option<mpsc::Receiver<MainToConnMsg>> {
+        let mut read_buf = vec![0u8; CONN_BUF_SIZE];
+        // Keep a queue to write serialized messages into We limit the queue
+        // size, and if it gets exceeded it means the peer at the other
+        // end isn't pulling data out fast enough. This should be basically
+        // impossible to hit given the size and rate of message exchange
+        // between peers. We go ahead and close the connection if the queue
+        // fills.
+        let mut write_queue: VecDeque<Vec<u8>> =
+            VecDeque::with_capacity(MSG_WRITE_QUEUE_CAPACITY);
+
+        // The current serialized message being written if there is one
+        let mut write_cursor: Option<Cursor<Vec<u8>>> = None;
+
+        let mut total_read = 0;
+
+        loop {
+            if write_cursor.is_none() && !write_queue.is_empty() {
+                write_cursor =
+                    Some(Cursor::new(write_queue.pop_front().unwrap()));
+            }
+            tokio::select! {
+                Some(msg) = self.rx.recv() => {
+                    match msg {
+                        MainToConnMsg::Close => {
+                            let _ = self.close().await;
+                            return None;
+                        }
+                        MainToConnMsg::Msg(msg) => {
+                            if write_queue.len() == MSG_WRITE_QUEUE_CAPACITY {
+                                warn!(
+                                    self.log,
+                                    "Closing connection: write queue full",
+                                );
+                                return Some(self.close().await);
+                            } else {
+                                match write_framed(&msg) {
+                                    Ok(msg) => {
+                                        write_queue.push_back(msg);
+                                    }
+                                    Err(e) => {
+                                        warn!(
+                                            self.log,
+                                            "Closing connection: Failed to serialize msg: {}",
+                                             e
+                                        );
+                                        return Some(self.close().await);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Read some data from the receive side
+                res = self.read_sock.read(&mut read_buf[total_read..]) => {
+                    match res {
+                        Ok(n) => {
+                            total_read += n;
+                            if total_read < FRAME_HEADER_SIZE {
+                                continue;
+                            }
+                            // Read frame size
+                            let size =
+                                read_frame_size(read_buf[..FRAME_HEADER_SIZE].try_into().unwrap());
+                            let end = size + FRAME_HEADER_SIZE;
+                            if end < total_read {
+                                continue;
+                            }
+                            let msg: Msg  = match ciborium::from_reader(&read_buf[FRAME_HEADER_SIZE..end]) {
+                                Ok(msg) => {
+                                    // Move any remaining bytes to the beginning of the buffer.
+                                    read_buf.copy_within(end..total_read, 0);
+                                    read_buf.truncate(total_read-end);
+                                    msg
+                                }
+                                Err(e) => {
+                                    warn!(
+                                        self.log,
+                                        "Closing connection: failed to deserialize: {}",
+                                        e
+                                    );
+                                    return Some(self.close().await);
+                                }
+                            };
+                        }
+                        Err(e) => {
+                            warn!(
+                                self.log,
+                                "Closing connection: failed to read: {}",
+                                e
+                            );
+                            return Some(self.close().await);
+                        }
+                    }
+                }
+
+                // Write some data
+                _ = self.write_sock.write_buf(write_cursor.as_mut().unwrap()), if write_cursor.is_some() => {
+                    if !write_cursor.as_ref().unwrap().has_remaining() {
+                        write_cursor = None;
+                    }
+                }
+            }
+        }
+    }
+
+    // Close and drop the connection.
+    //
+    // Return `rx` as it is not clonable.
+    async fn close(mut self) -> mpsc::Receiver<MainToConnMsg> {
+        self.main_tx
+            .send(ConnToMainMsg {
+                handle_unique_id: self.unique_id,
+                msg: ConnToMainMsgInner::Disconnected {
+                    peer_id: self.peer_id.clone(),
+                },
+            })
+            .await;
+        self.write_sock.shutdown();
+        self.rx
+    }
 }
 
 // Spawn a task that handles accepted connections from a peer
@@ -280,13 +402,10 @@ async fn spawn_server(
     let (tx, rx) = mpsc::channel(2);
     let log = log.clone();
     let handle = tokio::spawn(async move {
-        let mut read_buf = vec![0u8; CONN_BUF_SIZE];
-
         let (read_sock, write_sock, identify) = match perform_handshake(
             sock,
             &my_peer_id,
             my_addr,
-            &mut read_buf,
             &log,
         )
         .await
