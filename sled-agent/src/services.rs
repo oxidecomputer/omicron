@@ -1096,7 +1096,7 @@ impl ServiceManager {
                 // Note that when we configure the dns/install service, we're
                 // supplying values for an existing property group on the SMF
                 // *service*.  We're not creating a new property group, nor are
-                // we configuring a property group on the instance.t by default.
+                // we configuring a property group on the instance.
                 let all_nameservers = info
                     .resolver
                     .lookup_all_ipv6(internal_dns::ServiceName::InternalDns)
