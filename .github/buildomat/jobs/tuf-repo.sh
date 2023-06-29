@@ -44,17 +44,12 @@ set -o pipefail
 set -o xtrace
 
 TOP=$PWD
+VERSION=$(< /input/package/work/version.txt)
 
-source "$TOP/tools/dvt_dock_version"
-DVT_DOCK_COMMIT=$COMMIT
-source "$TOP/tools/hubris_version"
-HUBRIS_COMMIT=$COMMIT
-
-COMMIT=$(git rev-parse HEAD)
-VERSION="1.0.0-alpha+git${COMMIT:0:11}"
-
-ptime -m gunzip < /input/ci-tools/work/tufaceous.gz > /work/tufaceous
-chmod a+x /work/tufaceous
+for bin in caboose-util tufaceous; do
+    ptime -m gunzip < /input/ci-tools/work/$bin.gz > /work/$bin
+    chmod a+x /work/$bin
+done
 
 #
 # We do two things here:
@@ -113,31 +108,41 @@ EOF
 done
 
 # Fetch signed ROT images from oxidecomputer/dvt-dock.
+source "$TOP/tools/dvt_dock_version"
 git clone https://github.com/oxidecomputer/dvt-dock.git /work/dvt-dock
-(cd /work/dvt-dock; git checkout "$DVT_DOCK_COMMIT")
-DVT_DOCK_VERSION="1.0.0-alpha+git${DVT_DOCK_COMMIT:0:11}"
+(cd /work/dvt-dock; git checkout "$COMMIT")
 
 for noun in gimlet psc sidecar; do
     tufaceous_kind=${noun//sidecar/switch}_rot
     hubris_kind=${noun}-rot
+    path_a="/work/dvt-dock/staging/build-$hubris_kind-image-a-cert-dev.zip"
+    path_b="/work/dvt-dock/staging/build-$hubris_kind-image-b-cert-dev.zip"
+    version_a=$(/work/caboose-util read-version "$path_a")
+    version_b=$(/work/caboose-util read-version "$path_b")
+    if [[ "$version_a" != "$version_b" ]]; then
+        echo "version mismatch:"
+        echo "  $path_a: $version_a"
+        echo "  $path_b: $version_b"
+        exit 1
+    fi
     cat >>/work/manifest.toml <<EOF
 [artifact.$tufaceous_kind]
 name = "$tufaceous_kind"
-version = "$DVT_DOCK_VERSION"
+version = "$version_a"
 [artifact.$tufaceous_kind.source]
 kind = "composite-rot"
 [artifact.$tufaceous_kind.source.archive_a]
 kind = "file"
-path = "/work/dvt-dock/staging/build-$hubris_kind-image-a-cert-dev.zip"
+path = "$path_a"
 [artifact.$tufaceous_kind.source.archive_b]
 kind = "file"
-path = "/work/dvt-dock/staging/build-$hubris_kind-image-b-cert-dev.zip"
+path = "$path_b"
 EOF
 done
 
 # Fetch SP images from oxidecomputer/hubris GHA artifacts.
-HUBRIS_VERSION="1.0.0-alpha+git${HUBRIS_COMMIT:0:11}"
-run_id=$(curl --netrc -fsS "https://api.github.com/repos/oxidecomputer/hubris/actions/runs?head_sha=$HUBRIS_COMMIT" \
+source "$TOP/tools/hubris_version"
+run_id=$(curl --netrc -fsS "https://api.github.com/repos/oxidecomputer/hubris/actions/runs?head_sha=$COMMIT" \
     | /opt/ooce/bin/jq -r '.workflow_runs[] | select(.path == ".github/workflows/dist.yml") | .id')
 artifacts=$(curl --netrc -fsS "https://api.github.com/repos/oxidecomputer/hubris/actions/runs/$run_id/artifacts")
 for noun in gimlet-c psc-b sidecar-b; do
@@ -147,13 +152,15 @@ for noun in gimlet-c psc-b sidecar-b; do
     url=$(/opt/ooce/bin/jq --arg name "$job_name" -r '.artifacts[] | select(.name == $name) | .archive_download_url' <<<"$artifacts")
     curl --netrc -fsSL -o $job_name.zip "$url"
     unzip $job_name.zip
+    path="$PWD/build-$noun-image-default.zip"
+    version=$(/work/caboose-util read-version "$path")
     cat >>/work/manifest.toml <<EOF
 [artifact.$tufaceous_kind]
 name = "$tufaceous_kind"
-version = "$HUBRIS_VERSION"
+version = "$version"
 [artifact.$tufaceous_kind.source]
 kind = "file"
-path = "$PWD/build-$noun-image-default.zip"
+path = "$path"
 EOF
 done
 

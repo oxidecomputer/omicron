@@ -726,6 +726,17 @@ impl ServiceManager {
         }
     }
 
+    fn bootstrap_to_techport(addr: Ipv6Addr) -> Ipv6Addr {
+        // flip the last bit of the first octet
+        // fdb0:<id>::suffix -> fdb1:<id>::<suffix>
+        Ipv6Addr::from(u128::from(addr) | (1 << 112))
+    }
+
+    fn bootstrap_addr_to_prefix(addr: Ipv6Addr) -> Ipv6Addr {
+        // mask out lower 64 bits to form /64 prefix
+        Ipv6Addr::from(u128::from(addr) & ((u64::MAX as u128) << 64))
+    }
+
     // Check the services intended to run in the zone to determine whether any
     // physical links or vnics need to be mapped into the zone when it is
     // created. Returns a list of links, plus whether or not they need link
@@ -1404,9 +1415,11 @@ impl ServiceManager {
                             default_handler_task_mode:
                                 HandlerTaskMode::Detached,
                         },
-                        subnet: Ipv6Subnet::<RACK_PREFIX>::new(
-                            sled_info.underlay_address,
-                        ),
+                        internal_dns: nexus_config::InternalDns::FromSubnet {
+                            subnet: Ipv6Subnet::<RACK_PREFIX>::new(
+                                sled_info.underlay_address,
+                            ),
+                        },
                         database: nexus_config::Database::FromDns,
                     };
 
@@ -1702,6 +1715,23 @@ impl ServiceManager {
                 ServiceType::Tfport { pkt_source } => {
                     info!(self.inner.log, "Setting up tfport service");
 
+                    let techport_prefix =
+                        match bootstrap_name_and_address.as_ref() {
+                            Some((_, addr)) => Self::bootstrap_addr_to_prefix(
+                                Self::bootstrap_to_techport(*addr),
+                            ),
+                            None => {
+                                return Err(Error::BadServiceRequest {
+                                    service: "tfport".into(),
+                                    message: "bootstrap addr missing".into(),
+                                });
+                            }
+                        };
+
+                    smfh.setprop(
+                        "config/techport_prefix",
+                        techport_prefix.to_string(),
+                    )?;
                     smfh.setprop("config/pkt_source", pkt_source)?;
                     smfh.setprop(
                         "config/host",
