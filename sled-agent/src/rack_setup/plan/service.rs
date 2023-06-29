@@ -7,13 +7,15 @@
 use crate::bootstrap::params::StartSledAgentRequest;
 use crate::ledger::{Ledger, Ledgerable};
 use crate::params::{
-    DatasetEnsureBody, ServiceType, ServiceZoneRequest, ServiceZoneService,
+    DatasetRequest, ServiceType, ServiceZoneRequest, ServiceZoneService,
     ZoneType,
 };
 use crate::rack_setup::config::SetupServiceConfig as Config;
+use crate::storage::dataset::DatasetName;
 use crate::storage_manager::StorageResources;
 use camino::Utf8PathBuf;
 use dns_service_client::types::DnsConfigParams;
+use illumos_utils::zpool::ZpoolName;
 use internal_dns::{ServiceName, DNS_ZONE};
 use omicron_common::address::{
     get_sled_address, get_switch_zone_address, Ipv6Subnet, ReservedRackSubnet,
@@ -91,10 +93,6 @@ pub enum PlanError {
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
 pub struct SledRequest {
-    /// Datasets to be created.
-    #[serde(default, rename = "dataset")]
-    pub datasets: Vec<DatasetEnsureBody>,
-
     /// Services to be instantiated.
     #[serde(default, rename = "service")]
     pub services: Vec<ServiceZoneRequest>,
@@ -165,7 +163,7 @@ impl Plan {
     async fn get_u2_zpools_from_sled(
         log: &Logger,
         address: SocketAddrV6,
-    ) -> Result<Vec<Uuid>, PlanError> {
+    ) -> Result<Vec<ZpoolName>, PlanError> {
         let dur = std::time::Duration::from_secs(60);
         let client = reqwest::ClientBuilder::new()
             .connect_timeout(dur)
@@ -179,7 +177,7 @@ impl Plan {
         );
 
         let get_u2_zpools = || async {
-            let zpools: Vec<Uuid> = client
+            let zpools: Vec<ZpoolName> = client
                 .zpools_get()
                 .await
                 .map(|response| {
@@ -187,7 +185,9 @@ impl Plan {
                         .into_inner()
                         .into_iter()
                         .filter_map(|zpool| match zpool.disk_type {
-                            SledAgentTypes::DiskType::U2 => Some(zpool.id),
+                            SledAgentTypes::DiskType::U2 => {
+                                Some(ZpoolName::new_external(zpool.id))
+                            }
                             SledAgentTypes::DiskType::M2 => None,
                         })
                         .collect()
@@ -284,7 +284,8 @@ impl Plan {
             if idx < EXTERNAL_DNS_COUNT {
                 let internal_ip = addr_alloc.next().expect("Not enough addrs");
                 let http_port = omicron_common::address::DNS_HTTP_PORT;
-                let dns_port = omicron_common::address::DNS_PORT;
+                let http_address =
+                    SocketAddrV6::new(internal_ip, http_port, 0, 0);
                 let id = Uuid::new_v4();
                 let zone = dns_builder.host_zone(id, internal_ip).unwrap();
                 dns_builder
@@ -296,26 +297,27 @@ impl Plan {
                     .unwrap();
                 let (nic, external_ip) =
                     svc_port_builder.next_dns(id, &mut services_ip_pool)?;
+                let dns_port = omicron_common::address::DNS_PORT;
+                let dns_address = SocketAddr::new(external_ip, dns_port);
+                let dataset_kind = crate::params::DatasetKind::ExternalDns;
+                let dataset_name =
+                    DatasetName::new(u2_zpools[0].clone(), dataset_kind);
+
                 request.services.push(ServiceZoneRequest {
                     id,
                     zone_type: ZoneType::ExternalDns,
-                    addresses: vec![internal_ip],
-                    dataset: None,
+                    addresses: vec![*http_address.ip()],
+                    dataset: Some(DatasetRequest { id, name: dataset_name }),
                     gz_addresses: vec![],
                     services: vec![ServiceZoneService {
                         id,
                         details: ServiceType::ExternalDns {
-                            http_address: SocketAddrV6::new(
-                                internal_ip,
-                                http_port,
-                                0,
-                                0,
-                            ),
-                            dns_address: SocketAddr::new(external_ip, dns_port),
+                            http_address,
+                            dns_address,
                             nic,
                         },
                     }],
-                })
+                });
             }
 
             // The first enumerated sleds get assigned the responsibility
@@ -388,64 +390,91 @@ impl Plan {
             // zpools described from the underlying config file.
             if idx < CRDB_COUNT {
                 let id = Uuid::new_v4();
-                let address = addr_alloc.next().expect("Not enough addrs");
+                let ip = addr_alloc.next().expect("Not enough addrs");
                 let port = omicron_common::address::COCKROACH_PORT;
-                let zone = dns_builder.host_zone(id, address).unwrap();
+                let zone = dns_builder.host_zone(id, ip).unwrap();
                 dns_builder
                     .service_backend_zone(ServiceName::Cockroach, &zone, port)
                     .unwrap();
-                let address = SocketAddrV6::new(address, port, 0, 0);
-                request.datasets.push(DatasetEnsureBody {
+                request.services.push(ServiceZoneRequest {
                     id,
-                    zpool_id: u2_zpools[0],
-                    dataset_kind: crate::params::DatasetKind::CockroachDb,
-                    address,
+                    zone_type: ZoneType::CockroachDb,
+                    addresses: vec![ip],
+                    dataset: Some(DatasetRequest {
+                        id,
+                        name: DatasetName::new(
+                            u2_zpools[0].clone(),
+                            crate::params::DatasetKind::CockroachDb,
+                        ),
+                    }),
+                    gz_addresses: vec![],
+                    services: vec![ServiceZoneService {
+                        id,
+                        details: ServiceType::CockroachDb,
+                    }],
                 });
             }
 
             // TODO(https://github.com/oxidecomputer/omicron/issues/732): Remove
             if idx < CLICKHOUSE_COUNT {
                 let id = Uuid::new_v4();
-                let address = addr_alloc.next().expect("Not enough addrs");
+                let ip = addr_alloc.next().expect("Not enough addrs");
                 let port = omicron_common::address::CLICKHOUSE_PORT;
-                let zone = dns_builder.host_zone(id, address).unwrap();
+                let zone = dns_builder.host_zone(id, ip).unwrap();
                 dns_builder
                     .service_backend_zone(ServiceName::Clickhouse, &zone, port)
                     .unwrap();
-                let address = SocketAddrV6::new(address, port, 0, 0);
-                request.datasets.push(DatasetEnsureBody {
+                request.services.push(ServiceZoneRequest {
                     id,
-                    zpool_id: u2_zpools[0],
-                    dataset_kind: crate::params::DatasetKind::Clickhouse,
-                    address,
+                    zone_type: ZoneType::Clickhouse,
+                    addresses: vec![ip],
+                    dataset: Some(DatasetRequest {
+                        id,
+                        name: DatasetName::new(
+                            u2_zpools[0].clone(),
+                            crate::params::DatasetKind::Clickhouse,
+                        ),
+                    }),
+                    gz_addresses: vec![],
+                    services: vec![ServiceZoneService {
+                        id,
+                        details: ServiceType::Clickhouse,
+                    }],
                 });
             }
 
             // Each zpool gets a crucible zone.
             //
             // TODO(https://github.com/oxidecomputer/omicron/issues/732): Remove
-            for zpool_id in u2_zpools {
-                let address = SocketAddrV6::new(
-                    addr_alloc.next().expect("Not enough addrs"),
-                    omicron_common::address::CRUCIBLE_PORT,
-                    0,
-                    0,
-                );
+            for pool in &u2_zpools {
+                let ip = addr_alloc.next().expect("Not enough addrs");
+                let port = omicron_common::address::CRUCIBLE_PORT;
                 let id = Uuid::new_v4();
-                let zone = dns_builder.host_zone(id, *address.ip()).unwrap();
+                let zone = dns_builder.host_zone(id, ip).unwrap();
                 dns_builder
                     .service_backend_zone(
                         ServiceName::Crucible(id),
                         &zone,
-                        address.port(),
+                        port,
                     )
                     .unwrap();
 
-                request.datasets.push(DatasetEnsureBody {
+                request.services.push(ServiceZoneRequest {
                     id,
-                    zpool_id,
-                    dataset_kind: crate::params::DatasetKind::Crucible,
-                    address,
+                    zone_type: ZoneType::Crucible,
+                    addresses: vec![ip],
+                    dataset: Some(DatasetRequest {
+                        id,
+                        name: DatasetName::new(
+                            pool.clone(),
+                            crate::params::DatasetKind::Crucible,
+                        ),
+                    }),
+                    gz_addresses: vec![],
+                    services: vec![ServiceZoneService {
+                        id,
+                        details: ServiceType::Crucible,
+                    }],
                 });
             }
 
@@ -453,9 +482,12 @@ impl Plan {
             // responsibility of being internal DNS servers.
             if idx < dns_subnets.len() {
                 let dns_subnet = &dns_subnets[idx];
-                let dns_addr = dns_subnet.dns_address().ip();
+                let ip = dns_subnet.dns_address().ip();
+                let http_address = SocketAddrV6::new(ip, DNS_HTTP_PORT, 0, 0);
+                let dns_address = SocketAddrV6::new(ip, DNS_PORT, 0, 0);
+
                 let id = Uuid::new_v4();
-                let zone = dns_builder.host_zone(id, dns_addr).unwrap();
+                let zone = dns_builder.host_zone(id, ip).unwrap();
                 dns_builder
                     .service_backend_zone(
                         ServiceName::InternalDns,
@@ -463,24 +495,22 @@ impl Plan {
                         DNS_HTTP_PORT,
                     )
                     .unwrap();
+                let dataset_name = DatasetName::new(
+                    u2_zpools[0].clone(),
+                    crate::params::DatasetKind::InternalDns,
+                );
+
                 request.services.push(ServiceZoneRequest {
                     id,
                     zone_type: ZoneType::InternalDns,
-                    addresses: vec![dns_addr],
-                    dataset: None,
+                    addresses: vec![ip],
+                    dataset: Some(DatasetRequest { id, name: dataset_name }),
                     gz_addresses: vec![dns_subnet.gz_address().ip()],
                     services: vec![ServiceZoneService {
                         id,
                         details: ServiceType::InternalDns {
-                            http_address: SocketAddrV6::new(
-                                dns_addr,
-                                DNS_HTTP_PORT,
-                                0,
-                                0,
-                            ),
-                            dns_address: SocketAddrV6::new(
-                                dns_addr, DNS_PORT, 0, 0,
-                            ),
+                            http_address,
+                            dns_address,
                         },
                     }],
                 });
