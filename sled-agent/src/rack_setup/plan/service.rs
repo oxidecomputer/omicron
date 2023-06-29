@@ -343,6 +343,7 @@ impl Plan {
                         dns_address,
                     },
                 }],
+                boundary_switches: vec![],
             });
         }
 
@@ -372,6 +373,7 @@ impl Plan {
                     id,
                     details: ServiceType::CockroachDb,
                 }],
+                boundary_switches: vec![],
             });
         }
 
@@ -418,6 +420,7 @@ impl Plan {
                         nic,
                     },
                 }],
+                boundary_switches: vec![],
             });
         }
 
@@ -461,6 +464,7 @@ impl Plan {
                         external_tls: !config.external_certificates.is_empty(),
                     },
                 }],
+                boundary_switches: vec![],
             })
         }
 
@@ -492,6 +496,7 @@ impl Plan {
                     id,
                     details: ServiceType::Oximeter,
                 }],
+                boundary_switches: vec![],
             })
         }
 
@@ -522,6 +527,7 @@ impl Plan {
                     id,
                     details: ServiceType::Clickhouse,
                 }],
+                boundary_switches: vec![],
             });
         }
 
@@ -550,6 +556,7 @@ impl Plan {
                     id,
                     details: ServiceType::CruciblePantry,
                 }],
+                boundary_switches: vec![],
             })
         }
 
@@ -585,6 +592,7 @@ impl Plan {
                         id,
                         details: ServiceType::Crucible,
                     }],
+                    boundary_switches: vec![],
                 });
             }
         }
@@ -638,6 +646,7 @@ impl Plan {
                 dataset: None,
                 gz_addresses: vec![],
                 services,
+                boundary_switches: vec![],
             });
         }
 

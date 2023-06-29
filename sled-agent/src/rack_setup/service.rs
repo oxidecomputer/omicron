@@ -1122,7 +1122,7 @@ impl ServiceInner {
                 get_sled_address(initialization_request.subnet)
             })
             .collect();
-        let service_plan = if let Some(plan) =
+        let mut service_plan = if let Some(plan) =
             ServicePlan::load(&self.log, storage_resources).await?
         {
             plan
@@ -1157,6 +1157,10 @@ impl ServiceInner {
             info!(self.log, "Initializing Rack Network");
             let dpd_clients = self.initialize_dpd_clients(&switch_mgmt_addrs);
 
+            // set of switches from uplinks, these are our targets for initial NAT configurations
+            let mut boundary_switch_addrs: HashSet<Ipv6Addr> = HashSet::new();
+
+            // configure uplink for each requested uplink in configuration
             for uplink_config in &rack_network_config.uplinks {
                 // Configure the switch requested by the user
                 // Raise error if requested switch is not found
@@ -1168,6 +1172,11 @@ impl ServiceInner {
                         uplink_config.switch
                     ))
                 })?;
+
+                // This switch will have an uplink configured, so lets add it to our boundary_switch_addrs
+                boundary_switch_addrs.insert(
+                    *switch_mgmt_addrs.get(&uplink_config.switch).unwrap(),
+                );
 
                 let (ipv6_entry, dpd_port_settings, port_id) =
                     self.build_uplink_config(uplink_config)?;
@@ -1202,6 +1211,15 @@ impl ServiceInner {
                 ddmd_client.advertise_prefix(Ipv6Subnet::new(
                     BOUNDARY_SERVICES_ADDR.parse().unwrap(),
                 ));
+            }
+            // Inject boundary_switch_addrs into ServiceZoneRequests
+            // When the opte interface is created for the service,
+            // nat entries will be created using the switches present here
+            for (_, request) in service_plan.services.iter_mut() {
+                for mut zone_request in request.services.iter_mut() {
+                    zone_request.boundary_switches =
+                        Vec::from_iter(boundary_switch_addrs.clone());
+                }
             }
         }
 
