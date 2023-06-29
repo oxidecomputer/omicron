@@ -187,7 +187,7 @@ async fn spawn_client(
     main_tx: mpsc::Sender<ConnToMainMsg>,
 ) -> PeerConnHandle {
     // Create a channel for sending `MainToConnMsg`s to this connection task
-    let (tx, rx) = mpsc::channel(2);
+    let (tx, mut rx) = mpsc::channel(2);
     let log = log.clone();
 
     let handle = tokio::spawn(async move {
@@ -234,14 +234,21 @@ async fn spawn_client(
                 })
                 .await;
 
-            // Test loopy
-            loop {
-                info!(
-                    log,
-                    "Still connected to addr: {}",
-                    identify.addr.clone()
-                );
-                sleep(CONNECTION_RETRY_TIMEOUT).await;
+            let conn = EstablishedConn {
+                peer_id: identify.id.clone(),
+                unique_id,
+                write_sock,
+                read_sock,
+                main_tx: main_tx.clone(),
+                rx,
+                log: log.clone(),
+            };
+
+            if let Some(returned_rx) = conn.run().await {
+                rx = returned_rx;
+            } else {
+                // The Main task told us to shutdown
+                return;
             }
         }
     });
@@ -362,7 +369,8 @@ impl EstablishedConn {
                 }
 
                 // Write some data
-                _ = self.write_sock.write_buf(write_cursor.as_mut().unwrap()), if write_cursor.is_some() => {
+                _ = self.write_sock.writable(), if write_cursor.is_some() => {
+                    self.write_sock.write_buf(write_cursor.as_mut().unwrap());
                     if !write_cursor.as_ref().unwrap().has_remaining() {
                         write_cursor = None;
                     }
@@ -437,12 +445,21 @@ async fn spawn_server(
             })
             .await;
 
-        // Test loopy
-        loop {
-            info!(log, "Still connected to addr: {}", identify.addr.clone());
-            sleep(CONNECTION_RETRY_TIMEOUT).await;
-        }
+        let conn = EstablishedConn {
+            peer_id: identify.id.clone(),
+            unique_id,
+            write_sock,
+            read_sock,
+            main_tx: main_tx.clone(),
+            rx,
+            log: log.clone(),
+        };
+
+        // We always exit on server tasks, as the remote peer
+        // will reconnect.
+        let _ = conn.run().await;
     });
+
     AcceptedConnHandle { handle, tx, addr, unique_id }
 }
 
