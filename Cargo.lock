@@ -3464,7 +3464,7 @@ name = "internal-dns-cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "clap 4.3.4",
+ "clap 4.3.8",
  "dropshot",
  "internal-dns 0.1.0",
  "omicron-common 0.1.0",
