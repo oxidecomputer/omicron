@@ -190,10 +190,10 @@ async fn handle_start_sled_agent_request(
 
     let response = match read_request(&mut stream).await? {
         Request::StartSledAgentRequest(request) => {
-            // The call to `request_agent` should be idempotent if the request
+            // The call to `request_sled_agent` should be idempotent if the request
             // was the same.
             bootstrap_agent
-                .request_agent(&request)
+                .request_sled_agent(&request)
                 .await
                 .map(|response| Response::SledAgentResponse(response))
                 .map_err(|err| {

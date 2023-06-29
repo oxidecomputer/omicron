@@ -218,30 +218,8 @@ pub enum DatasetKind {
     CockroachDb,
     Crucible,
     Clickhouse,
-}
-
-impl DatasetKind {
-    /// Returns the type of the zone which manages this dataset.
-    pub fn zone_type(&self) -> ZoneType {
-        match *self {
-            DatasetKind::CockroachDb => ZoneType::CockroachDb,
-            DatasetKind::Crucible => ZoneType::Crucible,
-            DatasetKind::Clickhouse => ZoneType::Clickhouse,
-        }
-    }
-
-    /// Returns the service type which runs in the zone managing this dataset.
-    ///
-    /// NOTE: This interface is only viable because datasets run a single
-    /// service in their zone. If that precondition is no longer true, this
-    /// interface should be re-visited.
-    pub fn service_type(&self) -> ServiceType {
-        match *self {
-            DatasetKind::CockroachDb => ServiceType::CockroachDb,
-            DatasetKind::Crucible => ServiceType::Crucible,
-            DatasetKind::Clickhouse => ServiceType::Clickhouse,
-        }
-    }
+    ExternalDns,
+    InternalDns,
 }
 
 impl From<DatasetKind> for sled_agent_client::types::DatasetKind {
@@ -251,6 +229,8 @@ impl From<DatasetKind> for sled_agent_client::types::DatasetKind {
             CockroachDb => Self::CockroachDb,
             Crucible => Self::Crucible,
             Clickhouse => Self::Clickhouse,
+            ExternalDns => Self::ExternalDns,
+            InternalDns => Self::InternalDns,
         }
     }
 }
@@ -259,9 +239,11 @@ impl From<DatasetKind> for nexus_client::types::DatasetKind {
     fn from(k: DatasetKind) -> Self {
         use DatasetKind::*;
         match k {
-            CockroachDb { .. } => Self::Cockroach,
+            CockroachDb => Self::Cockroach,
             Crucible => Self::Crucible,
             Clickhouse => Self::Clickhouse,
+            ExternalDns => Self::ExternalDns,
+            InternalDns => Self::InternalDns,
         }
     }
 }
@@ -273,35 +255,10 @@ impl std::fmt::Display for DatasetKind {
             Crucible => "crucible",
             CockroachDb { .. } => "cockroachdb",
             Clickhouse => "clickhouse",
+            ExternalDns { .. } => "external_dns",
+            InternalDns { .. } => "internal_dns",
         };
         write!(f, "{}", s)
-    }
-}
-
-/// Used to request a new dataset kind exists within a zpool.
-///
-/// Many dataset types are associated with services that will be
-/// instantiated when the dataset is detected.
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
-pub struct DatasetEnsureBody {
-    // The UUID of the dataset, as well as the service using it directly.
-    pub id: Uuid,
-    // The name (and UUID) of the Zpool which we are inserting into.
-    pub zpool_id: Uuid,
-    // The type of the filesystem.
-    pub dataset_kind: DatasetKind,
-    // The address on which the zone will listen for requests.
-    pub address: SocketAddrV6,
-}
-
-impl From<DatasetEnsureBody> for sled_agent_client::types::DatasetEnsureBody {
-    fn from(p: DatasetEnsureBody) -> Self {
-        Self {
-            zpool_id: p.zpool_id,
-            dataset_kind: p.dataset_kind.into(),
-            address: p.address.to_string(),
-            id: p.id,
-        }
     }
 }
 
@@ -540,6 +497,21 @@ impl std::fmt::Display for ZoneType {
     }
 }
 
+/// Describes a request to provision a specific dataset
+#[derive(
+    Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
+)]
+pub struct DatasetRequest {
+    pub id: Uuid,
+    pub name: crate::storage::dataset::DatasetName,
+}
+
+impl From<DatasetRequest> for sled_agent_client::types::DatasetRequest {
+    fn from(d: DatasetRequest) -> Self {
+        Self { id: d.id, name: d.name.into() }
+    }
+}
+
 /// Describes a request to create a zone running one or more services.
 #[derive(
     Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
@@ -553,7 +525,7 @@ pub struct ServiceZoneRequest {
     pub addresses: Vec<Ipv6Addr>,
     // Datasets which should be managed by this service.
     #[serde(default)]
-    pub dataset: Option<crate::storage::dataset::DatasetName>,
+    pub dataset: Option<DatasetRequest>,
     // The addresses in the global zone which should be created, if necessary
     // to route to the service.
     //
@@ -578,7 +550,7 @@ impl ServiceZoneRequest {
 
     // The name of a unique identifier for the zone, if one is necessary.
     pub fn zone_name_unique_identifier(&self) -> Option<String> {
-        self.dataset.as_ref().map(|d| d.pool().to_string())
+        self.dataset.as_ref().map(|d| d.name.pool().to_string())
     }
 }
 
@@ -625,10 +597,6 @@ impl TryFrom<ServiceZoneService>
 }
 
 /// Used to request that the Sled initialize multiple services.
-///
-/// This may be used to record that certain sleds are responsible for
-/// launching services which may not be associated with a dataset, such
-/// as Nexus.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 pub struct ServiceEnsureBody {
     pub services: Vec<ServiceZoneRequest>,
