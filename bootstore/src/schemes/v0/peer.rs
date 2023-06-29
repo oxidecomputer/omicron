@@ -11,6 +11,7 @@ use crate::trust_quorum::RackSecret;
 use bytes::Buf;
 use derive_more::From;
 use serde::Serialize;
+use sled_hardware::Baseboard;
 use slog::{debug, info, o, warn, Logger};
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::Cursor;
@@ -29,8 +30,6 @@ const CONN_BUF_SIZE: usize = 512 * 1024;
 const KEEPALIVE_TIMEOUT: Duration = Duration::from_secs(10);
 const FRAME_HEADER_SIZE: usize = 4;
 
-use sled_hardware::Baseboard;
-
 #[derive(Debug, Clone)]
 pub struct Config {
     id: Baseboard,
@@ -42,7 +41,19 @@ pub struct Config {
 }
 
 // A handle to a task managing a connection to a peer
+//
+// TODO: Probably need to add a unique atomic id so we can differentiate
+// messages from instances of old peer tasks that have been cancelled
 struct PeerConnHandle {
+    pub handle: JoinHandle<()>,
+    pub tx: mpsc::Sender<MainToConnMsg>,
+    pub addr: SocketAddrV6,
+}
+
+// A handle to a task of an accepted socket, pre-handshake
+// TODO: Probably need to add a unique atomic id so we can differentiate
+// messages from instances of old peer tasks that have been cancelled
+struct AcceptedConnHandle {
     pub handle: JoinHandle<()>,
     pub tx: mpsc::Sender<MainToConnMsg>,
     pub addr: SocketAddrV6,
@@ -212,7 +223,7 @@ async fn spawn_client(
 
             // Inform the main task that we have connected to a peer
             main_tx
-                .send(ConnToMainMsg::Connected {
+                .send(ConnToMainMsg::ConnectedClient {
                     addr: addr.clone(),
                     peer_id: identify.id.clone(),
                 })
@@ -249,7 +260,7 @@ async fn spawn_server(
     sock: TcpStream,
     main_tx: mpsc::Sender<ConnToMainMsg>,
     log: &Logger,
-) -> PeerConnHandle {
+) -> AcceptedConnHandle {
     // Create a channel for sending `MainToConnMsg`s to this connection task
     let (tx, rx) = mpsc::channel(2);
     let log = log.clone();
@@ -271,15 +282,19 @@ async fn spawn_server(
             Ok(val) => val,
             Err(e) => {
                 warn!(log, "Handshake error: {:?}", e; "addr" => addr.to_string());
-                main_tx.send(ConnToMainMsg::FailedHandshake { addr }).await;
-                // This is a server so we just bail and wait for a new connection
+                // This is a server so we bail and wait for a new connection
+                // We must inform the main task so it can clean up any metadata.
+                main_tx
+                    .send(ConnToMainMsg::FailedServerHandshake { addr })
+                    .await;
                 return;
             }
         };
 
         // Inform the main task that we have connected to a peer
         main_tx
-            .send(ConnToMainMsg::Connected {
+            .send(ConnToMainMsg::ConnectedServer {
+                accepted_addr: addr,
                 addr: identify.addr.clone(),
                 peer_id: identify.id.clone(),
             })
@@ -291,16 +306,28 @@ async fn spawn_server(
             sleep(CONNECTION_RETRY_TIMEOUT).await;
         }
     });
-    PeerConnHandle { handle, tx, addr }
+    AcceptedConnHandle { handle, tx, addr }
 }
 
 // Messages sent from connection managing tasks to the main peer task
 #[derive(Debug, PartialEq)]
 enum ConnToMainMsg {
-    Connected { addr: SocketAddrV6, peer_id: Baseboard },
-    Disconnected { peer_id: Baseboard },
+    ConnectedServer {
+        accepted_addr: SocketAddrV6,
+        addr: SocketAddrV6,
+        peer_id: Baseboard,
+    },
+    ConnectedClient {
+        addr: SocketAddrV6,
+        peer_id: Baseboard,
+    },
+    Disconnected {
+        peer_id: Baseboard,
+    },
     Forward(Envelope),
-    FailedHandshake { addr: SocketAddrV6 },
+    FailedServerHandshake {
+        addr: SocketAddrV6,
+    },
 }
 
 #[derive(Debug, PartialEq)]
@@ -353,19 +380,52 @@ pub struct PeerHandle {
     tx: mpsc::Sender<PeerApiRequest>,
 }
 
+// Some stats useful for operational purposes
+#[derive(Debug, Default, Clone)]
+pub struct Stats {
+    server_accepted_connections: u64,
+    server_closed_connections: u64,
+    client_connections: u64,
+    client_disconnections: u64,
+    peer_updates: u64,
+    failed_handshakes: u64,
+}
+
+#[derive(Debug, Clone)]
+pub struct Status {
+    stats: Stats,
+    peers: BTreeMap<SocketAddrV6, PeerStatus>,
+    fsm_state: String,
+}
+
+#[derive(Debug, Clone)]
+pub enum PeerStatus {
+    Negotiating,
+    Connected(Baseboard),
+    Disconnected,
+}
+
 /// A peer in the bootstore protocol
 pub struct Peer {
     config: Config,
     fsm: Fsm,
     peers: BTreeSet<SocketAddrV6>,
+    stats: Stats,
+
+    // Connections that have been accepted, but where negotiation has not
+    // finished At this point, we only know the client port of the connection,
+    // and so cannot identify  it as a `Peer`.
+    accepted_connections: BTreeMap<SocketAddrV6, AcceptedConnHandle>,
 
     // Connections that have not yet completed handshakes via `Hello` and
     // `Identify` messages.
     //
-    // We only store the connecting side, not accepting side here.
+    // We only store the client (connecting) side, not server (accepting) side here.
     negotiating_connections: BTreeMap<SocketAddrV6, PeerConnHandle>,
 
     // Active connections participating in scheme v0
+    //
+    // This consists of both client and server connections
     connections: BTreeMap<Baseboard, PeerConnHandle>,
 
     // Handle requests received from `PeerHandle`
@@ -426,6 +486,8 @@ impl Peer {
                 config,
                 fsm,
                 peers: BTreeSet::new(),
+                stats: Stats::default(),
+                accepted_connections: BTreeMap::new(),
                 negotiating_connections: BTreeMap::new(),
                 connections: BTreeMap::new(),
                 rx,
@@ -456,10 +518,10 @@ impl Peer {
                                 warn!(self.log, "Got connection from IPv4 address {}", addr);
                                 continue;
                             };
-                            // Remove any existing connection
                             // TODO: Log if a peer with a lower address connects?
-                            self.remove_peer(addr).await;
-                            info!(self.log, "Accepted connection from {}", addr.to_string());
+                            // Remove any existing connection
+                            self.remove_accepted_connection(&addr).await;
+                            info!(self.log, "Accepted connection from {}", addr);
                             let handle = spawn_server(
                                 self.config.id.clone(),
                                 self.config.addr.clone(),
@@ -468,6 +530,7 @@ impl Peer {
                                 self.conn_tx.clone(),
                                 &self.log
                             ).await;
+                            self.accepted_connections.insert(addr, handle);
                         },
                         Err(err) => {}
                     }
@@ -512,7 +575,40 @@ impl Peer {
                     }
                 }
                 Some(msg) = self.conn_rx.recv() => {
-                    println!("{:?}", msg);
+                    match msg {
+                        ConnToMainMsg::ConnectedServer{accepted_addr, addr, peer_id} => {
+                            let Some(accepted_handle) =
+                                self.accepted_connections.remove(&accepted_addr) else
+                            {
+                                warn!(
+                                    self.log,
+                                    "Missing AcceptedConnHandle";
+                                    "accepted_addr" => accepted_addr.to_string(),
+                                    "addr" => addr.to_string(),
+                                    "remote_peer_id" => peer_id.to_string()
+                                );
+                                panic!("Missing AcceptedConnHandle");
+                            };
+                            // Gracefully close any old tasks for this peer if they exist
+                            self.remove_established_connection(&peer_id);
+
+                            // Move from `accepted_connections` to `connections`
+                            let handle = PeerConnHandle {
+                                handle: accepted_handle.handle,
+                                tx: accepted_handle.tx,
+                                addr
+                            };
+                            self.connections.insert(peer_id, handle);
+                        }
+                        ConnToMainMsg::ConnectedClient{addr, peer_id} => {
+                        }
+                        ConnToMainMsg::Disconnected{peer_id: Baseboard} => {
+                        }
+                        ConnToMainMsg::Forward(envelope) => {
+                        }
+                        ConnToMainMsg::FailedServerHandshake {addr: SocketAddrV6} => {
+                        }
+                    }
                 }
                 _ = interval.tick() => {
                     let output = self.fsm.tick();
@@ -557,6 +653,13 @@ impl Peer {
         }
     }
 
+    async fn remove_accepted_connection(&mut self, addr: &SocketAddrV6) {
+        if let Some(handle) = self.accepted_connections.remove(&addr) {
+            // The connection has not yet completed its handshake
+            let _ = handle.tx.send(MainToConnMsg::Close).await;
+        }
+    }
+
     async fn remove_peer(&mut self, addr: SocketAddrV6) {
         if let Some(handle) = self.negotiating_connections.remove(&addr) {
             // The connection has not yet completed its handshake
@@ -567,10 +670,17 @@ impl Peer {
                 self.connections.iter().find(|(_, handle)| handle.addr == addr)
             {
                 let _ = handle.tx.send(MainToConnMsg::Close).await;
-                // probably a better way to avoid borrock issues
+                // probably a better way to avoid borrowck issues
                 let id = id.clone();
                 self.connections.remove(&id);
             }
+        }
+    }
+
+    async fn remove_established_connection(&mut self, peer_id: &Baseboard) {
+        if let Some(handle) = self.connections.remove(peer_id) {
+            // Gracefully stop the task
+            let _ = handle.tx.send(MainToConnMsg::Close).await;
         }
     }
 }
