@@ -102,6 +102,11 @@ function configure_os
 			CIDL_PLATFORM="macos"
 			CIDL_MD5="$CIDL_MD5_DARWIN"
 			CIDL_MD5FUNC="do_md5"
+			# TODO: Garbage compactor does not build macos anymore. There are a few issues
+			# with signing binaries and building from source. There are no breaking changes
+			# that we need to worry about between v21.7 and v22.8.9.24 so we can safely
+			# leave macos on v21.7 for now since it is solely used with the simulated omicron.
+			CIDL_VERSION="v21.7"
 			;;
 		linux-gnu*)
 			CIDL_PLATFORM="linux"
