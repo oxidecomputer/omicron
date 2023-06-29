@@ -65,14 +65,17 @@ struct AcceptedConnHandle {
 // Return the total amount of data written into `buf` including the 4-byte header
 fn write_framed<T: Serialize + ?Sized>(
     msg: &T,
-    buf: &mut [u8],
-) -> Result<usize, ciborium::ser::Error<std::io::Error>> {
-    let mut cursor = Cursor::new(&mut buf[FRAME_HEADER_SIZE..]);
+) -> Result<Vec<u8>, ciborium::ser::Error<std::io::Error>> {
+    let mut cursor = Cursor::new(vec![]);
+    // Write a size placeholder
+    cursor.write(&[0u8; FRAME_HEADER_SIZE]);
+    cursor.set_position(FRAME_HEADER_SIZE as u64);
     ciborium::into_writer(msg, &mut cursor)?;
-    let size: u32 = cursor.position().try_into().unwrap();
+    let size: u32 =
+        (cursor.position() - FRAME_HEADER_SIZE as u64).try_into().unwrap();
+    let mut buf = cursor.into_inner();
     buf[0..FRAME_HEADER_SIZE].copy_from_slice(&size.to_be_bytes());
-
-    Ok(size as usize + FRAME_HEADER_SIZE)
+    Ok(buf)
 }
 
 // Decode the 4-byte big-endian frame size header
@@ -95,35 +98,27 @@ async fn perform_handshake(
     sock: TcpStream,
     local_peer_id: &Baseboard,
     local_addr: SocketAddrV6,
-    write_buf: &mut [u8],
     read_buf: &mut [u8],
     log: &Logger,
 ) -> Result<(OwnedReadHalf, OwnedWriteHalf, Identify), HandshakeError> {
     let (mut read_sock, mut write_sock) = sock.into_split();
 
     // Serialize and write the handshake messages into `write_buf`
-    Hello::default().serialize_into(write_buf).unwrap();
-    let identify_size = write_framed(
-        &Identify { id: local_peer_id.clone(), addr: local_addr },
-        &mut write_buf[Hello::serialized_size()..],
-    )
-    .unwrap();
-    println!(
-        "written = {:?}",
-        &hex::encode(
-            &write_buf[Hello::serialized_size() + 4..][..identify_size - 4]
-        )
-    );
+    let mut hello_cursor = Cursor::new(Hello::default().serialize());
+    let identify = write_framed(&Identify {
+        id: local_peer_id.clone(),
+        addr: local_addr,
+    })?;
+    let mut identify_cursor = Cursor::new(&identify);
 
     let handshake_start = Instant::now();
-    let mut buf =
-        Cursor::new(&write_buf[..Hello::serialized_size() + identify_size]);
 
     // Read `Hello` and the frame size of `Identify`
     let initial_read = Hello::serialized_size() + FRAME_HEADER_SIZE;
 
     let mut total_read = 0;
     let mut identify_len = 0;
+    let mut identify: Option<Identify> = None;
 
     loop {
         let timeout =
@@ -131,21 +126,30 @@ async fn perform_handshake(
 
         let end = initial_read + identify_len;
 
+        let hello_written = !hello_cursor.has_remaining();
+
+        if identify.is_some() && !identify_cursor.has_remaining() {
+            return Ok((read_sock, write_sock, identify.unwrap()));
+        }
+
         tokio::select! {
             _ = sleep(timeout) => {
                 return Err(HandshakeError::Timeout);
             }
-            _ = write_sock.write_buf(&mut buf), if buf.has_remaining() => {
-                    debug!(log, "Handshake writing");
+            _ = write_sock.writable(), if identify_cursor.has_remaining() => {
+                if hello_cursor.has_remaining() {
+                    write_sock.write_buf(&mut hello_cursor).await;
+                } else {
+                    write_sock.write_buf(&mut identify_cursor).await;
+                }
             }
-            res  = read_sock.read(&mut read_buf[total_read..end]) => {
+            res  = read_sock.read(&mut read_buf[total_read..end]), if identify.is_none() => {
                 let n = res?;
                 total_read += n;
                 if total_read < initial_read {
                     continue;
                 }
                 if total_read == initial_read {
-                    debug!(log, "Handshake done with initial_read");
                     let hello =
                         Hello::from_bytes(&read_buf[..Hello::serialized_size()]).unwrap();
                     if hello.scheme != 0 {
@@ -161,11 +165,9 @@ async fn perform_handshake(
                     );
                 } else {
                     if total_read == end {
-                        debug!(log, "Identify len = {}", identify_len);
-                        println!("{:?}", &hex::encode(&read_buf[initial_read..end]));
-                        let identify: Identify =
-                            ciborium::from_reader(&read_buf[initial_read..end])?;
-                        return Ok((read_sock, write_sock, identify));
+                        identify = Some(
+                            ciborium::from_reader(&read_buf[initial_read..end])?
+                        );
                     }
                 }
             }
@@ -187,8 +189,6 @@ async fn spawn_client(
     let log = log.clone();
 
     let handle = tokio::spawn(async move {
-        // Create a write buffer and read buffer
-        let mut write_buf = vec![0u8; CONN_BUF_SIZE];
         let mut read_buf = vec![0u8; CONN_BUF_SIZE];
 
         loop {
@@ -209,7 +209,6 @@ async fn spawn_client(
                 sock,
                 &my_peer_id,
                 my_addr,
-                &mut write_buf,
                 &mut read_buf,
                 &log,
             )
@@ -236,21 +235,31 @@ async fn spawn_client(
 
             // Test loopy
             loop {
-                info!(log, "Still connected to addr: {}", addr);
+                info!(
+                    log,
+                    "Still connected to addr: {}",
+                    identify.addr.clone()
+                );
                 sleep(CONNECTION_RETRY_TIMEOUT).await;
             }
 
-            /* loop {
-                    tokio::select! {
-                        // Receive a message to be sent to the peer
-                        Some(msg) = rx.recv() => {
+            /*loop {
+                tokio::select! {
+                    Some(msg) = rx.recv() => {
+                        match msg {
+                            MainToConnMsg::Close => return;
+                            MainToConnMsg::Msg(msg) => {
+                            }
                         }
+                    }
 
-                        // Read some data from the receive side
+                    // Read some data from the receive side
 
-                        // Write some data
+                    // Write some data
+                    _ = write_sock.write_buf(&mut buf), if buf.has_remaining() => {
                     }
                 }
+            }
             */
         }
     });
@@ -271,15 +280,12 @@ async fn spawn_server(
     let (tx, rx) = mpsc::channel(2);
     let log = log.clone();
     let handle = tokio::spawn(async move {
-        // Create a write buffer and read buffer
-        let mut write_buf = vec![0u8; CONN_BUF_SIZE];
         let mut read_buf = vec![0u8; CONN_BUF_SIZE];
 
         let (read_sock, write_sock, identify) = match perform_handshake(
             sock,
             &my_peer_id,
             my_addr,
-            &mut write_buf,
             &mut read_buf,
             &log,
         )
