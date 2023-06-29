@@ -260,6 +260,10 @@ impl RunningZone {
         self.inner.zonepath.join("root")
     }
 
+    pub fn control_interface(&self) -> AddrObject {
+        AddrObject::new(self.inner.get_control_vnic_name(), "omicron6").unwrap()
+    }
+
     /// Runs a command within the Zone, return the output.
     //
     // NOTE: It's important that this function is synchronous.

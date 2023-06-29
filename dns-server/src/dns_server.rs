@@ -15,8 +15,7 @@ use anyhow::anyhow;
 use anyhow::Context;
 use pretty_hex::*;
 use serde::Deserialize;
-use slog::info;
-use slog::{debug, error, o, Logger};
+use slog::{debug, error, info, o, trace, Logger};
 use std::net::SocketAddr;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -150,7 +149,7 @@ async fn handle_dns_packet(request: Request) {
     let log = &request.log;
     let buf = &request.packet;
 
-    debug!(&log, "buffer"; "buffer" => ?buf.hex_dump());
+    trace!(&log, "buffer"; "buffer" => ?buf.hex_dump());
 
     // Decode the message.
     let mut dec = BinDecoder::new(&buf);
@@ -270,6 +269,12 @@ async fn handle_dns_message(
             }
         })
         .collect::<Result<Vec<_>, RequestError>>()?;
+    debug!(
+        &log,
+        "dns response";
+        "query" => ?query,
+        "records" => ?&response_records
+    );
     respond_records(request, rb, header, &response_records).await
 }
 

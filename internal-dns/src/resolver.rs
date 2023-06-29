@@ -6,7 +6,7 @@ use crate::DNS_ZONE;
 use omicron_common::address::{
     Ipv6Subnet, ReservedRackSubnet, AZ_PREFIX, DNS_PORT,
 };
-use slog::{debug, info};
+use slog::{debug, info, trace};
 use std::net::{IpAddr, Ipv6Addr, SocketAddr, SocketAddrV6};
 use trust_dns_proto::rr::record_type::RecordType;
 use trust_dns_resolver::config::{
@@ -70,6 +70,15 @@ impl Resolver {
         Self::new_from_subnet(log, subnet)
     }
 
+    /// Return a resolver that uses the system configuration (usually
+    /// /etc/resolv.conf) for the underlying nameservers.
+    pub fn new_with_resolver(
+        log: slog::Logger,
+        tokio_resolver: TokioAsyncResolver,
+    ) -> Self {
+        Resolver { log, inner: Box::new(tokio_resolver) }
+    }
+
     // TODO-correctness This function and its callers make assumptions about how
     // many internal DNS servers there are on the subnet and where they are.  Is
     // that okay?  It would seem more flexible not to assume this.  Instead, we
@@ -121,6 +130,107 @@ impl Resolver {
         Ok(*address)
     }
 
+    /// Returns the targets of the SRV records for a DNS name
+    ///
+    /// The returned values are generally other DNS names that themselves would
+    /// need to be looked up to find A/AAAA records.
+    pub async fn lookup_srv(
+        &self,
+        srv: crate::ServiceName,
+    ) -> Result<Vec<String>, ResolveError> {
+        let name = format!("{}.{}", srv.dns_name(), DNS_ZONE);
+        trace!(self.log, "lookup_srv"; "dns_name" => &name);
+        let response = self.inner.srv_lookup(&name).await?;
+        debug!(
+            self.log,
+            "lookup_srv";
+            "dns_name" => &name,
+            "response" => ?response
+        );
+
+        Ok(response.into_iter().map(|srv| srv.target().to_string()).collect())
+    }
+
+    pub async fn lookup_all_ipv6(
+        &self,
+        srv: crate::ServiceName,
+    ) -> Result<Vec<Ipv6Addr>, ResolveError> {
+        let name = format!("{}.{}", srv.dns_name(), DNS_ZONE);
+        trace!(self.log, "lookup_all_ipv6 srv"; "dns_name" => &name);
+        let response = self.inner.srv_lookup(&name).await?;
+        debug!(
+            self.log,
+            "lookup_ipv6 srv";
+            "dns_name" => &name,
+            "response" => ?response
+        );
+
+        // SRV records have a target, which is itself another DNS name that
+        // needs to be looked up in order to get to the actual IP addresses.
+        // Many DNS servers return these IP addresses directly in the response
+        // to the SRV query as Additional records.  Ours does not.  See
+        // omicron#3434.  So we need to do another round of lookups separately.
+        //
+        // According to the docs` for
+        // `trust_dns_resolver::lookup::SrvLookup::ip_iter()`, it sounds like
+        // trust-dns would have done this for us.  It doesn't.  See
+        // bluejekyll/trust-dns#1980.
+        //
+        // So if we have gotten any IPs, then we assume that one of the above
+        // issues has been addressed and so we have all the IPs and we're done.
+        // Otherwise, explicitly do the extra lookups.
+        let addresses: Vec<Ipv6Addr> = response
+            .ip_iter()
+            .filter_map(|addr| match addr {
+                IpAddr::V4(_) => None,
+                IpAddr::V6(addr) => Some(addr),
+            })
+            .collect();
+        if !addresses.is_empty() {
+            return Ok(addresses);
+        }
+
+        // What do we do if some of these queries succeed while others fail?  We
+        // may have some addresses, but the list might be incomplete.  That
+        // might be okay for some use cases but not others.  For now, we do the
+        // simple thing.  In the future, we'll want a more cueball-like resolver
+        // interface that better deals with these cases.
+        let log = &self.log;
+        let futures = response.iter().map(|srv| async {
+            let target = srv.target();
+            trace!(
+                log,
+                "lookup_all_ipv6: looking up SRV target";
+                "name" => ?target,
+            );
+            self.inner.ipv6_lookup(target.clone()).await
+        });
+        let results = futures::future::try_join_all(futures).await?;
+        let results = results
+            .into_iter()
+            .flat_map(|ipv6| ipv6.into_iter())
+            .collect::<Vec<_>>();
+        if results.is_empty() {
+            Err(ResolveError::NotFound(srv))
+        } else {
+            Ok(results)
+        }
+    }
+
+    pub async fn lookup_ip(
+        &self,
+        srv: crate::ServiceName,
+    ) -> Result<IpAddr, ResolveError> {
+        let name = format!("{}.{}", srv.dns_name(), DNS_ZONE);
+        debug!(self.log, "lookup srv"; "dns_name" => &name);
+        let response = self.inner.lookup_ip(&name).await?;
+        let address = response
+            .iter()
+            .next()
+            .ok_or_else(|| ResolveError::NotFound(srv))?;
+        Ok(address)
+    }
+
     /// Looks up a single [`SocketAddrV6`] based on the SRV name
     /// Returns an error if the record does not exist.
     pub async fn lookup_socket_v6(
@@ -155,20 +265,6 @@ impl Resolver {
                 ));
             }
         })
-    }
-
-    pub async fn lookup_ip(
-        &self,
-        srv: crate::ServiceName,
-    ) -> Result<IpAddr, ResolveError> {
-        let name = format!("{}.{}", srv.dns_name(), DNS_ZONE);
-        debug!(self.log, "lookup srv"; "dns_name" => &name);
-        let response = self.inner.lookup_ip(&name).await?;
-        let address = response
-            .iter()
-            .next()
-            .ok_or_else(|| ResolveError::NotFound(srv))?;
-        Ok(address)
     }
 }
 
@@ -426,6 +522,17 @@ mod test {
             .await
             .expect("Should have been able to look up IP address");
         assert!(cockroach_addrs.iter().any(|addr| addr.ip() == &ip));
+
+        // Look up all the Cockroach addresses.
+        let mut ips =
+            resolver.lookup_all_ipv6(ServiceName::Cockroach).await.expect(
+                "Should have been able to look up all CockroachDB addresses",
+            );
+        ips.sort();
+        assert_eq!(
+            ips,
+            cockroach_addrs.iter().map(|s| *s.ip()).collect::<Vec<_>>()
+        );
 
         // Look up Clickhouse
         let ip = resolver
