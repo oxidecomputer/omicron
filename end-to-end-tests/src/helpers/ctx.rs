@@ -127,7 +127,7 @@ pub async fn nexus_addr() -> Result<IpAddr> {
         &resolver,
         &dns_name,
         Duration::from_secs(1),
-        Duration::from_secs(300),
+        Duration::from_secs(600),
     )
     .await
 }
@@ -240,7 +240,7 @@ pub async fn build_client() -> Result<oxide_client::Client> {
             })
         },
         &Duration::from_secs(1),
-        &Duration::from_secs(300),
+        &Duration::from_secs(600),
     )
     .await
     .context("logging in")?;
@@ -270,10 +270,9 @@ async fn wait_for_records(
 ) -> Result<IpAddr> {
     wait_for_condition::<_, anyhow::Error, _, _>(
         || async {
-            resolver
-                .resolver()
-                .lookup_ip(dns_name)
-                .await
+            let lookup = resolver.resolver().lookup_ip(dns_name).await;
+            eprintln!("resolving {}: {:?}", dns_name, lookup);
+            lookup
                 .map_err(|e| match e.kind() {
                     ResolveErrorKind::NoRecordsFound { .. }
                     | ResolveErrorKind::Timeout => CondCheckError::NotYet,

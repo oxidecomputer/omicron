@@ -47,13 +47,21 @@ function ensure_zpools {
             echo "Zpool: [$ZPOOL]"
             VDEV_PATH="$OMICRON_TOP/$ZPOOL.vdev"
             if ! [[ -f "$VDEV_PATH" ]]; then
-                dd if=/dev/zero of="$VDEV_PATH" bs=1 count=0 seek=10G
+                dd if=/dev/zero of="$VDEV_PATH" bs=1 count=0 seek=6G
             fi
             success "ZFS vdev $VDEV_PATH exists"
             if [[ -z "$(zpool list -o name | grep $ZPOOL)" ]]; then
                 zpool create -f "$ZPOOL" "$VDEV_PATH"
             fi
             success "ZFS zpool $ZPOOL exists"
+     # XXX-dap
+     pwd
+     ls -l "$VDEV_PATH"
+     du -sh "$VDEV_PATH"
+     df -h "$VDEV_PATH"
+     df -h
+     df -h /tmp
+     mount
         done
     done
 }
