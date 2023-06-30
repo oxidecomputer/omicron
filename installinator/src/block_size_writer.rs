@@ -88,8 +88,7 @@ impl<W: AsyncWrite + Unpin> AsyncWrite for BlockSizeBufWriter<W> {
             // from `buf` to `inner` (if there's enough data in `buf`) or just
             // copy it into our buffer.
             if buf.len() >= block_size {
-                Pin::new(&mut self.inner)
-                    .poll_write(cx, &buf[..block_size])
+                Pin::new(&mut self.inner).poll_write(cx, &buf[..block_size])
             } else {
                 // `me.buf` is empty and `buf` is strictly less than
                 // `block_size`, so just copy it.
