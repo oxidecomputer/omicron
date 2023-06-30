@@ -5,12 +5,14 @@
 //! The entrypoint of the v0 scheme for use by bootstrap agent
 
 use super::messages::Identify;
-use super::{ApiError, Config as FsmConfig, Envelope, Fsm, Msg, Output};
+use super::{
+    ApiError, Config as FsmConfig, Envelope, Fsm, Msg as FsmMsg, Output,
+};
 use crate::schemes::Hello;
 use crate::trust_quorum::RackSecret;
 use bytes::Buf;
 use derive_more::From;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sled_hardware::Baseboard;
 use slog::{debug, info, o, warn, Logger};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
@@ -22,7 +24,7 @@ use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
-use tokio::time::{interval, sleep, Instant};
+use tokio::time::{interval, sleep, Instant, MissedTickBehavior};
 use uuid::Uuid;
 
 const CONNECTION_RETRY_TIMEOUT: Duration = Duration::from_secs(1);
@@ -30,6 +32,18 @@ const CONN_BUF_SIZE: usize = 512 * 1024;
 const KEEPALIVE_TIMEOUT: Duration = Duration::from_secs(10);
 const FRAME_HEADER_SIZE: usize = 4;
 const MSG_WRITE_QUEUE_CAPACITY: usize = 5;
+const PING_INTERVAL: Duration = Duration::from_secs(1);
+const INACTIVITY_TIMEOUT: Duration = Duration::from_secs(10);
+
+// A superset of messages sent and received during an established connection
+//
+// This does not include `Hello` and `Identify` messages, which are sent during
+// the handshake.
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
+enum Msg {
+    Ping,
+    Fsm(FsmMsg),
+}
 
 #[derive(Debug, Clone)]
 pub struct Config {
@@ -69,7 +83,7 @@ fn write_framed<T: Serialize + ?Sized>(
 ) -> Result<Vec<u8>, ciborium::ser::Error<std::io::Error>> {
     let mut cursor = Cursor::new(vec![]);
     // Write a size placeholder
-    cursor.write(&[0u8; FRAME_HEADER_SIZE]);
+    std::io::Write::write(&mut cursor, &[0u8; FRAME_HEADER_SIZE]);
     cursor.set_position(FRAME_HEADER_SIZE as u64);
     ciborium::into_writer(msg, &mut cursor)?;
     let size: u32 =
@@ -234,25 +248,36 @@ async fn spawn_client(
                 })
                 .await;
 
-            let conn = EstablishedConn {
-                peer_id: identify.id.clone(),
+            let mut conn = EstablishedConn::new(
+                identify.id.clone(),
                 unique_id,
                 write_sock,
                 read_sock,
-                main_tx: main_tx.clone(),
+                main_tx.clone(),
                 rx,
-                log: log.clone(),
-            };
+                log.clone(),
+            );
 
-            if let Some(returned_rx) = conn.run().await {
-                rx = returned_rx;
-            } else {
-                // The Main task told us to shutdown
-                return;
+            // We can only get errors back from `conn.run`
+            match conn.run().await {
+                ConnErr::Retry => {
+                    // The only thing we need to keep is our receiver from main
+                    rx = conn.rx;
+                }
+                ConnErr::Close => {
+                    // The Main task told us to shutdown
+                    return;
+                }
             }
         }
     });
     PeerConnHandle { handle, tx, addr, unique_id }
+}
+
+// An error returned from an EstablishedConn
+enum ConnErr {
+    Retry,
+    Close,
 }
 
 // Established connection management code running in its own task
@@ -264,125 +289,205 @@ struct EstablishedConn {
     main_tx: mpsc::Sender<ConnToMainMsg>,
     rx: mpsc::Receiver<MainToConnMsg>,
     log: Logger,
+    read_buf: Vec<u8>,
+    total_read: usize,
+
+    // Used for managing inactivity timeouts for the coonnection
+    last_received_msg: Instant,
+
+    // Keep a queue to write serialized messages into We limit the queue
+    // size, and if it gets exceeded it means the peer at the other
+    // end isn't pulling data out fast enough. This should be basically
+    // impossible to hit given the size and rate of message exchange
+    // between peers. We go ahead and close the connection if the queue
+    // fills.
+    write_queue: VecDeque<Vec<u8>>,
+
+    // The current serialized message being written if there is one
+    current_write: Cursor<Vec<u8>>,
 }
 
 impl EstablishedConn {
+    fn new(
+        peer_id: Baseboard,
+        unique_id: u64,
+        write_sock: OwnedWriteHalf,
+        read_sock: OwnedReadHalf,
+        main_tx: mpsc::Sender<ConnToMainMsg>,
+        rx: mpsc::Receiver<MainToConnMsg>,
+        log: Logger,
+    ) -> EstablishedConn {
+        EstablishedConn {
+            peer_id,
+            unique_id,
+            write_sock,
+            read_sock,
+            main_tx,
+            rx,
+            log,
+            read_buf: vec![0u8; CONN_BUF_SIZE],
+            total_read: 0,
+            last_received_msg: Instant::now(),
+            write_queue: VecDeque::with_capacity(MSG_WRITE_QUEUE_CAPACITY),
+            current_write: Cursor::new(Vec::new()),
+        }
+    }
+
     // Run the main loop of the connection
     //
-    // Return `None` if the task should shutdown
-    // Return `Some(rx)` if a new connection should be spun up
-    async fn run(mut self) -> Option<mpsc::Receiver<MainToConnMsg>> {
-        let mut read_buf = vec![0u8; CONN_BUF_SIZE];
-        // Keep a queue to write serialized messages into We limit the queue
-        // size, and if it gets exceeded it means the peer at the other
-        // end isn't pulling data out fast enough. This should be basically
-        // impossible to hit given the size and rate of message exchange
-        // between peers. We go ahead and close the connection if the queue
-        // fills.
-        let mut write_queue: VecDeque<Vec<u8>> =
-            VecDeque::with_capacity(MSG_WRITE_QUEUE_CAPACITY);
-
-        // The current serialized message being written if there is one
-        let mut write_cursor: Option<Cursor<Vec<u8>>> = None;
-
-        let mut total_read = 0;
+    // The task can only return a `ConnErr`, otherwise it runs forever
+    async fn run(&mut self) -> ConnErr {
+        let mut interval = interval(PING_INTERVAL);
+        interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
 
         loop {
-            if write_cursor.is_none() && !write_queue.is_empty() {
-                write_cursor =
-                    Some(Cursor::new(write_queue.pop_front().unwrap()));
+            if !self.current_write.has_remaining() && !self.write_queue.is_empty() {
+                self.current_write=
+                    Cursor::new(self.write_queue.pop_front().unwrap());
             }
-            tokio::select! {
-                Some(msg) = self.rx.recv() => {
-                    match msg {
-                        MainToConnMsg::Close => {
-                            let _ = self.close().await;
-                            return None;
-                        }
-                        MainToConnMsg::Msg(msg) => {
-                            if write_queue.len() == MSG_WRITE_QUEUE_CAPACITY {
-                                warn!(
-                                    self.log,
-                                    "Closing connection: write queue full",
-                                );
-                                return Some(self.close().await);
-                            } else {
-                                match write_framed(&msg) {
-                                    Ok(msg) => {
-                                        write_queue.push_back(msg);
-                                    }
-                                    Err(e) => {
-                                        warn!(
-                                            self.log,
-                                            "Closing connection: Failed to serialize msg: {}",
-                                             e
-                                        );
-                                        return Some(self.close().await);
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
 
-                // Read some data from the receive side
-                res = self.read_sock.read(&mut read_buf[total_read..]) => {
-                    match res {
-                        Ok(n) => {
-                            total_read += n;
-                            if total_read < FRAME_HEADER_SIZE {
-                                continue;
-                            }
-                            // Read frame size
-                            let size =
-                                read_frame_size(read_buf[..FRAME_HEADER_SIZE].try_into().unwrap());
-                            let end = size + FRAME_HEADER_SIZE;
-                            if end < total_read {
-                                continue;
-                            }
-                            let msg: Msg  = match ciborium::from_reader(&read_buf[FRAME_HEADER_SIZE..end]) {
-                                Ok(msg) => {
-                                    // Move any remaining bytes to the beginning of the buffer.
-                                    read_buf.copy_within(end..total_read, 0);
-                                    read_buf.truncate(total_read-end);
-                                    msg
-                                }
-                                Err(e) => {
-                                    warn!(
-                                        self.log,
-                                        "Closing connection: failed to deserialize: {}",
-                                        e
-                                    );
-                                    return Some(self.close().await);
-                                }
-                            };
+            let res = tokio::select! {
+                _ = interval.tick() => {
+                    self.ping().await
+                }
+                Some(msg) = self.rx.recv() => {
+                    self.on_msg_from_main(msg).await
+                }
+                res = self.read_sock.read(&mut self.read_buf[self.total_read..]) => {
+                    self.read(res).await
+                }
+                res = self.write_sock.write_buf(&mut self.current_write), 
+                   if self.current_write.has_remaining() => {
+                        self.write(res).await
+                }
+            };
+
+            if let Err(err) = res {
+                return err;
+            }
+        }
+    }
+
+    async fn on_msg_from_main(&mut self, msg: MainToConnMsg) -> Result<(), ConnErr> {
+        match msg {
+            MainToConnMsg::Close => {
+                let _ = self.close().await;
+                return Err(ConnErr::Close);
+            }
+            MainToConnMsg::Msg(msg) => {
+                if self.write_queue.len() == MSG_WRITE_QUEUE_CAPACITY {
+                    warn!(self.log, "Closing connection: write queue full");
+                    self.close().await
+                } else {
+                    match write_framed(&msg) {
+                        Ok(msg) => {
+                            self.write_queue.push_back(msg);
+                            Ok(())
                         }
                         Err(e) => {
                             warn!(
-                                self.log,
-                                "Closing connection: failed to read: {}",
-                                e
+                                self.log, 
+                                "Closing connection: Failed to serialize msg: {}",
+                                e 
                             );
-                            return Some(self.close().await);
+                            self.close().await
                         }
-                    }
-                }
-
-                // Write some data
-                _ = self.write_sock.writable(), if write_cursor.is_some() => {
-                    self.write_sock.write_buf(write_cursor.as_mut().unwrap());
-                    if !write_cursor.as_ref().unwrap().has_remaining() {
-                        write_cursor = None;
                     }
                 }
             }
         }
     }
 
+    async fn write(&mut self, res: Result<usize, std::io::Error>) -> Result<(), ConnErr> {
+        match res {
+            Ok(_) => {
+                if !self.current_write.has_remaining() {
+                    self.current_write = Cursor::new(Vec::new());
+                }
+                Ok(())
+            }
+            Err(e) => {
+                warn!(self.log, "Closing connection: Failed to write: {}", e);
+                self.close().await
+            }
+        }
+    }
+
+    async fn read(&mut self, res: Result<usize, std::io::Error>) -> Result<(), ConnErr> {
+        match res {
+            Ok(n) => {
+                self.total_read += n;
+            }
+            Err(e) => {
+                warn!(self.log, "Closing connection: failed to read: {}", e);
+                return self.close().await;
+            }
+        }
+
+        // We may have more than one message that has been read
+        loop {
+            if self.total_read < FRAME_HEADER_SIZE {
+                return Ok(());
+            }
+            // Read frame size
+            let size = read_frame_size(
+                self.read_buf[..FRAME_HEADER_SIZE].try_into().unwrap(),
+            );
+            let end = size + FRAME_HEADER_SIZE;
+            if end < self.total_read {
+                return Ok(());
+            }
+            let msg: Msg = match ciborium::from_reader(
+                &self.read_buf[FRAME_HEADER_SIZE..end],
+            ) {
+                Ok(msg) => {
+                    // Move any remaining bytes to the beginning of the buffer.
+                    self.read_buf.copy_within(end..self.total_read, 0);
+                    self.total_read = self.total_read - end;
+                    msg
+                }
+                Err(e) => {
+                    warn!(
+                        self.log,
+                        "Closing connection: failed to deserialize: {}", e
+                    );
+                    return self.close().await;
+                }
+            };
+            self.last_received_msg = Instant::now();
+            println!("TODO: Do something with {:?}", msg);
+        }
+            
+    }
+
+    // Send ping messages and check for inactivity timeouts
+    async fn ping(&mut self) -> Result<(), ConnErr> {
+        if Instant::now() - self.last_received_msg > INACTIVITY_TIMEOUT {
+            warn!(self.log, "Closing connection: inactivity timeout",);
+            return self.close().await;
+        }
+        if self.write_queue.len() == MSG_WRITE_QUEUE_CAPACITY {
+            warn!(self.log, "Closing connection: write queue full",);
+            self.close().await
+        } else {
+            match write_framed(&Msg::Ping) {
+                Ok(msg) => {
+                    self.write_queue.push_back(msg);
+                    Ok(())
+                }
+                Err(e) => {
+                    warn!(
+                        self.log,
+                        "Closing connection: Failed to serialize msg: {}", e
+                    );
+                    self.close().await
+                }
+            }
+        }
+    }
+
     // Close and drop the connection.
-    //
-    // Return `rx` as it is not clonable.
-    async fn close(mut self) -> mpsc::Receiver<MainToConnMsg> {
+    async fn close(&mut self) -> Result<(), ConnErr> {
         self.main_tx
             .send(ConnToMainMsg {
                 handle_unique_id: self.unique_id,
@@ -391,8 +496,8 @@ impl EstablishedConn {
                 },
             })
             .await;
-        self.write_sock.shutdown();
-        self.rx
+        self.write_sock.shutdown().await;
+        Err(ConnErr::Retry)
     }
 }
 
@@ -445,15 +550,15 @@ async fn spawn_server(
             })
             .await;
 
-        let conn = EstablishedConn {
-            peer_id: identify.id.clone(),
+        let mut conn = EstablishedConn::new(
+            identify.id.clone(),
             unique_id,
             write_sock,
             read_sock,
-            main_tx: main_tx.clone(),
+            main_tx.clone(),
             rx,
-            log: log.clone(),
-        };
+            log.clone(),
+        );
 
         // We always exit on server tasks, as the remote peer
         // will reconnect.
@@ -790,7 +895,7 @@ impl Peer {
                     panic!("Missing AcceptedConnHandle");
                 };
                 // Gracefully close any old tasks for this peer if they exist
-                self.remove_established_connection(&peer_id);
+                self.remove_established_connection(&peer_id).await;
 
                 // Move from `accepted_connections` to `connections`
                 let handle = PeerConnHandle {
