@@ -13,7 +13,6 @@ use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils_macros::nexus_test;
 use omicron_common::address::IpRange;
 use omicron_common::address::Ipv4Range;
-use omicron_common::address::Ipv6Range;
 use omicron_common::api::external::{
     AddressLot, AddressLotBlock, AddressLotCreateResponse, AddressLotKind,
     IdentityMetadataCreateParams,
