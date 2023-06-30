@@ -135,7 +135,8 @@ hubris_artifacts=$(curl --netrc -fsS "https://api.github.com/repos/oxidecomputer
 
 add_hubris_artifacts() {
     series="$1"
-    shift
+    dockdir="$2"
+    shift 2
 
     manifest=/work/manifest-$series.toml
     cp /work/manifest.toml "$manifest"
@@ -147,8 +148,8 @@ add_hubris_artifacts() {
         noun=${noun%-?}
         tufaceous_kind=${noun//sidecar/switch}_rot
         hubris_kind=${noun}-rot
-        path_a="/work/dvt-dock/staging/build-$hubris_kind-image-a-cert-dev.zip"
-        path_b="/work/dvt-dock/staging/build-$hubris_kind-image-b-cert-dev.zip"
+        path_a="/work/dvt-dock/$dockdir/build-$hubris_kind-image-a-cert-dev.zip"
+        path_b="/work/dvt-dock/$dockdir/build-$hubris_kind-image-b-cert-dev.zip"
         version_a=$(/work/caboose-util read-version "$path_a")
         version_b=$(/work/caboose-util read-version "$path_b")
         if [[ "$version_a" != "$version_b" ]]; then
@@ -198,8 +199,9 @@ EOF
     done
 }
 
-add_hubris_artifacts dogfood gimlet-c psc-b sidecar-b
-add_hubris_artifacts pvt1 gimlet-d psc-b sidecar-c
+# usage:              SERIES   DVT_DOCK_DIR  BOARDS...
+add_hubris_artifacts  dogfood  staging       gimlet-c psc-b sidecar-b
+add_hubris_artifacts  pvt1     staging       gimlet-d psc-b sidecar-c
 
 for series in dogfood pvt1; do
     /work/tufaceous assemble --no-generate-key /work/manifest-$series.toml /work/repo-$series.zip
