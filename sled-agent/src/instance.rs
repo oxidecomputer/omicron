@@ -145,12 +145,8 @@ fn service_name() -> &'static str {
     "svc:/system/illumos/propolis-server"
 }
 
-fn instance_name(id: &Uuid) -> String {
-    format!("vm-{}", id)
-}
-
-fn fmri_name(id: &Uuid) -> String {
-    format!("{}:{}", service_name(), instance_name(id))
+fn fmri_name() -> String {
+    format!("{}:default", service_name())
 }
 
 fn propolis_zone_name(id: &Uuid) -> String {
@@ -913,10 +909,9 @@ impl Instance {
             .add_property("listen_port", "astring", &PROPOLIS_PORT.to_string())
             .add_property("metric_addr", "astring", &metric_addr.to_string());
 
-        let instance_name = instance_name(inner.propolis_id());
         let profile = ProfileBuilder::new("omicron").add_service(
             ServiceBuilder::new("system/illumos/propolis-server").add_instance(
-                ServiceInstanceBuilder::new(&instance_name)
+                ServiceInstanceBuilder::new("default")
                     .add_property_group(config),
             ),
         );
@@ -928,10 +923,11 @@ impl Instance {
         // This isn't strictly necessary - we wait for the HTTP server below -
         // but it helps distinguish "online in SMF" from "responding to HTTP
         // requests".
-        let fmri = fmri_name(inner.propolis_id());
+        let fmri = fmri_name();
         wait_for_service(Some(&zname), &fmri)
             .await
             .map_err(|_| Error::Timeout(fmri.to_string()))?;
+        info!(inner.log, "Propolis SMF service is online");
 
         let server_addr = SocketAddr::new(inner.propolis_ip, PROPOLIS_PORT);
         inner.state.current_mut().propolis_addr = Some(server_addr);
@@ -948,6 +944,7 @@ impl Instance {
         // yet. Wait for it to respond to requests, so users of the instance
         // don't need to worry about initialization races.
         wait_for_http_server(&inner.log, &client).await?;
+        info!(inner.log, "Propolis HTTP server online");
 
         Ok(PropolisSetup { client, running_zone })
     }
