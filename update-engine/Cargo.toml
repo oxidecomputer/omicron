@@ -13,7 +13,6 @@ futures.workspace = true
 indexmap.workspace = true
 linear-map.workspace = true
 petgraph.workspace = true
-pin-project-lite.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 serde_with.workspace = true
