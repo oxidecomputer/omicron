@@ -290,7 +290,8 @@ pub struct ZpoolName {
     kind: ZpoolKind,
 }
 
-const ZPOOL_NAME_REGEX: &str = r"^ox[ip]_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$";
+const ZPOOL_NAME_REGEX: &str =
+    r"^ox[ip]_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$";
 
 /// Custom JsonSchema implementation to encode the constraints on Name.
 impl JsonSchema for ZpoolName {
