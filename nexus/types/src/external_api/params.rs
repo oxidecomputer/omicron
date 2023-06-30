@@ -8,11 +8,14 @@
 use crate::external_api::shared;
 use base64::Engine;
 use chrono::{DateTime, Utc};
-use omicron_common::api::external::{
-    AddressLotKind, ByteCount, IdentityMetadataCreateParams,
-    IdentityMetadataUpdateParams, InstanceCpuCount, IpNet, Ipv4Net, Ipv6Net,
-    Name, NameOrId, PaginationOrder, RouteDestination, RouteTarget,
-    SemverVersion,
+use omicron_common::{
+    address::IpRange,
+    api::external::{
+        AddressLotKind, ByteCount, IdentityMetadataCreateParams,
+        IdentityMetadataUpdateParams, InstanceCpuCount, IpNet, Ipv4Net,
+        Ipv6Net, Name, NameOrId, PaginationOrder, RouteDestination,
+        RouteTarget, SemverVersion,
+    },
 };
 use schemars::JsonSchema;
 use serde::{
@@ -1242,17 +1245,7 @@ pub struct AddressLotCreate {
     /// The kind of address lot to create.
     pub kind: AddressLotKind,
     /// The blocks to add along with the new address lot.
-    pub blocks: Vec<AddressLotBlockCreate>,
-}
-
-/// Parameters for creating an address lot block. Fist and last addresses are
-/// inclusive.
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct AddressLotBlockCreate {
-    /// The first address in the lot (inclusive).
-    pub first_address: IpAddr,
-    /// The last address in the lot (inclusive).
-    pub last_address: IpAddr,
+    pub blocks: Vec<IpRange>,
 }
 
 /// Parameters for creating a loopback address on a particular rack switch.

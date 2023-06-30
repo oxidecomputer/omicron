@@ -7,6 +7,7 @@ use crate::schema::{address_lot, address_lot_block, address_lot_rsvd_block};
 use db_macros::Resource;
 use ipnetwork::IpNetwork;
 use nexus_types::identity::Resource;
+use omicron_common::address::IpRange;
 use omicron_common::api::external;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -108,12 +109,13 @@ pub struct AddressLotBlock {
 }
 
 impl AddressLotBlock {
-    pub fn new(
-        address_lot_id: Uuid,
-        first_address: IpNetwork,
-        last_address: IpNetwork,
-    ) -> Self {
-        Self { id: Uuid::new_v4(), address_lot_id, first_address, last_address }
+    pub fn new(address_lot_id: Uuid, ip_range: IpRange) -> Self {
+        Self {
+            id: Uuid::new_v4(),
+            address_lot_id,
+            first_address: ip_range.first_address().into(),
+            last_address: ip_range.last_address().into(),
+        }
     }
 }
 

@@ -18,7 +18,6 @@ use nexus_db_queries::db::datastore::DnsVersionUpdateBuilder;
 use nexus_db_queries::db::datastore::RackInit;
 use nexus_types::external_api::params::Address;
 use nexus_types::external_api::params::AddressConfig;
-use nexus_types::external_api::params::AddressLotBlockCreate;
 use nexus_types::external_api::params::RouteConfig;
 use nexus_types::external_api::params::SwitchPortConfig;
 use nexus_types::external_api::params::{
@@ -29,6 +28,7 @@ use nexus_types::external_api::shared::FleetRole;
 use nexus_types::external_api::shared::SiloIdentityMode;
 use nexus_types::external_api::shared::SiloRole;
 use nexus_types::internal_api::params::DnsRecord;
+use omicron_common::address::IpRange;
 use omicron_common::api::external::AddressLotKind;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
@@ -42,6 +42,7 @@ use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::collections::HashMap;
 use std::net::IpAddr;
+use std::net::Ipv6Addr;
 use std::str::FromStr;
 use uuid::Uuid;
 
@@ -263,27 +264,28 @@ impl super::Nexus {
 
             let kind = AddressLotKind::Infra;
 
-            let first_address = IpAddr::V4(rack_network_config.infra_ip_first);
-            let last_address = IpAddr::V4(rack_network_config.infra_ip_last);
-            let ipv4_block =
-                AddressLotBlockCreate { first_address, last_address };
+            let ipv4_block = IpRange::try_from((
+                rack_network_config.infra_ip_first,
+                rack_network_config.infra_ip_last,
+            ))
+            .unwrap();
 
             let first_address =
-                IpAddr::from_str("fd00:99::1").map_err(|e| {
+                Ipv6Addr::from_str("fd00:99::1").map_err(|e| {
                     Error::internal_error(&format!(
-                        "failed to parse `fd00:99::1` as `IpAddr`: {e}"
+                        "failed to parse `fd00:99::1` as `Ipv6Addr`: {e}"
                     ))
                 })?;
 
             let last_address =
-                IpAddr::from_str("fd00:99::ffff").map_err(|e| {
+                Ipv6Addr::from_str("fd00:99::ffff").map_err(|e| {
                     Error::internal_error(&format!(
-                        "failed to parse `fd00:99::ffff` as `IpAddr`: {e}"
+                        "failed to parse `fd00:99::ffff` as `Ipv6Addr`: {e}"
                     ))
                 })?;
 
             let ipv6_block =
-                AddressLotBlockCreate { first_address, last_address };
+                IpRange::try_from((first_address, last_address)).unwrap();
 
             let blocks = vec![ipv4_block, ipv6_block];
 
@@ -315,7 +317,7 @@ impl super::Nexus {
                 address_lot: NameOrId::Name(address_lot_name.clone()),
                 rack_id,
                 switch_location: switch_location.clone(),
-                address: first_address,
+                address: first_address.into(),
                 mask: 64,
             };
 

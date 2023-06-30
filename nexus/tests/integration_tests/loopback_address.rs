@@ -9,11 +9,12 @@ use http::method::Method;
 use http::StatusCode;
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use nexus_test_utils_macros::nexus_test;
+use omicron_common::address::{IpRange, Ipv4Range};
 use omicron_common::api::external::{
     AddressLotKind, IdentityMetadataCreateParams, LoopbackAddress, NameOrId,
 };
 use omicron_nexus::external_api::params::{
-    AddressLotBlockCreate, AddressLotCreate, LoopbackAddressCreate,
+    AddressLotCreate, LoopbackAddressCreate,
 };
 use omicron_nexus::external_api::views::Rack;
 
@@ -31,10 +32,13 @@ async fn test_loopback_address_basic_crud(ctx: &ControlPlaneTestContext) {
             description: "an address parking lot".into(),
         },
         kind: AddressLotKind::Infra,
-        blocks: vec![AddressLotBlockCreate {
-            first_address: "203.0.113.10".parse().unwrap(),
-            last_address: "203.0.113.100".parse().unwrap(),
-        }],
+        blocks: vec![IpRange::V4(
+            Ipv4Range::new(
+                "203.0.113.10".parse().unwrap(),
+                "203.0.113.100".parse().unwrap(),
+            )
+            .unwrap(),
+        )],
     };
 
     NexusRequest::objects_post(

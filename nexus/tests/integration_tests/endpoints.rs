@@ -410,10 +410,13 @@ lazy_static! {
                 description: "an address parking lot".into(),
             },
             kind: AddressLotKind::Infra,
-            blocks: vec![params::AddressLotBlockCreate {
-                first_address: "203.0.113.10".parse().unwrap(),
-                last_address: "203.0.113.20".parse().unwrap(),
-            }],
+            blocks: vec![IpRange::V4(
+                Ipv4Range::new(
+                    "203.0.113.10".parse().unwrap(),
+                    "203.0.113.20".parse().unwrap(),
+                )
+                .unwrap()
+            )],
         };
 }
 

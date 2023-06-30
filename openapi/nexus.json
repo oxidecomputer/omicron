@@ -8031,26 +8031,6 @@
           "last_address"
         ]
       },
-      "AddressLotBlockCreate": {
-        "description": "Parameters for creating an address lot block. Fist and last addresses are inclusive.",
-        "type": "object",
-        "properties": {
-          "first_address": {
-            "description": "The first address in the lot (inclusive).",
-            "type": "string",
-            "format": "ip"
-          },
-          "last_address": {
-            "description": "The last address in the lot (inclusive).",
-            "type": "string",
-            "format": "ip"
-          }
-        },
-        "required": [
-          "first_address",
-          "last_address"
-        ]
-      },
       "AddressLotBlockResultsPage": {
         "description": "A single page of results",
         "type": "object",
@@ -8080,7 +8060,7 @@
             "description": "The blocks to add along with the new address lot.",
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/AddressLotBlockCreate"
+              "$ref": "#/components/schemas/IpRange"
             }
           },
           "description": {
