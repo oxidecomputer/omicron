@@ -270,9 +270,10 @@ async fn wait_for_records(
 ) -> Result<IpAddr> {
     wait_for_condition::<_, anyhow::Error, _, _>(
         || async {
-            let lookup = resolver.resolver().lookup_ip(dns_name).await;
-            eprintln!("resolving {}: {:?}", dns_name, lookup);
-            lookup
+            resolver
+                .resolver()
+                .lookup_ip(dns_name)
+                .await
                 .map_err(|e| match e.kind() {
                     ResolveErrorKind::NoRecordsFound { .. }
                     | ResolveErrorKind::Timeout => CondCheckError::NotYet,

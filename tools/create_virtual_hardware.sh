@@ -54,14 +54,6 @@ function ensure_zpools {
                 zpool create -f "$ZPOOL" "$VDEV_PATH"
             fi
             success "ZFS zpool $ZPOOL exists"
-     # XXX-dap
-     pwd
-     ls -l "$VDEV_PATH"
-     du -sh "$VDEV_PATH"
-     df -h "$VDEV_PATH"
-     df -h
-     df -h /tmp
-     mount
         done
     done
 }
