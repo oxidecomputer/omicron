@@ -5,11 +5,10 @@
 //! HTTP entrypoint functions for the sled agent's exposed API
 
 use crate::params::{
-    DatasetEnsureBody, DiskEnsureBody, InstanceEnsureBody,
-    InstancePutMigrationIdsBody, InstancePutStateBody,
-    InstancePutStateResponse, InstanceUnregisterResponse, ServiceEnsureBody,
-    SledRole, TimeSync, VpcFirewallRulesEnsureBody, ZoneBundleId,
-    ZoneBundleMetadata, Zpool,
+    DiskEnsureBody, InstanceEnsureBody, InstancePutMigrationIdsBody,
+    InstancePutStateBody, InstancePutStateResponse, InstanceUnregisterResponse,
+    ServiceEnsureBody, SledRole, TimeSync, VpcFirewallRulesEnsureBody,
+    ZoneBundleId, ZoneBundleMetadata, Zpool,
 };
 use dropshot::{
     endpoint, ApiDescription, FreeformBody, HttpError, HttpResponseCreated,
@@ -33,7 +32,7 @@ type SledApiDescription = ApiDescription<SledAgent>;
 pub fn api() -> SledApiDescription {
     fn register_endpoints(api: &mut SledApiDescription) -> Result<(), String> {
         api.register(disk_put)?;
-        api.register(filesystem_put)?;
+        api.register(cockroachdb_init)?;
         api.register(instance_issue_disk_snapshot_request)?;
         api.register(instance_put_migration_ids)?;
         api.register(instance_put_state)?;
@@ -205,24 +204,16 @@ async fn sled_role_get(
     Ok(HttpResponseOk(sa.get_role().await))
 }
 
+/// Initializes a CockroachDB cluster
 #[endpoint {
-    method = PUT,
-    path = "/filesystem",
+    method = POST,
+    path = "/cockroachdb",
 }]
-async fn filesystem_put(
+async fn cockroachdb_init(
     rqctx: RequestContext<SledAgent>,
-    body: TypedBody<DatasetEnsureBody>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let sa = rqctx.context();
-    let body_args = body.into_inner();
-    sa.filesystem_ensure(
-        body_args.id,
-        body_args.zpool_id,
-        body_args.dataset_kind,
-        body_args.address,
-    )
-    .await
-    .map_err(|e| Error::from(e))?;
+    sa.cockroachdb_initialize().await?;
     Ok(HttpResponseUpdatedNoContent())
 }
 
