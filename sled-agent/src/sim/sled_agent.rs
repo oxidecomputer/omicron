@@ -480,6 +480,17 @@ impl SledAgent {
             .await;
     }
 
+    pub async fn get_zpools(&self) -> Vec<Uuid> {
+        self.storage.lock().await.get_all_zpools()
+    }
+
+    pub async fn get_datasets(
+        &self,
+        zpool_id: Uuid,
+    ) -> Vec<(Uuid, SocketAddr)> {
+        self.storage.lock().await.get_all_datasets(zpool_id)
+    }
+
     /// Adds a Zpool to the simulated sled agent.
     pub async fn create_zpool(
         &self,

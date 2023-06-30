@@ -3,6 +3,7 @@ members = [
     "api_identity",
     "bootstore",
     "bootstrap-agent-client",
+    "caboose-util",
     "certificates",
     "common",
     "ddm-admin-client",
@@ -22,6 +23,7 @@ members = [
     "installinator-artifactd",
     "installinator-common",
     "internal-dns",
+    "internal-dns-cli",
     "ipcc-key-value",
     "key-manager",
     "nexus",
@@ -63,6 +65,7 @@ members = [
 
 default-members = [
     "bootstrap-agent-client",
+    "caboose-util",
     "certificates",
     "common",
     "ddm-admin-client",
@@ -81,6 +84,7 @@ default-members = [
     "installinator-artifactd",
     "installinator-common",
     "internal-dns",
+    "internal-dns-cli",
     "ipcc-key-value",
     "key-manager",
     "nexus",
@@ -137,6 +141,7 @@ bytes = "1.4.0"
 bytesize = "1.2.0"
 camino = "1.1"
 camino-tempfile = "1.0.2"
+cancel-safe-futures = { git = "https://github.com/oxidecomputer/cancel-safe-futures", rev = "c15ea7069dc547434ee772f08ce040f71db9b453" }
 chacha20poly1305 = "0.10.1"
 ciborium = "0.2.1"
 cfg-if = "1.0"
@@ -181,9 +186,11 @@ hex-literal = "0.3.4"
 hkdf = "0.12.3"
 http = "0.2.9"
 httptest = "0.15.4"
-hyper-rustls = "0.24.0"
-hyper = "0.14"
+hubtools = { git = "https://github.com/oxidecomputer/hubtools.git" }
 humantime = "2.1.0"
+hyper = "0.14"
+hyper-rustls = "0.24.0"
+hyper-staticfile = "0.9.5"
 illumos-utils = { path = "illumos-utils" }
 indexmap = "1.9.3"
 indicatif = { version = "0.17.5", features = ["rayon"] }
@@ -257,9 +264,9 @@ pretty-hex = "0.3.0"
 proc-macro2 = "1.0"
 progenitor = { git = "https://github.com/oxidecomputer/progenitor", branch = "main" }
 progenitor-client = { git = "https://github.com/oxidecomputer/progenitor", branch = "main" }
-bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "54dc09da004b46b17819fd80dff8a295c15eb294" }
-propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "54dc09da004b46b17819fd80dff8a295c15eb294", features = [ "generated-migration" ] }
-propolis-server = { git = "https://github.com/oxidecomputer/propolis", rev = "54dc09da004b46b17819fd80dff8a295c15eb294", default-features = false, features = ["mock-only"] }
+bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "04a275736e9f3316de6bf2a4077d03acfa4e2cdf" }
+propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "04a275736e9f3316de6bf2a4077d03acfa4e2cdf", features = [ "generated-migration" ] }
+propolis-server = { git = "https://github.com/oxidecomputer/propolis", rev = "04a275736e9f3316de6bf2a4077d03acfa4e2cdf", default-features = false, features = ["mock-only"] }
 #propolis-server = { path = "../propolis/bin/propolis-server" }
 proptest = "1.2.0"
 quote = "1.0"
@@ -328,7 +335,7 @@ tokio-postgres = { version = "0.7", features = [ "with-chrono-0_4", "with-uuid-1
 tokio-stream = "0.1.14"
 tokio-tungstenite = "0.18"
 tokio-util = "0.7.8"
-toml = "0.7.4"
+toml = "0.7.5"
 toml_edit = "0.19.11"
 tough = { version = "0.12", features = [ "http" ] }
 trust-dns-client = "0.22"

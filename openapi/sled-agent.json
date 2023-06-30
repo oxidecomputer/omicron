@@ -10,6 +10,23 @@
     "version": "0.0.1"
   },
   "paths": {
+    "/cockroachdb": {
+      "post": {
+        "summary": "Initializes a CockroachDB cluster",
+        "operationId": "cockroachdb_init",
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/disks/{disk_id}": {
       "put": {
         "operationId": "disk_put",
@@ -44,32 +61,6 @@
                 }
               }
             }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/filesystem": {
-      "put": {
-        "operationId": "filesystem_put",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/DatasetEnsureBody"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "204": {
-            "description": "resource updated"
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -507,6 +498,149 @@
         }
       }
     },
+    "/zones": {
+      "get": {
+        "summary": "List the zones that are currently managed by the sled agent.",
+        "operationId": "zones_list",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Array_of_String",
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/zones/{zone_name}/bundles": {
+      "get": {
+        "summary": "List the zone bundles that are current available for a zone.",
+        "operationId": "zone_bundle_list",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "zone_name",
+            "description": "The name of the zone.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Array_of_ZoneBundleMetadata",
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ZoneBundleMetadata"
+                  }
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "post": {
+        "summary": "Ask the sled agent to create a zone bundle.",
+        "operationId": "zone_bundle_create",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "zone_name",
+            "description": "The name of the zone.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ZoneBundleMetadata"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/zones/{zone_name}/bundles/{bundle_id}": {
+      "get": {
+        "summary": "Fetch the binary content of a single zone bundle.",
+        "operationId": "zone_bundle_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "bundle_id",
+            "description": "The ID for this bundle itself.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "zone_name",
+            "description": "The name of the zone this bundle is derived from.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "*/*": {
+                "schema": {}
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/zpools": {
       "get": {
         "operationId": "zpools_get",
@@ -607,32 +741,6 @@
           "target"
         ]
       },
-      "DatasetEnsureBody": {
-        "description": "Used to request a new dataset kind exists within a zpool.\n\nMany dataset types are associated with services that will be instantiated when the dataset is detected.",
-        "type": "object",
-        "properties": {
-          "address": {
-            "type": "string"
-          },
-          "dataset_kind": {
-            "$ref": "#/components/schemas/DatasetKind"
-          },
-          "id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "zpool_id": {
-            "type": "string",
-            "format": "uuid"
-          }
-        },
-        "required": [
-          "address",
-          "dataset_kind",
-          "id",
-          "zpool_id"
-        ]
-      },
       "DatasetKind": {
         "description": "The type of a dataset, and an auxiliary information necessary to successfully launch a zone managing the associated data.",
         "oneOf": [
@@ -677,6 +785,34 @@
             "required": [
               "type"
             ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "external_dns"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "internal_dns"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
           }
         ]
       },
@@ -693,6 +829,23 @@
         "required": [
           "kind",
           "pool_name"
+        ]
+      },
+      "DatasetRequest": {
+        "description": "Describes a request to provision a specific dataset",
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "$ref": "#/components/schemas/DatasetName"
+          }
+        },
+        "required": [
+          "id",
+          "name"
         ]
       },
       "DiskEnsureBody": {
@@ -1736,7 +1889,7 @@
         "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$"
       },
       "ServiceEnsureBody": {
-        "description": "Used to request that the Sled initialize multiple services.\n\nThis may be used to record that certain sleds are responsible for launching services which may not be associated with a dataset, such as Nexus.",
+        "description": "Used to request that the Sled initialize multiple services.",
         "type": "object",
         "properties": {
           "services": {
@@ -2018,7 +2171,7 @@
             "default": null,
             "allOf": [
               {
-                "$ref": "#/components/schemas/DatasetName"
+                "$ref": "#/components/schemas/DatasetRequest"
               }
             ]
           },
@@ -2454,6 +2607,48 @@
           "vni"
         ]
       },
+      "ZoneBundleId": {
+        "description": "An identifier for a zone bundle.",
+        "type": "object",
+        "properties": {
+          "bundle_id": {
+            "description": "The ID for this bundle itself.",
+            "type": "string",
+            "format": "uuid"
+          },
+          "zone_name": {
+            "description": "The name of the zone this bundle is derived from.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "bundle_id",
+          "zone_name"
+        ]
+      },
+      "ZoneBundleMetadata": {
+        "description": "Metadata about a zone bundle.",
+        "type": "object",
+        "properties": {
+          "id": {
+            "description": "Identifier for this zone bundle",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ZoneBundleId"
+              }
+            ]
+          },
+          "time_created": {
+            "description": "The time at which this zone bundle was created.",
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "time_created"
+        ]
+      },
       "ZoneType": {
         "description": "The type of zone which may be requested from Sled Agent",
         "type": "string",
@@ -2486,29 +2681,11 @@
           "id"
         ]
       },
-      "ZpoolKind": {
-        "type": "string",
-        "enum": [
-          "external",
-          "internal"
-        ]
-      },
       "ZpoolName": {
-        "description": "A wrapper around a zpool name.\n\nThis expects that the format will be: `ox{i,p}_<UUID>` - we parse the prefix when reading the structure, and validate that the UUID can be utilized.",
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "kind": {
-            "$ref": "#/components/schemas/ZpoolKind"
-          }
-        },
-        "required": [
-          "id",
-          "kind"
-        ]
+        "title": "The name of a Zpool",
+        "description": "Zpool names are of the format ox{i,p}_<UUID>. They are either Internal or External, and should be unique",
+        "type": "string",
+        "pattern": "^ox[ip]_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
       }
     }
   }

@@ -344,12 +344,13 @@ impl Agent {
         // Before we start creating zones, we need to ensure that the
         // necessary ZFS and Zone resources are ready.
         //
-        // TODO(https://github.com/oxidecomputer/omicron/issues/1934):
+        // TODO(https://github.com/oxidecomputer/omicron/issues/2888):
         // We should carefully consider which dataset this is using; it's
         // currently part of the ramdisk.
         let zoned = true;
         let do_format = true;
         let encryption_details = None;
+        let quota = None;
         Zfs::ensure_filesystem(
             ZONE_ZFS_RAMDISK_DATASET,
             Mountpoint::Path(Utf8PathBuf::from(
@@ -358,6 +359,7 @@ impl Agent {
             zoned,
             do_format,
             encryption_details,
+            quota,
         )?;
 
         // Before we start monitoring for hardware, ensure we're running from a
@@ -425,7 +427,7 @@ impl Agent {
         let paths = sled_config_paths(&storage_resources).await;
         let maybe_ledger =
             Ledger::<PersistentSledAgentRequest>::new(&ba_log, paths).await;
-        let make_agent = move |initialized| Agent {
+        let make_bootstrap_agent = move |initialized| Agent {
             log: ba_log,
             parent_log: log,
             ip,
@@ -443,13 +445,13 @@ impl Agent {
             baseboard,
         };
         let agent = if let Some(ledger) = maybe_ledger {
-            let agent = make_agent(true);
+            let agent = make_bootstrap_agent(true);
             info!(agent.log, "Sled already configured, loading sled agent");
             let sled_request = ledger.data();
-            agent.request_agent(&sled_request.request).await?;
+            agent.request_sled_agent(&sled_request.request).await?;
             agent
         } else {
-            make_agent(false)
+            make_bootstrap_agent(false)
         };
 
         Ok(agent)
@@ -505,7 +507,7 @@ impl Agent {
     /// If the Sled Agent has already been initialized:
     /// - This method is idempotent for the same request
     /// - Thie method returns an error for different requests
-    pub async fn request_agent(
+    pub async fn request_sled_agent(
         &self,
         request: &StartSledAgentRequest,
     ) -> Result<SledAgentResponse, BootstrapError> {
