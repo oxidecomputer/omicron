@@ -123,85 +123,74 @@ path = "/input/$kind/work/helios/image/output/os.tar.gz"
 EOF
 done
 
-# Fetch signed ROT images from oxidecomputer/dvt-dock.
 source "$TOP/tools/dvt_dock_version"
-git clone https://github.com/oxidecomputer/dvt-dock.git /work/dvt-dock
-(cd /work/dvt-dock; git checkout "$COMMIT")
-# Fetch SP images from oxidecomputer/hubris GHA artifacts.
-source "$TOP/tools/hubris_version"
-run_id=$(curl --netrc -fsS "https://api.github.com/repos/oxidecomputer/hubris/actions/runs?head_sha=$COMMIT" \
-    | /opt/ooce/bin/jq -r '.workflow_runs[] | select(.path == ".github/workflows/dist.yml") | .id')
-hubris_artifacts=$(curl --netrc -fsS "https://api.github.com/repos/oxidecomputer/hubris/actions/runs/$run_id/artifacts")
+# instead of a `git clone` that pulls the full repo history, we'll grab a
+# tarball from github. this works well with `--netrc`.
+#
+# tar explanation:
+# - gunzip is used instead of tar's `z` option because it doesn't work when
+#   reading from stdin
+# - `X` adds an `exclude_file` parameter after the `tarfile` parameter
+# - illumos tar does not know how to handle the pax_global_header that
+#   git-archive hides the commit hash in, which results in a non-zero exit code.
+#   telling tar to ignore this file makes the exit code happy
+# - `<(echo pax_global_header)` is a bashism that creates a readable FIFO from
+#   the given command
+curl -v --netrc -fLsS "https://github.com/oxidecomputer/dvt-dock/archive/$COMMIT.tar.gz" \
+    | gunzip | tar xvfX - <(echo pax_global_header) -C /work
+dvt_dock=/work/dvt-dock-$COMMIT
 
 add_hubris_artifacts() {
     series="$1"
-    dockdir="$2"
-    shift 2
+    rot_dir="$2"
+    rot_version="$3"
+    shift 3
 
     manifest=/work/manifest-$series.toml
     cp /work/manifest.toml "$manifest"
 
-    # ROT images from dvt-dock
-    for noun in "$@"; do
-        # tufaceous_kind: gimlet-c => gimlet_rot
-        # hubris_kind: gimlet-c => gimlet-rot
-        noun=${noun%-?}
-        tufaceous_kind=${noun//sidecar/switch}_rot
-        hubris_kind=${noun}-rot
-        path_a="/work/dvt-dock/$dockdir/build-$hubris_kind-image-a-cert-dev.zip"
-        path_b="/work/dvt-dock/$dockdir/build-$hubris_kind-image-b-cert-dev.zip"
-        version_a=$(/work/caboose-util read-version "$path_a")
-        version_b=$(/work/caboose-util read-version "$path_b")
-        if [[ "$version_a" != "$version_b" ]]; then
+    for board_rev in "$@"; do
+        board=${board_rev%-?}
+        tufaceous_board=${board//sidecar/switch}
+
+        rot_image_a="${dvt_dock}/${rot_dir}/${board}/build-${board}-rot-image-a-${rot_version}.zip"
+        rot_image_b="${dvt_dock}/${rot_dir}/${board}/build-${board}-rot-image-b-${rot_version}.zip"
+        sp_image="${dvt_dock}/sp/${board}/build-${board_rev}-image-default.zip"
+
+        rot_version_a=$(/work/caboose-util read-version "$rot_image_a")
+        rot_version_b=$(/work/caboose-util read-version "$rot_image_b")
+        if [[ "$rot_version_a" != "$rot_version_b" ]]; then
             echo "version mismatch:"
-            echo "  $path_a: $version_a"
-            echo "  $path_b: $version_b"
+            echo "  $rot_image_a: $rot_version_a"
+            echo "  $rot_image_b: $rot_version_b"
             exit 1
         fi
+        sp_version=$(/work/caboose-util read-version "$sp_image")
 
         cat >>"$manifest" <<EOF
-[artifact.$tufaceous_kind]
-name = "$tufaceous_kind"
-version = "$version_a"
-[artifact.$tufaceous_kind.source]
+[artifact.${tufaceous_board}_rot]
+name = "${tufaceous_board}_rot"
+version = "$rot_version_a"
+[artifact.${tufaceous_board}_rot.source]
 kind = "composite-rot"
-[artifact.$tufaceous_kind.source.archive_a]
+[artifact.${tufaceous_board}_rot.source.archive_a]
 kind = "file"
-path = "$path_a"
-[artifact.$tufaceous_kind.source.archive_b]
+path = "$rot_image_a"
+[artifact.${tufaceous_board}_rot.source.archive_b]
 kind = "file"
-path = "$path_b"
-EOF
-    done
-
-    # SP images from hubris
-    for noun in "$@"; do
-        # tufaceous_kind: gimlet-c => gimlet_sp
-        # job_name: gimlet-c => dist-ubuntu-latest-gimlet-c
-        tufaceous_kind=${noun%-?}
-        tufaceous_kind=${tufaceous_kind//sidecar/switch}_sp
-        job_name=dist-ubuntu-latest-$noun
-        if ! [[ -f "$job_name.zip" ]]; then
-            url=$(/opt/ooce/bin/jq --arg name "$job_name" -r '.artifacts[] | select(.name == $name) | .archive_download_url' <<<"$hubris_artifacts")
-            curl --netrc -fsSL -o "$job_name.zip" "$url"
-            unzip "$job_name.zip"
-        fi
-        path="$PWD/build-$noun-image-default.zip"
-        version=$(/work/caboose-util read-version "$path")
-        cat >>"$manifest" <<EOF
-[artifact.$tufaceous_kind]
-name = "$tufaceous_kind"
-version = "$version"
-[artifact.$tufaceous_kind.source]
+path = "$rot_image_b"
+[artifact.${tufaceous_board}_sp]
+name = "${tufaceous_board}_sp"
+version = "$sp_version"
+[artifact.${tufaceous_board}_sp.source]
 kind = "file"
-path = "$path"
+path = "$sp_image"
 EOF
     done
 }
-
-# usage:              SERIES   DVT_DOCK_DIR  BOARDS...
-add_hubris_artifacts  dogfood  staging       gimlet-c psc-b sidecar-b
-add_hubris_artifacts  pvt1     staging       gimlet-d psc-b sidecar-c
+# usage:              SERIES   ROT_DIR      ROT_VERSION              BOARDS...
+add_hubris_artifacts  dogfood  staging/dev  cert-staging-dev-v1.0.0  gimlet-c psc-b sidecar-b
+add_hubris_artifacts  pvt1     prod/rel     cert-prod-rel-v1.0.0     gimlet-d psc-b sidecar-c
 
 for series in dogfood pvt1; do
     /work/tufaceous assemble --no-generate-key /work/manifest-$series.toml /work/repo-$series.zip
