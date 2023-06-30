@@ -18,9 +18,11 @@ use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::Instance;
 use omicron_common::api::external::InstanceCpuCount;
+use omicron_common::api::external::Name;
 use omicron_nexus::external_api::params;
 use omicron_nexus::external_api::views;
 use omicron_nexus::external_api::views::Project;
+use std::str::FromStr;
 
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
@@ -297,7 +299,7 @@ async fn test_project_deletion_with_snapshot(
                 name: "my-snapshot".parse().unwrap(),
                 description: "not attached to instance".into(),
             },
-            disk: "my-disk".parse().unwrap(),
+            disk: Name::from_str("my-disk").unwrap().into(),
         },
     )
     .await;

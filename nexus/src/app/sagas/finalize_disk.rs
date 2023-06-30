@@ -31,7 +31,6 @@ pub struct Params {
     pub serialized_authn: authn::saga::Serialized,
     pub silo_id: Uuid,
     pub project_id: Uuid,
-    pub disk_name: Name,
     pub disk_id: Uuid,
     pub snapshot_name: Option<Name>,
 }
@@ -86,10 +85,10 @@ impl NexusSaga for SagaFinalizeDisk {
                         name: snapshot_name.clone(),
                         description: format!(
                             "snapshot of finalized disk {}",
-                            params.disk_name
+                            params.disk_id
                         ),
                     },
-                    disk: params.disk_name.clone(),
+                    disk: params.disk_id.clone().into(),
                 },
             };
 
