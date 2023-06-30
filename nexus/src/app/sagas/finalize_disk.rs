@@ -88,7 +88,7 @@ impl NexusSaga for SagaFinalizeDisk {
                             params.disk_id
                         ),
                     },
-                    disk: params.disk_id.clone().into(),
+                    disk: params.disk_id.into(),
                 },
             };
 
