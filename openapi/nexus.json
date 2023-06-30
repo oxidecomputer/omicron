@@ -12316,7 +12316,7 @@
             "type": "string"
           },
           "disk": {
-            "description": "The name of the disk to be snapshotted",
+            "description": "The disk to be snapshotted",
             "allOf": [
               {
                 "$ref": "#/components/schemas/NameOrId"
