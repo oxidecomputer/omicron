@@ -124,21 +124,8 @@ EOF
 done
 
 source "$TOP/tools/dvt_dock_version"
-# instead of a `git clone` that pulls the full repo history, we'll grab a
-# tarball from github. this works well with `--netrc`.
-#
-# tar explanation:
-# - gunzip is used instead of tar's `z` option because it doesn't work when
-#   reading from stdin
-# - `X` adds an `exclude_file` parameter after the `tarfile` parameter
-# - illumos tar does not know how to handle the pax_global_header that
-#   git-archive hides the commit hash in, which results in a non-zero exit code.
-#   telling tar to ignore this file makes the exit code happy
-# - `<(echo pax_global_header)` is a bashism that creates a readable FIFO from
-#   the given command
-curl -v --netrc -fLsS "https://github.com/oxidecomputer/dvt-dock/archive/$COMMIT.tar.gz" \
-    | gunzip | tar xvfX - <(echo pax_global_header) -C /work
-dvt_dock=/work/dvt-dock-$COMMIT
+git clone https://github.com/oxidecomputer/dvt-dock.git /work/dvt-dock
+(cd /work/dvt-dock; git checkout "$COMMIT")
 
 add_hubris_artifacts() {
     series="$1"
@@ -153,9 +140,9 @@ add_hubris_artifacts() {
         board=${board_rev%-?}
         tufaceous_board=${board//sidecar/switch}
 
-        rot_image_a="${dvt_dock}/${rot_dir}/${board}/build-${board}-rot-image-a-${rot_version}.zip"
-        rot_image_b="${dvt_dock}/${rot_dir}/${board}/build-${board}-rot-image-b-${rot_version}.zip"
-        sp_image="${dvt_dock}/sp/${board}/build-${board_rev}-image-default.zip"
+        rot_image_a="/work/dvt-dock/${rot_dir}/${board}/build-${board}-rot-image-a-${rot_version}.zip"
+        rot_image_b="/work/dvt-dock/${rot_dir}/${board}/build-${board}-rot-image-b-${rot_version}.zip"
+        sp_image="/work/dvt-dock/sp/${board}/build-${board_rev}-image-default.zip"
 
         rot_version_a=$(/work/caboose-util read-version "$rot_image_a")
         rot_version_b=$(/work/caboose-util read-version "$rot_image_b")
