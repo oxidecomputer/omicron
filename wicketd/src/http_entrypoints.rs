@@ -212,7 +212,7 @@ async fn get_rss_config(
     let inventory = inventory_or_unavail(&ctx.mgs_handle).await?;
 
     let mut config = ctx.rss_config.lock().unwrap();
-    config.populate_available_bootstrap_sleds_from_inventory(
+    config.update_with_inventory_and_bootstrap_peers(
         &inventory,
         &ctx.bootstrap_peers,
     );
@@ -239,7 +239,7 @@ async fn put_rss_config(
     let inventory = inventory_or_unavail(&ctx.mgs_handle).await?;
 
     let mut config = ctx.rss_config.lock().unwrap();
-    config.populate_available_bootstrap_sleds_from_inventory(
+    config.update_with_inventory_and_bootstrap_peers(
         &inventory,
         &ctx.bootstrap_peers,
     );

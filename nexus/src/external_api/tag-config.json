@@ -32,10 +32,10 @@
         "url": "http://docs.oxide.computer/api/login"
       }
     },
-    "vpcs": {
-      "description": "Virtual Private Clouds (VPCs) provide isolated network environments for managing and deploying services.",
+    "metrics": {
+      "description": "Silo-scoped metrics",
       "external_docs": {
-        "url": "http://docs.oxide.computer/api/vpcs"
+        "url": "http://docs.oxide.computer/api/metrics"
       }
     },
     "policy": {
@@ -72,6 +72,12 @@
       "description": "Snapshots of virtual disks at a particular point in time.",
       "external_docs": {
         "url": "http://docs.oxide.computer/api/snapshots"
+      }
+    },
+    "vpcs": {
+      "description": "Virtual Private Clouds (VPCs) provide isolated network environments for managing and deploying services.",
+      "external_docs": {
+        "url": "http://docs.oxide.computer/api/vpcs"
       }
     },
     "system/hardware": {

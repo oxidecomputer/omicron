@@ -45,7 +45,9 @@ use illumos_utils::addrobj::IPV6_LINK_LOCAL_NAME;
 use illumos_utils::dladm::{Dladm, Etherstub, EtherstubVnic, PhysicalLink};
 use illumos_utils::link::{Link, VnicAllocator};
 use illumos_utils::opte::{Port, PortManager, PortTicket};
-use illumos_utils::running_zone::{InstalledZone, RunningZone};
+use illumos_utils::running_zone::{
+    InstalledZone, RunCommandError, RunningZone,
+};
 use illumos_utils::zfs::ZONE_ZFS_RAMDISK_DATASET_MOUNTPOINT;
 use illumos_utils::zone::AddressRequest;
 use illumos_utils::zone::Zones;
@@ -102,6 +104,12 @@ use uuid::Uuid;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
+    #[error("Failed to initialize CockroachDb: {err}")]
+    CockroachInit {
+        #[source]
+        err: RunCommandError,
+    },
+
     #[error("Cannot serialize TOML to file: {path}: {err}")]
     TomlSerialize { path: Utf8PathBuf, err: toml::ser::Error },
 
@@ -172,6 +180,9 @@ pub enum Error {
 
     #[error("Services already configured for this Sled Agent")]
     ServicesAlreadyConfigured,
+
+    #[error("Failed to get address: {0}")]
+    GetAddressFailure(#[from] illumos_utils::zone::GetAddressError),
 
     #[error("NTP zone not ready")]
     NtpZoneNotReady,
@@ -250,7 +261,6 @@ impl Config {
 
 // The filename of the ledger, within the provided directory.
 const SERVICES_LEDGER_FILENAME: &str = "services.toml";
-const STORAGE_SERVICES_LEDGER_FILENAME: &str = "storage-services.toml";
 
 // The directory within the debug dataset in which bundles are created.
 const BUNDLE_DIRECTORY: &str = "bundle";
@@ -348,8 +358,6 @@ pub struct ServiceManagerInner {
     sidecar_revision: SidecarRevision,
     // Zones representing running services
     zones: Mutex<Vec<RunningZone>>,
-    // Zones representing services which own datasets
-    dataset_zones: Mutex<Vec<RunningZone>>,
     underlay_vnic_allocator: VnicAllocator<Etherstub>,
     underlay_vnic: EtherstubVnic,
     bootstrap_vnic_allocator: VnicAllocator<Etherstub>,
@@ -422,7 +430,6 @@ impl ServiceManager {
                 sidecar_revision,
                 switch_zone_maghemite_links,
                 zones: Mutex::new(vec![]),
-                dataset_zones: Mutex::new(vec![]),
                 underlay_vnic_allocator: VnicAllocator::new(
                     "Service",
                     underlay_etherstub,
@@ -499,29 +506,18 @@ impl ServiceManager {
             .collect()
     }
 
-    async fn all_storage_service_ledgers(&self) -> Vec<Utf8PathBuf> {
-        if let Some(dir) = self.inner.ledger_directory_override.get() {
-            return vec![dir.join(STORAGE_SERVICES_LEDGER_FILENAME)];
-        }
-
-        self.inner
-            .storage
-            .resources()
-            .all_m2_mountpoints(sled_hardware::disk::CONFIG_DATASET)
-            .await
-            .into_iter()
-            .map(|p| p.join(STORAGE_SERVICES_LEDGER_FILENAME))
-            .collect()
-    }
-
-    pub async fn load_non_storage_services(&self) -> Result<(), Error> {
+    pub async fn load_services(&self) -> Result<(), Error> {
         let log = &self.inner.log;
+        let ledger_paths = self.all_service_ledgers().await;
+        info!(log, "Loading services from: {ledger_paths:?}");
+
         let mut existing_zones = self.inner.zones.lock().await;
         let Some(ledger) = Ledger::<AllZoneRequests>::new(
             log,
-            self.all_service_ledgers().await,
+            ledger_paths,
         )
         .await else {
+            info!(log, "Loading services - No services detected");
             return Ok(());
         };
         let services = ledger.data();
@@ -590,25 +586,6 @@ impl ServiceManager {
         Ok(())
     }
 
-    pub async fn load_storage_services(&self) -> Result<(), Error> {
-        let log = &self.inner.log;
-        let mut existing_zones = self.inner.dataset_zones.lock().await;
-        let Some(ledger) = Ledger::<AllZoneRequests>::new(
-            log,
-            self.all_storage_service_ledgers().await,
-        )
-        .await else {
-            return Ok(());
-        };
-        let services = ledger.data();
-        self.initialize_services_locked(
-            &mut existing_zones,
-            &services.requests,
-        )
-        .await?;
-        Ok(())
-    }
-
     /// Loads services from the services manager, and returns once all requested
     /// services have been started.
     pub async fn sled_agent_started(
@@ -618,7 +595,7 @@ impl ServiceManager {
         underlay_address: Ipv6Addr,
         rack_id: Uuid,
     ) -> Result<(), Error> {
-        debug!(&self.inner.log, "sled agent started"; "underlay_address" => underlay_address.to_string());
+        info!(&self.inner.log, "sled agent started"; "underlay_address" => underlay_address.to_string());
         self.inner
             .sled_info
             .set(SledAgentInfo {
@@ -634,15 +611,14 @@ impl ServiceManager {
             .map_err(|_| "already set".to_string())
             .expect("Sled Agent should only start once");
 
-        self.load_non_storage_services().await?;
         // TODO(https://github.com/oxidecomputer/omicron/issues/2973):
         // These will fail if the disks aren't attached.
         // Should we have a retry loop here? Kinda like we have with the switch
         // / NTP zone?
-        //
-        // NOTE: We could totally do the same thing with
-        // "load_non_storage_services".
-        self.load_storage_services().await?;
+        self.load_services().await.map_err(|e| {
+            error!(self.inner.log, "failed to launch services"; "error" => e.to_string());
+            e
+        })?;
 
         Ok(())
     }
@@ -713,6 +689,17 @@ impl ServiceManager {
             }
             _ => Ok(None),
         }
+    }
+
+    fn bootstrap_to_techport(addr: Ipv6Addr) -> Ipv6Addr {
+        // flip the last bit of the first octet
+        // fdb0:<id>::suffix -> fdb1:<id>::<suffix>
+        Ipv6Addr::from(u128::from(addr) | (1 << 112))
+    }
+
+    fn bootstrap_addr_to_prefix(addr: Ipv6Addr) -> Ipv6Addr {
+        // mask out lower 64 bits to form /64 prefix
+        Ipv6Addr::from(u128::from(addr) & ((u64::MAX as u128) << 64))
     }
 
     // Check the services intended to run in the zone to determine whether any
@@ -991,7 +978,7 @@ impl ServiceManager {
             .zone
             .dataset
             .iter()
-            .map(|d| zone::Dataset { name: d.full() })
+            .map(|d| zone::Dataset { name: d.name.full() })
             .collect::<Vec<_>>();
 
         let devices: Vec<zone::Device> = device_names
@@ -1074,6 +1061,40 @@ impl ServiceManager {
                 let Some(info) = self.inner.sled_info.get() else {
                     return Err(Error::SledAgentNotReady);
                 };
+
+                // We want to configure the dns/install SMF service inside the
+                // zone with the list of DNS nameservers.  This will cause
+                // /etc/resolv.conf to be populated inside the zone.  To do
+                // this, we need the full list of nameservers.  Fortunately, the
+                // nameservers provide a DNS name for the full list of
+                // nameservers.
+                //
+                // Note that when we configure the dns/install service, we're
+                // supplying values for an existing property group on the SMF
+                // *service*.  We're not creating a new property group, nor are
+                // we configuring a property group on the instance.
+                let all_nameservers = info
+                    .resolver
+                    .lookup_all_ipv6(internal_dns::ServiceName::InternalDns)
+                    .await?;
+                let mut dns_config_builder =
+                    PropertyGroupBuilder::new("install_props");
+                for ns_addr in &all_nameservers {
+                    dns_config_builder = dns_config_builder.add_property(
+                        "nameserver",
+                        "net_address",
+                        &ns_addr.to_string(),
+                    );
+                }
+                let dns_install = ServiceBuilder::new("network/dns/install")
+                    .add_property_group(dns_config_builder)
+                    // We do need to enable the default instance of the
+                    // dns/install service.  It's enough to just mention it
+                    // here, as the ServiceInstanceBuilder always enables the
+                    // instance being added.
+                    .add_instance(ServiceInstanceBuilder::new("default"));
+
+                // Configure the CockroachDB service.
                 let datalink = installed_zone.get_control_vnic_name();
                 let gateway = &info.underlay_address.to_string();
                 assert_eq!(request.zone.addresses.len(), 1);
@@ -1084,83 +1105,28 @@ impl ServiceManager {
                 let listen_addr = &address.ip().to_string();
                 let listen_port = &address.port().to_string();
 
-                let config = PropertyGroupBuilder::new("config")
+                let cockroachdb_config = PropertyGroupBuilder::new("config")
                     .add_property("datalink", "astring", datalink)
                     .add_property("gateway", "astring", gateway)
                     .add_property("listen_addr", "astring", listen_addr)
                     .add_property("listen_port", "astring", listen_port)
                     .add_property("store", "astring", "/data");
-
-                let profile = ProfileBuilder::new("omicron").add_service(
+                let cockroachdb_service =
                     ServiceBuilder::new("oxide/cockroachdb").add_instance(
                         ServiceInstanceBuilder::new("default")
-                            .add_property_group(config),
-                    ),
-                );
+                            .add_property_group(cockroachdb_config),
+                    );
+
+                let profile = ProfileBuilder::new("omicron")
+                    .add_service(cockroachdb_service)
+                    .add_service(dns_install);
                 profile
                     .add_to_zone(&self.inner.log, &installed_zone)
                     .await
                     .map_err(|err| {
                         Error::io("Failed to setup CRDB profile", err)
                     })?;
-                let running_zone = RunningZone::boot(installed_zone).await?;
-
-                // TODO: The following lines are necessary to initialize CRDB
-                // in a single-node environment. They're bad! They're wrong!
-                // We definitely shouldn't be wiping the database every time
-                // we want to boot this zone.
-                //
-                // But they're also necessary to prevent the build from
-                // regressing.
-                //
-                // NOTE: In the (very short-term) future, this will be
-                // replaced by the following:
-                // 1. CRDB will simply "start", rather than "start-single-node".
-                // 2. The Sled Agent will expose an explicit API to "init" the
-                // Cockroach cluster, and populate it with the expected
-                // contents.
-                let format_crdb = || async {
-                    info!(self.inner.log, "Formatting CRDB");
-                    running_zone
-                        .run_cmd(&[
-                            "/opt/oxide/cockroachdb/bin/cockroach",
-                            "sql",
-                            "--insecure",
-                            "--host",
-                            &address.to_string(),
-                            "--file",
-                            "/opt/oxide/cockroachdb/sql/dbwipe.sql",
-                        ])
-                        .map_err(BackoffError::transient)?;
-                    running_zone
-                        .run_cmd(&[
-                            "/opt/oxide/cockroachdb/bin/cockroach",
-                            "sql",
-                            "--insecure",
-                            "--host",
-                            &address.to_string(),
-                            "--file",
-                            "/opt/oxide/cockroachdb/sql/dbinit.sql",
-                        ])
-                        .map_err(BackoffError::transient)?;
-                    info!(self.inner.log, "Formatting CRDB - Completed");
-                    Ok::<
-                        (),
-                        BackoffError<
-                            illumos_utils::running_zone::RunCommandError,
-                        >,
-                    >(())
-                };
-                let log_failure = |error, _| {
-                    warn!(
-                        self.inner.log, "failed to format CRDB";
-                        "error" => ?error,
-                    );
-                };
-                retry_notify(retry_policy_local(), format_crdb, log_failure)
-                    .await
-                    .expect("expected an infinite retry loop waiting for crdb");
-                return Ok(running_zone);
+                return Ok(RunningZone::boot(installed_zone).await?);
             }
             ZoneType::Crucible => {
                 let Some(info) = self.inner.sled_info.get() else {
@@ -1172,16 +1138,17 @@ impl ServiceManager {
                 let listen_addr = &request.zone.addresses[0].to_string();
                 let listen_port = &CRUCIBLE_PORT.to_string();
 
-                let dataset = request
+                let dataset_name = request
                     .zone
                     .dataset
                     .as_ref()
+                    .map(|d| d.name.full())
                     .expect("Crucible requires dataset");
                 let uuid = &Uuid::new_v4().to_string();
                 let config = PropertyGroupBuilder::new("config")
                     .add_property("datalink", "astring", datalink)
                     .add_property("gateway", "astring", gateway)
-                    .add_property("dataset", "astring", &dataset.full())
+                    .add_property("dataset", "astring", &dataset_name)
                     .add_property("listen_addr", "astring", listen_addr)
                     .add_property("listen_port", "astring", listen_port)
                     .add_property("uuid", "astring", uuid)
@@ -1714,6 +1681,23 @@ impl ServiceManager {
                 ServiceType::Tfport { pkt_source } => {
                     info!(self.inner.log, "Setting up tfport service");
 
+                    let techport_prefix =
+                        match bootstrap_name_and_address.as_ref() {
+                            Some((_, addr)) => Self::bootstrap_addr_to_prefix(
+                                Self::bootstrap_to_techport(*addr),
+                            ),
+                            None => {
+                                return Err(Error::BadServiceRequest {
+                                    service: "tfport".into(),
+                                    message: "bootstrap addr missing".into(),
+                                });
+                            }
+                        };
+
+                    smfh.setprop(
+                        "config/techport_prefix",
+                        techport_prefix.to_string(),
+                    )?;
                     smfh.setprop("config/pkt_source", pkt_source)?;
                     smfh.setprop(
                         "config/host",
@@ -2207,19 +2191,6 @@ impl ServiceManager {
                 .await
                 .map_err(Error::from);
         }
-        if let Some(zone) = self
-            .inner
-            .dataset_zones
-            .lock()
-            .await
-            .iter()
-            .find(|z| z.name() == name)
-        {
-            return self
-                .create_zone_bundle_impl(zone)
-                .await
-                .map_err(Error::from);
-        }
         Err(Error::from(BundleError::NoSuchZone { name: name.to_string() }))
     }
 
@@ -2394,9 +2365,6 @@ impl ServiceManager {
         for zone in self.inner.zones.lock().await.iter() {
             zone_names.push(String::from(zone.name()));
         }
-        for zone in self.inner.dataset_zones.lock().await.iter() {
-            zone_names.push(String::from(zone.name()));
-        }
         zone_names.sort();
         Ok(zone_names)
     }
@@ -2473,59 +2441,61 @@ impl ServiceManager {
         Ok(())
     }
 
-    /// Ensures that a storage zone be initialized.
-    ///
-    /// These services will be instantiated by this function, and will be
-    /// recorded to a local file to ensure they start automatically on next
-    /// boot.
-    pub async fn ensure_storage_service(
-        &self,
-        request: ServiceZoneRequest,
-    ) -> Result<(), Error> {
+    pub async fn cockroachdb_initialize(&self) -> Result<(), Error> {
         let log = &self.inner.log;
-        let mut existing_zones = self.inner.dataset_zones.lock().await;
-
-        // Read the existing set of services from the ledger.
-        let service_paths = self.all_storage_service_ledgers().await;
-        let mut ledger =
-            match Ledger::<AllZoneRequests>::new(log, service_paths.clone())
-                .await
-            {
-                Some(ledger) => ledger,
-                None => Ledger::<AllZoneRequests>::new_with(
+        let dataset_zones = self.inner.zones.lock().await;
+        for zone in dataset_zones.iter() {
+            // TODO: We could probably store the ZoneKind in the running zone to
+            // make this "comparison to existing zones by name" mechanism a bit
+            // safer.
+            if zone.name().contains(&ZoneType::CockroachDb.to_string()) {
+                let address = Zones::get_address(
+                    Some(zone.name()),
+                    &zone.control_interface(),
+                )?
+                .ip();
+                let host = &format!("[{address}]:{COCKROACH_PORT}");
+                info!(
                     log,
-                    service_paths.clone(),
-                    AllZoneRequests::default(),
-                ),
-            };
-        let ledger_zone_requests = ledger.data_mut();
+                    "Initializing CRDB Cluster - sending request to {host}"
+                );
+                zone.run_cmd(&[
+                    "/opt/oxide/cockroachdb/bin/cockroach",
+                    "init",
+                    "--insecure",
+                    "--host",
+                    host,
+                ])
+                .map_err(|err| Error::CockroachInit { err })?;
+                info!(log, "Formatting CRDB");
+                zone.run_cmd(&[
+                    "/opt/oxide/cockroachdb/bin/cockroach",
+                    "sql",
+                    "--insecure",
+                    "--host",
+                    host,
+                    "--file",
+                    "/opt/oxide/cockroachdb/sql/dbwipe.sql",
+                ])
+                .map_err(|err| Error::CockroachInit { err })?;
+                zone.run_cmd(&[
+                    "/opt/oxide/cockroachdb/bin/cockroach",
+                    "sql",
+                    "--insecure",
+                    "--host",
+                    host,
+                    "--file",
+                    "/opt/oxide/cockroachdb/sql/dbinit.sql",
+                ])
+                .map_err(|err| Error::CockroachInit { err })?;
+                info!(log, "Formatting CRDB - Completed");
 
-        if !ledger_zone_requests
-            .requests
-            .iter()
-            .any(|zone_request| zone_request.zone.id == request.id)
-        {
-            // If this is a new request, provision a zone filesystem on the same
-            // disk as the dataset.
-            let dataset = request
-                .dataset
-                .as_ref()
-                .expect("Storage services should have a dataset");
-            let root = dataset
-                .pool()
-                .dataset_mountpoint(sled_hardware::disk::ZONE_DATASET);
-            ledger_zone_requests
-                .requests
-                .push(ZoneRequest { zone: request, root });
+                // In the single-sled case, if there are multiple CRDB nodes on
+                // a single device, we'd still only want to send the
+                // initialization requests to a single dataset.
+                return Ok(());
+            }
         }
-
-        self.initialize_services_locked(
-            &mut existing_zones,
-            &ledger_zone_requests.requests,
-        )
-        .await?;
-
-        ledger.commit().await?;
 
         Ok(())
     }

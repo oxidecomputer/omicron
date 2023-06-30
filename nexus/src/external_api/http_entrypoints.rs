@@ -269,6 +269,7 @@ pub fn external_api() -> NexusApiDescription {
         api.register(certificate_delete)?;
 
         api.register(system_metric)?;
+        api.register(silo_metric)?;
 
         api.register(system_update_refresh)?;
         api.register(system_version)?;
@@ -4373,9 +4374,15 @@ async fn sled_physical_disk_list(
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct SystemMetricParams {
-    /// The UUID of the container being queried
-    // TODO: I might want to force the caller to specify type here?
-    pub id: Uuid,
+    /// A silo ID. If unspecified, get aggregrate metrics across all silos.
+    pub silo_id: Option<Uuid>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct SiloMetricParams {
+    /// A project ID. If unspecified, get aggregrate metrics across all projects
+    /// in current silo.
+    pub project_id: Option<Uuid>,
 }
 
 #[derive(Display, Deserialize, JsonSchema)]
@@ -4404,22 +4411,73 @@ async fn system_metric(
     pag_params: Query<
         PaginationParams<params::ResourceMetrics, params::ResourceMetrics>,
     >,
-    other_params: Query<SystemMetricParams>,
+    other_params: Query<params::OptionalSiloSelector>,
 ) -> Result<HttpResponseOk<ResultsPage<oximeter_db::Measurement>>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let nexus = &apictx.nexus;
         let metric_name = path_params.into_inner().metric_name;
-        let resource_id = other_params.into_inner().id;
+        let pagination = pag_params.into_inner();
+        let limit = rqctx.page_limit(&pagination)?;
+
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let silo_lookup = match other_params.into_inner().silo {
+            Some(silo) => Some(nexus.silo_lookup(&opctx, silo)?),
+            _ => None,
+        };
+
+        let result = nexus
+            .system_metric_list(
+                &opctx,
+                metric_name,
+                silo_lookup,
+                pagination,
+                limit,
+            )
+            .await?;
+
+        Ok(HttpResponseOk(result))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Access metrics data
+#[endpoint {
+     method = GET,
+     path = "/v1/metrics/{metric_name}",
+     tags = ["metrics"],
+}]
+async fn silo_metric(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<SystemMetricsPathParam>,
+    pag_params: Query<
+        PaginationParams<params::ResourceMetrics, params::ResourceMetrics>,
+    >,
+    other_params: Query<params::OptionalProjectSelector>,
+) -> Result<HttpResponseOk<ResultsPage<oximeter_db::Measurement>>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let metric_name = path_params.into_inner().metric_name;
+
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let project_lookup = match other_params.into_inner().project {
+            Some(project) => {
+                let project_selector = params::ProjectSelector { project };
+                Some(nexus.project_lookup(&opctx, project_selector)?)
+            }
+            _ => None,
+        };
+
         let pagination = pag_params.into_inner();
         let limit = rqctx.page_limit(&pagination)?;
 
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
         let result = nexus
-            .system_metric_lookup(
+            .silo_metric_list(
                 &opctx,
                 metric_name,
-                resource_id,
+                project_lookup,
                 pagination,
                 limit,
             )

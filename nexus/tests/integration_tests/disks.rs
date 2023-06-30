@@ -4,7 +4,7 @@
 
 //! Tests basic disk support in the API
 
-use super::metrics::{get_latest_system_metric, query_for_metrics};
+use super::metrics::{get_latest_silo_metric, query_for_metrics};
 
 use chrono::Utc;
 use crucible_agent_client::types::State as RegionState;
@@ -1508,10 +1508,10 @@ async fn test_disk_metrics(cptestctx: &ControlPlaneTestContext) {
     assert!(measurements.items.is_empty());
 
     assert_eq!(
-        get_latest_system_metric(
+        get_latest_silo_metric(
             cptestctx,
             "virtual_disk_space_provisioned",
-            project_id,
+            Some(project_id),
         )
         .await,
         i64::from(disk.size)
@@ -1536,10 +1536,10 @@ async fn test_disk_metrics(cptestctx: &ControlPlaneTestContext) {
 
     // Check the utilization info for the whole project too.
     assert_eq!(
-        get_latest_system_metric(
+        get_latest_silo_metric(
             cptestctx,
             "virtual_disk_space_provisioned",
-            project_id,
+            Some(project_id),
         )
         .await,
         i64::from(disk.size)
