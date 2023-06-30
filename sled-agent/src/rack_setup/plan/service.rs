@@ -368,50 +368,9 @@ impl Plan {
             });
         }
 
-        // Provision Nexus zones, continuing to stripe across sleds.
-        for _ in 0..NEXUS_COUNT {
-            let sled = {
-                let which_sled =
-                    sled_allocator.next().ok_or(PlanError::NotEnoughSleds)?;
-                &mut sled_info[which_sled]
-            };
-            let id = Uuid::new_v4();
-            let address = sled.addr_alloc.next().expect("Not enough addrs");
-            let zone = dns_builder.host_zone(id, address).unwrap();
-            dns_builder
-                .service_backend_zone(
-                    ServiceName::Nexus,
-                    &zone,
-                    omicron_common::address::NEXUS_INTERNAL_PORT,
-                )
-                .unwrap();
-            let (nic, external_ip) =
-                svc_port_builder.next_nexus(id, &mut services_ip_pool)?;
-            sled.request.services.push(ServiceZoneRequest {
-                id,
-                zone_type: ZoneType::Nexus,
-                addresses: vec![address],
-                dataset: None,
-                gz_addresses: vec![],
-                services: vec![ServiceZoneService {
-                    id,
-                    details: ServiceType::Nexus {
-                        internal_ip: address,
-                        external_ip,
-                        nic,
-                        // Tell Nexus to use TLS if and only if the caller
-                        // provided TLS certificates.  This effectively
-                        // determines the status of TLS for the lifetime of
-                        // the rack.  In production-like deployments, we'd
-                        // always expect TLS to be enabled.  It's only in
-                        // development that it might not be.
-                        external_tls: !config.external_certificates.is_empty(),
-                    },
-                }],
-            })
-        }
-
         // Provision external DNS zones, continuing to stripe across sleds.
+        // We do this before provisioning Nexus so that DNS gets the first IPs
+        // in the services pool.
         // TODO(https://github.com/oxidecomputer/omicron/issues/732): Remove
         for _ in 0..EXTERNAL_DNS_COUNT {
             let sled = {
@@ -453,6 +412,49 @@ impl Plan {
                     },
                 }],
             });
+        }
+
+        // Provision Nexus zones, continuing to stripe across sleds.
+        for _ in 0..NEXUS_COUNT {
+            let sled = {
+                let which_sled =
+                    sled_allocator.next().ok_or(PlanError::NotEnoughSleds)?;
+                &mut sled_info[which_sled]
+            };
+            let id = Uuid::new_v4();
+            let address = sled.addr_alloc.next().expect("Not enough addrs");
+            let zone = dns_builder.host_zone(id, address).unwrap();
+            dns_builder
+                .service_backend_zone(
+                    ServiceName::Nexus,
+                    &zone,
+                    omicron_common::address::NEXUS_INTERNAL_PORT,
+                )
+                .unwrap();
+            let (nic, external_ip) =
+                svc_port_builder.next_nexus(id, &mut services_ip_pool)?;
+            sled.request.services.push(ServiceZoneRequest {
+                id,
+                zone_type: ZoneType::Nexus,
+                addresses: vec![address],
+                dataset: None,
+                gz_addresses: vec![],
+                services: vec![ServiceZoneService {
+                    id,
+                    details: ServiceType::Nexus {
+                        internal_ip: address,
+                        external_ip,
+                        nic,
+                        // Tell Nexus to use TLS if and only if the caller
+                        // provided TLS certificates.  This effectively
+                        // determines the status of TLS for the lifetime of
+                        // the rack.  In production-like deployments, we'd
+                        // always expect TLS to be enabled.  It's only in
+                        // development that it might not be.
+                        external_tls: !config.external_certificates.is_empty(),
+                    },
+                }],
+            })
         }
 
         // Provision Oximeter zones, continuing to stripe across sleds.
