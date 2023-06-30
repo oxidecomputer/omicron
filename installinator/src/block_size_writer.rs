@@ -2,7 +2,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use pin_project_lite::pin_project;
 use std::io;
 use std::pin::Pin;
 use std::task::ready;
@@ -10,27 +9,24 @@ use std::task::Context;
 use std::task::Poll;
 use tokio::io::AsyncWrite;
 
-pin_project! {
-    /// `BlockSizeBufWriter` is analogous to a tokio's `BufWriter`, except it
-    /// guarantees that writes made to the underlying writer are always
-    /// _exactly_ the requested block size, with two exceptions: explicitly
-    /// calling (1) `flush()` or (2) `shutdown()` will write any
-    /// buffered-but-not-yet-written data to the underlying buffer regardless of
-    /// its length.
-    ///
-    /// When `BlockSizeBufWriter` is dropped, any buffered data it's holding
-    /// will be discarded. It is critical to manually call
-    /// `BlockSizeBufWriter:flush()` or `BlockSizeBufWriter::shutdown()` prior
-    /// to dropping to avoid data loss.
-    pub(crate) struct BlockSizeBufWriter<W> {
-        #[pin]
-        inner: W,
-        buf: Vec<u8>,
-        block_size: usize,
-    }
+/// `BlockSizeBufWriter` is analogous to a tokio's `BufWriter`, except it
+/// guarantees that writes made to the underlying writer are always
+/// _exactly_ the requested block size, with two exceptions: explicitly
+/// calling (1) `flush()` or (2) `shutdown()` will write any
+/// buffered-but-not-yet-written data to the underlying buffer regardless of
+/// its length.
+///
+/// When `BlockSizeBufWriter` is dropped, any buffered data it's holding
+/// will be discarded. It is critical to manually call
+/// `BlockSizeBufWriter:flush()` or `BlockSizeBufWriter::shutdown()` prior
+/// to dropping to avoid data loss.
+pub(crate) struct BlockSizeBufWriter<W> {
+    inner: W,
+    buf: Vec<u8>,
+    block_size: usize,
 }
 
-impl<W: AsyncWrite> BlockSizeBufWriter<W> {
+impl<W: AsyncWrite + Unpin> BlockSizeBufWriter<W> {
     pub(crate) fn with_block_size(block_size: usize, inner: W) -> Self {
         Self { inner, buf: Vec::with_capacity(block_size), block_size }
     }
@@ -39,19 +35,17 @@ impl<W: AsyncWrite> BlockSizeBufWriter<W> {
         self.inner
     }
 
-    fn get_pin_mut(self: Pin<&mut Self>) -> Pin<&mut W> {
-        self.project().inner
+    fn get_pin_mut(&mut self) -> Pin<&mut W> {
+        Pin::new(&mut self.inner)
     }
 
-    fn flush_buf(
-        self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-    ) -> Poll<io::Result<()>> {
-        let mut me = self.project();
+    fn flush_buf(&mut self, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
         let mut written = 0;
         let mut ret = Ok(());
-        while written < me.buf.len() {
-            match ready!(me.inner.as_mut().poll_write(cx, &me.buf[written..])) {
+        while written < self.buf.len() {
+            match ready!(
+                Pin::new(&mut self.inner).poll_write(cx, &self.buf[written..])
+            ) {
                 Ok(0) => {
                     ret = Err(io::Error::new(
                         io::ErrorKind::WriteZero,
@@ -67,44 +61,46 @@ impl<W: AsyncWrite> BlockSizeBufWriter<W> {
             }
         }
         if written > 0 {
-            me.buf.drain(..written);
+            self.buf.drain(..written);
         }
         Poll::Ready(ret)
     }
 }
 
-impl<W: AsyncWrite> AsyncWrite for BlockSizeBufWriter<W> {
+impl<W: AsyncWrite + Unpin> AsyncWrite for BlockSizeBufWriter<W> {
     fn poll_write(
         mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,
         buf: &[u8],
     ) -> Poll<Result<usize, std::io::Error>> {
+        let block_size = self.block_size;
+
         // We should never buffer up more than `block_size` data.
-        assert!(self.buf.len() <= self.block_size);
+        assert!(self.buf.len() <= block_size);
 
         // If we already have exactly `block_size` bytes, begin by flushing.
-        if self.buf.len() == self.block_size {
+        if self.buf.len() == block_size {
             ready!(self.as_mut().flush_buf(cx))?;
         }
 
-        let me = self.project();
-        if me.buf.is_empty() {
+        if self.buf.is_empty() {
             // If our buffer is empty, either directly write `block_size` bytes
             // from `buf` to `inner` (if there's enough data in `buf`) or just
             // copy it into our buffer.
-            if buf.len() >= *me.block_size {
-                me.inner.poll_write(cx, &buf[..*me.block_size])
+            if buf.len() >= block_size {
+                Pin::new(&mut self.inner)
+                    .poll_write(cx, &buf[..block_size])
             } else {
                 // `me.buf` is empty and `buf` is strictly less than
-                // `self.block_size`, so just copy it.
-                me.buf.extend_from_slice(buf);
+                // `block_size`, so just copy it.
+                self.buf.extend_from_slice(buf);
                 Poll::Ready(Ok(buf.len()))
             }
         } else {
             // Our buffer already has data - just copy as much of `buf` as we
             // can onto the end of it.
-            let n = usize::min(*me.block_size - me.buf.len(), buf.len());
-            me.buf.extend_from_slice(&buf[..n]);
+            let n = usize::min(block_size - self.buf.len(), buf.len());
+            self.buf.extend_from_slice(&buf[..n]);
             Poll::Ready(Ok(n))
         }
     }
@@ -113,7 +109,7 @@ impl<W: AsyncWrite> AsyncWrite for BlockSizeBufWriter<W> {
         mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,
     ) -> Poll<Result<(), std::io::Error>> {
-        ready!(self.as_mut().flush_buf(cx))?;
+        ready!(self.flush_buf(cx))?;
         self.get_pin_mut().poll_flush(cx)
     }
 
@@ -121,7 +117,7 @@ impl<W: AsyncWrite> AsyncWrite for BlockSizeBufWriter<W> {
         mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,
     ) -> Poll<Result<(), std::io::Error>> {
-        ready!(self.as_mut().flush_buf(cx))?;
+        ready!(self.flush_buf(cx))?;
         self.get_pin_mut().poll_shutdown(cx)
     }
 }
