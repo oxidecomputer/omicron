@@ -177,7 +177,7 @@ EOF
 }
 # usage:              SERIES   ROT_DIR      ROT_VERSION              BOARDS...
 add_hubris_artifacts  dogfood  staging/dev  cert-staging-dev-v1.0.0  gimlet-c psc-b sidecar-b
-add_hubris_artifacts  pvt1     prod/rel     cert-prod-rel-v1.0.0     gimlet-d psc-b sidecar-c
+add_hubris_artifacts  pvt1     prod/rel     cert-prod-rel-v1.0.0     gimlet-d psc-c sidecar-c
 
 for series in dogfood pvt1; do
     /work/tufaceous assemble --no-generate-key /work/manifest-$series.toml /work/repo-$series.zip
