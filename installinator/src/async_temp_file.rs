@@ -3,7 +3,6 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use camino::Utf8PathBuf;
-use pin_project_lite::pin_project;
 use std::io;
 use std::pin::Pin;
 use std::task::Context;
@@ -14,17 +13,14 @@ use tempfile::TempPath;
 use tokio::fs::File;
 use tokio::io::AsyncWrite;
 
-pin_project! {
-    pub(crate) struct AsyncNamedTempFile {
-        // `temp_path` is _always_ `Some(_)`, except when we `.take()` from it
-        // in our `persist()` method below. This allows us to drop the temp path
-        // (deleting the temporary file) if we're dropped before `persist()` is
-        // called.
-        temp_path: Option<TempPath>,
-        destination: Utf8PathBuf,
-        #[pin]
-        inner: File,
-    }
+pub(crate) struct AsyncNamedTempFile {
+    // `temp_path` is _always_ `Some(_)`, except when we `.take()` from it
+    // in our `persist()` method below. This allows us to drop the temp path
+    // (deleting the temporary file) if we're dropped before `persist()` is
+    // called.
+    temp_path: Option<TempPath>,
+    destination: Utf8PathBuf,
+    inner: File,
 }
 
 impl AsyncNamedTempFile {
@@ -72,24 +68,24 @@ impl AsyncNamedTempFile {
 
 impl AsyncWrite for AsyncNamedTempFile {
     fn poll_write(
-        self: Pin<&mut Self>,
+        mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,
         buf: &[u8],
     ) -> Poll<Result<usize, io::Error>> {
-        self.project().inner.poll_write(cx, buf)
+        Pin::new(&mut self.inner).poll_write(cx, buf)
     }
 
     fn poll_flush(
-        self: Pin<&mut Self>,
+        mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,
     ) -> Poll<Result<(), io::Error>> {
-        self.project().inner.poll_flush(cx)
+        Pin::new(&mut self.inner).poll_flush(cx)
     }
 
     fn poll_shutdown(
-        self: Pin<&mut Self>,
+        mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,
     ) -> Poll<Result<(), io::Error>> {
-        self.project().inner.poll_shutdown(cx)
+        Pin::new(&mut self.inner).poll_shutdown(cx)
     }
 }
