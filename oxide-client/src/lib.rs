@@ -75,8 +75,11 @@ impl reqwest::dns::Resolve for CustomDnsResolver {
     ) -> reqwest::dns::Resolving {
         let resolver = self.resolver.clone();
         async move {
-            let list = resolver.lookup_ip(name.as_str()).await?;
-            Ok(Box::new(list.into_iter().map(|s| {
+            eprintln!("dap: resolve {}", name.as_str());
+            let list = resolver.lookup_ip(name.as_str()).await;
+            // XXX-dap
+            eprintln!("dap: resolve {} -> {:?}", name.as_str(), list);
+            Ok(Box::new(list?.into_iter().map(|s| {
                 // reqwest does not appear to use the port number here.
                 // (See the docs for `ClientBuilder::resolve()`, which isn't
                 // the same thing, but is related.)
