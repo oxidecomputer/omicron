@@ -204,6 +204,16 @@ impl InstallOpts {
                         fetch_artifact(&cx, &host_phase_2_id, discovery, log)
                             .await?;
 
+                    // Check that the sha256 of the data we got from wicket
+                    // matches the data we asked for. If this fails, we fail the
+                    // entire installation rather than trying to fetch the
+                    // artifact again, because we're fetching data from wicketd
+                    // (in memory) over TCP to ourselves (in memory), so the
+                    // only cases where this could fail are disturbing enough
+                    // (memory corruption, corruption under TCP, or wicketd gave
+                    // us something other than what we requested) we want to
+                    // know immediately and not retry: it's likely an operator
+                    // could miss any warnings we emit if a retry succeeds.
                     check_downloaded_artifact_hash(
                         "host phase 2",
                         host_phase_2_artifact.artifact.clone(),
@@ -239,6 +249,10 @@ impl InstallOpts {
                         fetch_artifact(&cx, &control_plane_id, discovery, log)
                             .await?;
 
+                    // Check that the sha256 of the data we got from wicket
+                    // matches the data we asked for. We do not retry this for
+                    // the same reasons described above when checking the
+                    // downloaded host phase 2 artifact.
                     check_downloaded_artifact_hash(
                         "control plane",
                         control_plane_artifact.artifact.clone(),
