@@ -12319,7 +12319,7 @@
             "description": "The name of the disk to be snapshotted",
             "allOf": [
               {
-                "$ref": "#/components/schemas/Name"
+                "$ref": "#/components/schemas/NameOrId"
               }
             ]
           },
