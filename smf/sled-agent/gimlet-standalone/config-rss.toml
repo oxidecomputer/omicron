@@ -41,6 +41,26 @@ dns_servers = [ "1.1.1.1", "9.9.9.9" ]
 # altogether (which also means skipping TLS).
 external_dns_zone_name = "oxide.test"
 
+# Initial TLS certificates for the external API
+#
+# Each entry here is really a TLS certificate chain.  You typically only need
+# one entry here.  Multiple are supported primarily for rotating them.
+#
+# The certificates provided here will be used for the "recovery" Silo that's
+# created during initial setup with Wicket.  Immediately after that setup, users
+# will go to https://recovery.sys.$external_dns_zone_name to reach the console
+# to finish initial setup.  The rack will serve one of these TLS certificates at
+# that time.  Once in the console, the user would generally create another Silo
+# with its own certificate(s).
+#
+# For the structure of these certificates, see `Certificate` in the Nexus
+# internal API.  In practice, it's unwieldy to put them in this file.  Instead,
+# you can specify a certificate by including the certificate chain and private
+# key in PEM-format files called "initial-tls-cert.pem" and
+# "initial-tls-key.pem", respectively, in the same place as this configuration
+# file.
+external_certificates = []
+
 # The IP ranges configured as part of the "internal services" IP Pool
 #
 # This is a range of *external* IP addresses that will be assigned to the
@@ -75,26 +95,6 @@ uplink_port_fec="none"
 # For softnpu, an address within the "infra" block above that will be used for
 # the softnpu uplink port.  You can just pick the first address in that pool.
 uplink_ip = "192.168.1.30"
-
-# Initial TLS certificates for the external API
-#
-# Each entry here is really a TLS certificate chain.  You typically only need
-# one entry here.  Multiple are supported primarily for rotating them.
-#
-# The certificates provided here will be used for the "recovery" Silo that's
-# created during initial setup with Wicket.  Immediately after that setup, users
-# will go to https://recovery.sys.$external_dns_zone_name to reach the console
-# to finish initial setup.  The rack will serve one of these TLS certificates at
-# that time.  Once in the console, the user would generally create another Silo
-# with its own certificate(s).
-#
-# For the structure of these certificates, see `Certificate` in the Nexus
-# internal API.  In practice, it's unwieldy to put them in this file.  Instead,
-# you can specify a certificate by including the certificate chain and private
-# key in PEM-format files called "initial-tls-cert.pem" and
-# "initial-tls-key.pem", respectively, in the same place as this configuration
-# file.
-external_certificates = []
 
 # Configuration for the initial Silo, user, and password.
 #
