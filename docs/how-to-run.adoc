@@ -444,7 +444,7 @@ First, create a Project:
 
 [source,console]
 ----
-$ oxide project create myproj
+$ oxide project create --name=myproj --description demo
 ----
 
 Create a Project Image that will be used as initial disk contents.
@@ -453,7 +453,7 @@ This can be the alpine.iso image that ships with propolis:
 
 [source,console]
 ----
-$ oxide api /v1/images?project=<proj> --method POST --input - <<EOF
+$ oxide api /v1/images?project=myproj --method POST --input - <<EOF
 {
   "name": "alpine",
   "description": "boot from propolis zone blob!",
@@ -462,6 +462,8 @@ $ oxide api /v1/images?project=<proj> --method POST --input - <<EOF
     "name": "alpine",
     "version": "propolis-blob"
   },
+  "os": "linux",
+  "version": "1",
   "source": {
     "type": "you_can_boot_anything_as_long_as_its_alpine"
   }
@@ -536,11 +538,11 @@ EOF
 
 === Attach to the serial console
 
-You can attach to the proxied propolis server serial console:
+You can attach to the proxied propolis server serial console.  You'll need the id returned from the previous command, which we'll call $INSTANCE_ID:
 
 [source,console]
 ----
-$ oxide instance serial --interactive -p myproj myinst
+$ oxide instance serial console --instance $INSTANCE_ID
 ----
 
 == Cleaning up
