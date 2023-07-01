@@ -4,8 +4,9 @@
 # Agent API.  See the `RackInitializeRequest` type in bootstrap-agent or its
 # OpenAPI spec (in openapi/bootstrap-agent.json in the root of this workspace).
 
-# The /56 subnet for the rack.
-# Also implies the /48 AZ subnet.
+# The /56 subnet for this rack.  This subnet is internal to the rack and fully
+# managed by Omicron, so you can pick anything you want.  The rack-specific /56
+# subnet also implies the parent /48 AZ subnet.
 #              |............|    <- This /48 is the AZ Subnet
 #              |...............| <- This /56 is the Rack Subnet
 rack_subnet = "fd00:1122:3344:0100::"
@@ -22,25 +23,82 @@ ntp_servers = [ "ntp.eng.oxide.computer" ]
 dns_servers = [ "1.1.1.1", "9.9.9.9" ]
 
 # Delegated external DNS zone name
+#
+# The rack provides separate external API and console endpoints for each Silo.
+# These are named `$silo_name.sys.$external_dns_zone_name`.  For a Silo called
+# "eng" with delegated domain "oxide.example", the API would be accessible at
+# "eng.sys.oxide.example".  The rack runs external DNS servers that serve A/AAAA
+# records for these DNS names.
+#
+# In a real deployment, the operator would own this DNS domain and delegate it
+# to the rack.  That means adding glue records in their DNS servers for the
+# parent domain that point to the rack's external DNS servers.
+#
+# In development, we usually use a fake domain here and configure clients to use
+# the rack's external DNS server as their normal DNS server.  Programmatically,
+# we do this with a custom reqwest Resolver.  Using curl or the Oxide CLI, you
+# can do this with the `--resolve` option.  In practice, people often skip DNS
+# altogether (which also means skipping TLS).
 external_dns_zone_name = "oxide.test"
+
+# The IP ranges configured as part of the "internal services" IP Pool
+#
+# This is a range of *external* IP addresses that will be assigned to the
+# External DNS server(s) and Nexus instances.  These are the IPs that users
+# *outside* the rack will use to reach these services.  These will also be used
+# by services like NTP as their externally-facing address for NAT.
+#
+# For more on this and what to put here, see docs/how-to-run.adoc.
+[[internal_services_ip_pool_ranges]]
+first = "192.168.1.20"
+last = "192.168.1.29"
+
+# TODO - this configuration is subject to change going forward. Ultimately these
+# parameters should be provided to the control plane via wicket, but we need to
+# put these parameters somewhere in the meantime so that the Nexus API will be
+# reachable upon Rack startup.
+
+# Configuration to bring up Boundary Services and make Nexus reachable from the
+# outside.  See docs/how-to-run.adoc for more on what to put here.
+[rack_network_config]
+# The gateway IP for the rack's external network
+gateway_ip = "192.168.1.199"
+# A range of IP addresses used by Boundary Services on the external network.  In
+# a real system, these would be addresses of the uplink ports on the Sidecar.
+# With softnpu, only one address is used.
+infra_ip_first = "192.168.1.30"
+infra_ip_last = "192.168.1.30"
+# Name of the uplink port.  This should always be "qsfp0" when using softnpu.
+uplink_port = "qsfp0"
+uplink_port_speed = "40G"
+uplink_port_fec="none"
+# For softnpu, an address within the "infra" block above that will be used for
+# the softnpu uplink port.  You can just pick the first address in that pool.
+uplink_ip = "192.168.1.30"
 
 # Initial TLS certificates for the external API
 #
+# Each entry here is really a TLS certificate chain.  You typically only need
+# one entry here.  Multiple are supported primarily for rotating them.
+#
+# The certificates provided here will be used for the "recovery" Silo that's
+# created during initial setup with Wicket.  Immediately after that setup, users
+# will go to https://recovery.sys.$external_dns_zone_name to reach the console
+# to finish initial setup.  The rack will serve one of these TLS certificates at
+# that time.  Once in the console, the user would generally create another Silo
+# with its own certificate(s).
+#
 # For the structure of these certificates, see `Certificate` in the Nexus
-# internal API.  In practice, it can be unwieldy to put them here.  You can also
-# specify a certificate by including the certificate chain and private key in
-# PEM-format files called "initial-tls-cert.pem" and "initial-tls-key.pem",
-# respectively, in the same place as this configuration file.
+# internal API.  In practice, it's unwieldy to put them in this file.  Instead,
+# you can specify a certificate by including the certificate chain and private
+# key in PEM-format files called "initial-tls-cert.pem" and
+# "initial-tls-key.pem", respectively, in the same place as this configuration
+# file.
 external_certificates = []
 
-# The IP ranges configured as part of the services IP Pool.
-# e.g., Nexus will be configured to use an address from this
-# pool as its external IP.
-[[internal_services_ip_pool_ranges]]
-first = "192.168.1.20"
-last = "192.168.1.22"
-
 # Configuration for the initial Silo, user, and password.
+#
+# You don't need to change the silo or user names.
 [recovery_silo]
 silo_name = "recovery"
 user_name = "recovery"
