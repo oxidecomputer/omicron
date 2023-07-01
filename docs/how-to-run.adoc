@@ -98,14 +98,14 @@ As an example, in this doc:
 * You can carve off 192.168.1.20 - 192.168.1.29 for externally-facing services provided by the system.
 * You can carve off 192.168.1.30 as the address used by SoftNPU on the external network.
 * You can carve off 192.168.1.31 - 192.168.1.40 as the addresses used for Instances that need some public IPs (even if just for NAT to the internet).
-2. Alternatively, you'll set up an "external" network that only exists on your test machine.  If you go this route, we'll choose 192.168.1.0/24 and all the same other details as in the case above, just for convenience.  In this mode, you'll need create your made-up network and give the global zone an IP address on it.  We'll use 192.168.1.19:
+2. Alternatively, you'll set up an "external" network that only exists on your test machine.  If you go this route, we'll choose 192.168.1.0/24 and all the same other details as in the case above, just for convenience.  In this mode, you'll need create your made-up network and give the global zone an IP address on it.  We'll use 192.168.1.199:
 +
 [source,text]
 ----
 # pfexec dladm create-etherstub -t fake_external_stub0
 $ pfexec dladm create-vnic -t -l fake_external_stub0 fake_external0
 $ pfexec ipadm create-if -t fake_external0
-$ pfexec ipadm create-addr -t -T static --address 192.168.1.19 fake_external0/external
+$ pfexec ipadm create-addr -t -T static --address 192.168.1.199 fake_external0/external
 ----
 
 Other network configurations are possible but beyond the scope of this doc.
@@ -355,7 +355,7 @@ If your external network is one you made up above, you'll need to override the g
 
 [source,console]
 ----
-$ GATEWAY_IP=192.168.1.19 ./tools/scrimlet/softnpu-init.sh
+$ GATEWAY_IP=192.168.1.199 ./tools/scrimlet/softnpu-init.sh
 ----
 
 You can also override GATEWAY_MAC if needed, but that shouldn't be necessary for the configurations described here.
