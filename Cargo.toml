@@ -385,7 +385,6 @@ opt-level = 3
 [profile.dev.package.rust-argon2]
 opt-level = 3
 
-
 [profile.release]
 panic = "abort"
 

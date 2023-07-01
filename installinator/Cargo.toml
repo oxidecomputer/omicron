@@ -27,6 +27,7 @@ omicron-common.workspace = true
 progenitor-client.workspace = true
 reqwest.workspace = true
 serde.workspace = true
+sha2.workspace = true
 sled-hardware.workspace = true
 slog.workspace = true
 slog-async.workspace = true

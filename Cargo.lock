@@ -3334,6 +3334,7 @@ dependencies = [
  "proptest",
  "reqwest",
  "serde",
+ "sha2 0.10.7",
  "sled-hardware",
  "slog",
  "slog-async",
