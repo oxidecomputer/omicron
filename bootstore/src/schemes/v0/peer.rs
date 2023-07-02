@@ -238,7 +238,7 @@ async fn spawn_client(
             let log = log.new(o!("remote_peer_id" => identify.id.to_string()));
 
             // Inform the main task that we have connected to a peer
-            main_tx
+            let _ = main_tx
                 .send(ConnToMainMsg {
                     handle_unique_id: unique_id,
                     msg: ConnToMainMsgInner::ConnectedClient {
@@ -455,7 +455,18 @@ impl EstablishedConn {
                 }
             };
             self.last_received_msg = Instant::now();
-            println!("TODO: Do something with {:?}", msg);
+            debug!(self.log, "Received {:?}", msg);
+            if let Msg::Fsm(msg) = msg {
+                self.main_tx
+                    .send(ConnToMainMsg {
+                        handle_unique_id: self.unique_id,
+                        msg: ConnToMainMsgInner::Received {
+                            from: self.peer_id.clone(),
+                            msg
+                        },
+                    })
+                    .await;
+            }
         }
             
     }
@@ -539,7 +550,7 @@ async fn spawn_server(
         };
 
         // Inform the main task that we have connected to a peer
-        main_tx
+        let _ = main_tx
             .send(ConnToMainMsg {
                 handle_unique_id: unique_id,
                 msg: ConnToMainMsgInner::ConnectedServer {
@@ -593,7 +604,10 @@ enum ConnToMainMsgInner {
     Disconnected {
         peer_id: Baseboard,
     },
-    Forward(Envelope),
+    Received {
+        from: Baseboard,
+        msg: FsmMsg
+    },
     FailedServerHandshake {
         addr: SocketAddrV6,
     },
@@ -789,7 +803,7 @@ impl Peer {
                 Some(msg) = self.conn_rx.recv() => self.on_conn_msg(msg).await,
                 _ = interval.tick() => {
                     let output = self.fsm.tick();
-                    self.handle_output(output);
+                    self.handle_output(output).await;
                 }
             }
         }
@@ -835,6 +849,7 @@ impl Peer {
                 initial_membership,
                 responder,
             } => {
+                info!(self.log, "Rack init started"; "rack_uuid" => rack_uuid.to_string());
                 if self.init_responder.is_some() {
                     let _ = responder
                         .send(Err(PeerRequestError::RequestAlreadyPending));
@@ -842,7 +857,7 @@ impl Peer {
                 }
                 self.init_responder = Some(responder);
                 let output = self.fsm.init_rack(rack_uuid, initial_membership);
-                self.handle_output(output);
+                self.handle_output(output).await;
             }
             PeerApiRequest::InitLearner { responder } => {
                 if self.init_responder.is_some() {
@@ -852,7 +867,7 @@ impl Peer {
                 }
                 self.init_responder = Some(responder);
                 let output = self.fsm.init_learner();
-                self.handle_output(output);
+                self.handle_output(output).await;
             }
             PeerApiRequest::LoadRackSecret { responder } => {
                 if self.rack_secret_responder.is_some() {
@@ -862,7 +877,7 @@ impl Peer {
                 }
                 self.rack_secret_responder = Some(responder);
                 let output = self.fsm.load_rack_secret();
-                self.handle_output(output);
+                self.handle_output(output).await;
             }
             PeerApiRequest::PeerAddresses(peers) => {
                 info!(self.log, "Updated Peer Addresses: {:?}", peers);
@@ -904,18 +919,35 @@ impl Peer {
                     addr,
                     unique_id: accepted_handle.unique_id,
                 };
-                self.connections.insert(peer_id, handle);
+                self.connections.insert(peer_id.clone(), handle);
+                let output = self.fsm.connected(peer_id);
+                self.handle_output(output).await;
             }
-            ConnToMainMsgInner::ConnectedClient { addr, peer_id } => {}
-            ConnToMainMsgInner::Disconnected { peer_id: Baseboard } => {}
-            ConnToMainMsgInner::Forward(envelope) => {}
+            ConnToMainMsgInner::ConnectedClient { addr, peer_id } => {
+                let handle = self.negotiating_connections.remove(&addr).unwrap();
+                self.connections.insert(peer_id.clone(), handle);
+                let output = self.fsm.connected(peer_id);
+                self.handle_output(output).await;
+            }
+            ConnToMainMsgInner::Disconnected { peer_id} => {}
+            ConnToMainMsgInner::Received{from, msg} => {
+                let output = self.fsm.handle(from, msg);
+                self.handle_output(output).await;
+            }
             ConnToMainMsgInner::FailedServerHandshake {
                 addr: SocketAddrV6,
             } => {}
         }
     }
 
-    fn handle_output(&mut self, output: Output) {}
+    async fn handle_output(&mut self, output: Output) {
+        for envelope in output.envelopes {
+            if let Some(conn_handle) = self.connections.get(&envelope.to) {
+                conn_handle.tx.send(MainToConnMsg::Msg(Msg::Fsm(envelope.msg))).await;
+            }
+        }
+        
+    }
 
     async fn manage_connections(&mut self, peers: BTreeSet<SocketAddrV6>) {
         if peers == self.peers {
@@ -1040,10 +1072,15 @@ mod tests {
 
         let addrs: BTreeSet<_> =
             config.iter().map(|c| c.addr.clone()).collect();
-        for peer in [handle0, handle1, handle2] {
+        for peer in [&handle0, &handle1, &handle2] {
             peer.tx.send(PeerApiRequest::PeerAddresses(addrs.clone())).await;
         }
 
+        sleep(Duration::from_secs(1)).await;
+
+        let (tx, rx) = oneshot::channel();
+        handle0.tx.send(PeerApiRequest::InitRack { rack_uuid: Uuid::new_v4(), initial_membership: initial_members(), responder: tx}).await;
+    
         sleep(Duration::from_secs(10)).await;
     }
 }
