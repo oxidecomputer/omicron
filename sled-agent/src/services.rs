@@ -590,8 +590,9 @@ impl ServiceManager {
         Ok(())
     }
 
-    /// Loads services from the services manager, and returns once all requested
-    /// services have been started.
+    /// Sets up "Sled Agent" information, including underlay info.
+    ///
+    /// Any subsequent calls after the first invocation return an error.
     pub async fn sled_agent_started(
         &self,
         config: Config,
