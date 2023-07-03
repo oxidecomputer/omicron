@@ -486,7 +486,7 @@ lazy_static! {
                 name: DEMO_SNAPSHOT_NAME.clone(),
                 description: String::from(""),
             },
-            disk: DEMO_DISK_NAME.clone(),
+            disk: DEMO_DISK_NAME.clone().into(),
         };
 
     // SSH keys
