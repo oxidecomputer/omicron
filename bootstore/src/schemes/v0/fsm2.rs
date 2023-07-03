@@ -60,12 +60,6 @@ pub struct Fsm2 {
     /// Unique IDs of connected peers
     connected_peers: BTreeSet<Baseboard>,
 
-    /// The approximate wall-clock time
-    ///
-    /// This is updated via API calls, and not read directly.
-    /// Doing it this way allows deterministic tests.
-    clock: Instant,
-
     /// Manage all trackable broadcasts
     request_manager: RequestManager,
 
@@ -76,15 +70,29 @@ pub struct Fsm2 {
 }
 
 impl Fsm2 {
+    /// Create a new FSM in `State::Uninitialized`
+    pub fn new_uninitialized(id: Baseboard, config: Config) -> Fsm2 {
+        Fsm2 {
+            state: State::Uninitialized,
+            id,
+            config,
+            connected_peers: BTreeSet::new(),
+            request_manager: RequestManager::new(config),
+            envelopes: vec![],
+        }
+    }
+
     /// This call is triggered locally on a single sled as a result of RSS
     /// running. It may only be called once, which is enforced by checking to see
     /// if we already are in `State::Uninitialized`.
+    ///
+    /// Persistence is required after a successful call to `init_rack`
     pub fn init_rack(
         &mut self,
         now: Instant,
         rack_uuid: Uuid,
         initial_membership: BTreeSet<Baseboard>,
-    ) -> Result<Option<ApiOutput>, ApiError> {
+    ) -> Result<(), ApiError> {
         let State::Uninitialized = self.state else {
             return Err(ApiError::RackAlreadyInitialized);
         };
@@ -94,18 +102,22 @@ impl Fsm2 {
         let mut iter = pkgs.expose_secret().into_iter();
         let our_pkg = iter.next().unwrap().clone();
 
+        // Move into an initialized state
+        self.state = State::InitialMember { pkg: our_pkg };
+
         let packages: BTreeMap<Baseboard, SharePkg> = initial_membership
             .into_iter()
             .filter(|peer| *peer != self.id)
             .zip(iter.cloned())
             .collect();
 
-        let request_id = self.request_manager.new_init_rack(
+        let request_id = self.request_manager.new_init_rack_req(
             now,
             rack_uuid,
             packages.clone(),
         );
 
+        // Send a `Request::Init` to each connected peer in the initial group
         let envelope_iter = packages.into_iter().filter_map(|(to, pkg)| {
             if self.connected_peers.contains(&to) {
                 Some(Envelope {
@@ -120,11 +132,27 @@ impl Fsm2 {
                 None
             }
         });
-
-        // Send a `Request::Init` to each connected peer in the initial group
         self.envelopes.extend(envelope_iter);
 
-        Ok(None)
+        Ok(())
+    }
+
+    /// Initialize a node added after rack initialization
+    ///
+    /// Persistence is required after a successful call to `init_learner`
+    pub fn init_learner(&mut self, now: Instant) -> Result<(), ApiError> {
+        let State::Uninitialized = self.state else {
+            return Err(ApiError::PeerAlreadyInitialized);
+        };
+
+        let attempt =
+            self.connected_peers.first().map(|peer_id| LearnAttempt {
+                peer: peer_id.clone(),
+                expiry: now + self.config.learn_timeout,
+            });
+
+        self.state = State::Learning { attempt };
+        Ok(())
     }
 }
 
@@ -192,7 +220,15 @@ pub struct RequestManager {
 }
 
 impl RequestManager {
-    pub fn new_init_rack(
+    pub fn new(config: Config) -> RequestManager {
+        RequestManager {
+            config,
+            requests: BTreeMap::new(),
+            expiry_to_id: BTreeMap::new(),
+        }
+    }
+
+    pub fn new_init_rack_req(
         &mut self,
         now: Instant,
         rack_uuid: Uuid,
@@ -207,7 +243,7 @@ impl RequestManager {
         self.new_request(expiry, req)
     }
 
-    pub fn new_load_rack_secret(
+    pub fn new_load_rack_secret_req(
         &mut self,
         now: Instant,
         rack_uuid: Uuid,
@@ -223,7 +259,7 @@ impl RequestManager {
         )
     }
 
-    pub fn new_learn(
+    pub fn new_learn_req(
         &mut self,
         now: Instant,
         rack_uuid: Uuid,
