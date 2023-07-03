@@ -6,11 +6,11 @@
 
 use std::collections::BTreeMap;
 
-use crate::schemes::v0::fsm_output::{ApiError, ApiOutput};
-use crate::trust_quorum::{LearnedSharePkgV0, RackSecret, SharePkgV0};
+use super::share_pkg::{LearnedSharePkg, SharePkg};
+use crate::trust_quorum::RackSecret;
 
 use super::fsm::StateHandler;
-use super::fsm_output::Output;
+use super::fsm_output::{ApiError, ApiOutput, Output};
 use super::messages::{Envelope, Error, RequestType, Response, ResponseType};
 use super::state::{
     FsmCommonData, RackInitState, RequestMetadata, ShareIdx, State,
@@ -21,7 +21,7 @@ use uuid::Uuid;
 
 #[derive(Debug)]
 pub struct InitialMemberState {
-    pub pkg: SharePkgV0,
+    pub pkg: SharePkg,
 
     /// Shares given to other sleds. We mark them as used so that we don't
     /// hand them out twice. If the same sled asks us for a share, because
@@ -56,7 +56,7 @@ pub struct InitialMemberState {
 
 impl InitialMemberState {
     pub fn new(
-        pkg: SharePkgV0,
+        pkg: SharePkg,
         distributed_shares: BTreeMap<Baseboard, ShareIdx>,
     ) -> Self {
         InitialMemberState {
@@ -335,7 +335,7 @@ impl StateHandler for InitialMemberState {
 fn decrypt_and_send_share_response(
     from: Baseboard,
     request_id: Uuid,
-    pkg: &SharePkgV0,
+    pkg: &SharePkg,
     distributed_shares: &mut BTreeMap<Baseboard, ShareIdx>,
     rack_secret: &RackSecret,
 ) -> Output {
@@ -358,7 +358,7 @@ fn decrypt_and_send_share_response(
 fn send_share_response(
     from: Baseboard,
     request_id: Uuid,
-    pkg: &SharePkgV0,
+    pkg: &SharePkg,
     distributed_shares: &mut BTreeMap<Baseboard, ShareIdx>,
     shares: &Secret<Vec<Vec<u8>>>,
 ) -> Output {
@@ -366,7 +366,7 @@ fn send_share_response(
         // The share was already handed out to this
         // peer. Give back the same one.
         let share = shares.expose_secret()[idx.0].clone();
-        let learned_pkg = LearnedSharePkgV0 {
+        let learned_pkg = LearnedSharePkg {
             rack_uuid: pkg.rack_uuid,
             epoch: pkg.epoch,
             threshold: pkg.threshold,
@@ -388,7 +388,7 @@ fn send_share_response(
         match shares.expose_secret().get(idx) {
             Some(share) => {
                 distributed_shares.insert(from.clone(), ShareIdx(idx));
-                let learned_pkg = LearnedSharePkgV0 {
+                let learned_pkg = LearnedSharePkg {
                     rack_uuid: pkg.rack_uuid,
                     epoch: pkg.epoch,
                     threshold: pkg.threshold,

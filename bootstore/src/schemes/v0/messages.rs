@@ -4,7 +4,7 @@
 
 //! Messages sent between peers
 
-use crate::trust_quorum::{LearnedSharePkgV0, SharePkgV0};
+use super::share_pkg::{LearnedSharePkg, SharePkg};
 use derive_more::From;
 use serde::{Deserialize, Serialize};
 use sled_hardware::Baseboard;
@@ -51,12 +51,12 @@ pub struct Response {
 pub enum RequestType {
     /// A rack initialization request informing the peer that it is a member of
     /// the initial trust quorum.
-    Init(SharePkgV0),
+    Init(SharePkg),
 
     /// Request a share from a remote peer
     GetShare { rack_uuid: Uuid },
 
-    /// Get a [`LearnedSharePkgV0`] from a peer that was part of the rack
+    /// Get a [`LearnedSharePkg`] from a peer that was part of the rack
     /// initialization group
     Learn,
 }
@@ -82,7 +82,7 @@ pub enum ResponseType {
     Share(Vec<u8>),
 
     /// Response to [`Request::Learn`]
-    Pkg(LearnedSharePkgV0),
+    Pkg(LearnedSharePkg),
 
     /// An error response
     Error(Error),

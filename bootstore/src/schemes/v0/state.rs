@@ -7,14 +7,12 @@
 use super::fsm::StateHandler;
 use super::fsm_output::{ApiError, ApiOutput};
 use super::messages::{Envelope, Request, RequestType};
+use super::share_pkg::{LearnedSharePkg, SharePkg};
 use super::state_learned::LearnedState;
 use super::state_learning::LearningState;
 use super::state_uninitialized::UninitializedState;
 use super::{fsm_output::Output, state_initial_member::InitialMemberState};
-use crate::{
-    trust_quorum::{LearnedSharePkgV0, RackSecret, SharePkgV0},
-    Sha3_256Digest,
-};
+use crate::{trust_quorum::RackSecret, Sha3_256Digest};
 use derive_more::From;
 use serde::{Deserialize, Serialize};
 use sha3::{Digest, Sha3_256};
@@ -152,7 +150,7 @@ pub enum RackSecretState {
         shares: Shares,
         expiry: Ticks,
         threshold: usize,
-        share_digests: Vec<Sha3_256Digest>,
+        share_digests: BTreeSet<Sha3_256Digest>,
     },
     /// We only store the computed secret in memory for so long after it has
     /// been computed
@@ -168,7 +166,7 @@ impl RackSecretState {
         local_share: &Vec<u8>,
         new_expiry: Ticks,
         threshold: usize,
-        share_digests: &Vec<Sha3_256Digest>,
+        share_digests: &BTreeSet<Sha3_256Digest>,
     ) -> Output {
         match self {
             RackSecretState::Empty => {
@@ -226,7 +224,7 @@ impl RackSecretState {
     fn validate_share(
         from: &Baseboard,
         share: &Vec<u8>,
-        share_digests: &Vec<Sha3_256Digest>,
+        share_digests: &BTreeSet<Sha3_256Digest>,
     ) -> Result<(), ApiError> {
         let computed_hash = Sha3_256Digest(
             Sha3_256::digest(share).as_slice().try_into().unwrap(),
@@ -428,12 +426,12 @@ impl From<PersistentFsmState> for PersistentState {
 pub enum PersistentFsmState {
     Uninitialized,
     InitialMember {
-        pkg: SharePkgV0,
+        pkg: SharePkg,
         distributed_shares: BTreeMap<Baseboard, ShareIdx>,
     },
     Learning,
     Learned {
-        pkg: LearnedSharePkgV0,
+        pkg: LearnedSharePkg,
     },
 }
 

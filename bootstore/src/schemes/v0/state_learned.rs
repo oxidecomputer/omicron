@@ -4,19 +4,17 @@
 
 //! FSM API for `State::Learned`
 
-use crate::schemes::v0::fsm_output::ApiError;
-use crate::trust_quorum::LearnedSharePkgV0;
-
 use super::fsm::StateHandler;
-use super::fsm_output::Output;
+use super::fsm_output::{ApiError, Output};
 use super::messages::{Error, RequestType, ResponseType};
+use super::share_pkg::LearnedSharePkg;
 use super::state::{FsmCommonData, RackSecretState, State};
 use sled_hardware::Baseboard;
 use uuid::Uuid;
 
 #[derive(Debug)]
 pub struct LearnedState {
-    pub pkg: LearnedSharePkgV0,
+    pub pkg: LearnedSharePkg,
     // In `InitialMember` or `Learned` states, it is sometimes necessary to
     // reconstruct the rack secret.
     //
@@ -26,7 +24,7 @@ pub struct LearnedState {
 }
 
 impl LearnedState {
-    pub fn new(pkg: LearnedSharePkgV0) -> Self {
+    pub fn new(pkg: LearnedSharePkg) -> Self {
         LearnedState { pkg, rack_secret_state: None }
     }
 

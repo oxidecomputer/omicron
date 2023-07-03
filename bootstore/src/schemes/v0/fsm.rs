@@ -12,11 +12,11 @@ use super::fsm_output::{ApiError, Output};
 use super::messages::{
     Envelope, Msg, Request, RequestType, Response, ResponseType,
 };
+use super::share_pkg::create_pkgs;
 use super::state::{Config, FsmCommonData, RackInitState, State};
 use super::{
     InitialMemberState, LearnedState, LearningState, UninitializedState,
 };
-use crate::trust_quorum::create_pkgs;
 use secrecy::ExposeSecret;
 use sled_hardware::Baseboard;
 use std::collections::{BTreeMap, BTreeSet};
