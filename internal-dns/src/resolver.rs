@@ -137,7 +137,7 @@ impl Resolver {
     pub async fn lookup_srv(
         &self,
         srv: crate::ServiceName,
-    ) -> Result<Vec<String>, ResolveError> {
+    ) -> Result<Vec<(String, u16)>, ResolveError> {
         let name = format!("{}.{}", srv.dns_name(), DNS_ZONE);
         trace!(self.log, "lookup_srv"; "dns_name" => &name);
         let response = self.inner.srv_lookup(&name).await?;
@@ -148,7 +148,10 @@ impl Resolver {
             "response" => ?response
         );
 
-        Ok(response.into_iter().map(|srv| srv.target().to_string()).collect())
+        Ok(response
+            .into_iter()
+            .map(|srv| (srv.target().to_string(), srv.port()))
+            .collect())
     }
 
     pub async fn lookup_all_ipv6(
