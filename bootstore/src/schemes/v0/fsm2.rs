@@ -194,6 +194,58 @@ impl Fsm2 {
         self.envelopes.extend(iter);
         Ok(())
     }
+
+    /// Periodic tick to check for request expiration
+    ///
+    /// Return any expired request errors mapped to their request id
+    pub fn tick(
+        &mut self,
+        now: Instant,
+    ) -> Result<(), BTreeMap<Uuid, ApiError>> {
+        match self.state {
+            State::Uninitialized => return Ok(()),
+            State::Learning { .. } => {
+                // TODO: Check for any learn timeouts and try to go to the next peer if possible
+            }
+            State::InitialMember { .. } | State::Learned { .. } => (),
+        }
+        let mut errors = BTreeMap::new();
+        for (req_id, req) in self.request_manager.expired(now) {
+            match req {
+                TrackableRequest::InitRack { rack_uuid, acks, .. } => {
+                    let unacked_peers = acks
+                        .expected
+                        .difference(&acks.received)
+                        .cloned()
+                        .collect();
+                    errors.insert(
+                        req_id,
+                        ApiError::RackInitTimeout { unacked_peers },
+                    );
+                }
+                TrackableRequest::LoadRackSecret { rack_uuid, acks } => {
+                    errors.insert(req_id, ApiError::RackSecretLoadTimeout);
+                }
+                TrackableRequest::Learn { .. } => {
+                    // Nothing to do here, as these are requests from messages
+                    // and not api requests
+                }
+            }
+        }
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors)
+        }
+    }
+
+    /// A peer has been connected.
+    ///
+    /// Send any necessary messages required by pending requesets.
+    pub fn on_connected(&mut self, peer_id: Baseboard) {
+        self.request_manager.on_connected(&peer_id);
+        self.connected_peers.insert(peer_id);
+    }
 }
 
 #[derive(Zeroize, ZeroizeOnDrop)]
@@ -328,14 +380,20 @@ impl RequestManager {
         id
     }
 
-    /// Return any expired requests
+    /// Return any expired requests mapped to their request id
     ///
     /// This is typically called during `on_tick` callbacks.
-    pub fn expired(&mut self, now: Instant) -> Vec<TrackableRequest> {
-        let mut expired = vec![];
+    pub fn expired(
+        &mut self,
+        now: Instant,
+    ) -> BTreeMap<Uuid, TrackableRequest> {
+        let mut expired = BTreeMap::new();
         while let Some((expiry, request_id)) = self.expiry_to_id.pop_last() {
             if expiry > now {
-                expired.push(self.requests.remove(&request_id).unwrap());
+                expired.insert(
+                    request_id,
+                    self.requests.remove(&request_id).unwrap(),
+                );
             } else {
                 // Put the last request back. We are done.
                 self.expiry_to_id.insert(expiry, request_id);
@@ -381,7 +439,8 @@ impl RequestManager {
             _ => return None,
         };
         acks.received.insert(from, share);
-        if acks.received.len() == acks.threshold as usize {
+        // We already have our own share to be used to reconstruct the secret
+        if acks.received.len() == (acks.threshold - 1) as usize {
             self.expiry_to_id.retain(|_, id| *id != request_id);
             self.requests.remove(&request_id)
         } else {
