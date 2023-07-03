@@ -8,8 +8,9 @@
 //! results. This is where the bulk of the protocol logic lives. It's
 //! written this way to enable easy testing and auditing.
 
-use super::share_pkg::{LearnedSharePkg, SharePkg};
-use super::{Envelope, Msg, Request, RequestType};
+use super::share_pkg::{create_pkgs, LearnedSharePkg, SharePkg};
+use super::{ApiError, ApiOutput, Envelope, Msg, Request, RequestType};
+use secrecy::ExposeSecret;
 use serde::{Deserialize, Serialize};
 use sled_hardware::Baseboard;
 use std::collections::{BTreeMap, BTreeSet};
@@ -67,9 +68,65 @@ pub struct Fsm2 {
 
     /// Manage all trackable broadcasts
     request_manager: RequestManager,
+
+    /// Messages that need sending to other peers.
+    ///
+    /// These should be drained on each API call.
+    envelopes: Vec<Envelope>,
 }
 
-impl Fsm2 {}
+impl Fsm2 {
+    /// This call is triggered locally on a single sled as a result of RSS
+    /// running. It may only be called once, which is enforced by checking to see
+    /// if we already are in `State::Uninitialized`.
+    pub fn init_rack(
+        &mut self,
+        now: Instant,
+        rack_uuid: Uuid,
+        initial_membership: BTreeSet<Baseboard>,
+    ) -> Result<Option<ApiOutput>, ApiError> {
+        let State::Uninitialized = self.state else {
+            return Err(ApiError::RackAlreadyInitialized);
+        };
+        let total_members = initial_membership.len();
+        let pkgs = create_pkgs(rack_uuid, initial_membership.clone())
+            .map_err(|e| ApiError::RackInitFailed(e))?;
+        let mut iter = pkgs.expose_secret().into_iter();
+        let our_pkg = iter.next().unwrap().clone();
+
+        let packages: BTreeMap<Baseboard, SharePkg> = initial_membership
+            .into_iter()
+            .filter(|peer| *peer != self.id)
+            .zip(iter.cloned())
+            .collect();
+
+        let request_id = self.request_manager.new_init_rack(
+            now,
+            rack_uuid,
+            packages.clone(),
+        );
+
+        let envelope_iter = packages.into_iter().filter_map(|(to, pkg)| {
+            if self.connected_peers.contains(&to) {
+                Some(Envelope {
+                    to,
+                    msg: Request {
+                        id: request_id,
+                        type_: RequestType::Init(pkg),
+                    }
+                    .into(),
+                })
+            } else {
+                None
+            }
+        });
+
+        // Send a `Request::Init` to each connected peer in the initial group
+        self.envelopes.extend(envelope_iter);
+
+        Ok(None)
+    }
+}
 
 #[derive(Zeroize, ZeroizeOnDrop)]
 pub struct Share(Vec<u8>);
