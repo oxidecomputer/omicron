@@ -325,10 +325,14 @@ pub struct Switch {
 
 // PHYSICAL DISKS
 
+/// Classifies a physical disk as either external to the sled (e.g. a U.2 SSD) or internal
+/// to the sled (e.g. an M.2)
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum PhysicalDiskType {
+    /// A drive located inside the sled
     Internal,
+    /// A dive located on the front side of the sled
     External,
 }
 

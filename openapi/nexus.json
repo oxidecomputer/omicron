@@ -11103,10 +11103,22 @@
         ]
       },
       "PhysicalDiskType": {
-        "type": "string",
-        "enum": [
-          "internal",
-          "external"
+        "description": "Classifies a physical disk as either external to the sled (e.g. a U.2 SSD) or internal to the sled (e.g. an M.2)",
+        "oneOf": [
+          {
+            "description": "A drive located inside the sled",
+            "type": "string",
+            "enum": [
+              "internal"
+            ]
+          },
+          {
+            "description": "A dive located on the front side of the sled",
+            "type": "string",
+            "enum": [
+              "external"
+            ]
+          }
         ]
       },
       "Project": {
