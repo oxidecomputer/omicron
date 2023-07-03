@@ -5,27 +5,22 @@
 //! The v0 bootstore protocol (aka Low-Rent Trust Quorum)
 
 mod fsm;
-mod fsm_output;
 mod messages;
-mod state;
-mod state_initial_member;
-mod state_learned;
-mod state_learning;
-mod state_uninitialized;
+mod request_manager;
+mod share_pkg;
 
-pub use fsm::Fsm;
-pub use fsm_output::{ApiError, ApiOutput, Output};
+use serde::{Deserialize, Serialize};
+use std::fmt::Debug;
+use std::time::Duration;
+use zeroize::{Zeroize, ZeroizeOnDrop};
+
+pub use fsm::{ApiError, ApiOutput, Fsm, State};
 pub use messages::{
     Envelope, Error as MsgError, Msg, Request, RequestType, Response,
     ResponseType,
 };
-pub use state::{
-    Config, FsmCommonData, RackInitState, RackSecretState, State, Ticks,
-};
-pub use state_initial_member::InitialMemberState;
-pub use state_learned::LearnedState;
-pub use state_learning::{LearnAttempt, LearningState};
-pub use state_uninitialized::UninitializedState;
+pub use request_manager::{RequestManager, TrackableRequest};
+pub use share_pkg::{create_pkgs, LearnedSharePkg, SharePkg};
 
 /// The current version of supported messages within the v0 scheme
 ///
@@ -47,7 +42,45 @@ pub struct V0Scheme {
     trust_quorum_transport: Tcp,
     trusted_group_membership: No,
     shamir_curve: Curve25519,
-    message_serialization: Bcs,
+    message_serialization: Cbor,
     message_framing_header: U32BigEndian,
     message_signing: No,
+}
+
+/// A secret share
+#[derive(
+    Zeroize, ZeroizeOnDrop, PartialEq, Eq, Clone, Serialize, Deserialize,
+)]
+pub struct Share(Vec<u8>);
+
+// Manually implemented to redact info
+impl Debug for Share {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Share").finish()
+    }
+}
+
+/// A combined set of secret shares. This is the format that `vsss_rs` requires
+/// the shares in so that it will combine them to reconstruct the secret.
+#[derive(Zeroize, ZeroizeOnDrop)]
+pub struct Shares(Vec<Vec<u8>>);
+
+impl Shares {
+    fn insert(&mut self, share: Vec<u8>) {
+        self.0.push(share);
+    }
+}
+
+impl Debug for Shares {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Shares").finish()
+    }
+}
+
+/// Configuration of the FSM
+#[derive(Debug, Clone, Copy)]
+pub struct Config {
+    pub learn_timeout: Duration,
+    pub rack_init_timeout: Duration,
+    pub rack_secret_request_timeout: Duration,
 }

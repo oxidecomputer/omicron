@@ -4,7 +4,7 @@
 
 //! Messages sent between peers
 
-use crate::trust_quorum::{LearnedSharePkgV0, SharePkgV0};
+use super::{LearnedSharePkg, Share, SharePkg};
 use derive_more::From;
 use serde::{Deserialize, Serialize};
 use sled_hardware::Baseboard;
@@ -51,23 +51,22 @@ pub struct Response {
 pub enum RequestType {
     /// A rack initialization request informing the peer that it is a member of
     /// the initial trust quorum.
-    Init(SharePkgV0),
+    Init(SharePkg),
 
     /// Request a share from a remote peer
     GetShare { rack_uuid: Uuid },
 
-    /// Get a [`LearnedSharePkgV0`] from a peer that was part of the rack
+    /// Get a [`LearnedSharePkg`] from a peer that was part of the rack
     /// initialization group
     Learn,
 }
 
 impl RequestType {
     pub fn name(&self) -> &'static str {
-        use RequestType::*;
         match self {
-            Init(_) => "init",
-            GetShare { .. } => "get_share",
-            Learn => "learn",
+            RequestType::Init(_) => "init",
+            RequestType::GetShare { .. } => "get_share",
+            RequestType::Learn => "learn",
         }
     }
 }
@@ -79,10 +78,10 @@ pub enum ResponseType {
     InitAck,
 
     /// Response to [`Request::GetShare`]
-    Share(Vec<u8>),
+    Share(Share),
 
     /// Response to [`Request::Learn`]
-    Pkg(LearnedSharePkgV0),
+    Pkg(LearnedSharePkg),
 
     /// An error response
     Error(Error),
@@ -90,11 +89,10 @@ pub enum ResponseType {
 
 impl ResponseType {
     pub fn name(&self) -> &'static str {
-        use ResponseType::*;
         match self {
-            InitAck => "init_ack",
-            Share(_) => "share",
-            Pkg(_) => "pkg",
+            ResponseType::InitAck => "init_ack",
+            ResponseType::Share(_) => "share",
+            ResponseType::Pkg(_) => "pkg",
             ResponseType::Error(_) => "error",
         }
     }
@@ -104,7 +102,7 @@ impl ResponseType {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Error {
     /// The peer is already initialized as a member of the original group
-    AlreadyInitialized { rack_uuid: Uuid },
+    AlreadyInitialized,
 
     /// The peer has already learned it is a shared member of the group
     AlreadyLearned { rack_uuid: Uuid },

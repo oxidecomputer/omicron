@@ -2,8 +2,9 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use super::RackSecret;
-use super::TrustQuorumError;
+//! Distributable data packages containing key shares and metadata
+
+use crate::trust_quorum::{RackSecret, TrustQuorumError};
 use crate::Sha3_256Digest;
 use chacha20poly1305::{aead::Aead, ChaCha20Poly1305, Key, KeyInit};
 use hkdf::Hkdf;
@@ -12,7 +13,6 @@ use secrecy::{ExposeSecret, Secret};
 use serde::{Deserialize, Serialize};
 use sha3::{Digest, Sha3_256};
 use sled_hardware::Baseboard;
-use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::fmt;
 use uuid::Uuid;
@@ -23,40 +23,15 @@ use zeroize::{Zeroize, ZeroizeOnDrop};
 // - one identifier (x-coordinate) byte, and one 32-byte y-coordinate.
 const SHARE_SIZE: usize = 33;
 
-/// Details about a `SharePkg` or analog, that can be read first to allow
-/// us to know what version and structure we are dealing with.
-#[derive(Clone, PartialEq, Serialize, Deserialize)]
-pub struct SharePkgHeader {
-    version: u32,
-    metadata: BTreeMap<String, String>,
-}
-
-#[allow(unused)]
-impl SharePkgHeader {
-    pub fn new_v0() -> SharePkgHeader {
-        SharePkgHeader {
-            version: 0,
-            metadata: BTreeMap::from([("learned".into(), "false".into())]),
-        }
-    }
-
-    pub fn new_v0_learned() -> SharePkgHeader {
-        SharePkgHeader {
-            version: 0,
-            metadata: BTreeMap::from([("learned".into(), "true".into())]),
-        }
-    }
-}
-
 /// A container distributed among trust quorum participants for
-/// trust quorum scheme version 0: [`crate::SchemeV0`].
+/// trust quorum scheme version 0: [`crate::Scheme`].
 ///
-/// This scheme does not verify membership, and will hand out shares
-/// to whomever asks.
+/// Security Note: This scheme does not verify membership, and will hand out
+/// shares to whomever asks.
 #[derive(
     Clone, PartialEq, Eq, Serialize, Deserialize, Zeroize, ZeroizeOnDrop,
 )]
-pub struct SharePkgV0 {
+pub struct SharePkg {
     /// Unique Id of the rack
     #[zeroize(skip)]
     pub rack_uuid: Uuid,
@@ -80,7 +55,7 @@ pub struct SharePkgV0 {
     ///
     /// No need for expensive zeroizing
     #[zeroize(skip)]
-    pub share_digests: Vec<Sha3_256Digest>,
+    pub share_digests: BTreeSet<Sha3_256Digest>,
 
     /// Salt used for key derivation
     /// Since we use the same key for all pkgs, we share the same salt
@@ -108,7 +83,7 @@ pub struct SharePkgV0 {
     pub encrypted_shares: Vec<u8>,
 }
 
-impl SharePkgV0 {
+impl SharePkg {
     pub fn decrypt_shares(
         &self,
         rack_secret: &RackSecret,
@@ -119,12 +94,12 @@ impl SharePkgV0 {
     }
 }
 
-/// An analog to [`SharePkgV0`] for nodes that were added after rack
-/// initialization. There is no encrypted_shares or nonces because of this.
+/// An analog to [`SharePkg`] for nodes that were added after rack
+/// initialization. There are no encrypted_shares or nonces because of this.
 #[derive(
     Clone, PartialEq, Eq, Serialize, Deserialize, Zeroize, ZeroizeOnDrop,
 )]
-pub struct LearnedSharePkgV0 {
+pub struct LearnedSharePkg {
     #[zeroize(skip)]
     pub rack_uuid: Uuid,
     // We aren't planning on doing any reconfigurations with this version of
@@ -142,14 +117,14 @@ pub struct LearnedSharePkgV0 {
     //
     // No need for expensive nonsense
     #[zeroize(skip)]
-    pub share_digests: Vec<Sha3_256Digest>,
+    pub share_digests: BTreeSet<Sha3_256Digest>,
 }
 
 /// Create a package for each sled
 pub fn create_pkgs(
     rack_uuid: Uuid,
     initial_membership: BTreeSet<Baseboard>,
-) -> Result<Secret<Vec<SharePkgV0>>, TrustQuorumError> {
+) -> Result<Secret<Vec<SharePkg>>, TrustQuorumError> {
     // There are only up to 32 sleds in a rack.
     let n = u8::try_from(initial_membership.len()).unwrap();
     let rack_secret = RackSecret::new();
@@ -185,7 +160,7 @@ pub fn create_pkgs(
             .encrypt((&nonce).into(), plaintext.expose_secret().as_ref())
             .map_err(|_| TrustQuorumError::FailedToEncrypt)?;
 
-        let pkg = SharePkgV0 {
+        let pkg = SharePkg {
             rack_uuid,
             epoch,
             threshold,
@@ -214,7 +189,7 @@ fn new_nonce(i: u8) -> [u8; 12] {
     nonce
 }
 
-fn share_digests(shares: &Secret<Vec<Vec<u8>>>) -> Vec<Sha3_256Digest> {
+fn share_digests(shares: &Secret<Vec<Vec<u8>>>) -> BTreeSet<Sha3_256Digest> {
     shares
         .expose_secret()
         .iter()
@@ -264,9 +239,9 @@ fn decrypt_shares(
 
 // We don't want to risk debug-logging the actual share contents, so implement
 // `Debug` manually and omit sensitive fields.
-impl fmt::Debug for SharePkgV0 {
+impl fmt::Debug for SharePkg {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("SharePkgV0")
+        f.debug_struct("SharePkg")
             .field("rack_uuid", &self.rack_uuid)
             .field("epoch", &self.epoch)
             .field("threshold", &self.threshold)
@@ -281,9 +256,9 @@ impl fmt::Debug for SharePkgV0 {
 
 // We don't want to risk debug-logging the actual share contents, so implement
 // `Debug` manually and omit sensitive fields.
-impl fmt::Debug for LearnedSharePkgV0 {
+impl fmt::Debug for LearnedSharePkg {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("SharePkgV0")
+        f.debug_struct("SharePkg")
             .field("rack_uuid", &self.rack_uuid)
             .field("epoch", &self.epoch)
             .field("threshold", &self.threshold)
@@ -353,15 +328,14 @@ mod tests {
         );
 
         let hashes = packages.expose_secret()[0].share_digests.clone();
-        for (share, hash) in decrypted_shares.iter().zip(hashes.iter()) {
-            assert_eq!(share.len(), SHARE_SIZE);
 
-            // Ensure the hash of each share matches what is stored in hashes
-            // Iteration guarantees that shares match hashes in order
-            let computed_hash = Sha3_256Digest(
+        // Compute share hashes and ensure they are valid
+        for share in &decrypted_shares {
+            assert_eq!(share.len(), SHARE_SIZE);
+            let computed = Sha3_256Digest(
                 Sha3_256::digest(share).as_slice().try_into().unwrap(),
             );
-            assert_eq!(computed_hash, *hash);
+            assert!(hashes.contains(&computed));
         }
 
         // Grab a threshold of random shares and ensure that we can recompute
