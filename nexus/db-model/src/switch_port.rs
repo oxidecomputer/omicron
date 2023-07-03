@@ -73,7 +73,16 @@ impl Into<external::SwitchPortGeometry> for SwitchPortGeometry {
 }
 
 #[derive(
-    Queryable, Insertable, Selectable, Clone, Debug, Serialize, Deserialize,
+    Queryable,
+    Insertable,
+    Selectable,
+    Clone,
+    Debug,
+    Serialize,
+    Deserialize,
+    Hash,
+    Eq,
+    PartialEq,
 )]
 #[diesel(table_name = switch_port)]
 pub struct SwitchPort {

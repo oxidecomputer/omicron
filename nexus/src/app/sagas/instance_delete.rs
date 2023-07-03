@@ -2,6 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use std::collections::HashSet;
+
 use super::ActionRegistry;
 use super::NexusActionContext;
 use super::NexusSaga;
@@ -12,6 +14,7 @@ use crate::db::lookup::LookupPath;
 use crate::{authn, authz};
 use nexus_types::identity::Resource;
 use omicron_common::api::external::{Error, ResourceType};
+use omicron_common::api::internal::shared::SwitchLocation;
 use serde::Deserialize;
 use serde::Serialize;
 use steno::ActionError;
@@ -23,6 +26,7 @@ pub struct Params {
     pub serialized_authn: authn::saga::Serialized,
     pub authz_instance: authz::Instance,
     pub instance: db::model::Instance,
+    pub boundary_switches: HashSet<SwitchLocation>,
 }
 
 // instance delete saga: actions
@@ -148,7 +152,7 @@ async fn sid_delete_network_config(
         &params.serialized_authn,
     );
     let osagactx = sagactx.user_data();
-    let dpd_client = &osagactx.nexus().dpd_client;
+
     let datastore = &osagactx.datastore();
     let log = sagactx.user_data().log();
 
@@ -165,26 +169,43 @@ async fn sid_delete_network_config(
     // any error handling. If we don't defer error handling, we might end up
     // bailing out before we've attempted deletion of all entries.
     for entry in external_ips {
-        debug!(log, "deleting nat mapping for entry: {entry:#?}");
+        for switch in &params.boundary_switches {
+            debug!(log, "deleting nat mapping"; "switch" => switch.to_string(), "entry" => format!("{entry:#?}"));
 
-        let result = retry_until_known_result(log, || async {
-            dpd_client
-                .ensure_nat_entry_deleted(log, entry.ip, *entry.first_port)
-                .await
-        })
-        .await;
+            let client_result =
+                osagactx.nexus().dpd_clients.get(switch).ok_or_else(|| {
+                    ActionError::action_failed(Error::internal_error(&format!(
+                        "unable to find dendrite client for {switch}"
+                    )))
+                });
 
-        match result {
-            Ok(_) => {
-                debug!(log, "deletion of nat entry successful for: {entry:#?}");
-            }
-            Err(e) => {
-                let new_error =
-                    ActionError::action_failed(Error::internal_error(
-                        &format!("failed to delete nat entry via dpd: {e}"),
-                    ));
-                error!(log, "{new_error:#?}");
-                errors.push(new_error);
+            let dpd_client = match client_result {
+                Ok(client) => client,
+                Err(new_error) => {
+                    errors.push(new_error);
+                    continue;
+                }
+            };
+
+            let result = retry_until_known_result(log, || async {
+                dpd_client
+                    .ensure_nat_entry_deleted(log, entry.ip, *entry.first_port)
+                    .await
+            })
+            .await;
+
+            match result {
+                Ok(_) => {
+                    debug!(log, "deleting nat mapping successful"; "switch" => switch.to_string(), "entry" => format!("{entry:#?}"));
+                }
+                Err(e) => {
+                    let new_error =
+                        ActionError::action_failed(Error::internal_error(
+                            &format!("failed to delete nat entry via dpd: {e}"),
+                        ));
+                    error!(log, "{new_error:#?}");
+                    errors.push(new_error);
+                }
             }
         }
     }
@@ -341,6 +362,8 @@ mod test {
     use omicron_common::api::external::{
         ByteCount, IdentityMetadataCreateParams, InstanceCpuCount,
     };
+    use omicron_common::api::internal::shared::SwitchLocation;
+    use std::collections::HashSet;
     use std::num::NonZeroU32;
     use uuid::Uuid;
 
@@ -375,6 +398,7 @@ mod test {
             serialized_authn: Serialized::for_opctx(&opctx),
             authz_instance,
             instance,
+            boundary_switches: HashSet::from([SwitchLocation::Switch0]),
         }
     }
 

@@ -38,6 +38,7 @@ use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::Vni;
 use omicron_common::api::internal::nexus;
+use omicron_common::api::internal::shared::SwitchLocation;
 use propolis_client::support::tungstenite::protocol::frame::coding::CloseCode;
 use propolis_client::support::tungstenite::protocol::CloseFrame;
 use propolis_client::support::tungstenite::Message as WebSocketMessage;
@@ -50,6 +51,7 @@ use sled_agent_client::types::InstancePutStateBody;
 use sled_agent_client::types::InstanceStateRequested;
 use sled_agent_client::types::SourceNatConfig;
 use sled_agent_client::Client as SledAgentClient;
+use std::collections::HashSet;
 use std::net::SocketAddr;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -181,6 +183,9 @@ impl super::Nexus {
             serialized_authn: authn::saga::Serialized::for_opctx(opctx),
             project_id: authz_project.id(),
             create_params: params.clone(),
+            boundary_switches: self
+                .boundary_switches(&self.opctx_alloc)
+                .await?,
         };
 
         let saga_outputs = self
@@ -261,10 +266,14 @@ impl super::Nexus {
         let (.., authz_instance, instance) =
             instance_lookup.fetch_for(authz::Action::Delete).await?;
 
+        let boundary_switches =
+            self.boundary_switches(&self.opctx_alloc).await?;
+
         let saga_params = sagas::instance_delete::Params {
             serialized_authn: authn::saga::Serialized::for_opctx(opctx),
             authz_instance,
             instance,
+            boundary_switches,
         };
         self.execute_saga::<sagas::instance_delete::SagaInstanceDelete>(
             saga_params,
@@ -1157,15 +1166,46 @@ impl super::Nexus {
             .fetch()
             .await?;
 
-        self.instance_ensure_dpd_config(
-            opctx,
-            db_instance.id(),
-            &sled.address(),
-            None,
-        )
-        .await?;
+        let boundary_switches =
+            self.boundary_switches(&self.opctx_alloc).await?;
+
+        for switch in &boundary_switches {
+            let dpd_client = self.dpd_clients.get(switch).ok_or_else(|| {
+                Error::internal_error(&format!(
+                    "could not find dpd client for {switch}"
+                ))
+            })?;
+            self.instance_ensure_dpd_config(
+                opctx,
+                db_instance.id(),
+                &sled.address(),
+                None,
+                dpd_client,
+            )
+            .await?;
+        }
 
         Ok(())
+    }
+
+    // Switches with uplinks configured and boundary services enabled
+    async fn boundary_switches(
+        &self,
+        opctx: &OpContext,
+    ) -> Result<HashSet<SwitchLocation>, Error> {
+        let mut boundary_switches: HashSet<SwitchLocation> = HashSet::new();
+        let uplinks = self.list_switch_ports_with_uplinks(opctx).await?;
+        for uplink in &uplinks {
+            let location: SwitchLocation =
+                uplink.switch_location.parse().map_err(|_| {
+                    Error::internal_error(&format!(
+                        "invalid switch location in uplink config: {}",
+                        uplink.switch_location
+                    ))
+                })?;
+            boundary_switches.insert(location);
+        }
+        Ok(boundary_switches)
     }
 
     /// Ensures that the Dendrite configuration for the supplied instance is
@@ -1192,9 +1232,9 @@ impl super::Nexus {
         instance_id: Uuid,
         sled_ip_address: &std::net::SocketAddrV6,
         ip_index_filter: Option<usize>,
+        dpd_client: &Arc<dpd_client::Client>,
     ) -> Result<(), Error> {
         let log = &self.log;
-        let dpd_client = &self.dpd_client;
 
         info!(log, "looking up instance's primary network interface";
               "instance_id" => %instance_id);

@@ -28,6 +28,7 @@ use omicron_common::address::NEXUS_OPTE_IPV4_SUBNET;
 use omicron_common::api::external::MacAddr;
 use omicron_common::api::external::{IdentityMetadata, Name};
 use omicron_common::api::internal::nexus::ProducerEndpoint;
+use omicron_common::api::internal::shared::SwitchLocation;
 use omicron_common::nexus_config;
 use omicron_common::nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
 use omicron_sled_agent::sim;
@@ -348,7 +349,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
         self.dendrite = Some(dendrite);
 
         let address = SocketAddrV6::new(Ipv6Addr::LOCALHOST, port, 0, 0);
-        let switch_name: Name = "switch0".parse().unwrap();
+        let switch_location = SwitchLocation::Switch0;
 
         // Update the configuration options for Nexus, if it's launched later.
         //
@@ -356,7 +357,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
         let config = omicron_common::nexus_config::DpdConfig {
             address: Some(std::net::SocketAddr::V6(address)),
         };
-        self.config.pkg.dendrite.insert(switch_name, config);
+        self.config.pkg.dendrite.insert(switch_location, config);
 
         let sled_id = Uuid::parse_str(SLED_AGENT_UUID).unwrap();
         self.rack_init_builder.add_service(

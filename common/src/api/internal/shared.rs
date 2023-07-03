@@ -11,6 +11,7 @@ use std::{
     collections::HashMap,
     fmt::Display,
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
+    str::FromStr,
 };
 use uuid::Uuid;
 
@@ -112,6 +113,23 @@ impl Display for SwitchLocation {
         match self {
             SwitchLocation::Switch0 => write!(f, "switch0"),
             SwitchLocation::Switch1 => write!(f, "switch1"),
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Eq, Deserialize, Serialize)]
+pub struct ParseSwitchLocationError(String);
+
+impl FromStr for SwitchLocation {
+    type Err = ParseSwitchLocationError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "switch0" => Ok(Self::Switch0),
+            "switch1" => Ok(Self::Switch1),
+            _ => Err(ParseSwitchLocationError(format!(
+                "not a valid location: {s}"
+            ))),
         }
     }
 }
