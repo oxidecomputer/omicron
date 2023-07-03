@@ -35,6 +35,12 @@ CREATE USER omicron;
 ALTER DEFAULT PRIVILEGES GRANT INSERT, SELECT, UPDATE, DELETE ON TABLES to omicron;
 
 /*
+ * Configure a replication factor of 5 to ensure that the system can maintain
+ * availability in the face of any two node failures.
+ */
+ALTER RANGE default CONFIGURE ZONE USING num_replicas = 5;
+
+/*
  * Racks
  */
 CREATE TABLE omicron.public.rack (

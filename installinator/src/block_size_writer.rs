@@ -35,6 +35,10 @@ impl<W: AsyncWrite + Unpin> BlockSizeBufWriter<W> {
         self.inner
     }
 
+    pub(crate) fn block_size(&self) -> usize {
+        self.block_size
+    }
+
     fn get_pin_mut(&mut self) -> Pin<&mut W> {
         Pin::new(&mut self.inner)
     }

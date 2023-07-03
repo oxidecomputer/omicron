@@ -1605,8 +1605,8 @@ pub struct SnapshotCreate {
     #[serde(flatten)]
     pub identity: IdentityMetadataCreateParams,
 
-    /// The name of the disk to be snapshotted
-    pub disk: Name,
+    /// The disk to be snapshotted
+    pub disk: NameOrId,
 }
 
 // USERS AND GROUPS

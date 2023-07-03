@@ -339,6 +339,11 @@ impl SledAgent {
             sa.hardware_monitor_task(log).await;
         });
 
+        // Finally, load services for which we're already responsible.
+        //
+        // Do this *after* monitoring for harware, to enable the switch zone to
+        // establish an underlay address before proceeding.
+        sled_agent.inner.services.load_services().await?;
         Ok(sled_agent)
     }
 

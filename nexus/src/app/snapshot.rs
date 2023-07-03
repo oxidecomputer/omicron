@@ -7,6 +7,7 @@ use crate::db::lookup;
 use crate::db::lookup::LookupPath;
 use nexus_db_queries::context::OpContext;
 use nexus_types::external_api::params;
+use nexus_types::external_api::params::DiskSelector;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DeleteResult;
@@ -64,14 +65,31 @@ impl super::Nexus {
         params: &params::SnapshotCreate,
     ) -> CreateResult<db::model::Snapshot> {
         let authz_silo: authz::Silo;
-        let authz_project: authz::Project;
+        let authz_disk_project: authz::Project;
         let authz_disk: authz::Disk;
         let db_disk: db::model::Disk;
 
-        (authz_silo, authz_project, authz_disk, db_disk) = project_lookup
-            .disk_name(&db::model::Name(params.disk.clone()))
-            .fetch_for(authz::Action::Read)
-            .await?;
+        let (.., authz_project) =
+            project_lookup.lookup_for(authz::Action::CreateChild).await?;
+
+        (authz_silo, authz_disk_project, authz_disk, db_disk) = match params
+            .disk
+            .clone()
+        {
+            NameOrId::Id(id) => self.disk_lookup(
+                opctx,
+                DiskSelector { disk: NameOrId::Id(id), project: None },
+            )?,
+            NameOrId::Name(name) => project_lookup.disk_name_owned(name.into()),
+        }
+        .fetch_for(authz::Action::Read)
+        .await?;
+
+        if authz_disk_project.id() != authz_project.id() {
+            return Err(Error::invalid_request(
+                "can't create a snapshot of a disk in a different project",
+            ));
+        }
 
         // If there isn't a running propolis, Nexus needs to use the Crucible
         // Pantry to make this snapshot
