@@ -5,8 +5,9 @@
 # OpenAPI spec (in openapi/bootstrap-agent.json in the root of this workspace).
 
 # The /56 subnet for this rack.  This subnet is internal to the rack and fully
-# managed by Omicron, so you can pick anything you want.  The rack-specific /56
-# subnet also implies the parent /48 AZ subnet.
+# managed by Omicron, so you can pick anything you want within the IPv6 Unique
+# Local Address (ULA) range.  The rack-specific /56 subnet also implies the
+# parent /48 AZ subnet.
 #              |............|    <- This /48 is the AZ Subnet
 #              |...............| <- This /56 is the Rack Subnet
 rack_subnet = "fd00:1122:3344:0100::"
@@ -43,22 +44,27 @@ external_dns_zone_name = "oxide.test"
 
 # Initial TLS certificates for the external API
 #
-# Each entry here is really a TLS certificate chain.  You typically only need
-# one entry here.  Multiple are supported primarily for rotating them.
+# You should probably leave this field empty even if you want to configure TLS.
+# If you want to configure TLS, the easier approach is to put the certificate
+# chain and private key into PEM-format files called "initial-tls-cert.pem" and
+# "initial-tls-key.pem", respectively, in the same place as this configuration
+# file.  They will be loaded and inserted into this array as part of loading
+# this file.  If for some reason you must put the contents inline here, see the
+# API documentation for the structure of these objects.
 #
-# The certificates provided here will be used for the "recovery" Silo that's
-# created during initial setup with Wicket.  Immediately after that setup, users
-# will go to https://recovery.sys.$external_dns_zone_name to reach the console
-# to finish initial setup.  The rack will serve one of these TLS certificates at
+# However you provide the initial certificates, these will become associated
+# with the "recovery" Silo that's created during initial setup (i.e., with
+# Wicket, in a real system).  Immediately after that setup, users will go to
+# https://recovery.sys.$external_dns_zone_name to reach the web console to
+# finish initial setup.  The rack will serve one of these TLS certificates at
 # that time.  Once in the console, the user would generally create another Silo
 # with its own certificate(s).
 #
-# For the structure of these certificates, see `Certificate` in the Nexus
-# internal API.  In practice, it's unwieldy to put them in this file.  Instead,
-# you can specify a certificate by including the certificate chain and private
-# key in PEM-format files called "initial-tls-cert.pem" and
-# "initial-tls-key.pem", respectively, in the same place as this configuration
-# file.
+# When configuring TLS, you typically only need one entry here.  Each entry is
+# more accurately called a TLS certificate _chain_.
+#
+# If no initial TLS certificates are provided, then your external API will be
+# configured to listen only for plaintext HTTP on port 80.
 external_certificates = []
 
 # The IP ranges configured as part of the "internal services" IP Pool
