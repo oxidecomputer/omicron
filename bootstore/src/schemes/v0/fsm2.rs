@@ -154,6 +154,46 @@ impl Fsm2 {
         self.state = State::Learning { attempt };
         Ok(())
     }
+
+    /// This call is triggered locally after RSS runs, in order to retrieve the
+    /// `RackSecret` so that it can be used as input key material.
+    ///
+    /// if the rack secret has not already been loaded, then share retrieval
+    /// will begin.
+    pub fn load_rack_secret(&mut self, now: Instant) -> Result<(), ApiError> {
+        let (request_id, rack_uuid) = match &self.state {
+            State::Uninitialized => return Err(ApiError::RackNotInitialized),
+            State::Learning { .. } => return Err(ApiError::StillLearning),
+            State::InitialMember { pkg } => {
+                let request_id = self.request_manager.new_load_rack_secret_req(
+                    now,
+                    pkg.rack_uuid,
+                    pkg.threshold,
+                );
+                (request_id, pkg.rack_uuid)
+            }
+            State::Learned { pkg } => {
+                let request_id = self.request_manager.new_load_rack_secret_req(
+                    now,
+                    pkg.rack_uuid,
+                    pkg.threshold,
+                );
+                (request_id, pkg.rack_uuid)
+            }
+        };
+
+        // Send a `GetShare` request to all connected peers
+        let iter = self.connected_peers.iter().cloned().map(|to| Envelope {
+            to,
+            msg: Request {
+                id: request_id,
+                type_: RequestType::GetShare { rack_uuid },
+            }
+            .into(),
+        });
+        self.envelopes.extend(iter);
+        Ok(())
+    }
 }
 
 #[derive(Zeroize, ZeroizeOnDrop)]
@@ -318,6 +358,7 @@ impl RequestManager {
         {
             acks.received.insert(from);
             if acks.received == acks.expected {
+                self.expiry_to_id.retain(|_, id| *id != request_id);
                 self.requests.remove(&request_id);
                 return true;
             }
@@ -341,6 +382,7 @@ impl RequestManager {
         };
         acks.received.insert(from, share);
         if acks.received.len() == acks.threshold as usize {
+            self.expiry_to_id.retain(|_, id| *id != request_id);
             self.requests.remove(&request_id)
         } else {
             None
