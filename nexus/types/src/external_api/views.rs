@@ -332,7 +332,7 @@ pub struct Switch {
 pub enum PhysicalDiskType {
     /// A drive located inside the sled
     Internal,
-    /// A dive located on the front side of the sled
+    /// A drive located on the front side of the sled
     External,
 }
 
