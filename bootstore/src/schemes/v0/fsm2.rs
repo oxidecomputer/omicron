@@ -58,18 +58,6 @@ pub struct Fsm2 {
 
 impl Fsm2 {}
 
-pub struct Request {
-    id: Uuid,
-    ty: RequestType,
-    expiry: Instant,
-}
-
-/// Acknowledgement tracking for `RequestType::InitRack`.
-pub struct InitAcks {
-    expected: BTreeSet<Baseboard>,
-    received: BTreeSet<Baseboard>,
-}
-
 #[derive(Zeroize, ZeroizeOnDrop)]
 pub struct Share(Vec<u8>);
 
@@ -80,6 +68,13 @@ impl Debug for Share {
     }
 }
 
+/// Acknowledgement tracking for `RequestType::InitRack`.
+#[derive(Debug, Default)]
+pub struct InitAcks {
+    expected: BTreeSet<Baseboard>,
+    received: BTreeSet<Baseboard>,
+}
+
 /// Acknowledgement tracking for `RequestType::LoadRackSecret` and
 /// `RequestType::Learn`
 #[derive(Debug)]
@@ -88,50 +83,127 @@ pub struct ShareAcks {
     received: BTreeMap<Baseboard, Share>,
 }
 
+impl ShareAcks {
+    pub fn new(threshold: u8) -> ShareAcks {
+        ShareAcks { threshold, received: BTreeMap::new() }
+    }
+}
+
 #[derive(Debug)]
-pub enum RequestType {
+pub enum Request {
     /// A request from the caller of the Fsm API to initialize a rack
     ///
     /// This must only be called at one peer.
-    InitRack { rack_uuid: Uuid },
+    InitRack { rack_uuid: Uuid, acks: InitAcks },
 
     /// A request from the caller of the Fsm API to load a rack secret
-    LoadRackSecret,
+    LoadRackSecret { acks: ShareAcks },
 
     /// A request from a peer to learn a new share
     /// This peer was not part of the initial membership group
-    Learn { from: Baseboard },
+    Learn { from: Baseboard, acks: ShareAcks },
 }
 
 /// A mechanism to manage all in flight requests
 ///
-/// We expect very few requests at a time - on the order of one or two requests,
-/// and so we just store them in a Vec.
+/// We expect very few requests at a time - on the order of one or two requests.
 pub struct RequestManager {
     config: Config,
-    requests: Vec<Request>,
+    requests: BTreeMap<Uuid, Request>,
+    expiry_to_id: BTreeMap<Instant, Uuid>,
 }
 
 impl RequestManager {
-    /// Create a new init_rack request and return the request id
     pub fn new_init_rack(&mut self, now: Instant, rack_uuid: Uuid) -> Uuid {
-        let ty = RequestType::InitRack { rack_uuid };
-        self.new_request(now, ty)
+        let req = Request::InitRack { rack_uuid, acks: InitAcks::default() };
+        self.new_request(now, req)
     }
 
-    pub fn new_rack_secret_load(&mut self, now: Instant) -> Uuid {
-        self.new_request(now, RequestType::LoadRackSecret)
+    pub fn new_load_rack_secret(
+        &mut self,
+        now: Instant,
+        threshold: u8,
+    ) -> Uuid {
+        self.new_request(
+            now,
+            Request::LoadRackSecret { acks: ShareAcks::new(threshold) },
+        )
     }
 
-    pub fn new_learn(&mut self, now: Instant, from: Baseboard) -> Uuid {
-        self.new_request(now, RequestType::Learn { from })
+    pub fn new_learn(
+        &mut self,
+        now: Instant,
+        threshold: u8,
+        from: Baseboard,
+    ) -> Uuid {
+        self.new_request(
+            now,
+            Request::Learn { from, acks: ShareAcks::new(threshold) },
+        )
     }
 
-    fn new_request(&mut self, now: Instant, ty: RequestType) -> Uuid {
+    /// Return any expired requests
+    pub fn expired(&mut self, now: Instant) -> Vec<Request> {
+        let mut expired = vec![];
+        while let Some((expiry, request_id)) = self.expiry_to_id.pop_last() {
+            if expiry > now {
+                expired.push(self.requests.remove(&request_id).unwrap());
+            } else {
+                // Put the last request back. We are done.
+                self.expiry_to_id.insert(expiry, request_id);
+                break;
+            }
+        }
+        expired
+    }
+
+    fn new_request(&mut self, now: Instant, request: Request) -> Uuid {
         let expiry = now + self.config.rack_init_timeout;
         let id = Uuid::new_v4();
-        let request = Request { id, ty, expiry };
-        self.requests.push(request);
+        self.requests.insert(id, request);
+        self.expiry_to_id.insert(expiry, id);
         id
+    }
+
+    /// Return true if initialization completed, false otherwise
+    ///
+    /// If initialization completed, the request will be deleted.
+    ///
+    /// We drop the ack if the request_id is not found. This could be a lingering
+    /// old ack from when the rack was reset to clean up after a prior failed rack
+    /// init.
+    pub fn on_init_ack(&mut self, from: Baseboard, request_id: Uuid) -> bool {
+        if let Some(Request::InitRack { acks, .. }) =
+            self.requests.get_mut(&request_id)
+        {
+            acks.received.insert(from);
+            if acks.received == acks.expected {
+                self.requests.remove(&request_id);
+                return true;
+            }
+        }
+
+        false
+    }
+
+    /// Return the `Some(request)` if a threshold of acks has been received.
+    /// Otherwise return `None`
+    pub fn on_share(
+        &mut self,
+        from: Baseboard,
+        request_id: Uuid,
+        share: Share,
+    ) -> Option<Request> {
+        let acks = match self.requests.get_mut(&request_id) {
+            Some(Request::LoadRackSecret { acks }) => acks,
+            Some(Request::Learn { acks, .. }) => acks,
+            _ => return None,
+        };
+        acks.received.insert(from, share);
+        if acks.received.len() == acks.threshold as usize {
+            self.requests.remove(&request_id)
+        } else {
+            None
+        }
     }
 }
