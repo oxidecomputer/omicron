@@ -186,7 +186,7 @@ version = "0.1.0"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.20",
+ "syn 2.0.23",
 ]
 
 [[package]]
@@ -196,7 +196,7 @@ source = "git+https://github.com/oxidecomputer/omicron?branch=main#bd6c62807fbb2
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.20",
+ "syn 2.0.23",
 ]
 
 [[package]]
@@ -301,7 +301,7 @@ checksum = "16e62a023e7c117e27523144c5d2459f4397fcc3cab0085af8e2224f643a0193"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.20",
+ "syn 2.0.23",
 ]
 
 [[package]]
@@ -312,7 +312,7 @@ checksum = "b9ccdd8f2a161be9bd5c023df56f1b2a0bd1d83872ae53b71a84a12c9bf6e842"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.20",
+ "syn 2.0.23",
 ]
 
 [[package]]
@@ -350,7 +350,7 @@ dependencies = [
  "quote",
  "serde",
  "serde_tokenstream 0.2.0",
- "syn 2.0.20",
+ "syn 2.0.23",
 ]
 
 [[package]]
@@ -502,7 +502,7 @@ dependencies = [
  "regex",
  "rustc-hash",
  "shlex",
- "syn 2.0.20",
+ "syn 2.0.23",
  "which",
 ]
 
@@ -1013,7 +1013,7 @@ dependencies = [
  "heck 0.4.1",
  "proc-macro2",
  "quote",
- "syn 2.0.20",
+ "syn 2.0.23",
 ]
 
 [[package]]
@@ -1554,7 +1554,7 @@ dependencies = [
  "proc-macro2",
  "quote",
  "strsim 0.10.0",
- "syn 2.0.20",
+ "syn 2.0.23",
 ]
 
 [[package]]
@@ -1576,7 +1576,7 @@ checksum = "7bfb82b62b1b8a2a9808fb4caf844ede819a76cfc23b2827d7f94eefb49551eb"
 dependencies = [
  "darling_core 0.20.0",
  "quote",
- "syn 2.0.20",
+ "syn 2.0.23",
 ]
 
 [[package]]
@@ -1619,7 +1619,7 @@ dependencies = [
  "rustfmt-wrapper",
  "serde",
  "serde_tokenstream 0.2.0",
- "syn 2.0.20",
+ "syn 2.0.23",
 ]
 
 [[package]]
@@ -1672,7 +1672,7 @@ dependencies = [
  "proc-macro-error",
  "proc-macro2",
  "quote",
- "syn 2.0.20",
+ "syn 2.0.23",
 ]
 
 [[package]]
@@ -1683,7 +1683,7 @@ checksum = "5bc1955a640c4464859ae700fbe48e666da6fdce99ce5fe1acd08dd295889d10"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.20",
+ "syn 2.0.23",
 ]
 
 [[package]]
@@ -1770,7 +1770,7 @@ dependencies = [
  "diesel_table_macro_syntax",
  "proc-macro2",
  "quote",
- "syn 2.0.20",
+ "syn 2.0.23",
 ]
 
 [[package]]
@@ -1779,7 +1779,7 @@ version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fc5557efc453706fed5e4fa85006fe9817c224c3f480a34c7e5959fd700921c5"
 dependencies = [
- "syn 2.0.20",
+ "syn 2.0.23",
 ]
 
 [[package]]
@@ -2055,7 +2055,7 @@ dependencies = [
  "quote",
  "serde",
  "serde_tokenstream 0.2.0",
- "syn 2.0.20",
+ "syn 2.0.23",
 ]
 
 [[package]]
@@ -2206,7 +2206,7 @@ checksum = "eecf8589574ce9b895052fa12d69af7a233f99e6107f5cb8dd1044f2a17bfdcb"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.20",
+ "syn 2.0.23",
 ]
 
 [[package]]
@@ -2529,7 +2529,7 @@ checksum = "89ca545a94061b6365f2c7355b4b32bd20df3ff95f02da9329b34ccc3bd6ee72"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.20",
+ "syn 2.0.23",
 ]
 
 [[package]]
@@ -4242,7 +4242,7 @@ version = "0.1.0"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.20",
+ "syn 2.0.23",
 ]
 
 [[package]]
@@ -5279,7 +5279,7 @@ version = "0.1.0"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.20",
+ "syn 2.0.23",
 ]
 
 [[package]]
@@ -5289,7 +5289,7 @@ source = "git+https://github.com/oxidecomputer/omicron?branch=main#bd6c62807fbb2
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.20",
+ "syn 2.0.23",
 ]
 
 [[package]]
@@ -5893,7 +5893,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1ceca8aaf45b5c46ec7ed39fff75f57290368c1846d33d24a122ca81416ab058"
 dependencies = [
  "proc-macro2",
- "syn 2.0.20",
+ "syn 2.0.23",
 ]
 
 [[package]]
@@ -5980,7 +5980,7 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
- "syn 2.0.20",
+ "syn 2.0.23",
  "thiserror",
  "typify",
  "unicode-ident",
@@ -6000,7 +6000,7 @@ dependencies = [
  "serde_json",
  "serde_tokenstream 0.2.0",
  "serde_yaml",
- "syn 2.0.20",
+ "syn 2.0.23",
 ]
 
 [[package]]
@@ -6418,7 +6418,7 @@ checksum = "8d2275aab483050ab2a7364c1a46604865ee7d6906684e08db0f090acf74f9e7"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.20",
+ "syn 2.0.23",
 ]
 
 [[package]]
@@ -7088,7 +7088,7 @@ checksum = "d9735b638ccc51c28bf6914d90a2e9725b377144fc612c49a611fddd1b631d68"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.20",
+ "syn 2.0.23",
 ]
 
 [[package]]
@@ -7180,7 +7180,7 @@ dependencies = [
  "proc-macro2",
  "quote",
  "serde",
- "syn 2.0.20",
+ "syn 2.0.23",
 ]
 
 [[package]]
@@ -7220,7 +7220,7 @@ dependencies = [
  "darling 0.20.0",
  "proc-macro2",
  "quote",
- "syn 2.0.20",
+ "syn 2.0.23",
 ]
 
 [[package]]
@@ -7911,9 +7911,9 @@ dependencies = [
 
 [[package]]
 name = "syn"
-version = "2.0.20"
+version = "2.0.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fcb8d4cebc40aa517dfb69618fa647a346562e67228e2236ae0042ee6ac14775"
+checksum = "59fb7d6d8281a51045d62b8eb3a7d1ce347b76f312af50cd3dc0af39c87c1737"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -8063,7 +8063,7 @@ checksum = "f9456a42c5b0d803c8cd86e73dd7cc9edd429499f37a3550d286d5e86720569f"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.20",
+ "syn 2.0.23",
 ]
 
 [[package]]
@@ -8251,7 +8251,7 @@ checksum = "630bdcf245f78637c13ec01ffae6187cca34625e8c63150d424b59e55af2675e"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.20",
+ "syn 2.0.23",
 ]
 
 [[package]]
@@ -8720,7 +8720,7 @@ dependencies = [
  "regress",
  "schemars",
  "serde_json",
- "syn 2.0.20",
+ "syn 2.0.23",
  "thiserror",
  "unicode-ident",
 ]
@@ -8736,7 +8736,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_tokenstream 0.2.0",
- "syn 2.0.20",
+ "syn 2.0.23",
  "typify-impl",
 ]
 
