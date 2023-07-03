@@ -5,8 +5,10 @@
 //! The v0 bootstore protocol (aka Low-Rent Trust Quorum)
 
 mod fsm;
+mod fsm2;
 mod fsm_output;
 mod messages;
+mod share_pkg;
 mod state;
 mod state_initial_member;
 mod state_learned;
