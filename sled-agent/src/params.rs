@@ -579,7 +579,7 @@ impl TryFrom<ServiceZoneRequest>
             dataset: s.dataset.map(|d| d.into()),
             gz_addresses: s.gz_addresses,
             services,
-            boundary_switches: vec![],
+            boundary_switches: s.boundary_switches,
         })
     }
 }
