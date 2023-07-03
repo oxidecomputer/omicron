@@ -43,10 +43,13 @@ vmm_reservoir_percentage = 0
 # $ dladm show-phys -p -o LINK
 # data_link = "igb0"
 
-# If testing on non-gimlet hardware, fill this in with the name of links that
-# should be mapped into the switch zone and used for transit mode maghemite
-# there. On gimlets, this is not required as tfportd will create links in the
-# switch zone when it boots, and maghemite is configured to use those.
+# On a multi-sled system, transit-mode Maghemite runs in the `oxz_switch` zone
+# to configure routes between sleds.  This runs over the Sidecar's rear ports
+# (whether simulated with SoftNPU or not).  On a Gimlet deployed in a rack,
+# tfportd will create the necessary links and Maghemite will be configured to
+# use those.  But on non-Gimlet systems, you need to specify physical links to
+# be passed into the `oxz_switch` zone for this purpose.  You can skip this if
+# you're deploying a single-sled system.
 #switch_zone_maghemite_links = ["ixgbe0", "ixgbe1"]
 
 [log]

@@ -6,7 +6,7 @@
 
 Omicron is the control plane for the Oxide system.  There are a few different ways to run Omicron depending on what resources you have available and how much of the stack you want to run using real components vs. simulated ones.  Generally speaking, it's easier to get things going and automate testing with simulated components, but of course much of the system's functionality is missing or faked up when using simulated components.
 
-The most common configurations are:
+The most common development configurations are:
 
 1. Using one or more simulated Sled Agents.  There are no real VMs.  All components listen on localhost and talk to each other directly.  The automated tests in this repo generally use this kind of deployment.  This is the only mode that's supported on non-illumos systems (i.e., Linux and MacOS).
 2. Using one or more real Sled Agents (on separate physical machines) using SoftNPU-based Boundary Services.  You can provision real VMs this way.  Intra-"rack" networking and boundary Services (i.e., external connectivity) are fully functional using SoftNPU, a software-based simulation of the Tofino device that's normally responsible for these functions.
@@ -64,7 +64,7 @@ Here's a summary of the tradeoffs:
 |Real implementation on-sled, simulated implementation across sleds (SoftNPU)
 
 |Boundary services (external connectivity)
-|Localhost
+|Missing.  Externally-facing Oxide services listen directly on localhost.  The VMs are fake, so external connectivity is moot.
 |Simulated implementation (SoftNPU)
 
 |Wicket
@@ -77,7 +77,16 @@ Here's a summary of the tradeoffs:
 
 |===
 
-To run the simulated control plane, refer to the guide on xref:how-to-run-simulated.adoc[running simulated Omicron].  The rest of this document describes how to run a single-Sled Omicron with a real Sled Agent and SoftNPU-based Boundary Services.
+**To run the simulated control plane, refer to the guide on xref:how-to-run-simulated.adoc[running simulated Omicron].**  The rest of this document describes how to run a single-Sled Omicron with a real Sled Agent and SoftNPU-based Boundary Services.
+
+There are other configurations besides the ones mentioned here:
+
+* A real Oxide rack: real hardware with real implementations of all components.
+* A Gimlet in a real Oxide rack, deployed as a single system in isolation from the rest of the rack.
+* A Gimlet on a bench (i.e., not in a rack -- requires separate hardware to connect power and networking) connected a Sidecar (the Oxide switch, also on a bench)
+* A Gimlet on a bench with no Sidecar.
+
+This document doesn't describe how to deploy these cases.
 
 == Prerequisites
 
@@ -116,13 +125,11 @@ When making this choice, note that **in order to use the system once it's set up
 
 Omicron packages (discussed in more detail below) are associated with a particular _machine_ type, which is one of:
 
-* `gimlet` (real Oxide hardware deployed in a real Oxide rack)
-* `gimlet-standalone` (real Oxide server hardware running as a single-machine "rack")
-* `non-gimlet` (some kind of PC running as a single-machine "rack")
+* `gimlet` (real Oxide hardware deployed in a real Oxide rack with a bunch of other Gimlets that together form a multi-sled system)
+* `gimlet-standalone` (real Oxide server hardware deployed in a real Oxide rack, but running as a separate single-node system)
+* `non-gimlet` (some kind of PC running as a single-machine "rack"; can potentially also be used for Gimlet running on the bench?)
 
-The main difference are the configuration files used for the Sled Agent and Rak Setup Service (RSS).
-
-This guide is for `gimlet-standalone` and `non-gimlet`.  In the rest of this guide, `$MACHINE` refers to one of these two values.
+The main difference are the configuration files used for the Sled Agent and Rack Setup Service (RSS).
 
 === Prerequisite software
 
@@ -238,9 +245,7 @@ uplink_port_fec="none"
 uplink_ip = "192.168.1.30"
 ----
 
-Update your `smf/sled-agent/$MACHINE/config.toml` if necessary:
-
-TODO how does one know if this is necessary and if so, what to put here?
+In some configurations (not the one described here), it may be necessary to update `smf/sled-agent/$MACHINE/config.toml`:
 
 ----
 # An optional data link from which we extract a MAC address.
@@ -248,13 +253,16 @@ TODO how does one know if this is necessary and if so, what to put here?
 #
 # If empty, this will be equivalent to the first result from:
 # $ dladm show-phys -p -o LINK
-# data_link = "igb0"           <--- update if necessary
+# data_link = "igb0"
 
-# If testing on non-gimlet hardware, fill this in with the name of links that
-# should be mapped into the switch zone and used for transit mode maghemite
-# there. On gimlets, this is not required as tfportd will create links in the
-# switch zone when it boots, and maghemite is configured to use those.
-# switch_zone_maghemite_links = ["ixgbe0", "ixgbe1"] <--- update if necessary
+# On a multi-sled system, transit-mode Maghemite runs in the `oxz_switch` zone
+# to configure routes between sleds.  This runs over the Sidecar's rear ports
+# (whether simulated with SoftNPU or not).  On a Gimlet deployed in a rack,
+# tfportd will create the necessary links and Maghemite will be configured to
+# use those.  But on non-Gimlet systems, you need to specify physical links to
+# be passed into the `oxz_switch` zone for this purpose.  You can skip this if
+# you're deploying a single-sled system.
+# switch_zone_maghemite_links = ["ixgbe0", "ixgbe1"]
 ----
 
 === Build Omicron packages
@@ -342,7 +350,7 @@ $ zoneadm list -cnv
 $ pfexec tail -f $(pfexec svcs -z oxz_nexus -L nexus)
 ----
 
-=== Finish configuring external networking
+=== SoftNPU Configuration
 
 After installing omicron with `omicron-package install`, you can run the `softnpu-init.sh` script to configure SoftNPU.  If your external network is the one that your global zone is already on (i.e., an existing network), then you can likely just run:
 
@@ -351,14 +359,18 @@ After installing omicron with `omicron-package install`, you can run the `softnp
 $ ./tools/scrimlet/softnpu-init.sh
 ----
 
-If your external network is one you made up above, you'll need to override the gateway IP to be the address of the global zone on your made-up network.  In our example:
+In this case, `softnpu-init.sh` determines a network gateway by looking at your system's default gateway.  Again, the assumption for this use case is that your rack gets external connectivity the same way your system does because it's part of the same network.
+
+If your external network is one you made up above that's local to your own system, this won't be right.  In that case, you'll want to override the gateway IP to be the address of the global zone on your made-up network.  In our example:
 
 [source,console]
 ----
 $ GATEWAY_IP=192.168.1.199 ./tools/scrimlet/softnpu-init.sh
 ----
 
-You can also override GATEWAY_MAC if needed, but that shouldn't be necessary for the configurations described here.
+In other configurations, you might use a different GATEWAY_IP.  You can also override GATEWAY_MAC if needed, but that shouldn't be necessary for the configurations described here.
+
+=== SoftNPU Proxy ARP Setup
 
 Services that require external connectivity (e.g. Nexus, Boundary NTP, External DNS) do so via OPTE using addresses from the services IP pool.  When using SoftNPU, we'll need to configure Proxy ARP for those addresses.
 
