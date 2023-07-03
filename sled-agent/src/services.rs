@@ -506,6 +506,10 @@ impl ServiceManager {
             .collect()
     }
 
+    // TODO(https://github.com/oxidecomputer/omicron/issues/2973):
+    // These will fail if the disks aren't attached.
+    // Should we have a retry loop here? Kinda like we have with the switch
+    // / NTP zone?
     pub async fn load_services(&self) -> Result<(), Error> {
         let log = &self.inner.log;
         let ledger_paths = self.all_service_ledgers().await;
@@ -586,8 +590,9 @@ impl ServiceManager {
         Ok(())
     }
 
-    /// Loads services from the services manager, and returns once all requested
-    /// services have been started.
+    /// Sets up "Sled Agent" information, including underlay info.
+    ///
+    /// Any subsequent calls after the first invocation return an error.
     pub async fn sled_agent_started(
         &self,
         config: Config,
@@ -610,15 +615,6 @@ impl ServiceManager {
             })
             .map_err(|_| "already set".to_string())
             .expect("Sled Agent should only start once");
-
-        // TODO(https://github.com/oxidecomputer/omicron/issues/2973):
-        // These will fail if the disks aren't attached.
-        // Should we have a retry loop here? Kinda like we have with the switch
-        // / NTP zone?
-        self.load_services().await.map_err(|e| {
-            error!(self.inner.log, "failed to launch services"; "error" => e.to_string());
-            e
-        })?;
 
         Ok(())
     }
@@ -1305,13 +1301,39 @@ impl ServiceManager {
             // can be supplied - now that we're actively using it, we
             // aren't really handling the "many GZ addresses" case, and it
             // doesn't seem necessary now.
+            info!(self.inner.log, "Zone using its own GZ address as gateway");
             Some(request.zone.gz_addresses[0])
         } else if let Some(info) = self.inner.sled_info.get() {
-            // If the service has not supplied a GZ address, simply add
-            // a route to the sled's underlay address.
-            Some(info.underlay_address)
+            // Only consider a route to the sled's underlay address if the
+            // underlay is up.
+            let sled_underlay_subnet =
+                Ipv6Subnet::<SLED_PREFIX>::new(info.underlay_address);
+
+            if request
+                .zone
+                .addresses
+                .iter()
+                .any(|ip| sled_underlay_subnet.net().contains(*ip))
+            {
+                // If the underlay is up, provide a route to it through an
+                // existing address in the Zone on the same subnet.
+                info!(self.inner.log, "Zone using sled underlay as gateway");
+                Some(info.underlay_address)
+            } else {
+                // If no such address exists in the sled's subnet, don't route
+                // to anything.
+                info!(
+                    self.inner.log,
+                    "Zone not using gateway (even though underlay is up)"
+                );
+                None
+            }
         } else {
             // If the underlay doesn't exist, no routing occurs.
+            info!(
+                self.inner.log,
+                "Zone not using gateway (underlay is not up)"
+            );
             None
         };
 
