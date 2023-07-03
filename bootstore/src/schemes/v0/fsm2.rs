@@ -202,9 +202,9 @@ impl Fsm2 {
         &mut self,
         now: Instant,
     ) -> Result<(), BTreeMap<Uuid, ApiError>> {
-        match self.state {
+        match &mut self.state {
             State::Uninitialized => return Ok(()),
-            State::Learning { .. } => {
+            State::Learning { attempt } => {
                 // TODO: Check for any learn timeouts and try to go to the next peer if possible
             }
             State::InitialMember { .. } | State::Learned { .. } => (),
@@ -242,7 +242,25 @@ impl Fsm2 {
     /// A peer has been connected.
     ///
     /// Send any necessary messages required by pending requesets.
-    pub fn on_connected(&mut self, peer_id: Baseboard) {
+    pub fn on_connected(&mut self, now: Instant, peer_id: Baseboard) {
+        if let State::Learning { attempt } = &mut self.state {
+            // This is the first peer we've seen in the learning state, so try
+            // to learn from it.
+            if attempt.is_none() {
+                *attempt = Some(LearnAttempt {
+                    peer: peer_id.clone(),
+                    expiry: now + self.config.learn_timeout,
+                });
+                self.envelopes.push(Envelope {
+                    to: peer_id.clone(),
+                    msg: Request {
+                        id: Uuid::new_v4(),
+                        type_: RequestType::Learn,
+                    }
+                    .into(),
+                });
+            }
+        }
         self.request_manager.on_connected(&peer_id);
         self.connected_peers.insert(peer_id);
     }
@@ -382,7 +400,7 @@ impl RequestManager {
 
     /// Return any expired requests mapped to their request id
     ///
-    /// This is typically called during `on_tick` callbacks.
+    /// This is typically called during `tick` callbacks.
     pub fn expired(
         &mut self,
         now: Instant,
