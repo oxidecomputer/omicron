@@ -1001,6 +1001,11 @@ impl ServiceInner {
     ) -> Result<(), SetupServiceError> {
         info!(self.log, "Injecting RSS configuration: {:#?}", config);
 
+        let resolver = internal_dns::resolver::Resolver::new_from_subnet(
+            self.log.new(o!("component" => "DnsResolver")),
+            config.az_subnet(),
+        )?;
+
         let marker_paths: Vec<Utf8PathBuf> = storage_resources
             .all_m2_mountpoints(sled_hardware::disk::CONFIG_DATASET)
             .await
@@ -1036,8 +1041,9 @@ impl ServiceInner {
                 .await?
                 .expect("Service plan should exist if completed marker exists");
 
-            info!(self.log, "Finding switch zone addresses in service plan");
-            let switch_zone_addresses = switch_zone_addresses(&service_plan);
+            info!(self.log, "Finding switch zone addresses in DNS");
+            let switch_zone_addresses =
+                resolver.lookup_all_ipv6(ServiceName::Dendrite).await?;
             info!(self.log, "Detected switch zone addresses"; "addresses" => format!("{switch_zone_addresses:#?}"));
 
             let switch_mgmt_addrs =
@@ -1143,8 +1149,9 @@ impl ServiceInner {
         self.ensure_all_services_of_type(&service_plan, &zone_types).await?;
         self.initialize_internal_dns_records(&service_plan).await?;
 
-        info!(self.log, "Finding switch zone addresses in service plan");
-        let switch_zone_addresses = switch_zone_addresses(&service_plan);
+        info!(self.log, "Finding switch zone addresses in DNS");
+        let switch_zone_addresses =
+            resolver.lookup_all_ipv6(ServiceName::Dendrite).await?;
         info!(self.log, "Detected switch zone addresses"; "addresses" => format!("{switch_zone_addresses:#?}"));
 
         let switch_mgmt_addrs =
@@ -1208,17 +1215,23 @@ impl ServiceInner {
 
                 let ddmd_addr = SocketAddrV6::new(*zone_addr, DDMD_PORT, 0, 0);
                 let ddmd_client = DdmAdminClient::new(&self.log, ddmd_addr)?;
-                ddmd_client.advertise_prefix(Ipv6Subnet::new(
-                    BOUNDARY_SERVICES_ADDR.parse().unwrap(),
-                ));
+                ddmd_client.advertise_prefix(Ipv6Subnet::new(ipv6_entry.addr));
             }
             // Inject boundary_switch_addrs into ServiceZoneRequests
             // When the opte interface is created for the service,
             // nat entries will be created using the switches present here
-            for (_, request) in service_plan.services.iter_mut() {
-                for mut zone_request in request.services.iter_mut() {
-                    zone_request.boundary_switches =
-                        Vec::from_iter(boundary_switch_addrs.clone());
+            let switch_addrs: Vec<Ipv6Addr> =
+                Vec::from_iter(boundary_switch_addrs);
+            for (_, request) in &mut service_plan.services {
+                for zone_request in &mut request.services {
+                    // Do not modify any services that have already been deployed
+                    if zone_types.contains(&zone_request.zone_type) {
+                        continue;
+                    }
+
+                    zone_request
+                        .boundary_switches
+                        .extend_from_slice(&switch_addrs);
                 }
             }
         }
@@ -1433,24 +1446,4 @@ impl ServiceInner {
             tokio::time::sleep(std::time::Duration::from_secs(2)).await;
         }
     }
-}
-/// Scan the DNS configuration in the service plan to find
-/// the addresses of the switch zones
-fn switch_zone_addresses(service_plan: &ServicePlan) -> Vec<Ipv6Addr> {
-    let mut addrs = vec![];
-    for entry in &service_plan.dns_config.zones {
-        for (name, records) in &entry.records {
-            if name.starts_with("dendrite") {
-                for record in records {
-                    match record {
-                        dns_service_client::types::DnsRecord::Aaaa(addr) => {
-                            addrs.push(*addr);
-                        }
-                        _ => continue,
-                    }
-                }
-            }
-        }
-    }
-    addrs
 }

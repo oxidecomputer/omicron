@@ -193,7 +193,7 @@ impl super::Nexus {
     pub async fn populate_switch_ports(
         &self,
         opctx: &OpContext,
-        ports: &Vec<Name>,
+        ports: &[Name],
         switch: Name,
     ) -> CreateResult<()> {
         for port in ports {

@@ -374,6 +374,25 @@ impl super::Nexus {
                     _ => Err(e),
                 },
             }?;
+
+            let address_lot_lookup = self
+                .address_lot_lookup(
+                    &opctx,
+                    NameOrId::Name(address_lot_name.clone()),
+                )
+                .map_err(|e| {
+                    Error::internal_error(&format!(
+                        "unable to lookup infra address_lot: {e}"
+                    ))
+                })?;
+
+            let (.., authz_address_lot) = address_lot_lookup
+                .lookup_for(authz::Action::Modify)
+                .await
+                .map_err(|e| {
+                    Error::internal_error(&format!("unable to retrieve authz_address_lot for infra address_lot: {e}"))
+                })?;
+
             for (idx, uplink_config) in
                 rack_network_config.uplinks.iter().enumerate()
             {
@@ -391,24 +410,6 @@ impl super::Nexus {
                     address: first_address,
                     mask: 64,
                 };
-
-                let address_lot_lookup = self
-                    .address_lot_lookup(
-                        &opctx,
-                        loopback_address_params.address_lot.clone(),
-                    )
-                    .map_err(|e| {
-                        Error::internal_error(&format!(
-                            "unable to lookup infra address_lot: {e}"
-                        ))
-                    })?;
-
-                let (.., authz_address_lot) = address_lot_lookup
-                .lookup_for(authz::Action::Modify)
-                .await
-                .map_err(|e| {
-                    Error::internal_error(&format!("unable to retrieve authz_address_lot for infra address_lot: {e}"))
-                })?;
 
                 if self
                     .loopback_address_lookup(
@@ -438,11 +439,7 @@ impl super::Nexus {
                         .await?;
                 }
                 let uplink_name = format!("default-uplink{idx}");
-                let name = Name::from_str(&uplink_name).map_err(|e| {
-                    Error::internal_error(&format!(
-                        "unable to use {uplink_name} as `Name`: {e}"
-                    ))
-                })?;
+                let name = Name::from_str(&uplink_name).unwrap();
 
                 let identity = IdentityMetadataCreateParams {
                     name: name.clone(),
