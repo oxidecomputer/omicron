@@ -251,14 +251,14 @@ impl RequestManager {
         expired
     }
 
-    /// Return true if initialization completed, false otherwise
+    /// Return `Some(true)` if initialization completed, `Some(false) if it did not
     ///
-    /// If initialization completed, the request will be deleted.
-    ///
-    /// We drop the ack if the request_id is not found. This could be a lingering
-    /// old ack from when the rack was reset to clean up after a prior failed rack
-    /// init.
-    pub fn on_init_ack(&mut self, from: Baseboard, request_id: Uuid) -> bool {
+    /// Return `None` if there is no active rack initialization ongoing
+    pub fn on_init_ack(
+        &mut self,
+        from: Baseboard,
+        request_id: Uuid,
+    ) -> Option<bool> {
         if let Some(TrackableRequest::InitRack { acks, .. }) =
             self.requests.get_mut(&request_id)
         {
@@ -266,11 +266,13 @@ impl RequestManager {
             if acks.received == acks.expected {
                 self.expiry_to_id.retain(|_, id| *id != request_id);
                 self.requests.remove(&request_id);
-                return true;
+                Some(true)
+            } else {
+                Some(false)
             }
+        } else {
+            None
         }
-
-        false
     }
 
     /// Return the `Some(request)` if a threshold of acks has been received.

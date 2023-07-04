@@ -36,6 +36,17 @@ pub enum State {
     Learned { pkg: LearnedSharePkg },
 }
 
+impl State {
+    pub fn name(&self) -> &'static str {
+        match self {
+            State::Uninitialized => "uninitialized",
+            State::InitialMember { .. } => "initial_member",
+            State::Learning => "learning",
+            State::Learned { .. } => "learned",
+        }
+    }
+}
+
 /// A response to an Fsm API request
 pub enum ApiOutput {
     /// This peer has been initialized
@@ -70,6 +81,25 @@ pub enum ApiError {
 
     #[error("rack secret load timeout")]
     RackSecretLoadTimeout,
+
+    #[error("critical: failed to reconstruct rack secret with valid shares")]
+    FailedToReconstructRackSecret,
+
+    #[error("unexpected response ({msg}) from ({from}) in state ({state}) with request_id ({request_id})")]
+    UnexpectedResponse {
+        from: Baseboard,
+        state: &'static str,
+        request_id: Uuid,
+        msg: &'static str,
+    },
+
+    #[error("error response received from ({from}) in state ({state}) with request_id ({request_id}): {error:?}")]
+    ErrorResponseReceived {
+        from: Baseboard,
+        state: &'static str,
+        request_id: Uuid,
+        error: MsgError,
+    },
 }
 
 pub struct Fsm2 {
@@ -404,7 +434,7 @@ impl Fsm2 {
         rsp: Response,
     ) -> Result<Option<ApiOutput>, ApiError> {
         match rsp.type_ {
-            ResponseType::InitAck => Ok(self.on_init_ack(from, rsp.request_id)),
+            ResponseType::InitAck => self.on_init_ack(from, rsp.request_id),
             ResponseType::Share(share) => {
                 unimplemented!()
             }
@@ -422,13 +452,17 @@ impl Fsm2 {
         &mut self,
         from: Baseboard,
         request_id: Uuid,
-    ) -> Option<ApiOutput> {
-        if let State::InitialMember { .. } = self.state {
-            if self.request_manager.on_init_ack(from, request_id) {
-                return Some(ApiOutput::RackInitComplete);
-            }
+    ) -> Result<Option<ApiOutput>, ApiError> {
+        match self.request_manager.on_init_ack(from.clone(), request_id) {
+            Some(true) => Ok(Some(ApiOutput::RackInitComplete)),
+            Some(false) => Ok(None),
+            None => Err(ApiError::UnexpectedResponse {
+                from,
+                state: self.state.name(),
+                request_id,
+                msg: "InitAck",
+            }),
         }
-        None
     }
 
     // Select the next peer in a round-robin fashion
