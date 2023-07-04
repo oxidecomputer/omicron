@@ -8,6 +8,7 @@ mod fsm;
 mod fsm2;
 mod fsm_output;
 mod messages;
+mod request_manager;
 mod share_pkg;
 mod state;
 mod state_initial_member;
@@ -21,6 +22,8 @@ pub use messages::{
     Envelope, Error as MsgError, Msg, Request, RequestType, Response,
     ResponseType,
 };
+pub use request_manager::{RequestManager, TrackableRequest};
+pub use share_pkg::{create_pkgs, LearnedSharePkg, SharePkg};
 pub use state::{
     Config, FsmCommonData, RackInitState, RackSecretState, State, Ticks,
 };
@@ -28,6 +31,10 @@ pub use state_initial_member::InitialMemberState;
 pub use state_learned::LearnedState;
 pub use state_learning::{LearnAttempt, LearningState};
 pub use state_uninitialized::UninitializedState;
+
+use std::fmt::Debug;
+use std::time::Duration;
+use zeroize::{Zeroize, ZeroizeOnDrop};
 
 /// The current version of supported messages within the v0 scheme
 ///
@@ -52,4 +59,23 @@ pub struct V0Scheme {
     message_serialization: Bcs,
     message_framing_header: U32BigEndian,
     message_signing: No,
+}
+
+/// A secret share
+#[derive(Zeroize, ZeroizeOnDrop)]
+pub struct Share(Vec<u8>);
+
+// Manually implemented to redact info
+impl Debug for Share {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Share").finish()
+    }
+}
+
+/// Configuration of the FSM
+#[derive(Debug, Clone, Copy)]
+pub struct Config2 {
+    pub learn_timeout: Duration,
+    pub rack_init_timeout: Duration,
+    pub rack_secret_request_timeout: Duration,
 }
