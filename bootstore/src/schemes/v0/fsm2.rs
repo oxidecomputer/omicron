@@ -27,15 +27,6 @@ pub struct Config {
     pub rack_secret_request_timeout: Duration,
 }
 
-/// An attempt by *this* peer to learn a key share
-///
-/// When received it triggers a `TrackableRequest::Learn` at the receiver.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LearnAttempt {
-    pub peer: Baseboard,
-    pub expiry: Instant,
-}
-
 // An index into an encrypted share
 #[derive(
     Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize,
@@ -45,7 +36,7 @@ pub struct ShareIdx(pub usize);
 pub enum State {
     Uninitialized,
     InitialMember { pkg: SharePkg },
-    Learning { attempt: Option<LearnAttempt> },
+    Learning,
     Learned { pkg: LearnedSharePkg },
 }
 
@@ -62,11 +53,6 @@ pub struct Fsm2 {
 
     /// Manage all trackable broadcasts
     request_manager: RequestManager,
-
-    /// Messages that need sending to other peers.
-    ///
-    /// These should be drained on each API call.
-    envelopes: Vec<Envelope>,
 }
 
 impl Fsm2 {
@@ -78,8 +64,14 @@ impl Fsm2 {
             config,
             connected_peers: BTreeSet::new(),
             request_manager: RequestManager::new(config),
-            envelopes: vec![],
         }
+    }
+
+    /// Return any envelopes that need sending
+    ///
+    /// This must be called after any API callback
+    pub fn envelopes(&mut self) -> impl Iterator<Item = Envelope> + '_ {
+        self.request_manager.envelopes.drain(..)
     }
 
     /// This call is triggered locally on a single sled as a result of RSS
@@ -111,28 +103,12 @@ impl Fsm2 {
             .zip(iter.cloned())
             .collect();
 
-        let request_id = self.request_manager.new_init_rack_req(
+        let _ = self.request_manager.new_init_rack_req(
             now,
             rack_uuid,
             packages.clone(),
+            &self.connected_peers,
         );
-
-        // Send a `Request::Init` to each connected peer in the initial group
-        let envelope_iter = packages.into_iter().filter_map(|(to, pkg)| {
-            if self.connected_peers.contains(&to) {
-                Some(Envelope {
-                    to,
-                    msg: Request {
-                        id: request_id,
-                        type_: RequestType::Init(pkg),
-                    }
-                    .into(),
-                })
-            } else {
-                None
-            }
-        });
-        self.envelopes.extend(envelope_iter);
 
         Ok(())
     }
@@ -145,13 +121,10 @@ impl Fsm2 {
             return Err(ApiError::PeerAlreadyInitialized);
         };
 
-        let attempt =
-            self.connected_peers.first().map(|peer_id| LearnAttempt {
-                peer: peer_id.clone(),
-                expiry: now + self.config.learn_timeout,
-            });
-
-        self.state = State::Learning { attempt };
+        if let Some(to) = self.connected_peers.first() {
+            let _ = self.request_manager.new_learn_sent_req(now, to.clone());
+        }
+        self.state = State::Learning;
         Ok(())
     }
 
@@ -161,37 +134,27 @@ impl Fsm2 {
     /// if the rack secret has not already been loaded, then share retrieval
     /// will begin.
     pub fn load_rack_secret(&mut self, now: Instant) -> Result<(), ApiError> {
-        let (request_id, rack_uuid) = match &self.state {
+        match &self.state {
             State::Uninitialized => return Err(ApiError::RackNotInitialized),
             State::Learning { .. } => return Err(ApiError::StillLearning),
             State::InitialMember { pkg } => {
-                let request_id = self.request_manager.new_load_rack_secret_req(
+                let _ = self.request_manager.new_load_rack_secret_req(
                     now,
                     pkg.rack_uuid,
                     pkg.threshold,
+                    &self.connected_peers,
                 );
-                (request_id, pkg.rack_uuid)
             }
             State::Learned { pkg } => {
-                let request_id = self.request_manager.new_load_rack_secret_req(
+                let _ = self.request_manager.new_load_rack_secret_req(
                     now,
                     pkg.rack_uuid,
                     pkg.threshold,
+                    &self.connected_peers,
                 );
-                (request_id, pkg.rack_uuid)
             }
-        };
+        }
 
-        // Send a `GetShare` request to all connected peers
-        let iter = self.connected_peers.iter().cloned().map(|to| Envelope {
-            to,
-            msg: Request {
-                id: request_id,
-                type_: RequestType::GetShare { rack_uuid },
-            }
-            .into(),
-        });
-        self.envelopes.extend(iter);
         Ok(())
     }
 
@@ -202,12 +165,8 @@ impl Fsm2 {
         &mut self,
         now: Instant,
     ) -> Result<(), BTreeMap<Uuid, ApiError>> {
-        match &mut self.state {
-            State::Uninitialized => return Ok(()),
-            State::Learning { attempt } => {
-                // TODO: Check for any learn timeouts and try to go to the next peer if possible
-            }
-            State::InitialMember { .. } | State::Learned { .. } => (),
+        if let State::Uninitialized = &self.state {
+            return Ok(());
         }
         let mut errors = BTreeMap::new();
         for (req_id, req) in self.request_manager.expired(now) {
@@ -226,9 +185,19 @@ impl Fsm2 {
                 TrackableRequest::LoadRackSecret { rack_uuid, acks } => {
                     errors.insert(req_id, ApiError::RackSecretLoadTimeout);
                 }
-                TrackableRequest::Learn { .. } => {
+                TrackableRequest::LearnReceived { .. } => {
                     // Nothing to do here, as these are requests from messages
                     // and not api requests
+                }
+                TrackableRequest::LearnSent { to } => {
+                    if let State::Learning = &self.state {
+                        // Issue the next request
+                        if let Some(next_peer) = self.next_peer(&to) {
+                            let _ = self
+                                .request_manager
+                                .new_learn_sent_req(now, next_peer);
+                        }
+                    }
                 }
             }
         }
@@ -243,26 +212,27 @@ impl Fsm2 {
     ///
     /// Send any necessary messages required by pending requesets.
     pub fn on_connected(&mut self, now: Instant, peer_id: Baseboard) {
-        if let State::Learning { attempt } = &mut self.state {
-            // This is the first peer we've seen in the learning state, so try
-            // to learn from it.
-            if attempt.is_none() {
-                *attempt = Some(LearnAttempt {
-                    peer: peer_id.clone(),
-                    expiry: now + self.config.learn_timeout,
-                });
-                self.envelopes.push(Envelope {
-                    to: peer_id.clone(),
-                    msg: Request {
-                        id: Uuid::new_v4(),
-                        type_: RequestType::Learn,
-                    }
-                    .into(),
-                });
+        if let State::Learning = &self.state {
+            if !self.request_manager.has_learn_sent_req() {
+                // This is the first peer we've seen in the learning state, so try
+                // to learn from it.
+                let request_id = self
+                    .request_manager
+                    .new_learn_sent_req(now, peer_id.clone());
             }
         }
         self.request_manager.on_connected(&peer_id);
         self.connected_peers.insert(peer_id);
+    }
+
+    /// Select the next peer in a round-robin fashion
+    pub fn next_peer(&self, current: &Baseboard) -> Option<Baseboard> {
+        let mut iter = self.connected_peers.range(current..);
+        let matched = iter.next() == Some(current);
+        iter.next()
+            .filter(|_| matched)
+            .or_else(|| self.connected_peers.first())
+            .cloned()
     }
 }
 
@@ -304,7 +274,8 @@ impl ShareAcks {
 pub enum TrackableRequest {
     /// A request from the caller of the Fsm API to initialize a rack
     ///
-    /// This must only be called at one peer, exactly once.
+    /// This must only be called at one peer, exactly once. That peer
+    /// will be in `InitialMember` state.
     InitRack {
         rack_uuid: Uuid,
         packages: BTreeMap<Baseboard, SharePkg>,
@@ -312,12 +283,22 @@ pub enum TrackableRequest {
     },
 
     /// A request from the caller of the Fsm API to load a rack secret
+    ///
+    /// Only peers in `InitialMember` or `Learned` state can load rack secrets
     LoadRackSecret { rack_uuid: Uuid, acks: ShareAcks },
 
-    /// A request from a peer to learn a new share
-    //
-    /// This peer was not part of the initial membership group.
-    Learn { rack_uuid: Uuid, from: Baseboard, acks: ShareAcks },
+    /// A request received from a peer to learn a new share
+    ///
+    /// This request results in share gathering so "extra" shares can be
+    /// decrypted via a key derived from the rack secret and one of them
+    /// distributed to the learner.
+    ///
+    /// Only peers in `InitialMember` state can respond successfully
+    LearnReceived { rack_uuid: Uuid, from: Baseboard, acks: ShareAcks },
+
+    /// A request sent from a peer in `Learning` state to another peer
+    /// to learn a key share.
+    LearnSent { to: Baseboard },
 }
 
 /// A mechanism to manage all in flight requests
@@ -327,6 +308,11 @@ pub struct RequestManager {
     config: Config,
     requests: BTreeMap<Uuid, TrackableRequest>,
     expiry_to_id: BTreeMap<Instant, Uuid>,
+
+    /// Messages that need sending to other peers.
+    ///
+    /// These should be drained on each API call.
+    envelopes: Vec<Envelope>,
 }
 
 impl RequestManager {
@@ -335,41 +321,78 @@ impl RequestManager {
             config,
             requests: BTreeMap::new(),
             expiry_to_id: BTreeMap::new(),
+            envelopes: vec![],
         }
     }
 
+    /// Track a new `Fsm::init_rack` api request and broadcast a
+    /// `RequestType::Init` to connected peers.
     pub fn new_init_rack_req(
         &mut self,
         now: Instant,
         rack_uuid: Uuid,
         packages: BTreeMap<Baseboard, SharePkg>,
+        connected_peers: &BTreeSet<Baseboard>,
     ) -> Uuid {
         let expiry = now + self.config.rack_init_timeout;
         let req = TrackableRequest::InitRack {
             rack_uuid,
-            packages,
+            packages: packages.clone(),
             acks: InitAcks::default(),
         };
-        self.new_request(expiry, req)
+        let request_id = self.new_request(expiry, req);
+
+        // Send a `Request::Init` to each connected peer in the initial group
+        let iter = packages.into_iter().filter_map(|(to, pkg)| {
+            if connected_peers.contains(&to) {
+                Some(Envelope {
+                    to,
+                    msg: Request {
+                        id: request_id,
+                        type_: RequestType::Init(pkg),
+                    }
+                    .into(),
+                })
+            } else {
+                None
+            }
+        });
+        self.envelopes.extend(iter);
+        request_id
     }
 
+    /// Track a new `Fsm::load_rack_secret` api request and broadcast a
+    /// `RequestType::GetShare` to connected peers.
     pub fn new_load_rack_secret_req(
         &mut self,
         now: Instant,
         rack_uuid: Uuid,
         threshold: u8,
+        connected_peers: &BTreeSet<Baseboard>,
     ) -> Uuid {
         let expiry = now + self.config.rack_secret_request_timeout;
-        self.new_request(
+        let request_id = self.new_request(
             expiry,
             TrackableRequest::LoadRackSecret {
                 rack_uuid,
                 acks: ShareAcks::new(threshold),
             },
-        )
+        );
+
+        // Send a `GetShare` request to all connected peers
+        let iter = connected_peers.iter().cloned().map(|to| Envelope {
+            to,
+            msg: Request {
+                id: request_id,
+                type_: RequestType::GetShare { rack_uuid },
+            }
+            .into(),
+        });
+        self.envelopes.extend(iter);
+        request_id
     }
 
-    pub fn new_learn_req(
+    pub fn new_learn_received_req(
         &mut self,
         now: Instant,
         rack_uuid: Uuid,
@@ -377,16 +400,39 @@ impl RequestManager {
         from: Baseboard,
     ) -> Uuid {
         let expiry = now + self.config.learn_timeout;
-        self.new_request(
+        let request_id = self.new_request(
             expiry,
-            TrackableRequest::Learn {
+            TrackableRequest::LearnReceived {
                 rack_uuid,
                 from,
                 acks: ShareAcks::new(threshold),
             },
-        )
+        );
+
+        request_id
     }
 
+    /// Track and send a `RequestType::Learn` as a result of an
+    /// `Fsm::init_learner` api request.
+    pub fn new_learn_sent_req(&mut self, now: Instant, to: Baseboard) -> Uuid {
+        let expiry = now + self.config.learn_timeout;
+        let request_id = self.new_request(
+            expiry,
+            TrackableRequest::LearnSent { to: to.clone() },
+        );
+
+        self.envelopes.push(Envelope {
+            to,
+            msg: Msg::Req(Request {
+                id: request_id,
+                type_: RequestType::Learn,
+            }),
+        });
+
+        request_id
+    }
+
+    // Track a new request
     fn new_request(
         &mut self,
         expiry: Instant,
@@ -396,6 +442,17 @@ impl RequestManager {
         self.requests.insert(id, request);
         self.expiry_to_id.insert(expiry, id);
         id
+    }
+
+    /// Is there an outstanding `LearnSent` request
+    pub fn has_learn_sent_req(&self) -> bool {
+        self.requests.values().any(|req| {
+            if let TrackableRequest::LearnSent { .. } = req {
+                true
+            } else {
+                false
+            }
+        })
     }
 
     /// Return any expired requests mapped to their request id
@@ -453,7 +510,7 @@ impl RequestManager {
     ) -> Option<TrackableRequest> {
         let acks = match self.requests.get_mut(&request_id) {
             Some(TrackableRequest::LoadRackSecret { acks, .. }) => acks,
-            Some(TrackableRequest::Learn { acks, .. }) => acks,
+            Some(TrackableRequest::LearnReceived { acks, .. }) => acks,
             _ => return None,
         };
         acks.received.insert(from, share);
@@ -466,10 +523,20 @@ impl RequestManager {
         }
     }
 
+    /// Return the pkg if there is a matching request for it.
+    ///Otherwise return `None`.
+    pub fn on_pkg(
+        &mut self,
+        from: Baseboard,
+        request_id: Uuid,
+        pkg: LearnedSharePkg,
+    ) -> Option<LearnedSharePkg> {
+        None
+    }
+
     /// If there are outstanding requests and this peer has not acknowledged
     /// the given request then send the request to the peer.
-    pub fn on_connected(&self, peer_id: &Baseboard) -> Vec<Envelope> {
-        let mut envelopes = vec![];
+    pub fn on_connected(&mut self, peer_id: &Baseboard) {
         for (request_id, request) in &self.requests {
             match request {
                 TrackableRequest::InitRack { rack_uuid, packages, acks } => {
@@ -477,7 +544,7 @@ impl RequestManager {
                         continue;
                     }
                     if let Some(pkg) = packages.get(peer_id) {
-                        envelopes.push(Envelope {
+                        self.envelopes.push(Envelope {
                             to: peer_id.clone(),
                             msg: Msg::Req(Request {
                                 id: *request_id,
@@ -490,7 +557,7 @@ impl RequestManager {
                     if acks.received.contains_key(peer_id) {
                         continue;
                     }
-                    envelopes.push(Envelope {
+                    self.envelopes.push(Envelope {
                         to: peer_id.clone(),
                         msg: Msg::Req(Request {
                             id: *request_id,
@@ -500,11 +567,11 @@ impl RequestManager {
                         }),
                     });
                 }
-                TrackableRequest::Learn { rack_uuid, acks, .. } => {
+                TrackableRequest::LearnReceived { rack_uuid, acks, .. } => {
                     if acks.received.contains_key(peer_id) {
                         continue;
                     }
-                    envelopes.push(Envelope {
+                    self.envelopes.push(Envelope {
                         to: peer_id.clone(),
                         msg: Msg::Req(Request {
                             id: *request_id,
@@ -514,8 +581,12 @@ impl RequestManager {
                         }),
                     });
                 }
+                TrackableRequest::LearnSent { .. } => {
+                    // If we have an existing `LearnSender` request there is no
+                    // need to send another one currently.
+                    continue;
+                }
             }
         }
-        envelopes
     }
 }
