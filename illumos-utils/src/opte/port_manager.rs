@@ -12,6 +12,8 @@ use crate::opte::Error;
 use crate::opte::Gateway;
 use crate::opte::Port;
 use crate::opte::Vni;
+use crate::process::BoxedExecutor;
+use debug_ignore::DebugIgnore;
 use ipnetwork::IpNetwork;
 use omicron_common::api::external;
 use omicron_common::api::internal::shared::NetworkInterface;
@@ -47,6 +49,8 @@ const XDE_LINK_PREFIX: &str = "opte";
 struct PortManagerInner {
     log: Logger,
 
+    executor: DebugIgnore<BoxedExecutor>,
+
     // Sequential identifier for each port on the system.
     next_port_id: AtomicU64,
 
@@ -76,9 +80,14 @@ pub struct PortManager {
 
 impl PortManager {
     /// Create a new manager, for creating OPTE ports
-    pub fn new(log: Logger, underlay_ip: Ipv6Addr) -> Self {
+    pub fn new(
+        log: Logger,
+        executor: &BoxedExecutor,
+        underlay_ip: Ipv6Addr,
+    ) -> Self {
         let inner = Arc::new(PortManagerInner {
             log,
+            executor: DebugIgnore(executor.clone()),
             next_port_id: AtomicU64::new(0),
             underlay_ip,
             ports: Mutex::new(BTreeMap::new()),
@@ -266,6 +275,7 @@ impl PortManager {
             let vnic_name = format!("v{}", port_name);
             #[cfg(target_os = "illumos")]
             if let Err(e) = crate::dladm::Dladm::create_vnic(
+                &self.inner.executor,
                 &crate::dladm::PhysicalLink(port_name.clone()),
                 &vnic_name,
                 Some(nic.mac),
@@ -303,6 +313,7 @@ impl PortManager {
             let mut ports = self.inner.ports.lock().unwrap();
             let ticket = PortTicket::new(nic.id, nic.kind, self.inner.clone());
             let port = Port::new(
+                &self.inner.executor,
                 port_name.clone(),
                 nic.ip,
                 mac,

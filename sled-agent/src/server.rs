@@ -12,8 +12,10 @@ use crate::nexus::NexusClientWithResolver;
 use crate::services::ServiceManager;
 use crate::storage_manager::StorageManager;
 use illumos_utils::process::BoxedExecutor;
+use internal_dns::resolver::Resolver;
 use slog::Logger;
 use std::net::SocketAddr;
+use std::sync::Arc;
 use uuid::Uuid;
 
 /// Packages up a [`SledAgent`], running the sled agent API under a Dropshot
@@ -44,9 +46,16 @@ impl Server {
         info!(log, "setting up sled agent server");
 
         let sled_address = request.sled_address();
-        let nexus_client =
-            NexusClientWithResolver::new(&log, *sled_address.ip())
-                .map_err(|e| e.to_string())?;
+        let resolver = Arc::new(
+            Resolver::new_from_ip(
+                log.new(o!("component" => "DnsResolver")),
+                *sled_address.ip(),
+            )
+            .map_err(|e| e.to_string())?,
+        );
+
+        let nexus_client = NexusClientWithResolver::new(&log, resolver)
+            .map_err(|e| e.to_string())?;
 
         let sled_agent = SledAgent::new(
             &config,

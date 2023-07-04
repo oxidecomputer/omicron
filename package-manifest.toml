@@ -104,6 +104,13 @@ setup_hint = "Run `./tools/ci_download_clickhouse` to download the necessary bin
 [package.cockroachdb]
 service_name = "cockroachdb"
 only_for_targets.image = "standard"
+source.type = "composite"
+source.packages = [ "cockroachdb-service.tar.gz", "internal-dns-cli.tar.gz" ]
+output.type = "zone"
+
+[package.cockroachdb-service]
+service_name = "cockroachdb-service"
+only_for_targets.image = "standard"
 source.type = "local"
 source.paths = [
   { from = "out/cockroachdb", to = "/opt/oxide/cockroachdb" },
@@ -112,7 +119,18 @@ source.paths = [
   { from = "smf/cockroachdb/method_script.sh", to = "/opt/oxide/lib/svc/manifest/cockroachdb.sh" },
 ]
 output.type = "zone"
+output.intermediate_only = true
 setup_hint = "Run `./tools/ci_download_cockroachdb` to download the necessary binaries"
+
+[package.internal-dns-cli]
+service_name = "internal-dns-cli"
+only_for_targets.image = "standard"
+source.type = "local"
+source.rust.binary_names = ["dnswait"]
+source.rust.release = true
+source.paths = []
+output.type = "zone"
+output.intermediate_only = true
 
 [package.internal-dns]
 service_name = "internal_dns"
@@ -248,10 +266,10 @@ service_name = "propolis-server"
 only_for_targets.image = "standard"
 source.type = "prebuilt"
 source.repo = "propolis"
-source.commit = "04a275736e9f3316de6bf2a4077d03acfa4e2cdf"
+source.commit = "21ac8a9f5005f96caa384e3de0bd38283fc0188f"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/propolis/image/<commit>/propolis-server.sha256.txt
-source.sha256 = "3b52f303d7f0a687fd895e7129c93ca1d683d2cb676bff9c6c9d15bd3d2b3b5e"
+source.sha256 = "2a7b4bfa6d2b13714f68ec0095419218257ab584e763faac1d34baf38c8b09de"
 output.type = "zone"
 
 [package.maghemite]
@@ -300,8 +318,8 @@ only_for_targets.image = "standard"
 # 2. Copy dendrite.tar.gz from dendrite/out to omicron/out
 source.type = "prebuilt"
 source.repo = "dendrite"
-source.commit = "b9444d0c96ba5cb7108a6167a603dd75709441fb"
-source.sha256 = "a45a86d33e0a9da9954c5df7e3d0c335c0f2d48c4747b1c163a08b7c675650d9"
+source.commit = "b419dfb6dbcabbf9d20b4d001de59eaaed42d2e5"
+source.sha256 = "50c27f558b9820b1bf77b892c01df99924a89f6fd2114b1f01a16d5334abce3d"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -325,8 +343,8 @@ only_for_targets.image = "standard"
 # 2. Copy the output zone image from dendrite/out to omicron/out
 source.type = "prebuilt"
 source.repo = "dendrite"
-source.commit = "b9444d0c96ba5cb7108a6167a603dd75709441fb"
-source.sha256 = "e19a2acc8d6f84be5dc2a1c5e327b05c4b5551aaf803d400ea26ada9ccd68ab6"
+source.commit = "b419dfb6dbcabbf9d20b4d001de59eaaed42d2e5"
+source.sha256 = "91c0559ea00f1df38faced0b68f9231795682de55be2d91cb4b90a72e2f8093c"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -343,8 +361,8 @@ only_for_targets.image = "standard"
 # 2. Copy dendrite.tar.gz from dendrite/out to omicron/out/dendrite-softnpu.tar.gz
 source.type = "prebuilt"
 source.repo = "dendrite"
-source.commit = "b9444d0c96ba5cb7108a6167a603dd75709441fb"
-source.sha256 = "e54f0dc9a85b6a02985dab8d84743f8ac7576303ef8e492733c21b85afb56ad4"
+source.commit = "b419dfb6dbcabbf9d20b4d001de59eaaed42d2e5"
+source.sha256 = "1a7004ec3c4419fec5d58b0909e1cdd197a64396f1775e8b4a114682c74e5fea"
 output.type = "zone"
 output.intermediate_only = true
 

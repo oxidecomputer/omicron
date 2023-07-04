@@ -288,7 +288,8 @@ impl Disk {
         let variant = unparsed_disk.variant;
         // Ensure the GPT has the right format. This does not necessarily
         // mean that the partitions are populated with the data we need.
-        let partitions = ensure_partition_layout(&log, &paths, variant)?;
+        let partitions =
+            ensure_partition_layout(&log, &executor, &paths, variant)?;
 
         // Find the path to the zpool which exists on this disk.
         //

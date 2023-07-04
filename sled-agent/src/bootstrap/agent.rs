@@ -448,7 +448,7 @@ impl Agent {
         let paths = sled_config_paths(&storage_resources).await;
         let maybe_ledger =
             Ledger::<PersistentSledAgentRequest>::new(&ba_log, paths).await;
-        let make_agent = move |initialized| Agent {
+        let make_bootstrap_agent = move |initialized| Agent {
             log: ba_log,
             parent_log: log,
             executor: executor.clone(),
@@ -467,13 +467,13 @@ impl Agent {
             baseboard,
         };
         let agent = if let Some(ledger) = maybe_ledger {
-            let agent = make_agent(true);
+            let agent = make_bootstrap_agent(true);
             info!(agent.log, "Sled already configured, loading sled agent");
             let sled_request = ledger.data();
-            agent.request_agent(&sled_request.request).await?;
+            agent.request_sled_agent(&sled_request.request).await?;
             agent
         } else {
-            make_agent(false)
+            make_bootstrap_agent(false)
         };
 
         Ok(agent)
@@ -532,7 +532,7 @@ impl Agent {
     /// If the Sled Agent has already been initialized:
     /// - This method is idempotent for the same request
     /// - Thie method returns an error for different requests
-    pub async fn request_agent(
+    pub async fn request_sled_agent(
         &self,
         request: &StartSledAgentRequest,
     ) -> Result<SledAgentResponse, BootstrapError> {

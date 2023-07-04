@@ -21,10 +21,24 @@ ipadm show-addr "$DATALINK/ll" || ipadm create-addr -t -T addrconf "$DATALINK/ll
 ipadm show-addr "$DATALINK/omicron6"  || ipadm create-addr -t -T static -a "$LISTEN_ADDR" "$DATALINK/omicron6"
 route get -inet6 default -inet6 "$GATEWAY" || route add -inet6 default -inet6 "$GATEWAY"
 
+# We need to tell CockroachDB the DNS names or IP addresses of the other nodes
+# in the cluster.  Look these up in internal DNS.  Per the recommendations in
+# the CockroachDB docs, we choose at most five addresses.  Providing more
+# addresses just increases the time for the cluster to stabilize.
+JOIN_ADDRS="$(/opt/oxide/internal-dns-cli/bin/dnswait cockroach \
+    | head -n 5 \
+    | tr '\n' ,)"
+
+if [[ -z "$JOIN_ADDRS" ]]; then
+    printf 'ERROR: found no addresses for other CockroachDB nodes\n' >&2
+    exit "$SMF_EXIT_ERR_CONFIG"
+fi
+
 args=(
   '--insecure'
   '--listen-addr' "[$LISTEN_ADDR]:$LISTEN_PORT"
   '--store' "$DATASTORE"
+  '--join' "$JOIN_ADDRS"
 )
 
-exec /opt/oxide/cockroachdb/bin/cockroach start-single-node "${args[@]}" &
+exec /opt/oxide/cockroachdb/bin/cockroach start "${args[@]}" &

@@ -5,7 +5,6 @@
 //! Management of sled-local storage.
 
 use crate::nexus::NexusClientWithResolver;
-use crate::params::DatasetKind;
 use crate::storage::dataset::DatasetName;
 use camino::Utf8PathBuf;
 use futures::stream::FuturesOrdered;
@@ -80,7 +79,7 @@ pub enum Error {
     },
 
     #[error("Dataset {name:?} exists with a different uuid (has {old}, requested {new})")]
-    UuidMismatch { name: DatasetName, old: Uuid, new: Uuid },
+    UuidMismatch { name: Box<DatasetName>, old: Uuid, new: Uuid },
 
     #[error("Error parsing pool {name}'s size: {err}")]
     BadPoolSize {
@@ -156,8 +155,7 @@ type NotifyFut =
 #[derive(Debug)]
 struct NewFilesystemRequest {
     dataset_id: Uuid,
-    zpool_id: Uuid,
-    dataset_kind: DatasetKind,
+    dataset_name: DatasetName,
     responder: oneshot::Sender<Result<DatasetName, Error>>,
 }
 
@@ -333,7 +331,7 @@ impl StorageWorker {
             if let Ok(id) = id_str.parse::<Uuid>() {
                 if id != dataset_id {
                     return Err(Error::UuidMismatch {
-                        name: dataset_name.clone(),
+                        name: Box::new(dataset_name.clone()),
                         old: id,
                         new: dataset_id,
                     });
@@ -799,14 +797,18 @@ impl StorageWorker {
     ) -> Result<DatasetName, Error> {
         info!(self.log, "add_dataset: {:?}", request);
         let mut pools = resources.pools.lock().await;
-        let pool = pools.get_mut(&request.zpool_id).ok_or_else(|| {
-            Error::ZpoolNotFound(format!(
-                "{}, looked up while trying to add dataset",
-                request.zpool_id
-            ))
-        })?;
-        let dataset_name =
-            DatasetName::new(pool.name.clone(), request.dataset_kind.clone());
+        let pool = pools
+            .get_mut(&request.dataset_name.pool().id())
+            .ok_or_else(|| {
+                Error::ZpoolNotFound(format!(
+                    "{}, looked up while trying to add dataset",
+                    request.dataset_name.pool(),
+                ))
+            })?;
+        let dataset_name = DatasetName::new(
+            pool.name.clone(),
+            request.dataset_name.dataset().clone(),
+        );
         self.ensure_dataset(request.dataset_id, &dataset_name)?;
         Ok(dataset_name)
     }
@@ -1044,16 +1046,11 @@ impl StorageManager {
     pub async fn upsert_filesystem(
         &self,
         dataset_id: Uuid,
-        zpool_id: Uuid,
-        dataset_kind: DatasetKind,
+        dataset_name: DatasetName,
     ) -> Result<DatasetName, Error> {
         let (tx, rx) = oneshot::channel();
-        let request = NewFilesystemRequest {
-            dataset_id,
-            zpool_id,
-            dataset_kind,
-            responder: tx,
-        };
+        let request =
+            NewFilesystemRequest { dataset_id, dataset_name, responder: tx };
 
         self.inner
             .tx

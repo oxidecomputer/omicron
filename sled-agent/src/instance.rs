@@ -14,6 +14,7 @@ use crate::params::{
     InstanceHardware, InstanceMigrationSourceParams,
     InstanceMigrationTargetParams, InstanceStateRequested, VpcFirewallRule,
 };
+use crate::profile::*;
 use anyhow::anyhow;
 use backoff::BackoffError;
 use futures::lock::{Mutex, MutexGuard};
@@ -21,12 +22,10 @@ use illumos_utils::dladm::Etherstub;
 use illumos_utils::link::VnicAllocator;
 use illumos_utils::opte::PortManager;
 use illumos_utils::process::BoxedExecutor;
-use illumos_utils::running_zone::{
-    InstalledZone, RunCommandError, RunningZone,
-};
+use illumos_utils::running_zone::{InstalledZone, RunningZone};
 use illumos_utils::svc::wait_for_service;
 use illumos_utils::zfs::ZONE_ZFS_RAMDISK_DATASET_MOUNTPOINT;
-use illumos_utils::zone::{AddressRequest, PROPOLIS_ZONE_PREFIX};
+use illumos_utils::zone::PROPOLIS_ZONE_PREFIX;
 use omicron_common::address::NEXUS_INTERNAL_PORT;
 use omicron_common::address::PROPOLIS_PORT;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
@@ -38,7 +37,7 @@ use omicron_common::backoff;
 use propolis_client::Client as PropolisClient;
 use slog::Logger;
 use std::net::IpAddr;
-use std::net::SocketAddr;
+use std::net::{SocketAddr, SocketAddrV6};
 use std::sync::Arc;
 use tokio::task::JoinHandle;
 use uuid::Uuid;
@@ -97,6 +96,9 @@ pub enum Error {
 
     #[error("Instance already registered with Propolis ID {0}")]
     InstanceAlreadyRegistered(Uuid),
+
+    #[error("I/O error")]
+    Io(#[from] std::io::Error),
 }
 
 // Issues read-only, idempotent HTTP requests at propolis until it responds with
@@ -144,12 +146,8 @@ fn service_name() -> &'static str {
     "svc:/system/illumos/propolis-server"
 }
 
-fn instance_name(id: &Uuid) -> String {
-    format!("vm-{}", id)
-}
-
-fn fmri_name(id: &Uuid) -> String {
-    format!("{}:{}", service_name(), instance_name(id))
+fn fmri_name() -> String {
+    format!("{}:default", service_name())
 }
 
 fn propolis_zone_name(id: &Uuid) -> String {
@@ -677,6 +675,10 @@ impl Instance {
         migration_params: Option<InstanceMigrationTargetParams>,
     ) -> Result<(), Error> {
         if let Some(running_state) = inner.running_state.as_ref() {
+            info!(
+                &inner.log,
+                "Ensuring instance which already has a running state"
+            );
             inner
                 .propolis_ensure(
                     &running_state.client,
@@ -696,10 +698,13 @@ impl Instance {
                 // logically running (on the source) while the target Propolis
                 // is being launched.
                 if migration_params.is_none() {
+                    info!(&inner.log, "Ensuring new instance");
                     inner.state.transition(PublishedInstanceState::Starting);
                     if let Err(e) = inner.publish_state_to_nexus().await {
                         break 'setup Err(e);
                     }
+                } else {
+                    info!(&inner.log, "Ensuring new instance (migration)");
                 }
 
                 // Set up the Propolis zone and the objects associated with it.
@@ -883,73 +888,7 @@ impl Instance {
         )
         .await?;
 
-        let running_zone = RunningZone::boot(installed_zone).await?;
-        let addr_request = AddressRequest::new_static(inner.propolis_ip, None);
-        let network = running_zone.ensure_address(addr_request).await?;
-        info!(inner.log, "Created address {} for zone: {}", network, zname);
-
         let gateway = inner.port_manager.underlay_ip();
-        running_zone.add_default_route(*gateway)?;
-
-        // Run Propolis in the Zone.
-        let smf_service_name = "svc:/system/illumos/propolis-server";
-        let instance_name = format!("vm-{}", inner.propolis_id());
-        let smf_instance_name =
-            format!("{}:{}", smf_service_name, instance_name);
-        let server_addr = SocketAddr::new(inner.propolis_ip, PROPOLIS_PORT);
-
-        // We intentionally do not import the service - it is placed under
-        // `/var/svc/manifest`, and should automatically be imported by
-        // configd.
-        //
-        // Insteady, we re-try adding the instance until it succeeds.
-        // This implies that the service was added successfully.
-        info!(
-            inner.log, "Adding service"; "smf_name" => &smf_instance_name
-        );
-        backoff::retry_notify(
-            backoff::retry_policy_local(),
-            || async {
-                running_zone
-                    .run_cmd(&[
-                        illumos_utils::zone::SVCCFG,
-                        "-s",
-                        smf_service_name,
-                        "add",
-                        &instance_name,
-                    ])
-                    .map_err(|e| backoff::BackoffError::transient(e))
-            },
-            |err: RunCommandError, delay| {
-                warn!(
-                    inner.log,
-                    "Failed to add {} as a service (retrying in {:?}): {}",
-                    instance_name,
-                    delay,
-                    err.to_string()
-                );
-            },
-        )
-        .await?;
-
-        info!(inner.log, "Adding service property group 'config'");
-        running_zone.run_cmd(&[
-            illumos_utils::zone::SVCCFG,
-            "-s",
-            &smf_instance_name,
-            "addpg",
-            "config",
-            "astring",
-        ])?;
-
-        info!(inner.log, "Setting server address property"; "address" => &server_addr);
-        running_zone.run_cmd(&[
-            illumos_utils::zone::SVCCFG,
-            "-s",
-            &smf_instance_name,
-            "setprop",
-            &format!("config/server_addr={}", server_addr),
-        ])?;
 
         // TODO: We should not be using the resolver here to lookup the Nexus IP
         // address. It would be preferable for Propolis, and through Propolis,
@@ -960,54 +899,54 @@ impl Instance {
         // breaks.
         // - With a DNS resolver: the metric producer would be able to continue
         // sending requests to new servers as they arise.
-        let metric_addr = inner
+        let metric_ip = inner
             .nexus_client
             .resolver()
             .lookup_ipv6(internal_dns::ServiceName::Nexus)
             .await?;
-        info!(
-            inner.log,
-            "Setting metric address property address [{}]:{}",
-            metric_addr,
+        let metric_addr = SocketAddr::V6(SocketAddrV6::new(
+            metric_ip,
             NEXUS_INTERNAL_PORT,
-        );
-        running_zone.run_cmd(&[
-            illumos_utils::zone::SVCCFG,
-            "-s",
-            &smf_instance_name,
-            "setprop",
-            &format!(
-                "config/metric_addr=[{}]:{}",
-                metric_addr, NEXUS_INTERNAL_PORT
+            0,
+            0,
+        ));
+
+        let config = PropertyGroupBuilder::new("config")
+            .add_property(
+                "datalink",
+                "astring",
+                installed_zone.get_control_vnic_name(),
+            )
+            .add_property("gateway", "astring", &gateway.to_string())
+            .add_property(
+                "listen_addr",
+                "astring",
+                &inner.propolis_ip.to_string(),
+            )
+            .add_property("listen_port", "astring", &PROPOLIS_PORT.to_string())
+            .add_property("metric_addr", "astring", &metric_addr.to_string());
+
+        let profile = ProfileBuilder::new("omicron").add_service(
+            ServiceBuilder::new("system/illumos/propolis-server").add_instance(
+                ServiceInstanceBuilder::new("default")
+                    .add_property_group(config),
             ),
-        ])?;
+        );
+        profile.add_to_zone(&inner.log, &installed_zone).await?;
 
-        info!(inner.log, "Refreshing instance");
-        running_zone.run_cmd(&[
-            illumos_utils::zone::SVCCFG,
-            "-s",
-            &smf_instance_name,
-            "refresh",
-        ])?;
-
-        info!(inner.log, "Enabling instance");
-        running_zone.run_cmd(&[
-            illumos_utils::zone::SVCADM,
-            "enable",
-            "-t",
-            &smf_instance_name,
-        ])?;
-
+        let running_zone = RunningZone::boot(installed_zone).await?;
         info!(inner.log, "Started propolis in zone: {}", zname);
 
         // This isn't strictly necessary - we wait for the HTTP server below -
         // but it helps distinguish "online in SMF" from "responding to HTTP
         // requests".
-        let fmri = fmri_name(inner.propolis_id());
+        let fmri = fmri_name();
         wait_for_service(Some(&zname), &fmri)
             .await
             .map_err(|_| Error::Timeout(fmri.to_string()))?;
+        info!(inner.log, "Propolis SMF service is online");
 
+        let server_addr = SocketAddr::new(inner.propolis_ip, PROPOLIS_PORT);
         inner.state.current_mut().propolis_addr = Some(server_addr);
 
         // We use a custom client builder here because the default progenitor
@@ -1022,6 +961,7 @@ impl Instance {
         // yet. Wait for it to respond to requests, so users of the instance
         // don't need to worry about initialization races.
         wait_for_http_server(&inner.log, &client).await?;
+        info!(inner.log, "Propolis HTTP server online");
 
         Ok(PropolisSetup { client, running_zone })
     }
@@ -1112,6 +1052,7 @@ mod test {
     use illumos_utils::dladm::Etherstub;
     use illumos_utils::opte::PortManager;
     use illumos_utils::process::FakeExecutor;
+    use internal_dns::resolver::Resolver;
     use omicron_common::api::external::{
         ByteCount, Generation, InstanceCpuCount, InstanceState,
     };
@@ -1175,7 +1116,8 @@ mod test {
         let underlay_ip = std::net::Ipv6Addr::new(
             0xfd00, 0x1de, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
         );
-        let port_manager = PortManager::new(log.new(slog::o!()), underlay_ip);
+        let port_manager =
+            PortManager::new(log.new(slog::o!()), executor, underlay_ip);
 
         // Create a fake Nexus Server (for notifications) and add it to a
         // corresponding fake DNS server for discovery.
@@ -1187,12 +1129,13 @@ mod test {
         );
         let dns =
             crate::fakes::nexus::start_dns_server(log, &nexus_server).await;
-        let internal_resolver =
-            internal_dns::resolver::Resolver::new_from_addrs(
+        let internal_resolver = Arc::new(
+            Resolver::new_from_addrs(
                 log.clone(),
                 vec![*dns.dns_server.local_address()],
             )
-            .unwrap();
+            .unwrap(),
+        );
         let nexus_client_with_resolver =
             NexusClientWithResolver::new_from_resolver_with_port(
                 log,

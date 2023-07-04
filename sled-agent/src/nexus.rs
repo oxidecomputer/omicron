@@ -9,7 +9,6 @@ use internal_dns::ServiceName;
 use omicron_common::address::NEXUS_INTERNAL_PORT;
 use slog::Logger;
 use std::future::Future;
-use std::net::Ipv6Addr;
 use std::pin::Pin;
 use std::sync::Arc;
 use tokio::sync::mpsc;
@@ -27,13 +26,8 @@ pub struct NexusClientWithResolver {
 impl NexusClientWithResolver {
     pub fn new(
         log: &Logger,
-        sled_agent_address: Ipv6Addr,
+        resolver: Arc<Resolver>,
     ) -> Result<Self, ResolveError> {
-        let resolver = Resolver::new_from_ip(
-            log.new(o!("component" => "DnsResolver")),
-            sled_agent_address,
-        )?;
-
         Ok(Self::new_from_resolver_with_port(
             log,
             resolver,
@@ -43,11 +37,9 @@ impl NexusClientWithResolver {
 
     pub fn new_from_resolver_with_port(
         log: &Logger,
-        resolver: Resolver,
+        resolver: Arc<Resolver>,
         port: u16,
     ) -> Self {
-        let resolver = Arc::new(resolver);
-
         let client = reqwest::ClientBuilder::new()
             .dns_resolver(resolver.clone())
             .build()

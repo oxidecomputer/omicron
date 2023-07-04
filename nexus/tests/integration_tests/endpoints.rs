@@ -486,7 +486,7 @@ lazy_static! {
                 name: DEMO_SNAPSHOT_NAME.clone(),
                 description: String::from(""),
             },
-            disk: DEMO_DISK_NAME.clone(),
+            disk: DEMO_DISK_NAME.clone().into(),
         };
 
     // SSH keys
@@ -541,10 +541,16 @@ lazy_static! {
 
     pub static ref DEMO_SYSTEM_METRICS_URL: String =
         format!(
-            "/v1/system/metrics/virtual_disk_space_provisioned?start_time={:?}&end_time={:?}&id={}",
+            "/v1/system/metrics/virtual_disk_space_provisioned?start_time={:?}&end_time={:?}",
             Utc::now(),
             Utc::now(),
-            "3aaf22ae-5691-4f6d-b62c-aa532512fa78",
+        );
+
+    pub static ref DEMO_SILO_METRICS_URL: String =
+        format!(
+            "/v1/metrics/virtual_disk_space_provisioned?start_time={:?}&end_time={:?}",
+            Utc::now(),
+            Utc::now(),
         );
 
     // Users
@@ -1653,6 +1659,17 @@ lazy_static! {
             url: &DEMO_SYSTEM_METRICS_URL,
             visibility: Visibility::Public,
             unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![
+                AllowedMethod::Get,
+            ],
+        },
+
+        VerifyEndpoint {
+            url: &DEMO_SILO_METRICS_URL,
+            visibility: Visibility::Public,
+            // unprivileged user has silo read, otherwise they wouldn't be able
+            // to do anything
+            unprivileged_access: UnprivilegedAccess::ReadOnly,
             allowed_methods: vec![
                 AllowedMethod::Get,
             ],

@@ -225,14 +225,15 @@ impl Drop for StaticHandler {
     }
 }
 
-pub type ExecutorFn = Box<dyn FnMut(&Command) -> Output + Send + Sync>;
+pub type ExecutorFn = dyn FnMut(&Command) -> Output + Send + Sync;
+pub type BoxedExecutorFn = Box<ExecutorFn>;
 
 /// An executor which can expect certain inputs, and respond with specific outputs.
 pub struct FakeExecutor {
     log: Logger,
     counter: AtomicU64,
     all_operations: Mutex<Vec<CompletedCommand>>,
-    handler: Mutex<ExecutorFn>,
+    handler: Mutex<BoxedExecutorFn>,
 }
 
 impl FakeExecutor {
@@ -246,7 +247,7 @@ impl FakeExecutor {
     }
 
     /// Set the request handler to an arbitrary function.
-    pub fn set_handler(&self, f: ExecutorFn) {
+    pub fn set_handler(&self, f: BoxedExecutorFn) {
         *self.handler.lock().unwrap() = f;
     }
 
@@ -374,6 +375,12 @@ pub enum ExecutionError {
 
     #[error("{0}")]
     CommandFailure(Box<FailureInfo>),
+
+    #[error("Failed to enter zone: {err}")]
+    ZoneEnter { err: std::io::Error },
+
+    #[error("Zone not running")]
+    NotRunning,
 }
 
 // We wrap this method in an inner module to make it possible to mock

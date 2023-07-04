@@ -4,12 +4,13 @@
 
 use std::{
     collections::{btree_map::Entry, BTreeMap, BTreeSet},
-    fmt, io,
+    fmt,
+    io::{self, Read},
     os::fd::AsRawFd,
     time::Duration,
 };
 
-use anyhow::{ensure, Context, Result};
+use anyhow::{anyhow, ensure, Context, Result};
 use async_trait::async_trait;
 use buf_list::BufList;
 use bytes::Buf;
@@ -24,7 +25,8 @@ use installinator_common::{
     StepProgress, StepResult, StepSuccess, UpdateEngine, WriteComponent,
     WriteError, WriteOutput, WriteSpec, WriteStepId,
 };
-use omicron_common::update::ArtifactHashId;
+use omicron_common::update::{ArtifactHash, ArtifactHashId};
+use sha2::{Digest, Sha256};
 use slog::{info, warn, Logger};
 use tokio::{
     fs::File,
@@ -395,24 +397,101 @@ impl<'a> SlotWriteContext<'a> {
         engine: &UpdateEngine<'b, WriteSpec>,
         transport: &'b mut WT,
     ) {
-        engine
+        let block_size_handle = engine
             .new_step(
                 WriteComponent::HostPhase2,
                 WriteStepId::Writing { slot: self.slot },
                 format!("Writing host phase 2 to slot {}", self.slot),
-                move |cx2| async move {
+                move |ctx| async move {
                     self.artifacts
                         .write_host_phase_2(
                             &self.log,
                             self.slot,
                             self.destinations,
                             transport,
-                            &cx2,
+                            &ctx,
                         )
                         .await
                 },
             )
             .register();
+
+        engine
+            .new_step(
+                WriteComponent::HostPhase2,
+                WriteStepId::Writing { slot: self.slot },
+                format!(
+                    "Validating checksum of host phase 2 in slot {}",
+                    self.slot
+                ),
+                move |ctx| async move {
+                    let block_size =
+                        block_size_handle.into_value(&ctx.token()).await;
+                    self.validate_written_host_phase_2_hash(block_size).await
+                },
+            )
+            .register();
+    }
+
+    async fn validate_written_host_phase_2_hash(
+        &self,
+        block_size: Option<usize>,
+    ) -> Result<StepResult<(), WriteSpec>, WriteError> {
+        let slot = self.slot;
+        let mut remaining = self.artifacts.host_phase_2_data.num_bytes();
+        let destination = self.destinations.host_phase_2.clone();
+
+        // If we don't need a specific block size, default to hashing 1 MiB at a
+        // time.
+        let block_size = block_size.unwrap_or(1 << 20);
+
+        // We definitely want to compute a large sha256 inside a
+        // `spawn_blocking`, so we'll also use regular old std::fs::File. We
+        // have to be a little careful to read in `block_size` chunks.
+        let computed_hash = tokio::task::spawn_blocking(move || {
+            let mut f =
+                std::fs::File::open(&destination).with_context(|| {
+                    format!("failed to open {destination} for reading")
+                })?;
+
+            let mut buf = vec![0; block_size];
+            let mut hasher = Sha256::new();
+            let mut offset = 0;
+
+            while remaining > 0 {
+                let buf = &mut buf[..usize::min(block_size, remaining)];
+                f.read_exact(buf).with_context(|| {
+                    format!(
+                        "I/O error reading {destination} at offset {offset}"
+                    )
+                })?;
+
+                hasher.update(&buf);
+
+                offset += buf.len();
+                remaining -= buf.len();
+            }
+
+            Ok(ArtifactHash(hasher.finalize().into()))
+        })
+        .await
+        .unwrap()
+        .map_err(WriteError::ChecksumValidationError)?;
+
+        if computed_hash == self.artifacts.host_phase_2_id.hash {
+            StepSuccess::new(())
+                .with_message(format!(
+                    "validated hash {computed_hash} \
+                     for host phase 2 written to {slot:?}"
+                ))
+                .into()
+        } else {
+            Err(WriteError::ChecksumValidationError(anyhow!(
+                "expected {} but computed {computed_hash} \
+                 for host phase 2 written to {slot:?}",
+                self.artifacts.host_phase_2_id.hash
+            )))
+        }
     }
 
     fn register_control_plane_step<'b, WT: WriteTransport>(
@@ -459,8 +538,8 @@ impl ArtifactsToWrite<'_> {
         destinations: &ArtifactDestination,
         transport: &'b mut WT,
         cx: &StepContext<WriteSpec>,
-    ) -> Result<StepResult<&'b mut WT, WriteSpec>, WriteError> {
-        write_artifact_impl(
+    ) -> Result<StepResult<Option<usize>, WriteSpec>, WriteError> {
+        let block_size = write_artifact_impl(
             WriteComponent::HostPhase2,
             slot,
             self.host_phase_2_data.clone(),
@@ -474,7 +553,7 @@ impl ArtifactsToWrite<'_> {
             error
         })?;
 
-        StepSuccess::new(transport).into()
+        StepSuccess::new(block_size).into()
     }
 
     // Attempt to write the control plane image.
@@ -670,11 +749,16 @@ trait WriteTransport: fmt::Debug + Send {
 
 #[async_trait]
 trait WriteTransportWriter: AsyncWrite + Send + Unpin {
+    fn block_size(&self) -> Option<usize>;
     async fn finalize(self) -> io::Result<()>;
 }
 
 #[async_trait]
 impl WriteTransportWriter for AsyncNamedTempFile {
+    fn block_size(&self) -> Option<usize> {
+        None
+    }
+
     async fn finalize(self) -> io::Result<()> {
         self.sync_all().await?;
         self.persist().await?;
@@ -684,6 +768,10 @@ impl WriteTransportWriter for AsyncNamedTempFile {
 
 #[async_trait]
 impl WriteTransportWriter for BlockSizeBufWriter<tokio::fs::File> {
+    fn block_size(&self) -> Option<usize> {
+        Some(BlockSizeBufWriter::block_size(self))
+    }
+
     async fn finalize(self) -> io::Result<()> {
         let f = self.into_inner();
         f.sync_all().await?;
@@ -792,6 +880,8 @@ impl WriteTransport for BlockDeviceTransport {
     }
 }
 
+/// On success, returns the block size required when interacting with
+/// `destination`.
 async fn write_artifact_impl<S: StepSpec<ProgressMetadata = ()>>(
     component: WriteComponent,
     slot: M2Slot,
@@ -799,7 +889,7 @@ async fn write_artifact_impl<S: StepSpec<ProgressMetadata = ()>>(
     destination: &Utf8Path,
     transport: &mut impl WriteTransport,
     cx: &StepContext<S>,
-) -> Result<(), WriteError> {
+) -> Result<Option<usize>, WriteError> {
     let mut writer = transport
         .make_writer(component, slot, destination, artifact.num_bytes() as u64)
         .await?;
@@ -844,6 +934,8 @@ async fn write_artifact_impl<S: StepSpec<ProgressMetadata = ()>>(
         }
     };
 
+    let block_size = writer.block_size();
+
     match writer.finalize().await {
         Ok(()) => {}
         Err(error) => {
@@ -857,7 +949,7 @@ async fn write_artifact_impl<S: StepSpec<ProgressMetadata = ()>>(
         }
     };
 
-    Ok(())
+    Ok(block_size)
 }
 
 #[cfg(test)]
@@ -993,7 +1085,22 @@ mod tests {
         let mut artifact_control_plane: BufList =
             data2.into_iter().map(Bytes::from).collect();
 
-        let host_id = dummy_artifact_hash_id(KnownArtifactKind::Host);
+        let host_id = ArtifactHashId {
+            kind: KnownArtifactKind::Host.into(),
+            hash: {
+                // The `validate_written_host_phase_2_hash()` will fail unless
+                // we give the actual hash of the host phase 2 data, so compute
+                // it here.
+                //
+                // We currently don't have any equivalent check on the control
+                // plane, so it can use `dummy_artifact_hash_id` instead.
+                let mut hasher = Sha256::new();
+                for chunk in artifact_host.iter() {
+                    hasher.update(chunk);
+                }
+                ArtifactHash(hasher.finalize().into())
+            },
+        };
         let control_plane_id =
             dummy_artifact_hash_id(KnownArtifactKind::ControlPlane);
 
@@ -1202,6 +1309,10 @@ mod tests {
 
     #[async_trait]
     impl WriteTransportWriter for PartialAsyncWrite<AsyncNamedTempFile> {
+        fn block_size(&self) -> Option<usize> {
+            None
+        }
+
         async fn finalize(self) -> io::Result<()> {
             self.into_inner().finalize().await
         }

@@ -10,7 +10,8 @@ use illumos_utils::process::HostExecutor;
 use omicron_common::cmd::fatal;
 use omicron_common::cmd::CmdError;
 use omicron_sled_agent::bootstrap::{
-    config::Config as BootstrapConfig, server as bootstrap_server,
+    agent as bootstrap_agent, config::Config as BootstrapConfig,
+    server as bootstrap_server,
 };
 use omicron_sled_agent::rack_setup::config::SetupServiceConfig as RssConfig;
 use omicron_sled_agent::{config::Config as SledConfig, server as sled_server};
@@ -127,10 +128,17 @@ async fn do_run() -> Result<(), CmdError> {
             // This should remain equivalent to the HTTP request which can
             // be invoked by Wicket.
             if let Some(rss_config) = rss_config {
-                server
-                    .agent()
-                    .start_rack_initialize(rss_config)
-                    .map_err(|e| CmdError::Failure(e.to_string()))?;
+                match server.agent().start_rack_initialize(rss_config) {
+                    // If the rack has already been initialized, we shouldn't
+                    // abandon the server.
+                    Ok(_)
+                    | Err(
+                        bootstrap_agent::RssAccessError::AlreadyInitialized,
+                    ) => {}
+                    Err(e) => {
+                        return Err(CmdError::Failure(e.to_string()));
+                    }
+                }
             }
 
             server.wait_for_finish().await.map_err(CmdError::Failure)?;

@@ -156,6 +156,7 @@ pub enum GetZoneError {
 // inside a non-global zone.
 #[cfg(target_os = "illumos")]
 mod zenter {
+    use super::*;
     use libc::zoneid_t;
     use std::ffi::c_int;
     use std::ffi::c_uint;
@@ -259,6 +260,10 @@ impl RunningZone {
     /// Returns the filesystem path to the zone's root
     pub fn root(&self) -> Utf8PathBuf {
         self.inner.zonepath.join("root")
+    }
+
+    pub fn control_interface(&self) -> AddrObject {
+        AddrObject::new(self.inner.get_control_vnic_name(), "omicron6").unwrap()
     }
 
     /// Runs a command within the Zone, return the output.

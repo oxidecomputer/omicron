@@ -9,11 +9,10 @@ use crate::config::Config;
 use crate::instance_manager::InstanceManager;
 use crate::nexus::{NexusClientWithResolver, NexusRequestQueue};
 use crate::params::{
-    DatasetKind, DiskStateRequested, InstanceHardware,
-    InstanceMigrationSourceParams, InstancePutStateResponse,
-    InstanceStateRequested, InstanceUnregisterResponse, ServiceEnsureBody,
-    ServiceZoneService, SledRole, TimeSync, VpcFirewallRule,
-    ZoneBundleMetadata, Zpool,
+    DiskStateRequested, InstanceHardware, InstanceMigrationSourceParams,
+    InstancePutStateResponse, InstanceStateRequested,
+    InstanceUnregisterResponse, ServiceEnsureBody, SledRole, TimeSync,
+    VpcFirewallRule, ZoneBundleMetadata, Zpool,
 };
 use crate::services::{self, ServiceManager};
 use crate::storage_manager::{self, StorageManager};
@@ -232,7 +231,7 @@ impl SledAgent {
             "component" => "SledAgent",
             "sled_id" => request.id.to_string(),
         ));
-        info!(&log, "created sled agent");
+        info!(&log, "SledAgent::new(..) starting");
 
         let etherstub = Dladm::ensure_etherstub(
             executor,
@@ -259,6 +258,7 @@ impl SledAgent {
         // Create the PortManager to manage all the OPTE ports on the sled.
         let port_manager = PortManager::new(
             parent_log.new(o!("component" => "PortManager")),
+            executor,
             *sled_address.ip(),
         );
 
@@ -283,7 +283,7 @@ impl SledAgent {
         match config.vmm_reservoir_percentage {
             Some(sz) if sz > 0 && sz < 100 => {
                 instances.set_reservoir_size(&hardware, sz).map_err(|e| {
-                    warn!(log, "Failed to set VMM reservoir size: {e}");
+                    error!(log, "Failed to set VMM reservoir size: {e}");
                     e
                 })?;
             }
@@ -346,6 +346,11 @@ impl SledAgent {
             sa.hardware_monitor_task(log).await;
         });
 
+        // Finally, load services for which we're already responsible.
+        //
+        // Do this *after* monitoring for harware, to enable the switch zone to
+        // establish an underlay address before proceeding.
+        sled_agent.inner.services.load_services().await?;
         Ok(sled_agent)
     }
 
@@ -576,7 +581,31 @@ impl SledAgent {
         &self,
         requested_services: ServiceEnsureBody,
     ) -> Result<(), Error> {
+        let datasets: Vec<_> = requested_services
+            .services
+            .iter()
+            .filter_map(|service| service.dataset.clone())
+            .collect();
+
+        // TODO:
+        // - If these are the set of filesystems, we should also consider
+        // removing the ones which are not listed here.
+        // - It's probably worth sending a bulk request to the storage system,
+        // rather than requesting individual datasets.
+        for dataset in &datasets {
+            // First, ensure the dataset exists
+            self.inner
+                .storage
+                .upsert_filesystem(dataset.id, dataset.name.clone())
+                .await?;
+        }
+
         self.inner.services.ensure_all_services(requested_services).await?;
+        Ok(())
+    }
+
+    pub async fn cockroachdb_initialize(&self) -> Result<(), Error> {
+        self.inner.services.cockroachdb_initialize().await?;
         Ok(())
     }
 
@@ -593,47 +622,6 @@ impl SledAgent {
         } else {
             SledRole::Gimlet
         }
-    }
-
-    /// Ensures that a filesystem type exists within the zpool.
-    pub async fn filesystem_ensure(
-        &self,
-        dataset_id: Uuid,
-        zpool_id: Uuid,
-        dataset_kind: DatasetKind,
-        address: SocketAddrV6,
-    ) -> Result<(), Error> {
-        // First, ensure the dataset exists
-        let dataset = self
-            .inner
-            .storage
-            .upsert_filesystem(dataset_id, zpool_id, dataset_kind.clone())
-            .await?;
-
-        // NOTE: We use the "dataset_id" as the "service_id" here.
-        //
-        // Since datasets are tightly coupled with their own services - e.g.,
-        // from the perspective of Nexus, provisioning a dataset implies the
-        // sled should start a service - this is ID re-use is reasonable.
-        //
-        // If Nexus ever wants sleds to provision datasets independently of
-        // launching services, this ID type overlap should be reconsidered.
-        let service_type = dataset_kind.service_type();
-        let services =
-            vec![ServiceZoneService { id: dataset_id, details: service_type }];
-
-        // Next, ensure a zone exists to manage storage for that dataset
-        let request = crate::params::ServiceZoneRequest {
-            id: dataset_id,
-            zone_type: dataset_kind.zone_type(),
-            addresses: vec![*address.ip()],
-            dataset: Some(dataset),
-            gz_addresses: vec![],
-            services,
-        };
-        self.inner.services.ensure_storage_service(request).await?;
-
-        Ok(())
     }
 
     /// Idempotently ensures that a given instance is registered with this sled,

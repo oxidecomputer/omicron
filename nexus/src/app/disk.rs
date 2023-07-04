@@ -12,7 +12,6 @@ use crate::db::lookup;
 use crate::db::lookup::LookupPath;
 use crate::external_api::params;
 use nexus_db_queries::context::OpContext;
-use nexus_types::identity::Resource;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::CreateResult;
@@ -568,15 +567,14 @@ impl super::Nexus {
         disk_lookup: &lookup::Disk<'_>,
         finalize_params: &params::FinalizeDisk,
     ) -> UpdateResult<()> {
-        let (authz_silo, authz_proj, authz_disk, db_disk) =
-            disk_lookup.fetch_for(authz::Action::Modify).await?;
+        let (authz_silo, authz_proj, authz_disk) =
+            disk_lookup.lookup_for(authz::Action::Modify).await?;
 
         let saga_params = sagas::finalize_disk::Params {
             serialized_authn: authn::saga::Serialized::for_opctx(opctx),
             silo_id: authz_silo.id(),
             project_id: authz_proj.id(),
             disk_id: authz_disk.id(),
-            disk_name: db_disk.name().clone(),
             snapshot_name: finalize_params.snapshot_name.clone(),
         };
 
