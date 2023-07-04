@@ -276,6 +276,8 @@ pub enum WriteError {
         #[source]
         error: std::io::Error,
     },
+    #[error("error validating checksum of written file")]
+    ChecksumValidationError(#[source] anyhow::Error),
     #[error("error removing files from {path}: {error}")]
     RemoveFilesError { path: Utf8PathBuf, error: std::io::Error },
     #[error("error fsyncing output directory: {error}")]

@@ -165,7 +165,7 @@ async fn test_snapshot_basic(cptestctx: &ControlPlaneTestContext) {
                 name: instance_name.parse().unwrap(),
                 description: format!("instance {:?}", instance_name),
             },
-            disk: base_disk_name,
+            disk: base_disk_name.into(),
         },
     )
     .await;
@@ -265,7 +265,7 @@ async fn test_snapshot_without_instance(cptestctx: &ControlPlaneTestContext) {
                 name: "not-attached".parse().unwrap(),
                 description: "not attached to instance".into(),
             },
-            disk: base_disk_name.clone(),
+            disk: base_disk_name.clone().into(),
         },
     )
     .await;
@@ -342,7 +342,7 @@ async fn test_delete_snapshot(cptestctx: &ControlPlaneTestContext) {
                 name: "not-attached".parse().unwrap(),
                 description: "not attached to instance".into(),
             },
-            disk: base_disk_name.clone(),
+            disk: base_disk_name.clone().into(),
         },
     )
     .await;
@@ -741,7 +741,7 @@ async fn test_cannot_snapshot_if_no_space(cptestctx: &ControlPlaneTestContext) {
                     name: "not-attached".parse().unwrap(),
                     description: "not attached to instance".into(),
                 },
-                disk: base_disk_name,
+                disk: base_disk_name.into(),
             }))
             .expect_status(Some(StatusCode::SERVICE_UNAVAILABLE)),
     )
@@ -841,7 +841,7 @@ async fn test_snapshot_unwind(cptestctx: &ControlPlaneTestContext) {
                 name: "snapshot".parse().unwrap(),
                 description: String::from("a snapshot"),
             },
-            disk: base_disk_name.clone(),
+            disk: base_disk_name.clone().into(),
         },
     )
     .authn_as(AuthnMode::PrivilegedUser)

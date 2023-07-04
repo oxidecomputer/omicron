@@ -92,6 +92,12 @@ impl From<Name> for SiloSelector {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct OptionalSiloSelector {
+    /// Name or ID of the silo
+    pub silo: Option<NameOrId>,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct SamlIdentityProviderSelector {
     /// Name or ID of the silo in which the SAML identity provider is associated
@@ -1599,8 +1605,8 @@ pub struct SnapshotCreate {
     #[serde(flatten)]
     pub identity: IdentityMetadataCreateParams,
 
-    /// The name of the disk to be snapshotted
-    pub disk: Name,
+    /// The disk to be snapshotted
+    pub disk: NameOrId,
 }
 
 // USERS AND GROUPS

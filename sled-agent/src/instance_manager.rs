@@ -368,6 +368,7 @@ mod test {
     use chrono::Utc;
     use illumos_utils::dladm::Etherstub;
     use illumos_utils::{dladm::MockDladm, zone::MockZones};
+    use internal_dns::resolver::Resolver;
     use omicron_common::api::external::{
         ByteCount, Generation, InstanceCpuCount, InstanceState,
     };
@@ -428,12 +429,13 @@ mod test {
         );
         let dns =
             crate::fakes::nexus::start_dns_server(log, &nexus_server).await;
-        let internal_resolver =
-            internal_dns::resolver::Resolver::new_from_addrs(
+        let internal_resolver = Arc::new(
+            Resolver::new_from_addrs(
                 log.clone(),
                 vec![*dns.dns_server.local_address()],
             )
-            .unwrap();
+            .unwrap(),
+        );
         let nexus_client = NexusClientWithResolver::new_from_resolver_with_port(
             log,
             internal_resolver,
@@ -563,12 +565,13 @@ mod test {
         );
         let dns =
             crate::fakes::nexus::start_dns_server(log, &nexus_server).await;
-        let internal_resolver =
-            internal_dns::resolver::Resolver::new_from_addrs(
+        let internal_resolver = Arc::new(
+            Resolver::new_from_addrs(
                 log.clone(),
                 vec![*dns.dns_server.local_address()],
             )
-            .unwrap();
+            .unwrap(),
+        );
         let nexus_client = NexusClientWithResolver::new_from_resolver_with_port(
             log,
             internal_resolver,

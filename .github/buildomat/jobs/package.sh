@@ -5,6 +5,7 @@
 #: target = "helios-latest"
 #: rust_toolchain = "1.70.0"
 #: output_rules = [
+#:	"=/work/version.txt",
 #:	"=/work/package.tar.gz",
 #:	"=/work/global-zone-packages.tar.gz",
 #:	"=/work/trampoline-global-zone-packages.tar.gz",
@@ -28,6 +29,17 @@ set -o xtrace
 cargo --version
 rustc --version
 
+#
+# Generate the version for control plane artifacts here. We use `0.git` as the
+# prerelease field because it comes before `alpha`.
+#
+# In this job, we stamp the version into packages installed in the host and
+# trampoline global zone images.
+#
+COMMIT=$(git rev-parse HEAD)
+VERSION="1.0.0-0.ci+git${COMMIT:0:11}"
+echo "$VERSION" >/work/version.txt
+
 ptime -m ./tools/install_builder_prerequisites.sh -yp
 ptime -m ./tools/ci_download_softnpu_machinery
 
@@ -36,8 +48,6 @@ ptime -m cargo run --locked --release --bin omicron-package -- \
   -t test target create -i standard -m non-gimlet -s softnpu
 ptime -m cargo run --locked --release --bin omicron-package -- \
   -t test package
-
-tarball_src_dir="$(pwd)/out"
 
 # Assemble some utilities into a tarball that can be used by deployment
 # phases of buildomat.
@@ -56,14 +66,29 @@ files=(
 pfexec mkdir -p /work && pfexec chown $USER /work
 ptime -m tar cvzf /work/package.tar.gz "${files[@]}"
 
+tarball_src_dir="$(pwd)/out/versioned"
+stamp_packages() {
+	for package in "$@"; do
+		# TODO: remove once https://github.com/oxidecomputer/omicron-package/pull/54 lands
+		if [[ $package == maghemite ]]; then
+			echo "0.0.0" > VERSION
+			tar rvf "out/$package.tar" VERSION
+			rm VERSION
+		fi
+
+		cargo run --locked --release --bin omicron-package -- stamp "$package" "$VERSION"
+	done
+}
+
 # Build necessary for the global zone
 ptime -m cargo run --locked --release --bin omicron-package -- \
   -t host target create -i standard -m gimlet -s asic
 ptime -m cargo run --locked --release --bin omicron-package -- \
   -t host package
+stamp_packages omicron-sled-agent maghemite propolis-server
 
 # Create global zone package @ /work/global-zone-packages.tar.gz
-ptime -m ./tools/build-global-zone-packages.sh $tarball_src_dir /work
+ptime -m ./tools/build-global-zone-packages.sh "$tarball_src_dir" /work
 
 # Non-Global Zones
 
@@ -101,6 +126,7 @@ ptime -m cargo run --locked --release --bin omicron-package -- \
   -t recovery target create -i trampoline
 ptime -m cargo run --locked --release --bin omicron-package -- \
   -t recovery package
+stamp_packages installinator maghemite
 
 # Create trampoline global zone package @ /work/trampoline-global-zone-packages.tar.gz
-ptime -m ./tools/build-trampoline-global-zone-packages.sh $tarball_src_dir /work
+ptime -m ./tools/build-trampoline-global-zone-packages.sh "$tarball_src_dir" /work
