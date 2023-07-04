@@ -265,11 +265,12 @@ impl Fsm2 {
     /// Handle messages from other peers
     pub fn handle_msg(
         &mut self,
+        now: Instant,
         from: Baseboard,
         msg: Msg,
     ) -> Result<Option<ApiOutput>, ApiError> {
         match msg {
-            Msg::Req(req) => self.handle_request(from, req),
+            Msg::Req(req) => self.handle_request(now, from, req),
             Msg::Rsp(rsp) => self.handle_response(from, rsp),
         }
     }
@@ -277,6 +278,7 @@ impl Fsm2 {
     // Handle a `Request` from a peer
     fn handle_request(
         &mut self,
+        now: Instant,
         from: Baseboard,
         req: Request,
     ) -> Result<Option<ApiOutput>, ApiError> {
@@ -286,7 +288,10 @@ impl Fsm2 {
                 self.on_get_share(from, req.id, rack_uuid);
                 Ok(None)
             }
-            RequestType::Learn => self.on_learn(from, req.id),
+            RequestType::Learn => {
+                self.on_learn(now, from, req.id);
+                Ok(None)
+            }
         }
     }
 
@@ -367,12 +372,29 @@ impl Fsm2 {
     }
 
     // Handle a `RequestType::Learn` from a peer
-    fn on_learn(
-        &mut self,
-        from: Baseboard,
-        request_id: Uuid,
-    ) -> Result<Option<ApiOutput>, ApiError> {
-        unimplemented!()
+    fn on_learn(&mut self, now: Instant, from: Baseboard, request_id: Uuid) {
+        let err = match &self.state {
+            State::Uninitialized => Some(MsgError::NotInitialized),
+            State::Learning => Some(MsgError::StillLearning),
+            State::Learned { .. } => Some(MsgError::CannotSpareAShare),
+            State::InitialMember { pkg } => {
+                let _ = self.request_manager.new_learn_received_req(
+                    now,
+                    pkg.rack_uuid,
+                    pkg.threshold,
+                    from.clone(),
+                );
+                // We need to gather shares and reconstruct the rack secret.
+                // Therefore we don't send a response immediately.
+                None
+            }
+        };
+        if let Some(err) = err {
+            self.envelopes.push(Envelope {
+                to: from,
+                msg: Msg::Rsp(Response { request_id, type_: err.into() }),
+            });
+        }
     }
 
     // Handle a `Response` from a peer
