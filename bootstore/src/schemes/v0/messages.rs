@@ -104,7 +104,7 @@ impl ResponseType {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Error {
     /// The peer is already initialized as a member of the original group
-    AlreadyInitialized { rack_uuid: Uuid },
+    AlreadyInitialized,
 
     /// The peer has already learned it is a shared member of the group
     AlreadyLearned { rack_uuid: Uuid },

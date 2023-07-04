@@ -189,7 +189,7 @@ impl StateHandler for InitialMemberState {
                     Output::respond(
                         from,
                         request_id,
-                        Error::AlreadyInitialized { rack_uuid }.into(),
+                        Error::AlreadyInitialized.into(),
                     )
                 }
             }

@@ -9,7 +9,7 @@
 //! written this way to enable easy testing and auditing.
 
 use super::{
-    create_pkgs, Config2, Envelope, LearnedSharePkg, Msg, Request,
+    create_pkgs, Config2, Envelope, LearnedSharePkg, Msg, MsgError, Request,
     RequestManager, RequestType, Response, ResponseType, Share, SharePkg,
     TrackableRequest,
 };
@@ -59,7 +59,7 @@ pub enum ApiError {
     #[error("not yet initialized")]
     NotInitialized,
 
-    #[error("cannot distribute shares while learning")]
+    #[error("cannot retrieve or distribute shares while learning")]
     StillLearning,
 
     #[error("rack init timeout: unacked_peers: {unacked_peers:?}")]
@@ -267,7 +267,7 @@ impl Fsm2 {
         &mut self,
         from: Baseboard,
         msg: Msg,
-    ) -> Result<ApiOutput, ApiError> {
+    ) -> Result<Option<ApiOutput>, ApiError> {
         match msg {
             Msg::Req(req) => self.handle_request(from, req),
             Msg::Rsp(rsp) => self.handle_response(from, rsp),
@@ -279,11 +279,12 @@ impl Fsm2 {
         &mut self,
         from: Baseboard,
         req: Request,
-    ) -> Result<ApiOutput, ApiError> {
+    ) -> Result<Option<ApiOutput>, ApiError> {
         match req.type_ {
             RequestType::Init(pkg) => self.on_init(from, req.id, pkg),
             RequestType::GetShare { rack_uuid } => {
-                self.on_get_share(from, req.id, rack_uuid)
+                self.on_get_share(from, req.id, rack_uuid);
+                Ok(None)
             }
             RequestType::Learn => self.on_learn(from, req.id),
         }
@@ -295,9 +296,10 @@ impl Fsm2 {
         from: Baseboard,
         request_id: Uuid,
         pkg: SharePkg,
-    ) -> Result<ApiOutput, ApiError> {
+    ) -> Result<Option<ApiOutput>, ApiError> {
         match self.state {
             State::Uninitialized => {
+                // Initialize ourselves and ack
                 self.state = State::InitialMember { pkg };
                 self.envelopes.push(Envelope {
                     to: from,
@@ -306,9 +308,21 @@ impl Fsm2 {
                         type_: ResponseType::InitAck,
                     }),
                 });
-                Ok(ApiOutput::Initialized)
+                Ok(Some(ApiOutput::Initialized))
             }
-            _ => Err(ApiError::AlreadyInitialized),
+            _ => {
+                // Send an error response
+                self.envelopes.push(Envelope {
+                    to: from,
+                    msg: Msg::Rsp(Response {
+                        request_id,
+                        type_: ResponseType::Error(
+                            MsgError::AlreadyInitialized,
+                        ),
+                    }),
+                });
+                Ok(None)
+            }
         }
     }
 
@@ -318,8 +332,38 @@ impl Fsm2 {
         from: Baseboard,
         request_id: Uuid,
         rack_uuid: Uuid,
-    ) -> Result<ApiOutput, ApiError> {
-        unimplemented!()
+    ) {
+        let response = match &self.state {
+            State::Uninitialized => MsgError::NotInitialized.into(),
+            State::Learning => MsgError::StillLearning.into(),
+            State::Learned { pkg } => {
+                if rack_uuid != pkg.rack_uuid {
+                    MsgError::RackUuidMismatch {
+                        expected: pkg.rack_uuid,
+                        got: rack_uuid,
+                    }
+                    .into()
+                } else {
+                    ResponseType::Share(pkg.share.clone())
+                }
+            }
+            State::InitialMember { pkg } => {
+                if rack_uuid != pkg.rack_uuid {
+                    MsgError::RackUuidMismatch {
+                        expected: pkg.rack_uuid,
+                        got: rack_uuid,
+                    }
+                    .into()
+                } else {
+                    ResponseType::Share(pkg.share.clone())
+                }
+            }
+        };
+
+        self.envelopes.push(Envelope {
+            to: from,
+            msg: Msg::Rsp(Response { request_id, type_: response }),
+        });
     }
 
     // Handle a `RequestType::Learn` from a peer
@@ -327,7 +371,7 @@ impl Fsm2 {
         &mut self,
         from: Baseboard,
         request_id: Uuid,
-    ) -> Result<ApiOutput, ApiError> {
+    ) -> Result<Option<ApiOutput>, ApiError> {
         unimplemented!()
     }
 
@@ -336,7 +380,7 @@ impl Fsm2 {
         &mut self,
         from: Baseboard,
         req: Response,
-    ) -> Result<ApiOutput, ApiError> {
+    ) -> Result<Option<ApiOutput>, ApiError> {
         unimplemented!()
     }
 
