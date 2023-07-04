@@ -1586,6 +1586,7 @@ mod test {
     use omicron_common::api::external::Instance;
     use omicron_common::api::external::InstanceCpuCount;
     use omicron_common::api::external::Name;
+    use omicron_common::api::external::NameOrId;
     use sled_agent_client::types::CrucibleOpts;
     use sled_agent_client::TestInterfaces as SledAgentTestInterfaces;
     use std::net::Ipv4Addr;
@@ -1804,7 +1805,7 @@ mod test {
         silo_id: Uuid,
         project_id: Uuid,
         disk_id: Uuid,
-        disk: Name,
+        disk: NameOrId,
         use_the_pantry: bool,
     ) -> Params {
         Params {
@@ -1860,7 +1861,7 @@ mod test {
             silo_id,
             project_id,
             disk_id,
-            Name::from_str(DISK_NAME).unwrap(),
+            Name::from_str(DISK_NAME).unwrap().into(),
             true,
         );
         let dag = create_saga_dag::<SagaSnapshotCreate>(params).unwrap();
@@ -1970,7 +1971,7 @@ mod test {
             silo_id,
             project_id,
             disk_id,
-            Name::from_str(DISK_NAME).unwrap(),
+            Name::from_str(DISK_NAME).unwrap().into(),
             use_the_pantry,
         );
         let mut dag = create_saga_dag::<SagaSnapshotCreate>(params).unwrap();
@@ -2028,7 +2029,7 @@ mod test {
                 silo_id,
                 project_id,
                 disk_id,
-                Name::from_str(DISK_NAME).unwrap(),
+                Name::from_str(DISK_NAME).unwrap().into(),
                 use_the_pantry,
             );
             dag = create_saga_dag::<SagaSnapshotCreate>(params).unwrap();
@@ -2067,7 +2068,7 @@ mod test {
             silo_id,
             project_id,
             disk_id,
-            Name::from_str(DISK_NAME).unwrap(),
+            Name::from_str(DISK_NAME).unwrap().into(),
             // set use_the_pantry to true, disk is unattached at time of saga creation
             true,
         );
@@ -2131,7 +2132,7 @@ mod test {
             silo_id,
             project_id,
             disk_id,
-            Name::from_str(DISK_NAME).unwrap(),
+            Name::from_str(DISK_NAME).unwrap().into(),
             // set use_the_pantry to true, disk is unattached at time of saga creation
             true,
         );
@@ -2176,7 +2177,7 @@ mod test {
             silo_id,
             project_id,
             disk_id,
-            Name::from_str(DISK_NAME).unwrap(),
+            Name::from_str(DISK_NAME).unwrap().into(),
             // set use_the_pantry to true, disk is attached at time of saga creation
             false,
         );
@@ -2270,7 +2271,7 @@ mod test {
             silo_id,
             project_id,
             disk_id,
-            Name::from_str(DISK_NAME).unwrap(),
+            Name::from_str(DISK_NAME).unwrap().into(),
             // set use_the_pantry to false, disk is attached at time of saga creation
             false,
         );

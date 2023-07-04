@@ -367,6 +367,7 @@ mod test {
     use chrono::Utc;
     use illumos_utils::dladm::Etherstub;
     use illumos_utils::{dladm::MockDladm, zone::MockZones};
+    use internal_dns::resolver::Resolver;
     use omicron_common::api::external::{
         ByteCount, Generation, InstanceCpuCount, InstanceState,
     };
@@ -425,9 +426,16 @@ mod test {
                 .returning(|| crate::mocks::MockNexusClient::default());
             mock
         });
+
+        let resolver = Arc::new(
+            Resolver::new_from_ip(
+                log.new(o!("component" => "DnsResolver")),
+                std::net::Ipv6Addr::LOCALHOST,
+            )
+            .unwrap(),
+        );
         let nexus_client =
-            NexusClientWithResolver::new(&log, std::net::Ipv6Addr::LOCALHOST)
-                .unwrap();
+            NexusClientWithResolver::new(&log, resolver).unwrap();
 
         // Creation of the instance manager incurs some "global" system
         // checks: cleanup of existing zones + vnics.
@@ -550,9 +558,16 @@ mod test {
                 .returning(|| crate::mocks::MockNexusClient::default());
             mock
         });
+
+        let resolver = Arc::new(
+            Resolver::new_from_ip(
+                log.new(o!("component" => "DnsResolver")),
+                std::net::Ipv6Addr::LOCALHOST,
+            )
+            .unwrap(),
+        );
         let nexus_client =
-            NexusClientWithResolver::new(&log, std::net::Ipv6Addr::LOCALHOST)
-                .unwrap();
+            NexusClientWithResolver::new(&log, resolver).unwrap();
 
         // Instance Manager creation.
 

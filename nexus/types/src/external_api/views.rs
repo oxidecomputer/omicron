@@ -247,6 +247,7 @@ pub struct IpPool {
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct IpPoolRange {
     pub id: Uuid,
+    pub ip_pool_id: Uuid,
     pub time_created: DateTime<Utc>,
     pub range: IpRange,
 }

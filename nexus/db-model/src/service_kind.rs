@@ -17,6 +17,9 @@ impl_enum_type!(
     pub enum ServiceKind;
 
     // Enum values
+    Clickhouse => b"clickhouse"
+    Cockroach => b"cockroach"
+    Crucible => b"crucible"
     CruciblePantry => b"crucible_pantry"
     Dendrite => b"dendrite"
     ExternalDns => b"external_dns"
@@ -48,6 +51,15 @@ impl From<ServiceUsingCertificate> for ServiceKind {
 impl From<internal_api::params::ServiceKind> for ServiceKind {
     fn from(k: internal_api::params::ServiceKind) -> Self {
         match k {
+            internal_api::params::ServiceKind::Clickhouse => {
+                ServiceKind::Clickhouse
+            }
+            internal_api::params::ServiceKind::Cockroach => {
+                ServiceKind::Cockroach
+            }
+            internal_api::params::ServiceKind::Crucible => {
+                ServiceKind::Crucible
+            }
             internal_api::params::ServiceKind::ExternalDns { .. } => {
                 ServiceKind::ExternalDns
             }

@@ -310,17 +310,16 @@ impl<'a, S: StepSpec + 'a> UpdateEngine<'a, S> {
     }
 }
 
-pin_project_lite::pin_project! {
-    /// A join handle for an UpdateEngine.
-    ///
-    /// This handle should be awaited to drive and obtain the result of an execution.
-    #[derive(Debug)]
-    #[must_use = "ExecutionHandle does nothing unless polled"]
-    pub struct ExecutionHandle<'a, S: StepSpec> {
-        #[pin]
-        engine_fut: DebugIgnore<BoxFuture<'a, Result<CompletionContext<S>, ExecutionError<S>>>>,
-        abort_handle: AbortHandle,
-    }
+/// A join handle for an UpdateEngine.
+///
+/// This handle should be awaited to drive and obtain the result of an execution.
+#[derive(Debug)]
+#[must_use = "ExecutionHandle does nothing unless polled"]
+pub struct ExecutionHandle<'a, S: StepSpec> {
+    engine_fut: DebugIgnore<
+        BoxFuture<'a, Result<CompletionContext<S>, ExecutionError<S>>>,
+    >,
+    abort_handle: AbortHandle,
 }
 
 impl<'a, S: StepSpec> ExecutionHandle<'a, S> {
@@ -381,29 +380,26 @@ impl AbortHandle {
     }
 }
 
-pin_project_lite::pin_project! {
-    /// A future which can be used to optionally block until an abort message is
-    /// processed.
-    ///
-    /// Dropping this future does not cancel the abort.
-    #[derive(Debug)]
-    pub struct AbortWaiter {
-        #[pin]
-        processed_receiver: oneshot::Receiver<()>,
-    }
+/// A future which can be used to optionally block until an abort message is
+/// processed.
+///
+/// Dropping this future does not cancel the abort.
+#[derive(Debug)]
+pub struct AbortWaiter {
+    processed_receiver: oneshot::Receiver<()>,
 }
 
 impl Future for AbortWaiter {
     type Output = ();
 
     fn poll(
-        self: Pin<&mut Self>,
+        mut self: Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> Poll<Self::Output> {
         // The return value of the receiver doesn't matter. If it's an error, it
         // means that the sender was dropped, which means that execution
         // finished.
-        _ = ready!(self.project().processed_receiver.poll(cx));
+        _ = ready!(self.as_mut().processed_receiver.poll_unpin(cx));
         Poll::Ready(())
     }
 }

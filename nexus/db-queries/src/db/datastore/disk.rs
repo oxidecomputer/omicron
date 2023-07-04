@@ -26,6 +26,7 @@ use crate::db::model::Instance;
 use crate::db::model::Name;
 use crate::db::model::Project;
 use crate::db::pagination::paginated;
+use crate::db::queries::disk::DiskSetClauseForAttach;
 use crate::db::update_and_check::UpdateAndCheck;
 use crate::db::update_and_check::UpdateStatus;
 use async_bb8_diesel::AsyncRunQueryDsl;
@@ -183,26 +184,22 @@ impl DataStore {
             db::model::InstanceState(api::external::InstanceState::Stopped),
         ];
 
-        let attached_label =
-            api::external::DiskState::Attached(authz_instance.id()).label();
+        let attach_update = DiskSetClauseForAttach::new(authz_instance.id());
 
-        let (instance, disk) = Instance::attach_resource(
+        let query = Instance::attach_resource(
             authz_instance.id(),
             authz_disk.id(),
-            instance::table
-                .into_boxed()
-                .filter(instance::dsl::state.eq_any(ok_to_attach_instance_states)),
-            disk::table
-                .into_boxed()
-                .filter(disk::dsl::disk_state.eq_any(ok_to_attach_disk_state_labels)),
+            instance::table.into_boxed().filter(
+                instance::dsl::state.eq_any(ok_to_attach_instance_states),
+            ),
+            disk::table.into_boxed().filter(
+                disk::dsl::disk_state.eq_any(ok_to_attach_disk_state_labels),
+            ),
             max_disks,
-            diesel::update(disk::dsl::disk)
-                .set((
-                    disk::dsl::disk_state.eq(attached_label),
-                    disk::dsl::attach_instance_id.eq(authz_instance.id())
-                ))
-        )
-        .attach_and_get_result_async(self.pool_authorized(opctx).await?)
+            diesel::update(disk::dsl::disk).set(attach_update),
+        );
+
+        let (instance, disk) = query.attach_and_get_result_async(self.pool_authorized(opctx).await?)
         .await
         .or_else(|e| {
             match e {
@@ -330,7 +327,8 @@ impl DataStore {
             diesel::update(disk::dsl::disk)
                 .set((
                     disk::dsl::disk_state.eq(detached_label),
-                    disk::dsl::attach_instance_id.eq(Option::<Uuid>::None)
+                    disk::dsl::attach_instance_id.eq(Option::<Uuid>::None),
+                    disk::dsl::slot.eq(Option::<i16>::None)
                 ))
         )
         .detach_and_get_result_async(self.pool_authorized(opctx).await?)
