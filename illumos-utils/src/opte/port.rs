@@ -89,6 +89,7 @@ pub struct Port {
 }
 
 impl Port {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         executor: &BoxedExecutor,
         name: String,

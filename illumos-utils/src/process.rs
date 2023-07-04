@@ -107,14 +107,9 @@ impl From<&Command> for Input {
     fn from(command: &Command) -> Self {
         Self {
             program: os_str_to_string(command.get_program()),
-            args: command
-                .get_args()
-                .into_iter()
-                .map(os_str_to_string)
-                .collect(),
+            args: command.get_args().map(os_str_to_string).collect(),
             envs: command
                 .get_envs()
-                .into_iter()
                 .map(|(k, v)| {
                     (
                         os_str_to_string(k),
@@ -207,7 +202,7 @@ impl StaticHandler {
         let expected = &self
             .expected
             .get(self.index)
-            .expect(&format!("Unexpected command: {input}"));
+            .unwrap_or_else(|| panic!("Unexpected command: {input}"));
         self.index += 1;
         assert_eq!(input, expected.0);
         expected.1.clone()

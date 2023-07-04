@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Mock / dummy versions of the OPTE module, for non-illumos platforms
+//! Stub versions of the OPTE module, for non-illumos platforms
 
 use slog::Logger;
 
