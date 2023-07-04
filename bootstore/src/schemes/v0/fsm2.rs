@@ -9,15 +9,18 @@
 //! written this way to enable easy testing and auditing.
 
 use super::{
-    create_pkgs, ApiError, ApiOutput, Config2, Envelope, LearnedSharePkg, Msg,
-    Request, RequestManager, RequestType, Share, SharePkg, TrackableRequest,
+    create_pkgs, Config2, Envelope, LearnedSharePkg, Msg, Request,
+    RequestManager, RequestType, Response, ResponseType, Share, SharePkg,
+    TrackableRequest,
 };
+use crate::trust_quorum::{RackSecret, TrustQuorumError};
 use secrecy::ExposeSecret;
 use serde::{Deserialize, Serialize};
 use sled_hardware::Baseboard;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Debug;
 use std::time::{Duration, Instant};
+use thiserror::Error;
 use uuid::Uuid;
 
 // An index into an encrypted share
@@ -33,6 +36,42 @@ pub enum State {
     Learned { pkg: LearnedSharePkg },
 }
 
+/// A response to an Fsm API request
+pub enum ApiOutput {
+    /// The peer has been initialized
+    ///
+    /// The caller *must* persist the state
+    Initialized,
+
+    /// Rack initialization has completed. This node was the coordinator.
+    RackInitComplete,
+
+    /// A `RackSecret` was reconstructed
+    RackSecret { request_id: Uuid, secret: RackSecret },
+}
+
+/// An error returned from an Fsm API request
+#[derive(Error, Debug)]
+pub enum ApiError {
+    #[error("already initialized")]
+    AlreadyInitialized,
+
+    #[error("not yet initialized")]
+    NotInitialized,
+
+    #[error("cannot distribute shares while learning")]
+    StillLearning,
+
+    #[error("rack init timeout: unacked_peers: {unacked_peers:?}")]
+    RackInitTimeout { unacked_peers: BTreeSet<Baseboard> },
+
+    #[error("rack init falied: trust quorum error: {0:?}")]
+    RackInitFailed(TrustQuorumError),
+
+    #[error("rack secret load timeout")]
+    RackSecretLoadTimeout,
+}
+
 pub struct Fsm2 {
     /// The current state of this peer
     state: State,
@@ -46,6 +85,10 @@ pub struct Fsm2 {
 
     /// Manage all trackable broadcasts
     request_manager: RequestManager,
+
+    /// Envelopes not managed by the `RequestManager`
+    /// These are all envelopes containing `Response` messages
+    envelopes: Vec<Envelope>,
 }
 
 impl Fsm2 {
@@ -57,6 +100,7 @@ impl Fsm2 {
             config,
             connected_peers: BTreeSet::new(),
             request_manager: RequestManager::new(config),
+            envelopes: vec![],
         }
     }
 
@@ -64,7 +108,7 @@ impl Fsm2 {
     ///
     /// This must be called after any API callback
     pub fn drain_envelopes(&mut self) -> impl Iterator<Item = Envelope> + '_ {
-        self.request_manager.drain_elements()
+        self.envelopes.drain(..).chain(self.request_manager.drain_elements())
     }
 
     /// This call is triggered locally on a single sled as a result of RSS
@@ -79,7 +123,7 @@ impl Fsm2 {
         initial_membership: BTreeSet<Baseboard>,
     ) -> Result<(), ApiError> {
         let State::Uninitialized = self.state else {
-            return Err(ApiError::RackAlreadyInitialized);
+            return Err(ApiError::AlreadyInitialized);
         };
         let total_members = initial_membership.len();
         let pkgs = create_pkgs(rack_uuid, initial_membership.clone())
@@ -111,7 +155,7 @@ impl Fsm2 {
     /// Persistence is required after a successful call to `init_learner`
     pub fn init_learner(&mut self, now: Instant) -> Result<(), ApiError> {
         let State::Uninitialized = self.state else {
-            return Err(ApiError::PeerAlreadyInitialized);
+            return Err(ApiError::AlreadyInitialized);
         };
 
         if let Some(to) = self.connected_peers.first() {
@@ -128,7 +172,7 @@ impl Fsm2 {
     /// will begin.
     pub fn load_rack_secret(&mut self, now: Instant) -> Result<(), ApiError> {
         match &self.state {
-            State::Uninitialized => return Err(ApiError::RackNotInitialized),
+            State::Uninitialized => return Err(ApiError::NotInitialized),
             State::Learning { .. } => return Err(ApiError::StillLearning),
             State::InitialMember { pkg } => {
                 let _ = self.request_manager.new_load_rack_secret_req(
@@ -218,8 +262,86 @@ impl Fsm2 {
         self.connected_peers.insert(peer_id);
     }
 
-    /// Select the next peer in a round-robin fashion
-    pub fn next_peer(&self, current: &Baseboard) -> Option<Baseboard> {
+    /// Handle messages from other peers
+    pub fn handle_msg(
+        &mut self,
+        from: Baseboard,
+        msg: Msg,
+    ) -> Result<ApiOutput, ApiError> {
+        match msg {
+            Msg::Req(req) => self.handle_request(from, req),
+            Msg::Rsp(rsp) => self.handle_response(from, rsp),
+        }
+    }
+
+    // Handle a `Request` from a peer
+    fn handle_request(
+        &mut self,
+        from: Baseboard,
+        req: Request,
+    ) -> Result<ApiOutput, ApiError> {
+        match req.type_ {
+            RequestType::Init(pkg) => self.on_init(from, req.id, pkg),
+            RequestType::GetShare { rack_uuid } => {
+                self.on_get_share(from, req.id, rack_uuid)
+            }
+            RequestType::Learn => self.on_learn(from, req.id),
+        }
+    }
+
+    // Handle a `RequestType::Init` from a peer
+    fn on_init(
+        &mut self,
+        from: Baseboard,
+        request_id: Uuid,
+        pkg: SharePkg,
+    ) -> Result<ApiOutput, ApiError> {
+        match self.state {
+            State::Uninitialized => {
+                self.state = State::InitialMember { pkg };
+                self.envelopes.push(Envelope {
+                    to: from,
+                    msg: Msg::Rsp(Response {
+                        request_id,
+                        type_: ResponseType::InitAck,
+                    }),
+                });
+                Ok(ApiOutput::Initialized)
+            }
+            _ => Err(ApiError::AlreadyInitialized),
+        }
+    }
+
+    // Handle a `RequestType::GetShare` from a peer
+    fn on_get_share(
+        &mut self,
+        from: Baseboard,
+        request_id: Uuid,
+        rack_uuid: Uuid,
+    ) -> Result<ApiOutput, ApiError> {
+        unimplemented!()
+    }
+
+    // Handle a `RequestType::Learn` from a peer
+    fn on_learn(
+        &mut self,
+        from: Baseboard,
+        request_id: Uuid,
+    ) -> Result<ApiOutput, ApiError> {
+        unimplemented!()
+    }
+
+    // Handle a `Response` from a peer
+    fn handle_response(
+        &mut self,
+        from: Baseboard,
+        req: Response,
+    ) -> Result<ApiOutput, ApiError> {
+        unimplemented!()
+    }
+
+    // Select the next peer in a round-robin fashion
+    fn next_peer(&self, current: &Baseboard) -> Option<Baseboard> {
         let mut iter = self.connected_peers.range(current..);
         let matched = iter.next() == Some(current);
         iter.next()
