@@ -14,6 +14,7 @@ use std::sync::Arc;
 
 #[derive(Debug)]
 struct PortInner {
+    #[allow(dead_code)]
     executor: DebugIgnore<BoxedExecutor>,
     // Name of the port as identified by OPTE
     name: String,
