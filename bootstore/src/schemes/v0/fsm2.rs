@@ -38,10 +38,10 @@ pub enum State {
 
 /// A response to an Fsm API request
 pub enum ApiOutput {
-    /// The peer has been initialized
+    /// This peer has been initialized
     ///
     /// The caller *must* persist the state
-    Initialized,
+    PeerInitialized,
 
     /// Rack initialization has completed. This node was the coordinator.
     RackInitComplete,
@@ -313,7 +313,7 @@ impl Fsm2 {
                         type_: ResponseType::InitAck,
                     }),
                 });
-                Ok(Some(ApiOutput::Initialized))
+                Ok(Some(ApiOutput::PeerInitialized))
             }
             _ => {
                 // Send an error response
@@ -401,9 +401,34 @@ impl Fsm2 {
     fn handle_response(
         &mut self,
         from: Baseboard,
-        req: Response,
+        rsp: Response,
     ) -> Result<Option<ApiOutput>, ApiError> {
-        unimplemented!()
+        match rsp.type_ {
+            ResponseType::InitAck => Ok(self.on_init_ack(from, rsp.request_id)),
+            ResponseType::Share(share) => {
+                unimplemented!()
+            }
+            ResponseType::Pkg(pkg) => {
+                unimplemented!()
+            }
+            ResponseType::Error(err) => {
+                unimplemented!()
+            }
+        }
+    }
+
+    // Handle a `ResposneType::InitAck` from a peer
+    fn on_init_ack(
+        &mut self,
+        from: Baseboard,
+        request_id: Uuid,
+    ) -> Option<ApiOutput> {
+        if let State::InitialMember { .. } = self.state {
+            if self.request_manager.on_init_ack(from, request_id) {
+                return Some(ApiOutput::RackInitComplete);
+            }
+        }
+        None
     }
 
     // Select the next peer in a round-robin fashion
