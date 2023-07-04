@@ -4,7 +4,7 @@
 
 //! Messages sent between peers
 
-use super::share_pkg::{LearnedSharePkg, SharePkg};
+use super::{LearnedSharePkg, Share, SharePkg};
 use derive_more::From;
 use serde::{Deserialize, Serialize};
 use sled_hardware::Baseboard;
@@ -63,11 +63,10 @@ pub enum RequestType {
 
 impl RequestType {
     pub fn name(&self) -> &'static str {
-        use RequestType::*;
         match self {
-            Init(_) => "init",
-            GetShare { .. } => "get_share",
-            Learn => "learn",
+            RequestType::Init(_) => "init",
+            RequestType::GetShare { .. } => "get_share",
+            RequestType::Learn => "learn",
         }
     }
 }
@@ -79,7 +78,7 @@ pub enum ResponseType {
     InitAck,
 
     /// Response to [`Request::GetShare`]
-    Share(Vec<u8>),
+    Share(Share),
 
     /// Response to [`Request::Learn`]
     Pkg(LearnedSharePkg),
@@ -90,11 +89,10 @@ pub enum ResponseType {
 
 impl ResponseType {
     pub fn name(&self) -> &'static str {
-        use ResponseType::*;
         match self {
-            InitAck => "init_ack",
-            Share(_) => "share",
-            Pkg(_) => "pkg",
+            ResponseType::InitAck => "init_ack",
+            ResponseType::Share(_) => "share",
+            ResponseType::Pkg(_) => "pkg",
             ResponseType::Error(_) => "error",
         }
     }

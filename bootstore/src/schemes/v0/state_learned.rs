@@ -7,8 +7,8 @@
 use super::fsm::StateHandler;
 use super::fsm_output::{ApiError, Output};
 use super::messages::{Error, RequestType, ResponseType};
-use super::share_pkg::LearnedSharePkg;
 use super::state::{FsmCommonData, RackSecretState, State};
+use super::{LearnedSharePkg, Share};
 use sled_hardware::Baseboard;
 use uuid::Uuid;
 
@@ -66,7 +66,7 @@ impl StateHandler for LearnedState {
                     Output::respond(
                         from,
                         request_id,
-                        ResponseType::Share(self.pkg.share.clone()),
+                        ResponseType::Share(Share(self.pkg.share.clone())),
                     )
                 }
             }

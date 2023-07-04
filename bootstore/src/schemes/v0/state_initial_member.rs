@@ -6,7 +6,7 @@
 
 use std::collections::BTreeMap;
 
-use super::share_pkg::{LearnedSharePkg, SharePkg};
+use super::{LearnedSharePkg, Share, SharePkg};
 use crate::trust_quorum::RackSecret;
 
 use super::fsm::StateHandler;
@@ -77,7 +77,7 @@ impl InitialMemberState {
         common: &mut FsmCommonData,
         from: Baseboard,
         request_id: Uuid,
-        share: Vec<u8>,
+        share: Share,
     ) -> Output {
         // The RackSecret state needs this deadline to know how long to keep
         // the secret
@@ -208,7 +208,7 @@ impl StateHandler for InitialMemberState {
                     Output::respond(
                         from,
                         request_id,
-                        ResponseType::Share(self.pkg.share.clone()),
+                        ResponseType::Share(Share(self.pkg.share.clone())),
                     )
                 }
             }

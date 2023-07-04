@@ -11,6 +11,7 @@ use super::share_pkg::{LearnedSharePkg, SharePkg};
 use super::state_learned::LearnedState;
 use super::state_learning::LearningState;
 use super::state_uninitialized::UninitializedState;
+use super::Share;
 use super::{fsm_output::Output, state_initial_member::InitialMemberState};
 use crate::{trust_quorum::RackSecret, Sha3_256Digest};
 use derive_more::From;
@@ -223,11 +224,11 @@ impl RackSecretState {
 
     fn validate_share(
         from: &Baseboard,
-        share: &Vec<u8>,
+        share: &Share,
         share_digests: &BTreeSet<Sha3_256Digest>,
     ) -> Result<(), ApiError> {
         let computed_hash = Sha3_256Digest(
-            Sha3_256::digest(share).as_slice().try_into().unwrap(),
+            Sha3_256::digest(&share.0).as_slice().try_into().unwrap(),
         );
 
         if !share_digests.contains(&computed_hash) {
@@ -269,7 +270,7 @@ impl RackSecretState {
         &mut self,
         from: Baseboard,
         request_id: Uuid,
-        share: Vec<u8>,
+        share: Share,
         rack_secret_expiry: Ticks,
     ) -> Output {
         match self {
@@ -300,7 +301,7 @@ impl RackSecretState {
                 }
 
                 // Keep track of our new valid share
-                shares.insert(share);
+                shares.insert(share.0.clone());
                 from_all.insert(from);
 
                 // If we have enough shares, try to recompute the rack secret

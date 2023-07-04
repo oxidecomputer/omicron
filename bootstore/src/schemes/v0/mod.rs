@@ -32,6 +32,7 @@ pub use state_learned::LearnedState;
 pub use state_learning::{LearnAttempt, LearningState};
 pub use state_uninitialized::UninitializedState;
 
+use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 use std::time::Duration;
 use zeroize::{Zeroize, ZeroizeOnDrop};
@@ -62,7 +63,9 @@ pub struct V0Scheme {
 }
 
 /// A secret share
-#[derive(Zeroize, ZeroizeOnDrop)]
+#[derive(
+    Zeroize, ZeroizeOnDrop, PartialEq, Eq, Clone, Serialize, Deserialize,
+)]
 pub struct Share(Vec<u8>);
 
 // Manually implemented to redact info

@@ -379,7 +379,7 @@ impl Fsm2 {
                     }
                     .into()
                 } else {
-                    ResponseType::Share(pkg.share.clone())
+                    ResponseType::Share(Share(pkg.share.clone()))
                 }
             }
             State::InitialMember { pkg } => {
@@ -390,7 +390,7 @@ impl Fsm2 {
                     }
                     .into()
                 } else {
-                    ResponseType::Share(pkg.share.clone())
+                    ResponseType::Share(Share(pkg.share.clone()))
                 }
             }
         };
@@ -436,7 +436,7 @@ impl Fsm2 {
         match rsp.type_ {
             ResponseType::InitAck => self.on_init_ack(from, rsp.request_id),
             ResponseType::Share(share) => {
-                unimplemented!()
+                self.on_share(from, rsp.request_id, share)
             }
             ResponseType::Pkg(pkg) => {
                 unimplemented!()
@@ -463,6 +463,16 @@ impl Fsm2 {
                 msg: "InitAck",
             }),
         }
+    }
+
+    // Handle a `ResponseType::Share` from a peer
+    fn on_share(
+        &mut self,
+        from: Baseboard,
+        request_id: Uuid,
+        share: Share,
+    ) -> Result<Option<ApiOutput>, ApiError> {
+        unimplemented!()
     }
 
     // Select the next peer in a round-robin fashion
