@@ -31,8 +31,8 @@ else
     # IPv4 gateway
     ipadm show-addr "$OPTE_INTERFACE/public"  || ipadm create-addr -t -T dhcp "$OPTE_INTERFACE/public"
     OPTE_IP=$(ipadm show-addr -p -o ADDR "$OPTE_INTERFACE/public" | cut -d'/' -f 1)
-    route add -host "$OPTE_GATEWAY" "$OPTE_IP" -interface -ifp "$OPTE_INTERFACE"
-    route add -inet default "$OPTE_GATEWAY"
+    route get -host "$OPTE_GATEWAY" "$OPTE_IP" -interface -ifp "$OPTE_INTERFACE" || route add -host "$OPTE_GATEWAY" "$OPTE_IP" -interface -ifp "$OPTE_INTERFACE"
+    route get -inet default "$OPTE_GATEWAY" || route add -inet default "$OPTE_GATEWAY"
 fi
 
 args=(
