@@ -536,88 +536,14 @@ impl Fsm2 {
                     }) => {
                         let rack_secret = combine_shares(&pkg.share, acks)?;
                         // We now have the rack secret and can decrypt extra shares
-                        // If decryption failse, we log it locally
-                        // The peer will timeout and move to the next one
-                        let shares =
-                            pkg.decrypt_shares(&rack_secret).map_err(|_| {
-                                ApiError::FailedToDecryptExtraShares
-                            })?;
-
-                        if let Some(idx) = distributed_shares.get(&from) {
-                            // The share was already handed out to this
-                            // peer. Give back the same one.
-                            let share = shares.expose_secret()[idx.0].clone();
-                            let learned_pkg = LearnedSharePkg {
-                                rack_uuid: pkg.rack_uuid,
-                                epoch: pkg.epoch,
-                                threshold: pkg.threshold,
-                                share: share.clone(),
-                                share_digests: pkg.share_digests.clone(),
-                            };
-                            // Queue up a response to the learner
-                            self.envelopes.push(Envelope {
-                                to: from,
-                                msg: Msg::Rsp(Response {
-                                    request_id,
-                                    type_: ResponseType::Pkg(learned_pkg),
-                                }),
-                            });
-                            Ok(None)
-                        } else {
-                            // We need to pick a share to hand out and
-                            // persist that fact. We find the highest currently used
-                            // index and add 1 or we select index 0.
-                            let idx = distributed_shares
-                                .values()
-                                .max()
-                                .cloned()
-                                .map(|idx| idx.0 + 1)
-                                .unwrap_or(0);
-
-                            match shares.expose_secret().get(idx) {
-                                Some(share) => {
-                                    distributed_shares
-                                        .insert(from.clone(), ShareIdx(idx));
-                                    let learned_pkg = LearnedSharePkg {
-                                        rack_uuid: pkg.rack_uuid,
-                                        epoch: pkg.epoch,
-                                        threshold: pkg.threshold,
-                                        share: share.clone(),
-                                        share_digests: pkg
-                                            .share_digests
-                                            .clone(),
-                                    };
-                                    // Queue up a response to the learner
-                                    self.envelopes.push(Envelope {
-                                        to: from,
-                                        msg: Msg::Rsp(Response {
-                                            request_id,
-                                            type_: ResponseType::Pkg(
-                                                learned_pkg,
-                                            ),
-                                        }),
-                                    });
-                                    // This is a new distribution so we must
-                                    // inform the caller to persist `self.state`
-                                    Ok(Some(
-                                        ApiOutput::ShareDistributedToLearner,
-                                    ))
-                                }
-                                None => {
-                                    // Inform the learner that we don't have
-                                    // any shares
-                                    self.envelopes.push(Envelope {
-                                        to: from,
-                                        msg: Msg::Rsp(Response {
-                                            request_id,
-                                            type_: MsgError::CannotSpareAShare
-                                                .into(),
-                                        }),
-                                    });
-                                    Ok(None)
-                                }
-                            }
-                        }
+                        decrypt_and_send_share_response(
+                            from,
+                            request_id,
+                            pkg,
+                            distributed_shares,
+                            &rack_secret,
+                            &mut self.envelopes,
+                        )
                     }
                     // Only LoadRackSecret and LearnReceived track shares so we
                     // cannot get another variant back.
@@ -670,6 +596,85 @@ impl Fsm2 {
             .or_else(|| self.connected_peers.first())
             .cloned()
     }
+}
+
+fn decrypt_and_send_share_response(
+    from: Baseboard,
+    request_id: Uuid,
+    pkg: &SharePkg,
+    distributed_shares: &mut BTreeMap<Baseboard, ShareIdx>,
+    rack_secret: &RackSecret,
+    envelopes: &mut Vec<Envelope>,
+) -> Result<Option<ApiOutput>, ApiError> {
+    // If decryption failse, we log it locally The peer will timeout and move to
+    // the next one
+    let shares = pkg
+        .decrypt_shares(&rack_secret)
+        .map_err(|_| ApiError::FailedToDecryptExtraShares)?;
+
+    if let Some(idx) = distributed_shares.get(&from) {
+        // The share was already handed out to this peer. Give back the same
+        // one.
+        let share = &shares.expose_secret()[idx.0];
+        queue_pkg_response(from, request_id, pkg, &share, envelopes);
+        // No state was updated, so no need to persist
+        Ok(None)
+    } else {
+        // We need to pick a share to hand out and persist that fact. We find
+        // the highest currently used index and add 1 or we select index 0.
+        let idx = distributed_shares
+            .values()
+            .max()
+            .cloned()
+            .map(|idx| idx.0 + 1)
+            .unwrap_or(0);
+
+        match shares.expose_secret().get(idx) {
+            Some(share) => {
+                distributed_shares.insert(from.clone(), ShareIdx(idx));
+                queue_pkg_response(from, request_id, pkg, share, envelopes);
+                // This is a new distribution so we must inform the caller to
+                // persist `Fsm::state`
+                Ok(Some(ApiOutput::ShareDistributedToLearner))
+            }
+            None => {
+                // Inform the learner that we don't have any shares
+                envelopes.push(Envelope {
+                    to: from,
+                    msg: Msg::Rsp(Response {
+                        request_id,
+                        type_: MsgError::CannotSpareAShare.into(),
+                    }),
+                });
+                Ok(None)
+            }
+        }
+    }
+}
+
+// We have a share to hand back to a learner. Enqueue it in a response envelope.
+fn queue_pkg_response(
+    from: Baseboard,
+    request_id: Uuid,
+    pkg: &SharePkg,
+    share: &Vec<u8>,
+    envelopes: &mut Vec<Envelope>,
+) {
+    let learned_pkg = LearnedSharePkg {
+        rack_uuid: pkg.rack_uuid,
+        epoch: pkg.epoch,
+        threshold: pkg.threshold,
+        share: share.clone(),
+        share_digests: pkg.share_digests.clone(),
+    };
+    // Queue up a response to the learner
+    envelopes.push(Envelope {
+        to: from,
+        msg: Msg::Rsp(Response {
+            request_id,
+            type_: ResponseType::Pkg(learned_pkg),
+        }),
+    });
 }
 
 // Combine a threshold of shares and return the `RackSecret` or an error.
