@@ -1,0 +1,123 @@
+<!-- TODO: It would be ideal for this config file to live in /etc/clickhouse/config.d -->
+<clickhouse>
+    <!-- old settings -->
+    <logger>
+        <level>trace</level>
+        <console>true</console>
+        <!-- TODO: Shouldn't this be /var/log/ ???-->
+        <log>/var/tmp/clickhouse-server.log</log>
+        <errorlog>/var/tmp/clickhouse-server.errlog</errorlog>
+        <size>1000M</size>
+        <count>3</count>
+    </logger>
+    <display_name>oximeter_cluster node 1</display_name>
+    <listen_host>::</listen_host>
+    <http_port>8123</http_port>
+    <tcp_port>9000</tcp_port>
+ <!--   <mysql_port>9004</mysql_port> ???-->
+
+    <path>./</path>
+
+    <mlock_executable>true</mlock_executable>
+
+    <users>
+        <default>
+            <password/>
+
+            <networks>
+                <ip>::/0</ip>
+            </networks>
+
+            <profile>default</profile>
+            <quota>default</quota>
+            <access_management>1</access_management>
+        </default>
+    </users>
+
+    <profiles>
+        <default/>
+    </profiles>
+
+    <quotas>
+        <default/>
+    </quotas>
+
+    <!-- Port for communication between replicas. Used for data exchange.
+         It provides low-level data access between servers.
+         This port should not be accessible from untrusted networks.
+         See also 'interserver_http_credentials'.
+         Data transferred over connections to this port should not go through untrusted networks.
+         See also 'interserver_https_port'.
+      -->
+    <interserver_http_port>9009</interserver_http_port>
+
+    <!-- replication settings -->
+    <macros>
+        <shard>01</shard>
+        <replica>01</replica>
+        <cluster>oximeter_cluster</cluster>
+    </macros>
+    <remote_servers replace="true">
+        <oximeter_cluster>
+            <!-- TODO: secret handling TBD -->
+            <secret>mysecretphrase</secret>
+            <shard>
+                <internal_replication>true</internal_replication>
+                <replica>
+                    <host>127.0.0.1</host>
+                    <port>9000</port>
+                </replica>
+                <!-- In a real set up this will be running on its own host -->
+                <replica>
+                    <host>127.0.0.1</host>
+                    <!-- This port would be 9000 as well in a real set up-->
+                    <port>9001</port>
+                </replica>
+            </shard>
+        </oximeter_cluster>
+    </remote_servers>
+    <zookeeper>
+        <node>
+            <!-- replace host on real set up -->
+            <host>127.0.0.1</host>
+            <port>9181</port>
+        </node>
+        <node>
+            <!-- replace host on real set up -->
+            <host>127.0.0.1</host>
+            <!-- This port would be 9181 as well in a real set up-->
+            <port>9182</port>
+        </node>
+        <node>
+            <!-- replace host on real set up -->
+            <host>127.0.0.1</host>
+            <!-- This port would be 9181 as well in a real set up-->
+            <port>9183</port>
+        </node>
+    </zookeeper>
+
+    <!-- The distributed_ddl settings will no longer be necessary in v23.X -->
+    <distributed_ddl>
+        <!-- Path in ZooKeeper to queue with DDL queries -->
+        <path>/clickhouse/task_queue/ddl</path>
+
+        <!-- Settings from this profile will be used to execute DDL queries -->
+        <profile>default</profile>
+
+        <!-- Controls how much ON CLUSTER queries can be run simultaneously. 
+        <pool_size>1</pool_size> -->
+
+        <!--
+             Cleanup settings (active tasks will not be removed)
+        -->
+
+        <!-- Controls task TTL (default 1 week) -->
+        <task_max_lifetime>604800</task_max_lifetime>
+
+        <!-- Controls how often cleanup should be performed (in seconds) -->
+        <cleanup_delay_period>60</cleanup_delay_period>
+
+        <!-- Controls how many tasks could be in the queue -->
+        <max_tasks_in_queue>1000</max_tasks_in_queue>
+    </distributed_ddl>
+</clickhouse>

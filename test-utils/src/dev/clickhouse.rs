@@ -60,6 +60,8 @@ impl ClickHouseInstance {
         let err_log_path = data_dir.path().join("clickhouse-server.errlog");
         let args = vec![
             "server".to_string(),
+        //    "--config".to_string(),
+        //    "/home/coatlicue/src/omicron/smf/clickhouse/config.xml".to_string(),
             "--log-file".to_string(),
             log_path.display().to_string(),
             "--errorlog-file".to_string(),

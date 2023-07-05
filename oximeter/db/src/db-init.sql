@@ -1,56 +1,56 @@
-CREATE DATABASE IF NOT EXISTS oximeter;
+CREATE DATABASE IF NOT EXISTS oximeter ON CLUSTER oximeter_cluster;
 --
-CREATE TABLE IF NOT EXISTS oximeter.measurements_bool
+CREATE TABLE IF NOT EXISTS oximeter.measurements_bool ON CLUSTER oximeter_cluster
 (
     timeseries_name String,
     timeseries_key UInt64,
     timestamp DateTime64(9, 'UTC'),
     datum UInt8
 )
-ENGINE = MergeTree()
+ENGINE = ReplicatedMergeTree()
 ORDER BY (timeseries_name, timeseries_key, timestamp);
 --
-CREATE TABLE IF NOT EXISTS oximeter.measurements_i64
+CREATE TABLE IF NOT EXISTS oximeter.measurements_i64 ON CLUSTER oximeter_cluster
 (
     timeseries_name String,
     timeseries_key UInt64,
     timestamp DateTime64(9, 'UTC'),
     datum Int64
 )
-ENGINE = MergeTree()
+ENGINE = ReplicatedMergeTree()
 ORDER BY (timeseries_name, timeseries_key, timestamp);
 --
-CREATE TABLE IF NOT EXISTS oximeter.measurements_f64
+CREATE TABLE IF NOT EXISTS oximeter.measurements_f64 ON CLUSTER oximeter_cluster
 (
     timeseries_name String,
     timeseries_key UInt64,
     timestamp DateTime64(9, 'UTC'),
     datum Float64
 )
-ENGINE = MergeTree()
+ENGINE = ReplicatedMergeTree()
 ORDER BY (timeseries_name, timeseries_key, timestamp);
 --
-CREATE TABLE IF NOT EXISTS oximeter.measurements_string
+CREATE TABLE IF NOT EXISTS oximeter.measurements_string ON CLUSTER oximeter_cluster
 (
     timeseries_name String,
     timeseries_key UInt64,
     timestamp DateTime64(9, 'UTC'),
     datum String
 )
-ENGINE = MergeTree()
+ENGINE = ReplicatedMergeTree()
 ORDER BY (timeseries_name, timeseries_key, timestamp);
 --
-CREATE TABLE IF NOT EXISTS oximeter.measurements_bytes
+CREATE TABLE IF NOT EXISTS oximeter.measurements_bytes ON CLUSTER oximeter_cluster
 (
     timeseries_name String,
     timeseries_key UInt64,
     timestamp DateTime64(9, 'UTC'),
     datum Array(UInt8)
 )
-ENGINE = MergeTree()
+ENGINE = ReplicatedMergeTree()
 ORDER BY (timeseries_name, timeseries_key, timestamp);
 --
-CREATE TABLE IF NOT EXISTS oximeter.measurements_cumulativei64
+CREATE TABLE IF NOT EXISTS oximeter.measurements_cumulativei64 ON CLUSTER oximeter_cluster
 (
     timeseries_name String,
     timeseries_key UInt64,
@@ -58,10 +58,10 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_cumulativei64
     timestamp DateTime64(9, 'UTC'),
     datum Int64
 )
-ENGINE = MergeTree()
+ENGINE = ReplicatedMergeTree()
 ORDER BY (timeseries_name, timeseries_key, start_time, timestamp);
 --
-CREATE TABLE IF NOT EXISTS oximeter.measurements_cumulativef64
+CREATE TABLE IF NOT EXISTS oximeter.measurements_cumulativef64 ON CLUSTER oximeter_cluster
 (
     timeseries_name String,
     timeseries_key UInt64,
@@ -69,10 +69,10 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_cumulativef64
     timestamp DateTime64(9, 'UTC'),
     datum Float64
 )
-ENGINE = MergeTree()
+ENGINE = ReplicatedMergeTree()
 ORDER BY (timeseries_name, timeseries_key, start_time, timestamp);
 --
-CREATE TABLE IF NOT EXISTS oximeter.measurements_histogrami64
+CREATE TABLE IF NOT EXISTS oximeter.measurements_histogrami64 ON CLUSTER oximeter_cluster
 (
     timeseries_name String,
     timeseries_key UInt64,
@@ -81,10 +81,10 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_histogrami64
     bins Array(Int64),
     counts Array(UInt64)
 )
-ENGINE = MergeTree()
+ENGINE = ReplicatedMergeTree()
 ORDER BY (timeseries_name, timeseries_key, start_time, timestamp);
 --
-CREATE TABLE IF NOT EXISTS oximeter.measurements_histogramf64
+CREATE TABLE IF NOT EXISTS oximeter.measurements_histogramf64 ON CLUSTER oximeter_cluster
 (
     timeseries_name String,
     timeseries_key UInt64,
@@ -93,60 +93,60 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_histogramf64
     bins Array(Float64),
     counts Array(UInt64)
 )
-ENGINE = MergeTree()
+ENGINE = ReplicatedMergeTree()
 ORDER BY (timeseries_name, timeseries_key, start_time, timestamp);
 --
-CREATE TABLE IF NOT EXISTS oximeter.fields_bool
+CREATE TABLE IF NOT EXISTS oximeter.fields_bool ON CLUSTER oximeter_cluster
 (
     timeseries_name String,
     timeseries_key UInt64,
     field_name String,
     field_value UInt8
 )
-ENGINE = ReplacingMergeTree()
+ENGINE = ReplicatedReplacingMergeTree()
 ORDER BY (timeseries_name, field_name, field_value, timeseries_key);
 --
-CREATE TABLE IF NOT EXISTS oximeter.fields_i64
+CREATE TABLE IF NOT EXISTS oximeter.fields_i64 ON CLUSTER oximeter_cluster
 (
     timeseries_name String,
     timeseries_key UInt64,
     field_name String,
     field_value Int64
 )
-ENGINE = ReplacingMergeTree()
+ENGINE = ReplicatedReplacingMergeTree()
 ORDER BY (timeseries_name, field_name, field_value, timeseries_key);
 --
-CREATE TABLE IF NOT EXISTS oximeter.fields_ipaddr
+CREATE TABLE IF NOT EXISTS oximeter.fields_ipaddr ON CLUSTER oximeter_cluster
 (
     timeseries_name String,
     timeseries_key UInt64,
     field_name String,
     field_value IPv6
 )
-ENGINE = ReplacingMergeTree()
+ENGINE = ReplicatedReplacingMergeTree()
 ORDER BY (timeseries_name, field_name, field_value, timeseries_key);
 --
-CREATE TABLE IF NOT EXISTS oximeter.fields_string
+CREATE TABLE IF NOT EXISTS oximeter.fields_string ON CLUSTER oximeter_cluster
 (
     timeseries_name String,
     timeseries_key UInt64,
     field_name String,
     field_value String
 )
-ENGINE = ReplacingMergeTree()
+ENGINE = ReplicatedReplacingMergeTree()
 ORDER BY (timeseries_name, field_name, field_value, timeseries_key);
 --
-CREATE TABLE IF NOT EXISTS oximeter.fields_uuid
+CREATE TABLE IF NOT EXISTS oximeter.fields_uuid ON CLUSTER oximeter_cluster
 (
     timeseries_name String,
     timeseries_key UInt64,
     field_name String,
     field_value UUID
 )
-ENGINE = ReplacingMergeTree()
+ENGINE = ReplicatedReplacingMergeTree()
 ORDER BY (timeseries_name, field_name, field_value, timeseries_key);
 --
-CREATE TABLE IF NOT EXISTS oximeter.timeseries_schema
+CREATE TABLE IF NOT EXISTS oximeter.timeseries_schema ON CLUSTER oximeter_cluster
 (
     timeseries_name String,
     fields Nested(
@@ -176,5 +176,5 @@ CREATE TABLE IF NOT EXISTS oximeter.timeseries_schema
     ),
     created DateTime64(9, 'UTC')
 )
-ENGINE = MergeTree()
+ENGINE = ReplicatedMergeTree()
 ORDER BY (timeseries_name, fields.name);
