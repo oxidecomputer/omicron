@@ -84,10 +84,10 @@ async fn test_snapshot_basic(cptestctx: &ControlPlaneTestContext) {
         },
         source: params::ImageSource::Url {
             url: server.url("/image.raw").to_string(),
+            block_size: params::BlockSize::try_from(512).unwrap(),
         },
         os: "alpine".to_string(),
         version: "edge".to_string(),
-        block_size: params::BlockSize::try_from(512).unwrap(),
     };
 
     let images_url = format!("/v1/images?project={}", PROJECT_NAME);
@@ -204,10 +204,10 @@ async fn test_snapshot_without_instance(cptestctx: &ControlPlaneTestContext) {
         },
         source: params::ImageSource::Url {
             url: server.url("/image.raw").to_string(),
+            block_size: params::BlockSize::try_from(512).unwrap(),
         },
         os: "alpine".to_string(),
         version: "edge".to_string(),
-        block_size: params::BlockSize::try_from(512).unwrap(),
     };
 
     let images_url = format!("/v1/images?project={}", PROJECT_NAME);
@@ -781,10 +781,10 @@ async fn test_snapshot_unwind(cptestctx: &ControlPlaneTestContext) {
         },
         source: params::ImageSource::Url {
             url: server.url("/image.raw").to_string(),
+            block_size: params::BlockSize::try_from(512).unwrap(),
         },
         os: "alpine".to_string(),
         version: "edge".to_string(),
-        block_size: params::BlockSize::try_from(512).unwrap(),
     };
 
     let images_url = format!("/v1/images?project={}", PROJECT_NAME);

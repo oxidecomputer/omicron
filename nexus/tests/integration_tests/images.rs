@@ -26,6 +26,8 @@ const PROJECT_NAME: &str = "myproj";
 
 const PROJECT_NAME_2: &str = "myproj2";
 
+const BLOCK_SIZE: params::BlockSize = params::BlockSize(512);
+
 fn get_project_images_url(project_name: &str) -> String {
     format!("/v1/images?project={}", project_name)
 }
@@ -44,7 +46,6 @@ fn get_image_create(source: params::ImageSource) -> params::ImageCreate {
         },
         os: "alpine".to_string(),
         version: "edge".to_string(),
-        block_size: params::BlockSize::try_from(512).unwrap(),
         source,
     }
 }
@@ -96,6 +97,7 @@ async fn test_image_create(cptestctx: &ControlPlaneTestContext) {
     // Create an image in the project
     let image_create_params = get_image_create(params::ImageSource::Url {
         url: server.url("/image.raw").to_string(),
+        block_size: BLOCK_SIZE,
     });
 
     NexusRequest::objects_post(client, &images_url, &image_create_params)
@@ -225,6 +227,7 @@ async fn test_silo_image_create(cptestctx: &ControlPlaneTestContext) {
     // Create an image in the project
     let image_create_params = get_image_create(params::ImageSource::Url {
         url: server.url("/image.raw").to_string(),
+        block_size: BLOCK_SIZE,
     });
 
     // Create image
@@ -260,6 +263,7 @@ async fn test_image_create_url_404(cptestctx: &ControlPlaneTestContext) {
 
     let image_create_params = get_image_create(params::ImageSource::Url {
         url: server.url("/image.raw").to_string(),
+        block_size: BLOCK_SIZE,
     });
 
     let images_url = get_project_images_url(PROJECT_NAME);
@@ -291,6 +295,7 @@ async fn test_image_create_bad_url(cptestctx: &ControlPlaneTestContext) {
 
     let image_create_params = get_image_create(params::ImageSource::Url {
         url: "not_a_url".to_string(),
+        block_size: BLOCK_SIZE,
     });
 
     let images_url = get_project_images_url(PROJECT_NAME);
@@ -333,6 +338,7 @@ async fn test_image_create_bad_content_length(
 
     let image_create_params = get_image_create(params::ImageSource::Url {
         url: server.url("/image.raw").to_string(),
+        block_size: BLOCK_SIZE,
     });
 
     let images_url = get_project_images_url(PROJECT_NAME);
@@ -374,6 +380,7 @@ async fn test_image_create_bad_image_size(cptestctx: &ControlPlaneTestContext) {
 
     let image_create_params = get_image_create(params::ImageSource::Url {
         url: server.url("/image.raw").to_string(),
+        block_size: BLOCK_SIZE,
     });
 
     let images_url = get_project_images_url(PROJECT_NAME);
@@ -418,6 +425,7 @@ async fn test_make_disk_from_image(cptestctx: &ControlPlaneTestContext) {
     // Create an image in the project
     let image_create_params = get_image_create(params::ImageSource::Url {
         url: server.url("/alpine/edge.raw").to_string(),
+        block_size: BLOCK_SIZE,
     });
 
     let images_url = get_project_images_url(PROJECT_NAME);
@@ -469,6 +477,7 @@ async fn test_make_disk_from_image_too_small(
     // Create an image in the project
     let image_create_params = get_image_create(params::ImageSource::Url {
         url: server.url("/alpine/edge.raw").to_string(),
+        block_size: BLOCK_SIZE,
     });
 
     let images_url = get_project_images_url(PROJECT_NAME);
@@ -543,6 +552,7 @@ async fn test_image_access(cptestctx: &ControlPlaneTestContext) {
 
     let image_create_params = get_image_create(params::ImageSource::Url {
         url: server.url("/image.raw").to_string(),
+        block_size: BLOCK_SIZE,
     });
 
     NexusRequest::objects_post(client, &images_url, &image_create_params)
