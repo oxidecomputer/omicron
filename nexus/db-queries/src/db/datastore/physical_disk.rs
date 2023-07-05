@@ -102,6 +102,7 @@ impl DataStore {
         use db::schema::physical_disk::dsl;
         paginated(dsl::physical_disk, dsl::id, pagparams)
             .filter(dsl::time_deleted.is_null())
+            .filter(dsl::variant.eq(PhysicalDiskKind::U2))
             .filter(dsl::sled_id.eq(sled_id))
             .select(PhysicalDisk::as_select())
             .load_async(self.pool_authorized(opctx).await?)
