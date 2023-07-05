@@ -33,6 +33,7 @@ mod sled_agent;
 mod smf_helper;
 pub(crate) mod storage;
 mod storage_manager;
+mod swap_device;
 mod updates;
 
 #[cfg(test)]
