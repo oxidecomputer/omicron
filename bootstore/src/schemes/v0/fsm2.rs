@@ -8,18 +8,21 @@
 //! results. This is where the bulk of the protocol logic lives. It's
 //! written this way to enable easy testing and auditing.
 
+use super::request_manager::ShareAcks;
 use super::{
     create_pkgs, Config2, Envelope, LearnedSharePkg, Msg, MsgError, Request,
     RequestManager, RequestType, Response, ResponseType, Share, SharePkg,
-    TrackableRequest,
+    Shares, TrackableRequest,
 };
 use crate::trust_quorum::{RackSecret, TrustQuorumError};
+use crate::Sha3_256Digest;
 use secrecy::ExposeSecret;
 use serde::{Deserialize, Serialize};
+use sha3::{Digest, Sha3_256};
 use sled_hardware::Baseboard;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Debug;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -31,9 +34,28 @@ pub struct ShareIdx(pub usize);
 
 pub enum State {
     Uninitialized,
-    InitialMember { pkg: SharePkg },
+    InitialMember {
+        pkg: SharePkg,
+
+        /// Shares given to other sleds. We mark them as used so that we don't
+        /// hand them out twice. If the same sled asks us for a share, because
+        /// it crashes or there is a network blip, we will return the same
+        /// share each time.
+        ///
+        /// Note that this is a fairly optimistic strategy as the requesting
+        /// sled can always go ask another sled after a network blip. However,
+        /// this guarantees that a single sled never hands out more than one of
+        /// its shares to any given sled.
+        ///
+        /// We can't do much better than this without some sort of centralized
+        /// distributor which is part of the reconfiguration mechanism in later
+        /// versions of the trust quourum protocol.
+        distributed_shares: BTreeMap<Baseboard, ShareIdx>,
+    },
     Learning,
-    Learned { pkg: LearnedSharePkg },
+    Learned {
+        pkg: LearnedSharePkg,
+    },
 }
 
 impl State {
@@ -59,6 +81,11 @@ pub enum ApiOutput {
 
     /// A `RackSecret` was reconstructed
     RackSecret { request_id: Uuid, secret: RackSecret },
+
+    /// An extra share has been distributed to a learning peer
+    ///
+    /// The caller *must* persist the state
+    ShareDistributedToLearner,
 }
 
 /// An error returned from an Fsm API request
@@ -82,8 +109,14 @@ pub enum ApiError {
     #[error("rack secret load timeout")]
     RackSecretLoadTimeout,
 
+    #[error("share from {from} has invalid sha3_256 digest")]
+    InvalidShare { from: Baseboard },
+
     #[error("critical: failed to reconstruct rack secret with valid shares")]
     FailedToReconstructRackSecret,
+
+    #[error("critical: failed to decrypt extra shares")]
+    FailedToDecryptExtraShares,
 
     #[error("unexpected response ({msg}) from ({from}) in state ({state}) with request_id ({request_id})")]
     UnexpectedResponse {
@@ -162,7 +195,10 @@ impl Fsm2 {
         let our_pkg = iter.next().unwrap().clone();
 
         // Move into an initialized state
-        self.state = State::InitialMember { pkg: our_pkg };
+        self.state = State::InitialMember {
+            pkg: our_pkg,
+            distributed_shares: BTreeMap::new(),
+        };
 
         let packages: BTreeMap<Baseboard, SharePkg> = initial_membership
             .into_iter()
@@ -204,7 +240,7 @@ impl Fsm2 {
         match &self.state {
             State::Uninitialized => return Err(ApiError::NotInitialized),
             State::Learning { .. } => return Err(ApiError::StillLearning),
-            State::InitialMember { pkg } => {
+            State::InitialMember { pkg, .. } => {
                 let _ = self.request_manager.new_load_rack_secret_req(
                     now,
                     pkg.rack_uuid,
@@ -249,7 +285,7 @@ impl Fsm2 {
                         ApiError::RackInitTimeout { unacked_peers },
                     );
                 }
-                TrackableRequest::LoadRackSecret { rack_uuid, acks } => {
+                TrackableRequest::LoadRackSecret { .. } => {
                     errors.insert(req_id, ApiError::RackSecretLoadTimeout);
                 }
                 TrackableRequest::LearnReceived { .. } => {
@@ -335,7 +371,10 @@ impl Fsm2 {
         match self.state {
             State::Uninitialized => {
                 // Initialize ourselves and ack
-                self.state = State::InitialMember { pkg };
+                self.state = State::InitialMember {
+                    pkg,
+                    distributed_shares: BTreeMap::new(),
+                };
                 self.envelopes.push(Envelope {
                     to: from,
                     msg: Msg::Rsp(Response {
@@ -382,7 +421,7 @@ impl Fsm2 {
                     ResponseType::Share(Share(pkg.share.clone()))
                 }
             }
-            State::InitialMember { pkg } => {
+            State::InitialMember { pkg, .. } => {
                 if rack_uuid != pkg.rack_uuid {
                     MsgError::RackUuidMismatch {
                         expected: pkg.rack_uuid,
@@ -407,12 +446,13 @@ impl Fsm2 {
             State::Uninitialized => Some(MsgError::NotInitialized),
             State::Learning => Some(MsgError::StillLearning),
             State::Learned { .. } => Some(MsgError::CannotSpareAShare),
-            State::InitialMember { pkg } => {
+            State::InitialMember { pkg, .. } => {
                 let _ = self.request_manager.new_learn_received_req(
                     now,
                     pkg.rack_uuid,
                     pkg.threshold,
                     from.clone(),
+                    &self.connected_peers,
                 );
                 // We need to gather shares and reconstruct the rack secret.
                 // Therefore we don't send a response immediately.
@@ -472,7 +512,78 @@ impl Fsm2 {
         request_id: Uuid,
         share: Share,
     ) -> Result<Option<ApiOutput>, ApiError> {
-        unimplemented!()
+        match &self.state {
+            // We don't send `GetShare` requests in these states
+            State::Uninitialized | State::Learning => {
+                return Err(ApiError::UnexpectedResponse {
+                    from,
+                    state: self.state.name(),
+                    request_id,
+                    msg: "Share",
+                });
+            }
+            State::InitialMember { pkg, distributed_shares } => {
+                validate_share(&from, &share, &pkg.share_digests)?;
+                match self.request_manager.on_share(from, request_id, share) {
+                    Some(TrackableRequest::LoadRackSecret { acks, .. }) => {
+                        let secret = combine_shares(&pkg.share, acks)?;
+                        Ok(Some(ApiOutput::RackSecret { request_id, secret }))
+                    }
+                    Some(TrackableRequest::LearnReceived {
+                        rack_uuid,
+                        from,
+                        acks,
+                    }) => {
+                        let rack_secret = combine_shares(&pkg.share, acks)?;
+                        // We now have the rack secret and can decrypt extra shares
+                        // If decryption failse, we log it locally
+                        // The peer will timeout and move to the next one
+                        let shares =
+                            pkg.decrypt_shares(&rack_secret).map_err(|_| {
+                                ApiError::FailedToDecryptExtraShares
+                            })?;
+                        Ok(Some(ApiOutput::ShareDistributedToLearner))
+                    }
+                    // Only LoadRackSecret and LearnReceived track shares so we
+                    // cannot get another variant back.
+                    //
+                    // If we get a `None` back we either haven't received enough
+                    // shares or we have a late response to a prior request. A
+                    // late response is very common, as we terminate the request
+                    // once a threshold is received but we may still receive
+                    // shares because we asked more than a threshold of peers
+                    // for a share. Logging this as an unexpected response would
+                    // be noisy and misleading.
+                    _ => Ok(None),
+                }
+            }
+            State::Learned { pkg } => {
+                validate_share(&from, &share, &pkg.share_digests)?;
+                match self.request_manager.on_share(from, request_id, share) {
+                    Some(TrackableRequest::LoadRackSecret { acks, .. }) => {
+                        let secret = combine_shares(&pkg.share, acks)?;
+                        Ok(Some(ApiOutput::RackSecret { request_id, secret }))
+                    }
+                    Some(TrackableRequest::LearnReceived { .. }) => {
+                        panic!(
+                            "Invariant violation: Learned members must not 
+                            accept 'Learn' requests"
+                        )
+                    }
+                    // Only LoadRackSecret and LearnReceived track shares so we
+                    // cannot get another variant back.
+                    //
+                    // If we get a `None` back we either haven't received enough
+                    // shares or we have a late response to a prior request. A
+                    // late response is very common, as we terminate the request
+                    // once a threshold is received but we may still receive
+                    // shares because we asked more than a threshold of peers
+                    // for a share. Logging this as an unexpected response would
+                    // be noisy and misleading.
+                    _ => Ok(None),
+                }
+            }
+        }
     }
 
     // Select the next peer in a round-robin fashion
@@ -483,5 +594,38 @@ impl Fsm2 {
             .filter(|_| matched)
             .or_else(|| self.connected_peers.first())
             .cloned()
+    }
+}
+
+// Combine a threshold of shares and return the `RackSecret` or an error.
+fn combine_shares(
+    my_share: &Vec<u8>,
+    acks: ShareAcks,
+) -> Result<RackSecret, ApiError> {
+    let shares = acks.received.into_values().fold(
+        Shares(vec![my_share.clone()]),
+        |mut acc, s| {
+            acc.0.push(s.0.clone());
+            acc
+        },
+    );
+    RackSecret::combine_shares(&shares.0)
+        .map_err(|_| ApiError::FailedToReconstructRackSecret)
+}
+
+// Validate a received share against known share digests
+fn validate_share(
+    from: &Baseboard,
+    share: &Share,
+    share_digests: &BTreeSet<Sha3_256Digest>,
+) -> Result<(), ApiError> {
+    let computed_hash = Sha3_256Digest(
+        Sha3_256::digest(&share.0).as_slice().try_into().unwrap(),
+    );
+
+    if !share_digests.contains(&computed_hash) {
+        Err(ApiError::InvalidShare { from: from.clone() })
+    } else {
+        Ok(())
     }
 }

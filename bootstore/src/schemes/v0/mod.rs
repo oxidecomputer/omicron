@@ -75,6 +75,23 @@ impl Debug for Share {
     }
 }
 
+/// A combined set of secret shares. This is the format that `vsss_rs` requires
+/// the shares in so that it will combine them to reconstruct the secret.
+#[derive(Zeroize, ZeroizeOnDrop)]
+pub struct Shares(Vec<Vec<u8>>);
+
+impl Shares {
+    fn insert(&mut self, share: Vec<u8>) {
+        self.0.push(share);
+    }
+}
+
+impl Debug for Shares {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Shares").finish()
+    }
+}
+
 /// Configuration of the FSM
 #[derive(Debug, Clone, Copy)]
 pub struct Config2 {

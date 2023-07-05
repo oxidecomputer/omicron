@@ -151,26 +151,21 @@ impl RequestManager {
                 acks: ShareAcks::new(threshold),
             },
         );
-
-        // Send a `GetShare` request to all connected peers
-        let iter = connected_peers.iter().cloned().map(|to| Envelope {
-            to,
-            msg: Request {
-                id: request_id,
-                type_: RequestType::GetShare { rack_uuid },
-            }
-            .into(),
-        });
-        self.envelopes.extend(iter);
+        self.broadcast_get_share(request_id, rack_uuid, connected_peers);
         request_id
     }
 
+    /// Track a new `RequestType::Learn` request received from a peer and
+    /// broadcast to all connected peers to get shares to unlock the rack
+    /// secret, so the "extra" shares can be decrypted and on can be handed out
+    /// to the learning peer.
     pub fn new_learn_received_req(
         &mut self,
         now: Instant,
         rack_uuid: Uuid,
         threshold: u8,
         from: Baseboard,
+        connected_peers: &BTreeSet<Baseboard>,
     ) -> Uuid {
         let expiry = now + self.config.learn_timeout;
         let request_id = self.new_request(
@@ -181,7 +176,7 @@ impl RequestManager {
                 acks: ShareAcks::new(threshold),
             },
         );
-
+        self.broadcast_get_share(request_id, rack_uuid, connected_peers);
         request_id
     }
 
@@ -215,6 +210,24 @@ impl RequestManager {
         self.requests.insert(id, request);
         self.expiry_to_id.insert(expiry, id);
         id
+    }
+
+    // Send a `GetShare` request to all connected peers
+    fn broadcast_get_share(
+        &mut self,
+        request_id: Uuid,
+        rack_uuid: Uuid,
+        connected_peers: &BTreeSet<Baseboard>,
+    ) {
+        let iter = connected_peers.iter().cloned().map(|to| Envelope {
+            to,
+            msg: Request {
+                id: request_id,
+                type_: RequestType::GetShare { rack_uuid },
+            }
+            .into(),
+        });
+        self.envelopes.extend(iter);
     }
 
     /// Is there an outstanding `LearnSent` request
@@ -288,6 +301,7 @@ impl RequestManager {
             Some(TrackableRequest::LearnReceived { acks, .. }) => acks,
             _ => return None,
         };
+
         acks.received.insert(from, share);
         // We already have our own share to be used to reconstruct the secret
         if acks.received.len() == (acks.threshold - 1) as usize {
@@ -328,7 +342,9 @@ impl RequestManager {
                         });
                     }
                 }
-                TrackableRequest::LoadRackSecret { rack_uuid, acks } => {
+                TrackableRequest::LoadRackSecret {
+                    rack_uuid, acks, ..
+                } => {
                     if acks.received.contains_key(peer_id) {
                         continue;
                     }
