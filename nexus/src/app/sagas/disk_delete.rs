@@ -67,10 +67,9 @@ impl NexusSaga for SagaDiskDelete {
         };
 
         let subsaga_dag = {
-            let subsaga_builder =
-                steno::DagBuilder::new(steno::SagaName::new(
-                    volume_delete::SagaVolumeDelete::NAME,
-                ));
+            let subsaga_builder = steno::DagBuilder::new(steno::SagaName::new(
+                volume_delete::SagaVolumeDelete::NAME,
+            ));
             volume_delete::SagaVolumeDelete::make_saga_dag(
                 &subsaga_params,
                 subsaga_builder,
@@ -168,8 +167,8 @@ pub(crate) mod test {
         app::sagas::disk_delete::SagaDiskDelete, authn::saga::Serialized,
     };
     use dropshot::test_util::ClientTestContext;
-    use nexus_db_queries::context::OpContext;
     use nexus_db_model::Disk;
+    use nexus_db_queries::context::OpContext;
     use nexus_test_utils::resource_helpers::create_ip_pool;
     use nexus_test_utils::resource_helpers::create_project;
     use nexus_test_utils::resource_helpers::DiskTest;
