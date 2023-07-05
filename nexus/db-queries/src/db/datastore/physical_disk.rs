@@ -19,6 +19,7 @@ use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::{DateTime, Utc};
 use diesel::prelude::*;
 use diesel::upsert::{excluded, on_constraint};
+use nexus_db_model::PhysicalDiskKind;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
@@ -84,6 +85,7 @@ impl DataStore {
         use db::schema::physical_disk::dsl;
         paginated(dsl::physical_disk, dsl::id, pagparams)
             .filter(dsl::time_deleted.is_null())
+            .filter(dsl::variant.eq(PhysicalDiskKind::U2))
             .select(PhysicalDisk::as_select())
             .load_async(self.pool_authorized(opctx).await?)
             .await
