@@ -4,19 +4,19 @@
 
 //! Proptest generators
 
-use super::network::FlowId;
-use bootstore::schemes::v0::{Config, Ticks};
+use bootstore::schemes::v0::Config;
 use proptest::prelude::*;
 use sled_hardware::Baseboard;
 use std::collections::BTreeSet;
 use std::ops::RangeInclusive;
+use std::time::Duration;
 use uuid::Uuid;
 
 // Ranges for timeout generation
-const LEARN_TIMEOUT: RangeInclusive<Ticks> = 5..=10;
-const RACK_SECRET_TIMEOUT: RangeInclusive<Ticks> = 20..=50;
-const TICKS_PER_ACTION: RangeInclusive<Ticks> = 1..=20;
-const MSG_DELIVERY_DELAY: RangeInclusive<Ticks> = 0..=20;
+const LEARN_TIMEOUT_SECS: RangeInclusive<u64> = 5..=10;
+const RACK_SECRET_TIMEOUT_SECS: RangeInclusive<u64> = 20..=50;
+const TICKS_PER_ACTION: RangeInclusive<usize> = 1..=20;
+const TICK_TIMEOUT: Duration = Duration::from_millis(50);
 const MAX_ACTIONS: usize = 1000;
 
 /// Input to the `run` method of our proptests
@@ -29,46 +29,33 @@ pub struct TestInput {
     pub rack_uuid: Uuid,
 }
 
-// Certain operations take different amounts of time to complete, and messages
-// take some duration to deliver. We can parameterize how long operations
-// and message delivery take without being overly prescriptive by adopting a
-// certain tick behavior at each point in the test run.
-//
-// While we could get complex and map different delivery times to different
-// network flows, and have operations take different amounts of time at
-// different sleds, we keep things relatively simple for now by having the tick
-// behavior affect all flows and sleds equally.
-#[derive(Debug, Clone)]
-pub struct Delays {
-    // The time to send a message from source to destination
-    pub msg_delivery: Ticks,
-}
-
-impl Default for Delays {
-    fn default() -> Self {
-        Delays { msg_delivery: 1 }
-    }
-}
-
 /// A test action to drive the test forward
 #[derive(Debug, Clone)]
 pub enum Action {
     /// Call the `Fsm::init_rack` on `rss_sled`
+    ///
+    /// This may or may not be the SUT Fsm
+    /// If it is the SUT FSM then the SUT FSM will act as coordinator
+    /// If it is not the SUT FSM, then we will send an `Init` request
+    /// to the SUT FSM if the SUT FSM is connected to the `rss_sled`.
+    /// If it is not connected this is a noop.
     RackInit {
         rss_sled: Baseboard,
         rack_uuid: Uuid,
         initial_members: BTreeSet<Baseboard>,
     },
-    ChangeDelays(Delays),
-    Ticks(Ticks),
-    Connect(Vec<FlowId>),
-    Disconnect(Vec<FlowId>),
+    Ticks(usize),
 
-    /// Call `Fsm::load_rack_secret` on the given sled
-    LoadRackSecret(Baseboard),
+    // Connections are relative to the SUT Fsm
+    Connect(BTreeSet<Baseboard>),
 
+    // Disconnections are relative to the SUT Fsm
+    Disconnect(BTreeSet<Baseboard>),
+
+    /// Call `Fsm::load_rack_secret`.
+    LoadRackSecret,
     // Initialize a learner
-    InitLearner(Baseboard),
+    // InitLearner(Baseboard),
 }
 
 /// Generate top-level test input
@@ -78,7 +65,7 @@ pub fn arb_test_input(
 ) -> impl Strategy<Value = TestInput> {
     let min_initial_members = 3;
     (
-        arb_peer_ids(min_initial_members, max_initial_members),
+        arb_initial_member_ids(min_initial_members, max_initial_members),
         arb_learner_ids(max_learners),
         arb_config(),
     )
@@ -123,7 +110,7 @@ fn arb_baseboard() -> impl Strategy<Value = Baseboard> {
 }
 
 // Generate a set of peer IDs for initial members
-fn arb_peer_ids(
+fn arb_initial_member_ids(
     min: usize,
     max: usize,
 ) -> impl Strategy<Value = BTreeSet<Baseboard>> {
@@ -141,6 +128,16 @@ fn arb_learner_ids(max: usize) -> impl Strategy<Value = BTreeSet<Baseboard>> {
     )
 }
 
+// Generate
+fn arb_peer_subset(
+    peers: Vec<Baseboard>,
+) -> impl Strategy<Value = BTreeSet<Baseboard>> + Clone {
+    prop::collection::vec(any::<prop::sample::Index>(), 1..=peers.len())
+        .prop_map(move |indexes| {
+            indexes.into_iter().map(|index| index.get(&peers).clone()).collect()
+        })
+}
+
 // Generate an FSM configuration
 //
 // Timeouts are in "Ticks", which maps to a fixed tick timer set by higher
@@ -148,47 +145,15 @@ fn arb_learner_ids(max: usize) -> impl Strategy<Value = BTreeSet<Baseboard>> {
 // are just concerned that the behavior is correct in regards to some abstract
 // clock.
 fn arb_config() -> impl Strategy<Value = Config> {
-    (LEARN_TIMEOUT, RACK_SECRET_TIMEOUT).prop_map(
+    (LEARN_TIMEOUT_SECS, RACK_SECRET_TIMEOUT_SECS).prop_map(
         |(learn_timeout, rack_secret_request_timeout)| Config {
-            learn_timeout,
-            rack_init_timeout: rack_secret_request_timeout,
-            rack_secret_request_timeout,
+            learn_timeout: Duration::from_secs(learn_timeout),
+            rack_init_timeout: Duration::from_secs(rack_secret_request_timeout),
+            rack_secret_request_timeout: Duration::from_secs(
+                rack_secret_request_timeout,
+            ),
         },
     )
-}
-
-// Generate a set of flows from one peer to another *different* peer
-fn arb_flows(
-    initial_members: Vec<Baseboard>,
-) -> impl Strategy<Value = Vec<FlowId>> + Clone {
-    prop::collection::vec(
-        any::<prop::sample::Index>(),
-        2..=initial_members.len(),
-    )
-    .prop_shuffle()
-    .prop_map(move |indexes| {
-        indexes
-            .chunks_exact(2)
-            .filter_map(|indexes| {
-                let source =
-                    &initial_members[indexes[0].index(initial_members.len())];
-                let dest =
-                    &initial_members[indexes[1].index(initial_members.len())];
-
-                // Don't create flows from a peer to itself
-                if source != dest {
-                    Some((source.clone(), dest.clone()))
-                } else {
-                    None
-                }
-            })
-            .collect()
-    })
-}
-
-// Generate arbitrary `Delays`
-fn arb_delays() -> impl Strategy<Value = Delays> {
-    MSG_DELIVERY_DELAY.prop_map(|msg_delivery| Delays { msg_delivery })
 }
 
 // Generate a single test action to drive the property based tests
@@ -199,30 +164,28 @@ fn arb_action(
 ) -> impl Strategy<Value = Action> {
     let peers: Vec<_> =
         initial_members.iter().chain(learners.iter()).cloned().collect();
-    let flows = arb_flows(peers);
+    let peer_subset = arb_peer_subset(peers);
     let initial_members2 = initial_members.clone();
     prop_oneof![
-        100 => (TICKS_PER_ACTION).prop_map(Action::Ticks),
-        5 => flows.clone().prop_map(Action::Connect),
-        5 => flows.prop_map(Action::Disconnect),
-        20 => arb_delays().prop_map(Action::ChangeDelays),
-        // Choose an RSS sled randomly
-        1 => any::<prop::sample::Selector>().prop_map(move |selector| {
-            Action::RackInit {
-                rss_sled: selector.select(&initial_members2).clone(),
-                rack_uuid,
-                initial_members: initial_members2.clone(),
-            }
-        }),
-        15 => any::<prop::sample::Selector>().prop_map(move |selector| {
-            Action::LoadRackSecret(selector.select(&initial_members).clone())
-        }),
-        10 => any::<prop::sample::Selector>().prop_map(move |selector| {
-            // If there are no learners just issue a tick
-            selector.try_select(&learners).map_or(
-                Action::Ticks(1),
-                |peer| Action::InitLearner(peer.clone())
-            )
-        })
-    ]
+            100 => (TICKS_PER_ACTION).prop_map(Action::Ticks),
+            5 => peer_subset.clone().prop_map(Action::Connect),
+            5 => peer_subset.prop_map(Action::Disconnect),
+            // Choose an RSS sled randomly
+            1 => any::<prop::sample::Selector>().prop_map(move |selector| {
+                Action::RackInit {
+                    rss_sled: selector.select(&initial_members2).clone(),
+                    rack_uuid,
+                    initial_members: initial_members2.clone(),
+                }
+            }),
+            15 => Just(Action::LoadRackSecret),
+    /*        10 => any::<prop::sample::Selector>().prop_map(move |selector| {
+                // If there are no learners just issue a tick
+                selector.try_select(&learners).map_or(
+                    Action::Ticks(1),
+                    |peer| Action::InitLearner(peer.clone())
+                )
+            })
+            */
+        ]
 }
