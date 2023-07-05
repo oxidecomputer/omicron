@@ -312,15 +312,18 @@ impl RequestManager {
         }
     }
 
-    /// Return the pkg if there is a matching request for it.
-    ///Otherwise return `None`.
-    pub fn on_pkg(
-        &mut self,
-        from: Baseboard,
-        request_id: Uuid,
-        pkg: LearnedSharePkg,
-    ) -> Option<LearnedSharePkg> {
-        None
+    /// Return true if there is a `LearnSent` for the given `request_id`, false
+    /// otherwise.
+    pub fn on_pkg(&mut self, request_id: Uuid) -> bool {
+        if let Some(TrackableRequest::LearnSent { .. }) =
+            self.requests.get_mut(&request_id)
+        {
+            self.expiry_to_id.retain(|_, id| *id != request_id);
+            self.requests.remove(&request_id);
+            true
+        } else {
+            false
+        }
     }
 
     /// If there are outstanding requests and this peer has not acknowledged

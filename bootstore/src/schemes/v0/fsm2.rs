@@ -32,6 +32,7 @@ use uuid::Uuid;
 )]
 pub struct ShareIdx(pub usize);
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum State {
     Uninitialized,
     InitialMember {
@@ -86,6 +87,11 @@ pub enum ApiOutput {
     ///
     /// The caller *must* persist the state
     ShareDistributedToLearner,
+
+    /// This peer Learned its share
+    ///
+    /// The caller must persist the state
+    LearningCompleted,
 }
 
 /// An error returned from an Fsm API request
@@ -478,9 +484,7 @@ impl Fsm2 {
             ResponseType::Share(share) => {
                 self.on_share(from, rsp.request_id, share)
             }
-            ResponseType::Pkg(pkg) => {
-                unimplemented!()
-            }
+            ResponseType::Pkg(pkg) => self.on_pkg(from, rsp.request_id, pkg),
             ResponseType::Error(err) => {
                 unimplemented!()
             }
@@ -502,6 +506,37 @@ impl Fsm2 {
                 request_id,
                 msg: "InitAck",
             }),
+        }
+    }
+
+    // Handle a `ResponseType::Pkg` from a peer
+    fn on_pkg(
+        &mut self,
+        from: Baseboard,
+        request_id: Uuid,
+        pkg: LearnedSharePkg,
+    ) -> Result<Option<ApiOutput>, ApiError> {
+        if self.request_manager.on_pkg(request_id) {
+            // This pkg matched our outstanding request. Let's transition from
+            // `State::Learning` to `State::Learned`.
+            assert_eq!(self.state, State::Learning);
+            self.state = State::Learned { pkg };
+            Ok(Some(ApiOutput::LearningCompleted))
+        } else {
+            if self.state == State::Learning {
+                // This is a stale response. We could choose to accept it, but
+                // for consistency with the rest of the `TrackableRequests`
+                // we  only accept responses that have currently outstanding
+                // requests.
+                Ok(None)
+            } else {
+                Err(ApiError::UnexpectedResponse {
+                    from,
+                    state: self.state.name(),
+                    request_id,
+                    msg: "Pkg",
+                })
+            }
         }
     }
 
