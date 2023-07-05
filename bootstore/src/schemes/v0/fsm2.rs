@@ -485,8 +485,13 @@ impl Fsm2 {
                 self.on_share(from, rsp.request_id, share)
             }
             ResponseType::Pkg(pkg) => self.on_pkg(from, rsp.request_id, pkg),
-            ResponseType::Error(err) => {
-                unimplemented!()
+            ResponseType::Error(error) => {
+                Err(ApiError::ErrorResponseReceived {
+                    from,
+                    state: self.state.name(),
+                    request_id: rsp.request_id,
+                    error,
+                })
             }
         }
     }
