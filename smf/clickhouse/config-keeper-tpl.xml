@@ -1,0 +1,49 @@
+<clickhouse>
+
+    <logger>
+        <level>trace</level>
+        <log>/var/log/clickhouse-keeper/clickhouse-keeper.log</log>
+        <errorlog>/var/log/clickhouse-keeper/clickhouse-keeper.err.log</errorlog>
+        <size>1000M</size>
+        <count>3</count>
+    </logger>
+    
+  <!-- <listen_host>::</listen_host> -->
+    <path>./</path>
+    <keeper_server>
+        <tcp_port>9181</tcp_port>
+        <!-- This was previously set to 1, 2 or 3 -->
+        <server_id>KEEPER_ID_CURRENT</server_id>
+        <log_storage_path>/var/lib/clickhouse/coordination/log</log_storage_path>
+        <snapshot_storage_path>/var/lib/clickhouse/coordination/snapshots</snapshot_storage_path>
+        <coordination_settings>
+            <operation_timeout_ms>10000</operation_timeout_ms>
+            <session_timeout_ms>30000</session_timeout_ms>
+            <raft_logs_level>trace</raft_logs_level>
+        </coordination_settings>
+        <raft_configuration>
+        <!-- TODO: Add each of these items dynamically in case we want more than 3 keepers-->
+            <server>
+            <!-- This was previously set to 1 -->
+                <id>KEEPER_ID_1</id>
+                <hostname>KEEPER_HOST_1</hostname>
+                <!-- In the future we may want to make these dynamic-->
+                <port>9234</port>
+            </server>
+            <server>
+            <!-- This was previously set to 2 -->
+                <id>KEEPER_ID_2</id>
+                <hostname>KEEPER_HOST_2</hostname>
+                <!-- In the future we may want to make these dynamic-->
+                <port>9234</port>
+            </server>
+            <server>
+            <!-- This was previously set to 3 -->
+                <id>KEEPER_ID_3</id>
+                <hostname>KEEPER_HOST_3</hostname>
+                <!-- In the future we may want to make these dynamic-->
+                <port>9234</port>
+            </server>
+        </raft_configuration>
+    </keeper_server>
+</clickhouse>
