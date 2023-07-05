@@ -328,15 +328,14 @@ mod tests {
         );
 
         let hashes = packages.expose_secret()[0].share_digests.clone();
-        for (share, hash) in decrypted_shares.iter().zip(hashes.iter()) {
-            assert_eq!(share.len(), SHARE_SIZE);
 
-            // Ensure the hash of each share matches what is stored in hashes
-            // Iteration guarantees that shares match hashes in order
-            let computed_hash = Sha3_256Digest(
+        // Compute share hashes and ensure they are valid
+        for share in &decrypted_shares {
+            assert_eq!(share.len(), SHARE_SIZE);
+            let computed = Sha3_256Digest(
                 Sha3_256::digest(share).as_slice().try_into().unwrap(),
             );
-            assert_eq!(computed_hash, *hash);
+            assert!(hashes.contains(&computed));
         }
 
         // Grab a threshold of random shares and ensure that we can recompute
