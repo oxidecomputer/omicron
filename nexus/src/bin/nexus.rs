@@ -17,6 +17,7 @@ use omicron_nexus::run_openapi_external;
 use omicron_nexus::run_openapi_internal;
 use omicron_nexus::run_server;
 use omicron_nexus::Config;
+use std::net::IpAddr;
 use std::path::PathBuf;
 
 #[derive(Debug, Parser)]
@@ -40,6 +41,10 @@ struct Args {
 
     #[clap(name = "CONFIG_FILE_PATH", action)]
     config_file_path: PathBuf,
+
+    /// Override for the external IP address
+    #[clap(long = "external-ip-override")]
+    external_ip_override: Option<IpAddr>,
 }
 
 #[tokio::main]
@@ -52,8 +57,12 @@ async fn main() {
 async fn do_run() -> Result<(), CmdError> {
     let args = Args::parse();
 
-    let config = Config::from_file(args.config_file_path)
+    let mut config = Config::from_file(args.config_file_path)
         .map_err(|e| CmdError::Failure(e.to_string()))?;
+
+    if let Some(ip) = args.external_ip_override {
+        config.deployment.dropshot_external.dropshot.bind_address.set_ip(ip);
+    }
 
     if args.openapi {
         run_openapi_external().map_err(CmdError::Failure)

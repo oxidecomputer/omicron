@@ -88,7 +88,7 @@ use std::collections::HashSet;
 use std::io::Cursor;
 use std::iter;
 use std::iter::FromIterator;
-use std::net::{IpAddr, Ipv6Addr, SocketAddr};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::str::FromStr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -122,6 +122,9 @@ pub enum Error {
 
     #[error("Failed to find device {device}")]
     MissingDevice { device: String },
+
+    #[error("Invalid service request: {0}")]
+    BadRequest(String),
 
     #[error("Failed to access ledger: {0}")]
     Ledger(#[from] crate::ledger::Error),
@@ -1194,6 +1197,155 @@ impl ServiceManager {
                 let running_zone = RunningZone::boot(installed_zone).await?;
                 return Ok(running_zone);
             }
+            ZoneType::Nexus => {
+                let (internal_ip, external_tls) = request
+                    .zone
+                    .services
+                    .iter()
+                    .find_map(|s| {
+                        if let ServiceType::Nexus {
+                            internal_ip,
+                            external_tls,
+                            ..
+                        } = s.details
+                        {
+                            Some((internal_ip, external_tls))
+                        } else {
+                            None
+                        }
+                    })
+                    .ok_or_else(|| {
+                        Error::BadRequest(
+                            "Nexus zone missing Nexus service".to_string(),
+                        )
+                    })?;
+
+                let sled_info = self
+                    .inner
+                    .sled_info
+                    .get()
+                    .ok_or(Error::SledAgentNotReady)?;
+
+                // While Nexus will be reachable via `external_ip`, it communicates
+                // atop an OPTE port which operates on a VPC private IP. OPTE will
+                // map the private IP to the external IP automatically.
+                let port =
+                    installed_zone.opte_ports().nth(0).ok_or_else(|| {
+                        Error::BadRequest(
+                            "Nexus zone missing OPTE port".to_string(),
+                        )
+                    })?;
+                let opte_interface = port.vnic_name();
+                let opte_gateway = &port.gateway().ip().to_string();
+
+                // Nexus takes a separate config file for parameters which
+                // cannot be known at packaging time.
+                let nexus_port = if external_tls { 443 } else { 80 };
+                let deployment_config = NexusDeploymentConfig {
+                    id: request.zone.id,
+                    rack_id: sled_info.rack_id,
+
+                    dropshot_external: ConfigDropshotWithTls {
+                        tls: external_tls,
+                        dropshot: dropshot::ConfigDropshot {
+                            // This is a bit silly, but:
+                            // - We do not know the private IP address of Nexus
+                            // until the zone is launched.
+                            // - To remediate, we pass a placeholder value here.
+                            // - We replace that value in the Nexus method
+                            // script. See the "external_ip_override" argument
+                            // to the Nexus binary.
+                            bind_address: SocketAddr::new(
+                                Ipv4Addr::LOCALHOST.into(),
+                                nexus_port,
+                            ),
+                            // This has to be large enough to support:
+                            // - bulk writes to disks
+                            request_body_max_bytes: 8192 * 1024,
+                            default_handler_task_mode:
+                                HandlerTaskMode::Detached,
+                        },
+                    },
+                    dropshot_internal: dropshot::ConfigDropshot {
+                        bind_address: SocketAddr::new(
+                            IpAddr::V6(internal_ip),
+                            NEXUS_INTERNAL_PORT,
+                        ),
+                        // This has to be large enough to support, among
+                        // other things, the initial list of TLS
+                        // certificates provided by the customer during rack
+                        // setup.
+                        request_body_max_bytes: 10 * 1024 * 1024,
+                        default_handler_task_mode: HandlerTaskMode::Detached,
+                    },
+                    internal_dns: nexus_config::InternalDns::FromSubnet {
+                        subnet: Ipv6Subnet::<RACK_PREFIX>::new(
+                            sled_info.underlay_address,
+                        ),
+                    },
+                    database: nexus_config::Database::FromDns,
+                };
+
+                // Copy the partial config file to the expected location.
+                let mut config_dir: Utf8PathBuf =
+                    installed_zone.zonepath().into();
+                config_dir.push("root/var/svc/manifest/site/nexus");
+
+                // The filename of a half-completed config, in need of parameters supplied at
+                // runtime.
+                const PARTIAL_LEDGER_FILENAME: &str = "config-partial.toml";
+                // The filename of a completed config, merging the partial config with
+                // additional appended parameters known at runtime.
+                const COMPLETE_LEDGER_FILENAME: &str = "config.toml";
+                let partial_config_path =
+                    config_dir.join(PARTIAL_LEDGER_FILENAME);
+                let config_path = config_dir.join(COMPLETE_LEDGER_FILENAME);
+                tokio::fs::copy(partial_config_path, &config_path)
+                    .await
+                    .map_err(|err| Error::io_path(&config_path, err))?;
+
+                // Serialize the configuration and append it into the file.
+                let serialized_cfg = toml::Value::try_from(&deployment_config)
+                    .expect("Cannot serialize config");
+                let mut map = toml::map::Map::new();
+                map.insert("deployment".to_string(), serialized_cfg);
+                let config_str = toml::to_string(&map).map_err(|err| {
+                    Error::TomlSerialize { path: config_path.clone(), err }
+                })?;
+                let mut file = tokio::fs::OpenOptions::new()
+                    .append(true)
+                    .open(&config_path)
+                    .await
+                    .map_err(|err| Error::io_path(&config_path, err))?;
+                file.write_all(config_str.as_bytes())
+                    .await
+                    .map_err(|err| Error::io_path(&config_path, err))?;
+
+                let datalink = installed_zone.get_control_vnic_name();
+                let gateway = &sled_info.underlay_address.to_string();
+                assert_eq!(request.zone.addresses.len(), 1);
+                let listen_addr = &request.zone.addresses[0].to_string();
+
+                let config = PropertyGroupBuilder::new("config")
+                    .add_property("datalink", "astring", datalink)
+                    .add_property("opte_interface", "astring", opte_interface)
+                    .add_property("opte_gateway", "astring", opte_gateway)
+                    .add_property("gateway", "astring", gateway)
+                    .add_property("listen_addr", "astring", listen_addr);
+
+                let profile = ProfileBuilder::new("omicron").add_service(
+                    ServiceBuilder::new("oxide/nexus").add_instance(
+                        ServiceInstanceBuilder::new("default")
+                            .add_property_group(config),
+                    ),
+                );
+                profile
+                    .add_to_zone(&self.inner.log, &installed_zone)
+                    .await
+                    .map_err(|err| Error::io("crucible pantry profile", err))?;
+                let running_zone = RunningZone::boot(installed_zone).await?;
+                return Ok(running_zone);
+            }
             _ => {}
         }
 
@@ -1353,100 +1505,6 @@ impl ServiceManager {
             smfh.import_manifest()?;
 
             match &service.details {
-                ServiceType::Nexus { internal_ip, external_tls, .. } => {
-                    info!(self.inner.log, "Setting up Nexus service");
-
-                    let sled_info = self
-                        .inner
-                        .sled_info
-                        .get()
-                        .ok_or(Error::SledAgentNotReady)?;
-
-                    // While Nexus will be reachable via `external_ip`, it communicates
-                    // atop an OPTE port which operates on a VPC private IP. OPTE will
-                    // map the private IP to the external IP automatically.
-                    let port_ip = running_zone
-                        .ensure_address_for_port("public", 0)
-                        .await?
-                        .ip();
-
-                    // Nexus takes a separate config file for parameters which
-                    // cannot be known at packaging time.
-                    let nexus_port = if *external_tls { 443 } else { 80 };
-                    let deployment_config = NexusDeploymentConfig {
-                        id: request.zone.id,
-                        rack_id: sled_info.rack_id,
-
-                        dropshot_external: ConfigDropshotWithTls {
-                            tls: *external_tls,
-                            dropshot: dropshot::ConfigDropshot {
-                                bind_address: SocketAddr::new(
-                                    port_ip, nexus_port,
-                                ),
-                                // This has to be large enough to support:
-                                // - bulk writes to disks
-                                request_body_max_bytes: 8192 * 1024,
-                                default_handler_task_mode:
-                                    HandlerTaskMode::Detached,
-                            },
-                        },
-                        dropshot_internal: dropshot::ConfigDropshot {
-                            bind_address: SocketAddr::new(
-                                IpAddr::V6(*internal_ip),
-                                NEXUS_INTERNAL_PORT,
-                            ),
-                            // This has to be large enough to support, among
-                            // other things, the initial list of TLS
-                            // certificates provided by the customer during rack
-                            // setup.
-                            request_body_max_bytes: 10 * 1024 * 1024,
-                            default_handler_task_mode:
-                                HandlerTaskMode::Detached,
-                        },
-                        internal_dns: nexus_config::InternalDns::FromSubnet {
-                            subnet: Ipv6Subnet::<RACK_PREFIX>::new(
-                                sled_info.underlay_address,
-                            ),
-                        },
-                        database: nexus_config::Database::FromDns,
-                    };
-
-                    // Copy the partial config file to the expected location.
-                    let config_dir = Utf8PathBuf::from(format!(
-                        "{}/var/svc/manifest/site/nexus",
-                        running_zone.root()
-                    ));
-                    // The filename of a half-completed config, in need of parameters supplied at
-                    // runtime.
-                    const PARTIAL_LEDGER_FILENAME: &str = "config-partial.toml";
-                    // The filename of a completed config, merging the partial config with
-                    // additional appended parameters known at runtime.
-                    const COMPLETE_LEDGER_FILENAME: &str = "config.toml";
-                    let partial_config_path =
-                        config_dir.join(PARTIAL_LEDGER_FILENAME);
-                    let config_path = config_dir.join(COMPLETE_LEDGER_FILENAME);
-                    tokio::fs::copy(partial_config_path, &config_path)
-                        .await
-                        .map_err(|err| Error::io_path(&config_path, err))?;
-
-                    // Serialize the configuration and append it into the file.
-                    let serialized_cfg =
-                        toml::Value::try_from(&deployment_config)
-                            .expect("Cannot serialize config");
-                    let mut map = toml::map::Map::new();
-                    map.insert("deployment".to_string(), serialized_cfg);
-                    let config_str = toml::to_string(&map).map_err(|err| {
-                        Error::TomlSerialize { path: config_path.clone(), err }
-                    })?;
-                    let mut file = tokio::fs::OpenOptions::new()
-                        .append(true)
-                        .open(&config_path)
-                        .await
-                        .map_err(|err| Error::io_path(&config_path, err))?;
-                    file.write_all(config_str.as_bytes())
-                        .await
-                        .map_err(|err| Error::io_path(&config_path, err))?;
-                }
                 ServiceType::ExternalDns {
                     http_address, dns_address, ..
                 } => {
@@ -1862,7 +1920,8 @@ impl ServiceManager {
                 ServiceType::Crucible
                 | ServiceType::CruciblePantry
                 | ServiceType::CockroachDb
-                | ServiceType::Clickhouse => {
+                | ServiceType::Clickhouse
+                | ServiceType::Nexus { .. } => {
                     panic!(
                         "{} is a service which exists as part of a self-assembling zone",
                         service.details,

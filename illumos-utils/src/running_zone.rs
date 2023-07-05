@@ -750,7 +750,7 @@ impl RunningZone {
 
     /// Return references to the OPTE ports for this zone.
     pub fn opte_ports(&self) -> impl Iterator<Item = &Port> {
-        self.inner.opte_ports.iter().map(|(port, _)| port)
+        self.inner.opte_ports()
     }
 
     /// Remove the OPTE ports on this zone from the port manager.
@@ -1009,6 +1009,11 @@ impl InstalledZone {
     /// Returns the filesystem path to the zonepath
     pub fn zonepath(&self) -> &Utf8Path {
         &self.zonepath
+    }
+
+    /// Return references to the OPTE ports for this zone.
+    pub fn opte_ports(&self) -> impl Iterator<Item = &Port> {
+        self.opte_ports.iter().map(|(port, _)| port)
     }
 
     // TODO: This would benefit from a "builder-pattern" interface.
