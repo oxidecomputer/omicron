@@ -5,7 +5,7 @@
 //! A mechanism for tracking in flight requests
 
 use super::{
-    Config2, Envelope, LearnedSharePkg, Msg, Request, RequestType, Share,
+    Config, Envelope, LearnedSharePkg, Msg, Request, RequestType, Share,
     SharePkg,
 };
 use sled_hardware::Baseboard;
@@ -72,7 +72,7 @@ pub enum TrackableRequest {
 ///
 /// We expect very few requests at a time - on the order of one or two requests.
 pub struct RequestManager {
-    config: Config2,
+    config: Config,
     requests: BTreeMap<Uuid, TrackableRequest>,
     expiry_to_id: BTreeMap<Instant, Uuid>,
 
@@ -84,7 +84,7 @@ pub struct RequestManager {
 
 impl RequestManager {
     /// Create a new RequestManager
-    pub fn new(config: Config2) -> RequestManager {
+    pub fn new(config: Config) -> RequestManager {
         RequestManager {
             config,
             requests: BTreeMap::new(),

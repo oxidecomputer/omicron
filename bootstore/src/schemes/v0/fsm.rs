@@ -8,184 +8,233 @@
 //! results. This is where the bulk of the protocol logic lives. It's
 //! written this way to enable easy testing and auditing.
 
-use super::fsm_output::{ApiError, Output};
-use super::messages::{
-    Envelope, Msg, Request, RequestType, Response, ResponseType,
-};
-use super::share_pkg::create_pkgs;
-use super::state::{Config, FsmCommonData, RackInitState, State};
+use super::request_manager::ShareAcks;
 use super::{
-    InitialMemberState, LearnedState, LearningState, UninitializedState,
+    create_pkgs, Config, Envelope, LearnedSharePkg, Msg, MsgError, Request,
+    RequestManager, RequestType, Response, ResponseType, Share, SharePkg,
+    Shares, TrackableRequest,
 };
+use crate::trust_quorum::{RackSecret, TrustQuorumError};
+use crate::Sha3_256Digest;
 use secrecy::ExposeSecret;
+use serde::{Deserialize, Serialize};
+use sha3::{Digest, Sha3_256};
 use sled_hardware::Baseboard;
 use std::collections::{BTreeMap, BTreeSet};
+use std::fmt::Debug;
+use std::time::Instant;
+use thiserror::Error;
 use uuid::Uuid;
 
-/// Handler methods implemented by each FSM state
-pub trait StateHandler {
-    fn handle_request(
-        self,
-        common: &mut FsmCommonData,
-        from: Baseboard,
-        request_id: Uuid,
-        request: RequestType,
-    ) -> (State, Output);
+// An index into an encrypted share
+#[derive(
+    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize,
+)]
+pub struct ShareIdx(pub usize);
 
-    fn handle_response(
-        self,
-        common: &mut FsmCommonData,
-        from: Baseboard,
-        request_id: Uuid,
-        response: ResponseType,
-    ) -> (State, Output);
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum State {
+    Uninitialized,
+    InitialMember {
+        pkg: SharePkg,
 
-    fn tick(self, common: &mut FsmCommonData) -> (State, Output);
-
-    /// A peer has connected.
-    ///
-    /// Outstanding requests may need to get re-sent.
-    /// Since we are using TCP at the network layer, we rely on connections
-    /// to tell us to retry rather than timeouts.
-    ///
-    /// This call can never trigger a state transition, so we don't bother
-    /// taking `self` by value.
-    fn on_connect(
-        &mut self,
-        common: &mut FsmCommonData,
-        peer: Baseboard,
-    ) -> Output;
-
-    /// A peer has disconnected.
-    ///
-    /// We can use this knowledge to assume a request won't complete. For
-    /// example, we may want to move onto the next peer immediately rather than
-    /// wait for a tick.
-    ///
-    /// This call can never trigger a state transition, so we don't bother
-    /// taking `self` by value.
-    fn on_disconnect(
-        &mut self,
-        common: &mut FsmCommonData,
-        peer: Baseboard,
-    ) -> Output;
+        /// Shares given to other sleds. We mark them as used so that we don't
+        /// hand them out twice. If the same sled asks us for a share, because
+        /// it crashes or there is a network blip, we will return the same
+        /// share each time.
+        ///
+        /// Note that this is a fairly optimistic strategy as the requesting
+        /// sled can always go ask another sled after a network blip. However,
+        /// this guarantees that a single sled never hands out more than one of
+        /// its shares to any given sled.
+        ///
+        /// We can't do much better than this without some sort of centralized
+        /// distributor which is part of the reconfiguration mechanism in later
+        /// versions of the trust quourum protocol.
+        distributed_shares: BTreeMap<Baseboard, ShareIdx>,
+    },
+    Learning,
+    Learned {
+        pkg: LearnedSharePkg,
+    },
 }
 
-/// The state machine for a [`$crate::Peer`]
-///
-/// This FSM assumes a network layer above it that can map peer IDs
-/// ( [`Baseboard`]s) to TCP sockets. When an attempt is made to send a
-/// message to a given peer the network layer will send it over an established
-/// connection if one exists. If there is no connection already to that peer,
-/// but the prefix is present and known, the network layer will attempt to
-/// establish a connection and then transmit the message. If the peer is not
-/// known then it must have just had its network prefix removed. In this case
-/// the message will be dropped and the FSM will be told to remove the peer.
-#[derive(Debug)]
-pub struct Fsm {
-    common: FsmCommonData,
+impl State {
+    pub fn name(&self) -> &'static str {
+        match self {
+            State::Uninitialized => "uninitialized",
+            State::InitialMember { .. } => "initial_member",
+            State::Learning => "learning",
+            State::Learned { .. } => "learned",
+        }
+    }
+}
 
-    // Use an option to allow taking and mutating `State` independently of `Fsm`
-    // An invariant of the Fsm is that `state` is always `Some` to API callers.
-    state: Option<State>,
+/// A response to an Fsm API request
+pub enum ApiOutput {
+    /// This peer has been initialized
+    ///
+    /// The caller *must* persist the state
+    PeerInitialized,
+
+    /// Rack initialization has completed. This node was the coordinator.
+    RackInitComplete,
+
+    /// A `RackSecret` was reconstructed
+    RackSecret { request_id: Uuid, secret: RackSecret },
+
+    /// An extra share has been distributed to a learning peer
+    ///
+    /// The caller *must* persist the state
+    ShareDistributedToLearner,
+
+    /// This peer Learned its share
+    ///
+    /// The caller must persist the state
+    LearningCompleted,
+}
+
+/// An error returned from an Fsm API request
+#[derive(Error, Debug)]
+pub enum ApiError {
+    #[error("already initialized")]
+    AlreadyInitialized,
+
+    #[error("not yet initialized")]
+    NotInitialized,
+
+    #[error("cannot retrieve or distribute shares while learning")]
+    StillLearning,
+
+    #[error("rack init timeout: unacked_peers: {unacked_peers:?}")]
+    RackInitTimeout { unacked_peers: BTreeSet<Baseboard> },
+
+    #[error("rack init falied: trust quorum error: {0:?}")]
+    RackInitFailed(TrustQuorumError),
+
+    #[error("rack secret load timeout")]
+    RackSecretLoadTimeout,
+
+    #[error("share from {from} has invalid sha3_256 digest")]
+    InvalidShare { from: Baseboard },
+
+    #[error("critical: failed to reconstruct rack secret with valid shares")]
+    FailedToReconstructRackSecret,
+
+    #[error("critical: failed to decrypt extra shares")]
+    FailedToDecryptExtraShares,
+
+    #[error("unexpected response ({msg}) from ({from}) in state ({state}) with request_id ({request_id})")]
+    UnexpectedResponse {
+        from: Baseboard,
+        state: &'static str,
+        request_id: Uuid,
+        msg: &'static str,
+    },
+
+    #[error("error response received from ({from}) in state ({state}) with request_id ({request_id}): {error:?}")]
+    ErrorResponseReceived {
+        from: Baseboard,
+        state: &'static str,
+        request_id: Uuid,
+        error: MsgError,
+    },
+}
+
+pub struct Fsm {
+    /// The current state of this peer
+    state: State,
+    /// Unique IDs of this peer
+    id: Baseboard,
+
+    config: Config,
+
+    /// Unique IDs of connected peers
+    connected_peers: BTreeSet<Baseboard>,
+
+    /// Manage all trackable broadcasts
+    request_manager: RequestManager,
+
+    /// Envelopes not managed by the `RequestManager`
+    /// These are all envelopes containing `Response` messages
+    envelopes: Vec<Envelope>,
 }
 
 impl Fsm {
-    /// Create a new FSM. This is useful when starting from a persistent state
-    /// on disk.
-    pub fn new(id: Baseboard, config: Config, state: State) -> Fsm {
-        Fsm { common: FsmCommonData::new(id, config), state: Some(state) }
-    }
-
     /// Create a new FSM in `State::Uninitialized`
     pub fn new_uninitialized(id: Baseboard, config: Config) -> Fsm {
-        let state = Some(State::Uninitialized(UninitializedState {}));
-        Fsm { common: FsmCommonData::new(id, config), state }
-    }
-
-    pub fn state_name(&self) -> &'static str {
-        self.state.as_ref().unwrap().name()
-    }
-
-    pub fn state(&self) -> &State {
-        self.state.as_ref().unwrap()
-    }
-
-    pub fn common_data(&self) -> &FsmCommonData {
-        &self.common
-    }
-
-    /// This call is triggered locally as a result of RSS running
-    /// It may only be called once, which is enforced by checking to see if
-    /// we already are in `State::Uninitialized`.
-    pub fn init_rack(
-        &mut self,
-        rack_uuid: Uuid,
-        initial_membership: BTreeSet<Baseboard>,
-    ) -> Output {
-        let State::Uninitialized(_) = self.state.as_ref().unwrap() else {
-            return ApiError::RackAlreadyInitialized.into();
-        };
-        let total_members = initial_membership.len();
-        match create_pkgs(rack_uuid, initial_membership.clone()) {
-            Ok(pkgs) => {
-                // We learn our pkg by iterating
-                let mut our_pkg = None;
-                let request_id = Uuid::new_v4();
-                let envelopes: Vec<_> = pkgs
-                    .expose_secret()
-                    .into_iter()
-                    .zip(initial_membership)
-                    .filter_map(|(pkg, peer)| {
-                        if peer == self.common.id {
-                            // Don't send a message to ourself
-                            our_pkg = Some(pkg.clone());
-                            None
-                        } else {
-                            Some(Envelope {
-                                to: peer,
-                                msg: Request {
-                                    id: request_id,
-                                    type_: RequestType::Init(pkg.clone()),
-                                }
-                                .into(),
-                            })
-                        }
-                    })
-                    .collect();
-                self.state = Some(State::InitialMember(InitialMemberState {
-                    pkg: our_pkg.unwrap(),
-                    distributed_shares: BTreeMap::new(),
-                    rack_init_state: Some(RackInitState::Running {
-                        start: self.common.clock,
-                        total_members,
-                        acks: BTreeSet::from([self.common.id.clone()]),
-                        unacked_envelopes: envelopes.clone(),
-                    }),
-                    pending_learn_requests: BTreeMap::new(),
-                }));
-                // Note that while we could only send the envelopes to
-                // connected peers, the network layer will just drop them.
-                // We already have a copy to send on connection stored in
-                // `Rack::InitState::Running.unacked_envelopes`.
-                Output { persist: true, envelopes, api_output: None }
-            }
-            Err(e) => return ApiError::RackInitFailed(e).into(),
+        Fsm {
+            state: State::Uninitialized,
+            id,
+            config,
+            connected_peers: BTreeSet::new(),
+            request_manager: RequestManager::new(config),
+            envelopes: vec![],
         }
     }
 
-    /// Initialize a node added after rack initialization
-    pub fn init_learner(&mut self) -> Output {
-        let State::Uninitialized(_) = self.state.as_ref().unwrap() else {
-            return ApiError::PeerAlreadyInitialized.into();
+    /// Return any envelopes that need sending
+    ///
+    /// This must be called after any API callback
+    pub fn drain_envelopes(&mut self) -> impl Iterator<Item = Envelope> + '_ {
+        self.envelopes.drain(..).chain(self.request_manager.drain_elements())
+    }
+
+    /// This call is triggered locally on a single sled as a result of RSS
+    /// running. It may only be called once, which is enforced by checking to see
+    /// if we already are in `State::Uninitialized`.
+    ///
+    /// Persistence is required after a successful call to `init_rack`
+    pub fn init_rack(
+        &mut self,
+        now: Instant,
+        rack_uuid: Uuid,
+        initial_membership: BTreeSet<Baseboard>,
+    ) -> Result<(), ApiError> {
+        let State::Uninitialized = self.state else {
+            return Err(ApiError::AlreadyInitialized);
+        };
+        let total_members = initial_membership.len();
+        let pkgs = create_pkgs(rack_uuid, initial_membership.clone())
+            .map_err(|e| ApiError::RackInitFailed(e))?;
+        let mut iter = pkgs.expose_secret().into_iter();
+        let our_pkg = iter.next().unwrap().clone();
+
+        // Move into an initialized state
+        self.state = State::InitialMember {
+            pkg: our_pkg,
+            distributed_shares: BTreeMap::new(),
         };
 
-        let mut state = LearningState { attempt: None };
-        let mut output = state.new_attempt(&mut self.common);
-        self.state = Some(State::Learning(state).into());
-        // We changed state into a learner, so persist this knowledge
-        output.persist = true;
-        output
+        let packages: BTreeMap<Baseboard, SharePkg> = initial_membership
+            .into_iter()
+            .filter(|peer| *peer != self.id)
+            .zip(iter.cloned())
+            .collect();
+
+        let _ = self.request_manager.new_init_rack_req(
+            now,
+            rack_uuid,
+            packages.clone(),
+            &self.connected_peers,
+        );
+
+        Ok(())
+    }
+
+    /// Initialize a node added after rack initialization
+    ///
+    /// Persistence is required after a successful call to `init_learner`
+    pub fn init_learner(&mut self, now: Instant) -> Result<(), ApiError> {
+        let State::Uninitialized = self.state else {
+            return Err(ApiError::AlreadyInitialized);
+        };
+
+        if let Some(to) = self.connected_peers.first() {
+            let _ = self.request_manager.new_learn_sent_req(now, to.clone());
+        }
+        self.state = State::Learning;
+        Ok(())
     }
 
     /// This call is triggered locally after RSS runs, in order to retrieve the
@@ -193,287 +242,510 @@ impl Fsm {
     ///
     /// if the rack secret has not already been loaded, then share retrieval
     /// will begin.
-    pub fn load_rack_secret(&mut self) -> Output {
-        let (rack_uuid, local_share, threshold, share_digests) = match self
-            .state
-            .as_ref()
-            .unwrap()
-        {
-            // We don't allow retrieval before initialization
-            State::Uninitialized(_) => {
-                return ApiError::RackNotInitialized.into()
+    pub fn load_rack_secret(&mut self, now: Instant) -> Result<(), ApiError> {
+        match &self.state {
+            State::Uninitialized => return Err(ApiError::NotInitialized),
+            State::Learning { .. } => return Err(ApiError::StillLearning),
+            State::InitialMember { pkg, .. } => {
+                let _ = self.request_manager.new_load_rack_secret_req(
+                    now,
+                    pkg.rack_uuid,
+                    pkg.threshold,
+                    &self.connected_peers,
+                );
             }
-            State::Learning(_) => return ApiError::StillLearning.into(),
-            State::InitialMember(InitialMemberState { pkg, .. }) => {
-                (pkg.rack_uuid, &pkg.share, pkg.threshold, &pkg.share_digests)
+            State::Learned { pkg } => {
+                let _ = self.request_manager.new_load_rack_secret_req(
+                    now,
+                    pkg.rack_uuid,
+                    pkg.threshold,
+                    &self.connected_peers,
+                );
             }
-            State::Learned(LearnedState { pkg, .. }) => {
-                (pkg.rack_uuid, &pkg.share, pkg.threshold, &pkg.share_digests)
+        }
+
+        Ok(())
+    }
+
+    /// Periodic tick to check for request expiration
+    ///
+    /// Return any expired request errors mapped to their request id
+    pub fn tick(
+        &mut self,
+        now: Instant,
+    ) -> Result<(), BTreeMap<Uuid, ApiError>> {
+        if let State::Uninitialized = &self.state {
+            return Ok(());
+        }
+        let mut errors = BTreeMap::new();
+        for (req_id, req) in self.request_manager.expired(now) {
+            match req {
+                TrackableRequest::InitRack { rack_uuid, acks, .. } => {
+                    let unacked_peers = acks
+                        .expected
+                        .difference(&acks.received)
+                        .cloned()
+                        .collect();
+                    errors.insert(
+                        req_id,
+                        ApiError::RackInitTimeout { unacked_peers },
+                    );
+                }
+                TrackableRequest::LoadRackSecret { .. } => {
+                    errors.insert(req_id, ApiError::RackSecretLoadTimeout);
+                }
+                TrackableRequest::LearnReceived { .. } => {
+                    // Nothing to do here, as these are requests from messages
+                    // and not api requests
+                }
+                TrackableRequest::LearnSent { to } => {
+                    if let State::Learning = &self.state {
+                        // Issue the next request
+                        if let Some(next_peer) = self.next_peer(&to) {
+                            let _ = self
+                                .request_manager
+                                .new_learn_sent_req(now, next_peer);
+                        }
+                    }
+                }
             }
-        };
-        let expiry =
-            self.common.clock + self.common.config.rack_secret_request_timeout;
-
-        self.common.rack_secret_state.load(
-            rack_uuid,
-            &self.common.peers,
-            &self.common.id,
-            local_share,
-            expiry,
-            threshold.into(),
-            share_digests,
-        )
+        }
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors)
+        }
     }
 
-    /// An abstraction of a timer tick.
+    /// A peer has been connected.
     ///
-    /// Ticks mutate state and can result in timeouts.
-    ///
-    /// Each tick represents some abstract duration of time. Timeouts are
-    /// represented by number of ticks, which allows for deterministic property
-    /// based test implementation in a straightforward manner.  We only deal in
-    /// relative time needed for timeouts, and not absolute time.
-    pub fn tick(&mut self) -> Output {
-        self.common.clock += 1;
-        let state = self.state.take().unwrap();
-        let (new_state, output) = state.tick(&mut self.common);
-        self.state = Some(new_state);
-        output
+    /// Send any necessary messages required by pending requesets.
+    pub fn on_connected(&mut self, now: Instant, peer_id: Baseboard) {
+        if let State::Learning = &self.state {
+            if !self.request_manager.has_learn_sent_req() {
+                // This is the first peer we've seen in the learning state, so try
+                // to learn from it.
+                let request_id = self
+                    .request_manager
+                    .new_learn_sent_req(now, peer_id.clone());
+            }
+        }
+        self.request_manager.on_connected(&peer_id);
+        self.connected_peers.insert(peer_id);
     }
 
-    /// A connection has been established to a specific peer.
-    ///
-    /// Messages may now be sent from the FSM to the peer
-    pub fn connected(&mut self, peer: Baseboard) -> Output {
-        let output = self
-            .state
-            .as_mut()
-            .unwrap()
-            .on_connect(&mut self.common, peer.clone());
-        // We specifically add the connected peers *after* calling
-        // `State::on_connect` so that the specific state can send any necessary
-        // messages to newly connected peers.
-        self.common.peers.insert(peer);
-        output
-    }
-
-    /// We have disconnected from a peer
-    ///
-    /// Messages will no longer be sent from the FSM to the peer
-    pub fn disconnected(&mut self, peer: Baseboard) -> Output {
-        self.common.peers.remove(&peer);
-        self.state.as_mut().unwrap().on_disconnect(&mut self.common, peer)
-    }
-
-    /// Handle a message from a peer.
-    ///
-    /// Return whether persistent state needs syncing to disk and a set of
-    /// messages to send to other peers. Persistant state must be saved by
-    /// the caller and safely persisted before messages are sent, or the next
-    /// message is handled here.
-    pub fn handle(&mut self, from: Baseboard, msg: Msg) -> Output {
+    /// Handle messages from other peers
+    pub fn handle_msg(
+        &mut self,
+        now: Instant,
+        from: Baseboard,
+        msg: Msg,
+    ) -> Result<Option<ApiOutput>, ApiError> {
         match msg {
-            Msg::Req(req) => self.handle_request(from, req),
+            Msg::Req(req) => self.handle_request(now, from, req),
             Msg::Rsp(rsp) => self.handle_response(from, rsp),
         }
     }
 
-    // Handle a `Request` message
-    fn handle_request(&mut self, from: Baseboard, request: Request) -> Output {
-        let state = self.state.take().unwrap();
-        let (new_state, output) = state.handle_request(
-            &mut self.common,
-            from,
-            request.id,
-            request.type_,
-        );
-        self.state = Some(new_state);
-        output
+    // Handle a `Request` from a peer
+    fn handle_request(
+        &mut self,
+        now: Instant,
+        from: Baseboard,
+        req: Request,
+    ) -> Result<Option<ApiOutput>, ApiError> {
+        match req.type_ {
+            RequestType::Init(pkg) => self.on_init(from, req.id, pkg),
+            RequestType::GetShare { rack_uuid } => {
+                self.on_get_share(from, req.id, rack_uuid);
+                Ok(None)
+            }
+            RequestType::Learn => {
+                self.on_learn(now, from, req.id);
+                Ok(None)
+            }
+        }
     }
 
+    // Handle a `RequestType::Init` from a peer
+    fn on_init(
+        &mut self,
+        from: Baseboard,
+        request_id: Uuid,
+        pkg: SharePkg,
+    ) -> Result<Option<ApiOutput>, ApiError> {
+        match self.state {
+            State::Uninitialized => {
+                // Initialize ourselves and ack
+                self.state = State::InitialMember {
+                    pkg,
+                    distributed_shares: BTreeMap::new(),
+                };
+                self.envelopes.push(Envelope {
+                    to: from,
+                    msg: Msg::Rsp(Response {
+                        request_id,
+                        type_: ResponseType::InitAck,
+                    }),
+                });
+                Ok(Some(ApiOutput::PeerInitialized))
+            }
+            _ => {
+                // Send an error response
+                self.envelopes.push(Envelope {
+                    to: from,
+                    msg: Msg::Rsp(Response {
+                        request_id,
+                        type_: ResponseType::Error(
+                            MsgError::AlreadyInitialized,
+                        ),
+                    }),
+                });
+                Ok(None)
+            }
+        }
+    }
+
+    // Handle a `RequestType::GetShare` from a peer
+    fn on_get_share(
+        &mut self,
+        from: Baseboard,
+        request_id: Uuid,
+        rack_uuid: Uuid,
+    ) {
+        let response = match &self.state {
+            State::Uninitialized => MsgError::NotInitialized.into(),
+            State::Learning => MsgError::StillLearning.into(),
+            State::Learned { pkg } => {
+                if rack_uuid != pkg.rack_uuid {
+                    MsgError::RackUuidMismatch {
+                        expected: pkg.rack_uuid,
+                        got: rack_uuid,
+                    }
+                    .into()
+                } else {
+                    ResponseType::Share(Share(pkg.share.clone()))
+                }
+            }
+            State::InitialMember { pkg, .. } => {
+                if rack_uuid != pkg.rack_uuid {
+                    MsgError::RackUuidMismatch {
+                        expected: pkg.rack_uuid,
+                        got: rack_uuid,
+                    }
+                    .into()
+                } else {
+                    ResponseType::Share(Share(pkg.share.clone()))
+                }
+            }
+        };
+
+        self.envelopes.push(Envelope {
+            to: from,
+            msg: Msg::Rsp(Response { request_id, type_: response }),
+        });
+    }
+
+    // Handle a `RequestType::Learn` from a peer
+    fn on_learn(&mut self, now: Instant, from: Baseboard, request_id: Uuid) {
+        let err = match &self.state {
+            State::Uninitialized => Some(MsgError::NotInitialized),
+            State::Learning => Some(MsgError::StillLearning),
+            State::Learned { .. } => Some(MsgError::CannotSpareAShare),
+            State::InitialMember { pkg, .. } => {
+                let _ = self.request_manager.new_learn_received_req(
+                    now,
+                    pkg.rack_uuid,
+                    pkg.threshold,
+                    from.clone(),
+                    &self.connected_peers,
+                );
+                // We need to gather shares and reconstruct the rack secret.
+                // Therefore we don't send a response immediately.
+                None
+            }
+        };
+        if let Some(err) = err {
+            self.envelopes.push(Envelope {
+                to: from,
+                msg: Msg::Rsp(Response { request_id, type_: err.into() }),
+            });
+        }
+    }
+
+    // Handle a `Response` from a peer
     fn handle_response(
         &mut self,
         from: Baseboard,
-        response: Response,
-    ) -> Output {
-        let state = self.state.take().unwrap();
-        let (new_state, output) = state.handle_response(
-            &mut self.common,
-            from,
-            response.request_id,
-            response.type_,
-        );
-        self.state = Some(new_state);
-        output
+        rsp: Response,
+    ) -> Result<Option<ApiOutput>, ApiError> {
+        match rsp.type_ {
+            ResponseType::InitAck => self.on_init_ack(from, rsp.request_id),
+            ResponseType::Share(share) => {
+                self.on_share(from, rsp.request_id, share)
+            }
+            ResponseType::Pkg(pkg) => self.on_pkg(from, rsp.request_id, pkg),
+            ResponseType::Error(error) => {
+                Err(ApiError::ErrorResponseReceived {
+                    from,
+                    state: self.state.name(),
+                    request_id: rsp.request_id,
+                    error,
+                })
+            }
+        }
+    }
+
+    // Handle a `ResposneType::InitAck` from a peer
+    fn on_init_ack(
+        &mut self,
+        from: Baseboard,
+        request_id: Uuid,
+    ) -> Result<Option<ApiOutput>, ApiError> {
+        match self.request_manager.on_init_ack(from.clone(), request_id) {
+            Some(true) => Ok(Some(ApiOutput::RackInitComplete)),
+            Some(false) => Ok(None),
+            None => Err(ApiError::UnexpectedResponse {
+                from,
+                state: self.state.name(),
+                request_id,
+                msg: "InitAck",
+            }),
+        }
+    }
+
+    // Handle a `ResponseType::Pkg` from a peer
+    fn on_pkg(
+        &mut self,
+        from: Baseboard,
+        request_id: Uuid,
+        pkg: LearnedSharePkg,
+    ) -> Result<Option<ApiOutput>, ApiError> {
+        if self.request_manager.on_pkg(request_id) {
+            // This pkg matched our outstanding request. Let's transition from
+            // `State::Learning` to `State::Learned`.
+            assert_eq!(self.state, State::Learning);
+            self.state = State::Learned { pkg };
+            Ok(Some(ApiOutput::LearningCompleted))
+        } else {
+            if self.state == State::Learning {
+                // This is a stale response. We could choose to accept it, but
+                // for consistency with the rest of the `TrackableRequests`
+                // we  only accept responses that have currently outstanding
+                // requests.
+                Ok(None)
+            } else {
+                Err(ApiError::UnexpectedResponse {
+                    from,
+                    state: self.state.name(),
+                    request_id,
+                    msg: "Pkg",
+                })
+            }
+        }
+    }
+
+    // Handle a `ResponseType::Share` from a peer
+    fn on_share(
+        &mut self,
+        from: Baseboard,
+        request_id: Uuid,
+        share: Share,
+    ) -> Result<Option<ApiOutput>, ApiError> {
+        match &mut self.state {
+            // We don't send `GetShare` requests in these states
+            State::Uninitialized | State::Learning => {
+                return Err(ApiError::UnexpectedResponse {
+                    from,
+                    state: self.state.name(),
+                    request_id,
+                    msg: "Share",
+                });
+            }
+            State::InitialMember { pkg, distributed_shares } => {
+                validate_share(&from, &share, &pkg.share_digests)?;
+                match self.request_manager.on_share(from, request_id, share) {
+                    Some(TrackableRequest::LoadRackSecret { acks, .. }) => {
+                        let secret = combine_shares(&pkg.share, acks)?;
+                        Ok(Some(ApiOutput::RackSecret { request_id, secret }))
+                    }
+                    Some(TrackableRequest::LearnReceived {
+                        rack_uuid,
+                        from,
+                        acks,
+                    }) => {
+                        let rack_secret = combine_shares(&pkg.share, acks)?;
+                        // We now have the rack secret and can decrypt extra shares
+                        decrypt_and_send_share_response(
+                            from,
+                            request_id,
+                            pkg,
+                            distributed_shares,
+                            &rack_secret,
+                            &mut self.envelopes,
+                        )
+                    }
+                    // Only LoadRackSecret and LearnReceived track shares so we
+                    // cannot get another variant back.
+                    //
+                    // If we get a `None` back we either haven't received enough
+                    // shares or we have a late response to a prior request. A
+                    // late response is very common, as we terminate the request
+                    // once a threshold is received but we may still receive
+                    // shares because we asked more than a threshold of peers
+                    // for a share. Logging this as an unexpected response would
+                    // be noisy and misleading.
+                    _ => Ok(None),
+                }
+            }
+            State::Learned { pkg } => {
+                validate_share(&from, &share, &pkg.share_digests)?;
+                match self.request_manager.on_share(from, request_id, share) {
+                    Some(TrackableRequest::LoadRackSecret { acks, .. }) => {
+                        let secret = combine_shares(&pkg.share, acks)?;
+                        Ok(Some(ApiOutput::RackSecret { request_id, secret }))
+                    }
+                    Some(TrackableRequest::LearnReceived { .. }) => {
+                        panic!(
+                            "Invariant violation: Learned members must not 
+                            accept 'Learn' requests"
+                        )
+                    }
+                    // Only LoadRackSecret and LearnReceived track shares so we
+                    // cannot get another variant back.
+                    //
+                    // If we get a `None` back we either haven't received enough
+                    // shares or we have a late response to a prior request. A
+                    // late response is very common, as we terminate the request
+                    // once a threshold is received but we may still receive
+                    // shares because we asked more than a threshold of peers
+                    // for a share. Logging this as an unexpected response would
+                    // be noisy and misleading.
+                    _ => Ok(None),
+                }
+            }
+        }
+    }
+
+    // Select the next peer in a round-robin fashion
+    fn next_peer(&self, current: &Baseboard) -> Option<Baseboard> {
+        let mut iter = self.connected_peers.range(current..);
+        let matched = iter.next() == Some(current);
+        iter.next()
+            .filter(|_| matched)
+            .or_else(|| self.connected_peers.first())
+            .cloned()
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::schemes::v0::state_uninitialized::UninitializedState;
-    use crate::schemes::v0::ApiOutput;
+fn decrypt_and_send_share_response(
+    from: Baseboard,
+    request_id: Uuid,
+    pkg: &SharePkg,
+    distributed_shares: &mut BTreeMap<Baseboard, ShareIdx>,
+    rack_secret: &RackSecret,
+    envelopes: &mut Vec<Envelope>,
+) -> Result<Option<ApiOutput>, ApiError> {
+    // If decryption failse, we log it locally The peer will timeout and move to
+    // the next one
+    let shares = pkg
+        .decrypt_shares(&rack_secret)
+        .map_err(|_| ApiError::FailedToDecryptExtraShares)?;
 
-    fn test_config() -> Config {
-        Config {
-            learn_timeout: 5,
-            rack_init_timeout: 5,
-            rack_secret_request_timeout: 5,
-        }
-    }
+    if let Some(idx) = distributed_shares.get(&from) {
+        // The share was already handed out to this peer. Give back the same
+        // one.
+        let share = &shares.expose_secret()[idx.0];
+        queue_pkg_response(from, request_id, pkg, &share, envelopes);
+        // No state was updated, so no need to persist
+        Ok(None)
+    } else {
+        // We need to pick a share to hand out and persist that fact. We find
+        // the highest currently used index and add 1 or we select index 0.
+        let idx = distributed_shares
+            .values()
+            .max()
+            .cloned()
+            .map(|idx| idx.0 + 1)
+            .unwrap_or(0);
 
-    fn initial_members() -> BTreeSet<Baseboard> {
-        [("a", "1"), ("b", "1"), ("c", "1"), ("d", "1"), ("e", "1")]
-            .iter()
-            .map(|(id, model)| {
-                Baseboard::new_pc(id.to_string(), model.to_string())
-            })
-            .collect()
-    }
-
-    /// Test that Fsm::init_rack correctly mutates state and returns correct
-    /// output when no members ack receipt of the initialization.
-    #[test]
-    fn init_rack_timeout_no_members_acked() {
-        let initial_members = initial_members();
-        let config = test_config();
-        let mut fsm = Fsm::new(
-            initial_members.first().unwrap().clone(),
-            config.clone(),
-            State::Uninitialized(UninitializedState {}),
-        );
-
-        // Tick in uninitialized state has no output
-        let output = fsm.tick();
-        assert_eq!(output, Output::none());
-        assert_eq!("uninitialized", fsm.state_name());
-
-        // Initializing a rack results in a state change of *this* FSM to `InitialMember`
-        // and results in an envelope destined for each of the other peers.
-        let rack_uuid = Uuid::new_v4();
-        let output = fsm.init_rack(rack_uuid, initial_members.clone());
-        assert_eq!("initial_member", fsm.state_name());
-
-        // We changed states, requiring persistence
-        assert_eq!(output.persist, true);
-        assert_eq!(output.envelopes.len(), 4);
-        assert_eq!(output.api_output, None);
-
-        // We don't timeout until we reach timeout number of ticks + 1.
-        // This guarantees at least a minimum timeout if registration occurs
-        // right before a tick.
-        for _ in 0..config.rack_init_timeout {
-            assert_eq!(Output::none(), fsm.tick());
-        }
-
-        // We should timeout on the next tick, reporting that none of the peers
-        // acked.
-        let output = fsm.tick();
-        assert_eq!(output.persist, false);
-        assert_eq!(output.envelopes.len(), 0);
-
-        let api_err = output.api_output.unwrap().unwrap_err();
-        let mut expected = initial_members.clone();
-        expected.pop_first().unwrap();
-        assert_eq!(
-            api_err,
-            ApiError::RackInitTimeout { unacked_peers: expected }
-        );
-    }
-
-    /// Ack one of the members and ensure the timeout occurs with the rest unacked
-    #[test]
-    fn partial_rack_init_timeout() {
-        let initial_members = initial_members();
-        let config = test_config();
-        let mut fsm = Fsm::new(
-            initial_members.first().unwrap().clone(),
-            config.clone(),
-            State::Uninitialized(UninitializedState {}),
-        );
-        let rack_uuid = Uuid::new_v4();
-        let mut output = fsm.init_rack(rack_uuid, initial_members.clone());
-
-        // Unpack the request to ack
-        let Envelope{
-            to,
-            msg: Msg::Req(Request{id, type_: RequestType::Init(_)})
-        } = output.envelopes.pop().unwrap() else {
-            panic!("expected a request");
-        };
-        let from = to;
-        let request_id = id;
-
-        // Skip over ticks that won't trigger timeout
-        for _ in 0..config.rack_init_timeout {
-            assert_eq!(Output::none(), fsm.tick());
-        }
-
-        // Handle the response
-        let response = Response { request_id, type_: ResponseType::InitAck };
-        let output = fsm.handle_response(from.clone(), response);
-        assert_eq!(Output::none(), output);
-
-        // Construct the expected unacked sleds map
-        // Remove ourself, and the acked sled
-        let mut expected = initial_members.clone();
-        expected.pop_first().unwrap();
-        expected.remove(&from);
-
-        // Now timeout. There should only be unacked sleds not including the responder.
-        let api_err = fsm.tick().api_output.unwrap().unwrap_err();
-        assert_eq!(
-            api_err,
-            ApiError::RackInitTimeout { unacked_peers: expected }
-        );
-    }
-
-    /// Ack all members and ensure rack init completes
-    #[test]
-    fn rack_init_completes() {
-        let initial_members = initial_members();
-        let config = test_config();
-        let mut fsm = Fsm::new(
-            initial_members.first().unwrap().clone(),
-            config.clone(),
-            State::Uninitialized(UninitializedState {}),
-        );
-        let rack_uuid = Uuid::new_v4();
-        let output = fsm.init_rack(rack_uuid, initial_members.clone());
-
-        let responses: Vec<_> = output
-            .envelopes
-            .into_iter()
-            .map(|envelope| {
-                if let Msg::Req(Request { id, .. }) = envelope.msg {
-                    (
-                        envelope.to,
-                        Response {
-                            request_id: id,
-                            type_: ResponseType::InitAck,
-                        },
-                    )
-                } else {
-                    panic!("expected a request");
-                }
-            })
-            .collect();
-
-        // Handle responses
-        let num_responses = responses.len();
-        for (i, (from, response)) in responses.into_iter().enumerate() {
-            let output = fsm.handle_response(from, response);
-            if i != num_responses - 1 {
-                // We don't expect any output as rack init is not complete
-                assert_eq!(Output::none(), output);
-            } else {
-                // Rack initialization completes on processing the last response and
-                // we inform the caller.
-                assert_eq!(
-                    ApiOutput::RackInitComplete,
-                    output.api_output.unwrap().unwrap()
-                );
+        match shares.expose_secret().get(idx) {
+            Some(share) => {
+                distributed_shares.insert(from.clone(), ShareIdx(idx));
+                queue_pkg_response(from, request_id, pkg, share, envelopes);
+                // This is a new distribution so we must inform the caller to
+                // persist `Fsm::state`
+                Ok(Some(ApiOutput::ShareDistributedToLearner))
+            }
+            None => {
+                // Inform the learner that we don't have any shares
+                envelopes.push(Envelope {
+                    to: from,
+                    msg: Msg::Rsp(Response {
+                        request_id,
+                        type_: MsgError::CannotSpareAShare.into(),
+                    }),
+                });
+                Ok(None)
             }
         }
+    }
+}
+
+// We have a share to hand back to a learner. Enqueue it in a response envelope.
+fn queue_pkg_response(
+    from: Baseboard,
+    request_id: Uuid,
+    pkg: &SharePkg,
+    share: &Vec<u8>,
+    envelopes: &mut Vec<Envelope>,
+) {
+    let learned_pkg = LearnedSharePkg {
+        rack_uuid: pkg.rack_uuid,
+        epoch: pkg.epoch,
+        threshold: pkg.threshold,
+        share: share.clone(),
+        share_digests: pkg.share_digests.clone(),
+    };
+    // Queue up a response to the learner
+    envelopes.push(Envelope {
+        to: from,
+        msg: Msg::Rsp(Response {
+            request_id,
+            type_: ResponseType::Pkg(learned_pkg),
+        }),
+    });
+}
+
+// Combine a threshold of shares and return the `RackSecret` or an error.
+fn combine_shares(
+    my_share: &Vec<u8>,
+    acks: ShareAcks,
+) -> Result<RackSecret, ApiError> {
+    let shares = acks.received.into_values().fold(
+        Shares(vec![my_share.clone()]),
+        |mut acc, s| {
+            acc.0.push(s.0.clone());
+            acc
+        },
+    );
+    RackSecret::combine_shares(&shares.0)
+        .map_err(|_| ApiError::FailedToReconstructRackSecret)
+}
+
+// Validate a received share against known share digests
+fn validate_share(
+    from: &Baseboard,
+    share: &Share,
+    share_digests: &BTreeSet<Sha3_256Digest>,
+) -> Result<(), ApiError> {
+    let computed_hash = Sha3_256Digest(
+        Sha3_256::digest(&share.0).as_slice().try_into().unwrap(),
+    );
+
+    if !share_digests.contains(&computed_hash) {
+        Err(ApiError::InvalidShare { from: from.clone() })
+    } else {
+        Ok(())
     }
 }
