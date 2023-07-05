@@ -4495,6 +4495,7 @@ async fn silo_metric(
      method = POST,
      path = "/v1/system/update/refresh",
      tags = ["system/update"],
+     unpublished = true,
 }]
 async fn system_update_refresh(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -4514,6 +4515,7 @@ async fn system_update_refresh(
      method = GET,
      path = "/v1/system/update/version",
      tags = ["system/update"],
+     unpublished = true,
 }]
 async fn system_version(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -4551,6 +4553,7 @@ async fn system_version(
      method = GET,
      path = "/v1/system/update/components",
      tags = ["system/update"],
+     unpublished = true,
 }]
 async fn system_component_version_list(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -4583,6 +4586,7 @@ async fn system_component_version_list(
      method = GET,
      path = "/v1/system/update/updates",
      tags = ["system/update"],
+     unpublished = true,
 }]
 async fn system_update_list(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -4614,6 +4618,7 @@ async fn system_update_list(
      method = GET,
      path = "/v1/system/update/updates/{version}",
      tags = ["system/update"],
+     unpublished = true,
 }]
 async fn system_update_view(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -4636,6 +4641,7 @@ async fn system_update_view(
     method = GET,
     path = "/v1/system/update/updates/{version}/components",
     tags = ["system/update"],
+    unpublished = true,
 }]
 async fn system_update_components_list(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -4662,6 +4668,7 @@ async fn system_update_components_list(
     method = POST,
     path = "/v1/system/update/start",
     tags = ["system/update"],
+    unpublished = true,
 }]
 async fn system_update_start(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -4711,6 +4718,7 @@ async fn system_update_start(
     method = POST,
     path = "/v1/system/update/stop",
     tags = ["system/update"],
+    unpublished = true,
 }]
 async fn system_update_stop(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -4746,6 +4754,7 @@ async fn system_update_stop(
      method = GET,
      path = "/v1/system/update/deployments",
      tags = ["system/update"],
+     unpublished = true,
 }]
 async fn update_deployments_list(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -4777,6 +4786,7 @@ async fn update_deployments_list(
      method = GET,
      path = "/v1/system/update/deployments/{id}",
      tags = ["system/update"],
+     unpublished = true,
 }]
 async fn update_deployment_view(
     rqctx: RequestContext<Arc<ServerContext>>,
