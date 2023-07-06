@@ -100,11 +100,12 @@ impl TestState {
     pub fn on_action(&mut self, action: Action) -> Result<(), TestCaseError> {
         match action {
             Action::RackInit => self.on_rack_init(),
+            Action::Connect(peers) => self.on_connect(peers),
             _ => Ok(()),
         }
     }
 
-    pub fn on_rack_init(&mut self) -> Result<(), TestCaseError> {
+    fn on_rack_init(&mut self) -> Result<(), TestCaseError> {
         self.check_rack_init_preconditions()?;
         if self.sut_id != self.rss_id {
             if self.rack_init_status.is_none() {
@@ -126,6 +127,26 @@ impl TestState {
             self.rack_init_status = Some(RackInitStatus::SutAsRssRunning);
         }
         self.check_rack_init_postconditions()?;
+        Ok(())
+    }
+
+    fn on_connect(
+        &mut self,
+        mut peers: BTreeSet<Baseboard>,
+    ) -> Result<(), TestCaseError> {
+        // Filter out the SUT
+        let _ = peers.remove(&self.sut_id);
+        let new_peers: BTreeSet<_> =
+            peers.difference(&self.connected_peers).cloned().collect();
+        for peer in &new_peers {
+            self.sut.on_connected(self.now, peer.clone());
+
+            // TODO: We will be expecting diff messages once we handle more actions
+            for envelope in self.sut.drain_envelopes() {
+                expect_init_request(&peer, envelope)?;
+            }
+        }
+        self.connected_peers.extend(new_peers);
         Ok(())
     }
 
@@ -204,9 +225,24 @@ impl TestState {
             })
             .collect();
 
-        prop_assert_eq!(&sent_to, &self.connected_peers);
+        prop_assert_eq!(
+            &sent_to,
+            &self.connected_peers.difference(&self.learners).cloned().collect()
+        );
         Ok(())
     }
+}
+
+fn expect_init_request(
+    to: &Baseboard,
+    envelope: Envelope,
+) -> Result<(), TestCaseError> {
+    prop_assert_eq!(&envelope.to, to);
+    assert_matches!(
+        envelope.msg,
+        Msg::Req(Request { type_: RequestType::Init(_), .. })
+    );
+    Ok(())
 }
 
 fn expect_init_ack_response(
