@@ -26,6 +26,7 @@ use common::generators::{arb_test_input, Action};
 
 const TICK_TIMEOUT: Duration = Duration::from_millis(50);
 
+#[derive(Debug, PartialEq, Eq)]
 enum RackInitStatus {
     // The RSS node is *not* the SUT node and we pretend it created the packages
     // stored here.
@@ -105,8 +106,49 @@ impl TestState {
             Action::Connect(peers) => self.on_connect(peers),
             Action::Disconnect(peers) => self.on_disconnect(peers),
             Action::Ticks(ticks) => self.on_ticks(ticks),
-            _ => Ok(()),
+            Action::LoadRackSecret => self.on_load_rack_secret(),
         }
+    }
+
+    fn on_load_rack_secret(&mut self) -> Result<(), TestCaseError> {
+        match self.sut.load_rack_secret(self.now) {
+            Ok(()) => {
+                if self.rss_id == self.sut_id {
+                    // SUT is either an initializing coordinator, or rack init
+                    // completed successfully
+                    let valid = match &self.rack_init_status {
+                        Some(RackInitStatus::SutAsRssRunning)
+                        | Some(RackInitStatus::SutAsRssSucceeded) => true,
+                        _ => false,
+                    };
+                    prop_assert!(valid);
+                    // We allow rack secret loading during init so that the coordinator is symmetric
+                    // with other nodes.
+                    for envelope in self.sut.drain_envelopes() {
+                        prop_assert!(self
+                            .connected_peers
+                            .contains(&envelope.to));
+                        expect_init_or_get_share_request(envelope.msg);
+                    }
+                } else {
+                    // SUT != RSS
+                    assert_matches!(
+                        self.rack_init_status,
+                        Some(RackInitStatus::RssNotSut(_))
+                    );
+                    for envelope in self.sut.drain_envelopes() {
+                        prop_assert!(self
+                            .connected_peers
+                            .contains(&envelope.to));
+                        expect_get_share_request(envelope.msg);
+                    }
+                }
+                assert_matches!(self.sut.state(), State::InitialMember { .. });
+            }
+            Err(err) => {}
+        }
+
+        Ok(())
     }
 
     fn on_ticks(&mut self, ticks: usize) -> Result<(), TestCaseError> {
@@ -159,8 +201,23 @@ impl TestState {
             let _ = self.sut.on_connected(self.now, peer.clone());
 
             // TODO: We will be expecting diff messages once we handle more actions
-            for envelope in self.sut.drain_envelopes() {
-                expect_init_request(&peer, envelope)?;
+            match self.rack_init_status {
+                Some(RackInitStatus::SutAsRssRunning)
+                | Some(RackInitStatus::SutAsRssSucceeded) => {
+                    // We allow rack secret loading during init so that the coordinator is symmetric
+                    // with other nodes.
+                    for envelope in self.sut.drain_envelopes() {
+                        prop_assert_eq!(peer, &envelope.to);
+                        expect_init_or_get_share_request(envelope.msg);
+                    }
+                }
+                Some(RackInitStatus::RssNotSut(_)) => {
+                    for envelope in self.sut.drain_envelopes() {
+                        prop_assert_eq!(peer, &envelope.to);
+                        expect_get_share_request(envelope.msg);
+                    }
+                }
+                _ => (),
             }
         }
         self.connected_peers.extend(new_peers);
@@ -299,6 +356,23 @@ impl TestState {
         );
         Ok(())
     }
+}
+
+fn expect_get_share_request(msg: Msg) {
+    assert_matches!(
+        msg,
+        Msg::Req(Request { type_: RequestType::GetShare { .. }, .. })
+    );
+}
+
+fn expect_init_or_get_share_request(msg: Msg) {
+    assert_matches!(
+        msg,
+        Msg::Req(
+            Request { type_: RequestType::Init(_), .. }
+                | Request { type_: RequestType::GetShare { .. }, .. }
+        )
+    );
 }
 
 fn expect_init_request(
