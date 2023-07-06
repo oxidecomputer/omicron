@@ -4,10 +4,7 @@
 
 //! A mechanism for tracking in flight requests
 
-use super::{
-    Config, Envelope, LearnedSharePkg, Msg, Request, RequestType, Share,
-    SharePkg,
-};
+use super::{Config, Envelope, Msg, Request, RequestType, Share, SharePkg};
 use sled_hardware::Baseboard;
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::Instant;
@@ -342,7 +339,7 @@ impl RequestManager {
     pub fn on_connected(&mut self, peer_id: &Baseboard) {
         for (request_id, request) in &self.requests {
             match request {
-                TrackableRequest::InitRack { rack_uuid, packages, acks } => {
+                TrackableRequest::InitRack { packages, acks, .. } => {
                     if acks.received.contains(peer_id) {
                         continue;
                     }

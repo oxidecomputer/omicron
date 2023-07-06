@@ -65,12 +65,6 @@ impl Debug for Share {
 #[derive(Zeroize, ZeroizeOnDrop)]
 pub struct Shares(Vec<Vec<u8>>);
 
-impl Shares {
-    fn insert(&mut self, share: Vec<u8>) {
-        self.0.push(share);
-    }
-}
-
 // Manually implemented to redact info
 impl Debug for Shares {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

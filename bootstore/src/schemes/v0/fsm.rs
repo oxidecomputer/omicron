@@ -217,13 +217,12 @@ impl Fsm {
         rack_uuid: Uuid,
         initial_membership: BTreeSet<Baseboard>,
     ) -> Result<(), ApiError> {
-        if let Some((request_id, err)) = &self.rack_init_error {
+        if let Some((_, err)) = &self.rack_init_error {
             return Err(err.clone());
         }
         let State::Uninitialized = self.state else {
             return Err(ApiError::AlreadyInitialized);
         };
-        let total_members = initial_membership.len();
         let pkgs = create_pkgs(rack_uuid, initial_membership.clone())
             .map_err(|e| ApiError::RackInitFailed(e))?;
         let mut iter = pkgs.expose_secret().into_iter();
@@ -260,7 +259,7 @@ impl Fsm {
     ///
     /// Persistence is required after a successful call to `init_learner`
     pub fn init_learner(&mut self, now: Instant) -> Result<(), ApiError> {
-        if let Some((request_id, err)) = &self.rack_init_error {
+        if let Some((_, err)) = &self.rack_init_error {
             return Err(err.clone());
         }
         let State::Uninitialized = self.state else {
@@ -279,7 +278,7 @@ impl Fsm {
     /// starts a a key share retrieval process so that the `RackSecret` can
     /// be reconstructed.
     pub fn load_rack_secret(&mut self, now: Instant) -> Result<(), ApiError> {
-        if let Some((request_id, err)) = &self.rack_init_error {
+        if let Some((_, err)) = &self.rack_init_error {
             return Err(err.clone());
         }
         match &self.state {
@@ -323,7 +322,7 @@ impl Fsm {
         let mut errors = BTreeMap::new();
         for (req_id, req) in self.request_manager.expired(now) {
             match req {
-                TrackableRequest::InitRack { rack_uuid, acks, .. } => {
+                TrackableRequest::InitRack { acks, .. } => {
                     let unacked_peers = acks
                         .expected
                         .difference(&acks.received)
@@ -367,7 +366,7 @@ impl Fsm {
         now: Instant,
         peer_id: Baseboard,
     ) -> Result<(), ApiError> {
-        if let Some((request_id, err)) = &self.rack_init_error {
+        if let Some((_, err)) = &self.rack_init_error {
             return Err(err.clone());
         }
         if let State::Learning = &self.state {
@@ -400,7 +399,7 @@ impl Fsm {
         from: Baseboard,
         msg: Msg,
     ) -> Result<Option<ApiOutput>, ApiError> {
-        if let Some((request_id, err)) = &self.rack_init_error {
+        if let Some((_, err)) = &self.rack_init_error {
             return Err(err.clone());
         }
         match msg {
@@ -631,9 +630,9 @@ impl Fsm {
                         Ok(Some(ApiOutput::RackSecret { request_id, secret }))
                     }
                     Some(TrackableRequest::LearnReceived {
-                        rack_uuid,
                         from,
                         acks,
+                        ..
                     }) => {
                         let rack_secret = combine_shares(&pkg.share, acks)?;
                         // We now have the rack secret and can decrypt extra shares

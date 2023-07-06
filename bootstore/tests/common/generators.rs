@@ -72,11 +72,7 @@ pub fn arb_test_input(
             let sut_selector = any::<prop::sample::Selector>();
             (
                 proptest::collection::vec(
-                    arb_action(
-                        rack_uuid,
-                        initial_members.clone(),
-                        learners.clone(),
-                    ),
+                    arb_action(initial_members.clone(), learners.clone()),
                     1..=MAX_ACTIONS,
                 ),
                 Just(initial_members),
@@ -170,14 +166,12 @@ fn arb_config() -> impl Strategy<Value = Config> {
 
 // Generate a single test action to drive the property based tests
 fn arb_action(
-    rack_uuid: Uuid,
     initial_members: BTreeSet<Baseboard>,
     learners: BTreeSet<Baseboard>,
 ) -> impl Strategy<Value = Action> {
     let peers: Vec<_> =
         initial_members.iter().chain(learners.iter()).cloned().collect();
     let peer_subset = arb_peer_subset(peers);
-    let initial_members2 = initial_members.clone();
     prop_oneof![
         40 => (TICKS_PER_ACTION).prop_map(Action::Ticks),
         100 => peer_subset.clone().prop_map(Action::Connect),

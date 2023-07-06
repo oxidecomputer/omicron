@@ -232,7 +232,7 @@ impl TestState {
 
     fn on_disconnect(
         &mut self,
-        mut peers: BTreeSet<Baseboard>,
+        peers: BTreeSet<Baseboard>,
     ) -> Result<(), TestCaseError> {
         // Filter out the SUT
         for peer in &peers {
@@ -249,7 +249,7 @@ impl TestState {
     fn run_and_check_init_rack_api_call(
         &mut self,
     ) -> Result<(), TestCaseError> {
-        if let Err(e) = self.sut.init_rack(
+        if let Err(_) = self.sut.init_rack(
             self.now,
             self.rack_uuid,
             self.initial_members.clone(),
@@ -379,18 +379,6 @@ fn expect_init_or_get_share_request(msg: Msg) {
                 | Request { type_: RequestType::GetShare { .. }, .. }
         )
     );
-}
-
-fn expect_init_request(
-    to: &Baseboard,
-    envelope: Envelope,
-) -> Result<(), TestCaseError> {
-    prop_assert_eq!(&envelope.to, to);
-    assert_matches!(
-        envelope.msg,
-        Msg::Req(Request { type_: RequestType::Init(_), .. })
-    );
-    Ok(())
 }
 
 fn expect_init_ack_response(

@@ -103,7 +103,6 @@ impl RackSecret {
 
 #[cfg(test)]
 mod tests {
-    use std::fmt::{self, Debug};
 
     use super::*;
 
