@@ -18,7 +18,7 @@ bootstrap_discovery.type = "only_ours"
 # For values less than 2, no rack secret will be generated.
 rack_secret_threshold = 1
 
-ntp_servers = [ "ntp.eng.oxide.computer" ]
+ntp_servers = [ "0.pool.ntp.org" ]
 dns_servers = [ "1.1.1.1", "9.9.9.9" ]
 
 # Delegated external DNS zone name

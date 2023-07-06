@@ -71,9 +71,18 @@ _exit_trap() {
 		pfexec zlogin "$z" netstat -rncva
 		pfexec zlogin "$z" netstat -anu
 		pfexec zlogin "$z" arp -an
+		pfexec zlogin "$z" cat /etc/inet/hosts
+		pfexec zlogin "$z" cat /etc/resolv.conf
+		pfexec zlogin "$z" cat /etc/nsswitch.conf
+
 	done
 
 	pfexec zlogin softnpu cat /softnpu.log
+
+	pfexec zlogin oxz_ntp chronyc tracking
+	pfexec zlogin oxz_ntp chronyc sources
+	pfexec zlogin oxz_ntp cat /etc/inet/chrony.conf
+	pfexec zlogin oxz_ntp getent hosts 0.pool.ntp.org
 
 	exit $status
 }
@@ -263,6 +272,22 @@ pfexec ./out/softnpu/scadm \
 	--client /opt/oxide/softnpu/stuff/client \
 	standalone \
 	dump-state
+
+# Wait for the chrony service in the NTP zone to come up
+retry=0
+while [[ $(pfexec svcs -z oxz_ntp -Hostate oxide/ntp || true) != online ]]; do
+	if [[ $retry -gt 30 ]]; then
+		echo "NTP zone chrony failed to come up after 30 seconds"
+		exit 1
+	fi
+	sleep 1
+	retry=$((retry + 1))
+done
+echo "Waited for chrony: ${retry}s"
+
+# Restart chrony now that networking is configured in case its sources timed
+# out and were removed in the interim.
+pfexec svcadm -z oxz_ntp restart oxide/ntp
 
 export RUST_BACKTRACE=1
 export E2E_TLS_CERT
