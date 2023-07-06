@@ -5,8 +5,8 @@
 //! V0 protocol state machine
 //!
 //! This state machine is entirely synchronous. It performs actions and returns
-//! results. This is where the bulk of the protocol logic lives. It's
-//! written this way to enable easy testing and auditing.
+//! results. This is where the bulk of the protocol logic lives. It's written
+//! this way to enable easy testing and auditing.
 
 use super::request_manager::ShareAcks;
 use super::{
@@ -50,7 +50,7 @@ pub enum State {
         ///
         /// We can't do much better than this without some sort of centralized
         /// distributor which is part of the reconfiguration mechanism in later
-        /// versions of the trust quourum protocol.
+        /// trust quourum protocol schemes.
         distributed_shares: BTreeMap<Baseboard, ShareIdx>,
     },
     Learning,
@@ -91,7 +91,7 @@ pub enum ApiOutput {
 
     /// This peer Learned its share
     ///
-    /// The caller must persist the state
+    /// The caller *must* persist the state
     LearningCompleted,
 }
 
@@ -145,15 +145,16 @@ pub enum ApiError {
 pub struct Fsm {
     /// The current state of this peer
     state: State,
-    /// Unique IDs of this peer
+    /// Unique ID of this peer
     id: Baseboard,
 
+    /// User provided configuration
     config: Config,
 
     /// Unique IDs of connected peers
     connected_peers: BTreeSet<Baseboard>,
 
-    /// Manage all trackable broadcasts
+    /// Manage all trackable requests
     request_manager: RequestManager,
 
     /// Envelopes not managed by the `RequestManager`
@@ -197,10 +198,10 @@ impl Fsm {
     }
 
     /// This call is triggered locally on a single sled as a result of RSS
-    /// running. It may only be called once, which is enforced by checking to see
-    /// if we already are in `State::Uninitialized`.
+    /// running. It may only be called once, which is enforced by checking to
+    /// see if we already are in `State::Uninitialized`.
     ///
-    /// Persistence is required after a successful call to `init_rack`
+    /// Persistence is required after a successful call to `init_rack`.
     pub fn init_rack(
         &mut self,
         now: Instant,
@@ -253,11 +254,10 @@ impl Fsm {
         Ok(())
     }
 
-    /// This call is triggered locally after RSS runs, in order to retrieve the
-    /// `RackSecret` so that it can be used as input key material.
-    ///
-    /// if the rack secret has not already been loaded, then share retrieval
-    /// will begin.
+    /// This call is triggered locally after RSS runs, in order to retrieve
+    /// the `RackSecret` so that it can be used as input key material. It
+    /// starts a a key share retrieval process so that the `RackSecret` can
+    /// be reconstructed.
     pub fn load_rack_secret(&mut self, now: Instant) -> Result<(), ApiError> {
         match &self.state {
             State::Uninitialized => return Err(ApiError::NotInitialized),
@@ -283,7 +283,8 @@ impl Fsm {
         Ok(())
     }
 
-    /// Periodic tick to check for request expiration
+    /// Periodic tick to check for request expiration and trigger learner
+    /// attempt peer rotation.
     ///
     /// Return any expired request errors mapped to their request id
     pub fn tick(
@@ -335,7 +336,7 @@ impl Fsm {
 
     /// A peer has been connected.
     ///
-    /// Send any necessary messages required by pending requesets.
+    /// Send any necessary messages required by pending requests.
     pub fn on_connected(&mut self, now: Instant, peer_id: Baseboard) {
         if let State::Learning = &self.state {
             if !self.request_manager.has_learn_sent_req() {

@@ -71,6 +71,7 @@ impl Shares {
     }
 }
 
+// Manually implemented to redact info
 impl Debug for Shares {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Shares").finish()
