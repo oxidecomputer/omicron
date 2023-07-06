@@ -145,7 +145,13 @@ impl TestState {
                 }
                 assert_matches!(self.sut.state(), State::InitialMember { .. });
             }
-            Err(err) => {}
+            Err(err) => match err {
+                ApiError::NotInitialized => {
+                    prop_assert!(self.rack_init_status.is_none());
+                    assert_matches!(self.sut.state(), State::Uninitialized);
+                }
+                _ => panic!("Unexpected error: {}", err),
+            },
         }
 
         Ok(())
