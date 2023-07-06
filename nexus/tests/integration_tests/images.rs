@@ -24,16 +24,10 @@ type ControlPlaneTestContext =
 
 const PROJECT_NAME: &str = "myproj";
 
-const PROJECT_NAME_2: &str = "myproj2";
-
 const BLOCK_SIZE: params::BlockSize = params::BlockSize(512);
 
 fn get_project_images_url(project_name: &str) -> String {
     format!("/v1/images?project={}", project_name)
-}
-
-fn get_project_images_with_silo_images_url(project_name: &str) -> String {
-    format!("/v1/images?project={}&include_silo_images=true", project_name)
 }
 
 fn get_image_create(source: params::ImageSource) -> params::ImageCreate {
@@ -67,9 +61,7 @@ async fn test_image_create(cptestctx: &ControlPlaneTestContext) {
             ),
     );
 
-    let silo_images_url = "/v1/images";
-    let project_images_url = get_project_images_url(PROJECT_NAME);
-    let images_url = get_project_images_with_silo_images_url(PROJECT_NAME);
+    let images_url = get_project_images_url(PROJECT_NAME);
 
     // Before project exists, image list 404s
     NexusRequest::expect_failure(
@@ -84,7 +76,7 @@ async fn test_image_create(cptestctx: &ControlPlaneTestContext) {
     .expect("Expected 404");
 
     // create the project, now we expect an empty list
-    let project = create_project(client, PROJECT_NAME).await;
+    let _project = create_project(client, PROJECT_NAME).await;
 
     let images = NexusRequest::object_get(client, &images_url)
         .authn_as(AuthnMode::PrivilegedUser)
@@ -114,86 +106,6 @@ async fn test_image_create(cptestctx: &ControlPlaneTestContext) {
 
     assert_eq!(images.len(), 1);
     assert_eq!(images[0].identity.name, "alpine-edge");
-
-    // create another project, which is empty until we promote the image to global
-    create_project(client, PROJECT_NAME_2).await;
-
-    let project_2_images_url =
-        get_project_images_with_silo_images_url(PROJECT_NAME_2);
-
-    let images = NexusRequest::object_get(client, &project_2_images_url)
-        .authn_as(AuthnMode::PrivilegedUser)
-        .execute_and_parse_unwrap::<ResultsPage<views::Image>>()
-        .await
-        .items;
-    assert_eq!(images.len(), 0);
-
-    // promote the image to the silo
-    let promote_url = format!(
-        "/v1/images/{}/promote?project={}",
-        "alpine-edge", PROJECT_NAME
-    );
-    NexusRequest::new(
-        RequestBuilder::new(client, http::Method::POST, &promote_url)
-            .expect_status(Some(http::StatusCode::ACCEPTED)),
-    )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute_and_parse_unwrap::<views::Image>()
-    .await;
-
-    let silo_images = NexusRequest::object_get(client, &silo_images_url)
-        .authn_as(AuthnMode::PrivilegedUser)
-        .execute_and_parse_unwrap::<ResultsPage<views::Image>>()
-        .await
-        .items;
-
-    assert_eq!(silo_images.len(), 1);
-    assert_eq!(silo_images[0].identity.name, "alpine-edge");
-
-    // Ensure original project images is empty
-    let images = NexusRequest::object_get(client, &project_images_url)
-        .authn_as(AuthnMode::PrivilegedUser)
-        .execute_and_parse_unwrap::<ResultsPage<views::Image>>()
-        .await
-        .items;
-    assert_eq!(images.len(), 0);
-
-    // Ensure project 2 images with silos lists the promoted image
-    let images = NexusRequest::object_get(client, &project_2_images_url)
-        .authn_as(AuthnMode::PrivilegedUser)
-        .execute_and_parse_unwrap::<ResultsPage<views::Image>>()
-        .await
-        .items;
-    assert_eq!(images.len(), 1);
-
-    // demote the image back to the project
-    let demote_url = format!(
-        "/v1/images/{}/demote?project={}",
-        silo_images[0].identity.id, project.identity.id
-    );
-    NexusRequest::new(
-        RequestBuilder::new(client, http::Method::POST, &demote_url)
-            .expect_status(Some(http::StatusCode::ACCEPTED)),
-    )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute_and_parse_unwrap::<views::Image>()
-    .await;
-
-    // Ensure there are no more silo images now that it has been demoted
-    let silo_images = NexusRequest::object_get(client, &silo_images_url)
-        .authn_as(AuthnMode::PrivilegedUser)
-        .execute_and_parse_unwrap::<ResultsPage<views::Image>>()
-        .await
-        .items;
-    assert_eq!(silo_images.len(), 0);
-
-    // Ensure image has returned to the project it was demoted to
-    let images = NexusRequest::object_get(client, &project_images_url)
-        .authn_as(AuthnMode::PrivilegedUser)
-        .execute_and_parse_unwrap::<ResultsPage<views::Image>>()
-        .await
-        .items;
-    assert_eq!(images.len(), 1);
 }
 
 #[nexus_test]
@@ -521,7 +433,7 @@ async fn test_make_disk_from_image_too_small(
 }
 
 #[nexus_test]
-async fn test_image_access(cptestctx: &ControlPlaneTestContext) {
+async fn test_image_promotion(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
     DiskTest::new(&cptestctx).await;
 
@@ -598,6 +510,15 @@ async fn test_image_access(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(silo_images.len(), 1);
     assert_eq!(silo_images[0].identity.name, "alpine-edge");
 
+    // Ensure there are no more project images
+    let project_images = NexusRequest::object_get(client, &images_url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute_and_parse_unwrap::<ResultsPage<views::Image>>()
+        .await
+        .items;
+
+    assert_eq!(project_images.len(), 0);
+
     let silo_image_url = format!("/v1/images/{}", image_id);
     let silo_image = NexusRequest::object_get(client, &silo_image_url)
         .authn_as(AuthnMode::PrivilegedUser)
@@ -605,4 +526,34 @@ async fn test_image_access(cptestctx: &ControlPlaneTestContext) {
         .await;
 
     assert_eq!(silo_image.identity.id, image_id);
+
+    // Create another project image with the same name
+    NexusRequest::objects_post(client, &images_url, &image_create_params)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute_and_parse_unwrap::<views::Image>()
+        .await;
+
+    // Ensure project image was created
+    let project_images = NexusRequest::object_get(client, &images_url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute_and_parse_unwrap::<ResultsPage<views::Image>>()
+        .await
+        .items;
+
+    assert_eq!(project_images.len(), 1);
+    assert_eq!(project_images[0].identity.name, "alpine-edge");
+
+    let image_id = project_images[0].identity.id;
+    let promote_url = format!("/v1/images/{}/promote", image_id);
+
+    NexusRequest::new(
+        RequestBuilder::new(client, http::Method::POST, &promote_url)
+            .expect_status(Some(StatusCode::BAD_REQUEST)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("unexpected success")
+    .parsed_body::<dropshot::HttpErrorResponseBody>()
+    .unwrap();
 }

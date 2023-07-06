@@ -145,51 +145,6 @@ pub struct SnapshotSelector {
     pub snapshot: NameOrId,
 }
 
-/// A specialized selector for image list, it contains an extra field to indicate
-/// if silo scoped images should be included when listing project images.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
-pub struct ImageListSelector {
-    /// Name or ID of the project
-    pub project: Option<NameOrId>,
-    /// Flag used to indicate if silo scoped images should be included when
-    /// listing project images. Only valid when `project` is provided.
-    #[serde(default)]
-    #[serde(deserialize_with = "deserialize_optional_bool_from_string")]
-    pub include_silo_images: Option<bool>,
-}
-
-// Unfortunately `include_silo_images` can't used the default `Deserialize`
-// derive given the selector that uses it is embedded via `serde(flatten)` which
-// causes it to attempt to deserialize all flattened values a string. Similar workarounds
-// have been implemented here: https://github.com/oxidecomputer/omicron/blob/efb03b501d7febe961cc8793b4d72e8542d28eab/gateway/src/http_entrypoints.rs#L443
-fn deserialize_optional_bool_from_string<'de, D>(
-    deserializer: D,
-) -> Result<Option<bool>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    use serde::de::Unexpected;
-
-    #[derive(Debug, Deserialize)]
-    #[serde(untagged)]
-    enum StringOrOptionalBool {
-        String(String),
-        OptionalBool(Option<bool>),
-    }
-
-    match StringOrOptionalBool::deserialize(deserializer)? {
-        StringOrOptionalBool::String(s) => match s.as_str() {
-            "true" => Ok(Some(true)),
-            "false" => Ok(None),
-            "" => Ok(None),
-            _ => {
-                Err(de::Error::invalid_type(Unexpected::Str(&s), &"a boolean"))
-            }
-        },
-        StringOrOptionalBool::OptionalBool(b) => Ok(b),
-    }
-}
-
 #[derive(Deserialize, JsonSchema)]
 pub struct ImageSelector {
     /// Name or ID of the project, only required if `image` is provided as a `Name`
