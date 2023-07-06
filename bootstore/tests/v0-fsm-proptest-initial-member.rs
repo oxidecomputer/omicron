@@ -19,10 +19,12 @@ use proptest::prelude::*;
 use secrecy::ExposeSecret;
 use sled_hardware::Baseboard;
 use std::collections::{BTreeMap, BTreeSet};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use uuid::Uuid;
 
 use common::generators::{arb_test_input, Action};
+
+const TICK_TIMEOUT: Duration = Duration::from_millis(50);
 
 enum RackInitStatus {
     // The RSS node is *not* the SUT node and we pretend it created the packages
@@ -101,8 +103,23 @@ impl TestState {
         match action {
             Action::RackInit => self.on_rack_init(),
             Action::Connect(peers) => self.on_connect(peers),
+            Action::Disconnect(peers) => self.on_disconnect(peers),
+            Action::Ticks(ticks) => self.on_ticks(ticks),
             _ => Ok(()),
         }
+    }
+
+    fn on_ticks(&mut self, ticks: usize) -> Result<(), TestCaseError> {
+        for _ in 0..ticks {
+            self.now += TICK_TIMEOUT;
+            match self.sut.tick(self.now) {
+                Ok(()) => {
+                    self.check_successful_tick_postconditions()?;
+                }
+                Err(errors) => self.check_tick_errors(errors)?,
+            }
+        }
+        Ok(())
     }
 
     fn on_rack_init(&mut self) -> Result<(), TestCaseError> {
@@ -139,7 +156,7 @@ impl TestState {
         let new_peers: BTreeSet<_> =
             peers.difference(&self.connected_peers).cloned().collect();
         for peer in &new_peers {
-            self.sut.on_connected(self.now, peer.clone());
+            let _ = self.sut.on_connected(self.now, peer.clone());
 
             // TODO: We will be expecting diff messages once we handle more actions
             for envelope in self.sut.drain_envelopes() {
@@ -227,6 +244,40 @@ impl TestState {
         Ok(())
     }
 
+    fn check_successful_tick_postconditions(
+        &mut self,
+    ) -> Result<(), TestCaseError> {
+        match self.rack_init_status {
+            None => {
+                // There should be no messages output if we are uninitialized
+                prop_assert_eq!(self.sut.state(), &State::Uninitialized);
+                prop_assert_eq!(None, self.sut.drain_envelopes().next());
+            }
+            Some(RackInitStatus::SutAsRssRunning) => {
+                // There should be an existing InitRack request in the `RequestManager`
+                prop_assert!(self.sut.is_rack_initializing());
+            }
+            _ => (),
+        }
+
+        Ok(())
+    }
+
+    fn check_tick_errors(
+        &mut self,
+        errors: BTreeMap<Uuid, ApiError>,
+    ) -> Result<(), TestCaseError> {
+        // TODO: Deal with other types of errors after we add test support
+        for error in errors {
+            if matches!(error, (_, ApiError::RackInitTimeout { .. })) {
+                // There should no longer be an outstanding `InitRack` request
+                // in the `RequestManager`
+                prop_assert!(!self.sut.is_rack_initializing());
+            }
+        }
+        Ok(())
+    }
+
     fn expect_init_broadcast(&mut self) -> Result<(), TestCaseError> {
         let sent_to: BTreeSet<Baseboard> = self
             .sut
@@ -298,7 +349,16 @@ proptest! {
             input.rack_uuid,
         );
 
-        for action in input.actions {
+        for (i, action) in input.actions.into_iter().enumerate() {
+            if let Some(RackInitStatus::SutAsRssFailed) = state.rack_init_status {
+                // Just assume the test succeeded. We can't do anything after
+                // a faiilure to initialize. In a real system the operator would perform an RSS
+                // reset.
+                // We want to minimize this path in our tests, but we still want
+                // to test it. That's why we wait `Action` generators appropriately.
+                println!("Rack init failed: proptest bailed after {i} iterations");
+                return Ok(());
+            }
             // println!("{:#?}", action);
             state.on_action(action)?;
         }

@@ -16,7 +16,6 @@ use uuid::Uuid;
 const LEARN_TIMEOUT_SECS: RangeInclusive<u64> = 5..=10;
 const RACK_SECRET_TIMEOUT_SECS: RangeInclusive<u64> = 20..=50;
 const TICKS_PER_ACTION: RangeInclusive<usize> = 1..=20;
-const TICK_TIMEOUT: Duration = Duration::from_millis(50);
 const MAX_ACTIONS: usize = 1000;
 
 /// Input to the `run` method of our proptests

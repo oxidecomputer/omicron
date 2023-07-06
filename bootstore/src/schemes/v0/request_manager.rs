@@ -241,6 +241,17 @@ impl RequestManager {
         })
     }
 
+    /// Is there an outstanding `InitRack` request
+    pub fn has_init_rack_req(&self) -> bool {
+        self.requests.values().any(|req| {
+            if let TrackableRequest::InitRack { .. } = req {
+                true
+            } else {
+                false
+            }
+        })
+    }
+
     /// Return any expired requests mapped to their request id
     ///
     /// This is typically called during `tick` callbacks.
@@ -250,7 +261,7 @@ impl RequestManager {
     ) -> BTreeMap<Uuid, TrackableRequest> {
         let mut expired = BTreeMap::new();
         while let Some((expiry, request_id)) = self.expiry_to_id.pop_last() {
-            if expiry > now {
+            if expiry < now {
                 expired.insert(
                     request_id,
                     self.requests.remove(&request_id).unwrap(),

@@ -96,7 +96,7 @@ pub enum ApiOutput {
 }
 
 /// An error returned from an Fsm API request
-#[derive(Error, Debug)]
+#[derive(Error, Debug, Clone)]
 pub enum ApiError {
     #[error("already initialized")]
     AlreadyInitialized,
@@ -160,6 +160,10 @@ pub struct Fsm {
     /// Envelopes not managed by the `RequestManager`
     /// These are all envelopes containing `Response` messages
     envelopes: Vec<Envelope>,
+
+    /// We keep track of whether the rack failed to initialize. If this happens
+    /// the coordinator should return this error on every new API request.
+    rack_init_error: Option<(Uuid, ApiError)>,
 }
 
 impl Fsm {
@@ -172,6 +176,7 @@ impl Fsm {
             connected_peers: BTreeSet::new(),
             request_manager: RequestManager::new(config),
             envelopes: vec![],
+            rack_init_error: None,
         }
     }
 
@@ -208,6 +213,9 @@ impl Fsm {
         rack_uuid: Uuid,
         initial_membership: BTreeSet<Baseboard>,
     ) -> Result<(), ApiError> {
+        if let Some((request_id, err)) = &self.rack_init_error {
+            return Err(err.clone());
+        }
         let State::Uninitialized = self.state else {
             return Err(ApiError::AlreadyInitialized);
         };
@@ -239,10 +247,18 @@ impl Fsm {
         Ok(())
     }
 
+    /// Are we still waiting for `InitAck` responses from peers?
+    pub fn is_rack_initializing(&self) -> bool {
+        self.request_manager.has_init_rack_req()
+    }
+
     /// Initialize a node added after rack initialization
     ///
     /// Persistence is required after a successful call to `init_learner`
     pub fn init_learner(&mut self, now: Instant) -> Result<(), ApiError> {
+        if let Some((request_id, err)) = &self.rack_init_error {
+            return Err(err.clone());
+        }
         let State::Uninitialized = self.state else {
             return Err(ApiError::AlreadyInitialized);
         };
@@ -259,6 +275,9 @@ impl Fsm {
     /// starts a a key share retrieval process so that the `RackSecret` can
     /// be reconstructed.
     pub fn load_rack_secret(&mut self, now: Instant) -> Result<(), ApiError> {
+        if let Some((request_id, err)) = &self.rack_init_error {
+            return Err(err.clone());
+        }
         match &self.state {
             State::Uninitialized => return Err(ApiError::NotInitialized),
             State::Learning { .. } => return Err(ApiError::StillLearning),
@@ -294,6 +313,9 @@ impl Fsm {
         if let State::Uninitialized = &self.state {
             return Ok(());
         }
+        if let Some((request_id, err)) = &self.rack_init_error {
+            return Err(BTreeMap::from([(request_id.clone(), err.clone())]));
+        }
         let mut errors = BTreeMap::new();
         for (req_id, req) in self.request_manager.expired(now) {
             match req {
@@ -303,10 +325,9 @@ impl Fsm {
                         .difference(&acks.received)
                         .cloned()
                         .collect();
-                    errors.insert(
-                        req_id,
-                        ApiError::RackInitTimeout { unacked_peers },
-                    );
+                    let err = ApiError::RackInitTimeout { unacked_peers };
+                    errors.insert(req_id, err.clone());
+                    self.rack_init_error = Some((req_id, err));
                 }
                 TrackableRequest::LoadRackSecret { .. } => {
                     errors.insert(req_id, ApiError::RackSecretLoadTimeout);
@@ -337,7 +358,14 @@ impl Fsm {
     /// A peer has been connected.
     ///
     /// Send any necessary messages required by pending requests.
-    pub fn on_connected(&mut self, now: Instant, peer_id: Baseboard) {
+    pub fn on_connected(
+        &mut self,
+        now: Instant,
+        peer_id: Baseboard,
+    ) -> Result<(), ApiError> {
+        if let Some((request_id, err)) = &self.rack_init_error {
+            return Err(err.clone());
+        }
         if let State::Learning = &self.state {
             if !self.request_manager.has_learn_sent_req() {
                 // This is the first peer we've seen in the learning state, so try
@@ -349,6 +377,7 @@ impl Fsm {
         }
         self.request_manager.on_connected(&peer_id);
         self.connected_peers.insert(peer_id);
+        Ok(())
     }
 
     /// A peer has been disconnected
@@ -367,6 +396,9 @@ impl Fsm {
         from: Baseboard,
         msg: Msg,
     ) -> Result<Option<ApiOutput>, ApiError> {
+        if let Some((request_id, err)) = &self.rack_init_error {
+            return Err(err.clone());
+        }
         match msg {
             Msg::Req(req) => self.handle_request(now, from, req),
             Msg::Rsp(rsp) => self.handle_response(from, rsp),
