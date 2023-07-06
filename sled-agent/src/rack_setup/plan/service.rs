@@ -54,7 +54,9 @@ const CRDB_COUNT: usize = 5;
 const OXIMETER_COUNT: usize = 1;
 // TODO(https://github.com/oxidecomputer/omicron/issues/732): Remove
 // when Nexus provisions Clickhouse.
-const CLICKHOUSE_COUNT: usize = 1;
+// TODO: For now servers and keepers are both being deployed as a clickhouse
+// service. Eventually the keeper coordinator nodes should be their own service.
+const CLICKHOUSE_COUNT: usize = 5;
 // TODO(https://github.com/oxidecomputer/omicron/issues/732): Remove.
 // when Nexus provisions Crucible.
 const MINIMUM_U2_ZPOOL_COUNT: usize = 3;

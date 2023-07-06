@@ -87,16 +87,16 @@
     </remote_servers>
     <zookeeper>
         <node>
-            <host>KEEPER_HOST_1</host>
+            <host>KEEPER_HOST_01</host>
             <!-- TODO: Make keeper ports dynamic? -->
             <port>9181</port>
         </node>
         <node>
-            <host>KEEPER_HOST_2</host>
+            <host>KEEPER_HOST_02</host>
             <port>9181</port>
         </node>
         <node>
-            <host>KEEPER_HOST_3</host>
+            <host>KEEPER_HOST_03</host>
             <port>9181</port>
         </node>
     </zookeeper>

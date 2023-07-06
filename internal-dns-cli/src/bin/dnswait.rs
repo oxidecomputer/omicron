@@ -32,12 +32,14 @@ struct Opt {
 #[value(rename_all = "kebab-case")]
 enum ServiceName {
     Cockroach,
+    Clickhouse,
 }
 
 impl From<ServiceName> for internal_dns::ServiceName {
     fn from(value: ServiceName) -> Self {
         match value {
             ServiceName::Cockroach => internal_dns::ServiceName::Cockroach,
+            ServiceName::Clickhouse => internal_dns::ServiceName::Clickhouse,
         }
     }
 }
