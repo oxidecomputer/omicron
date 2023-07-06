@@ -662,8 +662,8 @@ fn decrypt_and_send_share_response(
     rack_secret: &RackSecret,
     envelopes: &mut Vec<Envelope>,
 ) -> Result<Option<ApiOutput>, ApiError> {
-    // If decryption failse, we log it locally The peer will timeout and move to
-    // the next one
+    // If decryption fails, we log it locally. The peer will timeout and move to
+    // the next one. This is really bad and should be impossible.
     let shares = pkg
         .decrypt_shares(&rack_secret)
         .map_err(|_| ApiError::FailedToDecryptExtraShares)?;
@@ -745,6 +745,10 @@ fn combine_shares(
             acc
         },
     );
+    // If this fails, it's really bad. This means valid shares can't reconstruct
+    // the rack secret. This should be impossible, as reconstruction is
+    // determinisitic. It could only possibly happen with an incompatible
+    // upgrade that we should test before shipping.
     RackSecret::combine_shares(&shares.0)
         .map_err(|_| ApiError::FailedToReconstructRackSecret)
 }
