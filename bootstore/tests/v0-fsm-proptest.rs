@@ -23,10 +23,22 @@ use uuid::Uuid;
 
 use common::generators::{arb_test_input, Action};
 
+enum RackInitStatus {
+    Running,
+    Succeeded,
+    Failed,
+}
+
 /// State for the running test
 pub struct TestState {
     // The ID of the Fsm under test
     sut_id: Baseboard,
+
+    // The Fsm under test
+    sut: Fsm,
+
+    // The ID of the RSS sled
+    rss_id: Baseboard,
 
     // IDs of all initial members
     initial_members: BTreeSet<Baseboard>,
@@ -40,27 +52,32 @@ pub struct TestState {
     // The current time at the SUT Fsm
     current_time: Instant,
 
-    // Is the rack already initialized?
+    // We only allow rack init to run once if SUT Fsm is the RSS sled.
     //
-    // If initialization fails, we have to wipe all the sleds and start over. For the
-    // purposes of this test we therefore assume that initialization always succeeds
-    // if the initialization action runs.
-    rack_init_complete: bool,
+    //
+    // A failed rack init requires a complete rack reset, and so we just pass
+    // the test if a rack init fails for any reason when the SUT is the RSS sled.
+    rack_init_status: Option<RackInitStatus>,
 }
 
 impl TestState {
     pub fn new(
+        sut_id: Baseboard,
+        rss_id: Baseboard,
         initial_members: BTreeSet<Baseboard>,
         learners: BTreeSet<Baseboard>,
         config: Config,
     ) -> TestState {
+        let sut = Fsm::new_uninitialized(sut_id.clone(), config);
         TestState {
-            sut_id: initial_members.first().unwrap().clone(),
+            sut_id,
+            sut,
+            rss_id,
             initial_members,
             learners,
             connected_peers: BTreeSet::new(),
             current_time: Instant::now(),
-            rack_init_complete: false,
+            rack_init_status: None,
         }
     }
 
@@ -80,27 +97,15 @@ proptest! {
     #[test]
     fn run(input in arb_test_input(MAX_INITIAL_MEMBERS, MAX_LEARNERS)) {
         let mut state = TestState::new(
+            input.sut_id,
+            input.rss_id,
             input.initial_members.clone(),
             input.learners,
             input.config,
         );
 
-        // Before we run our generated actions, we want to ensure all sleds are
-        // connected to the rss_sled and successfully rack init. This is a requirement
-        // monitored by humans on the real rack, so let's just do it.
-/*        let rss_sled = input.initial_members.first().clone().unwrap();
-        let flows = state.all_other_initial_members(&rss_sled).cloned().map(|dest| {
-            (rss_sled.clone(), dest)
-        }).collect();
-        state.on_action(Action::Connect(flows))?;
-        state.on_action(Action::RackInit {
-            rss_sled: rss_sled.clone(),
-            rack_uuid: input.rack_uuid,
-            initial_members: input.initial_members.clone()
-        })?;
-*/
         for action in input.actions {
-            println!("{:#?}", action);
+            // println!("{:#?}", action);
             //state.on_action(action)?;
         }
     }

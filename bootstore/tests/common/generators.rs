@@ -27,23 +27,20 @@ pub struct TestInput {
     pub learners: BTreeSet<Baseboard>,
     pub config: Config,
     pub rack_uuid: Uuid,
+
+    // The sled where rss runs and we should rack init
+    pub rss_id: Baseboard,
+
+    // The sled of the system under test
+    pub sut_id: Baseboard,
 }
 
 /// A test action to drive the test forward
 #[derive(Debug, Clone)]
 pub enum Action {
     /// Call the `Fsm::init_rack` on `rss_sled`
-    ///
-    /// This may or may not be the SUT Fsm
-    /// If it is the SUT FSM then the SUT FSM will act as coordinator
-    /// If it is not the SUT FSM, then we will send an `Init` request
-    /// to the SUT FSM if the SUT FSM is connected to the `rss_sled`.
-    /// If it is not connected this is a noop.
-    RackInit {
-        rss_sled: Baseboard,
-        rack_uuid: Uuid,
-        initial_members: BTreeSet<Baseboard>,
-    },
+    RackInit,
+
     Ticks(usize),
 
     // Connections are relative to the SUT Fsm
@@ -72,6 +69,8 @@ pub fn arb_test_input(
         .prop_flat_map(|(initial_members, learners, config)| {
             // We have to generate an intermediate tuple of strategies
             let rack_uuid = Uuid::new_v4();
+            let rss_selector = any::<prop::sample::Selector>();
+            let sut_selector = any::<prop::sample::Selector>();
             (
                 proptest::collection::vec(
                     arb_action(
@@ -85,17 +84,31 @@ pub fn arb_test_input(
                 Just(learners),
                 Just(config),
                 Just(rack_uuid),
+                rss_selector,
+                sut_selector,
             )
         })
         // then we map the tuple into a structure
         .prop_map(
-            |(actions, initial_members, learners, config, rack_uuid)| {
+            |(
+                actions,
+                initial_members,
+                learners,
+                config,
+                rack_uuid,
+                rss_selector,
+                sut_selector,
+            )| {
+                let rss_id = rss_selector.select(&initial_members).clone();
+                let sut_id = sut_selector.select(&initial_members).clone();
                 TestInput {
                     actions,
                     initial_members,
                     learners,
                     config,
                     rack_uuid,
+                    rss_id,
+                    sut_id,
                 }
             },
         )
@@ -170,15 +183,9 @@ fn arb_action(
             100 => (TICKS_PER_ACTION).prop_map(Action::Ticks),
             5 => peer_subset.clone().prop_map(Action::Connect),
             5 => peer_subset.prop_map(Action::Disconnect),
-            // Choose an RSS sled randomly
-            1 => any::<prop::sample::Selector>().prop_map(move |selector| {
-                Action::RackInit {
-                    rss_sled: selector.select(&initial_members2).clone(),
-                    rack_uuid,
-                    initial_members: initial_members2.clone(),
-                }
-            }),
+            1 => Just(Action::RackInit),
             15 => Just(Action::LoadRackSecret),
+
     /*        10 => any::<prop::sample::Selector>().prop_map(move |selector| {
                 // If there are no learners just issue a tick
                 selector.try_select(&learners).map_or(
