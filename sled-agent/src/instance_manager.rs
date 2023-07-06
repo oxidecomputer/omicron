@@ -4,7 +4,7 @@
 
 //! API for controlling multiple instances on a sled.
 
-use crate::nexus::LazyNexusClient;
+use crate::nexus::NexusClientWithResolver;
 use crate::params::{
     InstanceHardware, InstanceMigrationSourceParams, InstancePutStateResponse,
     InstanceStateRequested, InstanceUnregisterResponse,
@@ -45,7 +45,7 @@ pub enum Error {
 
 struct InstanceManagerInternal {
     log: Logger,
-    lazy_nexus_client: LazyNexusClient,
+    nexus_client: NexusClientWithResolver,
 
     /// Last set size of the VMM reservoir (in bytes)
     reservoir_size: Mutex<ByteCount>,
@@ -69,14 +69,14 @@ impl InstanceManager {
     /// Initializes a new [`InstanceManager`] object.
     pub fn new(
         log: Logger,
-        lazy_nexus_client: LazyNexusClient,
+        nexus_client: NexusClientWithResolver,
         etherstub: Etherstub,
         port_manager: PortManager,
     ) -> Result<InstanceManager, Error> {
         Ok(InstanceManager {
             inner: Arc::new(InstanceManagerInternal {
                 log: log.new(o!("component" => "InstanceManager")),
-                lazy_nexus_client,
+                nexus_client,
 
                 // no reservoir size set on startup
                 reservoir_size: Mutex::new(ByteCount::from_kibibytes_u32(0)),
@@ -204,7 +204,7 @@ impl InstanceManager {
                     initial_hardware,
                     self.inner.vnic_allocator.clone(),
                     self.inner.port_manager.clone(),
-                    self.inner.lazy_nexus_client.clone(),
+                    self.inner.nexus_client.clone(),
                 )?;
                 let instance_clone = instance.clone();
                 let _old = instances
@@ -362,11 +362,12 @@ impl Drop for InstanceTicket {
 mod test {
     use super::*;
     use crate::instance::MockInstance;
-    use crate::nexus::LazyNexusClient;
+    use crate::nexus::NexusClientWithResolver;
     use crate::params::InstanceStateRequested;
     use chrono::Utc;
     use illumos_utils::dladm::Etherstub;
     use illumos_utils::{dladm::MockDladm, zone::MockZones};
+    use internal_dns::resolver::Resolver;
     use omicron_common::api::external::{
         ByteCount, Generation, InstanceCpuCount, InstanceState,
     };
@@ -416,9 +417,25 @@ mod test {
     async fn ensure_instance() {
         let logctx = test_setup_log("ensure_instance");
         let log = &logctx.log;
-        let lazy_nexus_client =
-            LazyNexusClient::new(log.clone(), std::net::Ipv6Addr::LOCALHOST)
-                .unwrap();
+
+        let nexus_client_ctx =
+            crate::mocks::MockNexusClient::new_with_client_context();
+        nexus_client_ctx.expect().returning(|_, _, _| {
+            let mut mock = crate::mocks::MockNexusClient::default();
+            mock.expect_clone()
+                .returning(|| crate::mocks::MockNexusClient::default());
+            mock
+        });
+
+        let resolver = Arc::new(
+            Resolver::new_from_ip(
+                log.new(o!("component" => "DnsResolver")),
+                std::net::Ipv6Addr::LOCALHOST,
+            )
+            .unwrap(),
+        );
+        let nexus_client =
+            NexusClientWithResolver::new(&log, resolver).unwrap();
 
         // Creation of the instance manager incurs some "global" system
         // checks: cleanup of existing zones + vnics.
@@ -437,7 +454,7 @@ mod test {
         );
         let im = InstanceManager::new(
             log.clone(),
-            lazy_nexus_client,
+            nexus_client,
             Etherstub("mylink".to_string()),
             port_manager,
         )
@@ -532,9 +549,25 @@ mod test {
     async fn ensure_instance_state_repeatedly() {
         let logctx = test_setup_log("ensure_instance_repeatedly");
         let log = &logctx.log;
-        let lazy_nexus_client =
-            LazyNexusClient::new(log.clone(), std::net::Ipv6Addr::LOCALHOST)
-                .unwrap();
+
+        let nexus_client_ctx =
+            crate::mocks::MockNexusClient::new_with_client_context();
+        nexus_client_ctx.expect().returning(|_, _, _| {
+            let mut mock = crate::mocks::MockNexusClient::default();
+            mock.expect_clone()
+                .returning(|| crate::mocks::MockNexusClient::default());
+            mock
+        });
+
+        let resolver = Arc::new(
+            Resolver::new_from_ip(
+                log.new(o!("component" => "DnsResolver")),
+                std::net::Ipv6Addr::LOCALHOST,
+            )
+            .unwrap(),
+        );
+        let nexus_client =
+            NexusClientWithResolver::new(&log, resolver).unwrap();
 
         // Instance Manager creation.
 
@@ -552,7 +585,7 @@ mod test {
         );
         let im = InstanceManager::new(
             log.clone(),
-            lazy_nexus_client,
+            nexus_client,
             Etherstub("mylink".to_string()),
             port_manager,
         )
