@@ -7,6 +7,7 @@
 #:  "%/var/svc/log/oxide-sled-agent:default.log*",
 #:  "%/pool/ext/*/crypt/zone/oxz_*/root/var/svc/log/oxide-*.log*",
 #:  "%/pool/ext/*/crypt/zone/oxz_*/root/var/svc/log/system-illumos-*.log*",
+#:  "%/pool/ext/*/crypt/zone/oxz_ntp_*/root/var/log/chrony/*.log*",
 #:  "!/pool/ext/*/crypt/zone/oxz_propolis-server_*/root/var/svc/log/*.log*",
 #:  "%/pool/ext/*/crypt/debug/global/oxide-sled-agent:default.log.*",
 #:  "%/pool/ext/*/crypt/debug/oxz_*/oxide-*.log.*",
@@ -53,6 +54,7 @@ _exit_trap() {
 	z_swadm addr list
 	z_swadm route list
 	z_swadm arp list
+	z_swadm nat list
 
 	PORTS=$(pfexec /opt/oxide/opte/bin/opteadm list-ports | tail +2 | awk '{ print $1; }')
 	for p in $PORTS; do
@@ -77,6 +79,13 @@ _exit_trap() {
 		pfexec zlogin "$z" arp -an
 	done
 
+	for z in $(zoneadm list -n | grep oxz_ntp); do
+		banner "${z/oxz_/}"
+		pfexec zlogin "$z" chronyc tracking
+		pfexec zlogin "$z" chronyc sources
+		pfexec zlogin "$z" cat /etc/inet/chrony.conf
+	done
+
 	pfexec zlogin sidecar_softnpu cat /var/log/softnpu.log
 
 	exit $status
@@ -84,6 +93,7 @@ _exit_trap() {
 trap _exit_trap EXIT
 
 z_swadm () {
+	echo "== swadm $@"
 	pfexec zlogin oxz_switch /opt/oxide/dendrite/bin/swadm $@
 }
 
@@ -139,19 +149,53 @@ for p in /input/ci-tools/work/end-to-end-tests/*.gz; do
 	chmod a+x "tests/$(basename "${p%.gz}")"
 done
 
-# Lab gateway ip
-export GATEWAY_IP=192.168.1.199
-# Proxy arp settings.
-export PXA_START="192.168.1.50"
-export PXA_END="192.168.1.90"
+# Ask buildomat for the range of extra addresses that we're allowed to use, and
+# break them up into the ranges we need.
 
-# Nexus (and any instances using the above IP pool) are configured to use external
-# IPs from a fixed subnet (192.168.1.0/24). OPTE/SoftNPU/Boundary Services take care
-# of NATing between the private VPC networks and this "external network".
-# We create a static IP in this subnet in the global zone and configure the switch
-# to use it as the default gateway.
-# NOTE: Keep in sync with $[SERVICE_]IP_POOL_{START,END}
-pfexec ipadm create-addr -T static -a $GATEWAY_IP/24 igb0/sidehatch
+bmat address ls
+set -- $(bmat address ls -f extra -Ho first,last,count)
+EXTRA_IP_START="${1:?No extra start IP address found}"
+EXTRA_IP_END="${2:?No extra end IP address found}"
+EXTRA_IP_COUNT="${3:?No extra IP address count found}"
+
+# We need at least 32 IP addresses
+((EXTRA_IP_COUNT >= 32))
+
+EXTRA_IP_BASE="${EXTRA_IP_START%.*}"
+EXTRA_IP_FOCTET="${EXTRA_IP_START##*.}"
+EXTRA_IP_LOCTET="${EXTRA_IP_END##*.}"
+
+# We will break up this additional IP address range as follows (offsets from
+# base address shown)
+#
+# 0-9	internal service pool
+#     0 external DNS server
+#     1 external DNS server
+#
+# 10	infra IP/uplink
+# 11+   IP pool
+
+SERVICE_IP_POOL_START="$EXTRA_IP_BASE.$((EXTRA_IP_FOCTET + 0))"
+SERVICE_IP_POOL_END="$EXTRA_IP_BASE.$((EXTRA_IP_FOCTET + 9))"
+DNS_IP1="$EXTRA_IP_BASE.$((EXTRA_IP_FOCTET + 0))"
+DNS_IP2="$EXTRA_IP_BASE.$((EXTRA_IP_FOCTET + 1))"
+UPLINK_IP="$EXTRA_IP_BASE.$((EXTRA_IP_FOCTET + 10))"
+PXA_START="$EXTRA_IP_BASE.$((EXTRA_IP_FOCTET + 11))"
+PXA_END="$EXTRA_IP_BASE.$((EXTRA_IP_LOCTET + 0))"
+
+# Set the gateway IP address to be the GZ IP...
+GATEWAY_IP=$(ipadm show-addr -po type,addr | \
+    awk -F'[:/]' '$1 == "dhcp" {print $2}')
+[[ -n "$GATEWAY_IP" ]]
+ping -s "$GATEWAY_IP" 56 1 || true
+GATEWAY_MAC=$(arp -an | awk -vgw=$GATEWAY_IP '$2 == gw {print $NF}')
+# ...and enable IP forwarding so that zones can reach external networks
+# through the GZ. This allows the NTP zone to talk to DNS and NTP servers on
+# the Internet.
+routeadm -e ipv4-forwarding -u
+
+# These variables are used by softnpu_init, so export them.
+export GATEWAY_IP GATEWAY_MAC PXA_START PXA_END
 
 pfexec zpool create -f scratch c1t1d0 c2t1d0
 ZPOOL_VDEV_DIR=/scratch ptime -m pfexec ./tools/create_virtual_hardware.sh
@@ -166,7 +210,34 @@ ZPOOL_VDEV_DIR=/scratch ptime -m pfexec ./tools/create_virtual_hardware.sh
 tar xf out/omicron-sled-agent.tar pkg/config-rss.toml
 SILO_NAME="$(sed -n 's/silo_name = "\(.*\)"/\1/p' pkg/config-rss.toml)"
 EXTERNAL_DNS_DOMAIN="$(sed -n 's/external_dns_zone_name = "\(.*\)"/\1/p' pkg/config-rss.toml)"
-rm -f pkg/config-rss.toml
+
+# Substitute addresses from the external network range into the RSS config.
+sed -i~ "
+	/^external_dns_ips/c\\
+external_dns_ips = [ \"$DNS_IP1\", \"$DNS_IP2\" ]
+	/^\\[\\[internal_services_ip_pool_ranges/,/^\$/ {
+		/^first/c\\
+first = \"$SERVICE_IP_POOL_START\"
+		/^last/c\\
+last = \"$SERVICE_IP_POOL_END\"
+	}
+	/^\\[rack_network_config/,/^$/ {
+		/^infra_ip_first/c\\
+infra_ip_first = \"$UPLINK_IP\"
+		/^infra_ip_last/c\\
+infra_ip_last = \"$UPLINK_IP\"
+	}
+	/^\\[\\[rack_network_config.uplinks/,/^\$/ {
+		/^gateway_ip/c\\
+gateway_ip = \"$GATEWAY_IP\"
+		/^uplink_cidr/c\\
+uplink_cidr = \"$UPLINK_IP/32\"
+	}
+" pkg/config-rss.toml
+diff -u pkg/config-rss.toml{~,} || true
+
+tar rvf out/omicron-sled-agent.tar pkg/config-rss.toml
+rm -f pkg/config-rss.toml*
 
 #
 # By default, OpenSSL creates self-signed certificates with "CA:true".  The TLS
@@ -239,13 +310,10 @@ do
 	retry=$((retry + 1))
 done
 
-
-# We also need to configure proxy arp for any services which use OPTE for external connectivity (e.g. Nexus)
-tar xf out/omicron-sled-agent.tar pkg/config-rss.toml
-SOFTNPU_MAC=$(dladm show-vnic sc0_1 -p -o macaddress | sed -E 's/[ :]/&0/g; s/0([^:]{2}(:|$))/\1/g')
-SERVICE_IP_POOL_START="$(sed -n 's/^first = "\(.*\)"/\1/p' pkg/config-rss.toml)"
-SERVICE_IP_POOL_END="$(sed -n 's/^last = "\(.*\)"/\1/p' pkg/config-rss.toml)"
-rm -r pkg
+# We also need to configure proxy arp for any services which use OPTE for
+# external connectivity (e.g. Nexus)
+SOFTNPU_MAC=$(dladm show-vnic sc0_1 -p -o macaddress \
+    | sed -E 's/[ :]/&0/g; s/0([^:]{2}(:|$))/\1/g')
 
 pfexec zlogin sidecar_softnpu /softnpu/scadm \
 	--server /softnpu/server \
@@ -258,6 +326,19 @@ pfexec zlogin sidecar_softnpu /softnpu/scadm \
 	--client /softnpu/client \
 	standalone \
 	dump-state
+
+# Wait for the chrony service in the NTP zone to come up
+retry=0
+while [[ $(pfexec svcs -z $(zoneadm list -n | grep oxz_ntp) \
+    -Hostate oxide/ntp || true) != online ]]; do
+	if [[ $retry -gt 60 ]]; then
+		echo "NTP zone chrony failed to come up after 60 seconds"
+		exit 1
+	fi
+	sleep 1
+	retry=$((retry + 1))
+done
+echo "Waited for chrony: ${retry}s"
 
 export RUST_BACKTRACE=1
 export E2E_TLS_CERT
