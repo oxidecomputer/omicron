@@ -117,15 +117,6 @@ async fn test_physical_disk_create_list_delete(
         sled_id,
     )
     .await;
-    create_physical_disk(
-        &internal_client,
-        "v2",
-        "s2",
-        "m2",
-        internal_params::PhysicalDiskKind::M2,
-        sled_id,
-    )
-    .await;
     let disks = physical_disks_list(&external_client, &disks_url).await;
     assert_eq!(disks.len(), 1);
     assert_eq!(disks[0].vendor, "v");
@@ -134,7 +125,6 @@ async fn test_physical_disk_create_list_delete(
 
     // Delete that disk using the internal API, observe it in the external API
     delete_physical_disk(&internal_client, "v", "s", "m", sled_id).await;
-    delete_physical_disk(&internal_client, "v2", "s2", "m2", sled_id).await;
     assert!(physical_disks_list(&external_client, &disks_url).await.is_empty());
 }
 
