@@ -150,6 +150,21 @@ impl TestState {
         Ok(())
     }
 
+    fn on_disconnect(
+        &mut self,
+        mut peers: BTreeSet<Baseboard>,
+    ) -> Result<(), TestCaseError> {
+        // Filter out the SUT
+        for peer in &peers {
+            self.sut.on_disconnected(peer);
+            self.connected_peers.remove(peer);
+
+            // There should be no envelopes sent on a disconnect
+            prop_assert_eq!(None, self.sut.drain_envelopes().next());
+        }
+        Ok(())
+    }
+
     // Call `Fsm::init_rack` at the SUT and validate the output
     fn run_and_check_init_rack_api_call(
         &mut self,

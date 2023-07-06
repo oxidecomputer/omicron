@@ -342,13 +342,22 @@ impl Fsm {
             if !self.request_manager.has_learn_sent_req() {
                 // This is the first peer we've seen in the learning state, so try
                 // to learn from it.
-                let request_id = self
+                let _ = self
                     .request_manager
                     .new_learn_sent_req(now, peer_id.clone());
             }
         }
         self.request_manager.on_connected(&peer_id);
         self.connected_peers.insert(peer_id);
+    }
+
+    /// A peer has been disconnected
+    ///
+    /// If this node is a learner and it was talking to the disconnected peer,
+    /// the `RequestManager` will eventually time out the request and we'll move
+    /// onto the next peer.
+    pub fn on_disconnected(&mut self, peer_id: &Baseboard) {
+        self.connected_peers.remove(peer_id);
     }
 
     /// Handle messages from other peers
