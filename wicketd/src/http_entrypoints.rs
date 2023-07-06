@@ -6,6 +6,11 @@
 
 use crate::mgs::GetInventoryError;
 use crate::mgs::GetInventoryResponse;
+use crate::mgs::MgsHandle;
+use crate::RackV1Inventory;
+use bootstrap_agent_client::types::RackInitId;
+use bootstrap_agent_client::types::RackOperationStatus;
+use bootstrap_agent_client::types::RackResetId;
 use dropshot::endpoint;
 use dropshot::ApiDescription;
 use dropshot::HttpError;
@@ -20,15 +25,20 @@ use gateway_client::types::IgnitionCommand;
 use gateway_client::types::SpIdentifier;
 use gateway_client::types::SpType;
 use http::StatusCode;
+use omicron_common::address;
 use omicron_common::api::external::SemverVersion;
+use omicron_common::api::internal::shared::RackNetworkConfig;
 use omicron_common::update::ArtifactId;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
 use sled_hardware::Baseboard;
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
+use std::net::Ipv6Addr;
 use std::time::Duration;
 use uuid::Uuid;
+use wicket_common::rack_setup::PutRssUserConfigInsensitive;
 use wicket_common::update_events::EventReport;
 
 use crate::ServerContext;
@@ -40,6 +50,16 @@ pub fn api() -> WicketdApiDescription {
     fn register_endpoints(
         api: &mut WicketdApiDescription,
     ) -> Result<(), String> {
+        api.register(get_bootstrap_sleds)?;
+        api.register(get_rss_config)?;
+        api.register(put_rss_config)?;
+        api.register(put_rss_config_recovery_user_password_hash)?;
+        api.register(post_rss_config_cert)?;
+        api.register(post_rss_config_key)?;
+        api.register(delete_rss_config)?;
+        api.register(get_rack_setup_state)?;
+        api.register(post_run_rack_setup)?;
+        api.register(post_run_rack_reset)?;
         api.register(get_inventory)?;
         api.register(put_repository)?;
         api.register(get_artifacts_and_event_reports)?;
@@ -57,6 +77,428 @@ pub fn api() -> WicketdApiDescription {
         panic!("failed to register entrypoints: {}", err);
     }
     api
+}
+
+#[derive(
+    Clone,
+    Debug,
+    Serialize,
+    Deserialize,
+    JsonSchema,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+)]
+pub struct BootstrapSledIp {
+    pub baseboard: Baseboard,
+    pub ip: Ipv6Addr,
+}
+
+#[derive(
+    Clone,
+    Debug,
+    Serialize,
+    Deserialize,
+    JsonSchema,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+)]
+pub struct BootstrapSledIps {
+    pub sleds: Vec<BootstrapSledIp>,
+}
+
+/// Get wicketd's current view of all sleds visible on the bootstrap network.
+#[endpoint {
+    method = GET,
+    path = "/bootstrap-sleds"
+}]
+async fn get_bootstrap_sleds(
+    rqctx: RequestContext<ServerContext>,
+) -> Result<HttpResponseOk<BootstrapSledIps>, HttpError> {
+    let ctx = rqctx.context();
+
+    let sleds = ctx
+        .bootstrap_peers
+        .sleds()
+        .into_iter()
+        .map(|(baseboard, ip)| BootstrapSledIp { baseboard, ip })
+        .collect();
+
+    Ok(HttpResponseOk(BootstrapSledIps { sleds }))
+}
+
+#[derive(
+    Clone,
+    Debug,
+    Serialize,
+    Deserialize,
+    JsonSchema,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+)]
+pub struct BootstrapSledDescription {
+    pub id: SpIdentifier,
+    pub baseboard: Baseboard,
+    /// The sled's bootstrap address, if the host is on and we've discovered it
+    /// on the bootstrap network.
+    pub bootstrap_ip: Option<Ipv6Addr>,
+}
+
+// This is the subset of `RackInitializeRequest` that the user fills in in clear
+// text (e.g., via an uploaded config file).
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct CurrentRssUserConfigInsensitive {
+    pub bootstrap_sleds: BTreeSet<BootstrapSledDescription>,
+    pub ntp_servers: Vec<String>,
+    pub dns_servers: Vec<String>,
+    pub internal_services_ip_pool_ranges: Vec<address::IpRange>,
+    pub external_dns_zone_name: String,
+    pub rack_network_config: Option<RackNetworkConfig>,
+}
+
+// This is a summary of the subset of `RackInitializeRequest` that is sensitive;
+// we only report a summary instead of returning actual data.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct CurrentRssUserConfigSensitive {
+    pub num_external_certificates: usize,
+    pub recovery_silo_password_set: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct CurrentRssUserConfig {
+    pub sensitive: CurrentRssUserConfigSensitive,
+    pub insensitive: CurrentRssUserConfigInsensitive,
+}
+
+// Get the current inventory or return a 503 Unavailable.
+async fn inventory_or_unavail(
+    mgs_handle: &MgsHandle,
+) -> Result<RackV1Inventory, HttpError> {
+    match mgs_handle.get_inventory(Vec::new()).await {
+        Ok(GetInventoryResponse::Response { inventory, .. }) => Ok(inventory),
+        Ok(GetInventoryResponse::Unavailable) => Err(HttpError::for_unavail(
+            None,
+            "Rack inventory not yet available".into(),
+        )),
+        Err(GetInventoryError::ShutdownInProgress) => {
+            Err(HttpError::for_unavail(None, "Server is shutting down".into()))
+        }
+        Err(GetInventoryError::InvalidSpIdentifier) => {
+            // We didn't provide any SP identifiers to refresh, so they can't be
+            // invalid.
+            unreachable!()
+        }
+    }
+}
+
+/// Get the current status of the user-provided (or system-default-provided, in
+/// some cases) RSS configuration.
+#[endpoint {
+    method = GET,
+    path = "/rack-setup/config"
+}]
+async fn get_rss_config(
+    rqctx: RequestContext<ServerContext>,
+) -> Result<HttpResponseOk<CurrentRssUserConfig>, HttpError> {
+    let ctx = rqctx.context();
+
+    // We can't run RSS if we don't have an inventory from MGS yet; we always
+    // need to fill in the bootstrap sleds first.
+    let inventory = inventory_or_unavail(&ctx.mgs_handle).await?;
+
+    let mut config = ctx.rss_config.lock().unwrap();
+    config.update_with_inventory_and_bootstrap_peers(
+        &inventory,
+        &ctx.bootstrap_peers,
+    );
+
+    Ok(HttpResponseOk((&*config).into()))
+}
+
+/// Update (a subset of) the current RSS configuration.
+///
+/// Sensitive values (certificates and password hash) are not set through this
+/// endpoint.
+#[endpoint {
+    method = PUT,
+    path = "/rack-setup/config"
+}]
+async fn put_rss_config(
+    rqctx: RequestContext<ServerContext>,
+    body: TypedBody<PutRssUserConfigInsensitive>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let ctx = rqctx.context();
+
+    // We can't run RSS if we don't have an inventory from MGS yet; we always
+    // need to fill in the bootstrap sleds first.
+    let inventory = inventory_or_unavail(&ctx.mgs_handle).await?;
+
+    let mut config = ctx.rss_config.lock().unwrap();
+    config.update_with_inventory_and_bootstrap_peers(
+        &inventory,
+        &ctx.bootstrap_peers,
+    );
+    config
+        .update(body.into_inner(), ctx.baseboard.as_ref())
+        .map_err(|err| HttpError::for_bad_request(None, err))?;
+
+    Ok(HttpResponseUpdatedNoContent())
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum CertificateUploadResponse {
+    /// The key has been uploaded, but we're waiting on its corresponding
+    /// certificate chain.
+    WaitingOnCert,
+    /// The cert chain has been uploaded, but we're waiting on its corresponding
+    /// private key.
+    WaitingOnKey,
+    /// A cert chain and its key have been accepted.
+    CertKeyAccepted,
+    /// A cert chain and its key are valid, but have already been uploaded.
+    CertKeyDuplicateIgnored,
+}
+
+/// Add an external certificate.
+///
+/// This must be paired with its private key. They may be posted in either
+/// order, but one cannot post two certs in a row (or two keys in a row).
+#[endpoint {
+    method = POST,
+    path = "/rack-setup/config/cert"
+}]
+async fn post_rss_config_cert(
+    rqctx: RequestContext<ServerContext>,
+    body: TypedBody<String>,
+) -> Result<HttpResponseOk<CertificateUploadResponse>, HttpError> {
+    let ctx = rqctx.context();
+
+    let mut config = ctx.rss_config.lock().unwrap();
+    let response = config
+        .push_cert(body.into_inner())
+        .map_err(|err| HttpError::for_bad_request(None, err))?;
+
+    Ok(HttpResponseOk(response))
+}
+
+/// Add the private key of an external certificate.
+///
+/// This must be paired with its certificate. They may be posted in either
+/// order, but one cannot post two keys in a row (or two certs in a row).
+#[endpoint {
+    method = POST,
+    path = "/rack-setup/config/key"
+}]
+async fn post_rss_config_key(
+    rqctx: RequestContext<ServerContext>,
+    body: TypedBody<String>,
+) -> Result<HttpResponseOk<CertificateUploadResponse>, HttpError> {
+    let ctx = rqctx.context();
+
+    let mut config = ctx.rss_config.lock().unwrap();
+    let response = config
+        .push_key(body.into_inner())
+        .map_err(|err| HttpError::for_bad_request(None, err))?;
+
+    Ok(HttpResponseOk(response))
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct PutRssRecoveryUserPasswordHash {
+    pub hash: omicron_passwords::NewPasswordHash,
+}
+
+/// Update the RSS config recovery silo user password hash.
+#[endpoint {
+    method = PUT,
+    path = "/rack-setup/config/recovery-user-password-hash"
+}]
+async fn put_rss_config_recovery_user_password_hash(
+    rqctx: RequestContext<ServerContext>,
+    body: TypedBody<PutRssRecoveryUserPasswordHash>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let ctx = rqctx.context();
+
+    let mut config = ctx.rss_config.lock().unwrap();
+    config.set_recovery_user_password_hash(body.into_inner().hash);
+
+    Ok(HttpResponseUpdatedNoContent())
+}
+
+/// Reset all RSS configuration to their default values.
+#[endpoint {
+    method = DELETE,
+    path = "/rack-setup/config"
+}]
+async fn delete_rss_config(
+    rqctx: RequestContext<ServerContext>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let ctx = rqctx.context();
+
+    let mut config = ctx.rss_config.lock().unwrap();
+    *config = Default::default();
+
+    Ok(HttpResponseUpdatedNoContent())
+}
+
+/// Query current state of rack setup.
+#[endpoint {
+    method = GET,
+    path = "/rack-setup"
+}]
+async fn get_rack_setup_state(
+    rqctx: RequestContext<ServerContext>,
+) -> Result<HttpResponseOk<RackOperationStatus>, HttpError> {
+    let ctx = rqctx.context();
+
+    let sled_agent_addr = ctx
+        .bootstrap_agent_addr()
+        .map_err(|err| HttpError::for_bad_request(None, format!("{err:#}")))?;
+
+    let client = bootstrap_agent_client::Client::new(
+        &format!("http://{}", sled_agent_addr),
+        ctx.log.new(slog::o!("component" => "bootstrap client")),
+    );
+
+    let op_status = client
+        .rack_initialization_status()
+        .await
+        .map_err(|err| {
+            use bootstrap_agent_client::Error as BaError;
+            match err {
+                BaError::CommunicationError(err) => {
+                    let message =
+                        format!("Failed to send rack setup request: {err}");
+                    HttpError {
+                        status_code: http::StatusCode::SERVICE_UNAVAILABLE,
+                        error_code: None,
+                        external_message: message.clone(),
+                        internal_message: message,
+                    }
+                }
+                other => HttpError::for_bad_request(
+                    None,
+                    format!("Rack setup request failed: {other}"),
+                ),
+            }
+        })?
+        .into_inner();
+
+    Ok(HttpResponseOk(op_status))
+}
+
+/// Run rack setup.
+///
+/// Will return an error if not all of the rack setup configuration has been
+/// populated.
+#[endpoint {
+    method = POST,
+    path = "/rack-setup"
+}]
+async fn post_run_rack_setup(
+    rqctx: RequestContext<ServerContext>,
+) -> Result<HttpResponseOk<RackInitId>, HttpError> {
+    let ctx = rqctx.context();
+
+    let sled_agent_addr = ctx
+        .bootstrap_agent_addr()
+        .map_err(|err| HttpError::for_bad_request(None, format!("{err:#}")))?;
+
+    let request = {
+        let config = ctx.rss_config.lock().unwrap();
+        config.start_rss_request(&ctx.bootstrap_peers).map_err(|err| {
+            HttpError::for_bad_request(None, format!("{err:#}"))
+        })?
+    };
+
+    slog::info!(
+        ctx.log,
+        "Sending RSS initialize request to {}",
+        sled_agent_addr
+    );
+    let client = bootstrap_agent_client::Client::new(
+        &format!("http://{}", sled_agent_addr),
+        ctx.log.new(slog::o!("component" => "bootstrap client")),
+    );
+
+    let init_id = client
+        .rack_initialize(&request)
+        .await
+        .map_err(|err| {
+            use bootstrap_agent_client::Error as BaError;
+            match err {
+                BaError::CommunicationError(err) => {
+                    let message =
+                        format!("Failed to send rack setup request: {err}");
+                    HttpError {
+                        status_code: http::StatusCode::SERVICE_UNAVAILABLE,
+                        error_code: None,
+                        external_message: message.clone(),
+                        internal_message: message,
+                    }
+                }
+                other => HttpError::for_bad_request(
+                    None,
+                    format!("Rack setup request failed: {other}"),
+                ),
+            }
+        })?
+        .into_inner();
+
+    Ok(HttpResponseOk(init_id))
+}
+
+/// Run rack reset.
+#[endpoint {
+    method = DELETE,
+    path = "/rack-setup"
+}]
+async fn post_run_rack_reset(
+    rqctx: RequestContext<ServerContext>,
+) -> Result<HttpResponseOk<RackResetId>, HttpError> {
+    let ctx = rqctx.context();
+
+    let sled_agent_addr = ctx
+        .bootstrap_agent_addr()
+        .map_err(|err| HttpError::for_bad_request(None, format!("{err:#}")))?;
+
+    slog::info!(ctx.log, "Sending RSS reset request to {}", sled_agent_addr);
+    let client = bootstrap_agent_client::Client::new(
+        &format!("http://{}", sled_agent_addr),
+        ctx.log.new(slog::o!("component" => "bootstrap client")),
+    );
+
+    let reset_id = client
+        .rack_reset()
+        .await
+        .map_err(|err| {
+            use bootstrap_agent_client::Error as BaError;
+            match err {
+                BaError::CommunicationError(err) => {
+                    let message =
+                        format!("Failed to send rack reset request: {err}");
+                    HttpError {
+                        status_code: http::StatusCode::SERVICE_UNAVAILABLE,
+                        error_code: None,
+                        external_message: message.clone(),
+                        internal_message: message,
+                    }
+                }
+                other => HttpError::for_bad_request(
+                    None,
+                    format!("Rack setup request failed: {other}"),
+                ),
+            }
+        })?
+        .into_inner();
+
+    Ok(HttpResponseOk(reset_id))
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]

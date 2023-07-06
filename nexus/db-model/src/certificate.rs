@@ -47,7 +47,7 @@ impl Certificate {
         params: params::CertificateCreate,
     ) -> Result<Self, CertificateError> {
         let validator = CertificateValidator::default();
-        validator.validate(&params.cert, &params.key)?;
+        validator.validate(params.cert.as_bytes(), params.key.as_bytes())?;
 
         Ok(Self::new_unvalidated(silo_id, id, service, params))
     }
@@ -64,8 +64,8 @@ impl Certificate {
             identity: CertificateIdentity::new(id, params.identity),
             silo_id,
             service,
-            cert: params.cert,
-            key: params.key,
+            cert: params.cert.into_bytes(),
+            key: params.key.into_bytes(),
         }
     }
 }

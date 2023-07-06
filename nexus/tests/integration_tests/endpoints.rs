@@ -29,7 +29,6 @@ use omicron_common::api::external::RouteTarget;
 use omicron_common::api::external::SemverVersion;
 use omicron_common::api::external::VpcFirewallRuleUpdateParams;
 use omicron_nexus::authn;
-use omicron_nexus::authz;
 use omicron_nexus::db::fixed_data::silo::DEFAULT_SILO;
 use omicron_nexus::db::identity::Resource;
 use omicron_nexus::external_api::params;
@@ -74,6 +73,7 @@ lazy_static! {
             identity_mode: shared::SiloIdentityMode::SamlJit,
             admin_group_name: None,
             tls_certificates: vec![],
+            mapped_fleet_roles: Default::default(),
         };
     // Use the default Silo for testing the local IdP
     pub static ref DEMO_SILO_USERS_CREATE_URL: String = format!(
@@ -434,13 +434,17 @@ lazy_static! {
                 name: DEMO_IMAGE_NAME.clone(),
                 description: String::from(""),
             },
-            source: params::ImageSource::Url { url: HTTP_SERVER.url("/image.raw").to_string() },
-            block_size: params::BlockSize::try_from(4096).unwrap(),
+            source: params::ImageSource::Url {
+                url: HTTP_SERVER.url("/image.raw").to_string(),
+                block_size: params::BlockSize::try_from(4096).unwrap(),
+            },
             os: "fake-os".to_string(),
             version: "1.0".to_string()
         };
 
     // IP Pools
+    pub static ref DEMO_IP_POOLS_PROJ_URL: String =
+        format!("/v1/ip-pools?project={}", *DEMO_PROJECT_NAME);
     pub static ref DEMO_IP_POOLS_URL: &'static str = "/v1/system/ip-pools";
     pub static ref DEMO_IP_POOL_NAME: Name = "default".parse().unwrap();
     pub static ref DEMO_IP_POOL_CREATE: params::IpPoolCreate =
@@ -450,6 +454,8 @@ lazy_static! {
                 description: String::from("an IP pool"),
             },
         };
+    pub static ref DEMO_IP_POOL_PROJ_URL: String =
+        format!("/v1/ip-pools/{}?project={}", *DEMO_IP_POOL_NAME, *DEMO_PROJECT_NAME);
     pub static ref DEMO_IP_POOL_URL: String = format!("/v1/system/ip-pools/{}", *DEMO_IP_POOL_NAME);
     pub static ref DEMO_IP_POOL_UPDATE: params::IpPoolUpdate =
         params::IpPoolUpdate {
@@ -482,7 +488,7 @@ lazy_static! {
                 name: DEMO_SNAPSHOT_NAME.clone(),
                 description: String::from(""),
             },
-            disk: DEMO_DISK_NAME.clone(),
+            disk: DEMO_DISK_NAME.clone().into(),
         };
 
     // SSH keys
@@ -537,10 +543,16 @@ lazy_static! {
 
     pub static ref DEMO_SYSTEM_METRICS_URL: String =
         format!(
-            "/v1/system/metrics/virtual_disk_space_provisioned?start_time={:?}&end_time={:?}&id={}",
+            "/v1/system/metrics/virtual_disk_space_provisioned?start_time={:?}&end_time={:?}",
             Utc::now(),
             Utc::now(),
-            "3aaf22ae-5691-4f6d-b62c-aa532512fa78",
+        );
+
+    pub static ref DEMO_SILO_METRICS_URL: String =
+        format!(
+            "/v1/metrics/virtual_disk_space_provisioned?start_time={:?}&end_time={:?}",
+            Utc::now(),
+            Utc::now(),
         );
 
     // Users
@@ -701,7 +713,7 @@ lazy_static! {
                 AllowedMethod::Get,
                 AllowedMethod::Put(
                     serde_json::to_value(
-                        &shared::Policy::<authz::FleetRole> {
+                        &shared::Policy::<shared::FleetRole> {
                             role_assignments: vec![]
                         }
                     ).unwrap()
@@ -721,6 +733,14 @@ lazy_static! {
                 ),
             ],
         },
+        VerifyEndpoint {
+            url: &DEMO_IP_POOLS_PROJ_URL,
+            visibility: Visibility::Public,
+            unprivileged_access: UnprivilegedAccess::ReadOnly,
+            allowed_methods: vec![
+                AllowedMethod::Get
+            ],
+        },
 
         // Single IP Pool endpoint
         VerifyEndpoint {
@@ -733,6 +753,14 @@ lazy_static! {
                     serde_json::to_value(&*DEMO_IP_POOL_UPDATE).unwrap()
                 ),
                 AllowedMethod::Delete,
+            ],
+        },
+        VerifyEndpoint {
+            url: &DEMO_IP_POOL_PROJ_URL,
+            visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::ReadOnly,
+            allowed_methods: vec![
+                AllowedMethod::Get
             ],
         },
 
@@ -843,7 +871,7 @@ lazy_static! {
                 AllowedMethod::Get,
                 AllowedMethod::Put(
                     serde_json::to_value(
-                        &shared::Policy::<authz::SiloRole> {
+                        &shared::Policy::<shared::SiloRole> {
                             role_assignments: vec![]
                         }
                     ).unwrap()
@@ -858,7 +886,7 @@ lazy_static! {
                 AllowedMethod::Get,
                 AllowedMethod::Put(
                     serde_json::to_value(
-                        &shared::Policy::<authz::SiloRole> {
+                        &shared::Policy::<shared::SiloRole> {
                             role_assignments: vec![]
                         }
                     ).unwrap()
@@ -992,7 +1020,7 @@ lazy_static! {
                 AllowedMethod::Get,
                 AllowedMethod::Put(
                     serde_json::to_value(
-                        &shared::Policy::<authz::ProjectRole> {
+                        &shared::Policy::<shared::ProjectRole> {
                             role_assignments: vec![]
                         }
                     ).unwrap()
@@ -1633,6 +1661,17 @@ lazy_static! {
             url: &DEMO_SYSTEM_METRICS_URL,
             visibility: Visibility::Public,
             unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![
+                AllowedMethod::Get,
+            ],
+        },
+
+        VerifyEndpoint {
+            url: &DEMO_SILO_METRICS_URL,
+            visibility: Visibility::Public,
+            // unprivileged user has silo read, otherwise they wouldn't be able
+            // to do anything
+            unprivileged_access: UnprivilegedAccess::ReadOnly,
             allowed_methods: vec![
                 AllowedMethod::Get,
             ],

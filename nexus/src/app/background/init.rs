@@ -154,6 +154,7 @@ pub mod test {
     use crate::db::TransactionError;
     use async_bb8_diesel::AsyncConnection;
     use async_bb8_diesel::AsyncRunQueryDsl;
+    use dropshot::HandlerTaskMode;
     use nexus_db_model::DnsGroup;
     use nexus_db_model::Generation;
     use nexus_db_queries::context::OpContext;
@@ -203,7 +204,7 @@ pub mod test {
         // the case because it was configured with version 1 when the simulated
         // sled agent started up.
         let initial_dns_dropshot_server =
-            &cptestctx.sled_agent.dns_dropshot_server;
+            &cptestctx.internal_dns.dropshot_server;
         let dns_config_client = dns_service_client::Client::new(
             &format!("http://{}", initial_dns_dropshot_server.local_addr()),
             cptestctx.logctx.log.clone(),
@@ -248,6 +249,7 @@ pub mod test {
             &dropshot::ConfigDropshot {
                 bind_address: "[::1]:0".parse().unwrap(),
                 request_body_max_bytes: 8 * 1024,
+                default_handler_task_mode: HandlerTaskMode::Detached,
             },
         )
         .await

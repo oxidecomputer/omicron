@@ -23,6 +23,7 @@ use omicron_common::update::ArtifactHashId;
 use reqwest::StatusCode;
 use sled_hardware::underlay::BootstrapInterface;
 use tokio::{sync::mpsc, time::Instant};
+use update_engine::events::ProgressUnits;
 use uuid::Uuid;
 
 use crate::{
@@ -319,6 +320,7 @@ impl Peers {
                     cx.send_progress(StepProgress::with_current_and_total(
                         downloaded_bytes,
                         total_bytes,
+                        ProgressUnits::BYTES,
                         metadata.clone(),
                     ))
                     .await;

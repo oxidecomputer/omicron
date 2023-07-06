@@ -3,6 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::NexusActionContext;
+use crate::app::sagas::retry_until_known_result;
 use crate::app::sagas::{
     declare_saga_actions, ActionRegistry, NexusSaga, SagaInitError,
 };
@@ -162,10 +163,10 @@ async fn slc_loopback_address_delete(
 ) -> Result<(), ActionError> {
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
+    let log = sagactx.user_data().log();
 
     // TODO: https://github.com/oxidecomputer/omicron/issues/2629
     if let Ok(_) = std::env::var("SKIP_ASIC_CONFIG") {
-        let log = sagactx.user_data().log();
         debug!(log, "SKIP_ASIC_CONFIG is set, disabling calls to dendrite");
         return Ok(());
     };
@@ -176,11 +177,9 @@ async fn slc_loopback_address_delete(
     let dpd_client: Arc<dpd_client::Client> =
         Arc::clone(&osagactx.nexus().dpd_client);
 
-    match &params.address {
-        IpNet::V4(a) => dpd_client.loopback_ipv4_delete(&a.ip()).await,
-        IpNet::V6(a) => dpd_client.loopback_ipv6_delete(&a.ip()).await,
-    }
-    .map_err(|e| ActionError::action_failed(e.to_string()))?;
-
-    Ok(())
+    retry_until_known_result(log, || async {
+        dpd_client.ensure_loopback_deleted(log, params.address.ip()).await
+    })
+    .await
+    .map_err(|e| ActionError::action_failed(e.to_string()))
 }

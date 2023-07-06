@@ -3,6 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::{NexusActionContext, NEXUS_DPD_TAG};
+use crate::app::sagas::retry_until_known_result;
 use crate::app::sagas::{
     declare_saga_actions, ActionRegistry, NexusSaga, SagaInitError,
 };
@@ -171,7 +172,11 @@ pub(crate) fn api_to_dpd_port_settings(
                 dpd_port_settings.v4_routes.insert(
                     Ipv4Cidr { prefix: n.ip(), prefix_len: n.prefix() }
                         .to_string(),
-                    RouteSettingsV4 { link_id: link_id.0, nexthop: Some(gw) },
+                    RouteSettingsV4 {
+                        link_id: link_id.0,
+                        nexthop: Some(gw),
+                        vid: r.vid.map(Into::into),
+                    },
                 );
             }
             IpNetwork::V6(n) => {
@@ -186,7 +191,11 @@ pub(crate) fn api_to_dpd_port_settings(
                 dpd_port_settings.v6_routes.insert(
                     Ipv6Cidr { prefix: n.ip(), prefix_len: n.prefix() }
                         .to_string(),
-                    RouteSettingsV6 { link_id: link_id.0, nexthop: Some(gw) },
+                    RouteSettingsV6 {
+                        link_id: link_id.0,
+                        nexthop: Some(gw),
+                        vid: r.vid.map(Into::into),
+                    },
                 );
             }
         }
@@ -200,6 +209,7 @@ async fn spa_ensure_switch_port_settings(
 ) -> Result<(), ActionError> {
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
+    let log = sagactx.user_data().log();
 
     let settings = sagactx
         .lookup::<SwitchPortSettingsCombinedResult>("switch_port_settings")?;
@@ -213,10 +223,11 @@ async fn spa_ensure_switch_port_settings(
     let dpd_port_settings = api_to_dpd_port_settings(&settings)
         .map_err(ActionError::action_failed)?;
 
-    dpd_client
-        .port_settings_apply(&port_id, &dpd_port_settings)
-        .await
-        .map_err(|e| ActionError::action_failed(e.to_string()))?;
+    retry_until_known_result(log, || async {
+        dpd_client.port_settings_apply(&port_id, &dpd_port_settings).await
+    })
+    .await
+    .map_err(|e| ActionError::action_failed(e.to_string()))?;
 
     Ok(())
 }
@@ -231,6 +242,7 @@ async fn spa_undo_ensure_switch_port_settings(
         &sagactx,
         &params.serialized_authn,
     );
+    let log = sagactx.user_data().log();
 
     let port_id: PortId = PortId::from_str(&params.switch_port_name)
         .map_err(|e| external::Error::internal_error(e))?;
@@ -245,10 +257,11 @@ async fn spa_undo_ensure_switch_port_settings(
     let id = match orig_port_settings_id {
         Some(id) => id,
         None => {
-            dpd_client
-                .port_settings_clear(&port_id)
-                .await
-                .map_err(|e| external::Error::internal_error(&e.to_string()))?;
+            retry_until_known_result(log, || async {
+                dpd_client.port_settings_clear(&port_id).await
+            })
+            .await
+            .map_err(|e| external::Error::internal_error(&e.to_string()))?;
 
             return Ok(());
         }
@@ -262,10 +275,11 @@ async fn spa_undo_ensure_switch_port_settings(
     let dpd_port_settings = api_to_dpd_port_settings(&settings)
         .map_err(ActionError::action_failed)?;
 
-    dpd_client
-        .port_settings_apply(&port_id, &dpd_port_settings)
-        .await
-        .map_err(|e| external::Error::internal_error(&e.to_string()))?;
+    retry_until_known_result(log, || async {
+        dpd_client.port_settings_apply(&port_id, &dpd_port_settings).await
+    })
+    .await
+    .map_err(|e| external::Error::internal_error(&e.to_string()))?;
 
     Ok(())
 }

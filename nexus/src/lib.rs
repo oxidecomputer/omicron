@@ -29,7 +29,6 @@ pub use context::ServerContext;
 pub use crucible_agent_client;
 use external_api::http_entrypoints::external_api;
 use internal_api::http_entrypoints::internal_api;
-use internal_dns::DnsConfigBuilder;
 use nexus_types::internal_api::params::ServiceKind;
 use omicron_common::address::IpRange;
 use slog::Logger;
@@ -198,6 +197,8 @@ impl nexus_test_interface::NexusServer for Server {
         internal_server: InternalServer,
         config: &Config,
         services: Vec<nexus_types::internal_api::params::ServicePutRequest>,
+        datasets: Vec<nexus_types::internal_api::params::DatasetCreateRequest>,
+        internal_dns_zone_config: nexus_types::internal_api::params::DnsConfigParams,
         external_dns_zone_name: &str,
         recovery_silo: nexus_types::internal_api::params::RecoverySiloConfig,
         certs: Vec<nexus_types::internal_api::params::Certificate>,
@@ -205,7 +206,7 @@ impl nexus_test_interface::NexusServer for Server {
         // Perform the "handoff from RSS".
         //
         // However, RSS isn't running, so we'll do the handoff ourselves.
-        let opctx = internal_server.apictx.nexus.opctx_for_service_balancer();
+        let opctx = internal_server.apictx.nexus.opctx_for_internal_api();
 
         // Allocation of the initial Nexus's external IP is a little funny.  In
         // a real system, it'd be allocated by RSS and provided with the rack
@@ -223,8 +224,8 @@ impl nexus_test_interface::NexusServer for Server {
         let internal_services_ip_pool_ranges = services
             .iter()
             .filter_map(|s| match s.kind {
-                ServiceKind::ExternalDns { external_address }
-                | ServiceKind::Nexus { external_address } => {
+                ServiceKind::ExternalDns { external_address, .. }
+                | ServiceKind::Nexus { external_address, .. } => {
                     Some(IpRange::from(external_address))
                 }
                 _ => None,
@@ -239,10 +240,10 @@ impl nexus_test_interface::NexusServer for Server {
                 config.deployment.rack_id,
                 internal_api::params::RackInitializationRequest {
                     services,
-                    datasets: vec![],
+                    datasets,
                     internal_services_ip_pool_ranges,
                     certs,
-                    internal_dns_zone_config: DnsConfigBuilder::new().build(),
+                    internal_dns_zone_config,
                     external_dns_zone_name: external_dns_zone_name.to_owned(),
                     recovery_silo,
                     external_port_count: 1,
@@ -262,10 +263,6 @@ impl nexus_test_interface::NexusServer for Server {
 
     async fn get_http_server_internal_address(&self) -> SocketAddr {
         self.apictx.nexus.get_internal_server_address().await.unwrap()
-    }
-
-    async fn set_resolver(&self, resolver: internal_dns::resolver::Resolver) {
-        self.apictx.nexus.set_resolver(resolver).await
     }
 
     async fn upsert_crucible_dataset(

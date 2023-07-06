@@ -94,6 +94,9 @@ pub(crate) const REGION_REDUNDANCY_THRESHOLD: usize = 3;
 /// The name of the built-in IP pool for Oxide services.
 pub const SERVICE_IP_POOL_NAME: &str = "oxide-service-pool";
 
+/// The name of the built-in Project and VPC for Oxide services.
+pub const SERVICES_DB_NAME: &str = "oxide-services";
+
 // Represents a query that is ready to be executed.
 //
 // This helper trait lets the statement either be executed or explained.
@@ -262,6 +265,8 @@ pub async fn datastore_test(
     datastore.load_builtin_roles(&opctx).await.unwrap();
     datastore.load_builtin_role_asgns(&opctx).await.unwrap();
     datastore.load_builtin_silos(&opctx).await.unwrap();
+    datastore.load_builtin_projects(&opctx).await.unwrap();
+    datastore.load_builtin_vpcs(&opctx).await.unwrap();
     datastore.load_silo_users(&opctx).await.unwrap();
     datastore.load_silo_user_role_assignments(&opctx).await.unwrap();
     datastore
@@ -282,8 +287,10 @@ pub async fn datastore_test(
 mod test {
     use super::*;
     use crate::authn;
+    use crate::authn::SiloAuthnPolicy;
     use crate::authz;
     use crate::db::explain::ExplainableAsync;
+    use crate::db::fixed_data::silo::DEFAULT_SILO;
     use crate::db::fixed_data::silo::SILO_ID;
     use crate::db::identity::Asset;
     use crate::db::lookup::LookupPath;
@@ -474,7 +481,11 @@ mod test {
         let silo_user_opctx = OpContext::for_background(
             logctx.log.new(o!()),
             Arc::new(authz::Authz::new(&logctx.log)),
-            authn::Context::for_test_user(silo_user_id, *SILO_ID),
+            authn::Context::for_test_user(
+                silo_user_id,
+                *SILO_ID,
+                SiloAuthnPolicy::try_from(&*DEFAULT_SILO).unwrap(),
+            ),
             Arc::clone(&datastore),
         );
         let delete = datastore

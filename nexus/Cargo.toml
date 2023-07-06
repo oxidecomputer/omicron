@@ -13,6 +13,7 @@ async-bb8-diesel.workspace = true
 async-trait.workspace = true
 base64.workspace = true
 bb8.workspace = true
+cancel-safe-futures.workspace = true
 camino.workspace = true
 clap.workspace = true
 chrono.workspace = true
@@ -51,6 +52,7 @@ parse-display.workspace = true
 paste.workspace = true
 # See omicron-rpaths for more about the "pq-sys" dependency.
 pq-sys = "*"
+progenitor-client.workspace = true
 propolis-client.workspace = true
 rand.workspace = true
 ref-cast.workspace = true

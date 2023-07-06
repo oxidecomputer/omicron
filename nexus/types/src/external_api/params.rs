@@ -19,6 +19,8 @@ use serde::{
     de::{self, Visitor},
     Deserialize, Deserializer, Serialize, Serializer,
 };
+use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::collections::HashMap;
 use std::{net::IpAddr, str::FromStr};
 use uuid::Uuid;
@@ -88,6 +90,12 @@ impl From<Name> for SiloSelector {
     fn from(name: Name) -> Self {
         SiloSelector { silo: name.into() }
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct OptionalSiloSelector {
+    /// Name or ID of the silo
+    pub silo: Option<NameOrId>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
@@ -298,6 +306,14 @@ pub struct SiloCreate {
     /// Initial TLS certificates to be used for the new Silo's console and API
     /// endpoints.  These should be valid for the Silo's DNS name(s).
     pub tls_certificates: Vec<CertificateCreate>,
+
+    /// Mapping of which Fleet roles are conferred by each Silo role
+    ///
+    /// The default is that no Fleet roles are conferred by any Silo roles
+    /// unless there's a corresponding entry in this map.
+    #[serde(default)]
+    pub mapped_fleet_roles:
+        BTreeMap<shared::SiloRole, BTreeSet<shared::FleetRole>>,
 }
 
 /// Create-time parameters for a `User`
@@ -735,10 +751,10 @@ pub struct CertificateCreate {
     /// common identifying metadata
     #[serde(flatten)]
     pub identity: IdentityMetadataCreateParams,
-    /// PEM file containing public certificate chain
-    pub cert: Vec<u8>,
-    /// PEM file containing private key
-    pub key: Vec<u8>,
+    /// PEM-formatted string containing public certificate chain
+    pub cert: String,
+    /// PEM-formatted string containing private key
+    pub key: String,
     /// The service using this certificate
     pub service: shared::ServiceUsingCertificate,
 }
@@ -1408,6 +1424,9 @@ pub struct Route {
 
     /// The route gateway.
     pub gw: IpAddr,
+
+    /// VLAN id the gateway is reachable over.
+    pub vid: Option<u16>,
 }
 
 /// A BGP peer configuration for an interface. Includes the set of announcements
@@ -1538,6 +1557,9 @@ pub struct SwitchPortApplySettings {
 pub enum ImageSource {
     Url {
         url: String,
+
+        /// The block size in bytes
+        block_size: BlockSize,
     },
     Snapshot {
         id: Uuid,
@@ -1570,9 +1592,6 @@ pub struct ImageCreate {
     /// The version of the operating system (e.g. 18.04, 20.04, etc.)
     pub version: String,
 
-    /// block size in bytes
-    pub block_size: BlockSize,
-
     /// The source of the image's contents.
     pub source: ImageSource,
 }
@@ -1586,8 +1605,8 @@ pub struct SnapshotCreate {
     #[serde(flatten)]
     pub identity: IdentityMetadataCreateParams,
 
-    /// The name of the disk to be snapshotted
-    pub disk: Name,
+    /// The disk to be snapshotted
+    pub disk: NameOrId,
 }
 
 // USERS AND GROUPS

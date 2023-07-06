@@ -11,16 +11,18 @@ use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::resource_helpers::{
     create_disk, create_project, create_vpc, object_create, populate_ip_pool,
-    project_get, DiskTest,
+    project_get, projects_list, DiskTest,
 };
 use nexus_test_utils_macros::nexus_test;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::Instance;
 use omicron_common::api::external::InstanceCpuCount;
+use omicron_common::api::external::Name;
 use omicron_nexus::external_api::params;
 use omicron_nexus::external_api::views;
 use omicron_nexus::external_api::views::Project;
+use std::str::FromStr;
 
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
@@ -44,15 +46,7 @@ async fn test_projects(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(project.identity.name, p2_name);
 
     // Verify the list of Projects.
-    let projects = NexusRequest::iter_collection_authn::<Project>(
-        &client,
-        "/v1/projects",
-        "",
-        None,
-    )
-    .await
-    .expect("failed to list projects")
-    .all_items;
+    let projects = projects_list(&client, "/v1/projects", "", None).await;
     assert_eq!(projects.len(), 2);
     // alphabetical order for now
     assert_eq!(projects[0].identity.name, p2_name);
@@ -236,7 +230,6 @@ async fn test_project_deletion_with_image(cptestctx: &ControlPlaneTestContext) {
         },
         os: "alpine".to_string(),
         version: "edge".to_string(),
-        block_size: params::BlockSize::try_from(512).unwrap(),
         source: params::ImageSource::YouCanBootAnythingAsLongAsItsAlpine,
     };
 
@@ -305,7 +298,7 @@ async fn test_project_deletion_with_snapshot(
                 name: "my-snapshot".parse().unwrap(),
                 description: "not attached to instance".into(),
             },
-            disk: "my-disk".parse().unwrap(),
+            disk: Name::from_str("my-disk").unwrap().into(),
         },
     )
     .await;

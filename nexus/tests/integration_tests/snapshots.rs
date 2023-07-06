@@ -84,10 +84,10 @@ async fn test_snapshot_basic(cptestctx: &ControlPlaneTestContext) {
         },
         source: params::ImageSource::Url {
             url: server.url("/image.raw").to_string(),
+            block_size: params::BlockSize::try_from(512).unwrap(),
         },
         os: "alpine".to_string(),
         version: "edge".to_string(),
-        block_size: params::BlockSize::try_from(512).unwrap(),
     };
 
     let images_url = format!("/v1/images?project={}", PROJECT_NAME);
@@ -165,7 +165,7 @@ async fn test_snapshot_basic(cptestctx: &ControlPlaneTestContext) {
                 name: instance_name.parse().unwrap(),
                 description: format!("instance {:?}", instance_name),
             },
-            disk: base_disk_name,
+            disk: base_disk_name.into(),
         },
     )
     .await;
@@ -204,10 +204,10 @@ async fn test_snapshot_without_instance(cptestctx: &ControlPlaneTestContext) {
         },
         source: params::ImageSource::Url {
             url: server.url("/image.raw").to_string(),
+            block_size: params::BlockSize::try_from(512).unwrap(),
         },
         os: "alpine".to_string(),
         version: "edge".to_string(),
-        block_size: params::BlockSize::try_from(512).unwrap(),
     };
 
     let images_url = format!("/v1/images?project={}", PROJECT_NAME);
@@ -265,7 +265,7 @@ async fn test_snapshot_without_instance(cptestctx: &ControlPlaneTestContext) {
                 name: "not-attached".parse().unwrap(),
                 description: "not attached to instance".into(),
             },
-            disk: base_disk_name.clone(),
+            disk: base_disk_name.clone().into(),
         },
     )
     .await;
@@ -342,7 +342,7 @@ async fn test_delete_snapshot(cptestctx: &ControlPlaneTestContext) {
                 name: "not-attached".parse().unwrap(),
                 description: "not attached to instance".into(),
             },
-            disk: base_disk_name.clone(),
+            disk: base_disk_name.clone().into(),
         },
     )
     .await;
@@ -741,7 +741,7 @@ async fn test_cannot_snapshot_if_no_space(cptestctx: &ControlPlaneTestContext) {
                     name: "not-attached".parse().unwrap(),
                     description: "not attached to instance".into(),
                 },
-                disk: base_disk_name,
+                disk: base_disk_name.into(),
             }))
             .expect_status(Some(StatusCode::SERVICE_UNAVAILABLE)),
     )
@@ -781,10 +781,10 @@ async fn test_snapshot_unwind(cptestctx: &ControlPlaneTestContext) {
         },
         source: params::ImageSource::Url {
             url: server.url("/image.raw").to_string(),
+            block_size: params::BlockSize::try_from(512).unwrap(),
         },
         os: "alpine".to_string(),
         version: "edge".to_string(),
-        block_size: params::BlockSize::try_from(512).unwrap(),
     };
 
     let images_url = format!("/v1/images?project={}", PROJECT_NAME);
@@ -841,7 +841,7 @@ async fn test_snapshot_unwind(cptestctx: &ControlPlaneTestContext) {
                 name: "snapshot".parse().unwrap(),
                 description: String::from("a snapshot"),
             },
-            disk: base_disk_name.clone(),
+            disk: base_disk_name.clone().into(),
         },
     )
     .authn_as(AuthnMode::PrivilegedUser)

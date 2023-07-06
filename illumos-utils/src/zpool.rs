@@ -284,10 +284,43 @@ pub enum ZpoolKind {
 ///
 /// This expects that the format will be: `ox{i,p}_<UUID>` - we parse the prefix
 /// when reading the structure, and validate that the UUID can be utilized.
-#[derive(Clone, Debug, Hash, PartialEq, Eq, JsonSchema)]
+#[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub struct ZpoolName {
     id: Uuid,
     kind: ZpoolKind,
+}
+
+const ZPOOL_NAME_REGEX: &str = r"^ox[ip]_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$";
+
+/// Custom JsonSchema implementation to encode the constraints on Name.
+impl JsonSchema for ZpoolName {
+    fn schema_name() -> String {
+        "ZpoolName".to_string()
+    }
+    fn json_schema(
+        _: &mut schemars::gen::SchemaGenerator,
+    ) -> schemars::schema::Schema {
+        schemars::schema::SchemaObject {
+            metadata: Some(Box::new(schemars::schema::Metadata {
+                title: Some(
+                    "The name of a Zpool".to_string(),
+                ),
+                description: Some(
+                    "Zpool names are of the format ox{i,p}_<UUID>. They are either \
+                     Internal or External, and should be unique"
+                        .to_string(),
+                ),
+                ..Default::default()
+            })),
+            instance_type: Some(schemars::schema::InstanceType::String.into()),
+            string: Some(Box::new(schemars::schema::StringValidation {
+                pattern: Some(ZPOOL_NAME_REGEX.to_owned()),
+                ..Default::default()
+            })),
+            ..Default::default()
+        }
+        .into()
+    }
 }
 
 impl ZpoolName {
@@ -373,6 +406,70 @@ impl fmt::Display for ZpoolName {
 #[cfg(test)]
 mod test {
     use super::*;
+
+    #[test]
+    fn test_zpool_name_regex() {
+        let valid = [
+            "oxi_d462a7f7-b628-40fe-80ff-4e4189e2d62b",
+            "oxp_d462a7f7-b628-40fe-80ff-4e4189e2d62b",
+        ];
+
+        let invalid = [
+            "",
+            // Whitespace
+            " oxp_d462a7f7-b628-40fe-80ff-4e4189e2d62b",
+            "oxp_d462a7f7-b628-40fe-80ff-4e4189e2d62b ",
+            // Case sensitivity
+            "oxp_D462A7F7-b628-40fe-80ff-4e4189e2d62b",
+            // Bad prefix
+            "ox_d462a7f7-b628-40fe-80ff-4e4189e2d62b",
+            "oxa_d462a7f7-b628-40fe-80ff-4e4189e2d62b",
+            "oxi-d462a7f7-b628-40fe-80ff-4e4189e2d62b",
+            "oxp-d462a7f7-b628-40fe-80ff-4e4189e2d62b",
+            // Missing Prefix
+            "d462a7f7-b628-40fe-80ff-4e4189e2d62b",
+            // Bad UUIDs (Not following UUIDv4 format)
+            "oxi_d462a7f7-b628-30fe-80ff-4e4189e2d62b",
+            "oxi_d462a7f7-b628-40fe-c0ff-4e4189e2d62b",
+        ];
+
+        let r = regress::Regex::new(ZPOOL_NAME_REGEX)
+            .expect("validation regex is valid");
+        for input in valid {
+            let m = r
+                .find(input)
+                .unwrap_or_else(|| panic!("input {input} did not match regex"));
+            assert_eq!(m.start(), 0, "input {input} did not match start");
+            assert_eq!(m.end(), input.len(), "input {input} did not match end");
+        }
+
+        for input in invalid {
+            assert!(
+                r.find(input).is_none(),
+                "invalid input {input} should not match validation regex"
+            );
+        }
+    }
+
+    #[test]
+    fn test_parse_zpool_name_json() {
+        #[derive(Serialize, Deserialize, JsonSchema)]
+        struct TestDataset {
+            pool_name: ZpoolName,
+        }
+
+        // Confirm that we can convert from a JSON string to a a ZpoolName
+        let json_string =
+            r#"{"pool_name":"oxi_d462a7f7-b628-40fe-80ff-4e4189e2d62b"}"#;
+        let dataset: TestDataset = serde_json::from_str(json_string)
+            .expect("Could not parse ZpoolName from Json Object");
+        assert!(matches!(dataset.pool_name.kind, ZpoolKind::Internal));
+
+        // Confirm we can go the other way (ZpoolName to JSON string) too.
+        let j = serde_json::to_string(&dataset)
+            .expect("Cannot convert back to JSON string");
+        assert_eq!(j, json_string);
+    }
 
     fn toml_string(s: &str) -> String {
         format!("zpool_name = \"{}\"", s)

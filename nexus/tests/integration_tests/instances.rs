@@ -4,7 +4,7 @@
 
 //! Tests basic instance support in the API
 
-use super::metrics::get_latest_system_metric;
+use super::metrics::{get_latest_silo_metric, get_latest_system_metric};
 
 use camino::Utf8Path;
 use http::method::Method;
@@ -36,7 +36,6 @@ use omicron_common::api::external::InstanceState;
 use omicron_common::api::external::Ipv4Net;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::Vni;
-use omicron_nexus::authz::SiloRole;
 use omicron_nexus::db::fixed_data::silo::SILO_ID;
 use omicron_nexus::db::lookup::LookupPath;
 use omicron_nexus::external_api::shared::IpKind;
@@ -58,6 +57,7 @@ use dropshot::{HttpErrorResponseBody, ResultsPage};
 use nexus_test_utils::identity_eq;
 use nexus_test_utils::resource_helpers::{create_instance, create_project};
 use nexus_test_utils_macros::nexus_test;
+use omicron_nexus::external_api::shared::SiloRole;
 use omicron_sled_agent::sim;
 
 type ControlPlaneTestContext =
@@ -522,7 +522,8 @@ async fn test_instance_migrate(cptestctx: &ControlPlaneTestContext) {
         PROJECT_NAME,
         instance_name,
         &params::InstanceNetworkInterfaceAttachment::Default,
-        vec![],
+        Vec::<params::InstanceDiskAttachment>::new(),
+        Vec::<params::ExternalIpCreate>::new(),
     )
     .await;
     let instance_id = instance.identity.id;
@@ -609,7 +610,8 @@ async fn test_instance_migrate_v2p(cptestctx: &ControlPlaneTestContext) {
         &params::InstanceNetworkInterfaceAttachment::Default,
         // Omit disks: simulated sled agent assumes that disks are always co-
         // located with their instances.
-        vec![],
+        Vec::<params::InstanceDiskAttachment>::new(),
+        Vec::<params::ExternalIpCreate>::new(),
     )
     .await;
     let instance_id = instance.identity.id;
@@ -715,6 +717,57 @@ async fn test_instance_migrate_v2p(cptestctx: &ControlPlaneTestContext) {
     }
 }
 
+/// Assert values for fleet, silo, and project using both system and silo
+/// metrics endpoints
+async fn assert_metrics(
+    cptestctx: &ControlPlaneTestContext,
+    project_id: Uuid,
+    disk: i64,
+    cpus: i64,
+    ram: i64,
+) {
+    cptestctx.oximeter.force_collect().await;
+
+    for id in &[None, Some(project_id)] {
+        assert_eq!(
+            get_latest_silo_metric(
+                cptestctx,
+                "virtual_disk_space_provisioned",
+                *id,
+            )
+            .await,
+            disk
+        );
+        assert_eq!(
+            get_latest_silo_metric(cptestctx, "cpus_provisioned", *id).await,
+            cpus
+        );
+        assert_eq!(
+            get_latest_silo_metric(cptestctx, "ram_provisioned", *id).await,
+            ram
+        );
+    }
+    for id in &[None, Some(*SILO_ID)] {
+        assert_eq!(
+            get_latest_system_metric(
+                cptestctx,
+                "virtual_disk_space_provisioned",
+                *id
+            )
+            .await,
+            disk
+        );
+        assert_eq!(
+            get_latest_system_metric(cptestctx, "cpus_provisioned", *id).await,
+            cpus
+        );
+        assert_eq!(
+            get_latest_system_metric(cptestctx, "ram_provisioned", *id).await,
+            ram
+        );
+    }
+}
+
 #[nexus_test]
 async fn test_instance_metrics(cptestctx: &ControlPlaneTestContext) {
     // Normally, Nexus is not registered as a producer for tests.
@@ -722,7 +775,6 @@ async fn test_instance_metrics(cptestctx: &ControlPlaneTestContext) {
     cptestctx.server.register_as_producer().await;
 
     let client = &cptestctx.external_client;
-    let oximeter = &cptestctx.oximeter;
     let apictx = &cptestctx.server.apictx();
     let nexus = &apictx.nexus;
     let datastore = nexus.datastore();
@@ -741,26 +793,7 @@ async fn test_instance_metrics(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(virtual_provisioning_collection.cpus_provisioned, 0);
     assert_eq!(virtual_provisioning_collection.ram_provisioned.to_bytes(), 0);
 
-    oximeter.force_collect().await;
-    for id in &[*SILO_ID, project_id] {
-        assert_eq!(
-            get_latest_system_metric(
-                cptestctx,
-                "virtual_disk_space_provisioned",
-                *id,
-            )
-            .await,
-            0
-        );
-        assert_eq!(
-            get_latest_system_metric(cptestctx, "cpus_provisioned", *id).await,
-            0
-        );
-        assert_eq!(
-            get_latest_system_metric(cptestctx, "ram_provisioned", *id).await,
-            0
-        );
-    }
+    assert_metrics(cptestctx, project_id, 0, 0, 0).await;
 
     // Create an instance.
     let instance_name = "just-rainsticks";
@@ -801,26 +834,7 @@ async fn test_instance_metrics(cptestctx: &ControlPlaneTestContext) {
         i64::from(virtual_provisioning_collection.ram_provisioned.0),
         expected_ram
     );
-    oximeter.force_collect().await;
-    for id in &[*SILO_ID, project_id] {
-        assert_eq!(
-            get_latest_system_metric(
-                cptestctx,
-                "virtual_disk_space_provisioned",
-                *id,
-            )
-            .await,
-            0
-        );
-        assert_eq!(
-            get_latest_system_metric(cptestctx, "cpus_provisioned", *id).await,
-            expected_cpus
-        );
-        assert_eq!(
-            get_latest_system_metric(cptestctx, "ram_provisioned", *id).await,
-            expected_ram
-        );
-    }
+    assert_metrics(cptestctx, project_id, 0, expected_cpus, expected_ram).await;
 
     // Stop the instance
     NexusRequest::object_delete(client, &get_instance_url(&instance_name))
@@ -835,26 +849,7 @@ async fn test_instance_metrics(cptestctx: &ControlPlaneTestContext) {
         .unwrap();
     assert_eq!(virtual_provisioning_collection.cpus_provisioned, 0);
     assert_eq!(virtual_provisioning_collection.ram_provisioned.to_bytes(), 0);
-    oximeter.force_collect().await;
-    for id in &[*SILO_ID, project_id] {
-        assert_eq!(
-            get_latest_system_metric(
-                cptestctx,
-                "virtual_disk_space_provisioned",
-                *id,
-            )
-            .await,
-            0
-        );
-        assert_eq!(
-            get_latest_system_metric(cptestctx, "cpus_provisioned", *id).await,
-            0
-        );
-        assert_eq!(
-            get_latest_system_metric(cptestctx, "ram_provisioned", *id).await,
-            0
-        );
-    }
+    assert_metrics(cptestctx, project_id, 0, 0, 0).await;
 }
 
 #[nexus_test]

@@ -98,6 +98,7 @@ use super::{
     ACTION_GENERATE_ID,
 };
 use crate::app::sagas::declare_saga_actions;
+use crate::app::sagas::retry_until_known_result;
 use crate::db::identity::{Asset, Resource};
 use crate::db::lookup::LookupPath;
 use crate::external_api::params;
@@ -680,15 +681,18 @@ async fn ssc_send_snapshot_request_to_sled_agent(
             info!(log, "instance {} sled agent created ok", instance_id);
 
             // Send a snapshot request to propolis through sled agent
-            sled_agent_client
-                .instance_issue_disk_snapshot_request(
-                    &instance.id(),
-                    &disk.id(),
-                    &InstanceIssueDiskSnapshotRequestBody { snapshot_id },
-                )
-                .await
-                .map_err(|e| e.to_string())
-                .map_err(ActionError::action_failed)?;
+            retry_until_known_result(log, || async {
+                sled_agent_client
+                    .instance_issue_disk_snapshot_request(
+                        &instance.id(),
+                        &disk.id(),
+                        &InstanceIssueDiskSnapshotRequestBody { snapshot_id },
+                    )
+                    .await
+            })
+            .await
+            .map_err(|e| e.to_string())
+            .map_err(ActionError::action_failed)?;
             Ok(())
         }
 
@@ -733,12 +737,15 @@ async fn ssc_send_snapshot_request_to_sled_agent_undo(
         let url = format!("http://{}", dataset.address());
         let client = CrucibleAgentClient::new(&url);
 
-        client
-            .region_delete_snapshot(
-                &RegionId(region.id().to_string()),
-                &snapshot_id.to_string(),
-            )
-            .await?;
+        retry_until_known_result(log, || async {
+            client
+                .region_delete_snapshot(
+                    &RegionId(region.id().to_string()),
+                    &snapshot_id.to_string(),
+                )
+                .await
+        })
+        .await?;
     }
     Ok(())
 }
@@ -1006,17 +1013,20 @@ async fn ssc_call_pantry_snapshot_for_disk(
 
     let client = crucible_pantry_client::Client::new(&endpoint);
 
-    client
-        .snapshot(
-            &params.disk_id.to_string(),
-            &crucible_pantry_client::types::SnapshotRequest {
-                snapshot_id: snapshot_id.to_string(),
-            },
-        )
-        .await
-        .map_err(|e| {
-            ActionError::action_failed(Error::internal_error(&e.to_string()))
-        })?;
+    retry_until_known_result(log, || async {
+        client
+            .snapshot(
+                &params.disk_id.to_string(),
+                &crucible_pantry_client::types::SnapshotRequest {
+                    snapshot_id: snapshot_id.to_string(),
+                },
+            )
+            .await
+    })
+    .await
+    .map_err(|e| {
+        ActionError::action_failed(Error::internal_error(&e.to_string()))
+    })?;
 
     Ok(())
 }
@@ -1049,12 +1059,15 @@ async fn ssc_call_pantry_snapshot_for_disk_undo(
         let url = format!("http://{}", dataset.address());
         let client = CrucibleAgentClient::new(&url);
 
-        client
-            .region_delete_snapshot(
-                &RegionId(region.id().to_string()),
-                &snapshot_id.to_string(),
-            )
-            .await?;
+        retry_until_known_result(log, || async {
+            client
+                .region_delete_snapshot(
+                    &RegionId(region.id().to_string()),
+                    &snapshot_id.to_string(),
+                )
+                .await
+        })
+        .await?;
     }
     Ok(())
 }
@@ -1196,31 +1209,39 @@ async fn ssc_start_running_snapshot(
         info!(log, "dataset {:?} region {:?} url {}", dataset, region, url);
 
         // Validate with the Crucible agent that the snapshot exists
-        let crucible_region = client
-            .region_get(&RegionId(region.id().to_string()))
-            .await
-            .map_err(|e| e.to_string())
-            .map_err(ActionError::action_failed)?;
+        let crucible_region = retry_until_known_result(log, || async {
+            client.region_get(&RegionId(region.id().to_string())).await
+        })
+        .await
+        .map_err(|e| e.to_string())
+        .map_err(ActionError::action_failed)?;
 
         info!(log, "crucible region {:?}", crucible_region);
 
-        let crucible_snapshot = client
-            .region_get_snapshot(
-                &RegionId(region.id().to_string()),
-                &snapshot_id.to_string(),
-            )
-            .await
-            .map_err(|e| e.to_string())
-            .map_err(ActionError::action_failed)?;
+        let crucible_snapshot = retry_until_known_result(log, || async {
+            client
+                .region_get_snapshot(
+                    &RegionId(region.id().to_string()),
+                    &snapshot_id.to_string(),
+                )
+                .await
+        })
+        .await
+        .map_err(|e| e.to_string())
+        .map_err(ActionError::action_failed)?;
 
         info!(log, "crucible snapshot {:?}", crucible_snapshot);
 
         // Start the snapshot running
-        let crucible_running_snapshot = client
-            .region_run_snapshot(
-                &RegionId(region.id().to_string()),
-                &snapshot_id.to_string(),
-            )
+        let crucible_running_snapshot =
+            retry_until_known_result(log, || async {
+                client
+                    .region_run_snapshot(
+                        &RegionId(region.id().to_string()),
+                        &snapshot_id.to_string(),
+                    )
+                    .await
+            })
             .await
             .map_err(|e| e.to_string())
             .map_err(ActionError::action_failed)?;
@@ -1288,25 +1309,26 @@ async fn ssc_start_running_snapshot_undo(
         use crucible_agent_client::Error::ErrorResponse;
         use http::status::StatusCode;
 
-        client
-            .region_delete_running_snapshot(
-                &RegionId(region.id().to_string()),
-                &snapshot_id.to_string(),
-            )
-            .await
-            .map(|_| ())
-            // NOTE: If we later create a volume record and delete it, the
-            // running snapshot may be deleted (see:
-            // ssc_create_volume_record_undo).
-            //
-            // To cope, we treat "running snapshot not found" as "Ok", since it
-            // may just be the result of the volume deletion steps completing.
-            .or_else(|err| match err {
-                ErrorResponse(r) if r.status() == StatusCode::NOT_FOUND => {
-                    Ok(())
-                }
-                _ => Err(err),
-            })?;
+        retry_until_known_result(log, || async {
+            client
+                .region_delete_running_snapshot(
+                    &RegionId(region.id().to_string()),
+                    &snapshot_id.to_string(),
+                )
+                .await
+        })
+        .await
+        .map(|_| ())
+        // NOTE: If we later create a volume record and delete it, the
+        // running snapshot may be deleted (see:
+        // ssc_create_volume_record_undo).
+        //
+        // To cope, we treat "running snapshot not found" as "Ok", since it
+        // may just be the result of the volume deletion steps completing.
+        .or_else(|err| match err {
+            ErrorResponse(r) if r.status() == StatusCode::NOT_FOUND => Ok(()),
+            _ => Err(err),
+        })?;
         osagactx
             .datastore()
             .region_snapshot_remove(dataset.id(), region.id(), snapshot_id)
@@ -1564,6 +1586,7 @@ mod test {
     use omicron_common::api::external::Instance;
     use omicron_common::api::external::InstanceCpuCount;
     use omicron_common::api::external::Name;
+    use omicron_common::api::external::NameOrId;
     use sled_agent_client::types::CrucibleOpts;
     use sled_agent_client::TestInterfaces as SledAgentTestInterfaces;
     use std::net::Ipv4Addr;
@@ -1782,7 +1805,7 @@ mod test {
         silo_id: Uuid,
         project_id: Uuid,
         disk_id: Uuid,
-        disk: Name,
+        disk: NameOrId,
         use_the_pantry: bool,
     ) -> Params {
         Params {
@@ -1838,7 +1861,7 @@ mod test {
             silo_id,
             project_id,
             disk_id,
-            Name::from_str(DISK_NAME).unwrap(),
+            Name::from_str(DISK_NAME).unwrap().into(),
             true,
         );
         let dag = create_saga_dag::<SagaSnapshotCreate>(params).unwrap();
@@ -1948,7 +1971,7 @@ mod test {
             silo_id,
             project_id,
             disk_id,
-            Name::from_str(DISK_NAME).unwrap(),
+            Name::from_str(DISK_NAME).unwrap().into(),
             use_the_pantry,
         );
         let mut dag = create_saga_dag::<SagaSnapshotCreate>(params).unwrap();
@@ -2006,7 +2029,7 @@ mod test {
                 silo_id,
                 project_id,
                 disk_id,
-                Name::from_str(DISK_NAME).unwrap(),
+                Name::from_str(DISK_NAME).unwrap().into(),
                 use_the_pantry,
             );
             dag = create_saga_dag::<SagaSnapshotCreate>(params).unwrap();
@@ -2045,7 +2068,7 @@ mod test {
             silo_id,
             project_id,
             disk_id,
-            Name::from_str(DISK_NAME).unwrap(),
+            Name::from_str(DISK_NAME).unwrap().into(),
             // set use_the_pantry to true, disk is unattached at time of saga creation
             true,
         );
@@ -2109,7 +2132,7 @@ mod test {
             silo_id,
             project_id,
             disk_id,
-            Name::from_str(DISK_NAME).unwrap(),
+            Name::from_str(DISK_NAME).unwrap().into(),
             // set use_the_pantry to true, disk is unattached at time of saga creation
             true,
         );
@@ -2154,7 +2177,7 @@ mod test {
             silo_id,
             project_id,
             disk_id,
-            Name::from_str(DISK_NAME).unwrap(),
+            Name::from_str(DISK_NAME).unwrap().into(),
             // set use_the_pantry to true, disk is attached at time of saga creation
             false,
         );
@@ -2248,7 +2271,7 @@ mod test {
             silo_id,
             project_id,
             disk_id,
-            Name::from_str(DISK_NAME).unwrap(),
+            Name::from_str(DISK_NAME).unwrap().into(),
             // set use_the_pantry to false, disk is attached at time of saga creation
             false,
         );

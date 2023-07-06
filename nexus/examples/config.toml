@@ -9,12 +9,8 @@ session_idle_timeout_minutes = 480 # 6 hours
 session_absolute_timeout_minutes = 1440 # 24 hours
 
 # List of authentication schemes to support.
-#
-# This is not fleshed out yet and the only reason to change it now is for
-# working on authentication or authorization.
 [authn]
-# TODO(https://github.com/oxidecomputer/omicron/issues/372): Remove "spoof".
-schemes_external = ["spoof", "session_cookie", "access_token"]
+schemes_external = ["session_cookie", "access_token"]
 
 [log]
 # Show log messages of this level and more severe
@@ -55,13 +51,17 @@ request_body_max_bytes = 1048576
 bind_address = "[::1]:12221"
 request_body_max_bytes = 1048576
 
-[deployment.subnet]
-net = "fd00:1122:3344:0100::/56"
+[deployment.internal_dns]
+# Example address.
+# If you're using `omicron-dev run-all`, this is value is overwritten
+# by the address / port created after starting the Internal DNS server.
+type = "from_address"
+address = "[::1]:3535"
 
 [deployment.database]
 # URL for connecting to the database
 type = "from_url"
-url = "postgresql://root@127.0.0.1:32221/omicron?sslmode=disable"
+url = "postgresql://root@[::1]:32221/omicron?sslmode=disable"
 
 # Tunable configuration parameters, for testing or experimentation
 [tunables]

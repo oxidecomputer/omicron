@@ -5,13 +5,17 @@
 use super::{Generation, Project};
 use crate::collection::DatastoreCollectionConfig;
 use crate::schema::{image, project, silo};
-use crate::{impl_enum_type, Image};
+use crate::{impl_enum_type, DatabaseString, Image};
 use db_macros::Resource;
-use nexus_types::external_api::shared::SiloIdentityMode;
+use nexus_types::external_api::shared::{
+    FleetRole, SiloIdentityMode, SiloRole,
+};
 use nexus_types::external_api::views;
 use nexus_types::external_api::{params, shared};
 use nexus_types::identity::Resource;
 use omicron_common::api::external::Error;
+use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use uuid::Uuid;
 
 impl_enum_type!(
@@ -19,7 +23,7 @@ impl_enum_type!(
     #[diesel(postgres_type(name = "authentication_mode"))]
     pub struct AuthenticationModeEnum;
 
-    #[derive(Copy, Clone, Debug, AsExpression, FromSqlRow, PartialEq)]
+    #[derive(Copy, Clone, Debug, AsExpression, FromSqlRow, PartialEq, Eq)]
     #[diesel(sql_type = AuthenticationModeEnum)]
     pub enum AuthenticationMode;
 
@@ -51,7 +55,7 @@ impl_enum_type!(
     #[diesel(postgres_type(name = "user_provision_type"))]
     pub struct UserProvisionTypeEnum;
 
-    #[derive(Copy, Clone, Debug, AsExpression, FromSqlRow, PartialEq)]
+    #[derive(Copy, Clone, Debug, AsExpression, FromSqlRow, PartialEq, Eq)]
     #[diesel(sql_type = UserProvisionTypeEnum)]
     pub enum UserProvisionType;
 
@@ -79,7 +83,9 @@ impl From<UserProvisionType> for shared::UserProvisionType {
 }
 
 /// Describes a silo within the database.
-#[derive(Clone, Queryable, Insertable, Debug, Resource, Selectable)]
+#[derive(
+    Clone, PartialEq, Eq, Queryable, Insertable, Debug, Resource, Selectable,
+)]
 #[diesel(table_name = silo)]
 pub struct Silo {
     #[diesel(embed)]
@@ -90,18 +96,84 @@ pub struct Silo {
     pub authentication_mode: AuthenticationMode,
     pub user_provision_type: UserProvisionType,
 
+    // The mapping of Silo roles to Fleet roles in each row is stored as a
+    // JSON-serialized map.  This is an implementation detail hidden behind this
+    // struct.  For writes, consumers provide a BTreeMap in `Silo::new()`.  For
+    // reads, consumers use mapped_fleet_roles() to get this information back
+    // out.  This struct takes care of converting to/from the stored
+    // representation (which happens to be identical).
+    mapped_fleet_roles: serde_json::Value,
+
     /// child resource generation number, per RFD 192
     pub rcgen: Generation,
 }
 
+/// Form of mapped fleet roles used when serializing to the database
+// A bunch of structures (e.g., `params::SiloCreate`, `views::Silo`,
+// `authn::SiloAuthnPolicy`) store a mapping of silo roles to a set of fleet
+// roles.  The obvious, normalized way to store this in the database involves a
+// bunch of extra tables and records.  That seems like overkill for a mapping
+// that currently has at most 3 keys, each pointing at a set of at most 3
+// entries, and that always would be updated together.  Instead, we'll store it
+// directly into the database row.  The easiest way to do that is to serialize
+// it to JSON and store it there.  This does give up some database-level
+// validation, unfortunately, but this isn't the sort of property that could
+// _only_ be validated safely at the database.
+//
+// Given this approach, we could serialize the map directly to JSON.  This
+// introduces the risk that somebody modifies the Rust structures in the
+// mapping (say, by removing one of the valid Silo roles) without realizing
+// that this could break our ability to parse existing database rows.  To avoid
+// this, we use a newtype here to translate from the Rust implementation to the
+// one that we will serialize to the database.
+//
+// WARNING: If you're considering changing anything about
+// `SerializedMappedFleetRoles`, including the `From` impl below, be sure you've
+// considered how to handle database records written prior to your change.
+// e.g., if you're removing a role, we won't be able to parse these records any
+// more.
+struct SerializedMappedFleetRoles(BTreeMap<String, BTreeSet<String>>);
+impl<'a> From<&'a BTreeMap<SiloRole, BTreeSet<FleetRole>>>
+    for SerializedMappedFleetRoles
+{
+    fn from(value: &'a BTreeMap<SiloRole, BTreeSet<FleetRole>>) -> Self {
+        SerializedMappedFleetRoles(
+            value
+                .iter()
+                .map(|(silo_role, fleet_roles)| {
+                    let silo_role_str =
+                        silo_role.to_database_string().to_string();
+                    let fleet_roles_str = fleet_roles
+                        .iter()
+                        .map(|f| f.to_database_string().to_string())
+                        .collect();
+                    (silo_role_str, fleet_roles_str)
+                })
+                .collect(),
+        )
+    }
+}
+
 impl Silo {
     /// Creates a new database Silo object.
-    pub fn new(params: params::SiloCreate) -> Self {
+    pub fn new(params: params::SiloCreate) -> Result<Self, Error> {
         Self::new_with_id(Uuid::new_v4(), params)
     }
 
-    pub fn new_with_id(id: Uuid, params: params::SiloCreate) -> Self {
-        Self {
+    pub fn new_with_id(
+        id: Uuid,
+        params: params::SiloCreate,
+    ) -> Result<Self, Error> {
+        let mapped_fleet_roles = serde_json::to_value(
+            &SerializedMappedFleetRoles::from(&params.mapped_fleet_roles).0,
+        )
+        .map_err(|e| {
+            Error::internal_error(&format!(
+                "failed to serialize mapped_fleet_roles: {:#}",
+                e
+            ))
+        })?;
+        Ok(Self {
             identity: SiloIdentity::new(id, params.identity),
             discoverable: params.discoverable,
             authentication_mode: params
@@ -113,7 +185,19 @@ impl Silo {
                 .user_provision_type()
                 .into(),
             rcgen: Generation::new(),
-        }
+            mapped_fleet_roles,
+        })
+    }
+
+    pub fn mapped_fleet_roles(
+        &self,
+    ) -> Result<BTreeMap<SiloRole, BTreeSet<FleetRole>>, Error> {
+        serde_json::from_value(self.mapped_fleet_roles.clone()).map_err(|e| {
+            Error::internal_error(&format!(
+                "failed to deserialize mapped fleet roles from database: {:#}",
+                e
+            ))
+        })
     }
 }
 
@@ -140,10 +224,13 @@ impl TryFrom<Silo> for views::Silo {
             ))
         })?;
 
+        let mapped_fleet_roles = silo.mapped_fleet_roles()?;
+
         Ok(Self {
             identity: silo.identity(),
             discoverable: silo.discoverable,
             identity_mode,
+            mapped_fleet_roles,
         })
     }
 }

@@ -17,6 +17,7 @@ use crucible_agent_client::types::{
     CreateRegion, Region, RegionId, RunningSnapshot, Snapshot, State,
 };
 use crucible_client_types::VolumeConstructionRequest;
+use dropshot::HandlerTaskMode;
 use dropshot::HttpError;
 use futures::lock::Mutex;
 use nexus_client::types::{
@@ -557,6 +558,20 @@ impl Storage {
         dataset.address()
     }
 
+    pub fn get_all_zpools(&self) -> Vec<Uuid> {
+        self.zpools.keys().cloned().collect()
+    }
+
+    pub fn get_all_datasets(&self, zpool_id: Uuid) -> Vec<(Uuid, SocketAddr)> {
+        let zpool = self.zpools.get(&zpool_id).expect("Zpool does not exist");
+
+        zpool
+            .datasets
+            .iter()
+            .map(|(id, server)| (*id, server.address()))
+            .collect()
+    }
+
     pub async fn get_dataset(
         &self,
         zpool_id: Uuid,
@@ -800,6 +815,7 @@ impl PantryServer {
                 // This has to be large enough to support:
                 // - bulk writes into disks
                 request_body_max_bytes: 8192 * 1024,
+                default_handler_task_mode: HandlerTaskMode::Detached,
             },
             super::http_entrypoints_pantry::api(),
             pantry.clone(),

@@ -17,6 +17,8 @@ use omicron_common::api::external::{
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::net::IpAddr;
 use uuid::Uuid;
 
@@ -36,6 +38,13 @@ pub struct Silo {
 
     /// How users and groups are managed in this Silo
     pub identity_mode: shared::SiloIdentityMode,
+
+    /// Mapping of which Fleet roles are conferred by each Silo role
+    ///
+    /// The default is that no Fleet roles are conferred by any Silo roles
+    /// unless there's a corresponding entry in this map.
+    pub mapped_fleet_roles:
+        BTreeMap<shared::SiloRole, BTreeSet<shared::FleetRole>>,
 }
 
 // IDENTITY PROVIDER
@@ -238,6 +247,7 @@ pub struct IpPool {
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct IpPoolRange {
     pub id: Uuid,
+    pub ip_pool_id: Uuid,
     pub time_created: DateTime<Utc>,
     pub range: IpRange,
 }

@@ -33,6 +33,9 @@ pub struct ClientState {
 impl Client {
     /// Ensure that a NAT entry exists, overwriting a previous conflicting entry if
     /// applicable.
+    ///
+    /// nat_ipv[46]_create are not idempotent (see oxidecomputer/dendrite#343),
+    /// but this wrapper function is. Call this from sagas instead.
     #[allow(clippy::too_many_arguments)]
     pub async fn ensure_nat_entry(
         &self,
@@ -131,13 +134,136 @@ impl Client {
 
         Ok(())
     }
+
+    /// Ensure that a NAT entry is deleted.
+    ///
+    /// nat_ipv[46]_delete are not idempotent (see oxidecomputer/dendrite#343),
+    /// but this wrapper function is. Call this from sagas instead.
+    pub async fn ensure_nat_entry_deleted(
+        &self,
+        log: &Logger,
+        target_ip: ipnetwork::IpNetwork,
+        target_first_port: u16,
+    ) -> Result<(), progenitor_client::Error<types::Error>> {
+        let result = match target_ip {
+            ipnetwork::IpNetwork::V4(network) => {
+                self.nat_ipv4_delete(&network.ip(), target_first_port).await
+            }
+            ipnetwork::IpNetwork::V6(network) => {
+                self.nat_ipv6_delete(&network.ip(), target_first_port).await
+            }
+        };
+
+        match result {
+            Ok(_) => {
+                info!(log, "deleted old nat entry"; "target_ip" => ?target_ip);
+            }
+
+            Err(e) => {
+                if e.status() == Some(http::StatusCode::NOT_FOUND) {
+                    info!(log, "no nat entry found for: {target_ip:#?}");
+                } else {
+                    return Err(e);
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Ensure that a loopback address is created.
+    ///
+    /// loopback_ipv[46]_create are not idempotent (see
+    /// oxidecomputer/dendrite#343), but this wrapper function is. Call this
+    /// from sagas instead.
+    pub async fn ensure_loopback_created(
+        &self,
+        log: &Logger,
+        address: IpAddr,
+        tag: &str,
+    ) -> Result<(), progenitor_client::Error<types::Error>> {
+        let result = match &address {
+            IpAddr::V4(a) => {
+                self.loopback_ipv4_create(&types::Ipv4Entry {
+                    addr: *a,
+                    tag: tag.into(),
+                })
+                .await
+            }
+            IpAddr::V6(a) => {
+                self.loopback_ipv6_create(&types::Ipv6Entry {
+                    addr: *a,
+                    tag: tag.into(),
+                })
+                .await
+            }
+        };
+
+        match result {
+            Ok(_) => {
+                info!(log, "created loopback address"; "address" => ?address);
+                Ok(())
+            }
+
+            Err(progenitor_client::Error::ErrorResponse(er)) => {
+                match er.status() {
+                    http::StatusCode::CONFLICT => {
+                        info!(log, "loopback address already created"; "address" => ?address);
+
+                        Ok(())
+                    }
+
+                    _ => Err(progenitor_client::Error::ErrorResponse(er)),
+                }
+            }
+
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Ensure that a loopback address is deleted.
+    ///
+    /// loopback_ipv[46]_delete are not idempotent (see
+    /// oxidecomputer/dendrite#343), but this wrapper function is. Call this
+    /// from sagas instead.
+    pub async fn ensure_loopback_deleted(
+        &self,
+        log: &Logger,
+        address: IpAddr,
+    ) -> Result<(), progenitor_client::Error<types::Error>> {
+        let result = match &address {
+            IpAddr::V4(a) => self.loopback_ipv4_delete(&a).await,
+            IpAddr::V6(a) => self.loopback_ipv6_delete(&a).await,
+        };
+
+        match result {
+            Ok(_) => {
+                info!(log, "deleted loopback address"; "address" => ?address);
+                Ok(())
+            }
+
+            Err(progenitor_client::Error::ErrorResponse(er)) => {
+                match er.status() {
+                    http::StatusCode::NOT_FOUND => {
+                        info!(log, "loopback address already deleted"; "address" => ?address);
+                        Ok(())
+                    }
+
+                    _ => Err(progenitor_client::Error::ErrorResponse(er)),
+                }
+            }
+
+            Err(e) => Err(e),
+        }
+    }
 }
+
 // XXX delete everything below once we use the real dpd-client crate.
 // https://github.com/oxidecomputer/omicron/issues/2775
 
 use std::convert::TryFrom;
 use std::fmt;
-use std::net::{Ipv4Addr, Ipv6Addr};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::str::FromStr;
 
 use schemars::JsonSchema;

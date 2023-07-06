@@ -39,8 +39,10 @@ use dropshot::{
     channel, endpoint, WebsocketChannelResult, WebsocketConnection,
 };
 use ipnetwork::IpNetwork;
+use nexus_db_queries::authz::ApiResource;
 use nexus_db_queries::db::lookup::ImageLookup;
 use nexus_db_queries::db::lookup::ImageParentLookup;
+use nexus_types::external_api::params::ProjectSelector;
 use nexus_types::{
     external_api::views::{SledInstance, Switch},
     identity::AssetIdentityMetadata,
@@ -107,6 +109,8 @@ pub fn external_api() -> NexusApiDescription {
         api.register(project_update)?;
         api.register(project_policy_view)?;
         api.register(project_policy_update)?;
+        api.register(project_ip_pool_list)?;
+        api.register(project_ip_pool_view)?;
 
         // Operator-Accessible IP Pools API
         api.register(ip_pool_list)?;
@@ -265,6 +269,7 @@ pub fn external_api() -> NexusApiDescription {
         api.register(certificate_delete)?;
 
         api.register(system_metric)?;
+        api.register(silo_metric)?;
 
         api.register(system_update_refresh)?;
         api.register(system_version)?;
@@ -287,9 +292,8 @@ pub fn external_api() -> NexusApiDescription {
         api.register(console_api::login_begin)?;
         api.register(console_api::login_local_begin)?;
         api.register(console_api::login_local)?;
-        api.register(console_api::login_spoof_begin)?;
-        api.register(console_api::login_spoof)?;
         api.register(console_api::login_saml_begin)?;
+        api.register(console_api::login_saml_redirect)?;
         api.register(console_api::login_saml)?;
         api.register(console_api::logout)?;
 
@@ -366,7 +370,7 @@ pub fn external_api() -> NexusApiDescription {
 }]
 async fn system_policy_view(
     rqctx: RequestContext<Arc<ServerContext>>,
-) -> Result<HttpResponseOk<shared::Policy<authz::FleetRole>>, HttpError> {
+) -> Result<HttpResponseOk<shared::Policy<shared::FleetRole>>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let nexus = &apictx.nexus;
@@ -391,8 +395,8 @@ struct ByIdPathParams {
 }]
 async fn system_policy_update(
     rqctx: RequestContext<Arc<ServerContext>>,
-    new_policy: TypedBody<shared::Policy<authz::FleetRole>>,
-) -> Result<HttpResponseOk<shared::Policy<authz::FleetRole>>, HttpError> {
+    new_policy: TypedBody<shared::Policy<shared::FleetRole>>,
+) -> Result<HttpResponseOk<shared::Policy<shared::FleetRole>>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let nexus = &apictx.nexus;
@@ -415,7 +419,7 @@ async fn system_policy_update(
  }]
 pub async fn policy_view(
     rqctx: RequestContext<Arc<ServerContext>>,
-) -> Result<HttpResponseOk<shared::Policy<authz::SiloRole>>, HttpError> {
+) -> Result<HttpResponseOk<shared::Policy<shared::SiloRole>>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let nexus = &apictx.nexus;
@@ -442,8 +446,8 @@ pub async fn policy_view(
 }]
 async fn policy_update(
     rqctx: RequestContext<Arc<ServerContext>>,
-    new_policy: TypedBody<shared::Policy<authz::SiloRole>>,
-) -> Result<HttpResponseOk<shared::Policy<authz::SiloRole>>, HttpError> {
+    new_policy: TypedBody<shared::Policy<shared::SiloRole>>,
+) -> Result<HttpResponseOk<shared::Policy<shared::SiloRole>>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let nexus = &apictx.nexus;
@@ -472,7 +476,7 @@ async fn policy_update(
 #[endpoint {
     method = GET,
     path = "/v1/system/silos",
-    tags = ["system"],
+    tags = ["system/silos"],
 }]
 async fn silo_list(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -505,7 +509,7 @@ async fn silo_list(
 #[endpoint {
     method = POST,
     path = "/v1/system/silos",
-    tags = ["system"],
+    tags = ["system/silos"],
 }]
 async fn silo_create(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -528,7 +532,7 @@ async fn silo_create(
 #[endpoint {
     method = GET,
     path = "/v1/system/silos/{silo}",
-    tags = ["system"],
+    tags = ["system/silos"],
 }]
 async fn silo_view(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -552,7 +556,7 @@ async fn silo_view(
 #[endpoint {
     method = DELETE,
     path = "/v1/system/silos/{silo}",
-    tags = ["system"],
+    tags = ["system/silos"],
 }]
 async fn silo_delete(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -574,12 +578,12 @@ async fn silo_delete(
 #[endpoint {
     method = GET,
     path = "/v1/system/silos/{silo}/policy",
-    tags = ["system"],
+    tags = ["system/silos"],
 }]
 async fn silo_policy_view(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::SiloPath>,
-) -> Result<HttpResponseOk<shared::Policy<authz::SiloRole>>, HttpError> {
+) -> Result<HttpResponseOk<shared::Policy<shared::SiloRole>>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
@@ -596,13 +600,13 @@ async fn silo_policy_view(
 #[endpoint {
     method = PUT,
     path = "/v1/system/silos/{silo}/policy",
-    tags = ["system"],
+    tags = ["system/silos"],
 }]
 async fn silo_policy_update(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::SiloPath>,
-    new_policy: TypedBody<shared::Policy<authz::SiloRole>>,
-) -> Result<HttpResponseOk<shared::Policy<authz::SiloRole>>, HttpError> {
+    new_policy: TypedBody<shared::Policy<shared::SiloRole>>,
+) -> Result<HttpResponseOk<shared::Policy<shared::SiloRole>>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let new_policy = new_policy.into_inner();
@@ -622,11 +626,11 @@ async fn silo_policy_update(
 
 // Silo-specific user endpoints
 
-/// List users in a silo
+/// List built-in (system) users in a silo
 #[endpoint {
     method = GET,
     path = "/v1/system/users",
-    tags = ["system"],
+    tags = ["system/silos"],
 }]
 async fn silo_user_list(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -663,11 +667,11 @@ struct UserParam {
     user_id: Uuid,
 }
 
-/// Fetch a user
+/// Fetch a built-in (system) user
 #[endpoint {
     method = GET,
     path = "/v1/system/users/{user_id}",
-    tags = ["system"],
+    tags = ["system/silos"],
 }]
 async fn silo_user_view(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -694,7 +698,7 @@ async fn silo_user_view(
 #[endpoint {
     method = GET,
     path = "/v1/system/identity-providers",
-    tags = ["system"],
+    tags = ["system/silos"],
 }]
 async fn silo_identity_provider_list(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -731,7 +735,7 @@ async fn silo_identity_provider_list(
 #[endpoint {
     method = POST,
     path = "/v1/system/identity-providers/saml",
-    tags = ["system"],
+    tags = ["system/silos"],
 }]
 async fn saml_identity_provider_create(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -760,7 +764,7 @@ async fn saml_identity_provider_create(
 #[endpoint {
     method = GET,
     path = "/v1/system/identity-providers/saml/{provider}",
-    tags = ["system"],
+    tags = ["system/silos"],
 }]
 async fn saml_identity_provider_view(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -802,7 +806,7 @@ async fn saml_identity_provider_view(
 #[endpoint {
     method = POST,
     path = "/v1/system/identity-providers/local/users",
-    tags = ["system"],
+    tags = ["system/silos"],
 }]
 async fn local_idp_user_create(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -831,7 +835,7 @@ async fn local_idp_user_create(
 #[endpoint {
     method = DELETE,
     path = "/v1/system/identity-providers/local/users/{user_id}",
-    tags = ["system"],
+    tags = ["system/silos"],
 }]
 async fn local_idp_user_delete(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -858,7 +862,7 @@ async fn local_idp_user_delete(
 #[endpoint {
     method = POST,
     path = "/v1/system/identity-providers/local/users/{user_id}/set-password",
-    tags = ["system"],
+    tags = ["system/silos"],
 }]
 async fn local_idp_user_set_password(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -1030,7 +1034,7 @@ async fn project_update(
 async fn project_policy_view(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::ProjectPath>,
-) -> Result<HttpResponseOk<shared::Policy<authz::ProjectRole>>, HttpError> {
+) -> Result<HttpResponseOk<shared::Policy<shared::ProjectRole>>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
@@ -1055,8 +1059,8 @@ async fn project_policy_view(
 async fn project_policy_update(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::ProjectPath>,
-    new_policy: TypedBody<shared::Policy<authz::ProjectRole>>,
-) -> Result<HttpResponseOk<shared::Policy<authz::ProjectRole>>, HttpError> {
+    new_policy: TypedBody<shared::Policy<shared::ProjectRole>>,
+) -> Result<HttpResponseOk<shared::Policy<shared::ProjectRole>>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
@@ -1076,11 +1080,88 @@ async fn project_policy_update(
 
 // IP Pools
 
+/// List all IP Pools that can be used by a given project.
+#[endpoint {
+    method = GET,
+    path = "/v1/ip-pools",
+    tags = ["projects"],
+}]
+async fn project_ip_pool_list(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    query_params: Query<PaginatedByNameOrId<params::ProjectSelector>>,
+) -> Result<HttpResponseOk<ResultsPage<IpPool>>, HttpError> {
+    // Per https://github.com/oxidecomputer/omicron/issues/2148
+    // This is currently the same list as /v1/system/ip-pools, that is to say,
+    // IP pools that are *available to* a given project, those being ones that
+    // are not the internal pools for Oxide service usage. This may change
+    // in the future as the scoping of pools is further developed, but for now,
+    // this is literally a near-duplicate of `ip_pool_list`:
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let query = query_params.into_inner();
+        let pag_params = data_page_params_for(&rqctx, &query)?;
+        let scan_params = ScanByNameOrId::from_query(&query)?;
+        let paginated_by = name_or_id_pagination(&pag_params, scan_params)?;
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let project_lookup =
+            nexus.project_lookup(&opctx, scan_params.selector.clone())?;
+        let pools = nexus
+            .project_ip_pools_list(&opctx, &project_lookup, &paginated_by)
+            .await?
+            .into_iter()
+            .map(IpPool::from)
+            .collect();
+        Ok(HttpResponseOk(ScanByNameOrId::results_page(
+            &query,
+            pools,
+            &marker_for_name_or_id,
+        )?))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Fetch an IP pool
+#[endpoint {
+    method = GET,
+    path = "/v1/ip-pools/{pool}",
+    tags = ["projects"],
+}]
+async fn project_ip_pool_view(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<params::IpPoolPath>,
+    project: Query<params::OptionalProjectSelector>,
+) -> Result<HttpResponseOk<views::IpPool>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let nexus = &apictx.nexus;
+        let pool_selector = path_params.into_inner().pool;
+        let project_lookup = if let Some(project) = project.into_inner().project
+        {
+            Some(nexus.project_lookup(&opctx, ProjectSelector { project })?)
+        } else {
+            None
+        };
+        let (authz_pool, pool) = nexus
+            .project_ip_pool_lookup(&opctx, &pool_selector, &project_lookup)?
+            .fetch()
+            .await?;
+        // TODO(2148): once we've actualy implemented filtering to pools belonging to
+        // the specified project, we can remove this internal check.
+        if pool.internal {
+            return Err(authz_pool.not_found().into());
+        }
+        Ok(HttpResponseOk(IpPool::from(pool)))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
 /// List IP pools
 #[endpoint {
     method = GET,
     path = "/v1/system/ip-pools",
-    tags = ["system"],
+    tags = ["system/networking"],
 }]
 async fn ip_pool_list(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -1118,7 +1199,7 @@ pub struct IpPoolPathParam {
 #[endpoint {
     method = POST,
     path = "/v1/system/ip-pools",
-    tags = ["system"],
+    tags = ["system/networking"],
 }]
 async fn ip_pool_create(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -1139,7 +1220,7 @@ async fn ip_pool_create(
 #[endpoint {
     method = GET,
     path = "/v1/system/ip-pools/{pool}",
-    tags = ["system"],
+    tags = ["system/networking"],
 }]
 async fn ip_pool_view(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -1161,7 +1242,7 @@ async fn ip_pool_view(
 #[endpoint {
     method = DELETE,
     path = "/v1/system/ip-pools/{pool}",
-    tags = ["system"],
+    tags = ["system/networking"],
 }]
 async fn ip_pool_delete(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -1183,7 +1264,7 @@ async fn ip_pool_delete(
 #[endpoint {
     method = PUT,
     path = "/v1/system/ip-pools/{pool}",
-    tags = ["system"],
+    tags = ["system/networking"],
 }]
 async fn ip_pool_update(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -1207,7 +1288,7 @@ async fn ip_pool_update(
 #[endpoint {
     method = GET,
     path = "/v1/system/ip-pools-service",
-    tags = ["system"],
+    tags = ["system/networking"],
 }]
 async fn ip_pool_service_view(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -1230,7 +1311,7 @@ type IpPoolRangePaginationParams = PaginationParams<EmptyScanParams, IpNetwork>;
 #[endpoint {
     method = GET,
     path = "/v1/system/ip-pools/{pool}/ranges",
-    tags = ["system"],
+    tags = ["system/networking"],
 }]
 async fn ip_pool_range_list(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -1274,7 +1355,7 @@ async fn ip_pool_range_list(
 #[endpoint {
     method = POST,
     path = "/v1/system/ip-pools/{pool}/ranges/add",
-    tags = ["system"],
+    tags = ["system/networking"],
 }]
 async fn ip_pool_range_add(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -1298,7 +1379,7 @@ async fn ip_pool_range_add(
 #[endpoint {
     method = POST,
     path = "/v1/system/ip-pools/{pool}/ranges/remove",
-    tags = ["system"],
+    tags = ["system/networking"],
 }]
 async fn ip_pool_range_remove(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -1325,7 +1406,7 @@ async fn ip_pool_range_remove(
 #[endpoint {
     method = GET,
     path = "/v1/system/ip-pools-service/ranges",
-    tags = ["system"],
+    tags = ["system/networking"],
 }]
 async fn ip_pool_service_range_list(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -1366,7 +1447,7 @@ async fn ip_pool_service_range_list(
 #[endpoint {
     method = POST,
     path = "/v1/system/ip-pools-service/ranges/add",
-    tags = ["system"],
+    tags = ["system/networking"],
 }]
 async fn ip_pool_service_range_add(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -1387,7 +1468,7 @@ async fn ip_pool_service_range_add(
 #[endpoint {
     method = POST,
     path = "/v1/system/ip-pools-service/ranges/remove",
-    tags = ["system"],
+    tags = ["system/networking"],
 }]
 async fn ip_pool_service_range_remove(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -2299,7 +2380,7 @@ async fn certificate_delete(
 #[endpoint {
     method = POST,
     path = "/v1/system/networking/address-lot",
-    tags = ["system"],
+    tags = ["system/networking"],
 }]
 async fn networking_address_lot_create(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -2325,7 +2406,7 @@ async fn networking_address_lot_create(
 #[endpoint {
     method = DELETE,
     path = "/v1/system/networking/address-lot/{address_lot}",
-    tags = ["system"],
+    tags = ["system/networking"],
 }]
 async fn networking_address_lot_delete(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -2348,7 +2429,7 @@ async fn networking_address_lot_delete(
 #[endpoint {
     method = GET,
     path = "/v1/system/networking/address-lot",
-    tags = ["system"],
+    tags = ["system/networking"],
 }]
 async fn networking_address_lot_list(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -2382,7 +2463,7 @@ async fn networking_address_lot_list(
 #[endpoint {
     method = GET,
     path = "/v1/system/networking/address-lot/{address_lot}/blocks",
-    tags = ["system"],
+    tags = ["system/networking"],
 }]
 async fn networking_address_lot_block_list(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -2418,7 +2499,7 @@ async fn networking_address_lot_block_list(
 #[endpoint {
     method = POST,
     path = "/v1/system/networking/loopback-address",
-    tags = ["system"],
+    tags = ["system/networking"],
 }]
 async fn networking_loopback_address_create(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -2459,7 +2540,7 @@ pub struct LoopbackAddressPath {
 #[endpoint {
     method = DELETE,
     path = "/v1/system/networking/loopback-address/{rack_id}/{switch_location}/{address}/{subnet_mask}",
-    tags = ["system"],
+    tags = ["system/networking"],
 }]
 async fn networking_loopback_address_delete(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -2494,7 +2575,7 @@ async fn networking_loopback_address_delete(
 #[endpoint {
     method = GET,
     path = "/v1/system/networking/loopback-address",
-    tags = ["system"],
+    tags = ["system/networking"],
 }]
 async fn networking_loopback_address_list(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -2526,7 +2607,7 @@ async fn networking_loopback_address_list(
 #[endpoint {
     method = POST,
     path = "/v1/system/networking/switch-port-settings",
-    tags = ["system"],
+    tags = ["system/networking"],
 }]
 async fn networking_switch_port_settings_create(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -2549,7 +2630,7 @@ async fn networking_switch_port_settings_create(
 #[endpoint {
     method = DELETE,
     path = "/v1/system/networking/switch-port-settings",
-    tags = ["system"],
+    tags = ["system/networking"],
 }]
 async fn networking_switch_port_settings_delete(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -2570,7 +2651,7 @@ async fn networking_switch_port_settings_delete(
 #[endpoint {
     method = GET,
     path = "/v1/system/networking/switch-port-settings",
-    tags = ["system"],
+    tags = ["system/networking"],
 }]
 async fn networking_switch_port_settings_list(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -2606,7 +2687,7 @@ async fn networking_switch_port_settings_list(
 #[endpoint {
     method = GET,
     path = "/v1/system/networking/switch-port-settings/{port}",
-    tags = ["system"],
+    tags = ["system/networking"],
 }]
 async fn networking_switch_port_settings_view(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -2627,7 +2708,7 @@ async fn networking_switch_port_settings_view(
 #[endpoint {
     method = GET,
     path = "/v1/system/hardware/switch-port",
-    tags = ["system"],
+    tags = ["system/hardware"],
 }]
 async fn networking_switch_port_list(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -2659,7 +2740,7 @@ async fn networking_switch_port_list(
 #[endpoint {
     method = POST,
     path = "/v1/system/hardware/switch-port/{port}/settings",
-    tags = ["system"],
+    tags = ["system/hardware"],
 }]
 async fn networking_switch_port_apply_settings(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -2686,7 +2767,7 @@ async fn networking_switch_port_apply_settings(
 #[endpoint {
     method = DELETE,
     path = "/v1/system/hardware/switch-port/{port}/settings",
-    tags = ["system"],
+    tags = ["system/hardware"],
 }]
 async fn networking_switch_port_clear_settings(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -4017,7 +4098,7 @@ async fn vpc_router_route_update(
 #[endpoint {
     method = GET,
     path = "/v1/system/hardware/racks",
-    tags = ["system"],
+    tags = ["system/hardware"],
 }]
 async fn rack_list(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -4054,7 +4135,7 @@ struct RackPathParam {
 #[endpoint {
     method = GET,
     path = "/v1/system/hardware/racks/{rack_id}",
-    tags = ["system"],
+    tags = ["system/hardware"],
 }]
 async fn rack_view(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -4077,7 +4158,7 @@ async fn rack_view(
 #[endpoint {
     method = GET,
     path = "/v1/system/hardware/sleds",
-    tags = ["system"],
+    tags = ["system/hardware"],
 }]
 async fn sled_list(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -4107,7 +4188,7 @@ async fn sled_list(
 #[endpoint {
     method = GET,
     path = "/v1/system/hardware/sleds/{sled_id}",
-    tags = ["system"],
+    tags = ["system/hardware"],
 }]
 async fn sled_view(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -4129,7 +4210,7 @@ async fn sled_view(
 #[endpoint {
     method = GET,
     path = "/v1/system/hardware/sleds/{sled_id}/instances",
-    tags = ["system"],
+    tags = ["system/hardware"],
 }]
 async fn sled_instance_list(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -4168,7 +4249,7 @@ async fn sled_instance_list(
 #[endpoint {
     method = GET,
     path = "/v1/system/hardware/disks",
-    tags = ["system"],
+    tags = ["system/hardware"],
 }]
 async fn physical_disk_list(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -4200,7 +4281,7 @@ async fn physical_disk_list(
 #[endpoint {
     method = GET,
     path = "/v1/system/hardware/switches",
-    tags = ["system"],
+    tags = ["system/hardware"],
 }]
 async fn switch_list(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -4230,7 +4311,7 @@ async fn switch_list(
 #[endpoint {
     method = GET,
     path = "/v1/system/hardware/switches/{switch_id}",
-    tags = ["system"],
+    tags = ["system/hardware"],
  }]
 async fn switch_view(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -4257,7 +4338,7 @@ async fn switch_view(
 #[endpoint {
     method = GET,
     path = "/v1/system/hardware/sleds/{sled_id}/disks",
-    tags = ["system"],
+    tags = ["system/hardware"],
 }]
 async fn sled_physical_disk_list(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -4293,9 +4374,15 @@ async fn sled_physical_disk_list(
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct SystemMetricParams {
-    /// The UUID of the container being queried
-    // TODO: I might want to force the caller to specify type here?
-    pub id: Uuid,
+    /// A silo ID. If unspecified, get aggregrate metrics across all silos.
+    pub silo_id: Option<Uuid>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct SiloMetricParams {
+    /// A project ID. If unspecified, get aggregrate metrics across all projects
+    /// in current silo.
+    pub project_id: Option<Uuid>,
 }
 
 #[derive(Display, Deserialize, JsonSchema)]
@@ -4316,7 +4403,7 @@ struct SystemMetricsPathParam {
 #[endpoint {
      method = GET,
      path = "/v1/system/metrics/{metric_name}",
-     tags = ["system"],
+     tags = ["system/metrics"],
 }]
 async fn system_metric(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -4324,22 +4411,73 @@ async fn system_metric(
     pag_params: Query<
         PaginationParams<params::ResourceMetrics, params::ResourceMetrics>,
     >,
-    other_params: Query<SystemMetricParams>,
+    other_params: Query<params::OptionalSiloSelector>,
 ) -> Result<HttpResponseOk<ResultsPage<oximeter_db::Measurement>>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let nexus = &apictx.nexus;
         let metric_name = path_params.into_inner().metric_name;
-        let resource_id = other_params.into_inner().id;
+        let pagination = pag_params.into_inner();
+        let limit = rqctx.page_limit(&pagination)?;
+
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let silo_lookup = match other_params.into_inner().silo {
+            Some(silo) => Some(nexus.silo_lookup(&opctx, silo)?),
+            _ => None,
+        };
+
+        let result = nexus
+            .system_metric_list(
+                &opctx,
+                metric_name,
+                silo_lookup,
+                pagination,
+                limit,
+            )
+            .await?;
+
+        Ok(HttpResponseOk(result))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Access metrics data
+#[endpoint {
+     method = GET,
+     path = "/v1/metrics/{metric_name}",
+     tags = ["metrics"],
+}]
+async fn silo_metric(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<SystemMetricsPathParam>,
+    pag_params: Query<
+        PaginationParams<params::ResourceMetrics, params::ResourceMetrics>,
+    >,
+    other_params: Query<params::OptionalProjectSelector>,
+) -> Result<HttpResponseOk<ResultsPage<oximeter_db::Measurement>>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let metric_name = path_params.into_inner().metric_name;
+
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let project_lookup = match other_params.into_inner().project {
+            Some(project) => {
+                let project_selector = params::ProjectSelector { project };
+                Some(nexus.project_lookup(&opctx, project_selector)?)
+            }
+            _ => None,
+        };
+
         let pagination = pag_params.into_inner();
         let limit = rqctx.page_limit(&pagination)?;
 
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
         let result = nexus
-            .system_metric_lookup(
+            .silo_metric_list(
                 &opctx,
                 metric_name,
-                resource_id,
+                project_lookup,
                 pagination,
                 limit,
             )
@@ -4356,7 +4494,8 @@ async fn system_metric(
 #[endpoint {
      method = POST,
      path = "/v1/system/update/refresh",
-     tags = ["system"],
+     tags = ["system/update"],
+     unpublished = true,
 }]
 async fn system_update_refresh(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -4375,7 +4514,8 @@ async fn system_update_refresh(
 #[endpoint {
      method = GET,
      path = "/v1/system/update/version",
-     tags = ["system"],
+     tags = ["system/update"],
+     unpublished = true,
 }]
 async fn system_version(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -4412,7 +4552,8 @@ async fn system_version(
 #[endpoint {
      method = GET,
      path = "/v1/system/update/components",
-     tags = ["system"],
+     tags = ["system/update"],
+     unpublished = true,
 }]
 async fn system_component_version_list(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -4444,7 +4585,8 @@ async fn system_component_version_list(
 #[endpoint {
      method = GET,
      path = "/v1/system/update/updates",
-     tags = ["system"],
+     tags = ["system/update"],
+     unpublished = true,
 }]
 async fn system_update_list(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -4475,7 +4617,8 @@ async fn system_update_list(
 #[endpoint {
      method = GET,
      path = "/v1/system/update/updates/{version}",
-     tags = ["system"],
+     tags = ["system/update"],
+     unpublished = true,
 }]
 async fn system_update_view(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -4497,7 +4640,8 @@ async fn system_update_view(
 #[endpoint {
     method = GET,
     path = "/v1/system/update/updates/{version}/components",
-    tags = ["system"],
+    tags = ["system/update"],
+    unpublished = true,
 }]
 async fn system_update_components_list(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -4523,7 +4667,8 @@ async fn system_update_components_list(
 #[endpoint {
     method = POST,
     path = "/v1/system/update/start",
-    tags = ["system"],
+    tags = ["system/update"],
+    unpublished = true,
 }]
 async fn system_update_start(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -4572,7 +4717,8 @@ async fn system_update_start(
 #[endpoint {
     method = POST,
     path = "/v1/system/update/stop",
-    tags = ["system"],
+    tags = ["system/update"],
+    unpublished = true,
 }]
 async fn system_update_stop(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -4607,7 +4753,8 @@ async fn system_update_stop(
 #[endpoint {
      method = GET,
      path = "/v1/system/update/deployments",
-     tags = ["system"],
+     tags = ["system/update"],
+     unpublished = true,
 }]
 async fn update_deployments_list(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -4638,7 +4785,8 @@ async fn update_deployments_list(
 #[endpoint {
      method = GET,
      path = "/v1/system/update/deployments/{id}",
-     tags = ["system"],
+     tags = ["system/update"],
+     unpublished = true,
 }]
 async fn update_deployment_view(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -4758,7 +4906,7 @@ async fn group_view(
 #[endpoint {
     method = GET,
     path = "/v1/system/users-builtin",
-    tags = ["system"],
+    tags = ["system/silos"],
 }]
 async fn user_builtin_list(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -4790,7 +4938,7 @@ async fn user_builtin_list(
 #[endpoint {
     method = GET,
     path = "/v1/system/users-builtin/{user}",
-    tags = ["system"],
+    tags = ["system/silos"],
 }]
 async fn user_builtin_view(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -4909,7 +5057,7 @@ pub async fn current_user_view(
     let handler = async {
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
         let user = nexus.silo_user_fetch_self(&opctx).await?;
-        let silo = nexus.silo_user_fetch_silo(&opctx).await?;
+        let (_, silo) = nexus.current_silo_lookup(&opctx)?.fetch().await?;
         Ok(HttpResponseOk(views::CurrentUser {
             user: user.into(),
             silo_name: silo.name().clone(),

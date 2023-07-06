@@ -32,7 +32,7 @@ pub mod background;
 mod certificate;
 mod device_auth;
 mod disk;
-mod external_endpoints;
+pub mod external_endpoints;
 mod external_ip;
 mod iam;
 mod image;
@@ -66,7 +66,7 @@ pub mod sagas;
 // TODO: When referring to API types, we should try to include
 // the prefix unless it is unambiguous.
 
-pub(crate) const MAX_DISKS_PER_INSTANCE: u32 = 8;
+pub(crate) use nexus_db_queries::db::queries::disk::MAX_DISKS_PER_INSTANCE;
 
 pub(crate) const MAX_NICS_PER_INSTANCE: usize = 8;
 
@@ -178,13 +178,22 @@ impl Nexus {
         {
             (dpd_address.ip().to_string(), dpd_address.port())
         } else {
-            let addr = resolver
-                .lock()
-                .await
-                .lookup_socket_v6(ServiceName::Dendrite)
-                .await
-                .map_err(|e| format!("Cannot access Dendrite address: {e}"))?;
-            (addr.ip().to_string(), addr.port())
+            loop {
+                match resolver
+                    .lock()
+                    .await
+                    .lookup_socket_v6(ServiceName::Dendrite)
+                    .await
+                    .map_err(|e| format!("Cannot access Dendrite address: {e}"))
+                {
+                    Ok(addr) => break (addr.ip().to_string(), addr.port()),
+                    Err(e) => {
+                        warn!(log, "Failed to access Dendrite address: {e}");
+                        tokio::time::sleep(std::time::Duration::from_secs(1))
+                            .await;
+                    }
+                }
+            }
         };
         let dpd_client = Arc::new(dpd_client::Client::new(
             &format!("http://[{dpd_host}]:{dpd_port}"),
@@ -339,15 +348,15 @@ impl Nexus {
         &self,
         tls_enabled: bool,
     ) -> Option<rustls::ServerConfig> {
-        if !tls_enabled {
-            return None;
-        }
-
         // Wait for the background task to complete at least once.  We don't
         // care about its value.  To do this, we need our own copy of the
         // channel.
         let mut rx = self.background_tasks.external_endpoints.clone();
         let _ = rx.wait_for(|s| s.is_some()).await;
+        if !tls_enabled {
+            return None;
+        }
+
         let mut rustls_cfg = rustls::ServerConfig::builder()
             .with_safe_default_cipher_suites()
             .with_safe_default_kx_groups()
@@ -436,6 +445,16 @@ impl Nexus {
             self.log.new(o!("component" => "ServiceBalancer")),
             Arc::clone(&self.authz),
             authn::Context::internal_service_balancer(),
+            Arc::clone(&self.db_datastore),
+        )
+    }
+
+    /// Returns an [`OpContext`] used for internal API calls.
+    pub fn opctx_for_internal_api(&self) -> OpContext {
+        OpContext::for_background(
+            self.log.new(o!("component" => "InternalApi")),
+            Arc::clone(&self.authz),
+            authn::Context::internal_api(),
             Arc::clone(&self.db_datastore),
         )
     }
@@ -643,13 +662,6 @@ impl Nexus {
         opctx: &'a OpContext,
     ) -> db::lookup::LookupPath {
         db::lookup::LookupPath::new(opctx, &self.db_datastore)
-    }
-
-    pub async fn set_resolver(
-        &self,
-        resolver: internal_dns::resolver::Resolver,
-    ) {
-        *self.resolver.lock().await = resolver;
     }
 
     pub async fn resolver(&self) -> internal_dns::resolver::Resolver {

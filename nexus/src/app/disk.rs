@@ -12,7 +12,6 @@ use crate::db::lookup;
 use crate::db::lookup::LookupPath;
 use crate::external_api::params;
 use nexus_db_queries::context::OpContext;
-use nexus_types::identity::Resource;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::CreateResult;
@@ -149,19 +148,10 @@ impl super::Nexus {
                     .fetch()
                     .await?;
 
-                // Reject disks where the block size doesn't evenly divide the
-                // total size
-                if (params.size.to_bytes()
-                    % db_image.block_size.to_bytes() as u64)
-                    != 0
-                {
-                    return Err(Error::InvalidValue {
-                        label: String::from("size and block_size"),
-                        message: String::from(
-                            "total size must be a multiple of global image's block size",
-                        ),
-                    });
-                }
+                validate_disk_create_params(
+                    &params,
+                    db_image.block_size.to_bytes().into(),
+                )?;
 
                 // If the size of the image is greater than the size of the
                 // disk, return an error.
@@ -173,32 +163,6 @@ impl super::Nexus {
                             db_image.size.to_bytes(),
                         ),
                     ));
-                }
-
-                // Reject disks where the size isn't at least
-                // MIN_DISK_SIZE_BYTES
-                if params.size.to_bytes() < params::MIN_DISK_SIZE_BYTES as u64 {
-                    return Err(Error::InvalidValue {
-                        label: String::from("size"),
-                        message: format!(
-                            "total size must be at least {}",
-                            ByteCount::from(params::MIN_DISK_SIZE_BYTES)
-                        ),
-                    });
-                }
-
-                // Reject disks where the MIN_DISK_SIZE_BYTES doesn't evenly
-                // divide the size
-                if (params.size.to_bytes() % params::MIN_DISK_SIZE_BYTES as u64)
-                    != 0
-                {
-                    return Err(Error::InvalidValue {
-                        label: String::from("size"),
-                        message: format!(
-                            "total size must be a multiple of {}",
-                            ByteCount::from(params::MIN_DISK_SIZE_BYTES)
-                        ),
-                    });
                 }
             }
             params::DiskSource::ImportingBlocks { block_size } => {
@@ -603,15 +567,14 @@ impl super::Nexus {
         disk_lookup: &lookup::Disk<'_>,
         finalize_params: &params::FinalizeDisk,
     ) -> UpdateResult<()> {
-        let (authz_silo, authz_proj, authz_disk, db_disk) =
-            disk_lookup.fetch_for(authz::Action::Modify).await?;
+        let (authz_silo, authz_proj, authz_disk) =
+            disk_lookup.lookup_for(authz::Action::Modify).await?;
 
         let saga_params = sagas::finalize_disk::Params {
             serialized_authn: authn::saga::Serialized::for_opctx(opctx),
             silo_id: authz_silo.id(),
             project_id: authz_proj.id(),
             disk_id: authz_disk.id(),
-            disk_name: db_disk.name().clone(),
             snapshot_name: finalize_params.snapshot_name.clone(),
         };
 

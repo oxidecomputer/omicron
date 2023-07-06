@@ -847,20 +847,10 @@
         "type": "object",
         "properties": {
           "cert": {
-            "type": "array",
-            "items": {
-              "type": "integer",
-              "format": "uint8",
-              "minimum": 0
-            }
+            "type": "string"
           },
           "key": {
-            "type": "array",
-            "items": {
-              "type": "integer",
-              "format": "uint8",
-              "minimum": 0
-            }
+            "type": "string"
           }
         },
         "required": [
@@ -931,7 +921,9 @@
         "enum": [
           "crucible",
           "cockroach",
-          "clickhouse"
+          "clickhouse",
+          "external_dns",
+          "internal_dns"
         ]
       },
       "DatasetPutRequest": {
@@ -2046,6 +2038,15 @@
           "last"
         ]
       },
+      "MacAddr": {
+        "example": "ff:ff:ff:ff:ff:ff",
+        "title": "A MAC address",
+        "description": "A Media Access Control address, in EUI-48 format",
+        "type": "string",
+        "pattern": "^([0-9a-fA-F]{0,2}:){5}[0-9a-fA-F]{0,2}$",
+        "minLength": 5,
+        "maxLength": 17
+      },
       "Measurement": {
         "description": "A `Measurement` is a timestamped datum from a single metric",
         "type": "object",
@@ -2456,19 +2457,23 @@
         "properties": {
           "gateway_ip": {
             "description": "Gateway address",
-            "type": "string"
+            "type": "string",
+            "format": "ipv4"
           },
           "infra_ip_first": {
             "description": "First ip address to be used for configuring network infrastructure",
-            "type": "string"
+            "type": "string",
+            "format": "ipv4"
           },
           "infra_ip_last": {
             "description": "Last ip address to be used for configuring network infrastructure",
-            "type": "string"
+            "type": "string",
+            "format": "ipv4"
           },
           "uplink_ip": {
             "description": "IP Address to apply to switchport (must be in infra_ip pool)",
-            "type": "string"
+            "type": "string",
+            "format": "ipv4"
           },
           "uplink_port": {
             "description": "Switchport to use for external connectivity",
@@ -2489,6 +2494,13 @@
                 "$ref": "#/components/schemas/PortSpeed"
               }
             ]
+          },
+          "uplink_vid": {
+            "nullable": true,
+            "description": "VLAN id to use for uplink",
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
           }
         },
         "required": [
@@ -2768,16 +2780,76 @@
           {
             "type": "object",
             "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "clickhouse"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "cockroach"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "crucible"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "crucible_pantry"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
               "content": {
                 "type": "object",
                 "properties": {
                   "external_address": {
                     "type": "string",
                     "format": "ip"
+                  },
+                  "nic": {
+                    "$ref": "#/components/schemas/ServiceNic"
                   }
                 },
                 "required": [
-                  "external_address"
+                  "external_address",
+                  "nic"
                 ]
               },
               "type": {
@@ -2815,10 +2887,14 @@
                   "external_address": {
                     "type": "string",
                     "format": "ip"
+                  },
+                  "nic": {
+                    "$ref": "#/components/schemas/ServiceNic"
                   }
                 },
                 "required": [
-                  "external_address"
+                  "external_address",
+                  "nic"
                 ]
               },
               "type": {
@@ -2878,37 +2954,25 @@
           {
             "type": "object",
             "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "crucible_pantry"
-                ]
-              }
-            },
-            "required": [
-              "type"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
               "content": {
                 "type": "object",
                 "properties": {
-                  "snat_cfg": {
-                    "nullable": true,
-                    "allOf": [
-                      {
-                        "$ref": "#/components/schemas/SourceNatConfig"
-                      }
-                    ]
+                  "nic": {
+                    "$ref": "#/components/schemas/ServiceNic"
+                  },
+                  "snat": {
+                    "$ref": "#/components/schemas/SourceNatConfig"
                   }
-                }
+                },
+                "required": [
+                  "nic",
+                  "snat"
+                ]
               },
               "type": {
                 "type": "string",
                 "enum": [
-                  "ntp"
+                  "boundary_ntp"
                 ]
               }
             },
@@ -2916,7 +2980,47 @@
               "content",
               "type"
             ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "internal_ntp"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
           }
+        ]
+      },
+      "ServiceNic": {
+        "description": "Describes the RSS allocated values for a service vnic",
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "ip": {
+            "type": "string",
+            "format": "ip"
+          },
+          "mac": {
+            "$ref": "#/components/schemas/MacAddr"
+          },
+          "name": {
+            "$ref": "#/components/schemas/Name"
+          }
+        },
+        "required": [
+          "id",
+          "ip",
+          "mac",
+          "name"
         ]
       },
       "ServicePutRequest": {

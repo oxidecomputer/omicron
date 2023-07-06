@@ -513,11 +513,8 @@ $ ./.github/buildomat/jobs/package.sh
 
 This will create a `/work` directory with a few tarballs in it. Building a host
 image requires a checkout of
-https://github.com/oxidecomputer/helios-engvm[helios]; the instructions below
-use `$HELIOS_PATH` for the path to this repository. To match CI builds, you
-should check out the commit specified in `./tools/helios_version`. (The script
-will check your current commit hash and will refuse to run if it doesn't match
-unless you pass `-f`.)
+https://github.com/oxidecomputer/helios[helios]; the instructions below
+use `$HELIOS_PATH` for the path to this repository.
 
 To build a standard host image:
 

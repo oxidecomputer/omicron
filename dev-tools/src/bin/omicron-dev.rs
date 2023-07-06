@@ -365,21 +365,29 @@ async fn cmd_run_all(args: &RunAllArgs) -> Result<(), anyhow::Error> {
         cptestctx.database.temp_dir().display()
     );
     println!(
+        "omicron-dev: internal DNS HTTP:     http://{}",
+        cptestctx.internal_dns.dropshot_server.local_addr()
+    );
+    println!(
+        "omicron-dev: internal DNS:          {}",
+        cptestctx.internal_dns.dns_server.local_address()
+    );
+    println!(
         "omicron-dev: external DNS name:     {}",
         cptestctx.external_dns_zone_name,
     );
     println!(
         "omicron-dev: external DNS HTTP:     http://{}",
-        cptestctx.external_dns_config_server.local_addr()
+        cptestctx.external_dns.dropshot_server.local_addr()
     );
     println!(
         "omicron-dev: external DNS:          {}",
-        cptestctx.external_dns_server.local_address()
+        cptestctx.external_dns.dns_server.local_address()
     );
     println!(
         "omicron-dev:   e.g. `dig @{} -p {} {}.sys.{}`",
-        cptestctx.external_dns_server.local_address().ip(),
-        cptestctx.external_dns_server.local_address().port(),
+        cptestctx.external_dns.dns_server.local_address().ip(),
+        cptestctx.external_dns.dns_server.local_address().port(),
         cptestctx.silo_name,
         cptestctx.external_dns_zone_name,
     );
@@ -435,6 +443,7 @@ async fn cmd_cert_create(args: &CertCreateArgs) -> Result<(), anyhow::Error> {
     Ok(())
 }
 
+#[cfg_attr(not(mac), allow(clippy::useless_conversion))]
 fn write_private_file(
     path: &Utf8Path,
     contents: &[u8],
@@ -444,7 +453,7 @@ fn write_private_file(
     let mut file = std::fs::OpenOptions::new()
         .write(true)
         .create_new(true)
-        .mode(perms)
+        .mode(perms.into()) // into() needed on mac only
         .open(path)
         .with_context(|| format!("open {:?} for writing", path))?;
     file.write_all(contents).with_context(|| format!("write to {:?}", path))

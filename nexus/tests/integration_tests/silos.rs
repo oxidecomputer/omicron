@@ -7,7 +7,7 @@ use nexus_db_queries::context::OpContext;
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use nexus_test_utils::resource_helpers::{
     create_local_user, create_project, create_silo, grant_iam, object_create,
-    objects_list_page_authz,
+    objects_list_page_authz, projects_list,
 };
 use nexus_test_utils_macros::nexus_test;
 use omicron_common::api::external::ObjectIdentity;
@@ -16,7 +16,7 @@ use omicron_common::api::external::{
 };
 use omicron_nexus::authn::silos::{AuthenticatedSubject, IdentityProviderType};
 use omicron_nexus::authn::{USER_TEST_PRIVILEGED, USER_TEST_UNPRIVILEGED};
-use omicron_nexus::authz::{self, SiloRole};
+use omicron_nexus::authz::{self};
 use omicron_nexus::db;
 use omicron_nexus::db::fixed_data::silo::{DEFAULT_SILO, SILO_ID};
 use omicron_nexus::db::identity::Asset;
@@ -27,7 +27,7 @@ use omicron_nexus::external_api::views::{
 use omicron_nexus::external_api::{params, shared};
 use omicron_test_utils::dev::poll::{wait_for_condition, CondCheckError};
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::fmt::Write;
 use std::str::FromStr;
 
@@ -35,6 +35,7 @@ use base64::Engine;
 use http::method::Method;
 use http::StatusCode;
 use httptest::{matchers::*, responders::*, Expectation, Server};
+use omicron_nexus::external_api::shared::{FleetRole, SiloRole};
 use std::convert::Infallible;
 use std::net::Ipv4Addr;
 use std::time::Duration;
@@ -66,6 +67,7 @@ async fn test_silos(cptestctx: &ControlPlaneTestContext) {
                 identity_mode: shared::SiloIdentityMode::LocalOnly,
                 admin_group_name: None,
                 tls_certificates: vec![],
+                mapped_fleet_roles: Default::default(),
             },
         )
         .authn_as(AuthnMode::PrivilegedUser)
@@ -163,11 +165,8 @@ async fn test_silos(cptestctx: &ControlPlaneTestContext) {
 
     // default silo project shows up in default silo
     let projects_in_default_silo =
-        NexusRequest::object_get(client, "/v1/projects")
-            .authn_as(AuthnMode::PrivilegedUser)
-            .execute_and_parse_unwrap::<dropshot::ResultsPage<Project>>()
-            .await;
-    assert_eq!(projects_in_default_silo.items.len(), 1);
+        projects_list(client, "/v1/projects", "", None).await;
+    assert_eq!(projects_in_default_silo.len(), 1);
 
     // default silo project does not show up in our silo
     let projects_in_our_silo = NexusRequest::object_get(client, "/v1/projects")
@@ -225,8 +224,7 @@ async fn test_silos(cptestctx: &ControlPlaneTestContext) {
     .expect("failed to delete test Vpc");
 
     // Verify GET /v1/projects works with built-in user auth
-    let projects =
-        objects_list_page_authz::<Project>(client, "/v1/projects").await.items;
+    let projects = projects_list(client, "/v1/projects", "", None).await;
     assert_eq!(projects.len(), 1);
     assert_eq!(projects[0].identity.name, "someproj");
 
@@ -285,6 +283,7 @@ async fn test_silo_admin_group(cptestctx: &ControlPlaneTestContext) {
             identity_mode: shared::SiloIdentityMode::SamlJit,
             admin_group_name: Some("administrator".into()),
             tls_certificates: vec![],
+            mapped_fleet_roles: Default::default(),
         },
     )
     .await;
@@ -554,7 +553,7 @@ async fn test_deleting_a_silo_deletes_the_idp(
             client,
             Method::GET,
             &format!(
-                "/login/{}/saml/{}",
+                "/login/{}/saml/{}/redirect",
                 SILO_NAME, silo_saml_idp.identity.name
             ),
         )
@@ -610,7 +609,10 @@ async fn test_saml_idp_metadata_data_valid(
         RequestBuilder::new(
             client,
             Method::GET,
-            &format!("/login/blahblah/saml/{}", silo_saml_idp.identity.name),
+            &format!(
+                "/login/blahblah/saml/{}/redirect",
+                silo_saml_idp.identity.name
+            ),
         )
         .expect_status(Some(StatusCode::FOUND)),
     )
@@ -1937,7 +1939,7 @@ async fn test_local_silo_constraints(cptestctx: &ControlPlaneTestContext) {
         client,
         StatusCode::NOT_FOUND,
         Method::GET,
-        "/login/fixed/saml/foo",
+        "/login/fixed/saml/foo/redirect",
     )
     .execute()
     .await
@@ -2144,7 +2146,10 @@ pub async fn verify_silo_dns_name(
     wait_for_condition(
         || async {
             let found = match cptestctx
-                .external_dns_resolver
+                .external_dns
+                .resolver()
+                .await
+                .expect("Failed to create external DNS resolver")
                 .ipv4_lookup(&dns_name)
                 .await
             {
@@ -2178,4 +2183,255 @@ pub async fn verify_silo_dns_name(
     )
     .await
     .expect("failed to verify external DNS configuration");
+}
+
+// Test the basic behavior of the Silo-level IAM policy that supports
+// configuring Silo roles to confer Fleet-level roles.  Because we don't support
+// modifying Silos at all, we have to use separate Silos to test this behavior.
+//
+// We'll create a few Silos for testing:
+//
+// - default-policy: uses the default conferred-roles policy
+// - viewer-policy: silo viewers get fleet viewer role
+// - admin-policy: silo admins get fleet admin role
+//
+// For each of these Silos, we'll create an admin user in that Silo and test
+// what privileges they have.
+//
+// This is not an exhaustive test of the policy choices here.  That's done
+// in the "policy_test" unit test in Nexus.  This is an end-to-end test
+// exercising _that_ this policy seems to be used when it should be.
+#[nexus_test]
+async fn test_silo_authn_policy(cptestctx: &ControlPlaneTestContext) {
+    let client = &cptestctx.external_client;
+
+    let test_cases = [
+        ("default-policy", ExpectedFleetPrivileges::None, BTreeMap::new()),
+        (
+            "viewer-policy",
+            ExpectedFleetPrivileges::ReadOnly,
+            BTreeMap::from([(
+                SiloRole::Viewer,
+                BTreeSet::from([FleetRole::Viewer]),
+            )]),
+        ),
+        // It's important to test the case of someone with "Fleet Collaborator"
+        // because that's the only role that would allow someone to create
+        // ordinary Silos but _not_ Silos that confer additional privileges.
+        // Thus, this is the only case that tests that we don't allow this
+        // potentially dangerous privilege escalation!
+        (
+            "collaborator-policy",
+            ExpectedFleetPrivileges::CreateSilo,
+            BTreeMap::from([(
+                SiloRole::Admin,
+                BTreeSet::from([FleetRole::Collaborator]),
+            )]),
+        ),
+        (
+            "admin-policy",
+            ExpectedFleetPrivileges::CreatePrivilegedSilo,
+            BTreeMap::from([(
+                SiloRole::Admin,
+                BTreeSet::from([FleetRole::Admin]),
+            )]),
+        ),
+    ];
+
+    for (label, expected_privileges, policy) in test_cases {
+        println!("test case: {:?}", label);
+
+        // Create a Silo with the expected policy.
+        let silo_name = label.parse().unwrap();
+        let silo = NexusRequest::objects_post(
+            client,
+            "/v1/system/silos",
+            &params::SiloCreate {
+                identity: IdentityMetadataCreateParams {
+                    name: silo_name,
+                    description: String::new(),
+                },
+                discoverable: false,
+                identity_mode: shared::SiloIdentityMode::LocalOnly,
+                admin_group_name: None,
+                tls_certificates: vec![],
+                mapped_fleet_roles: policy,
+            },
+        )
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap()
+        .parsed_body::<views::Silo>()
+        .unwrap();
+
+        // Create an administrator in this Silo.
+        let admin_user = create_local_user(
+            client,
+            &silo,
+            &(format!("{}-user", label).parse().unwrap()),
+            params::UserPassword::InvalidPassword,
+        )
+        .await;
+        grant_iam(
+            client,
+            &format!("/v1/system/silos/{}", label),
+            SiloRole::Admin,
+            admin_user.id,
+            AuthnMode::PrivilegedUser,
+        )
+        .await;
+
+        // See what Fleet-level privileges they have.
+        check_fleet_privileges(
+            client,
+            &AuthnMode::SiloUser(admin_user.id),
+            expected_privileges,
+        )
+        .await;
+    }
+}
+
+enum ExpectedFleetPrivileges {
+    None,
+    ReadOnly,
+    CreateSilo,
+    CreatePrivilegedSilo,
+}
+
+async fn check_fleet_privileges(
+    client: &dropshot::test_util::ClientTestContext,
+    authn_mode: &AuthnMode,
+    expected: ExpectedFleetPrivileges,
+) {
+    // To test reading the fleet, we try listing racks.
+    const URL_RO: &'static str = "/v1/system/hardware/racks";
+    let nexus_request = if let ExpectedFleetPrivileges::None = expected {
+        NexusRequest::expect_failure(
+            client,
+            http::StatusCode::FORBIDDEN,
+            http::Method::GET,
+            URL_RO,
+        )
+    } else {
+        NexusRequest::object_get(client, URL_RO)
+    };
+    nexus_request.authn_as(authn_mode.clone()).execute().await.unwrap();
+
+    // Next, see if the user can create an unprivileged Silo (i.e., one that
+    // confers no Fleet-level roles).
+    const URL_SILOS: &'static str = "/v1/system/silos";
+    const SILO_NAME: &'static str = "probe-silo";
+    let body = params::SiloCreate {
+        identity: IdentityMetadataCreateParams {
+            name: SILO_NAME.parse().unwrap(),
+            description: String::new(),
+        },
+        discoverable: false,
+        identity_mode: shared::SiloIdentityMode::LocalOnly,
+        admin_group_name: None,
+        tls_certificates: vec![],
+        mapped_fleet_roles: BTreeMap::new(),
+    };
+    let (do_delete, nexus_request) = match expected {
+        ExpectedFleetPrivileges::None | ExpectedFleetPrivileges::ReadOnly => (
+            false,
+            NexusRequest::expect_failure_with_body(
+                client,
+                http::StatusCode::FORBIDDEN,
+                http::Method::POST,
+                URL_SILOS,
+                &body,
+            ),
+        ),
+        ExpectedFleetPrivileges::CreateSilo
+        | ExpectedFleetPrivileges::CreatePrivilegedSilo => (
+            true,
+            NexusRequest::objects_post(
+                client,
+                URL_SILOS,
+                &params::SiloCreate {
+                    identity: IdentityMetadataCreateParams {
+                        name: SILO_NAME.parse().unwrap(),
+                        description: String::new(),
+                    },
+                    discoverable: false,
+                    identity_mode: shared::SiloIdentityMode::LocalOnly,
+                    admin_group_name: None,
+                    tls_certificates: vec![],
+                    mapped_fleet_roles: BTreeMap::new(),
+                },
+            ),
+        ),
+    };
+    nexus_request.authn_as(authn_mode.clone()).execute().await.unwrap();
+
+    if do_delete {
+        // Try to delete what we created.
+        let url = format!("{}/{}", URL_SILOS, SILO_NAME);
+        NexusRequest::object_delete(client, &url)
+            .authn_as(authn_mode.clone())
+            .execute()
+            .await
+            .unwrap();
+    }
+
+    // Last, see if the user can create a privileged Silo.
+    let body = params::SiloCreate {
+        identity: IdentityMetadataCreateParams {
+            name: SILO_NAME.parse().unwrap(),
+            description: String::new(),
+        },
+        discoverable: false,
+        identity_mode: shared::SiloIdentityMode::LocalOnly,
+        admin_group_name: None,
+        tls_certificates: vec![],
+        mapped_fleet_roles: BTreeMap::from([(
+            SiloRole::Admin,
+            BTreeSet::from([FleetRole::Viewer]),
+        )]),
+    };
+    let (do_delete, nexus_request) = match expected {
+        ExpectedFleetPrivileges::None
+        | ExpectedFleetPrivileges::ReadOnly
+        | ExpectedFleetPrivileges::CreateSilo => (
+            false,
+            NexusRequest::expect_failure_with_body(
+                client,
+                http::StatusCode::FORBIDDEN,
+                http::Method::POST,
+                URL_SILOS,
+                &body,
+            ),
+        ),
+        ExpectedFleetPrivileges::CreatePrivilegedSilo => (
+            true,
+            NexusRequest::objects_post(
+                client,
+                URL_SILOS,
+                &params::SiloCreate {
+                    identity: IdentityMetadataCreateParams {
+                        name: SILO_NAME.parse().unwrap(),
+                        description: String::new(),
+                    },
+                    discoverable: false,
+                    identity_mode: shared::SiloIdentityMode::LocalOnly,
+                    admin_group_name: None,
+                    tls_certificates: vec![],
+                    mapped_fleet_roles: BTreeMap::new(),
+                },
+            ),
+        ),
+    };
+    nexus_request.authn_as(authn_mode.clone()).execute().await.unwrap();
+
+    if do_delete {
+        // Try to delete what we created.
+        let url = format!("{}/{}", URL_SILOS, SILO_NAME);
+        NexusRequest::object_delete(client, &url)
+            .authn_as(authn_mode.clone())
+            .execute()
+            .await
+            .unwrap();
+    }
 }

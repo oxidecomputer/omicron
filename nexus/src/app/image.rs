@@ -94,14 +94,12 @@ impl super::Nexus {
             }
         };
         let new_image = match &params.source {
-            params::ImageSource::Url { url } => {
-                let db_block_size = db::model::BlockSize::try_from(
-                    params.block_size,
-                )
-                .map_err(|e| Error::InvalidValue {
-                    label: String::from("block_size"),
-                    message: format!("block_size is invalid: {}", e),
-                })?;
+            params::ImageSource::Url { url, block_size } => {
+                let db_block_size = db::model::BlockSize::try_from(*block_size)
+                    .map_err(|e| Error::InvalidValue {
+                        label: String::from("block_size"),
+                        message: format!("block_size is invalid: {}", e),
+                    })?;
 
                 let image_id = Uuid::new_v4();
 
@@ -177,7 +175,7 @@ impl super::Nexus {
                 )?;
 
                 // validate total size is divisible by block size
-                let block_size: u64 = params.block_size.into();
+                let block_size: u64 = (*block_size).into();
                 if (size.to_bytes() % block_size) != 0 {
                     return Err(Error::InvalidValue {
                         label: String::from("size"),

@@ -25,9 +25,8 @@ use omicron_test_utils::dev::poll::wait_for_condition;
 use omicron_test_utils::dev::poll::CondCheckError;
 use oxide_client::ClientSessionExt;
 use oxide_client::ClientSilosExt;
-use oxide_client::ClientSystemExt;
+use oxide_client::ClientSystemSilosExt;
 use oxide_client::CustomDnsResolver;
-use std::io::Write;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -88,8 +87,8 @@ impl CertificateChain {
         self.end_keypair.serialize_private_key_der()
     }
 
-    pub fn end_cert_private_key_as_pem(&self) -> Vec<u8> {
-        self.end_keypair.serialize_private_key_pem().into_bytes()
+    pub fn end_cert_private_key_as_pem(&self) -> String {
+        self.end_keypair.serialize_private_key_pem()
     }
 
     fn cert_chain(&self) -> Vec<rustls::Certificate> {
@@ -100,24 +99,21 @@ impl CertificateChain {
         ]
     }
 
-    pub fn cert_chain_as_pem(&self) -> Vec<u8> {
+    pub fn cert_chain_as_pem(&self) -> String {
         tls_cert_to_pem(&self.cert_chain())
     }
 }
 
-fn tls_cert_to_pem(certs: &Vec<rustls::Certificate>) -> Vec<u8> {
-    let mut serialized_certs = vec![];
-    let mut cert_writer = std::io::BufWriter::new(&mut serialized_certs);
+fn tls_cert_to_pem(certs: &Vec<rustls::Certificate>) -> String {
+    let mut serialized_certs = String::new();
     for cert in certs {
         let encoded_cert = pem::encode(&pem::Pem {
             tag: "CERTIFICATE".to_string(),
             contents: cert.0.clone(),
         });
-        cert_writer
-            .write_all(encoded_cert.as_bytes())
-            .expect("failed to serialize cert");
+
+        serialized_certs.push_str(&encoded_cert);
     }
-    drop(cert_writer);
     serialized_certs
 }
 
@@ -166,8 +162,8 @@ async fn cert_get_expect_not_found(client: &ClientTestContext) {
 async fn cert_create_expect_error(
     client: &ClientTestContext,
     name: &str,
-    cert: Vec<u8>,
-    key: Vec<u8>,
+    cert: String,
+    key: String,
 ) -> String {
     let url = CERTS_URL.to_string();
     let params = params::CertificateCreate {
@@ -281,8 +277,10 @@ async fn test_cannot_create_certificate_with_bad_key(
     let (cert, der_key) =
         (chain.cert_chain_as_pem(), chain.end_cert_private_key_as_der());
 
+    let key = String::from_utf8_lossy(&der_key).to_string();
+
     // Cannot create a certificate with a bad key (e.g. not PEM encoded)
-    cert_create_expect_error(&client, CERT_NAME, cert, der_key).await;
+    cert_create_expect_error(&client, CERT_NAME, cert, key).await;
 }
 
 #[nexus_test]
@@ -308,12 +306,14 @@ async fn test_cannot_create_certificate_with_bad_cert(
     let client = &cptestctx.external_client;
 
     let chain = CertificateChain::new();
-    let (mut cert, key) =
+    let (cert, key) =
         (chain.cert_chain_as_pem(), chain.end_cert_private_key_as_pem());
 
-    for i in 0..cert.len() {
-        cert[i] = !cert[i];
-    }
+    let tmp =
+        cert.as_bytes().into_iter().map(|c| c ^ 0x7f).collect::<Vec<u8>>();
+
+    let cert = String::from_utf8(tmp).unwrap();
+
     cert_create_expect_error(&client, CERT_NAME, cert, key).await;
 }
 
@@ -393,8 +393,10 @@ async fn test_silo_certificates() {
     // that was created when that Silo was created.  We'll use this session to
     // create the other Silos and their users.
     let resolver = Arc::new(
-        CustomDnsResolver::new(*cptestctx.external_dns_server.local_address())
-            .unwrap(),
+        CustomDnsResolver::new(
+            *cptestctx.external_dns.dns_server.local_address(),
+        )
+        .unwrap(),
     );
     let session_token = oxide_client::login(
         silo1.reqwest_client().dns_resolver(resolver.clone()),
@@ -621,7 +623,11 @@ async fn test_silo_certificates() {
         );
     if let oxide_client::Error::CommunicationError(error) = error {
         assert!(error.is_connect());
-        assert!(error.to_string().contains("invalid peer certificate"));
+        assert!(
+            error.to_string().contains("invalid peer certificate")
+                || error.to_string().contains("self-signed certificate")
+                || error.to_string().contains("self signed certificate")
+        );
     } else {
         panic!(
             "unexpected error connecting with wrong certificate: {:#}",
@@ -640,7 +646,11 @@ async fn test_silo_certificates() {
         );
     if let oxide_client::Error::CommunicationError(error) = error {
         assert!(error.is_connect());
-        assert!(error.to_string().contains("invalid peer certificate"));
+        assert!(
+            error.to_string().contains("invalid peer certificate")
+                || error.to_string().contains("self-signed certificate")
+                || error.to_string().contains("self signed certificate")
+        );
     } else {
         panic!(
             "unexpected error connecting with wrong certificate: {:#}",
@@ -698,7 +708,8 @@ impl SiloCert {
     /// client's certificate
     fn reqwest_client(&self) -> reqwest::ClientBuilder {
         let rustls_cert =
-            reqwest::tls::Certificate::from_pem(&self.cert.cert).unwrap();
+            reqwest::tls::Certificate::from_pem(&self.cert.cert.as_bytes())
+                .unwrap();
         reqwest::ClientBuilder::new().add_root_certificate(rustls_cert)
     }
 

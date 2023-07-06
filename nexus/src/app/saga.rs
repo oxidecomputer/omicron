@@ -174,6 +174,28 @@ impl super::Nexus {
         })
     }
 
+    /// Starts the supplied `runnable_saga` and, if that succeeded, awaits its
+    /// completion and returns the raw `SagaResult`.
+    ///
+    /// This is a test-only routine meant for use in tests that need to examine
+    /// the details of a saga's final state (e.g., examining the exact point at
+    /// which it failed). Non-test callers should use `run_saga` instead (it
+    /// logs messages on error conditions and has a standard mechanism for
+    /// converting saga errors to generic Omicron errors).
+    #[cfg(test)]
+    pub async fn run_saga_raw_result(
+        &self,
+        runnable_saga: RunnableSaga,
+    ) -> Result<SagaResult, Error> {
+        self.sec_client
+            .saga_start(runnable_saga.id)
+            .await
+            .context("starting saga")
+            .map_err(|error| Error::internal_error(&format!("{:#}", error)))?;
+
+        Ok(runnable_saga.fut.await)
+    }
+
     pub fn sec(&self) -> &steno::SecClient {
         &self.sec_client
     }

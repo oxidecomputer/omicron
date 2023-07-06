@@ -10,10 +10,10 @@ use super::ActionRegistry;
 use super::NexusActionContext;
 use super::NexusSaga;
 use super::SagaInitError;
+use crate::app::sagas::common_storage::call_pantry_detach_for_disk;
 use crate::app::sagas::snapshot_create;
 use crate::db::lookup::LookupPath;
 use crate::external_api::params;
-use crate::retry_until_known_result;
 use crate::{authn, authz};
 use nexus_db_model::Generation;
 use omicron_common::api::external;
@@ -31,7 +31,6 @@ pub struct Params {
     pub serialized_authn: authn::saga::Serialized,
     pub silo_id: Uuid,
     pub project_id: Uuid,
-    pub disk_name: Name,
     pub disk_id: Uuid,
     pub snapshot_name: Option<Name>,
 }
@@ -86,10 +85,10 @@ impl NexusSaga for SagaFinalizeDisk {
                         name: snapshot_name.clone(),
                         description: format!(
                             "snapshot of finalized disk {}",
-                            params.disk_name
+                            params.disk_id
                         ),
                     },
-                    disk: params.disk_name.clone(),
+                    disk: params.disk_id.into(),
                 },
             };
 
@@ -284,24 +283,9 @@ async fn sfd_call_pantry_detach_for_disk(
 ) -> Result<(), ActionError> {
     let log = sagactx.user_data().log();
     let params = sagactx.saga_params::<Params>()?;
-
     let pantry_address = sagactx.lookup::<SocketAddrV6>("pantry_address")?;
-    let endpoint = format!("http://{}", pantry_address);
 
-    info!(
-        log,
-        "sending detach request for disk {} to pantry endpoint {}",
-        params.disk_id,
-        endpoint,
-    );
-
-    let disk_id = params.disk_id.to_string();
-
-    let client = crucible_pantry_client::Client::new(&endpoint);
-
-    retry_until_known_result!(log, { client.detach(&disk_id) })?;
-
-    Ok(())
+    call_pantry_detach_for_disk(&log, params.disk_id, pantry_address).await
 }
 
 async fn sfd_clear_pantry_address(

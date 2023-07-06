@@ -102,6 +102,8 @@ pub enum InsertError {
     NoAvailableIpAddresses,
     /// An explicitly-requested IP address is already in use
     IpAddressNotAvailable(std::net::IpAddr),
+    /// An explicity-requested MAC address is already in use
+    MacAddressNotAvailable(MacAddr),
     /// There are no slots available for a new interface
     NoSlotsAvailable,
     /// There are no MAC addresses available
@@ -174,6 +176,12 @@ impl InsertError {
                     ip
                 ))
             }
+            InsertError::MacAddressNotAvailable(mac) => {
+                external::Error::invalid_request(&format!(
+                    "The MAC address '{}' is not available",
+                    mac
+                ))
+            }
             InsertError::NoSlotsAvailable => {
                 external::Error::invalid_request(&format!(
                     "May not attach more than {} network interfaces",
@@ -241,6 +249,11 @@ fn decode_database_error(
     // IP that is already allocated to another interface in the same subnet.
     const IP_NOT_AVAILABLE_CONSTRAINT: &str =
         "network_interface_subnet_id_ip_key";
+
+    // The name of the index whose uniqueness is violated if we try to assign a
+    // MAC that is already allocated to another interface in the same VPC.
+    const MAC_NOT_AVAILABLE_CONSTRAINT: &str =
+        "network_interface_vpc_id_mac_key";
 
     // The name of the index whose uniqueness is violated if we try to assign a
     // name to an interface that is already used for another interface on the
@@ -355,6 +368,12 @@ fn decode_database_error(
                     .unwrap_or_else(|| std::net::Ipv4Addr::UNSPECIFIED.into());
                 InsertError::IpAddressNotAvailable(ip)
             }
+            // Constraint violated if a user-requested MAC address has
+            // already been assigned within the same VPC.
+            Some(constraint) if constraint == MAC_NOT_AVAILABLE_CONSTRAINT => {
+                let mac = interface.mac.unwrap_or_else(|| MacAddr::from_i64(0));
+                InsertError::MacAddressNotAvailable(mac)
+            }
             // Constraint violated if the user-requested name is already
             // assigned to an interface on this resource
             Some(constraint) if constraint == NAME_CONFLICT_CONSTRAINT => {
@@ -363,7 +382,7 @@ fn decode_database_error(
                         external::ResourceType::InstanceNetworkInterface
                     }
                     NetworkInterfaceKind::Service => {
-                        todo!("service network interface")
+                        external::ResourceType::ServiceNetworkInterface
                     }
                 };
                 InsertError::External(error::public_error_from_diesel_pool(
@@ -952,6 +971,7 @@ pub struct InsertQuery {
     subnet_id_str: String,
     parent_id_str: String,
     ip_sql: Option<IpNetwork>,
+    mac_sql: Option<db::model::MacAddr>,
     next_mac_subquery: NextMacAddress,
     next_ipv4_address_subquery: NextIpv4Address,
     next_slot_subquery: NextNicSlot,
@@ -960,13 +980,14 @@ pub struct InsertQuery {
 
 impl InsertQuery {
     pub fn new(interface: IncompleteNetworkInterface) -> Self {
-        let vpc_id_str = interface.vpc_id.to_string();
+        let vpc_id_str = interface.subnet.vpc_id.to_string();
         let subnet_id_str = interface.subnet.identity.id.to_string();
         let kind = interface.kind;
         let parent_id_str = interface.parent_id.to_string();
         let ip_sql = interface.ip.map(|ip| ip.into());
+        let mac_sql = interface.mac.map(|mac| mac.into());
         let next_mac_subquery =
-            NextMacAddress::new(interface.vpc_id, interface.kind);
+            NextMacAddress::new(interface.subnet.vpc_id, interface.kind);
         let next_ipv4_address_subquery = NextIpv4Address::new(
             interface.subnet.ipv4_block.0 .0,
             interface.subnet.identity.id,
@@ -981,6 +1002,7 @@ impl InsertQuery {
             subnet_id_str,
             parent_id_str,
             ip_sql,
+            mac_sql,
             next_mac_subquery,
             next_ipv4_address_subquery,
             next_slot_subquery,
@@ -1023,7 +1045,7 @@ impl QueryFragment<Pg> for InsertQuery {
         push_interface_validation_cte(
             out.reborrow(),
             &self.interface.identity.id,
-            &self.interface.vpc_id,
+            &self.interface.subnet.vpc_id,
             &self.vpc_id_str,
             &self.interface.subnet.identity.id,
             &self.subnet_id_str,
@@ -1108,10 +1130,16 @@ impl QueryFragment<Pg> for InsertQuery {
         select_from_cte(out.reborrow(), dsl::subnet_id::NAME)?;
         out.push_sql(", ");
 
-        // Push the subquery for selecting the a MAC address.
-        out.push_sql("(");
-        self.next_mac_subquery.walk_ast(out.reborrow())?;
-        out.push_sql(") AS ");
+        // If the user specified a MAC address, then insert it by value.
+        // Otherwise we use a subquery to select the next available MAC.
+        if let Some(mac) = &self.mac_sql {
+            out.push_bind_param::<sql_types::BigInt, db::model::MacAddr>(mac)?;
+        } else {
+            out.push_sql("(");
+            self.next_mac_subquery.walk_ast(out.reborrow())?;
+            out.push_sql(")");
+        }
+        out.push_sql(" AS ");
         out.push_identifier(dsl::mac::NAME)?;
         out.push_sql(", ");
 
@@ -1765,7 +1793,6 @@ mod tests {
 
     // VPC with several distinct subnets.
     struct Network {
-        vpc_id: Uuid,
         subnets: Vec<VpcSubnet>,
     }
 
@@ -1806,7 +1833,7 @@ mod tests {
                 );
                 subnets.push(subnet);
             }
-            Self { vpc_id, subnets }
+            Self { subnets }
         }
 
         fn available_ipv4_addresses(&self) -> Vec<usize> {
@@ -1911,7 +1938,6 @@ mod tests {
         let interface = IncompleteNetworkInterface::new_instance(
             Uuid::new_v4(),
             instance_id,
-            context.net1.vpc_id,
             context.net1.subnets[0].clone(),
             IdentityMetadataCreateParams {
                 name: "interface-a".parse().unwrap(),
@@ -1942,7 +1968,6 @@ mod tests {
         let interface = IncompleteNetworkInterface::new_instance(
             Uuid::new_v4(),
             instance_id,
-            context.net1.vpc_id,
             context.net1.subnets[0].clone(),
             IdentityMetadataCreateParams {
                 name: "interface-a".parse().unwrap(),
@@ -1975,7 +2000,6 @@ mod tests {
         let interface = IncompleteNetworkInterface::new_instance(
             Uuid::new_v4(),
             Uuid::new_v4(),
-            context.net1.vpc_id,
             context.net1.subnets[0].clone(),
             IdentityMetadataCreateParams {
                 name: "interface-b".parse().unwrap(),
@@ -2014,7 +2038,6 @@ mod tests {
             let interface = IncompleteNetworkInterface::new_instance(
                 Uuid::new_v4(),
                 instance.id(),
-                context.net1.vpc_id,
                 context.net1.subnets[0].clone(),
                 IdentityMetadataCreateParams {
                     name: format!("interface-{}", i).parse().unwrap(),
@@ -2058,7 +2081,6 @@ mod tests {
         let interface = IncompleteNetworkInterface::new_instance(
             Uuid::new_v4(),
             instance.id(),
-            context.net1.vpc_id,
             context.net1.subnets[0].clone(),
             IdentityMetadataCreateParams {
                 name: "interface-c".parse().unwrap(),
@@ -2078,7 +2100,6 @@ mod tests {
         let interface = IncompleteNetworkInterface::new_instance(
             Uuid::new_v4(),
             new_instance.id(),
-            context.net1.vpc_id,
             context.net1.subnets[0].clone(),
             IdentityMetadataCreateParams {
                 name: "interface-c".parse().unwrap(),
@@ -2099,6 +2120,86 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_insert_request_mac() {
+        let context = TestContext::new("test_insert_request_mac", 1).await;
+
+        // Insert a service NIC with an explicit MAC address
+        let service_id = Uuid::new_v4();
+        let mac = MacAddr::random_system();
+        let interface = IncompleteNetworkInterface::new_service(
+            Uuid::new_v4(),
+            service_id,
+            context.net1.subnets[0].clone(),
+            IdentityMetadataCreateParams {
+                name: "service-nic".parse().unwrap(),
+                description: String::from("service nic"),
+            },
+            None,
+            Some(mac),
+        )
+        .unwrap();
+        let inserted_interface = context
+            .db_datastore
+            .service_create_network_interface_raw(&context.opctx, interface)
+            .await
+            .expect("Failed to insert interface");
+        assert_eq!(inserted_interface.mac.0, mac);
+
+        context.success().await;
+    }
+
+    #[tokio::test]
+    async fn test_insert_request_same_mac_fails() {
+        let context =
+            TestContext::new("test_insert_request_same_mac_fails", 2).await;
+
+        // Insert a service NIC
+        let service_id = Uuid::new_v4();
+        let interface = IncompleteNetworkInterface::new_service(
+            Uuid::new_v4(),
+            service_id,
+            context.net1.subnets[0].clone(),
+            IdentityMetadataCreateParams {
+                name: "service-nic".parse().unwrap(),
+                description: String::from("service nic"),
+            },
+            None,
+            None,
+        )
+        .unwrap();
+        let inserted_interface = context
+            .db_datastore
+            .service_create_network_interface_raw(&context.opctx, interface)
+            .await
+            .expect("Failed to insert interface");
+
+        // Inserting an interface with the same MAC should fail, even if all
+        // other parameters are valid.
+        let new_service_id = Uuid::new_v4();
+        let new_interface = IncompleteNetworkInterface::new_service(
+            Uuid::new_v4(),
+            new_service_id,
+            context.net1.subnets[0].clone(),
+            IdentityMetadataCreateParams {
+                name: "new-service-nic".parse().unwrap(),
+                description: String::from("new-service nic"),
+            },
+            None,
+            Some(inserted_interface.mac.0),
+        )
+        .unwrap();
+        let result = context
+            .db_datastore
+            .service_create_network_interface_raw(&context.opctx, new_interface)
+            .await;
+        assert!(
+            matches!(result, Err(InsertError::MacAddressNotAvailable(_))),
+            "Requesting an interface with an existing MAC should fail"
+        );
+        context.success().await;
+    }
+
+    #[tokio::test]
     async fn test_insert_with_duplicate_name_fails() {
         let context =
             TestContext::new("test_insert_with_duplicate_name_fails", 2).await;
@@ -2107,7 +2208,6 @@ mod tests {
         let interface = IncompleteNetworkInterface::new_instance(
             Uuid::new_v4(),
             instance.id(),
-            context.net1.vpc_id,
             context.net1.subnets[0].clone(),
             IdentityMetadataCreateParams {
                 name: "interface-c".parse().unwrap(),
@@ -2127,7 +2227,6 @@ mod tests {
         let interface = IncompleteNetworkInterface::new_instance(
             Uuid::new_v4(),
             instance.id(),
-            context.net1.vpc_id,
             context.net1.subnets[1].clone(),
             IdentityMetadataCreateParams {
                 name: "interface-c".parse().unwrap(),
@@ -2159,7 +2258,6 @@ mod tests {
         let interface = IncompleteNetworkInterface::new_instance(
             Uuid::new_v4(),
             instance.id(),
-            context.net1.vpc_id,
             context.net1.subnets[0].clone(),
             IdentityMetadataCreateParams {
                 name: "interface-c".parse().unwrap(),
@@ -2176,7 +2274,6 @@ mod tests {
         let interface = IncompleteNetworkInterface::new_instance(
             Uuid::new_v4(),
             instance.id(),
-            context.net1.vpc_id,
             context.net1.subnets[0].clone(),
             IdentityMetadataCreateParams {
                 name: "interface-d".parse().unwrap(),
@@ -2205,7 +2302,6 @@ mod tests {
         let interface = IncompleteNetworkInterface::new_instance(
             Uuid::new_v4(),
             instance.id(),
-            context.net1.vpc_id,
             context.net1.subnets[0].clone(),
             IdentityMetadataCreateParams {
                 name: "interface-c".parse().unwrap(),
@@ -2248,7 +2344,6 @@ mod tests {
         let interface = IncompleteNetworkInterface::new_instance(
             Uuid::new_v4(),
             instance.id(),
-            context.net1.vpc_id,
             context.net1.subnets[0].clone(),
             IdentityMetadataCreateParams {
                 name: "interface-c".parse().unwrap(),
@@ -2267,7 +2362,6 @@ mod tests {
             let interface = IncompleteNetworkInterface::new_instance(
                 Uuid::new_v4(),
                 instance.id(),
-                context.net2.vpc_id,
                 context.net2.subnets[0].clone(),
                 IdentityMetadataCreateParams {
                     name: "interface-a".parse().unwrap(),
@@ -2304,7 +2398,6 @@ mod tests {
             let interface = IncompleteNetworkInterface::new_instance(
                 Uuid::new_v4(),
                 instance.id(),
-                context.net1.vpc_id,
                 context.net1.subnets[0].clone(),
                 IdentityMetadataCreateParams {
                     name: "interface-c".parse().unwrap(),
@@ -2333,7 +2426,6 @@ mod tests {
         let interface = IncompleteNetworkInterface::new_instance(
             Uuid::new_v4(),
             instance.id(),
-            context.net1.vpc_id,
             context.net1.subnets[0].clone(),
             IdentityMetadataCreateParams {
                 name: "interface-d".parse().unwrap(),
@@ -2366,7 +2458,6 @@ mod tests {
             let interface = IncompleteNetworkInterface::new_instance(
                 Uuid::new_v4(),
                 instance.id(),
-                context.net1.vpc_id,
                 subnet.clone(),
                 IdentityMetadataCreateParams {
                     name: format!("if{}", i).parse().unwrap(),
@@ -2401,21 +2492,20 @@ mod tests {
         assert_eq!(inserted.description(), incomplete.identity.description);
         assert_eq!(inserted.kind, incomplete.kind);
         assert_eq!(inserted.parent_id, incomplete.parent_id);
-        assert_eq!(inserted.vpc_id, incomplete.vpc_id);
+        assert_eq!(inserted.vpc_id, incomplete.subnet.vpc_id);
         assert_eq!(inserted.subnet_id, incomplete.subnet.id());
-        let (lo, hi, kind) = match incomplete.kind {
+        let (mac_in_range, kind) = match incomplete.kind {
             NetworkInterfaceKind::Instance => {
-                (MacAddr::MIN_GUEST_ADDR, MacAddr::MAX_GUEST_ADDR, "guest")
+                (inserted.mac.is_guest(), "guest")
             }
             NetworkInterfaceKind::Service => {
-                (MacAddr::MIN_SYSTEM_ADDR, MacAddr::MAX_SYSTEM_ADDR, "system")
+                (inserted.mac.is_system(), "system")
             }
         };
         assert!(
-            inserted.mac.to_i64() >= lo && inserted.mac.to_i64() <= hi,
+            mac_in_range,
             "The random MAC address {:?} is not a valid {} address",
-            inserted.mac,
-            kind,
+            inserted.mac, kind,
         );
     }
 
@@ -2435,7 +2525,6 @@ mod tests {
             let interface = IncompleteNetworkInterface::new_instance(
                 Uuid::new_v4(),
                 instance.id(),
-                context.net1.vpc_id,
                 subnet.clone(),
                 IdentityMetadataCreateParams {
                     name: format!("interface-{}", slot).parse().unwrap(),
@@ -2472,7 +2561,6 @@ mod tests {
         let interface = IncompleteNetworkInterface::new_instance(
             Uuid::new_v4(),
             instance.id(),
-            context.net1.vpc_id,
             context.net1.subnets.last().unwrap().clone(),
             IdentityMetadataCreateParams {
                 name: "interface-8".parse().unwrap(),

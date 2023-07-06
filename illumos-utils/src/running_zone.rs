@@ -13,6 +13,7 @@ use crate::zone::{AddressRequest, IPADM, ZONE_PREFIX};
 use camino::{Utf8Path, Utf8PathBuf};
 use ipnetwork::IpNetwork;
 use omicron_common::backoff;
+use slog::error;
 use slog::info;
 use slog::o;
 use slog::warn;
@@ -23,6 +24,16 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use crate::zone::MockZones as Zones;
 #[cfg(not(any(test, feature = "testing")))]
 use crate::zone::Zones;
+
+/// Errors returned from methods for fetching SMF services and log files
+#[derive(thiserror::Error, Debug)]
+pub enum ServiceError {
+    #[error("I/O error")]
+    Io(#[from] std::io::Error),
+
+    #[error("Failed to run a command")]
+    RunCommand(#[from] RunCommandError),
+}
 
 /// Errors returned from [`RunningZone::run_cmd`].
 #[derive(thiserror::Error, Debug)]
@@ -41,6 +52,9 @@ pub enum BootError {
 
     #[error("Zone booted, but timed out waiting for {service} in {zone}")]
     Timeout { service: String, zone: String },
+
+    #[error("Zone booted, but failed to find zone ID for zone {zone}")]
+    NoZoneId { zone: String },
 
     #[error("Zone booted, but running a command experienced an error: {0}")]
     RunCommandError(#[from] RunCommandError),
@@ -137,9 +151,102 @@ pub enum GetZoneError {
     },
 }
 
+// Helper module for setting up and running `zone_enter()` for subprocesses run
+// inside a non-global zone.
+#[cfg(target_os = "illumos")]
+mod zenter {
+    use libc::zoneid_t;
+    use std::ffi::c_int;
+    use std::ffi::c_uint;
+    use std::ffi::CStr;
+
+    #[link(name = "contract")]
+    extern "C" {
+        fn ct_tmpl_set_critical(fd: c_int, events: c_uint) -> c_int;
+        fn ct_tmpl_set_informative(fd: c_int, events: c_uint) -> c_int;
+        fn ct_pr_tmpl_set_fatal(fd: c_int, events: c_uint) -> c_int;
+        fn ct_pr_tmpl_set_param(fd: c_int, params: c_uint) -> c_int;
+        fn ct_tmpl_activate(fd: c_int) -> c_int;
+        fn ct_tmpl_clear(fd: c_int) -> c_int;
+    }
+
+    #[link(name = "c")]
+    extern "C" {
+        pub fn zone_enter(zid: zoneid_t) -> c_int;
+    }
+
+    // A Rust wrapper around the process contract template.
+    #[derive(Debug)]
+    pub struct Template {
+        fd: c_int,
+    }
+
+    impl Drop for Template {
+        fn drop(&mut self) {
+            self.clear();
+            // Ignore any error, since printing may interfere with `slog`'s
+            // structured output.
+            unsafe { libc::close(self.fd) };
+        }
+    }
+
+    impl Template {
+        const TEMPLATE_PATH: &[u8] = b"/system/contract/process/template\0";
+
+        // Constants related to how the contract below is managed. See
+        // `usr/src/uts/common/sys/contract/process.h` in the illumos sources
+        // for details.
+
+        // Process experienced an uncorrectable error.
+        const CT_PR_EV_HWERR: c_uint = 0x20;
+        // Only kill process group on fatal errors.
+        const CT_PR_PGRPONLY: c_uint = 0x04;
+        // Automatically detach inherited contracts.
+        const CT_PR_REGENT: c_uint = 0x08;
+
+        pub fn new() -> Result<Self, crate::ExecutionError> {
+            let path = CStr::from_bytes_with_nul(Self::TEMPLATE_PATH).unwrap();
+            let fd = unsafe { libc::open(path.as_ptr(), libc::O_RDWR) };
+            if fd < 0 {
+                let err = std::io::Error::last_os_error();
+                return Err(crate::ExecutionError::ZoneEnter { err });
+            }
+
+            // Initialize the contract template.
+            //
+            // No events are delivered, nothing is inherited, and we do not
+            // allow the contract to be orphaned.
+            //
+            // See illumos sources in `usr/src/cmd/zlogin/zlogin.c` in the
+            // implementation of `init_template()` for details.
+            if unsafe { ct_tmpl_set_critical(fd, 0) } != 0
+                || unsafe { ct_tmpl_set_informative(fd, 0) } != 0
+                || unsafe { ct_pr_tmpl_set_fatal(fd, Self::CT_PR_EV_HWERR) }
+                    != 0
+                || unsafe {
+                    ct_pr_tmpl_set_param(
+                        fd,
+                        Self::CT_PR_PGRPONLY | Self::CT_PR_REGENT,
+                    )
+                } != 0
+                || unsafe { ct_tmpl_activate(fd) } != 0
+            {
+                let err = std::io::Error::last_os_error();
+                return Err(crate::ExecutionError::ZoneEnter { err });
+            }
+            Ok(Self { fd })
+        }
+
+        pub fn clear(&self) {
+            unsafe { ct_tmpl_clear(self.fd) };
+        }
+    }
+}
+
 /// Represents a running zone.
 pub struct RunningZone {
-    running: bool,
+    // The `zoneid_t` for the zone, while it's running, or `None` if not.
+    id: Option<i32>,
     inner: InstalledZone,
 }
 
@@ -153,27 +260,93 @@ impl RunningZone {
         self.inner.zonepath.join("root")
     }
 
+    pub fn control_interface(&self) -> AddrObject {
+        AddrObject::new(self.inner.get_control_vnic_name(), "omicron6").unwrap()
+    }
+
     /// Runs a command within the Zone, return the output.
+    //
+    // NOTE: It's important that this function is synchronous.
+    //
+    // Internally, we're setting the (thread-local) contract template before
+    // forking a child to exec the command inside the target zone. In order for
+    // that to all work correctly, that template must be set and then later
+    // cleared in the _same_ OS thread. An async method here would open the
+    // possibility that the template is set in some thread, and then cleared in
+    // another, if the task is swapped out at an await point. That would leave
+    // the first thread's template in a modified state.
+    //
+    // If we do need to make this method asynchronous, we will need to change the
+    // internals to avoid changing the thread's contract. One possible approach
+    // here would be to use `libscf` directly, rather than `exec`-ing `svccfg`
+    // directly in a forked child. That would obviate the need to work on the
+    // contract at all.
+    #[cfg(target_os = "illumos")]
     pub fn run_cmd<I, S>(&self, args: I) -> Result<String, RunCommandError>
     where
         I: IntoIterator<Item = S>,
         S: AsRef<std::ffi::OsStr>,
     {
+        use std::os::unix::process::CommandExt;
+        let Some(id) = self.id else {
+            return Err(RunCommandError {
+                zone: self.name().to_string(),
+                err: crate::ExecutionError::NotRunning,
+            });
+        };
+        let template =
+            std::sync::Arc::new(zenter::Template::new().map_err(|err| {
+                RunCommandError { zone: self.name().to_string(), err }
+            })?);
+        let tmpl = std::sync::Arc::clone(&template);
         let mut command = std::process::Command::new(crate::PFEXEC);
+        command.env_clear();
+        unsafe {
+            command.pre_exec(move || {
+                // Clear the template in the child, so that any other children
+                // it forks itself use the normal contract.
+                tmpl.clear();
 
-        let name = self.name();
-        let prefix = &[super::zone::ZLOGIN, name];
-        let suffix: Vec<_> = args.into_iter().collect();
-        let full_args = prefix
-            .iter()
-            .map(|s| std::ffi::OsStr::new(s))
-            .chain(suffix.iter().map(|a| a.as_ref()));
+                // Enter the target zone itself, in which the `exec()` call will
+                // be made.
+                if zenter::zone_enter(id) == 0 {
+                    Ok(())
+                } else {
+                    Err(std::io::Error::last_os_error())
+                }
+            });
+        }
+        let command = command.args(args);
 
-        let cmd = command.args(full_args);
-        let output = crate::execute(cmd)
-            .map_err(|err| RunCommandError { zone: name.to_string(), err })?;
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        Ok(stdout.to_string())
+        // Capture the result, and be sure to clear the template for this
+        // process itself before returning.
+        let res = crate::execute(command).map_err(|err| RunCommandError {
+            zone: self.name().to_string(),
+            err,
+        });
+        template.clear();
+        res.map(|output| String::from_utf8_lossy(&output.stdout).to_string())
+    }
+
+    /// Runs a command within the Zone, return the output.
+    #[cfg(not(target_os = "illumos"))]
+    pub fn run_cmd<I, S>(&self, args: I) -> Result<String, RunCommandError>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<std::ffi::OsStr>,
+    {
+        // NOTE: This implementation is useless, and will never work. However,
+        // it must actually call `crate::execute()` for the testing purposes.
+        // That's mocked by `mockall` to return known data, and so the command
+        // that's actually run is irrelevant.
+        let mut command = std::process::Command::new("echo");
+        let command = command.args(args);
+        crate::execute(command)
+            .map_err(|err| RunCommandError {
+                zone: self.name().to_string(),
+                err,
+            })
+            .map(|output| String::from_utf8_lossy(&output.stdout).to_string())
     }
 
     /// Boots a new zone.
@@ -199,10 +372,13 @@ impl RunningZone {
             }
         })?;
 
+        // Pull the zone ID.
+        let id = Zones::id(&zone.name)
+            .await?
+            .ok_or_else(|| BootError::NoZoneId { zone: zone.name.clone() })?;
         let site_profile_xml_exists =
             std::path::Path::new(&zone.site_profile_xml_path()).exists();
-
-        let running_zone = RunningZone { running: true, inner: zone };
+        let running_zone = RunningZone { id: Some(id), inner: zone };
 
         // Make sure the control vnic has an IP MTU of 9000 inside the zone
         const CONTROL_VNIC_MTU: usize = 9000;
@@ -554,7 +730,9 @@ impl RunningZone {
             });
 
         Ok(Self {
-            running: true,
+            id: zone_info.id().map(|x| {
+                x.try_into().expect("zoneid_t is expected to be an i32")
+            }),
             inner: InstalledZone {
                 log: log.new(o!("zone" => zone_name.to_string())),
                 zonepath: zone_info.path().to_path_buf().try_into()?,
@@ -586,8 +764,7 @@ impl RunningZone {
     ///
     /// Allows callers to synchronously stop a zone, and inspect an error.
     pub async fn stop(&mut self) -> Result<(), String> {
-        if self.running {
-            self.running = false;
+        if let Some(_) = self.id.take() {
             let log = self.inner.log.clone();
             let name = self.name().to_string();
             Zones::halt_and_remove_logged(&log, &name)
@@ -600,11 +777,133 @@ impl RunningZone {
     pub fn links(&self) -> &Vec<Link> {
         &self.inner.links
     }
+
+    /// Return the running processes associated with all the SMF services this
+    /// zone is intended to run.
+    pub fn service_processes(
+        &self,
+    ) -> Result<Vec<ServiceProcess>, ServiceError> {
+        let service_names = self.service_names()?;
+        let mut services = Vec::with_capacity(service_names.len());
+        for service_name in service_names.into_iter() {
+            let output = self.run_cmd(["ptree", "-s", &service_name])?;
+
+            // All Oxide SMF services currently run a single binary, though it
+            // may be run in a contract via `ctrun`. We don't care about that
+            // binary, but any others we _do_ want to collect data from.
+            for line in output.lines() {
+                if line.contains("ctrun") {
+                    continue;
+                }
+                let line = line.trim();
+                let mut parts = line.split_ascii_whitespace();
+
+                // The first two parts should be the PID and the process binary
+                // path, respectively.
+                let Some(pid_s) = parts.next() else {
+                    error!(
+                        self.inner.log,
+                        "failed to get service PID from ptree output";
+                        "service" => &service_name,
+                    );
+                    continue;
+                };
+                let Ok(pid) = pid_s.parse() else {
+                    error!(
+                        self.inner.log,
+                        "failed to parse service PID from ptree output";
+                        "service" => &service_name,
+                        "pid" => pid_s,
+                    );
+                    continue;
+                };
+                let Some(path) = parts.next() else {
+                    error!(
+                        self.inner.log,
+                        "failed to get service binary from ptree output";
+                        "service" => &service_name,
+                    );
+                    continue;
+                };
+                let binary = Utf8PathBuf::from(path);
+
+                // Fetch any log files for this SMF service.
+                let Some((log_file, rotated_log_files)) = self.service_log_files(&service_name)? else {
+                    error!(
+                        self.inner.log,
+                        "failed to find log files for existing service";
+                        "service_name" => &service_name,
+                    );
+                    continue;
+                };
+
+                services.push(ServiceProcess {
+                    service_name: service_name.clone(),
+                    binary,
+                    pid,
+                    log_file,
+                    rotated_log_files,
+                });
+            }
+        }
+        Ok(services)
+    }
+
+    /// Return the names of the Oxide SMF services this zone is intended to run.
+    pub fn service_names(&self) -> Result<Vec<String>, ServiceError> {
+        const NEEDLES: [&str; 2] = ["/oxide", "/system/illumos"];
+        let output = self.run_cmd(&["svcs", "-H", "-o", "fmri"])?;
+        Ok(output
+            .lines()
+            .filter(|line| NEEDLES.iter().any(|needle| line.contains(needle)))
+            .map(|line| line.trim().to_string())
+            .collect())
+    }
+
+    /// Return any SMF log files associated with the named service.
+    ///
+    /// Given a named service, this returns a tuple of the latest or current log
+    /// file, and an array of any rotated log files. If the service does not
+    /// exist, or there are no log files, `None` is returned.
+    pub fn service_log_files(
+        &self,
+        name: &str,
+    ) -> Result<Option<(Utf8PathBuf, Vec<Utf8PathBuf>)>, ServiceError> {
+        let output = self.run_cmd(&["svcs", "-L", name])?;
+        let mut lines = output.lines();
+        let Some(current) = lines.next() else {
+            return Ok(None);
+        };
+        // We need to prepend the zonepath root to get the path in the GZ. We
+        // can do this with `join()`, but that will _replace_ the path if the
+        // second one is absolute. So trim any prefixed `/` from each path.
+        let root = self.root();
+        let current_log_file =
+            root.join(current.trim().trim_start_matches('/'));
+
+        // The rotated log files should have the same prefix as the current, but
+        // with an index appended. We'll search the parent directory for
+        // matching names, skipping the current file.
+        //
+        // See https://illumos.org/man/8/logadm for details on the naming
+        // conventions around these files.
+        let dir = current_log_file.parent().unwrap();
+        let mut rotated_files = Vec::new();
+        for entry in dir.read_dir_utf8()? {
+            let entry = entry?;
+            let path = entry.path();
+            if path != current_log_file && path.starts_with(&current_log_file) {
+                rotated_files
+                    .push(root.join(path.strip_prefix("/").unwrap_or(path)));
+            }
+        }
+        Ok(Some((current_log_file, rotated_files)))
+    }
 }
 
 impl Drop for RunningZone {
     fn drop(&mut self) {
-        if self.running {
+        if let Some(_) = self.id.take() {
             let log = self.inner.log.clone();
             let name = self.name().to_string();
             tokio::task::spawn(async move {
@@ -619,6 +918,21 @@ impl Drop for RunningZone {
             });
         }
     }
+}
+
+/// A process running in the zone associated with an SMF service.
+#[derive(Clone, Debug)]
+pub struct ServiceProcess {
+    /// The name of the SMF service.
+    pub service_name: String,
+    /// The path of the binary in the process image.
+    pub binary: Utf8PathBuf,
+    /// The PID of the process.
+    pub pid: u32,
+    /// The path for the current log file.
+    pub log_file: Utf8PathBuf,
+    /// The paths for any rotated log files.
+    pub rotated_log_files: Vec<Utf8PathBuf>,
 }
 
 /// Errors returned from [`InstalledZone::install`].
@@ -655,7 +969,7 @@ pub struct InstalledZone {
     // NIC used for control plane communication.
     control_vnic: Link,
 
-    // Nic used for bootstrap network communication
+    // NIC used for bootstrap network communication
     bootstrap_vnic: Option<Link>,
 
     // OPTE devices for the guest network interfaces
