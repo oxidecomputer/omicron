@@ -1557,6 +1557,9 @@ pub struct SwitchPortApplySettings {
 pub enum ImageSource {
     Url {
         url: String,
+
+        /// The block size in bytes
+        block_size: BlockSize,
     },
     Snapshot {
         id: Uuid,
@@ -1588,9 +1591,6 @@ pub struct ImageCreate {
 
     /// The version of the operating system (e.g. 18.04, 20.04, etc.)
     pub version: String,
-
-    /// block size in bytes
-    pub block_size: BlockSize,
 
     /// The source of the image's contents.
     pub source: ImageSource,

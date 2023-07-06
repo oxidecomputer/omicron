@@ -9370,14 +9370,6 @@
         "description": "Create-time parameters for an `Image`",
         "type": "object",
         "properties": {
-          "block_size": {
-            "description": "block size in bytes",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/BlockSize"
-              }
-            ]
-          },
           "description": {
             "type": "string"
           },
@@ -9402,7 +9394,6 @@
           }
         },
         "required": [
-          "block_size",
           "description",
           "name",
           "os",
@@ -9437,6 +9428,14 @@
           {
             "type": "object",
             "properties": {
+              "block_size": {
+                "description": "The block size in bytes",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/BlockSize"
+                  }
+                ]
+              },
               "type": {
                 "type": "string",
                 "enum": [
@@ -9448,6 +9447,7 @@
               }
             },
             "required": [
+              "block_size",
               "type",
               "url"
             ]
