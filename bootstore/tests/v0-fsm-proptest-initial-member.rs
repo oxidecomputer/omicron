@@ -10,11 +10,11 @@
 
 mod common;
 
+use assert_matches::assert_matches;
 use bootstore::schemes::v0::{
     create_pkgs, ApiError, ApiOutput, Config, Envelope, Fsm, Msg, Request,
     RequestType, Response, ResponseType, SharePkg, State,
 };
-
 use proptest::prelude::*;
 use secrecy::ExposeSecret;
 use sled_hardware::Baseboard;
@@ -64,7 +64,7 @@ pub struct TestState {
     connected_peers: BTreeSet<Baseboard>,
 
     // The current time at the SUT Fsm
-    current_time: Instant,
+    now: Instant,
 
     // We only allow rack init to run once if SUT Fsm is the RSS sled.
     //
@@ -92,7 +92,7 @@ impl TestState {
             initial_members,
             learners,
             connected_peers: BTreeSet::new(),
-            current_time: Instant::now(),
+            now: Instant::now(),
             rack_init_status: None,
         }
     }
@@ -117,29 +117,42 @@ impl TestState {
                 // We arbitrarily choose the first share for rack init
                 let pkg = pkgs[0].clone();
                 self.rack_init_status = Some(RackInitStatus::RssNotSut(pkgs));
-
-                // We only send the init request if the SUT peer is an initial member
-                if self.initial_members.contains(&self.sut_id) {
-                    let req = rss_to_sut_init_request(pkg);
-                    self.run_and_check_rack_init_msg_result(req)?;
-                }
+                let req = rss_to_sut_init_request(pkg);
+                self.run_and_check_rack_init_msg_result(req)?;
             }
+        } else {
+            // SUT == RSS: Go ahead and call `Fsm::init_rack()`
+            self.run_and_check_init_rack_api_call()?;
+            self.rack_init_status = Some(RackInitStatus::SutAsRssRunning);
         }
         self.check_rack_init_postconditions()?;
         Ok(())
     }
 
-    // Check that a rack init via a message from RSS is correct
-    // We only run this if the SUT peer is an initial_member
-    // TODO: Should we have separate proptests for the following? :
-    // * RSS == SUT
-    // * SUT != RSS && initial_members.contains(SUT)
-    // * learners.contains(SUT)
+    // Call `Fsm::init_rack` at the SUT and validate the output
+    fn run_and_check_init_rack_api_call(
+        &mut self,
+    ) -> Result<(), TestCaseError> {
+        if let Err(e) = self.sut.init_rack(
+            self.now,
+            self.rack_uuid,
+            self.initial_members.clone(),
+        ) {
+            prop_assert!(self.rack_init_status.is_some())
+        } else {
+            // There should be an init message for each connected peer
+            self.expect_init_broadcast()?;
+        }
+        Ok(())
+    }
+
+    // Handle a msg with `RequestType::Init` at the SUT and check that a rack
+    // init via a message from RSS is correct
     fn run_and_check_rack_init_msg_result(
         &mut self,
         req: Msg,
     ) -> Result<(), TestCaseError> {
-        match self.sut.handle_msg(self.current_time, self.rss_id.clone(), req) {
+        match self.sut.handle_msg(self.now, self.rss_id.clone(), req) {
             Ok(Some(output)) => {
                 prop_assert_eq!(output, ApiOutput::PeerInitialized);
                 let mut iter = self.sut.drain_envelopes();
@@ -172,14 +185,27 @@ impl TestState {
     }
 
     fn check_rack_init_postconditions(&self) -> Result<(), TestCaseError> {
+        if self.initial_members.contains(&self.sut_id) {
+            prop_assert_eq!(self.sut.state().name(), "initial_member");
+        }
         Ok(())
     }
 
-    fn all_other_initial_members<'a>(
-        &'a self,
-        excluded: &'a Baseboard,
-    ) -> impl Iterator<Item = &Baseboard> + 'a {
-        self.initial_members.iter().filter(move |id| *id != excluded)
+    fn expect_init_broadcast(&mut self) -> Result<(), TestCaseError> {
+        let sent_to: BTreeSet<Baseboard> = self
+            .sut
+            .drain_envelopes()
+            .map(|envelope| {
+                assert_matches!(
+                    envelope.msg,
+                    Msg::Req(Request { type_: RequestType::Init(_), .. })
+                );
+                envelope.to
+            })
+            .collect();
+
+        prop_assert_eq!(&sent_to, &self.connected_peers);
+        Ok(())
     }
 }
 
@@ -188,11 +214,10 @@ fn expect_init_ack_response(
     envelope: Envelope,
 ) -> Result<(), TestCaseError> {
     prop_assert_eq!(&envelope.to, to);
-    let matches = matches!(
+    assert_matches!(
         envelope.msg,
         Msg::Rsp(Response { type_: ResponseType::InitAck, .. })
     );
-    prop_assert!(matches);
     Ok(())
 }
 
