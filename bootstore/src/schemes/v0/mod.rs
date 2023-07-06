@@ -14,7 +14,7 @@ use std::fmt::Debug;
 use std::time::Duration;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
-pub use fsm::{ApiError, ApiOutput, Fsm};
+pub use fsm::{ApiError, ApiOutput, Fsm, State};
 pub use messages::{
     Envelope, Error as MsgError, Msg, Request, RequestType, Response,
     ResponseType,

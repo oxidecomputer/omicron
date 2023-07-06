@@ -71,6 +71,7 @@ impl State {
 }
 
 /// A response to an Fsm API request
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ApiOutput {
     /// This peer has been initialized
     ///
@@ -178,6 +179,21 @@ impl Fsm {
     /// This must be called after any API callback
     pub fn drain_envelopes(&mut self) -> impl Iterator<Item = Envelope> + '_ {
         self.envelopes.drain(..).chain(self.request_manager.drain_elements())
+    }
+
+    /// Put a request into an envelope and add it to `self.envelopes`
+    pub fn push_response(
+        &mut self,
+        to: Baseboard,
+        request_id: Uuid,
+        type_: ResponseType,
+    ) {
+        self.envelopes
+            .push(Envelope { to, msg: Response { request_id, type_ }.into() });
+    }
+
+    pub fn state(&self) -> &State {
+        &self.state
     }
 
     /// This call is triggered locally on a single sled as a result of RSS
@@ -372,35 +388,40 @@ impl Fsm {
         &mut self,
         from: Baseboard,
         request_id: Uuid,
-        pkg: SharePkg,
+        new_pkg: SharePkg,
     ) -> Result<Option<ApiOutput>, ApiError> {
-        match self.state {
+        match &self.state {
             State::Uninitialized => {
                 // Initialize ourselves and ack
                 self.state = State::InitialMember {
-                    pkg,
+                    pkg: new_pkg,
                     distributed_shares: BTreeMap::new(),
                 };
-                self.envelopes.push(Envelope {
-                    to: from,
-                    msg: Msg::Rsp(Response {
-                        request_id,
-                        type_: ResponseType::InitAck,
-                    }),
-                });
+                self.push_response(from, request_id, ResponseType::InitAck);
                 Ok(Some(ApiOutput::PeerInitialized))
+            }
+            State::InitialMember { pkg, .. } => {
+                // Return sucess on idempotence
+                if pkg == &new_pkg {
+                    self.push_response(from, request_id, ResponseType::InitAck);
+                } else {
+                    // Send an error response
+                    self.push_response(
+                        from,
+                        request_id,
+                        MsgError::AlreadyInitialized.into(),
+                    );
+                }
+                // We already persisted that we are initialized
+                Ok(None)
             }
             _ => {
                 // Send an error response
-                self.envelopes.push(Envelope {
-                    to: from,
-                    msg: Msg::Rsp(Response {
-                        request_id,
-                        type_: ResponseType::Error(
-                            MsgError::AlreadyInitialized,
-                        ),
-                    }),
-                });
+                self.push_response(
+                    from,
+                    request_id,
+                    MsgError::AlreadyInitialized.into(),
+                );
                 Ok(None)
             }
         }
@@ -440,10 +461,7 @@ impl Fsm {
             }
         };
 
-        self.envelopes.push(Envelope {
-            to: from,
-            msg: Msg::Rsp(Response { request_id, type_: response }),
-        });
+        self.push_response(from, request_id, response);
     }
 
     // Handle a `RequestType::Learn` from a peer
@@ -466,10 +484,7 @@ impl Fsm {
             }
         };
         if let Some(err) = err {
-            self.envelopes.push(Envelope {
-                to: from,
-                msg: Msg::Rsp(Response { request_id, type_: err.into() }),
-            });
+            self.push_response(from, request_id, err.into());
         }
     }
 
