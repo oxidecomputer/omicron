@@ -202,6 +202,10 @@ impl Fsm {
         &self.state
     }
 
+    pub fn rack_init_failed(&self) -> bool {
+        self.rack_init_error.is_some()
+    }
+
     /// This call is triggered locally on a single sled as a result of RSS
     /// running. It may only be called once, which is enforced by checking to
     /// see if we already are in `State::Uninitialized`.

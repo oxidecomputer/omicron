@@ -273,6 +273,8 @@ impl TestState {
                 // There should no longer be an outstanding `InitRack` request
                 // in the `RequestManager`
                 prop_assert!(!self.sut.is_rack_initializing());
+                prop_assert!(self.sut.rack_init_failed());
+                self.rack_init_status = Some(RackInitStatus::SutAsRssFailed);
             }
         }
         Ok(())
@@ -356,10 +358,10 @@ proptest! {
                 // reset.
                 // We want to minimize this path in our tests, but we still want
                 // to test it. That's why we wait `Action` generators appropriately.
-                println!("Rack init failed: proptest bailed after {i} iterations");
+                eprintln!("Rack init failed: proptest bailed after {i} iterations");
                 return Ok(());
             }
-            // println!("{:#?}", action);
+            //println!("{:#?}", action);
             state.on_action(action)?;
         }
     }

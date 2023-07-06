@@ -15,7 +15,7 @@ use uuid::Uuid;
 // Ranges for timeout generation
 const LEARN_TIMEOUT_SECS: RangeInclusive<u64> = 5..=10;
 const RACK_SECRET_TIMEOUT_SECS: RangeInclusive<u64> = 20..=50;
-const TICKS_PER_ACTION: RangeInclusive<usize> = 1..=20;
+const TICKS_PER_ACTION: RangeInclusive<usize> = 1..=5;
 const MAX_ACTIONS: usize = 1000;
 
 /// Input to the `run` method of our proptests
@@ -179,19 +179,10 @@ fn arb_action(
     let peer_subset = arb_peer_subset(peers);
     let initial_members2 = initial_members.clone();
     prop_oneof![
-            100 => (TICKS_PER_ACTION).prop_map(Action::Ticks),
-            5 => peer_subset.clone().prop_map(Action::Connect),
-            5 => peer_subset.prop_map(Action::Disconnect),
-            1 => Just(Action::RackInit),
-            15 => Just(Action::LoadRackSecret),
-
-    /*        10 => any::<prop::sample::Selector>().prop_map(move |selector| {
-                // If there are no learners just issue a tick
-                selector.try_select(&learners).map_or(
-                    Action::Ticks(1),
-                    |peer| Action::InitLearner(peer.clone())
-                )
-            })
-            */
-        ]
+        40 => (TICKS_PER_ACTION).prop_map(Action::Ticks),
+        100 => peer_subset.clone().prop_map(Action::Connect),
+        50 => peer_subset.prop_map(Action::Disconnect),
+        1 => Just(Action::RackInit),
+        15 => Just(Action::LoadRackSecret),
+    ]
 }
