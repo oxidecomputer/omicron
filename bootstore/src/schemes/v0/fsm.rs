@@ -171,10 +171,10 @@ impl Fsm {
     pub fn new_uninitialized(id: Baseboard, config: Config) -> Fsm {
         Fsm {
             state: State::Uninitialized,
-            id,
+            id: id.clone(),
             config,
             connected_peers: BTreeSet::new(),
-            request_manager: RequestManager::new(config),
+            request_manager: RequestManager::new(id, config),
             envelopes: vec![],
             rack_init_error: None,
         }

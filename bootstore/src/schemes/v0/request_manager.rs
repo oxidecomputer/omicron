@@ -69,6 +69,7 @@ pub enum TrackableRequest {
 ///
 /// We expect very few requests at a time - on the order of one or two requests.
 pub struct RequestManager {
+    id: Baseboard,
     config: Config,
     requests: BTreeMap<Uuid, TrackableRequest>,
     expiry_to_id: BTreeMap<Instant, Uuid>,
@@ -81,8 +82,9 @@ pub struct RequestManager {
 
 impl RequestManager {
     /// Create a new RequestManager
-    pub fn new(config: Config) -> RequestManager {
+    pub fn new(id: Baseboard, config: Config) -> RequestManager {
         RequestManager {
+            id,
             config,
             requests: BTreeMap::new(),
             expiry_to_id: BTreeMap::new(),
@@ -105,6 +107,12 @@ impl RequestManager {
         connected_peers: &BTreeSet<Baseboard>,
     ) -> Uuid {
         let expiry = now + self.config.rack_init_timeout;
+        let mut acks = InitAcks::default();
+        acks.expected = packages
+            .keys()
+            .cloned()
+            .filter_map(|id| if id != self.id { Some(id) } else { None })
+            .collect();
         let req = TrackableRequest::InitRack {
             rack_uuid,
             packages: packages.clone(),
