@@ -120,12 +120,12 @@ impl Default for RackSetupPane {
                 ("Current Status Details", "<D>"),
             ],
             rack_uninitialized_help: vec![
-                ("Scoll", "<UP/DOWN>"),
+                ("Scroll", "<UP/DOWN>"),
                 ("Current Status Details", "<D>"),
                 ("Start Rack Setup", "<Ctrl-Alt-S>"),
             ],
             rack_initialized_help: vec![
-                ("Scoll", "<UP/DOWN>"),
+                ("Scroll", "<UP/DOWN>"),
                 ("Current Status Details", "<D>"),
                 ("Start Rack Reset", "<Ctrl-Alt-R>"),
             ],
