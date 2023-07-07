@@ -1623,38 +1623,6 @@ pub struct VpcFirewallRuleUpdateParams {
 #[repr(transparent)]
 pub struct VpcFirewallRulePriority(pub u16);
 
-struct OptionVecVisitor<T>(std::marker::PhantomData<T>);
-
-impl<'de, T> de::Visitor<'de> for OptionVecVisitor<T>
-where
-    T: Deserialize<'de>,
-{
-    type Value = Option<Vec<T>>;
-
-    fn expecting(&self, formatter: &mut Formatter) -> std::fmt::Result {
-        formatter.write_str("null or a non-empty array")
-    }
-
-    fn visit_none<E>(self) -> Result<Self::Value, E>
-    where
-        E: de::Error,
-    {
-        Ok(None)
-    }
-
-    fn visit_some<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let vec = Vec::<T>::deserialize(deserializer)?;
-        if vec.is_empty() {
-            Err(de::Error::custom("empty array is not allowed"))
-        } else {
-            Ok(Some(vec))
-        }
-    }
-}
-
 fn deserialize_option_vec<'de, T, D>(
     deserializer: D,
 ) -> Result<Option<Vec<T>>, D::Error>
@@ -1662,7 +1630,15 @@ where
     T: Deserialize<'de>,
     D: Deserializer<'de>,
 {
-    deserializer.deserialize_option(OptionVecVisitor(std::marker::PhantomData))
+    Option::deserialize(deserializer)?
+        .map(|vec: Vec<T>| {
+            if vec.is_empty() {
+                Err(de::Error::invalid_length(0, &"empty array is not allowed"))
+            } else {
+                Ok(vec)
+            }
+        })
+        .transpose()
 }
 
 /// Filter for a firewall rule. A given packet must match every field that is
