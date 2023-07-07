@@ -3169,7 +3169,7 @@ async fn test_instance_create_in_silo(cptestctx: &ControlPlaneTestContext) {
         client,
         &silo,
         &"unpriv".parse().unwrap(),
-        params::UserPassword::InvalidPassword,
+        params::UserPassword::LoginDisallowed,
     )
     .await
     .id;

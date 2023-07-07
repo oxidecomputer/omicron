@@ -558,7 +558,7 @@ lazy_static! {
     // Users
     pub static ref DEMO_USER_CREATE: params::UserCreate = params::UserCreate {
         external_id: params::UserId::from_str("dummy-user").unwrap(),
-        password: params::UserPassword::InvalidPassword,
+        password: params::UserPassword::LoginDisallowed,
     };
 }
 
@@ -966,7 +966,7 @@ lazy_static! {
             unprivileged_access: UnprivilegedAccess::ReadOnly,
             allowed_methods: vec![
                 AllowedMethod::Post(serde_json::to_value(
-                    params::UserPassword::InvalidPassword
+                    params::UserPassword::LoginDisallowed
                 ).unwrap()),
             ],
         },
