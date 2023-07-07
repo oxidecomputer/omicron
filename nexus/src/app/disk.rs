@@ -304,10 +304,16 @@ impl super::Nexus {
         let (.., project, authz_disk) =
             disk_lookup.lookup_for(authz::Action::Delete).await?;
 
+        let (.., db_disk) = LookupPath::new(opctx, &self.db_datastore)
+            .disk_id(authz_disk.id())
+            .fetch()
+            .await?;
+
         let saga_params = sagas::disk_delete::Params {
             serialized_authn: authn::saga::Serialized::for_opctx(opctx),
             project_id: project.id(),
             disk_id: authz_disk.id(),
+            volume_id: db_disk.volume_id,
         };
         self.execute_saga::<sagas::disk_delete::SagaDiskDelete>(saga_params)
             .await?;
