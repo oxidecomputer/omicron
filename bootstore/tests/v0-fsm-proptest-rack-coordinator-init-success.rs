@@ -16,8 +16,8 @@ mod common;
 
 use assert_matches::assert_matches;
 use bootstore::schemes::v0::{
-    ApiError, ApiOutput, Config, Envelope, Fsm, Msg, Request, RequestType,
-    Response, ResponseType, Share,
+    ApiError, ApiOutput, Config, Envelope, Fsm, Msg, MsgError, Request,
+    RequestType, Response, ResponseType, Share,
 };
 use proptest::prelude::*;
 use sled_hardware::Baseboard;
@@ -27,7 +27,7 @@ use uuid::Uuid;
 
 const MIN_INITIAL_MEMBERS: usize = 3;
 const MAX_INITIAL_MEMBERS: usize = 12;
-const TICK_TIMEOUT: Duration = Duration::from_millis(30000);
+const TICK_TIMEOUT: Duration = Duration::from_millis(250);
 
 use common::generators::{
     arb_config, arb_initial_member_ids, MAX_ACTIONS, TICKS_PER_ACTION,
@@ -50,6 +50,9 @@ pub enum Action {
     Connect(Baseboard),
     Disconnect(Baseboard),
     Ticks(usize),
+    GetShare(Baseboard),
+    // Trigger an error response by using an invalid rack_uuid in the request
+    GetShareFail(Baseboard),
 }
 
 #[derive(Debug)]
@@ -71,8 +74,10 @@ fn arb_action(
     prop_oneof![
         50 => (TICKS_PER_ACTION).prop_map(Action::Ticks),
         10 => selected_peer.clone().prop_map(Action::Connect),
-        10 => selected_peer.prop_map(Action::Disconnect),
-        5 => Just(Action::LoadRackSecret)
+        10 => selected_peer.clone().prop_map(Action::Disconnect),
+        5 => Just(Action::LoadRackSecret),
+        3 => selected_peer.clone().prop_map(Action::GetShare),
+        3 => selected_peer.clone().prop_map(Action::GetShareFail),
     ]
 }
 
@@ -394,6 +399,59 @@ impl TestState {
             }
         }
     }
+
+    pub fn get_share(&mut self, peer_id: Baseboard) {
+        let id = Uuid::new_v4();
+        let req = Request {
+            id,
+            type_: RequestType::GetShare { rack_uuid: self.rack_uuid },
+        }
+        .into();
+        let res = self.sut.handle_msg(self.now, peer_id.clone(), req);
+        assert_eq!(res, Ok(None));
+        let mut iter = self.sut.drain_envelopes();
+        let envelope = iter.next().unwrap();
+        assert_matches!(envelope, Envelope {
+            to,
+            msg: Msg::Rsp(Response {
+                request_id,
+                type_: ResponseType::Share(_)
+            })
+        } if to == peer_id && id == request_id);
+
+        // There's only one envelope
+        assert!(iter.next().is_none());
+    }
+
+    pub fn get_share_fail(&mut self, peer_id: Baseboard) {
+        let id = Uuid::new_v4();
+        let bad_rack_uuid = Uuid::new_v4();
+        let req = Request {
+            id,
+            type_: RequestType::GetShare { rack_uuid: bad_rack_uuid },
+        }
+        .into();
+        let res = self.sut.handle_msg(self.now, peer_id.clone(), req);
+        assert_eq!(res, Ok(None));
+        let mut iter = self.sut.drain_envelopes();
+        let envelope = iter.next().unwrap();
+        assert_matches!(envelope, Envelope {
+            to,
+            msg: Msg::Rsp(Response {
+                request_id,
+                type_: ResponseType::Error(
+                    MsgError::RackUuidMismatch { expected , got  }
+                )
+            })
+        } if to == peer_id &&
+             id == request_id &&
+             expected == self.rack_uuid &&
+             got == bad_rack_uuid
+        );
+
+        // There's only one envelope
+        assert!(iter.next().is_none());
+    }
 }
 
 proptest! {
@@ -417,6 +475,8 @@ proptest! {
                 Action::Connect(peer_id) => state.connect(peer_id),
                 Action::Disconnect(peer_id) => state.disconnect(peer_id),
                 Action::Ticks(ticks) => state.tick(ticks),
+                Action::GetShare(peer_id) => state.get_share(peer_id),
+                Action::GetShareFail(peer_id) => state.get_share_fail(peer_id),
             }
         }
     }

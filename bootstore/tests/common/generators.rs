@@ -13,7 +13,7 @@ use std::time::Duration;
 
 // Ranges for timeout generation
 const LEARN_TIMEOUT_SECS: RangeInclusive<u64> = 5..=10;
-const RACK_SECRET_TIMEOUT_SECS: RangeInclusive<u64> = 20..=50;
+const RACK_SECRET_TIMEOUT_SECS: RangeInclusive<u64> = 5..=20;
 pub const TICKS_PER_ACTION: RangeInclusive<usize> = 1..=5;
 pub const MAX_ACTIONS: usize = 1000;
 
