@@ -77,9 +77,7 @@ pub struct SledSelector {
 
 #[derive(Serialize, Deserialize, JsonSchema)]
 pub struct PhysicalDiskPath {
-    pub vendor: String,
-    pub serial: String,
-    pub model: String,
+    pub id: Uuid,
 }
 
 /// Updateable properties of a `PhysicalDisk`.

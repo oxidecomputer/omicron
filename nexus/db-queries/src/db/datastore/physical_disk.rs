@@ -13,6 +13,7 @@ use crate::db::collection_insert::DatastoreCollection;
 use crate::db::error::public_error_from_diesel_pool;
 use crate::db::error::ErrorHandler;
 use crate::db::model::PhysicalDisk;
+use crate::db::model::PhysicalDiskKind;
 use crate::db::model::PhysicalDiskState;
 use crate::db::model::Sled;
 use crate::db::pagination::paginated;
@@ -31,6 +32,38 @@ use omicron_common::api::external::UpdateResult;
 use uuid::Uuid;
 
 impl DataStore {
+    /// - Sled Agents like to look up physical disks by "Vendor, Serial, Model"
+    /// - The external API likes to look up physical disks by UUID
+    /// - LookuPath objects are opinionated about how they perform lookups. They
+    /// support "primary keys" or "names", but they're opinionated about the
+    /// name objects being a single string.
+    ///
+    /// This function bridges that gap, by allowing the external API to
+    /// translate "UUID" type into a "Vendor, Serial, Model" type which can
+    /// be used internally.
+    pub async fn physical_disk_id_to_name_no_auth(
+        &self,
+        id: Uuid,
+    ) -> Result<(String, String, String), Error> {
+        use db::schema::physical_disk::dsl;
+
+        dsl::physical_disk
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::id.eq(id))
+            .select((dsl::vendor, dsl::serial, dsl::model))
+            .get_result_async(self.pool())
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ErrorHandler::NotFoundByLookup(
+                        ResourceType::PhysicalDisk,
+                        LookupType::ById(id),
+                    ),
+                )
+            })
+    }
+
     /// Stores a new physical disk in the database.
     ///
     /// - If the Vendor, Serial, and Model fields are the same as an existing
@@ -124,7 +157,7 @@ impl DataStore {
             .filter(dsl::vendor.eq(vendor))
             .filter(dsl::serial.eq(serial))
             .filter(dsl::model.eq(model))
-            .filter(dsl::disk_type.eq(PhysicalDiskKind::U2))
+            .filter(dsl::variant.eq(PhysicalDiskKind::U2))
             .filter(dsl::state.eq(PhysicalDiskState::Active))
             .set(dsl::state.eq(PhysicalDiskState::Draining))
             .returning(PhysicalDisk::as_returning())

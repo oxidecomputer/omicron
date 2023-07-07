@@ -4274,7 +4274,7 @@ async fn physical_disk_list(
 /// Update a physical disk's state
 #[endpoint {
     method = PUT,
-    path = "/v1/system/hardware/disks/{vendor}/{serial}/{model}",
+    path = "/v1/system/hardware/disks/{id}",
     tags = ["system/hardware"],
 }]
 async fn physical_disk_update(
@@ -4289,7 +4289,8 @@ async fn physical_disk_update(
         let path = path_params.into_inner();
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
 
-        let physical_disk_lookup = nexus.physical_disk_lookup(&opctx, &path);
+        let physical_disk_lookup =
+            nexus.physical_disk_lookup(&opctx, &path).await?;
         let physical_disk = nexus
             .physical_disk_update(&opctx, &physical_disk_lookup, update_command)
             .await?;
