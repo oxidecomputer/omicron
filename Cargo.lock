@@ -2016,7 +2016,7 @@ dependencies = [
 [[package]]
 name = "dropshot"
 version = "0.9.1-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#904d53019896a7efe4f699520022614195c29cb0"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#be653ffda818f8b8e043849fcbb23537772dc03a"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -2061,7 +2061,7 @@ dependencies = [
 [[package]]
 name = "dropshot_endpoint"
 version = "0.9.1-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#904d53019896a7efe4f699520022614195c29cb0"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#be653ffda818f8b8e043849fcbb23537772dc03a"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -6823,9 +6823,9 @@ dependencies = [
 
 [[package]]
 name = "rustls-pemfile"
-version = "1.0.2"
+version = "1.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d194b56d58803a43635bdc398cd17e383d6f71f9182b9a192c127ca42494a59b"
+checksum = "2d3987094b1d07b653b7dfdc3f70ce9a1da9c51ac18c1b06b662e4f9a0e9f4b2"
 dependencies = [
  "base64 0.21.2",
 ]
