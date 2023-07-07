@@ -5,7 +5,7 @@
 use std::time::Duration;
 
 use anyhow::{bail, Context, Result};
-use buf_list::{BufList, Cursor};
+use buf_list::Cursor;
 use camino::{Utf8Path, Utf8PathBuf};
 use clap::{Args, Parser, Subcommand};
 use installinator_common::{
@@ -19,6 +19,7 @@ use omicron_common::{
 };
 use sha2::{Digest, Sha256};
 use slog::{error, warn, Drain};
+use tokio::io::AsyncWriteExt;
 use tufaceous_lib::ControlPlaneZoneImages;
 use update_engine::StepResult;
 
@@ -143,14 +144,18 @@ struct InstallOpts {
     #[clap(long)]
     stay_alive: bool,
 
+    /// Dump downloaded artifacts to the specified directory.
+    ///
+    /// This is most useful for debugging artifact download failures.
+    #[clap(long)]
+    artifact_dump_dir: Option<Utf8PathBuf>,
+
     /// Install on a gimlet's M.2 drives, found via scanning for hardware.
     ///
     /// WARNING: This will overwrite the boot image slice of both M.2 drives, if
     /// present!
     #[clap(long)]
     install_on_gimlet: bool,
-
-    // TODO: checksum?
 
     // The destination to write to.
     #[clap(
@@ -184,6 +189,7 @@ impl InstallOpts {
             });
         let progress_handle = progress_reporter.start();
         let discovery = &self.discover_opts.mechanism;
+        let artifact_dump_dir = self.artifact_dump_dir.as_deref();
 
         let engine = UpdateEngine::new(log, event_sender);
 
@@ -214,9 +220,11 @@ impl InstallOpts {
                     // us something other than what we requested) we want to
                     // know immediately and not retry: it's likely an operator
                     // could miss any warnings we emit if a retry succeeds.
-                    check_downloaded_artifact_hash(
+                    dump_and_check_downloaded_artifact_hash(
+                        log,
                         "host phase 2",
-                        host_phase_2_artifact.artifact.clone(),
+                        host_phase_2_artifact.clone(),
+                        artifact_dump_dir,
                         host_phase_2_id.hash,
                     )
                     .await?;
@@ -253,9 +261,11 @@ impl InstallOpts {
                     // matches the data we asked for. We do not retry this for
                     // the same reasons described above when checking the
                     // downloaded host phase 2 artifact.
-                    check_downloaded_artifact_hash(
+                    dump_and_check_downloaded_artifact_hash(
+                        log,
                         "control plane",
-                        control_plane_artifact.artifact.clone(),
+                        control_plane_artifact.clone(),
+                        artifact_dump_dir,
                         control_plane_id.hash,
                     )
                     .await?;
@@ -388,25 +398,65 @@ impl InstallOpts {
     }
 }
 
-async fn check_downloaded_artifact_hash(
+async fn dump_and_check_downloaded_artifact_hash(
+    log: &slog::Logger,
     name: &'static str,
-    data: BufList,
+    artifact: FetchedArtifact,
+    artifact_dump_dir: Option<&Utf8Path>,
     expected_hash: ArtifactHash,
 ) -> Result<()> {
+    // Make a separate copy of the artifact for dumping.
+    let mut artifact_bytes = artifact.artifact.clone();
+    if let Some(dir) = artifact_dump_dir {
+        let path = dir.join(artifact.kind.as_str());
+
+        slog::info!(log, "dumping artifact to `{path}`");
+
+        // Dump the artifact to the specified directory.
+        std::fs::create_dir_all(dir)
+            .with_context(|| format!("error creating dump dir `{dir}`"))?;
+
+        let path = dir.join(artifact.kind.as_str());
+        let mut f =
+            tokio::fs::File::create(&path).await.with_context(|| {
+                format!("error dumping artifact: error creating path `{path}`")
+            })?;
+
+        f.write_all_buf(&mut artifact_bytes).await.with_context(|| {
+            format!("error dumping artifact: error writing to path `{path}`")
+        })?;
+
+        f.shutdown().await.with_context(|| {
+            format!("error dumping artifact: error flushing path `{path}`")
+        })?;
+
+        slog::info!(log, "artifact dumped to `{path}`");
+    }
+
+    let log = log.clone();
+    let address = artifact.addr;
+
     tokio::task::spawn_blocking(move || {
+        slog::info!(
+            log,
+            "checking downloaded {name} against hash: {expected_hash}"
+        );
+
         let mut hasher = Sha256::new();
-        for chunk in data.iter() {
+        for chunk in artifact.artifact.iter() {
             hasher.update(chunk);
         }
         let computed_hash = ArtifactHash(hasher.finalize().into());
         if expected_hash != computed_hash {
-            bail!(
+            let message = format!(
                 "downloaded {name} checksum failure: \
-                 expected {} but calculated {}",
-                hex::encode(&expected_hash),
-                hex::encode(&computed_hash)
+                     expected {expected_hash} but calculated {computed_hash}",
             );
+            slog::error!(log, "{message}");
+            bail!("{message}");
         }
+
+        slog::info!(log, "downloaded {name} hash matches: {expected_hash}");
         Ok(())
     })
     .await

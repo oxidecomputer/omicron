@@ -18,8 +18,8 @@ use installinator_common::{
     EventReport, InstallinatorProgressMetadata, StepContext, StepProgress,
 };
 use itertools::Itertools;
-use omicron_common::address::BOOTSTRAP_ARTIFACT_PORT;
 use omicron_common::update::ArtifactHashId;
+use omicron_common::{address::BOOTSTRAP_ARTIFACT_PORT, update::ArtifactKind};
 use reqwest::StatusCode;
 use sled_hardware::underlay::BootstrapInterface;
 use tokio::{sync::mpsc, time::Instant};
@@ -109,7 +109,9 @@ impl FromStr for DiscoveryMechanism {
 }
 
 /// A fetched artifact.
+#[derive(Clone)]
 pub(crate) struct FetchedArtifact {
+    pub(crate) kind: ArtifactKind,
     pub(crate) attempt: usize,
     pub(crate) addr: SocketAddrV6,
     pub(crate) artifact: BufList,
@@ -165,7 +167,12 @@ impl FetchedArtifact {
             );
             match peers.fetch_artifact(&cx, artifact_hash_id).await {
                 Some((addr, artifact)) => {
-                    return Ok(Self { attempt, addr, artifact })
+                    return Ok(Self {
+                        kind: artifact_hash_id.kind.clone(),
+                        attempt,
+                        addr,
+                        artifact,
+                    })
                 }
                 None => {
                     slog::warn!(
