@@ -113,7 +113,7 @@ CREATE UNIQUE INDEX ON omicron.public.sled (
 ) WHERE time_deleted IS NULL;
 
 CREATE TYPE omicron.public.sled_resource_kind AS ENUM (
-    -- omicron.public.Dataset
+    -- omicron.public.dataset
     'dataset',
     -- omicron.public.service
     'service',
@@ -368,7 +368,7 @@ CREATE TABLE omicron.public.virtual_provisioning_resource (
  * ZPools of Storage, attached to Sleds.
  * These are backed by a single physical disk.
  */
-CREATE TABLE omicron.public.Zpool (
+CREATE TABLE omicron.public.zpool (
     /* Identity metadata (asset) */
     id UUID PRIMARY KEY,
     time_created TIMESTAMPTZ NOT NULL,
@@ -396,7 +396,7 @@ CREATE TYPE omicron.public.dataset_kind AS ENUM (
 /*
  * A dataset of allocated space within a zpool.
  */
-CREATE TABLE omicron.public.Dataset (
+CREATE TABLE omicron.public.dataset (
     /* Identity metadata (asset) */
     id UUID PRIMARY KEY,
     time_created TIMESTAMPTZ NOT NULL,
@@ -424,12 +424,12 @@ CREATE TABLE omicron.public.Dataset (
 );
 
 /* Create an index on the size usage for Crucible's allocation */
-CREATE INDEX on omicron.public.Dataset (
+CREATE INDEX on omicron.public.dataset (
     size_used
 ) WHERE size_used IS NOT NULL AND time_deleted IS NULL AND kind = 'crucible';
 
 /* Create an index on the size usage for any dataset */
-CREATE INDEX on omicron.public.Dataset (
+CREATE INDEX on omicron.public.dataset (
     size_used
 ) WHERE size_used IS NOT NULL AND time_deleted IS NULL;
 
@@ -442,7 +442,7 @@ CREATE TABLE omicron.public.region (
     time_created TIMESTAMPTZ NOT NULL,
     time_modified TIMESTAMPTZ NOT NULL,
 
-    /* FK into the Dataset table */
+    /* FK into the dataset table */
     dataset_id UUID NOT NULL,
 
     /* FK into the volume table */
