@@ -12740,7 +12740,7 @@
             ]
           },
           "password": {
-            "description": "describes how to set the user's login password",
+            "description": "how to set the user's login password",
             "allOf": [
               {
                 "$ref": "#/components/schemas/UserPassword"
@@ -12790,7 +12790,7 @@
               "mode": {
                 "type": "string",
                 "enum": [
-                  "invalid_password"
+                  "login_disallowed"
                 ]
               }
             },

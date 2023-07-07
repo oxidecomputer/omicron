@@ -276,7 +276,7 @@ pub struct SiloCreate {
 pub struct UserCreate {
     /// username used to log in
     pub external_id: UserId,
-    /// describes how to set the user's login password
+    /// how to set the user's login password
     pub password: UserPassword,
 }
 
@@ -411,7 +411,7 @@ pub enum UserPassword {
     /// Sets the user's password to the provided value
     Password(Password),
     /// Invalidates any current password (disabling password authentication)
-    InvalidPassword,
+    LoginDisallowed,
 }
 
 /// Credentials for local user login
