@@ -10,6 +10,7 @@ use crate::app::sagas::volume_delete;
 use crate::app::sagas::SagaInitError;
 use crate::authn;
 use crate::db;
+use omicron_common::api::external::DiskState;
 use serde::Deserialize;
 use serde::Serialize;
 use steno::ActionError;
@@ -106,9 +107,13 @@ async fn sdd_delete_disk_record(
 
     let disk = osagactx
         .datastore()
-        .project_delete_disk_no_auth(&params.disk_id)
+        .project_delete_disk_no_auth(
+            &params.disk_id,
+            &[DiskState::Detached, DiskState::Faulted],
+        )
         .await
         .map_err(ActionError::action_failed)?;
+
     Ok(disk)
 }
 

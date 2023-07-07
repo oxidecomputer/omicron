@@ -16,6 +16,7 @@ use crate::db::model::RegionSnapshot;
 use crate::db::model::Volume;
 use async_bb8_diesel::AsyncConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
+use async_bb8_diesel::OptionalExtension;
 use chrono::Utc;
 use diesel::prelude::*;
 use diesel::OptionalExtension as DieselOptionalExtension;
@@ -24,7 +25,6 @@ use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
-use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use serde::Deserialize;
 use serde::Serialize;
@@ -44,6 +44,26 @@ impl DataStore {
             SerdeError(#[from] serde_json::Error),
         }
         type TxnError = TransactionError<VolumeCreationError>;
+
+        // Grab all the targets that the volume construction request references.
+        // Do this outside the transaction, as the data inside volume doesn't
+        // change and this would simply add to the transaction time.
+        let crucible_targets = {
+            let vcr: VolumeConstructionRequest =
+                serde_json::from_str(&volume.data()).map_err(|e| {
+                    Error::internal_error(&format!(
+                        "serde_json::from_str error in volume_create: {}",
+                        e
+                    ))
+                })?;
+
+            let mut crucible_targets = CrucibleTargets::default();
+            read_only_resources_associated_with_volume(
+                &vcr,
+                &mut crucible_targets,
+            );
+            crucible_targets
+        };
 
         self.pool()
             .transaction(move |conn| {
@@ -93,25 +113,6 @@ impl DataStore {
                 // Increase the usage count for Crucible resources according to the
                 // contents of the volume.
 
-                // Grab all the targets that the volume construction request references.
-                let crucible_targets = {
-                    let vcr: VolumeConstructionRequest = serde_json::from_str(
-                        &volume.data(),
-                    )
-                    .map_err(|e: serde_json::Error| {
-                        TxnError::CustomError(VolumeCreationError::SerdeError(
-                            e,
-                        ))
-                    })?;
-
-                    let mut crucible_targets = CrucibleTargets::default();
-                    resources_associated_with_volume(
-                        &vcr,
-                        &mut crucible_targets,
-                    );
-                    crucible_targets
-                };
-
                 // Increase the number of uses for each referenced region snapshot.
                 use db::schema::region_snapshot::dsl as rs_dsl;
                 for read_only_target in &crucible_targets.read_only_targets {
@@ -146,24 +147,44 @@ impl DataStore {
             })
     }
 
-    pub async fn volume_hard_delete(&self, volume_id: Uuid) -> DeleteResult {
+    /// Return a Option<Volume> based on id, even if it's soft deleted.
+    pub async fn volume_get(
+        &self,
+        volume_id: Uuid,
+    ) -> LookupResult<Option<Volume>> {
         use db::schema::volume::dsl;
-
-        diesel::delete(dsl::volume)
+        dsl::volume
             .filter(dsl::id.eq(volume_id))
-            .execute_async(self.pool())
+            .select(Volume::as_select())
+            .first_async::<Volume>(self.pool())
             .await
-            .map_err(|e| {
-                public_error_from_diesel_pool(
-                    e,
-                    ErrorHandler::NotFoundByLookup(
-                        ResourceType::Volume,
-                        LookupType::ById(volume_id),
-                    ),
-                )
-            })?;
+            .optional()
+            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+    }
 
-        Ok(())
+    /// Delete the volume if it exists. If it was already deleted, this is a
+    /// no-op.
+    pub async fn volume_hard_delete(&self, volume_id: Uuid) -> DeleteResult {
+        self.pool()
+            .transaction(move |conn| {
+                use db::schema::volume::dsl;
+
+                let volume = dsl::volume
+                    .filter(dsl::id.eq(volume_id))
+                    .select(Volume::as_select())
+                    .first::<Volume>(conn)
+                    .optional()?;
+
+                if volume.is_some() {
+                    diesel::delete(dsl::volume)
+                        .filter(dsl::id.eq(volume_id))
+                        .execute(conn)?;
+                }
+
+                Ok(())
+            })
+            .await
+            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
     /// Checkout a copy of the Volume from the database.
@@ -457,6 +478,8 @@ impl DataStore {
             .filter(
                 dsl::volume_references
                     .eq(0)
+                    // Despite the SQL specifying that this column is NOT NULL,
+                    // this null check is required for this function to work!
                     .or(dsl::volume_references.is_null()),
             )
             // where the volume has already been soft-deleted
@@ -470,6 +493,28 @@ impl DataStore {
             .load_async(self.pool())
             .await
             .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+    }
+
+    pub async fn read_only_resources_associated_with_volume(
+        &self,
+        volume_id: Uuid,
+    ) -> LookupResult<CrucibleTargets> {
+        let volume = if let Some(volume) = self.volume_get(volume_id).await? {
+            volume
+        } else {
+            // Volume has already been hard deleted (volume_get returns
+            // soft deleted records), return that no cleanup is necessary.
+            return Ok(CrucibleTargets::default());
+        };
+
+        let vcr: VolumeConstructionRequest =
+            serde_json::from_str(&volume.data())?;
+
+        let mut crucible_targets = CrucibleTargets::default();
+
+        read_only_resources_associated_with_volume(&vcr, &mut crucible_targets);
+
+        Ok(crucible_targets)
     }
 
     /// Decrease the usage count for Crucible resources according to the
@@ -492,6 +537,37 @@ impl DataStore {
             SerdeError(#[from] serde_json::Error),
         }
         type TxnError = TransactionError<DecreaseCrucibleResourcesError>;
+
+        // Grab all the targets that the volume construction request references.
+        // Do this outside the transaction, as the data inside volume doesn't
+        // change and this would simply add to the transaction time.
+        let crucible_targets = {
+            let volume =
+                if let Some(volume) = self.volume_get(volume_id).await? {
+                    volume
+                } else {
+                    // The volume was hard-deleted, return an empty
+                    // CrucibleResources
+                    return Ok(CrucibleResources::V1(
+                        CrucibleResourcesV1::default(),
+                    ));
+                };
+
+            let vcr: VolumeConstructionRequest =
+                serde_json::from_str(&volume.data()).map_err(|e| {
+                    Error::internal_error(&format!(
+                        "serde_json::from_str error in volume_create: {}",
+                        e
+                    ))
+                })?;
+
+            let mut crucible_targets = CrucibleTargets::default();
+            read_only_resources_associated_with_volume(
+                &vcr,
+                &mut crucible_targets,
+            );
+            crucible_targets
+        };
 
         // In a transaction:
         //
@@ -518,11 +594,11 @@ impl DataStore {
                 // hard-deleted, assume clean-up has occurred and return an empty
                 // CrucibleResources. If the volume record was soft-deleted, then
                 // return the serialized CrucibleResources.
-                let volume = {
-                    use db::schema::volume::dsl;
+                use db::schema::volume::dsl as volume_dsl;
 
-                    let volume = dsl::volume
-                        .filter(dsl::id.eq(volume_id))
+                {
+                    let volume = volume_dsl::volume
+                        .filter(volume_dsl::id.eq(volume_id))
                         .select(Volume::as_select())
                         .get_result(conn)
                         .optional()?;
@@ -573,23 +649,6 @@ impl DataStore {
                     }
                 };
 
-                // Grab all the targets that the volume construction request references.
-                let crucible_targets = {
-                    let vcr: VolumeConstructionRequest =
-                        serde_json::from_str(&volume.data()).map_err(|e| {
-                            TxnError::CustomError(
-                                DecreaseCrucibleResourcesError::SerdeError(e),
-                            )
-                        })?;
-
-                    let mut crucible_targets = CrucibleTargets::default();
-                    resources_associated_with_volume(
-                        &vcr,
-                        &mut crucible_targets,
-                    );
-                    crucible_targets
-                };
-
                 // Decrease the number of uses for each referenced region snapshot.
                 use db::schema::region_snapshot::dsl;
 
@@ -631,6 +690,8 @@ impl DataStore {
                             .filter(
                                 dsl::volume_references
                                     .eq(0)
+                                    // Despite the SQL specifying that this column is NOT NULL,
+                                    // this null check is required for this function to work!
                                     .or(dsl::volume_references.is_null()),
                             )
                             .select((Dataset::as_select(), Region::as_select()))
@@ -663,8 +724,6 @@ impl DataStore {
 
                 // Soft delete this volume, and serialize the resources that are to
                 // be cleaned up.
-                use db::schema::volume::dsl as volume_dsl;
-
                 let now = Utc::now();
                 diesel::update(volume_dsl::volume)
                     .filter(volume_dsl::id.eq(volume_id))
@@ -896,8 +955,8 @@ impl DataStore {
     }
 }
 
-#[derive(Default)]
-struct CrucibleTargets {
+#[derive(Default, Debug, Serialize, Deserialize)]
+pub struct CrucibleTargets {
     read_only_targets: Vec<String>,
 }
 
@@ -917,7 +976,7 @@ pub struct CrucibleResourcesV1 {
 /// Return the targets from a VolumeConstructionRequest.
 ///
 /// The targets of a volume construction request map to resources.
-fn resources_associated_with_volume(
+fn read_only_resources_associated_with_volume(
     vcr: &VolumeConstructionRequest,
     crucible_targets: &mut CrucibleTargets,
 ) {
@@ -929,11 +988,14 @@ fn resources_associated_with_volume(
             read_only_parent,
         } => {
             for sub_volume in sub_volumes {
-                resources_associated_with_volume(sub_volume, crucible_targets);
+                read_only_resources_associated_with_volume(
+                    sub_volume,
+                    crucible_targets,
+                );
             }
 
             if let Some(read_only_parent) = read_only_parent {
-                resources_associated_with_volume(
+                read_only_resources_associated_with_volume(
                     read_only_parent,
                     crucible_targets,
                 );
