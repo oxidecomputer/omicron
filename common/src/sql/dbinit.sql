@@ -639,6 +639,11 @@ CREATE TABLE omicron.public.silo_group_membership (
     PRIMARY KEY (silo_group_id, silo_user_id)
 );
 
+/*
+ * The primary key lets us paginate through the users in a group.  We need to
+ * index the same fields in the reverse order to be able to paginate through the
+ * groups that a user is in.
+ */
 CREATE INDEX ON omicron.public.silo_group_membership (
     silo_user_id,
     silo_group_id
@@ -1740,6 +1745,8 @@ CREATE TABLE omicron.public.console_session (
 );
 
 -- to be used for cleaning up old tokens
+-- It's okay that this index is non-unique because we don't need to page through
+-- this list.  We'll just grab the next N, delete them, then repeat.
 CREATE INDEX ON omicron.public.console_session (
     time_created
 );
