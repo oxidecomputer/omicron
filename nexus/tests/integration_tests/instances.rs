@@ -60,6 +60,8 @@ use nexus_test_utils_macros::nexus_test;
 use omicron_nexus::external_api::shared::SiloRole;
 use omicron_sled_agent::sim;
 
+use httptest::{matchers::*, responders::*, Expectation, ServerBuilder};
+
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
 
@@ -1000,6 +1002,90 @@ async fn test_instances_invalid_creation_returns_bad_request(
     assert!(error.message.starts_with(
         "unable to parse JSON body: ncpus: invalid value: integer `-3`"
     ));
+}
+
+#[nexus_test]
+async fn test_instance_using_image_from_other_project_fails(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    create_org_and_project(&client).await;
+
+    let server = ServerBuilder::new().run().unwrap();
+    server.expect(
+        Expectation::matching(request::method_path("HEAD", "/image.raw"))
+            .times(1..)
+            .respond_with(
+                status_code(200).append_header(
+                    "Content-Length",
+                    format!("{}", 4096 * 1000),
+                ),
+            ),
+    );
+
+    // Create an image in springfield-squidport.
+    let images_url = format!("/v1/images?project={}", PROJECT_NAME);
+    let image_create_params = params::ImageCreate {
+        identity: IdentityMetadataCreateParams {
+            name: "alpine-edge".parse().unwrap(),
+            description: String::from(
+                "you can boot any image, as long as it's alpine",
+            ),
+        },
+        os: "alpine".to_string(),
+        version: "edge".to_string(),
+        source: params::ImageSource::Url {
+            url: server.url("/image.raw").to_string(),
+            block_size: params::BlockSize::try_from(512).unwrap(),
+        },
+    };
+    let image =
+        NexusRequest::objects_post(client, &images_url, &image_create_params)
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute_and_parse_unwrap::<views::Image>()
+            .await;
+
+    // Try and fail to create an instance in another project.
+    let project = create_project(client, "moes-tavern").await;
+    let instances_url =
+        format!("/v1/instances?project={}", project.identity.name);
+    let error: HttpErrorResponseBody = NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &instances_url)
+            .body(Some(&params::InstanceCreate {
+                identity: IdentityMetadataCreateParams {
+                    name: "stolen".parse().unwrap(),
+                    description: "i stole an image".into(),
+                },
+                ncpus: InstanceCpuCount(4),
+                memory: ByteCount::from_gibibytes_u32(1),
+                hostname: "stolen".into(),
+                user_data: vec![],
+                network_interfaces:
+                    params::InstanceNetworkInterfaceAttachment::Default,
+                external_ips: vec![],
+                disks: vec![params::InstanceDiskAttachment::Create(
+                    params::DiskCreate {
+                        identity: IdentityMetadataCreateParams {
+                            name: "stolen".parse().unwrap(),
+                            description: "i stole an image".into(),
+                        },
+                        disk_source: params::DiskSource::Image {
+                            image_id: image.identity.id,
+                        },
+                        size: ByteCount::from_gibibytes_u32(4),
+                    },
+                )],
+                start: true,
+            }))
+            .expect_status(Some(StatusCode::BAD_REQUEST)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body()
+    .unwrap();
+    assert_eq!(error.message, "image does not belong to this project");
 }
 
 #[nexus_test]
