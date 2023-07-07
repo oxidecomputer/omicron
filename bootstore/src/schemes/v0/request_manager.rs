@@ -166,23 +166,22 @@ impl RequestManager {
     /// to the learning peer.
     pub fn new_learn_received_req(
         &mut self,
+        request_id: Uuid,
         now: Instant,
         rack_uuid: Uuid,
         threshold: u8,
         from: Baseboard,
         connected_peers: &BTreeSet<Baseboard>,
-    ) -> Uuid {
+    ) {
+        let request = TrackableRequest::LearnReceived {
+            rack_uuid,
+            from,
+            acks: ShareAcks::new(threshold),
+        };
         let expiry = now + self.config.learn_timeout;
-        let request_id = self.new_request(
-            expiry,
-            TrackableRequest::LearnReceived {
-                rack_uuid,
-                from,
-                acks: ShareAcks::new(threshold),
-            },
-        );
+        self.requests.insert(request_id, request);
+        self.expiry_to_id.insert(expiry, request_id);
         self.broadcast_get_share(request_id, rack_uuid, connected_peers);
-        request_id
     }
 
     /// Track and send a `RequestType::Learn` as a result of an

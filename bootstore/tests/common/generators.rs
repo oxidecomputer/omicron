@@ -38,13 +38,14 @@ pub fn arb_initial_member_ids(
 pub fn arb_learner_ids(
     max: usize,
 ) -> impl Strategy<Value = BTreeSet<Baseboard>> {
-    proptest::collection::btree_set(
-        "learner-[a-z][a-z]".prop_map(|id| Baseboard::Pc {
-            identifier: id.to_string(),
-            model: "0".to_string(),
-        }),
-        0..max,
-    )
+    proptest::collection::btree_set(arb_learner_id(), 0..max)
+}
+
+pub fn arb_learner_id() -> impl Strategy<Value = Baseboard> {
+    "learner-[a-z][a-z]".prop_map(|id| Baseboard::Pc {
+        identifier: id.to_string(),
+        model: "0".to_string(),
+    })
 }
 
 // Generate an FSM configuration

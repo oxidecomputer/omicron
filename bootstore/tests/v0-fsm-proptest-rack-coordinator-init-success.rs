@@ -30,7 +30,8 @@ const MAX_INITIAL_MEMBERS: usize = 12;
 const TICK_TIMEOUT: Duration = Duration::from_millis(250);
 
 use common::generators::{
-    arb_config, arb_initial_member_ids, MAX_ACTIONS, TICKS_PER_ACTION,
+    arb_config, arb_initial_member_ids, arb_learner_id, MAX_ACTIONS,
+    TICKS_PER_ACTION,
 };
 
 /// Actions run during the rack init phase of the test
@@ -53,6 +54,7 @@ pub enum Action {
     GetShare(Baseboard),
     // Trigger an error response by using an invalid rack_uuid in the request
     GetShareFail(Baseboard),
+    Learn(Baseboard),
 }
 
 #[derive(Debug)]
@@ -78,6 +80,7 @@ fn arb_action(
         5 => Just(Action::LoadRackSecret),
         3 => selected_peer.clone().prop_map(Action::GetShare),
         3 => selected_peer.clone().prop_map(Action::GetShareFail),
+        5 => arb_learner_id().prop_map(Action::Learn)
     ]
 }
 
@@ -181,8 +184,17 @@ pub struct TestState {
     // `Fsm::load_rack_secret` requests triggered by an `Action::LoadRackSecret`
     load_rack_secret_requests: BTreeMap<Uuid, TestRequest>,
 
+    // Generated Learn requests triggered by `Action::Learn`
+    learn_requests: BTreeMap<Uuid, TestRequest>,
+
+    // Learners that have already learned their shares
+    already_learned: BTreeSet<Baseboard>,
+
     // Rack secret threshold
     threshold: usize,
+
+    // The number of "extra" shares per initial member sled
+    encrypted_shares_per_sled: usize,
 }
 
 impl TestState {
@@ -193,6 +205,9 @@ impl TestState {
     ) -> TestState {
         let sut_id = initial_members.first().cloned().unwrap();
         let threshold = initial_members.len() / 2 + 1;
+        // 255 is the maximum number of shares that can be created.
+        // This number matches the code in `share_pkg::create_pkgs`.
+        let encrypted_shares_per_sled = (255 / initial_members.len()) - 1;
         TestState {
             sut: Fsm::new_uninitialized(sut_id, config.clone()),
             rack_uuid,
@@ -203,7 +218,10 @@ impl TestState {
             rack_init_started: false,
             shares: BTreeMap::new(),
             load_rack_secret_requests: BTreeMap::new(),
+            learn_requests: BTreeMap::new(),
+            already_learned: BTreeSet::new(),
             threshold,
+            encrypted_shares_per_sled,
         }
     }
 
@@ -290,16 +308,27 @@ impl TestState {
         }
     }
 
-    pub fn load_rack_secret(&mut self) {
-        let request_uuid = self.sut.load_rack_secret(self.now).unwrap();
-        self.load_rack_secret_requests
-            .insert(request_uuid, TestRequest::new(self.now));
+    pub fn learn(&mut self, peer_id: Baseboard) {
+        let request_id = Uuid::new_v4();
+        self.learn_requests.insert(request_id, TestRequest::new(self.now));
+        let req = Request { id: request_id, type_: RequestType::Learn }.into();
+        let output = self.sut.handle_msg(self.now, peer_id.clone(), req);
+        assert_eq!(output, Ok(None));
         let envelopes = self.sut.drain_envelopes().collect();
-        self.check_load_rack_secret_output(&envelopes);
+        self.expect_get_share_broadcast(&envelopes);
         self.deliver_share_responses(envelopes);
     }
 
-    fn check_load_rack_secret_output(&self, envelopes: &Vec<Envelope>) {
+    pub fn load_rack_secret(&mut self) {
+        let request_id = self.sut.load_rack_secret(self.now).unwrap();
+        self.load_rack_secret_requests
+            .insert(request_id, TestRequest::new(self.now));
+        let envelopes = self.sut.drain_envelopes().collect();
+        self.expect_get_share_broadcast(&envelopes);
+        self.deliver_share_responses(envelopes);
+    }
+
+    fn expect_get_share_broadcast(&self, envelopes: &Vec<Envelope>) {
         assert_eq!(self.connected_peers.len(), envelopes.len());
         for envelope in envelopes {
             assert!(self.connected_peers.contains(&envelope.to));
@@ -320,18 +349,81 @@ impl TestState {
             let rsp =
                 Response { request_id, type_: ResponseType::Share(share) }
                     .into();
-            let acks = &mut self
-                .load_rack_secret_requests
-                .get_mut(&request_id)
-                .unwrap()
-                .acks;
-            acks.insert(envelope.to.clone());
-            let output = self.sut.handle_msg(self.now, envelope.to, rsp);
-            // We don't count the SUT, which has its own share
-            if acks.len() == self.threshold - 1 {
-                assert_matches!(output, Ok(Some(ApiOutput::RackSecret { .. })));
+            let output =
+                self.sut.handle_msg(self.now, envelope.to.clone(), rsp);
+
+            // Is this a `LoadRackSecret` request or a `Learn` request?
+            if let Some(test_req) =
+                self.load_rack_secret_requests.get_mut(&request_id)
+            {
+                test_req.acks.insert(envelope.to);
+                // We don't count the SUT, which has its own share
+                if test_req.acks.len() == self.threshold - 1 {
+                    assert_matches!(
+                        output,
+                        Ok(Some(ApiOutput::RackSecret { .. }))
+                    );
+                    self.load_rack_secret_requests.remove(&request_id);
+                } else {
+                    assert_matches!(output, Ok(None));
+                    assert!(self.sut.drain_envelopes().next().is_none());
+                }
+            } else if let Some(test_req) =
+                self.learn_requests.get_mut(&request_id)
+            {
+                test_req.acks.insert(envelope.to);
+                // We don't count the SUT, which has its own share
+                if test_req.acks.len() == self.threshold - 1 {
+                    self.learn_requests.remove(&request_id);
+                    // There should be a `LearnedSharePkg` delivered to the
+                    // learner
+                    let mut iter = self.sut.drain_envelopes();
+                    let rsp = iter.next().unwrap();
+                    let expected_id = request_id;
+
+                    // Have we handed out all our shares?
+                    if self.already_learned.len()
+                        == self.encrypted_shares_per_sled
+                        && !self.already_learned.contains(&rsp.to)
+                    {
+                        assert_matches!(
+                            rsp.msg,
+                            Msg::Rsp(Response {
+                                request_id,
+                                type_: ResponseType::Error(MsgError::CannotSpareAShare),
+                            }) if request_id == expected_id
+                        );
+                        assert_eq!(output, Ok(None));
+                    } else {
+                        assert_matches!(
+                            rsp.msg,
+                            Msg::Rsp(Response {
+                                request_id,
+                                type_: ResponseType::Pkg(_),
+                            }) if request_id == expected_id
+                        );
+                        if self.already_learned.contains(&rsp.to) {
+                            // We don't persist (inform the api) if the share
+                            // has already been handed out
+                            assert_eq!(output, Ok(None));
+                        } else {
+                            assert_matches!(
+                                output,
+                                Ok(Some(ApiOutput::ShareDistributedToLearner))
+                            );
+                            self.already_learned.insert(rsp.to);
+                        }
+                    }
+                    assert!(iter.next().is_none());
+                } else {
+                    // We don't have a threshold yet
+                    assert_matches!(output, Ok(None));
+                    assert!(self.sut.drain_envelopes().next().is_none());
+                }
             } else {
+                // These are extra shares (after the threshold is reached)
                 assert_matches!(output, Ok(None));
+                assert!(self.sut.drain_envelopes().next().is_none());
             }
         }
     }
@@ -351,22 +443,21 @@ impl TestState {
         envelopes: &Vec<Envelope>,
     ) {
         assert!(result.is_ok());
-        if self.connected_peers.contains(peer_id) {
-            assert!(envelopes.is_empty());
-        } else {
-            for envelope in envelopes {
-                let request_id = envelope.msg.request_id();
-                assert_eq!(peer_id, &envelope.to);
-                assert_matches!(
-                    &envelope.msg,
-                    &Msg::Req(Request {
-                        type_: RequestType::GetShare { .. },
-                        ..
-                    })
-                );
-                // An outstanding request must exist and the peer must
-                // not have acked for an envelope to be sent.
-                assert!(!self.load_rack_secret_requests[&request_id]
+        for envelope in envelopes {
+            let request_id = envelope.msg.request_id();
+            assert_eq!(peer_id, &envelope.to);
+            assert_matches!(
+                &envelope.msg,
+                &Msg::Req(Request { type_: RequestType::GetShare { .. }, .. })
+            );
+            // An outstanding request must exist and the peer must
+            // not have acked for an envelope to be sent.
+            if let Some(test_req) =
+                self.load_rack_secret_requests.get(&request_id)
+            {
+                assert!(!test_req.acks.contains(&envelope.to));
+            } else {
+                assert!(!self.learn_requests[&request_id]
                     .acks
                     .contains(&envelope.to));
             }
@@ -477,6 +568,7 @@ proptest! {
                 Action::Ticks(ticks) => state.tick(ticks),
                 Action::GetShare(peer_id) => state.get_share(peer_id),
                 Action::GetShareFail(peer_id) => state.get_share_fail(peer_id),
+                Action::Learn(peer_id) => state.learn(peer_id),
             }
         }
     }

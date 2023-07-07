@@ -520,7 +520,8 @@ impl Fsm {
             State::Learning => Some(MsgError::StillLearning),
             State::Learned { .. } => Some(MsgError::CannotSpareAShare),
             State::InitialMember { pkg, .. } => {
-                let _ = self.request_manager.new_learn_received_req(
+                self.request_manager.new_learn_received_req(
+                    request_id,
                     now,
                     pkg.rack_uuid,
                     pkg.threshold,
