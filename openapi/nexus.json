@@ -12740,7 +12740,7 @@
             ]
           },
           "password": {
-            "description": "password used to log in",
+            "description": "describes how to set the user's login password",
             "allOf": [
               {
                 "$ref": "#/components/schemas/UserPassword"
@@ -12768,26 +12768,26 @@
             "description": "Sets the user's password to the provided value",
             "type": "object",
             "properties": {
-              "details": {
-                "$ref": "#/components/schemas/Password"
-              },
-              "user_password_value": {
+              "mode": {
                 "type": "string",
                 "enum": [
                   "password"
                 ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/Password"
               }
             },
             "required": [
-              "details",
-              "user_password_value"
+              "mode",
+              "value"
             ]
           },
           {
             "description": "Invalidates any current password (disabling password authentication)",
             "type": "object",
             "properties": {
-              "user_password_value": {
+              "mode": {
                 "type": "string",
                 "enum": [
                   "invalid_password"
@@ -12795,7 +12795,7 @@
               }
             },
             "required": [
-              "user_password_value"
+              "mode"
             ]
           }
         ]
