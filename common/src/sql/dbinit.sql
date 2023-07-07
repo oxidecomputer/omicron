@@ -98,12 +98,6 @@ CREATE TABLE omicron.public.sled (
 
     /* The last address allocated to an Oxide service on this sled. */
     last_used_address INET NOT NULL,
-
-    -- This constraint should be upheld, even for deleted disks
-    -- in the fleet.
-    CONSTRAINT serial_part_revision_unique UNIQUE (
-      serial_number, part_number, revision
-    )
 );
 
 /* Add an index which lets us look up sleds on a rack */
@@ -255,12 +249,6 @@ CREATE TABLE omicron.public.physical_disk (
 
     -- FK into the Sled table
     sled_id UUID NOT NULL,
-
-    -- This constraint should be upheld, even for deleted disks
-    -- in the fleet.
-    CONSTRAINT vendor_serial_model_unique UNIQUE (
-      vendor, serial, model
-    )
 );
 
 CREATE INDEX ON omicron.public.physical_disk (
