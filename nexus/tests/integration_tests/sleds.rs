@@ -137,7 +137,7 @@ async fn test_physical_disk_create_list_disable_delete(
     assert_eq!(disks[0].state, PhysicalDiskState::Active);
 
     // Disable the disk, marking it as "not-for-use".
-    let disk_url = format!("/v1/system/hardware/disks/v/s/m");
+    let disk_url = "/v1/system/hardware/disks/v/s/m".to_string();
     let disk = physical_disks_update(
         &external_client,
         &disk_url,
