@@ -717,8 +717,6 @@ CREATE UNIQUE INDEX ON omicron.public.saml_identity_provider (
 ) WHERE
     time_deleted IS NULL;
 
-
-
 /*
  * Users' public SSH keys, per RFD 44
  */
