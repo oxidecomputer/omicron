@@ -327,13 +327,6 @@ pub struct Switch {
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
-pub enum PhysicalDiskType {
-    Internal,
-    External,
-}
-
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
 pub enum PhysicalDiskState {
     /// The disk is actively in-use.
     Active,
@@ -360,7 +353,6 @@ pub struct PhysicalDisk {
     pub serial: String,
     pub model: String,
 
-    pub disk_type: PhysicalDiskType,
     pub state: PhysicalDiskState,
 }
 

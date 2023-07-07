@@ -19,7 +19,7 @@ use nexus_test_utils::SLED_AGENT_UUID;
 use nexus_test_utils_macros::nexus_test;
 use omicron_nexus::external_api::params::PhysicalDiskUpdate;
 use omicron_nexus::external_api::views::{
-    PhysicalDisk, PhysicalDiskState, PhysicalDiskType, Sled, SledInstance,
+    PhysicalDisk, PhysicalDiskState, Sled, SledInstance,
 };
 use omicron_nexus::internal_api::params as internal_params;
 use omicron_sled_agent::sim;
@@ -133,7 +133,6 @@ async fn test_physical_disk_create_list_disable_delete(
     assert_eq!(disks[0].vendor, "v");
     assert_eq!(disks[0].serial, "s");
     assert_eq!(disks[0].model, "m");
-    assert_eq!(disks[0].disk_type, PhysicalDiskType::External);
     assert_eq!(disks[0].state, PhysicalDiskState::Active);
 
     // Disable the disk, marking it as "not-for-use".
@@ -147,7 +146,6 @@ async fn test_physical_disk_create_list_disable_delete(
     assert_eq!(disk.vendor, "v");
     assert_eq!(disk.serial, "s");
     assert_eq!(disk.model, "m");
-    assert_eq!(disk.disk_type, PhysicalDiskType::External);
     assert_eq!(disk.state, PhysicalDiskState::Draining);
 
     // Confirm that listing the disks again shows this new state too

@@ -2800,7 +2800,7 @@ async fn networking_switch_port_clear_settings(
 }]
 async fn image_list(
     rqctx: RequestContext<Arc<ServerContext>>,
-    query_params: Query<PaginatedByNameOrId<params::ImageListSelector>>,
+    query_params: Query<PaginatedByNameOrId<params::OptionalProjectSelector>>,
 ) -> Result<HttpResponseOk<ResultsPage<Image>>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
@@ -2824,12 +2824,7 @@ async fn image_list(
             }
         };
         let images = nexus
-            .image_list(
-                &opctx,
-                &parent_lookup,
-                scan_params.selector.include_silo_images.unwrap_or(false),
-                &paginated_by,
-            )
+            .image_list(&opctx, &parent_lookup, &paginated_by)
             .await?
             .into_iter()
             .map(|d| d.into())

@@ -7,7 +7,7 @@
 use crate::bootstrap::params::StartSledAgentRequest;
 use crate::config::Config;
 use crate::instance_manager::InstanceManager;
-use crate::nexus::{LazyNexusClient, NexusRequestQueue};
+use crate::nexus::{NexusClientWithResolver, NexusRequestQueue};
 use crate::params::{
     DiskStateRequested, InstanceHardware, InstanceMigrationSourceParams,
     InstancePutStateResponse, InstanceStateRequested,
@@ -187,8 +187,8 @@ struct SledAgentInner {
     // Other Oxide-controlled services running on this Sled.
     services: ServiceManager,
 
-    // Lazily-acquired connection to Nexus.
-    lazy_nexus_client: LazyNexusClient,
+    // Connection to Nexus.
+    nexus_client: NexusClientWithResolver,
 
     // A serialized request queue for operations interacting with Nexus.
     nexus_request_queue: NexusRequestQueue,
@@ -214,7 +214,7 @@ impl SledAgent {
     pub async fn new(
         config: &Config,
         log: Logger,
-        lazy_nexus_client: LazyNexusClient,
+        nexus_client: NexusClientWithResolver,
         request: StartSledAgentRequest,
         services: ServiceManager,
         storage: StorageManager,
@@ -258,7 +258,7 @@ impl SledAgent {
 
         storage
             .setup_underlay_access(storage_manager::UnderlayAccess {
-                lazy_nexus_client: lazy_nexus_client.clone(),
+                nexus_client: nexus_client.clone(),
                 sled_id: request.id,
             })
             .await?;
@@ -268,7 +268,7 @@ impl SledAgent {
 
         let instances = InstanceManager::new(
             parent_log.clone(),
-            lazy_nexus_client.clone(),
+            nexus_client.clone(),
             etherstub.clone(),
             port_manager.clone(),
         )?;
@@ -317,7 +317,7 @@ impl SledAgent {
                 updates,
                 port_manager,
                 services,
-                lazy_nexus_client,
+                nexus_client,
 
                 // TODO(https://github.com/oxidecomputer/omicron/issues/1917):
                 // Propagate usage of this request queue throughout the Sled Agent.
@@ -446,7 +446,7 @@ impl SledAgent {
     // Sends a request to Nexus informing it that the current sled exists.
     fn notify_nexus_about_self(&self, log: &Logger) {
         let sled_id = self.inner.id;
-        let lazy_nexus_client = self.inner.lazy_nexus_client.clone();
+        let nexus_client = self.inner.nexus_client.clone();
         let sled_address = self.inner.sled_address();
         let is_scrimlet = self.inner.hardware.is_scrimlet();
         let baseboard = nexus_client::types::Baseboard::from(
@@ -479,11 +479,8 @@ impl SledAgent {
                     nexus_client::types::SledRole::Gimlet
                 };
 
-                let nexus_client = lazy_nexus_client
-                    .get()
-                    .await
-                    .map_err(|err| BackoffError::transient(err.to_string()))?;
                 nexus_client
+                    .client()
                     .sled_agent_put(
                         &sled_id,
                         &nexus_client::types::SledAgentStartupInfo {
@@ -700,8 +697,10 @@ impl SledAgent {
         &self,
         artifact: UpdateArtifactId,
     ) -> Result<(), Error> {
-        let nexus_client = self.inner.lazy_nexus_client.get().await?;
-        self.inner.updates.download_artifact(artifact, &nexus_client).await?;
+        self.inner
+            .updates
+            .download_artifact(artifact, &self.inner.nexus_client.client())
+            .await?;
         Ok(())
     }
 

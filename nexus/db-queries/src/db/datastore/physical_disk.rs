@@ -124,6 +124,7 @@ impl DataStore {
             .filter(dsl::vendor.eq(vendor))
             .filter(dsl::serial.eq(serial))
             .filter(dsl::model.eq(model))
+            .filter(dsl::disk_type.eq(PhysicalDiskKind::U2))
             .filter(dsl::state.eq(PhysicalDiskState::Active))
             .set(dsl::state.eq(PhysicalDiskState::Draining))
             .returning(PhysicalDisk::as_returning())
