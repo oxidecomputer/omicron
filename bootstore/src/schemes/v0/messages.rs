@@ -30,6 +30,15 @@ pub enum Msg {
     Rsp(Response),
 }
 
+impl Msg {
+    pub fn request_id(&self) -> Uuid {
+        match self {
+            Msg::Req(req) => req.id,
+            Msg::Rsp(rsp) => rsp.request_id,
+        }
+    }
+}
+
 /// A request sent to a peer
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Request {

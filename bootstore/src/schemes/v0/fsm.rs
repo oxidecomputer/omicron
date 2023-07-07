@@ -96,7 +96,7 @@ pub enum ApiOutput {
 }
 
 /// An error returned from an Fsm API request
-#[derive(Error, Debug, Clone)]
+#[derive(Error, Debug, Clone, PartialEq, Eq)]
 pub enum ApiError {
     #[error("already initialized")]
     AlreadyInitialized,
@@ -178,6 +178,10 @@ impl Fsm {
             envelopes: vec![],
             rack_init_error: None,
         }
+    }
+
+    pub fn config(&self) -> &Config {
+        &self.config
     }
 
     /// Return any envelopes that need sending
@@ -277,32 +281,32 @@ impl Fsm {
     /// the `RackSecret` so that it can be used as input key material. It
     /// starts a a key share retrieval process so that the `RackSecret` can
     /// be reconstructed.
-    pub fn load_rack_secret(&mut self, now: Instant) -> Result<(), ApiError> {
+    pub fn load_rack_secret(&mut self, now: Instant) -> Result<Uuid, ApiError> {
         if let Some((_, err)) = &self.rack_init_error {
             return Err(err.clone());
         }
-        match &self.state {
+        let request_id = match &self.state {
             State::Uninitialized => return Err(ApiError::NotInitialized),
             State::Learning { .. } => return Err(ApiError::StillLearning),
             State::InitialMember { pkg, .. } => {
-                let _ = self.request_manager.new_load_rack_secret_req(
+                self.request_manager.new_load_rack_secret_req(
                     now,
                     pkg.rack_uuid,
                     pkg.threshold,
                     &self.connected_peers,
-                );
+                )
             }
             State::Learned { pkg } => {
-                let _ = self.request_manager.new_load_rack_secret_req(
+                self.request_manager.new_load_rack_secret_req(
                     now,
                     pkg.rack_uuid,
                     pkg.threshold,
                     &self.connected_peers,
-                );
+                )
             }
-        }
+        };
 
-        Ok(())
+        Ok(request_id)
     }
 
     /// Periodic tick to check for request expiration and trigger learner

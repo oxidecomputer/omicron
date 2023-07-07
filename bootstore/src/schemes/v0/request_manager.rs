@@ -116,7 +116,7 @@ impl RequestManager {
         let req = TrackableRequest::InitRack {
             rack_uuid,
             packages: packages.clone(),
-            acks: InitAcks::default(),
+            acks,
         };
         let request_id = self.new_request(expiry, req);
 

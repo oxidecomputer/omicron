@@ -51,7 +51,7 @@ pub struct V0Scheme {
 #[derive(
     Zeroize, ZeroizeOnDrop, PartialEq, Eq, Clone, Serialize, Deserialize,
 )]
-pub struct Share(Vec<u8>);
+pub struct Share(pub Vec<u8>);
 
 // Manually implemented to redact info
 impl Debug for Share {
@@ -63,7 +63,7 @@ impl Debug for Share {
 /// A combined set of secret shares. This is the format that `vsss_rs` requires
 /// the shares in so that it will combine them to reconstruct the secret.
 #[derive(Zeroize, ZeroizeOnDrop)]
-pub struct Shares(Vec<Vec<u8>>);
+pub struct Shares(pub Vec<Vec<u8>>);
 
 // Manually implemented to redact info
 impl Debug for Shares {
