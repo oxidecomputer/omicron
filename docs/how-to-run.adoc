@@ -33,7 +33,7 @@ Here's a summary of the tradeoffs:
 
 |CockroachDB
 |Real implementation, 1-node cluster
-|Real implementation, multi-node cluster (coming soon)
+|Real implementation, multi-node cluster
 
 |Internal/External DNS
 |Real implementation
@@ -83,7 +83,7 @@ There are other configurations besides the ones mentioned here:
 
 * A real Oxide rack: real hardware with real implementations of all components.
 * A Gimlet in a real Oxide rack, deployed as a single system in isolation from the rest of the rack.
-* A Gimlet on a bench (i.e., not in a rack -- requires separate hardware to connect power and networking) connected a Sidecar (the Oxide switch, also on a bench)
+* A Gimlet on a bench (i.e., not in a rack -- requires separate hardware to connect power and networking) connected a Sidecar (the Oxide switch), also on a bench.
 * A Gimlet on a bench with no Sidecar.
 
 This document doesn't describe how to deploy these cases.
