@@ -113,12 +113,6 @@ pub enum Error {
     /// The peer is already initialized as a member of the original group
     AlreadyInitialized,
 
-    /// The peer has already learned it is a shared member of the group
-    AlreadyLearned { rack_uuid: Uuid },
-
-    /// The peer is already in the process of learning
-    AlreadyLearning,
-
     /// The peer is not initialized yet
     NotInitialized,
 
@@ -128,9 +122,6 @@ pub enum Error {
     /// The peer does not have any shares to hand out
     /// to learners
     CannotSpareAShare,
-
-    /// Shares to hand to learners cannot be decrypted
-    FailedToDecryptShares,
 
     /// A request was received with a rack UUID that does not match this peer
     RackUuidMismatch { expected: Uuid, got: Uuid },

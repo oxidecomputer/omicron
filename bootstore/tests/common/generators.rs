@@ -4,12 +4,13 @@
 
 //! Proptest generators
 
-use bootstore::schemes::v0::Config;
+use bootstore::schemes::v0::{Config, MsgError};
 use proptest::prelude::*;
 use sled_hardware::Baseboard;
 use std::collections::BTreeSet;
 use std::ops::RangeInclusive;
 use std::time::Duration;
+use uuid::Uuid;
 
 // Ranges for timeout generation
 const LEARN_TIMEOUT_SECS: RangeInclusive<u64> = 5..=10;
@@ -49,11 +50,6 @@ pub fn arb_learner_id() -> impl Strategy<Value = Baseboard> {
 }
 
 // Generate an FSM configuration
-//
-// Timeouts are in "Ticks", which maps to a fixed tick timer set by higher
-// level software. The actual timing is unimportant for the protocol logic, we
-// are just concerned that the behavior is correct in regards to some abstract
-// clock.
 pub fn arb_config() -> impl Strategy<Value = Config> {
     (LEARN_TIMEOUT_SECS, RACK_SECRET_TIMEOUT_SECS).prop_map(
         |(learn_timeout, rack_secret_request_timeout)| Config {
@@ -64,4 +60,18 @@ pub fn arb_config() -> impl Strategy<Value = Config> {
             ),
         },
     )
+}
+
+// Generate a `MsgError`
+pub fn arb_msg_error() -> impl Strategy<Value = MsgError> {
+    prop_oneof![
+        Just(MsgError::AlreadyInitialized),
+        Just(MsgError::NotInitialized),
+        Just(MsgError::StillLearning),
+        Just(MsgError::CannotSpareAShare),
+        Just(MsgError::RackUuidMismatch {
+            expected: Uuid::new_v4(),
+            got: Uuid::new_v4()
+        })
+    ]
 }

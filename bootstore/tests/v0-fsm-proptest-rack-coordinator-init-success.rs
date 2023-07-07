@@ -30,8 +30,8 @@ const MAX_INITIAL_MEMBERS: usize = 12;
 const TICK_TIMEOUT: Duration = Duration::from_millis(250);
 
 use common::generators::{
-    arb_config, arb_initial_member_ids, arb_learner_id, MAX_ACTIONS,
-    TICKS_PER_ACTION,
+    arb_config, arb_initial_member_ids, arb_learner_id, arb_msg_error,
+    MAX_ACTIONS, TICKS_PER_ACTION,
 };
 
 /// Actions run during the rack init phase of the test
@@ -55,6 +55,8 @@ pub enum Action {
     // Trigger an error response by using an invalid rack_uuid in the request
     GetShareFail(Baseboard),
     Learn(Baseboard),
+    // Generate an error response from another peer
+    ErrorResponse(Baseboard, MsgError),
 }
 
 #[derive(Debug)]
@@ -73,14 +75,17 @@ fn arb_action(
     let peers: Vec<_> = initial_members.iter().skip(1).cloned().collect();
     let selected_peer = any::<prop::sample::Index>()
         .prop_map(move |index| index.get(&peers).clone());
+    let err_response = (selected_peer.clone(), arb_msg_error())
+        .prop_map(|(from, err)| Action::ErrorResponse(from, err));
     prop_oneof![
         50 => (TICKS_PER_ACTION).prop_map(Action::Ticks),
         10 => selected_peer.clone().prop_map(Action::Connect),
         10 => selected_peer.clone().prop_map(Action::Disconnect),
         5 => Just(Action::LoadRackSecret),
         3 => selected_peer.clone().prop_map(Action::GetShare),
-        3 => selected_peer.clone().prop_map(Action::GetShareFail),
-        5 => arb_learner_id().prop_map(Action::Learn)
+        3 => selected_peer.prop_map(Action::GetShareFail),
+        5 => arb_learner_id().prop_map(Action::Learn),
+        3 => err_response
     ]
 }
 
@@ -543,6 +548,14 @@ impl TestState {
         // There's only one envelope
         assert!(iter.next().is_none());
     }
+
+    pub fn handle_error_response(&mut self, peer_id: Baseboard, err: MsgError) {
+        let rsp =
+            Response { request_id: Uuid::new_v4(), type_: err.into() }.into();
+        let output = self.sut.handle_msg(self.now, peer_id, rsp);
+        assert_matches!(output, Err(ApiError::ErrorResponseReceived { .. }));
+        assert!(self.sut.drain_envelopes().next().is_none());
+    }
 }
 
 proptest! {
@@ -569,6 +582,9 @@ proptest! {
                 Action::GetShare(peer_id) => state.get_share(peer_id),
                 Action::GetShareFail(peer_id) => state.get_share_fail(peer_id),
                 Action::Learn(peer_id) => state.learn(peer_id),
+                Action::ErrorResponse(peer_id, err) => {
+                    state.handle_error_response(peer_id, err)
+                }
             }
         }
     }
