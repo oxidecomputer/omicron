@@ -15,6 +15,9 @@ end
 add net
     set physical=sc0_1
 end
+add net
+    set physical=sc0_2
+end
 add fs
     set dir=/stuff
     set special=/opt/oxide/softnpu/stuff

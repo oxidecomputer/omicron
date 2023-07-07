@@ -13,6 +13,7 @@ set -x
 SOURCE_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 cd "${SOURCE_DIR}/.."
 OMICRON_TOP="$PWD"
+PORT_COUNT=${PORT_COUNT:=2}
 
 MARKER=/etc/opt/oxide/NO_INSTALL
 if [[ -f "$MARKER" ]]; then
@@ -87,10 +88,20 @@ function try_remove_simnet {
     success "Verified simnet link $LINK does not exist"
 }
 
+function try_remove_etherstub {
+    local LINK="$1"
+    if [[ "$(dladm show-etherstub -p -o LINK "$LINK")" ]]; then
+        dladm delete-etherstub "$LINK" || warn "Failed to delete etherstub $LINK"
+    fi
+    success "Verified etherstub $LINK does not exist"
+}
+
 function try_remove_vnics {
     try_remove_address "lo0/underlay"
     try_remove_interface sc0_1
     try_remove_vnic sc0_1
+    try_remove_vnic sc0_2
+    try_remove_simnet fr0_0
     INDICES=("0" "1")
     for I in "${INDICES[@]}"; do
         try_remove_interface "net$I"
@@ -128,8 +139,27 @@ function remove_softnpu_zone {
     rm -rf /softnpu-zone
 }
 
+function try_remove_ports {
+    for i in $(seq 0 $1); do
+        try_remove_vnic "qsfp$i"
+        try_remove_etherstub "front_stub$i"
+        try_remove_simnet "rear$i"
+        try_remove_vnic "rear$i"
+        try_remove_etherstub "rear_stub$i"
+    done
+
+    count=$(($1 * 2))
+    for i in $(seq 0 $count); do
+        try_remove_simnet "tfportrear${i}_0"
+        try_remove_simnet "tfportqsfp${i}_0"
+        try_remove_simnet "softnpurear${i}_0"
+        try_remove_simnet "softnpuqsfp${i}_0"
+    done
+}
+
 verify_omicron_uninstalled
 unload_xde_driver
 remove_softnpu_zone
 try_remove_vnics
 try_destroy_zpools
+try_remove_ports $PORT_COUNT

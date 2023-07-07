@@ -25,6 +25,7 @@ fi
 
 # Select the physical link over which to simulate the Chelsio links
 PHYSICAL_LINK=${PHYSICAL_LINK:=$(dladm show-phys -p -o LINK | head -1)}
+PORT_COUNT=${PORT_COUNT:=2}
 echo "Using $PHYSICAL_LINK as physical link"
 
 function success {
@@ -70,34 +71,166 @@ function get_simnet_name_if_exists {
     dladm show-simnet -p -o LINK "$1" 2> /dev/null || echo ""
 }
 
-# Create virtual links to represent the Chelsio physical links
-#
-# Arguments:
-#   $1: Optional name of the physical link to use. If not provided, use the
-#   first physical link available on the machine.
-function ensure_simulated_chelsios {
-    local PHYSICAL_LINK="$1"
-    INDICES=("0" "1")
-    for I in "${INDICES[@]}"; do
-        if [[ -z "$(get_simnet_name_if_exists "net$I")" ]]; then
-            # sidecar ports
-            dladm create-simnet -t "net$I"
-            dladm create-simnet -t "sc${I}_0"
-            dladm modify-simnet -t -p "net$I" "sc${I}_0"
-            dladm set-linkprop -p mtu=1600 "sc${I}_0" # encap headroom
+# These are the ports that connect the ASIC to the Switch Zone
+# They are not mounted on a physical interface
+function create_tfport {
+    number="${1}_0"
+    tfport="tfport$2$number"
+    softnpu="softnpu$2$number"
+    if [[ -z "$(get_simnet_name_if_exists "$tfport")" ]]; then
+        dladm create-simnet -t "$tfport"
+        dladm create-simnet -t "$softnpu"
+        dladm modify-simnet -t -p "$tfport" "$softnpu"
+    fi
+    success "virtual $tfport exists"
+}
 
-            # corresponding scrimlet ports
-            dladm create-simnet -t "sr0_$I"
-            dladm create-simnet -t "scr0_$I"
-            dladm modify-simnet -t -p "sr0_$I" "scr0_$I"
+# These are the "front facing" ports. These are mounted on a
+# physical interface on your machine for external connectivity
+# to the "rack"
+function create_qsfp_port {
+    target="qsfp$1"
+    stub="front_stub$1"
+    if [[ -z "$(get_vnic_name_if_exists "$target")" ]]; then
+        if [[ -v $target ]]; then
+            echo "found physical mapping for $target"
+            mapping="${!target}"
+            mapping_type=${mapping#*,}
+            mapping_over=${mapping%,*}
+            if [[ "$mapping_type" == "vnic" ]]; then
+                dladm "create-$mapping_type" -t "$target" -l "$mapping_over"
+            elif [[ "mapping_type" == "simnet" ]]; then
+                dladm create-simnet -t "$target"
+                dladm create-simnet -t "$mapping_over"
+                dladm modify-simnet -t -p "$target" "$mapping_over"
+            fi
+            echo "mounted $target on $mapping_over"
+        else
+            echo "no mapping for $target found"
+            dladm create-etherstub "$stub"
+            dladm create-vnic -t "$target" -l "$stub"
+            echo "mounted $target on $stub"
         fi
-        success "Simnet net$I/sc${I}_0/sr0_$I/scr0_$I exists"
+    fi
+    success "$target exists"
+}
+
+# These are the "rear facing" ports. These are mounted on a
+# physical interface so your "scrimlet" can have a direct
+# network connection to another "gimlet" or "scrimlet"
+function create_rear_port {
+    target="rear$1"
+    stub="rear_stub$1"
+    if [[ -z "$(get_vnic_name_if_exists "$target")" ]]; then
+        if [[ -v $target ]]; then
+            echo "found physical mapping for $target"
+            mapping="${!target}"
+            mapping_type=${mapping#*,}
+            mapping_over=${mapping%,*}
+            if [[ "$mapping_type" == "vnic" ]]; then
+                dladm create-vnic -t "$target" -l "$mapping_over"
+            elif [[ "$mapping_type" == "simnet" ]]; then
+                dladm create-simnet -t "$target"
+                dladm modify-simnet -t -p "$target" "$mapping_over"
+                dladm set-linkprop -p mtu=1600 "$target" # encap headroom
+            fi
+            echo "mounted $target on $mapping_over"
+        else
+            echo "no mapping for $target found"
+            dladm create-etherstub "$stub"
+            dladm create-vnic -t "$target" -l "$stub"
+            echo "mounted $target on $stub"
+        fi
+    fi
+    success "$target exists"
+}
+
+function ensure_switchports {
+    source ./tools/scrimlet/port_mappings.conf
+    count=$(($PORT_COUNT - 1))
+    for i in $(seq 0 $count); do
+        create_qsfp_port $i
+        create_tfport $i "qsfp"
     done
 
-    if [[ -z "$(get_vnic_name_if_exists "sc0_1")" ]]; then
-        dladm create-vnic -t "sc0_1" -l $PHYSICAL_LINK -m a8:e1:de:01:70:1d
+    for i in $(seq 0 $count); do
+        create_rear_port $i
+        create_tfport $i "rear"
+    done
+}
+
+function generate_softnpu_zone_config {
+    file="./tools/scrimlet/generated-softnpu-zone.txt"
+    cat > "$file" <<EOF
+create
+set brand=omicron1
+set zonepath=/softnpu-zone
+set ip-type=exclusive
+set autoboot=false
+add fs
+    set dir=/stuff
+    set special=/opt/oxide/softnpu/stuff
+    set type=lofs
+end
+EOF
+
+    count=$(($PORT_COUNT - 1))
+    for i in $(seq 0 $count); do
+        echo "add net" >> $file
+        echo "    set physical=qsfp$i" >> $file
+        echo "end" >> $file
+        echo "add net" >> $file
+        echo "    set physical=softnpuqsfp${i}_0" >> $file
+        echo "end" >> $file
+    done
+
+    for i in $(seq 0 $count); do
+        echo "add net" >> $file
+        echo "    set physical=rear$i" >> $file
+        echo "end" >> $file
+        echo "add net" >> $file
+        echo "    set physical=softnpurear${i}_0" >> $file
+        echo "end" >> $file
+    done
+
+    echo "commit" >> $file
+
+    success "configuration created"
+}
+
+function generate_softnpu_toml {
+    file="./tools/scrimlet/generated-softnpu.toml"
+    cat > "$file" <<EOF
+p4_program = "/stuff/libsidecar_lite.so"
+ports = [
+EOF
+
+    count=$(($PORT_COUNT - 1))
+    for i in $(seq 0 $count); do
+        echo "    { sidecar = \"rear$i\", scrimlet = \"softnpurear${i}_0\", mtu = 1600 }," >> $file
+    done
+
+    for i in $(seq 0 $count); do
+        echo "    { sidecar = \"qsfp$i\", scrimlet = \"softnpuqsfp${i}_0\", mtu = 1500 }," >> $file
+    done
+    echo "]" >> $file
+}
+
+function ensure_chelsio_links {
+    if [[ -z "$(get_simnet_name_if_exists "net0")" ]]; then
+        dladm create-simnet -t "net0"
     fi
-    success "Vnic sc0_1 exists"
+
+    if [[ -z "$(get_simnet_name_if_exists "net1")" ]]; then
+        dladm create-simnet -t "net1"
+    fi
+    success "virtual chelsio links created"
+}
+
+function ensure_tfpkt0 {
+    if [[ -z "$(get_simnet_name_if_exists "tfpkt0")" ]]; then
+        dladm create-simnet -t "tfpkt0"
+    fi
 }
 
 function ensure_run_as_root {
@@ -111,7 +244,7 @@ function ensure_softnpu_zone {
     zoneadm list | grep -q softnpu || {
         mkdir -p /softnpu-zone
         mkdir -p /opt/oxide/softnpu/stuff
-        cp tools/scrimlet/softnpu.toml /opt/oxide/softnpu/stuff/
+        cp tools/scrimlet/generated-softnpu.toml /opt/oxide/softnpu/stuff/
         cp tools/scrimlet/softnpu-init.sh /opt/oxide/softnpu/stuff/
         cp out/softnpu/libsidecar_lite.so /opt/oxide/softnpu/stuff/
         cp out/softnpu/softnpu /opt/oxide/softnpu/stuff/
@@ -119,7 +252,7 @@ function ensure_softnpu_zone {
 
         zfs create -p -o mountpoint=/softnpu-zone rpool/softnpu-zone
 
-        zonecfg -z softnpu -f tools/scrimlet/softnpu-zone.txt
+        zonecfg -z softnpu -f tools/scrimlet/generated-softnpu-zone.txt
         zoneadm -z softnpu install
         zoneadm -z softnpu boot
     }
@@ -132,13 +265,17 @@ function enable_softnpu {
         exit 1
     }
     zlogin softnpu pgrep softnpu || {
-        zlogin softnpu 'RUST_LOG=debug /stuff/softnpu /stuff/softnpu.toml &> /softnpu.log &'
+        zlogin softnpu 'RUST_LOG=debug /stuff/softnpu /stuff/generated-softnpu.toml &> /softnpu.log &'
     }
     success "softnpu started"
 }
 
 ensure_run_as_root
+ensure_chelsio_links
+ensure_tfpkt0
+ensure_switchports $PORT_COUNT
+generate_softnpu_zone_config $PORT_COUNT
+generate_softnpu_toml
 ensure_zpools
-ensure_simulated_chelsios "$PHYSICAL_LINK"
 ensure_softnpu_zone
 enable_softnpu

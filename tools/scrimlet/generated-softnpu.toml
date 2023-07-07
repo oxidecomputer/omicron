@@ -1,0 +1,7 @@
+p4_program = "/stuff/libsidecar_lite.so"
+ports = [
+    { sidecar = "rear0", scrimlet = "softnpurear0_0", mtu = 1600 },
+    { sidecar = "rear1", scrimlet = "softnpurear1_0", mtu = 1600 },
+    { sidecar = "qsfp0", scrimlet = "softnpuqsfp0_0", mtu = 1500 },
+    { sidecar = "qsfp1", scrimlet = "softnpuqsfp1_0", mtu = 1500 },
+]
