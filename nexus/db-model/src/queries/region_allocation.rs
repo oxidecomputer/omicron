@@ -23,6 +23,7 @@
 // a CTE (where we want the alias name to come first).
 
 use crate::schema::dataset;
+use crate::schema::physical_disk;
 use crate::schema::zpool;
 
 table! {
@@ -147,10 +148,11 @@ diesel::allow_tables_to_appear_in_same_query!(
     do_insert,
     candidate_regions,
     dataset,
+    physical_disk,
     zpool,
 );
 
-diesel::allow_tables_to_appear_in_same_query!(candidate_zpools, dataset,);
+diesel::allow_tables_to_appear_in_same_query!(candidate_zpools, dataset);
 
 diesel::allow_tables_to_appear_in_same_query!(
     old_zpool_usage,

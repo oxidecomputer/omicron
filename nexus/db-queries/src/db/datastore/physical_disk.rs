@@ -13,6 +13,7 @@ use crate::db::collection_insert::DatastoreCollection;
 use crate::db::error::public_error_from_diesel_pool;
 use crate::db::error::ErrorHandler;
 use crate::db::model::PhysicalDisk;
+use crate::db::model::PhysicalDiskState;
 use crate::db::model::Sled;
 use crate::db::pagination::paginated;
 use async_bb8_diesel::AsyncRunQueryDsl;
@@ -26,6 +27,7 @@ use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
+use omicron_common::api::external::UpdateResult;
 use uuid::Uuid;
 
 impl DataStore {
@@ -105,6 +107,34 @@ impl DataStore {
             .load_async(self.pool_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+    }
+
+    pub async fn physical_disk_deactivate(
+        &self,
+        opctx: &OpContext,
+        authz_physical_disk: &authz::PhysicalDisk,
+    ) -> UpdateResult<PhysicalDisk> {
+        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
+        use db::schema::physical_disk::dsl;
+
+        let (vendor, serial, model) = authz_physical_disk.id();
+
+        diesel::update(dsl::physical_disk)
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::vendor.eq(vendor))
+            .filter(dsl::serial.eq(serial))
+            .filter(dsl::model.eq(model))
+            .filter(dsl::state.eq(PhysicalDiskState::Active))
+            .set(dsl::state.eq(PhysicalDiskState::Draining))
+            .returning(PhysicalDisk::as_returning())
+            .get_result_async(self.pool())
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ErrorHandler::NotFoundByResource(authz_physical_disk),
+                )
+            })
     }
 
     /// Deletes a disk from the database.

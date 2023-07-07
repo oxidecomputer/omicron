@@ -11,6 +11,7 @@ use crate::db::identity::Asset;
 use crate::db::lookup::LookupPath;
 use crate::db::model::DatasetKind;
 use crate::db::model::ServiceKind;
+use crate::external_api::params;
 use crate::internal_api::params::{
     PhysicalDiskDeleteRequest, PhysicalDiskPutRequest, SledAgentStartupInfo,
     SledRole, ZpoolPutRequest,
@@ -21,6 +22,7 @@ use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
+use omicron_common::api::external::UpdateResult;
 use sled_agent_client::types::SetVirtualNetworkInterfaceHost;
 use sled_agent_client::Client as SledAgentClient;
 use std::net::SocketAddrV6;
@@ -137,6 +139,18 @@ impl super::Nexus {
 
     // Physical disks
 
+    pub fn physical_disk_lookup<'a>(
+        &'a self,
+        opctx: &'a OpContext,
+        disk_selector: &params::PhysicalDiskPath,
+    ) -> lookup::PhysicalDisk<'a> {
+        LookupPath::new(&opctx, &self.db_datastore).physical_disk(
+            &disk_selector.vendor,
+            &disk_selector.serial,
+            &disk_selector.model,
+        )
+    }
+
     pub async fn sled_list_physical_disks(
         &self,
         opctx: &OpContext,
@@ -154,6 +168,24 @@ impl super::Nexus {
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<db::model::PhysicalDisk> {
         self.db_datastore.physical_disk_list(&opctx, pagparams).await
+    }
+
+    pub async fn physical_disk_update(
+        &self,
+        opctx: &OpContext,
+        physical_disk_lookup: &lookup::PhysicalDisk<'_>,
+        update_command: params::PhysicalDiskUpdate,
+    ) -> UpdateResult<db::model::PhysicalDisk> {
+        let (.., authz_physical_disk) =
+            physical_disk_lookup.lookup_for(authz::Action::Modify).await?;
+
+        match update_command {
+            params::PhysicalDiskUpdate::Disable => {
+                self.db_datastore
+                    .physical_disk_deactivate(&opctx, &authz_physical_disk)
+                    .await
+            }
+        }
     }
 
     /// Upserts a physical disk into the database, updating it if it already exists.

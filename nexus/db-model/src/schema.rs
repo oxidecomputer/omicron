@@ -746,6 +746,7 @@ table! {
 
         variant -> crate::PhysicalDiskKindEnum,
         sled_id -> Uuid,
+        state -> crate::PhysicalDiskStateEnum,
     }
 }
 

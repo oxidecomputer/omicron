@@ -3436,6 +3436,69 @@
         }
       }
     },
+    "/v1/system/hardware/disks/{vendor}/{serial}/{model}": {
+      "put": {
+        "tags": [
+          "system/hardware"
+        ],
+        "summary": "Update a physical disk's state",
+        "operationId": "physical_disk_update",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "model",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "serial",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "vendor",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PhysicalDiskUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PhysicalDisk"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/v1/system/hardware/racks": {
       "get": {
         "tags": [
@@ -10608,6 +10671,9 @@
             "type": "string",
             "format": "uuid"
           },
+          "state": {
+            "$ref": "#/components/schemas/PhysicalDiskState"
+          },
           "time_created": {
             "description": "timestamp when this resource was created",
             "type": "string",
@@ -10627,6 +10693,7 @@
           "id",
           "model",
           "serial",
+          "state",
           "time_created",
           "time_modified",
           "vendor"
@@ -10653,11 +10720,48 @@
           "items"
         ]
       },
+      "PhysicalDiskState": {
+        "oneOf": [
+          {
+            "description": "The disk is actively in-use.",
+            "type": "string",
+            "enum": [
+              "active"
+            ]
+          },
+          {
+            "description": "The disk has been marked for removal, and is transitioning to the Inactive state.",
+            "type": "string",
+            "enum": [
+              "draining"
+            ]
+          },
+          {
+            "description": "The disk is not in-use by the system.",
+            "type": "string",
+            "enum": [
+              "inactive"
+            ]
+          }
+        ]
+      },
       "PhysicalDiskType": {
         "type": "string",
         "enum": [
           "internal",
           "external"
+        ]
+      },
+      "PhysicalDiskUpdate": {
+        "description": "Updateable properties of a `PhysicalDisk`.",
+        "oneOf": [
+          {
+            "description": "Prevents the disk from being used for future provisioning.\n\nThis does not immediately cause services to be evacuated from using the underlying disk, that process may happen asynchronously.",
+            "type": "string",
+            "enum": [
+              "disable"
+            ]
+          }
         ]
       },
       "Project": {

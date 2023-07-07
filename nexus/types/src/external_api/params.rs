@@ -75,6 +75,24 @@ pub struct SledSelector {
     pub sled: Uuid,
 }
 
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct PhysicalDiskPath {
+    pub vendor: String,
+    pub serial: String,
+    pub model: String,
+}
+
+/// Updateable properties of a `PhysicalDisk`.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum PhysicalDiskUpdate {
+    /// Prevents the disk from being used for future provisioning.
+    ///
+    /// This does not immediately cause services to be evacuated from using
+    /// the underlying disk, that process may happen asynchronously.
+    Disable,
+}
+
 pub struct SwitchSelector {
     /// ID of the switch
     pub switch: Uuid,

@@ -532,10 +532,6 @@ mod test {
         sled_id
     }
 
-    fn test_zpool_size() -> ByteCount {
-        ByteCount::from_gibibytes_u32(100)
-    }
-
     const TEST_VENDOR: &str = "test-vendor";
     const TEST_SERIAL: &str = "test-serial";
     const TEST_MODEL: &str = "test-model";
@@ -548,7 +544,7 @@ mod test {
     ) -> Uuid {
         let physical_disk = PhysicalDisk::new(
             TEST_VENDOR.into(),
-            TEST_SERIAL.into(),
+            format!("{TEST_SERIAL}-{}", Uuid::new_v4()),
             TEST_MODEL.into(),
             kind,
             sled_id,
@@ -565,14 +561,11 @@ mod test {
         datastore: &DataStore,
         sled_id: Uuid,
         physical_disk_id: Uuid,
+        size: ByteCount,
     ) -> Uuid {
         let zpool_id = Uuid::new_v4();
-        let zpool = Zpool::new(
-            zpool_id,
-            sled_id,
-            physical_disk_id,
-            test_zpool_size().into(),
-        );
+        let zpool =
+            Zpool::new(zpool_id, sled_id, physical_disk_id, size.into());
         datastore.zpool_upsert(zpool).await.unwrap();
         zpool_id
     }
@@ -593,38 +586,140 @@ mod test {
         }
     }
 
+    struct RegionAllocationTestCtxBuilder {
+        sleds: usize,
+        // It's assumed that we have one zpool per disk
+        disks_per_sled: usize,
+        zpool_size: ByteCount,
+        datasets_per_zpool: usize,
+    }
+
+    impl RegionAllocationTestCtxBuilder {
+        pub fn sleds(mut self, s: usize) -> Self {
+            self.sleds = s;
+            self
+        }
+
+        pub fn disks_per_sled(mut self, d: usize) -> Self {
+            self.disks_per_sled = d;
+            self
+        }
+
+        pub fn zpool_size(mut self, b: ByteCount) -> Self {
+            self.zpool_size = b;
+            self
+        }
+
+        pub fn datasets_per_zpool(mut self, d: usize) -> Self {
+            self.datasets_per_zpool = d;
+            self
+        }
+    }
+
+    impl Default for RegionAllocationTestCtxBuilder {
+        fn default() -> Self {
+            Self {
+                sleds: 1,
+                disks_per_sled: 1,
+                zpool_size: ByteCount::from_gibibytes_u32(100),
+                datasets_per_zpool: 1,
+            }
+        }
+    }
+
+    impl RegionAllocationTestCtxBuilder {
+        async fn build(
+            &self,
+            opctx: &OpContext,
+            datastore: &Arc<DataStore>,
+        ) -> RegionAllocationTestCtx {
+            let mut sleds = vec![];
+
+            for _ in 0..self.sleds {
+                // Create a sled...
+                let mut sled = SledInfo {
+                    id: create_test_sled(&datastore).await,
+                    disks: vec![],
+                };
+
+                for _ in 0..self.disks_per_sled {
+                    // ... and a disk on that sled...
+                    let physical_disk_id = create_test_physical_disk(
+                        &datastore,
+                        opctx,
+                        sled.id,
+                        PhysicalDiskKind::U2,
+                    )
+                    .await;
+
+                    // ... and a zpool within that disk...
+                    let zpool_id = create_test_zpool(
+                        &datastore,
+                        sled.id,
+                        physical_disk_id,
+                        self.zpool_size,
+                    )
+                    .await;
+
+                    let mut disk = DiskInfo {
+                        id: physical_disk_id,
+                        zpool_id,
+                        datasets: vec![],
+                    };
+
+                    for _ in 0..self.datasets_per_zpool {
+                        // ... and datasets within that zpool.
+                        let bogus_addr =
+                            SocketAddrV6::new(Ipv6Addr::LOCALHOST, 8080, 0, 0);
+                        let dataset_id = Uuid::new_v4();
+                        let dataset = Dataset::new(
+                            dataset_id,
+                            zpool_id,
+                            bogus_addr,
+                            DatasetKind::Crucible,
+                        );
+                        datastore.dataset_upsert(dataset).await.unwrap();
+                        disk.datasets.push(dataset_id);
+                    }
+                    sled.disks.push(disk);
+                }
+                sleds.push(sled);
+            }
+
+            RegionAllocationTestCtx { sleds }
+        }
+    }
+
+    struct DiskInfo {
+        id: Uuid,
+        #[allow(unused)]
+        zpool_id: Uuid,
+        #[allow(unused)]
+        datasets: Vec<Uuid>,
+    }
+
+    struct SledInfo {
+        id: Uuid,
+        disks: Vec<DiskInfo>,
+    }
+
+    struct RegionAllocationTestCtx {
+        sleds: Vec<SledInfo>,
+    }
+
     #[tokio::test]
     async fn test_region_allocation() {
         let logctx = dev::test_setup_log("test_region_allocation");
         let mut db = test_setup_database(&logctx.log).await;
         let (opctx, datastore) = datastore_test(&logctx, &db).await;
 
-        // Create a sled...
-        let sled_id = create_test_sled(&datastore).await;
-
-        // ... and a disk on that sled...
-        let physical_disk_id = create_test_physical_disk(
-            &datastore,
-            &opctx,
-            sled_id,
-            PhysicalDiskKind::U2,
-        )
-        .await;
-
-        // ... and a zpool within that disk...
-        let zpool_id =
-            create_test_zpool(&datastore, sled_id, physical_disk_id).await;
-
-        // ... and datasets within that zpool.
-        let dataset_count = REGION_REDUNDANCY_THRESHOLD * 2;
-        let bogus_addr = SocketAddrV6::new(Ipv6Addr::LOCALHOST, 8080, 0, 0);
-        let dataset_ids: Vec<Uuid> =
-            (0..dataset_count).map(|_| Uuid::new_v4()).collect();
-        for id in &dataset_ids {
-            let dataset =
-                Dataset::new(*id, zpool_id, bogus_addr, DatasetKind::Crucible);
-            datastore.dataset_upsert(dataset).await.unwrap();
-        }
+        let _testctx = RegionAllocationTestCtxBuilder::default()
+            .sleds(1)
+            .disks_per_sled(REGION_REDUNDANCY_THRESHOLD * 2)
+            .zpool_size(ByteCount::from_gibibytes_u32(100))
+            .datasets_per_zpool(1)
+            .build(&opctx, &datastore)
+            .await;
 
         // Allocate regions from the datasets for this disk.
         let params = create_test_disk_create_params(
@@ -704,32 +799,14 @@ mod test {
         let mut db = test_setup_database(&logctx.log).await;
         let (opctx, datastore) = datastore_test(&logctx, &db).await;
 
-        // Create a sled...
-        let sled_id = create_test_sled(&datastore).await;
-
-        // ... and a disk on that sled...
-        let physical_disk_id = create_test_physical_disk(
-            &datastore,
-            &opctx,
-            sled_id,
-            PhysicalDiskKind::U2,
-        )
-        .await;
-
-        // ... and a zpool within that disk...
-        let zpool_id =
-            create_test_zpool(&datastore, sled_id, physical_disk_id).await;
-
-        // ... and datasets within that zpool.
-        let dataset_count = REGION_REDUNDANCY_THRESHOLD;
-        let bogus_addr = SocketAddrV6::new(Ipv6Addr::LOCALHOST, 8080, 0, 0);
-        let dataset_ids: Vec<Uuid> =
-            (0..dataset_count).map(|_| Uuid::new_v4()).collect();
-        for id in &dataset_ids {
-            let dataset =
-                Dataset::new(*id, zpool_id, bogus_addr, DatasetKind::Crucible);
-            datastore.dataset_upsert(dataset).await.unwrap();
-        }
+        let disk_count = REGION_REDUNDANCY_THRESHOLD;
+        let _testctx = RegionAllocationTestCtxBuilder::default()
+            .sleds(1)
+            .disks_per_sled(disk_count)
+            .zpool_size(ByteCount::from_gibibytes_u32(100))
+            .datasets_per_zpool(1)
+            .build(&opctx, &datastore)
+            .await;
 
         // Allocate regions from the datasets for this volume.
         let params = create_test_disk_create_params(
@@ -786,32 +863,13 @@ mod test {
         let mut db = test_setup_database(&logctx.log).await;
         let (opctx, datastore) = datastore_test(&logctx, &db).await;
 
-        // Create a sled...
-        let sled_id = create_test_sled(&datastore).await;
-
-        // ... and a disk on that sled...
-        let physical_disk_id = create_test_physical_disk(
-            &datastore,
-            &opctx,
-            sled_id,
-            PhysicalDiskKind::U2,
-        )
-        .await;
-
-        // ... and a zpool within that disk...
-        let zpool_id =
-            create_test_zpool(&datastore, sled_id, physical_disk_id).await;
-
-        // ... and datasets within that zpool.
-        let dataset_count = REGION_REDUNDANCY_THRESHOLD - 1;
-        let bogus_addr = SocketAddrV6::new(Ipv6Addr::LOCALHOST, 8080, 0, 0);
-        let dataset_ids: Vec<Uuid> =
-            (0..dataset_count).map(|_| Uuid::new_v4()).collect();
-        for id in &dataset_ids {
-            let dataset =
-                Dataset::new(*id, zpool_id, bogus_addr, DatasetKind::Crucible);
-            datastore.dataset_upsert(dataset).await.unwrap();
-        }
+        let _testctx = RegionAllocationTestCtxBuilder::default()
+            .sleds(1)
+            .disks_per_sled(REGION_REDUNDANCY_THRESHOLD - 1)
+            .zpool_size(ByteCount::from_gibibytes_u32(100))
+            .datasets_per_zpool(1)
+            .build(&opctx, &datastore)
+            .await;
 
         // Allocate regions from the datasets for this volume.
         let params = create_test_disk_create_params(
@@ -842,56 +900,159 @@ mod test {
     }
 
     #[tokio::test]
-    async fn test_region_allocation_out_of_space_fails() {
-        let logctx =
-            dev::test_setup_log("test_region_allocation_out_of_space_fails");
+    async fn test_region_allocation_out_of_space_fails_one_disk() {
+        let logctx = dev::test_setup_log(
+            "test_region_allocation_out_of_space_fails_one_disk",
+        );
         let mut db = test_setup_database(&logctx.log).await;
         let (opctx, datastore) = datastore_test(&logctx, &db).await;
 
-        // Create a sled...
-        let sled_id = create_test_sled(&datastore).await;
-
-        // ... and a disk on that sled...
-        let physical_disk_id = create_test_physical_disk(
-            &datastore,
-            &opctx,
-            sled_id,
-            PhysicalDiskKind::U2,
-        )
-        .await;
-
-        // ... and a zpool within that disk...
-        let zpool_id =
-            create_test_zpool(&datastore, sled_id, physical_disk_id).await;
-
-        // ... and datasets within that zpool.
-        let dataset_count = REGION_REDUNDANCY_THRESHOLD;
-        let bogus_addr = SocketAddrV6::new(Ipv6Addr::LOCALHOST, 8080, 0, 0);
-        let dataset_ids: Vec<Uuid> =
-            (0..dataset_count).map(|_| Uuid::new_v4()).collect();
-        for id in &dataset_ids {
-            let dataset =
-                Dataset::new(*id, zpool_id, bogus_addr, DatasetKind::Crucible);
-            datastore.dataset_upsert(dataset).await.unwrap();
-        }
+        let zpool_size = ByteCount::from_gibibytes_u32(100);
+        let _testctx = RegionAllocationTestCtxBuilder::default()
+            .sleds(1)
+            .disks_per_sled(1)
+            .zpool_size(zpool_size)
+            // The Zpool's space is shared by all these datasets.
+            //
+            // So even though we have enough datasets, we don't have enough
+            // space.
+            .datasets_per_zpool(REGION_REDUNDANCY_THRESHOLD)
+            .build(&opctx, &datastore)
+            .await;
 
         // Allocate regions from the datasets for this disk.
         //
         // Note that we ask for a disk which is as large as the zpool,
         // so we shouldn't have space for redundancy.
-        let disk_size = test_zpool_size();
-        let params = create_test_disk_create_params("disk1", disk_size);
+        let params = create_test_disk_create_params("disk1", zpool_size);
         let volume1_id = Uuid::new_v4();
 
-        assert!(datastore
+        datastore
             .region_allocate(
                 &opctx,
                 volume1_id,
                 &params.disk_source,
-                params.size
+                params.size,
             )
             .await
-            .is_err());
+            .unwrap_err();
+
+        let _ = db.cleanup().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_region_allocation_out_of_space_fails_many_sleds() {
+        let logctx = dev::test_setup_log(
+            "test_region_allocation_out_of_space_fails_many_sleds",
+        );
+        let mut db = test_setup_database(&logctx.log).await;
+        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+
+        let zpool_size = ByteCount::from_gibibytes_u32(100);
+        let disk_size = ByteCount::from_gibibytes_u32(101);
+        let _testctx = RegionAllocationTestCtxBuilder::default()
+            .sleds(REGION_REDUNDANCY_THRESHOLD)
+            .disks_per_sled(1)
+            .zpool_size(zpool_size)
+            .datasets_per_zpool(1)
+            .build(&opctx, &datastore)
+            .await;
+
+        // Allocate regions from the datasets for this disk.
+        //
+        // Note that we ask for a disk which is as large as the zpool,
+        // so we shouldn't have space for redundancy.
+        let params = create_test_disk_create_params("disk1", disk_size);
+        let volume1_id = Uuid::new_v4();
+
+        datastore
+            .region_allocate(
+                &opctx,
+                volume1_id,
+                &params.disk_source,
+                params.size,
+            )
+            .await
+            .unwrap_err();
+
+        let _ = db.cleanup().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_region_allocation_ignores_inactive_disks() {
+        let logctx = dev::test_setup_log(
+            "test_region_allocation_ignores_inactive_disks",
+        );
+        let mut db = test_setup_database(&logctx.log).await;
+        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+
+        let zpool_size = ByteCount::from_gibibytes_u32(100);
+        let disk_size = ByteCount::from_mebibytes_u32(100);
+        let testctx = RegionAllocationTestCtxBuilder::default()
+            .sleds(1)
+            .disks_per_sled(REGION_REDUNDANCY_THRESHOLD)
+            .zpool_size(zpool_size)
+            .datasets_per_zpool(1)
+            .build(&opctx, &datastore)
+            .await;
+
+        // Allocate one disk, observe that it works.
+        let params = create_test_disk_create_params("disk1", disk_size);
+        let volume_id = Uuid::new_v4();
+        datastore
+            .region_allocate(
+                &opctx,
+                volume_id,
+                &params.disk_source,
+                params.size,
+            )
+            .await
+            .unwrap();
+
+        // First, find the disk which we plan on deactivating.
+        let disk_to_disable = testctx.sleds[0].disks[0].id;
+        let disk = datastore
+            .physical_disk_list(
+                &opctx,
+                &DataPageParams::<Uuid> {
+                    marker: None,
+                    direction: dropshot::PaginationOrder::Ascending,
+                    limit: std::num::NonZeroU32::new(1024).unwrap(),
+                },
+            )
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|disk| disk.uuid() == disk_to_disable)
+            .unwrap();
+
+        let (.., physical_disk_authz) = LookupPath::new(&opctx, &datastore)
+            .physical_disk(&disk.vendor, &disk.serial, &disk.model)
+            .lookup_for(authz::Action::Modify)
+            .await
+            .unwrap();
+
+        // Deactivate the disk.
+        datastore
+            .physical_disk_deactivate(&opctx, &physical_disk_authz)
+            .await
+            .unwrap();
+
+        // After marking a disk as non-active, the provision fails, since
+        // one of the necessary disks cannot be used.
+        let params = create_test_disk_create_params("disk2", disk_size);
+        let volume_id = Uuid::new_v4();
+        datastore
+            .region_allocate(
+                &opctx,
+                volume_id,
+                &params.disk_source,
+                params.size,
+            )
+            .await
+            .unwrap_err();
 
         let _ = db.cleanup().await;
         logctx.cleanup_successful();
@@ -1415,10 +1576,10 @@ mod test {
         );
 
         // Deleting a non-existing record fails
-        assert!(datastore
+        datastore
             .deallocate_external_ip(&opctx, Uuid::nil())
             .await
-            .is_err());
+            .unwrap_err();
 
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
