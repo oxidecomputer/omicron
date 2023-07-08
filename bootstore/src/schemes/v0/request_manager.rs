@@ -285,6 +285,11 @@ impl RequestManager {
         if let Some(TrackableRequest::InitRack { acks, .. }) =
             self.requests.get_mut(&request_id)
         {
+            if !acks.expected.contains(&from) {
+                // We don't want to allow nodes outside of our initial trust
+                // quorum membership to ack.
+                return None;
+            }
             acks.received.insert(from);
             if acks.received == acks.expected {
                 let _req = self.remove_request(request_id);
@@ -339,7 +344,9 @@ impl RequestManager {
         for (request_id, request) in &self.requests {
             match request {
                 TrackableRequest::InitRack { packages, acks, .. } => {
-                    if acks.received.contains(peer_id) {
+                    if acks.received.contains(peer_id)
+                        || !acks.expected.contains(peer_id)
+                    {
                         continue;
                     }
                     if let Some(pkg) = packages.get(peer_id) {
