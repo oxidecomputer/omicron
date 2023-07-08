@@ -91,7 +91,7 @@ pub enum ResponseType {
     Share(Share),
 
     /// Response to [`Request::Learn`]
-    Pkg(LearnedSharePkg),
+    LearnPkg(LearnedSharePkg),
 
     /// An error response
     Error(MsgError),
@@ -102,7 +102,7 @@ impl ResponseType {
         match self {
             ResponseType::InitAck => "init_ack",
             ResponseType::Share(_) => "share",
-            ResponseType::Pkg(_) => "pkg",
+            ResponseType::LearnPkg(_) => "learn_pkg",
             ResponseType::Error(_) => "error",
         }
     }

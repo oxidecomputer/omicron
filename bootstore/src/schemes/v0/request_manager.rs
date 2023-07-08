@@ -193,6 +193,11 @@ impl RequestManager {
         request_id
     }
 
+    fn remove_request(&mut self, request_id: Uuid) -> Option<TrackableRequest> {
+        self.expiry_to_id.retain(|_, id| *id != request_id);
+        self.requests.remove(&request_id)
+    }
+
     // Track a new request
     fn new_request(
         &mut self,
@@ -282,8 +287,7 @@ impl RequestManager {
         {
             acks.received.insert(from);
             if acks.received == acks.expected {
-                self.expiry_to_id.retain(|_, id| *id != request_id);
-                self.requests.remove(&request_id);
+                let _req = self.remove_request(request_id);
                 Some(true)
             } else {
                 Some(false)
@@ -310,8 +314,7 @@ impl RequestManager {
         acks.received.insert(from, share);
         // We already have our own share to be used to reconstruct the secret
         if acks.received.len() == (acks.threshold - 1) as usize {
-            self.expiry_to_id.retain(|_, id| *id != request_id);
-            self.requests.remove(&request_id)
+            self.remove_request(request_id)
         } else {
             None
         }
@@ -319,12 +322,11 @@ impl RequestManager {
 
     /// Return true if there is a `LearnSent` for the given `request_id`, false
     /// otherwise.
-    pub fn on_pkg(&mut self, request_id: Uuid) -> bool {
+    pub fn on_learn_pkg(&mut self, request_id: Uuid) -> bool {
         if let Some(TrackableRequest::LearnSent { .. }) =
             self.requests.get_mut(&request_id)
         {
-            self.expiry_to_id.retain(|_, id| *id != request_id);
-            self.requests.remove(&request_id);
+            let _req = self.remove_request(request_id);
             true
         } else {
             false

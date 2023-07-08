@@ -212,6 +212,13 @@ impl Fsm {
         self.rack_init_error.is_some()
     }
 
+    pub fn check_init_err(&self) -> Result<(), ApiError> {
+        match &self.rack_init_error {
+            Some((_, err)) => Err(err.clone()),
+            None => Ok(()),
+        }
+    }
+
     /// This call is triggered locally on a single sled as a result of RSS
     /// running. It may only be called once, which is enforced by checking to
     /// see if we already are in `State::Uninitialized`.
@@ -223,9 +230,7 @@ impl Fsm {
         rack_uuid: Uuid,
         initial_membership: BTreeSet<Baseboard>,
     ) -> Result<(), ApiError> {
-        if let Some((_, err)) = &self.rack_init_error {
-            return Err(err.clone());
-        }
+        self.check_init_err()?;
         let State::Uninitialized = self.state else {
             return Err(ApiError::AlreadyInitialized);
         };
@@ -265,9 +270,7 @@ impl Fsm {
     ///
     /// Persistence is required after a successful call to `init_learner`
     pub fn init_learner(&mut self, now: Instant) -> Result<(), ApiError> {
-        if let Some((_, err)) = &self.rack_init_error {
-            return Err(err.clone());
-        }
+        self.check_init_err()?;
         let State::Uninitialized = self.state else {
             return Err(ApiError::AlreadyInitialized);
         };
@@ -285,9 +288,7 @@ impl Fsm {
     /// starts a key share retrieval process so that the `RackSecret` can
     /// be reconstructed.
     pub fn load_rack_secret(&mut self, now: Instant) -> Result<Uuid, ApiError> {
-        if let Some((_, err)) = &self.rack_init_error {
-            return Err(err.clone());
-        }
+        self.check_init_err()?;
         let (rack_uuid, threshold) = match &self.state {
             State::Uninitialized => return Err(ApiError::NotInitialized),
             State::Learning { .. } => return Err(ApiError::StillLearning),
@@ -365,9 +366,7 @@ impl Fsm {
         now: Instant,
         peer_id: Baseboard,
     ) -> Result<(), ApiError> {
-        if let Some((_, err)) = &self.rack_init_error {
-            return Err(err.clone());
-        }
+        self.check_init_err()?;
         if let State::Learning = &self.state {
             if !self.request_manager.has_learn_sent_req() {
                 // This is the first peer we've seen in the learning state, so try
@@ -398,9 +397,7 @@ impl Fsm {
         from: Baseboard,
         msg: Msg,
     ) -> Result<Option<ApiOutput>, ApiError> {
-        if let Some((_, err)) = &self.rack_init_error {
-            return Err(err.clone());
-        }
+        self.check_init_err()?;
         match msg {
             Msg::Req(req) => self.handle_request(now, from, req),
             Msg::Rsp(rsp) => self.handle_response(from, rsp),
@@ -544,7 +541,9 @@ impl Fsm {
             ResponseType::Share(share) => {
                 self.on_share(from, rsp.request_id, share)
             }
-            ResponseType::Pkg(pkg) => self.on_pkg(from, rsp.request_id, pkg),
+            ResponseType::LearnPkg(pkg) => {
+                self.on_learn_pkg(from, rsp.request_id, pkg)
+            }
             ResponseType::Error(error) => {
                 Err(ApiError::ErrorResponseReceived {
                     from,
@@ -575,13 +574,13 @@ impl Fsm {
     }
 
     // Handle a `ResponseType::Pkg` from a peer
-    fn on_pkg(
+    fn on_learn_pkg(
         &mut self,
         from: Baseboard,
         request_id: Uuid,
         pkg: LearnedSharePkg,
     ) -> Result<Option<ApiOutput>, ApiError> {
-        if self.request_manager.on_pkg(request_id) {
+        if self.request_manager.on_learn_pkg(request_id) {
             // This pkg matched our outstanding request. Let's transition from
             // `State::Learning` to `State::Learned`.
             assert_eq!(self.state, State::Learning);
@@ -770,7 +769,7 @@ fn queue_pkg_response(
         to: from,
         msg: Msg::Rsp(Response {
             request_id,
-            type_: ResponseType::Pkg(learned_pkg),
+            type_: ResponseType::LearnPkg(learned_pkg),
         }),
     });
 }

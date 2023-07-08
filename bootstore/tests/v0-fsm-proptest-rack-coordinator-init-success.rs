@@ -404,7 +404,7 @@ impl TestState {
                             rsp.msg,
                             Msg::Rsp(Response {
                                 request_id,
-                                type_: ResponseType::Pkg(_),
+                                type_: ResponseType::LearnPkg(_),
                             }) if request_id == expected_id
                         );
                         if self.already_learned.contains(&rsp.to) {
