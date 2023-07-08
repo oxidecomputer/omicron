@@ -9,9 +9,8 @@ use nexus_test_utils::resource_helpers::grant_iam;
 use nexus_test_utils::resource_helpers::{create_local_user, create_silo};
 use nexus_test_utils_macros::nexus_test;
 use omicron_common::api::external::Name;
-use omicron_nexus::authz::SiloRole;
 use omicron_nexus::external_api::params;
-use omicron_nexus::external_api::shared;
+use omicron_nexus::external_api::shared::{self, SiloRole};
 use omicron_nexus::external_api::views;
 use omicron_passwords::MIN_EXPECTED_PASSWORD_VERIFY_TIME;
 use std::str::FromStr;
@@ -242,7 +241,7 @@ async fn test_local_user_basic(client: &ClientTestContext, silo: &views::Silo) {
     NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &user_password_url)
             .expect_status(Some(StatusCode::NO_CONTENT))
-            .body(Some(&params::UserPassword::InvalidPassword)),
+            .body(Some(&params::UserPassword::LoginDisallowed)),
     )
     .authn_as(AuthnMode::Session(admin_session.to_string()))
     .execute()
@@ -292,7 +291,7 @@ async fn test_local_user_basic(client: &ClientTestContext, silo: &views::Silo) {
         StatusCode::FORBIDDEN,
         Method::POST,
         &admin_password_url,
-        &params::UserPassword::InvalidPassword,
+        &params::UserPassword::LoginDisallowed,
     )
     .authn_as(AuthnMode::Session(session_token2.clone()))
     .execute()
@@ -312,7 +311,7 @@ async fn test_local_user_with_no_initial_password(
         client,
         silo,
         &test_user,
-        params::UserPassword::InvalidPassword,
+        params::UserPassword::LoginDisallowed,
     )
     .await;
 

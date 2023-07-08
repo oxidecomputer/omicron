@@ -3,11 +3,13 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 mod overview;
+mod rack_setup;
 mod update;
 
 pub use super::Control;
 use crate::ui::defaults::style;
 pub use overview::OverviewPane;
+pub use rack_setup::RackSetupPane;
 use tui::layout::{Constraint, Direction, Layout, Rect};
 use tui::text::{Span, Spans, Text};
 use tui::widgets::Paragraph;

@@ -106,6 +106,29 @@ fn format_multiline_array(array: &mut Array) {
 }
 
 fn build_sleds_array(sleds: &[BootstrapSledDescription]) -> Array {
+    // Helper function to build the comment attached to a given sled.
+    fn sled_comment(sled: &BootstrapSledDescription, end: &str) -> String {
+        use wicketd_client::types::Baseboard;
+        let ip = sled
+            .bootstrap_ip
+            .map(|ip| Cow::from(format!("{ip}")))
+            .unwrap_or_else(|| Cow::from("IP address UNKNOWN"));
+        match &sled.baseboard {
+            Baseboard::Gimlet { identifier, model, revision } => {
+                format!(
+                    " # {identifier} (model {model} revision {revision}, {ip})\
+                     {end}"
+                )
+            }
+            Baseboard::Unknown => {
+                format!(" # UNKNOWN SLED ({ip}){end}")
+            }
+            Baseboard::Pc { identifier, model } => {
+                format!(" # NON-GIMLET {identifier} (model {model}, {ip}){end}")
+            }
+        }
+    }
+
     let mut array = Array::new();
     let mut prev: Option<&BootstrapSledDescription> = None;
 
@@ -121,13 +144,7 @@ fn build_sleds_array(sleds: &[BootstrapSledDescription]) -> Array {
         // We have to attach the comment for each sled on the _next_ item in the
         // array, so here we set our prefix to be the previous item's details.
         if let Some(prev) = prev {
-            decor.set_prefix(format!(
-                " # {serial} (model {model}, revision {rev}){sep}",
-                serial = prev.serial_number,
-                model = prev.model,
-                rev = prev.revision,
-                sep = ARRAY_SEP,
-            ));
+            decor.set_prefix(sled_comment(prev, ARRAY_SEP));
         } else {
             decor.set_prefix(ARRAY_SEP);
         }
@@ -139,12 +156,7 @@ fn build_sleds_array(sleds: &[BootstrapSledDescription]) -> Array {
     // Because we attach comments to previous items, we also need to add a
     // comment to the last element.
     if let Some(prev) = prev {
-        array.set_trailing(format!(
-            " # {serial} (model {model}, revision {rev})\n",
-            serial = prev.serial_number,
-            model = prev.model,
-            rev = prev.revision,
-        ));
+        array.set_trailing(sled_comment(prev, "\n"));
         array.set_trailing_comma(true);
     }
 
@@ -157,10 +169,10 @@ fn populate_network_table(
 ) {
     // Helper function to serialize enums into their appropriate string
     // representations.
-    fn enum_to_toml_string<T: Serialize>(value: &T) -> Cow<'static, str> {
+    fn enum_to_toml_string<T: Serialize>(value: &T) -> String {
         let value = toml::Value::try_from(value).unwrap();
         match value {
-            toml::Value::String(s) => Cow::from(s),
+            toml::Value::String(s) => s,
             other => {
                 panic!("improper use of enum_to_toml_string: got {other:?}");
             }
@@ -172,16 +184,16 @@ fn populate_network_table(
     };
 
     for (property, value) in [
-        ("gateway_ip", Cow::from(&config.gateway_ip)),
-        ("infra_ip_first", Cow::from(&config.infra_ip_first)),
-        ("infra_ip_last", Cow::from(&config.infra_ip_last)),
-        ("uplink_port", Cow::from(&config.uplink_port)),
+        ("gateway_ip", config.gateway_ip.to_string()),
+        ("infra_ip_first", config.infra_ip_first.to_string()),
+        ("infra_ip_last", config.infra_ip_last.to_string()),
+        ("uplink_port", config.uplink_port.to_string()),
         ("uplink_port_speed", enum_to_toml_string(&config.uplink_port_speed)),
         ("uplink_port_fec", enum_to_toml_string(&config.uplink_port_fec)),
-        ("uplink_ip", Cow::from(&config.uplink_ip)),
+        ("uplink_ip", config.uplink_ip.to_string()),
     ] {
         *table.get_mut(property).unwrap().as_value_mut().unwrap() =
-            Value::String(Formatted::new(value.into_owned()));
+            Value::String(Formatted::new(value));
     }
 }
 
@@ -189,7 +201,10 @@ fn populate_network_table(
 mod tests {
     use super::*;
     use omicron_common::api::internal::shared::RackNetworkConfig as InternalRackNetworkConfig;
+    use std::net::Ipv4Addr;
+    use std::net::Ipv6Addr;
     use wicket_common::rack_setup::PutRssUserConfigInsensitive;
+    use wicketd_client::types::Baseboard;
     use wicketd_client::types::PortFec;
     use wicketd_client::types::PortSpeed;
     use wicketd_client::types::SpIdentifier;
@@ -248,6 +263,7 @@ mod tests {
                     PortFec::Rs => InternalPortFec::Rs,
                 },
                 uplink_ip: rnc.uplink_ip,
+                uplink_vid: rnc.uplink_vid,
             },
         }
     }
@@ -258,15 +274,21 @@ mod tests {
             bootstrap_sleds: vec![
                 BootstrapSledDescription {
                     id: SpIdentifier { slot: 1, type_: SpType::Sled },
-                    model: "model1".into(),
-                    revision: 3,
-                    serial_number: "serial 1 2 3".into(),
+                    baseboard: Baseboard::Gimlet {
+                        model: "model1".into(),
+                        revision: 3,
+                        identifier: "serial 1 2 3".into(),
+                    },
+                    bootstrap_ip: None,
                 },
                 BootstrapSledDescription {
                     id: SpIdentifier { slot: 5, type_: SpType::Sled },
-                    model: "model2".into(),
-                    revision: 5,
-                    serial_number: "serial 4 5 6".into(),
+                    baseboard: Baseboard::Gimlet {
+                        model: "model2".into(),
+                        revision: 5,
+                        identifier: "serial 4 5 6".into(),
+                    },
+                    bootstrap_ip: Some(Ipv6Addr::LOCALHOST),
                 },
             ],
             dns_servers: vec!["1.1.1.1".into(), "2.2.2.2".into()],
@@ -279,13 +301,14 @@ mod tests {
             )],
             ntp_servers: vec!["ntp1.com".into(), "ntp2.com".into()],
             rack_network_config: Some(RackNetworkConfig {
-                gateway_ip: "1.2.3.4".into(),
-                infra_ip_first: "2.3.4.5".into(),
-                infra_ip_last: "3.4.5.6".into(),
-                uplink_ip: "4.5.6.7".into(),
+                gateway_ip: Ipv4Addr::new(1, 2, 3, 4),
+                infra_ip_first: Ipv4Addr::new(2, 3, 4, 5),
+                infra_ip_last: Ipv4Addr::new(3, 4, 5, 6),
+                uplink_ip: Ipv4Addr::new(4, 5, 6, 7),
                 uplink_port_speed: PortSpeed::Speed400G,
                 uplink_port_fec: PortFec::Firecode,
                 uplink_port: "port0".into(),
+                uplink_vid: None,
             }),
         };
         let template = TomlTemplate::populate(&config).to_string();

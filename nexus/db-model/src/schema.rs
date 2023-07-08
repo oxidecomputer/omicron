@@ -21,6 +21,7 @@ table! {
         attach_instance_id -> Nullable<Uuid>,
         state_generation -> Int8,
         time_state_updated -> Timestamptz,
+        slot -> Nullable<Int2>,
         size_bytes -> Int8,
         block_size -> crate::BlockSizeEnum,
         origin_snapshot -> Nullable<Uuid>,
@@ -185,11 +186,12 @@ table! {
 }
 
 table! {
-    switch_port_settings_route_config (port_settings_id, interface_name, dst, gw) {
+    switch_port_settings_route_config (port_settings_id, interface_name, dst, gw, vid) {
         port_settings_id -> Uuid,
         interface_name -> Text,
         dst -> Inet,
         gw -> Inet,
+        vid -> Nullable<Int4>,
     }
 }
 
@@ -494,6 +496,8 @@ table! {
         discoverable -> Bool,
         authentication_mode -> crate::AuthenticationModeEnum,
         user_provision_type -> crate::UserProvisionTypeEnum,
+
+        mapped_fleet_roles -> Jsonb,
 
         rcgen -> Int8,
     }

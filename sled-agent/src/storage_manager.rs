@@ -4,8 +4,7 @@
 
 //! Management of sled-local storage.
 
-use crate::nexus::LazyNexusClient;
-use crate::params::DatasetKind;
+use crate::nexus::NexusClientWithResolver;
 use crate::storage::dataset::DatasetName;
 use camino::Utf8PathBuf;
 use futures::stream::FuturesOrdered;
@@ -84,7 +83,7 @@ pub enum Error {
     },
 
     #[error("Dataset {name:?} exists with a different uuid (has {old}, requested {new})")]
-    UuidMismatch { name: DatasetName, old: Uuid, new: Uuid },
+    UuidMismatch { name: Box<DatasetName>, old: Uuid, new: Uuid },
 
     #[error("Error parsing pool {name}'s size: {err}")]
     BadPoolSize {
@@ -156,8 +155,7 @@ type NotifyFut =
 #[derive(Debug)]
 struct NewFilesystemRequest {
     dataset_id: Uuid,
-    zpool_id: Uuid,
-    dataset_kind: DatasetKind,
+    dataset_name: DatasetName,
     responder: oneshot::Sender<Result<DatasetName, Error>>,
 }
 
@@ -279,7 +277,7 @@ impl StorageResources {
 
 /// Describes the access to the underlay used by the StorageManager.
 pub struct UnderlayAccess {
-    pub lazy_nexus_client: LazyNexusClient,
+    pub nexus_client: NexusClientWithResolver,
     pub sled_id: Uuid,
 }
 
@@ -315,19 +313,21 @@ impl StorageWorker {
         let fs_name = &dataset_name.full();
         let do_format = true;
         let encryption_details = None;
+        let quota = None;
         Zfs::ensure_filesystem(
             &dataset_name.full(),
             Mountpoint::Path(Utf8PathBuf::from("/data")),
             zoned,
             do_format,
             encryption_details,
+            quota,
         )?;
         // Ensure the dataset has a usable UUID.
         if let Ok(id_str) = Zfs::get_oxide_value(&fs_name, "uuid") {
             if let Ok(id) = id_str.parse::<Uuid>() {
                 if id != dataset_id {
                     return Err(Error::UuidMismatch {
-                        name: dataset_name.clone(),
+                        name: Box::new(dataset_name.clone()),
                         old: id,
                         new: dataset_id,
                     });
@@ -374,15 +374,10 @@ impl StorageWorker {
                     return Err(backoff::BackoffError::transient(Error::UnderlayNotInitialized.to_string()));
                 };
                 let sled_id = underlay.sled_id;
-                let lazy_nexus_client = underlay.lazy_nexus_client.clone();
+                let nexus_client = underlay.nexus_client.client().clone();
                 drop(underlay_guard);
 
-                lazy_nexus_client
-                    .get()
-                    .await
-                    .map_err(|e| {
-                        backoff::BackoffError::transient(e.to_string())
-                    })?
+                nexus_client
                     .zpool_put(&sled_id, &pool_id, &zpool_request)
                     .await
                     .map_err(|e| {
@@ -693,12 +688,8 @@ impl StorageWorker {
                     return Err(backoff::BackoffError::transient(Error::UnderlayNotInitialized.to_string()));
                 };
                 let sled_id = underlay.sled_id;
-                let lazy_nexus_client = underlay.lazy_nexus_client.clone();
+                let nexus_client = underlay.nexus_client.client().clone();
                 drop(underlay_guard);
-
-                let nexus = lazy_nexus_client.get().await.map_err(|e| {
-                    backoff::BackoffError::transient(e.to_string())
-                })?;
 
                 match &disk {
                     NotifyDiskRequest::Add { identity, variant } => {
@@ -712,9 +703,12 @@ impl StorageWorker {
                             },
                             sled_id,
                         };
-                        nexus.physical_disk_put(&request).await.map_err(
-                            |e| backoff::BackoffError::transient(e.to_string()),
-                        )?;
+                        nexus_client
+                            .physical_disk_put(&request)
+                            .await
+                            .map_err(|e| {
+                                backoff::BackoffError::transient(e.to_string())
+                            })?;
                     }
                     NotifyDiskRequest::Remove(disk_identity) => {
                         let request = PhysicalDiskDeleteRequest {
@@ -723,9 +717,12 @@ impl StorageWorker {
                             vendor: disk_identity.vendor.clone(),
                             sled_id,
                         };
-                        nexus.physical_disk_delete(&request).await.map_err(
-                            |e| backoff::BackoffError::transient(e.to_string()),
-                        )?;
+                        nexus_client
+                            .physical_disk_delete(&request)
+                            .await
+                            .map_err(|e| {
+                                backoff::BackoffError::transient(e.to_string())
+                            })?;
                     }
                 }
                 Ok(())
@@ -788,14 +785,18 @@ impl StorageWorker {
     ) -> Result<DatasetName, Error> {
         info!(self.log, "add_dataset: {:?}", request);
         let mut pools = resources.pools.lock().await;
-        let pool = pools.get_mut(&request.zpool_id).ok_or_else(|| {
-            Error::ZpoolNotFound(format!(
-                "{}, looked up while trying to add dataset",
-                request.zpool_id
-            ))
-        })?;
-        let dataset_name =
-            DatasetName::new(pool.name.clone(), request.dataset_kind.clone());
+        let pool = pools
+            .get_mut(&request.dataset_name.pool().id())
+            .ok_or_else(|| {
+                Error::ZpoolNotFound(format!(
+                    "{}, looked up while trying to add dataset",
+                    request.dataset_name.pool(),
+                ))
+            })?;
+        let dataset_name = DatasetName::new(
+            pool.name.clone(),
+            request.dataset_name.dataset().clone(),
+        );
         self.ensure_dataset(request.dataset_id, &dataset_name)?;
         Ok(dataset_name)
     }
@@ -1027,16 +1028,11 @@ impl StorageManager {
     pub async fn upsert_filesystem(
         &self,
         dataset_id: Uuid,
-        zpool_id: Uuid,
-        dataset_kind: DatasetKind,
+        dataset_name: DatasetName,
     ) -> Result<DatasetName, Error> {
         let (tx, rx) = oneshot::channel();
-        let request = NewFilesystemRequest {
-            dataset_id,
-            zpool_id,
-            dataset_kind,
-            responder: tx,
-        };
+        let request =
+            NewFilesystemRequest { dataset_id, dataset_name, responder: tx };
 
         self.inner
             .tx

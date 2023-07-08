@@ -269,6 +269,7 @@ pub fn external_api() -> NexusApiDescription {
         api.register(certificate_delete)?;
 
         api.register(system_metric)?;
+        api.register(silo_metric)?;
 
         api.register(system_update_refresh)?;
         api.register(system_version)?;
@@ -369,7 +370,7 @@ pub fn external_api() -> NexusApiDescription {
 }]
 async fn system_policy_view(
     rqctx: RequestContext<Arc<ServerContext>>,
-) -> Result<HttpResponseOk<shared::Policy<authz::FleetRole>>, HttpError> {
+) -> Result<HttpResponseOk<shared::Policy<shared::FleetRole>>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let nexus = &apictx.nexus;
@@ -394,8 +395,8 @@ struct ByIdPathParams {
 }]
 async fn system_policy_update(
     rqctx: RequestContext<Arc<ServerContext>>,
-    new_policy: TypedBody<shared::Policy<authz::FleetRole>>,
-) -> Result<HttpResponseOk<shared::Policy<authz::FleetRole>>, HttpError> {
+    new_policy: TypedBody<shared::Policy<shared::FleetRole>>,
+) -> Result<HttpResponseOk<shared::Policy<shared::FleetRole>>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let nexus = &apictx.nexus;
@@ -418,7 +419,7 @@ async fn system_policy_update(
  }]
 pub async fn policy_view(
     rqctx: RequestContext<Arc<ServerContext>>,
-) -> Result<HttpResponseOk<shared::Policy<authz::SiloRole>>, HttpError> {
+) -> Result<HttpResponseOk<shared::Policy<shared::SiloRole>>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let nexus = &apictx.nexus;
@@ -445,8 +446,8 @@ pub async fn policy_view(
 }]
 async fn policy_update(
     rqctx: RequestContext<Arc<ServerContext>>,
-    new_policy: TypedBody<shared::Policy<authz::SiloRole>>,
-) -> Result<HttpResponseOk<shared::Policy<authz::SiloRole>>, HttpError> {
+    new_policy: TypedBody<shared::Policy<shared::SiloRole>>,
+) -> Result<HttpResponseOk<shared::Policy<shared::SiloRole>>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let nexus = &apictx.nexus;
@@ -582,7 +583,7 @@ async fn silo_delete(
 async fn silo_policy_view(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::SiloPath>,
-) -> Result<HttpResponseOk<shared::Policy<authz::SiloRole>>, HttpError> {
+) -> Result<HttpResponseOk<shared::Policy<shared::SiloRole>>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
@@ -604,8 +605,8 @@ async fn silo_policy_view(
 async fn silo_policy_update(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::SiloPath>,
-    new_policy: TypedBody<shared::Policy<authz::SiloRole>>,
-) -> Result<HttpResponseOk<shared::Policy<authz::SiloRole>>, HttpError> {
+    new_policy: TypedBody<shared::Policy<shared::SiloRole>>,
+) -> Result<HttpResponseOk<shared::Policy<shared::SiloRole>>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let new_policy = new_policy.into_inner();
@@ -1033,7 +1034,7 @@ async fn project_update(
 async fn project_policy_view(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::ProjectPath>,
-) -> Result<HttpResponseOk<shared::Policy<authz::ProjectRole>>, HttpError> {
+) -> Result<HttpResponseOk<shared::Policy<shared::ProjectRole>>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
@@ -1058,8 +1059,8 @@ async fn project_policy_view(
 async fn project_policy_update(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::ProjectPath>,
-    new_policy: TypedBody<shared::Policy<authz::ProjectRole>>,
-) -> Result<HttpResponseOk<shared::Policy<authz::ProjectRole>>, HttpError> {
+    new_policy: TypedBody<shared::Policy<shared::ProjectRole>>,
+) -> Result<HttpResponseOk<shared::Policy<shared::ProjectRole>>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
@@ -2798,7 +2799,7 @@ async fn networking_switch_port_clear_settings(
 }]
 async fn image_list(
     rqctx: RequestContext<Arc<ServerContext>>,
-    query_params: Query<PaginatedByNameOrId<params::ImageListSelector>>,
+    query_params: Query<PaginatedByNameOrId<params::OptionalProjectSelector>>,
 ) -> Result<HttpResponseOk<ResultsPage<Image>>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
@@ -2822,12 +2823,7 @@ async fn image_list(
             }
         };
         let images = nexus
-            .image_list(
-                &opctx,
-                &parent_lookup,
-                scan_params.selector.include_silo_images.unwrap_or(false),
-                &paginated_by,
-            )
+            .image_list(&opctx, &parent_lookup, &paginated_by)
             .await?
             .into_iter()
             .map(|d| d.into())
@@ -4373,9 +4369,15 @@ async fn sled_physical_disk_list(
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct SystemMetricParams {
-    /// The UUID of the container being queried
-    // TODO: I might want to force the caller to specify type here?
-    pub id: Uuid,
+    /// A silo ID. If unspecified, get aggregrate metrics across all silos.
+    pub silo_id: Option<Uuid>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct SiloMetricParams {
+    /// A project ID. If unspecified, get aggregrate metrics across all projects
+    /// in current silo.
+    pub project_id: Option<Uuid>,
 }
 
 #[derive(Display, Deserialize, JsonSchema)]
@@ -4404,22 +4406,73 @@ async fn system_metric(
     pag_params: Query<
         PaginationParams<params::ResourceMetrics, params::ResourceMetrics>,
     >,
-    other_params: Query<SystemMetricParams>,
+    other_params: Query<params::OptionalSiloSelector>,
 ) -> Result<HttpResponseOk<ResultsPage<oximeter_db::Measurement>>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let nexus = &apictx.nexus;
         let metric_name = path_params.into_inner().metric_name;
-        let resource_id = other_params.into_inner().id;
+        let pagination = pag_params.into_inner();
+        let limit = rqctx.page_limit(&pagination)?;
+
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let silo_lookup = match other_params.into_inner().silo {
+            Some(silo) => Some(nexus.silo_lookup(&opctx, silo)?),
+            _ => None,
+        };
+
+        let result = nexus
+            .system_metric_list(
+                &opctx,
+                metric_name,
+                silo_lookup,
+                pagination,
+                limit,
+            )
+            .await?;
+
+        Ok(HttpResponseOk(result))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Access metrics data
+#[endpoint {
+     method = GET,
+     path = "/v1/metrics/{metric_name}",
+     tags = ["metrics"],
+}]
+async fn silo_metric(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<SystemMetricsPathParam>,
+    pag_params: Query<
+        PaginationParams<params::ResourceMetrics, params::ResourceMetrics>,
+    >,
+    other_params: Query<params::OptionalProjectSelector>,
+) -> Result<HttpResponseOk<ResultsPage<oximeter_db::Measurement>>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let metric_name = path_params.into_inner().metric_name;
+
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let project_lookup = match other_params.into_inner().project {
+            Some(project) => {
+                let project_selector = params::ProjectSelector { project };
+                Some(nexus.project_lookup(&opctx, project_selector)?)
+            }
+            _ => None,
+        };
+
         let pagination = pag_params.into_inner();
         let limit = rqctx.page_limit(&pagination)?;
 
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
         let result = nexus
-            .system_metric_lookup(
+            .silo_metric_list(
                 &opctx,
                 metric_name,
-                resource_id,
+                project_lookup,
                 pagination,
                 limit,
             )
@@ -4437,6 +4490,7 @@ async fn system_metric(
      method = POST,
      path = "/v1/system/update/refresh",
      tags = ["system/update"],
+     unpublished = true,
 }]
 async fn system_update_refresh(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -4456,6 +4510,7 @@ async fn system_update_refresh(
      method = GET,
      path = "/v1/system/update/version",
      tags = ["system/update"],
+     unpublished = true,
 }]
 async fn system_version(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -4493,6 +4548,7 @@ async fn system_version(
      method = GET,
      path = "/v1/system/update/components",
      tags = ["system/update"],
+     unpublished = true,
 }]
 async fn system_component_version_list(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -4525,6 +4581,7 @@ async fn system_component_version_list(
      method = GET,
      path = "/v1/system/update/updates",
      tags = ["system/update"],
+     unpublished = true,
 }]
 async fn system_update_list(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -4556,6 +4613,7 @@ async fn system_update_list(
      method = GET,
      path = "/v1/system/update/updates/{version}",
      tags = ["system/update"],
+     unpublished = true,
 }]
 async fn system_update_view(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -4578,6 +4636,7 @@ async fn system_update_view(
     method = GET,
     path = "/v1/system/update/updates/{version}/components",
     tags = ["system/update"],
+    unpublished = true,
 }]
 async fn system_update_components_list(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -4604,6 +4663,7 @@ async fn system_update_components_list(
     method = POST,
     path = "/v1/system/update/start",
     tags = ["system/update"],
+    unpublished = true,
 }]
 async fn system_update_start(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -4653,6 +4713,7 @@ async fn system_update_start(
     method = POST,
     path = "/v1/system/update/stop",
     tags = ["system/update"],
+    unpublished = true,
 }]
 async fn system_update_stop(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -4688,6 +4749,7 @@ async fn system_update_stop(
      method = GET,
      path = "/v1/system/update/deployments",
      tags = ["system/update"],
+     unpublished = true,
 }]
 async fn update_deployments_list(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -4719,6 +4781,7 @@ async fn update_deployments_list(
      method = GET,
      path = "/v1/system/update/deployments/{id}",
      tags = ["system/update"],
+     unpublished = true,
 }]
 async fn update_deployment_view(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -4989,7 +5052,7 @@ pub async fn current_user_view(
     let handler = async {
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
         let user = nexus.silo_user_fetch_self(&opctx).await?;
-        let silo = nexus.silo_user_fetch_silo(&opctx).await?;
+        let (_, silo) = nexus.current_silo_lookup(&opctx)?.fetch().await?;
         Ok(HttpResponseOk(views::CurrentUser {
             user: user.into(),
             silo_name: silo.name().clone(),

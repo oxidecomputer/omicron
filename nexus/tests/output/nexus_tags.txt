@@ -54,6 +54,10 @@ OPERATION ID                             METHOD   URL PATH
 login_local                              POST     /v1/login/{silo_name}/local
 login_saml                               POST     /login/{silo_name}/saml/{provider_name}
 
+API operations found with tag "metrics"
+OPERATION ID                             METHOD   URL PATH
+silo_metric                              GET      /v1/metrics/{metric_name}
+
 API operations found with tag "policy"
 OPERATION ID                             METHOD   URL PATH
 system_policy_update                     PUT      /v1/system/policy
@@ -167,19 +171,6 @@ silo_user_view                           GET      /v1/system/users/{user_id}
 silo_view                                GET      /v1/system/silos/{silo}
 user_builtin_list                        GET      /v1/system/users-builtin
 user_builtin_view                        GET      /v1/system/users-builtin/{user}
-
-API operations found with tag "system/update"
-OPERATION ID                             METHOD   URL PATH
-system_component_version_list            GET      /v1/system/update/components
-system_update_components_list            GET      /v1/system/update/updates/{version}/components
-system_update_list                       GET      /v1/system/update/updates
-system_update_refresh                    POST     /v1/system/update/refresh
-system_update_start                      POST     /v1/system/update/start
-system_update_stop                       POST     /v1/system/update/stop
-system_update_view                       GET      /v1/system/update/updates/{version}
-system_version                           GET      /v1/system/update/version
-update_deployment_view                   GET      /v1/system/update/deployments/{id}
-update_deployments_list                  GET      /v1/system/update/deployments
 
 API operations found with tag "vpcs"
 OPERATION ID                             METHOD   URL PATH

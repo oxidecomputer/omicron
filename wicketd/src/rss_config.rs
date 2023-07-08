@@ -4,25 +4,46 @@
 
 //! Support for user-provided RSS configuration options.
 
+use crate::bootstrap_addrs::BootstrapPeers;
 use crate::http_entrypoints::BootstrapSledDescription;
 use crate::http_entrypoints::CertificateUploadResponse;
 use crate::http_entrypoints::CurrentRssUserConfig;
 use crate::http_entrypoints::CurrentRssUserConfigInsensitive;
 use crate::http_entrypoints::CurrentRssUserConfigSensitive;
 use crate::RackV1Inventory;
+use anyhow::anyhow;
+use anyhow::bail;
+use anyhow::Result;
+use bootstrap_agent_client::types::BootstrapAddressDiscovery;
 use bootstrap_agent_client::types::Certificate;
+use bootstrap_agent_client::types::Name;
+use bootstrap_agent_client::types::RackInitializeRequest;
+use bootstrap_agent_client::types::RecoverySiloConfig;
+use bootstrap_agent_client::types::UserId;
 use gateway_client::types::SpType;
 use omicron_certificates::CertificateValidator;
 use omicron_common::address;
+use omicron_common::address::Ipv4Range;
 use omicron_common::api::internal::shared::RackNetworkConfig;
 use sled_hardware::Baseboard;
 use std::collections::BTreeSet;
+use std::mem;
+use std::net::Ipv6Addr;
 use wicket_common::rack_setup::PutRssUserConfigInsensitive;
+
+// TODO-correctness For now, we always use the same rack subnet when running
+// RSS. When we get to multirack, this will be wrong, but there are many other
+// RSS-related things that need to change then too.
+const RACK_SUBNET: Ipv6Addr =
+    Ipv6Addr::new(0xfd00, 0x1122, 0x3344, 0x0100, 0, 0, 0, 0);
+
+const RECOVERY_SILO_NAME: &str = "recovery";
+const RECOVERY_SILO_USERNAME: &str = "recovery";
 
 #[derive(Default)]
 struct PartialCertificate {
-    cert: Option<Vec<u8>>,
-    key: Option<Vec<u8>>,
+    cert: Option<String>,
+    key: Option<String>,
 }
 
 /// An analogue to `RackInitializeRequest`, but with optional fields to allow
@@ -48,10 +69,13 @@ pub(crate) struct CurrentRssConfig {
 }
 
 impl CurrentRssConfig {
-    pub(crate) fn populate_available_bootstrap_sleds_from_inventory(
+    pub(crate) fn update_with_inventory_and_bootstrap_peers(
         &mut self,
         inventory: &RackV1Inventory,
+        bootstrap_peers: &BootstrapPeers,
     ) {
+        let bootstrap_sleds = bootstrap_peers.sleds();
+
         self.inventory = inventory
             .sps
             .iter()
@@ -60,14 +84,125 @@ impl CurrentRssConfig {
                     return None;
                 }
                 let state = sp.state.as_ref()?;
+                let baseboard = Baseboard::new_gimlet(
+                    state.serial_number.clone(),
+                    state.model.clone(),
+                    state.revision.into(),
+                );
+                let bootstrap_ip = bootstrap_sleds.get(&baseboard).copied();
                 Some(BootstrapSledDescription {
                     id: sp.id,
-                    serial_number: state.serial_number.clone(),
-                    model: state.model.clone(),
-                    revision: state.revision,
+                    baseboard,
+                    bootstrap_ip,
                 })
             })
             .collect();
+
+        // If the user has already uploaded a config specifying bootstrap_sleds,
+        // also update our knowledge of those sleds' bootstrap addresses.
+        let our_bootstrap_sleds = mem::take(&mut self.bootstrap_sleds);
+        self.bootstrap_sleds = our_bootstrap_sleds
+            .into_iter()
+            .map(|mut sled_desc| {
+                sled_desc.bootstrap_ip =
+                    bootstrap_sleds.get(&sled_desc.baseboard).copied();
+                sled_desc
+            })
+            .collect();
+    }
+
+    pub(crate) fn start_rss_request(
+        &self,
+        bootstrap_peers: &BootstrapPeers,
+    ) -> Result<RackInitializeRequest> {
+        // Basic "client-side" checks.
+        if self.bootstrap_sleds.is_empty() {
+            bail!("bootstrap_sleds is empty (have you uploaded a config?)");
+        }
+        if self.ntp_servers.is_empty() {
+            bail!("at least one NTP server is required");
+        }
+        if self.dns_servers.is_empty() {
+            bail!("at least one DNS server is required");
+        }
+        if self.internal_services_ip_pool_ranges.is_empty() {
+            bail!("at least one internal services IP pool range is required");
+        }
+        if self.external_dns_zone_name.is_empty() {
+            bail!("external dns zone name is required");
+        }
+        if self.external_certificates.is_empty() {
+            bail!("at least one certificate/key pair is required");
+        }
+        let Some(recovery_silo_password_hash)
+            = self.recovery_silo_password_hash.as_ref()
+        else {
+            bail!("recovery password not yet set");
+        };
+        let Some(rack_network_config) = self.rack_network_config.as_ref() else {
+            bail!("rack network config not set (have you uploaded a config?)");
+        };
+        let rack_network_config =
+            validate_rack_network_config(rack_network_config)?;
+
+        let known_bootstrap_sleds = bootstrap_peers.sleds();
+        let mut bootstrap_ips = Vec::new();
+        for sled in &self.bootstrap_sleds {
+            let Some(ip) = known_bootstrap_sleds.get(&sled.baseboard).copied()
+            else {
+                bail!(
+                    "IP address not (yet?) known for sled {} ({:?})",
+                    sled.id.slot,
+                    sled.baseboard,
+                );
+            };
+            bootstrap_ips.push(ip);
+        }
+
+        // Convert between internal and progenitor types.
+        let user_password_hash = bootstrap_agent_client::types::NewPasswordHash(
+            recovery_silo_password_hash.to_string(),
+        );
+        let internal_services_ip_pool_ranges = self
+            .internal_services_ip_pool_ranges
+            .iter()
+            .map(|pool| {
+                use bootstrap_agent_client::types::IpRange;
+                use bootstrap_agent_client::types::Ipv4Range;
+                use bootstrap_agent_client::types::Ipv6Range;
+                match pool {
+                    address::IpRange::V4(range) => IpRange::V4(Ipv4Range {
+                        first: range.first,
+                        last: range.last,
+                    }),
+                    address::IpRange::V6(range) => IpRange::V6(Ipv6Range {
+                        first: range.first,
+                        last: range.last,
+                    }),
+                }
+            })
+            .collect();
+
+        let request = RackInitializeRequest {
+            rack_subnet: RACK_SUBNET,
+            bootstrap_discovery: BootstrapAddressDiscovery::OnlyThese(
+                bootstrap_ips,
+            ),
+            rack_secret_threshold: 1, // TODO REMOVE?
+            ntp_servers: self.ntp_servers.clone(),
+            dns_servers: self.dns_servers.clone(),
+            internal_services_ip_pool_ranges,
+            external_dns_zone_name: self.external_dns_zone_name.clone(),
+            external_certificates: self.external_certificates.clone(),
+            recovery_silo: RecoverySiloConfig {
+                silo_name: Name::try_from(RECOVERY_SILO_NAME).unwrap(),
+                user_name: UserId(RECOVERY_SILO_USERNAME.into()),
+                user_password_hash,
+            },
+            rack_network_config: Some(rack_network_config),
+        };
+
+        Ok(request)
     }
 
     pub(crate) fn set_recovery_user_password_hash(
@@ -79,7 +214,7 @@ impl CurrentRssConfig {
 
     pub(crate) fn push_cert(
         &mut self,
-        cert: Vec<u8>,
+        cert: String,
     ) -> Result<CertificateUploadResponse, String> {
         self.partial_external_certificate.cert = Some(cert);
         self.maybe_promote_external_certificate()
@@ -87,7 +222,7 @@ impl CurrentRssConfig {
 
     pub(crate) fn push_key(
         &mut self,
-        key: Vec<u8>,
+        key: String,
     ) -> Result<CertificateUploadResponse, String> {
         self.partial_external_certificate.key = Some(key);
         self.maybe_promote_external_certificate()
@@ -120,7 +255,9 @@ impl CurrentRssConfig {
         // will have to do that.
         validator.danger_disable_expiration_validation();
 
-        validator.validate(cert, key).map_err(|err| err.to_string())?;
+        validator
+            .validate(cert.as_bytes(), key.as_bytes())
+            .map_err(|err| err.to_string())?;
 
         // Cert and key appear to be valid; steal them out of
         // `partial_external_certificate` and promote them to
@@ -148,17 +285,12 @@ impl CurrentRssConfig {
 
         // First, confirm we have ourself in the inventory _and_ the user didn't
         // remove us from the list.
-        if let Some(Baseboard::Gimlet { identifier, model, revision }) =
-            our_baseboard
-        {
+        if let Some(our_baseboard @ Baseboard::Gimlet { .. }) = our_baseboard {
             let our_slot = self
                 .inventory
                 .iter()
                 .find_map(|sled| {
-                    if &sled.serial_number == identifier
-                        && &sled.model == model
-                        && i64::from(sled.revision) == *revision
-                    {
+                    if sled.baseboard == *our_baseboard {
                         Some(sled.id.slot)
                     } else {
                         None
@@ -167,13 +299,13 @@ impl CurrentRssConfig {
                 .ok_or_else(|| {
                     format!(
                         "Inventory is missing the scrimlet where wicketd is \
-                         running ({identifier}, model {model} rev {revision})",
+                         running ({our_baseboard:?})",
                     )
                 })?;
             if !value.bootstrap_sleds.contains(&our_slot) {
                 return Err(format!(
                     "Cannot remove the scrimlet where wicketd is running \
-                     (sled {our_slot}: {identifier}, model {model} rev {revision}) \
+                     (sled {our_slot}: {our_baseboard:?}) \
                      from bootstrap_sleds"
                 ));
             }
@@ -236,4 +368,58 @@ impl From<&'_ CurrentRssConfig> for CurrentRssUserConfig {
             },
         }
     }
+}
+
+fn validate_rack_network_config(
+    config: &RackNetworkConfig,
+) -> Result<bootstrap_agent_client::types::RackNetworkConfig> {
+    use bootstrap_agent_client::types::PortFec as BaPortFec;
+    use bootstrap_agent_client::types::PortSpeed as BaPortSpeed;
+    use omicron_common::api::internal::shared::PortFec;
+    use omicron_common::api::internal::shared::PortSpeed;
+
+    // Make sure `infra_ip_first`..`infra_ip_last` is a well-defined range...
+    let infra_ip_range =
+        Ipv4Range::new(config.infra_ip_first, config.infra_ip_last).map_err(
+            |s: String| {
+                anyhow!("invalid `infra_ip_first`, `infra_ip_last` range: {s}")
+            },
+        )?;
+
+    // ... and that it contains `uplink_ip`.
+    if config.uplink_ip < infra_ip_range.first
+        || config.uplink_ip > infra_ip_range.last
+    {
+        bail!(
+            "`uplink_ip` must be in the range defined by `infra_ip_first` \
+             and `infra_ip_last`"
+        );
+    }
+
+    // TODO Add more client side checks on `rack_network_config` contents?
+
+    Ok(bootstrap_agent_client::types::RackNetworkConfig {
+        gateway_ip: config.gateway_ip,
+        infra_ip_first: config.infra_ip_first,
+        infra_ip_last: config.infra_ip_last,
+        uplink_port: config.uplink_port.clone(),
+        uplink_port_speed: match config.uplink_port_speed {
+            PortSpeed::Speed0G => BaPortSpeed::Speed0G,
+            PortSpeed::Speed1G => BaPortSpeed::Speed1G,
+            PortSpeed::Speed10G => BaPortSpeed::Speed10G,
+            PortSpeed::Speed25G => BaPortSpeed::Speed25G,
+            PortSpeed::Speed40G => BaPortSpeed::Speed40G,
+            PortSpeed::Speed50G => BaPortSpeed::Speed50G,
+            PortSpeed::Speed100G => BaPortSpeed::Speed100G,
+            PortSpeed::Speed200G => BaPortSpeed::Speed200G,
+            PortSpeed::Speed400G => BaPortSpeed::Speed400G,
+        },
+        uplink_port_fec: match config.uplink_port_fec {
+            PortFec::Firecode => BaPortFec::Firecode,
+            PortFec::None => BaPortFec::None,
+            PortFec::Rs => BaPortFec::Rs,
+        },
+        uplink_ip: config.uplink_ip,
+        uplink_vid: config.uplink_vid,
+    })
 }

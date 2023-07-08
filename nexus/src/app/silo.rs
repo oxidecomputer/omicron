@@ -148,7 +148,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         silo_lookup: &lookup::Silo<'_>,
-    ) -> LookupResult<shared::Policy<authz::SiloRole>> {
+    ) -> LookupResult<shared::Policy<shared::SiloRole>> {
         let (.., authz_silo) =
             silo_lookup.lookup_for(authz::Action::ReadPolicy).await?;
         let role_assignments = self
@@ -166,8 +166,8 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         silo_lookup: &lookup::Silo<'_>,
-        policy: &shared::Policy<authz::SiloRole>,
-    ) -> UpdateResult<shared::Policy<authz::SiloRole>> {
+        policy: &shared::Policy<shared::SiloRole>,
+    ) -> UpdateResult<shared::Policy<shared::SiloRole>> {
         let (.., authz_silo) =
             silo_lookup.lookup_for(authz::Action::ModifyPolicy).await?;
 
@@ -472,7 +472,7 @@ impl super::Nexus {
         password_value: params::UserPassword,
     ) -> UpdateResult<()> {
         let password_hash = match password_value {
-            params::UserPassword::InvalidPassword => None,
+            params::UserPassword::LoginDisallowed => None,
             params::UserPassword::Password(password) => {
                 let mut hasher = omicron_passwords::Hasher::default();
                 let password_hash = hasher

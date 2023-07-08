@@ -76,10 +76,10 @@ pub enum SledMode {
 #[derive(
     Clone,
     Debug,
-    PartialEq,
-    Eq,
     PartialOrd,
     Ord,
+    PartialEq,
+    Eq,
     Hash,
     Serialize,
     Deserialize,

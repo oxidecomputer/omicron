@@ -171,12 +171,15 @@ impl Zfs {
     }
 
     /// Creates a new ZFS filesystem named `name`, unless one already exists.
+    ///
+    /// Applies an optional quota, provided _in bytes_.
     pub fn ensure_filesystem(
         name: &str,
         mountpoint: Mountpoint,
         zoned: bool,
         do_format: bool,
         encryption_details: Option<EncryptionDetails>,
+        quota: Option<usize>,
     ) -> Result<(), EnsureFilesystemError> {
         let (exists, mounted) = Self::dataset_exists(name, &mountpoint)?;
         if exists {
@@ -225,9 +228,23 @@ impl Zfs {
         cmd.args(&["-o", &format!("mountpoint={}", mountpoint), name]);
         execute(cmd).map_err(|err| EnsureFilesystemError {
             name: name.to_string(),
-            mountpoint,
+            mountpoint: mountpoint.clone(),
             err: err.into(),
         })?;
+
+        // Apply any quota.
+        if let Some(quota) = quota {
+            if let Err(err) =
+                Self::set_value(name, "quota", &format!("{quota}"))
+            {
+                return Err(EnsureFilesystemError {
+                    name: name.to_string(),
+                    mountpoint,
+                    // Take the execution error from the SetValueError
+                    err: err.err.into(),
+                });
+            }
+        }
         Ok(())
     }
 

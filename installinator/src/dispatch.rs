@@ -4,8 +4,8 @@
 
 use std::time::Duration;
 
-use anyhow::{Context, Result};
-use buf_list::Cursor;
+use anyhow::{bail, Context, Result};
+use buf_list::{BufList, Cursor};
 use camino::{Utf8Path, Utf8PathBuf};
 use clap::{Args, Parser, Subcommand};
 use installinator_common::{
@@ -15,9 +15,10 @@ use installinator_common::{
 };
 use omicron_common::{
     api::internal::nexus::KnownArtifactKind,
-    update::{ArtifactHashId, ArtifactKind},
+    update::{ArtifactHash, ArtifactHashId, ArtifactKind},
 };
-use slog::Drain;
+use sha2::{Digest, Sha256};
+use slog::{error, warn, Drain};
 use tufaceous_lib::ControlPlaneZoneImages;
 use update_engine::StepResult;
 
@@ -203,6 +204,23 @@ impl InstallOpts {
                         fetch_artifact(&cx, &host_phase_2_id, discovery, log)
                             .await?;
 
+                    // Check that the sha256 of the data we got from wicket
+                    // matches the data we asked for. If this fails, we fail the
+                    // entire installation rather than trying to fetch the
+                    // artifact again, because we're fetching data from wicketd
+                    // (in memory) over TCP to ourselves (in memory), so the
+                    // only cases where this could fail are disturbing enough
+                    // (memory corruption, corruption under TCP, or wicketd gave
+                    // us something other than what we requested) we want to
+                    // know immediately and not retry: it's likely an operator
+                    // could miss any warnings we emit if a retry succeeds.
+                    check_downloaded_artifact_hash(
+                        "host phase 2",
+                        host_phase_2_artifact.artifact.clone(),
+                        host_phase_2_id.hash,
+                    )
+                    .await?;
+
                     let address = host_phase_2_artifact.addr;
 
                     StepSuccess::new(host_phase_2_artifact)
@@ -230,6 +248,17 @@ impl InstallOpts {
                     let control_plane_artifact =
                         fetch_artifact(&cx, &control_plane_id, discovery, log)
                             .await?;
+
+                    // Check that the sha256 of the data we got from wicket
+                    // matches the data we asked for. We do not retry this for
+                    // the same reasons described above when checking the
+                    // downloaded host phase 2 artifact.
+                    check_downloaded_artifact_hash(
+                        "control plane",
+                        control_plane_artifact.artifact.clone(),
+                        control_plane_id.hash,
+                    )
+                    .await?;
 
                     let address = control_plane_artifact.addr;
 
@@ -336,10 +365,17 @@ impl InstallOpts {
             )
             .register();
 
-        engine.execute().await.context("failed to execute installinator")?;
+        // Wait for both the engine to complete and all progress reports to be
+        // sent, then possibly return an error to our caller if either failed.
+        // We intentionally do not use `try_join!` here: we want both futures to
+        // complete, _then_ we will check for failures from either, so any
+        // errors from the engine that need to be reported to wicketd are
+        // reported before we return.
+        let (engine_result, progress_result) =
+            tokio::join!(engine.execute(), progress_handle);
 
-        // Wait for all progress reports to be sent.
-        progress_handle.await.context("progress reporter to complete")?;
+        engine_result.context("failed to execute installinator")?;
+        progress_result.context("progress reporter failed")?;
 
         if self.stay_alive {
             loop {
@@ -352,14 +388,41 @@ impl InstallOpts {
     }
 }
 
+async fn check_downloaded_artifact_hash(
+    name: &'static str,
+    data: BufList,
+    expected_hash: ArtifactHash,
+) -> Result<()> {
+    tokio::task::spawn_blocking(move || {
+        let mut hasher = Sha256::new();
+        for chunk in data.iter() {
+            hasher.update(chunk);
+        }
+        let computed_hash = ArtifactHash(hasher.finalize().into());
+        if expected_hash != computed_hash {
+            bail!(
+                "downloaded {name} checksum failure: \
+                 expected {} but calculated {}",
+                hex::encode(&expected_hash),
+                hex::encode(&computed_hash)
+            );
+        }
+        Ok(())
+    })
+    .await
+    .unwrap()
+}
+
 async fn scan_hardware_with_retries(
     cx: &StepContext,
     log: &slog::Logger,
 ) -> Result<StepResult<WriteDestination, InstallinatorSpec>> {
     // Scanning for our disks is inherently racy: we have to wait for the disks
     // to attach. This should take milliseconds in general; we'll set a hard cap
-    // at retrying for ~30 seconds.
-    const HARDWARE_RETRIES: usize = 60;
+    // at retrying for ~10 seconds. (In practice if we're failing, this will
+    // take much longer than 10 seconds, because each failed attempt takes a
+    // nontrivial amount of time.)
+    const HARDWARE_RETRIES: usize = 20;
     const HARDWARE_RETRY_DELAY: Duration = Duration::from_millis(500);
 
     let mut retry = 0;
@@ -371,6 +434,13 @@ async fn scan_hardware_with_retries(
             Ok(destination) => break Ok(destination),
             Err(error) => {
                 if retry < HARDWARE_RETRIES {
+                    warn!(
+                        log,
+                        "hardware scan failed; will retry after {:?} \
+                         (attempt {} of {})",
+                        HARDWARE_RETRY_DELAY, retry + 1, HARDWARE_RETRIES;
+                        "err" => #%error,
+                    );
                     cx.send_progress(StepProgress::retry(format!(
                         "hardware scan {retry} failed: {error:#}"
                     )))
@@ -379,6 +449,10 @@ async fn scan_hardware_with_retries(
                     tokio::time::sleep(HARDWARE_RETRY_DELAY).await;
                     continue;
                 } else {
+                    error!(
+                        log, "hardware scan failed (retries exhausted)";
+                        "err" => #%error,
+                    );
                     break Err(error);
                 }
             }

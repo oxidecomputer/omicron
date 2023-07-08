@@ -83,10 +83,10 @@ async fn create_image(client: &ClientTestContext) -> views::Image {
         },
         source: params::ImageSource::Url {
             url: server.url("/image.raw").to_string(),
+            block_size: params::BlockSize::try_from(512).unwrap(),
         },
         os: "alpine".to_string(),
         version: "edge".to_string(),
-        block_size: params::BlockSize::try_from(512).unwrap(),
     };
 
     let images_url = format!("/v1/images?project={}", PROJECT_NAME);
@@ -157,7 +157,7 @@ async fn test_snapshot_then_delete_disk(cptestctx: &ControlPlaneTestContext) {
                 name: "a-snapshot".parse().unwrap(),
                 description: "a snapshot!".to_string(),
             },
-            disk: base_disk_name.clone(),
+            disk: base_disk_name.clone().into(),
         },
     )
     .await;
@@ -218,7 +218,7 @@ async fn test_delete_snapshot_then_disk(cptestctx: &ControlPlaneTestContext) {
                 name: "a-snapshot".parse().unwrap(),
                 description: "a snapshot!".to_string(),
             },
-            disk: base_disk_name.clone(),
+            disk: base_disk_name.clone().into(),
         },
     )
     .await;
@@ -279,7 +279,7 @@ async fn test_multiple_snapshots(cptestctx: &ControlPlaneTestContext) {
                     name: format!("a-snapshot-{}", i).parse().unwrap(),
                     description: "a snapshot!".to_string(),
                 },
-                disk: base_disk_name.clone(),
+                disk: base_disk_name.clone().into(),
             },
         )
         .await;
@@ -341,7 +341,7 @@ async fn test_snapshot_prevents_other_disk(
                 name: "a-snapshot".parse().unwrap(),
                 description: "a snapshot!".to_string(),
             },
-            disk: base_disk_name.clone(),
+            disk: base_disk_name.clone().into(),
         },
     )
     .await;
@@ -465,7 +465,7 @@ async fn test_multiple_disks_multiple_snapshots_order_1(
                 name: "first-snapshot".parse().unwrap(),
                 description: "first snapshot!".to_string(),
             },
-            disk: first_disk_name.clone(),
+            disk: first_disk_name.clone().into(),
         },
     )
     .await;
@@ -507,7 +507,7 @@ async fn test_multiple_disks_multiple_snapshots_order_1(
                 name: "second-snapshot".parse().unwrap(),
                 description: "second snapshot!".to_string(),
             },
-            disk: second_disk_name.clone(),
+            disk: second_disk_name.clone().into(),
         },
     )
     .await;
@@ -601,7 +601,7 @@ async fn test_multiple_disks_multiple_snapshots_order_2(
                 name: "first-snapshot".parse().unwrap(),
                 description: "first snapshot!".to_string(),
             },
-            disk: first_disk_name.clone(),
+            disk: first_disk_name.clone().into(),
         },
     )
     .await;
@@ -643,7 +643,7 @@ async fn test_multiple_disks_multiple_snapshots_order_2(
                 name: "second-snapshot".parse().unwrap(),
                 description: "second snapshot!".to_string(),
             },
-            disk: second_disk_name.clone(),
+            disk: second_disk_name.clone().into(),
         },
     )
     .await;
@@ -731,7 +731,7 @@ async fn prepare_for_test_multiple_layers_of_snapshots(
                 name: "layer-1-snapshot".parse().unwrap(),
                 description: "layer 1 snapshot!".to_string(),
             },
-            disk: layer_1_disk_name.clone(),
+            disk: layer_1_disk_name.clone().into(),
         },
     )
     .await;
@@ -773,7 +773,7 @@ async fn prepare_for_test_multiple_layers_of_snapshots(
                 name: "layer-2-snapshot".parse().unwrap(),
                 description: "layer 2 snapshot!".to_string(),
             },
-            disk: layer_2_disk_name.clone(),
+            disk: layer_2_disk_name.clone().into(),
         },
     )
     .await;
@@ -815,7 +815,7 @@ async fn prepare_for_test_multiple_layers_of_snapshots(
                 name: "layer-3-snapshot".parse().unwrap(),
                 description: "layer 3 snapshot!".to_string(),
             },
-            disk: layer_3_disk_name.clone(),
+            disk: layer_3_disk_name.clone().into(),
         },
     )
     .await;
@@ -995,7 +995,7 @@ async fn test_create_image_from_snapshot(cptestctx: &ControlPlaneTestContext) {
                 name: "a-snapshot".parse().unwrap(),
                 description: "a snapshot!".to_string(),
             },
-            disk: base_disk_name.clone(),
+            disk: base_disk_name.clone().into(),
         },
     )
     .await;
@@ -1009,7 +1009,6 @@ async fn test_create_image_from_snapshot(cptestctx: &ControlPlaneTestContext) {
         source: params::ImageSource::Snapshot { id: snapshot.identity.id },
         os: "debian".parse().unwrap(),
         version: "11".into(),
-        block_size: params::BlockSize::try_from(512).unwrap(),
     };
 
     let _image: views::Image =
@@ -1055,7 +1054,7 @@ async fn test_create_image_from_snapshot_delete(
                 name: "a-snapshot".parse().unwrap(),
                 description: "a snapshot!".to_string(),
             },
-            disk: base_disk_name.clone(),
+            disk: base_disk_name.clone().into(),
         },
     )
     .await;
@@ -1069,7 +1068,6 @@ async fn test_create_image_from_snapshot_delete(
         source: params::ImageSource::Snapshot { id: snapshot.identity.id },
         os: "debian".parse().unwrap(),
         version: "11".into(),
-        block_size: params::BlockSize::try_from(512).unwrap(),
     };
 
     let _image: views::Image =

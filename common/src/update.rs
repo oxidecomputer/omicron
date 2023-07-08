@@ -218,6 +218,12 @@ pub struct ArtifactHash(
     pub [u8; 32],
 );
 
+impl AsRef<[u8]> for ArtifactHash {
+    fn as_ref(&self) -> &[u8] {
+        &self.0
+    }
+}
+
 impl fmt::Debug for ArtifactHash {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_tuple("ArtifactHash").field(&hex::encode(self.0)).finish()

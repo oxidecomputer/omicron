@@ -11,7 +11,7 @@
     "hidden": {
       "description": "TODO operations that will not ship to customers",
       "external_docs": {
-        "url": "http://docs.oxide.computer/api/"
+        "url": "http://docs.oxide.computer/api"
       }
     },
     "images": {
@@ -26,22 +26,16 @@
         "url": "http://docs.oxide.computer/api/instances"
       }
     },
-    "ip-pools": {
-      "description": "IP Pools contain external IP addresses that can be assigned to virtual machine instances.",
-      "external_docs": {
-        "url": "http://docs.oxide.computer/api/ip-pools"
-      }
-    },
     "login": {
       "description": "Authentication endpoints",
       "external_docs": {
         "url": "http://docs.oxide.computer/api/login"
       }
     },
-    "vpcs": {
-      "description": "Virtual Private Clouds (VPCs) provide isolated network environments for managing and deploying services.",
+    "metrics": {
+      "description": "Silo-scoped metrics",
       "external_docs": {
-        "url": "http://docs.oxide.computer/api/vpcs"
+        "url": "http://docs.oxide.computer/api/metrics"
       }
     },
     "policy": {
@@ -62,12 +56,6 @@
         "url": "http://docs.oxide.computer/api/roles"
       }
     },
-    "sagas": {
-      "description": "Sagas are the abstraction used to represent multi-step operations within the Oxide deployment. These operations can be used to query saga status and report errors.",
-      "external_docs": {
-        "url": "http://docs.oxide.computer/api/sagas"
-      }
-    },
     "session": {
       "description": "Information pertaining to the current session.",
       "external_docs": {
@@ -86,40 +74,34 @@
         "url": "http://docs.oxide.computer/api/snapshots"
       }
     },
-    "system": {
-      "description": "Internal system information",
+    "vpcs": {
+      "description": "Virtual Private Clouds (VPCs) provide isolated network environments for managing and deploying services.",
       "external_docs": {
-        "url": "http://docs.oxide.computer/api/system"
+        "url": "http://docs.oxide.computer/api/vpcs"
       }
     },
     "system/hardware": {
       "description": "These operations pertain to hardware inventory and management. Racks are the unit of expansion of an Oxide deployment. Racks are in turn composed of sleds, switches, power supplies, and a cabled backplane.",
       "external_docs": {
-        "url": "http://docs.oxide.computer/api/system/hardware"
+        "url": "http://docs.oxide.computer/api/system-hardware"
       }
     },
     "system/metrics": {
       "description": "Metrics provide insight into the operation of the Oxide deployment. These include telemetry on hardware and software components that can be used to understand the current state as well as to diagnose issues.",
       "external_docs": {
-        "url": "http://docs.oxide.computer/api/system/metrics"
+        "url": "http://docs.oxide.computer/api/system-metrics"
       }
     },
     "system/networking": {
       "description": "This provides rack-level network configuration.",
       "external_docs": {
-        "url": "http://docs.oxide.computer/api/system/networking"
+        "url": "http://docs.oxide.computer/api/system-networking"
       }
     },
     "system/silos": {
       "description": "Silos represent a logical partition of users and resources.",
       "external_docs": {
-        "url": "http://docs.oxide.computer/api/system/silos"
-      }
-    },
-    "system/update": {
-      "description": "This includes operations related to system updates.",
-      "external_docs": {
-        "url": "http://docs.oxide.computer/api/system/update"
+        "url": "http://docs.oxide.computer/api/system-silos"
       }
     }
   }

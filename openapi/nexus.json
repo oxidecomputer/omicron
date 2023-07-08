@@ -962,15 +962,6 @@
         "parameters": [
           {
             "in": "query",
-            "name": "include_silo_images",
-            "description": "Flag used to indicate if silo scoped images should be included when listing project images. Only valid when `project` is provided.",
-            "schema": {
-              "nullable": true,
-              "type": "boolean"
-            }
-          },
-          {
-            "in": "query",
             "name": "limit",
             "description": "Maximum number of items returned by a single call",
             "schema": {
@@ -2432,6 +2423,103 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
+        }
+      }
+    },
+    "/v1/metrics/{metric_name}": {
+      "get": {
+        "tags": [
+          "metrics"
+        ],
+        "summary": "Access metrics data",
+        "operationId": "silo_metric",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "metric_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SystemMetricName"
+            }
+          },
+          {
+            "in": "query",
+            "name": "end_time",
+            "description": "An exclusive end time of metrics.",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "order",
+            "description": "Query result order",
+            "schema": {
+              "$ref": "#/components/schemas/PaginationOrder"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "start_time",
+            "description": "An inclusive start time of metrics.",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeasurementResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": {
+          "required": [
+            "end_time",
+            "start_time"
+          ]
         }
       }
     },
@@ -4823,12 +4911,10 @@
           },
           {
             "in": "query",
-            "name": "id",
-            "description": "The UUID of the container being queried",
-            "required": true,
+            "name": "silo",
+            "description": "Name or ID of the silo",
             "schema": {
-              "type": "string",
-              "format": "uuid"
+              "$ref": "#/components/schemas/NameOrId"
             }
           }
         ],
@@ -5762,400 +5848,6 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/SiloRolePolicy"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/v1/system/update/components": {
-      "get": {
-        "tags": [
-          "system/update"
-        ],
-        "summary": "View version and update status of component tree",
-        "operationId": "system_component_version_list",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "limit",
-            "description": "Maximum number of items returned by a single call",
-            "schema": {
-              "nullable": true,
-              "type": "integer",
-              "format": "uint32",
-              "minimum": 1
-            }
-          },
-          {
-            "in": "query",
-            "name": "page_token",
-            "description": "Token returned by previous call to retrieve the subsequent page",
-            "schema": {
-              "nullable": true,
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "sort_by",
-            "schema": {
-              "$ref": "#/components/schemas/IdSortMode"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/UpdateableComponentResultsPage"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "x-dropshot-pagination": {
-          "required": []
-        }
-      }
-    },
-    "/v1/system/update/deployments": {
-      "get": {
-        "tags": [
-          "system/update"
-        ],
-        "summary": "List all update deployments",
-        "operationId": "update_deployments_list",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "limit",
-            "description": "Maximum number of items returned by a single call",
-            "schema": {
-              "nullable": true,
-              "type": "integer",
-              "format": "uint32",
-              "minimum": 1
-            }
-          },
-          {
-            "in": "query",
-            "name": "page_token",
-            "description": "Token returned by previous call to retrieve the subsequent page",
-            "schema": {
-              "nullable": true,
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "sort_by",
-            "schema": {
-              "$ref": "#/components/schemas/IdSortMode"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/UpdateDeploymentResultsPage"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "x-dropshot-pagination": {
-          "required": []
-        }
-      }
-    },
-    "/v1/system/update/deployments/{id}": {
-      "get": {
-        "tags": [
-          "system/update"
-        ],
-        "summary": "Fetch a system update deployment",
-        "operationId": "update_deployment_view",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "id",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/UpdateDeployment"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/v1/system/update/refresh": {
-      "post": {
-        "tags": [
-          "system/update"
-        ],
-        "summary": "Refresh update data",
-        "operationId": "system_update_refresh",
-        "responses": {
-          "204": {
-            "description": "resource updated"
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/v1/system/update/start": {
-      "post": {
-        "tags": [
-          "system/update"
-        ],
-        "summary": "Start system update",
-        "operationId": "system_update_start",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SystemUpdateStart"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "202": {
-            "description": "successfully enqueued operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/UpdateDeployment"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/v1/system/update/stop": {
-      "post": {
-        "tags": [
-          "system/update"
-        ],
-        "summary": "Stop system update",
-        "description": "If there is no update in progress, do nothing.",
-        "operationId": "system_update_stop",
-        "responses": {
-          "204": {
-            "description": "resource updated"
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/v1/system/update/updates": {
-      "get": {
-        "tags": [
-          "system/update"
-        ],
-        "summary": "List all updates",
-        "operationId": "system_update_list",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "limit",
-            "description": "Maximum number of items returned by a single call",
-            "schema": {
-              "nullable": true,
-              "type": "integer",
-              "format": "uint32",
-              "minimum": 1
-            }
-          },
-          {
-            "in": "query",
-            "name": "page_token",
-            "description": "Token returned by previous call to retrieve the subsequent page",
-            "schema": {
-              "nullable": true,
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "sort_by",
-            "schema": {
-              "$ref": "#/components/schemas/IdSortMode"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SystemUpdateResultsPage"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "x-dropshot-pagination": {
-          "required": []
-        }
-      }
-    },
-    "/v1/system/update/updates/{version}": {
-      "get": {
-        "tags": [
-          "system/update"
-        ],
-        "summary": "View system update",
-        "operationId": "system_update_view",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "version",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/SemverVersion"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SystemUpdate"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/v1/system/update/updates/{version}/components": {
-      "get": {
-        "tags": [
-          "system/update"
-        ],
-        "summary": "View system update component tree",
-        "operationId": "system_update_components_list",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "version",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/SemverVersion"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ComponentUpdateResultsPage"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/v1/system/update/version": {
-      "get": {
-        "tags": [
-          "system/update"
-        ],
-        "summary": "View system version and update status",
-        "operationId": "system_version",
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SystemVersion"
                 }
               }
             }
@@ -8385,25 +8077,15 @@
         "type": "object",
         "properties": {
           "cert": {
-            "description": "PEM file containing public certificate chain",
-            "type": "array",
-            "items": {
-              "type": "integer",
-              "format": "uint8",
-              "minimum": 0
-            }
+            "description": "PEM-formatted string containing public certificate chain",
+            "type": "string"
           },
           "description": {
             "type": "string"
           },
           "key": {
-            "description": "PEM file containing private key",
-            "type": "array",
-            "items": {
-              "type": "integer",
-              "format": "uint8",
-              "minimum": 0
-            }
+            "description": "PEM-formatted string containing private key",
+            "type": "string"
           },
           "name": {
             "$ref": "#/components/schemas/Name"
@@ -8434,61 +8116,6 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/Certificate"
-            }
-          },
-          "next_page": {
-            "nullable": true,
-            "description": "token used to fetch the next page of results (if any)",
-            "type": "string"
-          }
-        },
-        "required": [
-          "items"
-        ]
-      },
-      "ComponentUpdate": {
-        "description": "Identity-related metadata that's included in \"asset\" public API objects (which generally have no name or description)",
-        "type": "object",
-        "properties": {
-          "component_type": {
-            "$ref": "#/components/schemas/UpdateableComponentType"
-          },
-          "id": {
-            "description": "unique, immutable, system-controlled identifier for each resource",
-            "type": "string",
-            "format": "uuid"
-          },
-          "time_created": {
-            "description": "timestamp when this resource was created",
-            "type": "string",
-            "format": "date-time"
-          },
-          "time_modified": {
-            "description": "timestamp when this resource was last modified",
-            "type": "string",
-            "format": "date-time"
-          },
-          "version": {
-            "$ref": "#/components/schemas/SemverVersion"
-          }
-        },
-        "required": [
-          "component_type",
-          "id",
-          "time_created",
-          "time_modified",
-          "version"
-        ]
-      },
-      "ComponentUpdateResultsPage": {
-        "description": "A single page of results",
-        "type": "object",
-        "properties": {
-          "items": {
-            "description": "list of items on this page of results",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/ComponentUpdate"
             }
           },
           "next_page": {
@@ -9734,14 +9361,6 @@
         "description": "Create-time parameters for an `Image`",
         "type": "object",
         "properties": {
-          "block_size": {
-            "description": "block size in bytes",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/BlockSize"
-              }
-            ]
-          },
           "description": {
             "type": "string"
           },
@@ -9766,7 +9385,6 @@
           }
         },
         "required": [
-          "block_size",
           "description",
           "name",
           "os",
@@ -9801,6 +9419,14 @@
           {
             "type": "object",
             "properties": {
+              "block_size": {
+                "description": "The block size in bytes",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/BlockSize"
+                  }
+                ]
+              },
               "type": {
                 "type": "string",
                 "enum": [
@@ -9812,6 +9438,7 @@
               }
             },
             "required": [
+              "block_size",
               "type",
               "url"
             ]
@@ -10556,6 +10183,10 @@
             "type": "string",
             "format": "uuid"
           },
+          "ip_pool_id": {
+            "type": "string",
+            "format": "uuid"
+          },
           "range": {
             "$ref": "#/components/schemas/IpRange"
           },
@@ -10566,6 +10197,7 @@
         },
         "required": [
           "id",
+          "ip_pool_id",
           "range",
           "time_created"
         ]
@@ -10947,9 +10579,6 @@
         "description": "View of a Physical Disk\n\nPhysical disks reside in a particular sled and are used to store both Instance Disk data as well as internal metadata.",
         "type": "object",
         "properties": {
-          "disk_type": {
-            "$ref": "#/components/schemas/PhysicalDiskType"
-          },
           "id": {
             "description": "unique, immutable, system-controlled identifier for each resource",
             "type": "string",
@@ -10982,7 +10611,6 @@
           }
         },
         "required": [
-          "disk_type",
           "id",
           "model",
           "serial",
@@ -11010,13 +10638,6 @@
         },
         "required": [
           "items"
-        ]
-      },
-      "PhysicalDiskType": {
-        "type": "string",
-        "enum": [
-          "internal",
-          "external"
         ]
       },
       "Project": {
@@ -11266,6 +10887,13 @@
             "description": "The route gateway.",
             "type": "string",
             "format": "ip"
+          },
+          "vid": {
+            "nullable": true,
+            "description": "VLAN id the gateway is reachable over.",
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
           }
         },
         "required": [
@@ -11781,10 +11409,6 @@
           "technical_contact_email"
         ]
       },
-      "SemverVersion": {
-        "type": "string",
-        "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$"
-      },
       "ServiceUsingCertificate": {
         "description": "The service intended to use this certificate.",
         "oneOf": [
@@ -11822,6 +11446,17 @@
               }
             ]
           },
+          "mapped_fleet_roles": {
+            "description": "Mapping of which Fleet roles are conferred by each Silo role\n\nThe default is that no Fleet roles are conferred by any Silo roles unless there's a corresponding entry in this map.",
+            "type": "object",
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "$ref": "#/components/schemas/FleetRole"
+              },
+              "uniqueItems": true
+            }
+          },
           "name": {
             "description": "unique, mutable, user-controlled identifier for each resource",
             "allOf": [
@@ -11846,6 +11481,7 @@
           "discoverable",
           "id",
           "identity_mode",
+          "mapped_fleet_roles",
           "name",
           "time_created",
           "time_modified"
@@ -11868,6 +11504,18 @@
           },
           "identity_mode": {
             "$ref": "#/components/schemas/SiloIdentityMode"
+          },
+          "mapped_fleet_roles": {
+            "description": "Mapping of which Fleet roles are conferred by each Silo role\n\nThe default is that no Fleet roles are conferred by any Silo roles unless there's a corresponding entry in this map.",
+            "default": {},
+            "type": "object",
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "$ref": "#/components/schemas/FleetRole"
+              },
+              "uniqueItems": true
+            }
           },
           "name": {
             "$ref": "#/components/schemas/Name"
@@ -12195,10 +11843,10 @@
             "type": "string"
           },
           "disk": {
-            "description": "The name of the disk to be snapshotted",
+            "description": "The disk to be snapshotted",
             "allOf": [
               {
-                "$ref": "#/components/schemas/Name"
+                "$ref": "#/components/schemas/NameOrId"
               }
             ]
           },
@@ -12698,6 +12346,13 @@
             "description": "The port settings object this route configuration belongs to.",
             "type": "string",
             "format": "uuid"
+          },
+          "vlan_id": {
+            "nullable": true,
+            "description": "The VLAN identifier for the route. Use this if the gateway is reachable over an 802.1Q tagged L2 segment.",
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
           }
         },
         "required": [
@@ -12975,8 +12630,8 @@
             "type": "string",
             "format": "uuid"
           },
-          "vid": {
-            "description": "The virtual network id (VID) that distinguishes this interface and is used for producing and consuming 802.1Q Ethernet tags. This field has a maximum value of 4095 as 802.1Q tags are twelve bits.",
+          "vlan_id": {
+            "description": "The virtual network id for this interface that is used for producing and consuming 802.1Q Ethernet tags. This field has a maximum value of 4095 as 802.1Q tags are twelve bits.",
             "type": "integer",
             "format": "uint16",
             "minimum": 0
@@ -12984,255 +12639,7 @@
         },
         "required": [
           "interface_config_id",
-          "vid"
-        ]
-      },
-      "SystemUpdate": {
-        "description": "Identity-related metadata that's included in \"asset\" public API objects (which generally have no name or description)",
-        "type": "object",
-        "properties": {
-          "id": {
-            "description": "unique, immutable, system-controlled identifier for each resource",
-            "type": "string",
-            "format": "uuid"
-          },
-          "time_created": {
-            "description": "timestamp when this resource was created",
-            "type": "string",
-            "format": "date-time"
-          },
-          "time_modified": {
-            "description": "timestamp when this resource was last modified",
-            "type": "string",
-            "format": "date-time"
-          },
-          "version": {
-            "$ref": "#/components/schemas/SemverVersion"
-          }
-        },
-        "required": [
-          "id",
-          "time_created",
-          "time_modified",
-          "version"
-        ]
-      },
-      "SystemUpdateResultsPage": {
-        "description": "A single page of results",
-        "type": "object",
-        "properties": {
-          "items": {
-            "description": "list of items on this page of results",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/SystemUpdate"
-            }
-          },
-          "next_page": {
-            "nullable": true,
-            "description": "token used to fetch the next page of results (if any)",
-            "type": "string"
-          }
-        },
-        "required": [
-          "items"
-        ]
-      },
-      "SystemUpdateStart": {
-        "type": "object",
-        "properties": {
-          "version": {
-            "$ref": "#/components/schemas/SemverVersion"
-          }
-        },
-        "required": [
-          "version"
-        ]
-      },
-      "SystemVersion": {
-        "type": "object",
-        "properties": {
-          "status": {
-            "$ref": "#/components/schemas/UpdateStatus"
-          },
-          "version_range": {
-            "$ref": "#/components/schemas/VersionRange"
-          }
-        },
-        "required": [
-          "status",
-          "version_range"
-        ]
-      },
-      "UpdateDeployment": {
-        "description": "Identity-related metadata that's included in \"asset\" public API objects (which generally have no name or description)",
-        "type": "object",
-        "properties": {
-          "id": {
-            "description": "unique, immutable, system-controlled identifier for each resource",
-            "type": "string",
-            "format": "uuid"
-          },
-          "status": {
-            "$ref": "#/components/schemas/UpdateStatus"
-          },
-          "time_created": {
-            "description": "timestamp when this resource was created",
-            "type": "string",
-            "format": "date-time"
-          },
-          "time_modified": {
-            "description": "timestamp when this resource was last modified",
-            "type": "string",
-            "format": "date-time"
-          },
-          "version": {
-            "$ref": "#/components/schemas/SemverVersion"
-          }
-        },
-        "required": [
-          "id",
-          "status",
-          "time_created",
-          "time_modified",
-          "version"
-        ]
-      },
-      "UpdateDeploymentResultsPage": {
-        "description": "A single page of results",
-        "type": "object",
-        "properties": {
-          "items": {
-            "description": "list of items on this page of results",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/UpdateDeployment"
-            }
-          },
-          "next_page": {
-            "nullable": true,
-            "description": "token used to fetch the next page of results (if any)",
-            "type": "string"
-          }
-        },
-        "required": [
-          "items"
-        ]
-      },
-      "UpdateStatus": {
-        "oneOf": [
-          {
-            "type": "object",
-            "properties": {
-              "status": {
-                "type": "string",
-                "enum": [
-                  "updating"
-                ]
-              }
-            },
-            "required": [
-              "status"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "status": {
-                "type": "string",
-                "enum": [
-                  "steady"
-                ]
-              }
-            },
-            "required": [
-              "status"
-            ]
-          }
-        ]
-      },
-      "UpdateableComponent": {
-        "description": "Identity-related metadata that's included in \"asset\" public API objects (which generally have no name or description)",
-        "type": "object",
-        "properties": {
-          "component_type": {
-            "$ref": "#/components/schemas/UpdateableComponentType"
-          },
-          "device_id": {
-            "type": "string"
-          },
-          "id": {
-            "description": "unique, immutable, system-controlled identifier for each resource",
-            "type": "string",
-            "format": "uuid"
-          },
-          "status": {
-            "$ref": "#/components/schemas/UpdateStatus"
-          },
-          "system_version": {
-            "$ref": "#/components/schemas/SemverVersion"
-          },
-          "time_created": {
-            "description": "timestamp when this resource was created",
-            "type": "string",
-            "format": "date-time"
-          },
-          "time_modified": {
-            "description": "timestamp when this resource was last modified",
-            "type": "string",
-            "format": "date-time"
-          },
-          "version": {
-            "$ref": "#/components/schemas/SemverVersion"
-          }
-        },
-        "required": [
-          "component_type",
-          "device_id",
-          "id",
-          "status",
-          "system_version",
-          "time_created",
-          "time_modified",
-          "version"
-        ]
-      },
-      "UpdateableComponentResultsPage": {
-        "description": "A single page of results",
-        "type": "object",
-        "properties": {
-          "items": {
-            "description": "list of items on this page of results",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/UpdateableComponent"
-            }
-          },
-          "next_page": {
-            "nullable": true,
-            "description": "token used to fetch the next page of results (if any)",
-            "type": "string"
-          }
-        },
-        "required": [
-          "items"
-        ]
-      },
-      "UpdateableComponentType": {
-        "type": "string",
-        "enum": [
-          "bootloader_for_rot",
-          "bootloader_for_sp",
-          "bootloader_for_host_proc",
-          "hubris_for_psc_rot",
-          "hubris_for_psc_sp",
-          "hubris_for_sidecar_rot",
-          "hubris_for_sidecar_sp",
-          "hubris_for_gimlet_rot",
-          "hubris_for_gimlet_sp",
-          "helios_host_phase1",
-          "helios_host_phase2",
-          "host_omicron"
+          "vlan_id"
         ]
       },
       "User": {
@@ -13333,7 +12740,7 @@
             ]
           },
           "password": {
-            "description": "password used to log in",
+            "description": "how to set the user's login password",
             "allOf": [
               {
                 "$ref": "#/components/schemas/UserPassword"
@@ -13361,34 +12768,34 @@
             "description": "Sets the user's password to the provided value",
             "type": "object",
             "properties": {
-              "details": {
-                "$ref": "#/components/schemas/Password"
-              },
-              "user_password_value": {
+              "mode": {
                 "type": "string",
                 "enum": [
                   "password"
                 ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/Password"
               }
             },
             "required": [
-              "details",
-              "user_password_value"
+              "mode",
+              "value"
             ]
           },
           {
             "description": "Invalidates any current password (disabling password authentication)",
             "type": "object",
             "properties": {
-              "user_password_value": {
+              "mode": {
                 "type": "string",
                 "enum": [
-                  "invalid_password"
+                  "login_disallowed"
                 ]
               }
             },
             "required": [
-              "user_password_value"
+              "mode"
             ]
           }
         ]
@@ -13428,21 +12835,6 @@
         "required": [
           "password",
           "username"
-        ]
-      },
-      "VersionRange": {
-        "type": "object",
-        "properties": {
-          "high": {
-            "$ref": "#/components/schemas/SemverVersion"
-          },
-          "low": {
-            "$ref": "#/components/schemas/SemverVersion"
-          }
-        },
-        "required": [
-          "high",
-          "low"
         ]
       },
       "Vpc": {
@@ -14393,7 +13785,7 @@
       "name": "hidden",
       "description": "TODO operations that will not ship to customers",
       "externalDocs": {
-        "url": "http://docs.oxide.computer/api/"
+        "url": "http://docs.oxide.computer/api"
       }
     },
     {
@@ -14411,17 +13803,17 @@
       }
     },
     {
-      "name": "ip-pools",
-      "description": "IP Pools contain external IP addresses that can be assigned to virtual machine instances.",
-      "externalDocs": {
-        "url": "http://docs.oxide.computer/api/ip-pools"
-      }
-    },
-    {
       "name": "login",
       "description": "Authentication endpoints",
       "externalDocs": {
         "url": "http://docs.oxide.computer/api/login"
+      }
+    },
+    {
+      "name": "metrics",
+      "description": "Silo-scoped metrics",
+      "externalDocs": {
+        "url": "http://docs.oxide.computer/api/metrics"
       }
     },
     {
@@ -14446,13 +13838,6 @@
       }
     },
     {
-      "name": "sagas",
-      "description": "Sagas are the abstraction used to represent multi-step operations within the Oxide deployment. These operations can be used to query saga status and report errors.",
-      "externalDocs": {
-        "url": "http://docs.oxide.computer/api/sagas"
-      }
-    },
-    {
       "name": "session",
       "description": "Information pertaining to the current session.",
       "externalDocs": {
@@ -14474,46 +13859,35 @@
       }
     },
     {
-      "name": "system",
-      "description": "Internal system information",
-      "externalDocs": {
-        "url": "http://docs.oxide.computer/api/system"
-      }
-    },
-    {
       "name": "system/hardware",
       "description": "These operations pertain to hardware inventory and management. Racks are the unit of expansion of an Oxide deployment. Racks are in turn composed of sleds, switches, power supplies, and a cabled backplane.",
       "externalDocs": {
-        "url": "http://docs.oxide.computer/api/system/hardware"
+        "url": "http://docs.oxide.computer/api/system-hardware"
       }
     },
     {
       "name": "system/metrics",
       "description": "Metrics provide insight into the operation of the Oxide deployment. These include telemetry on hardware and software components that can be used to understand the current state as well as to diagnose issues.",
       "externalDocs": {
-        "url": "http://docs.oxide.computer/api/system/metrics"
+        "url": "http://docs.oxide.computer/api/system-metrics"
       }
     },
     {
       "name": "system/networking",
       "description": "This provides rack-level network configuration.",
       "externalDocs": {
-        "url": "http://docs.oxide.computer/api/system/networking"
+        "url": "http://docs.oxide.computer/api/system-networking"
       }
     },
     {
       "name": "system/silos",
       "description": "Silos represent a logical partition of users and resources.",
       "externalDocs": {
-        "url": "http://docs.oxide.computer/api/system/silos"
+        "url": "http://docs.oxide.computer/api/system-silos"
       }
     },
     {
-      "name": "system/update",
-      "description": "This includes operations related to system updates.",
-      "externalDocs": {
-        "url": "http://docs.oxide.computer/api/system/update"
-      }
+      "name": "system/update"
     },
     {
       "name": "vpcs",

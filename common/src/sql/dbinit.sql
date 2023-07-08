@@ -35,6 +35,12 @@ CREATE USER omicron;
 ALTER DEFAULT PRIVILEGES GRANT INSERT, SELECT, UPDATE, DELETE ON TABLES to omicron;
 
 /*
+ * Configure a replication factor of 5 to ensure that the system can maintain
+ * availability in the face of any two node failures.
+ */
+ALTER RANGE default CONFIGURE ZONE USING num_replicas = 5;
+
+/*
  * Racks
  */
 CREATE TABLE omicron.public.rack (
@@ -186,6 +192,9 @@ CREATE INDEX ON omicron.public.switch (
  */
 
 CREATE TYPE omicron.public.service_kind AS ENUM (
+  'clickhouse',
+  'cockroach',
+  'crucible',
   'crucible_pantry',
   'dendrite',
   'external_dns',
@@ -385,7 +394,9 @@ CREATE TABLE omicron.public.Zpool (
 CREATE TYPE omicron.public.dataset_kind AS ENUM (
   'crucible',
   'cockroach',
-  'clickhouse'
+  'clickhouse',
+  'external_dns',
+  'internal_dns'
 );
 
 /*
@@ -561,6 +572,8 @@ CREATE TABLE omicron.public.silo (
     discoverable BOOL NOT NULL,
     authentication_mode omicron.public.authentication_mode NOT NULL,
     user_provision_type omicron.public.user_provision_type NOT NULL,
+
+    mapped_fleet_roles JSONB NOT NULL,
 
     /* child resource generation number, per RFD 192 */
     rcgen INT NOT NULL
@@ -945,6 +958,7 @@ CREATE TABLE omicron.public.disk (
      */
     attach_instance_id UUID,
     state_generation INT NOT NULL,
+    slot INT2 CHECK (slot >= 0 AND slot < 8),
     time_state_updated TIMESTAMPTZ NOT NULL,
 
     /* Disk configuration */
@@ -1033,12 +1047,22 @@ FROM
 WHERE 
     project_id IS NULL;
 
+/* Index for silo images */
+CREATE UNIQUE INDEX on omicron.public.image (
+    silo_id,
+    name
+) WHERE
+    time_deleted is NULL AND
+    project_id is NULL;
+
+/* Index for project images */
 CREATE UNIQUE INDEX on omicron.public.image (
     silo_id,
     project_id,
     name
 ) WHERE
-    time_deleted is NULL;
+    time_deleted is NULL AND
+    project_id is NOT NULL;
 
 CREATE TYPE omicron.public.snapshot_state AS ENUM (
   'creating',
@@ -2397,6 +2421,7 @@ CREATE TABLE omicron.public.switch_port_settings_route_config (
     interface_name TEXT,
     dst INET,
     gw INET,
+    vid INT4,
 
     /* TODO https://github.com/oxidecomputer/omicron/issues/3013 */
     PRIMARY KEY (port_settings_id, interface_name, dst, gw)

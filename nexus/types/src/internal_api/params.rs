@@ -17,7 +17,6 @@ use std::fmt;
 use std::net::IpAddr;
 use std::net::SocketAddr;
 use std::net::SocketAddrV6;
-use std::str::FromStr;
 use uuid::Uuid;
 
 /// Describes the role of the sled within the rack.
@@ -134,6 +133,8 @@ pub enum DatasetKind {
     Crucible,
     Cockroach,
     Clickhouse,
+    ExternalDns,
+    InternalDns,
 }
 
 impl fmt::Display for DatasetKind {
@@ -143,24 +144,10 @@ impl fmt::Display for DatasetKind {
             Crucible => "crucible",
             Cockroach => "cockroach",
             Clickhouse => "clickhouse",
+            ExternalDns => "external_dns",
+            InternalDns => "internal_dns",
         };
         write!(f, "{}", s)
-    }
-}
-
-impl FromStr for DatasetKind {
-    type Err = omicron_common::api::external::Error;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        use DatasetKind::*;
-        match s {
-            "crucible" => Ok(Crucible),
-            "cockroach" => Ok(Cockroach),
-            "clickhouse" => Ok(Clickhouse),
-            _ => Err(Self::Err::InternalError {
-                internal_message: format!("Unknown dataset kind: {}", s),
-            }),
-        }
     }
 }
 
@@ -188,13 +175,16 @@ pub struct ServiceNic {
 #[derive(Debug, Serialize, Deserialize, JsonSchema, Clone, PartialEq, Eq)]
 #[serde(rename_all = "snake_case", tag = "type", content = "content")]
 pub enum ServiceKind {
+    Clickhouse,
+    Cockroach,
+    Crucible,
+    CruciblePantry,
     ExternalDns { external_address: IpAddr, nic: ServiceNic },
     InternalDns,
     Nexus { external_address: IpAddr, nic: ServiceNic },
     Oximeter,
     Dendrite,
     Tfport,
-    CruciblePantry,
     BoundaryNtp { snat: SourceNatConfig, nic: ServiceNic },
     InternalNtp,
 }
@@ -203,6 +193,9 @@ impl fmt::Display for ServiceKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         use ServiceKind::*;
         let s = match self {
+            Clickhouse => "clickhouse",
+            Cockroach => "cockroach",
+            Crucible => "crucible",
             ExternalDns { .. } => "external_dns",
             InternalDns => "internal_dns",
             Nexus { .. } => "nexus",
@@ -239,8 +232,8 @@ pub struct DatasetCreateRequest {
 
 #[derive(Clone, Serialize, Deserialize, JsonSchema)]
 pub struct Certificate {
-    pub cert: Vec<u8>,
-    pub key: Vec<u8>,
+    pub cert: String,
+    pub key: String,
 }
 
 impl std::fmt::Debug for Certificate {

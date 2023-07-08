@@ -127,6 +127,7 @@ impl From<IpPoolRange> for views::IpPoolRange {
     fn from(range: IpPoolRange) -> Self {
         Self {
             id: range.id,
+            ip_pool_id: range.ip_pool_id,
             time_created: range.time_created,
             range: IpRange::from(&range),
         }

@@ -12,56 +12,54 @@ use internal_dns::ServiceName;
 use omicron_common::address::NEXUS_INTERNAL_PORT;
 use slog::Logger;
 use std::future::Future;
-use std::net::Ipv6Addr;
 use std::pin::Pin;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
-struct Inner {
-    log: Logger,
-    resolver: Resolver,
-}
-
-/// Wrapper around a [`NexusClient`] object, which allows deferring
-/// the DNS lookup until accessed.
+/// A thin wrapper over a progenitor-generated NexusClient.
 ///
-/// Without the assistance of OS-level DNS lookups, the [`NexusClient`]
-/// interface requires knowledge of the target service IP address.
-/// For some services, like Nexus, this can be painful, as the IP address
-/// may not have even been allocated when the Sled Agent starts.
-///
-/// This structure allows clients to access the client on-demand, performing
-/// the DNS lookup only once it is actually needed.
+/// Also attaches the "DNS resolver" for historical reasons.
 #[derive(Clone)]
-pub struct LazyNexusClient {
-    inner: Arc<Inner>,
+pub struct NexusClientWithResolver {
+    client: NexusClient,
+    resolver: Arc<Resolver>,
 }
 
-impl LazyNexusClient {
-    pub fn new(log: Logger, addr: Ipv6Addr) -> Result<Self, ResolveError> {
+impl NexusClientWithResolver {
+    pub fn new(
+        log: &Logger,
+        resolver: Arc<Resolver>,
+    ) -> Result<Self, ResolveError> {
+        let client = reqwest::ClientBuilder::new()
+            .dns_resolver(resolver.clone())
+            .build()
+            .expect("Failed to build client");
+
+        let dns_name = ServiceName::Nexus.srv_name();
         Ok(Self {
-            inner: Arc::new(Inner {
-                log: log.clone(),
-                resolver: Resolver::new_from_ip(
-                    log.new(o!("component" => "DnsResolver")),
-                    addr,
-                )?,
-            }),
+            client: NexusClient::new_with_client(
+                &format!("http://{dns_name}:{NEXUS_INTERNAL_PORT}"),
+                client,
+                log.new(o!("component" => "NexusClient")),
+            ),
+            resolver,
         })
     }
 
-    pub async fn get_ip(&self) -> Result<Ipv6Addr, ResolveError> {
-        self.inner.resolver.lookup_ipv6(ServiceName::Nexus).await
+    /// Access the progenitor-based Nexus Client.
+    pub fn client(&self) -> &NexusClient {
+        &self.client
     }
 
-    pub async fn get(&self) -> Result<NexusClient, ResolveError> {
-        let address = self.get_ip().await?;
-
-        Ok(NexusClient::new(
-            &format!("http://[{}]:{}", address, NEXUS_INTERNAL_PORT),
-            self.inner.log.clone(),
-        ))
+    /// Access the DNS resolver used by the Nexus Client.
+    ///
+    /// WARNING: If you're using this resolver to access an IP address of
+    /// another service, be aware that it might change if that service moves
+    /// around! Be cautious when accessing and persisting IP addresses of other
+    /// services.
+    pub fn resolver(&self) -> &Arc<Resolver> {
+        &self.resolver
     }
 }
 

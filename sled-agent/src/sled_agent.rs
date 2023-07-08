@@ -7,12 +7,12 @@
 use crate::bootstrap::params::StartSledAgentRequest;
 use crate::config::Config;
 use crate::instance_manager::InstanceManager;
-use crate::nexus::{LazyNexusClient, NexusRequestQueue};
+use crate::nexus::{NexusClientWithResolver, NexusRequestQueue};
 use crate::params::{
-    DatasetKind, DiskStateRequested, InstanceHardware,
-    InstanceMigrationSourceParams, InstancePutStateResponse,
-    InstanceStateRequested, InstanceUnregisterResponse, ServiceEnsureBody,
-    ServiceZoneService, SledRole, TimeSync, VpcFirewallRule, Zpool,
+    DiskStateRequested, InstanceHardware, InstanceMigrationSourceParams,
+    InstancePutStateResponse, InstanceStateRequested,
+    InstanceUnregisterResponse, ServiceEnsureBody, SledRole, TimeSync,
+    VpcFirewallRule, ZoneBundleMetadata, Zpool,
 };
 use crate::services::{self, ServiceManager};
 use crate::storage_manager::{self, StorageManager};
@@ -141,7 +141,17 @@ impl From<Error> for dropshot::HttpError {
                     e => HttpError::for_internal_error(e.to_string()),
                 }
             }
-
+            crate::sled_agent::Error::Services(
+                crate::services::Error::Bundle(ref inner),
+            ) => match inner {
+                crate::services::BundleError::NoStorage => {
+                    HttpError::for_unavail(None, inner.to_string())
+                }
+                crate::services::BundleError::NoSuchZone { .. } => {
+                    HttpError::for_not_found(None, inner.to_string())
+                }
+                _ => HttpError::for_internal_error(err.to_string()),
+            },
             e => HttpError::for_internal_error(e.to_string()),
         }
     }
@@ -177,8 +187,8 @@ struct SledAgentInner {
     // Other Oxide-controlled services running on this Sled.
     services: ServiceManager,
 
-    // Lazily-acquired connection to Nexus.
-    lazy_nexus_client: LazyNexusClient,
+    // Connection to Nexus.
+    nexus_client: NexusClientWithResolver,
 
     // A serialized request queue for operations interacting with Nexus.
     nexus_request_queue: NexusRequestQueue,
@@ -204,7 +214,7 @@ impl SledAgent {
     pub async fn new(
         config: &Config,
         log: Logger,
-        lazy_nexus_client: LazyNexusClient,
+        nexus_client: NexusClientWithResolver,
         request: StartSledAgentRequest,
         services: ServiceManager,
         storage: StorageManager,
@@ -218,7 +228,7 @@ impl SledAgent {
             "component" => "SledAgent",
             "sled_id" => request.id.to_string(),
         ));
-        info!(&log, "created sled agent");
+        info!(&log, "SledAgent::new(..) starting");
 
         let etherstub = Dladm::ensure_etherstub(
             illumos_utils::dladm::UNDERLAY_ETHERSTUB_NAME,
@@ -248,7 +258,7 @@ impl SledAgent {
 
         storage
             .setup_underlay_access(storage_manager::UnderlayAccess {
-                lazy_nexus_client: lazy_nexus_client.clone(),
+                nexus_client: nexus_client.clone(),
                 sled_id: request.id,
             })
             .await?;
@@ -258,7 +268,7 @@ impl SledAgent {
 
         let instances = InstanceManager::new(
             parent_log.clone(),
-            lazy_nexus_client.clone(),
+            nexus_client.clone(),
             etherstub.clone(),
             port_manager.clone(),
         )?;
@@ -266,7 +276,7 @@ impl SledAgent {
         match config.vmm_reservoir_percentage {
             Some(sz) if sz > 0 && sz < 100 => {
                 instances.set_reservoir_size(&hardware, sz).map_err(|e| {
-                    warn!(log, "Failed to set VMM reservoir size: {e}");
+                    error!(log, "Failed to set VMM reservoir size: {e}");
                     e
                 })?;
             }
@@ -307,7 +317,7 @@ impl SledAgent {
                 updates,
                 port_manager,
                 services,
-                lazy_nexus_client,
+                nexus_client,
 
                 // TODO(https://github.com/oxidecomputer/omicron/issues/1917):
                 // Propagate usage of this request queue throughout the Sled Agent.
@@ -329,6 +339,11 @@ impl SledAgent {
             sa.hardware_monitor_task(log).await;
         });
 
+        // Finally, load services for which we're already responsible.
+        //
+        // Do this *after* monitoring for harware, to enable the switch zone to
+        // establish an underlay address before proceeding.
+        sled_agent.inner.services.load_services().await?;
         Ok(sled_agent)
     }
 
@@ -431,7 +446,7 @@ impl SledAgent {
     // Sends a request to Nexus informing it that the current sled exists.
     fn notify_nexus_about_self(&self, log: &Logger) {
         let sled_id = self.inner.id;
-        let lazy_nexus_client = self.inner.lazy_nexus_client.clone();
+        let nexus_client = self.inner.nexus_client.clone();
         let sled_address = self.inner.sled_address();
         let is_scrimlet = self.inner.hardware.is_scrimlet();
         let baseboard = nexus_client::types::Baseboard::from(
@@ -464,11 +479,8 @@ impl SledAgent {
                     nexus_client::types::SledRole::Gimlet
                 };
 
-                let nexus_client = lazy_nexus_client
-                    .get()
-                    .await
-                    .map_err(|err| BackoffError::transient(err.to_string()))?;
                 nexus_client
+                    .client()
                     .sled_agent_put(
                         &sled_id,
                         &nexus_client::types::SledAgentStartupInfo {
@@ -520,6 +532,40 @@ impl SledAgent {
             });
     }
 
+    /// List zone bundles for the provided zone.
+    pub async fn list_zone_bundles(
+        &self,
+        name: &str,
+    ) -> Result<Vec<ZoneBundleMetadata>, Error> {
+        self.inner.services.list_zone_bundles(name).await.map_err(Error::from)
+    }
+
+    /// Create a zone bundle for the provided zone.
+    pub async fn create_zone_bundle(
+        &self,
+        name: &str,
+    ) -> Result<ZoneBundleMetadata, Error> {
+        self.inner.services.create_zone_bundle(name).await.map_err(Error::from)
+    }
+
+    /// Fetch the path to a zone bundle.
+    pub async fn get_zone_bundle_path(
+        &self,
+        name: &str,
+        id: &Uuid,
+    ) -> Result<Option<Utf8PathBuf>, Error> {
+        self.inner
+            .services
+            .get_zone_bundle_path(name, id)
+            .await
+            .map_err(Error::from)
+    }
+
+    /// List the zones that the sled agent is currently managing.
+    pub async fn zones_list(&self) -> Result<Vec<String>, Error> {
+        self.inner.services.list_all_zones().await.map_err(Error::from)
+    }
+
     /// Ensures that particular services should be initialized.
     ///
     /// These services will be instantiated by this function, will be recorded
@@ -528,7 +574,31 @@ impl SledAgent {
         &self,
         requested_services: ServiceEnsureBody,
     ) -> Result<(), Error> {
+        let datasets: Vec<_> = requested_services
+            .services
+            .iter()
+            .filter_map(|service| service.dataset.clone())
+            .collect();
+
+        // TODO:
+        // - If these are the set of filesystems, we should also consider
+        // removing the ones which are not listed here.
+        // - It's probably worth sending a bulk request to the storage system,
+        // rather than requesting individual datasets.
+        for dataset in &datasets {
+            // First, ensure the dataset exists
+            self.inner
+                .storage
+                .upsert_filesystem(dataset.id, dataset.name.clone())
+                .await?;
+        }
+
         self.inner.services.ensure_all_services(requested_services).await?;
+        Ok(())
+    }
+
+    pub async fn cockroachdb_initialize(&self) -> Result<(), Error> {
+        self.inner.services.cockroachdb_initialize().await?;
         Ok(())
     }
 
@@ -545,47 +615,6 @@ impl SledAgent {
         } else {
             SledRole::Gimlet
         }
-    }
-
-    /// Ensures that a filesystem type exists within the zpool.
-    pub async fn filesystem_ensure(
-        &self,
-        dataset_id: Uuid,
-        zpool_id: Uuid,
-        dataset_kind: DatasetKind,
-        address: SocketAddrV6,
-    ) -> Result<(), Error> {
-        // First, ensure the dataset exists
-        let dataset = self
-            .inner
-            .storage
-            .upsert_filesystem(dataset_id, zpool_id, dataset_kind.clone())
-            .await?;
-
-        // NOTE: We use the "dataset_id" as the "service_id" here.
-        //
-        // Since datasets are tightly coupled with their own services - e.g.,
-        // from the perspective of Nexus, provisioning a dataset implies the
-        // sled should start a service - this is ID re-use is reasonable.
-        //
-        // If Nexus ever wants sleds to provision datasets independently of
-        // launching services, this ID type overlap should be reconsidered.
-        let service_type = dataset_kind.service_type();
-        let services =
-            vec![ServiceZoneService { id: dataset_id, details: service_type }];
-
-        // Next, ensure a zone exists to manage storage for that dataset
-        let request = crate::params::ServiceZoneRequest {
-            id: dataset_id,
-            zone_type: dataset_kind.zone_type(),
-            addresses: vec![*address.ip()],
-            dataset: Some(dataset),
-            gz_addresses: vec![],
-            services,
-        };
-        self.inner.services.ensure_storage_service(request).await?;
-
-        Ok(())
     }
 
     /// Idempotently ensures that a given instance is registered with this sled,
@@ -668,8 +697,10 @@ impl SledAgent {
         &self,
         artifact: UpdateArtifactId,
     ) -> Result<(), Error> {
-        let nexus_client = self.inner.lazy_nexus_client.get().await?;
-        self.inner.updates.download_artifact(artifact, &nexus_client).await?;
+        self.inner
+            .updates
+            .download_artifact(artifact, &self.inner.nexus_client.client())
+            .await?;
         Ok(())
     }
 
