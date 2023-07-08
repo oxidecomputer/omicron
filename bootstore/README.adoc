@@ -4,7 +4,7 @@
 
 = Bootstore
 
-The bootstore is the crate that implements the Oxide trust quroum protocol. The
+The bootstore is the crate that implements the Oxide trust quorum protocol. The
 bootstore is named the bootstore because it provides the necessary key share
 storage required to unlock the rack secret via the trust quorum protocol and
 boot the rack.
@@ -47,7 +47,7 @@ generative, property based tests. The protocol code is structured as a state
 machine that mutates state and returns messages to send via its user API. It
 also informs the caller when the state must be persisted. Importantly, all code
 for the scheme v0 protocol is deterministic, apart from UUID generation, and
-performs no I/O. This allows us to write proptery based tests that simulate an
+performs no I/O. This allows us to write property based tests that simulate an
 entire cluster of sleds operating in concert and ensure that any test failures
 shrink correctly.
 
@@ -56,7 +56,7 @@ shrink correctly.
 The code that implements network IO is not currently written. It will be a thin
 shim of async code on top of the v0 `Fsm`. For this protocol to work, peer sled
 bootstrap addresses will be discovered via DDM, and persistent TCP connections
-established using a "downstream" strategy, where sleds with higher ip addresses
+established using a "downstream" strategy, where sleds with higher IP addresses
 connect to those with lower IP addresses. The first thing peers do when they
 connect to each other is exchange `Hello` messages to identify the scheme and
 protocol version. This is described in link:./src/schemes/mod.rs[], although
@@ -168,7 +168,7 @@ callback on every timer tick.
 established on the bootstrap network
 . Bootstrap agent informs the higher level bootstore API on the same sled as RSS
 to initialize the rack with initial membership chosen by the wicket user.
-. The bootstore calls `FSM::init_rack` and gets back an `Output`
+. The bootstore calls `Fsm::init_rack` and gets back an `Output`
 . The output informs the bootstore to persist the local state to the M.2s and send the
 messages to peers addressed by their `Baseboard` in `Envelopes`.
 . Peers receive messages over TCP channels and respond according to the protocol
@@ -190,13 +190,13 @@ timeout. In this case RSS reset must be used to clear all the M.2 drives and try
 again. To prevent problems with a lingering sled that does not come back online
 to be cleared, that sled should be pulled. However, if it remains in the rack it
 will have a different `rack_uuid` and so errors will be triggered when it tries
-to talk to other sleds  in the new, successfully initialized trust quorum.
+to talk to other sleds in the new, successfully initialized trust quorum.
 
 Later on, we may wish to add a sled to a rack, most likely to replace a failed
 one. In order to do this the bootstrap agent will have to be instructed to
 trigger a call to the bootstore to inform the new sled that it is a "learning"
 member. This will result in a call to `Fsm::init_learner`, which will trigger
-a flow of  messages that allow the new sled to learn a key share from one of
+a flow of messages that allow the new sled to learn a key share from one of
 the other initial members. Each of the initial members keeps a set of encrypted
 "extra" key shares for this purpose that can be decrypted via a key that is also
 derived from the rack secret. The flow looks something like this:
@@ -249,7 +249,7 @@ peers. Each output message gets put in a queue representing it "floating" in
 the network. And because message delivery takes time, we also generate network
 delays in terms of ticks. When a tick callback fires, if the network delay is
 up and the connection is still valid we deliver the message to the appropriate
-peer FSM via calling it's `handle` method. We also, as always, call the model's
+peer FSM via calling its `handle` method. We also, as always, call the model's
 version of this method first so both the model and real FSMs are updated in
 lockstep. In this manner we can fully simulate arbitrary histories of message
 flows between peers and ensure the behavior of the system as a whole is what we

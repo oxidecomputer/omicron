@@ -75,7 +75,7 @@ impl State {
 pub enum ApiOutput {
     /// This peer has been initialized
     ///
-    /// The caller *must* persist the state
+    /// The caller *must* persist `Fsm::State`
     PeerInitialized,
 
     /// Rack initialization has completed. This node was the coordinator.
@@ -86,12 +86,12 @@ pub enum ApiOutput {
 
     /// An extra share has been distributed to a learning peer
     ///
-    /// The caller *must* persist the state
+    /// The caller *must* persist `Fsm::State`
     ShareDistributedToLearner,
 
-    /// This peer Learned its share
+    /// This peer learned its share
     ///
-    /// The caller *must* persist the state
+    /// The caller *must* persist `Fsm::State`
     LearningCompleted,
 }
 
@@ -159,7 +159,7 @@ pub struct Fsm {
 
     /// Envelopes not managed by the `RequestManager`
     /// These are all envelopes containing `Response` messages
-    envelopes: Vec<Envelope>,
+    responses: Vec<Envelope>,
 
     /// We keep track of whether the rack failed to initialize. If this happens
     /// the coordinator should return this error on every new API request.
@@ -175,7 +175,7 @@ impl Fsm {
             config,
             connected_peers: BTreeSet::new(),
             request_manager: RequestManager::new(id, config),
-            envelopes: vec![],
+            responses: vec![],
             rack_init_error: None,
         }
     }
@@ -188,7 +188,7 @@ impl Fsm {
     ///
     /// This must be called after any API callback
     pub fn drain_envelopes(&mut self) -> impl Iterator<Item = Envelope> + '_ {
-        self.envelopes.drain(..).chain(self.request_manager.drain_elements())
+        self.responses.drain(..).chain(self.request_manager.drain_elements())
     }
 
     /// Put a request into an envelope and add it to `self.envelopes`
@@ -198,7 +198,7 @@ impl Fsm {
         request_id: Uuid,
         type_: ResponseType,
     ) {
-        self.envelopes
+        self.responses
             .push(Envelope { to, msg: Response { request_id, type_ }.into() });
     }
 
@@ -228,7 +228,7 @@ impl Fsm {
             return Err(ApiError::AlreadyInitialized);
         };
         let pkgs = create_pkgs(rack_uuid, initial_membership.clone())
-            .map_err(|e| ApiError::RackInitFailed(e))?;
+            .map_err(ApiError::RackInitFailed)?;
         let mut iter = pkgs.expose_secret().into_iter();
         let our_pkg = iter.next().unwrap().clone();
 
@@ -271,7 +271,8 @@ impl Fsm {
         };
 
         if let Some(to) = self.connected_peers.first() {
-            let _ = self.request_manager.new_learn_sent_req(now, to.clone());
+            let _uuid =
+                self.request_manager.new_learn_sent_req(now, to.clone());
         }
         self.state = State::Learning;
         Ok(())
@@ -279,32 +280,24 @@ impl Fsm {
 
     /// This call is triggered locally after RSS runs, in order to retrieve
     /// the `RackSecret` so that it can be used as input key material. It
-    /// starts a a key share retrieval process so that the `RackSecret` can
+    /// starts a key share retrieval process so that the `RackSecret` can
     /// be reconstructed.
     pub fn load_rack_secret(&mut self, now: Instant) -> Result<Uuid, ApiError> {
         if let Some((_, err)) = &self.rack_init_error {
             return Err(err.clone());
         }
-        let request_id = match &self.state {
+        let (rack_uuid, threshold) = match &self.state {
             State::Uninitialized => return Err(ApiError::NotInitialized),
             State::Learning { .. } => return Err(ApiError::StillLearning),
-            State::InitialMember { pkg, .. } => {
-                self.request_manager.new_load_rack_secret_req(
-                    now,
-                    pkg.rack_uuid,
-                    pkg.threshold,
-                    &self.connected_peers,
-                )
-            }
-            State::Learned { pkg } => {
-                self.request_manager.new_load_rack_secret_req(
-                    now,
-                    pkg.rack_uuid,
-                    pkg.threshold,
-                    &self.connected_peers,
-                )
-            }
+            State::InitialMember { pkg, .. } => (pkg.rack_uuid, pkg.threshold),
+            State::Learned { pkg } => (pkg.rack_uuid, pkg.threshold),
         };
+        let request_id = self.request_manager.new_load_rack_secret_req(
+            now,
+            rack_uuid,
+            threshold,
+            &self.connected_peers,
+        );
 
         Ok(request_id)
     }
@@ -647,7 +640,7 @@ impl Fsm {
                             pkg,
                             distributed_shares,
                             &rack_secret,
-                            &mut self.envelopes,
+                            &mut self.responses,
                         )
                     }
                     // Only LoadRackSecret and LearnReceived track shares so we

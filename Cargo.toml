@@ -382,7 +382,7 @@ opt-level = 3
 [profile.release]
 panic = "abort"
 
-# proptery based test generation and shrinking is expensive. Let's optimize it.
+# proptest based test generation and shrinking is expensive. Let's optimize it.
 [profile.dev.package.proptest]
 opt-level = 3
 [profile.test.package.proptest]
