@@ -16,8 +16,7 @@ use zeroize::{Zeroize, ZeroizeOnDrop};
 
 pub use fsm::{ApiError, ApiOutput, Fsm, State};
 pub use messages::{
-    Envelope, Error as MsgError, Msg, Request, RequestType, Response,
-    ResponseType,
+    Envelope, Msg, MsgError, Request, RequestType, Response, ResponseType,
 };
 pub use request_manager::{RequestManager, TrackableRequest};
 pub use share_pkg::{create_pkgs, LearnedSharePkg, SharePkg};

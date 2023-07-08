@@ -204,7 +204,7 @@ derived from the rack secret. The flow looks something like this:
 ```mermaid
 
 sequenceDiagram
-    title Bootloader Update
+    title Sled Addition
     participant L as Learner
     participant Im1 as InitialMember_1
     participant Im2 as InitialMember_2

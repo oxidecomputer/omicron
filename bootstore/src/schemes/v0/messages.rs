@@ -8,6 +8,7 @@ use super::{LearnedSharePkg, Share, SharePkg};
 use derive_more::From;
 use serde::{Deserialize, Serialize};
 use sled_hardware::Baseboard;
+use thiserror::Error;
 use uuid::Uuid;
 
 /// The first thing a peer does after connecting or accepting is to identify
@@ -93,7 +94,7 @@ pub enum ResponseType {
     Pkg(LearnedSharePkg),
 
     /// An error response
-    Error(Error),
+    Error(MsgError),
 }
 
 impl ResponseType {
@@ -108,21 +109,20 @@ impl ResponseType {
 }
 
 /// An error returned from a peer over TCP
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum Error {
-    /// The peer is already initialized as a member of the original group
+#[derive(Error, Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum MsgError {
+    #[error("already initialized")]
     AlreadyInitialized,
 
-    /// The peer is not initialized yet
+    #[error("not yet initialized")]
     NotInitialized,
 
-    /// The peer is trying to learn its share
+    #[error("peer still trying to learn its share")]
     StillLearning,
 
-    /// The peer does not have any shares to hand out
-    /// to learners
+    #[error("no shares available for learners")]
     CannotSpareAShare,
 
-    /// A request was received with a rack UUID that does not match this peer
+    #[error("rack uuid mismatch: expected: {expected}, got: {got}")]
     RackUuidMismatch { expected: Uuid, got: Uuid },
 }
