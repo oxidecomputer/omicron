@@ -45,6 +45,7 @@ mod address_lot;
 mod certificate;
 mod console_session;
 mod dataset;
+mod db_metadata;
 mod device_auth;
 mod disk;
 mod dns;

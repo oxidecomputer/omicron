@@ -19,7 +19,7 @@ use ::oximeter::types::ProducerRegistry;
 use anyhow::anyhow;
 use internal_dns::ServiceName;
 use nexus_db_queries::context::OpContext;
-use omicron_common::api::external::Error;
+use omicron_common::api::external::{Error, SemverVersion};
 use slog::Logger;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -152,6 +152,24 @@ impl Nexus {
         let pool = Arc::new(pool);
         let db_datastore = Arc::new(db::DataStore::new(Arc::clone(&pool)));
         db_datastore.register_producers(&producer_registry);
+
+        // Keep looping until we find that the schema matches our expectation.
+        const EXPECTED_VERSION: SemverVersion = SemverVersion::new(1, 0, 0);
+        loop {
+            match db_datastore.database_schema_version().await {
+                Ok(version) => {
+                    if version == nexus_db_model::schema::SCHEMA_VERSION {
+                        break;
+                    }
+                    let observed = version.0;
+                    warn!(log, "Incompatible database schema: Saw {observed}, expected {EXPECTED_VERSION}");
+                }
+                Err(e) => {
+                    warn!(log, "Cannot read database schema version: {e}");
+                }
+            }
+            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+        }
 
         let my_sec_id = db::SecId::from(config.deployment.id);
         let sec_store = Arc::new(db::CockroachDbSecStore::new(
