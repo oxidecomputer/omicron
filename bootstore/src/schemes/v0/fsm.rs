@@ -16,6 +16,7 @@ use super::{
     RequestManager, RequestType, Response, ResponseType, Share, SharePkg,
     Shares, TrackableRequest,
 };
+use crate::schemes::v0::share_pkg::SharePkgCommon;
 use crate::trust_quorum::{RackSecret, TrustQuorumError};
 use crate::Sha3_256Digest;
 use secrecy::ExposeSecret;
@@ -289,16 +290,16 @@ impl Fsm {
     /// be reconstructed.
     pub fn load_rack_secret(&mut self, now: Instant) -> Result<Uuid, ApiError> {
         self.check_init_err()?;
-        let (rack_uuid, threshold) = match &self.state {
+        let pkg = match &self.state {
             State::Uninitialized => return Err(ApiError::NotInitialized),
             State::Learning { .. } => return Err(ApiError::StillLearning),
-            State::InitialMember { pkg, .. } => (pkg.rack_uuid, pkg.threshold),
-            State::Learned { pkg } => (pkg.rack_uuid, pkg.threshold),
+            State::InitialMember { pkg, .. } => &pkg.common,
+            State::Learned { pkg } => &pkg.common,
         };
         let request_id = self.request_manager.new_load_rack_secret_req(
             now,
-            rack_uuid,
-            threshold,
+            pkg.rack_uuid,
+            pkg.threshold,
             &self.connected_peers,
         );
 
@@ -478,26 +479,16 @@ impl Fsm {
         let response = match &self.state {
             State::Uninitialized => MsgError::NotInitialized.into(),
             State::Learning => MsgError::StillLearning.into(),
-            State::Learned { pkg } => {
-                if rack_uuid != pkg.rack_uuid {
+            State::Learned { pkg: LearnedSharePkg { common } }
+            | State::InitialMember { pkg: SharePkg { common, .. }, .. } => {
+                if rack_uuid != common.rack_uuid {
                     MsgError::RackUuidMismatch {
-                        expected: pkg.rack_uuid,
+                        expected: common.rack_uuid,
                         got: rack_uuid,
                     }
                     .into()
                 } else {
-                    ResponseType::Share(Share(pkg.share.clone()))
-                }
-            }
-            State::InitialMember { pkg, .. } => {
-                if rack_uuid != pkg.rack_uuid {
-                    MsgError::RackUuidMismatch {
-                        expected: pkg.rack_uuid,
-                        got: rack_uuid,
-                    }
-                    .into()
-                } else {
-                    ResponseType::Share(Share(pkg.share.clone()))
+                    ResponseType::Share(Share(common.share.clone()))
                 }
             }
         };
@@ -515,8 +506,8 @@ impl Fsm {
                 self.request_manager.new_learn_received_req(
                     request_id,
                     now,
-                    pkg.rack_uuid,
-                    pkg.threshold,
+                    pkg.common.rack_uuid,
+                    pkg.common.threshold,
                     from.clone(),
                     &self.connected_peers,
                 );
@@ -620,10 +611,10 @@ impl Fsm {
                 });
             }
             State::InitialMember { pkg, distributed_shares } => {
-                validate_share(&from, &share, &pkg.share_digests)?;
+                validate_share(&from, &share, &pkg.common.share_digests)?;
                 match self.request_manager.on_share(from, request_id, share) {
                     Some(TrackableRequest::LoadRackSecret { acks, .. }) => {
-                        let secret = combine_shares(&pkg.share, acks)?;
+                        let secret = combine_shares(&pkg.common.share, acks)?;
                         Ok(Some(ApiOutput::RackSecret { request_id, secret }))
                     }
                     Some(TrackableRequest::LearnReceived {
@@ -631,7 +622,8 @@ impl Fsm {
                         acks,
                         ..
                     }) => {
-                        let rack_secret = combine_shares(&pkg.share, acks)?;
+                        let rack_secret =
+                            combine_shares(&pkg.common.share, acks)?;
                         // We now have the rack secret and can decrypt extra shares
                         decrypt_and_send_share_response(
                             from,
@@ -656,10 +648,10 @@ impl Fsm {
                 }
             }
             State::Learned { pkg } => {
-                validate_share(&from, &share, &pkg.share_digests)?;
+                validate_share(&from, &share, &pkg.common.share_digests)?;
                 match self.request_manager.on_share(from, request_id, share) {
                     Some(TrackableRequest::LoadRackSecret { acks, .. }) => {
-                        let secret = combine_shares(&pkg.share, acks)?;
+                        let secret = combine_shares(&pkg.common.share, acks)?;
                         Ok(Some(ApiOutput::RackSecret { request_id, secret }))
                     }
                     Some(TrackableRequest::LearnReceived { .. }) => {
@@ -758,11 +750,13 @@ fn queue_pkg_response(
     envelopes: &mut Vec<Envelope>,
 ) {
     let learned_pkg = LearnedSharePkg {
-        rack_uuid: pkg.rack_uuid,
-        epoch: pkg.epoch,
-        threshold: pkg.threshold,
-        share: share.clone(),
-        share_digests: pkg.share_digests.clone(),
+        common: SharePkgCommon {
+            rack_uuid: pkg.common.rack_uuid,
+            epoch: pkg.common.epoch,
+            threshold: pkg.common.threshold,
+            share: share.clone(),
+            share_digests: pkg.common.share_digests.clone(),
+        },
     };
     // Queue up a response to the learner
     envelopes.push(Envelope {

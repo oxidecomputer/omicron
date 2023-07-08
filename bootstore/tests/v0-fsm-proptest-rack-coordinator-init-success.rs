@@ -299,7 +299,7 @@ impl TestState {
             } = envelope else {
                 panic!("Already verified the RequestType");
             };
-            self.shares.insert(to.clone(), Share(pkg.share.clone()));
+            self.shares.insert(to.clone(), Share(pkg.common.share.clone()));
             let ack = Response { request_id: id, type_: ResponseType::InitAck }
                 .into();
             let output = self.sut.handle_msg(self.now, to, ack);

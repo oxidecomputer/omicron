@@ -23,6 +23,33 @@ use zeroize::{Zeroize, ZeroizeOnDrop};
 // - one identifier (x-coordinate) byte, and one 32-byte y-coordinate.
 const SHARE_SIZE: usize = 33;
 
+/// A common container of fields used inside both [`SharePkg`] and
+/// [`LearnedSharePkg`]
+#[derive(
+    Clone, PartialEq, Eq, Serialize, Deserialize, Zeroize, ZeroizeOnDrop,
+)]
+pub struct SharePkgCommon {
+    /// Unique Id of the rack
+    #[zeroize(skip)]
+    pub rack_uuid: Uuid,
+    // We aren't planning on doing any reconfigurations with this version of
+    // the protocol
+    pub epoch: u32,
+
+    /// The number of shares required to recompute the [`RackSecret`]
+    pub threshold: u8,
+
+    /// This sled's unencrypted share
+    pub share: Vec<u8>,
+
+    // Digests of all 256 shares so that each sled can verify the integrity
+    // of received shares.
+    //
+    // No need for expensive nonsense
+    #[zeroize(skip)]
+    pub share_digests: BTreeSet<Sha3_256Digest>,
+}
+
 /// A container distributed among trust quorum participants for
 /// trust quorum scheme version 0: [`crate::Scheme`].
 ///
@@ -32,30 +59,10 @@ const SHARE_SIZE: usize = 33;
     Clone, PartialEq, Eq, Serialize, Deserialize, Zeroize, ZeroizeOnDrop,
 )]
 pub struct SharePkg {
-    /// Unique Id of the rack
-    #[zeroize(skip)]
-    pub rack_uuid: Uuid,
-    /// We aren't planning on doing any reconfigurations with this version of
-    /// the protocol. This is here in case we decide otherwise, and because an
-    /// epoch is used for disk encryption purposes.
-    pub epoch: u32,
-
-    /// The number of shares required to recompute the [`RackSecret`]
-    pub threshold: u8,
-
+    pub common: SharePkgCommon,
     /// The initial group membership
     #[zeroize(skip)]
     pub initial_membership: BTreeSet<Baseboard>,
-
-    /// This sled's unencrypted share
-    pub share: Vec<u8>,
-
-    /// Digests of all 256 shares so that each sled can verify the integrity
-    /// of received shares.
-    ///
-    /// No need for expensive zeroizing
-    #[zeroize(skip)]
-    pub share_digests: BTreeSet<Sha3_256Digest>,
 
     /// Salt used for key derivation
     /// Since we use the same key for all pkgs, we share the same salt
@@ -88,8 +95,11 @@ impl SharePkg {
         &self,
         rack_secret: &RackSecret,
     ) -> Result<Secret<Vec<Vec<u8>>>, TrustQuorumError> {
-        let cipher =
-            derive_encryption_key(&self.rack_uuid, &rack_secret, &self.salt);
+        let cipher = derive_encryption_key(
+            &self.common.rack_uuid,
+            &rack_secret,
+            &self.salt,
+        );
         decrypt_shares(self.nonce, &cipher, &self.encrypted_shares)
     }
 }
@@ -97,27 +107,10 @@ impl SharePkg {
 /// An analog to [`SharePkg`] for nodes that were added after rack
 /// initialization. There are no encrypted_shares or nonces because of this.
 #[derive(
-    Clone, PartialEq, Eq, Serialize, Deserialize, Zeroize, ZeroizeOnDrop,
+    Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Zeroize, ZeroizeOnDrop,
 )]
 pub struct LearnedSharePkg {
-    #[zeroize(skip)]
-    pub rack_uuid: Uuid,
-    // We aren't planning on doing any reconfigurations with this version of
-    // the protocol
-    pub epoch: u32,
-
-    /// The number of shares required to recompute the [`RackSecret`]
-    pub threshold: u8,
-
-    /// This sled's unencrypted share
-    pub share: Vec<u8>,
-
-    // Digests of all 256 shares so that each sled can verify the integrity
-    // of received shares.
-    //
-    // No need for expensive nonsense
-    #[zeroize(skip)]
-    pub share_digests: BTreeSet<Sha3_256Digest>,
+    pub common: SharePkgCommon,
 }
 
 /// Create a package for each sled
@@ -160,13 +153,17 @@ pub fn create_pkgs(
             .encrypt((&nonce).into(), plaintext.expose_secret().as_ref())
             .map_err(|_| TrustQuorumError::FailedToEncrypt)?;
 
-        let pkg = SharePkg {
+        let common = SharePkgCommon {
             rack_uuid,
             epoch,
             threshold,
-            initial_membership: initial_membership.clone(),
             share: share.clone(),
             share_digests: share_digests.clone(),
+        };
+
+        let pkg = SharePkg {
+            common,
+            initial_membership: initial_membership.clone(),
             salt,
             nonce,
             encrypted_shares,
@@ -238,32 +235,30 @@ fn decrypt_shares(
 }
 
 // We don't want to risk debug-logging the actual share contents, so implement
-// `Debug` manually and omit sensitive fields.
-impl fmt::Debug for SharePkg {
+// `Debug` manually and omit sensitive fields. This also allows us avoid printing
+// large amounts of data unnecessarily.
+impl fmt::Debug for SharePkgCommon {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("SharePkg")
+        f.debug_struct("SharePkgCommon")
             .field("rack_uuid", &self.rack_uuid)
             .field("epoch", &self.epoch)
             .field("threshold", &self.threshold)
             .field("share", &"Share")
             .field("share_digests", &"Digests")
-            .field("salt", &hex::encode(&self.salt))
-            .field("nonce", &hex::encode(self.nonce))
-            .field("encrypted_shares", &"Encrypted")
             .finish()
     }
 }
 
 // We don't want to risk debug-logging the actual share contents, so implement
-// `Debug` manually and omit sensitive fields.
-impl fmt::Debug for LearnedSharePkg {
+// `Debug` manually and omit sensitive fields. This also allows us avoid printing
+// large amounts of data unnecessarily.
+impl fmt::Debug for SharePkg {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("SharePkg")
-            .field("rack_uuid", &self.rack_uuid)
-            .field("epoch", &self.epoch)
-            .field("threshold", &self.threshold)
-            .field("share", &"Share")
-            .field("share_digests", &"Digests")
+            .field("common", &self.common)
+            .field("salt", &hex::encode(&self.salt))
+            .field("nonce", &hex::encode(self.nonce))
+            .field("encrypted_shares", &"Encrypted")
             .finish()
     }
 }
@@ -291,11 +286,11 @@ mod tests {
         let mut threshold_of_shares = vec![];
         // Verify basic properties of each pkg
         for pkg in packages.expose_secret() {
-            assert_eq!(uuid, pkg.rack_uuid);
-            assert_eq!(0, pkg.epoch);
-            assert_eq!(3, pkg.threshold); // n/2 + 1
-            assert_eq!(255, pkg.share_digests.len());
-            threshold_of_shares.push(pkg.share.clone());
+            assert_eq!(uuid, pkg.common.rack_uuid);
+            assert_eq!(0, pkg.common.epoch);
+            assert_eq!(3, pkg.common.threshold); // n/2 + 1
+            assert_eq!(255, pkg.common.share_digests.len());
+            threshold_of_shares.push(pkg.common.share.clone());
         }
 
         let rack_secret =
@@ -318,7 +313,7 @@ mod tests {
                 num_encrypted_shares_per_pkg,
                 shares.expose_secret().len()
             );
-            decrypted_shares.push(pkg.share.clone());
+            decrypted_shares.push(pkg.common.share.clone());
             decrypted_shares.extend_from_slice(shares.expose_secret());
         }
 
@@ -327,7 +322,7 @@ mod tests {
             (num_encrypted_shares_per_pkg + 1) * num_sleds
         );
 
-        let hashes = packages.expose_secret()[0].share_digests.clone();
+        let hashes = packages.expose_secret()[0].common.share_digests.clone();
 
         // Compute share hashes and ensure they are valid
         for share in &decrypted_shares {
