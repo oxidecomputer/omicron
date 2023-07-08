@@ -4,7 +4,7 @@
 
 //! Messages sent between peers
 
-use super::{LearnedSharePkg, Share, SharePkg};
+use super::{LearnedSharePkg, RackUuid, Share, SharePkg};
 use derive_more::From;
 use serde::{Deserialize, Serialize};
 use sled_hardware::Baseboard;
@@ -64,7 +64,7 @@ pub enum RequestType {
     Init(SharePkg),
 
     /// Request a share from a remote peer
-    GetShare { rack_uuid: Uuid },
+    GetShare { rack_uuid: RackUuid },
 
     /// Get a [`LearnedSharePkg`] from a peer that was part of the rack
     /// initialization group
@@ -124,5 +124,5 @@ pub enum MsgError {
     CannotSpareAShare,
 
     #[error("rack uuid mismatch: expected: {expected}, got: {got}")]
-    RackUuidMismatch { expected: Uuid, got: Uuid },
+    RackUuidMismatch { expected: RackUuid, got: RackUuid },
 }

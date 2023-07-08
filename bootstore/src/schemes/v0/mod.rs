@@ -9,9 +9,11 @@ mod messages;
 mod request_manager;
 mod share_pkg;
 
+use derive_more::{Display, From};
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 use std::time::Duration;
+use uuid::Uuid;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
 pub use fsm::{ApiError, ApiOutput, Fsm, State};
@@ -45,6 +47,22 @@ pub struct V0Scheme {
     message_framing_header: U32BigEndian,
     message_signing: No,
 }
+
+/// A newtype around Uuid useful for type-safe disambiguation
+#[derive(
+    Display,
+    From,
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Serialize,
+    Deserialize,
+)]
+pub struct RackUuid(pub Uuid);
 
 /// A secret share
 #[derive(

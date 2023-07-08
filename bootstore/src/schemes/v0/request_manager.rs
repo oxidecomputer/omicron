@@ -4,7 +4,9 @@
 
 //! A mechanism for tracking in flight requests
 
-use super::{Config, Envelope, Msg, Request, RequestType, Share, SharePkg};
+use super::{
+    Config, Envelope, Msg, RackUuid, Request, RequestType, Share, SharePkg,
+};
 use sled_hardware::Baseboard;
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::Instant;
@@ -39,7 +41,7 @@ pub enum TrackableRequest {
     /// This must only be called at one peer, exactly once. That peer
     /// will be in `InitialMember` state.
     InitRack {
-        rack_uuid: Uuid,
+        rack_uuid: RackUuid,
         packages: BTreeMap<Baseboard, SharePkg>,
         acks: InitAcks,
     },
@@ -47,7 +49,7 @@ pub enum TrackableRequest {
     /// A request from the caller of the Fsm API to load a rack secret
     ///
     /// Only peers in `InitialMember` or `Learned` state can load rack secrets
-    LoadRackSecret { rack_uuid: Uuid, acks: ShareAcks },
+    LoadRackSecret { rack_uuid: RackUuid, acks: ShareAcks },
 
     /// A request received from a peer to learn a new share
     ///
@@ -56,7 +58,7 @@ pub enum TrackableRequest {
     /// distributed to the learner.
     ///
     /// Only peers in `InitialMember` state can respond successfully
-    LearnReceived { rack_uuid: Uuid, from: Baseboard, acks: ShareAcks },
+    LearnReceived { rack_uuid: RackUuid, from: Baseboard, acks: ShareAcks },
 
     /// A request sent from a peer in `Learning` state to another peer
     /// to learn a key share.
@@ -100,7 +102,7 @@ impl RequestManager {
     pub fn new_init_rack_req(
         &mut self,
         now: Instant,
-        rack_uuid: Uuid,
+        rack_uuid: RackUuid,
         packages: BTreeMap<Baseboard, SharePkg>,
         connected_peers: &BTreeSet<Baseboard>,
     ) -> Uuid {
@@ -133,7 +135,7 @@ impl RequestManager {
     pub fn new_load_rack_secret_req(
         &mut self,
         now: Instant,
-        rack_uuid: Uuid,
+        rack_uuid: RackUuid,
         threshold: u8,
         connected_peers: &BTreeSet<Baseboard>,
     ) -> Uuid {
@@ -157,7 +159,7 @@ impl RequestManager {
         &mut self,
         request_id: Uuid,
         now: Instant,
-        rack_uuid: Uuid,
+        rack_uuid: RackUuid,
         threshold: u8,
         from: Baseboard,
         connected_peers: &BTreeSet<Baseboard>,
@@ -214,7 +216,7 @@ impl RequestManager {
     fn broadcast_get_share(
         &mut self,
         request_id: Uuid,
-        rack_uuid: Uuid,
+        rack_uuid: RackUuid,
         connected_peers: &BTreeSet<Baseboard>,
     ) {
         let iter = connected_peers.iter().cloned().map(|to| Envelope {

@@ -12,9 +12,9 @@
 
 use super::request_manager::ShareAcks;
 use super::{
-    create_pkgs, Config, Envelope, LearnedSharePkg, Msg, MsgError, Request,
-    RequestManager, RequestType, Response, ResponseType, Share, SharePkg,
-    Shares, TrackableRequest,
+    create_pkgs, Config, Envelope, LearnedSharePkg, Msg, MsgError, RackUuid,
+    Request, RequestManager, RequestType, Response, ResponseType, Share,
+    SharePkg, Shares, TrackableRequest,
 };
 use crate::schemes::v0::share_pkg::SharePkgCommon;
 use crate::trust_quorum::{RackSecret, TrustQuorumError};
@@ -228,14 +228,14 @@ impl Fsm {
     pub fn init_rack(
         &mut self,
         now: Instant,
-        rack_uuid: Uuid,
+        rack_uuid: RackUuid,
         initial_membership: BTreeSet<Baseboard>,
     ) -> Result<(), ApiError> {
         self.check_init_err()?;
         let State::Uninitialized = self.state else {
             return Err(ApiError::AlreadyInitialized);
         };
-        let pkgs = create_pkgs(rack_uuid, initial_membership.clone())
+        let pkgs = create_pkgs(rack_uuid.0, initial_membership.clone())
             .map_err(ApiError::RackInitFailed)?;
         let mut iter = pkgs.expose_secret().into_iter();
         let our_pkg = iter.next().unwrap().clone();
@@ -298,7 +298,7 @@ impl Fsm {
         };
         let request_id = self.request_manager.new_load_rack_secret_req(
             now,
-            pkg.rack_uuid,
+            pkg.rack_uuid.into(),
             pkg.threshold,
             &self.connected_peers,
         );
@@ -474,16 +474,16 @@ impl Fsm {
         &mut self,
         from: Baseboard,
         request_id: Uuid,
-        rack_uuid: Uuid,
+        rack_uuid: RackUuid,
     ) {
         let response = match &self.state {
             State::Uninitialized => MsgError::NotInitialized.into(),
             State::Learning => MsgError::StillLearning.into(),
             State::Learned { pkg: LearnedSharePkg { common } }
             | State::InitialMember { pkg: SharePkg { common, .. }, .. } => {
-                if rack_uuid != common.rack_uuid {
+                if rack_uuid.0 != common.rack_uuid {
                     MsgError::RackUuidMismatch {
-                        expected: common.rack_uuid,
+                        expected: common.rack_uuid.into(),
                         got: rack_uuid,
                     }
                     .into()
@@ -506,7 +506,7 @@ impl Fsm {
                 self.request_manager.new_learn_received_req(
                     request_id,
                     now,
-                    pkg.common.rack_uuid,
+                    pkg.common.rack_uuid.into(),
                     pkg.common.threshold,
                     from.clone(),
                     &self.connected_peers,

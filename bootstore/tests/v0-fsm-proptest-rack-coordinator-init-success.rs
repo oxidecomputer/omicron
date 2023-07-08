@@ -16,8 +16,8 @@ mod common;
 
 use assert_matches::assert_matches;
 use bootstore::schemes::v0::{
-    ApiError, ApiOutput, Config, Envelope, Fsm, Msg, MsgError, Request,
-    RequestType, Response, ResponseType, Share,
+    ApiError, ApiOutput, Config, Envelope, Fsm, Msg, MsgError, RackUuid,
+    Request, RequestType, Response, ResponseType, Share,
 };
 use proptest::prelude::*;
 use sled_hardware::Baseboard;
@@ -63,7 +63,7 @@ pub enum Action {
 pub struct TestInput {
     pub initial_members: BTreeSet<Baseboard>,
     pub config: Config,
-    pub rack_uuid: Uuid,
+    pub rack_uuid: RackUuid,
     pub rack_init_sequence: Vec<RackInitAction>,
     pub actions: Vec<Action>,
 }
@@ -122,7 +122,7 @@ fn arb_test_input() -> impl Strategy<Value = TestInput> {
             (
                 Just(initial_members.clone()),
                 arb_config(),
-                Just(Uuid::new_v4()),
+                Just(Uuid::new_v4().into()),
                 arb_rack_init_sequence(initial_members.clone()),
                 proptest::collection::vec(
                     arb_action(initial_members),
@@ -166,7 +166,7 @@ pub struct TestState {
     sut: Fsm,
 
     // The unique id of the initialized rack
-    rack_uuid: Uuid,
+    rack_uuid: RackUuid,
 
     // The generated configuration
     config: Config,
@@ -206,7 +206,7 @@ impl TestState {
     pub fn new(
         initial_members: BTreeSet<Baseboard>,
         config: Config,
-        rack_uuid: Uuid,
+        rack_uuid: RackUuid,
     ) -> TestState {
         let sut_id = initial_members.first().cloned().unwrap();
         let threshold = initial_members.len() / 2 + 1;
@@ -245,7 +245,7 @@ impl TestState {
                     self.rack_init_started = true;
                     let result = self.sut.init_rack(
                         self.now,
-                        self.rack_uuid,
+                        self.rack_uuid.into(),
                         self.initial_members.clone(),
                     );
                     let envelopes = self.sut.drain_envelopes().collect();
@@ -521,7 +521,7 @@ impl TestState {
 
     pub fn get_share_fail(&mut self, peer_id: Baseboard) {
         let id = Uuid::new_v4();
-        let bad_rack_uuid = Uuid::new_v4();
+        let bad_rack_uuid = Uuid::new_v4().into();
         let req = Request {
             id,
             type_: RequestType::GetShare { rack_uuid: bad_rack_uuid },

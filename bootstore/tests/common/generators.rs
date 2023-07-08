@@ -66,8 +66,8 @@ pub fn arb_msg_error() -> impl Strategy<Value = MsgError> {
         Just(MsgError::StillLearning),
         Just(MsgError::CannotSpareAShare),
         Just(MsgError::RackUuidMismatch {
-            expected: Uuid::new_v4(),
-            got: Uuid::new_v4()
+            expected: Uuid::new_v4().into(),
+            got: Uuid::new_v4().into()
         })
     ]
 }
