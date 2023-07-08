@@ -370,7 +370,7 @@ impl Fsm {
             if !self.request_manager.has_learn_sent_req() {
                 // This is the first peer we've seen in the learning state, so try
                 // to learn from it.
-                let _ = self
+                let _uuid = self
                     .request_manager
                     .new_learn_sent_req(now, peer_id.clone());
             }
@@ -554,7 +554,7 @@ impl Fsm {
         }
     }
 
-    // Handle a `ResposneType::InitAck` from a peer
+    // Handle a `ResponseType::InitAck` from a peer
     fn on_init_ack(
         &mut self,
         from: Baseboard,
@@ -589,7 +589,7 @@ impl Fsm {
             if self.state == State::Learning {
                 // This is a stale response. We could choose to accept it, but
                 // for consistency with the rest of the `TrackableRequests`
-                // we  only accept responses that have currently outstanding
+                // we only accept responses that have currently outstanding
                 // requests.
                 Ok(None)
             } else {
@@ -780,13 +780,14 @@ fn combine_shares(
     my_share: &Vec<u8>,
     acks: ShareAcks,
 ) -> Result<RackSecret, ApiError> {
-    let shares = acks.received.into_values().fold(
-        Shares(vec![my_share.clone()]),
-        |mut acc, s| {
-            acc.0.push(s.0.clone());
-            acc
-        },
+    let shares = Shares(
+        acks.received
+            .into_values()
+            .map(|mut s| std::mem::take(&mut s.0))
+            .chain(std::iter::once(my_share.clone()))
+            .collect(),
     );
+
     // If this fails, it's really bad. This means valid shares can't reconstruct
     // the rack secret. This should be impossible, as reconstruction is
     // determinisitic. It could only possibly happen with an incompatible

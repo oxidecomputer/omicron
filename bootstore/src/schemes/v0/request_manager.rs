@@ -32,8 +32,6 @@ impl ShareAcks {
 }
 
 /// A mechanism to track in flight requests
-///
-/// Manages expiry, acknowledgment, and retries
 #[derive(Debug)]
 pub enum TrackableRequest {
     /// A request from the caller of the Fsm API to initialize a rack
@@ -108,11 +106,8 @@ impl RequestManager {
     ) -> Uuid {
         let expiry = now + self.config.rack_init_timeout;
         let mut acks = InitAcks::default();
-        acks.expected = packages
-            .keys()
-            .cloned()
-            .filter_map(|id| if id != self.id { Some(id) } else { None })
-            .collect();
+        acks.expected =
+            packages.keys().cloned().filter(|id| id != &self.id).collect();
         let req = TrackableRequest::InitRack {
             rack_uuid,
             packages: packages.clone(),
@@ -121,20 +116,14 @@ impl RequestManager {
         let request_id = self.new_request(expiry, req);
 
         // Send a `Request::Init` to each connected peer in the initial group
-        let iter = packages.into_iter().filter_map(|(to, pkg)| {
-            if connected_peers.contains(&to) {
-                Some(Envelope {
-                    to,
-                    msg: Request {
-                        id: request_id,
-                        type_: RequestType::Init(pkg),
-                    }
+        let iter = packages
+            .into_iter()
+            .filter(|(to, _pkg)| connected_peers.contains(to))
+            .map(|(to, pkg)| Envelope {
+                to,
+                msg: Request { id: request_id, type_: RequestType::Init(pkg) }
                     .into(),
-                })
-            } else {
-                None
-            }
-        });
+            });
         self.envelopes.extend(iter);
         request_id
     }
@@ -279,9 +268,10 @@ impl RequestManager {
         expired
     }
 
-    /// Return `Some(true)` if initialization completed, `Some(false) if it did not
+    /// Return `Some(true)` if initialization completed, `Some(false)` if it
+    // did not.
     ///
-    /// Return `None` if there is no active rack initialization ongoing
+    /// Return `None` if there is no active rack initialization ongoing.
     pub fn on_init_ack(
         &mut self,
         from: Baseboard,
