@@ -214,7 +214,7 @@ impl TestState {
         // This number matches the code in `share_pkg::create_pkgs`.
         let encrypted_shares_per_sled = (255 / initial_members.len()) - 1;
         TestState {
-            sut: Fsm::new_uninitialized(sut_id, config.clone()),
+            sut: Fsm::new_uninitialized(sut_id, config),
             rack_uuid,
             config,
             initial_members,
@@ -317,7 +317,7 @@ impl TestState {
         let request_id = Uuid::new_v4();
         self.learn_requests.insert(request_id, TestRequest::new(self.now));
         let req = Request { id: request_id, type_: RequestType::Learn }.into();
-        let output = self.sut.handle_msg(self.now, peer_id.clone(), req);
+        let output = self.sut.handle_msg(self.now, peer_id, req);
         assert_eq!(output, Ok(None));
         let envelopes = self.sut.drain_envelopes().collect();
         self.expect_get_share_broadcast(&envelopes);

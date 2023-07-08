@@ -20,10 +20,8 @@ pub const MAX_ACTIONS: usize = 1000;
 
 // Generate an individual Baseboard used as a peer id
 pub fn arb_baseboard() -> impl Strategy<Value = Baseboard> {
-    "[a-z]".prop_map(|id| Baseboard::Pc {
-        identifier: id.to_string(),
-        model: "0".to_string(),
-    })
+    "[a-z]"
+        .prop_map(|id| Baseboard::Pc { identifier: id, model: "0".to_string() })
 }
 
 // Generate a set of peer IDs for initial members
@@ -43,10 +41,8 @@ pub fn arb_learner_ids(
 }
 
 pub fn arb_learner_id() -> impl Strategy<Value = Baseboard> {
-    "learner-[a-z][a-z]".prop_map(|id| Baseboard::Pc {
-        identifier: id.to_string(),
-        model: "0".to_string(),
-    })
+    "learner-[a-z][a-z]"
+        .prop_map(|id| Baseboard::Pc { identifier: id, model: "0".to_string() })
 }
 
 // Generate an FSM configuration

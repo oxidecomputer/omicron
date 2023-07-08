@@ -8,6 +8,8 @@
 //! results. This is where the bulk of the protocol logic lives. It's written
 //! this way to enable easy testing and auditing.
 
+#![allow(clippy::result_large_err)]
+
 use super::request_manager::ShareAcks;
 use super::{
     create_pkgs, Config, Envelope, LearnedSharePkg, Msg, MsgError, Request,
@@ -247,7 +249,7 @@ impl Fsm {
         let _ = self.request_manager.new_init_rack_req(
             now,
             rack_uuid,
-            packages.clone(),
+            packages,
             &self.connected_peers,
         );
 
@@ -314,7 +316,7 @@ impl Fsm {
             return Ok(());
         }
         if let Some((request_id, err)) = &self.rack_init_error {
-            return Err(BTreeMap::from([(request_id.clone(), err.clone())]));
+            return Err(BTreeMap::from([(*request_id, err.clone())]));
         }
         let mut errors = BTreeMap::new();
         for (req_id, req) in self.request_manager.expired(now) {
@@ -585,21 +587,19 @@ impl Fsm {
             assert_eq!(self.state, State::Learning);
             self.state = State::Learned { pkg };
             Ok(Some(ApiOutput::LearningCompleted))
+        } else if self.state == State::Learning {
+            // This is a stale response. We could choose to accept it, but
+            // for consistency with the rest of the `TrackableRequests`
+            // we only accept responses that have currently outstanding
+            // requests.
+            Ok(None)
         } else {
-            if self.state == State::Learning {
-                // This is a stale response. We could choose to accept it, but
-                // for consistency with the rest of the `TrackableRequests`
-                // we only accept responses that have currently outstanding
-                // requests.
-                Ok(None)
-            } else {
-                Err(ApiError::UnexpectedResponse {
-                    from,
-                    state: self.state.name(),
-                    request_id,
-                    msg: "Pkg",
-                })
-            }
+            Err(ApiError::UnexpectedResponse {
+                from,
+                state: self.state.name(),
+                request_id,
+                msg: "Pkg",
+            })
         }
     }
 

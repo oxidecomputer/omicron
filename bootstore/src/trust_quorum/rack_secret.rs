@@ -44,7 +44,7 @@ pub struct RackSecret {
 
 impl Clone for RackSecret {
     fn clone(&self) -> Self {
-        RackSecret { secret: Secret::new(self.secret.expose_secret().clone()) }
+        RackSecret { secret: Secret::new(*self.secret.expose_secret()) }
     }
 }
 
