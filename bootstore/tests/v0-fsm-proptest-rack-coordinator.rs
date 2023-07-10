@@ -2,12 +2,12 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Property based tests for bootstore scheme v0 protocol logic
+//! Property based test for bootstore scheme v0 protocol logic
 //!
-//! These tests create a single `Fsm` as the system under test (SUT), where that
+//! This test creates a single `Fsm` as the system under test (SUT), where that
 //! FSM is the RSS node and where `Fsm::rack_init` always succeeds. Success may
-//! happend immediately if all nodes are connected, or when initial members
-//! connect a short time after  `Fsm::rack_init` is called.
+//! happen immediately if all nodes are connected, or when initial members
+//! connect a short time after `Fsm::rack_init` is called.
 //!
 //! After rack init succeeds various api calls will be generated to exercise
 //! the Fsm.
@@ -22,16 +22,13 @@ use bootstore::schemes::v0::{
 use proptest::prelude::*;
 use sled_hardware::Baseboard;
 use std::collections::{BTreeMap, BTreeSet};
-use std::time::{Duration, Instant};
+use std::time::Instant;
 use uuid::Uuid;
-
-const MIN_INITIAL_MEMBERS: usize = 3;
-const MAX_INITIAL_MEMBERS: usize = 12;
-const TICK_TIMEOUT: Duration = Duration::from_millis(250);
 
 use common::generators::{
     arb_config, arb_initial_member_ids, arb_learner_id, arb_msg_error,
-    MAX_ACTIONS, TICKS_PER_ACTION,
+    MAX_ACTIONS, MAX_INITIAL_MEMBERS, MIN_INITIAL_MEMBERS, TICKS_PER_ACTION,
+    TICK_TIMEOUT,
 };
 
 /// Actions run during the rack init phase of the test
@@ -114,7 +111,7 @@ fn arb_rack_init_sequence(
     )
 }
 
-/// Create the test input to this test
+/// Create the input to this test
 fn arb_test_input() -> impl Strategy<Value = TestInput> {
     arb_initial_member_ids(MIN_INITIAL_MEMBERS, MAX_INITIAL_MEMBERS)
         .prop_flat_map(|initial_members| {

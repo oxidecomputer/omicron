@@ -21,7 +21,7 @@ pub use messages::{
     Envelope, Msg, MsgError, Request, RequestType, Response, ResponseType,
 };
 pub use request_manager::{RequestManager, TrackableRequest};
-pub use share_pkg::{create_pkgs, LearnedSharePkg, SharePkg};
+pub use share_pkg::{create_pkgs, LearnedSharePkg, SharePkg, SharePkgCommon};
 
 /// The current version of supported messages within the v0 scheme
 ///

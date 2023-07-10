@@ -15,8 +15,13 @@ use uuid::Uuid;
 // Ranges for timeout generation
 const LEARN_TIMEOUT_SECS: RangeInclusive<u64> = 5..=10;
 const RACK_SECRET_TIMEOUT_SECS: RangeInclusive<u64> = 5..=20;
+#[allow(dead_code)]
 pub const TICKS_PER_ACTION: RangeInclusive<usize> = 1..=5;
+#[allow(dead_code)]
 pub const MAX_ACTIONS: usize = 1000;
+pub const MIN_INITIAL_MEMBERS: usize = 3;
+pub const MAX_INITIAL_MEMBERS: usize = 12;
+pub const TICK_TIMEOUT: Duration = Duration::from_millis(250);
 
 // Generate an individual Baseboard used as a peer id
 pub fn arb_baseboard() -> impl Strategy<Value = Baseboard> {
@@ -59,6 +64,7 @@ pub fn arb_config() -> impl Strategy<Value = Config> {
 }
 
 // Generate a `MsgError`
+#[allow(dead_code)]
 pub fn arb_msg_error() -> impl Strategy<Value = MsgError> {
     prop_oneof![
         Just(MsgError::AlreadyInitialized),

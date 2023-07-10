@@ -14,4 +14,4 @@ mod error;
 mod rack_secret;
 
 pub use error::TrustQuorumError;
-pub(crate) use rack_secret::RackSecret;
+pub use rack_secret::RackSecret;
