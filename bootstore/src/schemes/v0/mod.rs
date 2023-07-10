@@ -6,6 +6,7 @@
 
 mod fsm;
 mod messages;
+mod peer;
 mod request_manager;
 mod share_pkg;
 
