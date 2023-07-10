@@ -388,6 +388,117 @@ opt-level = 3
 [profile.release]
 panic = "abort"
 
+# proptest based test generation and shrinking is expensive. Let's optimize it.
+[profile.dev.package.proptest]
+opt-level = 3
+[profile.test.package.proptest]
+opt-level = 3
+
+[profile.dev.package.bootstore]
+opt-level = 3
+[profile.test.package.bootstore]
+opt-level = 3
+
+# Crypto stuff always needs optimizations
+[profile.test.package.sha3]
+opt-level = 3
+[profile.test.package.sha2]
+opt-level = 3
+[profile.test.package.hkdf]
+opt-level = 3
+[profile.test.package.chacha20poly1305]
+opt-level = 3
+[profile.test.package.chacha20]
+opt-level = 3
+[profile.test.package.vsss-rs]
+opt-level = 3
+[profile.test.package.curve25519-dalek]
+opt-level = 3
+[profile.test.package.aead]
+opt-level = 3
+[profile.test.package.aes]
+opt-level = 3
+[profile.test.package.aes-gcm]
+opt-level = 3
+[profile.test.package.bcrypt-pbkdf]
+opt-level = 3
+[profile.test.package.blake2]
+opt-level = 3
+[profile.test.package.blake2b_simd]
+opt-level = 3
+[profile.test.package.block-buffer]
+opt-level = 3
+[profile.test.package.block-padding]
+opt-level = 3
+[profile.test.package.blowfish]
+opt-level = 3
+[profile.test.package.constant_time_eq]
+opt-level = 3
+[profile.test.package.crypto-bigint]
+opt-level = 3
+[profile.test.package.crypto-common]
+opt-level = 3
+[profile.test.package.ctr]
+opt-level = 3
+[profile.test.package.cbc]
+opt-level = 3
+[profile.test.package.digest]
+opt-level = 3
+[profile.test.package.ed25519]
+opt-level = 3
+[profile.test.package.ed25519-dalek]
+opt-level = 3
+[profile.test.package.elliptic-curve]
+opt-level = 3
+[profile.test.package.generic-array]
+opt-level = 3
+[profile.test.package.getrandom]
+opt-level = 3
+[profile.test.package.hmac]
+opt-level = 3
+[profile.test.package.lpc55_sign]
+opt-level = 3
+[profile.test.package.md5]
+opt-level = 3
+[profile.test.package.md-5]
+opt-level = 3
+[profile.test.package.num-bigint]
+opt-level = 3
+[profile.test.package.num-bigint-dig]
+opt-level = 3
+[profile.test.package.rand]
+opt-level = 3
+[profile.test.package.rand_chacha]
+opt-level = 3
+[profile.test.package.rand_core]
+opt-level = 3
+[profile.test.package.rand_hc]
+opt-level = 3
+[profile.test.package.rand_xorshift]
+opt-level = 3
+[profile.test.package.rsa]
+opt-level = 3
+[profile.test.package.salty]
+opt-level = 3
+[profile.test.package.signature]
+opt-level = 3
+[profile.test.package.subtle]
+opt-level = 3
+[profile.test.package.tiny-keccak]
+opt-level = 3
+[profile.test.package.uuid]
+opt-level = 3
+[profile.test.package.cipher]
+opt-level = 3
+[profile.test.package.cpufeatures]
+opt-level = 3
+[profile.test.package.poly1305]
+opt-level = 3
+[profile.test.package.inout]
+opt-level = 3
+[profile.test.package.keccak]
+opt-level = 3
+
 #
 # It's common during development to use a local copy of dropshot, propolis,
 # crucible, or steno in the parent directory.  If you want to use those,
