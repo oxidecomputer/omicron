@@ -3428,6 +3428,42 @@
       }
     },
     "/v1/system/hardware/disks/{id}": {
+      "get": {
+        "tags": [
+          "system/hardware"
+        ],
+        "summary": "Get a physical disk",
+        "operationId": "physical_disk_view",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PhysicalDisk"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
       "put": {
         "tags": [
           "system/hardware"

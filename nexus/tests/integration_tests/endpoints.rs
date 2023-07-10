@@ -13,6 +13,7 @@ use chrono::Utc;
 use http::method::Method;
 use lazy_static::lazy_static;
 use nexus_test_utils::resource_helpers::DiskTest;
+use nexus_test_utils::PHYSICAL_DISK_UUID;
 use nexus_test_utils::RACK_UUID;
 use nexus_test_utils::SLED_AGENT_UUID;
 use nexus_test_utils::SWITCH_UUID;
@@ -46,8 +47,10 @@ lazy_static! {
         format!("/v1/system/hardware/sleds/{}", SLED_AGENT_UUID);
     pub static ref HARDWARE_SWITCH_URL: String =
         format!("/v1/system/hardware/switches/{}", SWITCH_UUID);
-    pub static ref HARDWARE_DISK_URL: String =
+    pub static ref HARDWARE_DISKS_URL: String =
         format!("/v1/system/hardware/disks");
+    pub static ref HARDWARE_DISK_URL: String =
+        format!("/v1/system/hardware/disks/{}", PHYSICAL_DISK_UUID);
     pub static ref HARDWARE_SLED_DISK_URL: String =
         format!("/v1/system/hardware/sleds/{}/disks", SLED_AGENT_UUID);
 
@@ -1562,10 +1565,24 @@ lazy_static! {
         },
 
         VerifyEndpoint {
-            url: &HARDWARE_DISK_URL,
+            url: &HARDWARE_DISKS_URL,
             visibility: Visibility::Public,
             unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![AllowedMethod::Get],
+        },
+
+        VerifyEndpoint {
+            url: &HARDWARE_DISK_URL,
+            visibility: Visibility::Public,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![
+                AllowedMethod::Get,
+                AllowedMethod::Put(
+                    serde_json::to_value(
+                        params::PhysicalDiskUpdate::Disable,
+                    ).unwrap()
+                )
+            ],
         },
 
         VerifyEndpoint {
