@@ -38,7 +38,7 @@ async fn test_cannot_read_others_ssh_keys(cptestctx: &ControlPlaneTestContext) {
         client,
         &silo,
         &"user1".parse().unwrap(),
-        params::UserPassword::InvalidPassword,
+        params::UserPassword::LoginDisallowed,
     )
     .await
     .id;
@@ -46,7 +46,7 @@ async fn test_cannot_read_others_ssh_keys(cptestctx: &ControlPlaneTestContext) {
         client,
         &silo,
         &"user2".parse().unwrap(),
-        params::UserPassword::InvalidPassword,
+        params::UserPassword::LoginDisallowed,
     )
     .await
     .id;
@@ -144,7 +144,7 @@ async fn test_list_silo_users_for_unpriv(cptestctx: &ControlPlaneTestContext) {
         client,
         &silo,
         &"unpriv".parse().unwrap(),
-        params::UserPassword::InvalidPassword,
+        params::UserPassword::LoginDisallowed,
     )
     .await
     .id;
@@ -162,7 +162,7 @@ async fn test_list_silo_users_for_unpriv(cptestctx: &ControlPlaneTestContext) {
         client,
         &silo,
         &"otheruser".parse().unwrap(),
-        params::UserPassword::InvalidPassword,
+        params::UserPassword::LoginDisallowed,
     )
     .await;
 
@@ -200,7 +200,7 @@ async fn test_list_silo_idps_for_unpriv(cptestctx: &ControlPlaneTestContext) {
         client,
         &silo,
         &"unpriv".parse().unwrap(),
-        params::UserPassword::InvalidPassword,
+        params::UserPassword::LoginDisallowed,
     )
     .await
     .id;
@@ -236,7 +236,7 @@ async fn test_session_me_for_unpriv(cptestctx: &ControlPlaneTestContext) {
         client,
         &silo,
         &"unpriv".parse().unwrap(),
-        params::UserPassword::InvalidPassword,
+        params::UserPassword::LoginDisallowed,
     )
     .await
     .id;
@@ -266,7 +266,7 @@ async fn test_silo_read_for_unpriv(cptestctx: &ControlPlaneTestContext) {
         client,
         &silo,
         &"unpriv".parse().unwrap(),
-        params::UserPassword::InvalidPassword,
+        params::UserPassword::LoginDisallowed,
     )
     .await
     .id;
