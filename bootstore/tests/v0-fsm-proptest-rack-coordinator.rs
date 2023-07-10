@@ -22,14 +22,13 @@ use bootstore::schemes::v0::{
 use proptest::prelude::*;
 use sled_hardware::Baseboard;
 use std::collections::{BTreeMap, BTreeSet};
-use std::time::Instant;
 use uuid::Uuid;
 
 use common::generators::{
-    arb_config, arb_initial_member_ids, arb_learner_id, arb_msg_error,
-    MAX_ACTIONS, MAX_INITIAL_MEMBERS, MIN_INITIAL_MEMBERS, TICKS_PER_ACTION,
-    TICK_TIMEOUT,
+    arb_action, arb_config, arb_initial_member_ids, Action, MAX_ACTIONS,
+    MAX_INITIAL_MEMBERS, MIN_INITIAL_MEMBERS,
 };
+use common::{CommonTestState, TestRequest};
 
 /// Actions run during the rack init phase of the test
 #[derive(Debug, Clone)]
@@ -41,21 +40,6 @@ pub enum RackInitAction {
     RackInit,
 }
 
-/// Actions run after rack init succeeds
-#[derive(Debug, Clone)]
-pub enum Action {
-    LoadRackSecret,
-    Connect(Baseboard),
-    Disconnect(Baseboard),
-    Ticks(usize),
-    GetShare(Baseboard),
-    // Trigger an error response by using an invalid rack_uuid in the request
-    GetShareFail(Baseboard),
-    Learn(Baseboard),
-    // Generate an error response from another peer
-    ErrorResponse(Baseboard, MsgError),
-}
-
 #[derive(Debug)]
 pub struct TestInput {
     pub initial_members: BTreeSet<Baseboard>,
@@ -63,27 +47,6 @@ pub struct TestInput {
     pub rack_uuid: RackUuid,
     pub rack_init_sequence: Vec<RackInitAction>,
     pub actions: Vec<Action>,
-}
-
-fn arb_action(
-    initial_members: BTreeSet<Baseboard>,
-) -> impl Strategy<Value = Action> {
-    // We skip the first peer, which is the SUT
-    let peers: Vec<_> = initial_members.iter().skip(1).cloned().collect();
-    let selected_peer = any::<prop::sample::Index>()
-        .prop_map(move |index| index.get(&peers).clone());
-    let err_response = (selected_peer.clone(), arb_msg_error())
-        .prop_map(|(from, err)| Action::ErrorResponse(from, err));
-    prop_oneof![
-        50 => (TICKS_PER_ACTION).prop_map(Action::Ticks),
-        10 => selected_peer.clone().prop_map(Action::Connect),
-        10 => selected_peer.clone().prop_map(Action::Disconnect),
-        5 => Just(Action::LoadRackSecret),
-        3 => selected_peer.clone().prop_map(Action::GetShare),
-        3 => selected_peer.prop_map(Action::GetShareFail),
-        5 => arb_learner_id().prop_map(Action::Learn),
-        3 => err_response
-    ]
 }
 
 /// A generated initialization sequence that runs before other actions This
@@ -115,6 +78,7 @@ fn arb_rack_init_sequence(
 fn arb_test_input() -> impl Strategy<Value = TestInput> {
     arb_initial_member_ids(MIN_INITIAL_MEMBERS, MAX_INITIAL_MEMBERS)
         .prop_flat_map(|initial_members| {
+            let is_learner = false;
             // An intermediate tuple strategy
             (
                 Just(initial_members.clone()),
@@ -122,7 +86,7 @@ fn arb_test_input() -> impl Strategy<Value = TestInput> {
                 Just(Uuid::new_v4().into()),
                 arb_rack_init_sequence(initial_members.clone()),
                 proptest::collection::vec(
-                    arb_action(initial_members),
+                    arb_action(initial_members, is_learner),
                     1..=MAX_ACTIONS,
                 ),
             )
@@ -146,36 +110,8 @@ fn arb_test_input() -> impl Strategy<Value = TestInput> {
         )
 }
 
-// A tracked request issued to the SUT
-pub struct TestRequest {
-    pub start: Instant,
-    pub acks: BTreeSet<Baseboard>,
-}
-
-impl TestRequest {
-    pub fn new(start: Instant) -> TestRequest {
-        TestRequest { start, acks: BTreeSet::new() }
-    }
-}
-
 pub struct TestState {
-    // The Fsm under test
-    sut: Fsm,
-
-    // The unique id of the initialized rack
-    rack_uuid: RackUuid,
-
-    // The generated configuration
-    config: Config,
-
-    // IDs of all initial members
-    initial_members: BTreeSet<Baseboard>,
-
-    // Any peers connected to the SUT Fsm
-    connected_peers: BTreeSet<Baseboard>,
-
-    // The current time at the SUT Fsm
-    now: Instant,
+    common: CommonTestState,
 
     // Has `Fsm::init_rack` been called yet?
     rack_init_started: bool,
@@ -183,17 +119,11 @@ pub struct TestState {
     // Shares distributed as part of rack_init
     shares: BTreeMap<Baseboard, Share>,
 
-    // `Fsm::load_rack_secret` requests triggered by an `Action::LoadRackSecret`
-    load_rack_secret_requests: BTreeMap<Uuid, TestRequest>,
-
     // Generated Learn requests triggered by `Action::Learn`
     learn_requests: BTreeMap<Uuid, TestRequest>,
 
     // Learners that have already learned their shares
     already_learned: BTreeSet<Baseboard>,
-
-    // Rack secret threshold
-    threshold: usize,
 
     // The number of "extra" shares per initial member sled
     encrypted_shares_per_sled: usize,
@@ -206,23 +136,18 @@ impl TestState {
         rack_uuid: RackUuid,
     ) -> TestState {
         let sut_id = initial_members.first().cloned().unwrap();
-        let threshold = initial_members.len() / 2 + 1;
         // 255 is the maximum number of shares that can be created.
         // This number matches the code in `share_pkg::create_pkgs`.
         let encrypted_shares_per_sled = (255 / initial_members.len()) - 1;
+        let sut = Fsm::new_uninitialized(sut_id, config);
+        let common =
+            CommonTestState::new(sut, initial_members, config, rack_uuid);
         TestState {
-            sut: Fsm::new_uninitialized(sut_id, config),
-            rack_uuid,
-            config,
-            initial_members,
-            connected_peers: BTreeSet::new(),
-            now: Instant::now(),
+            common,
             rack_init_started: false,
             shares: BTreeMap::new(),
-            load_rack_secret_requests: BTreeMap::new(),
             learn_requests: BTreeMap::new(),
             already_learned: BTreeSet::new(),
-            threshold,
             encrypted_shares_per_sled,
         }
     }
@@ -232,20 +157,21 @@ impl TestState {
         for action in actions {
             let envelopes = match action {
                 RackInitAction::Connect(peer_id) => {
-                    self.connected_peers.insert(peer_id.clone());
-                    let result = self.sut.on_connected(self.now, peer_id);
-                    let envelopes = self.sut.drain_envelopes().collect();
+                    self.common.connected_peers.insert(peer_id.clone());
+                    let result =
+                        self.common.sut.on_connected(self.common.now, peer_id);
+                    let envelopes = self.common.sut.drain_envelopes().collect();
                     self.check_init_connect_output(result, &envelopes);
                     envelopes
                 }
                 RackInitAction::RackInit => {
                     self.rack_init_started = true;
-                    let result = self.sut.init_rack(
-                        self.now,
-                        self.rack_uuid.into(),
-                        self.initial_members.clone(),
+                    let result = self.common.sut.init_rack(
+                        self.common.now,
+                        self.common.rack_uuid.into(),
+                        self.common.initial_members.clone(),
                     );
-                    let envelopes = self.sut.drain_envelopes().collect();
+                    let envelopes = self.common.sut.drain_envelopes().collect();
                     self.check_rack_init_output(result, &envelopes);
                     envelopes
                 }
@@ -260,9 +186,9 @@ impl TestState {
         envelopes: &Vec<Envelope>,
     ) {
         assert!(result.is_ok());
-        assert_eq!(self.connected_peers.len(), envelopes.len());
+        assert_eq!(self.common.connected_peers.len(), envelopes.len());
         for envelope in envelopes {
-            assert!(self.connected_peers.contains(&envelope.to));
+            assert!(self.common.connected_peers.contains(&envelope.to));
             assert_matches!(
                 &envelope.msg,
                 &Msg::Req(Request { type_: RequestType::Init(_), .. })
@@ -299,9 +225,10 @@ impl TestState {
             self.shares.insert(to.clone(), Share(pkg.common.share.clone()));
             let ack = Response { request_id: id, type_: ResponseType::InitAck }
                 .into();
-            let output = self.sut.handle_msg(self.now, to, ack);
+            let output = self.common.sut.handle_msg(self.common.now, to, ack);
             if i == total - 1
-                && self.connected_peers.len() == self.initial_members.len() - 1
+                && self.common.connected_peers.len()
+                    == self.common.initial_members.len() - 1
             {
                 assert_matches!(output, Ok(Some(ApiOutput::RackInitComplete)));
             } else {
@@ -312,36 +239,14 @@ impl TestState {
 
     pub fn learn(&mut self, peer_id: Baseboard) {
         let request_id = Uuid::new_v4();
-        self.learn_requests.insert(request_id, TestRequest::new(self.now));
+        self.learn_requests
+            .insert(request_id, TestRequest::new(self.common.now));
         let req = Request { id: request_id, type_: RequestType::Learn }.into();
-        let output = self.sut.handle_msg(self.now, peer_id, req);
+        let output = self.common.sut.handle_msg(self.common.now, peer_id, req);
         assert_eq!(output, Ok(None));
-        let envelopes = self.sut.drain_envelopes().collect();
-        self.expect_get_share_broadcast(&envelopes);
+        let envelopes = self.common.sut.drain_envelopes().collect();
+        self.common.expect_get_share_broadcast(&envelopes);
         self.deliver_share_responses(envelopes);
-    }
-
-    pub fn load_rack_secret(&mut self) {
-        let request_id = self.sut.load_rack_secret(self.now).unwrap();
-        self.load_rack_secret_requests
-            .insert(request_id, TestRequest::new(self.now));
-        let envelopes = self.sut.drain_envelopes().collect();
-        self.expect_get_share_broadcast(&envelopes);
-        self.deliver_share_responses(envelopes);
-    }
-
-    fn expect_get_share_broadcast(&self, envelopes: &Vec<Envelope>) {
-        assert_eq!(self.connected_peers.len(), envelopes.len());
-        for envelope in envelopes {
-            assert!(self.connected_peers.contains(&envelope.to));
-            assert_matches!(
-                &envelope.msg,
-                &Msg::Req(Request {
-                    type_: RequestType::GetShare { rack_uuid },
-                    ..
-                }) if rack_uuid == self.rack_uuid
-            );
-        }
     }
 
     fn deliver_share_responses(&mut self, envelopes: Vec<Envelope>) {
@@ -351,35 +256,38 @@ impl TestState {
             let rsp =
                 Response { request_id, type_: ResponseType::Share(share) }
                     .into();
-            let output =
-                self.sut.handle_msg(self.now, envelope.to.clone(), rsp);
+            let output = self.common.sut.handle_msg(
+                self.common.now,
+                envelope.to.clone(),
+                rsp,
+            );
 
             // Is this a `LoadRackSecret` request or a `Learn` request?
             if let Some(test_req) =
-                self.load_rack_secret_requests.get_mut(&request_id)
+                self.common.load_rack_secret_requests.get_mut(&request_id)
             {
                 test_req.acks.insert(envelope.to);
                 // We don't count the SUT, which has its own share
-                if test_req.acks.len() == self.threshold - 1 {
+                if test_req.acks.len() == self.common.threshold - 1 {
                     assert_matches!(
                         output,
                         Ok(Some(ApiOutput::RackSecret { .. }))
                     );
-                    self.load_rack_secret_requests.remove(&request_id);
+                    self.common.load_rack_secret_requests.remove(&request_id);
                 } else {
                     assert_matches!(output, Ok(None));
-                    assert!(self.sut.drain_envelopes().next().is_none());
+                    assert!(self.common.sut.drain_envelopes().next().is_none());
                 }
             } else if let Some(test_req) =
                 self.learn_requests.get_mut(&request_id)
             {
                 test_req.acks.insert(envelope.to);
                 // We don't count the SUT, which has its own share
-                if test_req.acks.len() == self.threshold - 1 {
+                if test_req.acks.len() == self.common.threshold - 1 {
                     self.learn_requests.remove(&request_id);
                     // There should be a `LearnedSharePkg` delivered to the
                     // learner
-                    let mut iter = self.sut.drain_envelopes();
+                    let mut iter = self.common.sut.drain_envelopes();
                     let rsp = iter.next().unwrap();
                     let expected_id = request_id;
 
@@ -420,22 +328,14 @@ impl TestState {
                 } else {
                     // We don't have a threshold yet
                     assert_matches!(output, Ok(None));
-                    assert!(self.sut.drain_envelopes().next().is_none());
+                    assert!(self.common.sut.drain_envelopes().next().is_none());
                 }
             } else {
                 // These are extra shares (after the threshold is reached)
                 assert_matches!(output, Ok(None));
-                assert!(self.sut.drain_envelopes().next().is_none());
+                assert!(self.common.sut.drain_envelopes().next().is_none());
             }
         }
-    }
-
-    pub fn connect(&mut self, peer_id: Baseboard) {
-        let result = self.sut.on_connected(self.now, peer_id.clone());
-        let envelopes = self.sut.drain_envelopes().collect();
-        self.check_connect_output(&peer_id, result, &envelopes);
-        self.connected_peers.insert(peer_id);
-        self.deliver_share_responses(envelopes);
     }
 
     fn check_connect_output(
@@ -455,7 +355,7 @@ impl TestState {
             // An outstanding request must exist and the peer must
             // not have acked for an envelope to be sent.
             if let Some(test_req) =
-                self.load_rack_secret_requests.get(&request_id)
+                self.common.load_rack_secret_requests.get(&request_id)
             {
                 assert!(!test_req.acks.contains(&envelope.to));
             } else {
@@ -464,94 +364,6 @@ impl TestState {
                     .contains(&envelope.to));
             }
         }
-    }
-
-    pub fn disconnect(&mut self, peer_id: Baseboard) {
-        self.sut.on_disconnected(&peer_id);
-        self.connected_peers.remove(&peer_id);
-
-        // There should be no envelopes sent on a disconnect
-        assert_eq!(None, self.sut.drain_envelopes().next());
-    }
-
-    pub fn tick(&mut self, ticks: usize) {
-        for _ in 0..ticks {
-            self.now += TICK_TIMEOUT;
-            if let Err(errors) = self.sut.tick(self.now) {
-                // The only possible error is a timeout
-                // Ensure the request exists and it should have timed out
-                for (request_id, error) in errors {
-                    assert_eq!(error, ApiError::RackSecretLoadTimeout);
-                    let test_req = &self.load_rack_secret_requests[&request_id];
-                    let expiry = test_req.start
-                        + self.config.rack_secret_request_timeout;
-                    assert!(expiry < self.now);
-                    // Remove the tracking req from test state
-                    self.load_rack_secret_requests.remove(&request_id);
-                }
-            }
-        }
-    }
-
-    pub fn get_share(&mut self, peer_id: Baseboard) {
-        let id = Uuid::new_v4();
-        let req = Request {
-            id,
-            type_: RequestType::GetShare { rack_uuid: self.rack_uuid },
-        }
-        .into();
-        let res = self.sut.handle_msg(self.now, peer_id.clone(), req);
-        assert_eq!(res, Ok(None));
-        let mut iter = self.sut.drain_envelopes();
-        let envelope = iter.next().unwrap();
-        assert_matches!(envelope, Envelope {
-            to,
-            msg: Msg::Rsp(Response {
-                request_id,
-                type_: ResponseType::Share(_)
-            })
-        } if to == peer_id && id == request_id);
-
-        // There's only one envelope
-        assert!(iter.next().is_none());
-    }
-
-    pub fn get_share_fail(&mut self, peer_id: Baseboard) {
-        let id = Uuid::new_v4();
-        let bad_rack_uuid = Uuid::new_v4().into();
-        let req = Request {
-            id,
-            type_: RequestType::GetShare { rack_uuid: bad_rack_uuid },
-        }
-        .into();
-        let res = self.sut.handle_msg(self.now, peer_id.clone(), req);
-        assert_eq!(res, Ok(None));
-        let mut iter = self.sut.drain_envelopes();
-        let envelope = iter.next().unwrap();
-        assert_matches!(envelope, Envelope {
-            to,
-            msg: Msg::Rsp(Response {
-                request_id,
-                type_: ResponseType::Error(
-                    MsgError::RackUuidMismatch { expected , got  }
-                )
-            })
-        } if to == peer_id &&
-             id == request_id &&
-             expected == self.rack_uuid &&
-             got == bad_rack_uuid
-        );
-
-        // There's only one envelope
-        assert!(iter.next().is_none());
-    }
-
-    pub fn handle_error_response(&mut self, peer_id: Baseboard, err: MsgError) {
-        let rsp =
-            Response { request_id: Uuid::new_v4(), type_: err.into() }.into();
-        let output = self.sut.handle_msg(self.now, peer_id, rsp);
-        assert_matches!(output, Err(ApiError::ErrorResponseReceived { .. }));
-        assert!(self.sut.drain_envelopes().next().is_none());
     }
 }
 
@@ -572,15 +384,22 @@ proptest! {
         for action in input.actions {
             //println!("{:?}", action);
             match action {
-                Action::LoadRackSecret => state.load_rack_secret(),
-                Action::Connect(peer_id) => state.connect(peer_id),
-                Action::Disconnect(peer_id) => state.disconnect(peer_id),
-                Action::Ticks(ticks) => state.tick(ticks),
-                Action::GetShare(peer_id) => state.get_share(peer_id),
-                Action::GetShareFail(peer_id) => state.get_share_fail(peer_id),
+                Action::LoadRackSecret => {
+                    let envelopes = state.common.load_rack_secret();
+                    state.deliver_share_responses(envelopes);
+                }
+                Action::Connect(peer_id) => {
+                    let (result, envelopes) = state.common.connect(peer_id.clone());
+                    state.check_connect_output(&peer_id, result, &envelopes);
+                    state.deliver_share_responses(envelopes);
+                }
+                Action::Disconnect(peer_id) => state.common.disconnect(peer_id),
+                Action::Ticks(ticks) => state.common.tick(ticks),
+                Action::GetShare(peer_id) => state.common.get_share(peer_id),
+                Action::GetShareFail(peer_id) => state.common.get_share_fail(peer_id),
                 Action::Learn(peer_id) => state.learn(peer_id),
                 Action::ErrorResponse(peer_id, err) => {
-                    state.handle_error_response(peer_id, err)
+                    state.common.handle_error_response(peer_id, err)
                 }
             }
         }

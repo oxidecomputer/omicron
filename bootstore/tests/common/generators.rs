@@ -16,12 +16,52 @@ use uuid::Uuid;
 const LEARN_TIMEOUT_SECS: RangeInclusive<u64> = 5..=10;
 const RACK_SECRET_TIMEOUT_SECS: RangeInclusive<u64> = 5..=20;
 #[allow(dead_code)]
-pub const TICKS_PER_ACTION: RangeInclusive<usize> = 1..=5;
-#[allow(dead_code)]
+const TICKS_PER_ACTION: RangeInclusive<usize> = 1..=5;
 pub const MAX_ACTIONS: usize = 1000;
 pub const MIN_INITIAL_MEMBERS: usize = 3;
 pub const MAX_INITIAL_MEMBERS: usize = 12;
 pub const TICK_TIMEOUT: Duration = Duration::from_millis(250);
+
+/// Actions run after rack init succeeds
+#[derive(Debug, Clone)]
+pub enum Action {
+    LoadRackSecret,
+    Connect(Baseboard),
+    Disconnect(Baseboard),
+    Ticks(usize),
+    GetShare(Baseboard),
+    // Trigger an error response by using an invalid rack_uuid in the request
+    GetShareFail(Baseboard),
+    Learn(Baseboard),
+    // Generate an error response from another peer
+    ErrorResponse(Baseboard, MsgError),
+}
+
+pub fn arb_action(
+    initial_members: BTreeSet<Baseboard>,
+    is_learner: bool,
+) -> impl Strategy<Value = Action> {
+    // We skip the first peer, which is the SUT if we aren't testing a learner
+    let peers: Vec<_> = if is_learner {
+        initial_members.iter().cloned().collect()
+    } else {
+        initial_members.iter().skip(1).cloned().collect()
+    };
+    let selected_peer = any::<prop::sample::Index>()
+        .prop_map(move |index| index.get(&peers).clone());
+    let err_response = (selected_peer.clone(), arb_msg_error())
+        .prop_map(|(from, err)| Action::ErrorResponse(from, err));
+    prop_oneof![
+        50 => (TICKS_PER_ACTION).prop_map(Action::Ticks),
+        10 => selected_peer.clone().prop_map(Action::Connect),
+        10 => selected_peer.clone().prop_map(Action::Disconnect),
+        5 => Just(Action::LoadRackSecret),
+        3 => selected_peer.clone().prop_map(Action::GetShare),
+        3 => selected_peer.prop_map(Action::GetShareFail),
+        5 => arb_learner_id().prop_map(Action::Learn),
+        3 => err_response
+    ]
+}
 
 // Generate an individual Baseboard used as a peer id
 pub fn arb_baseboard() -> impl Strategy<Value = Baseboard> {
