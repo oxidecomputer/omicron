@@ -107,17 +107,13 @@ CREATE TABLE omicron.public.sled (
 );
 
 /* Add an index which lets us look up sleds on a rack */
-CREATE INDEX ON omicron.public.sled (
-    rack_id
+CREATE UNIQUE INDEX ON omicron.public.sled (
+    rack_id,
+    id
 ) WHERE time_deleted IS NULL;
 
-CREATE INDEX ON omicron.public.sled (
-    id
-) WHERE
-    time_deleted IS NULL;
-
 CREATE TYPE omicron.public.sled_resource_kind AS ENUM (
-    -- omicron.public.Dataset
+    -- omicron.public.dataset
     'dataset',
     -- omicron.public.service
     'service',
@@ -152,8 +148,9 @@ CREATE TABLE omicron.public.sled_resource (
 );
 
 -- Allow looking up all resources which reside on a sled
-CREATE INDEX ON omicron.public.sled_resource (
-    sled_id
+CREATE UNIQUE INDEX ON omicron.public.sled_resource (
+    sled_id,
+    id
 );
 
 /*
@@ -178,14 +175,10 @@ CREATE TABLE omicron.public.switch (
 );
 
 /* Add an index which lets us look up switches on a rack */
-CREATE INDEX ON omicron.public.switch (
-    rack_id
-) WHERE time_deleted IS NULL;
-
-CREATE INDEX ON omicron.public.switch (
+CREATE UNIQUE INDEX ON omicron.public.switch (
+    rack_id,
     id
-) WHERE
-    time_deleted IS NULL;
+) WHERE time_deleted IS NULL;
 
 /*
  * Services
@@ -224,12 +217,13 @@ CREATE TABLE omicron.public.service (
 );
 
 /* Add an index which lets us look up the services on a sled */
-CREATE INDEX ON omicron.public.service (
+CREATE UNIQUE INDEX ON omicron.public.service (
     sled_id,
     id
 );
 
-CREATE INDEX ON omicron.public.service (
+/* Look up (and paginate) services of a given kind. */
+CREATE UNIQUE INDEX ON omicron.public.service (
     kind,
     id
 );
@@ -263,13 +257,13 @@ CREATE TABLE omicron.public.physical_disk (
     )
 );
 
-CREATE INDEX ON omicron.public.physical_disk (
+CREATE UNIQUE INDEX ON omicron.public.physical_disk (
     variant,
     id
 ) WHERE time_deleted IS NULL;
 
 -- Make it efficient to look up physical disks by Sled.
-CREATE INDEX ON omicron.public.physical_disk (
+CREATE UNIQUE INDEX ON omicron.public.physical_disk (
     sled_id,
     id
 ) WHERE time_deleted IS NULL;
@@ -299,7 +293,7 @@ CREATE TABLE omicron.public.certificate (
 
 -- Add an index which lets us look up certificates for a particular service
 -- class.
-CREATE INDEX ON omicron.public.certificate (
+CREATE UNIQUE INDEX ON omicron.public.certificate (
     service,
     id
 ) WHERE
@@ -374,7 +368,7 @@ CREATE TABLE omicron.public.virtual_provisioning_resource (
  * ZPools of Storage, attached to Sleds.
  * These are backed by a single physical disk.
  */
-CREATE TABLE omicron.public.Zpool (
+CREATE TABLE omicron.public.zpool (
     /* Identity metadata (asset) */
     id UUID PRIMARY KEY,
     time_created TIMESTAMPTZ NOT NULL,
@@ -402,7 +396,7 @@ CREATE TYPE omicron.public.dataset_kind AS ENUM (
 /*
  * A dataset of allocated space within a zpool.
  */
-CREATE TABLE omicron.public.Dataset (
+CREATE TABLE omicron.public.dataset (
     /* Identity metadata (asset) */
     id UUID PRIMARY KEY,
     time_created TIMESTAMPTZ NOT NULL,
@@ -430,25 +424,25 @@ CREATE TABLE omicron.public.Dataset (
 );
 
 /* Create an index on the size usage for Crucible's allocation */
-CREATE INDEX on omicron.public.Dataset (
+CREATE INDEX on omicron.public.dataset (
     size_used
 ) WHERE size_used IS NOT NULL AND time_deleted IS NULL AND kind = 'crucible';
 
 /* Create an index on the size usage for any dataset */
-CREATE INDEX on omicron.public.Dataset (
+CREATE INDEX on omicron.public.dataset (
     size_used
 ) WHERE size_used IS NOT NULL AND time_deleted IS NULL;
 
 /*
  * A region of space allocated to Crucible Downstairs, within a dataset.
  */
-CREATE TABLE omicron.public.Region (
+CREATE TABLE omicron.public.region (
     /* Identity metadata (asset) */
     id UUID PRIMARY KEY,
     time_created TIMESTAMPTZ NOT NULL,
     time_modified TIMESTAMPTZ NOT NULL,
 
-    /* FK into the Dataset table */
+    /* FK into the dataset table */
     dataset_id UUID NOT NULL,
 
     /* FK into the volume table */
@@ -463,15 +457,17 @@ CREATE TABLE omicron.public.Region (
 /*
  * Allow all regions belonging to a disk to be accessed quickly.
  */
-CREATE INDEX on omicron.public.Region (
-    volume_id
+CREATE UNIQUE INDEX on omicron.public.region (
+    volume_id,
+    id
 );
 
 /*
  * Allow all regions belonging to a dataset to be accessed quickly.
  */
-CREATE INDEX on omicron.public.Region (
-    dataset_id
+CREATE UNIQUE INDEX on omicron.public.region (
+    dataset_id,
+    id
 );
 
 /*
@@ -643,6 +639,11 @@ CREATE TABLE omicron.public.silo_group_membership (
     PRIMARY KEY (silo_group_id, silo_user_id)
 );
 
+/*
+ * The primary key lets us paginate through the users in a group.  We need to
+ * index the same fields in the reverse order to be able to paginate through the
+ * groups that a user is in.
+ */
 CREATE INDEX ON omicron.public.silo_group_membership (
     silo_user_id,
     silo_group_id
@@ -669,15 +670,15 @@ CREATE TABLE omicron.public.identity_provider (
     provider_type omicron.public.provider_type NOT NULL
 );
 
-CREATE INDEX ON omicron.public.identity_provider (
-    id,
-    silo_id
+CREATE UNIQUE INDEX ON omicron.public.identity_provider (
+    silo_id,
+    id
 ) WHERE
     time_deleted IS NULL;
 
-CREATE INDEX ON omicron.public.identity_provider (
-    name,
-    silo_id
+CREATE UNIQUE INDEX ON omicron.public.identity_provider (
+    silo_id,
+    name
 ) WHERE
     time_deleted IS NULL;
 
@@ -709,9 +710,15 @@ CREATE TABLE omicron.public.saml_identity_provider (
     group_attribute_name TEXT
 );
 
-CREATE INDEX ON omicron.public.saml_identity_provider (
-    id,
-    silo_id
+CREATE UNIQUE INDEX ON omicron.public.saml_identity_provider (
+    silo_id,
+    id
+) WHERE
+    time_deleted IS NULL;
+
+CREATE UNIQUE INDEX ON omicron.public.saml_identity_provider (
+    silo_id,
+    name
 ) WHERE
     time_deleted IS NULL;
 
@@ -861,8 +868,9 @@ CREATE UNIQUE INDEX ON omicron.public.instance (
 
 -- Allow looking up instances by server. This is particularly
 -- useful for resource accounting within a sled.
-CREATE INDEX ON omicron.public.instance (
-    active_sled_id
+CREATE UNIQUE INDEX ON omicron.public.instance (
+    active_sled_id,
+    id
 ) WHERE
     time_deleted IS NULL;
 
@@ -976,8 +984,9 @@ CREATE UNIQUE INDEX ON omicron.public.disk (
 ) WHERE
     time_deleted IS NULL;
 
-CREATE INDEX ON omicron.public.disk (
-    attach_instance_id
+CREATE UNIQUE INDEX ON omicron.public.disk (
+    attach_instance_id,
+    id
 ) WHERE
     time_deleted IS NULL AND attach_instance_id IS NOT NULL;
 
@@ -1736,6 +1745,8 @@ CREATE TABLE omicron.public.console_session (
 );
 
 -- to be used for cleaning up old tokens
+-- It's okay that this index is non-unique because we don't need to page through
+-- this list.  We'll just grab the next N, delete them, then repeat.
 CREATE INDEX ON omicron.public.console_session (
     time_created
 );
