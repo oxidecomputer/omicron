@@ -54,9 +54,10 @@ const CRDB_COUNT: usize = 5;
 const OXIMETER_COUNT: usize = 1;
 // TODO(https://github.com/oxidecomputer/omicron/issues/732): Remove
 // when Nexus provisions Clickhouse.
-// TODO: For now servers and keepers are both being deployed as a clickhouse
-// service. Eventually the keeper coordinator nodes should be their own service.
-const CLICKHOUSE_COUNT: usize = 5;
+const CLICKHOUSE_COUNT: usize = 2;
+// TODO(https://github.com/oxidecomputer/omicron/issues/732): Remove
+// when Nexus provisions Clickhouse keeper.
+const CLICKHOUSE_KEEPER_COUNT: usize = 3;
 // TODO(https://github.com/oxidecomputer/omicron/issues/732): Remove.
 // when Nexus provisions Crucible.
 const MINIMUM_U2_ZPOOL_COUNT: usize = 3;
@@ -518,6 +519,37 @@ impl Plan {
                     details: ServiceType::Clickhouse,
                 }],
             });
+        }
+
+        // Provision Clickhouse Keeper zones, continuing to stripe across sleds.
+        // TODO(https://github.com/oxidecomputer/omicron/issues/732): Remove
+        for _ in 0..CLICKHOUSE_KEEPER_COUNT {
+            let sled = {
+                let which_sled =
+                    sled_allocator.next().ok_or(PlanError::NotEnoughSleds)?;
+                &mut sled_info[which_sled]
+            };
+            let id = Uuid::new_v4();
+            let address = sled.addr_alloc.next().expect("Not enough addrs");
+            let zone = dns_builder.host_zone(id, address).unwrap();
+            dns_builder
+                .service_backend_zone(
+                    ServiceName::ClickhouseKeeper,
+                    &zone,
+                    omicron_common::address::CLICKHOUSE_KEEPER_PORT,
+                )
+                .unwrap();
+            sled.request.services.push(ServiceZoneRequest {
+                id,
+                zone_type: ZoneType::ClickhouseKeeper,
+                addresses: vec![address],
+                dataset: None,
+                gz_addresses: vec![],
+                services: vec![ServiceZoneService {
+                    id,
+                    details: ServiceType::ClickhouseKeeper,
+                }],
+            })
         }
 
         // Provision Crucible Pantry zones, continuing to stripe across sleds.

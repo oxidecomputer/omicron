@@ -9,7 +9,7 @@
     </logger>
 
     <keeper_server>
-        <tcp_port>9181</tcp_port>
+        <tcp_port>LISTEN_PORT</tcp_port>
         <!-- This was previously set to 1, 2 or 3 -->
         <server_id>KEEPER_ID_CURRENT</server_id>
         <log_storage_path>/var/lib/clickhouse/coordination/log</log_storage_path>

@@ -86,7 +86,7 @@ use nexus_client::{
 };
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::{
-    get_sled_address, CLICKHOUSE_PORT, COCKROACH_PORT, CRUCIBLE_PANTRY_PORT,
+    get_sled_address, CLICKHOUSE_PORT, CLICKHOUSE_KEEPER_PORT, COCKROACH_PORT, CRUCIBLE_PANTRY_PORT,
     CRUCIBLE_PORT, DENDRITE_PORT, DNS_HTTP_PORT, NEXUS_INTERNAL_PORT, NTP_PORT,
     OXIMETER_PORT,
 };
@@ -747,6 +747,21 @@ impl ServiceInner {
                                 )
                                 .to_string(),
                                 kind: NexusTypes::ServiceKind::Clickhouse,
+                            });
+                        }
+                        ServiceType::ClickhouseKeeper => {
+                            services.push(NexusTypes::ServicePutRequest {
+                                service_id,
+                                zone_id,
+                                sled_id,
+                                address: SocketAddrV6::new(
+                                    zone.addresses[0],
+                                    CLICKHOUSE_KEEPER_PORT,
+                                    0,
+                                    0,
+                                )
+                                .to_string(),
+                                kind: NexusTypes::ServiceKind::ClickhouseKeeper,
                             });
                         }
                         ServiceType::Crucible => {

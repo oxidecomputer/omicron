@@ -58,6 +58,7 @@ use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::AZ_PREFIX;
 use omicron_common::address::BOOTSTRAP_ARTIFACT_PORT;
 use omicron_common::address::CLICKHOUSE_PORT;
+use omicron_common::address::CLICKHOUSE_KEEPER_PORT;
 use omicron_common::address::COCKROACH_PORT;
 use omicron_common::address::CRUCIBLE_PANTRY_PORT;
 use omicron_common::address::CRUCIBLE_PORT;
@@ -1053,6 +1054,38 @@ impl ServiceManager {
                     })?;
                 return Ok(RunningZone::boot(installed_zone).await?);
             }
+            ZoneType::ClickhouseKeeper => {
+                let Some(info) = self.inner.sled_info.get() else {
+                    return Err(Error::SledAgentNotReady);
+                };
+                let datalink = installed_zone.get_control_vnic_name();
+                let gateway = &info.underlay_address.to_string();
+                assert_eq!(request.zone.addresses.len(), 1);
+                let listen_addr = &request.zone.addresses[0].to_string();
+                let listen_port = &CLICKHOUSE_KEEPER_PORT.to_string();
+
+                let config = PropertyGroupBuilder::new("config")
+                    .add_property("datalink", "astring", datalink)
+                    .add_property("gateway", "astring", gateway)
+                    .add_property("listen_addr", "astring", listen_addr)
+                    .add_property("listen_port", "astring", listen_port);
+                   // TODO: This is probably not necessary
+                   // .add_property("store", "astring", "/data");
+
+                let profile = ProfileBuilder::new("omicron").add_service(
+                    ServiceBuilder::new("oxide/clickhouse-keeper").add_instance(
+                        ServiceInstanceBuilder::new("default")
+                            .add_property_group(config),
+                    ),
+                );
+                profile
+                    .add_to_zone(&self.inner.log, &installed_zone)
+                    .await
+                    .map_err(|err| {
+                        Error::io("Failed to setup clickhouse profile", err)
+                    })?;
+                return Ok(RunningZone::boot(installed_zone).await?);
+            }
             ZoneType::CockroachDb => {
                 let Some(info) = self.inner.sled_info.get() else {
                     return Err(Error::SledAgentNotReady);
@@ -1863,6 +1896,12 @@ impl ServiceManager {
                 | ServiceType::CruciblePantry
                 | ServiceType::CockroachDb
                 | ServiceType::Clickhouse => {
+                    panic!(
+                        "{} is a service which exists as part of a self-assembling zone",
+                        service.details,
+                    )
+                }
+                | ServiceType::ClickhouseKeeper => {
                     panic!(
                         "{} is a service which exists as part of a self-assembling zone",
                         service.details,

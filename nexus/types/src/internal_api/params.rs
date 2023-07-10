@@ -176,6 +176,7 @@ pub struct ServiceNic {
 #[serde(rename_all = "snake_case", tag = "type", content = "content")]
 pub enum ServiceKind {
     Clickhouse,
+    ClickhouseKeeper,
     Cockroach,
     Crucible,
     CruciblePantry,
@@ -194,6 +195,7 @@ impl fmt::Display for ServiceKind {
         use ServiceKind::*;
         let s = match self {
             Clickhouse => "clickhouse",
+            ClickhouseKeeper => "clickhouse_keeper",
             Cockroach => "cockroach",
             Crucible => "crucible",
             ExternalDns { .. } => "external_dns",

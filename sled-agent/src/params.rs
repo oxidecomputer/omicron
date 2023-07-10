@@ -331,6 +331,7 @@ pub enum ServiceType {
         domain: Option<String>,
     },
     Clickhouse,
+    ClickhouseKeeper,
     CockroachDb,
     Crucible,
 }
@@ -351,6 +352,7 @@ impl std::fmt::Display for ServiceType {
             | ServiceType::InternalNtp { .. } => write!(f, "ntp"),
             ServiceType::Maghemite { .. } => write!(f, "mg-ddm"),
             ServiceType::Clickhouse => write!(f, "clickhouse"),
+            ServiceType::ClickhouseKeeper => write!(f, "clickhouse_keeper"),
             ServiceType::CockroachDb => write!(f, "cockroachdb"),
             ServiceType::Crucible => write!(f, "crucible"),
         }
@@ -432,6 +434,7 @@ impl TryFrom<ServiceType> for sled_agent_client::types::ServiceType {
                 Ok(AutoSt::InternalNtp { ntp_servers, dns_servers, domain })
             }
             St::Clickhouse => Ok(AutoSt::Clickhouse),
+            St::ClickhouseKeeper => Ok(AutoSt::ClickhouseKeeper),
             St::CockroachDb => Ok(AutoSt::CockroachDb),
             St::Crucible => Ok(AutoSt::Crucible),
             St::ManagementGatewayService
@@ -450,6 +453,7 @@ impl TryFrom<ServiceType> for sled_agent_client::types::ServiceType {
 #[serde(rename_all = "snake_case")]
 pub enum ZoneType {
     Clickhouse,
+    ClickhouseKeeper,
     CockroachDb,
     CruciblePantry,
     Crucible,
@@ -465,6 +469,7 @@ impl From<ZoneType> for sled_agent_client::types::ZoneType {
     fn from(zt: ZoneType) -> Self {
         match zt {
             ZoneType::Clickhouse => Self::Clickhouse,
+            ZoneType::ClickhouseKeeper => Self::ClickhouseKeeper,
             ZoneType::CockroachDb => Self::CockroachDb,
             ZoneType::Crucible => Self::Crucible,
             ZoneType::CruciblePantry => Self::CruciblePantry,
@@ -483,6 +488,7 @@ impl std::fmt::Display for ZoneType {
         use ZoneType::*;
         let name = match self {
             Clickhouse => "clickhouse",
+            ClickhouseKeeper => "clickhouse_keeper",
             CockroachDb => "cockroachdb",
             Crucible => "crucible",
             CruciblePantry => "crucible_pantry",
