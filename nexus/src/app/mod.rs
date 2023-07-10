@@ -168,7 +168,7 @@ impl Nexus {
                     warn!(log, "Cannot read database schema version: {e}");
                 }
             }
-            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
         }
 
         let my_sec_id = db::SecId::from(config.deployment.id);

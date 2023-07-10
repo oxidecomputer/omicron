@@ -4746,6 +4746,7 @@ dependencies = [
  "rustls",
  "samael",
  "schemars",
+ "semver 1.0.17",
  "serde",
  "serde_json",
  "serde_urlencoded",
