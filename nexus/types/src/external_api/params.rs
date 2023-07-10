@@ -276,7 +276,7 @@ pub struct SiloCreate {
 pub struct UserCreate {
     /// username used to log in
     pub external_id: UserId,
-    /// password used to log in
+    /// how to set the user's login password
     pub password: UserPassword,
 }
 
@@ -406,12 +406,12 @@ impl AsRef<omicron_passwords::Password> for Password {
 /// Parameters for setting a user's password
 #[derive(Clone, Deserialize, JsonSchema, Serialize)]
 #[serde(rename_all = "snake_case")]
-#[serde(tag = "user_password_value", content = "details")]
+#[serde(tag = "mode", content = "value")]
 pub enum UserPassword {
     /// Sets the user's password to the provided value
     Password(Password),
     /// Invalidates any current password (disabling password authentication)
-    InvalidPassword,
+    LoginDisallowed,
 }
 
 /// Credentials for local user login
