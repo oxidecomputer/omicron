@@ -5,9 +5,8 @@
 = Bootstore
 
 The bootstore is the crate that implements the Oxide trust quorum protocol. The
-bootstore is named the bootstore because it provides the necessary key share
-storage required to unlock the rack secret via the trust quorum protocol and
-boot the rack.
+bootstore provides the necessary key share storage required to unlock the rack
+secret via the trust quorum protocol and boot the rack.
 
 We plan to incrementally improve the bootstore to be more full featured and
 secure over time. Each implementation is referred to as a `Scheme`. Schemes are
@@ -168,9 +167,10 @@ callback on every timer tick.
 established on the bootstrap network
 . Bootstrap agent informs the higher level bootstore API on the same sled as RSS
 to initialize the rack with initial membership chosen by the wicket user.
-. The bootstore calls `Fsm::init_rack` and gets back an `Output`
+. The bootstore calls `Fsm::init_rack` and gets back a `Result<Option<ApiOutput>, ApiError>`
 . The output informs the bootstore to persist the local state to the M.2s and send the
-messages to peers addressed by their `Baseboard` in `Envelopes`.
+messages to peers addressed by their `Baseboard` in `Envelopes`. These envelopes are 
+are retrieved from the Fsm via a call to `Fsm::drain_envelopes`.
 . Peers receive messages over TCP channels and respond according to the protocol
 . The rack is initialized
 . The bootstrap agent storage manager on each peer asks the `KeyManager` to unlock its
@@ -178,19 +178,19 @@ disks, which results in a call to the `RackSecretKeyRetriever` which eventually
 triggers a call to `Fsm::load_rack_secret`, which returns another `Output`
 containing messages since the shares need to be retrieved from peers.
 . Messages make their way back to the bootstore and it handles them with `Fsm::handle`, and this again
-returns an `Output`.
-. Eventually, the `Output` contains an `ApiOutput::RackSecret` which contains
+returns a `Result`, and the ability to call `Fsm::drain_envelopes`.
+. Eventually, the `Result` returns an `ApiOutput::RackSecret` which contains
 the rack secret and the higher level request from the KeyManager can be
 satisifed.
 
 The above is a relatively happy path, and in some cases peers can get
-disconnected and connected, timeouts can occur, and messages can be
-retransmitted as needed on reconnection. In worse cases, rack initialization may
-timeout. In this case RSS reset must be used to clear all the M.2 drives and try
-again. To prevent problems with a lingering sled that does not come back online
-to be cleared, that sled should be pulled. However, if it remains in the rack it
-will have a different `rack_uuid` and so errors will be triggered when it tries
-to talk to other sleds in the new, successfully initialized trust quorum.
+disconnected, timeouts can occur, and messages can be retransmitted as needed
+on reconnection. In worse cases, rack initialization may timeout. In this case
+RSS reset must be used to clear all the M.2 drives and try again. To prevent
+problems with a lingering sled that does not come back online to be cleared,
+that sled should be pulled. However, if it remains in the rack it will have a
+different `rack_uuid` and so errors will be triggered when it tries to talk to
+other sleds in the new, successfully initialized trust quorum.
 
 Later on, we may wish to add a sled to a rack, most likely to replace a failed
 one. In order to do this the bootstrap agent will have to be instructed to
@@ -220,64 +220,24 @@ Learners will rotate through known peers until they find one that has a share.
 
 === Testing strategy
 
-The primary method of testing is generative testing via 
-https://proptest-rs.github.io/proptest/intro.html[proptest]. While this is
-tradionally called "property based testing", this code doesn't particularly
-have a set of nameable properties it is validating. Since the code is stateful,
-we instead create a simplified `Model` of an entire rack in 
-link:./tests/common/model.rs[] that behaves  in similar, testable ways to the
-real FSMs interacting with each other. We then generate a set of `Actions` by
-implementing a `Strategy` for proptest to use that allows it to generate input
-to our system, and "shrink" the input to a minimum, debuggable test case when
-there is an error. The generators for these strategies and the generated types
-such as `Action` can be found in link:./tests/common/generators.rs[].
+The primary method of testing is generative testing via  https://proptest-
+rs.github.io/proptest/intro.html[proptest]. There are two property based tests:
+one for running as the `rack_coordinator` and one for running as a `learner`.
+Once the initial setup is performed to either initialize the rack, or learn
+a `LearnedSharePkg`, the tests largely share the same behavior in terms of
+processing generated `Action`s.
 
-Inside link:./tests/v0-fsm-proptest.rs[] there is a `TestState::on_action`
-callback that gets called with each generated action to drive the test forward.
-We match on and interpret these actions. For each discrete step we call the
-appropriate model method, which returns the expected output of the actual FSM
-method. We then call the FSM method and compare the outputs. After these step
-specific checks we call `TestState::check_invariants()` which contains checks
-that must hold after every step through the protocol in the global system.
-Surely, we can add more of these :)
+One important thing to note is in regard to message responses. We always send
+responses to a request from the system under test (SUT) peer when a peer is
+connected according to the `TestState`.
 
-Now, an astute reader may recognize that each `Output` returned by `Fsm` methods
-may contain messages that must be delivered to other peers. We can't just drop
-these on the floor. So we must instead model a
-link:./tests/common/network.rs[network] that allows delivery of messages to
-peers. Each output message gets put in a queue representing it "floating" in
-the network. And because message delivery takes time, we also generate network
-delays in terms of ticks. When a tick callback fires, if the network delay is
-up and the connection is still valid we deliver the message to the appropriate
-peer FSM via calling its `handle` method. We also, as always, call the model's
-version of this method first so both the model and real FSMs are updated in
-lockstep. In this manner we can fully simulate arbitrary histories of message
-flows between peers and ensure the behavior of the system as a whole is what we
-expect. For good measure we also generate network connect and disconnects, and
-learner additions to the system.
-
-Notably, since, rack initialization must succeed for anything to work, we always
-connect all initial members to the "rss_sled" and deliver all messages so all
-initial_members are ready to participate in the trust quorum, before we start
-running generated actions. You can see this inside the `run` test function
-at the bottom of `v0-fsm-proptests.rs`. Without this, we'd be arbitrarily
-wiping sleds a lot due to setup failure, which isn't really a useful test.
-However, because of this "cheat" during property testing, there are also some
-individual unit tests to cover rack initialization failures in `fsm.rs`.
-
-It is almost certainly useful for any reader/reviewer to go ahead and run the proptest with
-
-```
-cargo test -p bootstore --test v0-fsm-proptest -- --nocapture
-```
-
-If you uncomment the `println!` in the `run` function you will see all generated
-actions. Its important to note that each proptest run will run multiple
-instances of our test. So while our test is currently configured to generate
-up to 1000 actions, there can be dozes of tests run. It's also useful to modify
-code or the model to try to break the test in certain ways and then watch
-it shrink to give you the failing history. If you do this just remember that
-the history only makes sense because before the actions are run rack init has
-completed *and* the rss_sled is connected to all other initial members.
+It is almost certainly useful for any reader/reviewer to go ahead and run the
+proptests. It is also sometimes helpful to call `println` with the generated
+test input to understand better how the pieces fit together. It's important
+to note that each proptest run will run multiple instances of our test. So
+while our test is currently configured to generate up to 1000 actions, there
+can be dozes of tests run. It's also useful to modify code or the model to
+try to break the test in certain ways and then watch it shrink to give you the
+failing history.
 
 HAVE FUN!
