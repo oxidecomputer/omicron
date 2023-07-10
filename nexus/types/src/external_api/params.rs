@@ -1118,6 +1118,16 @@ impl JsonSchema for BlockSize {
     }
 }
 
+/// Describes the form factor of physical disks.
+#[derive(
+    Debug, Serialize, Deserialize, JsonSchema, Clone, Copy, PartialEq, Eq,
+)]
+#[serde(rename_all = "snake_case", tag = "type", content = "content")]
+pub enum PhysicalDiskKind {
+    M2,
+    U2,
+}
+
 /// Different sources for a disk
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
