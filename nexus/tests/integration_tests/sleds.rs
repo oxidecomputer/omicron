@@ -19,7 +19,6 @@ use nexus_test_utils_macros::nexus_test;
 use omicron_nexus::external_api::params::PhysicalDiskKind;
 use omicron_nexus::external_api::views::SledInstance;
 use omicron_nexus::external_api::views::{PhysicalDisk, Sled};
-use omicron_nexus::internal_api::params as internal_params;
 use omicron_sled_agent::sim;
 use std::str::FromStr;
 use uuid::Uuid;
