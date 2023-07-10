@@ -5,7 +5,7 @@
 use std::{
     collections::BTreeMap,
     fmt,
-    net::{Ipv6Addr, SocketAddr},
+    net::{IpAddr, Ipv6Addr, SocketAddr},
     time::Duration,
 };
 
@@ -466,15 +466,15 @@ struct MockReportPeers {
 impl MockReportPeers {
     // SocketAddr::new is not a const fn in stable Rust as of this writing
     fn valid_peer() -> SocketAddr {
-        SocketAddr::new(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 1), 2000)
+        SocketAddr::new(IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 1)), 2000)
     }
 
     fn invalid_peer() -> SocketAddr {
-        SocketAddr::new(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 2), 2000)
+        SocketAddr::new(IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 2)), 2000)
     }
 
     fn unresponsive_peer() -> SocketAddr {
-        SocketAddr::new(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 3), 2000)
+        SocketAddr::new(IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 3)), 2000)
     }
 
     fn new(update_id: Uuid, report_sender: mpsc::Sender<EventReport>) -> Self {
