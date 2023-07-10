@@ -219,6 +219,14 @@ impl super::Nexus {
                         .fetch()
                         .await?;
 
+                if let Some(authz_project) = &maybe_authz_project {
+                    if db_snapshot.project_id != authz_project.id() {
+                        return Err(Error::invalid_request(
+                            "snapshot does not belong to this project",
+                        ));
+                    }
+                }
+
                 // Copy the Volume data for this snapshot with randomized ids -
                 // this is safe because the snapshot is read-only, and even
                 // though volume_checkout will bump the gen numbers multiple

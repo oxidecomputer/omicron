@@ -20,10 +20,11 @@ impl super::Nexus {
     /// Only when all the associated resources have been cleaned up does Nexus
     /// hard delete the volume record.
     ///
-    /// Importantly, this should not be a sub-saga - whoever is calling this
-    /// should not block on cleaning up Crucible Resources, because the deletion
-    /// of a "disk" or "snapshot" could free up a *lot* of Crucible resources
-    /// and the user's query shouldn't wait on those DELETE calls.
+    /// Note it is **not** valid to call this function from an "action" node in
+    /// a saga because it would not be idempotent in the case of a rerun. This
+    /// function is ok to call from an "undo" node: as of this writing, this
+    /// occurs when unwinding the creation of a resource. If that unwind fails,
+    /// then the saga is parked in "Stuck" anyway.
     pub async fn volume_delete(
         self: &Arc<Self>,
         opctx: &OpContext,
@@ -34,7 +35,6 @@ impl super::Nexus {
             volume_id,
         };
 
-        // TODO execute this in the background instead, not using the usual SEC
         let saga_outputs = self
             .execute_saga::<sagas::volume_delete::SagaVolumeDelete>(saga_params)
             .await?;
