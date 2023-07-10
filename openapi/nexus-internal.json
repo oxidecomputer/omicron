@@ -2218,7 +2218,7 @@
         ]
       },
       "PhysicalDiskKind": {
-        "description": "Describes the type of physical disk.",
+        "description": "Describes the form factor of physical disks.",
         "oneOf": [
           {
             "type": "object",
