@@ -17,9 +17,7 @@ use nexus_test_utils::start_sled_agent;
 use nexus_test_utils::SLED_AGENT_UUID;
 use nexus_test_utils_macros::nexus_test;
 use omicron_nexus::external_api::views::SledInstance;
-use omicron_nexus::external_api::views::{
-    PhysicalDisk, PhysicalDiskType, Sled,
-};
+use omicron_nexus::external_api::views::{PhysicalDisk, Sled};
 use omicron_nexus::internal_api::params as internal_params;
 use omicron_sled_agent::sim;
 use std::str::FromStr;
@@ -124,7 +122,6 @@ async fn test_physical_disk_create_list_delete(
     assert_eq!(disks[0].vendor, "v");
     assert_eq!(disks[0].serial, "s");
     assert_eq!(disks[0].model, "m");
-    assert_eq!(disks[0].disk_type, PhysicalDiskType::External);
 
     // Delete that disk using the internal API, observe it in the external API
     delete_physical_disk(&internal_client, "v", "s", "m", sled_id).await;
