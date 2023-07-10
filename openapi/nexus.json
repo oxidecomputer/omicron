@@ -962,15 +962,6 @@
         "parameters": [
           {
             "in": "query",
-            "name": "include_silo_images",
-            "description": "Flag used to indicate if silo scoped images should be included when listing project images. Only valid when `project` is provided.",
-            "schema": {
-              "nullable": true,
-              "type": "boolean"
-            }
-          },
-          {
-            "in": "query",
             "name": "limit",
             "description": "Maximum number of items returned by a single call",
             "schema": {
@@ -10588,9 +10579,6 @@
         "description": "View of a Physical Disk\n\nPhysical disks reside in a particular sled and are used to store both Instance Disk data as well as internal metadata.",
         "type": "object",
         "properties": {
-          "disk_type": {
-            "$ref": "#/components/schemas/PhysicalDiskType"
-          },
           "id": {
             "description": "unique, immutable, system-controlled identifier for each resource",
             "type": "string",
@@ -10623,7 +10611,6 @@
           }
         },
         "required": [
-          "disk_type",
           "id",
           "model",
           "serial",
@@ -10651,13 +10638,6 @@
         },
         "required": [
           "items"
-        ]
-      },
-      "PhysicalDiskType": {
-        "type": "string",
-        "enum": [
-          "internal",
-          "external"
         ]
       },
       "Project": {
@@ -12760,7 +12740,7 @@
             ]
           },
           "password": {
-            "description": "password used to log in",
+            "description": "how to set the user's login password",
             "allOf": [
               {
                 "$ref": "#/components/schemas/UserPassword"
@@ -12788,34 +12768,34 @@
             "description": "Sets the user's password to the provided value",
             "type": "object",
             "properties": {
-              "details": {
-                "$ref": "#/components/schemas/Password"
-              },
-              "user_password_value": {
+              "mode": {
                 "type": "string",
                 "enum": [
                   "password"
                 ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/Password"
               }
             },
             "required": [
-              "details",
-              "user_password_value"
+              "mode",
+              "value"
             ]
           },
           {
             "description": "Invalidates any current password (disabling password authentication)",
             "type": "object",
             "properties": {
-              "user_password_value": {
+              "mode": {
                 "type": "string",
                 "enum": [
-                  "invalid_password"
+                  "login_disallowed"
                 ]
               }
             },
             "required": [
-              "user_password_value"
+              "mode"
             ]
           }
         ]

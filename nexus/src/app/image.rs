@@ -219,6 +219,14 @@ impl super::Nexus {
                         .fetch()
                         .await?;
 
+                if let Some(authz_project) = &maybe_authz_project {
+                    if db_snapshot.project_id != authz_project.id() {
+                        return Err(Error::invalid_request(
+                            "snapshot does not belong to this project",
+                        ));
+                    }
+                }
+
                 // Copy the Volume data for this snapshot with randomized ids -
                 // this is safe because the snapshot is read-only, and even
                 // though volume_checkout will bump the gen numbers multiple
@@ -328,21 +336,14 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         parent_lookup: &ImageParentLookup<'_>,
-        include_silo_images: bool,
         pagparams: &PaginatedBy<'_>,
     ) -> ListResultVec<db::model::Image> {
         match parent_lookup {
             ImageParentLookup::Project(project) => {
-                let (authz_silo, authz_project) =
+                let (.., authz_project) =
                     project.lookup_for(authz::Action::ListChildren).await?;
                 self.db_datastore
-                    .project_image_list(
-                        opctx,
-                        &authz_silo,
-                        &authz_project,
-                        include_silo_images,
-                        pagparams,
-                    )
+                    .project_image_list(opctx, &authz_project, pagparams)
                     .await
             }
             ImageParentLookup::Silo(silo) => {
@@ -385,8 +386,8 @@ impl super::Nexus {
     ) -> UpdateResult<db::model::Image> {
         match image_lookup {
             ImageLookup::ProjectImage(lookup) => {
-                let (authz_silo, _, authz_project_image) =
-                    lookup.lookup_for(authz::Action::Modify).await?;
+                let (authz_silo, _, authz_project_image, project_image) =
+                    lookup.fetch_for(authz::Action::Modify).await?;
                 opctx
                     .authorize(authz::Action::CreateChild, &authz_silo)
                     .await?;
@@ -395,6 +396,7 @@ impl super::Nexus {
                         opctx,
                         &authz_silo,
                         &authz_project_image,
+                        &project_image,
                     )
                     .await
             }
@@ -413,12 +415,17 @@ impl super::Nexus {
     ) -> UpdateResult<db::model::Image> {
         match image_lookup {
             ImageLookup::SiloImage(lookup) => {
-                let (_, authz_silo_image) =
-                    lookup.lookup_for(authz::Action::Modify).await?;
+                let (_, authz_silo_image, silo_image) =
+                    lookup.fetch_for(authz::Action::Modify).await?;
                 let (_, authz_project) =
                     project_lookup.lookup_for(authz::Action::Modify).await?;
                 self.db_datastore
-                    .silo_image_demote(opctx, &authz_silo_image, &authz_project)
+                    .silo_image_demote(
+                        opctx,
+                        &authz_silo_image,
+                        &authz_project,
+                        &silo_image,
+                    )
                     .await
             }
             ImageLookup::ProjectImage(_) => Err(Error::InvalidRequest {

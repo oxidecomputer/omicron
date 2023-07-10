@@ -3,7 +3,11 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use std::{
-    fmt, future::Future, net::SocketAddrV6, str::FromStr, time::Duration,
+    fmt,
+    future::Future,
+    net::{IpAddr, SocketAddr},
+    str::FromStr,
+    time::Duration,
 };
 
 use anyhow::{bail, Result};
@@ -38,7 +42,7 @@ pub(crate) enum DiscoveryMechanism {
     Bootstrap,
 
     /// A list of peers is manually specified.
-    List(Vec<SocketAddrV6>),
+    List(Vec<SocketAddr>),
 }
 
 impl DiscoveryMechanism {
@@ -68,7 +72,10 @@ impl DiscoveryMechanism {
                     })?;
                 addrs
                     .map(|addr| {
-                        SocketAddrV6::new(addr, BOOTSTRAP_ARTIFACT_PORT, 0, 0)
+                        SocketAddr::new(
+                            IpAddr::V6(addr),
+                            BOOTSTRAP_ARTIFACT_PORT,
+                        )
                     })
                     .collect()
             }
@@ -113,7 +120,7 @@ impl FromStr for DiscoveryMechanism {
 pub(crate) struct FetchedArtifact {
     pub(crate) kind: ArtifactKind,
     pub(crate) attempt: usize,
-    pub(crate) addr: SocketAddrV6,
+    pub(crate) addr: SocketAddr,
     pub(crate) artifact: BufList,
 }
 
@@ -229,7 +236,7 @@ impl Peers {
         &self,
         cx: &StepContext,
         artifact_hash_id: &ArtifactHashId,
-    ) -> Option<(SocketAddrV6, BufList)> {
+    ) -> Option<(SocketAddr, BufList)> {
         // TODO: do we want a check phase that happens before the download?
         let peers = self.peers();
         let mut remaining_peers = self.peer_count();
@@ -274,7 +281,7 @@ impl Peers {
         None
     }
 
-    pub(crate) fn peers(&self) -> impl Iterator<Item = SocketAddrV6> + '_ {
+    pub(crate) fn peers(&self) -> impl Iterator<Item = SocketAddr> + '_ {
         self.imp.peers()
     }
 
@@ -289,7 +296,7 @@ impl Peers {
     async fn fetch_from_peer(
         &self,
         cx: &StepContext,
-        peer: SocketAddrV6,
+        peer: SocketAddr,
         artifact_hash_id: &ArtifactHashId,
     ) -> Result<BufList, ArtifactFetchError> {
         let log = self.log.new(slog::o!("peer" => peer.to_string()));
@@ -420,19 +427,19 @@ impl Peers {
 
 #[async_trait]
 pub(crate) trait PeersImpl: fmt::Debug + Send + Sync {
-    fn peers(&self) -> Box<dyn Iterator<Item = SocketAddrV6> + Send + '_>;
+    fn peers(&self) -> Box<dyn Iterator<Item = SocketAddr> + Send + '_>;
     fn peer_count(&self) -> usize;
 
     /// Returns (size, receiver) on success, and an error on failure.
     async fn fetch_from_peer_impl(
         &self,
-        peer: SocketAddrV6,
+        peer: SocketAddr,
         artifact_hash_id: ArtifactHashId,
     ) -> Result<(u64, FetchReceiver), HttpError>;
 
     async fn report_progress_impl(
         &self,
-        peer: SocketAddrV6,
+        peer: SocketAddr,
         update_id: Uuid,
         report: EventReport,
     ) -> Result<(), ClientError>;
@@ -445,11 +452,11 @@ pub(crate) type FetchReceiver = mpsc::Receiver<Result<Bytes, ClientError>>;
 #[derive(Clone, Debug)]
 pub(crate) struct HttpPeers {
     log: slog::Logger,
-    peers: Vec<SocketAddrV6>,
+    peers: Vec<SocketAddr>,
 }
 
 impl HttpPeers {
-    pub(crate) fn new(log: &slog::Logger, peers: Vec<SocketAddrV6>) -> Self {
+    pub(crate) fn new(log: &slog::Logger, peers: Vec<SocketAddr>) -> Self {
         let log = log.new(slog::o!("component" => "HttpPeers"));
         Self { log, peers }
     }
@@ -457,7 +464,7 @@ impl HttpPeers {
 
 #[async_trait]
 impl PeersImpl for HttpPeers {
-    fn peers(&self) -> Box<dyn Iterator<Item = SocketAddrV6> + Send + '_> {
+    fn peers(&self) -> Box<dyn Iterator<Item = SocketAddr> + Send + '_> {
         Box::new(self.peers.iter().copied())
     }
 
@@ -467,7 +474,7 @@ impl PeersImpl for HttpPeers {
 
     async fn fetch_from_peer_impl(
         &self,
-        peer: SocketAddrV6,
+        peer: SocketAddr,
         artifact_hash_id: ArtifactHashId,
     ) -> Result<(u64, FetchReceiver), HttpError> {
         // TODO: be able to fetch from sled-agent clients as well
@@ -477,7 +484,7 @@ impl PeersImpl for HttpPeers {
 
     async fn report_progress_impl(
         &self,
-        peer: SocketAddrV6,
+        peer: SocketAddr,
         update_id: Uuid,
         report: EventReport,
     ) -> Result<(), ClientError> {

@@ -119,6 +119,12 @@ impl super::Nexus {
                 MAX_DISKS_PER_INSTANCE
             )));
         }
+        for disk in &params.disks {
+            if let params::InstanceDiskAttachment::Create(create) = disk {
+                self.validate_disk_create_params(opctx, &authz_project, create)
+                    .await?;
+            }
+        }
         if params.external_ips.len() > MAX_EXTERNAL_IPS_PER_INSTANCE {
             return Err(Error::invalid_request(&format!(
                 "An instance may not have more than {} external IP addresses",

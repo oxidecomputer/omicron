@@ -220,4 +220,4 @@ wrote private key to demo-key.pem
 $ curl -i --resolve test-suite-silo.sys.oxide-dev.test:12220:127.0.0.1 --cacert /path/to/your/certificate.pem https://test-suite-silo.sys.oxide-dev.test:12220
 ----
 +
-The Oxide CLI does not https://github.com/oxidecomputer/oxide.rs/issues/193[yet] support this so it's a little unwieldy to use a local TLS server this way.
+The Oxide CLI supports identical flags.
