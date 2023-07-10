@@ -2,9 +2,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-#[cfg(test)]
-pub use crate::mocks::MockNexusClient as NexusClient;
-#[cfg(not(test))]
 pub use nexus_client::Client as NexusClient;
 
 use internal_dns::resolver::{ResolveError, Resolver};
@@ -31,20 +28,32 @@ impl NexusClientWithResolver {
         log: &Logger,
         resolver: Arc<Resolver>,
     ) -> Result<Self, ResolveError> {
+        Ok(Self::new_from_resolver_with_port(
+            log,
+            resolver,
+            NEXUS_INTERNAL_PORT,
+        ))
+    }
+
+    pub fn new_from_resolver_with_port(
+        log: &Logger,
+        resolver: Arc<Resolver>,
+        port: u16,
+    ) -> Self {
         let client = reqwest::ClientBuilder::new()
             .dns_resolver(resolver.clone())
             .build()
             .expect("Failed to build client");
 
         let dns_name = ServiceName::Nexus.srv_name();
-        Ok(Self {
+        Self {
             client: NexusClient::new_with_client(
-                &format!("http://{dns_name}:{NEXUS_INTERNAL_PORT}"),
+                &format!("http://{dns_name}:{port}"),
                 client,
                 log.new(o!("component" => "NexusClient")),
             ),
             resolver,
-        })
+        }
     }
 
     /// Access the progenitor-based Nexus Client.

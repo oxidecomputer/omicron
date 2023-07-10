@@ -4891,6 +4891,7 @@ dependencies = [
  "flate2",
  "futures",
  "http",
+ "hyper",
  "hyper-staticfile",
  "illumos-utils",
  "internal-dns 0.1.0",
