@@ -57,8 +57,8 @@ use itertools::Itertools;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::AZ_PREFIX;
 use omicron_common::address::BOOTSTRAP_ARTIFACT_PORT;
-use omicron_common::address::CLICKHOUSE_PORT;
 use omicron_common::address::CLICKHOUSE_KEEPER_PORT;
+use omicron_common::address::CLICKHOUSE_PORT;
 use omicron_common::address::COCKROACH_PORT;
 use omicron_common::address::CRUCIBLE_PANTRY_PORT;
 use omicron_common::address::CRUCIBLE_PORT;
@@ -1069,14 +1069,15 @@ impl ServiceManager {
                     .add_property("gateway", "astring", gateway)
                     .add_property("listen_addr", "astring", listen_addr)
                     .add_property("listen_port", "astring", listen_port);
-                   // TODO: This is probably not necessary
-                   // .add_property("store", "astring", "/data");
+                // TODO: This is probably not necessary
+                // .add_property("store", "astring", "/data");
 
                 let profile = ProfileBuilder::new("omicron").add_service(
-                    ServiceBuilder::new("oxide/clickhouse-keeper").add_instance(
-                        ServiceInstanceBuilder::new("default")
-                            .add_property_group(config),
-                    ),
+                    ServiceBuilder::new("oxide/clickhouse-keeper")
+                        .add_instance(
+                            ServiceInstanceBuilder::new("default")
+                                .add_property_group(config),
+                        ),
                 );
                 profile
                     .add_to_zone(&self.inner.log, &installed_zone)
@@ -1895,12 +1896,7 @@ impl ServiceManager {
                 ServiceType::Crucible
                 | ServiceType::CruciblePantry
                 | ServiceType::CockroachDb
-                | ServiceType::Clickhouse => {
-                    panic!(
-                        "{} is a service which exists as part of a self-assembling zone",
-                        service.details,
-                    )
-                }
+                | ServiceType::Clickhouse 
                 | ServiceType::ClickhouseKeeper => {
                     panic!(
                         "{} is a service which exists as part of a self-assembling zone",

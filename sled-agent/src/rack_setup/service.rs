@@ -86,9 +86,9 @@ use nexus_client::{
 };
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::{
-    get_sled_address, CLICKHOUSE_PORT, CLICKHOUSE_KEEPER_PORT, COCKROACH_PORT, CRUCIBLE_PANTRY_PORT,
-    CRUCIBLE_PORT, DENDRITE_PORT, DNS_HTTP_PORT, NEXUS_INTERNAL_PORT, NTP_PORT,
-    OXIMETER_PORT,
+    get_sled_address, CLICKHOUSE_PORT, CLICKHOUSE_KEEPER_PORT, COCKROACH_PORT,
+    CRUCIBLE_PANTRY_PORT, CRUCIBLE_PORT, DENDRITE_PORT, DNS_HTTP_PORT,
+    NEXUS_INTERNAL_PORT, NTP_PORT, OXIMETER_PORT,
 };
 use omicron_common::api::internal::shared::{PortFec, PortSpeed};
 use omicron_common::backoff::{
