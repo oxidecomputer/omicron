@@ -3417,6 +3417,7 @@ dependencies = [
  "slog",
  "subprocess",
  "tokio",
+ "update-engine",
  "uuid",
 ]
 

@@ -58,7 +58,9 @@ use tokio::sync::watch;
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 use update_engine::events::ProgressUnits;
+use update_engine::events::StepOutcome;
 use update_engine::AbortHandle;
+use update_engine::NestedSpec;
 use update_engine::StepSpec;
 use uuid::Uuid;
 use wicket_common::update_events::ComponentRegistrar;
@@ -1287,7 +1289,7 @@ impl UpdateContext {
     async fn process_installinator_reports<'engine>(
         &self,
         cx: &StepContext,
-        mut ipr_receiver: mpsc::Receiver<EventReport<InstallinatorSpec>>,
+        mut ipr_receiver: mpsc::Receiver<EventReport<NestedSpec>>,
     ) -> anyhow::Result<WriteOutput> {
         let mut write_output = None;
 
@@ -1305,20 +1307,32 @@ impl UpdateContext {
                         continue;
                     };
 
-                    // We only care about successful (including "success with
-                    // warning") outcomes.
-                    let Some(metadata) = outcome.completion_metadata() else {
-                        continue;
-                    };
-
-                    match metadata {
-                        InstallinatorCompletionMetadata::Write { output } => {
-                            write_output = Some(output.clone());
+                    match StepOutcome::<InstallinatorSpec>::from_generic(
+                        outcome.clone(),
+                    ) {
+                        // We only care about successful (including "success with
+                        // warning") outcomes.
+                        Ok(outcome) => {
+                            let Some(metadata) = outcome.completion_metadata() else {
+                                continue;
+                            };
+                            match metadata {
+                                InstallinatorCompletionMetadata::Write { output } => {
+                                    write_output = Some(output.clone());
+                                }
+                                InstallinatorCompletionMetadata::HardwareScan { .. }
+                                | InstallinatorCompletionMetadata::ControlPlaneZones { .. }
+                                | InstallinatorCompletionMetadata::Download { .. }
+                                | InstallinatorCompletionMetadata::Unknown => (),
+                            }
                         }
-                        InstallinatorCompletionMetadata::HardwareScan { .. }
-                        | InstallinatorCompletionMetadata::ControlPlaneZones { .. }
-                        | InstallinatorCompletionMetadata::Download { .. }
-                        | InstallinatorCompletionMetadata::Unknown => (),
+                        Err(error) => {
+                            slog::warn!(self.log,
+                                "failed to deserialize StepOutcome returned \
+                                by installinator: {error}";
+                                "outcome" => ?outcome,
+                            );
+                        }
                     }
                 }
             }
@@ -1404,7 +1418,7 @@ impl UpdateContext {
         cx: &StepContext,
         mut ipr_start_receiver: IprStartReceiver,
         image_id: HostPhase2RecoveryImageId,
-    ) -> anyhow::Result<mpsc::Receiver<EventReport<InstallinatorSpec>>> {
+    ) -> anyhow::Result<mpsc::Receiver<EventReport<NestedSpec>>> {
         const MGS_PROGRESS_POLL_INTERVAL: Duration = Duration::from_secs(3);
 
         // Waiting for the installinator to start is a little strange. It can't

@@ -20,6 +20,7 @@ uuid.workspace = true
 
 installinator-common.workspace = true
 omicron-common.workspace = true
+update-engine.workspace = true
 
 [dev-dependencies]
 expectorate.workspace = true

@@ -31,6 +31,7 @@ use tough::TargetName;
 use tufaceous_lib::{
     ArchiveExtractor, HostPhaseImages, OmicronRepo, RotArchives,
 };
+use update_engine::{events::EventReport, NestedSpec};
 use uuid::Uuid;
 
 use crate::installinator_progress::IprArtifactServer;
@@ -102,7 +103,7 @@ impl ArtifactGetter for WicketdArtifactServer {
     async fn report_progress(
         &self,
         update_id: Uuid,
-        report: installinator_common::EventReport,
+        report: EventReport<NestedSpec>,
     ) -> Result<EventReportStatus, HttpError> {
         Ok(self.ipr_artifact.report_progress(update_id, report).await)
     }

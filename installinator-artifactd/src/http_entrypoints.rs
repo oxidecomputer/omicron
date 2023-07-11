@@ -14,6 +14,7 @@ use installinator_common::EventReport;
 use omicron_common::update::{ArtifactHashId, ArtifactId};
 use schemars::JsonSchema;
 use serde::Deserialize;
+use update_engine::NestedSpec;
 use uuid::Uuid;
 
 use crate::{context::ServerContext, EventReportStatus};
@@ -100,7 +101,12 @@ pub(crate) struct ReportQuery {
 async fn report_progress(
     rqctx: RequestContext<ServerContext>,
     path: Path<ReportQuery>,
-    report: TypedBody<EventReport>,
+    // NOTE: `report` uses NestedSpec rather than InstallinatorSpec to allow
+    // messages to come through even despite wire protocol mismatches between
+    // the installinator and the artifact server (eg different versions of
+    // installinator and wicketd). Most users only rarely care about the
+    // specific metadata being sent by the installinator.
+    report: TypedBody<EventReport<NestedSpec>>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let update_id = path.into_inner().update_id;
     match rqctx
