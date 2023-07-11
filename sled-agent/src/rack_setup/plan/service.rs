@@ -234,11 +234,7 @@ impl Plan {
         sleds: &HashMap<SocketAddrV6, StartSledAgentRequest>,
     ) -> Result<Self, PlanError> {
         let mut dns_builder = internal_dns::DnsConfigBuilder::new();
-        let mut services_ip_pool = config
-            .internal_services_ip_pool_ranges
-            .iter()
-            .flat_map(|range| range.iter());
-        let mut svc_port_builder = ServicePortBuilder::new();
+        let mut svc_port_builder = ServicePortBuilder::new(config);
 
         // Load the information we need about each Sled to be able to allocate
         // components on it.
@@ -390,8 +386,7 @@ impl Plan {
                     http_port,
                 )
                 .unwrap();
-            let (nic, external_ip) =
-                svc_port_builder.next_dns(id, &mut services_ip_pool)?;
+            let (nic, external_ip) = svc_port_builder.next_dns(id)?;
             let dns_port = omicron_common::address::DNS_PORT;
             let dns_address = SocketAddr::new(external_ip, dns_port);
             let dataset_kind = DatasetKind::ExternalDns;
@@ -431,8 +426,7 @@ impl Plan {
                     omicron_common::address::NEXUS_INTERNAL_PORT,
                 )
                 .unwrap();
-            let (nic, external_ip) =
-                svc_port_builder.next_nexus(id, &mut services_ip_pool)?;
+            let (nic, external_ip) = svc_port_builder.next_nexus(id)?;
             sled.request.services.push(ServiceZoneRequest {
                 id,
                 zone_type: ZoneType::Nexus,
@@ -593,8 +587,7 @@ impl Plan {
 
             let (services, svcname) = if idx < BOUNDARY_NTP_COUNT {
                 boundary_ntp_servers.push(format!("{}.host.{}", id, DNS_ZONE));
-                let (nic, snat_cfg) =
-                    svc_port_builder.next_snat(id, &mut services_ip_pool)?;
+                let (nic, snat_cfg) = svc_port_builder.next_snat(id)?;
                 (
                     vec![ServiceZoneService {
                         id,
@@ -750,6 +743,8 @@ impl SledInfo {
 }
 
 struct ServicePortBuilder {
+    internal_services_ip_pool: Box<dyn Iterator<Item = IpAddr> + Send>,
+
     next_snat_ip: Option<IpAddr>,
     next_snat_port: Wrapping<u16>,
 
@@ -766,12 +761,20 @@ struct ServicePortBuilder {
 }
 
 impl ServicePortBuilder {
-    fn new() -> Self {
+    fn new(config: &Config) -> Self {
         use omicron_common::address::{
             DNS_OPTE_IPV4_SUBNET, DNS_OPTE_IPV6_SUBNET, NEXUS_OPTE_IPV4_SUBNET,
             NEXUS_OPTE_IPV6_SUBNET, NTP_OPTE_IPV4_SUBNET, NTP_OPTE_IPV6_SUBNET,
         };
         use omicron_common::nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
+
+        let internal_services_ip_pool = Box::new(
+            config
+                .internal_services_ip_pool_ranges
+                .clone()
+                .into_iter()
+                .flat_map(|range| range.iter()),
+        );
 
         let dns_v4_ips = Box::new(
             DNS_OPTE_IPV4_SUBNET
@@ -810,6 +813,7 @@ impl ServicePortBuilder {
                 .skip(NUM_INITIAL_RESERVED_IP_ADDRESSES),
         );
         Self {
+            internal_services_ip_pool,
             next_snat_ip: None,
             next_snat_port: Wrapping(0),
             dns_v4_ips,
@@ -820,6 +824,10 @@ impl ServicePortBuilder {
             ntp_v6_ips,
             used_macs: HashSet::new(),
         }
+    }
+
+    fn next_internal_service_ip(&mut self) -> Option<IpAddr> {
+        self.internal_services_ip_pool.next()
     }
 
     fn random_mac(&mut self) -> MacAddr {
@@ -833,13 +841,12 @@ impl ServicePortBuilder {
     fn next_dns(
         &mut self,
         svc_id: Uuid,
-        ip_pool: &mut dyn Iterator<Item = IpAddr>,
     ) -> Result<(NetworkInterface, IpAddr), PlanError> {
         use omicron_common::address::{
             DNS_OPTE_IPV4_SUBNET, DNS_OPTE_IPV6_SUBNET,
         };
-        let external_ip = ip_pool
-            .next()
+        let external_ip = self
+            .next_internal_service_ip()
             .ok_or_else(|| PlanError::ServiceIp("External DNS"))?;
 
         let (ip, subnet) = match external_ip {
@@ -871,13 +878,13 @@ impl ServicePortBuilder {
     fn next_nexus(
         &mut self,
         svc_id: Uuid,
-        ip_pool: &mut dyn Iterator<Item = IpAddr>,
     ) -> Result<(NetworkInterface, IpAddr), PlanError> {
         use omicron_common::address::{
             NEXUS_OPTE_IPV4_SUBNET, NEXUS_OPTE_IPV6_SUBNET,
         };
-        let external_ip =
-            ip_pool.next().ok_or_else(|| PlanError::ServiceIp("Nexus"))?;
+        let external_ip = self
+            .next_internal_service_ip()
+            .ok_or_else(|| PlanError::ServiceIp("Nexus"))?;
 
         let (ip, subnet) = match external_ip {
             IpAddr::V4(_) => (
@@ -908,14 +915,13 @@ impl ServicePortBuilder {
     fn next_snat(
         &mut self,
         svc_id: Uuid,
-        ip_pool: &mut dyn Iterator<Item = IpAddr>,
     ) -> Result<(NetworkInterface, SourceNatConfig), PlanError> {
         use omicron_common::address::{
             NTP_OPTE_IPV4_SUBNET, NTP_OPTE_IPV6_SUBNET,
         };
         let snat_ip = self
             .next_snat_ip
-            .or_else(|| ip_pool.next())
+            .or_else(|| self.next_internal_service_ip())
             .ok_or_else(|| PlanError::ServiceIp("Boundary NTP"))?;
         let first_port = self.next_snat_port.0;
         let last_port = first_port + (NUM_SOURCE_NAT_PORTS - 1);
