@@ -9,10 +9,6 @@ use camino::Utf8PathBuf;
 use omicron_common::disk::DiskIdentity;
 use std::fmt;
 
-#[deprecated]
-pub const ZONE_ZFS_RAMDISK_DATASET_MOUNTPOINT: &str = "/zone";
-#[deprecated]
-pub const ZONE_ZFS_RAMDISK_DATASET: &str = "rpool/zone";
 const ZFS: &str = "/usr/sbin/zfs";
 pub const KEYPATH_ROOT: &str = "/var/run/oxide/";
 

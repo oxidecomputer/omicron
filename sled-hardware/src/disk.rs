@@ -46,6 +46,8 @@ pub enum DiskError {
     #[error("Requested partition {partition:?} not found on device {path}")]
     NotFound { path: Utf8PathBuf, partition: Partition },
     #[error(transparent)]
+    DestroyFilesystem(#[from] illumos_utils::zfs::DestroyDatasetError),
+    #[error(transparent)]
     EnsureFilesystem(#[from] illumos_utils::zfs::EnsureFilesystemError),
     #[error(transparent)]
     ZpoolCreate(#[from] illumos_utils::zpool::CreateError),
@@ -206,22 +208,28 @@ pub struct Disk {
 
 // Helper type for describing expected datasets and their optional quota.
 #[derive(Clone, Copy, Debug)]
-struct QuotaLimitedDataset {
+struct ExpectedDataset {
     // Name for the dataset
     name: &'static str,
     // Optional quota, in _bytes_
     quota: Option<usize>,
+    // Identifies if the dataset should be deleted on boot
+    wipe: bool,
 }
 
-impl QuotaLimitedDataset {
-    // Create a new dataset with quota.
-    const fn new(name: &'static str, quota: usize) -> Self {
-        QuotaLimitedDataset { name, quota: Some(quota) }
+impl ExpectedDataset {
+    const fn new(name: &'static str) -> Self {
+        ExpectedDataset { name, quota: None, wipe: false }
     }
 
-    // Create a new dataset with no quota.
-    const fn no_quota(name: &'static str) -> Self {
-        Self { name, quota: None }
+    const fn quota(mut self, quota: usize) -> Self {
+        self.quota = Some(quota);
+        self
+    }
+
+    const fn wipe(mut self) -> Self {
+        self.wipe = true;
+        self
     }
 }
 
@@ -241,32 +249,32 @@ pub const ZONE_DATASET: &'static str = "crypt/zone";
 pub const CRYPT_DATASET: &'static str = "crypt";
 
 const U2_EXPECTED_DATASET_COUNT: usize = 1;
-static U2_EXPECTED_DATASETS: [QuotaLimitedDataset; U2_EXPECTED_DATASET_COUNT] = [
+static U2_EXPECTED_DATASETS: [ExpectedDataset; U2_EXPECTED_DATASET_COUNT] = [
     // Stores filesystems for zones
-    QuotaLimitedDataset::no_quota(ZONE_DATASET),
+    ExpectedDataset::new(ZONE_DATASET).wipe(),
 ];
 
 const M2_EXPECTED_DATASET_COUNT: usize = 5;
-static M2_EXPECTED_DATASETS: [QuotaLimitedDataset; M2_EXPECTED_DATASET_COUNT] = [
+static M2_EXPECTED_DATASETS: [ExpectedDataset; M2_EXPECTED_DATASET_COUNT] = [
     // Stores software images.
     //
     // Should be duplicated to both M.2s.
-    QuotaLimitedDataset::no_quota(INSTALL_DATASET),
+    ExpectedDataset::new(INSTALL_DATASET),
     // Stores crash dumps.
-    QuotaLimitedDataset::no_quota(CRASH_DATASET),
+    ExpectedDataset::new(CRASH_DATASET),
     // Stores cluter configuration information.
     //
     // Should be duplicated to both M.2s.
-    QuotaLimitedDataset::no_quota(CLUSTER_DATASET),
+    ExpectedDataset::new(CLUSTER_DATASET),
     // Stores configuration data, including:
     // - What services should be launched on this sled
     // - Information about how to initialize the Sled Agent
     // - (For scrimlets) RSS setup information
     //
     // Should be duplicated to both M.2s.
-    QuotaLimitedDataset::no_quota(CONFIG_DATASET),
+    ExpectedDataset::new(CONFIG_DATASET),
     // Store debugging data, such as service bundles.
-    QuotaLimitedDataset::new(DEBUG_DATASET, DEBUG_DATASET_QUOTA),
+    ExpectedDataset::new(DEBUG_DATASET).quota(DEBUG_DATASET_QUOTA),
 ];
 
 impl Disk {
@@ -497,9 +505,16 @@ impl Disk {
 
         for dataset in datasets.into_iter() {
             let mountpoint = zpool_name.dataset_mountpoint(dataset.name);
+            let name = &format!("{}/{}", zpool_name, dataset.name);
+
+            if dataset.wipe {
+                info!(log, "Automatically destroying dataset {}", name);
+                Zfs::destroy_dataset(name)?;
+            }
+
             let encryption_details = None;
             Zfs::ensure_filesystem(
-                &format!("{}/{}", zpool_name, dataset.name),
+                name,
                 Mountpoint::Path(mountpoint),
                 zoned,
                 do_format,
