@@ -105,6 +105,7 @@ setup_hint = "Run `./tools/ci_download_clickhouse` to download the necessary bin
 [package.clickhouse-keeper]
 service_name = "clickhouse-keeper"
 only_for_targets.image = "standard"
+source.packages = [ "clickhouse-keeper.tar.gz"]
 source.type = "local"
 source.paths = [
   { from = "out/clickhouse", to = "/opt/oxide/clickhouse-keeper" },
