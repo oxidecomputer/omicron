@@ -47,7 +47,7 @@ pub enum Cmd {
     /// Raw(KeyEvent),
 
     /// Display details for the given selection
-    /// This can be used to do things like open a scollable popup for a given
+    /// This can be used to do things like open a scrollable popup for a given
     /// `Control`.
     Details,
 
