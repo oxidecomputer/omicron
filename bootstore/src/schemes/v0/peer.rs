@@ -456,6 +456,9 @@ impl Peer {
                 // TODO: Persistence
             }
             ApiOutput::LearningCompleted => {
+                if let Some(responder) = self.init_responder.take() {
+                    let _ = responder.send(Ok(()));
+                }
                 // TODO: Persistence
             }
         }
@@ -465,7 +468,32 @@ impl Peer {
     // Inform any callers (via outstanding responders) of errors.
     async fn handle_api_error(&mut self, err: ApiError) {
         warn!(self.log, "Fsm error= {:?}", err);
-        // TODO: Match on specific errors and return to responders
+        match err {
+            ApiError::AlreadyInitialized | ApiError::RackInitTimeout { .. } => {
+                if let Some(responder) = self.init_responder.take() {
+                    let _ = responder.send(Err(err.into()));
+                }
+            }
+            ApiError::StillLearning
+            | ApiError::NotInitialized
+            | ApiError::RackSecretLoadTimeout
+            | ApiError::RackInitFailed(_) => {
+                if let Some(responder) = self.rack_secret_responder.take() {
+                    let _ = responder.send(Err(err.into()));
+                }
+            }
+            ApiError::FailedToReconstructRackSecret => {
+                if let Some(responder) = self.rack_secret_responder.take() {
+                    let _ = responder.send(Err(err.into()));
+                }
+            }
+            // Nothing to do for these variants
+            // We already loggged the error at the top of this method
+            ApiError::FailedToDecryptExtraShares
+            | ApiError::UnexpectedResponse { .. }
+            | ApiError::ErrorResponseReceived { .. }
+            | ApiError::InvalidShare { .. } => {}
+        }
     }
 
     // Handle messages from connection management tasks
@@ -640,9 +668,24 @@ mod tests {
                 time_per_tick: Duration::from_millis(20),
                 learn_timeout: Duration::from_secs(5),
                 rack_init_timeout: Duration::from_secs(10),
-                rack_secret_request_timeout: Duration::from_secs(5),
+                rack_secret_request_timeout: Duration::from_secs(1),
             })
             .collect()
+    }
+
+    fn learner_id() -> Baseboard {
+        Baseboard::new_pc("learner".to_string(), "1".to_string())
+    }
+
+    fn learner_config() -> Config {
+        Config {
+            id: learner_id(),
+            addr: format!("[::1]:3333{}", 3).parse().unwrap(),
+            time_per_tick: Duration::from_millis(20),
+            learn_timeout: Duration::from_secs(5),
+            rack_init_timeout: Duration::from_secs(10),
+            rack_secret_request_timeout: Duration::from_secs(1),
+        }
     }
 
     fn log() -> slog::Logger {
@@ -671,7 +714,7 @@ mod tests {
         });
 
         // Inform each peer about the known addresses
-        let addrs: BTreeSet<_> =
+        let mut addrs: BTreeSet<_> =
             config.iter().map(|c| c.addr.clone()).collect();
         for handle in [&handle0, &handle1, &handle2] {
             let _ = handle.load_peer_addresses(addrs.clone()).await;
@@ -679,30 +722,56 @@ mod tests {
 
         let rack_uuid = RackUuid(Uuid::new_v4());
         let output = handle0.init_rack(rack_uuid, initial_members()).await;
-        println!("output = {:?}", output);
 
         let status = handle0.get_status().await;
-        println!("status = {:?}", status);
 
-        let output = handle0.load_rack_secret().await.unwrap();
-        println!("{:?}", output);
-        let output = handle1.load_rack_secret().await.unwrap();
-        println!("{:?}", output);
-        let output = handle2.load_rack_secret().await.unwrap();
-        println!("{:?}", output);
+        // Ensure we can load the rack secret at all peers
+        handle0.load_rack_secret().await.unwrap();
+        handle1.load_rack_secret().await.unwrap();
+        handle2.load_rack_secret().await.unwrap();
 
         // load the rack secret a second time on peer0
-        let output = handle0.load_rack_secret().await.unwrap();
-        println!("{:?}", output);
+        handle0.load_rack_secret().await.unwrap();
 
-        for handle in [&handle0, &handle1, &handle2] {
-            let err = handle.shutdown().await;
-            println!("shutdown err = {:?}", err);
-        }
+        // Shutdown the peer2 and make sure we can still load the rack
+        // secret (threshold=2) at peer0 and peer1
+        handle2.shutdown().await;
+        jh2.await;
+        handle0.load_rack_secret().await.unwrap();
+        handle1.load_rack_secret().await.unwrap();
 
-        // Wait for the peer tasks to stop
-        for jh in [jh0, jh1, jh2] {
-            let _ = jh.await;
-        }
+        // Add a learner node
+        let (mut learner, learner_handle) = Peer::new(learner_config(), &log);
+        let learner_jh = tokio::spawn(async move {
+            learner.run().await;
+        });
+        // Inform the learner and peer0 and peer1 about all addresses including
+        // the learner. This simulates DDM discovery
+        addrs.insert(learner_config().addr.clone());
+        let _ = learner_handle.load_peer_addresses(addrs.clone()).await;
+        let _ = handle0.load_peer_addresses(addrs.clone()).await;
+        let _ = handle1.load_peer_addresses(addrs.clone()).await;
+
+        // Tell the learner to go ahead and learn its share.
+        learner_handle.init_learner().await.unwrap();
+
+        // Shutdown peer1 and show that we can still load the rack secret at
+        // peer0 and the learner, because threshold=2 and it never changes.
+        handle1.shutdown().await;
+        jh1.await;
+        handle0.load_rack_secret().await.unwrap();
+        learner_handle.load_rack_secret().await.unwrap();
+
+        // Now shutdown the learner and show that peer0 cannot load the rack secret
+        learner_handle.shutdown().await;
+        learner_jh.await;
+        handle0.load_rack_secret().await.unwrap_err();
+
+        // TODO: Once we have persistence, we can bring an old peer back from the dead
+        // and reload the rack secret.
+
+        // Shutdown peer0
+        handle0.shutdown().await.unwrap();
+        let _ = jh0.await;
     }
 }
