@@ -298,6 +298,15 @@ impl JsonSchema for IpRange {
 }
 
 impl IpRange {
+    pub fn contains(&self, addr: IpAddr) -> bool {
+        match (self, addr) {
+            (IpRange::V4(r), IpAddr::V4(addr)) => r.contains(addr),
+            (IpRange::V6(r), IpAddr::V6(addr)) => r.contains(addr),
+            (IpRange::V6(_), IpAddr::V4(_))
+            | (IpRange::V4(_), IpAddr::V6(_)) => false,
+        }
+    }
+
     pub fn first_address(&self) -> IpAddr {
         match self {
             IpRange::V4(inner) => IpAddr::from(inner.first),
@@ -364,6 +373,10 @@ impl Ipv4Range {
         }
     }
 
+    pub fn contains(&self, addr: Ipv4Addr) -> bool {
+        self.first <= addr && addr <= self.last
+    }
+
     pub fn first_address(&self) -> Ipv4Addr {
         self.first
     }
@@ -414,6 +427,10 @@ impl Ipv6Range {
         } else {
             Err(String::from("IP address ranges must be non-decreasing"))
         }
+    }
+
+    pub fn contains(&self, addr: Ipv6Addr) -> bool {
+        self.first <= addr && addr <= self.last
     }
 
     pub fn first_address(&self) -> Ipv6Addr {

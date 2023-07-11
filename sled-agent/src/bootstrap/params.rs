@@ -4,13 +4,14 @@
 
 //! Request types for the bootstrap agent
 
+use anyhow::{bail, Result};
 use omicron_common::address::{self, Ipv6Subnet, SLED_PREFIX};
 use omicron_common::api::internal::shared::RackNetworkConfig;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 use std::collections::HashSet;
-use std::net::{Ipv6Addr, SocketAddrV6};
+use std::net::{IpAddr, Ipv6Addr, SocketAddrV6};
 use uuid::Uuid;
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
@@ -52,6 +53,11 @@ pub struct RackInitializeRequest {
     // we want to configure multiple pools.
     pub internal_services_ip_pool_ranges: Vec<address::IpRange>,
 
+    /// Service IP addresses on which we run external DNS servers.
+    ///
+    /// Each address must be present in `internal_services_ip_pool_ranges`.
+    pub external_dns_ips: Vec<IpAddr>,
+
     /// DNS name for the DNS zone delegated to the rack for external DNS
     pub external_dns_zone_name: String,
 
@@ -63,6 +69,36 @@ pub struct RackInitializeRequest {
 
     /// Initial rack network configuration
     pub rack_network_config: Option<RackNetworkConfig>,
+}
+
+impl RackInitializeRequest {
+    /// Perform _very basic_ validation that the parameters are self-consistent.
+    /// This function returning `Ok(_)` does NOT mean that all parameters are
+    /// definitely valid, but if it returns `Err(_)` it means they are
+    /// definitely invalid.
+    pub(crate) fn validate(&self) -> Result<()> {
+        if self.external_dns_ips.is_empty() {
+            bail!("At least one external DNS IP is required");
+        }
+
+        // Every external DNS IP should also be present in one of the internal
+        // services IP pool ranges. This check is O(N*M), but we expect both N
+        // and M to be small (~5 DNS servers, and a small number of pools).
+        for &dns_ip in &self.external_dns_ips {
+            if !self
+                .internal_services_ip_pool_ranges
+                .iter()
+                .any(|range| range.contains(dns_ip))
+            {
+                bail!(
+                    "External DNS IP {dns_ip} is not contained in \
+                     `internal_services_ip_pool_ranges`"
+                );
+            }
+        }
+
+        Ok(())
+    }
 }
 
 pub type Certificate = nexus_client::types::Certificate;
