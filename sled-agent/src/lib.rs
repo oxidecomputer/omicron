@@ -36,7 +36,7 @@ mod storage_manager;
 mod updates;
 
 #[cfg(test)]
-mod mocks;
+mod fakes;
 
 #[macro_use]
 extern crate slog;

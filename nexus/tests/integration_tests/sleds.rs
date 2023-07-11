@@ -16,9 +16,9 @@ use nexus_test_utils::resource_helpers::populate_ip_pool;
 use nexus_test_utils::start_sled_agent;
 use nexus_test_utils::SLED_AGENT_UUID;
 use nexus_test_utils_macros::nexus_test;
+use omicron_nexus::external_api::params::PhysicalDiskKind;
 use omicron_nexus::external_api::views::SledInstance;
 use omicron_nexus::external_api::views::{PhysicalDisk, Sled};
-use omicron_nexus::internal_api::params as internal_params;
 use omicron_sled_agent::sim;
 use std::str::FromStr;
 use uuid::Uuid;
@@ -113,7 +113,7 @@ async fn test_physical_disk_create_list_delete(
         "v",
         "s",
         "m",
-        internal_params::PhysicalDiskKind::U2,
+        PhysicalDiskKind::U2,
         sled_id,
     )
     .await;

@@ -4,6 +4,7 @@
 
 //! Params define the request bodies of API endpoints for creating or updating resources.
 
+use crate::external_api::params::PhysicalDiskKind;
 use crate::external_api::params::UserId;
 use crate::external_api::shared::IpRange;
 use omicron_common::api::external::ByteCount;
@@ -64,16 +65,6 @@ pub struct SledAgentStartupInfo {
     ///
     /// Must be smaller than "usable_physical_ram"
     pub reservoir_size: ByteCount,
-}
-
-/// Describes the type of physical disk.
-#[derive(
-    Debug, Serialize, Deserialize, JsonSchema, Clone, Copy, PartialEq, Eq,
-)]
-#[serde(rename_all = "snake_case", tag = "type", content = "content")]
-pub enum PhysicalDiskKind {
-    M2,
-    U2,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
