@@ -1122,7 +1122,7 @@ impl JsonSchema for BlockSize {
 #[derive(
     Debug, Serialize, Deserialize, JsonSchema, Clone, Copy, PartialEq, Eq,
 )]
-#[serde(rename_all = "snake_case", tag = "type", content = "content")]
+#[serde(rename_all = "snake_case")]
 pub enum PhysicalDiskKind {
     M2,
     U2,
