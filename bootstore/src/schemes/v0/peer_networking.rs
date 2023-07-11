@@ -222,7 +222,6 @@ impl EstablishedConn {
                 } else {
                     match write_framed(&msg) {
                         Ok(msg) => {
-                            debug!(self.log, "Queing msg for writing");
                             self.write_queue.push_back(msg);
                             Ok(())
                         }

@@ -12,7 +12,7 @@ use super::{ApiError, ApiOutput, Config as FsmConfig, Fsm, RackUuid};
 use crate::trust_quorum::RackSecret;
 use derive_more::From;
 use sled_hardware::Baseboard;
-use slog::{debug, info, o, warn, Logger};
+use slog::{debug, error, info, o, warn, Logger};
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::{SocketAddr, SocketAddrV6};
 use std::time::Duration;
@@ -269,8 +269,13 @@ impl Peer {
                 }
                 Some(msg) = self.conn_rx.recv() => self.on_conn_msg(msg).await,
                 _ = interval.tick() => {
-                    let output = self.fsm.tick(Instant::now().into());
-                    //self.handle_output(output).await;
+                    if let Err(errors) = self.fsm.tick(Instant::now().into()) {
+                        for (_, err) in errors {
+                            self.handle_api_error(err).await;
+                        }
+                    }
+                    // Even with errors there may be messages that need sending
+                    self.deliver_envelopes().await;
                 }
             }
         }
@@ -497,19 +502,37 @@ impl Peer {
                     unique_id: accepted_handle.unique_id,
                 };
                 self.connections.insert(peer_id.clone(), handle);
-                let output =
-                    self.fsm.on_connected(Instant::now().into(), peer_id);
-                //self.handle_output(output).await;
+                if let Err(e) =
+                    self.fsm.on_connected(Instant::now().into(), peer_id)
+                {
+                    // This can only be a failure to init the rack, so we
+                    // log it as an error and not a warning. It is unrecoverable
+                    // without a rack reset.
+                    error!(self.log, "Error on connection:  {e}");
+                } else {
+                    self.deliver_envelopes().await;
+                }
             }
             ConnToMainMsgInner::ConnectedClient { addr, peer_id } => {
                 let handle =
                     self.negotiating_connections.remove(&addr).unwrap();
                 self.connections.insert(peer_id.clone(), handle);
-                let output =
-                    self.fsm.on_connected(Instant::now().into(), peer_id);
-                //self.handle_output(output).await;
+                if let Err(e) =
+                    self.fsm.on_connected(Instant::now().into(), peer_id)
+                {
+                    // This can only be a failure to init the rack, so we
+                    // log it as an error and not a warning. It is unrecoverable
+                    // without a rack reset.
+                    error!(self.log, "Error on connection:  {e}");
+                } else {
+                    self.deliver_envelopes().await;
+                }
             }
-            ConnToMainMsgInner::Disconnected { peer_id } => {}
+            ConnToMainMsgInner::Disconnected { peer_id } => {
+                warn!(self.log, "peer disconnected {}", peer_id);
+                self.connections.remove(&peer_id);
+                self.fsm.on_disconnected(&peer_id);
+            }
             ConnToMainMsgInner::Received { from, msg } => {
                 match self.fsm.handle_msg(Instant::now().into(), from, msg) {
                     Ok(None) => self.deliver_envelopes().await,
@@ -664,6 +687,13 @@ mod tests {
         println!("status = {:?}", status);
 
         sleep(Duration::from_secs(10)).await;
+
+        let output = handle0.load_rack_secret().await.unwrap();
+        println!("{:?}", output);
+        let output = handle1.load_rack_secret().await.unwrap();
+        println!("{:?}", output);
+        let output = handle2.load_rack_secret().await.unwrap();
+        println!("{:?}", output);
 
         for handle in [&handle0, &handle1, &handle2] {
             let err = handle.shutdown().await;
