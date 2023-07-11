@@ -246,15 +246,31 @@ impl StorageResources {
         })
     }
 
+    // TODO: Could be generic over DiskVariant
+
     /// Returns all M.2 zpools
     pub async fn all_m2_zpools(&self) -> Vec<ZpoolName> {
         self.all_zpools(DiskVariant::M2).await
+    }
+
+    /// Returns all U.2 zpools
+    pub async fn all_u2_zpools(&self) -> Vec<ZpoolName> {
+        self.all_zpools(DiskVariant::U2).await
     }
 
     /// Returns all mountpoints within all M.2s for a particular dataset.
     pub async fn all_m2_mountpoints(&self, dataset: &str) -> Vec<Utf8PathBuf> {
         let m2_zpools = self.all_m2_zpools().await;
         m2_zpools
+            .iter()
+            .map(|zpool| zpool.dataset_mountpoint(dataset))
+            .collect()
+    }
+
+    /// Returns all mountpoints within all U.2s for a particular dataset.
+    pub async fn all_u2_mountpoints(&self, dataset: &str) -> Vec<Utf8PathBuf> {
+        let u2_zpools = self.all_u2_zpools().await;
+        u2_zpools
             .iter()
             .map(|zpool| zpool.dataset_mountpoint(dataset))
             .collect()

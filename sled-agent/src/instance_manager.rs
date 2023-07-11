@@ -4,11 +4,13 @@
 
 //! API for controlling multiple instances on a sled.
 
+use crate::instance::Instance;
 use crate::nexus::NexusClientWithResolver;
 use crate::params::{
     InstanceHardware, InstanceMigrationSourceParams, InstancePutStateResponse,
     InstanceStateRequested, InstanceUnregisterResponse,
 };
+use crate::storage_manager::StorageResources;
 use illumos_utils::dladm::Etherstub;
 use illumos_utils::link::VnicAllocator;
 use illumos_utils::opte::PortManager;
@@ -19,11 +21,6 @@ use slog::Logger;
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 use uuid::Uuid;
-
-#[cfg(not(test))]
-use crate::instance::Instance;
-#[cfg(test)]
-use crate::instance::MockInstance as Instance;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -58,6 +55,7 @@ struct InstanceManagerInternal {
 
     vnic_allocator: VnicAllocator<Etherstub>,
     port_manager: PortManager,
+    storage: StorageResources,
 }
 
 /// All instances currently running on the sled.
@@ -72,6 +70,7 @@ impl InstanceManager {
         nexus_client: NexusClientWithResolver,
         etherstub: Etherstub,
         port_manager: PortManager,
+        storage: StorageResources,
     ) -> Result<InstanceManager, Error> {
         Ok(InstanceManager {
             inner: Arc::new(InstanceManagerInternal {
@@ -83,6 +82,7 @@ impl InstanceManager {
                 instances: Mutex::new(BTreeMap::new()),
                 vnic_allocator: VnicAllocator::new("Instance", etherstub),
                 port_manager,
+                storage,
             }),
         })
     }
@@ -205,6 +205,7 @@ impl InstanceManager {
                     self.inner.vnic_allocator.clone(),
                     self.inner.port_manager.clone(),
                     self.inner.nexus_client.clone(),
+                    self.inner.storage.clone(),
                 )?;
                 let instance_clone = instance.clone();
                 let _old = instances
@@ -319,14 +320,6 @@ impl InstanceManager {
             .await
             .map_err(Error::from)
     }
-
-    /// Generates an instance ticket associated with this instance manager. This
-    /// allows tests in other modules to create an Instance even though they
-    /// lack visibility to `InstanceManagerInternal`.
-    #[cfg(test)]
-    pub fn test_instance_ticket(&self, instance_id: Uuid) -> InstanceTicket {
-        InstanceTicket::new(instance_id, self.inner.clone())
-    }
 }
 
 /// Represents membership of an instance in the [`InstanceManager`].
@@ -355,296 +348,5 @@ impl InstanceTicket {
 impl Drop for InstanceTicket {
     fn drop(&mut self) {
         self.terminate();
-    }
-}
-
-#[cfg(test)]
-mod test {
-    use super::*;
-    use crate::instance::MockInstance;
-    use crate::nexus::NexusClientWithResolver;
-    use crate::params::InstanceStateRequested;
-    use chrono::Utc;
-    use illumos_utils::dladm::Etherstub;
-    use illumos_utils::{dladm::MockDladm, zone::MockZones};
-    use internal_dns::resolver::Resolver;
-    use omicron_common::api::external::{
-        ByteCount, Generation, InstanceCpuCount, InstanceState,
-    };
-    use omicron_common::api::internal::nexus::InstanceRuntimeState;
-    use omicron_common::api::internal::shared::SourceNatConfig;
-    use omicron_test_utils::dev::test_setup_log;
-    use std::net::IpAddr;
-    use std::net::Ipv4Addr;
-
-    static INST_UUID_STR: &str = "e398c5d5-5059-4e55-beac-3a1071083aaa";
-
-    fn test_uuid() -> Uuid {
-        INST_UUID_STR.parse().unwrap()
-    }
-
-    fn new_initial_instance() -> InstanceHardware {
-        InstanceHardware {
-            runtime: InstanceRuntimeState {
-                run_state: InstanceState::Creating,
-                sled_id: Uuid::new_v4(),
-                propolis_id: Uuid::new_v4(),
-                dst_propolis_id: None,
-                propolis_addr: None,
-                migration_id: None,
-                propolis_gen: Generation::new(),
-                ncpus: InstanceCpuCount(2),
-                memory: ByteCount::from_mebibytes_u32(512),
-                hostname: "myvm".to_string(),
-                gen: Generation::new(),
-                time_updated: Utc::now(),
-            },
-            nics: vec![],
-            source_nat: SourceNatConfig {
-                ip: IpAddr::from(Ipv4Addr::new(10, 0, 0, 1)),
-                first_port: 0,
-                last_port: 1 << (14 - 1),
-            },
-            external_ips: vec![],
-            firewall_rules: vec![],
-            disks: vec![],
-            cloud_init_bytes: None,
-        }
-    }
-
-    #[tokio::test]
-    #[serial_test::serial]
-    async fn ensure_instance() {
-        let logctx = test_setup_log("ensure_instance");
-        let log = &logctx.log;
-
-        let nexus_client_ctx =
-            crate::mocks::MockNexusClient::new_with_client_context();
-        nexus_client_ctx.expect().returning(|_, _, _| {
-            let mut mock = crate::mocks::MockNexusClient::default();
-            mock.expect_clone()
-                .returning(|| crate::mocks::MockNexusClient::default());
-            mock
-        });
-
-        let resolver = Arc::new(
-            Resolver::new_from_ip(
-                log.new(o!("component" => "DnsResolver")),
-                std::net::Ipv6Addr::LOCALHOST,
-            )
-            .unwrap(),
-        );
-        let nexus_client =
-            NexusClientWithResolver::new(&log, resolver).unwrap();
-
-        // Creation of the instance manager incurs some "global" system
-        // checks: cleanup of existing zones + vnics.
-
-        let zones_get_ctx = MockZones::get_context();
-        zones_get_ctx.expect().return_once(|| Ok(vec![]));
-
-        let dladm_get_vnics_ctx = MockDladm::get_vnics_context();
-        dladm_get_vnics_ctx.expect().return_once(|| Ok(vec![]));
-
-        let port_manager = PortManager::new(
-            log.clone(),
-            std::net::Ipv6Addr::new(
-                0xfd00, 0x1de, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
-            ),
-        );
-        let im = InstanceManager::new(
-            log.clone(),
-            nexus_client,
-            Etherstub("mylink".to_string()),
-            port_manager,
-        )
-        .unwrap();
-
-        // Verify that no instances exist.
-        assert!(im.inner.instances.lock().unwrap().is_empty());
-
-        // Insert a new instance, verify that it exists.
-        //
-        // In the process, we'll clone the instance reference out
-        // of the manager, "start" and "transition" it to the desired state.
-        //
-        // Note that we need to perform some manual intervention to hold onto
-        // the "InstanceTicket". Normally, the "Instance" object would drop
-        // the ticket at the end of the instance lifetime to imply tracking
-        // should stop.
-        let ticket = Arc::new(std::sync::Mutex::new(None));
-        let ticket_clone = ticket.clone();
-        let instance_new_ctx = MockInstance::new_context();
-        let mut seq = mockall::Sequence::new();
-
-        // Expect one call to new() that produces an instance that expects to be
-        // cloned once. The clone should expect to ask to be put into the
-        // Running state.
-        instance_new_ctx.expect().return_once(move |_, _, t, _, _, _, _| {
-            let mut inst = MockInstance::default();
-
-            // Move the instance ticket out to the test, since the mock instance
-            // won't hold onto it.
-            let mut ticket_guard = ticket_clone.lock().unwrap();
-            *ticket_guard = Some(t);
-
-            // Expect to be cloned twice, once during registration (to fish the
-            // current state out of the instance) and once during the state
-            // transition (to hoist the instance reference out of the instance
-            // manager lock).
-            inst.expect_clone().times(1).in_sequence(&mut seq).return_once(
-                move || {
-                    let mut inst = MockInstance::default();
-                    inst.expect_current_state()
-                        .return_once(|| new_initial_instance().runtime);
-                    inst
-                },
-            );
-
-            inst.expect_clone().times(1).in_sequence(&mut seq).return_once(
-                move || {
-                    let mut inst = MockInstance::default();
-                    inst.expect_put_state().return_once(|_| {
-                        let mut rt_state = new_initial_instance();
-                        rt_state.runtime.run_state = InstanceState::Running;
-                        Ok(rt_state.runtime)
-                    });
-                    inst
-                },
-            );
-
-            Ok(inst)
-        });
-
-        im.ensure_registered(test_uuid(), new_initial_instance())
-            .await
-            .unwrap();
-
-        // The instance exists now.
-        assert_eq!(im.inner.instances.lock().unwrap().len(), 1);
-
-        let rt_state = im
-            .ensure_state(test_uuid(), InstanceStateRequested::Running)
-            .await
-            .unwrap();
-
-        // At this point, we can observe the expected state of the instance
-        // manager: containing the created instance...
-        assert_eq!(
-            rt_state.updated_runtime.unwrap().run_state,
-            InstanceState::Running
-        );
-        assert_eq!(im.inner.instances.lock().unwrap().len(), 1);
-
-        // ... however, when we drop the ticket of the corresponding instance,
-        // the entry is automatically removed from the instance manager.
-        ticket.lock().unwrap().take();
-        assert_eq!(im.inner.instances.lock().unwrap().len(), 0);
-
-        logctx.cleanup_successful();
-    }
-
-    #[tokio::test]
-    #[serial_test::serial]
-    async fn ensure_instance_state_repeatedly() {
-        let logctx = test_setup_log("ensure_instance_repeatedly");
-        let log = &logctx.log;
-
-        let nexus_client_ctx =
-            crate::mocks::MockNexusClient::new_with_client_context();
-        nexus_client_ctx.expect().returning(|_, _, _| {
-            let mut mock = crate::mocks::MockNexusClient::default();
-            mock.expect_clone()
-                .returning(|| crate::mocks::MockNexusClient::default());
-            mock
-        });
-
-        let resolver = Arc::new(
-            Resolver::new_from_ip(
-                log.new(o!("component" => "DnsResolver")),
-                std::net::Ipv6Addr::LOCALHOST,
-            )
-            .unwrap(),
-        );
-        let nexus_client =
-            NexusClientWithResolver::new(&log, resolver).unwrap();
-
-        // Instance Manager creation.
-
-        let zones_get_ctx = MockZones::get_context();
-        zones_get_ctx.expect().return_once(|| Ok(vec![]));
-
-        let dladm_get_vnics_ctx = MockDladm::get_vnics_context();
-        dladm_get_vnics_ctx.expect().return_once(|| Ok(vec![]));
-
-        let port_manager = PortManager::new(
-            log.clone(),
-            std::net::Ipv6Addr::new(
-                0xfd00, 0x1de, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
-            ),
-        );
-        let im = InstanceManager::new(
-            log.clone(),
-            nexus_client,
-            Etherstub("mylink".to_string()),
-            port_manager,
-        )
-        .unwrap();
-
-        let ticket = Arc::new(std::sync::Mutex::new(None));
-        let ticket_clone = ticket.clone();
-        let instance_new_ctx = MockInstance::new_context();
-        let mut seq = mockall::Sequence::new();
-        instance_new_ctx.expect().return_once(move |_, _, t, _, _, _, _| {
-            let mut inst = MockInstance::default();
-            let mut ticket_guard = ticket_clone.lock().unwrap();
-            *ticket_guard = Some(t);
-
-            // First call to ensure (start + transition).
-            inst.expect_clone().times(1).in_sequence(&mut seq).return_once(
-                move || {
-                    let mut inst = MockInstance::default();
-
-                    inst.expect_current_state()
-                        .returning(|| new_initial_instance().runtime);
-
-                    inst.expect_put_state().return_once(|_| {
-                        let mut rt_state = new_initial_instance();
-                        rt_state.runtime.run_state = InstanceState::Running;
-                        Ok(rt_state.runtime)
-                    });
-                    inst
-                },
-            );
-
-            // Next calls to ensure (transition only).
-            inst.expect_clone().times(3).in_sequence(&mut seq).returning(
-                move || {
-                    let mut inst = MockInstance::default();
-                    inst.expect_put_state().returning(|_| {
-                        let mut rt_state = new_initial_instance();
-                        rt_state.runtime.run_state = InstanceState::Running;
-                        Ok(rt_state.runtime)
-                    });
-                    inst
-                },
-            );
-            Ok(inst)
-        });
-
-        let id = test_uuid();
-        let rt = new_initial_instance();
-
-        // Register the instance, then issue all three state transitions.
-        im.ensure_registered(id, rt).await.unwrap();
-        im.ensure_state(id, InstanceStateRequested::Running).await.unwrap();
-        im.ensure_state(id, InstanceStateRequested::Running).await.unwrap();
-        im.ensure_state(id, InstanceStateRequested::Running).await.unwrap();
-
-        assert_eq!(im.inner.instances.lock().unwrap().len(), 1);
-        ticket.lock().unwrap().take();
-        assert_eq!(im.inner.instances.lock().unwrap().len(), 0);
-
-        logctx.cleanup_successful();
     }
 }

@@ -9,7 +9,9 @@ use camino::Utf8PathBuf;
 use omicron_common::disk::DiskIdentity;
 use std::fmt;
 
+#[deprecated]
 pub const ZONE_ZFS_RAMDISK_DATASET_MOUNTPOINT: &str = "/zone";
+#[deprecated]
 pub const ZONE_ZFS_RAMDISK_DATASET: &str = "rpool/zone";
 const ZFS: &str = "/usr/sbin/zfs";
 pub const KEYPATH_ROOT: &str = "/var/run/oxide/";
@@ -370,14 +372,5 @@ pub fn get_all_omicron_datasets_for_delete() -> anyhow::Result<Vec<String>> {
             datasets.push(format!("{pool}/{dataset}"));
         }
     }
-
-    // Collect all datasets for ramdisk-based Oxide zones,
-    // if any exist.
-    if let Ok(ramdisk_datasets) = Zfs::list_datasets(&ZONE_ZFS_RAMDISK_DATASET)
-    {
-        for dataset in &ramdisk_datasets {
-            datasets.push(format!("{}/{dataset}", ZONE_ZFS_RAMDISK_DATASET));
-        }
-    };
     Ok(datasets)
 }

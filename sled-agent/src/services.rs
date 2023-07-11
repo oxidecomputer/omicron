@@ -48,7 +48,6 @@ use illumos_utils::opte::{Port, PortManager, PortTicket};
 use illumos_utils::running_zone::{
     InstalledZone, RunCommandError, RunningZone,
 };
-use illumos_utils::zfs::ZONE_ZFS_RAMDISK_DATASET_MOUNTPOINT;
 use illumos_utils::zone::AddressRequest;
 use illumos_utils::zone::Zones;
 use illumos_utils::{execute, PFEXEC};
@@ -77,6 +76,9 @@ use omicron_common::nexus_config::{
     self, ConfigDropshotWithTls, DeploymentConfig as NexusDeploymentConfig,
 };
 use once_cell::sync::OnceCell;
+use rand::prelude::SliceRandom;
+use rand::SeedableRng;
+use sled_hardware::disk::ZONE_DATASET;
 use sled_hardware::is_gimlet;
 use sled_hardware::underlay;
 use sled_hardware::underlay::BOOTSTRAP_PREFIX;
@@ -128,6 +130,9 @@ pub enum Error {
 
     #[error("Sled Agent not initialized yet")]
     SledAgentNotReady,
+
+    #[error("No U.2 devices found")]
+    U2NotFound,
 
     #[error("Sled-local zone error: {0}")]
     SledLocalZone(anyhow::Error),
@@ -2445,8 +2450,25 @@ impl ServiceManager {
         };
 
         let mut zone_requests = AllZoneRequests::default();
+        let all_u2_roots = self
+            .inner
+            .storage
+            .resources()
+            .all_u2_mountpoints(ZONE_DATASET)
+            .await;
+
         for zone in new_zone_requests.into_iter() {
-            let root = Utf8PathBuf::from(ZONE_ZFS_RAMDISK_DATASET_MOUNTPOINT);
+            // For each new zone request, we pick an arbitrary U.2 to store
+            // the zone filesystem. Note: This isn't known to Nexus right now,
+            // so it's a local-to-sled decision.
+            //
+            // This is (currently) intentional, as the zone filesystem should
+            // be destroyed between reboots.
+            let mut rng = rand::thread_rng();
+            let root = all_u2_roots
+                .choose(&mut rng)
+                .ok_or_else(|| Error::U2NotFound)?
+                .clone();
             zone_requests.requests.push(ZoneRequest { zone, root });
         }
 
@@ -2909,7 +2931,18 @@ impl ServiceManager {
         let SledLocalZone::Initializing { request, filesystems, .. } = &*sled_zone else {
             return Ok(())
         };
-        let root = Utf8PathBuf::from(ZONE_ZFS_RAMDISK_DATASET_MOUNTPOINT);
+        let all_u2_roots = self
+            .inner
+            .storage
+            .resources()
+            .all_u2_mountpoints(ZONE_DATASET)
+            .await;
+        let mut rng = rand::rngs::StdRng::from_entropy();
+        let root = all_u2_roots
+            .choose(&mut rng)
+            .ok_or_else(|| Error::U2NotFound)?
+            .clone();
+
         let request = ZoneRequest { zone: request.clone(), root };
         let zone = self.initialize_zone(&request, filesystems).await?;
         *sled_zone =
