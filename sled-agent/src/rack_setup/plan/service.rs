@@ -34,7 +34,7 @@ use sled_agent_client::{
     types as SledAgentTypes, Client as SledAgentClient, Error as SledAgentError,
 };
 use slog::Logger;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV6};
 use std::num::Wrapping;
 use thiserror::Error;
@@ -61,9 +61,6 @@ const MINIMUM_U2_ZPOOL_COUNT: usize = 3;
 // TODO(https://github.com/oxidecomputer/omicron/issues/732): Remove.
 // when Nexus provisions the Pantry.
 const PANTRY_COUNT: usize = 1;
-// TODO(https://github.com/oxidecomputer/omicron/issues/732): Remove.
-// when Nexus provisions external DNS zones.
-const EXTERNAL_DNS_COUNT: usize = 1;
 
 /// Describes errors which may occur while generating a plan for services.
 #[derive(Error, Debug)]
@@ -365,10 +362,15 @@ impl Plan {
         }
 
         // Provision external DNS zones, continuing to stripe across sleds.
-        // We do this before provisioning Nexus so that DNS gets the first IPs
-        // in the services pool.
+        // The number of DNS services depends on the number of external DNS
+        // server IP addresses given to us at RSS-time.
         // TODO(https://github.com/oxidecomputer/omicron/issues/732): Remove
-        for _ in 0..EXTERNAL_DNS_COUNT {
+        loop {
+            let id = Uuid::new_v4();
+            let Some((nic, external_ip)) = svc_port_builder.next_dns(id) else {
+                break;
+            };
+
             let sled = {
                 let which_sled =
                     sled_allocator.next().ok_or(PlanError::NotEnoughSleds)?;
@@ -377,7 +379,6 @@ impl Plan {
             let internal_ip = sled.addr_alloc.next().expect("Not enough addrs");
             let http_port = omicron_common::address::DNS_HTTP_PORT;
             let http_address = SocketAddrV6::new(internal_ip, http_port, 0, 0);
-            let id = Uuid::new_v4();
             let zone = dns_builder.host_zone(id, internal_ip).unwrap();
             dns_builder
                 .service_backend_zone(
@@ -386,7 +387,6 @@ impl Plan {
                     http_port,
                 )
                 .unwrap();
-            let (nic, external_ip) = svc_port_builder.next_dns(id)?;
             let dns_port = omicron_common::address::DNS_PORT;
             let dns_address = SocketAddr::new(external_ip, dns_port);
             let dataset_kind = DatasetKind::ExternalDns;
@@ -744,6 +744,7 @@ impl SledInfo {
 
 struct ServicePortBuilder {
     internal_services_ip_pool: Box<dyn Iterator<Item = IpAddr> + Send>,
+    external_dns_ips: std::vec::IntoIter<IpAddr>,
 
     next_snat_ip: Option<IpAddr>,
     next_snat_port: Wrapping<u16>,
@@ -768,13 +769,24 @@ impl ServicePortBuilder {
         };
         use omicron_common::nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
 
+        let external_dns_ips_set = config
+            .external_dns_ips
+            .iter()
+            .copied()
+            .collect::<BTreeSet<IpAddr>>();
         let internal_services_ip_pool = Box::new(
             config
                 .internal_services_ip_pool_ranges
                 .clone()
                 .into_iter()
-                .flat_map(|range| range.iter()),
+                .flat_map(|range| range.iter())
+                // External DNS IPs are required to be present in
+                // `internal_services_ip_pool_ranges`, but we want to skip them
+                // when choosing IPs for non-DNS services, so filter them out
+                // here.
+                .filter(move |ip| !external_dns_ips_set.contains(ip)),
         );
+        let external_dns_ips = config.external_dns_ips.clone().into_iter();
 
         let dns_v4_ips = Box::new(
             DNS_OPTE_IPV4_SUBNET
@@ -814,6 +826,7 @@ impl ServicePortBuilder {
         );
         Self {
             internal_services_ip_pool,
+            external_dns_ips,
             next_snat_ip: None,
             next_snat_port: Wrapping(0),
             dns_v4_ips,
@@ -838,16 +851,11 @@ impl ServicePortBuilder {
         mac
     }
 
-    fn next_dns(
-        &mut self,
-        svc_id: Uuid,
-    ) -> Result<(NetworkInterface, IpAddr), PlanError> {
+    fn next_dns(&mut self, svc_id: Uuid) -> Option<(NetworkInterface, IpAddr)> {
         use omicron_common::address::{
             DNS_OPTE_IPV4_SUBNET, DNS_OPTE_IPV6_SUBNET,
         };
-        let external_ip = self
-            .next_internal_service_ip()
-            .ok_or_else(|| PlanError::ServiceIp("External DNS"))?;
+        let external_ip = self.external_dns_ips.next()?;
 
         let (ip, subnet) = match external_ip {
             IpAddr::V4(_) => (
@@ -872,7 +880,7 @@ impl ServicePortBuilder {
             slot: 0,
         };
 
-        Ok((nic, external_ip))
+        Some((nic, external_ip))
     }
 
     fn next_nexus(
