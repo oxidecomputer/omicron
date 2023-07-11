@@ -4,7 +4,7 @@
 
 use crate::schema::db_metadata;
 
-/// Physical disk attached to sled.
+/// Internal database metadata
 #[derive(Queryable, Insertable, Debug, Clone, Selectable)]
 #[diesel(table_name = db_metadata)]
 pub struct DbMetadata {

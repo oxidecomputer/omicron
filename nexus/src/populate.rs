@@ -384,7 +384,8 @@ mod test {
         let mut db = test_setup_database(&logctx.log).await;
         let cfg = db::Config { url: db.pg_config().clone() };
         let pool = Arc::new(db::Pool::new(&logctx.log, &cfg));
-        let datastore = Arc::new(db::DataStore::new(pool));
+        let datastore =
+            Arc::new(db::DataStore::new(&logctx.log, pool).await.unwrap());
         let opctx = OpContext::for_background(
             logctx.log.clone(),
             Arc::new(authz::Authz::new(&logctx.log)),
@@ -439,7 +440,8 @@ mod test {
         // ServiceUnavailable error, which indicates a transient failure.
         let pool =
             Arc::new(db::Pool::new_failfast_for_tests(&logctx.log, &cfg));
-        let datastore = Arc::new(db::DataStore::new(pool));
+        let datastore =
+            Arc::new(db::DataStore::new(&logctx.log, pool).await.unwrap());
         let opctx = OpContext::for_background(
             logctx.log.clone(),
             Arc::new(authz::Authz::new(&logctx.log)),
