@@ -78,7 +78,7 @@ sed -i "s/LISTEN_PORT/$LISTEN_PORT; \
     s/KEEPER_HOST_02/$KEEPER_HOST_02/g; \
     s/KEEPER_ID_03/$KEEPER_ID_03/g; \
     s/KEEPER_HOST_03/$KEEPER_HOST_03/g" \
-    /opt/oxide/clickhouse/clickhouse/config-keeper-tpl.xml
+    /opt/oxide/clickhouse-keeper/clickhouse/keeper_config.xml
 
-exec /opt/oxide/clickhouse/clickhouse keeper enable \
- --config /opt/oxide/clickhouse/clickhouse/config-keeper-tpl.xml &
+exec /opt/oxide/clickhouse-keeper/clickhouse keeper enable \
+ --config /opt/oxide/clickhouse-keeper/clickhouse/keeper_config.xml &

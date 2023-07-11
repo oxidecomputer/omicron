@@ -79,7 +79,7 @@ sed -i "s/REPLICA_DISPLAY_NAME/$REPLICA_DISPLAY_NAME/g; \
     s/KEEPER_HOST_01/$KEEPER_HOST_01/g; \
     s/KEEPER_HOST_02/$KEEPER_HOST_02/g; \
     s/KEEPER_HOST_03/$KEEPER_HOST_03/g" \
-    /opt/oxide/clickhouse/clickhouse/config-replica-tpl.xml
+    /opt/oxide/clickhouse/config.d/config_replica.xml
     
     exec /opt/oxide/clickhouse/clickhouse server \
-     --config /opt/oxide/clickhouse/clickhouse/config-replica-tpl.xml &
+     --config /opt/oxide/clickhouse/config.d/config_replica.xml &
