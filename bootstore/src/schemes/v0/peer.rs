@@ -677,8 +677,6 @@ mod tests {
             let _ = handle.load_peer_addresses(addrs.clone()).await;
         }
 
-        sleep(Duration::from_secs(1)).await;
-
         let rack_uuid = RackUuid(Uuid::new_v4());
         let output = handle0.init_rack(rack_uuid, initial_members()).await;
         println!("output = {:?}", output);
@@ -686,13 +684,15 @@ mod tests {
         let status = handle0.get_status().await;
         println!("status = {:?}", status);
 
-        sleep(Duration::from_secs(10)).await;
-
         let output = handle0.load_rack_secret().await.unwrap();
         println!("{:?}", output);
         let output = handle1.load_rack_secret().await.unwrap();
         println!("{:?}", output);
         let output = handle2.load_rack_secret().await.unwrap();
+        println!("{:?}", output);
+
+        // load the rack secret a second time on peer0
+        let output = handle0.load_rack_secret().await.unwrap();
         println!("{:?}", output);
 
         for handle in [&handle0, &handle1, &handle2] {

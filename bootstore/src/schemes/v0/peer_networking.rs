@@ -246,7 +246,6 @@ impl EstablishedConn {
         match res {
             Ok(_) => {
                 if !self.current_write.has_remaining() {
-                    debug!(self.log, "Clearing current write");
                     self.current_write = Cursor::new(Vec::new());
                 }
                 Ok(())
