@@ -6,7 +6,8 @@
 
 use super::messages::Identify;
 use super::{
-    ApiError, Config as FsmConfig, Envelope, Fsm, Msg as FsmMsg, RackUuid,
+    ApiError, ApiOutput, Config as FsmConfig, Envelope, Fsm, Msg as FsmMsg,
+    RackUuid,
 };
 use crate::schemes::Hello;
 use crate::trust_quorum::RackSecret;
@@ -109,6 +110,9 @@ pub enum PeerApiRequest {
 
     /// Get the status of this peer
     GetStatus { responder: oneshot::Sender<Status> },
+
+    /// Shutdown the peer
+    Shutdown,
 }
 
 // A handle for interacting with a `Peer` task
@@ -171,6 +175,11 @@ impl PeerHandle {
         let res = rx.await?;
         Ok(res)
     }
+
+    /// Shutdown the peer
+    pub async fn shutdown(&self) {
+        self.tx.send(PeerApiRequest::Shutdown).await;
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -188,6 +197,9 @@ pub struct Peer {
     fsm: Fsm,
     peers: BTreeSet<SocketAddrV6>,
     handle_unique_id_counter: u64,
+
+    // boolean set when a `PeerApiRequest::shutdown` is received
+    shutdown: bool,
 
     // Connections that have been accepted, but where negotiation has not
     // finished At this point, we only know the client port of the connection,
@@ -253,6 +265,7 @@ impl Peer {
                 fsm,
                 peers: BTreeSet::new(),
                 handle_unique_id_counter: 0,
+                shutdown: false,
                 accepted_connections: BTreeMap::new(),
                 negotiating_connections: BTreeMap::new(),
                 connections: BTreeMap::new(),
@@ -276,7 +289,7 @@ impl Peer {
         let mut interval = interval(self.config.time_per_tick);
         interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
         let listener = TcpListener::bind(&self.config.addr).await.unwrap();
-        loop {
+        while !self.shutdown {
             tokio::select! {
                 res = listener.accept() => self.on_accept(res).await,
                 Some(request) = self.rx.recv() => {
@@ -331,19 +344,25 @@ impl Peer {
                 initial_membership,
                 responder,
             } => {
-                info!(self.log, "Rack init started"; "rack_uuid" => rack_uuid.to_string());
+                info!(self.log,
+                    "Rack init started";
+                    "rack_uuid" => rack_uuid.to_string()
+                );
                 if self.init_responder.is_some() {
                     let _ = responder
                         .send(Err(PeerRequestError::RequestAlreadyPending));
                     return;
                 }
-                self.init_responder = Some(responder);
-                let output = self.fsm.init_rack(
+                if let Err(err) = self.fsm.init_rack(
                     Instant::now().into(),
                     rack_uuid,
                     initial_membership,
-                );
-                //self.handle_output(output).await;
+                ) {
+                    responder.send(Err(err.into()));
+                } else {
+                    self.init_responder = Some(responder);
+                    self.deliver_envelopes().await;
+                }
             }
             PeerApiRequest::InitLearner { responder } => {
                 if self.init_responder.is_some() {
@@ -351,9 +370,12 @@ impl Peer {
                         .send(Err(PeerRequestError::RequestAlreadyPending));
                     return;
                 }
-                self.init_responder = Some(responder);
-                let output = self.fsm.init_learner(Instant::now().into());
-                //self.handle_output(output).await;
+                if let Err(err) = self.fsm.init_learner(Instant::now().into()) {
+                    responder.send(Err(err.into()));
+                } else {
+                    self.init_responder = Some(responder);
+                    self.deliver_envelopes().await;
+                }
             }
             PeerApiRequest::LoadRackSecret { responder } => {
                 if self.rack_secret_responder.is_some() {
@@ -361,9 +383,14 @@ impl Peer {
                         .send(Err(PeerRequestError::RequestAlreadyPending));
                     return;
                 }
-                self.rack_secret_responder = Some(responder);
-                let output = self.fsm.load_rack_secret(Instant::now().into());
-                //self.handle_output(output).await;
+                if let Err(err) =
+                    self.fsm.load_rack_secret(Instant::now().into())
+                {
+                    responder.send(Err(err.into()));
+                } else {
+                    self.rack_secret_responder = Some(responder);
+                    self.deliver_envelopes().await;
+                }
             }
             PeerApiRequest::PeerAddresses(peers) => {
                 info!(self.log, "Updated Peer Addresses: {:?}", peers);
@@ -391,7 +418,69 @@ impl Peer {
                 };
                 let _ = responder.send(status);
             }
+            PeerApiRequest::Shutdown => {
+                self.shutdown = true;
+                // Shutdown all connection processing tasks
+                for (_, handle) in &self.accepted_connections {
+                    let _ = handle.tx.send(MainToConnMsg::Close).await;
+                }
+                for (_, handle) in &self.negotiating_connections {
+                    let _ = handle.tx.send(MainToConnMsg::Close).await;
+                }
+                for (_, handle) in &self.connections {
+                    let _ = handle.tx.send(MainToConnMsg::Close).await;
+                }
+            }
         }
+    }
+
+    // Route messages to their destination connections
+    async fn deliver_envelopes(&mut self) {
+        for envelope in self.fsm.drain_envelopes() {
+            debug!(self.log, "Sending {:?} to {}", envelope.msg, envelope.to);
+            if let Some(conn_handle) = self.connections.get(&envelope.to) {
+                conn_handle
+                    .tx
+                    .send(MainToConnMsg::Msg(Msg::Fsm(envelope.msg)))
+                    .await;
+            }
+        }
+    }
+
+    // Perform any operations required by a given `ApiOutput`, such as
+    // persisting state, and then inform any callers (via outstanding responders)
+    // of the result.
+    async fn handle_api_output(&mut self, output: ApiOutput) {
+        info!(self.log, "Fsm output = {:?}", output);
+        match output {
+            // Initialization is mutually exclusive
+            ApiOutput::PeerInitialized | ApiOutput::RackInitComplete => {
+                if let Some(responder) = self.init_responder.take() {
+                    responder.send(Ok(()));
+                }
+                // TODO: Persistence
+            }
+            ApiOutput::RackSecret { secret, .. } => {
+                // We only allow one outstanding request currently, so no
+                // need to get the `request_id` from destructuring above
+                if let Some(responder) = self.rack_secret_responder.take() {
+                    responder.send(Ok(secret));
+                }
+            }
+            ApiOutput::ShareDistributedToLearner => {
+                // TODO: Persistence
+            }
+            ApiOutput::LearningCompleted => {
+                // TODO: Persistence
+            }
+        }
+        self.deliver_envelopes();
+    }
+
+    // Inform any callers (via outstanding responders) of errors.
+    async fn handle_api_error(&mut self, err: ApiError) {
+        warn!(self.log, "Fsm error= {:?}", err);
+        // TODO: Match on specific errors and return to responders
     }
 
     // Handle messages from connection management tasks
@@ -442,9 +531,13 @@ impl Peer {
             }
             ConnToMainMsgInner::Disconnected { peer_id } => {}
             ConnToMainMsgInner::Received { from, msg } => {
-                let output =
-                    self.fsm.handle_msg(Instant::now().into(), from, msg);
-                //self.handle_output(output).await;
+                match self.fsm.handle_msg(Instant::now().into(), from, msg) {
+                    Ok(None) => self.deliver_envelopes().await,
+                    Ok(Some(api_output)) => {
+                        self.handle_api_output(api_output).await
+                    }
+                    Err(err) => self.handle_api_error(err).await,
+                }
             }
             ConnToMainMsgInner::FailedServerHandshake {
                 addr: SocketAddrV6,
@@ -1127,34 +1220,41 @@ mod tests {
         let (mut peer1, handle1) = Peer::new(config[1].clone(), &log);
         let (mut peer2, handle2) = Peer::new(config[2].clone(), &log);
 
-        tokio::spawn(async move {
+        let jh0 = tokio::spawn(async move {
             peer0.run().await;
         });
-        tokio::spawn(async move {
+        let jh1 = tokio::spawn(async move {
             peer1.run().await;
         });
-        tokio::spawn(async move {
+        let jh2 = tokio::spawn(async move {
             peer2.run().await;
         });
 
+        // Inform each peer about the known addresses
         let addrs: BTreeSet<_> =
             config.iter().map(|c| c.addr.clone()).collect();
-        for peer in [&handle0, &handle1, &handle2] {
-            peer.tx.send(PeerApiRequest::PeerAddresses(addrs.clone())).await;
+        for handle in [&handle0, &handle1, &handle2] {
+            handle.load_peer_addresses(addrs.clone()).await;
         }
 
         sleep(Duration::from_secs(1)).await;
 
-        let (tx, rx) = oneshot::channel();
-        handle0
-            .tx
-            .send(PeerApiRequest::InitRack {
-                rack_uuid: RackUuid(Uuid::new_v4()),
-                initial_membership: initial_members(),
-                responder: tx,
-            })
-            .await;
+        let rack_uuid = RackUuid(Uuid::new_v4());
+        let output = handle0.init_rack(rack_uuid, initial_members()).await;
+        println!("output = {:?}", output);
+
+        let status = handle0.get_status().await;
+        println!("status = {:?}", status);
 
         sleep(Duration::from_secs(10)).await;
+
+        for handle in [&handle0, &handle1, &handle2] {
+            handle.shutdown().await
+        }
+
+        // Wait for the peer tasks to stop
+        for jh in [jh0, jh1, jh2] {
+            jh.await;
+        }
     }
 }
