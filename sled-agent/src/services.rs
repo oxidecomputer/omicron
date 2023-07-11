@@ -687,15 +687,19 @@ impl ServiceManager {
         }
     }
 
-    fn bootstrap_to_techport(addr: Ipv6Addr) -> Ipv6Addr {
-        // flip the last bit of the first octet
-        // fdb0:<id>::suffix -> fdb1:<id>::<suffix>
-        Ipv6Addr::from(u128::from(addr) | (1 << 112))
-    }
-
-    fn bootstrap_addr_to_prefix(addr: Ipv6Addr) -> Ipv6Addr {
-        // mask out lower 64 bits to form /64 prefix
-        Ipv6Addr::from(u128::from(addr) & ((u64::MAX as u128) << 64))
+    // Derive two unique techport /64 prefixes from the bootstrap address.
+    fn bootstrap_addr_to_techport_prefixes(
+        addr: &Ipv6Addr,
+    ) -> [Ipv6Subnet<SLED_PREFIX>; 2] {
+        // Generate two unique prefixes from the bootstrap address, by
+        // incrementing the second octet. This assumes that the bootstrap
+        // address starts with `fdb0`, and so we end up with `fdb1` and `fdb2`.
+        let mut segments = addr.segments();
+        segments[0] += 1;
+        let prefix0 = Ipv6Subnet::new(Ipv6Addr::from(segments));
+        segments[0] += 1;
+        let prefix1 = Ipv6Subnet::new(Ipv6Addr::from(segments));
+        [prefix0, prefix1]
     }
 
     // Check the services intended to run in the zone to determine whether any
@@ -1703,11 +1707,12 @@ impl ServiceManager {
                 ServiceType::Tfport { pkt_source } => {
                     info!(self.inner.log, "Setting up tfport service");
 
-                    let techport_prefix =
+                    // Collect the prefixes for each techport.
+                    let techport_prefixes =
                         match bootstrap_name_and_address.as_ref() {
-                            Some((_, addr)) => Self::bootstrap_addr_to_prefix(
-                                Self::bootstrap_to_techport(*addr),
-                            ),
+                            Some((_, addr)) => {
+                                Self::bootstrap_addr_to_techport_prefixes(addr)
+                            }
                             None => {
                                 return Err(Error::BadServiceRequest {
                                     service: "tfport".into(),
@@ -1716,10 +1721,15 @@ impl ServiceManager {
                             }
                         };
 
-                    smfh.setprop(
-                        "config/techport_prefix",
-                        techport_prefix.to_string(),
-                    )?;
+                    for (i, prefix) in techport_prefixes.into_iter().enumerate()
+                    {
+                        // Each `prefix` is an `Ipv6Subnet` including a netmask.
+                        // Stringify just the network address, without the mask.
+                        smfh.setprop(
+                            format!("config/techport{i}_prefix"),
+                            prefix.net().network().to_string(),
+                        )?;
+                    }
                     smfh.setprop("config/pkt_source", pkt_source)?;
                     smfh.setprop(
                         "config/host",
@@ -3441,5 +3451,18 @@ mod test {
         drop_service_manager(mgr);
 
         logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn test_bootstrap_addr_to_techport_prefixes() {
+        let ba: Ipv6Addr = "fdb0:1122:3344:5566::".parse().unwrap();
+        let prefixes = ServiceManager::bootstrap_addr_to_techport_prefixes(&ba);
+        assert!(prefixes.iter().all(|p| p.net().prefix() == 64));
+        let prefix0 = prefixes[0].net().network();
+        let prefix1 = prefixes[1].net().network();
+        assert_eq!(prefix0.segments()[1..], ba.segments()[1..]);
+        assert_eq!(prefix1.segments()[1..], ba.segments()[1..]);
+        assert_eq!(prefix0.segments()[0], 0xfdb1);
+        assert_eq!(prefix1.segments()[0], 0xfdb2);
     }
 }
