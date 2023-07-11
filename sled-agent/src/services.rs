@@ -1896,7 +1896,7 @@ impl ServiceManager {
                 ServiceType::Crucible
                 | ServiceType::CruciblePantry
                 | ServiceType::CockroachDb
-                | ServiceType::Clickhouse 
+                | ServiceType::Clickhouse
                 | ServiceType::ClickhouseKeeper => {
                     panic!(
                         "{} is a service which exists as part of a self-assembling zone",

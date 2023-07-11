@@ -427,7 +427,7 @@ mod test {
     fn display_srv_service() {
         assert_eq!(ServiceName::Clickhouse.dns_name(), "_clickhouse._tcp",);
         assert_eq!(
-            ServiceName::ClickhouseKeeper.dns_name(), 
+            ServiceName::ClickhouseKeeper.dns_name(),
             "_clickhouse-keeper._tcp",
         );
         assert_eq!(ServiceName::Cockroach.dns_name(), "_cockroach._tcp",);
