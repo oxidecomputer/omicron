@@ -361,6 +361,7 @@ impl Drop for InstanceTicket {
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::fakes::nexus::FakeNexusServer;
     use crate::instance::MockInstance;
     use crate::nexus::NexusClientWithResolver;
     use crate::params::InstanceStateRequested;
@@ -418,24 +419,28 @@ mod test {
         let logctx = test_setup_log("ensure_instance");
         let log = &logctx.log;
 
-        let nexus_client_ctx =
-            crate::mocks::MockNexusClient::new_with_client_context();
-        nexus_client_ctx.expect().returning(|_, _, _| {
-            let mut mock = crate::mocks::MockNexusClient::default();
-            mock.expect_clone()
-                .returning(|| crate::mocks::MockNexusClient::default());
-            mock
-        });
-
-        let resolver = Arc::new(
-            Resolver::new_from_ip(
-                log.new(o!("component" => "DnsResolver")),
-                std::net::Ipv6Addr::LOCALHOST,
+        // Create a fake Nexus Server (for notifications) and add it to a
+        // corresponding fake DNS server for discovery.
+        struct NexusServer {}
+        impl FakeNexusServer for NexusServer {}
+        let nexus_server = crate::fakes::nexus::start_test_server(
+            log.clone(),
+            Box::new(NexusServer {}),
+        );
+        let dns =
+            crate::fakes::nexus::start_dns_server(log, &nexus_server).await;
+        let internal_resolver = Arc::new(
+            Resolver::new_from_addrs(
+                log.clone(),
+                vec![*dns.dns_server.local_address()],
             )
             .unwrap(),
         );
-        let nexus_client =
-            NexusClientWithResolver::new(&log, resolver).unwrap();
+        let nexus_client = NexusClientWithResolver::new_from_resolver_with_port(
+            log,
+            internal_resolver,
+            nexus_server.local_addr().port(),
+        );
 
         // Creation of the instance manager incurs some "global" system
         // checks: cleanup of existing zones + vnics.
@@ -550,24 +555,28 @@ mod test {
         let logctx = test_setup_log("ensure_instance_repeatedly");
         let log = &logctx.log;
 
-        let nexus_client_ctx =
-            crate::mocks::MockNexusClient::new_with_client_context();
-        nexus_client_ctx.expect().returning(|_, _, _| {
-            let mut mock = crate::mocks::MockNexusClient::default();
-            mock.expect_clone()
-                .returning(|| crate::mocks::MockNexusClient::default());
-            mock
-        });
-
-        let resolver = Arc::new(
-            Resolver::new_from_ip(
-                log.new(o!("component" => "DnsResolver")),
-                std::net::Ipv6Addr::LOCALHOST,
+        // Create a fake Nexus Server (for notifications) and add it to a
+        // corresponding fake DNS server for discovery.
+        struct NexusServer {}
+        impl FakeNexusServer for NexusServer {}
+        let nexus_server = crate::fakes::nexus::start_test_server(
+            log.clone(),
+            Box::new(NexusServer {}),
+        );
+        let dns =
+            crate::fakes::nexus::start_dns_server(log, &nexus_server).await;
+        let internal_resolver = Arc::new(
+            Resolver::new_from_addrs(
+                log.clone(),
+                vec![*dns.dns_server.local_address()],
             )
             .unwrap(),
         );
-        let nexus_client =
-            NexusClientWithResolver::new(&log, resolver).unwrap();
+        let nexus_client = NexusClientWithResolver::new_from_resolver_with_port(
+            log,
+            internal_resolver,
+            nexus_server.local_addr().port(),
+        );
 
         // Instance Manager creation.
 

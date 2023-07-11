@@ -1037,6 +1037,7 @@ impl Instance {
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::fakes::nexus::FakeNexusServer;
     use crate::instance_manager::InstanceManager;
     use crate::nexus::NexusClientWithResolver;
     use crate::params::InstanceStateRequested;
@@ -1093,20 +1094,7 @@ mod test {
         }
     }
 
-    // Due to the usage of global mocks, we use "serial_test" to avoid
-    // parellizing test invocations.
-    //
-    // From https://docs.rs/mockall/0.10.1/mockall/index.html#static-methods
-    //
-    //   Mockall can also mock static methods. But be careful! The expectations
-    //   are global. If you want to use a static method in multiple tests, you
-    //   must provide your own synchronization. For ordinary methods,
-    //   expectations are set on the mock object. But static methods don’t have
-    //   any mock object. Instead, you must create a Context object just to set
-    //   their expectations.
-
     #[tokio::test]
-    #[serial_test::serial]
     async fn transition_before_start() {
         let logctx = test_setup_log("transition_before_start");
         let log = &logctx.log;
@@ -1116,27 +1104,34 @@ mod test {
             0xfd00, 0x1de, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
         );
         let port_manager = PortManager::new(log.new(slog::o!()), underlay_ip);
-        let nexus_client_ctx =
-            crate::mocks::MockNexusClient::new_with_client_context();
-        nexus_client_ctx.expect().returning(|_, _, _| {
-            let mut mock = crate::mocks::MockNexusClient::default();
-            mock.expect_clone()
-                .returning(|| crate::mocks::MockNexusClient::default());
-            mock
-        });
 
-        let resolver = Arc::new(
-            Resolver::new_from_ip(
-                log.new(o!("component" => "DnsResolver")),
-                std::net::Ipv6Addr::LOCALHOST,
+        // Create a fake Nexus Server (for notifications) and add it to a
+        // corresponding fake DNS server for discovery.
+        struct NexusServer {}
+        impl FakeNexusServer for NexusServer {}
+        let nexus_server = crate::fakes::nexus::start_test_server(
+            log.clone(),
+            Box::new(NexusServer {}),
+        );
+        let dns =
+            crate::fakes::nexus::start_dns_server(log, &nexus_server).await;
+        let internal_resolver = Arc::new(
+            Resolver::new_from_addrs(
+                log.clone(),
+                vec![*dns.dns_server.local_address()],
             )
             .unwrap(),
         );
-        let nexus_client =
-            NexusClientWithResolver::new(&log, resolver).unwrap();
+        let nexus_client_with_resolver =
+            NexusClientWithResolver::new_from_resolver_with_port(
+                log,
+                internal_resolver,
+                nexus_server.local_addr().port(),
+            );
+
         let instance_manager = InstanceManager::new(
             log.clone(),
-            nexus_client.clone(),
+            nexus_client_with_resolver.clone(),
             Etherstub("mylink".to_string()),
             port_manager.clone(),
         )
@@ -1149,13 +1144,14 @@ mod test {
             new_initial_instance(),
             vnic_allocator,
             port_manager,
-            nexus_client,
+            nexus_client_with_resolver,
         )
         .unwrap();
 
         // Pick a state transition that requires the instance to have started.
         assert!(inst.put_state(InstanceStateRequested::Reboot).await.is_err());
 
+        drop(dns);
         logctx.cleanup_successful();
     }
 }

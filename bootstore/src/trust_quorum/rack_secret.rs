@@ -3,7 +3,8 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use rand::rngs::OsRng;
-use secrecy::{ExposeSecret, Secret};
+use secrecy::{DebugSecret, ExposeSecret, Secret};
+use std::fmt::Debug;
 use vsss_rs::curve25519::WrappedScalar;
 use vsss_rs::curve25519_dalek::Scalar;
 use vsss_rs::shamir;
@@ -39,6 +40,20 @@ use vsss_rs::subtle::ConstantTimeEq;
 /// type and orthogonal to its implementation.
 pub struct RackSecret {
     secret: Secret<Scalar>,
+}
+
+impl Clone for RackSecret {
+    fn clone(&self) -> Self {
+        RackSecret { secret: Secret::new(*self.secret.expose_secret()) }
+    }
+}
+
+impl DebugSecret for RackSecret {}
+
+impl Debug for RackSecret {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        Self::debug_secret(f)
+    }
 }
 
 impl PartialEq for RackSecret {
@@ -88,16 +103,8 @@ impl RackSecret {
 
 #[cfg(test)]
 mod tests {
-    use std::fmt::{self, Debug};
 
     use super::*;
-
-    // This is a secret. Let's not print it outside of tests.
-    impl Debug for RackSecret {
-        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-            self.expose_secret().fmt(f)
-        }
-    }
 
     fn verify(secret: &RackSecret, shares: &[Vec<u8>]) {
         let secret2 = RackSecret::combine_shares(&shares[..3]).unwrap();

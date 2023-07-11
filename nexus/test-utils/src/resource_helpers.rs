@@ -14,6 +14,7 @@ use dropshot::Method;
 use http::StatusCode;
 use nexus_test_interface::NexusServer;
 use nexus_types::external_api::params;
+use nexus_types::external_api::params::PhysicalDiskKind;
 use nexus_types::external_api::params::UserId;
 use nexus_types::external_api::shared;
 use nexus_types::external_api::shared::IdentityType;
@@ -201,7 +202,7 @@ pub async fn create_physical_disk(
     vendor: &str,
     serial: &str,
     model: &str,
-    variant: internal_params::PhysicalDiskKind,
+    variant: PhysicalDiskKind,
     sled_id: Uuid,
 ) -> internal_params::PhysicalDiskPutResponse {
     object_put(

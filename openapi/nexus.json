@@ -10579,6 +10579,9 @@
         "description": "View of a Physical Disk\n\nPhysical disks reside in a particular sled and are used to store both Instance Disk data as well as internal metadata.",
         "type": "object",
         "properties": {
+          "form_factor": {
+            "$ref": "#/components/schemas/PhysicalDiskKind"
+          },
           "id": {
             "description": "unique, immutable, system-controlled identifier for each resource",
             "type": "string",
@@ -10611,12 +10614,46 @@
           }
         },
         "required": [
+          "form_factor",
           "id",
           "model",
           "serial",
           "time_created",
           "time_modified",
           "vendor"
+        ]
+      },
+      "PhysicalDiskKind": {
+        "description": "Describes the form factor of physical disks.",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "m2"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "u2"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          }
         ]
       },
       "PhysicalDiskResultsPage": {

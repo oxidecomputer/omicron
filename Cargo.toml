@@ -280,7 +280,7 @@ reqwest = { version = "0.11", default-features = false }
 ring = "0.16"
 rpassword = "7.2.0"
 rustfmt-wrapper = "0.2"
-rustls = "0.21.2"
+rustls = "0.21.3"
 samael = { git = "https://github.com/njaremko/samael", features = ["xmlsec"], branch = "master" }
 schemars = "0.8.12"
 secrecy = "0.8.0"
@@ -289,7 +289,7 @@ serde = { version = "1.0", default-features = false, features = [ "derive" ] }
 serde_derive = "1.0"
 serde_human_bytes = { git = "http://github.com/oxidecomputer/serde_human_bytes" }
 serde_json = "1.0.100"
-serde_path_to_error = "0.1.12"
+serde_path_to_error = "0.1.13"
 serde_tokenstream = "0.2"
 serde_urlencoded = "0.7.1"
 serde_with = "2.3.3"
@@ -335,7 +335,7 @@ tokio-postgres = { version = "0.7", features = [ "with-chrono-0_4", "with-uuid-1
 tokio-stream = "0.1.14"
 tokio-tungstenite = "0.18"
 tokio-util = "0.7.8"
-toml = "0.7.5"
+toml = "0.7.6"
 toml_edit = "0.19.12"
 tough = { version = "0.12", features = [ "http" ] }
 trust-dns-client = "0.22"
@@ -387,6 +387,117 @@ opt-level = 3
 
 [profile.release]
 panic = "abort"
+
+# proptest based test generation and shrinking is expensive. Let's optimize it.
+[profile.dev.package.proptest]
+opt-level = 3
+[profile.test.package.proptest]
+opt-level = 3
+
+[profile.dev.package.bootstore]
+opt-level = 3
+[profile.test.package.bootstore]
+opt-level = 3
+
+# Crypto stuff always needs optimizations
+[profile.test.package.sha3]
+opt-level = 3
+[profile.test.package.sha2]
+opt-level = 3
+[profile.test.package.hkdf]
+opt-level = 3
+[profile.test.package.chacha20poly1305]
+opt-level = 3
+[profile.test.package.chacha20]
+opt-level = 3
+[profile.test.package.vsss-rs]
+opt-level = 3
+[profile.test.package.curve25519-dalek]
+opt-level = 3
+[profile.test.package.aead]
+opt-level = 3
+[profile.test.package.aes]
+opt-level = 3
+[profile.test.package.aes-gcm]
+opt-level = 3
+[profile.test.package.bcrypt-pbkdf]
+opt-level = 3
+[profile.test.package.blake2]
+opt-level = 3
+[profile.test.package.blake2b_simd]
+opt-level = 3
+[profile.test.package.block-buffer]
+opt-level = 3
+[profile.test.package.block-padding]
+opt-level = 3
+[profile.test.package.blowfish]
+opt-level = 3
+[profile.test.package.constant_time_eq]
+opt-level = 3
+[profile.test.package.crypto-bigint]
+opt-level = 3
+[profile.test.package.crypto-common]
+opt-level = 3
+[profile.test.package.ctr]
+opt-level = 3
+[profile.test.package.cbc]
+opt-level = 3
+[profile.test.package.digest]
+opt-level = 3
+[profile.test.package.ed25519]
+opt-level = 3
+[profile.test.package.ed25519-dalek]
+opt-level = 3
+[profile.test.package.elliptic-curve]
+opt-level = 3
+[profile.test.package.generic-array]
+opt-level = 3
+[profile.test.package.getrandom]
+opt-level = 3
+[profile.test.package.hmac]
+opt-level = 3
+[profile.test.package.lpc55_sign]
+opt-level = 3
+[profile.test.package.md5]
+opt-level = 3
+[profile.test.package.md-5]
+opt-level = 3
+[profile.test.package.num-bigint]
+opt-level = 3
+[profile.test.package.num-bigint-dig]
+opt-level = 3
+[profile.test.package.rand]
+opt-level = 3
+[profile.test.package.rand_chacha]
+opt-level = 3
+[profile.test.package.rand_core]
+opt-level = 3
+[profile.test.package.rand_hc]
+opt-level = 3
+[profile.test.package.rand_xorshift]
+opt-level = 3
+[profile.test.package.rsa]
+opt-level = 3
+[profile.test.package.salty]
+opt-level = 3
+[profile.test.package.signature]
+opt-level = 3
+[profile.test.package.subtle]
+opt-level = 3
+[profile.test.package.tiny-keccak]
+opt-level = 3
+[profile.test.package.uuid]
+opt-level = 3
+[profile.test.package.cipher]
+opt-level = 3
+[profile.test.package.cpufeatures]
+opt-level = 3
+[profile.test.package.poly1305]
+opt-level = 3
+[profile.test.package.inout]
+opt-level = 3
+[profile.test.package.keccak]
+opt-level = 3
 
 #
 # It's common during development to use a local copy of dropshot, propolis,
