@@ -553,18 +553,21 @@ async fn perform_handshake(
     let mut read_buf = [0u8; 128];
     let (mut read_sock, mut write_sock) = sock.into_split();
 
-    // Serialize and write the handshake messages into `write_buf`
-    let mut hello_cursor = Cursor::new(Hello::default().serialize());
-    let identify = write_framed(&Identify {
-        id: local_peer_id.clone(),
-        addr: local_addr,
-    })?;
-    let mut identify_cursor = Cursor::new(&identify);
+    // Serialize and write the handshake + identity messages to a local buffer
+    let out: Vec<u8> = Hello::default()
+        .serialize()
+        .into_iter()
+        .chain(write_framed(&Identify {
+            id: local_peer_id.clone(),
+            addr: local_addr,
+        })?)
+        .collect();
+    let mut out_cursor = Cursor::new(&out);
 
     let handshake_start = Instant::now();
 
     // Read `Hello` and the frame size of `Identify`
-    let initial_read = Hello::serialized_size() + FRAME_HEADER_SIZE;
+    const INITIAL_READ: usize = Hello::serialized_size() + FRAME_HEADER_SIZE;
 
     let mut total_read = 0;
     let mut identify_len = 0;
@@ -574,11 +577,9 @@ async fn perform_handshake(
         let timeout =
             KEEPALIVE_TIMEOUT.saturating_sub(Instant::now() - handshake_start);
 
-        let end = initial_read + identify_len;
+        let end = INITIAL_READ + identify_len;
 
-        let hello_written = !hello_cursor.has_remaining();
-
-        if identify.is_some() && !identify_cursor.has_remaining() {
+        if identify.is_some() && !out_cursor.has_remaining() {
             return Ok((read_sock, write_sock, identify.unwrap()));
         }
 
@@ -586,20 +587,16 @@ async fn perform_handshake(
             _ = sleep(timeout) => {
                 return Err(HandshakeError::Timeout);
             }
-            _ = write_sock.writable(), if identify_cursor.has_remaining() => {
-                if hello_cursor.has_remaining() {
-                    write_sock.write_buf(&mut hello_cursor).await?;
-                } else {
-                    write_sock.write_buf(&mut identify_cursor).await?;
-                }
+            _ = write_sock.writable(), if out_cursor.has_remaining() => {
+                    write_sock.write_buf(&mut out_cursor).await?;
             }
             res = read_sock.read(&mut read_buf[total_read..end]), if identify.is_none() => {
                 let n = res?;
                 total_read += n;
-                if total_read < initial_read {
+                if total_read < INITIAL_READ {
                     continue;
                 }
-                if total_read == initial_read {
+                if total_read == INITIAL_READ {
                     let hello =
                         Hello::from_bytes(&read_buf[..Hello::serialized_size()]).unwrap();
                     if hello.scheme != 0 {
@@ -609,14 +606,14 @@ async fn perform_handshake(
                         return Err(HandshakeError::UnsupportedVersion);
                     }
                     identify_len = read_frame_size(
-                        read_buf[Hello::serialized_size()..initial_read]
+                        read_buf[Hello::serialized_size()..INITIAL_READ]
                             .try_into()
                             .unwrap(),
                     );
                 } else {
                     if total_read == end {
                         identify = Some(
-                            ciborium::from_reader(&read_buf[initial_read..end])?
+                            ciborium::from_reader(&read_buf[INITIAL_READ..end])?
                         );
                     }
                 }

@@ -109,7 +109,7 @@ pub struct Hello {
 pub struct BufferTooSmall;
 
 impl Hello {
-    fn serialized_size() -> usize {
+    const fn serialized_size() -> usize {
         16
     }
 
