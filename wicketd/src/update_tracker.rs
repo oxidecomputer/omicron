@@ -1404,7 +1404,8 @@ impl UpdateContext {
         cx: &StepContext,
         mut ipr_start_receiver: IprStartReceiver,
         image_id: HostPhase2RecoveryImageId,
-    ) -> anyhow::Result<mpsc::Receiver<EventReport<InstallinatorSpec>>> {
+    ) -> anyhow::Result<mpsc::UnboundedReceiver<EventReport<InstallinatorSpec>>>
+    {
         const MGS_PROGRESS_POLL_INTERVAL: Duration = Duration::from_secs(3);
 
         // Waiting for the installinator to start is a little strange. It can't

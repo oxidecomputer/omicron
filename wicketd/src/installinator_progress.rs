@@ -7,10 +7,13 @@
 //! This connects up the wicketd artifact server, which receives reports, to the
 //! update tracker.
 
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::HashMap,
+    sync::{Arc, Mutex},
+};
 
 use installinator_artifactd::EventReportStatus;
-use tokio::sync::{mpsc, oneshot, Mutex};
+use tokio::sync::{mpsc, oneshot};
 use update_engine::events::StepEventIsTerminal;
 use uuid::Uuid;
 
@@ -40,9 +43,8 @@ pub(crate) fn new(log: &slog::Logger) -> (IprArtifactServer, IprUpdateTracker) {
 #[must_use]
 pub(crate) struct IprArtifactServer {
     log: slog::Logger,
-    // TODO: rewrite using message-passing for cancel safety reasons. For now,
-    // the tokio Mutex is fine because in `report_progress`, invariants are not
-    // violated across await points.
+    // Note: this is a std::sync::Mutex because it isn't held past an await
+    // point. Tokio mutexes have cancel-safety issues.
     running_updates: Arc<Mutex<HashMap<Uuid, RunningUpdate>>>,
 }
 
@@ -52,10 +54,8 @@ impl IprArtifactServer {
         update_id: Uuid,
         report: installinator_common::EventReport,
     ) -> EventReportStatus {
-        let mut running_updates = self.running_updates.lock().await;
-        let (status, sender) = if let Some(update) =
-            running_updates.get_mut(&update_id)
-        {
+        let mut running_updates = self.running_updates.lock().unwrap();
+        if let Some(update) = running_updates.get_mut(&update_id) {
             slog::debug!(
                 self.log,
                 "progress report seen ({} step events, {} progress events)",
@@ -65,21 +65,17 @@ impl IprArtifactServer {
             );
             // Note that take() leaves update in the Invalid state. Each branch
             // must restore *update to a valid state.
-            //
-            // This is written in this somewhat convoluted style because we want
-            // to ensure that `update` is never left in the `Invalid` state
-            // across an await point.
-            let sender = match update.take() {
+            match update.take() {
                 RunningUpdate::Initial(start_sender) => {
                     slog::debug!(
                         self.log,
                         "first report seen for this update ID";
                         "update_id" => %update_id
                     );
-                    let (sender, receiver) = mpsc::channel(16);
+                    let (sender, receiver) = mpsc::unbounded_channel();
                     _ = start_sender.send(receiver);
-                    *update = RunningUpdate::next_state(&sender, &report);
-                    Some(sender)
+                    *update =
+                        RunningUpdate::send_and_next_state(sender, report);
                 }
                 RunningUpdate::ReportsReceived(sender) => {
                     slog::debug!(
@@ -87,39 +83,23 @@ impl IprArtifactServer {
                         "further report seen for this update ID";
                         "update_id" => %update_id
                     );
-                    *update = RunningUpdate::next_state(&sender, &report);
-                    Some(sender)
+                    *update =
+                        RunningUpdate::send_and_next_state(sender, report);
                 }
                 RunningUpdate::Closed => {
                     // The sender has been closed; ignore the report.
                     *update = RunningUpdate::Closed;
-                    None
                 }
                 RunningUpdate::Invalid => {
-                    unreachable!("invalid state");
+                    unreachable!("invalid state")
                 }
-            };
+            }
 
-            (EventReportStatus::Processed, sender)
+            EventReportStatus::Processed
         } else {
             slog::debug!(self.log, "update ID unrecognized"; "update_id" => %update_id);
-            (EventReportStatus::UnrecognizedUpdateId, None)
-        };
-
-        // Don't drop the mutex here because we don't want messages to be sent
-        // out-of-order. (If we were OK with messages being sent out-of-order,
-        // this could be a std Mutex rather than a Tokio mutex.)
-        if let Some(sender) = sender {
-            // Spawn a task to finish sending the report -- let that run in the
-            // background in case this future gets cancelled.
-            tokio::spawn(async move {
-                _ = sender.send(report).await;
-            })
-            .await
-            .expect("sender.send didn't panic");
+            EventReportStatus::UnrecognizedUpdateId
         }
-
-        status
     }
 }
 
@@ -143,7 +123,7 @@ impl IprUpdateTracker {
         slog::debug!(self.log, "registering new update id"; "update_id" => %update_id);
         let (start_sender, start_receiver) = oneshot::channel();
 
-        let mut running_updates = self.running_updates.lock().await;
+        let mut running_updates = self.running_updates.lock().unwrap();
         running_updates.insert(update_id, RunningUpdate::Initial(start_sender));
         start_receiver
     }
@@ -154,25 +134,33 @@ impl IprUpdateTracker {
         &self,
         update_id: Uuid,
     ) -> Option<RunningUpdateState> {
-        let running_updates = self.running_updates.lock().await;
+        let running_updates = self.running_updates.lock().unwrap();
         running_updates.get(&update_id).map(|x| x.to_state())
     }
 }
 
 /// Type alias for the receiver that resolves when the first message from the
 /// installinator has been received.
-pub(crate) type IprStartReceiver =
-    oneshot::Receiver<mpsc::Receiver<installinator_common::EventReport>>;
+pub(crate) type IprStartReceiver = oneshot::Receiver<
+    mpsc::UnboundedReceiver<installinator_common::EventReport>,
+>;
 
 #[derive(Debug)]
 #[must_use]
 enum RunningUpdate {
     /// This is the initial state: the first message from the installinator
     /// hasn't been received yet.
-    Initial(oneshot::Sender<mpsc::Receiver<installinator_common::EventReport>>),
+    Initial(
+        oneshot::Sender<
+            mpsc::UnboundedReceiver<installinator_common::EventReport>,
+        >,
+    ),
 
     /// Reports from the installinator have been received.
-    ReportsReceived(mpsc::Sender<installinator_common::EventReport>),
+    ///
+    /// This is an `UnboundedSender` to avoid cancel-safety issues (see
+    /// https://github.com/oxidecomputer/omicron/pull/3579).
+    ReportsReceived(mpsc::UnboundedSender<installinator_common::EventReport>),
 
     /// All messages have been received.
     ///
@@ -209,14 +197,16 @@ impl RunningUpdate {
         std::mem::replace(self, Self::Invalid)
     }
 
-    fn next_state(
-        sender: &mpsc::Sender<installinator_common::EventReport>,
-        report: &installinator_common::EventReport,
+    fn send_and_next_state(
+        sender: mpsc::UnboundedSender<installinator_common::EventReport>,
+        report: installinator_common::EventReport,
     ) -> Self {
-        if Self::is_terminal(report) {
+        let is_terminal = Self::is_terminal(&report);
+        _ = sender.send(report);
+        if is_terminal {
             Self::Closed
         } else {
-            Self::ReportsReceived(sender.clone())
+            Self::ReportsReceived(sender)
         }
     }
 
