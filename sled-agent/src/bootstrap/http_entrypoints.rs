@@ -135,9 +135,6 @@ async fn rack_initialize(
 ) -> Result<HttpResponseOk<RackInitId>, HttpError> {
     let ba = rqctx.context();
     let request = body.into_inner();
-    request
-        .validate()
-        .map_err(|err| HttpError::for_bad_request(None, err.to_string()))?;
     let id = ba
         .start_rack_initialize(request)
         .map_err(|err| HttpError::for_bad_request(None, err.to_string()))?;

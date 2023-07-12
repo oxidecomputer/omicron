@@ -23,6 +23,23 @@ pub enum BootstrapAddressDiscovery {
     OnlyThese { addrs: HashSet<Ipv6Addr> },
 }
 
+// "Shadow" copy of `RackInitializeRequest` that does no validation on its
+// fields.
+#[derive(Clone, Debug, Deserialize)]
+struct UnvalidatedRackInitializeRequest {
+    rack_subnet: Ipv6Addr,
+    bootstrap_discovery: BootstrapAddressDiscovery,
+    rack_secret_threshold: usize,
+    ntp_servers: Vec<String>,
+    dns_servers: Vec<String>,
+    internal_services_ip_pool_ranges: Vec<address::IpRange>,
+    external_dns_ips: Vec<IpAddr>,
+    external_dns_zone_name: String,
+    external_certificates: Vec<Certificate>,
+    recovery_silo: RecoverySiloConfig,
+    rack_network_config: Option<RackNetworkConfig>,
+}
+
 /// Configuration for the "rack setup service".
 ///
 /// The Rack Setup Service should be responsible for one-time setup actions,
@@ -30,6 +47,7 @@ pub enum BootstrapAddressDiscovery {
 /// intervention, however, these actions need a way to be automated in our
 /// deployment.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
+#[serde(try_from = "UnvalidatedRackInitializeRequest")]
 pub struct RackInitializeRequest {
     pub rack_subnet: Ipv6Addr,
 
@@ -71,21 +89,19 @@ pub struct RackInitializeRequest {
     pub rack_network_config: Option<RackNetworkConfig>,
 }
 
-impl RackInitializeRequest {
-    /// Perform _very basic_ validation that the parameters are self-consistent.
-    /// This function returning `Ok(_)` does NOT mean that all parameters are
-    /// definitely valid, but if it returns `Err(_)` it means they are
-    /// definitely invalid.
-    pub(crate) fn validate(&self) -> Result<()> {
-        if self.external_dns_ips.is_empty() {
+impl TryFrom<UnvalidatedRackInitializeRequest> for RackInitializeRequest {
+    type Error = anyhow::Error;
+
+    fn try_from(value: UnvalidatedRackInitializeRequest) -> Result<Self> {
+        if value.external_dns_ips.is_empty() {
             bail!("At least one external DNS IP is required");
         }
 
         // Every external DNS IP should also be present in one of the internal
         // services IP pool ranges. This check is O(N*M), but we expect both N
         // and M to be small (~5 DNS servers, and a small number of pools).
-        for &dns_ip in &self.external_dns_ips {
-            if !self
+        for &dns_ip in &value.external_dns_ips {
+            if !value
                 .internal_services_ip_pool_ranges
                 .iter()
                 .any(|range| range.contains(dns_ip))
@@ -97,7 +113,20 @@ impl RackInitializeRequest {
             }
         }
 
-        Ok(())
+        Ok(RackInitializeRequest {
+            rack_subnet: value.rack_subnet,
+            bootstrap_discovery: value.bootstrap_discovery,
+            rack_secret_threshold: value.rack_secret_threshold,
+            ntp_servers: value.ntp_servers,
+            dns_servers: value.dns_servers,
+            internal_services_ip_pool_ranges: value
+                .internal_services_ip_pool_ranges,
+            external_dns_ips: value.external_dns_ips,
+            external_dns_zone_name: value.external_dns_zone_name,
+            external_certificates: value.external_certificates,
+            recovery_silo: value.recovery_silo,
+            rack_network_config: value.rack_network_config,
+        })
     }
 }
 
@@ -232,7 +261,7 @@ mod tests {
     fn validate_external_dns_ips_must_be_in_internal_services_ip_pools() {
         // Conjure up a config; we'll tweak the internal services pools and
         // external DNS IPs, but no other fields matter.
-        let mut config = RackInitializeRequest {
+        let mut config = UnvalidatedRackInitializeRequest {
             rack_subnet: Ipv6Addr::LOCALHOST,
             bootstrap_discovery: BootstrapAddressDiscovery::OnlyOurs,
             rack_secret_threshold: 0,
@@ -286,8 +315,8 @@ mod tests {
             config.external_dns_ips =
                 dns_ips.iter().map(|ip| ip.parse().unwrap()).collect();
 
-            match config.validate() {
-                Ok(()) => (),
+            match RackInitializeRequest::try_from(config.clone()) {
+                Ok(_) => (),
                 Err(err) => panic!(
                     "failure on {ip_pool_ranges:?} with DNS IPs {dns_ips:?}: \
                      {err}"
@@ -330,8 +359,8 @@ mod tests {
             config.external_dns_ips =
                 dns_ips.iter().map(|ip| ip.parse().unwrap()).collect();
 
-            match config.validate() {
-                Ok(()) => panic!(
+            match RackInitializeRequest::try_from(config.clone()) {
+                Ok(_) => panic!(
                     "unexpected success on {ip_pool_ranges:?} with \
                      DNS IPs {dns_ips:?}"
                 ),
