@@ -36,6 +36,7 @@ use omicron_common::api::external::InstanceState;
 use omicron_common::api::external::Ipv4Net;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::Vni;
+use omicron_nexus::app::MAX_VCPU_PER_INSTANCE;
 use omicron_nexus::db::fixed_data::silo::SILO_ID;
 use omicron_nexus::db::lookup::LookupPath;
 use omicron_nexus::external_api::shared::IpKind;
@@ -2993,6 +2994,48 @@ async fn test_cannot_provision_instance_beyond_cpu_capacity(
     let url_instance = get_instance_url(&name1.to_string());
     expect_instance_deletion_ok(client, &url_instance).await;
     expect_instance_creation_ok(client, &url_instances, &instance_params).await;
+}
+
+#[nexus_test]
+async fn test_cannot_provision_instance_beyond_cpu_limit(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    create_project(client, PROJECT_NAME).await;
+    populate_ip_pool(&client, "default", None).await;
+
+    let too_many_cpus =
+        InstanceCpuCount::try_from(i64::from(MAX_VCPU_PER_INSTANCE + 1))
+            .unwrap();
+
+    // Try to boot an instance that uses more CPUs than the limit
+    let name1 = Name::try_from(String::from("test")).unwrap();
+    let instance_params = params::InstanceCreate {
+        identity: IdentityMetadataCreateParams {
+            name: name1.clone(),
+            description: String::from("probably serving data"),
+        },
+        ncpus: too_many_cpus,
+        memory: ByteCount::from_gibibytes_u32(4),
+        hostname: String::from("test"),
+        user_data: vec![],
+        network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
+        external_ips: vec![],
+        disks: vec![],
+        start: false,
+    };
+    let url_instances = get_instances_url();
+
+    let builder =
+        RequestBuilder::new(client, http::Method::POST, &url_instances)
+            .body(Some(&instance_params))
+            .expect_status(Some(http::StatusCode::BAD_REQUEST));
+
+    let _response = NexusRequest::new(builder)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("Expected instance creation to fail with bad request!");
 }
 
 #[nexus_test]
