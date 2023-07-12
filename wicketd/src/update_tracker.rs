@@ -1287,7 +1287,9 @@ impl UpdateContext {
     async fn process_installinator_reports<'engine>(
         &self,
         cx: &StepContext,
-        mut ipr_receiver: mpsc::Receiver<EventReport<InstallinatorSpec>>,
+        mut ipr_receiver: mpsc::UnboundedReceiver<
+            EventReport<InstallinatorSpec>,
+        >,
     ) -> anyhow::Result<WriteOutput> {
         let mut write_output = None;
 
