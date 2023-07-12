@@ -284,7 +284,7 @@ mod swapctl {
         flags: i64,
     }
 
-    /// swapctl(2)
+    // swapctl(2)
     extern "C" {
         fn swapctl(cmd: i32, arg: *mut libc::c_void) -> i32;
     }
