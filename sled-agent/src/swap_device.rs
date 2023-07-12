@@ -2,7 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-/// Operations for creating a system swap device.
+//! Operations for creating a system swap device.
+
 use std::io::Read;
 use zeroize::Zeroize;
 
@@ -70,6 +71,8 @@ pub(crate) fn ensure_swap_device(
             // probably fine to have more than one swap device. Thus, don't panic
             // over it, but do log a warning so there is evidence that we found
             // extra devices.
+            //
+            // Eventually, we should probably send an ereport here.
             warn!(
                 log,
                 "Found multiple existing swap devices on startup: {:?}", devs
@@ -109,7 +112,6 @@ fn zvol_exists(name: &str) -> Result<bool, SwapDeviceError> {
         illumos_utils::execute(cmd).map_err(|e| SwapDeviceError::Zfs(e))?;
     let stdout = String::from_utf8_lossy(&output.stdout);
 
-    let mut found = false;
     for line in stdout.lines() {
         let v: Vec<_> = line.split('\t').collect();
 
@@ -117,16 +119,19 @@ fn zvol_exists(name: &str) -> Result<bool, SwapDeviceError> {
             continue;
         }
         if v[1] != "volume" {
-            panic!(
-                "found dataset \"{}\" for swap device, but it is not a volume",
-                name
-            );
+            return Err(SwapDeviceError::Misc {
+                msg: "could verify zvol",
+                error: format!(
+                    "found dataset \"{}\" for swap device, but it is not a volume",
+                    name
+                     ),
+            });
         } else {
-            found = true;
+            return Ok(true);
         }
     }
 
-    Ok(found)
+    Ok(false)
 }
 
 // Destroys a zvol at the given path.
@@ -329,23 +334,6 @@ mod swapctl {
         }
     }
 
-    // The argument for SC_LIST (struct swaptbl) requires an embedded array in
-    // the struct, with swt_n entries, each of which requires a pointer to store
-    // the path to the device.
-    //
-    // Ideally, we would want to query the number of swap devices on the system
-    // via SC_GETNSWP, allocate enough memory for each device entry, then pass
-    // in pointers to memory to the list command. Unfortunately, creating a
-    // generically large array embedded in a struct that can be passed to C is a
-    // bit of a challenge in safe Rust. So instead, we just pick a reasonable
-    // max number of devices to list.
-    //
-    // We pick a max of 3 devices, somewhat arbitrarily. We only ever expect to
-    // see 0 or 1 swap device(s); if there are more, that is a bug. In the case
-    // that we see more than 1 swap device, we log a warning, and eventually, we
-    // should send an ereport.
-    const N_SWAPENTS: usize = 3;
-
     // Wrapper around swapctl(2) call. All commands except SC_GETNSWP require an
     // argument, hence `data` being an optional parameter.
     unsafe fn swapctl_cmd<T>(
@@ -373,9 +361,23 @@ mod swapctl {
     /// List swap devices on the system.
     pub(crate) fn list_swap_devices() -> Result<Vec<SwapDevice>, SwapDeviceError>
     {
-        // Statically create the array of swapents for SC_LIST; see comment on
-        // `N_SWAPENTS` for details as to why we do this statically.
+        // The argument for SC_LIST (struct swaptbl) requires an embedded array in
+        // the struct, with swt_n entries, each of which requires a pointer to store
+        // the path to the device.
         //
+        // Ideally, we would want to query the number of swap devices on the system
+        // via SC_GETNSWP, allocate enough memory for each device entry, then pass
+        // in pointers to memory to the list command. Unfortunately, creating a
+        // generically large array embedded in a struct that can be passed to C is a
+        // bit of a challenge in safe Rust. So instead, we just pick a reasonable
+        // max number of devices to list.
+        //
+        // We pick a max of 3 devices, somewhat arbitrarily. We only ever expect to
+        // see 0 or 1 swap device(s); if there are more, that is a bug. In the case
+        // that we see more than 1 swap device, we log a warning, and eventually, we
+        // should send an ereport.
+        const N_SWAPENTS: usize = 3;
+
         // Each swapent requires a char * pointer in our control for the
         // `ste_path` field,, which the kernel will fill in with a path if there
         // is a swap device for that entry. Because these pointers are mutated
@@ -388,7 +390,6 @@ mod swapctl {
         // name, including the null terminating character, so these buffers
         // have sufficient space for paths on the system.
         const MAXPATHLEN: usize = libc::PATH_MAX as usize;
-        assert_eq!(N_SWAPENTS, 3);
         let mut p1 = [0i8; MAXPATHLEN];
         let mut p2 = [0i8; MAXPATHLEN];
         let mut p3 = [0i8; MAXPATHLEN];
@@ -460,10 +461,7 @@ mod swapctl {
         let path_cp = path.clone();
         let name = std::ffi::CString::new(path).map_err(|e| {
             SwapDeviceError::AddDevice {
-                msg: format!(
-                    "could not convert path to CString: {}",
-                    e,
-                ),
+                msg: format!("could not convert path to CString: {}", e,),
                 path: path_cp.clone(),
                 start: start,
                 length: length,

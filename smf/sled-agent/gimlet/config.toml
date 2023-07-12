@@ -27,8 +27,8 @@ vmm_reservoir_percentage = 0
 
 # Swap device size for the system.
 # We pick 256 GiB somewhat arbitrarily, since the device is sparsely allocated.
-# This field is only needed for the gimlet configuration: helios configures a
-# swap device by default.
+# This field is only needed for the gimlet configuration: helios as packaged
+# for non-gimlets will configure a swap device via /etc/vfstab.
 swap_device_size_gb = 256
 
 [log]
