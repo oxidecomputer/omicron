@@ -1480,6 +1480,13 @@ impl ServiceManager {
                     // it can advertise it to other sleds.
                     self.advertise_prefix_of_address(*gz_address).await;
 
+                    running_zone.add_default_route(*gz_address).map_err(
+                        |err| Error::ZoneCommand {
+                            intent: "Adding Route".to_string(),
+                            err,
+                        },
+                    )?;
+
                     smfh.setprop(
                         "config/http_address",
                         format!(
