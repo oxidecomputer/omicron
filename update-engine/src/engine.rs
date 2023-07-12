@@ -6,7 +6,7 @@
 
 use std::{
     borrow::Cow,
-    fmt,
+    fmt::{self, Write},
     ops::ControlFlow,
     pin::Pin,
     sync::{
@@ -94,6 +94,7 @@ impl<'a, S: StepSpec + 'a> UpdateEngine<'a, S> {
         Self {
             log: log.new(slog::o!(
                 "component" => "UpdateEngine",
+                "spec" => S::schema_name(),
                 "execution_id" => format!("{execution_id}"),
             )),
             execution_id: ExecutionId(Uuid::new_v4()),
@@ -801,7 +802,7 @@ impl<'a, S: StepSpec> StepExec<'a, S> {
         let cx = StepContext::new(log, payload_sender);
 
         let mut step_fut = (self.exec_fn.0)(cx);
-        let mut reporter = StepProgressReporter::new(step_exec_cx);
+        let mut reporter = StepProgressReporter::new(log, step_exec_cx);
 
         let mut step_res = None;
         let mut payload_done = false;
@@ -942,6 +943,7 @@ type StepExecFn<'a, S> = Box<
 >;
 
 struct StepProgressReporter<S: StepSpec, F> {
+    log: slog::Logger,
     execution_id: ExecutionId,
     next_event_index: F,
     total_start: Instant,
@@ -953,9 +955,17 @@ struct StepProgressReporter<S: StepSpec, F> {
 }
 
 impl<S: StepSpec, F: Fn() -> usize> StepProgressReporter<S, F> {
-    fn new(step_exec_cx: StepExecutionContext<S, F>) -> Self {
+    fn new(
+        log: &slog::Logger,
+        step_exec_cx: StepExecutionContext<S, F>,
+    ) -> Self {
+        let log = log.new(slog::o!(
+            "step component" => format!("{:?}", step_exec_cx.step_info.info.component),
+            "step id" => format!("{:?}", step_exec_cx.step_info.info.id),
+        ));
         let step_start = Instant::now();
         Self {
+            log,
             execution_id: step_exec_cx.execution_id,
             next_event_index: step_exec_cx.next_event_index.0,
             total_start: step_exec_cx.total_start,
@@ -1086,6 +1096,11 @@ impl<S: StepSpec, F: Fn() -> usize> StepProgressReporter<S, F> {
         // The only way this can fail is if the event receiver is closed or
         // dropped. That failure doesn't have any implications on whether this
         // aborts or not.
+        slog::warn!(
+            self.log,
+            "aborted with message \"{}\"", message.message;
+        );
+
         let res = self
             .sender
             .send(Event::Step(StepEvent {
@@ -1200,7 +1215,7 @@ impl<S: StepSpec, F: Fn() -> usize> StepProgressReporter<S, F> {
         self,
         error: &S::Error,
     ) -> Result<(), mpsc::error::SendError<Event<S>>> {
-        // Stringify `error` into a message + list causes; this is written the
+        // Stringify `error` into a message + list of causes; this is written the
         // way it is to avoid `error` potentially living across the `.await`
         // below (which can cause lifetime issues in callers).
         let (message, causes) = {
@@ -1215,6 +1230,23 @@ impl<S: StepSpec, F: Fn() -> usize> StepProgressReporter<S, F> {
             }
             (message, causes)
         };
+
+        // Build up a list of causes to show.
+        let causes_str = if causes.is_empty() {
+            " (no causes)".to_owned()
+        } else {
+            let mut causes_str = "\n".to_owned();
+            for cause in &causes {
+                writeln!(causes_str, " -> {cause}")
+                    .expect("writing to a string is infallible");
+            }
+            causes_str
+        };
+
+        slog::warn!(
+            self.log,
+            "execution failed with message \"{}\" and causes:{causes_str}", message;
+        );
 
         self.sender
             .send(Event::Step(StepEvent {

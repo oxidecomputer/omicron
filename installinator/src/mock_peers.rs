@@ -648,7 +648,7 @@ mod tests {
             match (expected_result, fetched_artifact) {
                 (
                     Ok((expected_attempt, expected_addr)),
-                    Ok(FetchedArtifact { attempt, addr, mut artifact }),
+                    Ok(FetchedArtifact { attempt, addr, mut artifact, .. }),
                 ) => {
                     assert_eq!(
                         expected_attempt, attempt,

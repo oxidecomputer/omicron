@@ -5,20 +5,22 @@
 use std::time::Duration;
 
 use anyhow::{bail, Context, Result};
-use buf_list::{BufList, Cursor};
+use buf_list::Cursor;
 use camino::{Utf8Path, Utf8PathBuf};
 use clap::{Args, Parser, Subcommand};
 use installinator_common::{
-    InstallinatorCompletionMetadata, InstallinatorComponent, InstallinatorSpec,
-    InstallinatorStepId, StepContext, StepHandle, StepProgress, StepSuccess,
-    StepWarning, UpdateEngine,
+    Event, InstallinatorCompletionMetadata, InstallinatorComponent,
+    InstallinatorSpec, InstallinatorStepId, StepContext, StepHandle,
+    StepProgress, StepSuccess, StepWarning, UpdateEngine,
 };
+use ipcc_key_value::InstallinatorImageId;
 use omicron_common::{
     api::internal::nexus::KnownArtifactKind,
     update::{ArtifactHash, ArtifactHashId, ArtifactKind},
 };
 use sha2::{Digest, Sha256};
 use slog::{error, warn, Drain};
+use tokio::io::AsyncWriteExt;
 use tufaceous_lib::ControlPlaneZoneImages;
 use update_engine::StepResult;
 
@@ -42,6 +44,7 @@ impl InstallinatorApp {
     pub async fn exec(self, log: &slog::Logger) -> Result<()> {
         match self.subcommand {
             InstallinatorCommand::DebugDiscover(opts) => opts.exec(log).await,
+            InstallinatorCommand::DebugDownload(opts) => opts.exec(log).await,
             InstallinatorCommand::DebugHardwareScan(opts) => {
                 opts.exec(log).await
             }
@@ -74,6 +77,8 @@ impl InstallinatorApp {
 enum InstallinatorCommand {
     /// Discover peers on the bootstrap network.
     DebugDiscover(DebugDiscoverOpts),
+    /// Download artifacts.
+    DebugDownload(DebugDownloadOpts),
     /// Scan hardware to find the target M.2 device.
     DebugHardwareScan(DebugHardwareScan),
     /// Perform the installation.
@@ -96,6 +101,66 @@ impl DebugDiscoverOpts {
             Duration::from_secs(10),
         );
         println!("discovered peers: {}", peers.display());
+        Ok(())
+    }
+}
+
+/// Download artifacts.
+#[derive(Debug, Args)]
+#[command(version)]
+struct DebugDownloadOpts {
+    #[command(flatten)]
+    discover_opts: DiscoverOpts,
+
+    /// Artifact ID options
+    #[command(flatten)]
+    artifact_ids: ArtifactIdOpts,
+
+    /// Perform downloads until a hash mismatch occurs.
+    #[clap(long)]
+    retry_until_mismatch: bool,
+
+    /// Dump downloaded artifacts to the specified directory.
+    ///
+    /// This is most useful for debugging artifact download failures.
+    #[clap(long)]
+    artifact_dump_dir: Option<Utf8PathBuf>,
+}
+
+impl DebugDownloadOpts {
+    async fn exec(self, log: &slog::Logger) -> Result<()> {
+        let image_id = self.artifact_ids.resolve()?;
+        let discovery = &self.discover_opts.mechanism;
+
+        let (event_sender, mut event_receiver) =
+            tokio::sync::mpsc::channel::<Event>(512);
+        tokio::task::spawn(async move {
+            // Discard events until the sender is closed.
+            while event_receiver.recv().await.is_some() {}
+        });
+        let artifact_dump_dir = self.artifact_dump_dir.as_deref();
+
+        for i in 1.. {
+            slog::info!(log, "trying download, iteration {i}");
+            let engine = UpdateEngine::new(log, event_sender.clone());
+            register_download_steps(
+                log,
+                &engine,
+                image_id,
+                discovery,
+                artifact_dump_dir,
+            );
+
+            engine.execute().await?;
+            if self.retry_until_mismatch {
+                slog::info!(log, "download successful, retrying after 100ms");
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            } else {
+                slog::info!(log, "download successful, exiting (--retry-until-mismatch to retry)");
+                break;
+            }
+        }
+
         Ok(())
     }
 }
@@ -143,14 +208,18 @@ struct InstallOpts {
     #[clap(long)]
     stay_alive: bool,
 
+    /// Dump downloaded artifacts to the specified directory.
+    ///
+    /// This is most useful for debugging artifact download failures.
+    #[clap(long)]
+    artifact_dump_dir: Option<Utf8PathBuf>,
+
     /// Install on a gimlet's M.2 drives, found via scanning for hardware.
     ///
     /// WARNING: This will overwrite the boot image slice of both M.2 drives, if
     /// present!
     #[clap(long)]
     install_on_gimlet: bool,
-
-    // TODO: checksum?
 
     // The destination to write to.
     #[clap(
@@ -184,94 +253,22 @@ impl InstallOpts {
             });
         let progress_handle = progress_reporter.start();
         let discovery = &self.discover_opts.mechanism;
+        let artifact_dump_dir = self.artifact_dump_dir.as_deref();
 
         let engine = UpdateEngine::new(log, event_sender);
 
-        let host_phase_2_id = ArtifactHashId {
-            // TODO: currently we're assuming that wicketd will unpack the host
-            // phase 2 image. We may instead have the installinator do it.
-            kind: ArtifactKind::HOST_PHASE_2,
-            hash: image_id.host_phase_2,
-        };
-        let host_2_phase_id_2 = host_phase_2_id.clone();
-        let host_phase_2_artifact = engine
-            .new_step(
-                InstallinatorComponent::HostPhase2,
-                InstallinatorStepId::Download,
-                "Downloading host phase 2 artifact",
-                |cx| async move {
-                    let host_phase_2_artifact =
-                        fetch_artifact(&cx, &host_phase_2_id, discovery, log)
-                            .await?;
-
-                    // Check that the sha256 of the data we got from wicket
-                    // matches the data we asked for. If this fails, we fail the
-                    // entire installation rather than trying to fetch the
-                    // artifact again, because we're fetching data from wicketd
-                    // (in memory) over TCP to ourselves (in memory), so the
-                    // only cases where this could fail are disturbing enough
-                    // (memory corruption, corruption under TCP, or wicketd gave
-                    // us something other than what we requested) we want to
-                    // know immediately and not retry: it's likely an operator
-                    // could miss any warnings we emit if a retry succeeds.
-                    check_downloaded_artifact_hash(
-                        "host phase 2",
-                        host_phase_2_artifact.artifact.clone(),
-                        host_phase_2_id.hash,
-                    )
-                    .await?;
-
-                    let address = host_phase_2_artifact.addr;
-
-                    StepSuccess::new(host_phase_2_artifact)
-                        .with_metadata(
-                            InstallinatorCompletionMetadata::Download {
-                                address,
-                            },
-                        )
-                        .into()
-                },
-            )
-            .register();
-
-        let control_plane_id = ArtifactHashId {
-            kind: KnownArtifactKind::ControlPlane.into(),
-            hash: image_id.control_plane,
-        };
-        let control_plane_id_2 = control_plane_id.clone();
-        let control_plane_artifact = engine
-            .new_step(
-                InstallinatorComponent::ControlPlane,
-                InstallinatorStepId::Download,
-                "Downloading control plane artifact",
-                |cx| async move {
-                    let control_plane_artifact =
-                        fetch_artifact(&cx, &control_plane_id, discovery, log)
-                            .await?;
-
-                    // Check that the sha256 of the data we got from wicket
-                    // matches the data we asked for. We do not retry this for
-                    // the same reasons described above when checking the
-                    // downloaded host phase 2 artifact.
-                    check_downloaded_artifact_hash(
-                        "control plane",
-                        control_plane_artifact.artifact.clone(),
-                        control_plane_id.hash,
-                    )
-                    .await?;
-
-                    let address = control_plane_artifact.addr;
-
-                    StepSuccess::new(control_plane_artifact)
-                        .with_metadata(
-                            InstallinatorCompletionMetadata::Download {
-                                address,
-                            },
-                        )
-                        .into()
-                },
-            )
-            .register();
+        let DownloadStepHandles {
+            host_phase_2_id,
+            host_phase_2_artifact,
+            control_plane_id,
+            control_plane_artifact,
+        } = register_download_steps(
+            log,
+            &engine,
+            image_id,
+            discovery,
+            artifact_dump_dir,
+        );
 
         let destination = if self.install_on_gimlet {
             let log = log.clone();
@@ -329,9 +326,9 @@ impl InstallOpts {
                         control_plane_zones.into_value(cx.token()).await;
 
                     let mut writer = ArtifactWriter::new(
-                        &host_2_phase_id_2,
+                        &host_phase_2_id,
                         &host_phase_2_artifact.artifact,
-                        &control_plane_id_2,
+                        &control_plane_id,
                         &control_plane_zones,
                         destination,
                     );
@@ -388,25 +385,173 @@ impl InstallOpts {
     }
 }
 
-async fn check_downloaded_artifact_hash(
+struct DownloadStepHandles {
+    host_phase_2_id: ArtifactHashId,
+    host_phase_2_artifact: StepHandle<FetchedArtifact>,
+
+    control_plane_id: ArtifactHashId,
+    control_plane_artifact: StepHandle<FetchedArtifact>,
+}
+
+fn register_download_steps<'a>(
+    log: &'a slog::Logger,
+    engine: &UpdateEngine<'a, InstallinatorSpec>,
+    image_id: InstallinatorImageId,
+    discovery: &'a DiscoveryMechanism,
+    artifact_dump_dir: Option<&'a Utf8Path>,
+) -> DownloadStepHandles {
+    let host_phase_2_id = ArtifactHashId {
+        // TODO: currently we're assuming that wicketd will unpack the host
+        // phase 2 image. We may instead have the installinator do it.
+        kind: ArtifactKind::HOST_PHASE_2,
+        hash: image_id.host_phase_2,
+    };
+    let host_phase_2_id_2 = host_phase_2_id.clone();
+    let host_phase_2_artifact = engine
+        .new_step(
+            InstallinatorComponent::HostPhase2,
+            InstallinatorStepId::Download,
+            "Downloading host phase 2 artifact",
+            move |cx| async move {
+                let host_phase_2_artifact =
+                    fetch_artifact(&cx, &host_phase_2_id_2, discovery, log)
+                        .await?;
+
+                // Check that the sha256 of the data we got from wicket
+                // matches the data we asked for. If this fails, we fail the
+                // entire installation rather than trying to fetch the
+                // artifact again, because we're fetching data from wicketd
+                // (in memory) over TCP to ourselves (in memory), so the
+                // only cases where this could fail are disturbing enough
+                // (memory corruption, corruption under TCP, or wicketd gave
+                // us something other than what we requested) we want to
+                // know immediately and not retry: it's likely an operator
+                // could miss any warnings we emit if a retry succeeds.
+                dump_and_check_downloaded_artifact_hash(
+                    log,
+                    "host phase 2",
+                    host_phase_2_artifact.clone(),
+                    artifact_dump_dir,
+                    host_phase_2_id_2.hash,
+                )
+                .await?;
+
+                let address = host_phase_2_artifact.addr;
+
+                StepSuccess::new(host_phase_2_artifact)
+                    .with_metadata(InstallinatorCompletionMetadata::Download {
+                        address,
+                    })
+                    .into()
+            },
+        )
+        .register();
+
+    let control_plane_id = ArtifactHashId {
+        kind: KnownArtifactKind::ControlPlane.into(),
+        hash: image_id.control_plane,
+    };
+    let control_plane_id_2 = control_plane_id.clone();
+    let control_plane_artifact = engine
+        .new_step(
+            InstallinatorComponent::ControlPlane,
+            InstallinatorStepId::Download,
+            "Downloading control plane artifact",
+            move |cx| async move {
+                let control_plane_artifact =
+                    fetch_artifact(&cx, &control_plane_id_2, discovery, log)
+                        .await?;
+
+                // Check that the sha256 of the data we got from wicket
+                // matches the data we asked for. We do not retry this for
+                // the same reasons described above when checking the
+                // downloaded host phase 2 artifact.
+                dump_and_check_downloaded_artifact_hash(
+                    log,
+                    "control plane",
+                    control_plane_artifact.clone(),
+                    artifact_dump_dir,
+                    control_plane_id_2.hash,
+                )
+                .await?;
+
+                let address = control_plane_artifact.addr;
+
+                StepSuccess::new(control_plane_artifact)
+                    .with_metadata(InstallinatorCompletionMetadata::Download {
+                        address,
+                    })
+                    .into()
+            },
+        )
+        .register();
+
+    DownloadStepHandles {
+        host_phase_2_id,
+        host_phase_2_artifact,
+        control_plane_id,
+        control_plane_artifact,
+    }
+}
+
+async fn dump_and_check_downloaded_artifact_hash(
+    log: &slog::Logger,
     name: &'static str,
-    data: BufList,
+    artifact: FetchedArtifact,
+    artifact_dump_dir: Option<&Utf8Path>,
     expected_hash: ArtifactHash,
 ) -> Result<()> {
+    // Make a separate copy of the artifact for dumping.
+    let mut artifact_bytes = artifact.artifact.clone();
+    if let Some(dir) = artifact_dump_dir {
+        let path = dir.join(artifact.kind.as_str());
+
+        slog::info!(log, "dumping artifact to `{path}`");
+
+        // Dump the artifact to the specified directory.
+        std::fs::create_dir_all(dir)
+            .with_context(|| format!("error creating dump dir `{dir}`"))?;
+
+        let path = dir.join(artifact.kind.as_str());
+        let mut f =
+            tokio::fs::File::create(&path).await.with_context(|| {
+                format!("error dumping artifact: error creating path `{path}`")
+            })?;
+
+        f.write_all_buf(&mut artifact_bytes).await.with_context(|| {
+            format!("error dumping artifact: error writing to path `{path}`")
+        })?;
+
+        f.shutdown().await.with_context(|| {
+            format!("error dumping artifact: error flushing path `{path}`")
+        })?;
+
+        slog::info!(log, "artifact dumped to `{path}`");
+    }
+
+    let log = log.clone();
+
     tokio::task::spawn_blocking(move || {
+        slog::info!(
+            log,
+            "checking downloaded {name} against hash: {expected_hash}"
+        );
+
         let mut hasher = Sha256::new();
-        for chunk in data.iter() {
+        for chunk in artifact.artifact.iter() {
             hasher.update(chunk);
         }
         let computed_hash = ArtifactHash(hasher.finalize().into());
         if expected_hash != computed_hash {
-            bail!(
+            let message = format!(
                 "downloaded {name} checksum failure: \
-                 expected {} but calculated {}",
-                hex::encode(&expected_hash),
-                hex::encode(&computed_hash)
+                     expected {expected_hash} but calculated {computed_hash}",
             );
+            slog::error!(log, "{message}");
+            bail!("{message}");
         }
+
+        slog::info!(log, "downloaded {name} hash matches: {expected_hash}");
         Ok(())
     })
     .await
