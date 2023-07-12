@@ -10625,35 +10625,10 @@
       },
       "PhysicalDiskKind": {
         "description": "Describes the form factor of physical disks.",
-        "oneOf": [
-          {
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "m2"
-                ]
-              }
-            },
-            "required": [
-              "type"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "u2"
-                ]
-              }
-            },
-            "required": [
-              "type"
-            ]
-          }
+        "type": "string",
+        "enum": [
+          "m2",
+          "u2"
         ]
       },
       "PhysicalDiskResultsPage": {

@@ -841,7 +841,7 @@ impl Instance {
             &root,
             &["/opt/oxide".into()],
             "propolis-server",
-            Some(&inner.propolis_id().to_string()),
+            Some(*inner.propolis_id()),
             // dataset=
             &[],
             // filesystems=

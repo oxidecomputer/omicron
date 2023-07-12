@@ -1011,7 +1011,7 @@ impl ServiceManager {
             &request.root,
             zone_image_paths.as_slice(),
             &request.zone.zone_type.to_string(),
-            unique_name.as_deref(),
+            unique_name,
             datasets.as_slice(),
             &filesystems,
             &devices,
@@ -3013,7 +3013,7 @@ mod test {
     const GLOBAL_ZONE_BOOTSTRAP_IP: Ipv6Addr = Ipv6Addr::LOCALHOST;
     const SWITCH_ZONE_BOOTSTRAP_IP: Ipv6Addr = Ipv6Addr::LOCALHOST;
 
-    const EXPECTED_ZONE_NAME: &str = "oxz_oximeter";
+    const EXPECTED_ZONE_NAME_PREFIX: &str = "oxz_oximeter";
 
     // Returns the expectations for a new service to be created.
     fn expect_new_service() -> Vec<Box<dyn std::any::Any>> {
@@ -3028,14 +3028,14 @@ mod test {
         // Install the Omicron Zone
         let install_ctx = MockZones::install_omicron_zone_context();
         install_ctx.expect().return_once(|_, _, name, _, _, _, _, _, _| {
-            assert_eq!(name, EXPECTED_ZONE_NAME);
+            assert!(name.starts_with(EXPECTED_ZONE_NAME_PREFIX));
             Ok(())
         });
 
         // Boot the zone.
         let boot_ctx = MockZones::boot_context();
         boot_ctx.expect().return_once(|name| {
-            assert_eq!(name, EXPECTED_ZONE_NAME);
+            assert!(name.starts_with(EXPECTED_ZONE_NAME_PREFIX));
             Ok(())
         });
 
@@ -3044,7 +3044,7 @@ mod test {
         // `MockZone::id` to find the zone and get its ID.
         let id_ctx = MockZones::id_context();
         id_ctx.expect().return_once(|name| {
-            assert_eq!(name, EXPECTED_ZONE_NAME);
+            assert!(name.starts_with(EXPECTED_ZONE_NAME_PREFIX));
             Ok(Some(1))
         });
 
@@ -3128,7 +3128,7 @@ mod test {
     fn drop_service_manager(mgr: ServiceManager) {
         let halt_ctx = MockZones::halt_and_remove_logged_context();
         halt_ctx.expect().returning(|_, name| {
-            assert_eq!(name, EXPECTED_ZONE_NAME);
+            assert!(name.starts_with(EXPECTED_ZONE_NAME_PREFIX));
             Ok(())
         });
         let delete_vnic_ctx = MockDladm::delete_vnic_context();

@@ -544,13 +544,26 @@ impl ServiceZoneRequest {
     pub fn zone_name(&self) -> String {
         illumos_utils::running_zone::InstalledZone::get_zone_name(
             &self.zone_type.to_string(),
-            self.zone_name_unique_identifier().as_deref(),
+            self.zone_name_unique_identifier(),
         )
     }
 
     // The name of a unique identifier for the zone, if one is necessary.
-    pub fn zone_name_unique_identifier(&self) -> Option<String> {
-        self.dataset.as_ref().map(|d| d.name.pool().to_string())
+    pub fn zone_name_unique_identifier(&self) -> Option<Uuid> {
+        match &self.zone_type {
+            // The switch zone is necessarily a singleton.
+            ZoneType::Switch => None,
+            // All other zones should be identified by their zone UUID.
+            ZoneType::Clickhouse
+            | ZoneType::CockroachDb
+            | ZoneType::Crucible
+            | ZoneType::ExternalDns
+            | ZoneType::InternalDns
+            | ZoneType::Nexus
+            | ZoneType::CruciblePantry
+            | ZoneType::Ntp
+            | ZoneType::Oximeter => Some(self.id),
+        }
     }
 }
 
