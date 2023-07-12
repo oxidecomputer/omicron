@@ -305,7 +305,8 @@ impl Plan {
             .into_iter()
             .map(|dns_subnet| dns_subnet.dns_address().ip().to_string())
             .collect::<Vec<String>>();
-        for dns_subnet in dns_subnets {
+        for i in 0..dns_subnets.len() {
+            let dns_subnet = &dns_subnets[i];
             let ip = dns_subnet.dns_address().ip();
             let sled = {
                 let which_sled =
@@ -332,12 +333,13 @@ impl Plan {
                 zone_type: ZoneType::InternalDns,
                 addresses: vec![ip],
                 dataset: Some(DatasetRequest { id, name: dataset_name }),
-                gz_addresses: vec![dns_subnet.gz_address().ip()],
                 services: vec![ServiceZoneService {
                     id,
                     details: ServiceType::InternalDns {
                         http_address,
                         dns_address,
+                        gz_address: dns_subnet.gz_address().ip(),
+                        gz_address_index: i.try_into().expect("Giant indices?"),
                     },
                 }],
             });
@@ -364,7 +366,6 @@ impl Plan {
                 zone_type: ZoneType::CockroachDb,
                 addresses: vec![ip],
                 dataset: Some(DatasetRequest { id, name: dataset_name }),
-                gz_addresses: vec![],
                 services: vec![ServiceZoneService {
                     id,
                     details: ServiceType::CockroachDb,
@@ -406,7 +407,6 @@ impl Plan {
                 zone_type: ZoneType::ExternalDns,
                 addresses: vec![*http_address.ip()],
                 dataset: Some(DatasetRequest { id, name: dataset_name }),
-                gz_addresses: vec![],
                 services: vec![ServiceZoneService {
                     id,
                     details: ServiceType::ExternalDns {
@@ -442,7 +442,6 @@ impl Plan {
                 zone_type: ZoneType::Nexus,
                 addresses: vec![address],
                 dataset: None,
-                gz_addresses: vec![],
                 services: vec![ServiceZoneService {
                     id,
                     details: ServiceType::Nexus {
@@ -484,7 +483,6 @@ impl Plan {
                 zone_type: ZoneType::Oximeter,
                 addresses: vec![address],
                 dataset: None,
-                gz_addresses: vec![],
                 services: vec![ServiceZoneService {
                     id,
                     details: ServiceType::Oximeter,
@@ -514,7 +512,6 @@ impl Plan {
                 zone_type: ZoneType::Clickhouse,
                 addresses: vec![ip],
                 dataset: Some(DatasetRequest { id, name: dataset_name }),
-                gz_addresses: vec![],
                 services: vec![ServiceZoneService {
                     id,
                     details: ServiceType::Clickhouse,
@@ -542,7 +539,6 @@ impl Plan {
                 zone_type: ZoneType::CruciblePantry,
                 addresses: vec![address],
                 dataset: None,
-                gz_addresses: vec![],
                 services: vec![ServiceZoneService {
                     id,
                     details: ServiceType::CruciblePantry,
@@ -577,7 +573,6 @@ impl Plan {
                             DatasetKind::Crucible,
                         ),
                     }),
-                    gz_addresses: vec![],
                     services: vec![ServiceZoneService {
                         id,
                         details: ServiceType::Crucible,
@@ -633,7 +628,6 @@ impl Plan {
                 zone_type: ZoneType::Ntp,
                 addresses: vec![address],
                 dataset: None,
-                gz_addresses: vec![],
                 services,
             });
         }

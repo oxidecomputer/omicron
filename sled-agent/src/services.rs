@@ -1264,46 +1264,7 @@ impl ServiceManager {
             );
         }
 
-        info!(self.inner.log, "GZ addresses: {:#?}", request.zone.gz_addresses);
-        for &addr in &request.zone.gz_addresses {
-            info!(
-                self.inner.log,
-                "Ensuring GZ address {} exists",
-                addr.to_string()
-            );
-
-            let addr_name =
-                request.zone.zone_type.to_string().replace(&['-', '_'][..], "");
-            Zones::ensure_has_global_zone_v6_address(
-                self.inner.underlay_vnic.clone(),
-                addr,
-                &addr_name,
-            )
-            .map_err(|err| Error::GzAddress {
-                message: format!(
-                    "adding address on behalf of service zone '{}'",
-                    request.zone.zone_type
-                ),
-                err,
-            })?;
-
-            // If this address is in a new ipv6 prefix, notify maghemite so
-            // it can advertise it to other sleds.
-            self.advertise_prefix_of_address(addr).await;
-        }
-
-        let maybe_gateway = if !request.zone.gz_addresses.is_empty() {
-            // If this service supplies its own GZ address, add a route.
-            //
-            // This is currently being used for the DNS service.
-            //
-            // TODO: consider limiting the number of GZ addresses which
-            // can be supplied - now that we're actively using it, we
-            // aren't really handling the "many GZ addresses" case, and it
-            // doesn't seem necessary now.
-            info!(self.inner.log, "Zone using its own GZ address as gateway");
-            Some(request.zone.gz_addresses[0])
-        } else if let Some(info) = self.inner.sled_info.get() {
+        let maybe_gateway = if let Some(info) = self.inner.sled_info.get() {
             // Only consider a route to the sled's underlay address if the
             // underlay is up.
             let sled_underlay_subnet =
@@ -1481,8 +1442,44 @@ impl ServiceManager {
                     // enabled.
                     smfh.refresh()?;
                 }
-                ServiceType::InternalDns { http_address, dns_address } => {
+                ServiceType::InternalDns {
+                    http_address,
+                    dns_address,
+                    gz_address,
+                    gz_address_index,
+                } => {
                     info!(self.inner.log, "Setting up internal-dns service");
+
+                    // Internal DNS zones require a special route through the
+                    // global zone, since they are not on the same part of the
+                    // underlay as most other services on this sled (the sled's
+                    // subnet).
+                    //
+                    // We create an IP address in the dedicated portion of the
+                    // underlay used for internal DNS servers, but we *also*
+                    // add a number ("which DNS server is this") to ensure
+                    // these addresses are given unique names. In the unlikely
+                    // case that two internal DNS servers end up on the same
+                    // machine (which is effectively a developer-only
+                    // environment -- we wouldn't want this in prod!), they need
+                    // to be given distinct names.
+                    let addr_name = format!("internaldns{gz_address_index}");
+                    Zones::ensure_has_global_zone_v6_address(
+                        self.inner.underlay_vnic.clone(),
+                        *gz_address,
+                        &addr_name,
+                    )
+                    .map_err(|err| Error::GzAddress {
+                        message: format!(
+                            "Failed to create address {} for Internal DNS zone",
+                            addr_name
+                        ),
+                        err,
+                    })?;
+                    // If this address is in a new ipv6 prefix, notify maghemite so
+                    // it can advertise it to other sleds.
+                    self.advertise_prefix_of_address(*gz_address).await;
+
                     smfh.setprop(
                         "config/http_address",
                         format!(
@@ -2677,7 +2674,6 @@ impl ServiceManager {
             zone_type: ZoneType::Switch,
             addresses,
             dataset: None,
-            gz_addresses: vec![],
             services: services
                 .into_iter()
                 .map(|s| ServiceZoneService { id: Uuid::new_v4(), details: s })
@@ -3057,7 +3053,6 @@ mod test {
                 zone_type: ZoneType::Oximeter,
                 addresses: vec![Ipv6Addr::LOCALHOST],
                 dataset: None,
-                gz_addresses: vec![],
                 services: vec![ServiceZoneService {
                     id,
                     details: ServiceType::Oximeter,
@@ -3077,7 +3072,6 @@ mod test {
                 zone_type: ZoneType::Oximeter,
                 addresses: vec![Ipv6Addr::LOCALHOST],
                 dataset: None,
-                gz_addresses: vec![],
                 services: vec![ServiceZoneService {
                     id,
                     details: ServiceType::Oximeter,
