@@ -193,7 +193,6 @@ impl CurrentRssConfig {
             bootstrap_discovery: BootstrapAddressDiscovery::OnlyThese(
                 bootstrap_ips,
             ),
-            rack_secret_threshold: 1, // TODO REMOVE?
             ntp_servers: self.ntp_servers.clone(),
             dns_servers: self.dns_servers.clone(),
             internal_services_ip_pool_ranges,

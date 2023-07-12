@@ -1042,7 +1042,6 @@ mod tests {
         let config = Config {
             rack_subnet: Ipv6Addr::LOCALHOST,
             bootstrap_discovery: BootstrapAddressDiscovery::OnlyOurs,
-            rack_secret_threshold: 0,
             ntp_servers: Vec::new(),
             dns_servers: Vec::new(),
             internal_services_ip_pool_ranges: ip_pools
