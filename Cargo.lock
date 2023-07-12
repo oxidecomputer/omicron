@@ -4931,6 +4931,7 @@ dependencies = [
  "slog-term",
  "smf",
  "sp-sim",
+ "static_assertions",
  "subprocess",
  "tar",
  "tempfile",

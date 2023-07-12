@@ -19,8 +19,8 @@ use illumos_utils::zpool::ZpoolName;
 use internal_dns::{ServiceName, DNS_ZONE};
 use omicron_common::address::{
     get_sled_address, get_switch_zone_address, Ipv6Subnet, ReservedRackSubnet,
-    DENDRITE_PORT, DNS_HTTP_PORT, DNS_PORT, NTP_PORT, NUM_SOURCE_NAT_PORTS,
-    RSS_RESERVED_ADDRESSES, SLED_PREFIX,
+    DENDRITE_PORT, DNS_HTTP_PORT, DNS_PORT, DNS_REDUNDANCY, MAX_DNS_REDUNDANCY,
+    NTP_PORT, NUM_SOURCE_NAT_PORTS, RSS_RESERVED_ADDRESSES, SLED_PREFIX,
 };
 use omicron_common::api::external::{MacAddr, Vni};
 use omicron_common::api::internal::shared::{
@@ -295,13 +295,15 @@ impl Plan {
 
         // Provision internal DNS zones, striping across Sleds.
         let reserved_rack_subnet = ReservedRackSubnet::new(config.az_subnet());
-        let dns_subnets = reserved_rack_subnet.get_dns_subnets();
+        static_assertions::const_assert!(DNS_REDUNDANCY <= MAX_DNS_REDUNDANCY,);
+        let dns_subnets =
+            &reserved_rack_subnet.get_dns_subnets()[0..DNS_REDUNDANCY];
         let rack_dns_servers = dns_subnets
-            .clone()
             .into_iter()
             .map(|dns_subnet| dns_subnet.dns_address().ip().to_string())
             .collect::<Vec<String>>();
-        for dns_subnet in &dns_subnets {
+        for i in 0..dns_subnets.len() {
+            let dns_subnet = &dns_subnets[i];
             let ip = dns_subnet.dns_address().ip();
             let sled = {
                 let which_sled =
@@ -328,12 +330,13 @@ impl Plan {
                 zone_type: ZoneType::InternalDns,
                 addresses: vec![ip],
                 dataset: Some(DatasetRequest { id, name: dataset_name }),
-                gz_addresses: vec![dns_subnet.gz_address().ip()],
                 services: vec![ServiceZoneService {
                     id,
                     details: ServiceType::InternalDns {
                         http_address,
                         dns_address,
+                        gz_address: dns_subnet.gz_address().ip(),
+                        gz_address_index: i.try_into().expect("Giant indices?"),
                     },
                 }],
             });
@@ -360,7 +363,6 @@ impl Plan {
                 zone_type: ZoneType::CockroachDb,
                 addresses: vec![ip],
                 dataset: Some(DatasetRequest { id, name: dataset_name }),
-                gz_addresses: vec![],
                 services: vec![ServiceZoneService {
                     id,
                     details: ServiceType::CockroachDb,
@@ -402,7 +404,6 @@ impl Plan {
                 zone_type: ZoneType::ExternalDns,
                 addresses: vec![*http_address.ip()],
                 dataset: Some(DatasetRequest { id, name: dataset_name }),
-                gz_addresses: vec![],
                 services: vec![ServiceZoneService {
                     id,
                     details: ServiceType::ExternalDns {
@@ -438,7 +439,6 @@ impl Plan {
                 zone_type: ZoneType::Nexus,
                 addresses: vec![address],
                 dataset: None,
-                gz_addresses: vec![],
                 services: vec![ServiceZoneService {
                     id,
                     details: ServiceType::Nexus {
@@ -480,7 +480,6 @@ impl Plan {
                 zone_type: ZoneType::Oximeter,
                 addresses: vec![address],
                 dataset: None,
-                gz_addresses: vec![],
                 services: vec![ServiceZoneService {
                     id,
                     details: ServiceType::Oximeter,
@@ -510,7 +509,6 @@ impl Plan {
                 zone_type: ZoneType::Clickhouse,
                 addresses: vec![ip],
                 dataset: Some(DatasetRequest { id, name: dataset_name }),
-                gz_addresses: vec![],
                 services: vec![ServiceZoneService {
                     id,
                     details: ServiceType::Clickhouse,
@@ -538,7 +536,6 @@ impl Plan {
                 zone_type: ZoneType::CruciblePantry,
                 addresses: vec![address],
                 dataset: None,
-                gz_addresses: vec![],
                 services: vec![ServiceZoneService {
                     id,
                     details: ServiceType::CruciblePantry,
@@ -573,7 +570,6 @@ impl Plan {
                             DatasetKind::Crucible,
                         ),
                     }),
-                    gz_addresses: vec![],
                     services: vec![ServiceZoneService {
                         id,
                         details: ServiceType::Crucible,
@@ -629,7 +625,6 @@ impl Plan {
                 zone_type: ZoneType::Ntp,
                 addresses: vec![address],
                 dataset: None,
-                gz_addresses: vec![],
                 services,
             });
         }

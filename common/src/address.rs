@@ -17,14 +17,14 @@ pub const AZ_PREFIX: u8 = 48;
 pub const RACK_PREFIX: u8 = 56;
 pub const SLED_PREFIX: u8 = 64;
 
-/// The amount of redundancy for DNS servers.
+/// The amount of redundancy for internal DNS servers.
 ///
-/// Must be less than MAX_DNS_REDUNDANCY.
-pub const DNS_REDUNDANCY: usize = 1;
+/// Must be less than or equal to MAX_DNS_REDUNDANCY.
+pub const DNS_REDUNDANCY: usize = 3;
+
 /// The maximum amount of redundancy for DNS servers.
 ///
-/// This determines the number of addresses which are
-/// reserved for DNS servers.
+/// This determines the number of addresses which are reserved for DNS servers.
 pub const MAX_DNS_REDUNDANCY: usize = 5;
 
 pub const DNS_PORT: u16 = 53;
@@ -205,10 +205,10 @@ impl ReservedRackSubnet {
 
     /// Returns the DNS addresses from this reserved rack subnet.
     ///
-    /// These addresses will come from the first [`DNS_REDUNDANCY`] `/64s` of the
+    /// These addresses will come from the first [`MAX_DNS_REDUNDANCY`] `/64s` of the
     /// [`RACK_PREFIX`] subnet.
     pub fn get_dns_subnets(&self) -> Vec<DnsSubnet> {
-        (0..DNS_REDUNDANCY)
+        (0..MAX_DNS_REDUNDANCY)
             .map(|idx| {
                 let subnet =
                     get_64_subnet(self.0, u8::try_from(idx + 1).unwrap());
@@ -523,7 +523,7 @@ mod test {
 
         // Observe the first DNS subnet within this reserved rack subnet.
         let dns_subnets = rack_subnet.get_dns_subnets();
-        assert_eq!(DNS_REDUNDANCY, dns_subnets.len());
+        assert_eq!(MAX_DNS_REDUNDANCY, dns_subnets.len());
 
         // The DNS address and GZ address should be only differing by one.
         assert_eq!(
