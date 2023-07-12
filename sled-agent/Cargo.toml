@@ -68,6 +68,7 @@ tokio-tungstenite.workspace = true
 toml.workspace = true
 uuid.workspace = true
 zone.workspace = true
+static_assertions.workspace = true
 
 [target.'cfg(target_os = "illumos")'.dependencies]
 opte-ioctl.workspace = true

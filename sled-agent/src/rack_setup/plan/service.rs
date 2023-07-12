@@ -295,10 +295,7 @@ impl Plan {
 
         // Provision internal DNS zones, striping across Sleds.
         let reserved_rack_subnet = ReservedRackSubnet::new(config.az_subnet());
-        assert!(
-            DNS_REDUNDANCY <= MAX_DNS_REDUNDANCY,
-            "Attempting to deploy too many DNS servers"
-        );
+        static_assertions::const_assert!(DNS_REDUNDANCY <= MAX_DNS_REDUNDANCY,);
         let dns_subnets =
             &reserved_rack_subnet.get_dns_subnets()[0..DNS_REDUNDANCY];
         let rack_dns_servers = dns_subnets
