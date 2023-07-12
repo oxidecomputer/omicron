@@ -220,6 +220,37 @@ pub struct StorageResources {
 }
 
 impl StorageResources {
+    /// Creates a fabricated view of storage resources.
+    ///
+    /// Use this only when you want to reference the disks, but not actually
+    /// access them. Creates one internal and one external disk.
+    #[cfg(test)]
+    pub fn new_for_test() -> Self {
+        let new_disk_identity = || DiskIdentity {
+            vendor: "vendor".to_string(),
+            serial: Uuid::new_v4().to_string(),
+            model: "model".to_string(),
+        };
+
+        Self {
+            disks: Arc::new(Mutex::new(HashMap::from([
+                (
+                    new_disk_identity(),
+                    DiskWrapper::Synthetic {
+                        zpool_name: ZpoolName::new_internal(Uuid::new_v4()),
+                    },
+                ),
+                (
+                    new_disk_identity(),
+                    DiskWrapper::Synthetic {
+                        zpool_name: ZpoolName::new_external(Uuid::new_v4()),
+                    },
+                ),
+            ]))),
+            pools: Arc::new(Mutex::new(HashMap::new())),
+        }
+    }
+
     /// Returns the identity of the boot disk.
     ///
     /// If this returns `None`, we have not processed the boot disk yet.
