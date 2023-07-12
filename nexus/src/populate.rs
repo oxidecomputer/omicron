@@ -424,9 +424,6 @@ mod test {
             })
             .unwrap();
 
-        info!(&log, "cleaning up database");
-        db.cleanup().await.unwrap();
-
         // Test again with the database offline.  In principle we could do this
         // immediately without creating a new pool and datastore.  However, the
         // pool's default behavior is to wait 30 seconds for a connection, which
@@ -440,6 +437,8 @@ mod test {
         // ServiceUnavailable error, which indicates a transient failure.
         let pool =
             Arc::new(db::Pool::new_failfast_for_tests(&logctx.log, &cfg));
+        // We need to create the datastore before tearing down the database, as
+        // it verifies the schema version of the DB while booting.
         let datastore =
             Arc::new(db::DataStore::new(&logctx.log, pool).await.unwrap());
         let opctx = OpContext::for_background(
@@ -448,6 +447,9 @@ mod test {
             authn::Context::internal_db_init(),
             Arc::clone(&datastore),
         );
+
+        info!(&log, "cleaning up database");
+        db.cleanup().await.unwrap();
 
         info!(&log, "populator {:?}, with database offline", p);
         match p.populate(&opctx, &datastore, &args).await {
