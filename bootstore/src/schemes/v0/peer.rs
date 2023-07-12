@@ -31,20 +31,20 @@ pub struct Config {
     rack_secret_request_timeout: Duration,
 }
 
-// An error response from a `PeerRequest`
+/// An error response from a `PeerRequest`
 #[derive(Debug, From)]
 pub enum PeerRequestError {
-    // An `Init_` or `LoadRackSecret` request is already outstanding
-    // We only allow one at a time.
+    /// An `Init_` or `LoadRackSecret` request is already outstanding
+    /// We only allow one at a time.
     RequestAlreadyPending,
 
-    // An error returned by the Fsm API
+    /// An error returned by the Fsm API
     Fsm(ApiError),
 
-    // The peer task shutdown
+    /// The peer task shutdown
     Recv(oneshot::error::RecvError),
 
-    // Failed to send to a connection management task
+    /// Failed to send to a connection management task
     Send(mpsc::error::SendError<PeerApiRequest>),
 }
 
@@ -78,11 +78,11 @@ pub enum PeerApiRequest {
     /// Get the status of this peer
     GetStatus { responder: oneshot::Sender<Status> },
 
-    /// Shutdown the peer
+    /// Shutdown the peer's tokio tasks
     Shutdown,
 }
 
-// A handle for interacting with a `Peer` task
+/// A handle for interacting with a `Peer` task
 pub struct PeerHandle {
     tx: mpsc::Sender<PeerApiRequest>,
 }
@@ -164,6 +164,11 @@ pub struct Status {
 }
 
 /// A peer in the bootstore protocol
+///
+/// This is the primary type for running the lrtq. There is one peer running on
+/// each sled on the rack. Each peer runs in a tokio task, with separate tokio
+/// tasks for each connection to other peers. Peers drive the lrtq protocol via
+/// control of an underlying  `Fsm`.
 pub struct Peer {
     config: Config,
     fsm: Fsm,
@@ -174,8 +179,8 @@ pub struct Peer {
     shutdown: bool,
 
     // Connections that have been accepted, but where negotiation has not
-    // finished At this point, we only know the client port of the connection,
-    // and so cannot identify  it as a `Peer`.
+    // finished. At this point, we only know the client port of the connection,
+    // and so cannot identify it as a `Peer`.
     accepted_connections: BTreeMap<SocketAddrV6, AcceptedConnHandle>,
 
     // Connections that have not yet completed handshakes via `Hello` and
@@ -289,13 +294,13 @@ impl Peer {
         match res {
             Ok((sock, addr)) => {
                 let SocketAddr::V6(addr) = addr else {
-                    warn!(self.log, "Got connection from IPv4 address {}", addr);
+                    warn!(self.log, "Got connection from IPv4 address {addr}");
                     return;
                 };
                 // TODO: Log if a peer with a lower address connects?
                 // Remove any existing connection
                 self.remove_accepted_connection(&addr).await;
-                info!(self.log, "Accepted connection from {}", addr);
+                info!(self.log, "Accepted connection from {addr}");
                 self.handle_unique_id_counter += 1;
                 let handle = spawn_server(
                     self.handle_unique_id_counter,
@@ -370,7 +375,7 @@ impl Peer {
                 }
             }
             PeerApiRequest::PeerAddresses(peers) => {
-                info!(self.log, "Updated Peer Addresses: {:?}", peers);
+                info!(self.log, "Updated Peer Addresses: {peers:?}");
                 self.manage_connections(peers).await;
             }
             PeerApiRequest::GetStatus { responder } => {
@@ -424,7 +429,7 @@ impl Peer {
                     .send(MainToConnMsg::Msg(Msg::Fsm(envelope.msg)))
                     .await
                 {
-                    warn!(self.log, "Failed to send {:?}", e);
+                    warn!(self.log, "Failed to send {e:?}");
                 }
             } else {
                 warn!(self.log, "Missing connection to {}", envelope.to);
@@ -436,7 +441,7 @@ impl Peer {
     // persisting state, and then inform any callers (via outstanding responders)
     // of the result.
     async fn handle_api_output(&mut self, output: ApiOutput) {
-        info!(self.log, "Fsm output = {:?}", output);
+        info!(self.log, "Fsm output = {output:?}");
         match output {
             // Initialization is mutually exclusive
             ApiOutput::PeerInitialized | ApiOutput::RackInitComplete => {
@@ -467,7 +472,7 @@ impl Peer {
 
     // Inform any callers (via outstanding responders) of errors.
     async fn handle_api_error(&mut self, err: ApiError) {
-        warn!(self.log, "Fsm error= {:?}", err);
+        warn!(self.log, "Fsm error= {err:?}");
         match err {
             ApiError::AlreadyInitialized | ApiError::RackInitTimeout { .. } => {
                 if let Some(responder) = self.init_responder.take() {
@@ -541,7 +546,7 @@ impl Peer {
                     // This can only be a failure to init the rack, so we
                     // log it as an error and not a warning. It is unrecoverable
                     // without a rack reset.
-                    error!(self.log, "Error on connection:  {e}");
+                    error!(self.log, "Error on connection: {e}");
                 } else {
                     self.deliver_envelopes().await;
                 }
@@ -564,7 +569,7 @@ impl Peer {
                     // log it as an error and not a warning. It is unrecoverable
                     // without a rack reset. It's not an invariant violation
                     // though, so we don't panic.
-                    error!(self.log, "Error on connection:  {e}");
+                    error!(self.log, "Error on connection: {e}");
                 } else {
                     self.deliver_envelopes().await;
                 }
@@ -577,7 +582,7 @@ impl Peer {
                         return;
                     }
                 }
-                warn!(self.log, "peer disconnected {}", peer_id);
+                warn!(self.log, "peer disconnected {peer_id}");
                 self.connections.remove(&peer_id);
                 self.fsm.on_disconnected(&peer_id);
             }

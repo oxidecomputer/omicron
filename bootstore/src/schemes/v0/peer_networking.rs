@@ -127,10 +127,10 @@ struct EstablishedConn {
     read_buf: Vec<u8>,
     total_read: usize,
 
-    // Used for managing inactivity timeouts for the coonnection
+    // Used for managing inactivity timeouts for the connection
     last_received_msg: Instant,
 
-    // Keep a queue to write serialized messages into We limit the queue
+    // Keep a queue to write serialized messages into. We limit the queue
     // size, and if it gets exceeded it means the peer at the other
     // end isn't pulling data out fast enough. This should be basically
     // impossible to hit given the size and rate of message exchange
@@ -200,7 +200,7 @@ impl EstablishedConn {
             };
 
             if let Err(err) = res {
-                warn!(self.log, "Connection error: {:?}", err);
+                warn!(self.log, "Connection error: {err:?}");
                 return err;
             }
         }
@@ -228,8 +228,7 @@ impl EstablishedConn {
                         Err(e) => {
                             warn!(
                                 self.log,
-                                "Closing connection: Failed to serialize msg: {}",
-                                e
+                                "Closing connection: Failed to serialize msg: {e}"
                             );
                             self.close().await
                         }
@@ -251,7 +250,7 @@ impl EstablishedConn {
                 Ok(())
             }
             Err(e) => {
-                warn!(self.log, "Closing connection: Failed to write: {}", e);
+                warn!(self.log, "Closing connection: Failed to write: {e}");
                 self.close().await
             }
         }
@@ -266,7 +265,7 @@ impl EstablishedConn {
                 self.total_read += n;
             }
             Err(e) => {
-                warn!(self.log, "Closing connection: failed to read: {}", e);
+                warn!(self.log, "Closing connection: failed to read: {e}");
                 return self.close().await;
             }
         }
@@ -281,6 +280,8 @@ impl EstablishedConn {
                 self.read_buf[..FRAME_HEADER_SIZE].try_into().unwrap(),
             );
             let end = size + FRAME_HEADER_SIZE;
+
+            // If we haven't read the whole message yet, then return
             if end > self.total_read {
                 return Ok(());
             }
@@ -296,13 +297,13 @@ impl EstablishedConn {
                 Err(e) => {
                     warn!(
                         self.log,
-                        "Closing connection: failed to deserialize: {}", e
+                        "Closing connection: failed to deserialize: {e}",
                     );
                     return self.close().await;
                 }
             };
             self.last_received_msg = Instant::now();
-            debug!(self.log, "Received {:?}", msg);
+            debug!(self.log, "Received {msg:?}");
             if let Msg::Fsm(msg) = msg {
                 if let Err(e) = self
                     .main_tx
@@ -317,7 +318,7 @@ impl EstablishedConn {
                 {
                     warn!(
                         self.log,
-                        "Failed to send received msg to main task: {:?}", e
+                        "Failed to send received msg to main task: {e:?}"
                     );
                 }
             }
@@ -342,7 +343,7 @@ impl EstablishedConn {
                 Err(e) => {
                     warn!(
                         self.log,
-                        "Closing connection: Failed to serialize msg: {}", e
+                        "Closing connection: Failed to serialize msg: {e}"
                     );
                     self.close().await
                 }
@@ -362,7 +363,7 @@ impl EstablishedConn {
             })
             .await
         {
-            warn!(self.log, "Failed to send to main task: {:?}", e);
+            warn!(self.log, "Failed to send to main task: {e:?}");
         }
         let _ = self.write_sock.shutdown().await;
         Err(ConnErr::Retry)
@@ -388,7 +389,6 @@ pub async fn spawn_client(
                 Err(err) => {
                     // TODO: Throttle this?
                     warn!(log, "Failed to connect"; "addr" => addr.to_string());
-                    // TODO: Sleep
                     sleep(CONNECTION_RETRY_TIMEOUT).await;
                     continue;
                 }
