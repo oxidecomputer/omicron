@@ -28,6 +28,7 @@ use omicron_common::api::internal::shared::RackNetworkConfig;
 use sled_hardware::Baseboard;
 use std::collections::BTreeSet;
 use std::mem;
+use std::net::IpAddr;
 use std::net::Ipv6Addr;
 use wicket_common::rack_setup::PutRssUserConfigInsensitive;
 
@@ -56,6 +57,7 @@ pub(crate) struct CurrentRssConfig {
     ntp_servers: Vec<String>,
     dns_servers: Vec<String>,
     internal_services_ip_pool_ranges: Vec<address::IpRange>,
+    external_dns_ips: Vec<IpAddr>,
     external_dns_zone_name: String,
     external_certificates: Vec<Certificate>,
     recovery_silo_password_hash: Option<omicron_passwords::NewPasswordHash>,
@@ -128,6 +130,9 @@ impl CurrentRssConfig {
         if self.internal_services_ip_pool_ranges.is_empty() {
             bail!("at least one internal services IP pool range is required");
         }
+        if self.external_dns_ips.is_empty() {
+            bail!("at least one external DNS IP address is required");
+        }
         if self.external_dns_zone_name.is_empty() {
             bail!("external dns zone name is required");
         }
@@ -192,6 +197,7 @@ impl CurrentRssConfig {
             ntp_servers: self.ntp_servers.clone(),
             dns_servers: self.dns_servers.clone(),
             internal_services_ip_pool_ranges,
+            external_dns_ips: self.external_dns_ips.clone(),
             external_dns_zone_name: self.external_dns_zone_name.clone(),
             external_certificates: self.external_certificates.clone(),
             recovery_silo: RecoverySiloConfig {
@@ -332,6 +338,7 @@ impl CurrentRssConfig {
         self.dns_servers = value.dns_servers;
         self.internal_services_ip_pool_ranges =
             value.internal_services_ip_pool_ranges;
+        self.external_dns_ips = value.external_dns_ips;
         self.external_dns_zone_name = value.external_dns_zone_name;
         self.rack_network_config = Some(value.rack_network_config);
 
@@ -363,6 +370,7 @@ impl From<&'_ CurrentRssConfig> for CurrentRssUserConfig {
                 internal_services_ip_pool_ranges: rss
                     .internal_services_ip_pool_ranges
                     .clone(),
+                external_dns_ips: rss.external_dns_ips.clone(),
                 external_dns_zone_name: rss.external_dns_zone_name.clone(),
                 rack_network_config: rss.rack_network_config.clone(),
             },
