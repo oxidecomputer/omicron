@@ -347,7 +347,7 @@ You can also list the zones that have been created so far:
 $ zoneadm list -cnv
 
 # View logs for a service:
-$ pfexec tail -f $(pfexec svcs -z oxz_nexus -L nexus)
+$ pfexec tail -f $(pfexec svcs -z oxz_nexus_<UUID> -L nexus)
 ----
 
 === SoftNPU Configuration

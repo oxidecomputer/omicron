@@ -544,33 +544,26 @@ impl ServiceZoneRequest {
     pub fn zone_name(&self) -> String {
         illumos_utils::running_zone::InstalledZone::get_zone_name(
             &self.zone_type.to_string(),
-            self.zone_name_unique_identifier().as_deref(),
+            self.zone_name_unique_identifier(),
         )
     }
 
     // The name of a unique identifier for the zone, if one is necessary.
-    pub fn zone_name_unique_identifier(&self) -> Option<String> {
-        self.dataset.as_ref().map(|d| d.name.pool().to_string()).or_else(|| {
-            match &self.zone_type {
-                // The switch zone is necessarily a singleton.
-                ZoneType::Switch => None,
-
-                // We should never get here for the following zones because they
-                // have a dataset.
-                ZoneType::Clickhouse
-                | ZoneType::CockroachDb
-                | ZoneType::Crucible
-                | ZoneType::ExternalDns
-                | ZoneType::InternalDns => None,
-
-                // Other zones should be able to have multiple instances on the
-                // same Sled.  Not all have been tested yet.
-                ZoneType::Nexus => Some(self.id.to_string()),
-                ZoneType::CruciblePantry
-                | ZoneType::Ntp
-                | ZoneType::Oximeter => None,
-            }
-        })
+    pub fn zone_name_unique_identifier(&self) -> Option<Uuid> {
+        match &self.zone_type {
+            // The switch zone is necessarily a singleton.
+            ZoneType::Switch => None,
+            // All other zones should be identified by their zone UUID.
+            ZoneType::Clickhouse
+            | ZoneType::CockroachDb
+            | ZoneType::Crucible
+            | ZoneType::ExternalDns
+            | ZoneType::InternalDns
+            | ZoneType::Nexus
+            | ZoneType::CruciblePantry
+            | ZoneType::Ntp
+            | ZoneType::Oximeter => Some(self.id),
+        }
     }
 }
 
