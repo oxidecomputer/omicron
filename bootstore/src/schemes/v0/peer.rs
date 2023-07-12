@@ -566,9 +566,6 @@ impl Node {
                 }
             }
             ConnToMainMsgInner::ConnectedInitiator { addr, peer_id } => {
-                // If we don't have a handle, it just means that the connection re-occurred
-                // inside the loop in `spawn_connection_initiator_task`, and we already
-                // have it in `established_connections`.
                 if let Some(handle) = self.initiating_connections.remove(&addr)
                 {
                     // Ignore the stale message if the unique_id doesn't match what
