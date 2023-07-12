@@ -5,8 +5,9 @@
 //! The entrypoint of the v0 scheme for use by bootstrap agent
 
 use super::peer_networking::{
-    spawn_client, spawn_server, AcceptedConnHandle, ConnToMainMsg,
-    ConnToMainMsgInner, MainToConnMsg, Msg, PeerConnHandle,
+    spawn_accepted_connection_management_task, spawn_connection_initiator_task,
+    AcceptedConnHandle, ConnToMainMsg, ConnToMainMsgInner, MainToConnMsg, Msg,
+    PeerConnHandle,
 };
 use super::{ApiError, ApiOutput, Config as FsmConfig, Fsm, RackUuid};
 use crate::trust_quorum::RackSecret;
@@ -31,9 +32,9 @@ pub struct Config {
     rack_secret_request_timeout: Duration,
 }
 
-/// An error response from a `PeerRequest`
+/// An error response from a `NodeApiRequest`
 #[derive(Debug, From)]
-pub enum PeerRequestError {
+pub enum NodeRequestError {
     /// An `Init_` or `LoadRackSecret` request is already outstanding
     /// We only allow one at a time.
     RequestAlreadyPending,
@@ -45,59 +46,61 @@ pub enum PeerRequestError {
     Recv(oneshot::error::RecvError),
 
     /// Failed to send to a connection management task
-    Send(mpsc::error::SendError<PeerApiRequest>),
+    Send(mpsc::error::SendError<NodeApiRequest>),
 }
 
-/// A request sent to the `Peer` task from the `PeerHandle`
-pub enum PeerApiRequest {
-    /// Initialize a rack at the behest of RSS running on the same scrimlet as this Peer
+/// A request sent to the `Node` task from the `NodeHandle`
+pub enum NodeApiRequest {
+    /// Initialize a rack at the behest of RSS running on the same scrimlet as
+    /// this node
     InitRack {
         rack_uuid: RackUuid,
         initial_membership: BTreeSet<Baseboard>,
-        responder: oneshot::Sender<Result<(), PeerRequestError>>,
+        responder: oneshot::Sender<Result<(), NodeRequestError>>,
     },
 
-    /// Initialize this peer as a learner.
+    /// Initialize this `Node` as a learner.
     ///
     /// Return `()` from the responder when the learner has learned its share
-    InitLearner { responder: oneshot::Sender<Result<(), PeerRequestError>> },
+    InitLearner { responder: oneshot::Sender<Result<(), NodeRequestError>> },
 
     /// Load the rack secret.
     ///
-    /// This can only be successfully called when a peer has been initialized,
-    /// either as initial member or learner who has learned its share.
+    /// This can only be successfully called when this `Node` has been
+    /// initialized, either as initial member or learner who has learned its
+    /// share.
     LoadRackSecret {
-        responder: oneshot::Sender<Result<RackSecret, PeerRequestError>>,
+        responder: oneshot::Sender<Result<RackSecret, NodeRequestError>>,
     },
 
-    /// Inform the peer of currently known IP addresses on the bootstrap network
+    /// Inform the `Node` of currently known IP addresses on the bootstrap network
     ///
     /// These are generated from DDM prefixes learned by the bootstrap agent.
     PeerAddresses(BTreeSet<SocketAddrV6>),
 
-    /// Get the status of this peer
+    /// Get the status of this node
     GetStatus { responder: oneshot::Sender<Status> },
 
-    /// Shutdown the peer's tokio tasks
+    /// Shutdown the node's tokio tasks
     Shutdown,
 }
 
-/// A handle for interacting with a `Peer` task
-pub struct PeerHandle {
-    tx: mpsc::Sender<PeerApiRequest>,
+/// A handle for interacting with a `Node` task
+pub struct NodeHandle {
+    tx: mpsc::Sender<NodeApiRequest>,
 }
 
-impl PeerHandle {
+impl NodeHandle {
     /// Initialize a rack at the behest of RSS running on the same scrimlet as
-    /// this Peer
+    /// this Node
     pub async fn init_rack(
         &self,
         rack_uuid: RackUuid,
         initial_membership: BTreeSet<Baseboard>,
-    ) -> Result<(), PeerRequestError> {
+    ) -> Result<(), NodeRequestError> {
         let (tx, rx) = oneshot::channel();
         self.tx
-            .send(PeerApiRequest::InitRack {
+            .send(NodeApiRequest::InitRack {
                 rack_uuid: RackUuid(Uuid::new_v4()),
                 initial_membership,
                 responder: tx,
@@ -107,49 +110,49 @@ impl PeerHandle {
         res
     }
 
-    /// Initialize this peer as a learner
-    pub async fn init_learner(&self) -> Result<(), PeerRequestError> {
+    /// Initialize this node  as a learner
+    pub async fn init_learner(&self) -> Result<(), NodeRequestError> {
         let (tx, rx) = oneshot::channel();
-        self.tx.send(PeerApiRequest::InitLearner { responder: tx }).await?;
+        self.tx.send(NodeApiRequest::InitLearner { responder: tx }).await?;
         let res = rx.await?;
         res
     }
 
     /// Load the rack secret.
     ///
-    /// This can only be successfully called when a peer has been initialized,
+    /// This can only be successfully called when a node has been initialized,
     /// either as initial member or learner who has learned its share.
     pub async fn load_rack_secret(
         &self,
-    ) -> Result<RackSecret, PeerRequestError> {
+    ) -> Result<RackSecret, NodeRequestError> {
         let (tx, rx) = oneshot::channel();
-        self.tx.send(PeerApiRequest::LoadRackSecret { responder: tx }).await?;
+        self.tx.send(NodeApiRequest::LoadRackSecret { responder: tx }).await?;
         let res = rx.await?;
         res
     }
 
-    /// Inform the peer of currently known IP addresses on the bootstrap network
+    /// Inform the node of currently known IP addresses on the bootstrap network
     ///
     /// These are generated from DDM prefixes learned by the bootstrap agent.
     pub async fn load_peer_addresses(
         &self,
         addrs: BTreeSet<SocketAddrV6>,
-    ) -> Result<(), PeerRequestError> {
-        self.tx.send(PeerApiRequest::PeerAddresses(addrs)).await?;
+    ) -> Result<(), NodeRequestError> {
+        self.tx.send(NodeApiRequest::PeerAddresses(addrs)).await?;
         Ok(())
     }
 
-    /// Get the status of this peer
-    pub async fn get_status(&self) -> Result<Status, PeerRequestError> {
+    /// Get the status of this node
+    pub async fn get_status(&self) -> Result<Status, NodeRequestError> {
         let (tx, rx) = oneshot::channel();
-        self.tx.send(PeerApiRequest::GetStatus { responder: tx }).await?;
+        self.tx.send(NodeApiRequest::GetStatus { responder: tx }).await?;
         let res = rx.await?;
         Ok(res)
     }
 
-    /// Shutdown the peer
-    pub async fn shutdown(&self) -> Result<(), PeerRequestError> {
-        self.tx.send(PeerApiRequest::Shutdown).await?;
+    /// Shutdown the node's tokio tasks
+    pub async fn shutdown(&self) -> Result<(), NodeRequestError> {
+        self.tx.send(NodeApiRequest::Shutdown).await?;
         Ok(())
     }
 }
@@ -163,53 +166,54 @@ pub struct Status {
     negotiating_connections: BTreeSet<SocketAddrV6>,
 }
 
-/// A peer in the bootstore protocol
+/// A node in the bootstore protocol
 ///
-/// This is the primary type for running the lrtq. There is one peer running on
-/// each sled on the rack. Each peer runs in a tokio task, with separate tokio
-/// tasks for each connection to other peers. Peers drive the lrtq protocol via
-/// control of an underlying  `Fsm`.
-pub struct Peer {
+/// This is the primary type for running the lrtq. There is one node running on
+/// each sled on the rack. Each node runs in a tokio task, with separate tokio
+/// tasks for each connection to other peer nodes. Nodes drive the lrtq protocol
+/// via control of an underlying  `Fsm`.
+pub struct Node {
     config: Config,
     fsm: Fsm,
     peers: BTreeSet<SocketAddrV6>,
     handle_unique_id_counter: u64,
 
-    // boolean set when a `PeerApiRequest::shutdown` is received
+    // boolean set when a `NodeApiRequest::shutdown` is received
     shutdown: bool,
 
     // Connections that have been accepted, but where negotiation has not
     // finished. At this point, we only know the client port of the connection,
-    // and so cannot identify it as a `Peer`.
+    // and so cannot identify it as a peer `Node`.
     accepted_connections: BTreeMap<SocketAddrV6, AcceptedConnHandle>,
 
-    // Connections that have not yet completed handshakes via `Hello` and
-    // `Identify` messages.
+    // Connections initiated from this node that have not yet completed
+    // handshakes via `Hello` and `Identify` messages.
     //
-    // We only store the client (connecting) side, not server (accepting) side here.
-    negotiating_connections: BTreeMap<SocketAddrV6, PeerConnHandle>,
+    // We only store the initiating (connecting) side, not accepting side here.
+    initiating_connections: BTreeMap<SocketAddrV6, PeerConnHandle>,
 
     // Active connections participating in scheme v0
     //
-    // This consists of both client and server connections
-    connections: BTreeMap<Baseboard, PeerConnHandle>,
+    // This consists of both initiating and accepting connections that have
+    // completed handshake and are now logically equivalent.
+    established_connections: BTreeMap<Baseboard, PeerConnHandle>,
 
     // Handle requests received from `PeerHandle`
-    rx: mpsc::Receiver<PeerApiRequest>,
+    rx: mpsc::Receiver<NodeApiRequest>,
 
     // Used to respond to `InitRack` or `InitLearner` requests
-    init_responder: Option<oneshot::Sender<Result<(), PeerRequestError>>>,
+    init_responder: Option<oneshot::Sender<Result<(), NodeRequestError>>>,
 
     // Used to respond to `LoadRackSecret` requests
     rack_secret_responder:
-        Option<oneshot::Sender<Result<RackSecret, PeerRequestError>>>,
+        Option<oneshot::Sender<Result<RackSecret, NodeRequestError>>>,
 
     log: Logger,
 
     // Handle messages received from connection tasks
     conn_rx: mpsc::Receiver<ConnToMainMsg>,
 
-    // Clone for use by connection tasks to send to the main peer task
+    // Clone for use by connection tasks to send to the main node task
     conn_tx: mpsc::Sender<ConnToMainMsg>,
 }
 
@@ -223,8 +227,8 @@ impl From<Config> for FsmConfig {
     }
 }
 
-impl Peer {
-    pub fn new(config: Config, log: &Logger) -> (Peer, PeerHandle) {
+impl Node {
+    pub fn new(config: Config, log: &Logger) -> (Node, NodeHandle) {
         // We only expect one outstanding request at a time for `Init_` or
         // `LoadRackSecret` requests, We can have one of those requests in
         // flight while allowing `PeerAddresses` updates.
@@ -237,15 +241,15 @@ impl Peer {
             Fsm::new_uninitialized(config.id.clone(), config.clone().into());
         let id_str = config.id.to_string();
         (
-            Peer {
+            Node {
                 config,
                 fsm,
                 peers: BTreeSet::new(),
                 handle_unique_id_counter: 0,
                 shutdown: false,
                 accepted_connections: BTreeMap::new(),
-                negotiating_connections: BTreeMap::new(),
-                connections: BTreeMap::new(),
+                initiating_connections: BTreeMap::new(),
+                established_connections: BTreeMap::new(),
                 rx,
                 init_responder: None,
                 rack_secret_responder: None,
@@ -254,7 +258,7 @@ impl Peer {
                 conn_rx,
                 conn_tx,
             },
-            PeerHandle { tx },
+            NodeHandle { tx },
         )
     }
 
@@ -302,7 +306,7 @@ impl Peer {
                 self.remove_accepted_connection(&addr).await;
                 info!(self.log, "Accepted connection from {addr}");
                 self.handle_unique_id_counter += 1;
-                let handle = spawn_server(
+                let handle = spawn_accepted_connection_management_task(
                     self.handle_unique_id_counter,
                     self.config.id.clone(),
                     self.config.addr.clone(),
@@ -318,10 +322,10 @@ impl Peer {
         }
     }
 
-    // Handle API requests from the `PeerHandle`
-    async fn on_api_request(&mut self, request: PeerApiRequest) {
+    // Handle API requests from the `NodeHandle`
+    async fn on_api_request(&mut self, request: NodeApiRequest) {
         match request {
-            PeerApiRequest::InitRack {
+            NodeApiRequest::InitRack {
                 rack_uuid,
                 initial_membership,
                 responder,
@@ -332,7 +336,7 @@ impl Peer {
                 );
                 if self.init_responder.is_some() {
                     let _ = responder
-                        .send(Err(PeerRequestError::RequestAlreadyPending));
+                        .send(Err(NodeRequestError::RequestAlreadyPending));
                     return;
                 }
                 if let Err(err) = self.fsm.init_rack(
@@ -346,10 +350,10 @@ impl Peer {
                     self.deliver_envelopes().await;
                 }
             }
-            PeerApiRequest::InitLearner { responder } => {
+            NodeApiRequest::InitLearner { responder } => {
                 if self.init_responder.is_some() {
                     let _ = responder
-                        .send(Err(PeerRequestError::RequestAlreadyPending));
+                        .send(Err(NodeRequestError::RequestAlreadyPending));
                     return;
                 }
                 if let Err(err) = self.fsm.init_learner(Instant::now().into()) {
@@ -359,10 +363,10 @@ impl Peer {
                     self.deliver_envelopes().await;
                 }
             }
-            PeerApiRequest::LoadRackSecret { responder } => {
+            NodeApiRequest::LoadRackSecret { responder } => {
                 if self.rack_secret_responder.is_some() {
                     let _ = responder
-                        .send(Err(PeerRequestError::RequestAlreadyPending));
+                        .send(Err(NodeRequestError::RequestAlreadyPending));
                     return;
                 }
                 if let Err(err) =
@@ -374,16 +378,16 @@ impl Peer {
                     self.deliver_envelopes().await;
                 }
             }
-            PeerApiRequest::PeerAddresses(peers) => {
+            NodeApiRequest::PeerAddresses(peers) => {
                 info!(self.log, "Updated Peer Addresses: {peers:?}");
                 self.manage_connections(peers).await;
             }
-            PeerApiRequest::GetStatus { responder } => {
+            NodeApiRequest::GetStatus { responder } => {
                 let status = Status {
                     fsm_state: self.fsm.state().name(),
                     peers: self.peers.clone(),
                     connections: self
-                        .connections
+                        .established_connections
                         .iter()
                         .map(|(id, handle)| (id.clone(), handle.addr))
                         .collect(),
@@ -393,23 +397,23 @@ impl Peer {
                         .cloned()
                         .collect(),
                     negotiating_connections: self
-                        .negotiating_connections
+                        .initiating_connections
                         .keys()
                         .cloned()
                         .collect(),
                 };
                 let _ = responder.send(status);
             }
-            PeerApiRequest::Shutdown => {
+            NodeApiRequest::Shutdown => {
                 self.shutdown = true;
                 // Shutdown all connection processing tasks
                 for (_, handle) in &self.accepted_connections {
                     let _ = handle.tx.send(MainToConnMsg::Close).await;
                 }
-                for (_, handle) in &self.negotiating_connections {
+                for (_, handle) in &self.initiating_connections {
                     let _ = handle.tx.send(MainToConnMsg::Close).await;
                 }
-                for (_, handle) in &self.connections {
+                for (_, handle) in &self.established_connections {
                     let _ = handle.tx.send(MainToConnMsg::Close).await;
                 }
             }
@@ -419,7 +423,9 @@ impl Peer {
     // Route messages to their destination connections
     async fn deliver_envelopes(&mut self) {
         for envelope in self.fsm.drain_envelopes() {
-            if let Some(conn_handle) = self.connections.get(&envelope.to) {
+            if let Some(conn_handle) =
+                self.established_connections.get(&envelope.to)
+            {
                 debug!(
                     self.log,
                     "Sending {:?} to {}", envelope.msg, envelope.to
@@ -539,7 +545,7 @@ impl Peer {
                     addr,
                     unique_id: accepted_handle.unique_id,
                 };
-                self.connections.insert(peer_id.clone(), handle);
+                self.established_connections.insert(peer_id.clone(), handle);
                 if let Err(e) =
                     self.fsm.on_connected(Instant::now().into(), peer_id)
                 {
@@ -552,8 +558,7 @@ impl Peer {
                 }
             }
             ConnToMainMsgInner::ConnectedClient { addr, peer_id } => {
-                let handle =
-                    self.negotiating_connections.remove(&addr).unwrap();
+                let handle = self.initiating_connections.remove(&addr).unwrap();
 
                 // Ignore the stale message if the unique_id doesn't match what
                 // we have stored.
@@ -561,7 +566,7 @@ impl Peer {
                     return;
                 }
 
-                self.connections.insert(peer_id.clone(), handle);
+                self.established_connections.insert(peer_id.clone(), handle);
                 if let Err(e) =
                     self.fsm.on_connected(Instant::now().into(), peer_id)
                 {
@@ -577,13 +582,14 @@ impl Peer {
             ConnToMainMsgInner::Disconnected { peer_id } => {
                 // Ignore the stale message if the unique_id doesn't match what
                 // we have stored.
-                if let Some(handle) = self.connections.get(&peer_id) {
+                if let Some(handle) = self.established_connections.get(&peer_id)
+                {
                     if unique_id != handle.unique_id {
                         return;
                     }
                 }
                 warn!(self.log, "peer disconnected {peer_id}");
-                self.connections.remove(&peer_id);
+                self.established_connections.remove(&peer_id);
                 self.fsm.on_disconnected(&peer_id);
             }
             ConnToMainMsgInner::Received { from, msg } => {
@@ -617,7 +623,7 @@ impl Peer {
         for addr in new_peers {
             if addr < self.config.addr {
                 self.handle_unique_id_counter += 1;
-                let handle = spawn_client(
+                let handle = spawn_connection_initiator_task(
                     self.handle_unique_id_counter,
                     self.config.id.clone(),
                     self.config.addr.clone(),
@@ -626,7 +632,7 @@ impl Peer {
                     self.conn_tx.clone(),
                 )
                 .await;
-                self.negotiating_connections.insert(addr, handle);
+                self.initiating_connections.insert(addr, handle);
             }
         }
 
@@ -644,24 +650,26 @@ impl Peer {
     }
 
     async fn remove_peer(&mut self, addr: SocketAddrV6) {
-        if let Some(handle) = self.negotiating_connections.remove(&addr) {
+        if let Some(handle) = self.initiating_connections.remove(&addr) {
             // The connection has not yet completed its handshake
             let _ = handle.tx.send(MainToConnMsg::Close).await;
         } else {
             // Do we have an established connection?
-            if let Some((id, handle)) =
-                self.connections.iter().find(|(_, handle)| handle.addr == addr)
+            if let Some((id, handle)) = self
+                .established_connections
+                .iter()
+                .find(|(_, handle)| handle.addr == addr)
             {
                 let _ = handle.tx.send(MainToConnMsg::Close).await;
                 // probably a better way to avoid borrowck issues
                 let id = id.clone();
-                self.connections.remove(&id);
+                self.established_connections.remove(&id);
             }
         }
     }
 
     async fn remove_established_connection(&mut self, peer_id: &Baseboard) {
-        if let Some(handle) = self.connections.remove(peer_id) {
+        if let Some(handle) = self.established_connections.remove(peer_id) {
             // Gracefully stop the task
             let _ = handle.tx.send(MainToConnMsg::Close).await;
         }
@@ -721,24 +729,24 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn basic_3_peers() {
+    async fn basic_3_nodes() {
         let log = log();
         let config = initial_config();
-        let (mut peer0, handle0) = Peer::new(config[0].clone(), &log);
-        let (mut peer1, handle1) = Peer::new(config[1].clone(), &log);
-        let (mut peer2, handle2) = Peer::new(config[2].clone(), &log);
+        let (mut node0, handle0) = Node::new(config[0].clone(), &log);
+        let (mut node1, handle1) = Node::new(config[1].clone(), &log);
+        let (mut node2, handle2) = Node::new(config[2].clone(), &log);
 
         let jh0 = tokio::spawn(async move {
-            peer0.run().await;
+            node0.run().await;
         });
         let jh1 = tokio::spawn(async move {
-            peer1.run().await;
+            node1.run().await;
         });
         let jh2 = tokio::spawn(async move {
-            peer2.run().await;
+            node2.run().await;
         });
 
-        // Inform each peer about the known addresses
+        // Inform each node about the known addresses
         let mut addrs: BTreeSet<_> =
             config.iter().map(|c| c.addr.clone()).collect();
         for handle in [&handle0, &handle1, &handle2] {
@@ -750,27 +758,27 @@ mod tests {
 
         let status = handle0.get_status().await;
 
-        // Ensure we can load the rack secret at all peers
+        // Ensure we can load the rack secret at all nodes
         handle0.load_rack_secret().await.unwrap();
         handle1.load_rack_secret().await.unwrap();
         handle2.load_rack_secret().await.unwrap();
 
-        // load the rack secret a second time on peer0
+        // load the rack secret a second time on node0
         handle0.load_rack_secret().await.unwrap();
 
-        // Shutdown the peer2 and make sure we can still load the rack
-        // secret (threshold=2) at peer0 and peer1
+        // Shutdown the node2 and make sure we can still load the rack
+        // secret (threshold=2) at node0 and node1
         handle2.shutdown().await;
         jh2.await;
         handle0.load_rack_secret().await.unwrap();
         handle1.load_rack_secret().await.unwrap();
 
         // Add a learner node
-        let (mut learner, learner_handle) = Peer::new(learner_config(), &log);
+        let (mut learner, learner_handle) = Node::new(learner_config(), &log);
         let learner_jh = tokio::spawn(async move {
             learner.run().await;
         });
-        // Inform the learner and peer0 and peer1 about all addresses including
+        // Inform the learner and node0 and node1 about all addresses including
         // the learner. This simulates DDM discovery
         addrs.insert(learner_config().addr.clone());
         let _ = learner_handle.load_peer_addresses(addrs.clone()).await;
@@ -780,22 +788,22 @@ mod tests {
         // Tell the learner to go ahead and learn its share.
         learner_handle.init_learner().await.unwrap();
 
-        // Shutdown peer1 and show that we can still load the rack secret at
-        // peer0 and the learner, because threshold=2 and it never changes.
+        // Shutdown node1 and show that we can still load the rack secret at
+        // node0 and the learner, because threshold=2 and it never changes.
         handle1.shutdown().await;
         jh1.await;
         handle0.load_rack_secret().await.unwrap();
         learner_handle.load_rack_secret().await.unwrap();
 
-        // Now shutdown the learner and show that peer0 cannot load the rack secret
+        // Now shutdown the learner and show that node0 cannot load the rack secret
         learner_handle.shutdown().await;
         learner_jh.await;
         handle0.load_rack_secret().await.unwrap_err();
 
-        // TODO: Once we have persistence, we can bring an old peer back from the dead
+        // TODO: Once we have persistence, we can bring an old node back from the dead
         // and reload the rack secret.
 
-        // Shutdown peer0
+        // Shutdown node0
         handle0.shutdown().await.unwrap();
         let _ = jh0.await;
     }

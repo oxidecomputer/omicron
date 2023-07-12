@@ -370,7 +370,7 @@ impl EstablishedConn {
     }
 }
 /// Spawn a task that maintains a client connection to a peer
-pub async fn spawn_client(
+pub async fn spawn_connection_initiator_task(
     unique_id: u64,
     my_peer_id: Baseboard,
     my_addr: SocketAddrV6,
@@ -452,7 +452,7 @@ pub async fn spawn_client(
 }
 
 /// Spawn a task that handles accepted connections from a peer
-pub async fn spawn_server(
+pub async fn spawn_accepted_connection_management_task(
     unique_id: u64,
     my_peer_id: Baseboard,
     my_addr: SocketAddrV6,
