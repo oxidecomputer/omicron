@@ -414,7 +414,7 @@ pub async fn spawn_connection_initiator_task(
                 .send(ConnToMainMsg {
                     handle_unique_id: unique_id,
                     msg: ConnToMainMsgInner::ConnectedInitiator {
-                        addr: addr.clone(),
+                        addr,
                         peer_id: identify.id.clone(),
                     },
                 })
@@ -490,7 +490,7 @@ pub async fn spawn_accepted_connection_management_task(
                 handle_unique_id: unique_id,
                 msg: ConnToMainMsgInner::ConnectedAcceptor {
                     accepted_addr: client_addr,
-                    addr: identify.addr.clone(),
+                    addr: identify.addr,
                     peer_id: identify.id.clone(),
                 },
             })

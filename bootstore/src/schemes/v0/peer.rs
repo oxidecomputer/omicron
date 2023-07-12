@@ -320,8 +320,8 @@ impl Node {
                 let handle = spawn_accepted_connection_management_task(
                     self.handle_unique_id_counter,
                     self.config.id.clone(),
-                    self.config.addr.clone(),
-                    addr.clone(),
+                    self.config.addr,
+                    addr,
                     sock,
                     self.conn_tx.clone(),
                     &self.log,
@@ -675,8 +675,8 @@ impl Node {
                 let handle = spawn_connection_initiator_task(
                     self.handle_unique_id_counter,
                     self.config.id.clone(),
-                    self.config.addr.clone(),
-                    addr.clone(),
+                    self.config.addr,
+                    addr,
                     &self.log,
                     self.conn_tx.clone(),
                 )
