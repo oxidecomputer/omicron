@@ -49,7 +49,7 @@ pub(crate) struct IprArtifactServer {
 }
 
 impl IprArtifactServer {
-    pub(crate) async fn report_progress(
+    pub(crate) fn report_progress(
         &self,
         update_id: Uuid,
         report: installinator_common::EventReport,
@@ -119,7 +119,7 @@ impl IprUpdateTracker {
     ///
     /// Exposed for testing.
     #[doc(hidden)]
-    pub async fn register(&self, update_id: Uuid) -> IprStartReceiver {
+    pub fn register(&self, update_id: Uuid) -> IprStartReceiver {
         slog::debug!(self.log, "registering new update id"; "update_id" => %update_id);
         let (start_sender, start_receiver) = oneshot::channel();
 
@@ -130,10 +130,7 @@ impl IprUpdateTracker {
 
     /// Returns the status of a running update, or None if the update ID hasn't
     /// been registered.
-    pub async fn update_state(
-        &self,
-        update_id: Uuid,
-    ) -> Option<RunningUpdateState> {
+    pub fn update_state(&self, update_id: Uuid) -> Option<RunningUpdateState> {
         let running_updates = self.running_updates.lock().unwrap();
         running_updates.get(&update_id).map(|x| x.to_state())
     }
@@ -270,17 +267,15 @@ mod tests {
         let update_id = Uuid::new_v4();
 
         assert_eq!(
-            ipr_artifact
-                .report_progress(
-                    Uuid::new_v4(),
-                    installinator_common::EventReport::default()
-                )
-                .await,
+            ipr_artifact.report_progress(
+                Uuid::new_v4(),
+                installinator_common::EventReport::default()
+            ),
             EventReportStatus::UnrecognizedUpdateId,
             "no registered UUIDs yet"
         );
 
-        let mut start_receiver = ipr_update_tracker.register(update_id).await;
+        let mut start_receiver = ipr_update_tracker.register(update_id);
 
         assert_eq!(
             start_receiver.try_recv().unwrap_err(),
@@ -291,7 +286,7 @@ mod tests {
         let first_report = installinator_common::EventReport::default();
 
         assert_eq!(
-            ipr_artifact.report_progress(update_id, first_report.clone()).await,
+            ipr_artifact.report_progress(update_id, first_report.clone()),
             EventReportStatus::Processed,
             "initial progress sent"
         );
@@ -349,9 +344,7 @@ mod tests {
         };
 
         assert_eq!(
-            ipr_artifact
-                .report_progress(update_id, completion_report.clone())
-                .await,
+            ipr_artifact.report_progress(update_id, completion_report.clone()),
             EventReportStatus::Processed,
             "completion report sent"
         );
@@ -373,9 +366,7 @@ mod tests {
         // it, causing the installinator to try again). This should result in
         // another Processed message rather than UnrecognizedUpdateId.
         assert_eq!(
-            ipr_artifact
-                .report_progress(update_id, completion_report.clone())
-                .await,
+            ipr_artifact.report_progress(update_id, completion_report.clone()),
             EventReportStatus::Processed,
             "completion report sent after being closed"
         );

@@ -202,7 +202,7 @@ impl UpdateTracker {
 
             let event_buffer = Arc::new(StdMutex::new(EventBuffer::new(16)));
             let ipr_start_receiver =
-                self.ipr_update_tracker.register(update_id).await;
+                self.ipr_update_tracker.register(update_id);
 
             let update_cx = UpdateContext {
                 update_id,
