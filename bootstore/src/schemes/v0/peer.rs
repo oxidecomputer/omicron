@@ -630,9 +630,16 @@ impl Node {
                     Err(err) => self.handle_api_error(err).await,
                 }
             }
-            ConnToMainMsgInner::FailedServerHandshake {
+            ConnToMainMsgInner::FailedAcceptorHandshake {
                 addr: SocketAddrV6,
-            } => {}
+            } => {
+                if let Some(handle) = self.accepted_connections.get(&addr) {
+                    if handle.unique_id != unique_id {
+                        return;
+                    }
+                }
+                self.accepted_connections.remove(&addr);
+            }
         }
     }
 

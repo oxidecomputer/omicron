@@ -79,7 +79,7 @@ pub enum ConnToMainMsgInner {
         from: Baseboard,
         msg: FsmMsg,
     },
-    FailedServerHandshake {
+    FailedAcceptorHandshake {
         addr: SocketAddrV6,
     },
 }
@@ -476,7 +476,9 @@ pub async fn spawn_accepted_connection_management_task(
                 main_tx
                     .send(ConnToMainMsg {
                         handle_unique_id: unique_id,
-                        msg: ConnToMainMsgInner::FailedServerHandshake { addr },
+                        msg: ConnToMainMsgInner::FailedAcceptorHandshake {
+                            addr,
+                        },
                     })
                     .await;
                 return;
