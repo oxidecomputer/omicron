@@ -106,6 +106,7 @@ mod test {
             internal_services_ip_pool_ranges: vec![IpRange::from(IpAddr::V4(
                 Ipv4Addr::new(129, 168, 1, 20),
             ))],
+            external_dns_ips: vec![],
             external_certificates: vec![],
             recovery_silo: RecoverySiloConfig {
                 silo_name: "test-silo".parse().unwrap(),

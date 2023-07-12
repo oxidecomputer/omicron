@@ -904,6 +904,13 @@
               "type": "string"
             }
           },
+          "external_dns_ips": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "ip"
+            }
+          },
           "external_dns_zone_name": {
             "type": "string"
           },
@@ -931,6 +938,7 @@
         "required": [
           "bootstrap_sleds",
           "dns_servers",
+          "external_dns_ips",
           "external_dns_zone_name",
           "internal_services_ip_pool_ranges",
           "ntp_servers"
@@ -1733,6 +1741,13 @@
               "type": "string"
             }
           },
+          "external_dns_ips": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "ip"
+            }
+          },
           "external_dns_zone_name": {
             "type": "string"
           },
@@ -1755,6 +1770,7 @@
         "required": [
           "bootstrap_sleds",
           "dns_servers",
+          "external_dns_ips",
           "external_dns_zone_name",
           "internal_services_ip_pool_ranges",
           "ntp_servers",

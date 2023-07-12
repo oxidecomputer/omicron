@@ -456,6 +456,14 @@
               "$ref": "#/components/schemas/Certificate"
             }
           },
+          "external_dns_ips": {
+            "description": "Service IP addresses on which we run external DNS servers.\n\nEach address must be present in `internal_services_ip_pool_ranges`.",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "ip"
+            }
+          },
           "external_dns_zone_name": {
             "description": "DNS name for the DNS zone delegated to the rack for external DNS",
             "type": "string"
@@ -506,6 +514,7 @@
           "bootstrap_discovery",
           "dns_servers",
           "external_certificates",
+          "external_dns_ips",
           "external_dns_zone_name",
           "internal_services_ip_pool_ranges",
           "ntp_servers",

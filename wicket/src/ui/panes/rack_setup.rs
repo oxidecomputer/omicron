@@ -787,6 +787,16 @@ fn rss_config_text<'a>(
     );
     append_list(
         &mut spans,
+        "External DNS IPs: ",
+        insensitive
+            .external_dns_ips
+            .iter()
+            .cloned()
+            .map(|ip| plain_list_item(ip.to_string()))
+            .collect(),
+    );
+    append_list(
+        &mut spans,
         "Sleds: ",
         insensitive
             .bootstrap_sleds

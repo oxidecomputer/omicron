@@ -71,9 +71,19 @@ impl TomlTemplate {
             })
             .collect();
 
-        for array in
-            ["ntp_servers", "dns_servers", "internal_services_ip_pool_ranges"]
-        {
+        *doc.get_mut("external_dns_ips").unwrap().as_array_mut().unwrap() =
+            config
+                .external_dns_ips
+                .iter()
+                .map(|s| Value::String(Formatted::new(s.to_string())))
+                .collect();
+
+        for array in [
+            "ntp_servers",
+            "dns_servers",
+            "internal_services_ip_pool_ranges",
+            "external_dns_ips",
+        ] {
             format_multiline_array(
                 doc.get_mut(array).unwrap().as_array_mut().unwrap(),
             );
@@ -240,6 +250,7 @@ mod tests {
                     }
                 })
                 .collect(),
+            external_dns_ips: value.external_dns_ips,
             ntp_servers: value.ntp_servers,
             rack_network_config: InternalRackNetworkConfig {
                 gateway_ip: rnc.gateway_ip,
@@ -299,6 +310,7 @@ mod tests {
                     last: "10.0.0.5".parse().unwrap(),
                 },
             )],
+            external_dns_ips: vec!["10.0.0.1".parse().unwrap()],
             ntp_servers: vec!["ntp1.com".into(), "ntp2.com".into()],
             rack_network_config: Some(RackNetworkConfig {
                 gateway_ip: Ipv4Addr::new(1, 2, 3, 4),
