@@ -5,8 +5,10 @@ request_body_max_bytes = 104857600
 
 [log]
 # Show log messages of this level and more severe
-level = "info"
-mode = "stderr-terminal"
+level = "debug"
+mode = "file"
+path = "/dev/stdout"
+if_exists = "append"
 
 [storage]
 storage_path = "./dns-storage"
