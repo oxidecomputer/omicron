@@ -285,8 +285,20 @@ mod swapctl {
     }
 
     // swapctl(2)
+    #[cfg(target_os = "illumos")]
     extern "C" {
         fn swapctl(cmd: i32, arg: *mut libc::c_void) -> i32;
+    }
+
+    // TODO: in the limit, we probably want to stub out all illumos-specific
+    // calls, and perhaps define an alternate version of this module for
+    // non-illumos targets. But currently, this code is only used by the real
+    // sled agent, and there is a fair amount of work there to make the real
+    // sled agent work on non-illumos targets. So for now, just stub out this
+    // piece.
+    #[cfg(not(target_os = "illumos"))]
+    fn swapctl(_cmd: i32, _arg: *mut libc::c_void) -> i32 {
+        panic!("swapctl(2) only on illumos");
     }
 
     // swapctl(2) commands
