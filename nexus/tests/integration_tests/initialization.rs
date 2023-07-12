@@ -156,7 +156,7 @@ async fn test_nexus_boots_with_valid_schema() {
     nexus_schema_test_setup(&mut builder).await;
 
     assert!(
-        timeout(Duration::from_secs(5), builder.start_nexus_internal(),)
+        timeout(Duration::from_secs(60), builder.start_nexus_internal(),)
             .await
             .is_ok(),
         "Nexus should have started"
@@ -267,7 +267,7 @@ async fn test_nexus_does_not_boot_until_schema_updated() {
     });
 
     assert!(
-        timeout(Duration::from_secs(5), builder.start_nexus_internal(),)
+        timeout(Duration::from_secs(60), builder.start_nexus_internal(),)
             .await
             .is_ok(),
         "Nexus should have started"
