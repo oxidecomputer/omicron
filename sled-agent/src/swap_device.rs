@@ -93,7 +93,7 @@ pub(crate) fn ensure_swap_device(
 
     create_encrypted_swap_zvol(log, &swap_zvol, size_gb)?;
 
-    // The process of paging out using block I/O, so use the "dsk" version of
+    // The process of paging out uses block I/O, so use the "dsk" version of
     // the zvol path (as opposed to "rdsk", which is for character/raw access.)
     let blk_zvol_path = format!("/dev/zvol/dsk/{}", swap_zvol);
     info!(log, "adding swap device: swapname=\"{}\"", blk_zvol_path);
@@ -104,7 +104,7 @@ pub(crate) fn ensure_swap_device(
     Ok(())
 }
 
-// Check whether the given zvol exists.
+/// Check whether the given zvol exists.
 fn zvol_exists(name: &str) -> Result<bool, SwapDeviceError> {
     let mut command = std::process::Command::new(illumos_utils::zfs::ZFS);
     let cmd = command.args(&["list", "-Hpo", "name,type"]);
@@ -135,7 +135,7 @@ fn zvol_exists(name: &str) -> Result<bool, SwapDeviceError> {
     Ok(false)
 }
 
-// Destroys a zvol at the given path.
+/// Destroys a zvol at the given path.
 fn zvol_destroy(name: &str) -> Result<(), SwapDeviceError> {
     let mut command = std::process::Command::new(illumos_utils::zfs::ZFS);
     let cmd = command.args(&["destroy", name]);
@@ -144,10 +144,10 @@ fn zvol_destroy(name: &str) -> Result<(), SwapDeviceError> {
     Ok(())
 }
 
-// Creates an encrypted zvol at the input path with the given size.
-//
-// We create the key from random bytes, pipe it to stdin to minimize copying,
-// and zeroize the buffer after the zvol is created.
+/// Creates an encrypted zvol at the input path with the given size.
+///
+/// We create the key from random bytes, pipe it to stdin to minimize copying,
+/// and zeroize the buffer after the zvol is created.
 fn create_encrypted_swap_zvol(
     log: &slog::Logger,
     name: &str,
@@ -284,7 +284,7 @@ mod swapctl {
         flags: i64,
     }
 
-    // swapctl(2)
+    /// swapctl(2)
     extern "C" {
         fn swapctl(cmd: i32, arg: *mut libc::c_void) -> i32;
     }
@@ -335,25 +335,25 @@ mod swapctl {
         }
     }
 
-    // The argument for SC_LIST (struct swaptbl) requires an embedded array in
-    // the struct, with swt_n entries, each of which requires a pointer to store
-    // the path to the device.
-    //
-    // Ideally, we would want to query the number of swap devices on the system
-    // via SC_GETNSWP, allocate enough memory for each device entry, then pass
-    // in pointers to memory to the list command. Unfortunately, creating a
-    // generically large array embedded in a struct that can be passed to C is a
-    // bit of a challenge in safe Rust. So instead, we just pick a reasonable
-    // max number of devices to list.
-    //
-    // We pick a max of 3 devices, somewhat arbitrarily. We only ever expect to
-    // see 0 or 1 swap device(s); if there are more, that is a bug. In the case
-    // that we see more than 1 swap device, we log a warning, and eventually, we
-    // should send an ereport.
+    /// The argument for SC_LIST (struct swaptbl) requires an embedded array in
+    /// the struct, with swt_n entries, each of which requires a pointer to store
+    /// the path to the device.
+    ///
+    /// Ideally, we would want to query the number of swap devices on the system
+    /// via SC_GETNSWP, allocate enough memory for each device entry, then pass
+    /// in pointers to memory to the list command. Unfortunately, creating a
+    /// generically large array embedded in a struct that can be passed to C is a
+    /// bit of a challenge in safe Rust. So instead, we just pick a reasonable
+    /// max number of devices to list.
+    ///
+    /// We pick a max of 3 devices, somewhat arbitrarily. We only ever expect to
+    /// see 0 or 1 swap device(s); if there are more, that is a bug. In the case
+    /// that we see more than 1 swap device, we log a warning, and eventually, we
+    /// should send an ereport.
     const N_SWAPENTS: usize = 3;
 
-    // Wrapper around swapctl(2) call. All commands except SC_GETNSWP require an
-    // argument, hence `data` being an optional parameter.
+    /// Wrapper around swapctl(2) call. All commands except SC_GETNSWP require an
+    /// argument, hence `data` being an optional parameter.
     unsafe fn swapctl_cmd<T>(
         cmd: i32,
         data: Option<std::ptr::NonNull<T>>,
