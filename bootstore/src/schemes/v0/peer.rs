@@ -181,7 +181,7 @@ pub struct Node {
     // boolean set when a `NodeApiRequest::shutdown` is received
     shutdown: bool,
 
-    // Connections that have been accepted, but where negotiation has not
+    // Connections that have been accepted, but where handshake has not
     // finished. At this point, we only know the client port of the connection,
     // and so cannot identify it as a peer `Node`.
     accepted_connections: BTreeMap<SocketAddrV6, AcceptedConnHandle>,
@@ -196,6 +196,12 @@ pub struct Node {
     //
     // This consists of both initiating and accepting connections that have
     // completed handshake and are now logically equivalent.
+    //
+    // Note that we key `established_connections` by `Baseboard` as that is
+    // how the underlying `Fsm`'s identify peers. We didn't know the mapping
+    // of Baseboard to TCP connection until handshake completed, which
+    // is why `accepted_connections` and `initiating_connections` key by
+    // `SocketAddrV6`.
     established_connections: BTreeMap<Baseboard, PeerConnHandle>,
 
     // Handle requests received from `PeerHandle`
@@ -300,7 +306,14 @@ impl Node {
                     warn!(self.log, "Got connection from IPv4 address {addr}");
                     return;
                 };
-                // TODO: Log if a peer with a lower address connects?
+                if addr < self.config.addr {
+                    error!(
+                        self.log,
+                        "Misbehaving peer: Connection from peer
+            with lower valued address: {addr}"
+                    );
+                    return;
+                }
                 // Remove any existing connection
                 self.remove_accepted_connection(&addr).await;
                 info!(self.log, "Accepted connection from {addr}");
@@ -352,6 +365,7 @@ impl Node {
                 }
             }
             NodeApiRequest::InitLearner { responder } => {
+                info!(self.log, "InitLearner started");
                 if self.init_responder.is_some() {
                     let _ = responder
                         .send(Err(NodeRequestError::RequestAlreadyPending));
@@ -365,6 +379,7 @@ impl Node {
                 }
             }
             NodeApiRequest::LoadRackSecret { responder } => {
+                info!(self.log, "LoadRackSecret started");
                 if self.rack_secret_responder.is_some() {
                     let _ = responder
                         .send(Err(NodeRequestError::RequestAlreadyPending));
@@ -406,6 +421,7 @@ impl Node {
                 let _ = responder.send(status);
             }
             NodeApiRequest::Shutdown => {
+                info!(self.log, "Shutting down Node tokio tasks");
                 self.shutdown = true;
                 // Shutdown all connection processing tasks
                 for (_, handle) in &self.accepted_connections {
@@ -548,7 +564,7 @@ impl Node {
                 // Gracefully close any old tasks for this peer if they exist
                 self.remove_established_connection(&peer_id).await;
 
-                // Move from `accepted_connections` to `connections`
+                // Move from `accepted_connections` to `established_connections`
                 let handle = PeerConnHandle {
                     handle: accepted_handle.handle,
                     tx: accepted_handle.tx,
@@ -630,9 +646,7 @@ impl Node {
                     Err(err) => self.handle_api_error(err).await,
                 }
             }
-            ConnToMainMsgInner::FailedAcceptorHandshake {
-                addr: SocketAddrV6,
-            } => {
+            ConnToMainMsgInner::FailedAcceptorHandshake { addr } => {
                 if let Some(handle) = self.accepted_connections.get(&addr) {
                     if handle.unique_id != unique_id {
                         return;
