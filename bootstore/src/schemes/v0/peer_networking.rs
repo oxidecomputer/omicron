@@ -124,7 +124,7 @@ struct EstablishedConn {
     main_tx: mpsc::Sender<ConnToMainMsg>,
     rx: mpsc::Receiver<MainToConnMsg>,
     log: Logger,
-    read_buf: Vec<u8>,
+    read_buf: Box<[u8]>,
     total_read: usize,
 
     // Used for managing inactivity timeouts for the connection
@@ -160,7 +160,7 @@ impl EstablishedConn {
             main_tx,
             rx,
             log,
-            read_buf: vec![0u8; CONN_BUF_SIZE],
+            read_buf: vec![0u8; CONN_BUF_SIZE].into_boxed_slice(),
             total_read: 0,
             last_received_msg: Instant::now(),
             write_queue: VecDeque::with_capacity(MSG_WRITE_QUEUE_CAPACITY),
