@@ -110,7 +110,13 @@ impl IprArtifactServer {
         // out-of-order. (If we were OK with messages being sent out-of-order,
         // this could be a std Mutex rather than a Tokio mutex.)
         if let Some(sender) = sender {
-            _ = sender.send(report).await;
+            // Spawn a task to finish sending the report -- let that run in the
+            // background in case this future gets cancelled.
+            tokio::spawn(async move {
+                _ = sender.send(report).await;
+            })
+            .await
+            .expect("sender.send didn't panic");
         }
 
         status
