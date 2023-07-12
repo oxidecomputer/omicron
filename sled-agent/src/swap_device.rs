@@ -91,14 +91,15 @@ pub(crate) fn ensure_swap_device(
         info!(log, "swap zvol \"{}\" destroyed", swap_zvol);
     }
 
+    create_encrypted_swap_zvol(log, &swap_zvol, size_gb)?;
+
     // The process of paging out using block I/O, so use the "dsk" version of
     // the zvol path (as opposed to "rdsk", which is for character/raw access.)
-    let swapname = format!("/dev/zvol/dsk/{}", swap_zvol);
-    create_encrypted_swap_zvol(log, &swapname, size_gb)?;
+    let blk_zvol_path = format!("/dev/zvol/dsk/{}", swap_zvol);
+    info!(log, "adding swap device: swapname=\"{}\"", blk_zvol_path);
 
     // Specifying 0 length tells the kernel to use the size of the device.
-    info!(log, "adding swap device: swapname=\"{}\"", swapname);
-    swapctl::add_swap_device(swapname, 0, 0)?;
+    swapctl::add_swap_device(blk_zvol_path, 0, 0)?;
 
     Ok(())
 }
