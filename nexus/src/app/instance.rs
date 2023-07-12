@@ -131,7 +131,7 @@ impl super::Nexus {
         if params.ncpus.0 > MAX_VCPU_PER_INSTANCE {
             return Err(Error::invalid_request(&format!(
                 "cannot have more than {} vCPUs per instance",
-                MAX_DISKS_PER_INSTANCE
+                MAX_VCPU_PER_INSTANCE
             )));
         }
         if params.external_ips.len() > MAX_EXTERNAL_IPS_PER_INSTANCE {
