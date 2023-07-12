@@ -21,6 +21,10 @@ dns_servers = []
 #    { first = "172.20.26.1", last = "172.20.26.10" }
 internal_services_ip_pool_ranges = []
 
+# IP addresses on which the rack runs DNS servers. Each of these IP addresses
+# must be contained in one of the internal services IP pool ranges listed above.
+external_dns_ips = []
+
 # List of sleds to initialize.
 #
 # Confirm this list contains all expected sleds before continuing!
