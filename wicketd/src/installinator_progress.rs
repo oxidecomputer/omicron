@@ -40,6 +40,9 @@ pub(crate) fn new(log: &slog::Logger) -> (IprArtifactServer, IprUpdateTracker) {
 #[must_use]
 pub(crate) struct IprArtifactServer {
     log: slog::Logger,
+    // TODO: rewrite using message-passing for cancel safety reasons. For now,
+    // the tokio Mutex is fine because in `report_progress`, invariants are not
+    // violated across await points.
     running_updates: Arc<Mutex<HashMap<Uuid, RunningUpdate>>>,
 }
 
@@ -50,7 +53,9 @@ impl IprArtifactServer {
         report: installinator_common::EventReport,
     ) -> EventReportStatus {
         let mut running_updates = self.running_updates.lock().await;
-        if let Some(update) = running_updates.get_mut(&update_id) {
+        let (status, sender) = if let Some(update) =
+            running_updates.get_mut(&update_id)
+        {
             slog::debug!(
                 self.log,
                 "progress report seen ({} step events, {} progress events)",
@@ -60,7 +65,11 @@ impl IprArtifactServer {
             );
             // Note that take() leaves update in the Invalid state. Each branch
             // must restore *update to a valid state.
-            match update.take() {
+            //
+            // This is written in this somewhat convoluted style because we want
+            // to ensure that `update` is never left in the `Invalid` state
+            // across an await point.
+            let sender = match update.take() {
                 RunningUpdate::Initial(start_sender) => {
                     slog::debug!(
                         self.log,
@@ -69,9 +78,8 @@ impl IprArtifactServer {
                     );
                     let (sender, receiver) = mpsc::channel(16);
                     _ = start_sender.send(receiver);
-                    *update =
-                        RunningUpdate::send_and_next_state(sender, report)
-                            .await;
+                    *update = RunningUpdate::next_state(&sender, &report);
+                    Some(sender)
                 }
                 RunningUpdate::ReportsReceived(sender) => {
                     slog::debug!(
@@ -79,24 +87,33 @@ impl IprArtifactServer {
                         "further report seen for this update ID";
                         "update_id" => %update_id
                     );
-                    *update =
-                        RunningUpdate::send_and_next_state(sender, report)
-                            .await;
+                    *update = RunningUpdate::next_state(&sender, &report);
+                    Some(sender)
                 }
                 RunningUpdate::Closed => {
                     // The sender has been closed; ignore the report.
                     *update = RunningUpdate::Closed;
+                    None
                 }
                 RunningUpdate::Invalid => {
-                    unreachable!("invalid state")
+                    unreachable!("invalid state");
                 }
-            }
+            };
 
-            EventReportStatus::Processed
+            (EventReportStatus::Processed, sender)
         } else {
             slog::debug!(self.log, "update ID unrecognized"; "update_id" => %update_id);
-            EventReportStatus::UnrecognizedUpdateId
+            (EventReportStatus::UnrecognizedUpdateId, None)
+        };
+
+        // Don't drop the mutex here because we don't want messages to be sent
+        // out-of-order. (If we were OK with messages being sent out-of-order,
+        // this could be a std Mutex rather than a Tokio mutex.)
+        if let Some(sender) = sender {
+            _ = sender.send(report).await;
         }
+
+        status
     }
 }
 
@@ -186,16 +203,14 @@ impl RunningUpdate {
         std::mem::replace(self, Self::Invalid)
     }
 
-    async fn send_and_next_state(
-        sender: mpsc::Sender<installinator_common::EventReport>,
-        report: installinator_common::EventReport,
+    fn next_state(
+        sender: &mpsc::Sender<installinator_common::EventReport>,
+        report: &installinator_common::EventReport,
     ) -> Self {
-        let is_terminal = Self::is_terminal(&report);
-        _ = sender.send(report).await;
-        if is_terminal {
+        if Self::is_terminal(report) {
             Self::Closed
         } else {
-            Self::ReportsReceived(sender)
+            Self::ReportsReceived(sender.clone())
         }
     }
 
