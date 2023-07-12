@@ -20,7 +20,6 @@ use std::time::Duration;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{mpsc, oneshot};
 use tokio::time::{interval, Instant, MissedTickBehavior};
-use uuid::Uuid;
 
 #[derive(Debug, Clone)]
 pub struct Config {
@@ -101,7 +100,7 @@ impl NodeHandle {
         let (tx, rx) = oneshot::channel();
         self.tx
             .send(NodeApiRequest::InitRack {
-                rack_uuid: RackUuid(Uuid::new_v4()),
+                rack_uuid,
                 initial_membership,
                 responder: tx,
             })
@@ -159,11 +158,11 @@ impl NodeHandle {
 
 #[derive(Debug, Clone)]
 pub struct Status {
-    fsm_state: &'static str,
-    peers: BTreeSet<SocketAddrV6>,
-    connections: BTreeMap<Baseboard, SocketAddrV6>,
-    accepted_connections: BTreeSet<SocketAddrV6>,
-    negotiating_connections: BTreeSet<SocketAddrV6>,
+    pub fsm_state: &'static str,
+    pub peers: BTreeSet<SocketAddrV6>,
+    pub connections: BTreeMap<Baseboard, SocketAddrV6>,
+    pub accepted_connections: BTreeSet<SocketAddrV6>,
+    pub negotiating_connections: BTreeSet<SocketAddrV6>,
 }
 
 /// A node in the bootstore protocol
@@ -730,7 +729,7 @@ impl Node {
 mod tests {
     use super::*;
     use slog::Drain;
-    use tokio::time::sleep;
+    use uuid::Uuid;
 
     fn initial_members() -> BTreeSet<Baseboard> {
         [("a", "1"), ("b", "1"), ("c", "1")]
@@ -804,9 +803,10 @@ mod tests {
         }
 
         let rack_uuid = RackUuid(Uuid::new_v4());
-        let output = handle0.init_rack(rack_uuid, initial_members()).await;
+        handle0.init_rack(rack_uuid, initial_members()).await.unwrap();
 
         let status = handle0.get_status().await;
+        println!("Status = {status:?}");
 
         // Ensure we can load the rack secret at all nodes
         handle0.load_rack_secret().await.unwrap();
@@ -818,8 +818,8 @@ mod tests {
 
         // Shutdown the node2 and make sure we can still load the rack
         // secret (threshold=2) at node0 and node1
-        handle2.shutdown().await;
-        jh2.await;
+        handle2.shutdown().await.unwrap();
+        jh2.await.unwrap();
         handle0.load_rack_secret().await.unwrap();
         handle1.load_rack_secret().await.unwrap();
 
@@ -840,14 +840,14 @@ mod tests {
 
         // Shutdown node1 and show that we can still load the rack secret at
         // node0 and the learner, because threshold=2 and it never changes.
-        handle1.shutdown().await;
-        jh1.await;
+        handle1.shutdown().await.unwrap();
+        jh1.await.unwrap();
         handle0.load_rack_secret().await.unwrap();
         learner_handle.load_rack_secret().await.unwrap();
 
         // Now shutdown the learner and show that node0 cannot load the rack secret
-        learner_handle.shutdown().await;
-        learner_jh.await;
+        learner_handle.shutdown().await.unwrap();
+        learner_jh.await.unwrap();
         handle0.load_rack_secret().await.unwrap_err();
 
         // TODO: Once we have persistence, we can bring an old node back from the dead
@@ -855,6 +855,6 @@ mod tests {
 
         // Shutdown node0
         handle0.shutdown().await.unwrap();
-        let _ = jh0.await;
+        jh0.await.unwrap();
     }
 }

@@ -384,7 +384,7 @@ pub async fn spawn_connection_initiator_task(
                 Ok(sock) => sock,
                 Err(err) => {
                     // TODO: Throttle this?
-                    warn!(log, "Failed to connect"; "addr" => addr.to_string());
+                    warn!(log, "Failed to connect: {err:?}"; "addr" => addr.to_string());
                     sleep(CONNECTION_RETRY_TIMEOUT).await;
                     continue;
                 }
@@ -396,7 +396,6 @@ pub async fn spawn_connection_initiator_task(
                 sock,
                 &my_peer_id,
                 my_addr,
-                &log,
             )
             .await
             {
@@ -465,7 +464,6 @@ pub async fn spawn_accepted_connection_management_task(
             sock,
             &my_peer_id,
             my_addr,
-            &log,
         )
         .await
         {
@@ -474,7 +472,7 @@ pub async fn spawn_accepted_connection_management_task(
                 warn!(log, "Handshake error: {:?}", e; "addr" => client_addr.to_string());
                 // This is a server so we bail and wait for a new connection
                 // We must inform the main task so it can clean up any metadata.
-                main_tx
+                let _ = main_tx
                     .send(ConnToMainMsg {
                         handle_unique_id: unique_id,
                         msg: ConnToMainMsgInner::FailedAcceptorHandshake {
@@ -524,7 +522,7 @@ fn write_framed<T: Serialize + ?Sized>(
 ) -> Result<Vec<u8>, ciborium::ser::Error<std::io::Error>> {
     let mut cursor = Cursor::new(vec![]);
     // Write a size placeholder
-    std::io::Write::write(&mut cursor, &[0u8; FRAME_HEADER_SIZE]);
+    std::io::Write::write(&mut cursor, &[0u8; FRAME_HEADER_SIZE])?;
     cursor.set_position(FRAME_HEADER_SIZE as u64);
     ciborium::into_writer(msg, &mut cursor)?;
     let size: u32 =
@@ -554,7 +552,6 @@ async fn perform_handshake(
     sock: TcpStream,
     local_peer_id: &Baseboard,
     local_addr: SocketAddrV6,
-    log: &Logger,
 ) -> Result<(OwnedReadHalf, OwnedWriteHalf, Identify), HandshakeError> {
     // Enough to hold the `Hello` and `Identify` messages
     let mut read_buf = [0u8; 128];
