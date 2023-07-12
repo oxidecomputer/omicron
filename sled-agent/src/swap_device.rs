@@ -135,11 +135,6 @@ fn zvol_destroy(name: &str) -> Result<(), SwapDeviceError> {
     let cmd = command.args(&["destroy", name]);
     illumos_utils::execute(cmd).map_err(|e| SwapDeviceError::Zfs(e))?;
 
-    // TODO: remove after testing
-    if zvol_exists(name)? {
-        panic!("zvol not cleaned up");
-    }
-
     Ok(())
 }
 
@@ -246,11 +241,6 @@ fn create_encrypted_swap_zvol(
         return Err(SwapDeviceError::Zfs(illumos_utils::output_to_exec_error(
             &command, &output,
         )));
-    }
-
-    // TODO: remove after testing
-    if !zvol_exists(name)? {
-        panic!("zvol not created successfully");
     }
 
     info!(
@@ -472,7 +462,7 @@ mod swapctl {
             SwapDeviceError::AddDevice {
                 msg: format!(
                     "could not convert path to CString: {}",
-                    e.to_string()
+                    e,
                 ),
                 path: path_cp.clone(),
                 start: start,
