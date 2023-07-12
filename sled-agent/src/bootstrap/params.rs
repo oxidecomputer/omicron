@@ -187,11 +187,11 @@ mod tests {
             ntp_servers = [ "ntp.eng.oxide.computer" ]
             dns_servers = [ "1.1.1.1", "9.9.9.9" ]
             external_dns_zone_name = "oxide.test"
-            
+
             [[internal_services_ip_pool_ranges]]
             first = "192.168.1.20"
             last = "192.168.1.22"
-            
+
             [recovery_silo]
             silo_name = "recovery"
             user_name = "recovery"
@@ -226,5 +226,117 @@ mod tests {
             serde_json::from_slice(serialized.as_slice()).unwrap();
 
         assert!(envelope == deserialized, "serialization round trip failed");
+    }
+
+    #[test]
+    fn validate_external_dns_ips_must_be_in_internal_services_ip_pools() {
+        // Conjure up a config; we'll tweak the internal services pools and
+        // external DNS IPs, but no other fields matter.
+        let mut config = RackInitializeRequest {
+            rack_subnet: Ipv6Addr::LOCALHOST,
+            bootstrap_discovery: BootstrapAddressDiscovery::OnlyOurs,
+            rack_secret_threshold: 0,
+            ntp_servers: Vec::new(),
+            dns_servers: Vec::new(),
+            internal_services_ip_pool_ranges: Vec::new(),
+            external_dns_ips: Vec::new(),
+            external_dns_zone_name: "".to_string(),
+            external_certificates: Vec::new(),
+            recovery_silo: RecoverySiloConfig {
+                silo_name: "recovery".parse().unwrap(),
+                user_name: "recovery".parse().unwrap(),
+                user_password_hash: "$argon2id$v=19$m=98304,t=13,p=1$RUlWc0ZxaHo0WFdrN0N6ZQ$S8p52j85GPvMhR/ek3GL0el/oProgTwWpHJZ8lsQQoY".parse().unwrap(),
+            },
+            rack_network_config: None,
+        };
+
+        // Valid configs: all external DNS IPs are contained in the IP pool
+        // ranges.
+        for (ip_pool_ranges, dns_ips) in [
+            (
+                &[("fd00::1", "fd00::10")] as &[(&str, &str)],
+                &["fd00::1", "fd00::5", "fd00::10"] as &[&str],
+            ),
+            (
+                &[("192.168.1.10", "192.168.1.20")],
+                &["192.168.1.10", "192.168.1.15", "192.168.1.20"],
+            ),
+            (
+                &[("fd00::1", "fd00::10"), ("192.168.1.10", "192.168.1.20")],
+                &[
+                    "fd00::1",
+                    "fd00::5",
+                    "fd00::10",
+                    "192.168.1.10",
+                    "192.168.1.15",
+                    "192.168.1.20",
+                ],
+            ),
+        ] {
+            config.internal_services_ip_pool_ranges = ip_pool_ranges
+                .iter()
+                .map(|(a, b)| {
+                    address::IpRange::try_from((
+                        a.parse::<IpAddr>().unwrap(),
+                        b.parse::<IpAddr>().unwrap(),
+                    ))
+                    .unwrap()
+                })
+                .collect();
+            config.external_dns_ips =
+                dns_ips.iter().map(|ip| ip.parse().unwrap()).collect();
+
+            match config.validate() {
+                Ok(()) => (),
+                Err(err) => panic!(
+                    "failure on {ip_pool_ranges:?} with DNS IPs {dns_ips:?}: \
+                     {err}"
+                ),
+            }
+        }
+
+        // Invalid configs: either no DNS IPs, or one or more DNS IPs are not
+        // contained in the ip pool ranges.
+        for (ip_pool_ranges, dns_ips) in [
+            (&[("fd00::1", "fd00::10")] as &[(&str, &str)], &[] as &[&str]),
+            (&[("fd00::1", "fd00::10")], &["fd00::1", "fd00::5", "fd00::11"]),
+            (
+                &[("192.168.1.10", "192.168.1.20")],
+                &["192.168.1.9", "192.168.1.15", "192.168.1.20"],
+            ),
+            (
+                &[("fd00::1", "fd00::10"), ("192.168.1.10", "192.168.1.20")],
+                &[
+                    "fd00::1",
+                    "fd00::5",
+                    "fd00::10",
+                    "192.168.1.10",
+                    "192.168.1.15",
+                    "192.168.1.20",
+                    "192.168.1.21",
+                ],
+            ),
+        ] {
+            config.internal_services_ip_pool_ranges = ip_pool_ranges
+                .iter()
+                .map(|(a, b)| {
+                    address::IpRange::try_from((
+                        a.parse::<IpAddr>().unwrap(),
+                        b.parse::<IpAddr>().unwrap(),
+                    ))
+                    .unwrap()
+                })
+                .collect();
+            config.external_dns_ips =
+                dns_ips.iter().map(|ip| ip.parse().unwrap()).collect();
+
+            match config.validate() {
+                Ok(()) => panic!(
+                    "unexpected success on {ip_pool_ranges:?} with \
+                     DNS IPs {dns_ips:?}"
+                ),
+                Err(_) => (),
+            }
+        }
     }
 }

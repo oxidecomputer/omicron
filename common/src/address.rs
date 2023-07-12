@@ -338,6 +338,20 @@ impl From<IpAddr> for IpRange {
     }
 }
 
+impl TryFrom<(IpAddr, IpAddr)> for IpRange {
+    type Error = String;
+
+    fn try_from(pair: (IpAddr, IpAddr)) -> Result<Self, Self::Error> {
+        match (pair.0, pair.1) {
+            (IpAddr::V4(a), IpAddr::V4(b)) => Self::try_from((a, b)),
+            (IpAddr::V6(a), IpAddr::V6(b)) => Self::try_from((a, b)),
+            (IpAddr::V4(_), IpAddr::V6(_)) | (IpAddr::V6(_), IpAddr::V4(_)) => {
+                Err("IP address ranges cannot mix IPv4 and IPv6".to_string())
+            }
+        }
+    }
+}
+
 impl TryFrom<(Ipv4Addr, Ipv4Addr)> for IpRange {
     type Error = String;
 
