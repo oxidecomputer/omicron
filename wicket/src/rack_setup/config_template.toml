@@ -1,7 +1,19 @@
 # TODO Explanatory block comment
 
-# DNS name for the DNS zone delegated to the rack for external DNS.
+# Delegated external DNS zone name
+#
+# The rack provides separate external API and console endpoints for each Silo.
+# These are named `$silo_name.sys.$external_dns_zone_name`.  For a Silo called
+# "eng" with delegated domain "oxide.example", the API would be accessible at
+# "eng.sys.oxide.example".  The rack runs external DNS servers that serve A/AAAA
+# records for these DNS names.
 external_dns_zone_name = ""
+
+# IP addresses for authoritative external DNS servers operated by the rack for
+# the DNS domain delegated to the rack by the customer. Each of these addresses
+# must be contained in one of the "internal services" IP Pool ranges listed
+# below.
+external_dns_ips = []
 
 # External NTP servers; e.g., "ntp.eng.oxide.computer".
 ntp_servers = [
@@ -20,10 +32,6 @@ dns_servers = []
 #
 #    { first = "172.20.26.1", last = "172.20.26.10" }
 internal_services_ip_pool_ranges = []
-
-# IP addresses on which the rack runs DNS servers. Each of these IP addresses
-# must be contained in one of the internal services IP pool ranges listed above.
-external_dns_ips = []
 
 # List of sleds to initialize.
 #

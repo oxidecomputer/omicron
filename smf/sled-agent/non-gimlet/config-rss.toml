@@ -42,6 +42,12 @@ dns_servers = [ "1.1.1.1", "9.9.9.9" ]
 # altogether (which also means skipping TLS).
 external_dns_zone_name = "oxide.test"
 
+# IP addresses for authoritative external DNS servers operated by the rack for
+# the DNS domain delegated to the rack by the customer. Each of these addresses
+# must be contained in one of the "internal services" IP Pool ranges listed
+# below.
+external_dns_ips = [ "192.168.1.20", "192.168.1.21" ]
+
 # Initial TLS certificates for the external API
 #
 # You should probably leave this field empty even if you want to configure TLS.
@@ -66,10 +72,6 @@ external_dns_zone_name = "oxide.test"
 # If no initial TLS certificates are provided, then your external API will be
 # configured to listen only for plaintext HTTP on port 80.
 external_certificates = []
-
-# IP addresses for external DNS servers. Each of these addresses must be
-# contained in one of the "internal services" IP Pool ranges listed below.
-external_dns_ips = [ "192.168.1.20", "192.168.1.21" ]
 
 # The IP ranges configured as part of the "internal services" IP Pool
 #
