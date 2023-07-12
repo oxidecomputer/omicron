@@ -191,7 +191,7 @@ impl EstablishedConn {
                     self.on_msg_from_main(msg).await
                 }
                 res = self.read_sock.read(&mut self.read_buf[self.total_read..]) => {
-                    self.read(res).await
+                    self.on_read(res).await
                 }
                 res = self.write_sock.write_buf(&mut self.current_write),
                    if self.current_write.has_remaining() => {
@@ -215,26 +215,7 @@ impl EstablishedConn {
                 let _ = self.close().await;
                 return Err(ConnErr::Close);
             }
-            MainToConnMsg::Msg(msg) => {
-                if self.write_queue.len() == MSG_WRITE_QUEUE_CAPACITY {
-                    warn!(self.log, "Closing connection: write queue full");
-                    self.close().await
-                } else {
-                    match write_framed(&msg) {
-                        Ok(msg) => {
-                            self.write_queue.push_back(msg);
-                            Ok(())
-                        }
-                        Err(e) => {
-                            warn!(
-                                self.log,
-                                "Closing connection: Failed to serialize msg: {e}"
-                            );
-                            self.close().await
-                        }
-                    }
-                }
-            }
+            MainToConnMsg::Msg(msg) => self.write_framed_to_queue(msg).await,
         }
     }
 
@@ -256,7 +237,7 @@ impl EstablishedConn {
         }
     }
 
-    async fn read(
+    async fn on_read(
         &mut self,
         res: Result<usize, std::io::Error>,
     ) -> Result<(), ConnErr> {
@@ -304,22 +285,28 @@ impl EstablishedConn {
             };
             self.last_received_msg = Instant::now();
             debug!(self.log, "Received {msg:?}");
-            if let Msg::Fsm(msg) = msg {
-                if let Err(e) = self
-                    .main_tx
-                    .send(ConnToMainMsg {
-                        handle_unique_id: self.unique_id,
-                        msg: ConnToMainMsgInner::Received {
-                            from: self.peer_id.clone(),
-                            msg,
-                        },
-                    })
-                    .await
-                {
-                    warn!(
-                        self.log,
-                        "Failed to send received msg to main task: {e:?}"
-                    );
+            match msg {
+                Msg::Fsm(msg) => {
+                    if let Err(e) = self
+                        .main_tx
+                        .send(ConnToMainMsg {
+                            handle_unique_id: self.unique_id,
+                            msg: ConnToMainMsgInner::Received {
+                                from: self.peer_id.clone(),
+                                msg,
+                            },
+                        })
+                        .await
+                    {
+                        warn!(
+                            self.log,
+                            "Failed to send received msg to main task: {e:?}"
+                        );
+                    }
+                }
+                Msg::Ping => {
+                    // Nothing to do here, since Ping is just to keep us alive and
+                    // we updated self.last_received_msg above.
                 }
             }
         }
@@ -331,11 +318,15 @@ impl EstablishedConn {
             warn!(self.log, "Closing connection: inactivity timeout",);
             return self.close().await;
         }
+        self.write_framed_to_queue(Msg::Ping).await
+    }
+
+    async fn write_framed_to_queue(&mut self, msg: Msg) -> Result<(), ConnErr> {
         if self.write_queue.len() == MSG_WRITE_QUEUE_CAPACITY {
-            warn!(self.log, "Closing connection: write queue full",);
+            warn!(self.log, "Closing connection: write queue full");
             self.close().await
         } else {
-            match write_framed(&Msg::Ping) {
+            match write_framed(&msg) {
                 Ok(msg) => {
                     self.write_queue.push_back(msg);
                     Ok(())
@@ -343,7 +334,7 @@ impl EstablishedConn {
                 Err(e) => {
                     warn!(
                         self.log,
-                        "Closing connection: Failed to serialize msg: {e}"
+                        "Closing connection: Failed to serialize msg: {}", e
                     );
                     self.close().await
                 }

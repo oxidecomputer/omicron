@@ -283,10 +283,9 @@ impl Node {
                             self.handle_api_error(err).await;
                         }
                     }
-                    // Even with errors there may be messages that need sending
-                    self.deliver_envelopes().await;
                 }
             }
+            self.deliver_envelopes().await;
         }
     }
 
@@ -318,7 +317,9 @@ impl Node {
                 .await;
                 self.accepted_connections.insert(addr, handle);
             }
-            Err(err) => {}
+            Err(err) => {
+                error!(self.log, "Failed to accept a connection: {err:?}");
+            }
         }
     }
 
@@ -473,7 +474,6 @@ impl Node {
                 // TODO: Persistence
             }
         }
-        self.deliver_envelopes().await;
     }
 
     // Inform any callers (via outstanding responders) of errors.
@@ -553,8 +553,6 @@ impl Node {
                     // log it as an error and not a warning. It is unrecoverable
                     // without a rack reset.
                     error!(self.log, "Error on connection: {e}");
-                } else {
-                    self.deliver_envelopes().await;
                 }
             }
             ConnToMainMsgInner::ConnectedClient { addr, peer_id } => {
@@ -575,8 +573,6 @@ impl Node {
                     // without a rack reset. It's not an invariant violation
                     // though, so we don't panic.
                     error!(self.log, "Error on connection: {e}");
-                } else {
-                    self.deliver_envelopes().await;
                 }
             }
             ConnToMainMsgInner::Disconnected { peer_id } => {
@@ -594,7 +590,7 @@ impl Node {
             }
             ConnToMainMsgInner::Received { from, msg } => {
                 match self.fsm.handle_msg(Instant::now().into(), from, msg) {
-                    Ok(None) => self.deliver_envelopes().await,
+                    Ok(None) => (),
                     Ok(Some(api_output)) => {
                         self.handle_api_output(api_output).await
                     }
