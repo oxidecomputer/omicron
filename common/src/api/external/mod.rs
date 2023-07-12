@@ -1905,6 +1905,14 @@ impl MacAddr {
         Self::from_i64(value)
     }
 
+    /// Iterate the MAC addresses in the system address range
+    /// (used as an allocator in contexts where collisions are not expected and
+    /// determinism is useful, like in the test suite)
+    pub fn iter_system() -> impl Iterator<Item = MacAddr> {
+        ((Self::MAX_SYSTEM_RESV + 1)..=Self::MAX_SYSTEM_ADDR)
+            .map(Self::from_i64)
+    }
+
     /// Is this a MAC in the Guest Addresses range
     pub fn is_guest(&self) -> bool {
         let value = self.to_i64();
@@ -3258,6 +3266,22 @@ mod test {
         let _ = MacAddr::from_str("g:g:g:g:g:g").unwrap_err();
         // Too many characters
         let _ = MacAddr::from_str("fff:ff:ff:ff:ff:ff").unwrap_err();
+    }
+
+    #[test]
+    fn test_mac_system_iterator() {
+        use super::MacAddr;
+
+        let mut count = 0;
+        for m in MacAddr::iter_system() {
+            assert!(m.is_system());
+            assert!(m.to_i64() > MacAddr::MAX_SYSTEM_RESV);
+            count += 1;
+        }
+        assert_eq!(
+            count,
+            MacAddr::MAX_SYSTEM_ADDR - MacAddr::MAX_SYSTEM_RESV
+        );
     }
 
     #[test]
