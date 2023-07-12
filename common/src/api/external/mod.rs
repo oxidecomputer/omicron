@@ -3278,10 +3278,7 @@ mod test {
             assert!(m.to_i64() > MacAddr::MAX_SYSTEM_RESV);
             count += 1;
         }
-        assert_eq!(
-            count,
-            MacAddr::MAX_SYSTEM_ADDR - MacAddr::MAX_SYSTEM_RESV
-        );
+        assert_eq!(count, MacAddr::MAX_SYSTEM_ADDR - MacAddr::MAX_SYSTEM_RESV);
     }
 
     #[test]

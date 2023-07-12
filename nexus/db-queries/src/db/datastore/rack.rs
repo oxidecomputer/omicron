@@ -913,6 +913,7 @@ mod test {
             .unwrap();
         let ntp2_id = Uuid::new_v4();
         let ntp3_id = Uuid::new_v4();
+        let mut macs = MacAddr::iter_system();
         let services = vec![
             internal_params::ServicePutRequest {
                 service_id: external_dns_id,
@@ -925,7 +926,7 @@ mod test {
                         id: Uuid::new_v4(),
                         name: "external-dns".parse().unwrap(),
                         ip: external_dns_pip.into(),
-                        mac: MacAddr::random_system(),
+                        mac: macs.next().unwrap(),
                     },
                 },
             },
@@ -944,7 +945,7 @@ mod test {
                         id: Uuid::new_v4(),
                         name: "ntp1".parse().unwrap(),
                         ip: ntp1_pip.into(),
-                        mac: MacAddr::random_system(),
+                        mac: macs.next().unwrap(),
                     },
                 },
             },
@@ -959,7 +960,7 @@ mod test {
                         id: Uuid::new_v4(),
                         name: "nexus".parse().unwrap(),
                         ip: nexus_pip.into(),
-                        mac: MacAddr::random_system(),
+                        mac: macs.next().unwrap(),
                     },
                 },
             },
@@ -978,7 +979,7 @@ mod test {
                         id: Uuid::new_v4(),
                         name: "ntp2".parse().unwrap(),
                         ip: ntp2_pip.into(),
-                        mac: MacAddr::random_system(),
+                        mac: macs.next().unwrap(),
                     },
                 },
             },
@@ -1159,6 +1160,7 @@ mod test {
         let nexus_pip2 = NEXUS_OPTE_IPV4_SUBNET
             .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES as u32 + 2)
             .unwrap();
+        let mut macs = MacAddr::iter_system();
         let mut services = vec![
             internal_params::ServicePutRequest {
                 service_id: nexus_id1,
@@ -1171,7 +1173,7 @@ mod test {
                         id: Uuid::new_v4(),
                         name: "nexus1".parse().unwrap(),
                         ip: nexus_pip1.into(),
-                        mac: MacAddr::random_system(),
+                        mac: macs.next().unwrap(),
                     },
                 },
             },
@@ -1186,7 +1188,7 @@ mod test {
                         id: Uuid::new_v4(),
                         name: "nexus2".parse().unwrap(),
                         ip: nexus_pip2.into(),
-                        mac: MacAddr::random_system(),
+                        mac: macs.next().unwrap(),
                     },
                 },
             },
@@ -1356,6 +1358,7 @@ mod test {
             .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES as u32 + 1)
             .unwrap();
         let nexus_id = Uuid::new_v4();
+        let mut macs = MacAddr::iter_system();
         let services = vec![internal_params::ServicePutRequest {
             service_id: nexus_id,
             sled_id: sled.id(),
@@ -1367,7 +1370,7 @@ mod test {
                     id: Uuid::new_v4(),
                     name: "nexus".parse().unwrap(),
                     ip: nexus_pip.into(),
-                    mac: MacAddr::random_system(),
+                    mac: macs.next().unwrap(),
                 },
             },
         }];
@@ -1412,6 +1415,7 @@ mod test {
         let nexus_pip = NEXUS_OPTE_IPV4_SUBNET
             .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES as u32 + 1)
             .unwrap();
+        let mut macs = MacAddr::iter_system();
 
         let services = vec![
             internal_params::ServicePutRequest {
@@ -1425,7 +1429,7 @@ mod test {
                         id: Uuid::new_v4(),
                         name: "external-dns".parse().unwrap(),
                         ip: external_dns_pip.into(),
-                        mac: MacAddr::random_system(),
+                        mac: macs.next().unwrap(),
                     },
                 },
             },
@@ -1440,7 +1444,7 @@ mod test {
                         id: Uuid::new_v4(),
                         name: "nexus".parse().unwrap(),
                         ip: nexus_pip.into(),
-                        mac: MacAddr::random_system(),
+                        mac: macs.next().unwrap(),
                     },
                 },
             },
