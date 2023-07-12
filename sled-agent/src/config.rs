@@ -51,6 +51,8 @@ pub struct Config {
     pub sidecar_revision: SidecarRevision,
     /// Optional percentage of DRAM to reserve for guest memory
     pub vmm_reservoir_percentage: Option<u8>,
+    /// Optional swap device size in GiB
+    pub swap_device_size_gb: Option<u32>,
     /// Optional VLAN ID to be used for tagging guest VNICs.
     pub vlan: Option<VlanID>,
     /// Optional list of zpools to be used as "discovered disks".

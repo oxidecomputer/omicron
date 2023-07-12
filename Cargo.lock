@@ -4898,6 +4898,7 @@ dependencies = [
  "ipnetwork",
  "itertools",
  "key-manager",
+ "libc",
  "macaddr",
  "mockall",
  "nexus-client 0.1.0",
@@ -4941,6 +4942,7 @@ dependencies = [
  "tokio-tungstenite 0.18.0",
  "toml 0.7.6",
  "uuid",
+ "zeroize",
  "zone",
 ]
 
