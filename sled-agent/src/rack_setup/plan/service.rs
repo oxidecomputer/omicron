@@ -971,6 +971,9 @@ impl ServicePortBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::bootstrap::params::BootstrapAddressDiscovery;
+    use crate::bootstrap::params::RecoverySiloConfig;
+    use omicron_common::address::IpRange;
 
     const EXPECTED_RESERVED_ADDRESSES: u16 = 2;
     const EXPECTED_USABLE_ADDRESSES: u16 =
@@ -1023,5 +1026,82 @@ mod tests {
             );
         }
         assert!(allocator.next().is_none(), "Expected allocation to fail");
+    }
+
+    #[test]
+    fn service_port_builder_skips_dns_ips() {
+        // Conjure up a config; only the internal services pools and
+        // external DNS IPs matter when constructing a ServicePortBuilder.
+        let ip_pools = [
+            ("192.168.1.10", "192.168.1.14"),
+            ("fd00::20", "fd00::23"),
+            ("fd01::100", "fd01::103"),
+        ];
+        let dns_ips = [
+            "192.168.1.10",
+            "192.168.1.13",
+            "fd00::22",
+            "fd01::100",
+            "fd01::103",
+        ];
+        let config = Config {
+            rack_subnet: Ipv6Addr::LOCALHOST,
+            bootstrap_discovery: BootstrapAddressDiscovery::OnlyOurs,
+            rack_secret_threshold: 0,
+            ntp_servers: Vec::new(),
+            dns_servers: Vec::new(),
+            internal_services_ip_pool_ranges: ip_pools
+                .iter()
+                .map(|(a, b)| {
+                    let a: IpAddr = a.parse().unwrap();
+                    let b: IpAddr = b.parse().unwrap();
+                    IpRange::try_from((a, b)).unwrap()
+                })
+                .collect(),
+            external_dns_ips: dns_ips
+                .iter()
+                .map(|ip| ip.parse().unwrap())
+                .collect(),
+            external_dns_zone_name: "".to_string(),
+            external_certificates: Vec::new(),
+            recovery_silo: RecoverySiloConfig {
+                silo_name: "recovery".parse().unwrap(),
+                user_name: "recovery".parse().unwrap(),
+                user_password_hash: "$argon2id$v=19$m=98304,t=13,p=1$RUlWc0ZxaHo0WFdrN0N6ZQ$S8p52j85GPvMhR/ek3GL0el/oProgTwWpHJZ8lsQQoY".parse().unwrap(),
+            },
+            rack_network_config: None,
+        };
+
+        let mut svp = ServicePortBuilder::new(&config);
+
+        // We should only get back the 5 DNS IPs we specified.
+        let mut svp_dns_ips = Vec::new();
+        while let Some((_interface, ip)) = svp.next_dns(Uuid::new_v4()) {
+            svp_dns_ips.push(ip.to_string());
+        }
+        assert_eq!(svp_dns_ips, dns_ips);
+
+        // next_internal_service_ip() should return all the IPs in our
+        // `ip_pools` ranges _except_ the 5 DNS IPs.
+        let expected_internal_service_ips = [
+            // "192.168.1.10", DNS IP
+            "192.168.1.11",
+            "192.168.1.12",
+            // "192.168.1.13", DNS IP
+            "192.168.1.14",
+            "fd00::20",
+            "fd00::21",
+            // "fd00::22", DNS IP
+            "fd00::23",
+            // "fd01::100", DNS IP
+            "fd01::101",
+            "fd01::102",
+            // "fd01::103", DNS IP
+        ];
+        let mut internal_service_ips = Vec::new();
+        while let Some(ip) = svp.next_internal_service_ip() {
+            internal_service_ips.push(ip.to_string());
+        }
+        assert_eq!(internal_service_ips, expected_internal_service_ips);
     }
 }
