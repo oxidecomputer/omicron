@@ -75,6 +75,9 @@ pub(crate) const MAX_EXTERNAL_IPS_PER_INSTANCE: usize = 1;
 
 pub const MAX_VCPU_PER_INSTANCE: u16 = 32;
 
+pub const MIN_MEMORY_BYTES_PER_INSTANCE: u32 = 1 << 30; // 1 GiB
+pub const MAX_MEMORY_BYTES_PER_INSTANCE: u64 = 64 * (1 << 30); // 64 GiB
+
 /// Manages an Oxide fleet -- the heart of the control plane
 pub struct Nexus {
     /// uuid for this nexus instance.
