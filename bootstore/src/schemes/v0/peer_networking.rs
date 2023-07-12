@@ -63,12 +63,12 @@ pub struct ConnToMainMsg {
 
 #[derive(Debug, PartialEq)]
 pub enum ConnToMainMsgInner {
-    ConnectedServer {
+    ConnectedAcceptor {
         accepted_addr: SocketAddrV6,
         addr: SocketAddrV6,
         peer_id: Baseboard,
     },
-    ConnectedClient {
+    ConnectedInitiator {
         addr: SocketAddrV6,
         peer_id: Baseboard,
     },
@@ -99,6 +99,8 @@ pub enum MainToConnMsg {
 pub struct PeerConnHandle {
     pub handle: JoinHandle<()>,
     pub tx: mpsc::Sender<MainToConnMsg>,
+
+    // The canonical IP:Port of the peer
     pub addr: SocketAddrV6,
     // This is used to differentiate stale `ConnToMainMsg`s from cancelled tasks
     // with the same addr from each other
@@ -109,6 +111,8 @@ pub struct PeerConnHandle {
 pub struct AcceptedConnHandle {
     pub handle: JoinHandle<()>,
     pub tx: mpsc::Sender<MainToConnMsg>,
+
+    // The canonical IP with ephemeral port of the peer
     pub addr: SocketAddrV6,
     // This is used to differentiate stale `ConnToMainMsg`s from cancelled tasks
     // with the same addr from each other
@@ -409,7 +413,7 @@ pub async fn spawn_connection_initiator_task(
             let _ = main_tx
                 .send(ConnToMainMsg {
                     handle_unique_id: unique_id,
-                    msg: ConnToMainMsgInner::ConnectedClient {
+                    msg: ConnToMainMsgInner::ConnectedInitiator {
                         addr: addr.clone(),
                         peer_id: identify.id.clone(),
                     },
@@ -483,7 +487,7 @@ pub async fn spawn_accepted_connection_management_task(
         let _ = main_tx
             .send(ConnToMainMsg {
                 handle_unique_id: unique_id,
-                msg: ConnToMainMsgInner::ConnectedServer {
+                msg: ConnToMainMsgInner::ConnectedAcceptor {
                     accepted_addr: addr,
                     addr: identify.addr.clone(),
                     peer_id: identify.id.clone(),

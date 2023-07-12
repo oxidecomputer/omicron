@@ -462,6 +462,11 @@ impl Node {
                 // need to get the `request_id` from destructuring above
                 if let Some(responder) = self.rack_secret_responder.take() {
                     let _ = responder.send(Ok(secret));
+                } else {
+                    warn!(
+                        self.log,
+                        "Rack secret loaded, but no pending responder"
+                    );
                 }
             }
             ApiOutput::ShareDistributedToLearner => {
@@ -470,6 +475,11 @@ impl Node {
             ApiOutput::LearningCompleted => {
                 if let Some(responder) = self.init_responder.take() {
                     let _ = responder.send(Ok(()));
+                } else {
+                    warn!(
+                        self.log,
+                        "Learning completed, but no pending responder"
+                    );
                 }
                 // TODO: Persistence
             }
@@ -511,7 +521,7 @@ impl Node {
     async fn on_conn_msg(&mut self, msg: ConnToMainMsg) {
         let unique_id = msg.handle_unique_id;
         match msg.msg {
-            ConnToMainMsgInner::ConnectedServer {
+            ConnToMainMsgInner::ConnectedAcceptor {
                 accepted_addr,
                 addr,
                 peer_id,
@@ -555,16 +565,30 @@ impl Node {
                     error!(self.log, "Error on connection: {e}");
                 }
             }
-            ConnToMainMsgInner::ConnectedClient { addr, peer_id } => {
-                let handle = self.initiating_connections.remove(&addr).unwrap();
+            ConnToMainMsgInner::ConnectedInitiator { addr, peer_id } => {
+                // If we don't have a handle, it just means that the connection re-occurred
+                // inside the loop in `spawn_connection_initiator_task`, and we already
+                // have it in `established_connections`.
+                if let Some(handle) = self.initiating_connections.remove(&addr)
+                {
+                    // Ignore the stale message if the unique_id doesn't match what
+                    // we have stored.
+                    if unique_id != handle.unique_id {
+                        return;
+                    }
 
-                // Ignore the stale message if the unique_id doesn't match what
-                // we have stored.
-                if unique_id != handle.unique_id {
-                    return;
+                    self.established_connections
+                        .insert(peer_id.clone(), handle);
+                } else {
+                    error!(
+                        self.log,
+                        "Missing PeerConnHandle";
+                        "addr" => addr.to_string(),
+                        "remote_peer_id" => peer_id.to_string()
+                    );
+                    panic!("Missing PeerConnHandle");
                 }
 
-                self.established_connections.insert(peer_id.clone(), handle);
                 if let Err(e) =
                     self.fsm.on_connected(Instant::now().into(), peer_id)
                 {
@@ -583,9 +607,21 @@ impl Node {
                     if unique_id != handle.unique_id {
                         return;
                     }
+                } else {
+                    error!(
+                        self.log,
+                        "Missing PeerConnHandle";
+                        "remote_peer_id" => peer_id.to_string()
+                    );
+                    panic!("Missing PeerConnHandle");
                 }
                 warn!(self.log, "peer disconnected {peer_id}");
-                self.established_connections.remove(&peer_id);
+                let handle =
+                    self.established_connections.remove(&peer_id).unwrap();
+                if peer_id < self.config.id {
+                    // Put the connection handle back in initiating state
+                    self.initiating_connections.insert(handle.addr, handle);
+                }
                 self.fsm.on_disconnected(&peer_id);
             }
             ConnToMainMsgInner::Received { from, msg } => {
