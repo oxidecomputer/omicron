@@ -113,10 +113,8 @@ impl Hello {
         16
     }
 
-    /// Serialize `Hello` into a buffer of at least 16 bytes in size
-    /// as 2 big-endian u32 values, followed by 1 big-endian u64 value
-    ///
-    /// Return `Err(BufferToSmall)` if `buf.len() < 16`
+    /// Serialize `Hello` into a 16 byte array as 2 big-endian u32 values,
+    /// followed by 1 big-endian u64 value
     pub fn serialize(&self) -> [u8; 16] {
         let mut buf = [0u8; 16];
         buf[0..4].copy_from_slice(&self.scheme.to_be_bytes());

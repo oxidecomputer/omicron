@@ -225,8 +225,8 @@ impl Peer {
         // flight while allowing `PeerAddresses` updates.
         let (tx, rx) = mpsc::channel(3);
 
-        // Up to 31 sleds sending messages with some extra room. These are mostly one at a time
-        // for each sled, but we leave some extra room.
+        // There are up to 31 sleds sending messages. These are mostly one at a
+        // time for each sled, but we leave some extra room.
         let (conn_tx, conn_rx) = mpsc::channel(128);
         let fsm =
             Fsm::new_uninitialized(config.id.clone(), config.clone().into());
@@ -505,12 +505,10 @@ impl Peer {
                 addr,
                 peer_id,
             } => {
-                // Do we need to worry about checking unique_id here? Is it even
-                // possible to have a race?
                 let Some(accepted_handle) =
                    self.accepted_connections.remove(&accepted_addr) else
                 {
-                    warn!(
+                    error!(
                         self.log,
                         "Missing AcceptedConnHandle";
                         "accepted_addr" => accepted_addr.to_string(),
@@ -519,6 +517,13 @@ impl Peer {
                     );
                     panic!("Missing AcceptedConnHandle");
                 };
+
+                // Ignore the stale message if the unique_id doesn't match what
+                // we have stored.
+                if unique_id != accepted_handle.unique_id {
+                    return;
+                }
+
                 // Gracefully close any old tasks for this peer if they exist
                 self.remove_established_connection(&peer_id).await;
 
@@ -544,19 +549,34 @@ impl Peer {
             ConnToMainMsgInner::ConnectedClient { addr, peer_id } => {
                 let handle =
                     self.negotiating_connections.remove(&addr).unwrap();
+
+                // Ignore the stale message if the unique_id doesn't match what
+                // we have stored.
+                if unique_id != handle.unique_id {
+                    return;
+                }
+
                 self.connections.insert(peer_id.clone(), handle);
                 if let Err(e) =
                     self.fsm.on_connected(Instant::now().into(), peer_id)
                 {
                     // This can only be a failure to init the rack, so we
                     // log it as an error and not a warning. It is unrecoverable
-                    // without a rack reset.
+                    // without a rack reset. It's not an invariant violation
+                    // though, so we don't panic.
                     error!(self.log, "Error on connection:  {e}");
                 } else {
                     self.deliver_envelopes().await;
                 }
             }
             ConnToMainMsgInner::Disconnected { peer_id } => {
+                // Ignore the stale message if the unique_id doesn't match what
+                // we have stored.
+                if let Some(handle) = self.connections.get(&peer_id) {
+                    if unique_id != handle.unique_id {
+                        return;
+                    }
+                }
                 warn!(self.log, "peer disconnected {}", peer_id);
                 self.connections.remove(&peer_id);
                 self.fsm.on_disconnected(&peer_id);
