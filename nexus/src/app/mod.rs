@@ -73,6 +73,8 @@ pub(crate) const MAX_NICS_PER_INSTANCE: usize = 8;
 // TODO-completeness: Support multiple external IPs
 pub(crate) const MAX_EXTERNAL_IPS_PER_INSTANCE: usize = 1;
 
+pub(crate) const MAX_VCPU_PER_INSTANCE: u16 = 32;
+
 /// Manages an Oxide fleet -- the heart of the control plane
 pub struct Nexus {
     /// uuid for this nexus instance.

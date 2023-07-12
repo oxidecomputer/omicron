@@ -7,6 +7,7 @@
 use super::MAX_DISKS_PER_INSTANCE;
 use super::MAX_EXTERNAL_IPS_PER_INSTANCE;
 use super::MAX_NICS_PER_INSTANCE;
+use super::MAX_VCPU_PER_INSTANCE;
 use crate::app::sagas;
 use crate::app::sagas::retry_until_known_result;
 use crate::authn;
@@ -115,7 +116,7 @@ impl super::Nexus {
         // Validate parameters
         if params.disks.len() > MAX_DISKS_PER_INSTANCE as usize {
             return Err(Error::invalid_request(&format!(
-                "cannot attach more than {} disks to instance!",
+                "cannot attach more than {} disks to instance",
                 MAX_DISKS_PER_INSTANCE
             )));
         }
@@ -124,6 +125,12 @@ impl super::Nexus {
                 self.validate_disk_create_params(opctx, &authz_project, create)
                     .await?;
             }
+        }
+        if params.ncpus.0 > MAX_VCPU_PER_INSTANCE {
+            return Err(Error::invalid_request(&format!(
+                "cannot have more than {} vCPUs per instance",
+                MAX_DISKS_PER_INSTANCE
+            )));
         }
         if params.external_ips.len() > MAX_EXTERNAL_IPS_PER_INSTANCE {
             return Err(Error::invalid_request(&format!(
