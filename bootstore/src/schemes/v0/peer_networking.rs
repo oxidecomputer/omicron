@@ -198,8 +198,9 @@ impl EstablishedConn {
                     self.on_read(res).await
                 }
                 res = self.write_sock.write_buf(&mut self.current_write),
-                   if self.current_write.has_remaining() => {
-                        self.check_write_result(res).await
+                   if self.current_write.has_remaining() =>
+                {
+                   self.check_write_result(res).await
                 }
             };
 
@@ -451,7 +452,7 @@ pub async fn spawn_accepted_connection_management_task(
     unique_id: u64,
     my_peer_id: Baseboard,
     my_addr: SocketAddrV6,
-    addr: SocketAddrV6,
+    client_addr: SocketAddrV6,
     sock: TcpStream,
     main_tx: mpsc::Sender<ConnToMainMsg>,
     log: &Logger,
@@ -470,14 +471,14 @@ pub async fn spawn_accepted_connection_management_task(
         {
             Ok(val) => val,
             Err(e) => {
-                warn!(log, "Handshake error: {:?}", e; "addr" => addr.to_string());
+                warn!(log, "Handshake error: {:?}", e; "addr" => client_addr.to_string());
                 // This is a server so we bail and wait for a new connection
                 // We must inform the main task so it can clean up any metadata.
                 main_tx
                     .send(ConnToMainMsg {
                         handle_unique_id: unique_id,
                         msg: ConnToMainMsgInner::FailedAcceptorHandshake {
-                            addr,
+                            addr: client_addr,
                         },
                     })
                     .await;
@@ -490,7 +491,7 @@ pub async fn spawn_accepted_connection_management_task(
             .send(ConnToMainMsg {
                 handle_unique_id: unique_id,
                 msg: ConnToMainMsgInner::ConnectedAcceptor {
-                    accepted_addr: addr,
+                    accepted_addr: client_addr,
                     addr: identify.addr.clone(),
                     peer_id: identify.id.clone(),
                 },
@@ -512,7 +513,7 @@ pub async fn spawn_accepted_connection_management_task(
         let _ = conn.run().await;
     });
 
-    AcceptedConnHandle { handle, tx, addr, unique_id }
+    AcceptedConnHandle { handle, tx, addr: client_addr, unique_id }
 }
 
 // Serialize and write `msg` into `buf`, prefixed by a 4-byte big-endian size header
