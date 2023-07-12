@@ -378,23 +378,6 @@ mod swapctl {
     /// List swap devices on the system.
     pub(crate) fn list_swap_devices() -> Result<Vec<SwapDevice>, SwapDeviceError>
     {
-        // The argument for SC_LIST (struct swaptbl) requires an embedded array in
-        // the struct, with swt_n entries, each of which requires a pointer to store
-        // the path to the device.
-        //
-        // Ideally, we would want to query the number of swap devices on the system
-        // via SC_GETNSWP, allocate enough memory for each device entry, then pass
-        // in pointers to memory to the list command. Unfortunately, creating a
-        // generically large array embedded in a struct that can be passed to C is a
-        // bit of a challenge in safe Rust. So instead, we just pick a reasonable
-        // max number of devices to list.
-        //
-        // We pick a max of 3 devices, somewhat arbitrarily. We only ever expect to
-        // see 0 or 1 swap device(s); if there are more, that is a bug. In the case
-        // that we see more than 1 swap device, we log a warning, and eventually, we
-        // should send an ereport.
-        const N_SWAPENTS: usize = 3;
-
         // Each swapent requires a char * pointer in our control for the
         // `ste_path` field,, which the kernel will fill in with a path if there
         // is a swap device for that entry. Because these pointers are mutated
