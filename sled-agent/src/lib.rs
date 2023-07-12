@@ -22,7 +22,6 @@ pub mod config;
 mod http_entrypoints;
 mod instance;
 mod instance_manager;
-mod ledger;
 mod nexus;
 pub mod params;
 mod profile;

@@ -26,7 +26,6 @@
 //! or disable (via [ServiceManager::deactivate_switch]) the switch zone.
 
 use crate::config::SidecarRevision;
-use crate::ledger::{Ledger, Ledgerable};
 use crate::params::{
     DendriteAsic, ServiceEnsureBody, ServiceType, ServiceZoneRequest,
     ServiceZoneService, TimeSync, ZoneBundleMetadata, ZoneType,
@@ -73,6 +72,7 @@ use omicron_common::backoff::{
     retry_notify, retry_policy_internal_service_aggressive, retry_policy_local,
     BackoffError,
 };
+use omicron_common::ledger::{self, Ledger, Ledgerable};
 use omicron_common::nexus_config::{
     self, ConfigDropshotWithTls, DeploymentConfig as NexusDeploymentConfig,
 };
@@ -124,7 +124,7 @@ pub enum Error {
     MissingDevice { device: String },
 
     #[error("Failed to access ledger: {0}")]
-    Ledger(#[from] crate::ledger::Error),
+    Ledger(#[from] ledger::Error),
 
     #[error("Sled Agent not initialized yet")]
     SledAgentNotReady,

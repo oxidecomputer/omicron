@@ -5,7 +5,6 @@
 //! Plan generation for "where should services be initialized".
 
 use crate::bootstrap::params::StartSledAgentRequest;
-use crate::ledger::{Ledger, Ledgerable};
 use crate::params::{
     DatasetKind, DatasetRequest, ServiceType, ServiceZoneRequest,
     ServiceZoneService, ZoneType,
@@ -29,6 +28,7 @@ use omicron_common::api::internal::shared::{
 use omicron_common::backoff::{
     retry_notify_ext, retry_policy_internal_service_aggressive, BackoffError,
 };
+use omicron_common::ledger::{self, Ledger, Ledgerable};
 use serde::{Deserialize, Serialize};
 use sled_agent_client::{
     types as SledAgentTypes, Client as SledAgentClient, Error as SledAgentError,
@@ -76,7 +76,7 @@ pub enum PlanError {
     },
 
     #[error("Failed to access ledger: {0}")]
-    Ledger(#[from] crate::ledger::Error),
+    Ledger(#[from] ledger::Error),
 
     #[error("Error making HTTP request to Sled Agent: {0}")]
     SledApi(#[from] SledAgentError<SledAgentTypes::Error>),
