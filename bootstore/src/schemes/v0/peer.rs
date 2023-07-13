@@ -517,16 +517,61 @@ impl Node {
                         is current"
                     );
                 } else {
+                    self.network_config = Some(config.clone());
                     NetworkConfig::save(
                         &self.log,
                         self.config.network_config_ledger_paths.clone(),
                         config,
                     )
                     .await;
-                    // TODO: Broadacst the updated config. We only broadcast
-                    // when we save it so we don't trigger an endless broadcast storm
+                    // Broadacst the updated config. We only broadcast
+                    // when we successfully update it so we don't trigger an
+                    // endless broadcast storm.
+                    self.broadcast_network_config(None).await;
                     let _ = responder.send(Ok(()));
                 }
+            }
+        }
+    }
+
+    // After we have updated our network config, we should send it out to all
+    // peers, with the exception of the peer we received it from if this was not
+    // a local update.
+    async fn broadcast_network_config(
+        &mut self,
+        excluded_peer: Option<&Baseboard>,
+    ) {
+        // We only call this method when there has been an update. Otherwise we
+        // have an invariant violation due to programmer error and should panic.
+        let network_config = self.network_config.as_ref().unwrap();
+        info!(
+            self.log,
+            "Broadcasting network config with generation {}",
+            network_config.generation
+        );
+        for (id, handle) in self
+            .established_connections
+            .iter()
+            .filter(|(id, _)| Some(*id) != excluded_peer)
+        {
+            debug!(
+                self.log,
+                "Sending network config with generation {} to {id}",
+                network_config.generation
+            );
+            // Send the current network config
+            if let Err(e) = handle
+                .tx
+                .send(MainToConnMsg::Msg(Msg::NetworkConfig(
+                    network_config.clone(),
+                )))
+                .await
+            {
+                warn!(
+                    self.log,
+                    "Failed to send network config to connection
+                         management task for {id} {e:?}"
+                );
             }
         }
     }
@@ -810,12 +855,14 @@ impl Node {
                     generation: {generation}, current generation: {current_gen}"
                 );
                 if generation > current_gen {
+                    self.network_config = Some(config.clone());
                     NetworkConfig::save(
                         &self.log,
                         self.config.network_config_ledger_paths.clone(),
                         config,
                     )
                     .await;
+                    self.broadcast_network_config(Some(&from)).await;
                 }
             }
         }
