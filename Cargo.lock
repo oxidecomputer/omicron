@@ -4524,7 +4524,10 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "api_identity 0.1.0",
+ "async-trait",
  "backoff",
+ "camino",
+ "camino-tempfile",
  "chrono",
  "dropshot",
  "expectorate",
