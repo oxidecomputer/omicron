@@ -2510,7 +2510,7 @@ CREATE TABLE omicron.public.switch_port_settings_address_config (
  */
 
 CREATE TABLE omicron.public.db_metadata (
-    name  STRING(63) NOT NULL,
+    name  STRING(63) NOT NULL PRIMARY KEY,
     value STRING(1023) NOT NULL
 );
 
