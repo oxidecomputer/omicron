@@ -27,7 +27,7 @@ pub struct PersistentFsmState {
 
 impl Ledgerable for PersistentFsmState {
     fn is_newer_than(&self, other: &Self) -> bool {
-        self.generation >= other.generation
+        self.generation > other.generation
     }
 
     fn generation_bump(&mut self) {
@@ -97,7 +97,7 @@ pub struct NetworkConfig {
 
 impl Ledgerable for NetworkConfig {
     fn is_newer_than(&self, other: &Self) -> bool {
-        self.generation >= other.generation
+        self.generation > other.generation
     }
 
     fn generation_bump(&mut self) {

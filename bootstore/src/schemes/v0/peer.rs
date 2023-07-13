@@ -800,6 +800,24 @@ impl Node {
                 }
                 self.accepted_connections.remove(&addr);
             }
+            ConnToMainMsgInner::ReceivedNetworkConfig { from, config } => {
+                let current_gen =
+                    self.network_config.as_ref().map_or(0, |c| c.generation);
+                let generation = config.generation;
+                info!(
+                    self.log,
+                    "Received network config from {from} with 
+                    generation: {generation}, current generation: {current_gen}"
+                );
+                if generation > current_gen {
+                    NetworkConfig::save(
+                        &self.log,
+                        self.config.network_config_ledger_paths.clone(),
+                        config,
+                    )
+                    .await;
+                }
+            }
         }
     }
 
@@ -1080,7 +1098,9 @@ mod tests {
         let peer1_gen_new_2 =
             handle1.get_status().await.unwrap().fsm_ledger_generation;
 
-        // Ensure only one of the peers generation numbers gets bumped
+        // Ensure the peer's generation numbers don't get bumped. The learner
+        // will ask the same sled for a share first, which it already handed
+        // out.
         assert!(
             peer0_gen_new == peer0_gen_new_2
                 && peer1_gen_new == peer1_gen_new_2

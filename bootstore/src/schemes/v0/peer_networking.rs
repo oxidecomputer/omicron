@@ -86,6 +86,10 @@ pub enum ConnToMainMsgInner {
     FailedAcceptorHandshake {
         addr: SocketAddrV6,
     },
+    ReceivedNetworkConfig {
+        from: Baseboard,
+        config: NetworkConfig,
+    },
 }
 
 /// Messages sent from the main task to the connection managing tasks
@@ -309,7 +313,7 @@ impl EstablishedConn {
                     {
                         warn!(
                             self.log,
-                            "Failed to send received msg to main task: {e:?}"
+                            "Failed to send received fsm msg to main task: {e:?}"
                         );
                     }
                 }
@@ -317,7 +321,26 @@ impl EstablishedConn {
                     // Nothing to do here, since Ping is just to keep us alive and
                     // we updated self.last_received_msg above.
                 }
-                Msg::NetworkConfig(_) => {}
+                Msg::NetworkConfig(config) => {
+                    let generation = config.generation;
+                    if let Err(e) = self
+                        .main_tx
+                        .send(ConnToMainMsg {
+                            handle_unique_id: self.unique_id,
+                            msg: ConnToMainMsgInner::ReceivedNetworkConfig {
+                                from: self.peer_id.clone(),
+                                config,
+                            },
+                        })
+                        .await
+                    {
+                        warn!(
+                            self.log,
+                            "Failed to send received NetworkConfig with
+                             generation {generation} to main task: {e:?}"
+                        );
+                    }
+                }
             }
         }
     }
