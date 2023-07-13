@@ -7,7 +7,10 @@ license = "MPL-2.0"
 [dependencies]
 anyhow.workspace = true
 api_identity.workspace = true
+async-trait.workspace = true
 backoff.workspace = true
+camino.workspace = true
+camino-tempfile.workspace = true
 chrono.workspace = true
 dropshot.workspace = true
 futures.workspace = true

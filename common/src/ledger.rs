@@ -7,7 +7,7 @@
 use async_trait::async_trait;
 use camino::{Utf8Path, Utf8PathBuf};
 use serde::{de::DeserializeOwned, Serialize};
-use slog::Logger;
+use slog::{debug, warn, Logger};
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -37,9 +37,9 @@ impl Error {
     }
 }
 
-impl From<Error> for omicron_common::api::external::Error {
+impl From<Error> for crate::api::external::Error {
     fn from(err: Error) -> Self {
-        omicron_common::api::external::Error::InternalError {
+        crate::api::external::Error::InternalError {
             internal_message: err.to_string(),
         }
     }
@@ -203,7 +203,29 @@ pub trait Ledgerable: DeserializeOwned + Serialize + Send + Sync {
 #[cfg(test)]
 mod test {
     use super::*;
-    use omicron_test_utils::dev::test_setup_log;
+
+    pub use dropshot::test_util::LogContext;
+    use dropshot::ConfigLogging;
+    use dropshot::ConfigLoggingIfExists;
+    use dropshot::ConfigLoggingLevel;
+
+    // Copied from `omicron-test-utils` to avoid a circular dependency where
+    // `omicron-common` depends on `omicron-test-utils` which depends on
+    // `omicron-common`.
+    /// Set up a [`dropshot::test_util::LogContext`] appropriate for a test named
+    /// `test_name`
+    ///
+    /// This function is currently only used by unit tests.  (We want the dead code
+    /// warning if it's removed from unit tests, but not during a normal build.)
+    pub fn test_setup_log(test_name: &str) -> LogContext {
+        let log_config = ConfigLogging::File {
+            level: ConfigLoggingLevel::Trace,
+            path: "UNUSED".into(),
+            if_exists: ConfigLoggingIfExists::Fail,
+        };
+
+        LogContext::new(test_name, &log_config)
+    }
 
     #[derive(Serialize, serde::Deserialize, Default, Eq, PartialEq, Debug)]
     struct Data {
