@@ -5,12 +5,15 @@
 //! API for controlling multiple instances on a sled.
 
 use crate::instance::Instance;
+use crate::instance::InstanceZoneBundleResult;
 use crate::nexus::NexusClientWithResolver;
+use crate::params::ZoneBundleMetadata;
 use crate::params::{
     InstanceHardware, InstanceMigrationSourceParams, InstancePutStateResponse,
     InstanceStateRequested, InstanceUnregisterResponse,
 };
 use crate::storage_manager::StorageResources;
+use crate::zone_bundle::BundleError;
 use illumos_utils::dladm::Etherstub;
 use illumos_utils::link::VnicAllocator;
 use illumos_utils::opte::PortManager;
@@ -20,6 +23,7 @@ use omicron_common::api::internal::nexus::InstanceRuntimeState;
 use slog::Logger;
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
+use tokio::sync::Mutex as TokioMutex;
 use uuid::Uuid;
 
 #[derive(thiserror::Error, Debug)]
@@ -38,6 +42,9 @@ pub enum Error {
 
     #[error("Cannot find data link: {0}")]
     Underlay(#[from] sled_hardware::underlay::Error),
+
+    #[error("Zone bundle error")]
+    ZoneBundle(#[from] BundleError),
 }
 
 struct InstanceManagerInternal {
@@ -51,7 +58,7 @@ struct InstanceManagerInternal {
     // instance, we could avoid the methods within "instance.rs" that panic
     // if the Propolis client hasn't been initialized.
     /// A mapping from a Sled Agent "Instance ID" to ("Propolis ID", [Instance]).
-    instances: Mutex<BTreeMap<Uuid, (Uuid, Instance)>>,
+    instances: TokioMutex<BTreeMap<Uuid, (Uuid, Instance)>>,
 
     vnic_allocator: VnicAllocator<Etherstub>,
     port_manager: PortManager,
@@ -79,7 +86,7 @@ impl InstanceManager {
 
                 // no reservoir size set on startup
                 reservoir_size: Mutex::new(ByteCount::from_kibibytes_u32(0)),
-                instances: Mutex::new(BTreeMap::new()),
+                instances: TokioMutex::new(BTreeMap::new()),
                 vnic_allocator: VnicAllocator::new("Instance", etherstub),
                 port_manager,
                 storage,
@@ -169,7 +176,7 @@ impl InstanceManager {
         );
 
         let instance = {
-            let mut instances = self.inner.instances.lock().unwrap();
+            let mut instances = self.inner.instances.lock().await;
             if let Some((existing_propolis_id, existing_instance)) =
                 instances.get(&instance_id)
             {
@@ -226,7 +233,7 @@ impl InstanceManager {
         instance_id: Uuid,
     ) -> Result<InstanceUnregisterResponse, Error> {
         let instance = {
-            let instances = self.inner.instances.lock().unwrap();
+            let instances = self.inner.instances.lock().await;
             let instance = instances.get(&instance_id);
             if let Some((_, instance)) = instance {
                 instance.clone()
@@ -250,7 +257,7 @@ impl InstanceManager {
         target: InstanceStateRequested,
     ) -> Result<InstancePutStateResponse, Error> {
         let instance = {
-            let instances = self.inner.instances.lock().unwrap();
+            let instances = self.inner.instances.lock().await;
             let instance = instances.get(&instance_id);
 
             if let Some((_, instance)) = instance {
@@ -293,7 +300,7 @@ impl InstanceManager {
             .inner
             .instances
             .lock()
-            .unwrap()
+            .await
             .get(&instance_id)
             .ok_or_else(|| Error::NoSuchInstance(instance_id))?
             .clone();
@@ -308,7 +315,7 @@ impl InstanceManager {
         snapshot_id: Uuid,
     ) -> Result<(), Error> {
         let instance = {
-            let instances = self.inner.instances.lock().unwrap();
+            let instances = self.inner.instances.lock().await;
             let (_, instance) = instances
                 .get(&instance_id)
                 .ok_or(Error::NoSuchInstance(instance_id))?;
@@ -319,6 +326,27 @@ impl InstanceManager {
             .issue_snapshot_request(disk_id, snapshot_id)
             .await
             .map_err(Error::from)
+    }
+
+    /// Create a zone bundle from a named instance zone, if it exists.
+    pub async fn create_zone_bundle(
+        &self,
+        name: &str,
+    ) -> Result<ZoneBundleMetadata, BundleError> {
+        for (_propolis_id, instance) in
+            self.inner.instances.lock().await.values()
+        {
+            match instance.request_zone_bundle(name).await {
+                InstanceZoneBundleResult::NotMe => continue,
+                InstanceZoneBundleResult::NotRunning => {
+                    return Err(BundleError::Unavailable {
+                        name: name.to_string(),
+                    });
+                }
+                InstanceZoneBundleResult::Ok(result) => return result,
+            }
+        }
+        Err(BundleError::NoSuchZone { name: name.to_string() })
     }
 }
 
@@ -340,7 +368,15 @@ impl InstanceTicket {
     /// themselves after stopping.
     pub fn terminate(&mut self) {
         if let Some(inner) = self.inner.take() {
-            inner.instances.lock().unwrap().remove(&self.id);
+            // NOTE: We cannot call methods like `Mutex::blocking_lock()` from
+            // an asynchronous context. We wrap this in a call to
+            // `block_in_place()`. This does block the current thread (and any
+            // concurrent tasks in the same task), but that's not a distinction
+            // from the previous implementation which called
+            // `std::sync::Mutex::lock()` here.
+            tokio::task::block_in_place(|| {
+                inner.instances.blocking_lock().remove(&self.id);
+            });
         }
     }
 }

@@ -4,10 +4,20 @@
   "description": "Metadata about a zone bundle.",
   "type": "object",
   "required": [
+    "cause",
     "id",
-    "time_created"
+    "time_created",
+    "version"
   ],
   "properties": {
+    "cause": {
+      "description": "The reason or cause a bundle was created.",
+      "allOf": [
+        {
+          "$ref": "#/definitions/ZoneBundleCause"
+        }
+      ]
+    },
     "id": {
       "description": "Identifier for this zone bundle",
       "allOf": [
@@ -20,9 +30,48 @@
       "description": "The time at which this zone bundle was created.",
       "type": "string",
       "format": "date-time"
+    },
+    "version": {
+      "description": "A version number for this zone bundle.",
+      "type": "integer",
+      "format": "uint8",
+      "minimum": 0.0
     }
   },
   "definitions": {
+    "ZoneBundleCause": {
+      "description": "The reason or cause for a zone bundle, i.e., why it was created.",
+      "oneOf": [
+        {
+          "description": "Generated in response to an explicit request to the sled agent.",
+          "type": "string",
+          "enum": [
+            "explicit_request"
+          ]
+        },
+        {
+          "description": "A zone bundle taken when a sled agent finds a zone that it does not expect to be running.",
+          "type": "string",
+          "enum": [
+            "unexpected_zone"
+          ]
+        },
+        {
+          "description": "An instance zone was terminated.",
+          "type": "string",
+          "enum": [
+            "terminated_instance"
+          ]
+        },
+        {
+          "description": "Some other, unspecified reason.",
+          "type": "string",
+          "enum": [
+            "other"
+          ]
+        }
+      ]
+    },
     "ZoneBundleId": {
       "description": "An identifier for a zone bundle.",
       "type": "object",

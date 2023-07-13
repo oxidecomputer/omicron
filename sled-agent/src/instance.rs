@@ -13,6 +13,7 @@ use crate::nexus::NexusClientWithResolver;
 use crate::params::{
     InstanceHardware, InstanceMigrationSourceParams,
     InstanceMigrationTargetParams, InstanceStateRequested, VpcFirewallRule,
+    ZoneBundleCause,
 };
 use crate::profile::*;
 use crate::storage_manager::StorageResources;
@@ -34,6 +35,9 @@ use omicron_common::api::internal::shared::{
 };
 use omicron_common::backoff;
 //use propolis_client::generated::DiskRequest;
+use crate::params::ZoneBundleMetadata;
+use crate::zone_bundle;
+use crate::zone_bundle::BundleError;
 use propolis_client::Client as PropolisClient;
 use rand::prelude::SliceRandom;
 use rand::SeedableRng;
@@ -526,12 +530,47 @@ impl InstanceInner {
     /// This routine is safe to call even if the instance's zone was never
     /// started. It is also safe to call multiple times on a single instance.
     async fn terminate(&mut self) -> Result<(), Error> {
+        let zname = propolis_zone_name(self.propolis_id());
+
+        // First fetch the running state.
+        //
+        // If there is nothing here, then there is no `RunningZone`, and so
+        // there's no zone or resources to clean up at all.
+        let mut running_state = if let Some(state) = self.running_state.take() {
+            state
+        } else {
+            debug!(
+                self.log,
+                "Instance::terminate() called with no running state"
+            );
+            return Ok(());
+        };
+
+        // Take a zone bundle whenever this instance stops.
+        let context = self
+            .storage
+            .zone_bundle_context(&zname, ZoneBundleCause::TerminatedInstance)
+            .await;
+        if let Err(e) = zone_bundle::create(
+            &self.log,
+            &running_state.running_zone,
+            &context,
+        )
+        .await
+        {
+            error!(
+                self.log,
+                "Failed to take zone bundle for terminated instance";
+                "zone_name" => &zname,
+                "reason" => ?e,
+            );
+        }
+
         // Ensure that no zone exists. This succeeds even if no zone was ever
         // created.
         // NOTE: we call`Zones::halt_and_remove_logged` directly instead of
         // `RunningZone::stop` in case we're called between creating the
         // zone and assigning `running_state`.
-        let zname = propolis_zone_name(self.propolis_id());
         warn!(self.log, "Halting and removing zone: {}", zname);
         Zones::halt_and_remove_logged(&self.log, &zname).await.unwrap();
 
@@ -539,12 +578,7 @@ impl InstanceInner {
         self.instance_ticket.terminate();
 
         // See if there are any runtime objects to clean up.
-        let mut running_state = if let Some(state) = self.running_state.take() {
-            state
-        } else {
-            return Ok(());
-        };
-
+        //
         // We already removed the zone above but mark it as stopped
         running_state.running_zone.stop().await.unwrap();
 
@@ -553,6 +587,20 @@ impl InstanceInner {
 
         Ok(())
     }
+}
+
+/// A result asking an instance to generate a zone bundle.
+#[derive(Debug)]
+pub enum InstanceZoneBundleResult {
+    /// A zone bundle was operation was performed on the requested zone.
+    Ok(Result<ZoneBundleMetadata, BundleError>),
+
+    /// A request to create a bundle for a zone whose name does not match this
+    /// one's Propolis zone.
+    NotMe,
+
+    /// The zone is not currently running.
+    NotRunning,
 }
 
 /// A reference to a single instance running a running Propolis server.
@@ -625,6 +673,39 @@ impl Instance {
         let inner = Arc::new(Mutex::new(instance));
 
         Ok(Instance { inner })
+    }
+
+    /// Create bundle from a zone matching the provided name.
+    ///
+    /// This returns an [`InstanceZoneBundleResult`] to indicate whether the
+    /// bundle could be correctly taken. See that enum for details.
+    pub async fn request_zone_bundle(
+        &self,
+        name: &str,
+    ) -> InstanceZoneBundleResult {
+        let inner = self.inner.lock().await;
+        let zone_name = propolis_zone_name(inner.propolis_id());
+        if zone_name != name {
+            return InstanceZoneBundleResult::NotMe;
+        }
+        match &*inner {
+            InstanceInner { running_state: None, .. } => {
+                InstanceZoneBundleResult::NotRunning
+            }
+            InstanceInner {
+                ref log,
+                running_state: Some(RunningState { ref running_zone, .. }),
+                ..
+            } => {
+                let context = inner
+                    .storage
+                    .zone_bundle_context(name, ZoneBundleCause::ExplicitRequest)
+                    .await;
+                InstanceZoneBundleResult::Ok(
+                    zone_bundle::create(log, running_zone, &context).await,
+                )
+            }
+        }
     }
 
     pub async fn current_state(&self) -> InstanceRuntimeState {

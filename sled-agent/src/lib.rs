@@ -34,6 +34,7 @@ pub(crate) mod storage;
 mod storage_manager;
 mod swap_device;
 mod updates;
+mod zone_bundle;
 
 #[cfg(test)]
 mod fakes;
