@@ -491,12 +491,6 @@
               }
             ]
           },
-          "rack_secret_threshold": {
-            "description": "The minimum number of sleds required to unlock the rack secret.\n\nIf this value is less than 2, no rack secret will be created on startup; this is the typical case for single-server test/development.",
-            "type": "integer",
-            "format": "uint",
-            "minimum": 0
-          },
           "rack_subnet": {
             "type": "string",
             "format": "ipv6"
@@ -518,7 +512,6 @@
           "external_dns_zone_name",
           "internal_services_ip_pool_ranges",
           "ntp_servers",
-          "rack_secret_threshold",
           "rack_subnet",
           "recovery_silo"
         ]

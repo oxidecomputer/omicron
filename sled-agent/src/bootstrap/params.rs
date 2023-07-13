@@ -29,7 +29,6 @@ pub enum BootstrapAddressDiscovery {
 struct UnvalidatedRackInitializeRequest {
     rack_subnet: Ipv6Addr,
     bootstrap_discovery: BootstrapAddressDiscovery,
-    rack_secret_threshold: usize,
     ntp_servers: Vec<String>,
     dns_servers: Vec<String>,
     internal_services_ip_pool_ranges: Vec<address::IpRange>,
@@ -53,12 +52,6 @@ pub struct RackInitializeRequest {
 
     /// Describes how bootstrap addresses should be collected during RSS.
     pub bootstrap_discovery: BootstrapAddressDiscovery,
-
-    /// The minimum number of sleds required to unlock the rack secret.
-    ///
-    /// If this value is less than 2, no rack secret will be created on startup;
-    /// this is the typical case for single-server test/development.
-    pub rack_secret_threshold: usize,
 
     /// The external NTP server addresses.
     pub ntp_servers: Vec<String>,
@@ -116,7 +109,6 @@ impl TryFrom<UnvalidatedRackInitializeRequest> for RackInitializeRequest {
         Ok(RackInitializeRequest {
             rack_subnet: value.rack_subnet,
             bootstrap_discovery: value.bootstrap_discovery,
-            rack_secret_threshold: value.rack_secret_threshold,
             ntp_servers: value.ntp_servers,
             dns_servers: value.dns_servers,
             internal_services_ip_pool_ranges: value
@@ -212,7 +204,6 @@ mod tests {
         let config = r#"
             rack_subnet = "fd00:1122:3344:0100::"
             bootstrap_discovery.type = "only_ours"
-            rack_secret_threshold = 1
             ntp_servers = [ "ntp.eng.oxide.computer" ]
             dns_servers = [ "1.1.1.1", "9.9.9.9" ]
             external_dns_zone_name = "oxide.test"
@@ -264,7 +255,6 @@ mod tests {
         let mut config = UnvalidatedRackInitializeRequest {
             rack_subnet: Ipv6Addr::LOCALHOST,
             bootstrap_discovery: BootstrapAddressDiscovery::OnlyOurs,
-            rack_secret_threshold: 0,
             ntp_servers: Vec::new(),
             dns_servers: Vec::new(),
             internal_services_ip_pool_ranges: Vec::new(),
