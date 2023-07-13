@@ -9,8 +9,10 @@ use super::peer_networking::{
     AcceptedConnHandle, ConnToMainMsg, ConnToMainMsgInner, MainToConnMsg, Msg,
     PeerConnHandle,
 };
-use super::{ApiError, ApiOutput, Config as FsmConfig, Fsm, RackUuid};
+use super::storage::PersistentFsmState;
+use super::{ApiError, ApiOutput, Fsm, FsmConfig, RackUuid};
 use crate::trust_quorum::RackSecret;
+use camino::Utf8PathBuf;
 use derive_more::From;
 use sled_hardware::Baseboard;
 use slog::{debug, error, info, o, warn, Logger};
@@ -29,6 +31,7 @@ pub struct Config {
     learn_timeout: Duration,
     rack_init_timeout: Duration,
     rack_secret_request_timeout: Duration,
+    fsm_state_ledger_paths: Vec<Utf8PathBuf>,
 }
 
 /// An error response from a `NodeApiRequest`
@@ -158,6 +161,7 @@ impl NodeHandle {
 
 #[derive(Debug, Clone)]
 pub struct Status {
+    pub fsm_ledger_generation: u64,
     pub fsm_state: &'static str,
     pub peers: BTreeSet<SocketAddrV6>,
     pub connections: BTreeMap<Baseboard, SocketAddrV6>,
@@ -172,6 +176,7 @@ pub struct Status {
 /// tasks for each connection to other peer nodes. Nodes drive the lrtq protocol
 /// via control of an underlying  `Fsm`.
 pub struct Node {
+    fsm_ledger_generation: u64,
     config: Config,
     fsm: Fsm,
     peers: BTreeSet<SocketAddrV6>,
@@ -233,7 +238,7 @@ impl From<Config> for FsmConfig {
 }
 
 impl Node {
-    pub fn new(config: Config, log: &Logger) -> (Node, NodeHandle) {
+    pub async fn new(config: Config, log: &Logger) -> (Node, NodeHandle) {
         // We only expect one outstanding request at a time for `Init_` or
         // `LoadRackSecret` requests, We can have one of those requests in
         // flight while allowing `PeerAddresses` updates.
@@ -242,11 +247,21 @@ impl Node {
         // There are up to 31 sleds sending messages. These are mostly one at a
         // time for each sled, but we leave some extra room.
         let (conn_tx, conn_rx) = mpsc::channel(128);
-        let fsm =
-            Fsm::new_uninitialized(config.id.clone(), config.clone().into());
+
         let id_str = config.id.to_string();
+        let log = log.new(o!("component" => "bootstore", "peer_id" => id_str));
+
+        let (fsm, ledger_generation) = PersistentFsmState::load(
+            &log,
+            config.fsm_state_ledger_paths.clone(),
+            config.id.clone(),
+            config.clone().into(),
+        )
+        .await;
+
         (
             Node {
+                fsm_ledger_generation: ledger_generation,
                 config,
                 fsm,
                 peers: BTreeSet::new(),
@@ -258,8 +273,7 @@ impl Node {
                 rx,
                 init_responder: None,
                 rack_secret_responder: None,
-                log: log
-                    .new(o!("component" => "bootstore", "peer_id" => id_str)),
+                log,
                 conn_rx,
                 conn_tx,
             },
@@ -399,6 +413,7 @@ impl Node {
             }
             NodeApiRequest::GetStatus { responder } => {
                 let status = Status {
+                    fsm_ledger_generation: self.fsm_ledger_generation,
                     fsm_state: self.fsm.state().name(),
                     peers: self.peers.clone(),
                     connections: self
@@ -470,7 +485,13 @@ impl Node {
                 if let Some(responder) = self.init_responder.take() {
                     let _ = responder.send(Ok(()));
                 }
-                // TODO: Persistence
+                self.fsm_ledger_generation = PersistentFsmState::save(
+                    &self.log,
+                    self.config.fsm_state_ledger_paths.clone(),
+                    self.fsm_ledger_generation,
+                    self.fsm.state().clone(),
+                )
+                .await;
             }
             ApiOutput::RackSecret { secret, .. } => {
                 // We only allow one outstanding request currently, so no
@@ -485,7 +506,13 @@ impl Node {
                 }
             }
             ApiOutput::ShareDistributedToLearner => {
-                // TODO: Persistence
+                self.fsm_ledger_generation = PersistentFsmState::save(
+                    &self.log,
+                    self.config.fsm_state_ledger_paths.clone(),
+                    self.fsm_ledger_generation,
+                    self.fsm.state().clone(),
+                )
+                .await;
             }
             ApiOutput::LearningCompleted => {
                 if let Some(responder) = self.init_responder.take() {
@@ -496,7 +523,13 @@ impl Node {
                         "Learning completed, but no pending responder"
                     );
                 }
-                // TODO: Persistence
+                self.fsm_ledger_generation = PersistentFsmState::save(
+                    &self.log,
+                    self.config.fsm_state_ledger_paths.clone(),
+                    self.fsm_ledger_generation,
+                    self.fsm.state().clone(),
+                )
+                .await;
             }
         }
     }
@@ -728,6 +761,7 @@ impl Node {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use camino_tempfile::Utf8TempDir;
     use slog::Drain;
     use uuid::Uuid;
 
@@ -740,33 +774,39 @@ mod tests {
             .collect()
     }
 
-    fn initial_config() -> Vec<Config> {
+    fn initial_config(tempdir: &Utf8TempDir) -> Vec<Config> {
         initial_members()
             .into_iter()
             .enumerate()
-            .map(|(i, id)| Config {
-                id,
-                addr: format!("[::1]:3333{}", i).parse().unwrap(),
-                time_per_tick: Duration::from_millis(20),
-                learn_timeout: Duration::from_secs(5),
-                rack_init_timeout: Duration::from_secs(10),
-                rack_secret_request_timeout: Duration::from_secs(1),
+            .map(|(i, id)| {
+                let file = format!("test-{i}-fsm-state-ledger");
+                Config {
+                    id,
+                    addr: format!("[::1]:3333{}", i).parse().unwrap(),
+                    time_per_tick: Duration::from_millis(20),
+                    learn_timeout: Duration::from_secs(5),
+                    rack_init_timeout: Duration::from_secs(10),
+                    rack_secret_request_timeout: Duration::from_secs(1),
+                    fsm_state_ledger_paths: vec![tempdir.path().join(&file)],
+                }
             })
             .collect()
     }
 
-    fn learner_id() -> Baseboard {
-        Baseboard::new_pc("learner".to_string(), "1".to_string())
+    fn learner_id(n: usize) -> Baseboard {
+        Baseboard::new_pc("learner".to_string(), n.to_string())
     }
 
-    fn learner_config() -> Config {
+    fn learner_config(tempdir: &Utf8TempDir, n: usize) -> Config {
+        let file = format!("test-learner-{n}-fsm-state-ledger");
         Config {
-            id: learner_id(),
+            id: learner_id(n),
             addr: format!("[::1]:3333{}", 3).parse().unwrap(),
             time_per_tick: Duration::from_millis(20),
             learn_timeout: Duration::from_secs(5),
             rack_init_timeout: Duration::from_secs(10),
             rack_secret_request_timeout: Duration::from_secs(1),
+            fsm_state_ledger_paths: vec![tempdir.path().join(&file)],
         }
     }
 
@@ -779,11 +819,12 @@ mod tests {
 
     #[tokio::test]
     async fn basic_3_nodes() {
+        let tempdir = Utf8TempDir::new().unwrap();
         let log = log();
-        let config = initial_config();
-        let (mut node0, handle0) = Node::new(config[0].clone(), &log);
-        let (mut node1, handle1) = Node::new(config[1].clone(), &log);
-        let (mut node2, handle2) = Node::new(config[2].clone(), &log);
+        let config = initial_config(&tempdir);
+        let (mut node0, handle0) = Node::new(config[0].clone(), &log).await;
+        let (mut node1, handle1) = Node::new(config[1].clone(), &log).await;
+        let (mut node2, handle2) = Node::new(config[2].clone(), &log).await;
 
         let jh0 = tokio::spawn(async move {
             node0.run().await;
@@ -824,13 +865,15 @@ mod tests {
         handle1.load_rack_secret().await.unwrap();
 
         // Add a learner node
-        let (mut learner, learner_handle) = Node::new(learner_config(), &log);
+        let learner_conf = learner_config(&tempdir, 1);
+        let (mut learner, learner_handle) =
+            Node::new(learner_conf.clone(), &log).await;
         let learner_jh = tokio::spawn(async move {
             learner.run().await;
         });
         // Inform the learner and node0 and node1 about all addresses including
         // the learner. This simulates DDM discovery
-        addrs.insert(learner_config().addr.clone());
+        addrs.insert(learner_conf.addr.clone());
         let _ = learner_handle.load_peer_addresses(addrs.clone()).await;
         let _ = handle0.load_peer_addresses(addrs.clone()).await;
         let _ = handle1.load_peer_addresses(addrs.clone()).await;
@@ -850,11 +893,82 @@ mod tests {
         learner_jh.await.unwrap();
         handle0.load_rack_secret().await.unwrap_err();
 
-        // TODO: Once we have persistence, we can bring an old node back from the dead
-        // and reload the rack secret.
+        // Reload an node from persistent state and successfully reload the
+        // rack secret.
+        let (mut node1, handle1) = Node::new(config[1].clone(), &log).await;
+        let jh1 = tokio::spawn(async move {
+            node1.run().await;
+        });
+        let _ = handle1.load_peer_addresses(addrs.clone()).await;
+        handle0.load_rack_secret().await.unwrap();
 
-        // Shutdown node0
+        // Add a second learner and ensure that the generation gets bumped for
+        // either node0 or node1
+        let peer0_gen =
+            handle0.get_status().await.unwrap().fsm_ledger_generation;
+        let peer1_gen =
+            handle1.get_status().await.unwrap().fsm_ledger_generation;
+        let learner_config = learner_config(&tempdir, 2);
+        let (mut learner, learner_handle) =
+            Node::new(learner_config.clone(), &log).await;
+        let learner_jh = tokio::spawn(async move {
+            learner.run().await;
+        });
+
+        // Inform the learner, node0, and node1 about all addresses including
+        // the learner. This simulates DDM discovery
+        addrs.insert(learner_config.addr.clone());
+        let _ = learner_handle.load_peer_addresses(addrs.clone()).await;
+        let _ = handle0.load_peer_addresses(addrs.clone()).await;
+        let _ = handle1.load_peer_addresses(addrs.clone()).await;
+
+        // Tell the learner to go ahead and learn its share.
+        learner_handle.init_learner().await.unwrap();
+
+        // Get the new generation numbers
+        let peer0_gen_new =
+            handle0.get_status().await.unwrap().fsm_ledger_generation;
+        let peer1_gen_new =
+            handle1.get_status().await.unwrap().fsm_ledger_generation;
+
+        // Ensure only one of the peers generation numbers gets bumped
+        assert!(
+            (peer0_gen_new == peer0_gen && peer1_gen_new == peer1_gen + 1)
+                || (peer0_gen_new == peer0_gen + 1
+                    && peer1_gen_new == peer1_gen)
+        );
+
+        // Wipe the learner ledger, restart the learner and instruct it to
+        // relearn its share, and ensure that the neither generation number gets
+        // bumped because persistence doesn't occur.
+        learner_handle.shutdown().await.unwrap();
+        learner_jh.await.unwrap();
+        std::fs::remove_file(&learner_config.fsm_state_ledger_paths[0])
+            .unwrap();
+        let (mut learner, learner_handle) =
+            Node::new(learner_config.clone(), &log).await;
+        let learner_jh = tokio::spawn(async move {
+            learner.run().await;
+        });
+        let _ = learner_handle.load_peer_addresses(addrs.clone()).await;
+        learner_handle.init_learner().await.unwrap();
+        let peer0_gen_new_2 =
+            handle0.get_status().await.unwrap().fsm_ledger_generation;
+        let peer1_gen_new_2 =
+            handle1.get_status().await.unwrap().fsm_ledger_generation;
+
+        // Ensure only one of the peers generation numbers gets bumped
+        assert!(
+            peer0_gen_new == peer0_gen_new_2
+                && peer1_gen_new == peer1_gen_new_2
+        );
+
+        // Shutdown the new learner, node0, and node1
+        learner_handle.shutdown().await.unwrap();
+        learner_jh.await.unwrap();
         handle0.shutdown().await.unwrap();
         jh0.await.unwrap();
+        handle1.shutdown().await.unwrap();
+        jh1.await.unwrap();
     }
 }

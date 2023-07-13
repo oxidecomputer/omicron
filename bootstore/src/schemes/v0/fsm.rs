@@ -12,7 +12,7 @@
 
 use super::request_manager::ShareAcks;
 use super::{
-    create_pkgs, Config, Envelope, LearnedSharePkg, Msg, MsgError, RackUuid,
+    create_pkgs, Envelope, FsmConfig, LearnedSharePkg, Msg, MsgError, RackUuid,
     Request, RequestManager, RequestType, Response, ResponseType, Share,
     SharePkg, Shares, TrackableRequest,
 };
@@ -21,6 +21,7 @@ use crate::trust_quorum::{RackSecret, TrustQuorumError};
 use crate::Sha3_256Digest;
 use secrecy::ExposeSecret;
 use serde::{Deserialize, Serialize};
+use serde_with::serde_as;
 use sha3::{Digest, Sha3_256};
 use sled_hardware::Baseboard;
 use std::collections::{BTreeMap, BTreeSet};
@@ -35,6 +36,7 @@ use uuid::Uuid;
 )]
 pub struct ShareIdx(pub usize);
 
+#[serde_as]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum State {
     Uninitialized,
@@ -54,6 +56,7 @@ pub enum State {
         /// We can't do much better than this without some sort of centralized
         /// distributor which is part of the reconfiguration mechanism in later
         /// trust quourum protocol schemes.
+        #[serde_as(as = "Vec<(_, _)>")]
         distributed_shares: BTreeMap<Baseboard, ShareIdx>,
     },
     Learning,
@@ -152,7 +155,7 @@ pub struct Fsm {
     id: Baseboard,
 
     /// User provided configuration
-    config: Config,
+    config: FsmConfig,
 
     /// Unique IDs of connected peers
     connected_peers: BTreeSet<Baseboard>,
@@ -171,9 +174,14 @@ pub struct Fsm {
 
 impl Fsm {
     /// Create a new FSM in `State::Uninitialized`
-    pub fn new_uninitialized(id: Baseboard, config: Config) -> Fsm {
+    pub fn new_uninitialized(id: Baseboard, config: FsmConfig) -> Fsm {
+        Fsm::new(id, config, State::Uninitialized)
+    }
+
+    /// Create an Fsm with a saved state
+    pub fn new(id: Baseboard, config: FsmConfig, state: State) -> Fsm {
         Fsm {
-            state: State::Uninitialized,
+            state,
             id: id.clone(),
             config,
             connected_peers: BTreeSet::new(),
@@ -183,7 +191,7 @@ impl Fsm {
         }
     }
 
-    pub fn config(&self) -> &Config {
+    pub fn config(&self) -> &FsmConfig {
         &self.config
     }
 

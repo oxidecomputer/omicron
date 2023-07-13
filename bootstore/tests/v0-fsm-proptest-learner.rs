@@ -11,9 +11,9 @@ mod common;
 
 use assert_matches::assert_matches;
 use bootstore::schemes::v0::{
-    create_pkgs, ApiError, ApiOutput, Config, Envelope, Fsm, LearnedSharePkg,
-    Msg, MsgError, RackUuid, Request, RequestType, Response, ResponseType,
-    Share, SharePkg, State,
+    create_pkgs, ApiError, ApiOutput, Envelope, Fsm, FsmConfig,
+    LearnedSharePkg, Msg, MsgError, RackUuid, Request, RequestType, Response,
+    ResponseType, Share, SharePkg, State,
 };
 use bootstore::trust_quorum::RackSecret;
 use common::CommonTestState;
@@ -40,7 +40,7 @@ pub enum LearnAction {
 pub struct TestInput {
     pub sut_id: Baseboard,
     pub initial_members: BTreeSet<Baseboard>,
-    pub config: Config,
+    pub config: FsmConfig,
     pub rack_uuid: RackUuid,
     pub learn_sequence: Vec<LearnAction>,
     pub actions: Vec<Action>,
@@ -127,7 +127,7 @@ impl TestState {
     pub fn new(
         sut_id: Baseboard,
         initial_members: BTreeSet<Baseboard>,
-        config: Config,
+        config: FsmConfig,
         rack_uuid: RackUuid,
         pkgs: BTreeMap<Baseboard, SharePkg>,
     ) -> TestState {
