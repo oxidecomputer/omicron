@@ -19,9 +19,7 @@ progenitor::generate_api!(
     }),
     derives = [schemars::JsonSchema],
     replace = {
-        EventReportForInstallinatorSpec = installinator_common::EventReport,
-        StepEventForInstallinatorSpec = installinator_common::StepEvent,
-        ProgressEventForInstallinatorSpec = installinator_common::ProgressEvent,
+        EventReportForGenericSpec = installinator_common::EventReport<update_engine::NestedSpec>,
         StepEventForGenericSpec = installinator_common::StepEvent<update_engine::NestedSpec>,
         ProgressEventForGenericSpec = installinator_common::ProgressEvent<update_engine::NestedSpec>,
         M2Slot = installinator_common::M2Slot,

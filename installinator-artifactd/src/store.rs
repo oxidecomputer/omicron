@@ -12,6 +12,7 @@ use hyper::Body;
 use installinator_common::EventReport;
 use omicron_common::update::{ArtifactHashId, ArtifactId};
 use slog::Logger;
+use update_engine::NestedSpec;
 use uuid::Uuid;
 
 /// Represents a way to fetch artifacts.
@@ -27,7 +28,7 @@ pub trait ArtifactGetter: fmt::Debug + Send + Sync + 'static {
     async fn report_progress(
         &self,
         update_id: Uuid,
-        report: EventReport,
+        report: EventReport<NestedSpec>,
     ) -> Result<EventReportStatus, HttpError>;
 }
 
@@ -79,7 +80,7 @@ impl ArtifactStore {
     pub(crate) async fn report_progress(
         &self,
         update_id: Uuid,
-        report: EventReport,
+        report: EventReport<NestedSpec>,
     ) -> Result<EventReportStatus, HttpError> {
         slog::debug!(self.log, "Report for {update_id}: {report:?}");
         self.getter.report_progress(update_id, report).await

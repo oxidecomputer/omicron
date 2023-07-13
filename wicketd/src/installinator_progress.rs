@@ -11,7 +11,10 @@ use std::{collections::HashMap, sync::Arc};
 
 use installinator_artifactd::EventReportStatus;
 use tokio::sync::{mpsc, oneshot, Mutex};
-use update_engine::events::StepEventIsTerminal;
+use update_engine::{
+    events::{EventReport, StepEventIsTerminal},
+    NestedSpec,
+};
 use uuid::Uuid;
 
 /// Creates the artifact server and update tracker's interfaces to the
@@ -47,7 +50,7 @@ impl IprArtifactServer {
     pub(crate) async fn report_progress(
         &self,
         update_id: Uuid,
-        report: installinator_common::EventReport,
+        report: EventReport<NestedSpec>,
     ) -> EventReportStatus {
         let mut running_updates = self.running_updates.lock().await;
         if let Some(update) = running_updates.get_mut(&update_id) {
@@ -139,17 +142,17 @@ impl IprUpdateTracker {
 /// Type alias for the receiver that resolves when the first message from the
 /// installinator has been received.
 pub(crate) type IprStartReceiver =
-    oneshot::Receiver<mpsc::Receiver<installinator_common::EventReport>>;
+    oneshot::Receiver<mpsc::Receiver<EventReport<NestedSpec>>>;
 
 #[derive(Debug)]
 #[must_use]
 enum RunningUpdate {
     /// This is the initial state: the first message from the installinator
     /// hasn't been received yet.
-    Initial(oneshot::Sender<mpsc::Receiver<installinator_common::EventReport>>),
+    Initial(oneshot::Sender<mpsc::Receiver<EventReport<NestedSpec>>>),
 
     /// Reports from the installinator have been received.
-    ReportsReceived(mpsc::Sender<installinator_common::EventReport>),
+    ReportsReceived(mpsc::Sender<EventReport<NestedSpec>>),
 
     /// All messages have been received.
     ///
@@ -187,8 +190,8 @@ impl RunningUpdate {
     }
 
     async fn send_and_next_state(
-        sender: mpsc::Sender<installinator_common::EventReport>,
-        report: installinator_common::EventReport,
+        sender: mpsc::Sender<EventReport<NestedSpec>>,
+        report: EventReport<NestedSpec>,
     ) -> Self {
         let is_terminal = Self::is_terminal(&report);
         _ = sender.send(report).await;
@@ -199,7 +202,7 @@ impl RunningUpdate {
         }
     }
 
-    fn is_terminal(report: &installinator_common::EventReport) -> bool {
+    fn is_terminal(report: &EventReport<NestedSpec>) -> bool {
         report
             .step_events
             .last()
@@ -296,7 +299,9 @@ mod tests {
         let execution_id = ExecutionId(Uuid::new_v4());
 
         // Send a completion report.
-        let completion_report = installinator_common::EventReport {
+        let completion_report = installinator_common::EventReport::<
+            InstallinatorSpec,
+        > {
             step_events: vec![StepEvent {
                 spec: InstallinatorSpec::schema_name(),
                 execution_id,
@@ -335,7 +340,8 @@ mod tests {
                 },
             }],
             ..Default::default()
-        };
+        }
+        .into_generic();
 
         assert_eq!(
             ipr_artifact
