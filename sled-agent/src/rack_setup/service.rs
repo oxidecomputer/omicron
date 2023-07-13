@@ -85,10 +85,9 @@ use internal_dns::ServiceName;
 use nexus_client::{
     types as NexusTypes, Client as NexusClient, Error as NexusError,
 };
+use omicron_common::address::get_sled_address;
 use omicron_common::address::Ipv6Subnet;
-use omicron_common::address::DDMD_PORT;
-use omicron_common::address::MGS_PORT;
-use omicron_common::address::{get_sled_address, DENDRITE_PORT};
+use omicron_common::address::{DDMD_PORT, DENDRITE_PORT, MGS_PORT};
 use omicron_common::api::internal::shared::ExternalPortDiscovery;
 use omicron_common::api::internal::shared::SwitchLocation;
 use omicron_common::api::internal::shared::UplinkConfig;
@@ -586,21 +585,6 @@ impl ServiceInner {
                                 },
                             });
                         }
-                        ServiceType::Dendrite { .. } => {
-                            services.push(NexusTypes::ServicePutRequest {
-                                service_id,
-                                zone_id,
-                                sled_id,
-                                address: SocketAddrV6::new(
-                                    zone.addresses[0],
-                                    DENDRITE_PORT,
-                                    0,
-                                    0,
-                                )
-                                .to_string(),
-                                kind: NexusTypes::ServiceKind::Dendrite,
-                            });
-                        }
                         ServiceType::ExternalDns {
                             http_address,
                             dns_address,
@@ -710,6 +694,7 @@ impl ServiceInner {
                         ServiceType::ManagementGatewayService
                         | ServiceType::SpSim
                         | ServiceType::Wicketd { .. }
+                        | ServiceType::Dendrite { .. }
                         | ServiceType::Maghemite { .. }
                         | ServiceType::Tfport { .. } => {
                             return Err(SetupServiceError::BadConfig(format!(
