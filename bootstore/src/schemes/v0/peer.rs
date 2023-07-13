@@ -523,6 +523,8 @@ impl Node {
                         config,
                     )
                     .await;
+                    // TODO: Broadacst the updated config. We only broadcast
+                    // when we save it so we don't trigger an endless broadcast storm
                     let _ = responder.send(Ok(()));
                 }
             }
@@ -681,6 +683,23 @@ impl Node {
                     addr,
                     unique_id: accepted_handle.unique_id,
                 };
+                if let Some(network_config) = self.network_config.as_ref() {
+                    // Send the current network config
+                    if let Err(e) = handle
+                        .tx
+                        .send(MainToConnMsg::Msg(Msg::NetworkConfig(
+                            network_config.clone(),
+                        )))
+                        .await
+                    {
+                        warn!(
+                            self.log,
+                            "Failed to send network config to connection
+                         management task for {peer_id} {e:?}"
+                        );
+                    }
+                }
+
                 self.established_connections.insert(peer_id.clone(), handle);
                 if let Err(e) =
                     self.fsm.on_connected(Instant::now().into(), peer_id)
@@ -698,6 +717,23 @@ impl Node {
                     // we have stored.
                     if unique_id != handle.unique_id {
                         return;
+                    }
+
+                    if let Some(network_config) = self.network_config.as_ref() {
+                        // Send the current network config
+                        if let Err(e) = handle
+                            .tx
+                            .send(MainToConnMsg::Msg(Msg::NetworkConfig(
+                                network_config.clone(),
+                            )))
+                            .await
+                        {
+                            warn!(
+                                self.log,
+                                "Failed to send network config to connection
+                         management task for {peer_id}: {e:?}"
+                            );
+                        }
                     }
 
                     self.established_connections
