@@ -2592,7 +2592,7 @@ impl ServiceManager {
 
         let ntp_zone = existing_zones
             .iter()
-            .find(|z| z.name() == ntp_zone_name)
+            .find(|z| z.name().starts_with(&ntp_zone_name))
             .ok_or_else(|| Error::NtpZoneNotReady)?;
 
         // XXXNTP - This could be replaced with a direct connection to the
