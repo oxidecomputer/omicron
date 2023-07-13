@@ -330,6 +330,7 @@ pub async fn run_standalone_server(
     }];
 
     let mut internal_services_ip_pool_ranges = vec![];
+    let mut macs = MacAddr::iter_system();
     if let Some(nexus_external_addr) = rss_args.nexus_external_addr {
         let ip = nexus_external_addr.ip();
 
@@ -344,7 +345,7 @@ pub async fn run_standalone_server(
                         .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES as u32 + 1)
                         .unwrap()
                         .into(),
-                    mac: MacAddr::random_system(),
+                    mac: macs.next().unwrap(),
                 },
             },
             service_id: Uuid::new_v4(),
@@ -377,7 +378,7 @@ pub async fn run_standalone_server(
                         .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES as u32 + 1)
                         .unwrap()
                         .into(),
-                    mac: MacAddr::random_system(),
+                    mac: macs.next().unwrap(),
                 },
             },
             service_id: Uuid::new_v4(),
