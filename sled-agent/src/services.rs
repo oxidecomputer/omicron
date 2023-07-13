@@ -62,8 +62,6 @@ use omicron_common::address::CRUCIBLE_PANTRY_PORT;
 use omicron_common::address::CRUCIBLE_PORT;
 use omicron_common::address::DENDRITE_PORT;
 use omicron_common::address::MGS_PORT;
-use omicron_common::address::NEXUS_INTERNAL_PORT;
-use omicron_common::address::OXIMETER_PORT;
 use omicron_common::address::RACK_PREFIX;
 use omicron_common::address::SLED_PREFIX;
 use omicron_common::address::WICKETD_PORT;
@@ -1322,7 +1320,9 @@ impl ServiceManager {
             smfh.import_manifest()?;
 
             match &service.details {
-                ServiceType::Nexus { internal_ip, external_tls, .. } => {
+                ServiceType::Nexus {
+                    internal_address, external_tls, ..
+                } => {
                     info!(self.inner.log, "Setting up Nexus service");
 
                     let sled_info = self
@@ -1360,10 +1360,7 @@ impl ServiceManager {
                             },
                         },
                         dropshot_internal: dropshot::ConfigDropshot {
-                            bind_address: SocketAddr::new(
-                                IpAddr::V6(*internal_ip),
-                                NEXUS_INTERNAL_PORT,
-                            ),
+                            bind_address: (*internal_address).into(),
                             // This has to be large enough to support, among
                             // other things, the initial list of TLS
                             // certificates provided by the customer during rack
@@ -1517,15 +1514,11 @@ impl ServiceManager {
                     // enabled.
                     smfh.refresh()?;
                 }
-                ServiceType::Oximeter => {
+                ServiceType::Oximeter { address } => {
                     info!(self.inner.log, "Setting up oximeter service");
 
-                    let address = request.zone.addresses[0];
                     smfh.setprop("config/id", request.zone.id)?;
-                    smfh.setprop(
-                        "config/address",
-                        &format!("[{}]:{}", address, OXIMETER_PORT),
-                    )?;
+                    smfh.setprop("config/address", address.to_string())?;
                     smfh.refresh()?;
                 }
                 ServiceType::ManagementGatewayService => {
@@ -1759,6 +1752,7 @@ impl ServiceManager {
                     ntp_servers,
                     dns_servers,
                     domain,
+                    ..
                 } => {
                     let boundary = matches!(
                         service.details,
@@ -1880,10 +1874,10 @@ impl ServiceManager {
 
                     smfh.refresh()?;
                 }
-                ServiceType::Crucible
-                | ServiceType::CruciblePantry
-                | ServiceType::CockroachDb
-                | ServiceType::Clickhouse => {
+                ServiceType::Crucible { .. }
+                | ServiceType::CruciblePantry { .. }
+                | ServiceType::CockroachDb { .. }
+                | ServiceType::Clickhouse { .. } => {
                     panic!(
                         "{} is a service which exists as part of a self-assembling zone",
                         service.details,
@@ -2993,7 +2987,8 @@ mod test {
         KeyManager, SecretRetriever, SecretRetrieverError, SecretState,
         StorageKeyRequester, VersionedIkm,
     };
-    use std::net::Ipv6Addr;
+    use omicron_common::address::OXIMETER_PORT;
+    use std::net::{Ipv6Addr, SocketAddrV6};
     use std::os::unix::process::ExitStatusExt;
     use uuid::Uuid;
 
@@ -3080,7 +3075,14 @@ mod test {
                 dataset: None,
                 services: vec![ServiceZoneService {
                     id,
-                    details: ServiceType::Oximeter,
+                    details: ServiceType::Oximeter {
+                        address: SocketAddrV6::new(
+                            Ipv6Addr::LOCALHOST,
+                            OXIMETER_PORT,
+                            0,
+                            0,
+                        ),
+                    },
                 }],
                 boundary_switches: vec![],
             }],
@@ -3100,7 +3102,14 @@ mod test {
                 dataset: None,
                 services: vec![ServiceZoneService {
                     id,
-                    details: ServiceType::Oximeter,
+                    details: ServiceType::Oximeter {
+                        address: SocketAddrV6::new(
+                            Ipv6Addr::LOCALHOST,
+                            OXIMETER_PORT,
+                            0,
+                            0,
+                        ),
+                    },
                 }],
                 boundary_switches: vec![],
             }],
