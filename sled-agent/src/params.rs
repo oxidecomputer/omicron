@@ -634,6 +634,155 @@ impl TryFrom<ServiceZoneRequest>
     }
 }
 
+impl ServiceZoneRequest {
+    pub fn into_nexus_service_req(
+        &self,
+        sled_id: Uuid,
+    ) -> Result<
+        Vec<nexus_client::types::ServicePutRequest>,
+        AutonomousServiceOnlyError,
+    > {
+        use nexus_client::types as NexusTypes;
+
+        let mut services = vec![];
+        for svc in &self.services {
+            let service_id = svc.id;
+            let zone_id = Some(self.id);
+            match &svc.details {
+                ServiceType::Nexus {
+                    external_ip,
+                    internal_address,
+                    nic,
+                    ..
+                } => {
+                    services.push(NexusTypes::ServicePutRequest {
+                        service_id,
+                        zone_id,
+                        sled_id,
+                        address: internal_address.to_string(),
+                        kind: NexusTypes::ServiceKind::Nexus {
+                            external_address: *external_ip,
+                            nic: NexusTypes::ServiceNic {
+                                id: nic.id,
+                                name: nic.name.clone(),
+                                ip: nic.ip,
+                                mac: nic.mac,
+                            },
+                        },
+                    });
+                }
+                ServiceType::ExternalDns { http_address, dns_address, nic } => {
+                    services.push(NexusTypes::ServicePutRequest {
+                        service_id,
+                        zone_id,
+                        sled_id,
+                        address: http_address.to_string(),
+                        kind: NexusTypes::ServiceKind::ExternalDns {
+                            external_address: dns_address.ip(),
+                            nic: NexusTypes::ServiceNic {
+                                id: nic.id,
+                                name: nic.name.clone(),
+                                ip: nic.ip,
+                                mac: nic.mac,
+                            },
+                        },
+                    });
+                }
+                ServiceType::InternalDns { http_address, .. } => {
+                    services.push(NexusTypes::ServicePutRequest {
+                        service_id,
+                        zone_id,
+                        sled_id,
+                        address: http_address.to_string(),
+                        kind: NexusTypes::ServiceKind::InternalDns,
+                    });
+                }
+                ServiceType::Oximeter { address } => {
+                    services.push(NexusTypes::ServicePutRequest {
+                        service_id,
+                        zone_id,
+                        sled_id,
+                        address: address.to_string(),
+                        kind: NexusTypes::ServiceKind::Oximeter,
+                    });
+                }
+                ServiceType::CruciblePantry { address } => {
+                    services.push(NexusTypes::ServicePutRequest {
+                        service_id,
+                        zone_id,
+                        sled_id,
+                        address: address.to_string(),
+                        kind: NexusTypes::ServiceKind::CruciblePantry,
+                    });
+                }
+                ServiceType::BoundaryNtp { address, snat_cfg, nic, .. } => {
+                    services.push(NexusTypes::ServicePutRequest {
+                        service_id,
+                        zone_id,
+                        sled_id,
+                        address: address.to_string(),
+                        kind: NexusTypes::ServiceKind::BoundaryNtp {
+                            snat: snat_cfg.into(),
+                            nic: NexusTypes::ServiceNic {
+                                id: nic.id,
+                                name: nic.name.clone(),
+                                ip: nic.ip,
+                                mac: nic.mac,
+                            },
+                        },
+                    });
+                }
+                ServiceType::InternalNtp { address, .. } => {
+                    services.push(NexusTypes::ServicePutRequest {
+                        service_id,
+                        zone_id,
+                        sled_id,
+                        address: address.to_string(),
+                        kind: NexusTypes::ServiceKind::InternalNtp,
+                    });
+                }
+                ServiceType::Clickhouse { address } => {
+                    services.push(NexusTypes::ServicePutRequest {
+                        service_id,
+                        zone_id,
+                        sled_id,
+                        address: address.to_string(),
+                        kind: NexusTypes::ServiceKind::Clickhouse,
+                    });
+                }
+                ServiceType::Crucible { address } => {
+                    services.push(NexusTypes::ServicePutRequest {
+                        service_id,
+                        zone_id,
+                        sled_id,
+                        address: address.to_string(),
+                        kind: NexusTypes::ServiceKind::Crucible,
+                    });
+                }
+                ServiceType::CockroachDb { address } => {
+                    services.push(NexusTypes::ServicePutRequest {
+                        service_id,
+                        zone_id,
+                        sled_id,
+                        address: address.to_string(),
+                        kind: NexusTypes::ServiceKind::Cockroach,
+                    });
+                }
+                ServiceType::ManagementGatewayService
+                | ServiceType::SpSim
+                | ServiceType::Wicketd { .. }
+                | ServiceType::Dendrite { .. }
+                | ServiceType::Maghemite { .. }
+                | ServiceType::Tfport { .. } => {
+                    return Err(AutonomousServiceOnlyError);
+                }
+            }
+        }
+
+        Ok(services)
+    }
+}
+
 /// Used to request that the Sled initialize a single service.
 #[derive(
     Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
