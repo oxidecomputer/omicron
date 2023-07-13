@@ -551,35 +551,6 @@ fn inventory_description(component: &Component) -> Text {
     // blank line separator
     spans.push(Spans::default());
 
-    // Helper closure for appending caboose details (used for both SP and RoT
-    // below).
-    let append_caboose =
-        |spans: &mut Vec<Spans>, caboose: &SpComponentCaboose| {
-            spans.push(
-                vec![
-                    nest_bullet(),
-                    Span::styled("Git Commit: ", label_style),
-                    Span::styled(caboose.git_commit.clone(), ok_style),
-                ]
-                .into(),
-            );
-            spans.push(
-                vec![
-                    nest_bullet(),
-                    Span::styled("Board: ", label_style),
-                    Span::styled(caboose.board.clone(), ok_style),
-                ]
-                .into(),
-            );
-            let mut version =
-                vec![nest_bullet(), Span::styled("Version: ", label_style)];
-            if let Some(v) = caboose.version.as_ref() {
-                version.push(Span::styled(v.clone(), ok_style));
-            } else {
-                version.push(Span::styled("Unknown", bad_style));
-            }
-        };
-
     // Describe the SP.
     let mut label = vec![Span::styled("Service Processor: ", label_style)];
     if let Some(state) = sp.state() {
@@ -649,7 +620,7 @@ fn inventory_description(component: &Component) -> Text {
         );
 
         if let Some(caboose) = sp.caboose_active() {
-            append_caboose(&mut spans, caboose);
+            append_caboose(&mut spans, nest_bullet(), caboose);
         } else {
             spans.push(
                 vec![
@@ -664,7 +635,7 @@ fn inventory_description(component: &Component) -> Text {
             vec![bullet(), Span::styled("Inactive Slot:", label_style)].into(),
         );
         if let Some(caboose) = sp.caboose_inactive() {
-            append_caboose(&mut spans, caboose);
+            append_caboose(&mut spans, nest_bullet(), caboose);
         } else {
             spans.push(
                 vec![nest_bullet(), Span::styled("No information", warn_style)]
@@ -767,7 +738,7 @@ fn inventory_description(component: &Component) -> Text {
                 if let Some(caboose) =
                     sp.rot().and_then(|r| r.caboose_a.as_ref())
                 {
-                    append_caboose(&mut spans, caboose);
+                    append_caboose(&mut spans, nest_bullet(), caboose);
                 } else {
                     spans.push(
                         vec![
@@ -796,7 +767,7 @@ fn inventory_description(component: &Component) -> Text {
                 if let Some(caboose) =
                     sp.rot().and_then(|r| r.caboose_b.as_ref())
                 {
-                    append_caboose(&mut spans, caboose);
+                    append_caboose(&mut spans, nest_bullet(), caboose);
                 } else {
                     spans.push(
                         vec![
@@ -868,4 +839,40 @@ fn inventory_description(component: &Component) -> Text {
     }
 
     Text::from(spans)
+}
+
+// Helper function for appending caboose details to a section of the
+// inventory (used for both SP and RoT above).
+fn append_caboose(
+    spans: &mut Vec<Spans>,
+    prefix: Span<'static>,
+    caboose: &SpComponentCaboose,
+) {
+    let label_style = style::text_label();
+    let ok_style = style::text_success();
+    let bad_style = style::text_failure();
+
+    spans.push(
+        vec![
+            prefix.clone(),
+            Span::styled("Git Commit: ", label_style),
+            Span::styled(caboose.git_commit.clone(), ok_style),
+        ]
+        .into(),
+    );
+    spans.push(
+        vec![
+            prefix.clone(),
+            Span::styled("Board: ", label_style),
+            Span::styled(caboose.board.clone(), ok_style),
+        ]
+        .into(),
+    );
+    let mut version =
+        vec![prefix.clone(), Span::styled("Version: ", label_style)];
+    if let Some(v) = caboose.version.as_ref() {
+        version.push(Span::styled(v.clone(), ok_style));
+    } else {
+        version.push(Span::styled("Unknown", bad_style));
+    }
 }
