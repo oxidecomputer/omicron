@@ -582,7 +582,7 @@ fn inventory_description(component: &Component) -> Text {
             power_state,
             revision,
             serial_number,
-            // We git the rot its own section below.
+            // We give the rot its own section below.
             rot: _,
         } = state;
         spans.push(label.into());
