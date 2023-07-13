@@ -111,6 +111,16 @@ pub struct Sp {
     rot: Option<RotInventory>,
 }
 
+impl Sp {
+    pub fn ignition(&self) -> Option<&SpIgnition> {
+        self.ignition.as_ref()
+    }
+
+    pub fn state(&self) -> Option<&SpState> {
+        self.state.as_ref()
+    }
+}
+
 // XXX: Eventually a Sled will have a host component.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Component {
