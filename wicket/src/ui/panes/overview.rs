@@ -177,7 +177,12 @@ impl Control for RackView {
 
         // Draw the rack
         let rack = Rack {
+            inventory: &state.inventory,
             state: &state.rack_state,
+            not_present_style: Style::default()
+                .bg(OX_GRAY_DARK)
+                .fg(OX_OFF_WHITE),
+            suspicious_style: Style::default().bg(OX_RED).fg(OX_WHITE),
             switch_style: Style::default().bg(OX_GRAY_DARK).fg(OX_WHITE),
             power_shelf_style: Style::default().bg(OX_GRAY).fg(OX_OFF_WHITE),
             sled_style: Style::default().bg(OX_GREEN_LIGHT).fg(TUI_BLACK),
