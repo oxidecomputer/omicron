@@ -16,7 +16,7 @@ mod common;
 
 use assert_matches::assert_matches;
 use bootstore::schemes::v0::{
-    ApiError, ApiOutput, Config, Envelope, Fsm, Msg, MsgError, RackUuid,
+    ApiError, ApiOutput, Envelope, Fsm, FsmConfig, Msg, MsgError, RackUuid,
     Request, RequestType, Response, ResponseType, Share,
 };
 use proptest::prelude::*;
@@ -43,7 +43,7 @@ pub enum RackInitAction {
 #[derive(Debug)]
 pub struct TestInput {
     pub initial_members: BTreeSet<Baseboard>,
-    pub config: Config,
+    pub config: FsmConfig,
     pub rack_uuid: RackUuid,
     pub rack_init_sequence: Vec<RackInitAction>,
     pub actions: Vec<Action>,
@@ -132,7 +132,7 @@ pub struct TestState {
 impl TestState {
     pub fn new(
         initial_members: BTreeSet<Baseboard>,
-        config: Config,
+        config: FsmConfig,
         rack_uuid: RackUuid,
     ) -> TestState {
         let sut_id = initial_members.first().cloned().unwrap();
