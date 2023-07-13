@@ -19,6 +19,7 @@ use slog::o;
 use slog::warn;
 use slog::Logger;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use uuid::Uuid;
 
 #[cfg(any(test, feature = "testing"))]
 use crate::zone::MockZones as Zones;
@@ -968,11 +969,11 @@ impl InstalledZone {
     /// The zone name is based on:
     /// - A unique Oxide prefix ("oxz_")
     /// - The name of the zone type being hosted (e.g., "nexus")
-    /// - An optional, zone-unique identifier (typically a UUID).
+    /// - An optional, zone-unique UUID
     ///
     /// This results in a zone name which is distinct across different zpools,
     /// but stable and predictable across reboots.
-    pub fn get_zone_name(zone_type: &str, unique_name: Option<&str>) -> String {
+    pub fn get_zone_name(zone_type: &str, unique_name: Option<Uuid>) -> String {
         let mut zone_name = format!("{}{}", ZONE_PREFIX, zone_type);
         if let Some(suffix) = unique_name {
             zone_name.push_str(&format!("_{}", suffix));
@@ -1001,7 +1002,7 @@ impl InstalledZone {
         zone_root_path: &Utf8Path,
         zone_image_paths: &[Utf8PathBuf],
         zone_type: &str,
-        unique_name: Option<&str>,
+        unique_name: Option<Uuid>,
         datasets: &[zone::Dataset],
         filesystems: &[zone::Fs],
         devices: &[zone::Device],

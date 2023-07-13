@@ -534,7 +534,7 @@ fn do_activate(config: &Config, install_dir: &Path) -> Result<()> {
             .join("manifest.xml");
         info!(
             config.log,
-            "Installing boostrap service from {}",
+            "Installing bootstrap service from {}",
             manifest_path.to_string_lossy()
         );
 

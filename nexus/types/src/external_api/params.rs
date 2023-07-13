@@ -742,8 +742,6 @@ pub struct IpPoolUpdate {
 
 // INSTANCES
 
-pub const MIN_MEMORY_SIZE_BYTES: u32 = 1 << 30; // 1 GiB
-
 /// Describes an attachment of an `InstanceNetworkInterface` to an `Instance`,
 /// at the time the instance is created.
 // NOTE: VPC's are an organizing concept for networking resources, not for
@@ -1122,7 +1120,7 @@ impl JsonSchema for BlockSize {
 #[derive(
     Debug, Serialize, Deserialize, JsonSchema, Clone, Copy, PartialEq, Eq,
 )]
-#[serde(rename_all = "snake_case", tag = "type", content = "content")]
+#[serde(rename_all = "snake_case")]
 pub enum PhysicalDiskKind {
     M2,
     U2,

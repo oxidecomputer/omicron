@@ -446,16 +446,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "bcs"
-version = "0.1.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4bd3ffe8b19a604421a5d461d4a70346223e535903fbc3067138bddbebddcf77"
-dependencies = [
- "serde",
- "thiserror",
-]
-
-[[package]]
 name = "bhyve_api"
 version = "0.0.0"
 source = "git+https://github.com/oxidecomputer/propolis?rev=9e12522341048d7b8c38394f0ddeb18083685c2f#9e12522341048d7b8c38394f0ddeb18083685c2f"
@@ -639,8 +629,9 @@ name = "bootstore"
 version = "0.1.0"
 dependencies = [
  "assert_matches",
- "bcs",
+ "bytes",
  "chacha20poly1305",
+ "ciborium",
  "curve25519-dalek 3.2.0",
  "derive_more",
  "hex",
@@ -655,6 +646,8 @@ dependencies = [
  "sha3",
  "sled-hardware",
  "slog",
+ "slog-async",
+ "slog-term",
  "thiserror",
  "tokio",
  "uuid",
@@ -4524,7 +4517,10 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "api_identity 0.1.0",
+ "async-trait",
  "backoff",
+ "camino",
+ "camino-tempfile",
  "chrono",
  "dropshot",
  "expectorate",
@@ -4899,6 +4895,7 @@ dependencies = [
  "ipnetwork",
  "itertools",
  "key-manager",
+ "libc",
  "macaddr",
  "mockall",
  "nexus-client 0.1.0",
@@ -4932,6 +4929,7 @@ dependencies = [
  "slog-term",
  "smf",
  "sp-sim",
+ "static_assertions",
  "subprocess",
  "tar",
  "tempfile",
@@ -4941,6 +4939,7 @@ dependencies = [
  "tokio-tungstenite 0.18.0",
  "toml 0.7.6",
  "uuid",
+ "zeroize",
  "zone",
 ]
 

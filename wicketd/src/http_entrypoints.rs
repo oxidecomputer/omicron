@@ -35,6 +35,7 @@ use serde::Serialize;
 use sled_hardware::Baseboard;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
+use std::net::IpAddr;
 use std::net::Ipv6Addr;
 use std::time::Duration;
 use uuid::Uuid;
@@ -157,6 +158,7 @@ pub struct CurrentRssUserConfigInsensitive {
     pub ntp_servers: Vec<String>,
     pub dns_servers: Vec<String>,
     pub internal_services_ip_pool_ranges: Vec<address::IpRange>,
+    pub external_dns_ips: Vec<IpAddr>,
     pub external_dns_zone_name: String,
     pub rack_network_config: Option<RackNetworkConfig>,
 }

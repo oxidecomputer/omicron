@@ -6,7 +6,10 @@
 
 use super::MAX_DISKS_PER_INSTANCE;
 use super::MAX_EXTERNAL_IPS_PER_INSTANCE;
+use super::MAX_MEMORY_BYTES_PER_INSTANCE;
 use super::MAX_NICS_PER_INSTANCE;
+use super::MAX_VCPU_PER_INSTANCE;
+use super::MIN_MEMORY_BYTES_PER_INSTANCE;
 use crate::app::sagas;
 use crate::app::sagas::retry_until_known_result;
 use crate::authn;
@@ -115,7 +118,7 @@ impl super::Nexus {
         // Validate parameters
         if params.disks.len() > MAX_DISKS_PER_INSTANCE as usize {
             return Err(Error::invalid_request(&format!(
-                "cannot attach more than {} disks to instance!",
+                "cannot attach more than {} disks to instance",
                 MAX_DISKS_PER_INSTANCE
             )));
         }
@@ -124,6 +127,12 @@ impl super::Nexus {
                 self.validate_disk_create_params(opctx, &authz_project, create)
                     .await?;
             }
+        }
+        if params.ncpus.0 > MAX_VCPU_PER_INSTANCE {
+            return Err(Error::invalid_request(&format!(
+                "cannot have more than {} vCPUs per instance",
+                MAX_VCPU_PER_INSTANCE
+            )));
         }
         if params.external_ips.len() > MAX_EXTERNAL_IPS_PER_INSTANCE {
             return Err(Error::invalid_request(&format!(
@@ -158,27 +167,38 @@ impl super::Nexus {
         }
 
         // Reject instances where the memory is not at least
-        // MIN_MEMORY_SIZE_BYTES
-        if params.memory.to_bytes() < params::MIN_MEMORY_SIZE_BYTES as u64 {
+        // MIN_MEMORY_BYTES_PER_INSTANCE
+        if params.memory.to_bytes() < MIN_MEMORY_BYTES_PER_INSTANCE as u64 {
             return Err(Error::InvalidValue {
                 label: String::from("size"),
                 message: format!(
                     "memory must be at least {}",
-                    ByteCount::from(params::MIN_MEMORY_SIZE_BYTES)
+                    ByteCount::from(MIN_MEMORY_BYTES_PER_INSTANCE)
                 ),
             });
         }
 
         // Reject instances where the memory is not divisible by
-        // MIN_MEMORY_SIZE_BYTES
-        if (params.memory.to_bytes() % params::MIN_MEMORY_SIZE_BYTES as u64)
+        // MIN_MEMORY_BYTES_PER_INSTANCE
+        if (params.memory.to_bytes() % MIN_MEMORY_BYTES_PER_INSTANCE as u64)
             != 0
         {
             return Err(Error::InvalidValue {
                 label: String::from("size"),
                 message: format!(
                     "memory must be divisible by {}",
-                    ByteCount::from(params::MIN_MEMORY_SIZE_BYTES)
+                    ByteCount::from(MIN_MEMORY_BYTES_PER_INSTANCE)
+                ),
+            });
+        }
+
+        // Reject instances where the memory is greated than the limit
+        if params.memory.to_bytes() > MAX_MEMORY_BYTES_PER_INSTANCE {
+            return Err(Error::InvalidValue {
+                label: String::from("size"),
+                message: format!(
+                    "memory must be less than or equal to {}",
+                    ByteCount::try_from(MAX_MEMORY_BYTES_PER_INSTANCE).unwrap()
                 ),
             });
         }

@@ -4,13 +4,14 @@
 
 //! Request types for the bootstrap agent
 
+use anyhow::{bail, Result};
 use omicron_common::address::{self, Ipv6Subnet, SLED_PREFIX};
 use omicron_common::api::internal::shared::RackNetworkConfig;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 use std::collections::HashSet;
-use std::net::{Ipv6Addr, SocketAddrV6};
+use std::net::{IpAddr, Ipv6Addr, SocketAddrV6};
 use uuid::Uuid;
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
@@ -22,6 +23,23 @@ pub enum BootstrapAddressDiscovery {
     OnlyThese { addrs: HashSet<Ipv6Addr> },
 }
 
+// "Shadow" copy of `RackInitializeRequest` that does no validation on its
+// fields.
+#[derive(Clone, Debug, Deserialize)]
+struct UnvalidatedRackInitializeRequest {
+    rack_subnet: Ipv6Addr,
+    bootstrap_discovery: BootstrapAddressDiscovery,
+    rack_secret_threshold: usize,
+    ntp_servers: Vec<String>,
+    dns_servers: Vec<String>,
+    internal_services_ip_pool_ranges: Vec<address::IpRange>,
+    external_dns_ips: Vec<IpAddr>,
+    external_dns_zone_name: String,
+    external_certificates: Vec<Certificate>,
+    recovery_silo: RecoverySiloConfig,
+    rack_network_config: Option<RackNetworkConfig>,
+}
+
 /// Configuration for the "rack setup service".
 ///
 /// The Rack Setup Service should be responsible for one-time setup actions,
@@ -29,6 +47,7 @@ pub enum BootstrapAddressDiscovery {
 /// intervention, however, these actions need a way to be automated in our
 /// deployment.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
+#[serde(try_from = "UnvalidatedRackInitializeRequest")]
 pub struct RackInitializeRequest {
     pub rack_subnet: Ipv6Addr,
 
@@ -52,6 +71,11 @@ pub struct RackInitializeRequest {
     // we want to configure multiple pools.
     pub internal_services_ip_pool_ranges: Vec<address::IpRange>,
 
+    /// Service IP addresses on which we run external DNS servers.
+    ///
+    /// Each address must be present in `internal_services_ip_pool_ranges`.
+    pub external_dns_ips: Vec<IpAddr>,
+
     /// DNS name for the DNS zone delegated to the rack for external DNS
     pub external_dns_zone_name: String,
 
@@ -63,6 +87,47 @@ pub struct RackInitializeRequest {
 
     /// Initial rack network configuration
     pub rack_network_config: Option<RackNetworkConfig>,
+}
+
+impl TryFrom<UnvalidatedRackInitializeRequest> for RackInitializeRequest {
+    type Error = anyhow::Error;
+
+    fn try_from(value: UnvalidatedRackInitializeRequest) -> Result<Self> {
+        if value.external_dns_ips.is_empty() {
+            bail!("At least one external DNS IP is required");
+        }
+
+        // Every external DNS IP should also be present in one of the internal
+        // services IP pool ranges. This check is O(N*M), but we expect both N
+        // and M to be small (~5 DNS servers, and a small number of pools).
+        for &dns_ip in &value.external_dns_ips {
+            if !value
+                .internal_services_ip_pool_ranges
+                .iter()
+                .any(|range| range.contains(dns_ip))
+            {
+                bail!(
+                    "External DNS IP {dns_ip} is not contained in \
+                     `internal_services_ip_pool_ranges`"
+                );
+            }
+        }
+
+        Ok(RackInitializeRequest {
+            rack_subnet: value.rack_subnet,
+            bootstrap_discovery: value.bootstrap_discovery,
+            rack_secret_threshold: value.rack_secret_threshold,
+            ntp_servers: value.ntp_servers,
+            dns_servers: value.dns_servers,
+            internal_services_ip_pool_ranges: value
+                .internal_services_ip_pool_ranges,
+            external_dns_ips: value.external_dns_ips,
+            external_dns_zone_name: value.external_dns_zone_name,
+            external_certificates: value.external_certificates,
+            recovery_silo: value.recovery_silo,
+            rack_network_config: value.rack_network_config,
+        })
+    }
 }
 
 pub type Certificate = nexus_client::types::Certificate;
@@ -151,11 +216,11 @@ mod tests {
             ntp_servers = [ "ntp.eng.oxide.computer" ]
             dns_servers = [ "1.1.1.1", "9.9.9.9" ]
             external_dns_zone_name = "oxide.test"
-            
+
             [[internal_services_ip_pool_ranges]]
             first = "192.168.1.20"
             last = "192.168.1.22"
-            
+
             [recovery_silo]
             silo_name = "recovery"
             user_name = "recovery"
@@ -190,5 +255,117 @@ mod tests {
             serde_json::from_slice(serialized.as_slice()).unwrap();
 
         assert!(envelope == deserialized, "serialization round trip failed");
+    }
+
+    #[test]
+    fn validate_external_dns_ips_must_be_in_internal_services_ip_pools() {
+        // Conjure up a config; we'll tweak the internal services pools and
+        // external DNS IPs, but no other fields matter.
+        let mut config = UnvalidatedRackInitializeRequest {
+            rack_subnet: Ipv6Addr::LOCALHOST,
+            bootstrap_discovery: BootstrapAddressDiscovery::OnlyOurs,
+            rack_secret_threshold: 0,
+            ntp_servers: Vec::new(),
+            dns_servers: Vec::new(),
+            internal_services_ip_pool_ranges: Vec::new(),
+            external_dns_ips: Vec::new(),
+            external_dns_zone_name: "".to_string(),
+            external_certificates: Vec::new(),
+            recovery_silo: RecoverySiloConfig {
+                silo_name: "recovery".parse().unwrap(),
+                user_name: "recovery".parse().unwrap(),
+                user_password_hash: "$argon2id$v=19$m=98304,t=13,p=1$RUlWc0ZxaHo0WFdrN0N6ZQ$S8p52j85GPvMhR/ek3GL0el/oProgTwWpHJZ8lsQQoY".parse().unwrap(),
+            },
+            rack_network_config: None,
+        };
+
+        // Valid configs: all external DNS IPs are contained in the IP pool
+        // ranges.
+        for (ip_pool_ranges, dns_ips) in [
+            (
+                &[("fd00::1", "fd00::10")] as &[(&str, &str)],
+                &["fd00::1", "fd00::5", "fd00::10"] as &[&str],
+            ),
+            (
+                &[("192.168.1.10", "192.168.1.20")],
+                &["192.168.1.10", "192.168.1.15", "192.168.1.20"],
+            ),
+            (
+                &[("fd00::1", "fd00::10"), ("192.168.1.10", "192.168.1.20")],
+                &[
+                    "fd00::1",
+                    "fd00::5",
+                    "fd00::10",
+                    "192.168.1.10",
+                    "192.168.1.15",
+                    "192.168.1.20",
+                ],
+            ),
+        ] {
+            config.internal_services_ip_pool_ranges = ip_pool_ranges
+                .iter()
+                .map(|(a, b)| {
+                    address::IpRange::try_from((
+                        a.parse::<IpAddr>().unwrap(),
+                        b.parse::<IpAddr>().unwrap(),
+                    ))
+                    .unwrap()
+                })
+                .collect();
+            config.external_dns_ips =
+                dns_ips.iter().map(|ip| ip.parse().unwrap()).collect();
+
+            match RackInitializeRequest::try_from(config.clone()) {
+                Ok(_) => (),
+                Err(err) => panic!(
+                    "failure on {ip_pool_ranges:?} with DNS IPs {dns_ips:?}: \
+                     {err}"
+                ),
+            }
+        }
+
+        // Invalid configs: either no DNS IPs, or one or more DNS IPs are not
+        // contained in the ip pool ranges.
+        for (ip_pool_ranges, dns_ips) in [
+            (&[("fd00::1", "fd00::10")] as &[(&str, &str)], &[] as &[&str]),
+            (&[("fd00::1", "fd00::10")], &["fd00::1", "fd00::5", "fd00::11"]),
+            (
+                &[("192.168.1.10", "192.168.1.20")],
+                &["192.168.1.9", "192.168.1.15", "192.168.1.20"],
+            ),
+            (
+                &[("fd00::1", "fd00::10"), ("192.168.1.10", "192.168.1.20")],
+                &[
+                    "fd00::1",
+                    "fd00::5",
+                    "fd00::10",
+                    "192.168.1.10",
+                    "192.168.1.15",
+                    "192.168.1.20",
+                    "192.168.1.21",
+                ],
+            ),
+        ] {
+            config.internal_services_ip_pool_ranges = ip_pool_ranges
+                .iter()
+                .map(|(a, b)| {
+                    address::IpRange::try_from((
+                        a.parse::<IpAddr>().unwrap(),
+                        b.parse::<IpAddr>().unwrap(),
+                    ))
+                    .unwrap()
+                })
+                .collect();
+            config.external_dns_ips =
+                dns_ips.iter().map(|ip| ip.parse().unwrap()).collect();
+
+            match RackInitializeRequest::try_from(config.clone()) {
+                Ok(_) => panic!(
+                    "unexpected success on {ip_pool_ranges:?} with \
+                     DNS IPs {dns_ips:?}"
+                ),
+                Err(_) => (),
+            }
+        }
     }
 }

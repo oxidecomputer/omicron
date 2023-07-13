@@ -7,10 +7,10 @@
 use crate::bootstrap::{
     config::BOOTSTRAP_AGENT_RACK_INIT_PORT, params::StartSledAgentRequest,
 };
-use crate::ledger::{Ledger, Ledgerable};
 use crate::rack_setup::config::SetupServiceConfig as Config;
 use crate::storage_manager::StorageResources;
 use camino::Utf8PathBuf;
+use omicron_common::ledger::{self, Ledger, Ledgerable};
 use serde::{Deserialize, Serialize};
 use slog::Logger;
 use std::collections::{HashMap, HashSet};
@@ -29,7 +29,7 @@ pub enum PlanError {
     },
 
     #[error("Failed to access ledger: {0}")]
-    Ledger(#[from] crate::ledger::Error),
+    Ledger(#[from] ledger::Error),
 }
 
 impl Ledgerable for Plan {

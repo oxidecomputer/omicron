@@ -22,6 +22,8 @@
  *    sparingly."
  */
 
+BEGIN;
+
 /*
  * We assume the database and user do not already exist so that we don't
  * inadvertently clobber what's there.  If they might exist, the user has to
@@ -2518,3 +2520,5 @@ INSERT INTO omicron.public.db_metadata (
 ) VALUES
     ( 'schema_version', '1.0.0' ),
     ( 'schema_time_created', CAST(NOW() AS STRING) );
+
+COMMIT;
