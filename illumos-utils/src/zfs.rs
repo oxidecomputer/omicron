@@ -9,7 +9,7 @@ use camino::Utf8PathBuf;
 use omicron_common::disk::DiskIdentity;
 use std::fmt;
 
-const ZFS: &str = "/usr/sbin/zfs";
+pub const ZFS: &str = "/usr/sbin/zfs";
 pub const KEYPATH_ROOT: &str = "/var/run/oxide/";
 
 /// Error returned by [`Zfs::list_datasets`].

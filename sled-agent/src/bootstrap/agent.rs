@@ -14,7 +14,6 @@ use super::params::StartSledAgentRequest;
 use super::secret_retriever::LocalSecretRetriever;
 use super::views::SledAgentResponse;
 use crate::config::Config as SledConfig;
-use crate::ledger::{Ledger, Ledgerable};
 use crate::server::Server as SledServer;
 use crate::services::ServiceManager;
 use crate::storage_manager::{StorageManager, StorageResources};
@@ -30,6 +29,7 @@ use illumos_utils::{execute, PFEXEC};
 use key_manager::{KeyManager, StorageKeyRequester};
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::api::external::Error as ExternalError;
+use omicron_common::ledger::{self, Ledger, Ledgerable};
 use serde::{Deserialize, Serialize};
 use sled_hardware::underlay::BootstrapInterface;
 use sled_hardware::{Baseboard, HardwareManager};
@@ -74,7 +74,7 @@ pub enum BootstrapError {
     Hardware(#[from] crate::bootstrap::hardware::Error),
 
     #[error("Failed to access ledger: {0}")]
-    Ledger(#[from] crate::ledger::Error),
+    Ledger(#[from] ledger::Error),
 
     #[error("Error managing sled agent: {0}")]
     SledError(String),

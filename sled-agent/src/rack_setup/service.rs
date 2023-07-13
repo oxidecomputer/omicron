@@ -59,7 +59,6 @@ use crate::bootstrap::config::BOOTSTRAP_AGENT_HTTP_PORT;
 use crate::bootstrap::params::BootstrapAddressDiscovery;
 use crate::bootstrap::params::StartSledAgentRequest;
 use crate::bootstrap::rss_handle::BootstrapAgentHandle;
-use crate::ledger::{Ledger, Ledgerable};
 use crate::nexus::d2n_params;
 use crate::params::{
     AutonomousServiceOnlyError, DatasetKind, ServiceType, ServiceZoneRequest,
@@ -94,6 +93,7 @@ use omicron_common::api::internal::shared::{PortFec, PortSpeed};
 use omicron_common::backoff::{
     retry_notify, retry_policy_internal_service_aggressive, BackoffError,
 };
+use omicron_common::ledger::{self, Ledger, Ledgerable};
 use serde::{Deserialize, Serialize};
 use sled_agent_client::{
     types as SledAgentTypes, Client as SledAgentClient, Error as SledAgentError,
@@ -119,7 +119,7 @@ pub enum SetupServiceError {
     },
 
     #[error("Failed to access ledger: {0}")]
-    Ledger(#[from] crate::ledger::Error),
+    Ledger(#[from] ledger::Error),
 
     #[error("Cannot create plan for sled services: {0}")]
     ServicePlan(#[from] ServicePlanError),
