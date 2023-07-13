@@ -21,13 +21,21 @@ pub struct ListDatasetsError {
     err: crate::ExecutionError,
 }
 
+#[derive(thiserror::Error, Debug)]
+pub enum DestroyDatasetErrorVariant {
+    #[error("Dataset not found")]
+    NotFound,
+    #[error(transparent)]
+    Other(crate::ExecutionError),
+}
+
 /// Error returned by [`Zfs::destroy_dataset`].
 #[derive(thiserror::Error, Debug)]
 #[error("Could not destroy dataset {name}: {err}")]
 pub struct DestroyDatasetError {
     name: String,
     #[source]
-    err: crate::ExecutionError,
+    pub err: DestroyDatasetErrorVariant,
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -161,9 +169,16 @@ impl Zfs {
     pub fn destroy_dataset(name: &str) -> Result<(), DestroyDatasetError> {
         let mut command = std::process::Command::new(PFEXEC);
         let cmd = command.args(&[ZFS, "destroy", "-r", name]);
-        execute(cmd).map_err(|err| DestroyDatasetError {
-            name: name.to_string(),
-            err,
+        execute(cmd).map_err(|err| {
+            let variant = match err {
+                crate::ExecutionError::CommandFailure(info)
+                    if info.stderr.contains("does not exist") =>
+                {
+                    DestroyDatasetErrorVariant::NotFound
+                }
+                _ => DestroyDatasetErrorVariant::Other(err),
+            };
+            DestroyDatasetError { name: name.to_string(), err: variant }
         })?;
         Ok(())
     }

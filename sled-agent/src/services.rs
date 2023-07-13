@@ -131,7 +131,7 @@ pub enum Error {
     #[error("Sled Agent not initialized yet")]
     SledAgentNotReady,
 
-    #[error("No U.2 devices found")]
+    #[error("No U.2 devices found with a {ZONE_DATASET} mountpoint")]
     U2NotFound,
 
     #[error("Sled-local zone error: {0}")]

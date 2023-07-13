@@ -4,6 +4,7 @@
 
 use camino::{Utf8Path, Utf8PathBuf};
 use illumos_utils::fstyp::Fstyp;
+use illumos_utils::zfs::DestroyDatasetErrorVariant;
 use illumos_utils::zfs::EncryptionDetails;
 use illumos_utils::zfs::Keypath;
 use illumos_utils::zfs::Mountpoint;
@@ -509,7 +510,15 @@ impl Disk {
 
             if dataset.wipe {
                 info!(log, "Automatically destroying dataset {}", name);
-                Zfs::destroy_dataset(name)?;
+                Zfs::destroy_dataset(name).or_else(|err| {
+                    // If we can't find the dataset, that's fine -- it might
+                    // not have been formatted yet.
+                    if let DestroyDatasetErrorVariant::NotFound = err.err {
+                        Ok(())
+                    } else {
+                        Err(err)
+                    }
+                })?;
             }
 
             let encryption_details = None;
