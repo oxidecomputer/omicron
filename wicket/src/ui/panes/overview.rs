@@ -22,8 +22,10 @@ use tui::text::{Span, Spans, Text};
 use tui::widgets::{Block, BorderType, Borders, Paragraph};
 use wicketd_client::types::RotState;
 use wicketd_client::types::SpComponentCaboose;
+use wicketd_client::types::SpComponentInfo;
 use wicketd_client::types::SpComponentPresence;
 use wicketd_client::types::SpIgnition;
+use wicketd_client::types::SpState;
 
 enum PopupKind {
     Ignition,
@@ -554,12 +556,22 @@ fn inventory_description(component: &Component) -> Text {
     // Describe the SP.
     let mut label = vec![Span::styled("Service Processor: ", label_style)];
     if let Some(state) = sp.state() {
+        let SpState {
+            base_mac_address,
+            hubris_archive_id,
+            model,
+            power_state,
+            revision,
+            serial_number,
+            // We git the rot its own section below.
+            rot: _,
+        } = state;
         spans.push(label.into());
         spans.push(
             vec![
                 bullet(),
                 Span::styled("Serial number: ", label_style),
-                Span::styled(state.serial_number.clone(), ok_style),
+                Span::styled(serial_number.clone(), ok_style),
             ]
             .into(),
         );
@@ -567,7 +579,7 @@ fn inventory_description(component: &Component) -> Text {
             vec![
                 bullet(),
                 Span::styled("Model: ", label_style),
-                Span::styled(state.model.clone(), ok_style),
+                Span::styled(model.clone(), ok_style),
             ]
             .into(),
         );
@@ -575,7 +587,7 @@ fn inventory_description(component: &Component) -> Text {
             vec![
                 bullet(),
                 Span::styled("Revision: ", label_style),
-                Span::styled(state.revision.to_string(), ok_style),
+                Span::styled(revision.to_string(), ok_style),
             ]
             .into(),
         );
@@ -586,12 +598,12 @@ fn inventory_description(component: &Component) -> Text {
                 Span::styled(
                     format!(
                         "{:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}",
-                        state.base_mac_address[0],
-                        state.base_mac_address[1],
-                        state.base_mac_address[2],
-                        state.base_mac_address[3],
-                        state.base_mac_address[4],
-                        state.base_mac_address[5],
+                        base_mac_address[0],
+                        base_mac_address[1],
+                        base_mac_address[2],
+                        base_mac_address[3],
+                        base_mac_address[4],
+                        base_mac_address[5],
                     ),
                     ok_style,
                 ),
@@ -602,7 +614,7 @@ fn inventory_description(component: &Component) -> Text {
             vec![
                 bullet(),
                 Span::styled("Power State: ", label_style),
-                Span::styled(format!("{:?}", state.power_state), ok_style),
+                Span::styled(format!("{:?}", power_state), ok_style),
             ]
             .into(),
         );
@@ -614,7 +626,7 @@ fn inventory_description(component: &Component) -> Text {
             vec![
                 nest_bullet(),
                 Span::styled("Hubris Archive ID: ", label_style),
-                Span::styled(state.hubris_archive_id.clone(), ok_style),
+                Span::styled(hubris_archive_id.clone(), ok_style),
             ]
             .into(),
         );
@@ -810,13 +822,24 @@ fn inventory_description(component: &Component) -> Text {
         spans.push(label.into());
     } else {
         spans.push(label.into());
-        for component_info in components {
+        for SpComponentInfo {
+            description,
+            device,
+            presence,
+            // `cababilities` and `component` are internal-use only and not
+            // meaningful to an end user
+            capabilities: _,
+            component: _,
+            // serial number is currently always unpopulated
+            serial_number: _,
+        } in components
+        {
             spans.push(
                 vec![
                     bullet(),
                     Span::styled(
-                        format!("{:?}", component_info.presence),
-                        match component_info.presence {
+                        format!("{:?}", presence),
+                        match presence {
                             SpComponentPresence::Present => ok_style,
                             SpComponentPresence::Timeout
                             | SpComponentPresence::Unavailable => warn_style,
@@ -826,10 +849,7 @@ fn inventory_description(component: &Component) -> Text {
                         },
                     ),
                     Span::styled(
-                        format!(
-                            " {} ({})",
-                            component_info.description, component_info.device
-                        ),
+                        format!(" {} ({})", description, device),
                         label_style,
                     ),
                 ]
@@ -848,6 +868,13 @@ fn append_caboose(
     prefix: Span<'static>,
     caboose: &SpComponentCaboose,
 ) {
+    let SpComponentCaboose {
+        board,
+        git_commit,
+        // Currently `name` is always the same as `board`, so we'll skip it.
+        name: _,
+        version,
+    } = caboose;
     let label_style = style::text_label();
     let ok_style = style::text_success();
     let bad_style = style::text_failure();
@@ -856,7 +883,7 @@ fn append_caboose(
         vec![
             prefix.clone(),
             Span::styled("Git Commit: ", label_style),
-            Span::styled(caboose.git_commit.clone(), ok_style),
+            Span::styled(git_commit.clone(), ok_style),
         ]
         .into(),
     );
@@ -864,15 +891,15 @@ fn append_caboose(
         vec![
             prefix.clone(),
             Span::styled("Board: ", label_style),
-            Span::styled(caboose.board.clone(), ok_style),
+            Span::styled(board.clone(), ok_style),
         ]
         .into(),
     );
-    let mut version =
+    let mut version_spans =
         vec![prefix.clone(), Span::styled("Version: ", label_style)];
-    if let Some(v) = caboose.version.as_ref() {
-        version.push(Span::styled(v.clone(), ok_style));
+    if let Some(v) = version.as_ref() {
+        version_spans.push(Span::styled(v.clone(), ok_style));
     } else {
-        version.push(Span::styled("Unknown", bad_style));
+        version_spans.push(Span::styled("Unknown", bad_style));
     }
 }
