@@ -771,22 +771,24 @@ impl ServiceManager {
             return Ok(vec![]);
         }
 
-        let SledAgentInfo { port_manager, resolver, underlay_address, .. } =
+        let SledAgentInfo { port_manager, underlay_address, .. } =
             &self.inner.sled_info.get().ok_or(Error::SledAgentNotReady)?;
 
-        let dpd_addr = resolver
-            .lookup_socket_v6(internal_dns::ServiceName::Dendrite)
-            .await?;
-
-        let dpd_client = DpdClient::new(
-            &format!("http://[{}]:{}", dpd_addr.ip(), dpd_addr.port()),
-            dpd_client::ClientState {
-                tag: "sled-agent".to_string(),
-                log: self.inner.log.new(o!(
-                    "component" => "DpdClient"
-                )),
-            },
-        );
+        let dpd_clients: Vec<DpdClient> = req
+            .boundary_switches
+            .iter()
+            .map(|addr| {
+                DpdClient::new(
+                    &format!("http://[{}]:{}", addr, DENDRITE_PORT),
+                    dpd_client::ClientState {
+                        tag: "sled-agent".to_string(),
+                        log: self.inner.log.new(o!(
+                            "component" => "DpdClient"
+                        )),
+                    },
+                )
+            })
+            .collect();
 
         let mut ports = vec![];
         for svc in &req.services {
@@ -823,44 +825,46 @@ impl ServiceManager {
                 None => (external_ips[0], 0, u16::MAX),
             };
 
-            // TODO-correctness(#2933): If we fail part-way we need to
-            // clean up previous entries instead of leaking them.
-            let nat_create = || async {
-                info!(
-                    self.inner.log, "creating NAT entry for service";
-                    "service" => ?svc,
-                );
+            for dpd_client in &dpd_clients {
+                // TODO-correctness(#2933): If we fail part-way we need to
+                // clean up previous entries instead of leaking them.
+                let nat_create = || async {
+                    info!(
+                        self.inner.log, "creating NAT entry for service";
+                        "service" => ?svc,
+                    );
 
-                dpd_client
-                    .ensure_nat_entry(
-                        &self.inner.log,
-                        target_ip.into(),
-                        dpd_client::types::MacAddr {
-                            a: port.0.mac().into_array(),
-                        },
-                        first_port,
-                        last_port,
-                        port.0.vni().as_u32(),
-                        underlay_address,
-                    )
-                    .await
-                    .map_err(BackoffError::transient)?;
+                    dpd_client
+                        .ensure_nat_entry(
+                            &self.inner.log,
+                            target_ip.into(),
+                            dpd_client::types::MacAddr {
+                                a: port.0.mac().into_array(),
+                            },
+                            first_port,
+                            last_port,
+                            port.0.vni().as_u32(),
+                            underlay_address,
+                        )
+                        .await
+                        .map_err(BackoffError::transient)?;
 
-                Ok::<(), BackoffError<DpdError<DpdTypes::Error>>>(())
-            };
-            let log_failure = |error, _| {
-                warn!(
-                    self.inner.log, "failed to create NAT entry for service";
-                    "error" => ?error,
-                    "service" => ?svc,
-                );
-            };
-            retry_notify(
-                retry_policy_internal_service_aggressive(),
-                nat_create,
-                log_failure,
-            )
-            .await?;
+                    Ok::<(), BackoffError<DpdError<DpdTypes::Error>>>(())
+                };
+                let log_failure = |error, _| {
+                    warn!(
+                        self.inner.log, "failed to create NAT entry for service";
+                        "error" => ?error,
+                        "service" => ?svc,
+                    );
+                };
+                retry_notify(
+                    retry_policy_internal_service_aggressive(),
+                    nat_create,
+                    log_failure,
+                )
+                .await?;
+            }
 
             ports.push(port);
         }
@@ -1546,6 +1550,9 @@ impl ServiceManager {
                     }
 
                     smfh.refresh()?;
+                }
+                ServiceType::SpSim => {
+                    info!(self.inner.log, "Setting up Simulated SP service");
                 }
                 ServiceType::Wicketd { baseboard } => {
                     info!(self.inner.log, "Setting up wicketd service");
@@ -2672,12 +2679,12 @@ impl ServiceManager {
                     };
                     filesystems.push(softnpu_filesystem);
                 }
-
                 vec![
                     ServiceType::Dendrite { asic },
                     ServiceType::ManagementGatewayService,
                     ServiceType::Wicketd { baseboard },
                     ServiceType::Maghemite { mode: "transit".to_string() },
+                    ServiceType::SpSim,
                 ]
             }
         };
@@ -2695,6 +2702,7 @@ impl ServiceManager {
                 .into_iter()
                 .map(|s| ServiceZoneService { id: Uuid::new_v4(), details: s })
                 .collect(),
+            boundary_switches: vec![],
         };
 
         self.ensure_zone(
@@ -3074,6 +3082,7 @@ mod test {
                     id,
                     details: ServiceType::Oximeter,
                 }],
+                boundary_switches: vec![],
             }],
         })
         .await
@@ -3093,6 +3102,7 @@ mod test {
                     id,
                     details: ServiceType::Oximeter,
                 }],
+                boundary_switches: vec![],
             }],
         })
         .await

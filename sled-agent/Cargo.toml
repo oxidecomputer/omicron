@@ -29,6 +29,7 @@ flate2.workspace = true
 futures.workspace = true
 http.workspace = true
 hyper-staticfile.workspace = true
+gateway-client.workspace = true
 illumos-utils.workspace = true
 internal-dns.workspace = true
 ipnetwork.workspace = true

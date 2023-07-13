@@ -19,7 +19,8 @@ use internal_dns::{ServiceName, DNS_ZONE};
 use omicron_common::address::{
     get_sled_address, get_switch_zone_address, Ipv6Subnet, ReservedRackSubnet,
     DENDRITE_PORT, DNS_HTTP_PORT, DNS_PORT, DNS_REDUNDANCY, MAX_DNS_REDUNDANCY,
-    NTP_PORT, NUM_SOURCE_NAT_PORTS, RSS_RESERVED_ADDRESSES, SLED_PREFIX,
+    MGS_PORT, NTP_PORT, NUM_SOURCE_NAT_PORTS, RSS_RESERVED_ADDRESSES,
+    SLED_PREFIX,
 };
 use omicron_common::api::external::{MacAddr, Vni};
 use omicron_common::api::internal::shared::{
@@ -278,6 +279,13 @@ impl Plan {
                     DENDRITE_PORT,
                 )
                 .unwrap();
+            dns_builder
+                .service_backend_zone(
+                    ServiceName::ManagementGatewayService,
+                    &zone,
+                    MGS_PORT,
+                )
+                .unwrap();
         }
 
         // We'll stripe most services across all available Sleds, round-robin
@@ -332,6 +340,7 @@ impl Plan {
                         gz_address_index: i.try_into().expect("Giant indices?"),
                     },
                 }],
+                boundary_switches: vec![],
             });
         }
 
@@ -360,6 +369,7 @@ impl Plan {
                     id,
                     details: ServiceType::CockroachDb,
                 }],
+                boundary_switches: vec![],
             });
         }
 
@@ -407,6 +417,7 @@ impl Plan {
                         nic,
                     },
                 }],
+                boundary_switches: vec![],
             });
         }
 
@@ -448,6 +459,7 @@ impl Plan {
                         external_tls: !config.external_certificates.is_empty(),
                     },
                 }],
+                boundary_switches: vec![],
             })
         }
 
@@ -478,6 +490,7 @@ impl Plan {
                     id,
                     details: ServiceType::Oximeter,
                 }],
+                boundary_switches: vec![],
             })
         }
 
@@ -507,6 +520,7 @@ impl Plan {
                     id,
                     details: ServiceType::Clickhouse,
                 }],
+                boundary_switches: vec![],
             });
         }
 
@@ -534,6 +548,7 @@ impl Plan {
                     id,
                     details: ServiceType::CruciblePantry,
                 }],
+                boundary_switches: vec![],
             })
         }
 
@@ -568,6 +583,7 @@ impl Plan {
                         id,
                         details: ServiceType::Crucible,
                     }],
+                    boundary_switches: vec![],
                 });
             }
         }
@@ -619,6 +635,7 @@ impl Plan {
                 addresses: vec![address],
                 dataset: None,
                 services,
+                boundary_switches: vec![],
             });
         }
 

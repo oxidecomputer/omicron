@@ -1228,6 +1228,7 @@ pub struct LoopbackAddressCreate {
     /// The containing the switch this loopback address will be configured on.
     pub rack_id: Uuid,
 
+    // TODO: #3604 Consider using `SwitchLocation` type instead of `Name` for `LoopbackAddressCreate.switch_location`
     /// The location of the switch within the rack this loopback address will be
     /// configured on.
     pub switch_location: Name,

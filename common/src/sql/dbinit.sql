@@ -2322,6 +2322,8 @@ CREATE TABLE omicron.public.switch_port (
     )
 );
 
+CREATE INDEX ON omicron.public.switch_port (port_settings_id);
+
 /* port settings groups included from port settings objects */
 CREATE TABLE omicron.public.switch_port_settings_groups (
     port_settings_id UUID,

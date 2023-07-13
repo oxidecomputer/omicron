@@ -51,9 +51,6 @@ pub use rack_ops::RackResetId;
 use rack_ops::RssAccess;
 pub use rack_ops::RssAccessError;
 
-/// The number of QSFP28 ports on sidecar revisions A and B
-const SIDECAR_REV_A_B_N_QSFP28_PORTS: u8 = 32;
-
 /// Describes errors which may occur while operating the bootstrap service.
 #[derive(Error, Debug)]
 pub enum BootstrapError {
