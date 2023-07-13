@@ -9,7 +9,7 @@ use super::peer_networking::{
     AcceptedConnHandle, ConnToMainMsg, ConnToMainMsgInner, MainToConnMsg, Msg,
     PeerConnHandle,
 };
-use super::storage::PersistentFsmState;
+use super::storage::{NetworkConfig, PersistentFsmState};
 use super::{ApiError, ApiOutput, Fsm, FsmConfig, RackUuid};
 use crate::trust_quorum::RackSecret;
 use camino::Utf8PathBuf;
@@ -32,6 +32,7 @@ pub struct Config {
     rack_init_timeout: Duration,
     rack_secret_request_timeout: Duration,
     fsm_state_ledger_paths: Vec<Utf8PathBuf>,
+    network_config_ledger_paths: Vec<Utf8PathBuf>,
 }
 
 /// An error response from a `NodeApiRequest`
@@ -162,6 +163,7 @@ impl NodeHandle {
 #[derive(Debug, Clone)]
 pub struct Status {
     pub fsm_ledger_generation: u64,
+    pub network_config_ledger_generation: Option<u64>,
     pub fsm_state: &'static str,
     pub peers: BTreeSet<SocketAddrV6>,
     pub connections: BTreeMap<Baseboard, SocketAddrV6>,
@@ -177,6 +179,7 @@ pub struct Status {
 /// via control of an underlying  `Fsm`.
 pub struct Node {
     fsm_ledger_generation: u64,
+    network_config: Option<NetworkConfig>,
     config: Config,
     fsm: Fsm,
     peers: BTreeSet<SocketAddrV6>,
@@ -258,10 +261,16 @@ impl Node {
             config.clone().into(),
         )
         .await;
+        let network_config = NetworkConfig::load(
+            &log,
+            config.network_config_ledger_paths.clone(),
+        )
+        .await;
 
         (
             Node {
                 fsm_ledger_generation: ledger_generation,
+                network_config,
                 config,
                 fsm,
                 peers: BTreeSet::new(),
@@ -414,6 +423,10 @@ impl Node {
             NodeApiRequest::GetStatus { responder } => {
                 let status = Status {
                     fsm_ledger_generation: self.fsm_ledger_generation,
+                    network_config_ledger_generation: self
+                        .network_config
+                        .as_ref()
+                        .map(|c| c.generation),
                     fsm_state: self.fsm.state().name(),
                     peers: self.peers.clone(),
                     connections: self
@@ -779,7 +792,8 @@ mod tests {
             .into_iter()
             .enumerate()
             .map(|(i, id)| {
-                let file = format!("test-{i}-fsm-state-ledger");
+                let fsm_file = format!("test-{i}-fsm-state-ledger");
+                let network_file = format!("test-{i}-network-config-ledger");
                 Config {
                     id,
                     addr: format!("[::1]:3333{}", i).parse().unwrap(),
@@ -787,7 +801,12 @@ mod tests {
                     learn_timeout: Duration::from_secs(5),
                     rack_init_timeout: Duration::from_secs(10),
                     rack_secret_request_timeout: Duration::from_secs(1),
-                    fsm_state_ledger_paths: vec![tempdir.path().join(&file)],
+                    fsm_state_ledger_paths: vec![tempdir
+                        .path()
+                        .join(&fsm_file)],
+                    network_config_ledger_paths: vec![tempdir
+                        .path()
+                        .join(&network_file)],
                 }
             })
             .collect()
@@ -798,7 +817,8 @@ mod tests {
     }
 
     fn learner_config(tempdir: &Utf8TempDir, n: usize) -> Config {
-        let file = format!("test-learner-{n}-fsm-state-ledger");
+        let fsm_file = format!("test-learner-{n}-fsm-state-ledger");
+        let network_file = format!("test-{n}-network-config-ledger");
         Config {
             id: learner_id(n),
             addr: format!("[::1]:3333{}", 3).parse().unwrap(),
@@ -806,7 +826,10 @@ mod tests {
             learn_timeout: Duration::from_secs(5),
             rack_init_timeout: Duration::from_secs(10),
             rack_secret_request_timeout: Duration::from_secs(1),
-            fsm_state_ledger_paths: vec![tempdir.path().join(&file)],
+            fsm_state_ledger_paths: vec![tempdir.path().join(&fsm_file)],
+            network_config_ledger_paths: vec![tempdir
+                .path()
+                .join(&network_file)],
         }
     }
 
@@ -902,8 +925,7 @@ mod tests {
         let _ = handle1.load_peer_addresses(addrs.clone()).await;
         handle0.load_rack_secret().await.unwrap();
 
-        // Add a second learner and ensure that the generation gets bumped for
-        // either node0 or node1
+        // Add a second learner
         let peer0_gen =
             handle0.get_status().await.unwrap().fsm_ledger_generation;
         let peer1_gen =

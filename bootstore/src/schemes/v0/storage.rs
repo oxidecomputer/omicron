@@ -51,9 +51,10 @@ impl PersistentFsmState {
         ledger
             .commit()
             .await
-            .expect("Critical: Failed to save bootstore ledger.");
+            .expect("Critical: Failed to save bootstore ledger for Fsm::State");
         ledger.data().generation
     }
+
     /// If the Ledger that stores the Fsm::State exists, then initialize the Fsm
     /// in the saved state, otherwise start out in `State::Uninitialized`.
     ///
@@ -101,5 +102,49 @@ impl Ledgerable for NetworkConfig {
 
     fn generation_bump(&mut self) {
         self.generation += 1;
+    }
+}
+
+impl NetworkConfig {
+    /// Save the `NetworkConfig` to a ledger.
+    ///
+    /// Panics if the ledger cannot be saved.
+    pub async fn save(
+        log: &Logger,
+        paths: Vec<Utf8PathBuf>,
+        mut config: NetworkConfig,
+    ) {
+        // Decrement the generation number of the config, so that when we commit
+        // it the commit bumps it back to the actual generation number. This
+        // keeps the generation number of the network config identical to the
+        // ledger generation.
+        //
+        // Note that generation numbers of valid configs must start at 1, so we
+        // specifically do not use a saturating subtraction.
+        config.generation -= 1;
+        let mut ledger = Ledger::new_with(log, paths, config);
+        ledger.commit().await.expect(
+            "Critical: Failed to save bootstore ledger for network config",
+        );
+    }
+
+    /// If the Ledger that stores the `NetworkConfig` exists, then return it,
+    /// otherwise return `None`
+    pub async fn load(
+        log: &Logger,
+        paths: Vec<Utf8PathBuf>,
+    ) -> Option<NetworkConfig> {
+        if let Some(ledger) = Ledger::<NetworkConfig>::new(&log, paths).await {
+            let config = ledger.into_inner();
+            info!(
+                log,
+                "Loading network config from ledger with generation {}",
+                config.generation
+            );
+            Some(config)
+        } else {
+            info!(log, "No ledger found for network config");
+            None
+        }
     }
 }
