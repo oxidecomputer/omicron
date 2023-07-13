@@ -6,7 +6,6 @@ use super::help_text;
 use super::push_text_lines;
 use super::ComputedScrollOffset;
 use crate::keymap::ShowPopupCmd;
-use crate::ui::defaults::colors;
 use crate::ui::defaults::style;
 use crate::ui::widgets::BoxConnector;
 use crate::ui::widgets::BoxConnectorKind;
@@ -23,7 +22,6 @@ use tui::layout::Constraint;
 use tui::layout::Direction;
 use tui::layout::Layout;
 use tui::layout::Rect;
-use tui::style::Style;
 use tui::text::Span;
 use tui::text::Spans;
 use tui::text::Text;
@@ -628,8 +626,8 @@ fn rss_config_text<'a>(
         ok_contents: impl Into<Cow<'a, str>>,
         bad_contents: &'static str,
     ) -> Span<'a> {
-        let ok_style = Style::default().fg(colors::OX_GREEN_LIGHT);
-        let bad_style = Style::default().fg(colors::OX_RED);
+        let ok_style = style::text_success();
+        let bad_style = style::text_failure();
         if ok {
             Span::styled(ok_contents, ok_style)
         } else {
@@ -637,10 +635,10 @@ fn rss_config_text<'a>(
         }
     }
 
-    let label_style = Style::default().fg(colors::OX_OFF_WHITE);
-    let ok_style = Style::default().fg(colors::OX_GREEN_LIGHT);
-    let bad_style = Style::default().fg(colors::OX_RED);
-    let warn_style = Style::default().fg(colors::OX_YELLOW);
+    let label_style = style::text_label();
+    let ok_style = style::text_success();
+    let bad_style = style::text_failure();
+    let warn_style = style::text_warning();
     let dyn_style = |ok| if ok { ok_style } else { bad_style };
 
     let setup_description = match setup_state {

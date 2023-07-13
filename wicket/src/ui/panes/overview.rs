@@ -10,7 +10,6 @@ use super::ComputedScrollOffset;
 use super::Control;
 use crate::state::Component;
 use crate::state::{ComponentId, ALL_COMPONENT_IDS};
-use crate::ui::defaults::colors;
 use crate::ui::defaults::colors::*;
 use crate::ui::defaults::style;
 use crate::ui::widgets::IgnitionPopup;
@@ -448,10 +447,10 @@ impl Control for InventoryView {
 fn inventory_description(component: &Component) -> Text {
     let sp = component.sp();
 
-    let label_style = Style::default().fg(colors::OX_OFF_WHITE);
-    let ok_style = Style::default().fg(colors::OX_GREEN_LIGHT);
-    let bad_style = Style::default().fg(colors::OX_RED);
-    let warn_style = Style::default().fg(colors::OX_YELLOW);
+    let label_style = style::text_label();
+    let ok_style = style::text_success();
+    let bad_style = style::text_failure();
+    let warn_style = style::text_warning();
     let dyn_style = |ok| if ok { ok_style } else { bad_style };
     let yes_no = |val| if val { "Yes" } else { "No" };
     let bullet = || Span::styled("  • ", label_style);
