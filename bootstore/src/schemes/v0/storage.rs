@@ -86,7 +86,7 @@ impl PersistentFsmState {
     }
 }
 
-/// Network configuration required before before rack unlock
+/// Network configuration required to bring up the control plane
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NetworkConfig {
     pub generation: u64,

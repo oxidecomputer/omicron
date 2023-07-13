@@ -36,6 +36,7 @@ pub struct Config {
 }
 
 /// An error response from a `NodeApiRequest`
+/// TODO: use thiserror
 #[derive(Debug, From)]
 pub enum NodeRequestError {
     /// An `Init_` or `LoadRackSecret` request is already outstanding
@@ -50,6 +51,12 @@ pub enum NodeRequestError {
 
     /// Failed to send to a connection management task
     Send(mpsc::error::SendError<NodeApiRequest>),
+
+    /// NetworkConfig generation is older than current generation at Node
+    StaleNetworkConfig {
+        attempted_update_generation: u64,
+        current_generation: u64,
+    },
 }
 
 /// A request sent to the `Node` task from the `NodeHandle`
@@ -86,6 +93,12 @@ pub enum NodeApiRequest {
 
     /// Shutdown the node's tokio tasks
     Shutdown,
+
+    /// Update Network Config used to bring up the control plane
+    UpdateNetworkConfig {
+        config: NetworkConfig,
+        responder: oneshot::Sender<Result<(), NodeRequestError>>,
+    },
 }
 
 /// A handle for interacting with a `Node` task
@@ -157,6 +170,18 @@ impl NodeHandle {
     pub async fn shutdown(&self) -> Result<(), NodeRequestError> {
         self.tx.send(NodeApiRequest::Shutdown).await?;
         Ok(())
+    }
+
+    /// Update network config needed for bringing up the control plane
+    pub async fn update_network_config(
+        &self,
+        config: NetworkConfig,
+    ) -> Result<(), NodeRequestError> {
+        let (tx, rx) = oneshot::channel();
+        self.tx
+            .send(NodeApiRequest::UpdateNetworkConfig { config, responder: tx })
+            .await?;
+        rx.await?
     }
 }
 
@@ -459,6 +484,46 @@ impl Node {
                 }
                 for (_, handle) in &self.established_connections {
                     let _ = handle.tx.send(MainToConnMsg::Close).await;
+                }
+            }
+            NodeApiRequest::UpdateNetworkConfig { config, responder } => {
+                let current_gen =
+                    self.network_config.as_ref().map_or(0, |c| c.generation);
+                info!(
+                    self.log,
+                    "Attempting to update network config with 
+                    generation: {}, current_generation: {}",
+                    config.generation,
+                    current_gen,
+                );
+                if current_gen > config.generation {
+                    error!(
+                        self.log,
+                        "Attempted network config update with
+                         stale generation: attemped_update_generation: {}, 
+                        current_generation: {current_gen}",
+                        config.generation
+                    );
+                    let _ = responder.send(Err(
+                        NodeRequestError::StaleNetworkConfig {
+                            attempted_update_generation: config.generation,
+                            current_generation: current_gen,
+                        },
+                    ));
+                } else if current_gen == config.generation {
+                    warn!(
+                        self.log,
+                        "Not updating network config: generation {current_gen} 
+                        is current"
+                    );
+                } else {
+                    NetworkConfig::save(
+                        &self.log,
+                        self.config.network_config_ledger_paths.clone(),
+                        config,
+                    )
+                    .await;
+                    let _ = responder.send(Ok(()));
                 }
             }
         }

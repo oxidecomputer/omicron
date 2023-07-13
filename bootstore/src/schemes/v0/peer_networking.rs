@@ -40,8 +40,8 @@ const INACTIVITY_TIMEOUT: Duration = Duration::from_secs(10);
 pub enum Msg {
     Ping,
     Fsm(FsmMsg),
-    /// Message exchanged for reconciling pre-rack-unlock network config stored
-    /// in the bootstore.
+    /// Message exchanged for reconciling network config used to bring up the
+    /// control plane stored in the bootstore.
     NetworkConfig(NetworkConfig),
 }
 
