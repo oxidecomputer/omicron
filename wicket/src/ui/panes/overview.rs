@@ -15,6 +15,7 @@ use crate::ui::defaults::style;
 use crate::ui::widgets::IgnitionPopup;
 use crate::ui::widgets::PopupScrollKind;
 use crate::ui::widgets::{BoxConnector, BoxConnectorKind, Rack};
+use crate::ui::wrap::wrap_text;
 use crate::{Action, Cmd, Frame, State};
 use tui::layout::{Constraint, Direction, Layout, Rect};
 use tui::style::Style;
@@ -241,6 +242,17 @@ impl InventoryView {
         }
     }
 
+    /// Returns the wrap options that should be used in most cases for popups.
+    fn default_wrap_options(width: usize) -> crate::ui::wrap::Options<'static> {
+        crate::ui::wrap::Options {
+            width,
+            // The indent here is to add 1 character of padding.
+            initial_indent: Span::raw(" "),
+            subsequent_indent: Span::raw(" "),
+            break_words: true,
+        }
+    }
+
     pub fn draw_ignition_popup(
         &mut self,
         state: &State,
@@ -346,6 +358,13 @@ impl Control for InventoryView {
             Some(inventory) => inventory_description(inventory),
             None => Text::styled("Inventory Unavailable", inventory_style),
         };
+        let text = wrap_text(
+            &text,
+            // -2 each for borders and padding
+            Self::default_wrap_options(
+                chunks[1].width.saturating_sub(4).into(),
+            ),
+        );
 
         let scroll_offset = self.scroll_offsets.get_mut(&component_id).unwrap();
         let y_offset = ComputedScrollOffset::new(
