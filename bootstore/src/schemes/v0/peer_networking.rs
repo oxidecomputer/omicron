@@ -5,6 +5,7 @@
 //! Async networking used by peer.rs
 
 use super::messages::Identify;
+use super::storage::NetworkConfig;
 use super::Msg as FsmMsg;
 use crate::schemes::Hello;
 use bytes::Buf;
@@ -31,19 +32,22 @@ const MSG_WRITE_QUEUE_CAPACITY: usize = 5;
 const PING_INTERVAL: Duration = Duration::from_secs(1);
 const INACTIVITY_TIMEOUT: Duration = Duration::from_secs(10);
 
-// A superset of messages sent and received during an established connection
-//
-// This does not include `Hello` and `Identify` messages, which are sent during
-// the handshake.
+/// A superset of messages sent and received during an established connection
+///
+/// This does not include `Hello` and `Identify` messages, which are sent during
+/// the handshake.
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub enum Msg {
     Ping,
     Fsm(FsmMsg),
+    /// Message exchanged for reconciling network config used to bring up the
+    /// control plane stored in the bootstore.
+    NetworkConfig(NetworkConfig),
 }
 
-// An error returned from an EstablishedConn
-//
-// Also a great movie
+/// An error returned from an EstablishedConn
+///
+/// Also a great movie
 #[derive(Debug)]
 enum ConnErr {
     Retry,
@@ -81,6 +85,10 @@ pub enum ConnToMainMsgInner {
     },
     FailedAcceptorHandshake {
         addr: SocketAddrV6,
+    },
+    ReceivedNetworkConfig {
+        from: Baseboard,
+        config: NetworkConfig,
     },
 }
 
@@ -305,13 +313,33 @@ impl EstablishedConn {
                     {
                         warn!(
                             self.log,
-                            "Failed to send received msg to main task: {e:?}"
+                            "Failed to send received fsm msg to main task: {e:?}"
                         );
                     }
                 }
                 Msg::Ping => {
                     // Nothing to do here, since Ping is just to keep us alive and
                     // we updated self.last_received_msg above.
+                }
+                Msg::NetworkConfig(config) => {
+                    let generation = config.generation;
+                    if let Err(e) = self
+                        .main_tx
+                        .send(ConnToMainMsg {
+                            handle_unique_id: self.unique_id,
+                            msg: ConnToMainMsgInner::ReceivedNetworkConfig {
+                                from: self.peer_id.clone(),
+                                config,
+                            },
+                        })
+                        .await
+                    {
+                        warn!(
+                            self.log,
+                            "Failed to send received NetworkConfig with
+                             generation {generation} to main task: {e:?}"
+                        );
+                    }
                 }
             }
         }
