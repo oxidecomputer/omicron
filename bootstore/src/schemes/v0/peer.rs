@@ -37,7 +37,7 @@ pub struct Config {
 }
 
 /// An error response from a `NodeApiRequest`
-#[derive(Error, Debug, From)]
+#[derive(Error, Debug, From, PartialEq)]
 pub enum NodeRequestError {
     #[error("only one request allowed at a time")]
     RequestAlreadyPending,
@@ -49,10 +49,10 @@ pub enum NodeRequestError {
     Recv(oneshot::error::RecvError),
 
     #[error("failed to send request to node task")]
-    Send(mpsc::error::SendError<NodeApiRequest>),
+    Send,
 
     #[error(
-        "Network config update failed because it is out of date. Attempted 
+        "Network config update failed because it is out of date. Attempted
         update generation: {attempted_update_generation}, current generation: 
         {current_generation}"
     )]
@@ -127,7 +127,8 @@ impl NodeHandle {
                 initial_membership,
                 responder: tx,
             })
-            .await?;
+            .await
+            .map_err(|_| NodeRequestError::Send)?;
         let res = rx.await?;
         res
     }
@@ -135,7 +136,10 @@ impl NodeHandle {
     /// Initialize this node  as a learner
     pub async fn init_learner(&self) -> Result<(), NodeRequestError> {
         let (tx, rx) = oneshot::channel();
-        self.tx.send(NodeApiRequest::InitLearner { responder: tx }).await?;
+        self.tx
+            .send(NodeApiRequest::InitLearner { responder: tx })
+            .await
+            .map_err(|_| NodeRequestError::Send)?;
         let res = rx.await?;
         res
     }
@@ -148,7 +152,10 @@ impl NodeHandle {
         &self,
     ) -> Result<RackSecret, NodeRequestError> {
         let (tx, rx) = oneshot::channel();
-        self.tx.send(NodeApiRequest::LoadRackSecret { responder: tx }).await?;
+        self.tx
+            .send(NodeApiRequest::LoadRackSecret { responder: tx })
+            .await
+            .map_err(|_| NodeRequestError::Send)?;
         let res = rx.await?;
         res
     }
@@ -160,21 +167,30 @@ impl NodeHandle {
         &self,
         addrs: BTreeSet<SocketAddrV6>,
     ) -> Result<(), NodeRequestError> {
-        self.tx.send(NodeApiRequest::PeerAddresses(addrs)).await?;
+        self.tx
+            .send(NodeApiRequest::PeerAddresses(addrs))
+            .await
+            .map_err(|_| NodeRequestError::Send)?;
         Ok(())
     }
 
     /// Get the status of this node
     pub async fn get_status(&self) -> Result<Status, NodeRequestError> {
         let (tx, rx) = oneshot::channel();
-        self.tx.send(NodeApiRequest::GetStatus { responder: tx }).await?;
+        self.tx
+            .send(NodeApiRequest::GetStatus { responder: tx })
+            .await
+            .map_err(|_| NodeRequestError::Send)?;
         let res = rx.await?;
         Ok(res)
     }
 
     /// Shutdown the node's tokio tasks
     pub async fn shutdown(&self) -> Result<(), NodeRequestError> {
-        self.tx.send(NodeApiRequest::Shutdown).await?;
+        self.tx
+            .send(NodeApiRequest::Shutdown)
+            .await
+            .map_err(|_| NodeRequestError::Send)?;
         Ok(())
     }
 
@@ -186,7 +202,8 @@ impl NodeHandle {
         let (tx, rx) = oneshot::channel();
         self.tx
             .send(NodeApiRequest::UpdateNetworkConfig { config, responder: tx })
-            .await?;
+            .await
+            .map_err(|_| NodeRequestError::Send)?;
         rx.await?
     }
 
@@ -197,7 +214,8 @@ impl NodeHandle {
         let (tx, rx) = oneshot::channel();
         self.tx
             .send(NodeApiRequest::GetNetworkConfig { responder: tx })
-            .await?;
+            .await
+            .map_err(|_| NodeRequestError::Send)?;
         let res = rx.await?;
         Ok(res)
     }
@@ -509,18 +527,23 @@ impl Node {
                     self.network_config.as_ref().map_or(0, |c| c.generation);
                 info!(
                     self.log,
-                    "Attempting to update network config with 
-                    generation: {}, current_generation: {}",
+                    concat!(
+                        "Attempting to update network config with ",
+                        "generation: {}, current_generation: {}"
+                    ),
                     config.generation,
                     current_gen,
                 );
                 if current_gen > config.generation {
                     error!(
                         self.log,
-                        "Attempted network config update with
-                         stale generation: attemped_update_generation: {}, 
-                        current_generation: {current_gen}",
-                        config.generation
+                        concat!(
+                            "Attempted network config update with ",
+                            "stale generation: attemped_update_generation: {}, ",
+                            "current_generation: {}"
+                        ),
+                        config.generation,
+                        current_gen,
                     );
                     let _ = responder.send(Err(
                         NodeRequestError::StaleNetworkConfig {
@@ -531,8 +554,11 @@ impl Node {
                 } else if current_gen == config.generation {
                     warn!(
                         self.log,
-                        "Not updating network config: generation {current_gen} 
-                        is current"
+                        concat!(
+                            "Not updating network config: generation ",
+                            "{} is current"
+                        ),
+                        current_gen
                     );
                 } else {
                     self.network_config = Some(config.clone());
@@ -590,8 +616,12 @@ impl Node {
             {
                 warn!(
                     self.log,
-                    "Failed to send network config to connection
-                         management task for {id} {e:?}"
+                    concat!(
+                        "Failed to send network config to connection ",
+                        "management task for {} {:?}"
+                    ),
+                    id,
+                    e
                 );
             }
         }
@@ -760,8 +790,12 @@ impl Node {
                     {
                         warn!(
                             self.log,
-                            "Failed to send network config to connection
-                         management task for {peer_id} {e:?}"
+                            concat!(
+                                "Failed to send network config to connection ",
+                                "management task for {} {:?}"
+                            ),
+                            peer_id,
+                            e
                         );
                     }
                 }
@@ -796,8 +830,12 @@ impl Node {
                         {
                             warn!(
                                 self.log,
-                                "Failed to send network config to connection
-                         management task for {peer_id}: {e:?}"
+                                concat!(
+                                    "Failed to send network config to ",
+                                    "connection management task for {}: {:?}"
+                                ),
+                                peer_id,
+                                e
                             );
                         }
                     }
@@ -872,8 +910,13 @@ impl Node {
                 let generation = config.generation;
                 info!(
                     self.log,
-                    "Received network config from {from} with 
-                    generation: {generation}, current generation: {current_gen}"
+                    concat!(
+                        "Received network config from {} with ",
+                        "generation: {}, current generation: {}"
+                    ),
+                    from,
+                    generation,
+                    current_gen
                 );
                 if generation > current_gen {
                     self.network_config = Some(config.clone());
@@ -963,6 +1006,7 @@ mod tests {
     use super::*;
     use camino_tempfile::Utf8TempDir;
     use slog::Drain;
+    use tokio::time::sleep;
     use uuid::Uuid;
 
     fn initial_members() -> BTreeSet<Baseboard> {
@@ -1181,5 +1225,177 @@ mod tests {
         jh0.await.unwrap();
         handle1.shutdown().await.unwrap();
         jh1.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn network_config() {
+        let tempdir = Utf8TempDir::new().unwrap();
+        let log = log();
+        let config = initial_config(&tempdir);
+        let (mut node0, handle0) = Node::new(config[0].clone(), &log).await;
+        let (mut node1, handle1) = Node::new(config[1].clone(), &log).await;
+        let (mut node2, handle2) = Node::new(config[2].clone(), &log).await;
+
+        let jh0 = tokio::spawn(async move {
+            node0.run().await;
+        });
+        let jh1 = tokio::spawn(async move {
+            node1.run().await;
+        });
+        let jh2 = tokio::spawn(async move {
+            node2.run().await;
+        });
+
+        // Inform each node about the known addresses
+        let mut addrs: BTreeSet<_> =
+            config.iter().map(|c| c.addr.clone()).collect();
+        for handle in [&handle0, &handle1, &handle2] {
+            let _ = handle.load_peer_addresses(addrs.clone()).await;
+        }
+
+        // Ensure there is no network config at any of the nodes
+        for handle in [&handle0, &handle1, &handle2] {
+            assert_eq!(None, handle.get_network_config().await.unwrap());
+        }
+
+        // Update the network config at node0 and ensure it has taken effect
+        let network_config = NetworkConfig {
+            generation: 1,
+            blob: b"Some network data".to_vec(),
+        };
+        handle0.update_network_config(network_config.clone()).await.unwrap();
+        assert_eq!(
+            Some(&network_config),
+            handle0.get_network_config().await.unwrap().as_ref()
+        );
+
+        // Poll node1 and node2 until the network config update shows up
+        // Timeout after 5 seconds
+        const POLL_TIMEOUT: Duration = Duration::from_secs(5);
+        let start = Instant::now();
+        let mut node1_done = false;
+        let mut node2_done = false;
+        while !(node1_done && node2_done) {
+            let timeout = POLL_TIMEOUT.saturating_sub(Instant::now() - start);
+            tokio::select! {
+                _ = sleep(timeout) => {
+                    panic!("Network config not replicated");
+                }
+                res = handle1.get_network_config(), if !node1_done => {
+                    if res.unwrap().as_ref() == Some(&network_config) {
+                        node1_done = true;
+                        continue;
+                    }
+                }
+                res = handle2.get_network_config(), if !node2_done => {
+                    if res.unwrap().as_ref() == Some(&network_config) {
+                        node2_done = true;
+                        continue;
+                    }
+                }
+            }
+        }
+
+        // Bring a learner online
+        let learner_conf = learner_config(&tempdir, 1);
+        let (mut learner, learner_handle) =
+            Node::new(learner_conf.clone(), &log).await;
+        let learner_jh = tokio::spawn(async move {
+            learner.run().await;
+        });
+        // Inform the learner and other nodes about all addresses including
+        // the learner. This simulates DDM discovery.
+        addrs.insert(learner_conf.addr.clone());
+        for handle in [&learner_handle, &handle0, &handle1, &handle2] {
+            let _ = handle.load_peer_addresses(addrs.clone()).await;
+        }
+
+        // Poll the learner to ensure it gets the network config
+        // Note that the learner doesn't even need to learn its share
+        // for network config replication to work.
+        let start = Instant::now();
+        let mut done = false;
+        while !done {
+            let timeout = POLL_TIMEOUT.saturating_sub(Instant::now() - start);
+            tokio::select! {
+                _ = sleep(timeout) => {
+                    panic!("Network config not replicated");
+                }
+                res = learner_handle.get_network_config() => {
+                    if res.unwrap().as_ref() == Some(&network_config) {
+                        done = true;
+                    }
+                }
+            }
+        }
+
+        // Stop node0, bring it back online and ensure it still sees the config
+        // at generation 1
+        handle0.shutdown().await.unwrap();
+        jh0.await.unwrap();
+        let (mut node0, handle0) = Node::new(config[0].clone(), &log).await;
+        let jh0 = tokio::spawn(async move {
+            node0.run().await;
+        });
+        assert_eq!(
+            Some(&network_config),
+            handle0.get_network_config().await.unwrap().as_ref()
+        );
+
+        // Stop node0 again, update network config via node1, bring node0 back online,
+        // and ensure all nodes see the latest configuration.
+        let new_config = NetworkConfig {
+            generation: 2,
+            blob: b"Some more network data".to_vec(),
+        };
+        handle0.shutdown().await.unwrap();
+        jh0.await.unwrap();
+        handle1.update_network_config(new_config.clone()).await.unwrap();
+        assert_eq!(
+            Some(&new_config),
+            handle1.get_network_config().await.unwrap().as_ref()
+        );
+        let (mut node0, handle0) = Node::new(config[0].clone(), &log).await;
+        let jh0 = tokio::spawn(async move {
+            node0.run().await;
+        });
+        let start = Instant::now();
+        // These should all resolve instantly, so no real need for a select,
+        // which is getting tedious.
+        // We also want to repeatedly loop until all consistently have the same version
+        // to give some assurance that the old version from node0 doesn't replicate
+        'outer: loop {
+            if Instant::now() - start > POLL_TIMEOUT {
+                panic!("network config not replicated");
+            }
+            for h in [&handle0, &handle1, &handle2, &learner_handle] {
+                if h.get_network_config().await.unwrap().as_ref()
+                    != Some(&new_config)
+                {
+                    // We need to try again
+                    continue 'outer;
+                }
+            }
+            // Success
+            break;
+        }
+
+        // Try to update node0 with an old config, and watch it fail
+        let expected = Err(NodeRequestError::StaleNetworkConfig {
+            attempted_update_generation: 1,
+            current_generation: 2,
+        });
+        assert_eq!(
+            handle0.update_network_config(network_config).await,
+            expected
+        );
+
+        // Shut it all down
+        for h in [handle0, handle1, handle2, learner_handle] {
+            let _ = h.shutdown().await;
+        }
+        for jh in [jh0, jh1, jh2, learner_jh] {
+            jh.await.unwrap();
+        }
     }
 }
