@@ -5,8 +5,10 @@
 //! Bootstrap-related APIs.
 
 use super::config::{
-    Config, BOOTSTRAP_AGENT_HTTP_PORT, BOOTSTRAP_AGENT_RACK_INIT_PORT,
+    Config, BOOTSTORE_PORT, BOOTSTRAP_AGENT_HTTP_PORT,
+    BOOTSTRAP_AGENT_RACK_INIT_PORT,
 };
+use super::early_networking::EarlyNetworkSetup;
 use super::hardware::HardwareMonitor;
 use super::http_entrypoints::RackOperationStatus;
 use super::params::RackInitializeRequest;
@@ -18,6 +20,7 @@ use crate::server::Server as SledServer;
 use crate::services::ServiceManager;
 use crate::storage_manager::{StorageManager, StorageResources};
 use crate::updates::UpdateManager;
+use bootstore::schemes::v0 as bootstore;
 use camino::Utf8PathBuf;
 use ddm_admin_client::{Client as DdmAdminClient, DdmError};
 use futures::stream::{self, StreamExt, TryStreamExt};
@@ -35,6 +38,7 @@ use sled_hardware::underlay::BootstrapInterface;
 use sled_hardware::{Baseboard, HardwareManager};
 use slog::Logger;
 use std::borrow::Cow;
+use std::collections::BTreeSet;
 use std::net::{IpAddr, Ipv6Addr, SocketAddrV6};
 use std::sync::Arc;
 use thiserror::Error;
@@ -185,21 +189,40 @@ pub struct Agent {
 
     global_zone_bootstrap_link_local_address: Ipv6Addr,
 
-    // We maintain the handle just to show ownership, but don't use it
-    // as the KeyManager task should run forever
+    /// We maintain the handle just to show ownership, but don't use it
+    /// as the KeyManager task should run forever
     #[allow(unused)]
     key_manager_handle: JoinHandle<()>,
 
-    // We maintain a copy of the `StorageKeyRequester` so we can pass it through
-    // from the `HardwareManager` to the `StorageManager` when the `HardwareManger`
-    // gets recreated.
+    /// We maintain a copy of the `StorageKeyRequester` so we can pass it through
+    /// from the `HardwareManager` to the `StorageManager` when the `HardwareManger`
+    /// gets recreated.
     storage_key_requester: StorageKeyRequester,
 
     /// Our sled's baseboard identity.
     baseboard: Baseboard,
+
+    /// Handle for interacting with the local `bootstore::Node`
+    bootstore: bootstore::NodeHandle,
+
+    /// The join handle of the `bootstore::Node` task
+    /// The bootstore main task runs forever. This handle field shows ownership.
+    #[allow(unused)]
+    bootstore_join_handle: JoinHandle<()>,
+
+    /// The join handle of a task that polls DDMD and updates the bootstore with
+    /// known peer addresses. This task runs forever. This handle field shows
+    /// ownership.
+    #[allow(unused)]
+    bootstore_peer_update_handle: JoinHandle<()>,
+
+    /// Code for initializing networking in order to bring up the control plane
+    early_networking: EarlyNetworkSetup,
 }
 
 const SLED_AGENT_REQUEST_FILE: &str = "sled-agent-request.toml";
+const BOOTSTORE_FSM_STATE_FILE: &str = "bootstore-fsm-state.json";
+const BOOTSTORE_NETWORK_CONFIG_FILE: &str = "bootstore-network-config.json";
 
 // Deletes all state which may be left-over from a previous execution of the
 // Sled Agent.
@@ -262,6 +285,28 @@ async fn sled_config_paths(storage: &StorageResources) -> Vec<Utf8PathBuf> {
         .await
         .into_iter()
         .map(|p| p.join(SLED_AGENT_REQUEST_FILE))
+        .collect()
+}
+
+async fn bootstore_fsm_state_paths(
+    storage: &StorageResources,
+) -> Vec<Utf8PathBuf> {
+    storage
+        .all_m2_mountpoints(sled_hardware::disk::CLUSTER_DATASET)
+        .await
+        .into_iter()
+        .map(|p| p.join(BOOTSTORE_FSM_STATE_FILE))
+        .collect()
+}
+
+async fn bootstore_network_config_paths(
+    storage: &StorageResources,
+) -> Vec<Utf8PathBuf> {
+    storage
+        .all_m2_mountpoints(sled_hardware::disk::CLUSTER_DATASET)
+        .await
+        .into_iter()
+        .map(|p| p.join(BOOTSTORE_NETWORK_CONFIG_FILE))
         .collect()
 }
 
@@ -397,9 +442,41 @@ impl Agent {
             }
         }
 
+        // Configure and start the bootstore
+        let bootstore_config = bootstore::Config {
+            id: baseboard.clone(),
+            addr: SocketAddrV6::new(ip, BOOTSTORE_PORT, 0, 0),
+            time_per_tick: std::time::Duration::from_millis(250),
+            learn_timeout: std::time::Duration::from_secs(5),
+            rack_init_timeout: std::time::Duration::from_secs(60),
+            rack_secret_request_timeout: std::time::Duration::from_secs(30),
+            fsm_state_ledger_paths: bootstore_fsm_state_paths(
+                &storage_resources,
+            )
+            .await,
+            network_config_ledger_paths: bootstore_network_config_paths(
+                &storage_resources,
+            )
+            .await,
+        };
+        let (mut bootstore_node, bootstore_node_handle) =
+            bootstore::Node::new(bootstore_config, &ba_log).await;
+
+        let bootstore_join_handle =
+            tokio::spawn(async move { bootstore_node.run().await });
+
+        // Spawn a task for polling DDMD and updating bootstore
+        let bootstore_peer_update_handle =
+            Self::poll_ddmd_for_bootstore_peer_update(
+                &ba_log,
+                bootstore_node_handle.clone(),
+            )
+            .await;
+
         let paths = sled_config_paths(&storage_resources).await;
         let maybe_ledger =
             Ledger::<PersistentSledAgentRequest>::new(&ba_log, paths).await;
+        let early_networking = EarlyNetworkSetup::new(&ba_log);
         let make_bootstrap_agent = move |initialized| Agent {
             log: ba_log,
             parent_log: log,
@@ -416,6 +493,10 @@ impl Agent {
             key_manager_handle: handle,
             storage_key_requester,
             baseboard,
+            bootstore: bootstore_node_handle,
+            bootstore_join_handle,
+            bootstore_peer_update_handle,
+            early_networking,
         };
         let agent = if let Some(ledger) = maybe_ledger {
             let agent = make_bootstrap_agent(true);
@@ -432,6 +513,66 @@ impl Agent {
 
     pub fn baseboard(&self) -> &Baseboard {
         &self.baseboard
+    }
+
+    async fn poll_ddmd_for_bootstore_peer_update(
+        log: &Logger,
+        bootstore_node_handle: bootstore::NodeHandle,
+    ) -> JoinHandle<()> {
+        let log = log.clone();
+        tokio::spawn(async move {
+            // Explicit fail fast. We can't do anything without a DdmAdminClient.
+            // Do we need to loop as in wicketd?
+            let ddmd_client = DdmAdminClient::localhost(&log).unwrap();
+            let mut current_peers: BTreeSet<SocketAddrV6> = BTreeSet::new();
+            loop {
+                // We're talking to a service's admin interface on localhost and
+                // we're only asking for its current state. We use a retry in a
+                // loop instead of `backoff`.
+                const RETRY: tokio::time::Duration =
+                    tokio::time::Duration::from_secs(5);
+
+                loop {
+                    match ddmd_client
+                        .derive_bootstrap_addrs_from_prefixes(&[
+                            BootstrapInterface::GlobalZone,
+                        ])
+                        .await
+                    {
+                        Ok(addrs) => {
+                            let peers: BTreeSet<_> = addrs
+                                .map(|ip| {
+                                    SocketAddrV6::new(ip, BOOTSTORE_PORT, 0, 0)
+                                })
+                                .collect();
+                            if peers != current_peers {
+                                current_peers = peers;
+                                if let Err(e) = bootstore_node_handle
+                                    .load_peer_addresses(current_peers.clone())
+                                    .await
+                                {
+                                    warn!(
+                                        log,
+                                        concat!("Bootstore comms error: {}. ",
+                                        "bootstrap agent must be terminating?.",
+                                    ),
+                                        e
+                                    );
+                                    return;
+                                }
+                            }
+                        }
+                        Err(err) => {
+                            warn!(
+                                log, "Failed to get prefixes from ddmd";
+                                "err" => #%err,
+                            );
+                        }
+                    }
+                    tokio::time::sleep(RETRY).await;
+                }
+            }
+        })
     }
 
     async fn start_hardware_monitor(
@@ -815,6 +956,10 @@ impl Agent {
 
         // Return any errors encountered resetting the sled.
         result
+    }
+
+    pub fn get_bootstore_node_handle(&self) -> bootstore::NodeHandle {
+        self.bootstore.clone()
     }
 
     pub async fn components_get(
