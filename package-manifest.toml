@@ -456,7 +456,7 @@ service_name = "switch"
 only_for_targets.switch = "asic"
 only_for_targets.image = "standard"
 source.type = "composite"
-source.packages = [ "omicron-gateway.tar.gz", "dendrite-asic.tar.gz", "wicketd.tar.gz", "wicket.tar.gz", "mg-ddm.tar.gz", "switch_zone_setup.tar.gz" ]
+source.packages = [ "omicron-gateway-asic.tar.gz", "dendrite-asic.tar.gz", "wicketd.tar.gz", "wicket.tar.gz", "mg-ddm.tar.gz", "switch_zone_setup.tar.gz" ]
 output.type = "zone"
 
 # To package and install the stub variant of the switch, do the following:
