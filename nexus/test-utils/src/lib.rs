@@ -37,6 +37,7 @@ use oximeter_collector::Oximeter;
 use oximeter_producer::LogConfig;
 use oximeter_producer::Server as ProducerServer;
 use slog::{debug, o, Logger};
+use std::collections::HashMap;
 use std::fmt::Debug;
 use std::net::{IpAddr, Ipv6Addr, SocketAddr, SocketAddrV6};
 use std::time::Duration;
@@ -83,8 +84,7 @@ pub struct ControlPlaneTestContext<N> {
     pub sled_agent: sim::Server,
     pub oximeter: Oximeter,
     pub producer: ProducerServer,
-    pub dendrite: dev::dendrite::DendriteInstance,
-
+    pub dendrite: HashMap<SwitchLocation, dev::dendrite::DendriteInstance>,
     pub external_dns_zone_name: String,
     pub external_dns: dns_server::TransientServer,
     pub internal_dns: dns_server::TransientServer,
@@ -100,7 +100,9 @@ impl<N: NexusServer> ControlPlaneTestContext<N> {
         self.sled_agent.http_server.close().await.unwrap();
         self.oximeter.close().await.unwrap();
         self.producer.close().await.unwrap();
-        self.dendrite.cleanup().await.unwrap();
+        for (_, mut dendrite) in self.dendrite {
+            dendrite.cleanup().await.unwrap();
+        }
         self.logctx.cleanup_successful();
     }
 }
@@ -229,7 +231,7 @@ pub struct ControlPlaneTestContextBuilder<'a, N: NexusServer> {
     pub sled_agent: Option<sim::Server>,
     pub oximeter: Option<Oximeter>,
     pub producer: Option<ProducerServer>,
-    pub dendrite: Option<dev::dendrite::DendriteInstance>,
+    pub dendrite: HashMap<SwitchLocation, dev::dendrite::DendriteInstance>,
 
     // NOTE: Only exists after starting Nexus, until external Nexus is
     // initialized.
@@ -266,7 +268,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             sled_agent: None,
             oximeter: None,
             producer: None,
-            dendrite: None,
+            dendrite: HashMap::new(),
             nexus_internal: None,
             nexus_internal_addr: None,
             external_dns_zone_name: None,
@@ -341,17 +343,16 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             .set_port(port);
     }
 
-    pub async fn start_dendrite(&mut self) {
+    pub async fn start_dendrite(&mut self, switch_location: SwitchLocation) {
         let log = &self.logctx.log;
-        debug!(log, "Starting Dendrite");
+        debug!(log, "Starting Dendrite for {switch_location}");
 
         // Set up a stub instance of dendrite
         let dendrite = dev::dendrite::DendriteInstance::start(0).await.unwrap();
         let port = dendrite.port;
-        self.dendrite = Some(dendrite);
+        self.dendrite.insert(switch_location.clone(), dendrite);
 
         let address = SocketAddrV6::new(Ipv6Addr::LOCALHOST, port, 0, 0);
-        let switch_location = SwitchLocation::Switch0;
 
         // Update the configuration options for Nexus, if it's launched later.
         //
@@ -712,7 +713,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             oximeter: self.oximeter.unwrap(),
             producer: self.producer.unwrap(),
             logctx: self.logctx,
-            dendrite: self.dendrite.unwrap(),
+            dendrite: self.dendrite,
             external_dns_zone_name: self.external_dns_zone_name.unwrap(),
             external_dns: self.external_dns.unwrap(),
             internal_dns: self.internal_dns.unwrap(),
@@ -740,7 +741,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
         if let Some(producer) = self.producer {
             producer.close().await.unwrap();
         }
-        if let Some(mut dendrite) = self.dendrite {
+        for (_, mut dendrite) in self.dendrite {
             dendrite.cleanup().await.unwrap();
         }
         self.logctx.cleanup_successful();
@@ -758,7 +759,8 @@ pub async fn test_setup_with_config<N: NexusServer>(
 
     builder.start_crdb().await;
     builder.start_clickhouse().await;
-    builder.start_dendrite().await;
+    builder.start_dendrite(SwitchLocation::Switch0).await;
+    builder.start_dendrite(SwitchLocation::Switch1).await;
     builder.start_internal_dns().await;
     builder.start_external_dns().await;
     builder.start_nexus_internal().await;

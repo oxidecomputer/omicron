@@ -380,6 +380,7 @@ lazy_static! {
             switch_location: "switch0".parse().unwrap(),
             address: "203.0.113.99".parse().unwrap(),
             mask: 24,
+            anycast: false,
         };
 }
 

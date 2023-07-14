@@ -10444,6 +10444,10 @@
               }
             ]
           },
+          "anycast": {
+            "description": "Address is an anycast address. This allows the address to be assigned to multiple locations simultaneously.",
+            "type": "boolean"
+          },
           "mask": {
             "description": "The subnet mask to use for the address.",
             "type": "integer",
@@ -10467,6 +10471,7 @@
         "required": [
           "address",
           "address_lot",
+          "anycast",
           "mask",
           "rack_id",
           "switch_location"

@@ -276,6 +276,7 @@ table! {
         address_lot_id -> Uuid,
         first_address -> Inet,
         last_address -> Inet,
+        anycast -> Bool,
     }
 }
 
@@ -289,6 +290,7 @@ table! {
         rack_id -> Uuid,
         switch_location -> Text,
         address -> Inet,
+        anycast -> Bool,
     }
 }
 

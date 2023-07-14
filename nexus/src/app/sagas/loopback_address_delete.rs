@@ -129,6 +129,7 @@ async fn slc_loopback_address_undelete_record(
             .map_err(|e| anyhow!("bad switch location name: {}", e))?,
         address: value.address.ip(),
         mask: value.address.prefix(),
+        anycast: value.anycast,
     };
 
     let address_lot_lookup = nexus

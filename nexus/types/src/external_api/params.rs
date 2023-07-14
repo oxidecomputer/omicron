@@ -1238,6 +1238,10 @@ pub struct LoopbackAddressCreate {
 
     /// The subnet mask to use for the address.
     pub mask: u8,
+
+    /// Address is an anycast address.
+    /// This allows the address to be assigned to multiple locations simultaneously.
+    pub anycast: bool,
 }
 
 /// Parameters for creating a port settings group.
