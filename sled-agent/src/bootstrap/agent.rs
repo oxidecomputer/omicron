@@ -903,7 +903,7 @@ mod tests {
 
         let ledger = Ledger::<PersistentSledAgentRequest>::new(log, paths)
             .await
-            .expect("Failt to read request");
+            .expect("Failed to read request");
 
         assert!(&request == ledger.data(), "serialization round trip failed");
         logctx.cleanup_successful();

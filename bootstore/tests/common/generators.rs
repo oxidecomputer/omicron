@@ -4,7 +4,7 @@
 
 //! Proptest generators
 
-use bootstore::schemes::v0::{Config, MsgError};
+use bootstore::schemes::v0::{FsmConfig, MsgError};
 use proptest::prelude::*;
 use sled_hardware::Baseboard;
 use std::collections::BTreeSet;
@@ -91,9 +91,9 @@ pub fn arb_learner_id() -> impl Strategy<Value = Baseboard> {
 }
 
 // Generate an FSM configuration
-pub fn arb_config() -> impl Strategy<Value = Config> {
+pub fn arb_config() -> impl Strategy<Value = FsmConfig> {
     (LEARN_TIMEOUT_SECS, RACK_SECRET_TIMEOUT_SECS).prop_map(
-        |(learn_timeout, rack_secret_request_timeout)| Config {
+        |(learn_timeout, rack_secret_request_timeout)| FsmConfig {
             learn_timeout: Duration::from_secs(learn_timeout),
             rack_init_timeout: Duration::from_secs(rack_secret_request_timeout),
             rack_secret_request_timeout: Duration::from_secs(
