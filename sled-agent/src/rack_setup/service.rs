@@ -61,7 +61,7 @@ use crate::bootstrap::params::StartSledAgentRequest;
 use crate::bootstrap::rss_handle::BootstrapAgentHandle;
 use crate::nexus::d2n_params;
 use crate::params::{
-    AutonomousServiceOnlyError, DatasetKind, ServiceType, ServiceZoneRequest,
+    AutonomousServiceOnlyError, ServiceType, ServiceZoneRequest,
     ServiceZoneService, TimeSync, ZoneType,
 };
 use crate::rack_setup::plan::service::{
@@ -85,14 +85,9 @@ use internal_dns::ServiceName;
 use nexus_client::{
     types as NexusTypes, Client as NexusClient, Error as NexusError,
 };
+use omicron_common::address::get_sled_address;
 use omicron_common::address::Ipv6Subnet;
-use omicron_common::address::DDMD_PORT;
-use omicron_common::address::MGS_PORT;
-use omicron_common::address::{
-    get_sled_address, CLICKHOUSE_PORT, COCKROACH_PORT, CRUCIBLE_PANTRY_PORT,
-    CRUCIBLE_PORT, DENDRITE_PORT, DNS_HTTP_PORT, NEXUS_INTERNAL_PORT, NTP_PORT,
-    OXIMETER_PORT,
-};
+use omicron_common::address::{DDMD_PORT, DENDRITE_PORT, MGS_PORT};
 use omicron_common::api::internal::shared::ExternalPortDiscovery;
 use omicron_common::api::internal::shared::SwitchLocation;
 use omicron_common::api::internal::shared::UplinkConfig;
@@ -110,7 +105,7 @@ use slog::Logger;
 use std::collections::{HashMap, HashSet};
 use std::iter;
 use std::net::IpAddr;
-use std::net::{Ipv6Addr, SocketAddr, SocketAddrV6};
+use std::net::{Ipv6Addr, SocketAddrV6};
 use thiserror::Error;
 
 static BOUNDARY_SERVICES_ADDR: &str = "fd00:99::1";
@@ -534,7 +529,7 @@ impl ServiceInner {
         sled_plan: &SledPlan,
         service_plan: &ServicePlan,
         port_discovery_mode: ExternalPortDiscovery,
-        nexus_address: SocketAddr,
+        nexus_address: SocketAddrV6,
     ) -> Result<(), SetupServiceError> {
         info!(self.log, "Handing off control to Nexus");
 
@@ -564,247 +559,18 @@ impl ServiceInner {
                 .expect("Sled address in service plan, but not sled plan");
 
             for zone in &service_request.services {
-                for svc in &zone.services {
-                    // TODO-cleanup Here, we take the ServiceZoneRequests that
-                    // were constructed with the ServicePlan and turn them into
-                    // Nexus ServicePutRequest objects.  For Nexus, we need to
-                    // specify a SocketAddr -- both an IP address and a port on
-                    // which the service is listening.  The code here hardcodes
-                    // the default ports for each service.  This happens to be
-                    // correct because the ServicePlan uses the same hardcoded
-                    // ports when it sets up the DNS zone and the Sled Agent
-                    // uses the same hardcoded ports when configuring each of
-                    // these services.  It would be more robust to pick the
-                    // (hardcoded) port when constructing the ServicePlan and
-                    // plumb the SocketAddr (with port) everywhere that needs it
-                    // (including both here and DNS).  That way we don't bake
-                    // the port assumption into multiple places and we can also
-                    // more easily support things running on different ports
-                    // (which is useful in dev/test situations).
-                    let service_id = svc.id;
-                    let zone_id = Some(zone.id);
-                    match &svc.details {
-                        ServiceType::Nexus {
-                            external_ip,
-                            internal_ip: _,
-                            nic,
-                            ..
-                        } => {
-                            services.push(NexusTypes::ServicePutRequest {
-                                service_id,
-                                zone_id,
-                                sled_id,
-                                address: SocketAddrV6::new(
-                                    zone.addresses[0],
-                                    NEXUS_INTERNAL_PORT,
-                                    0,
-                                    0,
-                                )
-                                .to_string(),
-                                kind: NexusTypes::ServiceKind::Nexus {
-                                    external_address: *external_ip,
-                                    nic: NexusTypes::ServiceNic {
-                                        id: nic.id,
-                                        name: nic.name.clone(),
-                                        ip: nic.ip,
-                                        mac: nic.mac,
-                                    },
-                                },
-                            });
-                        }
-                        ServiceType::Dendrite { .. } => {
-                            services.push(NexusTypes::ServicePutRequest {
-                                service_id,
-                                zone_id,
-                                sled_id,
-                                address: SocketAddrV6::new(
-                                    zone.addresses[0],
-                                    DENDRITE_PORT,
-                                    0,
-                                    0,
-                                )
-                                .to_string(),
-                                kind: NexusTypes::ServiceKind::Dendrite,
-                            });
-                        }
-                        ServiceType::ExternalDns {
-                            http_address,
-                            dns_address,
-                            nic,
-                        } => {
-                            services.push(NexusTypes::ServicePutRequest {
-                                service_id,
-                                zone_id,
-                                sled_id,
-                                address: http_address.to_string(),
-                                kind: NexusTypes::ServiceKind::ExternalDns {
-                                    external_address: dns_address.ip(),
-                                    nic: NexusTypes::ServiceNic {
-                                        id: nic.id,
-                                        name: nic.name.clone(),
-                                        ip: nic.ip,
-                                        mac: nic.mac,
-                                    },
-                                },
-                            });
-                        }
-                        ServiceType::InternalDns { http_address, .. } => {
-                            services.push(NexusTypes::ServicePutRequest {
-                                service_id,
-                                zone_id,
-                                sled_id,
-                                address: http_address.to_string(),
-                                kind: NexusTypes::ServiceKind::InternalDns,
-                            });
-                        }
-                        ServiceType::Oximeter => {
-                            services.push(NexusTypes::ServicePutRequest {
-                                service_id,
-                                zone_id,
-                                sled_id,
-                                address: SocketAddrV6::new(
-                                    zone.addresses[0],
-                                    OXIMETER_PORT,
-                                    0,
-                                    0,
-                                )
-                                .to_string(),
-                                kind: NexusTypes::ServiceKind::Oximeter,
-                            });
-                        }
-                        ServiceType::CruciblePantry => {
-                            services.push(NexusTypes::ServicePutRequest {
-                                service_id,
-                                zone_id,
-                                sled_id,
-                                address: SocketAddrV6::new(
-                                    zone.addresses[0],
-                                    CRUCIBLE_PANTRY_PORT,
-                                    0,
-                                    0,
-                                )
-                                .to_string(),
-                                kind: NexusTypes::ServiceKind::CruciblePantry,
-                            });
-                        }
-                        ServiceType::BoundaryNtp { snat_cfg, nic, .. } => {
-                            services.push(NexusTypes::ServicePutRequest {
-                                service_id,
-                                zone_id,
-                                sled_id,
-                                address: SocketAddrV6::new(
-                                    zone.addresses[0],
-                                    NTP_PORT,
-                                    0,
-                                    0,
-                                )
-                                .to_string(),
-                                kind: NexusTypes::ServiceKind::BoundaryNtp {
-                                    snat: snat_cfg.into(),
-                                    nic: NexusTypes::ServiceNic {
-                                        id: nic.id,
-                                        name: nic.name.clone(),
-                                        ip: nic.ip,
-                                        mac: nic.mac,
-                                    },
-                                },
-                            });
-                        }
-                        ServiceType::InternalNtp { .. } => {
-                            services.push(NexusTypes::ServicePutRequest {
-                                service_id,
-                                zone_id,
-                                sled_id,
-                                address: SocketAddrV6::new(
-                                    zone.addresses[0],
-                                    NTP_PORT,
-                                    0,
-                                    0,
-                                )
-                                .to_string(),
-                                kind: NexusTypes::ServiceKind::InternalNtp,
-                            });
-                        }
-                        ServiceType::Clickhouse => {
-                            services.push(NexusTypes::ServicePutRequest {
-                                service_id,
-                                zone_id,
-                                sled_id,
-                                address: SocketAddrV6::new(
-                                    zone.addresses[0],
-                                    CLICKHOUSE_PORT,
-                                    0,
-                                    0,
-                                )
-                                .to_string(),
-                                kind: NexusTypes::ServiceKind::Clickhouse,
-                            });
-                        }
-                        ServiceType::Crucible => {
-                            services.push(NexusTypes::ServicePutRequest {
-                                service_id,
-                                zone_id,
-                                sled_id,
-                                address: SocketAddrV6::new(
-                                    zone.addresses[0],
-                                    CRUCIBLE_PORT,
-                                    0,
-                                    0,
-                                )
-                                .to_string(),
-                                kind: NexusTypes::ServiceKind::Crucible,
-                            });
-                        }
-                        ServiceType::CockroachDb => {
-                            services.push(NexusTypes::ServicePutRequest {
-                                service_id,
-                                zone_id,
-                                sled_id,
-                                address: SocketAddrV6::new(
-                                    zone.addresses[0],
-                                    COCKROACH_PORT,
-                                    0,
-                                    0,
-                                )
-                                .to_string(),
-                                kind: NexusTypes::ServiceKind::Cockroach,
-                            });
-                        }
-                        ServiceType::ManagementGatewayService
-                        | ServiceType::SpSim
-                        | ServiceType::Wicketd { .. }
-                        | ServiceType::Maghemite { .. }
-                        | ServiceType::Tfport { .. } => {
-                            return Err(SetupServiceError::BadConfig(format!(
-                                "RSS should not request service of type: {}",
-                                svc.details
-                            )));
-                        }
-                    }
-                }
+                services.extend(zone.into_nexus_service_req(sled_id).map_err(
+                    |err| SetupServiceError::BadConfig(err.to_string()),
+                )?);
             }
 
             for service in service_request.services.iter() {
                 if let Some(dataset) = &service.dataset {
-                    let port = match dataset.name.dataset() {
-                        DatasetKind::CockroachDb => COCKROACH_PORT,
-                        DatasetKind::Clickhouse => CLICKHOUSE_PORT,
-                        DatasetKind::Crucible => CRUCIBLE_PORT,
-                        DatasetKind::ExternalDns => DNS_HTTP_PORT,
-                        DatasetKind::InternalDns => DNS_HTTP_PORT,
-                    };
-
                     datasets.push(NexusTypes::DatasetCreateRequest {
                         zpool_id: dataset.name.pool().id(),
                         dataset_id: dataset.id,
                         request: NexusTypes::DatasetPutRequest {
-                            address: SocketAddrV6::new(
-                                service.addresses[0],
-                                port,
-                                0,
-                                0,
-                            )
-                            .to_string(),
+                            address: dataset.service_address.to_string(),
                             kind: dataset.name.dataset().clone().into(),
                         },
                     })
@@ -1039,8 +805,8 @@ impl ServiceInner {
             let switch_mgmt_addrs =
                 self.map_switch_zone_addrs(switch_zone_addresses).await;
 
-            let ip = resolver.lookup_ip(ServiceName::Nexus).await?;
-            let nexus_address = SocketAddr::new(ip, NEXUS_INTERNAL_PORT);
+            let nexus_address =
+                resolver.lookup_socket_v6(ServiceName::Nexus).await?;
 
             self.handoff_to_nexus(
                 &config,
@@ -1279,8 +1045,8 @@ impl ServiceInner {
         );
         ledger.commit().await?;
 
-        let ip = resolver.lookup_ip(ServiceName::Nexus).await?;
-        let nexus_address = SocketAddr::new(ip, NEXUS_INTERNAL_PORT);
+        let nexus_address =
+            resolver.lookup_socket_v6(ServiceName::Nexus).await?;
 
         // At this point, even if we reboot, we must not try to manage sleds,
         // services, or DNS records.

@@ -841,11 +841,15 @@
           },
           "name": {
             "$ref": "#/components/schemas/DatasetName"
+          },
+          "service_address": {
+            "type": "string"
           }
         },
         "required": [
           "id",
-          "name"
+          "name",
+          "service_address"
         ]
       },
       "DiskEnsureBody": {
@@ -1918,10 +1922,9 @@
                 "description": "Whether Nexus's external endpoint should use TLS",
                 "type": "boolean"
               },
-              "internal_ip": {
+              "internal_address": {
                 "description": "The address at which the internal nexus server is reachable.",
-                "type": "string",
-                "format": "ipv6"
+                "type": "string"
               },
               "nic": {
                 "description": "The service vNIC providing external connectivity using OPTE.",
@@ -1941,7 +1944,7 @@
             "required": [
               "external_ip",
               "external_tls",
-              "internal_ip",
+              "internal_address",
               "nic",
               "type"
             ]
@@ -2017,6 +2020,9 @@
           {
             "type": "object",
             "properties": {
+              "address": {
+                "type": "string"
+              },
               "type": {
                 "type": "string",
                 "enum": [
@@ -2025,12 +2031,16 @@
               }
             },
             "required": [
+              "address",
               "type"
             ]
           },
           {
             "type": "object",
             "properties": {
+              "address": {
+                "type": "string"
+              },
               "type": {
                 "type": "string",
                 "enum": [
@@ -2039,12 +2049,16 @@
               }
             },
             "required": [
+              "address",
               "type"
             ]
           },
           {
             "type": "object",
             "properties": {
+              "address": {
+                "type": "string"
+              },
               "dns_servers": {
                 "type": "array",
                 "items": {
@@ -2085,6 +2099,7 @@
               }
             },
             "required": [
+              "address",
               "dns_servers",
               "nic",
               "ntp_servers",
@@ -2095,6 +2110,9 @@
           {
             "type": "object",
             "properties": {
+              "address": {
+                "type": "string"
+              },
               "dns_servers": {
                 "type": "array",
                 "items": {
@@ -2119,6 +2137,7 @@
               }
             },
             "required": [
+              "address",
               "dns_servers",
               "ntp_servers",
               "type"
@@ -2127,6 +2146,9 @@
           {
             "type": "object",
             "properties": {
+              "address": {
+                "type": "string"
+              },
               "type": {
                 "type": "string",
                 "enum": [
@@ -2135,12 +2157,16 @@
               }
             },
             "required": [
+              "address",
               "type"
             ]
           },
           {
             "type": "object",
             "properties": {
+              "address": {
+                "type": "string"
+              },
               "type": {
                 "type": "string",
                 "enum": [
@@ -2149,12 +2175,16 @@
               }
             },
             "required": [
+              "address",
               "type"
             ]
           },
           {
             "type": "object",
             "properties": {
+              "address": {
+                "type": "string"
+              },
               "type": {
                 "type": "string",
                 "enum": [
@@ -2163,20 +2193,7 @@
               }
             },
             "required": [
-              "type"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "sp_sim"
-                ]
-              }
-            },
-            "required": [
+              "address",
               "type"
             ]
           }

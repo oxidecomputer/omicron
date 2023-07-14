@@ -330,7 +330,11 @@ impl Plan {
                 id,
                 zone_type: ZoneType::InternalDns,
                 addresses: vec![ip],
-                dataset: Some(DatasetRequest { id, name: dataset_name }),
+                dataset: Some(DatasetRequest {
+                    id,
+                    name: dataset_name,
+                    service_address: http_address,
+                }),
                 services: vec![ServiceZoneService {
                     id,
                     details: ServiceType::InternalDns {
@@ -354,6 +358,7 @@ impl Plan {
             let id = Uuid::new_v4();
             let ip = sled.addr_alloc.next().expect("Not enough addrs");
             let port = omicron_common::address::COCKROACH_PORT;
+            let address = SocketAddrV6::new(ip, port, 0, 0);
             let zone = dns_builder.host_zone(id, ip).unwrap();
             dns_builder
                 .service_backend_zone(ServiceName::Cockroach, &zone, port)
@@ -364,10 +369,14 @@ impl Plan {
                 id,
                 zone_type: ZoneType::CockroachDb,
                 addresses: vec![ip],
-                dataset: Some(DatasetRequest { id, name: dataset_name }),
+                dataset: Some(DatasetRequest {
+                    id,
+                    name: dataset_name,
+                    service_address: address,
+                }),
                 services: vec![ServiceZoneService {
                     id,
-                    details: ServiceType::CockroachDb,
+                    details: ServiceType::CockroachDb { address },
                 }],
                 boundary_switches: vec![],
             });
@@ -408,7 +417,11 @@ impl Plan {
                 id,
                 zone_type: ZoneType::ExternalDns,
                 addresses: vec![*http_address.ip()],
-                dataset: Some(DatasetRequest { id, name: dataset_name }),
+                dataset: Some(DatasetRequest {
+                    id,
+                    name: dataset_name,
+                    service_address: http_address,
+                }),
                 services: vec![ServiceZoneService {
                     id,
                     details: ServiceType::ExternalDns {
@@ -447,7 +460,12 @@ impl Plan {
                 services: vec![ServiceZoneService {
                     id,
                     details: ServiceType::Nexus {
-                        internal_ip: address,
+                        internal_address: SocketAddrV6::new(
+                            address,
+                            omicron_common::address::NEXUS_INTERNAL_PORT,
+                            0,
+                            0,
+                        ),
                         external_ip,
                         nic,
                         // Tell Nexus to use TLS if and only if the caller
@@ -488,7 +506,14 @@ impl Plan {
                 dataset: None,
                 services: vec![ServiceZoneService {
                     id,
-                    details: ServiceType::Oximeter,
+                    details: ServiceType::Oximeter {
+                        address: SocketAddrV6::new(
+                            address,
+                            omicron_common::address::OXIMETER_PORT,
+                            0,
+                            0,
+                        ),
+                    },
                 }],
                 boundary_switches: vec![],
             })
@@ -505,6 +530,7 @@ impl Plan {
             let id = Uuid::new_v4();
             let ip = sled.addr_alloc.next().expect("Not enough addrs");
             let port = omicron_common::address::CLICKHOUSE_PORT;
+            let address = SocketAddrV6::new(ip, port, 0, 0);
             let zone = dns_builder.host_zone(id, ip).unwrap();
             dns_builder
                 .service_backend_zone(ServiceName::Clickhouse, &zone, port)
@@ -515,10 +541,14 @@ impl Plan {
                 id,
                 zone_type: ZoneType::Clickhouse,
                 addresses: vec![ip],
-                dataset: Some(DatasetRequest { id, name: dataset_name }),
+                dataset: Some(DatasetRequest {
+                    id,
+                    name: dataset_name,
+                    service_address: address,
+                }),
                 services: vec![ServiceZoneService {
                     id,
-                    details: ServiceType::Clickhouse,
+                    details: ServiceType::Clickhouse { address },
                 }],
                 boundary_switches: vec![],
             });
@@ -546,7 +576,9 @@ impl Plan {
                 dataset: None,
                 services: vec![ServiceZoneService {
                     id,
-                    details: ServiceType::CruciblePantry,
+                    details: ServiceType::CruciblePantry {
+                        address: SocketAddrV6::new(address, port, 0, 0),
+                    },
                 }],
                 boundary_switches: vec![],
             })
@@ -558,6 +590,7 @@ impl Plan {
             for pool in &sled.u2_zpools {
                 let ip = sled.addr_alloc.next().expect("Not enough addrs");
                 let port = omicron_common::address::CRUCIBLE_PORT;
+                let address = SocketAddrV6::new(ip, port, 0, 0);
                 let id = Uuid::new_v4();
                 let zone = dns_builder.host_zone(id, ip).unwrap();
                 dns_builder
@@ -578,10 +611,11 @@ impl Plan {
                             pool.clone(),
                             DatasetKind::Crucible,
                         ),
+                        service_address: address,
                     }),
                     services: vec![ServiceZoneService {
                         id,
-                        details: ServiceType::Crucible,
+                        details: ServiceType::Crucible { address },
                     }],
                     boundary_switches: vec![],
                 });
@@ -604,6 +638,7 @@ impl Plan {
                     vec![ServiceZoneService {
                         id,
                         details: ServiceType::BoundaryNtp {
+                            address: SocketAddrV6::new(address, NTP_PORT, 0, 0),
                             ntp_servers: config.ntp_servers.clone(),
                             dns_servers: config.dns_servers.clone(),
                             domain: None,
@@ -618,6 +653,7 @@ impl Plan {
                     vec![ServiceZoneService {
                         id,
                         details: ServiceType::InternalNtp {
+                            address: SocketAddrV6::new(address, NTP_PORT, 0, 0),
                             ntp_servers: boundary_ntp_servers.clone(),
                             dns_servers: rack_dns_servers.clone(),
                             domain: None,
