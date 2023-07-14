@@ -22,6 +22,8 @@ use std::collections::BTreeSet;
 use std::net::IpAddr;
 use uuid::Uuid;
 
+use super::params::PhysicalDiskKind;
+
 // SILOS
 
 /// View of a Silo
@@ -325,13 +327,6 @@ pub struct Switch {
 
 // PHYSICAL DISKS
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum PhysicalDiskType {
-    Internal,
-    External,
-}
-
 /// View of a Physical Disk
 ///
 /// Physical disks reside in a particular sled and are used to store both
@@ -348,7 +343,7 @@ pub struct PhysicalDisk {
     pub serial: String,
     pub model: String,
 
-    pub disk_type: PhysicalDiskType,
+    pub form_factor: PhysicalDiskKind,
 }
 
 // SILO USERS

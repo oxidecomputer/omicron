@@ -380,6 +380,7 @@ lazy_static! {
             switch_location: "switch0".parse().unwrap(),
             address: "203.0.113.99".parse().unwrap(),
             mask: 24,
+            anycast: false,
         };
 }
 
@@ -437,8 +438,10 @@ lazy_static! {
                 name: DEMO_IMAGE_NAME.clone(),
                 description: String::from(""),
             },
-            source: params::ImageSource::Url { url: HTTP_SERVER.url("/image.raw").to_string() },
-            block_size: params::BlockSize::try_from(4096).unwrap(),
+            source: params::ImageSource::Url {
+                url: HTTP_SERVER.url("/image.raw").to_string(),
+                block_size: params::BlockSize::try_from(4096).unwrap(),
+            },
             os: "fake-os".to_string(),
             version: "1.0".to_string()
         };
@@ -489,7 +492,7 @@ lazy_static! {
                 name: DEMO_SNAPSHOT_NAME.clone(),
                 description: String::from(""),
             },
-            disk: DEMO_DISK_NAME.clone(),
+            disk: DEMO_DISK_NAME.clone().into(),
         };
 
     // SSH keys
@@ -559,7 +562,7 @@ lazy_static! {
     // Users
     pub static ref DEMO_USER_CREATE: params::UserCreate = params::UserCreate {
         external_id: params::UserId::from_str("dummy-user").unwrap(),
-        password: params::UserPassword::InvalidPassword,
+        password: params::UserPassword::LoginDisallowed,
     };
 }
 
@@ -967,7 +970,7 @@ lazy_static! {
             unprivileged_access: UnprivilegedAccess::ReadOnly,
             allowed_methods: vec![
                 AllowedMethod::Post(serde_json::to_value(
-                    params::UserPassword::InvalidPassword
+                    params::UserPassword::LoginDisallowed
                 ).unwrap()),
             ],
         },

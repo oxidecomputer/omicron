@@ -4,7 +4,7 @@
 
 //! Management of sled-local storage.
 
-use crate::nexus::LazyNexusClient;
+use crate::nexus::NexusClientWithResolver;
 use crate::storage::dataset::DatasetName;
 use camino::Utf8PathBuf;
 use futures::stream::FuturesOrdered;
@@ -220,6 +220,37 @@ pub struct StorageResources {
 }
 
 impl StorageResources {
+    /// Creates a fabricated view of storage resources.
+    ///
+    /// Use this only when you want to reference the disks, but not actually
+    /// access them. Creates one internal and one external disk.
+    #[cfg(test)]
+    pub fn new_for_test() -> Self {
+        let new_disk_identity = || DiskIdentity {
+            vendor: "vendor".to_string(),
+            serial: Uuid::new_v4().to_string(),
+            model: "model".to_string(),
+        };
+
+        Self {
+            disks: Arc::new(Mutex::new(HashMap::from([
+                (
+                    new_disk_identity(),
+                    DiskWrapper::Synthetic {
+                        zpool_name: ZpoolName::new_internal(Uuid::new_v4()),
+                    },
+                ),
+                (
+                    new_disk_identity(),
+                    DiskWrapper::Synthetic {
+                        zpool_name: ZpoolName::new_external(Uuid::new_v4()),
+                    },
+                ),
+            ]))),
+            pools: Arc::new(Mutex::new(HashMap::new())),
+        }
+    }
+
     /// Returns the identity of the boot disk.
     ///
     /// If this returns `None`, we have not processed the boot disk yet.
@@ -246,15 +277,31 @@ impl StorageResources {
         })
     }
 
+    // TODO: Could be generic over DiskVariant
+
     /// Returns all M.2 zpools
     pub async fn all_m2_zpools(&self) -> Vec<ZpoolName> {
         self.all_zpools(DiskVariant::M2).await
+    }
+
+    /// Returns all U.2 zpools
+    pub async fn all_u2_zpools(&self) -> Vec<ZpoolName> {
+        self.all_zpools(DiskVariant::U2).await
     }
 
     /// Returns all mountpoints within all M.2s for a particular dataset.
     pub async fn all_m2_mountpoints(&self, dataset: &str) -> Vec<Utf8PathBuf> {
         let m2_zpools = self.all_m2_zpools().await;
         m2_zpools
+            .iter()
+            .map(|zpool| zpool.dataset_mountpoint(dataset))
+            .collect()
+    }
+
+    /// Returns all mountpoints within all U.2s for a particular dataset.
+    pub async fn all_u2_mountpoints(&self, dataset: &str) -> Vec<Utf8PathBuf> {
+        let u2_zpools = self.all_u2_zpools().await;
+        u2_zpools
             .iter()
             .map(|zpool| zpool.dataset_mountpoint(dataset))
             .collect()
@@ -277,7 +324,7 @@ impl StorageResources {
 
 /// Describes the access to the underlay used by the StorageManager.
 pub struct UnderlayAccess {
-    pub lazy_nexus_client: LazyNexusClient,
+    pub nexus_client: NexusClientWithResolver,
     pub sled_id: Uuid,
 }
 
@@ -374,15 +421,10 @@ impl StorageWorker {
                     return Err(backoff::BackoffError::transient(Error::UnderlayNotInitialized.to_string()));
                 };
                 let sled_id = underlay.sled_id;
-                let lazy_nexus_client = underlay.lazy_nexus_client.clone();
+                let nexus_client = underlay.nexus_client.client().clone();
                 drop(underlay_guard);
 
-                lazy_nexus_client
-                    .get()
-                    .await
-                    .map_err(|e| {
-                        backoff::BackoffError::transient(e.to_string())
-                    })?
+                nexus_client
                     .zpool_put(&sled_id, &pool_id, &zpool_request)
                     .await
                     .map_err(|e| {
@@ -693,12 +735,8 @@ impl StorageWorker {
                     return Err(backoff::BackoffError::transient(Error::UnderlayNotInitialized.to_string()));
                 };
                 let sled_id = underlay.sled_id;
-                let lazy_nexus_client = underlay.lazy_nexus_client.clone();
+                let nexus_client = underlay.nexus_client.client().clone();
                 drop(underlay_guard);
-
-                let nexus = lazy_nexus_client.get().await.map_err(|e| {
-                    backoff::BackoffError::transient(e.to_string())
-                })?;
 
                 match &disk {
                     NotifyDiskRequest::Add { identity, variant } => {
@@ -712,9 +750,12 @@ impl StorageWorker {
                             },
                             sled_id,
                         };
-                        nexus.physical_disk_put(&request).await.map_err(
-                            |e| backoff::BackoffError::transient(e.to_string()),
-                        )?;
+                        nexus_client
+                            .physical_disk_put(&request)
+                            .await
+                            .map_err(|e| {
+                                backoff::BackoffError::transient(e.to_string())
+                            })?;
                     }
                     NotifyDiskRequest::Remove(disk_identity) => {
                         let request = PhysicalDiskDeleteRequest {
@@ -723,9 +764,12 @@ impl StorageWorker {
                             vendor: disk_identity.vendor.clone(),
                             sled_id,
                         };
-                        nexus.physical_disk_delete(&request).await.map_err(
-                            |e| backoff::BackoffError::transient(e.to_string()),
-                        )?;
+                        nexus_client
+                            .physical_disk_delete(&request)
+                            .await
+                            .map_err(|e| {
+                                backoff::BackoffError::transient(e.to_string())
+                            })?;
                     }
                 }
                 Ok(())

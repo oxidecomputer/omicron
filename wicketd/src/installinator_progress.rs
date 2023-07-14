@@ -7,10 +7,13 @@
 //! This connects up the wicketd artifact server, which receives reports, to the
 //! update tracker.
 
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::HashMap,
+    sync::{Arc, Mutex},
+};
 
 use installinator_artifactd::EventReportStatus;
-use tokio::sync::{mpsc, oneshot, Mutex};
+use tokio::sync::{mpsc, oneshot};
 use update_engine::events::StepEventIsTerminal;
 use uuid::Uuid;
 
@@ -40,16 +43,18 @@ pub(crate) fn new(log: &slog::Logger) -> (IprArtifactServer, IprUpdateTracker) {
 #[must_use]
 pub(crate) struct IprArtifactServer {
     log: slog::Logger,
+    // Note: this is a std::sync::Mutex because it isn't held past an await
+    // point. Tokio mutexes have cancel-safety issues.
     running_updates: Arc<Mutex<HashMap<Uuid, RunningUpdate>>>,
 }
 
 impl IprArtifactServer {
-    pub(crate) async fn report_progress(
+    pub(crate) fn report_progress(
         &self,
         update_id: Uuid,
         report: installinator_common::EventReport,
     ) -> EventReportStatus {
-        let mut running_updates = self.running_updates.lock().await;
+        let mut running_updates = self.running_updates.lock().unwrap();
         if let Some(update) = running_updates.get_mut(&update_id) {
             slog::debug!(
                 self.log,
@@ -67,11 +72,10 @@ impl IprArtifactServer {
                         "first report seen for this update ID";
                         "update_id" => %update_id
                     );
-                    let (sender, receiver) = mpsc::channel(16);
+                    let (sender, receiver) = mpsc::unbounded_channel();
                     _ = start_sender.send(receiver);
                     *update =
-                        RunningUpdate::send_and_next_state(sender, report)
-                            .await;
+                        RunningUpdate::send_and_next_state(sender, report);
                 }
                 RunningUpdate::ReportsReceived(sender) => {
                     slog::debug!(
@@ -80,8 +84,7 @@ impl IprArtifactServer {
                         "update_id" => %update_id
                     );
                     *update =
-                        RunningUpdate::send_and_next_state(sender, report)
-                            .await;
+                        RunningUpdate::send_and_next_state(sender, report);
                 }
                 RunningUpdate::Closed => {
                     // The sender has been closed; ignore the report.
@@ -116,40 +119,45 @@ impl IprUpdateTracker {
     ///
     /// Exposed for testing.
     #[doc(hidden)]
-    pub async fn register(&self, update_id: Uuid) -> IprStartReceiver {
+    pub fn register(&self, update_id: Uuid) -> IprStartReceiver {
         slog::debug!(self.log, "registering new update id"; "update_id" => %update_id);
         let (start_sender, start_receiver) = oneshot::channel();
 
-        let mut running_updates = self.running_updates.lock().await;
+        let mut running_updates = self.running_updates.lock().unwrap();
         running_updates.insert(update_id, RunningUpdate::Initial(start_sender));
         start_receiver
     }
 
     /// Returns the status of a running update, or None if the update ID hasn't
     /// been registered.
-    pub async fn update_state(
-        &self,
-        update_id: Uuid,
-    ) -> Option<RunningUpdateState> {
-        let running_updates = self.running_updates.lock().await;
+    pub fn update_state(&self, update_id: Uuid) -> Option<RunningUpdateState> {
+        let running_updates = self.running_updates.lock().unwrap();
         running_updates.get(&update_id).map(|x| x.to_state())
     }
 }
 
 /// Type alias for the receiver that resolves when the first message from the
 /// installinator has been received.
-pub(crate) type IprStartReceiver =
-    oneshot::Receiver<mpsc::Receiver<installinator_common::EventReport>>;
+pub(crate) type IprStartReceiver = oneshot::Receiver<
+    mpsc::UnboundedReceiver<installinator_common::EventReport>,
+>;
 
 #[derive(Debug)]
 #[must_use]
 enum RunningUpdate {
     /// This is the initial state: the first message from the installinator
     /// hasn't been received yet.
-    Initial(oneshot::Sender<mpsc::Receiver<installinator_common::EventReport>>),
+    Initial(
+        oneshot::Sender<
+            mpsc::UnboundedReceiver<installinator_common::EventReport>,
+        >,
+    ),
 
     /// Reports from the installinator have been received.
-    ReportsReceived(mpsc::Sender<installinator_common::EventReport>),
+    ///
+    /// This is an `UnboundedSender` to avoid cancel-safety issues (see
+    /// https://github.com/oxidecomputer/omicron/pull/3579).
+    ReportsReceived(mpsc::UnboundedSender<installinator_common::EventReport>),
 
     /// All messages have been received.
     ///
@@ -186,12 +194,12 @@ impl RunningUpdate {
         std::mem::replace(self, Self::Invalid)
     }
 
-    async fn send_and_next_state(
-        sender: mpsc::Sender<installinator_common::EventReport>,
+    fn send_and_next_state(
+        sender: mpsc::UnboundedSender<installinator_common::EventReport>,
         report: installinator_common::EventReport,
     ) -> Self {
         let is_terminal = Self::is_terminal(&report);
-        _ = sender.send(report).await;
+        _ = sender.send(report);
         if is_terminal {
             Self::Closed
         } else {
@@ -259,17 +267,15 @@ mod tests {
         let update_id = Uuid::new_v4();
 
         assert_eq!(
-            ipr_artifact
-                .report_progress(
-                    Uuid::new_v4(),
-                    installinator_common::EventReport::default()
-                )
-                .await,
+            ipr_artifact.report_progress(
+                Uuid::new_v4(),
+                installinator_common::EventReport::default()
+            ),
             EventReportStatus::UnrecognizedUpdateId,
             "no registered UUIDs yet"
         );
 
-        let mut start_receiver = ipr_update_tracker.register(update_id).await;
+        let mut start_receiver = ipr_update_tracker.register(update_id);
 
         assert_eq!(
             start_receiver.try_recv().unwrap_err(),
@@ -280,7 +286,7 @@ mod tests {
         let first_report = installinator_common::EventReport::default();
 
         assert_eq!(
-            ipr_artifact.report_progress(update_id, first_report.clone()).await,
+            ipr_artifact.report_progress(update_id, first_report.clone()),
             EventReportStatus::Processed,
             "initial progress sent"
         );
@@ -338,9 +344,7 @@ mod tests {
         };
 
         assert_eq!(
-            ipr_artifact
-                .report_progress(update_id, completion_report.clone())
-                .await,
+            ipr_artifact.report_progress(update_id, completion_report.clone()),
             EventReportStatus::Processed,
             "completion report sent"
         );
@@ -362,9 +366,7 @@ mod tests {
         // it, causing the installinator to try again). This should result in
         // another Processed message rather than UnrecognizedUpdateId.
         assert_eq!(
-            ipr_artifact
-                .report_progress(update_id, completion_report.clone())
-                .await,
+            ipr_artifact.report_progress(update_id, completion_report.clone()),
             EventReportStatus::Processed,
             "completion report sent after being closed"
         );

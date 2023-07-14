@@ -230,6 +230,7 @@ pub(crate) type ReserveBlockTxnError = TransactionError<ReserveBlockError>;
 pub(crate) async fn try_reserve_block(
     lot_id: Uuid,
     inet: IpNetwork,
+    anycast: bool,
     conn: &Connection<DTraceConnection<PgConnection>>,
 ) -> Result<(AddressLotBlock, AddressLotReservedBlock), ReserveBlockTxnError> {
     use db::schema::address_lot_block;
@@ -256,13 +257,26 @@ pub(crate) async fn try_reserve_block(
 
     // Ensure the address is not already taken.
 
-    let results: Vec<Uuid> = rsvd_block_dsl::address_lot_rsvd_block
-        .filter(address_lot_rsvd_block::address_lot_id.eq(lot_id))
-        .filter(address_lot_rsvd_block::first_address.le(inet))
-        .filter(address_lot_rsvd_block::last_address.ge(inet))
-        .select(address_lot_rsvd_block::id)
-        .get_results_async(conn)
-        .await?;
+    let results: Vec<Uuid> = if anycast {
+        // Ensure that a non-anycast reservation has not already been made
+        rsvd_block_dsl::address_lot_rsvd_block
+            .filter(address_lot_rsvd_block::address_lot_id.eq(lot_id))
+            .filter(address_lot_rsvd_block::first_address.le(inet))
+            .filter(address_lot_rsvd_block::last_address.ge(inet))
+            .filter(address_lot_rsvd_block::anycast.eq(false))
+            .select(address_lot_rsvd_block::id)
+            .get_results_async(conn)
+            .await?
+    } else {
+        // Ensure that a reservation of any kind has not already been made
+        rsvd_block_dsl::address_lot_rsvd_block
+            .filter(address_lot_rsvd_block::address_lot_id.eq(lot_id))
+            .filter(address_lot_rsvd_block::first_address.le(inet))
+            .filter(address_lot_rsvd_block::last_address.ge(inet))
+            .select(address_lot_rsvd_block::id)
+            .get_results_async(conn)
+            .await?
+    };
 
     if !results.is_empty() {
         return Err(ReserveBlockTxnError::CustomError(
@@ -277,6 +291,7 @@ pub(crate) async fn try_reserve_block(
         address_lot_id: lot_id,
         first_address: inet,
         last_address: inet,
+        anycast: anycast,
     };
 
     diesel::insert_into(rsvd_block_dsl::address_lot_rsvd_block)

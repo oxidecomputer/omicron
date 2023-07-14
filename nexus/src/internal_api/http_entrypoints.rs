@@ -94,11 +94,12 @@ async fn sled_agent_put(
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
+    let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
     let path = path_params.into_inner();
     let info = sled_info.into_inner();
     let sled_id = &path.sled_id;
     let handler = async {
-        nexus.upsert_sled(*sled_id, info).await?;
+        nexus.upsert_sled(&opctx, *sled_id, info).await?;
         Ok(HttpResponseUpdatedNoContent())
     };
     apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await

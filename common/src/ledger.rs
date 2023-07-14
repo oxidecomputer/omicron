@@ -2,20 +2,20 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Utilities to help reading/writing toml files from/to multiple paths
+//! Utilities to help reading/writing json files from/to multiple paths
 
 use async_trait::async_trait;
 use camino::{Utf8Path, Utf8PathBuf};
 use serde::{de::DeserializeOwned, Serialize};
-use slog::Logger;
+use slog::{debug, warn, Logger};
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
-    #[error("Cannot serialize TOML to file {path}: {err}")]
-    TomlSerialize { path: Utf8PathBuf, err: toml::ser::Error },
+    #[error("Cannot serialize JSON to file {path}: {err}")]
+    JsonSerialize { path: Utf8PathBuf, err: serde_json::error::Error },
 
-    #[error("Cannot deserialize TOML from file {path}: {err}")]
-    TomlDeserialize { path: Utf8PathBuf, err: toml::de::Error },
+    #[error("Cannot deserialize JSON from file {path}: {err}")]
+    JsonDeserialize { path: Utf8PathBuf, err: serde_json::error::Error },
 
     #[error("Failed to perform I/O: {message}: {err}")]
     Io {
@@ -37,9 +37,9 @@ impl Error {
     }
 }
 
-impl From<Error> for omicron_common::api::external::Error {
+impl From<Error> for crate::api::external::Error {
     fn from(err: Error) -> Self {
-        omicron_common::api::external::Error::InternalError {
+        crate::api::external::Error::InternalError {
             internal_message: err.to_string(),
         }
     }
@@ -108,6 +108,10 @@ impl<T: Ledgerable> Ledger<T> {
         &mut self.ledger
     }
 
+    pub fn into_inner(self) -> T {
+        self.ledger
+    }
+
     /// Writes the ledger back to all config directories.
     ///
     /// Succeeds if at least one of the writes succeeds.
@@ -162,16 +166,16 @@ pub trait Ledgerable: DeserializeOwned + Serialize + Send + Sync {
     /// Increments the gneration number.
     fn generation_bump(&mut self);
 
-    /// Reads from `path` as a toml-serialized version of `Self`.
+    /// Reads from `path` as a json-serialized version of `Self`.
     async fn read_from(log: &Logger, path: &Utf8Path) -> Result<Self, Error> {
         if path.exists() {
             debug!(log, "Reading ledger from {}", path);
-            toml::from_str(
+            serde_json::from_str(
                 &tokio::fs::read_to_string(&path)
                     .await
                     .map_err(|err| Error::io_path(&path, err))?,
             )
-            .map_err(|err| Error::TomlDeserialize {
+            .map_err(|err| Error::JsonDeserialize {
                 path: path.to_path_buf(),
                 err,
             })
@@ -181,17 +185,15 @@ pub trait Ledgerable: DeserializeOwned + Serialize + Send + Sync {
         }
     }
 
-    /// Writes to `path` as a toml-serialized version of `Self`.
+    /// Writes to `path` as a json-serialized version of `Self`.
     async fn write_to(
         &self,
         log: &Logger,
         path: &Utf8Path,
     ) -> Result<(), Error> {
         debug!(log, "Writing ledger to {}", path);
-        let serialized =
-            toml::Value::try_from(&self).expect("Cannot serialize ledger");
-        let as_str = toml::to_string(&serialized).map_err(|err| {
-            Error::TomlSerialize { path: path.to_path_buf(), err }
+        let as_str = serde_json::to_string(&self).map_err(|err| {
+            Error::JsonSerialize { path: path.to_path_buf(), err }
         })?;
         tokio::fs::write(&path, as_str)
             .await
@@ -203,7 +205,29 @@ pub trait Ledgerable: DeserializeOwned + Serialize + Send + Sync {
 #[cfg(test)]
 mod test {
     use super::*;
-    use omicron_test_utils::dev::test_setup_log;
+
+    pub use dropshot::test_util::LogContext;
+    use dropshot::ConfigLogging;
+    use dropshot::ConfigLoggingIfExists;
+    use dropshot::ConfigLoggingLevel;
+
+    // Copied from `omicron-test-utils` to avoid a circular dependency where
+    // `omicron-common` depends on `omicron-test-utils` which depends on
+    // `omicron-common`.
+    /// Set up a [`dropshot::test_util::LogContext`] appropriate for a test named
+    /// `test_name`
+    ///
+    /// This function is currently only used by unit tests.  (We want the dead code
+    /// warning if it's removed from unit tests, but not during a normal build.)
+    pub fn test_setup_log(test_name: &str) -> LogContext {
+        let log_config = ConfigLogging::File {
+            level: ConfigLoggingLevel::Trace,
+            path: "UNUSED".into(),
+            if_exists: ConfigLoggingIfExists::Fail,
+        };
+
+        LogContext::new(test_name, &log_config)
+    }
 
     #[derive(Serialize, serde::Deserialize, Default, Eq, PartialEq, Debug)]
     struct Data {
@@ -251,7 +275,7 @@ mod test {
         let log = &logctx.log;
 
         let config_dir = camino_tempfile::Utf8TempDir::new().unwrap();
-        let config_path = config_dir.path().join("ledger.toml");
+        let config_path = config_dir.path().join("ledger.json");
 
         // Create the ledger within a configuration directory
         let mut ledger =
@@ -284,7 +308,7 @@ mod test {
         ];
         let config_paths = config_dirs
             .iter()
-            .map(|d| d.path().join("ledger.toml"))
+            .map(|d| d.path().join("ledger.json"))
             .collect::<Vec<_>>();
 
         let mut ledger =
@@ -329,7 +353,7 @@ mod test {
         ];
         let config_paths = config_dirs
             .iter()
-            .map(|d| d.path().join("ledger.toml"))
+            .map(|d| d.path().join("ledger.json"))
             .collect::<Vec<_>>();
 
         let mut ledger =

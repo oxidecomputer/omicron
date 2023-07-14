@@ -11,6 +11,7 @@ pub mod destructor;
 pub mod dkio;
 pub mod dladm;
 pub mod fstyp;
+pub mod libc;
 pub mod link;
 pub mod opte;
 pub mod running_zone;
@@ -71,6 +72,22 @@ mod inner {
             .join(" ")
     }
 
+    pub fn output_to_exec_error(
+        command: &std::process::Command,
+        output: &std::process::Output,
+    ) -> ExecutionError {
+        ExecutionError::CommandFailure(Box::new(CommandFailureInfo {
+            command: command
+                .get_args()
+                .map(|s| s.to_string_lossy().into())
+                .collect::<Vec<String>>()
+                .join(" "),
+            status: output.status,
+            stdout: String::from_utf8_lossy(&output.stdout).to_string(),
+            stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+        }))
+    }
+
     // Helper function for starting the process and checking the
     // exit code result.
     pub fn execute(
@@ -81,18 +98,7 @@ mod inner {
         })?;
 
         if !output.status.success() {
-            return Err(ExecutionError::CommandFailure(Box::new(
-                CommandFailureInfo {
-                    command: command
-                        .get_args()
-                        .map(|s| s.to_string_lossy().into())
-                        .collect::<Vec<String>>()
-                        .join(" "),
-                    status: output.status,
-                    stdout: String::from_utf8_lossy(&output.stdout).to_string(),
-                    stderr: String::from_utf8_lossy(&output.stderr).to_string(),
-                },
-            )));
+            return Err(output_to_exec_error(command, &output));
         }
 
         Ok(output)

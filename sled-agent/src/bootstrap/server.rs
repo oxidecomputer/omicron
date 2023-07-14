@@ -73,6 +73,7 @@ impl Server {
             Agent::new(log.clone(), config.clone(), sled_config)
                 .await
                 .map_err(|e| e.to_string())?;
+        info!(log, "bootstrap agent finished initialization successfully");
         let bootstrap_agent = Arc::new(bootstrap_agent);
 
         let mut dropshot_config = dropshot::ConfigDropshot::default();

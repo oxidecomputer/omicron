@@ -442,7 +442,7 @@ async fn test_silo_certificates() {
         .body(
             oxide_client::types::UserCreate::builder()
                 .external_id("testuser-silo2")
-                .password(oxide_client::types::UserPassword::InvalidPassword),
+                .password(oxide_client::types::UserPassword::LoginDisallowed),
         )
         .send()
         .await
@@ -500,7 +500,7 @@ async fn test_silo_certificates() {
         .body(
             oxide_client::types::UserCreate::builder()
                 .external_id("testuser-silo3")
-                .password(oxide_client::types::UserPassword::InvalidPassword),
+                .password(oxide_client::types::UserPassword::LoginDisallowed),
         )
         .send()
         .await

@@ -2,6 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use super::switch_port_settings_apply::select_dendrite_client;
 use super::NexusActionContext;
 use crate::app::sagas::retry_until_known_result;
 use crate::app::sagas::switch_port_settings_apply::api_to_dpd_port_settings;
@@ -15,7 +16,6 @@ use dpd_client::types::PortId;
 use omicron_common::api::external::{self, NameOrId};
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
-use std::sync::Arc;
 use steno::ActionError;
 use uuid::Uuid;
 
@@ -122,15 +122,13 @@ async fn spa_reassociate_switch_port(
 async fn spa_clear_switch_port_settings(
     sagactx: NexusActionContext,
 ) -> Result<(), ActionError> {
-    let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
     let log = sagactx.user_data().log();
 
     let port_id: PortId = PortId::from_str(&params.port_name)
         .map_err(|e| ActionError::action_failed(e.to_string()))?;
 
-    let dpd_client: Arc<dpd_client::Client> =
-        Arc::clone(&osagactx.nexus().dpd_client);
+    let dpd_client = select_dendrite_client(&sagactx).await?;
 
     retry_until_known_result(log, || async {
         dpd_client.port_settings_clear(&port_id).await
@@ -160,9 +158,6 @@ async fn spa_undo_clear_switch_port_settings(
         .lookup::<Option<Uuid>>("original_switch_port_settings_id")
         .map_err(|e| external::Error::internal_error(&e.to_string()))?;
 
-    let dpd_client: Arc<dpd_client::Client> =
-        Arc::clone(&osagactx.nexus().dpd_client);
-
     let id = match orig_port_settings_id {
         Some(id) => id,
         None => return Ok(()),
@@ -172,6 +167,8 @@ async fn spa_undo_clear_switch_port_settings(
         .switch_port_settings_get(&opctx, &NameOrId::Id(id))
         .await
         .map_err(ActionError::action_failed)?;
+
+    let dpd_client = select_dendrite_client(&sagactx).await?;
 
     let dpd_port_settings = api_to_dpd_port_settings(&settings)
         .map_err(ActionError::action_failed)?;

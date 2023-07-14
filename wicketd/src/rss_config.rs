@@ -28,6 +28,7 @@ use omicron_common::api::internal::shared::RackNetworkConfig;
 use sled_hardware::Baseboard;
 use std::collections::BTreeSet;
 use std::mem;
+use std::net::IpAddr;
 use std::net::Ipv6Addr;
 use wicket_common::rack_setup::PutRssUserConfigInsensitive;
 
@@ -56,6 +57,7 @@ pub(crate) struct CurrentRssConfig {
     ntp_servers: Vec<String>,
     dns_servers: Vec<String>,
     internal_services_ip_pool_ranges: Vec<address::IpRange>,
+    external_dns_ips: Vec<IpAddr>,
     external_dns_zone_name: String,
     external_certificates: Vec<Certificate>,
     recovery_silo_password_hash: Option<omicron_passwords::NewPasswordHash>,
@@ -128,6 +130,9 @@ impl CurrentRssConfig {
         if self.internal_services_ip_pool_ranges.is_empty() {
             bail!("at least one internal services IP pool range is required");
         }
+        if self.external_dns_ips.is_empty() {
+            bail!("at least one external DNS IP address is required");
+        }
         if self.external_dns_zone_name.is_empty() {
             bail!("external dns zone name is required");
         }
@@ -188,10 +193,10 @@ impl CurrentRssConfig {
             bootstrap_discovery: BootstrapAddressDiscovery::OnlyThese(
                 bootstrap_ips,
             ),
-            rack_secret_threshold: 1, // TODO REMOVE?
             ntp_servers: self.ntp_servers.clone(),
             dns_servers: self.dns_servers.clone(),
             internal_services_ip_pool_ranges,
+            external_dns_ips: self.external_dns_ips.clone(),
             external_dns_zone_name: self.external_dns_zone_name.clone(),
             external_certificates: self.external_certificates.clone(),
             recovery_silo: RecoverySiloConfig {
@@ -332,6 +337,7 @@ impl CurrentRssConfig {
         self.dns_servers = value.dns_servers;
         self.internal_services_ip_pool_ranges =
             value.internal_services_ip_pool_ranges;
+        self.external_dns_ips = value.external_dns_ips;
         self.external_dns_zone_name = value.external_dns_zone_name;
         self.rack_network_config = Some(value.rack_network_config);
 
@@ -363,6 +369,7 @@ impl From<&'_ CurrentRssConfig> for CurrentRssUserConfig {
                 internal_services_ip_pool_ranges: rss
                     .internal_services_ip_pool_ranges
                     .clone(),
+                external_dns_ips: rss.external_dns_ips.clone(),
                 external_dns_zone_name: rss.external_dns_zone_name.clone(),
                 rack_network_config: rss.rack_network_config.clone(),
             },
@@ -375,8 +382,16 @@ fn validate_rack_network_config(
 ) -> Result<bootstrap_agent_client::types::RackNetworkConfig> {
     use bootstrap_agent_client::types::PortFec as BaPortFec;
     use bootstrap_agent_client::types::PortSpeed as BaPortSpeed;
+    use bootstrap_agent_client::types::SwitchLocation as BaSwitchLocation;
+    use bootstrap_agent_client::types::UplinkConfig as BaUplinkConfig;
     use omicron_common::api::internal::shared::PortFec;
     use omicron_common::api::internal::shared::PortSpeed;
+    use omicron_common::api::internal::shared::SwitchLocation;
+
+    // Ensure that there is at least one uplink
+    if config.uplinks.is_empty() {
+        return Err(anyhow!("Must have at least one uplink configured"));
+    }
 
     // Make sure `infra_ip_first`..`infra_ip_last` is a well-defined range...
     let infra_ip_range =
@@ -386,40 +401,52 @@ fn validate_rack_network_config(
             },
         )?;
 
-    // ... and that it contains `uplink_ip`.
-    if config.uplink_ip < infra_ip_range.first
-        || config.uplink_ip > infra_ip_range.last
-    {
-        bail!(
-            "`uplink_ip` must be in the range defined by `infra_ip_first` \
-             and `infra_ip_last`"
-        );
+    // iterate through each UplinkConfig
+    for uplink_config in &config.uplinks {
+        // ... and check that it contains `uplink_ip`.
+        if uplink_config.uplink_ip < infra_ip_range.first
+            || uplink_config.uplink_ip > infra_ip_range.last
+        {
+            bail!(
+                "`uplink_ip` must be in the range defined by `infra_ip_first` \
+                and `infra_ip_last`"
+            );
+        }
     }
-
     // TODO Add more client side checks on `rack_network_config` contents?
 
     Ok(bootstrap_agent_client::types::RackNetworkConfig {
-        gateway_ip: config.gateway_ip,
         infra_ip_first: config.infra_ip_first,
         infra_ip_last: config.infra_ip_last,
-        uplink_port: config.uplink_port.clone(),
-        uplink_port_speed: match config.uplink_port_speed {
-            PortSpeed::Speed0G => BaPortSpeed::Speed0G,
-            PortSpeed::Speed1G => BaPortSpeed::Speed1G,
-            PortSpeed::Speed10G => BaPortSpeed::Speed10G,
-            PortSpeed::Speed25G => BaPortSpeed::Speed25G,
-            PortSpeed::Speed40G => BaPortSpeed::Speed40G,
-            PortSpeed::Speed50G => BaPortSpeed::Speed50G,
-            PortSpeed::Speed100G => BaPortSpeed::Speed100G,
-            PortSpeed::Speed200G => BaPortSpeed::Speed200G,
-            PortSpeed::Speed400G => BaPortSpeed::Speed400G,
-        },
-        uplink_port_fec: match config.uplink_port_fec {
-            PortFec::Firecode => BaPortFec::Firecode,
-            PortFec::None => BaPortFec::None,
-            PortFec::Rs => BaPortFec::Rs,
-        },
-        uplink_ip: config.uplink_ip,
-        uplink_vid: config.uplink_vid,
+        uplinks: config
+            .uplinks
+            .iter()
+            .map(|config| BaUplinkConfig {
+                gateway_ip: config.gateway_ip,
+                switch: match config.switch {
+                    SwitchLocation::Switch0 => BaSwitchLocation::Switch0,
+                    SwitchLocation::Switch1 => BaSwitchLocation::Switch1,
+                },
+                uplink_ip: config.uplink_ip,
+                uplink_port: config.uplink_port.clone(),
+                uplink_port_speed: match config.uplink_port_speed {
+                    PortSpeed::Speed0G => BaPortSpeed::Speed0G,
+                    PortSpeed::Speed1G => BaPortSpeed::Speed1G,
+                    PortSpeed::Speed10G => BaPortSpeed::Speed10G,
+                    PortSpeed::Speed25G => BaPortSpeed::Speed25G,
+                    PortSpeed::Speed40G => BaPortSpeed::Speed40G,
+                    PortSpeed::Speed50G => BaPortSpeed::Speed50G,
+                    PortSpeed::Speed100G => BaPortSpeed::Speed100G,
+                    PortSpeed::Speed200G => BaPortSpeed::Speed200G,
+                    PortSpeed::Speed400G => BaPortSpeed::Speed400G,
+                },
+                uplink_port_fec: match config.uplink_port_fec {
+                    PortFec::Firecode => BaPortFec::Firecode,
+                    PortFec::None => BaPortFec::None,
+                    PortFec::Rs => BaPortFec::Rs,
+                },
+                uplink_vid: config.uplink_vid,
+            })
+            .collect(),
     })
 }
