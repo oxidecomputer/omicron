@@ -81,7 +81,6 @@ assert_matches.workspace = true
 expectorate.workspace = true
 http.workspace = true
 hyper.workspace = true
-mockall.workspace = true
 omicron-test-utils.workspace = true
 openapi-lint.workspace = true
 openapiv3.workspace = true

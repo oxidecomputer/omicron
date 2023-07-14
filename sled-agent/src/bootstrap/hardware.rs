@@ -219,7 +219,7 @@ impl HardwareMonitor {
             sled_config.sidecar_revision.clone(),
             switch_zone_bootstrap_address,
             sled_config.switch_zone_maghemite_links.clone(),
-            storage_manager.clone(),
+            storage_manager.resources().clone(),
         )
         .await?;
 

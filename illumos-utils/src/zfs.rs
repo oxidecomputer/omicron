@@ -9,8 +9,6 @@ use camino::Utf8PathBuf;
 use omicron_common::disk::DiskIdentity;
 use std::fmt;
 
-pub const ZONE_ZFS_RAMDISK_DATASET_MOUNTPOINT: &str = "/zone";
-pub const ZONE_ZFS_RAMDISK_DATASET: &str = "rpool/zone";
 pub const ZFS: &str = "/usr/sbin/zfs";
 pub const KEYPATH_ROOT: &str = "/var/run/oxide/";
 
@@ -23,13 +21,21 @@ pub struct ListDatasetsError {
     err: crate::ExecutionError,
 }
 
+#[derive(thiserror::Error, Debug)]
+pub enum DestroyDatasetErrorVariant {
+    #[error("Dataset not found")]
+    NotFound,
+    #[error(transparent)]
+    Other(crate::ExecutionError),
+}
+
 /// Error returned by [`Zfs::destroy_dataset`].
 #[derive(thiserror::Error, Debug)]
 #[error("Could not destroy dataset {name}: {err}")]
 pub struct DestroyDatasetError {
     name: String,
     #[source]
-    err: crate::ExecutionError,
+    pub err: DestroyDatasetErrorVariant,
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -163,9 +169,16 @@ impl Zfs {
     pub fn destroy_dataset(name: &str) -> Result<(), DestroyDatasetError> {
         let mut command = std::process::Command::new(PFEXEC);
         let cmd = command.args(&[ZFS, "destroy", "-r", name]);
-        execute(cmd).map_err(|err| DestroyDatasetError {
-            name: name.to_string(),
-            err,
+        execute(cmd).map_err(|err| {
+            let variant = match err {
+                crate::ExecutionError::CommandFailure(info)
+                    if info.stderr.contains("does not exist") =>
+                {
+                    DestroyDatasetErrorVariant::NotFound
+                }
+                _ => DestroyDatasetErrorVariant::Other(err),
+            };
+            DestroyDatasetError { name: name.to_string(), err: variant }
         })?;
         Ok(())
     }
@@ -370,14 +383,5 @@ pub fn get_all_omicron_datasets_for_delete() -> anyhow::Result<Vec<String>> {
             datasets.push(format!("{pool}/{dataset}"));
         }
     }
-
-    // Collect all datasets for ramdisk-based Oxide zones,
-    // if any exist.
-    if let Ok(ramdisk_datasets) = Zfs::list_datasets(&ZONE_ZFS_RAMDISK_DATASET)
-    {
-        for dataset in &ramdisk_datasets {
-            datasets.push(format!("{}/{dataset}", ZONE_ZFS_RAMDISK_DATASET));
-        }
-    };
     Ok(datasets)
 }

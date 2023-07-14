@@ -296,6 +296,7 @@ impl SledAgent {
             nexus_client.clone(),
             etherstub.clone(),
             port_manager.clone(),
+            storage.resources().clone(),
         )?;
 
         match config.vmm_reservoir_percentage {
