@@ -66,7 +66,8 @@ ptime -m cargo build --locked --all-targets --verbose
 # timeout that kills the job first.  On explicit failure like this, buildomat
 # will save the files left around.
 banner test
-RUST_BACKTRACE=1 ptime -m timeout 1h cargo test --locked --verbose --no-fail-fast
+RUST_BACKTRACE=1 ptime -m timeout --signal KILL 1h \
+    cargo test --locked --verbose --no-fail-fast
 
 #
 # Make sure that we have left nothing around in $TEST_TMPDIR.  The easiest way
