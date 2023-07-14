@@ -19,6 +19,7 @@ use slog::{debug, error, info, o, warn, Logger};
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::{SocketAddr, SocketAddrV6};
 use std::time::Duration;
+use thiserror::Error;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{mpsc, oneshot};
 use tokio::time::{interval, Instant, MissedTickBehavior};
@@ -36,23 +37,25 @@ pub struct Config {
 }
 
 /// An error response from a `NodeApiRequest`
-/// TODO: use thiserror
-#[derive(Debug, From)]
+#[derive(Error, Debug, From)]
 pub enum NodeRequestError {
-    /// An `Init_` or `LoadRackSecret` request is already outstanding
-    /// We only allow one at a time.
+    #[error("only one request allowed at a time")]
     RequestAlreadyPending,
 
-    /// An error returned by the Fsm API
+    #[error("Fsm error: {0}")]
     Fsm(ApiError),
 
-    /// The peer task shutdown
+    #[error("failed to receive response from node task: {0}")]
     Recv(oneshot::error::RecvError),
 
-    /// Failed to send to a connection management task
+    #[error("failed to send request to node task")]
     Send(mpsc::error::SendError<NodeApiRequest>),
 
-    /// NetworkConfig generation is older than current generation at Node
+    #[error(
+        "Network config update failed because it is out of date. Attempted 
+        update generation: {attempted_update_generation}, current generation: 
+        {current_generation}"
+    )]
     StaleNetworkConfig {
         attempted_update_generation: u64,
         current_generation: u64,
@@ -99,6 +102,9 @@ pub enum NodeApiRequest {
         config: NetworkConfig,
         responder: oneshot::Sender<Result<(), NodeRequestError>>,
     },
+
+    /// Retrieve the current network config
+    GetNetworkConfig { responder: oneshot::Sender<Option<NetworkConfig>> },
 }
 
 /// A handle for interacting with a `Node` task
@@ -182,6 +188,18 @@ impl NodeHandle {
             .send(NodeApiRequest::UpdateNetworkConfig { config, responder: tx })
             .await?;
         rx.await?
+    }
+
+    /// Retrieve the current network config
+    pub async fn get_network_config(
+        &self,
+    ) -> Result<Option<NetworkConfig>, NodeRequestError> {
+        let (tx, rx) = oneshot::channel();
+        self.tx
+            .send(NodeApiRequest::GetNetworkConfig { responder: tx })
+            .await?;
+        let res = rx.await?;
+        Ok(res)
     }
 }
 
@@ -530,6 +548,9 @@ impl Node {
                     self.broadcast_network_config(None).await;
                     let _ = responder.send(Ok(()));
                 }
+            }
+            NodeApiRequest::GetNetworkConfig { responder } => {
+                let _ = responder.send(self.network_config.clone());
             }
         }
     }
