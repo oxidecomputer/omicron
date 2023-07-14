@@ -1062,8 +1062,6 @@ pub struct RouterRouteUpdate {
 
 // DISKS
 
-pub const MIN_DISK_SIZE_BYTES: u32 = 1 << 30; // 1 GiB
-
 #[derive(Copy, Clone, Debug, Deserialize, Serialize)]
 #[serde(try_from = "u32")] // invoke the try_from validation routine below
 pub struct BlockSize(pub u32);
