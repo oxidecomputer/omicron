@@ -405,6 +405,7 @@ impl super::Nexus {
                     switch_location: switch_location.clone(),
                     address: first_address,
                     mask: 64,
+                    anycast: true,
                 };
 
                 if self

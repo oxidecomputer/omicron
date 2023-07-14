@@ -359,6 +359,9 @@ impl DataStore {
                         crate::db::datastore::address_lot::try_reserve_block(
                             address_lot_id,
                             address.address.ip().into(),
+                            // TODO: Should we allow anycast addresses for switch_ports?
+                            // anycast
+                            false,
                             &conn
                         )
                         .await

@@ -10,6 +10,7 @@ use gateway_test_utils::setup as mgs_setup;
 use nexus_test_interface::NexusServer;
 use nexus_test_utils::{load_test_config, ControlPlaneTestContextBuilder};
 use omicron_common::address::MGS_PORT;
+use omicron_common::api::internal::shared::SwitchLocation;
 use tokio::time::sleep;
 use tokio::time::timeout;
 use tokio::time::Duration;
@@ -26,7 +27,8 @@ async fn test_nexus_boots_before_cockroach() {
 
     let log = builder.logctx.log.new(o!("component" => "test"));
 
-    builder.start_dendrite().await;
+    builder.start_dendrite(SwitchLocation::Switch0).await;
+    builder.start_dendrite(SwitchLocation::Switch1).await;
     builder.start_internal_dns().await;
     builder.start_external_dns().await;
 
@@ -136,7 +138,8 @@ async fn test_nexus_boots_before_dendrite() {
     //
     // This is necessary for the prior call to "start Nexus" to succeed.
     info!(log, "Starting Dendrite");
-    builder.start_dendrite().await;
+    builder.start_dendrite(SwitchLocation::Switch0).await;
+    builder.start_dendrite(SwitchLocation::Switch1).await;
     info!(log, "Started Dendrite");
 
     info!(log, "Populating internal DNS records");
@@ -158,7 +161,8 @@ async fn nexus_schema_test_setup(
     builder.start_crdb().await;
     builder.start_internal_dns().await;
     builder.start_external_dns().await;
-    builder.start_dendrite().await;
+    builder.start_dendrite(SwitchLocation::Switch0).await;
+    builder.start_dendrite(SwitchLocation::Switch1).await;
     builder.populate_internal_dns().await;
 }
 

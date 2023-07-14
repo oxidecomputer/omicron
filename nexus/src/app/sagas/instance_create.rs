@@ -174,7 +174,7 @@ impl NexusSaga for SagaInstanceCreate {
 
         // Helper function for appending subsagas to our parent saga.
         fn subsaga_append<S: Serialize>(
-            node_basename: &'static str,
+            node_basename: String,
             subsaga_dag: steno::Dag,
             parent_builder: &mut steno::DagBuilder,
             params: S,
@@ -238,7 +238,7 @@ impl NexusSaga for SagaInstanceCreate {
                 CREATE_NETWORK_INTERFACE.as_ref(),
             ));
             subsaga_append(
-                "network_interface",
+                "network_interface".into(),
                 subsaga_builder.build()?,
                 &mut builder,
                 repeat_params,
@@ -272,7 +272,7 @@ impl NexusSaga for SagaInstanceCreate {
                 CREATE_EXTERNAL_IP.as_ref(),
             ));
             subsaga_append(
-                "external_ip",
+                "external_ip".into(),
                 subsaga_builder.build()?,
                 &mut builder,
                 repeat_params,
@@ -292,7 +292,7 @@ impl NexusSaga for SagaInstanceCreate {
                     create_params: create_disk.clone(),
                 };
                 subsaga_append(
-                    "create_disk",
+                    "create_disk".into(),
                     SagaDiskCreate::make_saga_dag(&params, subsaga_builder)?,
                     &mut builder,
                     params,
@@ -319,7 +319,7 @@ impl NexusSaga for SagaInstanceCreate {
                 attach_params: disk_attach.clone(),
             };
             subsaga_append(
-                "attach_disk",
+                "attach_disk".into(),
                 subsaga_builder.build()?,
                 &mut builder,
                 params,
@@ -335,9 +335,11 @@ impl NexusSaga for SagaInstanceCreate {
                     "instance-configure-nat-{i}-{switch_location}"
                 ));
                 let mut subsaga_builder = DagBuilder::new(subsaga_name);
+
+                let basename = format!("ConfigureAsic-{i}-{switch_location}");
                 subsaga_builder.append(Node::action(
                     "configure_asic",
-                    format!("ConfigureAsic-{i}-{switch_location}").as_str(),
+                    &basename,
                     CONFIGURE_ASIC.as_ref(),
                 ));
                 let net_params = NetworkConfigParams {
@@ -347,7 +349,7 @@ impl NexusSaga for SagaInstanceCreate {
                     switch_location: switch_location.clone(),
                 };
                 subsaga_append(
-                    "configure_asic",
+                    basename,
                     subsaga_builder.build()?,
                     &mut builder,
                     net_params,
