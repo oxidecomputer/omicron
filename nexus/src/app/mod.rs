@@ -83,6 +83,9 @@ pub const MAX_VCPU_PER_INSTANCE: u16 = 32;
 pub const MIN_MEMORY_BYTES_PER_INSTANCE: u32 = 1 << 30; // 1 GiB
 pub const MAX_MEMORY_BYTES_PER_INSTANCE: u64 = 64 * (1 << 30); // 64 GiB
 
+pub const MIN_DISK_SIZE_BYTES: u32 = 1 << 30; // 1 GiB
+pub const MAX_DISK_SIZE_BYTES: u64 = 1 << 40; // 1 TiB
+
 /// Manages an Oxide fleet -- the heart of the control plane
 pub struct Nexus {
     /// uuid for this nexus instance.
