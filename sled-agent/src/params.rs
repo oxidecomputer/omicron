@@ -300,7 +300,7 @@ pub enum ServiceType {
         gz_address_index: u32,
     },
     Oximeter,
-    // We should never receive external requests to start wicketd, MGS,
+    // We should never receive external requests to start wicketd, MGS, sp-sim
     // dendrite, tfport, or maghemite: these are all services running in the
     // global zone or switch zone that we start autonomously. We tag them with
     // `serde(skip)` both to omit them from our OpenAPI definition and to avoid
@@ -324,6 +324,8 @@ pub enum ServiceType {
     Maghemite {
         mode: String,
     },
+    #[serde(skip)]
+    SpSim,
     CruciblePantry,
     BoundaryNtp {
         ntp_servers: Vec<String>,
@@ -342,7 +344,6 @@ pub enum ServiceType {
     Clickhouse,
     CockroachDb,
     Crucible,
-    SpSim,
 }
 
 impl std::fmt::Display for ServiceType {
