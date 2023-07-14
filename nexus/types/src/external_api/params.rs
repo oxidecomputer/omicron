@@ -742,8 +742,6 @@ pub struct IpPoolUpdate {
 
 // INSTANCES
 
-pub const MIN_MEMORY_SIZE_BYTES: u32 = 1 << 30; // 1 GiB
-
 /// Describes an attachment of an `InstanceNetworkInterface` to an `Instance`,
 /// at the time the instance is created.
 // NOTE: VPC's are an organizing concept for networking resources, not for
@@ -1230,6 +1228,7 @@ pub struct LoopbackAddressCreate {
     /// The containing the switch this loopback address will be configured on.
     pub rack_id: Uuid,
 
+    // TODO: #3604 Consider using `SwitchLocation` type instead of `Name` for `LoopbackAddressCreate.switch_location`
     /// The location of the switch within the rack this loopback address will be
     /// configured on.
     pub switch_location: Name,

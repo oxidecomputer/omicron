@@ -201,7 +201,7 @@ async fn sled_role_get(
     rqctx: RequestContext<SledAgent>,
 ) -> Result<HttpResponseOk<SledRole>, HttpError> {
     let sa = rqctx.context();
-    Ok(HttpResponseOk(sa.get_role().await))
+    Ok(HttpResponseOk(sa.get_role()))
 }
 
 /// Initializes a CockroachDB cluster

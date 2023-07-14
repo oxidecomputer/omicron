@@ -18,6 +18,7 @@ use dpd_client::types::{
 use dpd_client::{Ipv4Cidr, Ipv6Cidr};
 use ipnetwork::IpNetwork;
 use omicron_common::api::external::{self, NameOrId};
+use omicron_common::api::internal::shared::SwitchLocation;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::net::IpAddr;
@@ -207,7 +208,6 @@ pub(crate) fn api_to_dpd_port_settings(
 async fn spa_ensure_switch_port_settings(
     sagactx: NexusActionContext,
 ) -> Result<(), ActionError> {
-    let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
     let log = sagactx.user_data().log();
 
@@ -218,7 +218,7 @@ async fn spa_ensure_switch_port_settings(
         .map_err(|e| ActionError::action_failed(e.to_string()))?;
 
     let dpd_client: Arc<dpd_client::Client> =
-        Arc::clone(&osagactx.nexus().dpd_client);
+        select_dendrite_client(&sagactx).await?;
 
     let dpd_port_settings = api_to_dpd_port_settings(&settings)
         .map_err(ActionError::action_failed)?;
@@ -252,7 +252,7 @@ async fn spa_undo_ensure_switch_port_settings(
         .map_err(|e| external::Error::internal_error(&e.to_string()))?;
 
     let dpd_client: Arc<dpd_client::Client> =
-        Arc::clone(&osagactx.nexus().dpd_client);
+        select_dendrite_client(&sagactx).await?;
 
     let id = match orig_port_settings_id {
         Some(id) => id,
@@ -319,4 +319,37 @@ async fn spa_disassociate_switch_port(
         .map_err(ActionError::action_failed)?;
 
     Ok(())
+}
+
+pub async fn select_dendrite_client(
+    sagactx: &NexusActionContext,
+) -> Result<Arc<dpd_client::Client>, ActionError> {
+    let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params::<Params>()?;
+    let nexus = osagactx.nexus();
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
+
+    let switch_port = nexus
+        .get_switch_port(&opctx, params.switch_port_id)
+        .await
+        .map_err(ActionError::action_failed)?;
+    let switch_location: SwitchLocation =
+        switch_port
+            .switch_location
+            .parse()
+            .map_err(ActionError::action_failed)?;
+    let dpd_client: Arc<dpd_client::Client> = osagactx
+        .nexus()
+        .dpd_clients
+        .get(&switch_location)
+        .ok_or_else(|| {
+            ActionError::action_failed(format!(
+                "requested switch not available: {switch_location}"
+            ))
+        })?
+        .clone();
+    Ok(dpd_client)
 }

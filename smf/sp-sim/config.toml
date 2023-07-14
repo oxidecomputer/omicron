@@ -1,0 +1,53 @@
+#
+# SP simulator: example config file
+#
+
+[[simulated_sps.sidecar]]
+multicast_addr = "ff15:0:1de::0"
+bind_addrs = ["[::]:33300", "[::]:33301"]
+serial_number = "SimSidecar0"
+manufacturing_root_cert_seed = "01de01de01de01de01de01de01de01de01de01de01de01de01de01de01de01de"
+device_id_cert_seed = "01de000000000000000000000000000000000000000000000000000000000000"
+
+
+[[simulated_sps.gimlet]]
+multicast_addr = "ff15:0:1de::1"
+bind_addrs = ["[::]:33310", "[::]:33311"]
+serial_number = "SimGimlet0"
+manufacturing_root_cert_seed = "01de01de01de01de01de01de01de01de01de01de01de01de01de01de01de01de"
+device_id_cert_seed = "01de000000000000000000000000000000000000000000000000000000000001"
+
+[[simulated_sps.gimlet.components]]
+id = "sp3-host-cpu"
+device = "sp3-host-cpu"
+description = "FAKE host cpu"
+capabilities.bits = 0
+presence = "Present"
+serial_console = "[::1]:33312"
+
+[[simulated_sps.gimlet]]
+multicast_addr = "ff15:0:1de::2"
+bind_addrs = ["[::]:33320", "[::]:33321"]
+serial_number = "SimGimlet1"
+manufacturing_root_cert_seed = "01de01de01de01de01de01de01de01de01de01de01de01de01de01de01de01de"
+device_id_cert_seed = "01de000000000000000000000000000000000000000000000000000000000002"
+
+[[simulated_sps.gimlet.components]]
+id = "sp3-host-cpu"
+device = "sp3-host-cpu"
+description = "FAKE host cpu"
+capabilities.bits = 0
+presence = "Present"
+serial_console = "[::1]:33322"
+
+[log]
+# Show log messages of this level and more severe
+level = "debug"
+
+# Example output to a terminal (with colors)
+mode = "stderr-terminal"
+
+# Example output to a file, appending if it already exists.
+#mode = "file"
+#path = "logs/server.log"
+#if_exists = "append"

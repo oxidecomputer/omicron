@@ -6,8 +6,6 @@
 //!
 //! Contains code shared by all schemes
 
-use serde::{Deserialize, Serialize};
-
 pub mod v0;
 
 // We keep these in a module to prevent naming conflicts
@@ -92,7 +90,7 @@ pub mod params {
 /// It's important to note that prior to the use of sprockets, such as in
 /// scheme v0, upgrade will have to be untrusted since `Hello` messages are
 /// unauthenticated.
-#[derive(Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Default)]
 pub struct Hello {
     /// The version of the bootstore protocol itself
     pub scheme: u32,
@@ -105,4 +103,58 @@ pub struct Hello {
     /// Reserved for future usage. May be interpreted differently depending
     /// upon current scheme in use.
     pub reserved: u64,
+}
+
+#[derive(Debug, Clone)]
+pub struct BufferTooSmall;
+
+impl Hello {
+    const fn serialized_size() -> usize {
+        16
+    }
+
+    /// Serialize `Hello` into a 16 byte array as 2 big-endian u32 values,
+    /// followed by 1 big-endian u64 value
+    pub fn serialize(&self) -> [u8; 16] {
+        let mut buf = [0u8; 16];
+        buf[0..4].copy_from_slice(&self.scheme.to_be_bytes());
+        buf[4..8].copy_from_slice(&self.version.to_be_bytes());
+        buf[8..16].copy_from_slice(&self.reserved.to_be_bytes());
+        buf
+    }
+
+    /// Deserialize a buffer of at least 16 bytes into a `Hello` message.
+    ///
+    /// Return `Err(BufferTooSmall)` if `bytes.len() < 16`
+    pub fn from_bytes(bytes: &[u8]) -> Result<Hello, BufferTooSmall> {
+        if bytes.len() < 16 {
+            return Err(BufferTooSmall);
+        }
+        Ok(Hello {
+            scheme: u32::from_be_bytes(bytes[0..4].try_into().unwrap()),
+            version: u32::from_be_bytes(bytes[4..8].try_into().unwrap()),
+            reserved: u64::from_be_bytes(bytes[8..16].try_into().unwrap()),
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use proptest::prelude::*;
+
+    fn arb_hello() -> impl Strategy<Value = Hello> {
+        (0..100u32, 0..100u32, 0..100u64).prop_map(
+            |(scheme, version, reserved)| Hello { scheme, version, reserved },
+        )
+    }
+
+    proptest! {
+        #[test]
+        fn hello_roundtrip(hello in arb_hello()) {
+            let output = hello.serialize();
+            let hello2 = Hello::from_bytes(&output).unwrap();
+            prop_assert_eq!(hello, hello2);
+        }
+    }
 }

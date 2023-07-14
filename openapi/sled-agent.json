@@ -1985,6 +1985,17 @@
               "dns_address": {
                 "type": "string"
               },
+              "gz_address": {
+                "description": "The addresses in the global zone which should be created\n\nFor the DNS service, which exists outside the sleds's typical subnet - adding an address in the GZ is necessary to allow inter-zone traffic routing.",
+                "type": "string",
+                "format": "ipv6"
+              },
+              "gz_address_index": {
+                "description": "The address is also identified with an auxiliary bit of information to ensure that the created global zone address can have a unique name.",
+                "type": "integer",
+                "format": "uint32",
+                "minimum": 0
+              },
               "http_address": {
                 "type": "string"
               },
@@ -1997,6 +2008,8 @@
             },
             "required": [
               "dns_address",
+              "gz_address",
+              "gz_address_index",
               "http_address",
               "type"
             ]
@@ -2152,6 +2165,20 @@
             "required": [
               "type"
             ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "sp_sim"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
           }
         ]
       },
@@ -2166,6 +2193,13 @@
               "format": "ipv6"
             }
           },
+          "boundary_switches": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "ipv6"
+            }
+          },
           "dataset": {
             "nullable": true,
             "default": null,
@@ -2174,14 +2208,6 @@
                 "$ref": "#/components/schemas/DatasetRequest"
               }
             ]
-          },
-          "gz_addresses": {
-            "default": [],
-            "type": "array",
-            "items": {
-              "type": "string",
-              "format": "ipv6"
-            }
           },
           "id": {
             "type": "string",
@@ -2199,6 +2225,7 @@
         },
         "required": [
           "addresses",
+          "boundary_switches",
           "id",
           "services",
           "zone_type"

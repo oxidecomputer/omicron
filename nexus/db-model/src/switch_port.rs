@@ -73,12 +73,23 @@ impl Into<external::SwitchPortGeometry> for SwitchPortGeometry {
 }
 
 #[derive(
-    Queryable, Insertable, Selectable, Clone, Debug, Serialize, Deserialize,
+    Queryable,
+    Insertable,
+    Selectable,
+    Clone,
+    Debug,
+    Serialize,
+    Deserialize,
+    Hash,
+    Eq,
+    PartialEq,
 )]
 #[diesel(table_name = switch_port)]
 pub struct SwitchPort {
     pub id: Uuid,
     pub rack_id: Uuid,
+    // TODO: #3594 Correctness
+    // Change this field to a `SwitchLocation` type.
     pub switch_location: String,
     pub port_name: String,
     pub port_settings_id: Option<Uuid>,

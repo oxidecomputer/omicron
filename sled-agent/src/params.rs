@@ -289,6 +289,15 @@ pub enum ServiceType {
     InternalDns {
         http_address: SocketAddrV6,
         dns_address: SocketAddrV6,
+        /// The addresses in the global zone which should be created
+        ///
+        /// For the DNS service, which exists outside the sleds's typical subnet - adding an
+        /// address in the GZ is necessary to allow inter-zone traffic routing.
+        gz_address: Ipv6Addr,
+
+        /// The address is also identified with an auxiliary bit of information
+        /// to ensure that the created global zone address can have a unique name.
+        gz_address_index: u32,
     },
     Oximeter,
     // We should never receive external requests to start wicketd, MGS,
@@ -333,6 +342,7 @@ pub enum ServiceType {
     Clickhouse,
     CockroachDb,
     Crucible,
+    SpSim,
 }
 
 impl std::fmt::Display for ServiceType {
@@ -353,6 +363,7 @@ impl std::fmt::Display for ServiceType {
             ServiceType::Clickhouse => write!(f, "clickhouse"),
             ServiceType::CockroachDb => write!(f, "cockroachdb"),
             ServiceType::Crucible => write!(f, "crucible"),
+            ServiceType::SpSim => write!(f, "sp-sim"),
         }
     }
 }
@@ -405,12 +416,17 @@ impl TryFrom<ServiceType> for sled_agent_client::types::ServiceType {
                     nic: nic.into(),
                 })
             }
-            St::InternalDns { http_address, dns_address } => {
-                Ok(AutoSt::InternalDns {
-                    http_address: http_address.to_string(),
-                    dns_address: dns_address.to_string(),
-                })
-            }
+            St::InternalDns {
+                http_address,
+                dns_address,
+                gz_address,
+                gz_address_index,
+            } => Ok(AutoSt::InternalDns {
+                http_address: http_address.to_string(),
+                dns_address: dns_address.to_string(),
+                gz_address,
+                gz_address_index,
+            }),
             St::Oximeter => Ok(AutoSt::Oximeter),
             St::CruciblePantry => Ok(AutoSt::CruciblePantry),
             St::BoundaryNtp {
@@ -433,6 +449,7 @@ impl TryFrom<ServiceType> for sled_agent_client::types::ServiceType {
             St::CockroachDb => Ok(AutoSt::CockroachDb),
             St::Crucible => Ok(AutoSt::Crucible),
             St::ManagementGatewayService
+            | St::SpSim
             | St::Wicketd { .. }
             | St::Dendrite { .. }
             | St::Tfport { .. }
@@ -526,17 +543,10 @@ pub struct ServiceZoneRequest {
     // Datasets which should be managed by this service.
     #[serde(default)]
     pub dataset: Option<DatasetRequest>,
-    // The addresses in the global zone which should be created, if necessary
-    // to route to the service.
-    //
-    // For addresses allocated within the Sled's Subnet, no extra address should
-    // be necessary. However, for other services - such the DNS service, which
-    // exists outside the sleds's typical subnet - adding an address in the GZ
-    // is necessary to allow inter-zone traffic routing.
-    #[serde(default)]
-    pub gz_addresses: Vec<Ipv6Addr>,
     // Services that should be run in the zone
     pub services: Vec<ServiceZoneService>,
+    // Switch addresses for SNAT configuration, if required
+    pub boundary_switches: Vec<Ipv6Addr>,
 }
 
 impl ServiceZoneRequest {
@@ -583,8 +593,8 @@ impl TryFrom<ServiceZoneRequest>
             zone_type: s.zone_type.into(),
             addresses: s.addresses,
             dataset: s.dataset.map(|d| d.into()),
-            gz_addresses: s.gz_addresses,
             services,
+            boundary_switches: s.boundary_switches,
         })
     }
 }

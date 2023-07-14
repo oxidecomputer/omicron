@@ -27,6 +27,9 @@ dpd-client.workspace = true
 dropshot.workspace = true
 fatfs.workspace = true
 futures.workspace = true
+gateway-client.workspace = true
+gateway-messages.workspace = true
+gateway-test-utils.workspace = true
 headers.workspace = true
 hex.workspace = true
 http.workspace = true
@@ -60,6 +63,7 @@ reqwest = { workspace = true, features = ["json"] }
 ring.workspace = true
 samael.workspace = true
 schemars = { workspace = true, features = ["chrono", "uuid1"] }
+semver.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 serde_urlencoded.workspace = true

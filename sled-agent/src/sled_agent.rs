@@ -49,6 +49,9 @@ pub enum Error {
     #[error("Configuration error: {0}")]
     Config(#[from] crate::config::ConfigError),
 
+    #[error("Error setting up swap device: {0}")]
+    SwapDevice(#[from] crate::swap_device::SwapDeviceError),
+
     #[error("Failed to acquire etherstub: {0}")]
     Etherstub(illumos_utils::ExecutionError),
 
@@ -229,6 +232,28 @@ impl SledAgent {
             "sled_id" => request.id.to_string(),
         ));
         info!(&log, "SledAgent::new(..) starting");
+
+        // Configure a swap device of the configured size before other system setup.
+        match config.swap_device_size_gb {
+            Some(sz) if sz > 0 => {
+                info!(log, "Requested swap device of size {} GiB", sz);
+                let boot_disk =
+                    storage.resources().boot_disk().await.ok_or_else(|| {
+                        crate::swap_device::SwapDeviceError::BootDiskNotFound
+                    })?;
+                crate::swap_device::ensure_swap_device(
+                    &parent_log,
+                    &boot_disk.1,
+                    sz,
+                )?;
+            }
+            Some(sz) if sz == 0 => {
+                panic!("Invalid requested swap device size of 0 GiB");
+            }
+            None | Some(_) => {
+                info!(log, "Not setting up swap device: not configured");
+            }
+        }
 
         let etherstub = Dladm::ensure_etherstub(
             illumos_utils::dladm::UNDERLAY_ETHERSTUB_NAME,
@@ -609,7 +634,7 @@ impl SledAgent {
     }
 
     /// Returns whether or not the sled believes itself to be a scrimlet
-    pub async fn get_role(&self) -> SledRole {
+    pub fn get_role(&self) -> SledRole {
         if self.inner.hardware.is_scrimlet() {
             SledRole::Scrimlet
         } else {

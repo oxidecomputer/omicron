@@ -10,6 +10,7 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
 use std::collections::BTreeSet;
+use std::net::IpAddr;
 
 // The portion of `CurrentRssUserConfig` that can be posted in one shot; it is
 // provided by the wicket user uploading a TOML file, currently.
@@ -24,6 +25,7 @@ pub struct PutRssUserConfigInsensitive {
     pub ntp_servers: Vec<String>,
     pub dns_servers: Vec<String>,
     pub internal_services_ip_pool_ranges: Vec<address::IpRange>,
+    pub external_dns_ips: Vec<IpAddr>,
     pub external_dns_zone_name: String,
     pub rack_network_config: RackNetworkConfig,
 }

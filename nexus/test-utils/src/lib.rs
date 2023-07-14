@@ -28,6 +28,7 @@ use omicron_common::address::NEXUS_OPTE_IPV4_SUBNET;
 use omicron_common::api::external::MacAddr;
 use omicron_common::api::external::{IdentityMetadata, Name};
 use omicron_common::api::internal::nexus::ProducerEndpoint;
+use omicron_common::api::internal::shared::SwitchLocation;
 use omicron_common::nexus_config;
 use omicron_common::nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
 use omicron_sled_agent::sim;
@@ -145,6 +146,7 @@ struct RackInitRequestBuilder {
     services: Vec<nexus_types::internal_api::params::ServicePutRequest>,
     datasets: Vec<nexus_types::internal_api::params::DatasetCreateRequest>,
     internal_dns_config: internal_dns::DnsConfigBuilder,
+    mac_addrs: Box<dyn Iterator<Item = MacAddr>>,
 }
 
 impl RackInitRequestBuilder {
@@ -153,6 +155,7 @@ impl RackInitRequestBuilder {
             services: vec![],
             datasets: vec![],
             internal_dns_config: internal_dns::DnsConfigBuilder::new(),
+            mac_addrs: Box::new(MacAddr::iter_system()),
         }
     }
 
@@ -348,11 +351,15 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
         self.dendrite = Some(dendrite);
 
         let address = SocketAddrV6::new(Ipv6Addr::LOCALHOST, port, 0, 0);
+        let switch_location = SwitchLocation::Switch0;
 
         // Update the configuration options for Nexus, if it's launched later.
         //
         // NOTE: If dendrite is started after Nexus, this is ignored.
-        self.config.pkg.dendrite.address = Some(address.into());
+        let config = omicron_common::nexus_config::DpdConfig {
+            address: std::net::SocketAddr::V6(address),
+        };
+        self.config.pkg.dendrite.insert(switch_location, config);
 
         let sled_id = Uuid::parse_str(SLED_AGENT_UUID).unwrap();
         self.rack_init_builder.add_service(
@@ -445,6 +452,11 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
         );
 
         let sled_id = Uuid::parse_str(SLED_AGENT_UUID).unwrap();
+        let mac = self
+            .rack_init_builder
+            .mac_addrs
+            .next()
+            .expect("ran out of MAC addresses");
         self.rack_init_builder.add_service(
             address,
             ServiceKind::Nexus {
@@ -462,7 +474,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                         .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES as u32 + 1)
                         .unwrap()
                         .into(),
-                    mac: MacAddr::random_system(),
+                    mac,
                 },
             },
             internal_dns::ServiceName::Nexus,
@@ -643,6 +655,11 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             panic!("Unsupported IPv4 Dropshot address");
         };
 
+        let mac = self
+            .rack_init_builder
+            .mac_addrs
+            .next()
+            .expect("ran out of MAC addresses");
         self.rack_init_builder.add_service(
             dropshot_address,
             ServiceKind::ExternalDns {
@@ -654,7 +671,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                         .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES as u32 + 1)
                         .unwrap()
                         .into(),
-                    mac: MacAddr::random_system(),
+                    mac,
                 },
             },
             internal_dns::ServiceName::ExternalDns,

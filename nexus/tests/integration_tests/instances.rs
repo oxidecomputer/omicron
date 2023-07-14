@@ -36,6 +36,9 @@ use omicron_common::api::external::InstanceState;
 use omicron_common::api::external::Ipv4Net;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::Vni;
+use omicron_nexus::app::MAX_MEMORY_BYTES_PER_INSTANCE;
+use omicron_nexus::app::MAX_VCPU_PER_INSTANCE;
+use omicron_nexus::app::MIN_MEMORY_BYTES_PER_INSTANCE;
 use omicron_nexus::db::fixed_data::silo::SILO_ID;
 use omicron_nexus::db::lookup::LookupPath;
 use omicron_nexus::external_api::shared::IpKind;
@@ -2792,7 +2795,7 @@ async fn test_disks_detached_when_instance_destroyed(
 }
 
 // Tests that an instance is rejected if the memory is less than
-// MIN_MEMORY_SIZE_BYTES
+// MIN_MEMORY_BYTES_PER_INSTANCE
 #[nexus_test]
 async fn test_instances_memory_rejected_less_than_min_memory_size(
     cptestctx: &ControlPlaneTestContext,
@@ -2808,7 +2811,7 @@ async fn test_instances_memory_rejected_less_than_min_memory_size(
             description: format!("instance {:?}", &instance_name),
         },
         ncpus: InstanceCpuCount(1),
-        memory: ByteCount::from(params::MIN_MEMORY_SIZE_BYTES / 2),
+        memory: ByteCount::from(MIN_MEMORY_BYTES_PER_INSTANCE / 2),
         hostname: String::from("inst"),
         user_data:
             b"#cloud-config\nsystem_info:\n  default_user:\n    name: oxide"
@@ -2835,7 +2838,7 @@ async fn test_instances_memory_rejected_less_than_min_memory_size(
         error.message,
         format!(
             "unsupported value for \"size\": memory must be at least {}",
-            ByteCount::from(params::MIN_MEMORY_SIZE_BYTES)
+            ByteCount::from(MIN_MEMORY_BYTES_PER_INSTANCE)
         ),
     );
 }
@@ -2884,9 +2887,52 @@ async fn test_instances_memory_not_divisible_by_min_memory_size(
         error.message,
         format!(
             "unsupported value for \"size\": memory must be divisible by {}",
-            ByteCount::from(params::MIN_MEMORY_SIZE_BYTES)
+            ByteCount::from(MIN_MEMORY_BYTES_PER_INSTANCE)
         ),
     );
+}
+
+// Test that an instance is rejected if memory is above cap
+#[nexus_test]
+async fn test_instances_memory_greater_than_max_size(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    create_org_and_project(client).await;
+
+    // Attempt to create the instance, observe a server error.
+    let instance_name = "just-rainsticks";
+    let instance = params::InstanceCreate {
+        identity: IdentityMetadataCreateParams {
+            name: instance_name.parse().unwrap(),
+            description: format!("instance {:?}", &instance_name),
+        },
+        ncpus: InstanceCpuCount(1),
+        memory: ByteCount::try_from(MAX_MEMORY_BYTES_PER_INSTANCE + (1 << 30))
+            .unwrap(),
+        hostname: String::from("inst"),
+        user_data:
+            b"#cloud-config\nsystem_info:\n  default_user:\n    name: oxide"
+                .to_vec(),
+        network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
+        external_ips: vec![],
+        disks: vec![],
+        start: true,
+    };
+
+    let error = NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &get_instances_url())
+            .body(Some(&instance))
+            .expect_status(Some(StatusCode::BAD_REQUEST)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body::<dropshot::HttpErrorResponseBody>()
+    .unwrap();
+
+    assert!(error.message.contains("memory must be less than"));
 }
 
 async fn expect_instance_creation_fail_unavailable(
@@ -2996,6 +3042,48 @@ async fn test_cannot_provision_instance_beyond_cpu_capacity(
 }
 
 #[nexus_test]
+async fn test_cannot_provision_instance_beyond_cpu_limit(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    create_project(client, PROJECT_NAME).await;
+    populate_ip_pool(&client, "default", None).await;
+
+    let too_many_cpus =
+        InstanceCpuCount::try_from(i64::from(MAX_VCPU_PER_INSTANCE + 1))
+            .unwrap();
+
+    // Try to boot an instance that uses more CPUs than the limit
+    let name1 = Name::try_from(String::from("test")).unwrap();
+    let instance_params = params::InstanceCreate {
+        identity: IdentityMetadataCreateParams {
+            name: name1.clone(),
+            description: String::from("probably serving data"),
+        },
+        ncpus: too_many_cpus,
+        memory: ByteCount::from_gibibytes_u32(4),
+        hostname: String::from("test"),
+        user_data: vec![],
+        network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
+        external_ips: vec![],
+        disks: vec![],
+        start: false,
+    };
+    let url_instances = get_instances_url();
+
+    let builder =
+        RequestBuilder::new(client, http::Method::POST, &url_instances)
+            .body(Some(&instance_params))
+            .expect_status(Some(http::StatusCode::BAD_REQUEST));
+
+    let _response = NexusRequest::new(builder)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("Expected instance creation to fail with bad request!");
+}
+
+#[nexus_test]
 async fn test_cannot_provision_instance_beyond_ram_capacity(
     cptestctx: &ControlPlaneTestContext,
 ) {
@@ -3005,7 +3093,7 @@ async fn test_cannot_provision_instance_beyond_ram_capacity(
 
     let too_much_ram = ByteCount::try_from(
         nexus_test_utils::TEST_PHYSICAL_RAM
-            + u64::from(params::MIN_MEMORY_SIZE_BYTES),
+            + u64::from(MIN_MEMORY_BYTES_PER_INSTANCE),
     )
     .unwrap();
     let enough_ram =

@@ -164,18 +164,22 @@ async fn slc_loopback_address_delete(
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
     let log = sagactx.user_data().log();
+    let switch = &params
+        .switch_location
+        .as_str()
+        .parse()
+        .map_err(|e| ActionError::action_failed(format!("{e:#?}")))?;
 
-    // TODO: https://github.com/oxidecomputer/omicron/issues/2629
-    if let Ok(_) = std::env::var("SKIP_ASIC_CONFIG") {
-        debug!(log, "SKIP_ASIC_CONFIG is set, disabling calls to dendrite");
-        return Ok(());
-    };
-
-    // TODO https://github.com/oxidecomputer/omicron/issues/2760
-    // how do we know this is the right dpd client? There will be at least
-    // two and in multirack 2*N where N is the number of racks.
-    let dpd_client: Arc<dpd_client::Client> =
-        Arc::clone(&osagactx.nexus().dpd_client);
+    let dpd_client: Arc<dpd_client::Client> = osagactx
+        .nexus()
+        .dpd_clients
+        .get(&switch)
+        .ok_or_else(|| {
+            ActionError::action_failed(format!(
+                "unable to retrieve dendrite client for {switch}"
+            ))
+        })?
+        .clone();
 
     retry_until_known_result(log, || async {
         dpd_client.ensure_loopback_deleted(log, params.address.ip()).await

@@ -22,6 +22,8 @@
  *    sparingly."
  */
 
+BEGIN;
+
 /*
  * We assume the database and user do not already exist so that we don't
  * inadvertently clobber what's there.  If they might exist, the user has to
@@ -2320,6 +2322,8 @@ CREATE TABLE omicron.public.switch_port (
     )
 );
 
+CREATE INDEX ON omicron.public.switch_port (port_settings_id);
+
 /* port settings groups included from port settings objects */
 CREATE TABLE omicron.public.switch_port_settings_groups (
     port_settings_id UUID,
@@ -2508,7 +2512,7 @@ CREATE TABLE omicron.public.switch_port_settings_address_config (
  */
 
 CREATE TABLE omicron.public.db_metadata (
-    name  STRING(63) NOT NULL,
+    name  STRING(63) NOT NULL PRIMARY KEY,
     value STRING(1023) NOT NULL
 );
 
@@ -2518,3 +2522,5 @@ INSERT INTO omicron.public.db_metadata (
 ) VALUES
     ( 'schema_version', '1.0.0' ),
     ( 'schema_time_created', CAST(NOW() AS STRING) );
+
+COMMIT;
