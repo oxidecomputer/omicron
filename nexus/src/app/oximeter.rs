@@ -26,9 +26,7 @@ use slog::Logger;
 use std::convert::TryInto;
 use std::net::SocketAddr;
 use std::num::NonZeroU32;
-use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::Mutex;
 use uuid::Uuid;
 
 /// A client which knows how to connect to Clickhouse, but does so
@@ -44,12 +42,12 @@ pub struct LazyTimeseriesClient {
 }
 
 enum ClientSource {
-    FromDns { resolver: Arc<Mutex<Resolver>> },
+    FromDns { resolver: Resolver },
     FromIp { address: SocketAddr },
 }
 
 impl LazyTimeseriesClient {
-    pub fn new_from_dns(log: Logger, resolver: Arc<Mutex<Resolver>>) -> Self {
+    pub fn new_from_dns(log: Logger, resolver: Resolver) -> Self {
         Self { log, source: ClientSource::FromDns { resolver } }
     }
 
@@ -61,11 +59,7 @@ impl LazyTimeseriesClient {
         let address = match &self.source {
             ClientSource::FromIp { address } => *address,
             ClientSource::FromDns { resolver } => SocketAddr::new(
-                resolver
-                    .lock()
-                    .await
-                    .lookup_ip(ServiceName::Clickhouse)
-                    .await?,
+                resolver.lookup_ip(ServiceName::Clickhouse).await?,
                 CLICKHOUSE_PORT,
             ),
         };
