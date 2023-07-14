@@ -145,51 +145,6 @@ pub struct SnapshotSelector {
     pub snapshot: NameOrId,
 }
 
-/// A specialized selector for image list, it contains an extra field to indicate
-/// if silo scoped images should be included when listing project images.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
-pub struct ImageListSelector {
-    /// Name or ID of the project
-    pub project: Option<NameOrId>,
-    /// Flag used to indicate if silo scoped images should be included when
-    /// listing project images. Only valid when `project` is provided.
-    #[serde(default)]
-    #[serde(deserialize_with = "deserialize_optional_bool_from_string")]
-    pub include_silo_images: Option<bool>,
-}
-
-// Unfortunately `include_silo_images` can't used the default `Deserialize`
-// derive given the selector that uses it is embedded via `serde(flatten)` which
-// causes it to attempt to deserialize all flattened values a string. Similar workarounds
-// have been implemented here: https://github.com/oxidecomputer/omicron/blob/efb03b501d7febe961cc8793b4d72e8542d28eab/gateway/src/http_entrypoints.rs#L443
-fn deserialize_optional_bool_from_string<'de, D>(
-    deserializer: D,
-) -> Result<Option<bool>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    use serde::de::Unexpected;
-
-    #[derive(Debug, Deserialize)]
-    #[serde(untagged)]
-    enum StringOrOptionalBool {
-        String(String),
-        OptionalBool(Option<bool>),
-    }
-
-    match StringOrOptionalBool::deserialize(deserializer)? {
-        StringOrOptionalBool::String(s) => match s.as_str() {
-            "true" => Ok(Some(true)),
-            "false" => Ok(None),
-            "" => Ok(None),
-            _ => {
-                Err(de::Error::invalid_type(Unexpected::Str(&s), &"a boolean"))
-            }
-        },
-        StringOrOptionalBool::OptionalBool(b) => Ok(b),
-    }
-}
-
 #[derive(Deserialize, JsonSchema)]
 pub struct ImageSelector {
     /// Name or ID of the project, only required if `image` is provided as a `Name`
@@ -321,7 +276,7 @@ pub struct SiloCreate {
 pub struct UserCreate {
     /// username used to log in
     pub external_id: UserId,
-    /// password used to log in
+    /// how to set the user's login password
     pub password: UserPassword,
 }
 
@@ -451,12 +406,12 @@ impl AsRef<omicron_passwords::Password> for Password {
 /// Parameters for setting a user's password
 #[derive(Clone, Deserialize, JsonSchema, Serialize)]
 #[serde(rename_all = "snake_case")]
-#[serde(tag = "user_password_value", content = "details")]
+#[serde(tag = "mode", content = "value")]
 pub enum UserPassword {
     /// Sets the user's password to the provided value
     Password(Password),
     /// Invalidates any current password (disabling password authentication)
-    InvalidPassword,
+    LoginDisallowed,
 }
 
 /// Credentials for local user login
@@ -786,8 +741,6 @@ pub struct IpPoolUpdate {
 }
 
 // INSTANCES
-
-pub const MIN_MEMORY_SIZE_BYTES: u32 = 1 << 30; // 1 GiB
 
 /// Describes an attachment of an `InstanceNetworkInterface` to an `Instance`,
 /// at the time the instance is created.
@@ -1163,6 +1116,16 @@ impl JsonSchema for BlockSize {
     }
 }
 
+/// Describes the form factor of physical disks.
+#[derive(
+    Debug, Serialize, Deserialize, JsonSchema, Clone, Copy, PartialEq, Eq,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum PhysicalDiskKind {
+    M2,
+    U2,
+}
+
 /// Different sources for a disk
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -1265,6 +1228,7 @@ pub struct LoopbackAddressCreate {
     /// The containing the switch this loopback address will be configured on.
     pub rack_id: Uuid,
 
+    // TODO: #3604 Consider using `SwitchLocation` type instead of `Name` for `LoopbackAddressCreate.switch_location`
     /// The location of the switch within the rack this loopback address will be
     /// configured on.
     pub switch_location: Name,
@@ -1557,6 +1521,9 @@ pub struct SwitchPortApplySettings {
 pub enum ImageSource {
     Url {
         url: String,
+
+        /// The block size in bytes
+        block_size: BlockSize,
     },
     Snapshot {
         id: Uuid,
@@ -1589,9 +1556,6 @@ pub struct ImageCreate {
     /// The version of the operating system (e.g. 18.04, 20.04, etc.)
     pub version: String,
 
-    /// block size in bytes
-    pub block_size: BlockSize,
-
     /// The source of the image's contents.
     pub source: ImageSource,
 }
@@ -1605,8 +1569,8 @@ pub struct SnapshotCreate {
     #[serde(flatten)]
     pub identity: IdentityMetadataCreateParams,
 
-    /// The name of the disk to be snapshotted
-    pub disk: Name,
+    /// The disk to be snapshotted
+    pub disk: NameOrId,
 }
 
 // USERS AND GROUPS

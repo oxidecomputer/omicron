@@ -2799,7 +2799,7 @@ async fn networking_switch_port_clear_settings(
 }]
 async fn image_list(
     rqctx: RequestContext<Arc<ServerContext>>,
-    query_params: Query<PaginatedByNameOrId<params::ImageListSelector>>,
+    query_params: Query<PaginatedByNameOrId<params::OptionalProjectSelector>>,
 ) -> Result<HttpResponseOk<ResultsPage<Image>>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
@@ -2823,12 +2823,7 @@ async fn image_list(
             }
         };
         let images = nexus
-            .image_list(
-                &opctx,
-                &parent_lookup,
-                scan_params.selector.include_silo_images.unwrap_or(false),
-                &paginated_by,
-            )
+            .image_list(&opctx, &parent_lookup, &paginated_by)
             .await?
             .into_iter()
             .map(|d| d.into())
@@ -4495,6 +4490,7 @@ async fn silo_metric(
      method = POST,
      path = "/v1/system/update/refresh",
      tags = ["system/update"],
+     unpublished = true,
 }]
 async fn system_update_refresh(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -4514,6 +4510,7 @@ async fn system_update_refresh(
      method = GET,
      path = "/v1/system/update/version",
      tags = ["system/update"],
+     unpublished = true,
 }]
 async fn system_version(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -4551,6 +4548,7 @@ async fn system_version(
      method = GET,
      path = "/v1/system/update/components",
      tags = ["system/update"],
+     unpublished = true,
 }]
 async fn system_component_version_list(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -4583,6 +4581,7 @@ async fn system_component_version_list(
      method = GET,
      path = "/v1/system/update/updates",
      tags = ["system/update"],
+     unpublished = true,
 }]
 async fn system_update_list(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -4614,6 +4613,7 @@ async fn system_update_list(
      method = GET,
      path = "/v1/system/update/updates/{version}",
      tags = ["system/update"],
+     unpublished = true,
 }]
 async fn system_update_view(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -4636,6 +4636,7 @@ async fn system_update_view(
     method = GET,
     path = "/v1/system/update/updates/{version}/components",
     tags = ["system/update"],
+    unpublished = true,
 }]
 async fn system_update_components_list(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -4662,6 +4663,7 @@ async fn system_update_components_list(
     method = POST,
     path = "/v1/system/update/start",
     tags = ["system/update"],
+    unpublished = true,
 }]
 async fn system_update_start(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -4711,6 +4713,7 @@ async fn system_update_start(
     method = POST,
     path = "/v1/system/update/stop",
     tags = ["system/update"],
+    unpublished = true,
 }]
 async fn system_update_stop(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -4746,6 +4749,7 @@ async fn system_update_stop(
      method = GET,
      path = "/v1/system/update/deployments",
      tags = ["system/update"],
+     unpublished = true,
 }]
 async fn update_deployments_list(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -4777,6 +4781,7 @@ async fn update_deployments_list(
      method = GET,
      path = "/v1/system/update/deployments/{id}",
      tags = ["system/update"],
+     unpublished = true,
 }]
 async fn update_deployment_view(
     rqctx: RequestContext<Arc<ServerContext>>,

@@ -90,8 +90,8 @@ async fn main() -> Result<()> {
     .await
     .context("unexpectedly gave up")?;
 
-    for ip in result {
-        println!("{}", ip)
+    for (target, port) in result {
+        println!("{}:{}", target, port)
     }
 
     Ok(())

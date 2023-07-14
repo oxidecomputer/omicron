@@ -7,7 +7,7 @@
 use crate::bootstrap::params::StartSledAgentRequest;
 use crate::config::Config;
 use crate::instance_manager::InstanceManager;
-use crate::nexus::{LazyNexusClient, NexusRequestQueue};
+use crate::nexus::{NexusClientWithResolver, NexusRequestQueue};
 use crate::params::{
     DiskStateRequested, InstanceHardware, InstanceMigrationSourceParams,
     InstancePutStateResponse, InstanceStateRequested,
@@ -48,6 +48,9 @@ use illumos_utils::{dladm::MockDladm as Dladm, zone::MockZones as Zones};
 pub enum Error {
     #[error("Configuration error: {0}")]
     Config(#[from] crate::config::ConfigError),
+
+    #[error("Error setting up swap device: {0}")]
+    SwapDevice(#[from] crate::swap_device::SwapDeviceError),
 
     #[error("Failed to acquire etherstub: {0}")]
     Etherstub(illumos_utils::ExecutionError),
@@ -187,8 +190,8 @@ struct SledAgentInner {
     // Other Oxide-controlled services running on this Sled.
     services: ServiceManager,
 
-    // Lazily-acquired connection to Nexus.
-    lazy_nexus_client: LazyNexusClient,
+    // Connection to Nexus.
+    nexus_client: NexusClientWithResolver,
 
     // A serialized request queue for operations interacting with Nexus.
     nexus_request_queue: NexusRequestQueue,
@@ -214,7 +217,7 @@ impl SledAgent {
     pub async fn new(
         config: &Config,
         log: Logger,
-        lazy_nexus_client: LazyNexusClient,
+        nexus_client: NexusClientWithResolver,
         request: StartSledAgentRequest,
         services: ServiceManager,
         storage: StorageManager,
@@ -229,6 +232,28 @@ impl SledAgent {
             "sled_id" => request.id.to_string(),
         ));
         info!(&log, "SledAgent::new(..) starting");
+
+        // Configure a swap device of the configured size before other system setup.
+        match config.swap_device_size_gb {
+            Some(sz) if sz > 0 => {
+                info!(log, "Requested swap device of size {} GiB", sz);
+                let boot_disk =
+                    storage.resources().boot_disk().await.ok_or_else(|| {
+                        crate::swap_device::SwapDeviceError::BootDiskNotFound
+                    })?;
+                crate::swap_device::ensure_swap_device(
+                    &parent_log,
+                    &boot_disk.1,
+                    sz,
+                )?;
+            }
+            Some(sz) if sz == 0 => {
+                panic!("Invalid requested swap device size of 0 GiB");
+            }
+            None | Some(_) => {
+                info!(log, "Not setting up swap device: not configured");
+            }
+        }
 
         let etherstub = Dladm::ensure_etherstub(
             illumos_utils::dladm::UNDERLAY_ETHERSTUB_NAME,
@@ -258,7 +283,7 @@ impl SledAgent {
 
         storage
             .setup_underlay_access(storage_manager::UnderlayAccess {
-                lazy_nexus_client: lazy_nexus_client.clone(),
+                nexus_client: nexus_client.clone(),
                 sled_id: request.id,
             })
             .await?;
@@ -268,7 +293,7 @@ impl SledAgent {
 
         let instances = InstanceManager::new(
             parent_log.clone(),
-            lazy_nexus_client.clone(),
+            nexus_client.clone(),
             etherstub.clone(),
             port_manager.clone(),
         )?;
@@ -317,7 +342,7 @@ impl SledAgent {
                 updates,
                 port_manager,
                 services,
-                lazy_nexus_client,
+                nexus_client,
 
                 // TODO(https://github.com/oxidecomputer/omicron/issues/1917):
                 // Propagate usage of this request queue throughout the Sled Agent.
@@ -335,9 +360,20 @@ impl SledAgent {
 
         // Begin monitoring the underlying hardware, and reacting to changes.
         let sa = sled_agent.clone();
+        let hardware_log = log.clone();
         tokio::spawn(async move {
-            sa.hardware_monitor_task(log).await;
+            sa.hardware_monitor_task(hardware_log).await;
         });
+
+        // Finally, load services for which we're already responsible.
+        //
+        // Do this *after* monitoring for harware, to enable the switch zone to
+        // establish an underlay address before proceeding.
+        sled_agent.inner.services.load_services().await?;
+
+        // Now that we've initialized the sled services, notify nexus again
+        // at which point it'll plumb any necessary firewall rules back to us.
+        sled_agent.notify_nexus_about_self(&log);
 
         Ok(sled_agent)
     }
@@ -441,7 +477,7 @@ impl SledAgent {
     // Sends a request to Nexus informing it that the current sled exists.
     fn notify_nexus_about_self(&self, log: &Logger) {
         let sled_id = self.inner.id;
-        let lazy_nexus_client = self.inner.lazy_nexus_client.clone();
+        let nexus_client = self.inner.nexus_client.clone();
         let sled_address = self.inner.sled_address();
         let is_scrimlet = self.inner.hardware.is_scrimlet();
         let baseboard = nexus_client::types::Baseboard::from(
@@ -474,11 +510,8 @@ impl SledAgent {
                     nexus_client::types::SledRole::Gimlet
                 };
 
-                let nexus_client = lazy_nexus_client
-                    .get()
-                    .await
-                    .map_err(|err| BackoffError::transient(err.to_string()))?;
                 nexus_client
+                    .client()
                     .sled_agent_put(
                         &sled_id,
                         &nexus_client::types::SledAgentStartupInfo {
@@ -607,7 +640,7 @@ impl SledAgent {
     }
 
     /// Returns whether or not the sled believes itself to be a scrimlet
-    pub async fn get_role(&self) -> SledRole {
+    pub fn get_role(&self) -> SledRole {
         if self.inner.hardware.is_scrimlet() {
             SledRole::Scrimlet
         } else {
@@ -695,8 +728,10 @@ impl SledAgent {
         &self,
         artifact: UpdateArtifactId,
     ) -> Result<(), Error> {
-        let nexus_client = self.inner.lazy_nexus_client.get().await?;
-        self.inner.updates.download_artifact(artifact, &nexus_client).await?;
+        self.inner
+            .updates
+            .download_artifact(artifact, &self.inner.nexus_client.client())
+            .await?;
         Ok(())
     }
 

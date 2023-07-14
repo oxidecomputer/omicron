@@ -42,6 +42,7 @@ impl super::Nexus {
     // be (for graceful degradation at large scale).
     pub async fn upsert_sled(
         &self,
+        opctx: &OpContext,
         id: Uuid,
         info: SledAgentStartupInfo,
     ) -> Result<(), Error> {
@@ -69,6 +70,11 @@ impl super::Nexus {
             self.rack_id,
         );
         self.db_datastore.sled_upsert(sled).await?;
+
+        // Make sure any firewall rules for serices that may
+        // be running on this sled get plumbed
+        self.plumb_service_firewall_rules(opctx, &[id]).await?;
+
         Ok(())
     }
 
@@ -285,6 +291,27 @@ impl super::Nexus {
                 .activate(&self.background_tasks.task_internal_dns_servers);
         }
 
+        Ok(())
+    }
+
+    /// Ensure firewall rules for internal services get reflected on all the relevant sleds.
+    pub async fn plumb_service_firewall_rules(
+        &self,
+        opctx: &OpContext,
+        sleds_filter: &[Uuid],
+    ) -> Result<(), Error> {
+        let svcs_vpc = LookupPath::new(opctx, &self.db_datastore)
+            .vpc_id(*db::fixed_data::vpc::SERVICES_VPC_ID);
+        let svcs_fw_rules =
+            self.vpc_list_firewall_rules(opctx, &svcs_vpc).await?;
+        let (_, _, _, svcs_vpc) = svcs_vpc.fetch().await?;
+        self.send_sled_agents_firewall_rules(
+            opctx,
+            &svcs_vpc,
+            &svcs_fw_rules,
+            sleds_filter,
+        )
+        .await?;
         Ok(())
     }
 

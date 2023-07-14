@@ -6,7 +6,6 @@ use super::help_text;
 use super::push_text_lines;
 use super::ComputedScrollOffset;
 use crate::keymap::ShowPopupCmd;
-use crate::ui::defaults::colors;
 use crate::ui::defaults::style;
 use crate::ui::widgets::BoxConnector;
 use crate::ui::widgets::BoxConnectorKind;
@@ -23,7 +22,6 @@ use tui::layout::Constraint;
 use tui::layout::Direction;
 use tui::layout::Layout;
 use tui::layout::Rect;
-use tui::style::Style;
 use tui::text::Span;
 use tui::text::Spans;
 use tui::text::Text;
@@ -120,12 +118,12 @@ impl Default for RackSetupPane {
                 ("Current Status Details", "<D>"),
             ],
             rack_uninitialized_help: vec![
-                ("Scoll", "<UP/DOWN>"),
+                ("Scroll", "<UP/DOWN>"),
                 ("Current Status Details", "<D>"),
-                ("Start Rack Setup", "<Ctrl-Alt-S>"),
+                ("Start Rack Setup", "<Ctrl-Alt-K>"),
             ],
             rack_initialized_help: vec![
-                ("Scoll", "<UP/DOWN>"),
+                ("Scroll", "<UP/DOWN>"),
                 ("Current Status Details", "<D>"),
                 ("Start Rack Reset", "<Ctrl-Alt-R>"),
             ],
@@ -628,8 +626,8 @@ fn rss_config_text<'a>(
         ok_contents: impl Into<Cow<'a, str>>,
         bad_contents: &'static str,
     ) -> Span<'a> {
-        let ok_style = Style::default().fg(colors::OX_GREEN_LIGHT);
-        let bad_style = Style::default().fg(colors::OX_RED);
+        let ok_style = style::text_success();
+        let bad_style = style::text_failure();
         if ok {
             Span::styled(ok_contents, ok_style)
         } else {
@@ -637,10 +635,10 @@ fn rss_config_text<'a>(
         }
     }
 
-    let label_style = Style::default().fg(colors::OX_OFF_WHITE);
-    let ok_style = Style::default().fg(colors::OX_GREEN_LIGHT);
-    let bad_style = Style::default().fg(colors::OX_RED);
-    let warn_style = Style::default().fg(colors::OX_YELLOW);
+    let label_style = style::text_label();
+    let ok_style = style::text_success();
+    let bad_style = style::text_failure();
+    let warn_style = style::text_warning();
     let dyn_style = |ok| if ok { ok_style } else { bad_style };
 
     let setup_description = match setup_state {
@@ -697,10 +695,6 @@ fn rss_config_text<'a>(
     ]));
 
     let net_config = insensitive.rack_network_config.as_ref();
-    let uplink_port_speed = net_config
-        .map_or(Cow::default(), |c| c.uplink_port_speed.to_string().into());
-    let uplink_port_fec = net_config
-        .map_or(Cow::default(), |c| c.uplink_port_fec.to_string().into());
 
     // List of single-line values, each of which may or may not be set; if it's
     // set we show its value, and if not we show "Not set" in bad_style.
@@ -708,10 +702,6 @@ fn rss_config_text<'a>(
         (
             "External DNS zone name: ",
             Cow::from(insensitive.external_dns_zone_name.as_str()),
-        ),
-        (
-            "Gateway IP: ",
-            net_config.map_or("".into(), |c| c.gateway_ip.to_string().into()),
         ),
         (
             "Infrastructure first IP: ",
@@ -722,13 +712,6 @@ fn rss_config_text<'a>(
             "Infrastructure last IP: ",
             net_config
                 .map_or("".into(), |c| c.infra_ip_last.to_string().into()),
-        ),
-        ("Uplink port: ", net_config.map_or("", |c| &c.uplink_port).into()),
-        ("Uplink port speed: ", uplink_port_speed),
-        ("Uplink port FEC: ", uplink_port_fec),
-        (
-            "Uplink IP: ",
-            net_config.map_or("".into(), |c| c.uplink_ip.to_string().into()),
         ),
     ] {
         spans.push(Spans::from(vec![
@@ -760,19 +743,72 @@ fn rss_config_text<'a>(
         vec![Span::styled("  • ", label_style), Span::styled(item, ok_style)]
     };
 
+    if let Some(cfg) = insensitive.rack_network_config.as_ref() {
+        for (i, uplink) in cfg.uplinks.iter().enumerate() {
+            let mut items = vec![
+                vec![
+                    Span::styled("  • Switch           : ", label_style),
+                    Span::styled(uplink.switch.to_string(), ok_style),
+                ],
+                vec![
+                    Span::styled("  • Gateway IP       : ", label_style),
+                    Span::styled(uplink.gateway_ip.to_string(), ok_style),
+                ],
+                vec![
+                    Span::styled("  • Uplink IP        : ", label_style),
+                    Span::styled(uplink.uplink_ip.to_string(), ok_style),
+                ],
+                vec![
+                    Span::styled("  • Uplink port      : ", label_style),
+                    Span::styled(uplink.uplink_port.clone(), ok_style),
+                ],
+                vec![
+                    Span::styled("  • Uplink port speed: ", label_style),
+                    Span::styled(
+                        uplink.uplink_port_speed.to_string(),
+                        ok_style,
+                    ),
+                ],
+                vec![
+                    Span::styled("  • Uplink port FEC  : ", label_style),
+                    Span::styled(uplink.uplink_port_fec.to_string(), ok_style),
+                ],
+            ];
+            if let Some(uplink_vid) = uplink.uplink_vid {
+                items.push(vec![
+                    Span::styled("  • Uplink VLAN id   : ", label_style),
+                    Span::styled(uplink_vid.to_string(), ok_style),
+                ]);
+            } else {
+                items.push(vec![
+                    Span::styled("  • Uplink VLAN id   : ", label_style),
+                    Span::styled("none", ok_style),
+                ]);
+            }
+
+            append_list(
+                &mut spans,
+                Cow::from(format!("Uplink {}: ", i + 1)),
+                items,
+            );
+        }
+    } else {
+        append_list(&mut spans, "Uplinks: ".into(), vec![]);
+    }
+
     append_list(
         &mut spans,
-        "NTP servers: ",
+        "NTP servers: ".into(),
         insensitive.ntp_servers.iter().cloned().map(plain_list_item).collect(),
     );
     append_list(
         &mut spans,
-        "DNS servers: ",
+        "DNS servers: ".into(),
         insensitive.dns_servers.iter().cloned().map(plain_list_item).collect(),
     );
     append_list(
         &mut spans,
-        "Internal services IP pool ranges: ",
+        "Internal services IP pool ranges: ".into(),
         insensitive
             .internal_services_ip_pool_ranges
             .iter()
@@ -787,7 +823,17 @@ fn rss_config_text<'a>(
     );
     append_list(
         &mut spans,
-        "Sleds: ",
+        "External DNS IPs: ".into(),
+        insensitive
+            .external_dns_ips
+            .iter()
+            .cloned()
+            .map(|ip| plain_list_item(ip.to_string()))
+            .collect(),
+    );
+    append_list(
+        &mut spans,
+        "Sleds: ".into(),
         insensitive
             .bootstrap_sleds
             .iter()

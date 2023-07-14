@@ -37,6 +37,11 @@ use omicron_common::api::external::Error;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
+use omicron_common::api::external::SemverVersion;
+use omicron_common::backoff::{
+    retry_notify, retry_policy_internal_service, BackoffError,
+};
+use slog::Logger;
 use std::net::Ipv6Addr;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -45,6 +50,7 @@ mod address_lot;
 mod certificate;
 mod console_session;
 mod dataset;
+mod db_metadata;
 mod device_auth;
 mod disk;
 mod dns;
@@ -131,12 +137,40 @@ pub struct DataStore {
 // to compilation times; changing a query only requires incremental
 // recompilation of that query's module instead of all queries on `DataStore`.
 impl DataStore {
-    pub fn new(pool: Arc<Pool>) -> Self {
-        DataStore {
+    /// Constructs a new Datastore object.
+    ///
+    /// Only returns if the database schema is compatible with Nexus's known
+    /// schema version.
+    pub async fn new(log: &Logger, pool: Arc<Pool>) -> Result<Self, String> {
+        let datastore = DataStore {
             pool,
             virtual_provisioning_collection_producer:
                 crate::provisioning::Producer::new(),
-        }
+        };
+
+        // Keep looping until we find that the schema matches our expectation.
+        const EXPECTED_VERSION: SemverVersion = SemverVersion::new(1, 0, 0);
+        retry_notify(
+            retry_policy_internal_service(),
+            || async {
+                match datastore.database_schema_version().await {
+                    Ok(version) => {
+                        if version == nexus_db_model::schema::SCHEMA_VERSION {
+                            return Ok(());
+                        }
+                        let observed = version.0;
+                        warn!(log, "Incompatible database schema: Saw {observed}, expected {EXPECTED_VERSION}");
+                    }
+                    Err(e) => {
+                        warn!(log, "Cannot read database schema version: {e}");
+                    }
+                };
+                return Err(BackoffError::transient(()));
+            },
+            |_, _| {},
+        ).await.map_err(|_| "Failed to read valid DB schema".to_string())?;
+
+        Ok(datastore)
     }
 
     pub fn register_producers(&self, registry: &ProducerRegistry) {
@@ -248,7 +282,7 @@ pub async fn datastore_test(
 
     let cfg = db::Config { url: db.pg_config().clone() };
     let pool = Arc::new(db::Pool::new(&logctx.log, &cfg));
-    let datastore = Arc::new(DataStore::new(pool));
+    let datastore = Arc::new(DataStore::new(&logctx.log, pool).await.unwrap());
 
     // Create an OpContext with the credentials of "db-init" just for the
     // purpose of loading the built-in users, roles, and assignments.
@@ -907,7 +941,8 @@ mod test {
         let mut db = test_setup_database(&logctx.log).await;
         let cfg = db::Config { url: db.pg_config().clone() };
         let pool = db::Pool::new(&logctx.log, &cfg);
-        let datastore = DataStore::new(Arc::new(pool));
+        let datastore =
+            DataStore::new(&logctx.log, Arc::new(pool)).await.unwrap();
 
         let explanation = DataStore::get_allocated_regions_query(Uuid::nil())
             .explain_async(datastore.pool())
@@ -956,7 +991,8 @@ mod test {
         let mut db = test_setup_database(&logctx.log).await;
         let cfg = db::Config { url: db.pg_config().clone() };
         let pool = Arc::new(db::Pool::new(&logctx.log, &cfg));
-        let datastore = Arc::new(DataStore::new(Arc::clone(&pool)));
+        let datastore =
+            Arc::new(DataStore::new(&logctx.log, pool).await.unwrap());
         let opctx =
             OpContext::for_tests(logctx.log.new(o!()), datastore.clone());
 

@@ -91,6 +91,14 @@ impl super::Nexus {
         self.db_datastore.switch_port_get(opctx, params).await
     }
 
+    pub async fn list_switch_ports_with_uplinks(
+        &self,
+        opctx: &OpContext,
+    ) -> ListResultVec<SwitchPort> {
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+        self.db_datastore.switch_ports_with_uplinks(opctx).await
+    }
+
     pub async fn set_switch_port_settings_id(
         &self,
         opctx: &OpContext,
@@ -182,22 +190,19 @@ impl super::Nexus {
         Ok(())
     }
 
-    // TODO Discover switch ports via Dendrite
-    // https://github.com/oxidecomputer/omicron/issues/3069
     pub async fn populate_switch_ports(
         &self,
         opctx: &OpContext,
-        port_count: u8,
+        ports: &[Name],
+        switch: Name,
     ) -> CreateResult<()> {
-        for i in 0..port_count {
+        for port in ports {
             match self
                 .switch_port_create(
                     opctx,
                     self.rack_id,
-                    // TODO https://github.com/oxidecomputer/omicron/issues/3014
-                    // Populate ports for multiple switches
-                    "switch0".parse().unwrap(),
-                    format!("qsfp{}", i).parse().unwrap(),
+                    switch.clone(),
+                    port.clone(),
                 )
                 .await
             {

@@ -2,22 +2,31 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use std::borrow::Cow;
 use std::collections::BTreeMap;
 
 use super::help_text;
 use super::ComputedScrollOffset;
 use super::Control;
+use crate::state::Component;
 use crate::state::{ComponentId, ALL_COMPONENT_IDS};
 use crate::ui::defaults::colors::*;
 use crate::ui::defaults::style;
 use crate::ui::widgets::IgnitionPopup;
 use crate::ui::widgets::PopupScrollKind;
 use crate::ui::widgets::{BoxConnector, BoxConnectorKind, Rack};
+use crate::ui::wrap::wrap_text;
 use crate::{Action, Cmd, Frame, State};
 use tui::layout::{Constraint, Direction, Layout, Rect};
 use tui::style::Style;
 use tui::text::{Span, Spans, Text};
 use tui::widgets::{Block, BorderType, Borders, Paragraph};
+use wicketd_client::types::RotState;
+use wicketd_client::types::SpComponentCaboose;
+use wicketd_client::types::SpComponentInfo;
+use wicketd_client::types::SpComponentPresence;
+use wicketd_client::types::SpIgnition;
+use wicketd_client::types::SpState;
 
 enum PopupKind {
     Ignition,
@@ -177,7 +186,12 @@ impl Control for RackView {
 
         // Draw the rack
         let rack = Rack {
+            inventory: &state.inventory,
             state: &state.rack_state,
+            not_present_style: Style::default()
+                .bg(OX_GRAY_DARK)
+                .fg(OX_OFF_WHITE),
+            suspicious_style: Style::default().bg(OX_RED).fg(OX_WHITE),
             switch_style: Style::default().bg(OX_GRAY_DARK).fg(OX_WHITE),
             power_shelf_style: Style::default().bg(OX_GRAY).fg(OX_OFF_WHITE),
             sled_style: Style::default().bg(OX_GREEN_LIGHT).fg(TUI_BLACK),
@@ -225,6 +239,17 @@ impl InventoryView {
                 .collect(),
             ignition: IgnitionPopup::default(),
             popup: None,
+        }
+    }
+
+    /// Returns the wrap options that should be used in most cases for popups.
+    fn default_wrap_options(width: usize) -> crate::ui::wrap::Options<'static> {
+        crate::ui::wrap::Options {
+            width,
+            // The indent here is to add 1 character of padding.
+            initial_indent: Span::raw(" "),
+            subsequent_indent: Span::raw(" "),
+            break_words: true,
         }
     }
 
@@ -330,11 +355,16 @@ impl Control for InventoryView {
         let inventory_style = Style::default().fg(OX_OFF_WHITE);
         let component_id = state.rack_state.selected;
         let text = match state.inventory.get_inventory(&component_id) {
-            Some(inventory) => {
-                Text::styled(format!("{:#?}", inventory), inventory_style)
-            }
+            Some(inventory) => inventory_description(inventory),
             None => Text::styled("Inventory Unavailable", inventory_style),
         };
+        let text = wrap_text(
+            &text,
+            // -2 each for borders and padding
+            Self::default_wrap_options(
+                chunks[1].width.saturating_sub(4).into(),
+            ),
+        );
 
         let scroll_offset = self.scroll_offsets.get_mut(&component_id).unwrap();
         let y_offset = ComputedScrollOffset::new(
@@ -432,5 +462,463 @@ impl Control for InventoryView {
             }
             _ => None,
         }
+    }
+}
+
+fn inventory_description(component: &Component) -> Text {
+    let sp = component.sp();
+
+    let label_style = style::text_label();
+    let ok_style = style::text_success();
+    let bad_style = style::text_failure();
+    let warn_style = style::text_warning();
+    let dyn_style = |ok| if ok { ok_style } else { bad_style };
+    let yes_no = |val| if val { "Yes" } else { "No" };
+    let bullet = || Span::styled("  • ", label_style);
+    let nest_bullet = || Span::styled("      • ", label_style);
+
+    let mut spans: Vec<Spans> = Vec::new();
+
+    // Describe ignition.
+    let mut label = vec![Span::styled("Ignition: ", label_style)];
+    if let Some(ignition) = sp.ignition() {
+        match ignition {
+            SpIgnition::No => {
+                label.push(Span::styled("Not present", warn_style));
+                spans.push(label.into());
+            }
+            SpIgnition::Yes {
+                ctrl_detect_0,
+                ctrl_detect_1,
+                flt_a2,
+                flt_a3,
+                flt_rot,
+                flt_sp,
+                id,
+                power,
+            } => {
+                spans.push(label.into());
+                spans.push(
+                    vec![
+                        bullet(),
+                        Span::styled("Identity: ", label_style),
+                        Span::styled(format!("{id:?}"), ok_style),
+                    ]
+                    .into(),
+                );
+                spans.push(
+                    vec![
+                        bullet(),
+                        Span::styled("Power: ", label_style),
+                        Span::styled(yes_no(*power), dyn_style(*power)),
+                    ]
+                    .into(),
+                );
+                if *flt_a2 || *flt_a3 || *flt_rot || *flt_sp {
+                    let mut faults =
+                        vec![bullet(), Span::styled("Faults:", label_style)];
+                    if *flt_a2 {
+                        faults.push(Span::styled(" A2", bad_style));
+                    }
+                    if *flt_a3 {
+                        faults.push(Span::styled(" A3", bad_style));
+                    }
+                    if *flt_rot {
+                        faults.push(Span::styled(" RoT", bad_style));
+                    }
+                    if *flt_sp {
+                        faults.push(Span::styled(" SP", bad_style));
+                    }
+                    spans.push(faults.into());
+                } else {
+                    spans.push(
+                        vec![
+                            bullet(),
+                            Span::styled("Faults: ", label_style),
+                            Span::styled("None", ok_style),
+                        ]
+                        .into(),
+                    );
+                }
+                spans.push(
+                    vec![
+                        bullet(),
+                        Span::styled("Controller 0 detected: ", label_style),
+                        Span::styled(
+                            yes_no(*ctrl_detect_0),
+                            dyn_style(*ctrl_detect_0),
+                        ),
+                    ]
+                    .into(),
+                );
+                spans.push(
+                    vec![
+                        bullet(),
+                        Span::styled("Controller 1 detected: ", label_style),
+                        Span::styled(
+                            yes_no(*ctrl_detect_1),
+                            dyn_style(*ctrl_detect_1),
+                        ),
+                    ]
+                    .into(),
+                );
+            }
+        }
+    } else {
+        label.push(Span::styled("Not available", bad_style));
+        spans.push(label.into());
+    }
+
+    // blank line separator
+    spans.push(Spans::default());
+
+    // Describe the SP.
+    let mut label = vec![Span::styled("Service Processor: ", label_style)];
+    if let Some(state) = sp.state() {
+        let SpState {
+            base_mac_address,
+            hubris_archive_id,
+            model,
+            power_state,
+            revision,
+            serial_number,
+            // We give the rot its own section below.
+            rot: _,
+        } = state;
+        spans.push(label.into());
+        spans.push(
+            vec![
+                bullet(),
+                Span::styled("Serial number: ", label_style),
+                Span::styled(serial_number.clone(), ok_style),
+            ]
+            .into(),
+        );
+        spans.push(
+            vec![
+                bullet(),
+                Span::styled("Model: ", label_style),
+                Span::styled(model.clone(), ok_style),
+            ]
+            .into(),
+        );
+        spans.push(
+            vec![
+                bullet(),
+                Span::styled("Revision: ", label_style),
+                Span::styled(revision.to_string(), ok_style),
+            ]
+            .into(),
+        );
+        spans.push(
+            vec![
+                bullet(),
+                Span::styled("Base MAC Address: ", label_style),
+                Span::styled(
+                    format!(
+                        "{:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}",
+                        base_mac_address[0],
+                        base_mac_address[1],
+                        base_mac_address[2],
+                        base_mac_address[3],
+                        base_mac_address[4],
+                        base_mac_address[5],
+                    ),
+                    ok_style,
+                ),
+            ]
+            .into(),
+        );
+        spans.push(
+            vec![
+                bullet(),
+                Span::styled("Power State: ", label_style),
+                Span::styled(format!("{:?}", power_state), ok_style),
+            ]
+            .into(),
+        );
+
+        spans.push(
+            vec![bullet(), Span::styled("Active Slot:", label_style)].into(),
+        );
+        spans.push(
+            vec![
+                nest_bullet(),
+                Span::styled("Hubris Archive ID: ", label_style),
+                Span::styled(hubris_archive_id.clone(), ok_style),
+            ]
+            .into(),
+        );
+
+        if let Some(caboose) = sp.caboose_active() {
+            append_caboose(&mut spans, nest_bullet(), caboose);
+        } else {
+            spans.push(
+                vec![
+                    nest_bullet(),
+                    Span::styled("No further information", warn_style),
+                ]
+                .into(),
+            );
+        }
+
+        spans.push(
+            vec![bullet(), Span::styled("Inactive Slot:", label_style)].into(),
+        );
+        if let Some(caboose) = sp.caboose_inactive() {
+            append_caboose(&mut spans, nest_bullet(), caboose);
+        } else {
+            spans.push(
+                vec![nest_bullet(), Span::styled("No information", warn_style)]
+                    .into(),
+            );
+        }
+    } else {
+        label.push(Span::styled("Not available", bad_style));
+        spans.push(label.into());
+    }
+
+    // blank line separator
+    spans.push(Spans::default());
+
+    // Describe the RoT.
+    let mut label = vec![Span::styled("Root of Trust: ", label_style)];
+    if let Some(rot) = sp.state().map(|sp| &sp.rot) {
+        match rot {
+            RotState::Enabled {
+                active,
+                pending_persistent_boot_preference,
+                persistent_boot_preference,
+                slot_a_sha3_256_digest,
+                slot_b_sha3_256_digest,
+                transient_boot_preference,
+            } => {
+                spans.push(label.into());
+                spans.push(
+                    vec![
+                        bullet(),
+                        Span::styled("Active Slot: ", label_style),
+                        Span::styled(format!("{active:?}"), ok_style),
+                    ]
+                    .into(),
+                );
+                spans.push(
+                    vec![
+                        bullet(),
+                        Span::styled(
+                            "Persistent Boot Preference: ",
+                            label_style,
+                        ),
+                        Span::styled(
+                            format!("{persistent_boot_preference:?}"),
+                            ok_style,
+                        ),
+                    ]
+                    .into(),
+                );
+                spans.push(
+                    vec![
+                        bullet(),
+                        Span::styled(
+                            "Pending Persistent Boot Preference: ",
+                            label_style,
+                        ),
+                        Span::styled(
+                            match pending_persistent_boot_preference.as_ref() {
+                                Some(pref) => Cow::from(format!("{pref:?}")),
+                                None => Cow::from("None"),
+                            },
+                            ok_style,
+                        ),
+                    ]
+                    .into(),
+                );
+                spans.push(
+                    vec![
+                        bullet(),
+                        Span::styled(
+                            "Transient Boot Preference: ",
+                            label_style,
+                        ),
+                        Span::styled(
+                            match transient_boot_preference.as_ref() {
+                                Some(pref) => Cow::from(format!("{pref:?}")),
+                                None => Cow::from("None"),
+                            },
+                            ok_style,
+                        ),
+                    ]
+                    .into(),
+                );
+                spans.push(
+                    vec![bullet(), Span::styled("Slot A:", label_style)].into(),
+                );
+                spans.push(
+                    vec![
+                        nest_bullet(),
+                        Span::styled("Image SHA3-256: ", label_style),
+                        match slot_a_sha3_256_digest.as_ref() {
+                            Some(digest) => {
+                                Span::styled(digest.clone(), ok_style)
+                            }
+                            None => Span::styled("Unknown", warn_style),
+                        },
+                    ]
+                    .into(),
+                );
+                if let Some(caboose) =
+                    sp.rot().and_then(|r| r.caboose_a.as_ref())
+                {
+                    append_caboose(&mut spans, nest_bullet(), caboose);
+                } else {
+                    spans.push(
+                        vec![
+                            nest_bullet(),
+                            Span::styled("No further information", warn_style),
+                        ]
+                        .into(),
+                    );
+                }
+                spans.push(
+                    vec![bullet(), Span::styled("Slot B:", label_style)].into(),
+                );
+                spans.push(
+                    vec![
+                        nest_bullet(),
+                        Span::styled("Image SHA3-256: ", label_style),
+                        match slot_b_sha3_256_digest.as_ref() {
+                            Some(digest) => {
+                                Span::styled(digest.clone(), ok_style)
+                            }
+                            None => Span::styled("Unknown", warn_style),
+                        },
+                    ]
+                    .into(),
+                );
+                if let Some(caboose) =
+                    sp.rot().and_then(|r| r.caboose_b.as_ref())
+                {
+                    append_caboose(&mut spans, nest_bullet(), caboose);
+                } else {
+                    spans.push(
+                        vec![
+                            nest_bullet(),
+                            Span::styled("No further information", warn_style),
+                        ]
+                        .into(),
+                    );
+                }
+            }
+            RotState::CommunicationFailed { message } => {
+                spans.push(label.into());
+                spans.push(
+                    vec![
+                        bullet(),
+                        Span::styled(
+                            format!("Communication Failure: {message}"),
+                            bad_style,
+                        ),
+                    ]
+                    .into(),
+                );
+            }
+        }
+    } else {
+        label.push(Span::styled("Not available", bad_style));
+        spans.push(label.into());
+    }
+
+    // blank line separator
+    spans.push(Spans::default());
+
+    // Describe all components.
+    // TODO-correctness: component information will change with the IPCC /
+    // topology work that is ongoing; show our current stand-in for now.
+    let mut label = vec![Span::styled("Components: ", label_style)];
+    let components = sp.components();
+    if components.is_empty() {
+        label.push(Span::styled("Not available", bad_style));
+        spans.push(label.into());
+    } else {
+        spans.push(label.into());
+        for SpComponentInfo {
+            description,
+            device,
+            presence,
+            // `cababilities` and `component` are internal-use only and not
+            // meaningful to an end user
+            capabilities: _,
+            component: _,
+            // serial number is currently always unpopulated
+            serial_number: _,
+        } in components
+        {
+            spans.push(
+                vec![
+                    bullet(),
+                    Span::styled(
+                        format!("{:?}", presence),
+                        match presence {
+                            SpComponentPresence::Present => ok_style,
+                            SpComponentPresence::Timeout
+                            | SpComponentPresence::Unavailable => warn_style,
+                            SpComponentPresence::NotPresent
+                            | SpComponentPresence::Failed
+                            | SpComponentPresence::Error => bad_style,
+                        },
+                    ),
+                    Span::styled(
+                        format!(" {} ({})", description, device),
+                        label_style,
+                    ),
+                ]
+                .into(),
+            );
+        }
+    }
+
+    Text::from(spans)
+}
+
+// Helper function for appending caboose details to a section of the
+// inventory (used for both SP and RoT above).
+fn append_caboose(
+    spans: &mut Vec<Spans>,
+    prefix: Span<'static>,
+    caboose: &SpComponentCaboose,
+) {
+    let SpComponentCaboose {
+        board,
+        git_commit,
+        // Currently `name` is always the same as `board`, so we'll skip it.
+        name: _,
+        version,
+    } = caboose;
+    let label_style = style::text_label();
+    let ok_style = style::text_success();
+    let bad_style = style::text_failure();
+
+    spans.push(
+        vec![
+            prefix.clone(),
+            Span::styled("Git Commit: ", label_style),
+            Span::styled(git_commit.clone(), ok_style),
+        ]
+        .into(),
+    );
+    spans.push(
+        vec![
+            prefix.clone(),
+            Span::styled("Board: ", label_style),
+            Span::styled(board.clone(), ok_style),
+        ]
+        .into(),
+    );
+    let mut version_spans =
+        vec![prefix.clone(), Span::styled("Version: ", label_style)];
+    if let Some(v) = version.as_ref() {
+        version_spans.push(Span::styled(v.clone(), ok_style));
+    } else {
+        version_spans.push(Span::styled("Unknown", bad_style));
     }
 }

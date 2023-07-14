@@ -241,7 +241,7 @@ async fn test_local_user_basic(client: &ClientTestContext, silo: &views::Silo) {
     NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &user_password_url)
             .expect_status(Some(StatusCode::NO_CONTENT))
-            .body(Some(&params::UserPassword::InvalidPassword)),
+            .body(Some(&params::UserPassword::LoginDisallowed)),
     )
     .authn_as(AuthnMode::Session(admin_session.to_string()))
     .execute()
@@ -291,7 +291,7 @@ async fn test_local_user_basic(client: &ClientTestContext, silo: &views::Silo) {
         StatusCode::FORBIDDEN,
         Method::POST,
         &admin_password_url,
-        &params::UserPassword::InvalidPassword,
+        &params::UserPassword::LoginDisallowed,
     )
     .authn_as(AuthnMode::Session(session_token2.clone()))
     .execute()
@@ -311,7 +311,7 @@ async fn test_local_user_with_no_initial_password(
         client,
         silo,
         &test_user,
-        params::UserPassword::InvalidPassword,
+        params::UserPassword::LoginDisallowed,
     )
     .await;
 

@@ -84,4 +84,9 @@ impl ServiceName {
             }
         }
     }
+
+    /// Returns the full DNS name of this service
+    pub fn srv_name(&self) -> String {
+        format!("{}.{DNS_ZONE}", self.dns_name())
+    }
 }

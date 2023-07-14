@@ -9,19 +9,27 @@ license = "MPL-2.0"
 path = "../rpaths"
 
 [dependencies]
-bcs.workspace = true
+bytes.workspace = true
+camino.workspace = true
+camino-tempfile.workspace = true
 chacha20poly1305.workspace = true
+ciborium.workspace = true
 curve25519-dalek.workspace = true
 derive_more.workspace = true
+hex.workspace = true
 hkdf.workspace = true
+omicron-common.workspace = true
 rand = { workspace = true, features = ["getrandom"] }
 secrecy.workspace = true
 serde.workspace = true
+serde_with.workspace = true
 sha3.workspace = true
+sled-hardware.workspace = true
 slog.workspace = true
 thiserror.workspace = true
+tokio.workspace = true
 uuid.workspace = true
-vsss-rs = { version = "3.2.0", features = ["std"] }
+vsss-rs = { version = "3.2.0", features = ["std", "curve25519"] }
 zeroize.workspace = true
 
 # See omicron-rpaths for more about the "pq-sys" dependency.
@@ -33,6 +41,7 @@ pq-sys = "*"
 
 [dev-dependencies]
 assert_matches.workspace = true
-bincode.workspace = true
 omicron-test-utils.workspace = true
 proptest.workspace = true
+slog-async.workspace = true
+slog-term.workspace = true

@@ -22,7 +22,6 @@ pub mod config;
 mod http_entrypoints;
 mod instance;
 mod instance_manager;
-mod ledger;
 mod nexus;
 pub mod params;
 mod profile;
@@ -33,10 +32,11 @@ mod sled_agent;
 mod smf_helper;
 pub(crate) mod storage;
 mod storage_manager;
+mod swap_device;
 mod updates;
 
 #[cfg(test)]
-mod mocks;
+mod fakes;
 
 #[macro_use]
 extern crate slog;

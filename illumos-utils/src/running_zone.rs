@@ -19,6 +19,7 @@ use slog::o;
 use slog::warn;
 use slog::Logger;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use uuid::Uuid;
 
 #[cfg(any(test, feature = "testing"))]
 use crate::zone::MockZones as Zones;
@@ -372,78 +373,60 @@ impl RunningZone {
             }
         })?;
 
-        // Pull the zone ID.
+        // If the zone is self-assembling, then SMF service(s) inside the zone
+        // will be creating the listen address for the zone's service(s),
+        // setting the appropriate ifprop MTU, and so on. The idea behind
+        // self-assembling zones is that once they boot there should be *no*
+        // zlogin required.
+
+        // Use the zone ID in order to check if /var/svc/profile/site.xml
+        // exists.
         let id = Zones::id(&zone.name)
             .await?
             .ok_or_else(|| BootError::NoZoneId { zone: zone.name.clone() })?;
         let site_profile_xml_exists =
             std::path::Path::new(&zone.site_profile_xml_path()).exists();
+
         let running_zone = RunningZone { id: Some(id), inner: zone };
 
-        // Make sure the control vnic has an IP MTU of 9000 inside the zone
-        const CONTROL_VNIC_MTU: usize = 9000;
-        let vnic = running_zone.inner.control_vnic.name().to_string();
-
-        // If the zone is self-assembling, then SMF service(s) inside the zone
-        // will be creating the listen address for the zone's service(s). This
-        // will create IP interfaces, and means that `create-if` here will fail
-        // due to the interface already existing. Checking the output of
-        // `show-if` is also problematic due to TOCTOU. Use the check for the
-        // existence of site.xml, which means the zone is performing this
-        // self-assembly, and skip create-if if so.
-
         if !site_profile_xml_exists {
-            let args = vec![
-                IPADM.to_string(),
-                "create-if".to_string(),
-                "-t".to_string(),
-                vnic.clone(),
+            // If the zone is not self-assembling, make sure the control vnic
+            // has an IP MTU of 9000 inside the zone.
+            const CONTROL_VNIC_MTU: usize = 9000;
+            let vnic = running_zone.inner.control_vnic.name().to_string();
+
+            let commands = vec![
+                vec![
+                    IPADM.to_string(),
+                    "create-if".to_string(),
+                    "-t".to_string(),
+                    vnic.clone(),
+                ],
+                vec![
+                    IPADM.to_string(),
+                    "set-ifprop".to_string(),
+                    "-t".to_string(),
+                    "-p".to_string(),
+                    format!("mtu={}", CONTROL_VNIC_MTU),
+                    "-m".to_string(),
+                    "ipv4".to_string(),
+                    vnic.clone(),
+                ],
+                vec![
+                    IPADM.to_string(),
+                    "set-ifprop".to_string(),
+                    "-t".to_string(),
+                    "-p".to_string(),
+                    format!("mtu={}", CONTROL_VNIC_MTU),
+                    "-m".to_string(),
+                    "ipv6".to_string(),
+                    vnic,
+                ],
             ];
 
-            running_zone.run_cmd(args)?;
-        } else {
-            // If the zone is self-assembling, then it's possible that the IP
-            // interface does not exist yet because it has not been brought up
-            // by the software in the zone. Run `create-if` here, but eat the
-            // error if there is one: this is safe unless the software that's
-            // part of self-assembly inside the zone is also trying to run
-            // `create-if` (instead of `create-addr`), and required for the
-            // `set-ifprop` commands below to pass.
-            let args = vec![
-                IPADM.to_string(),
-                "create-if".to_string(),
-                "-t".to_string(),
-                vnic.clone(),
-            ];
-
-            let _result = running_zone.run_cmd(args);
-        }
-
-        let commands = vec![
-            vec![
-                IPADM.to_string(),
-                "set-ifprop".to_string(),
-                "-t".to_string(),
-                "-p".to_string(),
-                format!("mtu={}", CONTROL_VNIC_MTU),
-                "-m".to_string(),
-                "ipv4".to_string(),
-                vnic.clone(),
-            ],
-            vec![
-                IPADM.to_string(),
-                "set-ifprop".to_string(),
-                "-t".to_string(),
-                "-p".to_string(),
-                format!("mtu={}", CONTROL_VNIC_MTU),
-                "-m".to_string(),
-                "ipv6".to_string(),
-                vnic,
-            ],
-        ];
-
-        for args in &commands {
-            running_zone.run_cmd(args)?;
+            for args in &commands {
+                running_zone.run_cmd(args)?;
+            }
         }
 
         Ok(running_zone)
@@ -986,11 +969,11 @@ impl InstalledZone {
     /// The zone name is based on:
     /// - A unique Oxide prefix ("oxz_")
     /// - The name of the zone type being hosted (e.g., "nexus")
-    /// - An optional, zone-unique identifier (typically a UUID).
+    /// - An optional, zone-unique UUID
     ///
     /// This results in a zone name which is distinct across different zpools,
     /// but stable and predictable across reboots.
-    pub fn get_zone_name(zone_type: &str, unique_name: Option<&str>) -> String {
+    pub fn get_zone_name(zone_type: &str, unique_name: Option<Uuid>) -> String {
         let mut zone_name = format!("{}{}", ZONE_PREFIX, zone_type);
         if let Some(suffix) = unique_name {
             zone_name.push_str(&format!("_{}", suffix));
@@ -1019,7 +1002,7 @@ impl InstalledZone {
         zone_root_path: &Utf8Path,
         zone_image_paths: &[Utf8PathBuf],
         zone_type: &str,
-        unique_name: Option<&str>,
+        unique_name: Option<Uuid>,
         datasets: &[zone::Dataset],
         filesystems: &[zone::Fs],
         devices: &[zone::Device],

@@ -138,7 +138,7 @@ async fn test_silos(cptestctx: &ControlPlaneTestContext) {
         client,
         &silos[0],
         &"some-silo-user".parse().unwrap(),
-        params::UserPassword::InvalidPassword,
+        params::UserPassword::LoginDisallowed,
     )
     .await
     .id;
@@ -787,7 +787,7 @@ async fn test_silo_user_provision_types(cptestctx: &ControlPlaneTestContext) {
                         client,
                         &silo,
                         &"external-id-com".parse().unwrap(),
-                        params::UserPassword::InvalidPassword,
+                        params::UserPassword::LoginDisallowed,
                     )
                     .await;
                 }
@@ -862,7 +862,7 @@ async fn test_silo_user_fetch_by_external_id(
         client,
         &silo,
         &"f5513e049dac9468de5bdff36ab17d04f".parse().unwrap(),
-        params::UserPassword::InvalidPassword,
+        params::UserPassword::LoginDisallowed,
     )
     .await;
 
@@ -926,7 +926,7 @@ async fn test_silo_users_list(cptestctx: &ControlPlaneTestContext) {
         client,
         &views::Silo::try_from(DEFAULT_SILO.clone()).unwrap(),
         &new_silo_user_external_id.parse().unwrap(),
-        params::UserPassword::InvalidPassword,
+        params::UserPassword::LoginDisallowed,
     )
     .await
     .id;
@@ -970,7 +970,7 @@ async fn test_silo_users_list(cptestctx: &ControlPlaneTestContext) {
         client,
         &silo,
         &new_silo_user_name.parse().unwrap(),
-        params::UserPassword::InvalidPassword,
+        params::UserPassword::LoginDisallowed,
     )
     .await
     .id;
@@ -1101,7 +1101,7 @@ async fn test_silo_groups_fixed(cptestctx: &ControlPlaneTestContext) {
         client,
         &silo,
         &"external-id-com".parse().unwrap(),
-        params::UserPassword::InvalidPassword,
+        params::UserPassword::LoginDisallowed,
     )
     .await;
 
@@ -1543,7 +1543,7 @@ async fn test_silo_user_views(cptestctx: &ControlPlaneTestContext) {
         client,
         &silo2,
         &"silo2-user1".parse().unwrap(),
-        params::UserPassword::InvalidPassword,
+        params::UserPassword::LoginDisallowed,
     )
     .await;
     let silo2_user1_id = silo2_user1.id;
@@ -1551,7 +1551,7 @@ async fn test_silo_user_views(cptestctx: &ControlPlaneTestContext) {
         client,
         &silo2,
         &"silo2-user2".parse().unwrap(),
-        params::UserPassword::InvalidPassword,
+        params::UserPassword::LoginDisallowed,
     )
     .await;
     let silo2_user2_id = silo2_user2.id;
@@ -1767,7 +1767,7 @@ async fn test_jit_silo_constraints(cptestctx: &ControlPlaneTestContext) {
                 "/v1/system/identity-providers/local/users?silo=jit",
                 &params::UserCreate {
                     external_id: params::UserId::from_str("dummy").unwrap(),
-                    password: params::UserPassword::InvalidPassword,
+                    password: params::UserPassword::LoginDisallowed,
                 },
             )
             .authn_as(caller),
@@ -1876,7 +1876,7 @@ async fn test_local_silo_constraints(cptestctx: &ControlPlaneTestContext) {
         client,
         &silo,
         &"admin-user".parse().unwrap(),
-        params::UserPassword::InvalidPassword,
+        params::UserPassword::LoginDisallowed,
     )
     .await
     .id;
@@ -1985,7 +1985,7 @@ async fn test_local_silo_users(cptestctx: &ControlPlaneTestContext) {
         client,
         &silo1,
         &"admin-user".parse().unwrap(),
-        params::UserPassword::InvalidPassword,
+        params::UserPassword::LoginDisallowed,
     )
     .await;
     grant_iam(
@@ -2038,7 +2038,7 @@ async fn run_user_tests(
         &url_user_create,
         &params::UserCreate {
             external_id: params::UserId::from_str("a-test-user").unwrap(),
-            password: params::UserPassword::InvalidPassword,
+            password: params::UserPassword::LoginDisallowed,
         },
     )
     .authn_as(authn_mode.clone())
@@ -2270,7 +2270,7 @@ async fn test_silo_authn_policy(cptestctx: &ControlPlaneTestContext) {
             client,
             &silo,
             &(format!("{}-user", label).parse().unwrap()),
-            params::UserPassword::InvalidPassword,
+            params::UserPassword::LoginDisallowed,
         )
         .await;
         grant_iam(
