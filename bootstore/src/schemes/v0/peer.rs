@@ -26,14 +26,14 @@ use tokio::time::{interval, Instant, MissedTickBehavior};
 
 #[derive(Debug, Clone)]
 pub struct Config {
-    id: Baseboard,
-    addr: SocketAddrV6,
-    time_per_tick: Duration,
-    learn_timeout: Duration,
-    rack_init_timeout: Duration,
-    rack_secret_request_timeout: Duration,
-    fsm_state_ledger_paths: Vec<Utf8PathBuf>,
-    network_config_ledger_paths: Vec<Utf8PathBuf>,
+    pub id: Baseboard,
+    pub addr: SocketAddrV6,
+    pub time_per_tick: Duration,
+    pub learn_timeout: Duration,
+    pub rack_init_timeout: Duration,
+    pub rack_secret_request_timeout: Duration,
+    pub fsm_state_ledger_paths: Vec<Utf8PathBuf>,
+    pub network_config_ledger_paths: Vec<Utf8PathBuf>,
 }
 
 /// An error response from a `NodeApiRequest`
@@ -305,8 +305,9 @@ impl Node {
     pub async fn new(config: Config, log: &Logger) -> (Node, NodeHandle) {
         // We only expect one outstanding request at a time for `Init_` or
         // `LoadRackSecret` requests, We can have one of those requests in
-        // flight while allowing `PeerAddresses` updates.
-        let (tx, rx) = mpsc::channel(3);
+        // flight while allowing `PeerAddresses` updates. We also allow status
+        // requests in parallel. Just leave some room.
+        let (tx, rx) = mpsc::channel(10);
 
         // There are up to 31 sleds sending messages. These are mostly one at a
         // time for each sled, but we leave some extra room.

@@ -5,7 +5,8 @@
 //! Bootstrap-related APIs.
 
 use super::config::{
-    Config, BOOTSTRAP_AGENT_HTTP_PORT, BOOTSTRAP_AGENT_RACK_INIT_PORT,
+    Config, BOOTSTORE_PORT, BOOTSTRAP_AGENT_HTTP_PORT,
+    BOOTSTRAP_AGENT_RACK_INIT_PORT,
 };
 use super::hardware::HardwareMonitor;
 use super::http_entrypoints::RackOperationStatus;
@@ -18,6 +19,7 @@ use crate::server::Server as SledServer;
 use crate::services::ServiceManager;
 use crate::storage_manager::{StorageManager, StorageResources};
 use crate::updates::UpdateManager;
+use bootstore::schemes::v0 as bootstore;
 use camino::Utf8PathBuf;
 use ddm_admin_client::{Client as DdmAdminClient, DdmError};
 use futures::stream::{self, StreamExt, TryStreamExt};
@@ -185,21 +187,29 @@ pub struct Agent {
 
     global_zone_bootstrap_link_local_address: Ipv6Addr,
 
-    // We maintain the handle just to show ownership, but don't use it
-    // as the KeyManager task should run forever
+    /// We maintain the handle just to show ownership, but don't use it
+    /// as the KeyManager task should run forever
     #[allow(unused)]
     key_manager_handle: JoinHandle<()>,
 
-    // We maintain a copy of the `StorageKeyRequester` so we can pass it through
-    // from the `HardwareManager` to the `StorageManager` when the `HardwareManger`
-    // gets recreated.
+    /// We maintain a copy of the `StorageKeyRequester` so we can pass it through
+    /// from the `HardwareManager` to the `StorageManager` when the `HardwareManger`
+    /// gets recreated.
     storage_key_requester: StorageKeyRequester,
 
     /// Our sled's baseboard identity.
     baseboard: Baseboard,
+
+    /// Handle for interacting with the local `bootstore::Node`
+    bootstore: bootstore::NodeHandle,
+
+    /// The join handle of the `bootstore::Node` task
+    bootstore_join_handle: JoinHandle<()>,
 }
 
 const SLED_AGENT_REQUEST_FILE: &str = "sled-agent-request.toml";
+const BOOTSTORE_FSM_STATE_FILE: &str = "bootstore-fsm-state.json";
+const BOOTSTORE_NETWORK_CONFIG_FILE: &str = "bootstore-network-config.json";
 
 // Deletes all state which may be left-over from a previous execution of the
 // Sled Agent.
@@ -262,6 +272,28 @@ async fn sled_config_paths(storage: &StorageResources) -> Vec<Utf8PathBuf> {
         .await
         .into_iter()
         .map(|p| p.join(SLED_AGENT_REQUEST_FILE))
+        .collect()
+}
+
+async fn bootstore_fsm_state_paths(
+    storage: &StorageResources,
+) -> Vec<Utf8PathBuf> {
+    storage
+        .all_m2_mountpoints(sled_hardware::disk::CLUSTER_DATASET)
+        .await
+        .into_iter()
+        .map(|p| p.join(BOOTSTORE_FSM_STATE_FILE))
+        .collect()
+}
+
+async fn bootstore_network_config_paths(
+    storage: &StorageResources,
+) -> Vec<Utf8PathBuf> {
+    storage
+        .all_m2_mountpoints(sled_hardware::disk::CLUSTER_DATASET)
+        .await
+        .into_iter()
+        .map(|p| p.join(BOOTSTORE_NETWORK_CONFIG_FILE))
         .collect()
 }
 
@@ -397,6 +429,28 @@ impl Agent {
             }
         }
 
+        let bootstore_config = bootstore::Config {
+            id: baseboard.clone(),
+            addr: SocketAddrV6::new(ip, BOOTSTORE_PORT, 0, 0),
+            time_per_tick: std::time::Duration::from_millis(250),
+            learn_timeout: std::time::Duration::from_secs(5),
+            rack_init_timeout: std::time::Duration::from_secs(60),
+            rack_secret_request_timeout: std::time::Duration::from_secs(30),
+            fsm_state_ledger_paths: bootstore_fsm_state_paths(
+                &storage_resources,
+            )
+            .await,
+            network_config_ledger_paths: bootstore_network_config_paths(
+                &storage_resources,
+            )
+            .await,
+        };
+        let (mut bootstore_node, bootstore_handle) =
+            bootstore::Node::new(bootstore_config, &ba_log).await;
+
+        let bootstore_join_handle =
+            tokio::spawn(async move { bootstore_node.run().await });
+
         let paths = sled_config_paths(&storage_resources).await;
         let maybe_ledger =
             Ledger::<PersistentSledAgentRequest>::new(&ba_log, paths).await;
@@ -416,6 +470,8 @@ impl Agent {
             key_manager_handle: handle,
             storage_key_requester,
             baseboard,
+            bootstore: bootstore_handle,
+            bootstore_join_handle,
         };
         let agent = if let Some(ledger) = maybe_ledger {
             let agent = make_bootstrap_agent(true);
