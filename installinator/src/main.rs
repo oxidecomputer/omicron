@@ -9,19 +9,8 @@ use installinator::InstallinatorApp;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
-    // Work around https://github.com/oxidecomputer/omicron/issues/3507 by
-    // allocating a balloon (that we don't use) to push us past the dangerous
-    // address space.
-    const BALLOON_SIZE: usize = 2 << 30; // 2 GiB
-    let balloon = vec![1; BALLOON_SIZE];
     let app = InstallinatorApp::parse();
     let log = InstallinatorApp::setup_log("/tmp/installinator.log")?;
     app.exec(&log).await?;
-
-    // Dumb way to ensure `balloon` isn't compiled out
-    println!(
-        "omicron#3507 workaround (ignore this): {}",
-        std::hint::black_box(&balloon[BALLOON_SIZE - 1])
-    );
     Ok(())
 }
