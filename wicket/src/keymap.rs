@@ -208,19 +208,29 @@ impl KeyHandler {
             KeyCode::Char('u') if event.modifiers == KeyModifiers::CONTROL => {
                 Cmd::StartUpdate
             }
+            // The CONTROL+ALT shortcuts are a bit harder to define because some
+            // terminals interpret them as well. However, as a heuristic we can
+            // rely on the fact that common Emacs shortcuts with the same
+            // modifiers (C-M-<char>) will not be interpreted by the terminal.
+            //
+            // C-M-a is "move to next function".
             KeyCode::Char('a')
                 if event.modifiers
                     == KeyModifiers::CONTROL | KeyModifiers::ALT =>
             {
                 Cmd::AbortUpdate
             }
+            // C-M-r is "reverse regular expression search".
             KeyCode::Char('r')
                 if event.modifiers
                     == KeyModifiers::CONTROL | KeyModifiers::ALT =>
             {
                 Cmd::ResetState
             }
-            KeyCode::Char('s')
+            // C-M-k is "kill sexp forward". (This was previously C-M-s, which
+            // is "regular expression search", but that is bound to other
+            // commands by default in both KDE Konsole and urxvt.)
+            KeyCode::Char('k')
                 if event.modifiers
                     == KeyModifiers::CONTROL | KeyModifiers::ALT =>
             {
