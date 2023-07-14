@@ -370,9 +370,6 @@ pub struct ServiceManagerInner {
     advertised_prefixes: Mutex<HashSet<Ipv6Subnet<SLED_PREFIX>>>,
     sled_info: OnceCell<SledAgentInfo>,
     switch_zone_bootstrap_address: Ipv6Addr,
-    // TODO(https://github.com/oxidecomputer/omicron/issues/2888): We will
-    // need this interface to provision Zone filesystems on explicit U.2s,
-    // rather than simply placing them on the ramdisk.
     storage: StorageResources,
     ledger_directory_override: OnceCell<Utf8PathBuf>,
     image_directory_override: OnceCell<Utf8PathBuf>,
