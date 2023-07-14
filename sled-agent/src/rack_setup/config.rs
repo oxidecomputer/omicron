@@ -99,7 +99,6 @@ mod test {
         let cfg = SetupServiceConfig {
             rack_subnet: "fd00:1122:3344:0100::".parse().unwrap(),
             bootstrap_discovery: BootstrapAddressDiscovery::OnlyOurs,
-            rack_secret_threshold: 0,
             ntp_servers: vec![String::from("test.pool.example.com")],
             dns_servers: vec![String::from("1.1.1.1")],
             external_dns_zone_name: String::from("oxide.test"),

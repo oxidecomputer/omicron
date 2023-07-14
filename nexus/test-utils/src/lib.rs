@@ -145,6 +145,7 @@ struct RackInitRequestBuilder {
     services: Vec<nexus_types::internal_api::params::ServicePutRequest>,
     datasets: Vec<nexus_types::internal_api::params::DatasetCreateRequest>,
     internal_dns_config: internal_dns::DnsConfigBuilder,
+    mac_addrs: Box<dyn Iterator<Item = MacAddr>>,
 }
 
 impl RackInitRequestBuilder {
@@ -153,6 +154,7 @@ impl RackInitRequestBuilder {
             services: vec![],
             datasets: vec![],
             internal_dns_config: internal_dns::DnsConfigBuilder::new(),
+            mac_addrs: Box::new(MacAddr::iter_system()),
         }
     }
 
@@ -445,6 +447,11 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
         );
 
         let sled_id = Uuid::parse_str(SLED_AGENT_UUID).unwrap();
+        let mac = self
+            .rack_init_builder
+            .mac_addrs
+            .next()
+            .expect("ran out of MAC addresses");
         self.rack_init_builder.add_service(
             address,
             ServiceKind::Nexus {
@@ -462,7 +469,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                         .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES as u32 + 1)
                         .unwrap()
                         .into(),
-                    mac: MacAddr::random_system(),
+                    mac,
                 },
             },
             internal_dns::ServiceName::Nexus,
@@ -643,6 +650,11 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             panic!("Unsupported IPv4 Dropshot address");
         };
 
+        let mac = self
+            .rack_init_builder
+            .mac_addrs
+            .next()
+            .expect("ran out of MAC addresses");
         self.rack_init_builder.add_service(
             dropshot_address,
             ServiceKind::ExternalDns {
@@ -654,7 +666,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                         .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES as u32 + 1)
                         .unwrap()
                         .into(),
-                    mac: MacAddr::random_system(),
+                    mac,
                 },
             },
             internal_dns::ServiceName::ExternalDns,
