@@ -20,7 +20,6 @@ impl DumpSetup {
         log: Logger,
     ) {
         let mut dump_slices = Vec::new();
-        let mut pilot_saved_crash_dirs = Vec::new();
         let mut u2_dump_dirs = Vec::new();
         for (_id, disk_wrapper) in disks.iter() {
             match disk_wrapper {
@@ -32,11 +31,6 @@ impl DumpSetup {
                                 warn!(log, "Error getting dump device devfs path: {err:?}");
                             }
                         }
-                        pilot_saved_crash_dirs.push(
-                            disk.zpool_name().dataset_mountpoint(
-                                sled_hardware::disk::CRASH_DATASET,
-                            ),
-                        );
                     }
                     DiskVariant::U2 => {
                         let name = disk.zpool_name();
@@ -59,21 +53,6 @@ impl DumpSetup {
 
         dump_slices.sort();
         u2_dump_dirs.sort();
-
-        // TODO: remove when pilot isn't doing this any more
-        let u2_dump_dirs_clone = u2_dump_dirs.clone();
-        let log_clone = log.clone();
-        tokio::spawn(async move {
-            if let Err(err) = Self::move_pilot_savecores(
-                &log_clone,
-                pilot_saved_crash_dirs,
-                u2_dump_dirs_clone,
-            )
-            .await
-            {
-                error!(log_clone, "Could not move dump saved to M.2 by pilot to U.2 dump zvol: {err:?}");
-            }
-        });
 
         let savecore_lock = self.savecore_lock.clone();
         tokio::task::spawn_blocking(move || {
@@ -170,59 +149,5 @@ impl DumpSetup {
                 }
             }
         }
-    }
-
-    // pilot currently will savecore to the crash zvol on the internal M.2,
-    // move it to the U.2 to be consistent with where the others go
-    async fn move_pilot_savecores(
-        log: &Logger,
-        pilot_saved_crash_dirs: Vec<Utf8PathBuf>,
-        u2_dump_dirs: Vec<Utf8PathBuf>,
-    ) -> std::io::Result<()> {
-        let vmdump = std::ffi::OsStr::new("vmdump");
-        for crash_dir in &pilot_saved_crash_dirs {
-            if let Ok(dir) = crash_dir.read_dir() {
-                for entry in dir.flatten() {
-                    if let Some(name) = entry.path().file_stem() {
-                        if name == vmdump {
-                            for dump_dir in &u2_dump_dirs {
-                                let mut dest_n = 0;
-                                while dump_dir
-                                    .join_os(vmdump)
-                                    .with_extension(format!("{dest_n}"))
-                                    .exists()
-                                {
-                                    dest_n += 1;
-                                }
-                                let dest = dump_dir
-                                    .join_os(vmdump)
-                                    .with_extension(format!("{dest_n}"));
-
-                                let mut dest_f =
-                                    tokio::fs::File::create(&dest).await?;
-                                let mut src_f =
-                                    tokio::fs::File::open(&entry.path())
-                                        .await?;
-                                tokio::io::copy(&mut src_f, &mut dest_f)
-                                    .await?;
-                                dest_f.sync_all().await?;
-                                drop(src_f);
-                                drop(dest_f);
-
-                                if let Err(err) =
-                                    tokio::fs::remove_file(entry.path()).await
-                                {
-                                    warn!(log, "Could not remove copy of dump from M.2 after copying it to U.2: {err:?}");
-                                } else {
-                                    info!(log, "Relocated dump saved by pilot at {entry:?} to {dest:?}");
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        Ok(())
     }
 }
