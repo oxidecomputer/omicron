@@ -19,6 +19,12 @@ In our examples, one network will be used for connecting to the host OS running
 on the gimlet, and the second network will be used for connecting to Nexus as well
 as allow instances running on Omicron to connect to the outside.
 
+Whatever network you plan on using for the gimlet, you will need a contiguous
+range of IP addresses.  This range will be split into two segments. One segment
+will be for internal services, the other for external.  The required minimum
+number of IPs for each segment is decided by requirements in Omicron, and the
+values here may be out of date.
+
 == Overview
 
 For setting up a build system, follow the instructions in
@@ -26,6 +32,11 @@ xref:how-to-run.adoc[How to Run].
 
 You will need to compile Omicron somewhere else, then copy the files over
 to the gimlet.
+
+== Gimlet setup
+
+You gimlet should have the M.2 devices formatted and setup with 4k sector
+sizes.  Info on how to do that is:  <TBD>
 
 == A helios image for your bench gimlet
 
@@ -110,19 +121,28 @@ cargo build --release
 
 === Gimet non-gimlet configuration changes
 
-These changes are how we tell Nexus/Omicron what I.P. addresses it will use
+These changes are how we tell Nexus/Omicron what IP addresses it will use
 for internal services that require external network access, and what addresses
 we use for ingress and egress of network traffic from virtual machines we
 create.
 
-Update these two sections of `smf/seld-agent/non-gimlet/config-rss.toml` with
-the appropriate network information.  These values are for gimlet-sn21:
+Update these sections of `smf/sled-agent/non-gimlet/config-rss.toml` with
+the appropriate network information.  These values are for gimlet-sn21
+
+Choose two IP Addresses from the `internal_services_ip_pool_ranges`
 
 [source,text]
 ----
+external_dns_ips = [ "172.20.24.20", "172.20.24.21" ]
+----
+
+Select a range of address that includes at least 10.
+This number is subject to change depending on what Omicron needs.
+[source,text]
+----
 [[internal_services_ip_pool_ranges]]
-first = "172.20.24.10"          <--- first address of pool used for internal services (like Nexus)
-last = "172.20.24.15"           <--- last address of pool used for internal services
+first = "172.20.24.11"          <--- first address of pool used for internal services (like Nexus)
+last = "172.20.24.22"           <--- last address of pool used for internal services
 ----
 
 And this section as well
@@ -131,14 +151,20 @@ And this section as well
 # Configuration to bring up boundary services and make nexus reachable from the outside
 [rack_network_config]
 gateway_ip = "172.20.24.1"    <--- ip address of your default gateway / router
-infra_ip_first = "172.20.24.20" <--- first address of pool used for rack networking
+infra_ip_first = "172.20.24.23" <--- first address of pool used for rack networking
+                                     this typically starts where the
+                                     internal_services_ip_pool_ranges ends.
 infra_ip_last = "172.20.24.50"  <--- last address of pool used for rack networking
 uplink_port = "qsfp0"           <--- for "softnpu" environments, this will always be "qsfp0"
 uplink_port_speed = "1G"       <--- uplink interface speed
-uplink_ip = "172.20.24.20"      <--- address to assign to the uplink port
+uplink_port_fec="none"
+uplink_ip = "172.20.24.23"      <--- address to assign to the uplink port. I just chose
+                                     the first IP in the infra_ip_ list
 ----
 
-Update this section of your `smf/sled-agent/$MACHINE/config.toml`:
+Update this section of your `smf/sled-agent/non-gimlet/config.toml` if you are using
+a second k.2 for your Omicron/Nexus network.  If you have only one, then you don't
+need to update this section.
 [source,text]
 ----
 # An optional data link from which we extract a MAC address.
@@ -176,13 +202,14 @@ This includes the `tools` directory as we make use of a few scripts.
 == On the gimlet.
 
 After copying your Omicron packages over, setup the system with "virtual hardware".
-In my example, the `rge1` is the network interface the gimlet will be using.
+In my example, the `rge1` is the network interface the gimlet will be using for
+Omicron/Nexus.  If you only have one K.2, then you don't need the `PHYSICAL_LINK..`
 All commands on the gimlet are run as root.
 
 [source,text]
 ----
 cd /tmp
-$ PHYSICAL_LINK=rge1 ./tools/create_virtual_hardware.sh
+PHYSICAL_LINK=rge1 ./tools/create_virtual_hardware.sh
 ----
 
 == Install Omicron
@@ -198,7 +225,7 @@ You should start seeing zones appear, and you can monitor the sled-agent log
 for progress with `tail -f $(svcs -L sled-agent)`.  It will take a few seconds
 for the sled-agent service to start.
 
-Watch for the oxz_switch zone to appear, and give it an additional 20/30 seconds
+Watch for the oxz_switch zone to appear, and give it an additional minute
 to come online.  Then, run this command to setup softnpu.
 The GATEWAY_IP is the I.P. address of the gateway for the network we are
 using for Omicron/Nexus.  This will be the same as what you set in the
@@ -253,7 +280,7 @@ The ip pool start and ip pool end also come from your config-rss.toml
 ----
 export SOFTNPU_MAC=a8:e1:de:01:70:1d
 
-opt/oxide/softnpu/stuff/scadm \
+/opt/oxide/softnpu/stuff/scadm \
   --server /opt/oxide/softnpu/stuff/server \
   --client /opt/oxide/softnpu/stuff/client \
   standalone \
