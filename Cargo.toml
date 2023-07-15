@@ -264,9 +264,9 @@ pretty-hex = "0.3.0"
 proc-macro2 = "1.0"
 progenitor = { git = "https://github.com/oxidecomputer/progenitor", branch = "main" }
 progenitor-client = { git = "https://github.com/oxidecomputer/progenitor", branch = "main" }
-bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "83d2b5f80dd5b2dfaad71123bcb53eee065bbb07" }
-propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "83d2b5f80dd5b2dfaad71123bcb53eee065bbb07", features = [ "generated-migration" ] }
-propolis-server = { git = "https://github.com/oxidecomputer/propolis", rev = "83d2b5f80dd5b2dfaad71123bcb53eee065bbb07", default-features = false, features = ["mock-only"] }
+bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "fbd701c0a54f25208712b0b3b2dc7931c875d347" }
+propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "fbd701c0a54f25208712b0b3b2dc7931c875d347", features = [ "generated-migration" ] }
+propolis-server = { git = "https://github.com/oxidecomputer/propolis", rev = "fbd701c0a54f25208712b0b3b2dc7931c875d347", default-features = false, features = ["mock-only"] }
 #propolis-server = { path = "../propolis/bin/propolis-server" }
 proptest = "1.2.0"
 quote = "1.0"
