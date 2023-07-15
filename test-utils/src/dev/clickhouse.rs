@@ -52,7 +52,7 @@ pub enum ClickHouseError {
 }
 
 impl ClickHouseInstance {
-    /// Start a new ClickHouse server
+    /// Start a new ClickHouse server on the given IPv6 port.
     pub async fn new(port: u16) -> Result<Self, anyhow::Error> {
         let data_dir = TempDir::new()
             .context("failed to create tempdir for ClickHouse data")?;
@@ -223,17 +223,17 @@ async fn discover_local_listening_port(
 async fn find_clickhouse_port_in_log(
     path: &Path,
 ) -> Result<u16, ClickHouseError> {
-    let reader = BufReader::new(File::open(path).await?);
-    const NEEDLE: &str = "<Information> Application: Listening for http://";
+    let mut reader = BufReader::new(File::open(path).await?);
+    const NEEDLE: &str =
+        "<Information> Application: Listening for http://[::1]";
     let mut lines = reader.lines();
     loop {
         let line = lines.next_line().await?;
         match line {
             Some(line) => {
-                if let Some(needle_start) = line.find(&NEEDLE) {
-                    // The address is currently written as ":PORT", but may in the future be written as
-                    // "ADDR:PORT" or "HOST:PORT". Split on the colon, and parse the port number, rather
-                    // than assuming the address conforms to a specific syntax.
+                if let Some(needle_start) = line.find(NEEDLE) {
+                    // Our needle ends with `http://[::1]`; we'll split on the
+                    // colon we expect to follow it to find the port.
                     let address_start = needle_start + NEEDLE.len();
                     return line[address_start..]
                         .trim()
@@ -247,6 +247,11 @@ async fn find_clickhouse_port_in_log(
             None => {
                 // Reached EOF, just sleep for an interval and check again.
                 sleep(Duration::from_millis(10)).await;
+
+                // We might have gotten a partial line; close the file, reopen
+                // it, and start reading again from the beginning.
+                reader = BufReader::new(File::open(path).await?);
+                lines = reader.lines();
             }
         }
     }
@@ -282,7 +287,7 @@ mod tests {
         writeln!(file, "A garbage line").unwrap();
         writeln!(
             file,
-            "<Information> Application: Listening for http://127.0.0.1:{}",
+            "<Information> Application: Listening for http://[::1]:{}",
             EXPECTED_PORT
         )
         .unwrap();
@@ -340,7 +345,7 @@ mod tests {
                 file.path(),
                 line
             );
-            writeln!(file, "{}", line).unwrap();
+            write!(file, "{}", line).unwrap();
             file.flush().unwrap();
             sleep(interval).await;
         }
@@ -360,22 +365,30 @@ mod tests {
             let mut file = writer_file.lock().await;
             write_and_wait(
                 &mut file,
-                "A garbage line".to_string(),
+                "A garbage line\n".to_string(),
+                writer_interval,
+            )
+            .await;
+
+            // Ensure we can still parse the line even if our buf reader hits
+            // EOF in the middle of the line
+            // (https://github.com/oxidecomputer/omicron/issues/3580).
+            write_and_wait(
+                &mut file,
+                "<Information> Application: List".to_string(),
                 writer_interval,
             )
             .await;
             write_and_wait(
                 &mut file,
-                format!(
-                    "<Information> Application: Listening for http://127.0.0.1:{}",
-                    EXPECTED_PORT
-                ),
+                format!("ening for http://[::1]:{}\n", EXPECTED_PORT),
                 writer_interval,
             )
             .await;
+
             write_and_wait(
                 &mut file,
-                "Another garbage line".to_string(),
+                "Another garbage line\n".to_string(),
                 writer_interval,
             )
             .await;
