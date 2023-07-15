@@ -23,10 +23,7 @@ use ddm_admin_client::{Client as DdmAdminClient, DdmError};
 use futures::stream::{self, StreamExt, TryStreamExt};
 use illumos_utils::addrobj::AddrObject;
 use illumos_utils::dladm::{Dladm, Etherstub, EtherstubVnic, GetMacError};
-use illumos_utils::zfs::{
-    self, Mountpoint, Zfs, ZONE_ZFS_RAMDISK_DATASET,
-    ZONE_ZFS_RAMDISK_DATASET_MOUNTPOINT,
-};
+use illumos_utils::zfs;
 use illumos_utils::zone::Zones;
 use illumos_utils::{execute, PFEXEC};
 use key_manager::{KeyManager, StorageKeyRequester};
@@ -50,9 +47,6 @@ pub use rack_ops::RackInitId;
 pub use rack_ops::RackResetId;
 use rack_ops::RssAccess;
 pub use rack_ops::RssAccessError;
-
-/// The number of QSFP28 ports on sidecar revisions A and B
-const SIDECAR_REV_A_B_N_QSFP28_PORTS: u8 = 32;
 
 /// Describes errors which may occur while operating the bootstrap service.
 #[derive(Error, Debug)]
@@ -340,27 +334,6 @@ impl Agent {
         // advertise it to other sleds.
         let ddmd_client = DdmAdminClient::localhost(&log)?;
         ddmd_client.advertise_prefix(Ipv6Subnet::new(ip));
-
-        // Before we start creating zones, we need to ensure that the
-        // necessary ZFS and Zone resources are ready.
-        //
-        // TODO(https://github.com/oxidecomputer/omicron/issues/2888):
-        // We should carefully consider which dataset this is using; it's
-        // currently part of the ramdisk.
-        let zoned = true;
-        let do_format = true;
-        let encryption_details = None;
-        let quota = None;
-        Zfs::ensure_filesystem(
-            ZONE_ZFS_RAMDISK_DATASET,
-            Mountpoint::Path(Utf8PathBuf::from(
-                ZONE_ZFS_RAMDISK_DATASET_MOUNTPOINT,
-            )),
-            zoned,
-            do_format,
-            encryption_details,
-            quota,
-        )?;
 
         // Before we start monitoring for hardware, ensure we're running from a
         // predictable state.
@@ -906,7 +879,7 @@ mod tests {
 
         let ledger = Ledger::<PersistentSledAgentRequest>::new(log, paths)
             .await
-            .expect("Failt to read request");
+            .expect("Failed to read request");
 
         assert!(&request == ledger.data(), "serialization round trip failed");
         logctx.cleanup_successful();

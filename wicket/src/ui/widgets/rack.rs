@@ -4,7 +4,7 @@
 
 //! A rendering of the Oxide rack
 
-use crate::state::{Component, Inventory};
+use crate::state::Inventory;
 use crate::state::{ComponentId, KnightRiderMode, RackState};
 use std::collections::BTreeMap;
 use tui::buffer::Buffer;
@@ -179,11 +179,7 @@ enum ComponentPresence {
 impl ComponentPresence {
     fn for_component(inventory: &Inventory, component: &ComponentId) -> Self {
         let sp = match inventory.get_inventory(component) {
-            Some(
-                Component::Sled(sp)
-                | Component::Switch(sp)
-                | Component::Psc(sp),
-            ) => sp,
+            Some(component) => component.sp(),
             None => return Self::NotPresent,
         };
 

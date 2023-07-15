@@ -9,7 +9,7 @@ use self::generators::TICK_TIMEOUT;
 use crate::Uuid;
 use assert_matches::assert_matches;
 use bootstore::schemes::v0::{
-    ApiError, Config, Envelope, Fsm, Msg, MsgError, RackUuid, Request,
+    ApiError, Envelope, Fsm, FsmConfig, Msg, MsgError, RackUuid, Request,
     RequestType, Response, ResponseType,
 };
 use sled_hardware::Baseboard;
@@ -37,7 +37,7 @@ pub struct CommonTestState {
     pub rack_uuid: RackUuid,
 
     // The generated configuration
-    pub config: Config,
+    pub config: FsmConfig,
 
     // IDs of all initial members
     pub initial_members: BTreeSet<Baseboard>,
@@ -59,7 +59,7 @@ impl CommonTestState {
     pub fn new(
         sut: Fsm,
         initial_members: BTreeSet<Baseboard>,
-        config: Config,
+        config: FsmConfig,
         rack_uuid: RackUuid,
     ) -> CommonTestState {
         let threshold = initial_members.len() / 2 + 1;

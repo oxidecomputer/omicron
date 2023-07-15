@@ -296,6 +296,7 @@ impl SledAgent {
             nexus_client.clone(),
             etherstub.clone(),
             port_manager.clone(),
+            storage.resources().clone(),
         )?;
 
         match config.vmm_reservoir_percentage {
@@ -360,8 +361,9 @@ impl SledAgent {
 
         // Begin monitoring the underlying hardware, and reacting to changes.
         let sa = sled_agent.clone();
+        let hardware_log = log.clone();
         tokio::spawn(async move {
-            sa.hardware_monitor_task(log).await;
+            sa.hardware_monitor_task(hardware_log).await;
         });
 
         // Finally, load services for which we're already responsible.
@@ -369,6 +371,11 @@ impl SledAgent {
         // Do this *after* monitoring for harware, to enable the switch zone to
         // establish an underlay address before proceeding.
         sled_agent.inner.services.load_services().await?;
+
+        // Now that we've initialized the sled services, notify nexus again
+        // at which point it'll plumb any necessary firewall rules back to us.
+        sled_agent.notify_nexus_about_self(&log);
+
         Ok(sled_agent)
     }
 

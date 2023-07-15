@@ -15,6 +15,7 @@ use crate::params::{
     InstanceMigrationTargetParams, InstanceStateRequested, VpcFirewallRule,
 };
 use crate::profile::*;
+use crate::storage_manager::StorageResources;
 use anyhow::anyhow;
 use backoff::BackoffError;
 use futures::lock::{Mutex, MutexGuard};
@@ -23,7 +24,7 @@ use illumos_utils::link::VnicAllocator;
 use illumos_utils::opte::PortManager;
 use illumos_utils::running_zone::{InstalledZone, RunningZone};
 use illumos_utils::svc::wait_for_service;
-use illumos_utils::zfs::ZONE_ZFS_RAMDISK_DATASET_MOUNTPOINT;
+use illumos_utils::zone::Zones;
 use illumos_utils::zone::PROPOLIS_ZONE_PREFIX;
 use omicron_common::address::NEXUS_INTERNAL_PORT;
 use omicron_common::address::PROPOLIS_PORT;
@@ -34,17 +35,15 @@ use omicron_common::api::internal::shared::{
 use omicron_common::backoff;
 //use propolis_client::generated::DiskRequest;
 use propolis_client::Client as PropolisClient;
+use rand::prelude::SliceRandom;
+use rand::SeedableRng;
+use sled_hardware::disk::ZONE_DATASET;
 use slog::Logger;
 use std::net::IpAddr;
 use std::net::{SocketAddr, SocketAddrV6};
 use std::sync::Arc;
 use tokio::task::JoinHandle;
 use uuid::Uuid;
-
-#[cfg(test)]
-use illumos_utils::zone::MockZones as Zones;
-#[cfg(not(test))]
-use illumos_utils::zone::Zones;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -95,6 +94,9 @@ pub enum Error {
 
     #[error("Instance already registered with Propolis ID {0}")]
     InstanceAlreadyRegistered(Uuid),
+
+    #[error("No U.2 devices found")]
+    U2NotFound,
 
     #[error("I/O error")]
     Io(#[from] std::io::Error),
@@ -234,6 +236,9 @@ struct InstanceInner {
 
     // Connection to Nexus
     nexus_client: NexusClientWithResolver,
+
+    // Storage resources
+    storage: StorageResources,
 
     // Object representing membership in the "instance manager".
     instance_ticket: InstanceTicket,
@@ -559,42 +564,6 @@ pub struct Instance {
     inner: Arc<Mutex<InstanceInner>>,
 }
 
-#[cfg(test)]
-mockall::mock! {
-    pub Instance {
-        #[allow(clippy::too_many_arguments)]
-        pub fn new(
-            log: Logger,
-            id: Uuid,
-            ticket: InstanceTicket,
-            initial: InstanceHardware,
-            vnic_allocator: VnicAllocator<Etherstub>,
-            port_manager: PortManager,
-            nexus_client: NexusClientWithResolver,
-        ) -> Result<Self, Error>;
-        pub async fn current_state(&self) -> InstanceRuntimeState;
-        pub async fn put_state(
-            &self,
-            state: InstanceStateRequested,
-        ) -> Result<InstanceRuntimeState, Error>;
-        pub async fn put_migration_ids(
-            &self,
-            old_runtime: &InstanceRuntimeState,
-            migration_ids: &Option<InstanceMigrationSourceParams>
-        ) -> Result<InstanceRuntimeState, Error>;
-        pub async fn issue_snapshot_request(
-            &self,
-            disk_id: Uuid,
-            snapshot_name: Uuid,
-        ) -> Result<(), Error>;
-        pub async fn terminate(&self) -> Result<InstanceRuntimeState, Error>;
-    }
-    impl Clone for Instance {
-        fn clone(&self) -> Self;
-    }
-}
-
-#[cfg_attr(test, allow(dead_code))]
 impl Instance {
     /// Creates a new (not yet running) instance object.
     ///
@@ -618,6 +587,7 @@ impl Instance {
         vnic_allocator: VnicAllocator<Etherstub>,
         port_manager: PortManager,
         nexus_client: NexusClientWithResolver,
+        storage: StorageResources,
     ) -> Result<Self, Error> {
         info!(log, "Instance::new w/initial HW: {:?}", initial);
         let instance = InstanceInner {
@@ -648,6 +618,7 @@ impl Instance {
             state: InstanceStates::new(initial.runtime),
             running_state: None,
             nexus_client,
+            storage,
             instance_ticket: ticket,
         };
 
@@ -856,7 +827,14 @@ impl Instance {
         // Create a zone for the propolis instance, using the previously
         // configured VNICs.
         let zname = propolis_zone_name(inner.propolis_id());
-        let root = camino::Utf8Path::new(ZONE_ZFS_RAMDISK_DATASET_MOUNTPOINT);
+        let mut rng = rand::rngs::StdRng::from_entropy();
+        let root = inner
+            .storage
+            .all_u2_mountpoints(ZONE_DATASET)
+            .await
+            .choose(&mut rng)
+            .ok_or_else(|| Error::U2NotFound)?
+            .clone();
         let installed_zone = InstalledZone::install(
             &inner.log,
             &inner.vnic_allocator,
@@ -1031,127 +1009,5 @@ impl Instance {
         } else {
             Err(Error::InstanceNotRunning(inner.properties.id))
         }
-    }
-}
-
-#[cfg(test)]
-mod test {
-    use super::*;
-    use crate::fakes::nexus::FakeNexusServer;
-    use crate::instance_manager::InstanceManager;
-    use crate::nexus::NexusClientWithResolver;
-    use crate::params::InstanceStateRequested;
-    use chrono::Utc;
-    use illumos_utils::dladm::Etherstub;
-    use illumos_utils::opte::PortManager;
-    use internal_dns::resolver::Resolver;
-    use omicron_common::api::external::{
-        ByteCount, Generation, InstanceCpuCount, InstanceState,
-    };
-    use omicron_common::api::internal::nexus::InstanceRuntimeState;
-    use omicron_common::api::internal::shared::SourceNatConfig;
-    use omicron_test_utils::dev::test_setup_log;
-    use std::net::IpAddr;
-    use std::net::Ipv4Addr;
-
-    static INST_UUID_STR: &str = "e398c5d5-5059-4e55-beac-3a1071083aaa";
-    static PROPOLIS_UUID_STR: &str = "ed895b13-55d5-4e0b-88e9-3f4e74d0d936";
-
-    fn test_uuid() -> Uuid {
-        INST_UUID_STR.parse().unwrap()
-    }
-
-    fn test_propolis_uuid() -> Uuid {
-        PROPOLIS_UUID_STR.parse().unwrap()
-    }
-
-    fn new_initial_instance() -> InstanceHardware {
-        InstanceHardware {
-            runtime: InstanceRuntimeState {
-                run_state: InstanceState::Creating,
-                sled_id: Uuid::new_v4(),
-                propolis_id: test_propolis_uuid(),
-                dst_propolis_id: None,
-                propolis_addr: Some("[fd00:1de::74]:12400".parse().unwrap()),
-                migration_id: None,
-                propolis_gen: Generation::new(),
-                ncpus: InstanceCpuCount(2),
-                memory: ByteCount::from_mebibytes_u32(512),
-                hostname: "myvm".to_string(),
-                gen: Generation::new(),
-                time_updated: Utc::now(),
-            },
-            nics: vec![],
-            source_nat: SourceNatConfig {
-                ip: IpAddr::from(Ipv4Addr::new(10, 0, 0, 1)),
-                first_port: 0,
-                last_port: 16_384,
-            },
-            external_ips: vec![],
-            firewall_rules: vec![],
-            disks: vec![],
-            cloud_init_bytes: None,
-        }
-    }
-
-    #[tokio::test]
-    async fn transition_before_start() {
-        let logctx = test_setup_log("transition_before_start");
-        let log = &logctx.log;
-        let vnic_allocator =
-            VnicAllocator::new("Test", Etherstub("mylink".to_string()));
-        let underlay_ip = std::net::Ipv6Addr::new(
-            0xfd00, 0x1de, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
-        );
-        let port_manager = PortManager::new(log.new(slog::o!()), underlay_ip);
-
-        // Create a fake Nexus Server (for notifications) and add it to a
-        // corresponding fake DNS server for discovery.
-        struct NexusServer {}
-        impl FakeNexusServer for NexusServer {}
-        let nexus_server = crate::fakes::nexus::start_test_server(
-            log.clone(),
-            Box::new(NexusServer {}),
-        );
-        let dns =
-            crate::fakes::nexus::start_dns_server(log, &nexus_server).await;
-        let internal_resolver = Arc::new(
-            Resolver::new_from_addrs(
-                log.clone(),
-                vec![*dns.dns_server.local_address()],
-            )
-            .unwrap(),
-        );
-        let nexus_client_with_resolver =
-            NexusClientWithResolver::new_from_resolver_with_port(
-                log,
-                internal_resolver,
-                nexus_server.local_addr().port(),
-            );
-
-        let instance_manager = InstanceManager::new(
-            log.clone(),
-            nexus_client_with_resolver.clone(),
-            Etherstub("mylink".to_string()),
-            port_manager.clone(),
-        )
-        .unwrap();
-
-        let inst = Instance::new(
-            log.clone(),
-            test_uuid(),
-            instance_manager.test_instance_ticket(test_uuid()),
-            new_initial_instance(),
-            vnic_allocator,
-            port_manager,
-            nexus_client_with_resolver,
-        )
-        .unwrap();
-
-        // Pick a state transition that requires the instance to have started.
-        assert!(inst.put_state(InstanceStateRequested::Reboot).await.is_err());
-
-        drop(dns);
-        logctx.cleanup_successful();
     }
 }

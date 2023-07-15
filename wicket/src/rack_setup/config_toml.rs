@@ -12,6 +12,7 @@ use toml_edit::Array;
 use toml_edit::Document;
 use toml_edit::Formatted;
 use toml_edit::InlineTable;
+use toml_edit::Item;
 use toml_edit::Table;
 use toml_edit::Value;
 use wicketd_client::types::BootstrapSledDescription;
@@ -194,16 +195,69 @@ fn populate_network_table(
     };
 
     for (property, value) in [
-        ("gateway_ip", config.gateway_ip.to_string()),
         ("infra_ip_first", config.infra_ip_first.to_string()),
         ("infra_ip_last", config.infra_ip_last.to_string()),
-        ("uplink_port", config.uplink_port.to_string()),
-        ("uplink_port_speed", enum_to_toml_string(&config.uplink_port_speed)),
-        ("uplink_port_fec", enum_to_toml_string(&config.uplink_port_fec)),
-        ("uplink_ip", config.uplink_ip.to_string()),
     ] {
         *table.get_mut(property).unwrap().as_value_mut().unwrap() =
             Value::String(Formatted::new(value));
+    }
+
+    // If `config.uplinks` is empty, we'll leave the template uplinks in place;
+    // otherwise, replace it with the user's uplinks.
+    if !config.uplinks.is_empty() {
+        *table.get_mut("uplinks").unwrap().as_array_of_tables_mut().unwrap() =
+            config
+                .uplinks
+                .iter()
+                .map(|cfg| {
+                    let mut uplink = Table::new();
+                    let mut last_key = None;
+                    for (property, value) in [
+                        ("switch", cfg.switch.to_string()),
+                        ("gateway_ip", cfg.gateway_ip.to_string()),
+                        ("uplink_port", cfg.uplink_port.to_string()),
+                        (
+                            "uplink_port_speed",
+                            enum_to_toml_string(&cfg.uplink_port_speed),
+                        ),
+                        (
+                            "uplink_port_fec",
+                            enum_to_toml_string(&cfg.uplink_port_fec),
+                        ),
+                        ("uplink_ip", cfg.uplink_ip.to_string()),
+                    ] {
+                        uplink.insert(
+                            property,
+                            Item::Value(Value::String(Formatted::new(value))),
+                        );
+                        last_key = Some(property);
+                    }
+
+                    if let Some(uplink_vid) = cfg.uplink_vid {
+                        uplink.insert(
+                            "uplink_vid",
+                            Item::Value(Value::Integer(Formatted::new(
+                                i64::from(uplink_vid),
+                            ))),
+                        );
+                    } else {
+                        // Unwraps: We know `last_key` is `Some(_)`, because we
+                        // set it in every iteration of the loop above, and we
+                        // know it's present in `uplink` because we set it to
+                        // the `property` we just inserted.
+                        let last = uplink.get_mut(last_key.unwrap()).unwrap();
+
+                        // Every item we insert is an `Item::Value`, so we can
+                        // unwrap this conversion.
+                        last.as_value_mut()
+                            .unwrap()
+                            .decor_mut()
+                            .set_suffix("\n# uplink_vid =");
+                    }
+
+                    uplink
+                })
+                .collect();
     }
 }
 
@@ -218,12 +272,16 @@ mod tests {
     use wicketd_client::types::PortFec;
     use wicketd_client::types::PortSpeed;
     use wicketd_client::types::SpIdentifier;
+    use wicketd_client::types::SwitchLocation;
+    use wicketd_client::types::UplinkConfig;
 
     fn put_config_from_current_config(
         value: CurrentRssUserConfigInsensitive,
     ) -> PutRssUserConfigInsensitive {
         use omicron_common::api::internal::shared::PortFec as InternalPortFec;
         use omicron_common::api::internal::shared::PortSpeed as InternalPortSpeed;
+        use omicron_common::api::internal::shared::SwitchLocation as InternalSwitchLocation;
+        use omicron_common::api::internal::shared::UplinkConfig as InternalUplinkConfig;
 
         let rnc = value.rack_network_config.unwrap();
 
@@ -253,28 +311,48 @@ mod tests {
             external_dns_ips: value.external_dns_ips,
             ntp_servers: value.ntp_servers,
             rack_network_config: InternalRackNetworkConfig {
-                gateway_ip: rnc.gateway_ip,
                 infra_ip_first: rnc.infra_ip_first,
                 infra_ip_last: rnc.infra_ip_last,
-                uplink_port: rnc.uplink_port,
-                uplink_port_speed: match rnc.uplink_port_speed {
-                    PortSpeed::Speed0G => InternalPortSpeed::Speed0G,
-                    PortSpeed::Speed1G => InternalPortSpeed::Speed1G,
-                    PortSpeed::Speed10G => InternalPortSpeed::Speed10G,
-                    PortSpeed::Speed25G => InternalPortSpeed::Speed25G,
-                    PortSpeed::Speed40G => InternalPortSpeed::Speed40G,
-                    PortSpeed::Speed50G => InternalPortSpeed::Speed50G,
-                    PortSpeed::Speed100G => InternalPortSpeed::Speed100G,
-                    PortSpeed::Speed200G => InternalPortSpeed::Speed200G,
-                    PortSpeed::Speed400G => InternalPortSpeed::Speed400G,
-                },
-                uplink_port_fec: match rnc.uplink_port_fec {
-                    PortFec::Firecode => InternalPortFec::Firecode,
-                    PortFec::None => InternalPortFec::None,
-                    PortFec::Rs => InternalPortFec::Rs,
-                },
-                uplink_ip: rnc.uplink_ip,
-                uplink_vid: rnc.uplink_vid,
+                uplinks: rnc
+                    .uplinks
+                    .iter()
+                    .map(|config| InternalUplinkConfig {
+                        gateway_ip: config.gateway_ip,
+                        uplink_port: config.uplink_port.clone(),
+                        uplink_port_speed: match config.uplink_port_speed {
+                            PortSpeed::Speed0G => InternalPortSpeed::Speed0G,
+                            PortSpeed::Speed1G => InternalPortSpeed::Speed1G,
+                            PortSpeed::Speed10G => InternalPortSpeed::Speed10G,
+                            PortSpeed::Speed25G => InternalPortSpeed::Speed25G,
+                            PortSpeed::Speed40G => InternalPortSpeed::Speed40G,
+                            PortSpeed::Speed50G => InternalPortSpeed::Speed50G,
+                            PortSpeed::Speed100G => {
+                                InternalPortSpeed::Speed100G
+                            }
+                            PortSpeed::Speed200G => {
+                                InternalPortSpeed::Speed200G
+                            }
+                            PortSpeed::Speed400G => {
+                                InternalPortSpeed::Speed400G
+                            }
+                        },
+                        uplink_port_fec: match config.uplink_port_fec {
+                            PortFec::Firecode => InternalPortFec::Firecode,
+                            PortFec::None => InternalPortFec::None,
+                            PortFec::Rs => InternalPortFec::Rs,
+                        },
+                        uplink_ip: config.uplink_ip,
+                        uplink_vid: config.uplink_vid,
+                        switch: match config.switch {
+                            SwitchLocation::Switch0 => {
+                                InternalSwitchLocation::Switch0
+                            }
+                            SwitchLocation::Switch1 => {
+                                InternalSwitchLocation::Switch1
+                            }
+                        },
+                    })
+                    .collect(),
             },
         }
     }
@@ -313,14 +391,17 @@ mod tests {
             external_dns_ips: vec!["10.0.0.1".parse().unwrap()],
             ntp_servers: vec!["ntp1.com".into(), "ntp2.com".into()],
             rack_network_config: Some(RackNetworkConfig {
-                gateway_ip: Ipv4Addr::new(1, 2, 3, 4),
                 infra_ip_first: Ipv4Addr::new(2, 3, 4, 5),
                 infra_ip_last: Ipv4Addr::new(3, 4, 5, 6),
-                uplink_ip: Ipv4Addr::new(4, 5, 6, 7),
-                uplink_port_speed: PortSpeed::Speed400G,
-                uplink_port_fec: PortFec::Firecode,
-                uplink_port: "port0".into(),
-                uplink_vid: None,
+                uplinks: vec![UplinkConfig {
+                    gateway_ip: Ipv4Addr::new(1, 2, 3, 4),
+                    uplink_ip: Ipv4Addr::new(4, 5, 6, 7),
+                    uplink_port_speed: PortSpeed::Speed400G,
+                    uplink_port_fec: PortFec::Firecode,
+                    uplink_port: "port0".into(),
+                    uplink_vid: None,
+                    switch: SwitchLocation::Switch0,
+                }],
             }),
         };
         let template = TomlTemplate::populate(&config).to_string();

@@ -71,7 +71,7 @@ url = "postgresql://root@[::1]:32221/omicron?sslmode=disable"
 max_vpc_ipv4_subnet_prefix = 26
 
 # Configuration for interacting with the dataplane daemon
-[dendrite]
+[dendrite.switch0]
 address = "[::1]:12224"
 
 [background_tasks]

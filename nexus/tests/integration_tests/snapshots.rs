@@ -26,6 +26,7 @@ use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::Instance;
 use omicron_common::api::external::InstanceCpuCount;
 use omicron_common::api::external::Name;
+use omicron_nexus::app::MIN_DISK_SIZE_BYTES;
 use omicron_nexus::authz;
 use omicron_nexus::db;
 use omicron_nexus::db::identity::Resource;
@@ -490,11 +491,9 @@ async fn test_reject_creating_disk_from_snapshot(
                 state: db::model::SnapshotState::Creating,
                 block_size: db::model::BlockSize::AdvancedFormat,
 
-                size: external::ByteCount::try_from(
-                    2 * params::MIN_DISK_SIZE_BYTES,
-                )
-                .unwrap()
-                .into(),
+                size: external::ByteCount::try_from(2 * MIN_DISK_SIZE_BYTES)
+                    .unwrap()
+                    .into(),
             },
         )
         .await
@@ -516,7 +515,7 @@ async fn test_reject_creating_disk_from_snapshot(
                 },
 
                 size: ByteCount::try_from(
-                    2 * params::MIN_DISK_SIZE_BYTES
+                    2 * MIN_DISK_SIZE_BYTES
                         + db::model::BlockSize::Traditional.to_bytes(),
                 )
                 .unwrap(),
@@ -547,7 +546,7 @@ async fn test_reject_creating_disk_from_snapshot(
                     snapshot_id: snapshot.id(),
                 },
 
-                size: ByteCount::try_from(params::MIN_DISK_SIZE_BYTES).unwrap(),
+                size: ByteCount::try_from(MIN_DISK_SIZE_BYTES).unwrap(),
             }))
             .expect_status(Some(StatusCode::BAD_REQUEST)),
     )
@@ -561,8 +560,8 @@ async fn test_reject_creating_disk_from_snapshot(
         error.message,
         format!(
             "disk size {} must be greater than or equal to snapshot size {}",
-            params::MIN_DISK_SIZE_BYTES,
-            2 * params::MIN_DISK_SIZE_BYTES,
+            MIN_DISK_SIZE_BYTES,
+            2 * MIN_DISK_SIZE_BYTES,
         )
     );
 
@@ -581,7 +580,7 @@ async fn test_reject_creating_disk_from_snapshot(
                 },
 
                 size: ByteCount::try_from(
-                    2 * params::MIN_DISK_SIZE_BYTES
+                    2 * MIN_DISK_SIZE_BYTES
                         + db::model::BlockSize::AdvancedFormat.to_bytes(),
                 )
                 .unwrap(),
@@ -766,7 +765,7 @@ async fn test_reject_creating_disk_from_other_project_snapshot(
                     snapshot_id: snapshot.id(),
                 },
 
-                size: ByteCount::try_from(params::MIN_DISK_SIZE_BYTES).unwrap(),
+                size: ByteCount::try_from(MIN_DISK_SIZE_BYTES).unwrap(),
             }))
             .expect_status(Some(StatusCode::BAD_REQUEST)),
     )

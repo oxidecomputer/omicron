@@ -276,6 +276,7 @@ table! {
         address_lot_id -> Uuid,
         first_address -> Inet,
         last_address -> Inet,
+        anycast -> Bool,
     }
 }
 
@@ -289,6 +290,7 @@ table! {
         rack_id -> Uuid,
         switch_location -> Text,
         address -> Inet,
+        anycast -> Bool,
     }
 }
 
@@ -1169,3 +1171,8 @@ allow_tables_to_appear_in_same_query!(
 
 allow_tables_to_appear_in_same_query!(dns_zone, dns_version, dns_name);
 allow_tables_to_appear_in_same_query!(external_ip, service);
+
+allow_tables_to_appear_in_same_query!(
+    switch_port,
+    switch_port_settings_route_config
+);

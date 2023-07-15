@@ -10,6 +10,7 @@ mod peer;
 mod peer_networking;
 mod request_manager;
 mod share_pkg;
+mod storage;
 
 use derive_more::{Display, From};
 use serde::{Deserialize, Serialize};
@@ -94,7 +95,7 @@ impl Debug for Shares {
 
 /// Configuration of the FSM
 #[derive(Debug, Clone, Copy)]
-pub struct Config {
+pub struct FsmConfig {
     pub learn_timeout: Duration,
     pub rack_init_timeout: Duration,
     pub rack_secret_request_timeout: Duration,

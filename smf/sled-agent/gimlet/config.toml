@@ -23,7 +23,7 @@ data_link = "cxgbe0"
 
 # Percentage of usable physical DRAM to use for the VMM reservoir, which
 # guest memory is pulled from.
-vmm_reservoir_percentage = 0
+vmm_reservoir_percentage = 80
 
 # Swap device size for the system.
 # We pick 256 GiB somewhat arbitrarily, since the device is sparsely allocated.

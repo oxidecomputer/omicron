@@ -2286,11 +2286,16 @@ CREATE TABLE omicron.public.address_lot_rsvd_block (
     id UUID PRIMARY KEY,
     address_lot_id UUID NOT NULL,
     first_address INET NOT NULL,
-    last_address INET NOT NULL
+    last_address INET NOT NULL,
+    anycast BOOL NOT NULL
 );
 
 CREATE INDEX ON omicron.public.address_lot_rsvd_block (
     address_lot_id
+);
+
+CREATE INDEX on omicron.public.address_lot_rsvd_block (
+    anycast
 );
 
 CREATE TABLE omicron.public.loopback_address (
@@ -2301,7 +2306,8 @@ CREATE TABLE omicron.public.loopback_address (
     rsvd_address_lot_block_id UUID NOT NULL,
     rack_id UUID NOT NULL,
     switch_location TEXT NOT NULL,
-    address INET NOT NULL
+    address INET NOT NULL,
+    anycast BOOL NOT NULL
 );
 
 /* TODO https://github.com/oxidecomputer/omicron/issues/3001 */
@@ -2321,6 +2327,8 @@ CREATE TABLE omicron.public.switch_port (
         rack_id, switch_location, port_name
     )
 );
+
+CREATE INDEX ON omicron.public.switch_port (port_settings_id);
 
 /* port settings groups included from port settings objects */
 CREATE TABLE omicron.public.switch_port_settings_groups (

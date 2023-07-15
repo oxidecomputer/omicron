@@ -149,4 +149,8 @@ pub struct AddressLotReservedBlock {
 
     /// The last address in the reservation (inclusive).
     pub last_address: IpNetwork,
+
+    /// Address is an anycast address.
+    /// This allows the address to be assigned to multiple locations simultaneously.
+    pub anycast: bool,
 }

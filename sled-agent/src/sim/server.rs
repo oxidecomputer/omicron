@@ -23,6 +23,7 @@ use omicron_common::backoff::{
 };
 use omicron_common::nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
 use slog::{info, Drain, Logger};
+use std::collections::HashMap;
 use std::net::IpAddr;
 use std::net::SocketAddr;
 use std::net::SocketAddrV6;
@@ -437,7 +438,9 @@ pub async fn run_standalone_server(
         external_dns_zone_name: internal_dns::names::DNS_ZONE_EXTERNAL_TESTING
             .to_owned(),
         recovery_silo,
-        external_port_count: 1,
+        external_port_count: NexusTypes::ExternalPortDiscovery::Static(
+            HashMap::new(),
+        ),
         rack_network_config: None,
     };
 

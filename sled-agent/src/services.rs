@@ -33,7 +33,7 @@ use crate::params::{
 use crate::profile::*;
 use crate::smf_helper::Service;
 use crate::smf_helper::SmfHelper;
-use crate::storage_manager::StorageManager;
+use crate::storage_manager::StorageResources;
 use camino::{Utf8Path, Utf8PathBuf};
 use ddm_admin_client::{Client as DdmAdminClient, DdmError};
 use dpd_client::{types as DpdTypes, Client as DpdClient, Error as DpdError};
@@ -47,7 +47,6 @@ use illumos_utils::opte::{Port, PortManager, PortTicket};
 use illumos_utils::running_zone::{
     InstalledZone, RunCommandError, RunningZone,
 };
-use illumos_utils::zfs::ZONE_ZFS_RAMDISK_DATASET_MOUNTPOINT;
 use illumos_utils::zone::AddressRequest;
 use illumos_utils::zone::Zones;
 use illumos_utils::{execute, PFEXEC};
@@ -62,8 +61,6 @@ use omicron_common::address::CRUCIBLE_PANTRY_PORT;
 use omicron_common::address::CRUCIBLE_PORT;
 use omicron_common::address::DENDRITE_PORT;
 use omicron_common::address::MGS_PORT;
-use omicron_common::address::NEXUS_INTERNAL_PORT;
-use omicron_common::address::OXIMETER_PORT;
 use omicron_common::address::RACK_PREFIX;
 use omicron_common::address::SLED_PREFIX;
 use omicron_common::address::WICKETD_PORT;
@@ -77,6 +74,9 @@ use omicron_common::nexus_config::{
     self, ConfigDropshotWithTls, DeploymentConfig as NexusDeploymentConfig,
 };
 use once_cell::sync::OnceCell;
+use rand::prelude::SliceRandom;
+use rand::SeedableRng;
+use sled_hardware::disk::ZONE_DATASET;
 use sled_hardware::is_gimlet;
 use sled_hardware::underlay;
 use sled_hardware::underlay::BOOTSTRAP_PREFIX;
@@ -128,6 +128,9 @@ pub enum Error {
 
     #[error("Sled Agent not initialized yet")]
     SledAgentNotReady,
+
+    #[error("No U.2 devices found with a {ZONE_DATASET} mountpoint")]
+    U2NotFound,
 
     #[error("Sled-local zone error: {0}")]
     SledLocalZone(anyhow::Error),
@@ -365,10 +368,7 @@ pub struct ServiceManagerInner {
     advertised_prefixes: Mutex<HashSet<Ipv6Subnet<SLED_PREFIX>>>,
     sled_info: OnceCell<SledAgentInfo>,
     switch_zone_bootstrap_address: Ipv6Addr,
-    // TODO(https://github.com/oxidecomputer/omicron/issues/2888): We will
-    // need this interface to provision Zone filesystems on explicit U.2s,
-    // rather than simply placing them on the ramdisk.
-    storage: StorageManager,
+    storage: StorageResources,
     ledger_directory_override: OnceCell<Utf8PathBuf>,
     image_directory_override: OnceCell<Utf8PathBuf>,
 }
@@ -413,7 +413,7 @@ impl ServiceManager {
         sidecar_revision: SidecarRevision,
         switch_zone_bootstrap_address: Ipv6Addr,
         switch_zone_maghemite_links: Vec<PhysicalLink>,
-        storage: StorageManager,
+        storage: StorageResources,
     ) -> Result<Self, Error> {
         debug!(log, "Creating new ServiceManager");
         let log = log.new(o!("component" => "ServiceManager"));
@@ -469,7 +469,6 @@ impl ServiceManager {
     async fn all_debug_directories(&self) -> Vec<Utf8PathBuf> {
         self.inner
             .storage
-            .resources()
             .all_m2_mountpoints(sled_hardware::disk::DEBUG_DATASET)
             .await
     }
@@ -498,7 +497,6 @@ impl ServiceManager {
         }
         self.inner
             .storage
-            .resources()
             .all_m2_mountpoints(sled_hardware::disk::CONFIG_DATASET)
             .await
             .into_iter()
@@ -771,22 +769,24 @@ impl ServiceManager {
             return Ok(vec![]);
         }
 
-        let SledAgentInfo { port_manager, resolver, underlay_address, .. } =
+        let SledAgentInfo { port_manager, underlay_address, .. } =
             &self.inner.sled_info.get().ok_or(Error::SledAgentNotReady)?;
 
-        let dpd_addr = resolver
-            .lookup_socket_v6(internal_dns::ServiceName::Dendrite)
-            .await?;
-
-        let dpd_client = DpdClient::new(
-            &format!("http://[{}]:{}", dpd_addr.ip(), dpd_addr.port()),
-            dpd_client::ClientState {
-                tag: "sled-agent".to_string(),
-                log: self.inner.log.new(o!(
-                    "component" => "DpdClient"
-                )),
-            },
-        );
+        let dpd_clients: Vec<DpdClient> = req
+            .boundary_switches
+            .iter()
+            .map(|addr| {
+                DpdClient::new(
+                    &format!("http://[{}]:{}", addr, DENDRITE_PORT),
+                    dpd_client::ClientState {
+                        tag: "sled-agent".to_string(),
+                        log: self.inner.log.new(o!(
+                            "component" => "DpdClient"
+                        )),
+                    },
+                )
+            })
+            .collect();
 
         let mut ports = vec![];
         for svc in &req.services {
@@ -823,44 +823,46 @@ impl ServiceManager {
                 None => (external_ips[0], 0, u16::MAX),
             };
 
-            // TODO-correctness(#2933): If we fail part-way we need to
-            // clean up previous entries instead of leaking them.
-            let nat_create = || async {
-                info!(
-                    self.inner.log, "creating NAT entry for service";
-                    "service" => ?svc,
-                );
+            for dpd_client in &dpd_clients {
+                // TODO-correctness(#2933): If we fail part-way we need to
+                // clean up previous entries instead of leaking them.
+                let nat_create = || async {
+                    info!(
+                        self.inner.log, "creating NAT entry for service";
+                        "service" => ?svc,
+                    );
 
-                dpd_client
-                    .ensure_nat_entry(
-                        &self.inner.log,
-                        target_ip.into(),
-                        dpd_client::types::MacAddr {
-                            a: port.0.mac().into_array(),
-                        },
-                        first_port,
-                        last_port,
-                        port.0.vni().as_u32(),
-                        underlay_address,
-                    )
-                    .await
-                    .map_err(BackoffError::transient)?;
+                    dpd_client
+                        .ensure_nat_entry(
+                            &self.inner.log,
+                            target_ip.into(),
+                            dpd_client::types::MacAddr {
+                                a: port.0.mac().into_array(),
+                            },
+                            first_port,
+                            last_port,
+                            port.0.vni().as_u32(),
+                            underlay_address,
+                        )
+                        .await
+                        .map_err(BackoffError::transient)?;
 
-                Ok::<(), BackoffError<DpdError<DpdTypes::Error>>>(())
-            };
-            let log_failure = |error, _| {
-                warn!(
-                    self.inner.log, "failed to create NAT entry for service";
-                    "error" => ?error,
-                    "service" => ?svc,
-                );
-            };
-            retry_notify(
-                retry_policy_internal_service_aggressive(),
-                nat_create,
-                log_failure,
-            )
-            .await?;
+                    Ok::<(), BackoffError<DpdError<DpdTypes::Error>>>(())
+                };
+                let log_failure = |error, _| {
+                    warn!(
+                        self.inner.log, "failed to create NAT entry for service";
+                        "error" => ?error,
+                        "service" => ?svc,
+                    );
+                };
+                retry_notify(
+                    retry_policy_internal_service_aggressive(),
+                    nat_create,
+                    log_failure,
+                )
+                .await?;
+            }
 
             ports.push(port);
         }
@@ -995,9 +997,7 @@ impl ServiceManager {
 
         // If the boot disk exists, look for the image in the "install" dataset
         // there too.
-        if let Some((_, boot_zpool)) =
-            self.inner.storage.resources().boot_disk().await
-        {
+        if let Some((_, boot_zpool)) = self.inner.storage.boot_disk().await {
             zone_image_paths.push(
                 boot_zpool
                     .dataset_mountpoint(sled_hardware::disk::INSTALL_DATASET),
@@ -1318,7 +1318,9 @@ impl ServiceManager {
             smfh.import_manifest()?;
 
             match &service.details {
-                ServiceType::Nexus { internal_ip, external_tls, .. } => {
+                ServiceType::Nexus {
+                    internal_address, external_tls, ..
+                } => {
                     info!(self.inner.log, "Setting up Nexus service");
 
                     let sled_info = self
@@ -1356,10 +1358,7 @@ impl ServiceManager {
                             },
                         },
                         dropshot_internal: dropshot::ConfigDropshot {
-                            bind_address: SocketAddr::new(
-                                IpAddr::V6(*internal_ip),
-                                NEXUS_INTERNAL_PORT,
-                            ),
+                            bind_address: (*internal_address).into(),
                             // This has to be large enough to support, among
                             // other things, the initial list of TLS
                             // certificates provided by the customer during rack
@@ -1513,15 +1512,11 @@ impl ServiceManager {
                     // enabled.
                     smfh.refresh()?;
                 }
-                ServiceType::Oximeter => {
+                ServiceType::Oximeter { address } => {
                     info!(self.inner.log, "Setting up oximeter service");
 
-                    let address = request.zone.addresses[0];
                     smfh.setprop("config/id", request.zone.id)?;
-                    smfh.setprop(
-                        "config/address",
-                        &format!("[{}]:{}", address, OXIMETER_PORT),
-                    )?;
+                    smfh.setprop("config/address", address.to_string())?;
                     smfh.refresh()?;
                 }
                 ServiceType::ManagementGatewayService => {
@@ -1546,6 +1541,9 @@ impl ServiceManager {
                     }
 
                     smfh.refresh()?;
+                }
+                ServiceType::SpSim => {
+                    info!(self.inner.log, "Setting up Simulated SP service");
                 }
                 ServiceType::Wicketd { baseboard } => {
                     info!(self.inner.log, "Setting up wicketd service");
@@ -1752,6 +1750,7 @@ impl ServiceManager {
                     ntp_servers,
                     dns_servers,
                     domain,
+                    ..
                 } => {
                     let boundary = matches!(
                         service.details,
@@ -1873,10 +1872,10 @@ impl ServiceManager {
 
                     smfh.refresh()?;
                 }
-                ServiceType::Crucible
-                | ServiceType::CruciblePantry
-                | ServiceType::CockroachDb
-                | ServiceType::Clickhouse => {
+                ServiceType::Crucible { .. }
+                | ServiceType::CruciblePantry { .. }
+                | ServiceType::CockroachDb { .. }
+                | ServiceType::Clickhouse { .. } => {
                     panic!(
                         "{} is a service which exists as part of a self-assembling zone",
                         service.details,
@@ -2459,8 +2458,21 @@ impl ServiceManager {
         };
 
         let mut zone_requests = AllZoneRequests::default();
+        let all_u2_roots =
+            self.inner.storage.all_u2_mountpoints(ZONE_DATASET).await;
+
         for zone in new_zone_requests.into_iter() {
-            let root = Utf8PathBuf::from(ZONE_ZFS_RAMDISK_DATASET_MOUNTPOINT);
+            // For each new zone request, we pick an arbitrary U.2 to store
+            // the zone filesystem. Note: This isn't known to Nexus right now,
+            // so it's a local-to-sled decision.
+            //
+            // This is (currently) intentional, as the zone filesystem should
+            // be destroyed between reboots.
+            let mut rng = rand::thread_rng();
+            let root = all_u2_roots
+                .choose(&mut rng)
+                .ok_or_else(|| Error::U2NotFound)?
+                .clone();
             zone_requests.requests.push(ZoneRequest { zone, root });
         }
 
@@ -2672,12 +2684,12 @@ impl ServiceManager {
                     };
                     filesystems.push(softnpu_filesystem);
                 }
-
                 vec![
                     ServiceType::Dendrite { asic },
                     ServiceType::ManagementGatewayService,
                     ServiceType::Wicketd { baseboard },
                     ServiceType::Maghemite { mode: "transit".to_string() },
+                    ServiceType::SpSim,
                 ]
             }
         };
@@ -2695,6 +2707,7 @@ impl ServiceManager {
                 .into_iter()
                 .map(|s| ServiceZoneService { id: Uuid::new_v4(), details: s })
                 .collect(),
+            boundary_switches: vec![],
         };
 
         self.ensure_zone(
@@ -2922,7 +2935,14 @@ impl ServiceManager {
         let SledLocalZone::Initializing { request, filesystems, .. } = &*sled_zone else {
             return Ok(())
         };
-        let root = Utf8PathBuf::from(ZONE_ZFS_RAMDISK_DATASET_MOUNTPOINT);
+        let all_u2_roots =
+            self.inner.storage.all_u2_mountpoints(ZONE_DATASET).await;
+        let mut rng = rand::rngs::StdRng::from_entropy();
+        let root = all_u2_roots
+            .choose(&mut rng)
+            .ok_or_else(|| Error::U2NotFound)?
+            .clone();
+
         let request = ZoneRequest { zone: request.clone(), root };
         let zone = self.initialize_zone(&request, filesystems).await?;
         *sled_zone =
@@ -2982,10 +3002,10 @@ mod test {
         zone::MockZones,
     };
     use key_manager::{
-        KeyManager, SecretRetriever, SecretRetrieverError, SecretState,
-        StorageKeyRequester, VersionedIkm,
+        SecretRetriever, SecretRetrieverError, SecretState, VersionedIkm,
     };
-    use std::net::Ipv6Addr;
+    use omicron_common::address::OXIMETER_PORT;
+    use std::net::{Ipv6Addr, SocketAddrV6};
     use std::os::unix::process::ExitStatusExt;
     use uuid::Uuid;
 
@@ -3072,8 +3092,16 @@ mod test {
                 dataset: None,
                 services: vec![ServiceZoneService {
                     id,
-                    details: ServiceType::Oximeter,
+                    details: ServiceType::Oximeter {
+                        address: SocketAddrV6::new(
+                            Ipv6Addr::LOCALHOST,
+                            OXIMETER_PORT,
+                            0,
+                            0,
+                        ),
+                    },
                 }],
+                boundary_switches: vec![],
             }],
         })
         .await
@@ -3091,8 +3119,16 @@ mod test {
                 dataset: None,
                 services: vec![ServiceZoneService {
                     id,
-                    details: ServiceType::Oximeter,
+                    details: ServiceType::Oximeter {
+                        address: SocketAddrV6::new(
+                            Ipv6Addr::LOCALHOST,
+                            OXIMETER_PORT,
+                            0,
+                            0,
+                        ),
+                    },
                 }],
+                boundary_switches: vec![],
             }],
         })
         .await
@@ -3173,14 +3209,6 @@ mod test {
         }
     }
 
-    async fn spawn_key_manager(log: &Logger) -> StorageKeyRequester {
-        let (mut key_manager, storage_key_requester) =
-            KeyManager::new(log, TestSecretRetriever {});
-
-        tokio::spawn(async move { key_manager.run().await });
-        storage_key_requester
-    }
-
     #[tokio::test]
     #[serial_test::serial]
     async fn test_ensure_service() {
@@ -3188,7 +3216,6 @@ mod test {
             omicron_test_utils::dev::test_setup_log("test_ensure_service");
         let log = logctx.log.clone();
         let test_config = TestConfig::new().await;
-        let storage_key_requester = spawn_key_manager(&log).await;
 
         let mgr = ServiceManager::new(
             log.clone(),
@@ -3201,7 +3228,7 @@ mod test {
             SidecarRevision::Physical("rev-test".to_string()),
             SWITCH_ZONE_BOOTSTRAP_IP,
             vec![],
-            StorageManager::new(&log, storage_key_requester).await,
+            StorageResources::new_for_test(),
         )
         .await
         .unwrap();
@@ -3235,7 +3262,6 @@ mod test {
         );
         let log = logctx.log.clone();
         let test_config = TestConfig::new().await;
-        let storage_key_requester = spawn_key_manager(&log).await;
 
         let mgr = ServiceManager::new(
             log.clone(),
@@ -3248,7 +3274,7 @@ mod test {
             SidecarRevision::Physical("rev-test".to_string()),
             SWITCH_ZONE_BOOTSTRAP_IP,
             vec![],
-            StorageManager::new(&log, storage_key_requester).await,
+            StorageResources::new_for_test(),
         )
         .await
         .unwrap();
@@ -3283,12 +3309,11 @@ mod test {
         );
         let log = logctx.log.clone();
         let test_config = TestConfig::new().await;
-        let storage_key_requester = spawn_key_manager(&log).await;
 
         // First, spin up a ServiceManager, create a new service, and tear it
         // down.
         let mgr = ServiceManager::new(
-            logctx.log.clone(),
+            log.clone(),
             GLOBAL_ZONE_BOOTSTRAP_IP,
             Etherstub(UNDERLAY_ETHERSTUB_NAME.to_string()),
             EtherstubVnic(UNDERLAY_ETHERSTUB_VNIC_NAME.to_string()),
@@ -3298,14 +3323,14 @@ mod test {
             SidecarRevision::Physical("rev-test".to_string()),
             SWITCH_ZONE_BOOTSTRAP_IP,
             vec![],
-            StorageManager::new(&log, storage_key_requester).await,
+            StorageResources::new_for_test(),
         )
         .await
         .unwrap();
         test_config.override_paths(&mgr);
 
         let port_manager = PortManager::new(
-            logctx.log.new(o!("component" => "PortManager")),
+            log.new(o!("component" => "PortManager")),
             Ipv6Addr::new(0xfd00, 0x1de, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01),
         );
         mgr.sled_agent_started(
@@ -3323,10 +3348,9 @@ mod test {
 
         // Before we re-create the service manager - notably, using the same
         // config file! - expect that a service gets initialized.
-        let storage_key_requester = spawn_key_manager(&log).await;
         let _expectations = expect_new_service();
         let mgr = ServiceManager::new(
-            logctx.log.clone(),
+            log.clone(),
             GLOBAL_ZONE_BOOTSTRAP_IP,
             Etherstub(UNDERLAY_ETHERSTUB_NAME.to_string()),
             EtherstubVnic(UNDERLAY_ETHERSTUB_VNIC_NAME.to_string()),
@@ -3336,14 +3360,14 @@ mod test {
             SidecarRevision::Physical("rev-test".to_string()),
             SWITCH_ZONE_BOOTSTRAP_IP,
             vec![],
-            StorageManager::new(&log, storage_key_requester).await,
+            StorageResources::new_for_test(),
         )
         .await
         .unwrap();
         test_config.override_paths(&mgr);
 
         let port_manager = PortManager::new(
-            logctx.log.new(o!("component" => "PortManager")),
+            log.new(o!("component" => "PortManager")),
             Ipv6Addr::new(0xfd00, 0x1de, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01),
         );
         mgr.sled_agent_started(
@@ -3368,12 +3392,11 @@ mod test {
         );
         let log = logctx.log.clone();
         let test_config = TestConfig::new().await;
-        let storage_key_requester = spawn_key_manager(&log).await;
 
         // First, spin up a ServiceManager, create a new service, and tear it
         // down.
         let mgr = ServiceManager::new(
-            logctx.log.clone(),
+            log.clone(),
             GLOBAL_ZONE_BOOTSTRAP_IP,
             Etherstub(UNDERLAY_ETHERSTUB_NAME.to_string()),
             EtherstubVnic(UNDERLAY_ETHERSTUB_VNIC_NAME.to_string()),
@@ -3383,14 +3406,14 @@ mod test {
             SidecarRevision::Physical("rev-test".to_string()),
             SWITCH_ZONE_BOOTSTRAP_IP,
             vec![],
-            StorageManager::new(&log, storage_key_requester).await,
+            StorageResources::new_for_test(),
         )
         .await
         .unwrap();
         test_config.override_paths(&mgr);
 
         let port_manager = PortManager::new(
-            logctx.log.new(o!("component" => "PortManager")),
+            log.new(o!("component" => "PortManager")),
             Ipv6Addr::new(0xfd00, 0x1de, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01),
         );
         mgr.sled_agent_started(
@@ -3413,14 +3436,9 @@ mod test {
         )
         .unwrap();
 
-        // We don't really have a need to make the StorageKeyRequester `Clone`
-        // and we want to keep the channel buffer size management simple. So
-        // for tests, just create another key manager and `storage_key_requester`.
-        // They all manage the same hardcoded test secrets and will derive the same keys.
-        let storage_key_requester = spawn_key_manager(&log).await;
         // Observe that the old service is not re-initialized.
         let mgr = ServiceManager::new(
-            logctx.log.clone(),
+            log.clone(),
             GLOBAL_ZONE_BOOTSTRAP_IP,
             Etherstub(UNDERLAY_ETHERSTUB_NAME.to_string()),
             EtherstubVnic(UNDERLAY_ETHERSTUB_VNIC_NAME.to_string()),
@@ -3430,14 +3448,14 @@ mod test {
             SidecarRevision::Physical("rev-test".to_string()),
             SWITCH_ZONE_BOOTSTRAP_IP,
             vec![],
-            StorageManager::new(&log, storage_key_requester).await,
+            StorageResources::new_for_test(),
         )
         .await
         .unwrap();
         test_config.override_paths(&mgr);
 
         let port_manager = PortManager::new(
-            logctx.log.new(o!("component" => "PortManager")),
+            log.new(o!("component" => "PortManager")),
             Ipv6Addr::new(0xfd00, 0x1de, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01),
         );
         mgr.sled_agent_started(
