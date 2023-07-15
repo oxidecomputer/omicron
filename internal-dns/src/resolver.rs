@@ -69,7 +69,10 @@ impl Resolver {
                 bind_addr: None,
             });
         }
-        let resolver = TokioAsyncResolver::tokio(rc, ResolverOpts::default())?;
+        let mut opts = ResolverOpts::default();
+        opts.use_hosts_file = false;
+        opts.num_concurrent_reqs = dns_addrs.len();
+        let resolver = TokioAsyncResolver::tokio(rc, opts)?;
 
         Ok(Self { log, resolver })
     }
