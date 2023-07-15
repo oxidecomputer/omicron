@@ -205,11 +205,14 @@ pub struct Agent {
     bootstore: bootstore::NodeHandle,
 
     /// The join handle of the `bootstore::Node` task
-    /// The bootstore main task runs forever. This just shows ownership.
+    /// The bootstore main task runs forever. This handle field shows ownership.
+    #[allow(unused)]
     bootstore_join_handle: JoinHandle<()>,
 
-    /// The join handle of a task that polls DDMD and updates
-    /// the bootstore with known peer addresses.
+    /// The join handle of a task that polls DDMD and updates the bootstore with
+    /// known peer addresses. This task runs forever. This handle field shows
+    /// ownership.
+    #[allow(unused)]
     bootstore_peer_update_handle: JoinHandle<()>,
 }
 
