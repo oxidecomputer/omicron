@@ -169,7 +169,7 @@ impl TestState {
                     let result = self.common.sut.init_rack(
                         self.common.now,
                         self.common.rack_uuid.into(),
-                        self.common.initial_members.clone(),
+                        self.common.initial_members,
                     );
                     let envelopes = self.common.sut.drain_envelopes().collect();
                     self.check_rack_init_output(result, &envelopes);
