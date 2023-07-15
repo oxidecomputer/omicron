@@ -606,24 +606,29 @@ impl Node {
                 "Sending network config with generation {} to {id}",
                 network_config.generation
             );
-            // Send the current network config
-            if let Err(e) = handle
-                .tx
-                .send(MainToConnMsg::Msg(Msg::NetworkConfig(
-                    network_config.clone(),
-                )))
-                .await
-            {
-                warn!(
-                    self.log,
-                    concat!(
-                        "Failed to send network config to connection ",
-                        "management task for {} {:?}"
-                    ),
-                    id,
-                    e
-                );
-            }
+            self.send_network_config(network_config.clone(), id, handle).await;
+        }
+    }
+
+    // Send network config to a peer
+    async fn send_network_config(
+        &self,
+        config: NetworkConfig,
+        peer_id: &Baseboard,
+        handle: &PeerConnHandle,
+    ) {
+        if let Err(e) =
+            handle.tx.send(MainToConnMsg::Msg(Msg::NetworkConfig(config))).await
+        {
+            warn!(
+                self.log,
+                concat!(
+                    "Failed to send network config to connection ",
+                    "management task for {} {:?}"
+                ),
+                peer_id,
+                e
+            );
         }
     }
 
@@ -780,24 +785,12 @@ impl Node {
                     unique_id: accepted_handle.unique_id,
                 };
                 if let Some(network_config) = self.network_config.as_ref() {
-                    // Send the current network config
-                    if let Err(e) = handle
-                        .tx
-                        .send(MainToConnMsg::Msg(Msg::NetworkConfig(
-                            network_config.clone(),
-                        )))
-                        .await
-                    {
-                        warn!(
-                            self.log,
-                            concat!(
-                                "Failed to send network config to connection ",
-                                "management task for {} {:?}"
-                            ),
-                            peer_id,
-                            e
-                        );
-                    }
+                    self.send_network_config(
+                        network_config.clone(),
+                        &peer_id,
+                        &handle,
+                    )
+                    .await;
                 }
 
                 self.established_connections.insert(peer_id.clone(), handle);
@@ -820,24 +813,12 @@ impl Node {
                     }
 
                     if let Some(network_config) = self.network_config.as_ref() {
-                        // Send the current network config
-                        if let Err(e) = handle
-                            .tx
-                            .send(MainToConnMsg::Msg(Msg::NetworkConfig(
-                                network_config.clone(),
-                            )))
-                            .await
-                        {
-                            warn!(
-                                self.log,
-                                concat!(
-                                    "Failed to send network config to ",
-                                    "connection management task for {}: {:?}"
-                                ),
-                                peer_id,
-                                e
-                            );
-                        }
+                        self.send_network_config(
+                            network_config.clone(),
+                            &peer_id,
+                            &handle,
+                        )
+                        .await;
                     }
 
                     self.established_connections

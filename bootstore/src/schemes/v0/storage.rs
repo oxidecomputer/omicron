@@ -121,7 +121,7 @@ impl NetworkConfig {
         //
         // Note that generation numbers of valid configs must start at 1, so we
         // specifically do not use a saturating subtraction.
-        config.generation -= 1;
+        config.generation = config.generation.checked_sub(1).unwrap();
         let mut ledger = Ledger::new_with(log, paths, config);
         ledger.commit().await.expect(
             "Critical: Failed to save bootstore ledger for network config",
