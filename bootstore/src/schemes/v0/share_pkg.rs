@@ -51,7 +51,7 @@ pub struct SharePkgCommon {
 }
 
 /// A container distributed among trust quorum participants for
-/// trust quorum scheme version 0: [`crate::Scheme`].
+/// trust quorum scheme version 0.
 ///
 /// Security Note: This scheme does not verify membership, and will hand out
 /// shares to whomever asks.

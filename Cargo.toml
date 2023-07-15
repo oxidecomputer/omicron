@@ -65,6 +65,7 @@ members = [
 
 default-members = [
     "bootstrap-agent-client",
+    "bootstore",
     "caboose-util",
     "certificates",
     "common",
