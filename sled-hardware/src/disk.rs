@@ -71,7 +71,7 @@ pub enum DiskError {
     CannotSetAgentProperty {
         dataset: String,
         #[source]
-        err: zfs::SetValueError,
+        err: Box<zfs::SetValueError>,
     },
     #[error(
         "Encrypted dataset '{dataset}' missing 'oxide:agent' property: {err}"
@@ -580,7 +580,7 @@ impl Disk {
                 Zfs::set_oxide_value(name, "agent", agent_local_value)
                     .map_err(|err| DiskError::CannotSetAgentProperty {
                         dataset: name.clone(),
-                        err,
+                        err: Box::new(err),
                     })?;
             }
         }
