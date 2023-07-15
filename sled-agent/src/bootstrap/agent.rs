@@ -958,6 +958,10 @@ impl Agent {
         result
     }
 
+    pub fn get_bootstore_node_handle(&self) -> bootstore::NodeHandle {
+        self.bootstore.clone()
+    }
+
     pub async fn components_get(
         &self,
     ) -> Result<Vec<crate::updates::Component>, BootstrapError> {

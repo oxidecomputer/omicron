@@ -74,14 +74,9 @@ use crate::rack_setup::plan::sled::{
     Plan as SledPlan, PlanError as SledPlanError,
 };
 use crate::storage_manager::StorageResources;
+use bootstore::schemes::v0 as bootstore;
 use camino::Utf8PathBuf;
 use ddm_admin_client::{Client as DdmAdminClient, DdmError};
-use dpd_client::types::Ipv6Entry;
-use dpd_client::types::{
-    LinkCreate, LinkId, LinkSettings, PortId, PortSettings, RouteSettingsV4,
-};
-use dpd_client::Client as DpdClient;
-use dpd_client::Ipv4Cidr;
 use gateway_client::Client as MgsClient;
 use internal_dns::resolver::{DnsError, Resolver as DnsResolver};
 use internal_dns::ServiceName;
@@ -89,12 +84,9 @@ use nexus_client::{
     types as NexusTypes, Client as NexusClient, Error as NexusError,
 };
 use omicron_common::address::get_sled_address;
-use omicron_common::address::Ipv6Subnet;
-use omicron_common::address::{DDMD_PORT, DENDRITE_PORT, MGS_PORT};
+use omicron_common::address::MGS_PORT;
 use omicron_common::api::internal::shared::ExternalPortDiscovery;
 use omicron_common::api::internal::shared::SwitchLocation;
-use omicron_common::api::internal::shared::UplinkConfig;
-use omicron_common::api::internal::shared::{PortFec, PortSpeed};
 use omicron_common::backoff::{
     retry_notify, retry_policy_internal_service_aggressive, BackoffError,
 };
@@ -107,7 +99,6 @@ use sled_hardware::underlay::BootstrapInterface;
 use slog::Logger;
 use std::collections::{HashMap, HashSet};
 use std::iter;
-use std::net::IpAddr;
 use std::net::{Ipv6Addr, SocketAddrV6};
 use thiserror::Error;
 
@@ -163,8 +154,13 @@ pub enum SetupServiceError {
     #[error("Error during DNS lookup: {0}")]
     DnsResolver(#[from] internal_dns::resolver::ResolveError),
 
+    // We used transparent, because `EarlyNetworkSetupError` contains a subset
+    // of error variants already in this type
     #[error(transparent)]
     EarlyNetworkSetup(#[from] EarlyNetworkSetupError),
+
+    #[error("Failed to save early network config to bootstore")]
+    Bootstore(#[from] bootstore::NodeRequestError),
 }
 
 // The workload / information allocated to a single sled.
@@ -193,11 +189,17 @@ impl RackSetupService {
         config: Config,
         storage_resources: StorageResources,
         local_bootstrap_agent: BootstrapAgentHandle,
+        bootstore: bootstore::NodeHandle,
     ) -> Self {
         let handle = tokio::task::spawn(async move {
             let svc = ServiceInner::new(log.clone());
             if let Err(e) = svc
-                .run(&config, &storage_resources, local_bootstrap_agent)
+                .run(
+                    &config,
+                    &storage_resources,
+                    local_bootstrap_agent,
+                    bootstore,
+                )
                 .await
             {
                 warn!(log, "RSS injection failed: {}", e);
@@ -731,6 +733,7 @@ impl ServiceInner {
         config: &Config,
         storage_resources: &StorageResources,
         local_bootstrap_agent: BootstrapAgentHandle,
+        bootstore: bootstore::NodeHandle,
     ) -> Result<(), SetupServiceError> {
         info!(self.log, "Injecting RSS configuration: {:#?}", config);
 
@@ -901,6 +904,17 @@ impl ServiceInner {
             let mut early_networking = EarlyNetworkSetup::new(&self.log);
             let boundary_switch_addrs = early_networking
                 .init_rack_network(&rack_network_config, &switch_mgmt_addrs)
+                .await?;
+
+            // Save the relevant network config in the bootstore
+            let early_network_config = EarlyNetworkConfig {
+                generation: 1,
+                rack_subnet: config.rack_subnet,
+                ntp_servers: config.ntp_servers.clone(),
+                rack_network_config: rack_network_config.clone(),
+            };
+            bootstore
+                .update_network_config(early_network_config.into())
                 .await?;
 
             // Inject boundary_switch_addrs into ServiceZoneRequests
