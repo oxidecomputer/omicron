@@ -67,8 +67,12 @@ pub enum DiskError {
     MissingStorageKeyRequester,
     #[error("Encrypted filesystem '{0}' missing 'oxide:epoch' property")]
     CannotParseEpochProperty(String),
-    #[error("Encrypted filesystem '{dataset}' cannot set 'oxide:agent' property: {err}")]
-    CannotSetAgentProperty { dataset: String, err: zfs::SetValueError },
+    #[error("Encrypted dataset '{dataset}' cannot set 'oxide:agent' property: {err}")]
+    CannotSetAgentProperty {
+        dataset: String,
+        #[source]
+        err: zfs::SetValueError,
+    },
     #[error(
         "Encrypted dataset '{dataset}' missing 'oxide:agent' property: {err}"
     )]
@@ -527,8 +531,8 @@ impl Disk {
             // to answer the question: should we wipe this disk, or have
             // we seen it before?
             //
-            // If this zone comes from a prior iteration of the sled agent,
-            // we opt to remove it.
+            // If this value comes from a prior iteration of the sled agent,
+            // we opt to remove the corresponding dataset.
             static AGENT_LOCAL_VALUE: OnceLock<String> = OnceLock::new();
             let agent_local_value = AGENT_LOCAL_VALUE.get_or_init(|| {
                 Alphanumeric.sample_string(&mut rand::thread_rng(), 12)
