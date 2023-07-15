@@ -999,7 +999,7 @@ mod tests {
             .collect()
     }
 
-    fn initial_config(tempdir: &Utf8TempDir) -> Vec<Config> {
+    fn initial_config(tempdir: &Utf8TempDir, port_start: u16) -> Vec<Config> {
         initial_members()
             .into_iter()
             .enumerate()
@@ -1008,7 +1008,7 @@ mod tests {
                 let network_file = format!("test-{i}-network-config-ledger");
                 Config {
                     id,
-                    addr: format!("[::1]:3333{}", i).parse().unwrap(),
+                    addr: format!("[::1]:{}{}", port_start, i).parse().unwrap(),
                     time_per_tick: Duration::from_millis(20),
                     learn_timeout: Duration::from_secs(5),
                     rack_init_timeout: Duration::from_secs(10),
@@ -1028,12 +1028,16 @@ mod tests {
         Baseboard::new_pc("learner".to_string(), n.to_string())
     }
 
-    fn learner_config(tempdir: &Utf8TempDir, n: usize) -> Config {
+    fn learner_config(
+        tempdir: &Utf8TempDir,
+        n: usize,
+        port_start: u16,
+    ) -> Config {
         let fsm_file = format!("test-learner-{n}-fsm-state-ledger");
         let network_file = format!("test-{n}-network-config-ledger");
         Config {
             id: learner_id(n),
-            addr: format!("[::1]:3333{}", 3).parse().unwrap(),
+            addr: format!("[::1]:{}{}", port_start, 3).parse().unwrap(),
             time_per_tick: Duration::from_millis(20),
             learn_timeout: Duration::from_secs(5),
             rack_init_timeout: Duration::from_secs(10),
@@ -1054,9 +1058,10 @@ mod tests {
 
     #[tokio::test]
     async fn basic_3_nodes() {
+        let port_start = 3333;
         let tempdir = Utf8TempDir::new().unwrap();
         let log = log();
-        let config = initial_config(&tempdir);
+        let config = initial_config(&tempdir, port_start);
         let (mut node0, handle0) = Node::new(config[0].clone(), &log).await;
         let (mut node1, handle1) = Node::new(config[1].clone(), &log).await;
         let (mut node2, handle2) = Node::new(config[2].clone(), &log).await;
@@ -1100,7 +1105,7 @@ mod tests {
         handle1.load_rack_secret().await.unwrap();
 
         // Add a learner node
-        let learner_conf = learner_config(&tempdir, 1);
+        let learner_conf = learner_config(&tempdir, 1, port_start);
         let (mut learner, learner_handle) =
             Node::new(learner_conf.clone(), &log).await;
         let learner_jh = tokio::spawn(async move {
@@ -1142,7 +1147,7 @@ mod tests {
             handle0.get_status().await.unwrap().fsm_ledger_generation;
         let peer1_gen =
             handle1.get_status().await.unwrap().fsm_ledger_generation;
-        let learner_config = learner_config(&tempdir, 2);
+        let learner_config = learner_config(&tempdir, 2, port_start);
         let (mut learner, learner_handle) =
             Node::new(learner_config.clone(), &log).await;
         let learner_jh = tokio::spawn(async move {
@@ -1210,9 +1215,10 @@ mod tests {
 
     #[tokio::test]
     async fn network_config() {
+        let port_start = 4444;
         let tempdir = Utf8TempDir::new().unwrap();
         let log = log();
-        let config = initial_config(&tempdir);
+        let config = initial_config(&tempdir, port_start);
         let (mut node0, handle0) = Node::new(config[0].clone(), &log).await;
         let (mut node1, handle1) = Node::new(config[1].clone(), &log).await;
         let (mut node2, handle2) = Node::new(config[2].clone(), &log).await;
@@ -1278,7 +1284,7 @@ mod tests {
         }
 
         // Bring a learner online
-        let learner_conf = learner_config(&tempdir, 1);
+        let learner_conf = learner_config(&tempdir, 1, port_start);
         let (mut learner, learner_handle) =
             Node::new(learner_conf.clone(), &log).await;
         let learner_jh = tokio::spawn(async move {
