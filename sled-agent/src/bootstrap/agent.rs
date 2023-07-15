@@ -37,6 +37,7 @@ use sled_hardware::underlay::BootstrapInterface;
 use sled_hardware::{Baseboard, HardwareManager};
 use slog::Logger;
 use std::borrow::Cow;
+use std::collections::BTreeSet;
 use std::net::{IpAddr, Ipv6Addr, SocketAddrV6};
 use std::sync::Arc;
 use thiserror::Error;
@@ -204,7 +205,12 @@ pub struct Agent {
     bootstore: bootstore::NodeHandle,
 
     /// The join handle of the `bootstore::Node` task
+    /// The bootstore main task runs forever. This just shows ownership.
     bootstore_join_handle: JoinHandle<()>,
+
+    /// The join handle of a task that polls DDMD and updates
+    /// the bootstore with known peer addresses.
+    bootstore_peer_update_handle: JoinHandle<()>,
 }
 
 const SLED_AGENT_REQUEST_FILE: &str = "sled-agent-request.toml";
@@ -429,6 +435,7 @@ impl Agent {
             }
         }
 
+        // Configure and start the bootstore
         let bootstore_config = bootstore::Config {
             id: baseboard.clone(),
             addr: SocketAddrV6::new(ip, BOOTSTORE_PORT, 0, 0),
@@ -445,11 +452,19 @@ impl Agent {
             )
             .await,
         };
-        let (mut bootstore_node, bootstore_handle) =
+        let (mut bootstore_node, bootstore_node_handle) =
             bootstore::Node::new(bootstore_config, &ba_log).await;
 
         let bootstore_join_handle =
             tokio::spawn(async move { bootstore_node.run().await });
+
+        // Spawn a task for polling DDMD and updating bootstore
+        let bootstore_peer_update_handle =
+            Self::poll_ddmd_for_bootstore_peer_update(
+                &ba_log,
+                bootstore_node_handle.clone(),
+            )
+            .await;
 
         let paths = sled_config_paths(&storage_resources).await;
         let maybe_ledger =
@@ -470,8 +485,9 @@ impl Agent {
             key_manager_handle: handle,
             storage_key_requester,
             baseboard,
-            bootstore: bootstore_handle,
+            bootstore: bootstore_node_handle,
             bootstore_join_handle,
+            bootstore_peer_update_handle,
         };
         let agent = if let Some(ledger) = maybe_ledger {
             let agent = make_bootstrap_agent(true);
@@ -488,6 +504,66 @@ impl Agent {
 
     pub fn baseboard(&self) -> &Baseboard {
         &self.baseboard
+    }
+
+    async fn poll_ddmd_for_bootstore_peer_update(
+        log: &Logger,
+        bootstore_node_handle: bootstore::NodeHandle,
+    ) -> JoinHandle<()> {
+        let log = log.clone();
+        tokio::spawn(async move {
+            // Explicit fail fast. We can't do anything without a DdmAdminClient.
+            // Do we need to loop as in wicketd?
+            let ddmd_client = DdmAdminClient::localhost(&log).unwrap();
+            let mut current_peers: BTreeSet<SocketAddrV6> = BTreeSet::new();
+            loop {
+                // We're talking to a service's admin interface on localhost and
+                // we're only asking for its current state. We use a retry in a
+                // loop instead of `backoff`.
+                const RETRY: tokio::time::Duration =
+                    tokio::time::Duration::from_secs(5);
+
+                loop {
+                    match ddmd_client
+                        .derive_bootstrap_addrs_from_prefixes(&[
+                            BootstrapInterface::GlobalZone,
+                        ])
+                        .await
+                    {
+                        Ok(addrs) => {
+                            let peers: BTreeSet<_> = addrs
+                                .map(|ip| {
+                                    SocketAddrV6::new(ip, BOOTSTORE_PORT, 0, 0)
+                                })
+                                .collect();
+                            if peers != current_peers {
+                                current_peers = peers;
+                                if let Err(e) = bootstore_node_handle
+                                    .load_peer_addresses(current_peers.clone())
+                                    .await
+                                {
+                                    warn!(
+                                        log,
+                                        concat!("Bootstore comms error: {}. ",
+                                        "bootstrap agent must be terminating?.",
+                                    ),
+                                        e
+                                    );
+                                    return;
+                                }
+                            }
+                        }
+                        Err(err) => {
+                            warn!(
+                                log, "Failed to get prefixes from ddmd";
+                                "err" => #%err,
+                            );
+                        }
+                    }
+                    tokio::time::sleep(RETRY).await;
+                }
+            }
+        })
     }
 
     async fn start_hardware_monitor(
