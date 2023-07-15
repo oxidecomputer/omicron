@@ -8,6 +8,7 @@ use super::config::{
     Config, BOOTSTORE_PORT, BOOTSTRAP_AGENT_HTTP_PORT,
     BOOTSTRAP_AGENT_RACK_INIT_PORT,
 };
+use super::early_networking::EarlyNetworkSetup;
 use super::hardware::HardwareMonitor;
 use super::http_entrypoints::RackOperationStatus;
 use super::params::RackInitializeRequest;
@@ -214,6 +215,9 @@ pub struct Agent {
     /// ownership.
     #[allow(unused)]
     bootstore_peer_update_handle: JoinHandle<()>,
+
+    /// Code for initializing networking in order to bring up the control plane
+    early_networking: EarlyNetworkSetup,
 }
 
 const SLED_AGENT_REQUEST_FILE: &str = "sled-agent-request.toml";
@@ -472,6 +476,7 @@ impl Agent {
         let paths = sled_config_paths(&storage_resources).await;
         let maybe_ledger =
             Ledger::<PersistentSledAgentRequest>::new(&ba_log, paths).await;
+        let early_networking = EarlyNetworkSetup::new(&ba_log);
         let make_bootstrap_agent = move |initialized| Agent {
             log: ba_log,
             parent_log: log,
@@ -491,6 +496,7 @@ impl Agent {
             bootstore: bootstore_node_handle,
             bootstore_join_handle,
             bootstore_peer_update_handle,
+            early_networking,
         };
         let agent = if let Some(ledger) = maybe_ledger {
             let agent = make_bootstrap_agent(true);

@@ -48,7 +48,7 @@
 //!
 //! ## Execution Complete
 //!
-//! Once both the Sled and Service plans have finished execution, handoff of
+//! Once the both the Sled and Service plans have finished execution, handoff of
 //! control to Nexus can occur. <https://rfd.shared.oxide.computer/rfd/0278>
 //! covers this in more detail, but in short, RSS creates a "marker" file after
 //! completing execution, and unconditionally calls the "handoff to Nexus" API
@@ -57,7 +57,7 @@
 use super::config::SetupServiceConfig as Config;
 use crate::bootstrap::config::BOOTSTRAP_AGENT_HTTP_PORT;
 use crate::bootstrap::early_networking::{
-    EarlyNetworkConfig, EarlyNetworkSetup,
+    EarlyNetworkConfig, EarlyNetworkSetup, EarlyNetworkSetupError,
 };
 use crate::bootstrap::params::BootstrapAddressDiscovery;
 use crate::bootstrap::params::StartSledAgentRequest;
@@ -111,8 +111,6 @@ use std::net::IpAddr;
 use std::net::{Ipv6Addr, SocketAddrV6};
 use thiserror::Error;
 
-static BOUNDARY_SERVICES_ADDR: &str = "fd00:99::1";
-
 /// Describes errors which may occur while operating the setup service.
 #[derive(Error, Debug)]
 pub enum SetupServiceError {
@@ -164,6 +162,9 @@ pub enum SetupServiceError {
 
     #[error("Error during DNS lookup: {0}")]
     DnsResolver(#[from] internal_dns::resolver::ResolveError),
+
+    #[error(transparent)]
+    EarlyNetworkSetup(#[from] EarlyNetworkSetupError),
 }
 
 // The workload / information allocated to a single sled.
@@ -229,32 +230,6 @@ impl RackSetupService {
     /// Awaits the completion of the RSS service.
     pub async fn join(self) -> Result<(), SetupServiceError> {
         self.handle.await.expect("Rack Setup Service Task panicked")
-    }
-}
-
-// The following two conversion functions translate the speed and fec types used
-// in the internal API to the types used in the dpd-client API.  The conversion
-// is done here, rather than with "impl From" at the definition, to avoid a
-// circular dependency between omicron-common and dpd.
-fn convert_speed(speed: &PortSpeed) -> dpd_client::types::PortSpeed {
-    match speed {
-        PortSpeed::Speed0G => dpd_client::types::PortSpeed::Speed0G,
-        PortSpeed::Speed1G => dpd_client::types::PortSpeed::Speed1G,
-        PortSpeed::Speed10G => dpd_client::types::PortSpeed::Speed10G,
-        PortSpeed::Speed25G => dpd_client::types::PortSpeed::Speed25G,
-        PortSpeed::Speed40G => dpd_client::types::PortSpeed::Speed40G,
-        PortSpeed::Speed50G => dpd_client::types::PortSpeed::Speed50G,
-        PortSpeed::Speed100G => dpd_client::types::PortSpeed::Speed100G,
-        PortSpeed::Speed200G => dpd_client::types::PortSpeed::Speed200G,
-        PortSpeed::Speed400G => dpd_client::types::PortSpeed::Speed400G,
-    }
-}
-
-fn convert_fec(fec: &PortFec) -> dpd_client::types::PortFec {
-    match fec {
-        PortFec::Firecode => dpd_client::types::PortFec::Firecode,
-        PortFec::None => dpd_client::types::PortFec::None,
-        PortFec::Rs => dpd_client::types::PortFec::Rs,
     }
 }
 
@@ -923,59 +898,11 @@ impl ServiceInner {
         // services will not be available and NTP will fail to sync
         info!(self.log, "Checking for Rack Network Configuration");
         if let Some(rack_network_config) = &config.rack_network_config {
-            info!(self.log, "Initializing Rack Network");
-            let dpd_clients = self.initialize_dpd_clients(&switch_mgmt_addrs);
+            let mut early_networking = EarlyNetworkSetup::new(&self.log);
+            let boundary_switch_addrs = early_networking
+                .init_rack_network(&rack_network_config, &switch_mgmt_addrs)
+                .await?;
 
-            // set of switches from uplinks, these are our targets for initial NAT configurations
-            let mut boundary_switch_addrs: HashSet<Ipv6Addr> = HashSet::new();
-
-            // configure uplink for each requested uplink in configuration
-            for uplink_config in &rack_network_config.uplinks {
-                // Configure the switch requested by the user
-                // Raise error if requested switch is not found
-                let dpd = dpd_clients
-                .get(&uplink_config.switch)
-                .ok_or_else(|| {
-                    SetupServiceError::BadConfig(format!(
-                        "Switch requested by rack network config not found: {:#?}",
-                        uplink_config.switch
-                    ))
-                })?;
-
-                let zone_addr =
-                    switch_mgmt_addrs.get(&uplink_config.switch).unwrap();
-
-                // This switch will have an uplink configured, so lets add it to our boundary_switch_addrs
-                boundary_switch_addrs.insert(*zone_addr);
-
-                let (ipv6_entry, dpd_port_settings, port_id) =
-                    self.build_uplink_config(uplink_config)?;
-
-                self.wait_for_dendrite(dpd).await;
-
-                info!(self.log, "Configuring boundary services loopback address on switch"; "config" => #?ipv6_entry);
-                dpd.loopback_ipv6_create(&ipv6_entry).await.map_err(|e| {
-                    SetupServiceError::Dendrite(format!(
-                        "unable to create inital switch loopback address: {e}"
-                    ))
-                })?;
-
-                info!(self.log, "Configuring default uplink on switch"; "config" => #?dpd_port_settings);
-                dpd.port_settings_apply(&port_id, &dpd_port_settings)
-                    .await
-                    .map_err(|e| {
-                        SetupServiceError::Dendrite(format!("unable to apply initial uplink port configuration: {e}"))
-                    })?;
-
-                info!(
-                    self.log,
-                    "advertising boundary services loopback address"
-                );
-
-                let ddmd_addr = SocketAddrV6::new(*zone_addr, DDMD_PORT, 0, 0);
-                let ddmd_client = DdmAdminClient::new(&self.log, ddmd_addr)?;
-                ddmd_client.advertise_prefix(Ipv6Subnet::new(ipv6_entry.addr));
-            }
             // Inject boundary_switch_addrs into ServiceZoneRequests
             // When the opte interface is created for the service,
             // nat entries will be created using the switches present here
@@ -1066,5 +993,60 @@ impl ServiceInner {
         // it get a /64?
 
         Ok(())
+    }
+
+    // TODO: #3601 Audit switch location discovery logic for robustness in multi-rack deployments.
+    // Query MGS servers in each switch zone to determine which switch slot they are managing.
+    // This logic does not handle an event where there are multiple racks. Is that ok?
+    async fn map_switch_zone_addrs(
+        &self,
+        switch_zone_addresses: Vec<Ipv6Addr>,
+    ) -> HashMap<SwitchLocation, Ipv6Addr> {
+        info!(self.log, "Determining switch slots managed by switch zones");
+        let mut switch_zone_addrs = HashMap::new();
+        for addr in switch_zone_addresses {
+            let mgs_client = MgsClient::new(
+                &format!("http://[{}]:{}", addr, MGS_PORT),
+                self.log.new(o!("component" => "MgsClient")),
+            );
+
+            info!(self.log, "determining switch slot managed by dendrite zone"; "zone_address" => #?addr);
+            // TODO: #3599 Use retry function instead of looping on a fixed timer
+            let switch_slot = loop {
+                match mgs_client.sp_local_switch_id().await {
+                    Ok(switch) => {
+                        info!(
+                            self.log,
+                            "identified switch slot for dendrite zone";
+                            "slot" => #?switch,
+                            "zone_address" => #?addr
+                        );
+                        break switch.slot;
+                    }
+                    Err(e) => {
+                        warn!(
+                            self.log,
+                            "failed to identify switch slot for dendrite, will retry in 2 seconds";
+                            "zone_address" => #?addr,
+                            "reason" => #?e
+                        );
+                    }
+                }
+                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+            };
+
+            match switch_slot {
+                0 => {
+                    switch_zone_addrs.insert(SwitchLocation::Switch0, addr);
+                }
+                1 => {
+                    switch_zone_addrs.insert(SwitchLocation::Switch1, addr);
+                }
+                _ => {
+                    warn!(self.log, "Expected a slot number of 0 or 1, found {switch_slot:#?} when querying {addr:#?}");
+                }
+            };
+        }
+        switch_zone_addrs
     }
 }

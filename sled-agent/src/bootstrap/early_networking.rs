@@ -12,20 +12,18 @@ use dpd_client::types::{
 };
 use dpd_client::Client as DpdClient;
 use dpd_client::Ipv4Cidr;
-use internal_dns::resolver::{DnsError, Resolver as DnsResolver};
-use internal_dns::ServiceName;
-use omicron_common::address::{
-    get_64_subnet, Ipv6Subnet, AZ_PREFIX, RACK_PREFIX, SLED_PREFIX,
-};
-use omicron_common::address::{DDMD_PORT, DENDRITE_PORT, MGS_PORT};
+use omicron_common::address::{Ipv6Subnet, AZ_PREFIX};
+use omicron_common::address::{DDMD_PORT, DENDRITE_PORT};
 use omicron_common::api::internal::shared::{
-    RackNetworkConfig, SwitchLocation, UplinkConfig,
+    PortFec, PortSpeed, RackNetworkConfig, SwitchLocation, UplinkConfig,
 };
 use serde::{Deserialize, Serialize};
 use slog::Logger;
 use std::collections::{HashMap, HashSet};
 use std::net::{IpAddr, Ipv6Addr, SocketAddrV6};
 use thiserror::Error;
+
+static BOUNDARY_SERVICES_ADDR: &str = "fd00:99::1";
 
 /// Errors that can occur during early network setup
 #[derive(Error, Debug)]
@@ -47,36 +45,22 @@ pub enum EarlyNetworkSetupError {
 /// plane
 pub struct EarlyNetworkSetup {
     log: Logger,
-
-    /// Handle for interacting with the local `bootstore::Node`
-    bootstore: bootstore::NodeHandle,
 }
 
 impl EarlyNetworkSetup {
-    pub fn new(log: &Logger, bootstore: bootstore::NodeHandle) -> Self {
-        EarlyNetworkSetup { log: log.clone(), bootstore }
+    pub fn new(log: &Logger) -> Self {
+        EarlyNetworkSetup { log: log.clone() }
     }
 
-    pub async fn init_switch_zone(
+    // Initialize the rack network and return the boundary switch addresses to
+    // be injected into zone requests
+    pub async fn init_rack_network(
         &mut self,
-        config: EarlyNetworkConfig,
-    ) -> Result<(), EarlyNetworkSetupError> {
-        let resolver = DnsResolver::new_from_subnet(
-            self.log.new(o!("component" => "DnsResolver")),
-            config.az_subnet(),
-        )?;
-
-        info!(self.log, "Finding switch zone addresses in DNS");
-        let switch_zone_addresses =
-            resolver.lookup_all_ipv6(ServiceName::Dendrite).await?;
-        info!(self.log, "Detected switch zone addresses"; "addresses" => #?switch_zone_addresses);
-
-        let switch_mgmt_addrs =
-            self.map_switch_zone_addrs(switch_zone_addresses).await;
-
+        rack_network_config: &RackNetworkConfig,
+        switch_mgmt_addrs: &HashMap<SwitchLocation, Ipv6Addr>,
+    ) -> Result<HashSet<Ipv6Addr>, EarlyNetworkSetupError> {
         // Initialize rack network before NTP comes online, otherwise boundary
         // services will not be available and NTP will fail to sync
-        let rack_network_config = &config.rack_network_config;
         info!(self.log, "Initializing Rack Network");
         let dpd_clients = self.initialize_dpd_clients(&switch_mgmt_addrs);
 
@@ -127,20 +111,7 @@ impl EarlyNetworkSetup {
             let ddmd_client = DdmAdminClient::new(&self.log, ddmd_addr)?;
             ddmd_client.advertise_prefix(Ipv6Subnet::new(ipv6_entry.addr));
         }
-        // Inject boundary_switch_addrs into ServiceZoneRequests
-        // When the opte interface is created for the service,
-        // nat entries will be created using the switches present here
-        let switch_addrs: Vec<Ipv6Addr> = Vec::from_iter(boundary_switch_addrs);
-        for (_, request) in &mut service_plan.services {
-            for zone_request in &mut request.services {
-                // Do not modify any services that have already been deployed
-                if zone_types.contains(&zone_request.zone_type) {
-                    continue;
-                }
-
-                zone_request.boundary_switches.extend_from_slice(&switch_addrs);
-            }
-        }
+        Ok(boundary_switch_addrs)
     }
 
     fn initialize_dpd_clients(
@@ -164,61 +135,6 @@ impl EarlyNetworkSetup {
             .collect()
     }
 
-    // TODO: #3601 Audit switch location discovery logic for robustness in multi-rack deployments.
-    // Query MGS servers in each switch zone to determine which switch slot they are managing.
-    // This logic does not handle an event where there are multiple racks. Is that ok?
-    async fn map_switch_zone_addrs(
-        &self,
-        switch_zone_addresses: Vec<Ipv6Addr>,
-    ) -> HashMap<SwitchLocation, Ipv6Addr> {
-        info!(self.log, "Determining switch slots managed by switch zones");
-        let mut switch_zone_addrs = HashMap::new();
-        for addr in switch_zone_addresses {
-            let mgs_client = MgsClient::new(
-                &format!("http://[{}]:{}", addr, MGS_PORT),
-                self.log.new(o!("component" => "MgsClient")),
-            );
-
-            info!(self.log, "determining switch slot managed by dendrite zone"; "zone_address" => #?addr);
-            // TODO: #3599 Use retry function instead of looping on a fixed timer
-            let switch_slot = loop {
-                match mgs_client.sp_local_switch_id().await {
-                    Ok(switch) => {
-                        info!(
-                            self.log,
-                            "identified switch slot for dendrite zone";
-                            "slot" => #?switch,
-                            "zone_address" => #?addr
-                        );
-                        break switch.slot;
-                    }
-                    Err(e) => {
-                        warn!(
-                            self.log,
-                            "failed to identify switch slot for dendrite, will retry in 2 seconds";
-                            "zone_address" => #?addr,
-                            "reason" => #?e
-                        );
-                    }
-                }
-                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-            };
-
-            match switch_slot {
-                0 => {
-                    switch_zone_addrs.insert(SwitchLocation::Switch0, addr);
-                }
-                1 => {
-                    switch_zone_addrs.insert(SwitchLocation::Switch1, addr);
-                }
-                _ => {
-                    warn!(self.log, "Expected a slot number of 0 or 1, found {switch_slot:#?} when querying {addr:#?}");
-                }
-            };
-        }
-        switch_zone_addrs
-    }
-
     fn build_uplink_config(
         &self,
         uplink_config: &UplinkConfig,
@@ -226,7 +142,7 @@ impl EarlyNetworkSetup {
         info!(self.log, "Building Uplink Configuration");
         let ipv6_entry = Ipv6Entry {
             addr: BOUNDARY_SERVICES_ADDR.parse().map_err(|e| {
-                SetupServiceError::BadConfig(format!(
+                EarlyNetworkSetupError::BadConfig(format!(
                 "failed to parse `BOUNDARY_SERVICES_ADDR` as `Ipv6Addr`: {e}"
             ))
             })?,
@@ -255,7 +171,7 @@ impl EarlyNetworkSetup {
         let port_id: PortId = uplink_config
             .uplink_port
             .parse()
-            .map_err(|e| SetupServiceError::BadConfig(
+            .map_err(|e| EarlyNetworkSetupError::BadConfig(
             format!("could not use value provided to rack_network_config.uplink_port as PortID: {e}")))?;
         let nexthop = Some(uplink_config.gateway_ip);
         dpd_port_settings.v4_routes.insert(
@@ -334,5 +250,31 @@ impl TryFrom<bootstore::NetworkConfig> for EarlyNetworkConfig {
         value: bootstore::NetworkConfig,
     ) -> std::result::Result<Self, Self::Error> {
         Ok(serde_json::from_slice(&value.blob)?)
+    }
+}
+
+// The following two conversion functions translate the speed and fec types used
+// in the internal API to the types used in the dpd-client API.  The conversion
+// is done here, rather than with "impl From" at the definition, to avoid a
+// circular dependency between omicron-common and dpd.
+fn convert_speed(speed: &PortSpeed) -> dpd_client::types::PortSpeed {
+    match speed {
+        PortSpeed::Speed0G => dpd_client::types::PortSpeed::Speed0G,
+        PortSpeed::Speed1G => dpd_client::types::PortSpeed::Speed1G,
+        PortSpeed::Speed10G => dpd_client::types::PortSpeed::Speed10G,
+        PortSpeed::Speed25G => dpd_client::types::PortSpeed::Speed25G,
+        PortSpeed::Speed40G => dpd_client::types::PortSpeed::Speed40G,
+        PortSpeed::Speed50G => dpd_client::types::PortSpeed::Speed50G,
+        PortSpeed::Speed100G => dpd_client::types::PortSpeed::Speed100G,
+        PortSpeed::Speed200G => dpd_client::types::PortSpeed::Speed200G,
+        PortSpeed::Speed400G => dpd_client::types::PortSpeed::Speed400G,
+    }
+}
+
+fn convert_fec(fec: &PortFec) -> dpd_client::types::PortFec {
+    match fec {
+        PortFec::Firecode => dpd_client::types::PortFec::Firecode,
+        PortFec::None => dpd_client::types::PortFec::None,
+        PortFec::Rs => dpd_client::types::PortFec::Rs,
     }
 }
