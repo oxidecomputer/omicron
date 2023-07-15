@@ -151,10 +151,10 @@ cookie = "0.16"
 criterion = { version = "0.5.1", features = [ "async_tokio" ] }
 crossbeam = "0.8"
 crossterm = { version = "0.26.1", features = ["event-stream"] }
-crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "c574ff1232aa66eb60069795fe45f0c47f5da51d" }
-crucible-client-types = { git = "https://github.com/oxidecomputer/crucible", rev = "c574ff1232aa66eb60069795fe45f0c47f5da51d" }
-crucible-pantry-client = { git = "https://github.com/oxidecomputer/crucible", rev = "c574ff1232aa66eb60069795fe45f0c47f5da51d" }
-crucible-smf = { git = "https://github.com/oxidecomputer/crucible", rev = "c574ff1232aa66eb60069795fe45f0c47f5da51d" }
+crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "ddb4bae0d30083311c8e45efc0027672a15cc3ea" }
+crucible-client-types = { git = "https://github.com/oxidecomputer/crucible", rev = "ddb4bae0d30083311c8e45efc0027672a15cc3ea" }
+crucible-pantry-client = { git = "https://github.com/oxidecomputer/crucible", rev = "ddb4bae0d30083311c8e45efc0027672a15cc3ea" }
+crucible-smf = { git = "https://github.com/oxidecomputer/crucible", rev = "ddb4bae0d30083311c8e45efc0027672a15cc3ea" }
 curve25519-dalek = "3"
 datatest-stable = "0.1.3"
 display-error-chain = "0.1.1"
@@ -264,9 +264,9 @@ pretty-hex = "0.3.0"
 proc-macro2 = "1.0"
 progenitor = { git = "https://github.com/oxidecomputer/progenitor", branch = "main" }
 progenitor-client = { git = "https://github.com/oxidecomputer/progenitor", branch = "main" }
-bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "9e12522341048d7b8c38394f0ddeb18083685c2f" }
-propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "9e12522341048d7b8c38394f0ddeb18083685c2f", features = [ "generated-migration" ] }
-propolis-server = { git = "https://github.com/oxidecomputer/propolis", rev = "9e12522341048d7b8c38394f0ddeb18083685c2f", default-features = false, features = ["mock-only"] }
+bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "d4ec627694b2b7b76fcf75b83d9d9766938af0dc" }
+propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "d4ec627694b2b7b76fcf75b83d9d9766938af0dc", features = [ "generated-migration" ] }
+propolis-server = { git = "https://github.com/oxidecomputer/propolis", rev = "d4ec627694b2b7b76fcf75b83d9d9766938af0dc", default-features = false, features = ["mock-only"] }
 #propolis-server = { path = "../propolis/bin/propolis-server" }
 proptest = "1.2.0"
 quote = "1.0"

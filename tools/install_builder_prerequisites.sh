@@ -121,14 +121,16 @@ function install_packages {
         confirm "Install (or update) [${packages[*]}]?" && sudo apt-get install "${packages[@]}"
     fi
   elif [[ "${HOST_OS}" == "SunOS" ]]; then
+    CLANGVER=15
+    PGVER=13
     packages=(
-      'pkg:/package/pkg'
-      'build-essential'
-      'library/postgresql-13'
-      'pkg-config'
-      'library/libxmlsec1'
+      "pkg:/package/pkg"
+      "build-essential"
+      "library/postgresql-$PGVER"
+      "pkg-config"
+      "library/libxmlsec1"
       # "bindgen leverages libclang to preprocess, parse, and type check C and C++ header files."
-      'pkg:/ooce/developer/clang-120'
+      "pkg:/ooce/developer/clang-$CLANGVER"
     )
 
     # Install/update the set of packages.
@@ -139,10 +141,16 @@ function install_packages {
     # Return codes:
     #  0: Normal Success
     #  4: Failure because we're already up-to-date. Also acceptable.
-    if [[ "$rc" -ne 4 ]] && [[ "$rc" -ne 0 ]]; then
+    if ((rc != 4 && rc != 0)); then
       exit "$rc"
     fi
 
+    confirm "Set mediators?" && {
+      pfexec pkg set-mediator -V $CLANGVER clang llvm
+      pfexec pkg set-mediator -V $PGVER postgresql
+    }
+
+    pkg mediator -a
     pkg list -v "${packages[@]}"
   elif [[ "${HOST_OS}" == "Darwin" ]]; then
     packages=(
