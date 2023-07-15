@@ -152,10 +152,10 @@ cookie = "0.16"
 criterion = { version = "0.5.1", features = [ "async_tokio" ] }
 crossbeam = "0.8"
 crossterm = { version = "0.26.1", features = ["event-stream"] }
-crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "ddb4bae0d30083311c8e45efc0027672a15cc3ea" }
-crucible-client-types = { git = "https://github.com/oxidecomputer/crucible", rev = "ddb4bae0d30083311c8e45efc0027672a15cc3ea" }
-crucible-pantry-client = { git = "https://github.com/oxidecomputer/crucible", rev = "ddb4bae0d30083311c8e45efc0027672a15cc3ea" }
-crucible-smf = { git = "https://github.com/oxidecomputer/crucible", rev = "ddb4bae0d30083311c8e45efc0027672a15cc3ea" }
+crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "179e68b8718d24673893dac46a8ab4a9249ec318" }
+crucible-client-types = { git = "https://github.com/oxidecomputer/crucible", rev = "179e68b8718d24673893dac46a8ab4a9249ec318" }
+crucible-pantry-client = { git = "https://github.com/oxidecomputer/crucible", rev = "179e68b8718d24673893dac46a8ab4a9249ec318" }
+crucible-smf = { git = "https://github.com/oxidecomputer/crucible", rev = "179e68b8718d24673893dac46a8ab4a9249ec318" }
 curve25519-dalek = "3"
 datatest-stable = "0.1.3"
 display-error-chain = "0.1.1"
@@ -265,9 +265,9 @@ pretty-hex = "0.3.0"
 proc-macro2 = "1.0"
 progenitor = { git = "https://github.com/oxidecomputer/progenitor", branch = "main" }
 progenitor-client = { git = "https://github.com/oxidecomputer/progenitor", branch = "main" }
-bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "d4ec627694b2b7b76fcf75b83d9d9766938af0dc" }
-propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "d4ec627694b2b7b76fcf75b83d9d9766938af0dc", features = [ "generated-migration" ] }
-propolis-server = { git = "https://github.com/oxidecomputer/propolis", rev = "d4ec627694b2b7b76fcf75b83d9d9766938af0dc", default-features = false, features = ["mock-only"] }
+bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "fbd701c0a54f25208712b0b3b2dc7931c875d347" }
+propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "fbd701c0a54f25208712b0b3b2dc7931c875d347", features = [ "generated-migration" ] }
+propolis-server = { git = "https://github.com/oxidecomputer/propolis", rev = "fbd701c0a54f25208712b0b3b2dc7931c875d347", default-features = false, features = ["mock-only"] }
 #propolis-server = { path = "../propolis/bin/propolis-server" }
 proptest = "1.2.0"
 quote = "1.0"
@@ -516,6 +516,7 @@ opt-level = 3
 #crucible-agent-client = { path = "../crucible/agent-client" }
 #crucible-client-types = { path = "../crucible/crucible-client-types" }
 #crucible-pantry-client = { path = "../crucible/pantry-client" }
+#crucible-smf = { path = "../crucible/smf" }
 
 #
 # Local client generation during development.
