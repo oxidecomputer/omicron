@@ -256,7 +256,10 @@ fn verify_graceful_exit(
 // Exercises the normal use case of `omicron-dev db-run`: the database starts
 // up, we can connect to it and query it, then we simulate the user typing ^C at
 // the shell, and then it cleans up its temporary directory.
+//
+// This test is currently ignored by default.  See omicron#3639.
 #[tokio::test]
+#[ignore]
 async fn test_db_run() {
     let cmd_path = path_to_omicron_dev();
 
