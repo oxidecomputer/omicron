@@ -438,7 +438,7 @@ impl Disk {
 
         // Ensure the root encrypted filesystem exists
         // Datasets below this in the hierarchy will inherit encryption
-        if let Some(dataset) = root {
+        let newly_mounted_crypt = if let Some(dataset) = root {
             let Some(key_requester) = key_requester else {
                 return Err(DiskError::MissingStorageKeyRequester);
             };
@@ -486,7 +486,9 @@ impl Disk {
 
             info!(
                 log,
-                "Ensuring encryted filesystem: {} for epoch {}", dataset, epoch
+                "Ensuring encrypted filesystem: {} for epoch {}",
+                dataset,
+                epoch
             );
             let result = Zfs::ensure_filesystem(
                 &format!("{}/{}", zpool_name, dataset),
@@ -501,14 +503,16 @@ impl Disk {
                 DiskError::IoError { path: keyfile.path().0.clone(), error }
             })?;
 
-            result?;
-        }
+            result?
+        } else {
+            false
+        };
 
         for dataset in datasets.into_iter() {
             let mountpoint = zpool_name.dataset_mountpoint(dataset.name);
             let name = &format!("{}/{}", zpool_name, dataset.name);
 
-            if dataset.wipe {
+            if dataset.wipe && newly_mounted_crypt {
                 info!(log, "Automatically destroying dataset {}", name);
                 Zfs::destroy_dataset(name).or_else(|err| {
                     // If we can't find the dataset, that's fine -- it might
