@@ -1077,8 +1077,7 @@ mod tests {
         });
 
         // Inform each node about the known addresses
-        let mut addrs: BTreeSet<_> =
-            config.iter().map(|c| c.addr.clone()).collect();
+        let mut addrs: BTreeSet<_> = config.iter().map(|c| c.addr).collect();
         for handle in [&handle0, &handle1, &handle2] {
             let _ = handle.load_peer_addresses(addrs.clone()).await;
         }
@@ -1113,7 +1112,7 @@ mod tests {
         });
         // Inform the learner and node0 and node1 about all addresses including
         // the learner. This simulates DDM discovery
-        addrs.insert(learner_conf.addr.clone());
+        addrs.insert(learner_conf.addr);
         let _ = learner_handle.load_peer_addresses(addrs.clone()).await;
         let _ = handle0.load_peer_addresses(addrs.clone()).await;
         let _ = handle1.load_peer_addresses(addrs.clone()).await;
@@ -1156,7 +1155,7 @@ mod tests {
 
         // Inform the learner, node0, and node1 about all addresses including
         // the learner. This simulates DDM discovery
-        addrs.insert(learner_config.addr.clone());
+        addrs.insert(learner_config.addr);
         let _ = learner_handle.load_peer_addresses(addrs.clone()).await;
         let _ = handle0.load_peer_addresses(addrs.clone()).await;
         let _ = handle1.load_peer_addresses(addrs.clone()).await;
@@ -1234,8 +1233,7 @@ mod tests {
         });
 
         // Inform each node about the known addresses
-        let mut addrs: BTreeSet<_> =
-            config.iter().map(|c| c.addr.clone()).collect();
+        let mut addrs: BTreeSet<_> = config.iter().map(|c| c.addr).collect();
         for handle in [&handle0, &handle1, &handle2] {
             let _ = handle.load_peer_addresses(addrs.clone()).await;
         }
@@ -1292,7 +1290,7 @@ mod tests {
         });
         // Inform the learner and other nodes about all addresses including
         // the learner. This simulates DDM discovery.
-        addrs.insert(learner_conf.addr.clone());
+        addrs.insert(learner_conf.addr);
         for handle in [&learner_handle, &handle0, &handle1, &handle2] {
             let _ = handle.load_peer_addresses(addrs.clone()).await;
         }
