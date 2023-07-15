@@ -7520,6 +7520,7 @@ dependencies = [
  "nexus-client 0.1.0",
  "omicron-common 0.1.0",
  "omicron-test-utils",
+ "rand 0.8.5",
  "schemars",
  "serde",
  "serial_test",
