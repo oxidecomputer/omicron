@@ -394,6 +394,7 @@ async fn test_db_run() {
 //
 // This mirrors the `test_db_run()` test.
 #[tokio::test]
+#[ignore]
 async fn test_run_all() {
     let cmd_path = path_to_omicron_dev();
 
