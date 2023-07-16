@@ -6,6 +6,7 @@
 
 use crate::nexus::NexusClientWithResolver;
 use crate::storage::dataset::DatasetName;
+use crate::storage::dump_setup::DumpSetup;
 use camino::Utf8PathBuf;
 use futures::stream::FuturesOrdered;
 use futures::FutureExt;
@@ -31,6 +32,7 @@ use tokio::sync::{mpsc, oneshot, Mutex};
 use tokio::task::JoinHandle;
 use uuid::Uuid;
 
+use illumos_utils::dumpadm::DumpHdrError;
 #[cfg(test)]
 use illumos_utils::{zfs::MockZfs as Zfs, zpool::MockZpool as Zpool};
 #[cfg(not(test))]
@@ -125,6 +127,9 @@ pub enum Error {
 
     #[error("Underlay not yet initialized")]
     UnderlayNotInitialized,
+
+    #[error("Encountered error checking dump device flags: {0}")]
+    DumpHdr(#[from] DumpHdrError),
 }
 
 /// A ZFS storage pool.
@@ -165,7 +170,7 @@ struct UnderlayRequest {
 }
 
 #[derive(PartialEq, Eq, Clone)]
-enum DiskWrapper {
+pub(crate) enum DiskWrapper {
     Real { disk: Disk, devfs_path: Utf8PathBuf },
     Synthetic { zpool_name: ZpoolName },
 }
@@ -338,6 +343,9 @@ struct StorageWorker {
     // A mechanism for requesting disk encryption keys from the
     // [`key_manager::KeyManager`]
     key_requester: StorageKeyRequester,
+
+    // Invokes dumpadm(8) and savecore(8) when new disks are encountered
+    dump_setup: Arc<DumpSetup>,
 }
 
 #[derive(Clone, Debug)]
@@ -621,6 +629,8 @@ impl StorageWorker {
         >,
         disk: DiskWrapper,
     ) -> Result<(), Error> {
+        let log = self.log.clone();
+
         disks.insert(disk.identity(), disk.clone());
         self.physical_disk_notify(NotifyDiskRequest::Add {
             identity: disk.identity(),
@@ -629,6 +639,8 @@ impl StorageWorker {
         .await;
         self.upsert_zpool(&resources, disk.identity(), disk.zpool_name())
             .await?;
+
+        self.dump_setup.update_dumpdev_setup(disks, log).await;
 
         Ok(())
     }
@@ -965,6 +977,7 @@ impl StorageManager {
                         rx,
                         underlay: Arc::new(Mutex::new(None)),
                         key_requester,
+                        dump_setup: Arc::new(DumpSetup::default()),
                     };
 
                     worker.do_work(resources).await
