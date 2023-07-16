@@ -40,8 +40,8 @@ pub async fn ensure_region_in_dataset(
 
     let region_request = CreateRegion {
         block_size: region.block_size().to_bytes(),
-        extent_count: region.extent_count().try_into().unwrap(),
-        extent_size: region.blocks_per_extent().try_into().unwrap(),
+        extent_count: region.extent_count(),
+        extent_size: region.blocks_per_extent(),
         // TODO: Can we avoid casting from UUID to string?
         // NOTE: This'll require updating the crucible agent client.
         id: RegionId(region.id().to_string()),

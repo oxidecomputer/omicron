@@ -48,13 +48,6 @@ table! {
 }
 
 table! {
-    candidate_zpools {
-        id -> Uuid,
-        total_size -> Int8,
-    }
-}
-
-table! {
     candidate_regions {
         id -> Uuid,
         time_created -> Timestamptz,
@@ -66,13 +59,6 @@ table! {
         block_size -> Int8,
         blocks_per_extent -> Int8,
         extent_count -> Int8,
-    }
-}
-
-table! {
-    zpool_size_delta (pool_id) {
-        pool_id -> Uuid,
-        size_used_delta -> Numeric,
     }
 }
 
@@ -92,8 +78,8 @@ table! {
 }
 
 table! {
-    proposed_datasets_fit (fits) {
-        fits -> Bool,
+    candidate_zpools (pool_id) {
+        pool_id -> Uuid
     }
 }
 
@@ -136,6 +122,8 @@ table! {
     }
 }
 
+// XXX These could do for some cleanup
+
 diesel::allow_tables_to_appear_in_same_query!(candidate_datasets, zpool,);
 
 diesel::allow_tables_to_appear_in_same_query!(
@@ -150,12 +138,9 @@ diesel::allow_tables_to_appear_in_same_query!(
     zpool,
 );
 
-diesel::allow_tables_to_appear_in_same_query!(candidate_zpools, dataset,);
-
 diesel::allow_tables_to_appear_in_same_query!(
     old_zpool_usage,
     zpool,
-    zpool_size_delta,
     proposed_dataset_changes,
 );
 
@@ -165,3 +150,26 @@ diesel::allow_tables_to_appear_in_same_query!(
     inserted_regions,
     updated_datasets,
 );
+
+diesel::allow_tables_to_appear_in_same_query!(candidate_zpools, dataset,);
+diesel::allow_tables_to_appear_in_same_query!(candidate_zpools, zpool,);
+
+// == Needed for random region allocation ==
+
+pub mod cockroach_md5 {
+    pub mod functions {
+        use diesel::sql_types::*;
+        diesel::sql_function!(fn md5(x: Bytea) -> Bytea);
+    }
+
+    pub mod helper_types {
+        pub type Md5<Expr> = super::functions::md5::HelperType<Expr>;
+    }
+
+    pub mod dsl {
+        pub use super::functions::*;
+        pub use super::helper_types::*;
+    }
+}
+
+// == End random region allocation dependencies ==
