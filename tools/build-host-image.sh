@@ -102,7 +102,7 @@ function main
 
     pfexec zfs create -p rpool/images/$USER
 
-    HELIOS_REPO=https://pkg.oxide.computer/helios-netdev
+    HELIOS_REPO=https://pkg.oxide.computer/helios/2/dev/
 
     # Build an image name that includes the omicron and host OS hashes
     IMAGE_NAME="$IMAGE_PREFIX ${GITHUB_SHA:0:7}"
@@ -111,7 +111,7 @@ function main
     IMAGE_NAME+=" $(date +'%Y-%m-%d %H:%M')"
 
     ./helios-build experiment-image \
-        -p helios-netdev="$HELIOS_REPO" \
+        -p helios-dev="$HELIOS_REPO" \
         -F optever="$OPTE_VER" \
         -P "$tmp_gz/root" \
         -N "$IMAGE_NAME" \

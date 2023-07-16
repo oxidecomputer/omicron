@@ -256,11 +256,7 @@ impl TestState {
 
     fn connect_and_expect_no_messages(&mut self, peer_id: Baseboard) {
         self.common.connected_peers.insert(peer_id.clone());
-        assert!(self
-            .common
-            .sut
-            .on_connected(self.common.now, peer_id.clone())
-            .is_ok());
+        assert!(self.common.sut.on_connected(self.common.now, peer_id).is_ok());
         assert!(self.common.sut.drain_envelopes().next().is_none());
     }
 
