@@ -197,7 +197,11 @@ fn savecore() -> Result<Option<OsString>, DumpAdmError> {
     cmd.arg("-v");
     let out = cmd.output().map_err(DumpAdmError::ExecSavecore)?;
     if out.status.success() {
-        Ok(Some(OsString::from_vec(out.stdout)))
+        if out.stdout.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(OsString::from_vec(out.stdout)))
+        }
     } else {
         Err(DumpAdmError::SavecoreFailure(OsString::from_vec(out.stderr)))
     }
