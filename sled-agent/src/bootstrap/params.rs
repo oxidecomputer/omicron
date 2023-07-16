@@ -9,6 +9,7 @@ use omicron_common::address::{self, Ipv6Subnet, SLED_PREFIX};
 use omicron_common::api::internal::shared::RackNetworkConfig;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use sled_hardware::Baseboard;
 use std::borrow::Cow;
 use std::collections::HashSet;
 use std::net::{IpAddr, Ipv6Addr, SocketAddrV6};
@@ -28,6 +29,7 @@ pub enum BootstrapAddressDiscovery {
 #[derive(Clone, Deserialize)]
 struct UnvalidatedRackInitializeRequest {
     rack_subnet: Ipv6Addr,
+    trust_quorum_peers: Option<Vec<Baseboard>>,
     bootstrap_discovery: BootstrapAddressDiscovery,
     ntp_servers: Vec<String>,
     dns_servers: Vec<String>,
@@ -49,6 +51,14 @@ struct UnvalidatedRackInitializeRequest {
 #[serde(try_from = "UnvalidatedRackInitializeRequest")]
 pub struct RackInitializeRequest {
     pub rack_subnet: Ipv6Addr,
+
+    /// The set of peer_ids required to initialize lrtq
+    ///
+    /// These are only set when we are using
+    /// `BootstrapAddressDiscovery::OnlyThese` and there are at least 3
+    /// addresses. The addresses map 1:1 to the `Baseboard`s. LRTQ only
+    /// requires the `Baseboards` as it rediscovers the addresses from DDM.
+    pub trust_quorum_peers: Option<Vec<Baseboard>>,
 
     /// Describes how bootstrap addresses should be collected during RSS.
     pub bootstrap_discovery: BootstrapAddressDiscovery,
@@ -89,6 +99,7 @@ impl std::fmt::Debug for RackInitializeRequest {
         // struct, be sure to add it to the Debug impl below!
         let RackInitializeRequest {
             rack_subnet,
+            trust_quorum_peers: trust_qurorum_peers,
             bootstrap_discovery,
             ntp_servers,
             dns_servers,
@@ -102,6 +113,7 @@ impl std::fmt::Debug for RackInitializeRequest {
 
         f.debug_struct("RackInitializeRequest")
             .field("rack_subnet", rack_subnet)
+            .field("trust_quorum_peers", trust_qurorum_peers)
             .field("bootstrap_discovery", bootstrap_discovery)
             .field("ntp_servers", ntp_servers)
             .field("dns_servers", dns_servers)
@@ -144,6 +156,7 @@ impl TryFrom<UnvalidatedRackInitializeRequest> for RackInitializeRequest {
 
         Ok(RackInitializeRequest {
             rack_subnet: value.rack_subnet,
+            trust_quorum_peers: value.trust_quorum_peers,
             bootstrap_discovery: value.bootstrap_discovery,
             ntp_servers: value.ntp_servers,
             dns_servers: value.dns_servers,
@@ -290,6 +303,7 @@ mod tests {
         // external DNS IPs, but no other fields matter.
         let mut config = UnvalidatedRackInitializeRequest {
             rack_subnet: Ipv6Addr::LOCALHOST,
+            trust_quorum_peers: None,
             bootstrap_discovery: BootstrapAddressDiscovery::OnlyOurs,
             ntp_servers: Vec::new(),
             dns_servers: Vec::new(),

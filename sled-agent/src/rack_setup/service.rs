@@ -71,6 +71,7 @@ use crate::rack_setup::plan::sled::{
     Plan as SledPlan, PlanError as SledPlanError,
 };
 use crate::storage_manager::StorageResources;
+use bootstore::schemes::v0 as bootstore;
 use camino::Utf8PathBuf;
 use ddm_admin_client::{Client as DdmAdminClient, DdmError};
 use dpd_client::types::Ipv6Entry;
@@ -102,11 +103,13 @@ use sled_agent_client::{
 };
 use sled_hardware::underlay::BootstrapInterface;
 use slog::Logger;
+use std::collections::BTreeSet;
 use std::collections::{HashMap, HashSet};
 use std::iter;
 use std::net::IpAddr;
 use std::net::{Ipv6Addr, SocketAddrV6};
 use thiserror::Error;
+use uuid::Uuid;
 
 static BOUNDARY_SERVICES_ADDR: &str = "fd00:99::1";
 
@@ -161,6 +164,9 @@ pub enum SetupServiceError {
 
     #[error("Error during DNS lookup: {0}")]
     DnsResolver(#[from] internal_dns::resolver::ResolveError),
+
+    #[error("Failed to save early network config to bootstore")]
+    Bootstore(#[from] bootstore::NodeRequestError),
 }
 
 // The workload / information allocated to a single sled.
@@ -180,21 +186,27 @@ impl RackSetupService {
     /// Arguments:
     /// - `log`: The logger.
     /// - `config`: The config file, which is used to setup the rack.
-    /// - `peer_monitor`: The mechanism by which the setup service discovers
-    ///   bootstrap agents on nearby sleds.
+    /// - `storage_resources`: All the disks and zpools managed by this sled
     /// - `local_bootstrap_agent`: Communication channel by which we can send
     ///   commands to our local bootstrap-agent (e.g., to initialize sled
+    /// - `bootstore` - A handle to call bootstore APIs
     ///   agents).
     pub(crate) fn new(
         log: Logger,
         config: Config,
         storage_resources: StorageResources,
         local_bootstrap_agent: BootstrapAgentHandle,
+        bootstore: bootstore::NodeHandle,
     ) -> Self {
         let handle = tokio::task::spawn(async move {
             let svc = ServiceInner::new(log.clone());
             if let Err(e) = svc
-                .run(&config, &storage_resources, local_bootstrap_agent)
+                .run(
+                    &config,
+                    &storage_resources,
+                    local_bootstrap_agent,
+                    bootstore,
+                )
                 .await
             {
                 warn!(log, "RSS injection failed: {}", e);
@@ -754,6 +766,7 @@ impl ServiceInner {
         config: &Config,
         storage_resources: &StorageResources,
         local_bootstrap_agent: BootstrapAgentHandle,
+        bootstore: bootstore::NodeHandle,
     ) -> Result<(), SetupServiceError> {
         info!(self.log, "Injecting RSS configuration: {:#?}", config);
 
@@ -865,6 +878,15 @@ impl ServiceInner {
             .await?
         };
         let config = &plan.config;
+
+        // Initialize the trust quorum if there are peers configured.
+        if let Some(peers) = &config.trust_quorum_peers {
+            // The value doesn't really matter here. It just needs to be unique.
+            let rack_uuid = Uuid::new_v4();
+            let initial_membership: BTreeSet<_> =
+                peers.iter().cloned().collect();
+            bootstore.init_rack(rack_uuid.into(), initial_membership).await?;
+        }
 
         // Forward the sled initialization requests to our sled-agent.
         local_bootstrap_agent

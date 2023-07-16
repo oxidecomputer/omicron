@@ -164,6 +164,17 @@ impl CurrentRssConfig {
             bootstrap_ips.push(ip);
         }
 
+        // LRTQ requires at least 3 sleds
+        let trust_quorum_peers: Option<
+            Vec<bootstrap_agent_client::types::Baseboard>,
+        > = if known_bootstrap_sleds.len() >= 3 {
+            Some(
+                known_bootstrap_sleds.keys().cloned().map(Into::into).collect(),
+            )
+        } else {
+            None
+        };
+
         // Convert between internal and progenitor types.
         let user_password_hash = bootstrap_agent_client::types::NewPasswordHash(
             recovery_silo_password_hash.to_string(),
@@ -190,6 +201,7 @@ impl CurrentRssConfig {
 
         let request = RackInitializeRequest {
             rack_subnet: RACK_SUBNET,
+            trust_quorum_peers,
             bootstrap_discovery: BootstrapAddressDiscovery::OnlyThese(
                 bootstrap_ips,
             ),

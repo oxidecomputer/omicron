@@ -98,6 +98,7 @@ mod test {
     fn test_subnets() {
         let cfg = SetupServiceConfig {
             rack_subnet: "fd00:1122:3344:0100::".parse().unwrap(),
+            trust_quorum_peers: None,
             bootstrap_discovery: BootstrapAddressDiscovery::OnlyOurs,
             ntp_servers: vec![String::from("test.pool.example.com")],
             dns_servers: vec![String::from("1.1.1.1")],

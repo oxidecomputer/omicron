@@ -672,6 +672,7 @@ dependencies = [
  "reqwest",
  "schemars",
  "serde",
+ "sled-hardware",
  "slog",
  "uuid",
 ]
@@ -4866,6 +4867,7 @@ dependencies = [
  "async-trait",
  "base64 0.21.2",
  "bincode",
+ "bootstore",
  "bootstrap-agent-client",
  "bytes",
  "camino",
