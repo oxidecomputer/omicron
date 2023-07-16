@@ -125,7 +125,7 @@ EOF
 done
 
 source "$TOP/tools/dvt_dock_version"
-git clone https://github.com/oxidecomputer/dvt-dock.git /work/dvt-dock
+git clone --depth 1 https://github.com/oxidecomputer/dvt-dock.git /work/dvt-dock
 (cd /work/dvt-dock; git checkout "$COMMIT")
 
 add_hubris_artifacts() {
