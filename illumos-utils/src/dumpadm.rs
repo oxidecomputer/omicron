@@ -30,6 +30,12 @@ pub enum DumpHdrError {
     InvalidVersion(u32),
 }
 
+/// Returns Ok(true) if the given block device contains a dump that needs to
+/// be savecore'd, Ok(false) if the given block device contains a dump that's
+/// already been savecore'd, Err(DumpHdrError::InvalidMagic) if there's never
+/// been a core written there at all, Err(DumpHdrError::InvalidVersion) if the
+/// dumphdr isn't the one we know how to handle (10), or other variants of
+/// DumpHdrError if there are I/O failures while reading the block device.
 pub fn dump_flag_is_valid(
     dump_slice: &Utf8PathBuf,
 ) -> Result<bool, DumpHdrError> {
@@ -101,6 +107,12 @@ pub enum DumpAdmError {
     ExecSavecore(std::io::Error),
 }
 
+/// Invokes `dumpadm(8)` to configure the kernel to dump core into the given
+/// `dump_slice` block device in the event of a panic. If a core is already
+/// present in that block device, and a `savecore_dir` is provided, this
+/// function also invokes `savecore(8)` to save it into that directory.
+/// On success, returns Ok(Some(stdout)) if `savecore(8)` was invoked, or
+/// Ok(None) if it wasn't.
 pub fn dumpadm(
     dump_slice: &Utf8PathBuf,
     savecore_dir: Option<&Utf8PathBuf>,
@@ -118,17 +130,20 @@ pub fn dumpadm(
     // Compress crash dumps:
     cmd.arg("-z").arg("on");
 
+    // Do not run savecore(8) automatically on boot (irrelevant anyhow, as the
+    // config file being mutated by dumpadm won't survive reboots on gimlets).
+    // The sled-agent will invoke it manually instead.
+    cmd.arg("-n");
+
     if let Some(savecore_dir) = savecore_dir {
         // Run savecore(8) to place the existing contents of dump_slice (if
         // any) into savecore_dir, and clear the presence flag.
         cmd.arg("-s").arg(savecore_dir);
     } else {
-        // Do not run savecore(8) automatically...
-        cmd.arg("-n");
-
-        // ...but do create and use a tmpfs path (rather than the default
-        // location under /var/crash, which is in the ramdisk pool), because
-        // dumpadm refuses to do what we ask otherwise.
+        // if we don't have a savecore destination yet, still create and use
+        // a tmpfs path (rather than the default location under /var/crash,
+        // which is in the ramdisk pool), because dumpadm refuses to do what
+        // we ask otherwise.
         let tmp_crash = "/tmp/crash";
         std::fs::create_dir_all(tmp_crash).map_err(DumpAdmError::Mkdir)?;
 
@@ -139,7 +154,9 @@ pub fn dumpadm(
 
     match out.status.code() {
         Some(0) => {
+            // do we have a destination for the saved dump
             if savecore_dir.is_some() {
+                // and does the dump slice have one to save off
                 if let Ok(true) = dump_flag_is_valid(dump_slice) {
                     return savecore();
                 }
@@ -166,13 +183,14 @@ pub fn dumpadm(
 
 // invokes savecore(8) according to the system-wide config set by dumpadm.
 // savecore(8) creates a file in the savecore directory called `vmdump.<n>`,
-// where `<n>` is the number in the neighboring plaintext file called `bounds`.
+// where `<n>` is the number in the neighboring plaintext file called `bounds`,
+// or 0 if the file doesn't exist.
 // if savecore(8) successfully copies the data from the dump slice to the
 // vmdump file, it clears the "valid" flag in the dump slice's header and
 // increments the number in `bounds` by 1.
 // in the event that savecore(8) terminates before it finishes copying the
 // dump, the incomplete dump will remain in the target directory, but the next
-// invocation will overwrite it.
+// invocation will overwrite it, because `bounds` wasn't created/incremented.
 fn savecore() -> Result<Option<OsString>, DumpAdmError> {
     let mut cmd = Command::new(SAVECORE);
     cmd.env_clear();

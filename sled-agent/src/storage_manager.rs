@@ -640,7 +640,7 @@ impl StorageWorker {
         self.upsert_zpool(&resources, disk.identity(), disk.zpool_name())
             .await?;
 
-        self.dump_setup.poll_dumpdev_setup(disks, log).await;
+        self.dump_setup.update_dumpdev_setup(disks, log).await;
 
         Ok(())
     }

@@ -10,11 +10,12 @@ use tokio::sync::MutexGuard;
 
 #[derive(Default)]
 pub struct DumpSetup {
+    // prevent us from running savecore concurrently.
     savecore_lock: Arc<std::sync::Mutex<()>>,
 }
 
 impl DumpSetup {
-    pub(crate) async fn poll_dumpdev_setup(
+    pub(crate) async fn update_dumpdev_setup(
         &self,
         disks: &mut MutexGuard<'_, HashMap<DiskIdentity, DiskWrapper>>,
         log: Logger,
