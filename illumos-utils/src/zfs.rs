@@ -9,6 +9,15 @@ use camino::Utf8PathBuf;
 use omicron_common::disk::DiskIdentity;
 use std::fmt;
 
+// These locations in the ramdisk should must only be used by the switch zone.
+// We need the switch zone online before we can create the U.2 drives and
+// encrypt the zpools during rack initialization. Without the switch zone we
+// cannot get the rack initialization request from wicketd in RSS which allows
+// us to  initialize the trust quorum and derive the encryption keys needed for
+// the U.2 disks.
+pub const ZONE_ZFS_RAMDISK_DATASET_MOUNTPOINT: &str = "/zone";
+pub const ZONE_ZFS_RAMDISK_DATASET: &str = "rpool/zone";
+
 pub const ZFS: &str = "/usr/sbin/zfs";
 pub const KEYPATH_ROOT: &str = "/var/run/oxide/";
 
@@ -383,5 +392,15 @@ pub fn get_all_omicron_datasets_for_delete() -> anyhow::Result<Vec<String>> {
             datasets.push(format!("{pool}/{dataset}"));
         }
     }
+
+    // Collect all datasets for ramdisk-based Oxide zones,
+    // if any exist.
+    if let Ok(ramdisk_datasets) = Zfs::list_datasets(&ZONE_ZFS_RAMDISK_DATASET)
+    {
+        for dataset in &ramdisk_datasets {
+            datasets.push(format!("{}/{dataset}", ZONE_ZFS_RAMDISK_DATASET));
+        }
+    };
+
     Ok(datasets)
 }

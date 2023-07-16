@@ -25,7 +25,10 @@ use ddm_admin_client::{Client as DdmAdminClient, DdmError};
 use futures::stream::{self, StreamExt, TryStreamExt};
 use illumos_utils::addrobj::AddrObject;
 use illumos_utils::dladm::{Dladm, Etherstub, EtherstubVnic, GetMacError};
-use illumos_utils::zfs;
+use illumos_utils::zfs::{
+    self, Mountpoint, Zfs, ZONE_ZFS_RAMDISK_DATASET,
+    ZONE_ZFS_RAMDISK_DATASET_MOUNTPOINT,
+};
 use illumos_utils::zone::Zones;
 use illumos_utils::{execute, PFEXEC};
 use key_manager::{KeyManager, StorageKeyRequester};
@@ -375,6 +378,24 @@ impl Agent {
         // advertise it to other sleds.
         let ddmd_client = DdmAdminClient::localhost(&log)?;
         ddmd_client.advertise_prefix(Ipv6Subnet::new(ip));
+
+        // Before we create the switch zone, we need to ensure that the
+        // necessary ZFS and Zone resources are ready. All other zones are
+        // created on U.2 drives.
+        let zoned = true;
+        let do_format = true;
+        let encryption_details = None;
+        let quota = None;
+        Zfs::ensure_filesystem(
+            ZONE_ZFS_RAMDISK_DATASET,
+            Mountpoint::Path(Utf8PathBuf::from(
+                ZONE_ZFS_RAMDISK_DATASET_MOUNTPOINT,
+            )),
+            zoned,
+            do_format,
+            encryption_details,
+            quota,
+        )?;
 
         // Before we start monitoring for hardware, ensure we're running from a
         // predictable state.
