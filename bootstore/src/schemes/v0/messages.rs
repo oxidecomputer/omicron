@@ -91,13 +91,13 @@ impl RequestType {
 /// A response to a request from a peer over TCP
 #[derive(From, Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ResponseType {
-    /// Response to [`Request::Init`]
+    /// Response to [`RequestType::Init`]
     InitAck,
 
-    /// Response to [`Request::GetShare`]
+    /// Response to [`RequestType::GetShare`]
     Share(Share),
 
-    /// Response to [`Request::Learn`]
+    /// Response to [`RequestType::Learn`]
     LearnPkg(LearnedSharePkg),
 
     /// An error response

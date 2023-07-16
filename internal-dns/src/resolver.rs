@@ -60,6 +60,7 @@ impl Resolver {
         info!(log, "new DNS resolver"; "addresses" => ?dns_addrs);
 
         let mut rc = ResolverConfig::new();
+        let dns_server_count = dns_addrs.len();
         for socket_addr in dns_addrs.into_iter() {
             rc.add_name_server(NameServerConfig {
                 socket_addr,
@@ -69,7 +70,10 @@ impl Resolver {
                 bind_addr: None,
             });
         }
-        let resolver = TokioAsyncResolver::tokio(rc, ResolverOpts::default())?;
+        let mut opts = ResolverOpts::default();
+        opts.use_hosts_file = false;
+        opts.num_concurrent_reqs = dns_server_count;
+        let resolver = TokioAsyncResolver::tokio(rc, opts)?;
 
         Ok(Self { log, resolver })
     }

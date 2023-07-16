@@ -9,7 +9,7 @@ use super::peer_networking::{
     AcceptedConnHandle, ConnToMainMsg, ConnToMainMsgInner, MainToConnMsg, Msg,
     PeerConnHandle,
 };
-use super::storage::PersistentFsmState;
+use super::storage::{NetworkConfig, PersistentFsmState};
 use super::{ApiError, ApiOutput, Fsm, FsmConfig, RackUuid};
 use crate::trust_quorum::RackSecret;
 use camino::Utf8PathBuf;
@@ -19,6 +19,7 @@ use slog::{debug, error, info, o, warn, Logger};
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::{SocketAddr, SocketAddrV6};
 use std::time::Duration;
+use thiserror::Error;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{mpsc, oneshot};
 use tokio::time::{interval, Instant, MissedTickBehavior};
@@ -32,23 +33,33 @@ pub struct Config {
     rack_init_timeout: Duration,
     rack_secret_request_timeout: Duration,
     fsm_state_ledger_paths: Vec<Utf8PathBuf>,
+    network_config_ledger_paths: Vec<Utf8PathBuf>,
 }
 
 /// An error response from a `NodeApiRequest`
-#[derive(Debug, From)]
+#[derive(Error, Debug, From, PartialEq)]
 pub enum NodeRequestError {
-    /// An `Init_` or `LoadRackSecret` request is already outstanding
-    /// We only allow one at a time.
+    #[error("only one request allowed at a time")]
     RequestAlreadyPending,
 
-    /// An error returned by the Fsm API
+    #[error("Fsm error: {0}")]
     Fsm(ApiError),
 
-    /// The peer task shutdown
+    #[error("failed to receive response from node task: {0}")]
     Recv(oneshot::error::RecvError),
 
-    /// Failed to send to a connection management task
-    Send(mpsc::error::SendError<NodeApiRequest>),
+    #[error("failed to send request to node task")]
+    Send,
+
+    #[error(
+        "Network config update failed because it is out of date. Attempted
+        update generation: {attempted_update_generation}, current generation: 
+        {current_generation}"
+    )]
+    StaleNetworkConfig {
+        attempted_update_generation: u64,
+        current_generation: u64,
+    },
 }
 
 /// A request sent to the `Node` task from the `NodeHandle`
@@ -85,6 +96,15 @@ pub enum NodeApiRequest {
 
     /// Shutdown the node's tokio tasks
     Shutdown,
+
+    /// Update Network Config used to bring up the control plane
+    UpdateNetworkConfig {
+        config: NetworkConfig,
+        responder: oneshot::Sender<Result<(), NodeRequestError>>,
+    },
+
+    /// Retrieve the current network config
+    GetNetworkConfig { responder: oneshot::Sender<Option<NetworkConfig>> },
 }
 
 /// A handle for interacting with a `Node` task
@@ -107,7 +127,8 @@ impl NodeHandle {
                 initial_membership,
                 responder: tx,
             })
-            .await?;
+            .await
+            .map_err(|_| NodeRequestError::Send)?;
         let res = rx.await?;
         res
     }
@@ -115,7 +136,10 @@ impl NodeHandle {
     /// Initialize this node  as a learner
     pub async fn init_learner(&self) -> Result<(), NodeRequestError> {
         let (tx, rx) = oneshot::channel();
-        self.tx.send(NodeApiRequest::InitLearner { responder: tx }).await?;
+        self.tx
+            .send(NodeApiRequest::InitLearner { responder: tx })
+            .await
+            .map_err(|_| NodeRequestError::Send)?;
         let res = rx.await?;
         res
     }
@@ -128,7 +152,10 @@ impl NodeHandle {
         &self,
     ) -> Result<RackSecret, NodeRequestError> {
         let (tx, rx) = oneshot::channel();
-        self.tx.send(NodeApiRequest::LoadRackSecret { responder: tx }).await?;
+        self.tx
+            .send(NodeApiRequest::LoadRackSecret { responder: tx })
+            .await
+            .map_err(|_| NodeRequestError::Send)?;
         let res = rx.await?;
         res
     }
@@ -140,28 +167,64 @@ impl NodeHandle {
         &self,
         addrs: BTreeSet<SocketAddrV6>,
     ) -> Result<(), NodeRequestError> {
-        self.tx.send(NodeApiRequest::PeerAddresses(addrs)).await?;
+        self.tx
+            .send(NodeApiRequest::PeerAddresses(addrs))
+            .await
+            .map_err(|_| NodeRequestError::Send)?;
         Ok(())
     }
 
     /// Get the status of this node
     pub async fn get_status(&self) -> Result<Status, NodeRequestError> {
         let (tx, rx) = oneshot::channel();
-        self.tx.send(NodeApiRequest::GetStatus { responder: tx }).await?;
+        self.tx
+            .send(NodeApiRequest::GetStatus { responder: tx })
+            .await
+            .map_err(|_| NodeRequestError::Send)?;
         let res = rx.await?;
         Ok(res)
     }
 
     /// Shutdown the node's tokio tasks
     pub async fn shutdown(&self) -> Result<(), NodeRequestError> {
-        self.tx.send(NodeApiRequest::Shutdown).await?;
+        self.tx
+            .send(NodeApiRequest::Shutdown)
+            .await
+            .map_err(|_| NodeRequestError::Send)?;
         Ok(())
+    }
+
+    /// Update network config needed for bringing up the control plane
+    pub async fn update_network_config(
+        &self,
+        config: NetworkConfig,
+    ) -> Result<(), NodeRequestError> {
+        let (tx, rx) = oneshot::channel();
+        self.tx
+            .send(NodeApiRequest::UpdateNetworkConfig { config, responder: tx })
+            .await
+            .map_err(|_| NodeRequestError::Send)?;
+        rx.await?
+    }
+
+    /// Retrieve the current network config
+    pub async fn get_network_config(
+        &self,
+    ) -> Result<Option<NetworkConfig>, NodeRequestError> {
+        let (tx, rx) = oneshot::channel();
+        self.tx
+            .send(NodeApiRequest::GetNetworkConfig { responder: tx })
+            .await
+            .map_err(|_| NodeRequestError::Send)?;
+        let res = rx.await?;
+        Ok(res)
     }
 }
 
 #[derive(Debug, Clone)]
 pub struct Status {
     pub fsm_ledger_generation: u64,
+    pub network_config_ledger_generation: Option<u64>,
     pub fsm_state: &'static str,
     pub peers: BTreeSet<SocketAddrV6>,
     pub connections: BTreeMap<Baseboard, SocketAddrV6>,
@@ -177,6 +240,7 @@ pub struct Status {
 /// via control of an underlying  `Fsm`.
 pub struct Node {
     fsm_ledger_generation: u64,
+    network_config: Option<NetworkConfig>,
     config: Config,
     fsm: Fsm,
     peers: BTreeSet<SocketAddrV6>,
@@ -258,10 +322,16 @@ impl Node {
             config.clone().into(),
         )
         .await;
+        let network_config = NetworkConfig::load(
+            &log,
+            config.network_config_ledger_paths.clone(),
+        )
+        .await;
 
         (
             Node {
                 fsm_ledger_generation: ledger_generation,
+                network_config,
                 config,
                 fsm,
                 peers: BTreeSet::new(),
@@ -414,6 +484,10 @@ impl Node {
             NodeApiRequest::GetStatus { responder } => {
                 let status = Status {
                     fsm_ledger_generation: self.fsm_ledger_generation,
+                    network_config_ledger_generation: self
+                        .network_config
+                        .as_ref()
+                        .map(|c| c.generation),
                     fsm_state: self.fsm.state().name(),
                     peers: self.peers.clone(),
                     connections: self
@@ -448,6 +522,113 @@ impl Node {
                     let _ = handle.tx.send(MainToConnMsg::Close).await;
                 }
             }
+            NodeApiRequest::UpdateNetworkConfig { config, responder } => {
+                let current_gen =
+                    self.network_config.as_ref().map_or(0, |c| c.generation);
+                info!(
+                    self.log,
+                    concat!(
+                        "Attempting to update network config with ",
+                        "generation: {}, current_generation: {}"
+                    ),
+                    config.generation,
+                    current_gen,
+                );
+                if current_gen > config.generation {
+                    error!(
+                        self.log,
+                        concat!(
+                            "Attempted network config update with ",
+                            "stale generation: attemped_update_generation: {}, ",
+                            "current_generation: {}"
+                        ),
+                        config.generation,
+                        current_gen,
+                    );
+                    let _ = responder.send(Err(
+                        NodeRequestError::StaleNetworkConfig {
+                            attempted_update_generation: config.generation,
+                            current_generation: current_gen,
+                        },
+                    ));
+                } else if current_gen == config.generation {
+                    warn!(
+                        self.log,
+                        concat!(
+                            "Not updating network config: generation ",
+                            "{} is current"
+                        ),
+                        current_gen
+                    );
+                } else {
+                    self.network_config = Some(config.clone());
+                    NetworkConfig::save(
+                        &self.log,
+                        self.config.network_config_ledger_paths.clone(),
+                        config,
+                    )
+                    .await;
+                    // Broadacst the updated config. We only broadcast
+                    // when we successfully update it so we don't trigger an
+                    // endless broadcast storm.
+                    self.broadcast_network_config(None).await;
+                    let _ = responder.send(Ok(()));
+                }
+            }
+            NodeApiRequest::GetNetworkConfig { responder } => {
+                let _ = responder.send(self.network_config.clone());
+            }
+        }
+    }
+
+    // After we have updated our network config, we should send it out to all
+    // peers, with the exception of the peer we received it from if this was not
+    // a local update.
+    async fn broadcast_network_config(
+        &mut self,
+        excluded_peer: Option<&Baseboard>,
+    ) {
+        // We only call this method when there has been an update. Otherwise we
+        // have an invariant violation due to programmer error and should panic.
+        let network_config = self.network_config.as_ref().unwrap();
+        info!(
+            self.log,
+            "Broadcasting network config with generation {}",
+            network_config.generation
+        );
+        for (id, handle) in self
+            .established_connections
+            .iter()
+            .filter(|(id, _)| Some(*id) != excluded_peer)
+        {
+            debug!(
+                self.log,
+                "Sending network config with generation {} to {id}",
+                network_config.generation
+            );
+            self.send_network_config(network_config.clone(), id, handle).await;
+        }
+    }
+
+    // Send network config to a peer
+    async fn send_network_config(
+        &self,
+        config: NetworkConfig,
+        peer_id: &Baseboard,
+        handle: &PeerConnHandle,
+    ) {
+        if let Err(e) =
+            handle.tx.send(MainToConnMsg::Msg(Msg::NetworkConfig(config))).await
+        {
+            warn!(
+                self.log,
+                concat!(
+                    "Failed to send network config to connection ",
+                    "management task for {} {:?}"
+                ),
+                peer_id,
+                e
+            );
         }
     }
 
@@ -603,6 +784,15 @@ impl Node {
                     addr,
                     unique_id: accepted_handle.unique_id,
                 };
+                if let Some(network_config) = self.network_config.as_ref() {
+                    self.send_network_config(
+                        network_config.clone(),
+                        &peer_id,
+                        &handle,
+                    )
+                    .await;
+                }
+
                 self.established_connections.insert(peer_id.clone(), handle);
                 if let Err(e) =
                     self.fsm.on_connected(Instant::now().into(), peer_id)
@@ -620,6 +810,15 @@ impl Node {
                     // we have stored.
                     if unique_id != handle.unique_id {
                         return;
+                    }
+
+                    if let Some(network_config) = self.network_config.as_ref() {
+                        self.send_network_config(
+                            network_config.clone(),
+                            &peer_id,
+                            &handle,
+                        )
+                        .await;
                     }
 
                     self.established_connections
@@ -685,6 +884,31 @@ impl Node {
                     }
                 }
                 self.accepted_connections.remove(&addr);
+            }
+            ConnToMainMsgInner::ReceivedNetworkConfig { from, config } => {
+                let current_gen =
+                    self.network_config.as_ref().map_or(0, |c| c.generation);
+                let generation = config.generation;
+                info!(
+                    self.log,
+                    concat!(
+                        "Received network config from {} with ",
+                        "generation: {}, current generation: {}"
+                    ),
+                    from,
+                    generation,
+                    current_gen
+                );
+                if generation > current_gen {
+                    self.network_config = Some(config.clone());
+                    NetworkConfig::save(
+                        &self.log,
+                        self.config.network_config_ledger_paths.clone(),
+                        config,
+                    )
+                    .await;
+                    self.broadcast_network_config(Some(&from)).await;
+                }
             }
         }
     }
@@ -763,6 +987,7 @@ mod tests {
     use super::*;
     use camino_tempfile::Utf8TempDir;
     use slog::Drain;
+    use tokio::time::sleep;
     use uuid::Uuid;
 
     fn initial_members() -> BTreeSet<Baseboard> {
@@ -774,20 +999,26 @@ mod tests {
             .collect()
     }
 
-    fn initial_config(tempdir: &Utf8TempDir) -> Vec<Config> {
+    fn initial_config(tempdir: &Utf8TempDir, port_start: u16) -> Vec<Config> {
         initial_members()
             .into_iter()
             .enumerate()
             .map(|(i, id)| {
-                let file = format!("test-{i}-fsm-state-ledger");
+                let fsm_file = format!("test-{i}-fsm-state-ledger");
+                let network_file = format!("test-{i}-network-config-ledger");
                 Config {
                     id,
-                    addr: format!("[::1]:3333{}", i).parse().unwrap(),
+                    addr: format!("[::1]:{}{}", port_start, i).parse().unwrap(),
                     time_per_tick: Duration::from_millis(20),
                     learn_timeout: Duration::from_secs(5),
                     rack_init_timeout: Duration::from_secs(10),
                     rack_secret_request_timeout: Duration::from_secs(1),
-                    fsm_state_ledger_paths: vec![tempdir.path().join(&file)],
+                    fsm_state_ledger_paths: vec![tempdir
+                        .path()
+                        .join(&fsm_file)],
+                    network_config_ledger_paths: vec![tempdir
+                        .path()
+                        .join(&network_file)],
                 }
             })
             .collect()
@@ -797,16 +1028,24 @@ mod tests {
         Baseboard::new_pc("learner".to_string(), n.to_string())
     }
 
-    fn learner_config(tempdir: &Utf8TempDir, n: usize) -> Config {
-        let file = format!("test-learner-{n}-fsm-state-ledger");
+    fn learner_config(
+        tempdir: &Utf8TempDir,
+        n: usize,
+        port_start: u16,
+    ) -> Config {
+        let fsm_file = format!("test-learner-{n}-fsm-state-ledger");
+        let network_file = format!("test-{n}-network-config-ledger");
         Config {
             id: learner_id(n),
-            addr: format!("[::1]:3333{}", 3).parse().unwrap(),
+            addr: format!("[::1]:{}{}", port_start, 3).parse().unwrap(),
             time_per_tick: Duration::from_millis(20),
             learn_timeout: Duration::from_secs(5),
             rack_init_timeout: Duration::from_secs(10),
             rack_secret_request_timeout: Duration::from_secs(1),
-            fsm_state_ledger_paths: vec![tempdir.path().join(&file)],
+            fsm_state_ledger_paths: vec![tempdir.path().join(&fsm_file)],
+            network_config_ledger_paths: vec![tempdir
+                .path()
+                .join(&network_file)],
         }
     }
 
@@ -819,9 +1058,10 @@ mod tests {
 
     #[tokio::test]
     async fn basic_3_nodes() {
+        let port_start = 3333;
         let tempdir = Utf8TempDir::new().unwrap();
         let log = log();
-        let config = initial_config(&tempdir);
+        let config = initial_config(&tempdir, port_start);
         let (mut node0, handle0) = Node::new(config[0].clone(), &log).await;
         let (mut node1, handle1) = Node::new(config[1].clone(), &log).await;
         let (mut node2, handle2) = Node::new(config[2].clone(), &log).await;
@@ -837,8 +1077,7 @@ mod tests {
         });
 
         // Inform each node about the known addresses
-        let mut addrs: BTreeSet<_> =
-            config.iter().map(|c| c.addr.clone()).collect();
+        let mut addrs: BTreeSet<_> = config.iter().map(|c| c.addr).collect();
         for handle in [&handle0, &handle1, &handle2] {
             let _ = handle.load_peer_addresses(addrs.clone()).await;
         }
@@ -865,7 +1104,7 @@ mod tests {
         handle1.load_rack_secret().await.unwrap();
 
         // Add a learner node
-        let learner_conf = learner_config(&tempdir, 1);
+        let learner_conf = learner_config(&tempdir, 1, port_start);
         let (mut learner, learner_handle) =
             Node::new(learner_conf.clone(), &log).await;
         let learner_jh = tokio::spawn(async move {
@@ -873,7 +1112,7 @@ mod tests {
         });
         // Inform the learner and node0 and node1 about all addresses including
         // the learner. This simulates DDM discovery
-        addrs.insert(learner_conf.addr.clone());
+        addrs.insert(learner_conf.addr);
         let _ = learner_handle.load_peer_addresses(addrs.clone()).await;
         let _ = handle0.load_peer_addresses(addrs.clone()).await;
         let _ = handle1.load_peer_addresses(addrs.clone()).await;
@@ -902,13 +1141,12 @@ mod tests {
         let _ = handle1.load_peer_addresses(addrs.clone()).await;
         handle0.load_rack_secret().await.unwrap();
 
-        // Add a second learner and ensure that the generation gets bumped for
-        // either node0 or node1
+        // Add a second learner
         let peer0_gen =
             handle0.get_status().await.unwrap().fsm_ledger_generation;
         let peer1_gen =
             handle1.get_status().await.unwrap().fsm_ledger_generation;
-        let learner_config = learner_config(&tempdir, 2);
+        let learner_config = learner_config(&tempdir, 2, port_start);
         let (mut learner, learner_handle) =
             Node::new(learner_config.clone(), &log).await;
         let learner_jh = tokio::spawn(async move {
@@ -917,7 +1155,7 @@ mod tests {
 
         // Inform the learner, node0, and node1 about all addresses including
         // the learner. This simulates DDM discovery
-        addrs.insert(learner_config.addr.clone());
+        addrs.insert(learner_config.addr);
         let _ = learner_handle.load_peer_addresses(addrs.clone()).await;
         let _ = handle0.load_peer_addresses(addrs.clone()).await;
         let _ = handle1.load_peer_addresses(addrs.clone()).await;
@@ -957,7 +1195,9 @@ mod tests {
         let peer1_gen_new_2 =
             handle1.get_status().await.unwrap().fsm_ledger_generation;
 
-        // Ensure only one of the peers generation numbers gets bumped
+        // Ensure the peer's generation numbers don't get bumped. The learner
+        // will ask the same sled for a share first, which it already handed
+        // out.
         assert!(
             peer0_gen_new == peer0_gen_new_2
                 && peer1_gen_new == peer1_gen_new_2
@@ -970,5 +1210,177 @@ mod tests {
         jh0.await.unwrap();
         handle1.shutdown().await.unwrap();
         jh1.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn network_config() {
+        let port_start = 4444;
+        let tempdir = Utf8TempDir::new().unwrap();
+        let log = log();
+        let config = initial_config(&tempdir, port_start);
+        let (mut node0, handle0) = Node::new(config[0].clone(), &log).await;
+        let (mut node1, handle1) = Node::new(config[1].clone(), &log).await;
+        let (mut node2, handle2) = Node::new(config[2].clone(), &log).await;
+
+        let jh0 = tokio::spawn(async move {
+            node0.run().await;
+        });
+        let jh1 = tokio::spawn(async move {
+            node1.run().await;
+        });
+        let jh2 = tokio::spawn(async move {
+            node2.run().await;
+        });
+
+        // Inform each node about the known addresses
+        let mut addrs: BTreeSet<_> = config.iter().map(|c| c.addr).collect();
+        for handle in [&handle0, &handle1, &handle2] {
+            let _ = handle.load_peer_addresses(addrs.clone()).await;
+        }
+
+        // Ensure there is no network config at any of the nodes
+        for handle in [&handle0, &handle1, &handle2] {
+            assert_eq!(None, handle.get_network_config().await.unwrap());
+        }
+
+        // Update the network config at node0 and ensure it has taken effect
+        let network_config = NetworkConfig {
+            generation: 1,
+            blob: b"Some network data".to_vec(),
+        };
+        handle0.update_network_config(network_config.clone()).await.unwrap();
+        assert_eq!(
+            Some(&network_config),
+            handle0.get_network_config().await.unwrap().as_ref()
+        );
+
+        // Poll node1 and node2 until the network config update shows up
+        // Timeout after 5 seconds
+        const POLL_TIMEOUT: Duration = Duration::from_secs(5);
+        let start = Instant::now();
+        let mut node1_done = false;
+        let mut node2_done = false;
+        while !(node1_done && node2_done) {
+            let timeout = POLL_TIMEOUT.saturating_sub(Instant::now() - start);
+            tokio::select! {
+                _ = sleep(timeout) => {
+                    panic!("Network config not replicated");
+                }
+                res = handle1.get_network_config(), if !node1_done => {
+                    if res.unwrap().as_ref() == Some(&network_config) {
+                        node1_done = true;
+                        continue;
+                    }
+                }
+                res = handle2.get_network_config(), if !node2_done => {
+                    if res.unwrap().as_ref() == Some(&network_config) {
+                        node2_done = true;
+                        continue;
+                    }
+                }
+            }
+        }
+
+        // Bring a learner online
+        let learner_conf = learner_config(&tempdir, 1, port_start);
+        let (mut learner, learner_handle) =
+            Node::new(learner_conf.clone(), &log).await;
+        let learner_jh = tokio::spawn(async move {
+            learner.run().await;
+        });
+        // Inform the learner and other nodes about all addresses including
+        // the learner. This simulates DDM discovery.
+        addrs.insert(learner_conf.addr);
+        for handle in [&learner_handle, &handle0, &handle1, &handle2] {
+            let _ = handle.load_peer_addresses(addrs.clone()).await;
+        }
+
+        // Poll the learner to ensure it gets the network config
+        // Note that the learner doesn't even need to learn its share
+        // for network config replication to work.
+        let start = Instant::now();
+        let mut done = false;
+        while !done {
+            let timeout = POLL_TIMEOUT.saturating_sub(Instant::now() - start);
+            tokio::select! {
+                _ = sleep(timeout) => {
+                    panic!("Network config not replicated");
+                }
+                res = learner_handle.get_network_config() => {
+                    if res.unwrap().as_ref() == Some(&network_config) {
+                        done = true;
+                    }
+                }
+            }
+        }
+
+        // Stop node0, bring it back online and ensure it still sees the config
+        // at generation 1
+        handle0.shutdown().await.unwrap();
+        jh0.await.unwrap();
+        let (mut node0, handle0) = Node::new(config[0].clone(), &log).await;
+        let jh0 = tokio::spawn(async move {
+            node0.run().await;
+        });
+        assert_eq!(
+            Some(&network_config),
+            handle0.get_network_config().await.unwrap().as_ref()
+        );
+
+        // Stop node0 again, update network config via node1, bring node0 back online,
+        // and ensure all nodes see the latest configuration.
+        let new_config = NetworkConfig {
+            generation: 2,
+            blob: b"Some more network data".to_vec(),
+        };
+        handle0.shutdown().await.unwrap();
+        jh0.await.unwrap();
+        handle1.update_network_config(new_config.clone()).await.unwrap();
+        assert_eq!(
+            Some(&new_config),
+            handle1.get_network_config().await.unwrap().as_ref()
+        );
+        let (mut node0, handle0) = Node::new(config[0].clone(), &log).await;
+        let jh0 = tokio::spawn(async move {
+            node0.run().await;
+        });
+        let start = Instant::now();
+        // These should all resolve instantly, so no real need for a select,
+        // which is getting tedious.
+        // We also want to repeatedly loop until all consistently have the same version
+        // to give some assurance that the old version from node0 doesn't replicate
+        'outer: loop {
+            if Instant::now() - start > POLL_TIMEOUT {
+                panic!("network config not replicated");
+            }
+            for h in [&handle0, &handle1, &handle2, &learner_handle] {
+                if h.get_network_config().await.unwrap().as_ref()
+                    != Some(&new_config)
+                {
+                    // We need to try again
+                    continue 'outer;
+                }
+            }
+            // Success
+            break;
+        }
+
+        // Try to update node0 with an old config, and watch it fail
+        let expected = Err(NodeRequestError::StaleNetworkConfig {
+            attempted_update_generation: 1,
+            current_generation: 2,
+        });
+        assert_eq!(
+            handle0.update_network_config(network_config).await,
+            expected
+        );
+
+        // Shut it all down
+        for h in [handle0, handle1, handle2, learner_handle] {
+            let _ = h.shutdown().await;
+        }
+        for jh in [jh0, jh1, jh2, learner_jh] {
+            jh.await.unwrap();
+        }
     }
 }

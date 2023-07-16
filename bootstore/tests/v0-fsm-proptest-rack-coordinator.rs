@@ -168,7 +168,7 @@ impl TestState {
                     self.rack_init_started = true;
                     let result = self.common.sut.init_rack(
                         self.common.now,
-                        self.common.rack_uuid.into(),
+                        self.common.rack_uuid,
                         self.common.initial_members.clone(),
                     );
                     let envelopes = self.common.sut.drain_envelopes().collect();

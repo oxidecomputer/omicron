@@ -27,7 +27,6 @@ use slog::Logger;
 use std::collections::HashMap;
 use std::net::Ipv6Addr;
 use std::sync::Arc;
-use tokio::sync::Mutex;
 use uuid::Uuid;
 
 // The implementation of Nexus is large, and split into a number of submodules
@@ -82,6 +81,9 @@ pub const MAX_VCPU_PER_INSTANCE: u16 = 32;
 
 pub const MIN_MEMORY_BYTES_PER_INSTANCE: u32 = 1 << 30; // 1 GiB
 pub const MAX_MEMORY_BYTES_PER_INSTANCE: u64 = 64 * (1 << 30); // 64 GiB
+
+pub const MIN_DISK_SIZE_BYTES: u32 = 1 << 30; // 1 GiB
+pub const MAX_DISK_SIZE_BYTES: u64 = 1 << 40; // 1 TiB
 
 /// Manages an Oxide fleet -- the heart of the control plane
 pub struct Nexus {
@@ -138,7 +140,7 @@ pub struct Nexus {
     // Nexus to not all fail.
     samael_max_issue_delay: std::sync::Mutex<Option<chrono::Duration>>,
 
-    resolver: Arc<Mutex<internal_dns::resolver::Resolver>>,
+    resolver: internal_dns::resolver::Resolver,
 
     /// Mapping of SwitchLocations to their respective Dendrite Clients
     dpd_clients: HashMap<SwitchLocation, Arc<dpd_client::Client>>,
@@ -153,7 +155,7 @@ impl Nexus {
     pub async fn new_with_id(
         rack_id: Uuid,
         log: Logger,
-        resolver: Arc<Mutex<internal_dns::resolver::Resolver>>,
+        resolver: internal_dns::resolver::Resolver,
         pool: db::Pool,
         producer_registry: &ProducerRegistry,
         config: &config::Config,
@@ -201,8 +203,6 @@ impl Nexus {
         if config.pkg.dendrite.is_empty() {
             loop {
                 let result = resolver
-                    .lock()
-                    .await
                     .lookup_all_ipv6(ServiceName::Dendrite)
                     .await
                     .map_err(|e| {
@@ -700,8 +700,7 @@ impl Nexus {
     }
 
     pub async fn resolver(&self) -> internal_dns::resolver::Resolver {
-        let resolver = self.resolver.lock().await;
-        resolver.clone()
+        self.resolver.clone()
     }
 }
 

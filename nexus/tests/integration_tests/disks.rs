@@ -5,7 +5,6 @@
 //! Tests basic disk support in the API
 
 use super::metrics::{get_latest_silo_metric, query_for_metrics};
-
 use chrono::Utc;
 use crucible_agent_client::types::State as RegionState;
 use dropshot::test_util::ClientTestContext;
@@ -33,6 +32,7 @@ use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::Instance;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::NameOrId;
+use omicron_nexus::app::{MAX_DISK_SIZE_BYTES, MIN_DISK_SIZE_BYTES};
 use omicron_nexus::db::fixed_data::{silo::SILO_ID, FLEET_ID};
 use omicron_nexus::db::lookup::LookupPath;
 use omicron_nexus::TestInterfaces as _;
@@ -855,7 +855,7 @@ async fn test_disk_reject_total_size_less_than_one_gibibyte(
     let client = &cptestctx.external_client;
     create_org_and_project(client).await;
 
-    let disk_size = ByteCount::from(params::MIN_DISK_SIZE_BYTES / 2);
+    let disk_size = ByteCount::from(MIN_DISK_SIZE_BYTES / 2);
 
     // Attempt to allocate the disk, observe a server error.
     let disks_url = get_disks_url();
@@ -885,7 +885,50 @@ async fn test_disk_reject_total_size_less_than_one_gibibyte(
         error.message,
         format!(
             "unsupported value for \"size\": total size must be at least {}",
-            ByteCount::from(params::MIN_DISK_SIZE_BYTES)
+            ByteCount::from(MIN_DISK_SIZE_BYTES)
+        )
+    );
+}
+
+#[nexus_test]
+async fn test_disk_reject_total_size_greater_than_one_tebibyte(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    create_org_and_project(client).await;
+
+    let disk_size =
+        ByteCount::try_from(MAX_DISK_SIZE_BYTES + (1 << 30)).unwrap();
+
+    // Atempt to allocate the disk, observe a server error.
+    let disks_url = get_disks_url();
+    let new_disk = params::DiskCreate {
+        identity: IdentityMetadataCreateParams {
+            name: DISK_NAME.parse().unwrap(),
+            description: String::from("sells rainsticks"),
+        },
+        disk_source: params::DiskSource::Blank {
+            block_size: params::BlockSize::try_from(512).unwrap(),
+        },
+        size: disk_size,
+    };
+
+    let error = NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &disks_url)
+            .body(Some(&new_disk))
+            .expect_status(Some(StatusCode::BAD_REQUEST)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body::<dropshot::HttpErrorResponseBody>()
+    .unwrap();
+    assert_eq!(
+        error.message,
+        format!(
+            "unsupported value for \"size\": total size must be less than {}",
+            ByteCount::try_from(MAX_DISK_SIZE_BYTES).unwrap()
         )
     );
 }
@@ -929,7 +972,7 @@ async fn test_disk_reject_total_size_not_divisible_by_min_disk_size(
         error.message,
         format!(
             "unsupported value for \"size\": total size must be a multiple of {}",
-            ByteCount::from(params::MIN_DISK_SIZE_BYTES)
+            ByteCount::from(MIN_DISK_SIZE_BYTES)
         )
     );
 }
