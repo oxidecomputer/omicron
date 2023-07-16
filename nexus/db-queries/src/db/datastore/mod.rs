@@ -275,7 +275,7 @@ pub enum UpdatePrecondition<T> {
 ///
 /// NOTE: More strategies can - and should! - be added.
 ///
-/// See https://rfd.shared.oxide.computer/rfd/0205 for a more
+/// See <https://rfd.shared.oxide.computer/rfd/0205> for a more
 /// complete discussion.
 ///
 /// Longer-term, we should consider:
