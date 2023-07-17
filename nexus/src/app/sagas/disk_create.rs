@@ -16,6 +16,7 @@ use crate::db::identity::{Asset, Resource};
 use crate::db::lookup::LookupPath;
 use crate::external_api::params;
 use crate::{authn, authz, db};
+use nexus_db_queries::db::datastore::RegionAllocationStrategy;
 use omicron_common::api::external::Error;
 use rand::{rngs::StdRng, RngCore, SeedableRng};
 use serde::Deserialize;
@@ -250,6 +251,7 @@ async fn sdc_alloc_regions(
             volume_id,
             &params.create_params.disk_source,
             params.create_params.size,
+            &RegionAllocationStrategy::Random(None),
         )
         .await
         .map_err(ActionError::action_failed)?;
