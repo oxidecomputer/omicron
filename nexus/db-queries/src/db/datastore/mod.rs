@@ -752,13 +752,13 @@ mod test {
                 &format!("disk{}", alloc_seed),
                 ByteCount::from_mebibytes_u32(1),
             );
-            let volume1_id = Uuid::new_v4();
+            let volume_id = Uuid::new_v4();
 
             let expected_region_count = REGION_REDUNDANCY_THRESHOLD;
             let dataset_and_regions = datastore
                 .region_allocate(
                     &opctx,
-                    volume1_id,
+                    volume_id,
                     &params.disk_source,
                     params.size,
                     &RegionAllocationStrategy::Random(Some(alloc_seed as u128)),
@@ -768,23 +768,23 @@ mod test {
 
             // Verify the allocation.
             assert_eq!(expected_region_count, dataset_and_regions.len());
-            let mut disk1_datasets = HashSet::new();
-            let mut disk1_zpools = HashSet::new();
+            let mut disk_datasets = HashSet::new();
+            let mut disk_zpools = HashSet::new();
 
             // TODO: When allocation chooses 3 distinct sleds, uncomment this.
             // let mut disk1_sleds = HashSet::new();
             for (dataset, region) in dataset_and_regions {
                 // Must be 3 unique datasets
-                assert!(disk1_datasets.insert(dataset.id()));
+                assert!(disk_datasets.insert(dataset.id()));
 
                 // Must be 3 unique zpools
-                assert!(disk1_zpools.insert(dataset.pool_id));
+                assert!(disk_zpools.insert(dataset.pool_id));
 
                 // Must be 3 unique sleds
                 // TODO: When allocation chooses 3 distinct sleds, uncomment this.
                 // assert!(disk1_sleds.insert(Err(dataset)));
 
-                assert_eq!(volume1_id, region.volume_id());
+                assert_eq!(volume_id, region.volume_id());
                 assert_eq!(ByteCount::from(4096), region.block_size());
                 let (_, extent_count) = DataStore::get_crucible_allocation(
                     &BlockSize::AdvancedFormat,
@@ -823,13 +823,16 @@ mod test {
             )
             .await
             .unwrap();
+
+        // Use a different allocation ordering to ensure we're idempotent even
+        // if the shuffle changes.
         let mut dataset_and_regions2 = datastore
             .region_allocate(
                 &opctx,
                 volume_id,
                 &params.disk_source,
                 params.size,
-                &RegionAllocationStrategy::Random(Some(0)),
+                &RegionAllocationStrategy::Random(Some(1)),
             )
             .await
             .unwrap();

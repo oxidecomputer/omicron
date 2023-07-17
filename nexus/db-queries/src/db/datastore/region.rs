@@ -126,60 +126,19 @@ impl DataStore {
         let (blocks_per_extent, extent_count) =
             Self::get_crucible_allocation(&block_size, size);
 
-        // Right now the SQL queries to allocate regions will shuffle all the
-        // datasets and pick 3. However, if a zpool has multiple datasets, it
-        // may pick 2 datasets on the same zpool. We do not want this, because
-        // then you have 2 datasets on the same disk, and now you don't have
-        // redundancy. We can't deal with that in the SQL query, but we can
-        // *detect* it. So we detect it.
-        //
-        // When a query fails because it picked 2 zpools from the same dataset,
-        // but there were 3 valid zpools it could have picked from,
-        // can_be_retried(error) will return true. It is highly likely that if
-        // we simply retry the query with a different shuffle-ordering, we will
-        // get a valid result. However, we should no retry forever, in the event
-        // that something else is going on, so we limit it.
-        //
-        // In theory we could also fail on the criteria of picking datasets from
-        // the same sled, and retry until we get 3 different sleds.
-        //
-        // It does seem like a bit of a hack, doesn't it?
+        let dataset_and_regions: Vec<(Dataset, Region)> =
+            crate::db::queries::region_allocation::RegionAllocate::new(
+                volume_id,
+                block_size.to_bytes() as u64,
+                blocks_per_extent,
+                extent_count,
+                allocation_strategy,
+            )
+            .get_results_async(self.pool())
+            .await
+            .map_err(|e| crate::db::queries::region_allocation::from_pool(e))?;
 
-        const RETRIES: usize = 10;
-        let mut times_tried = 0;
-
-        // If the strat specified a certain seed, we increment the seed with
-        // each retry, so that the retry-shuffles are still based on the input
-        // seed in some fashion.
-        let strats: Vec<RegionAllocationStrategy> = match allocation_strategy {
-            RegionAllocationStrategy::Random(Some(seed)) => (*seed
-                ..=*seed + RETRIES as u128)
-                .map(|seed| RegionAllocationStrategy::Random(Some(seed)))
-                .collect(),
-            strat => (0..=RETRIES).map(|_| strat.clone()).collect(),
-        };
-        loop {
-            let query_result =
-                crate::db::queries::region_allocation::RegionAllocate::new(
-                    volume_id,
-                    block_size.to_bytes() as u64,
-                    blocks_per_extent,
-                    extent_count,
-                    &strats[times_tried],
-                )
-                .get_results_async(self.pool())
-                .await;
-
-            match query_result {
-                Ok(dataset_and_regions) => return Ok(dataset_and_regions),
-                Err(e) => {
-                    if times_tried >= RETRIES || !crate::db::queries::region_allocation::can_be_retried(&e) {
-                        return Err(crate::db::queries::region_allocation::from_pool(e));
-                    }
-                }
-            };
-            times_tried = times_tried + 1
-        }
+        Ok(dataset_and_regions)
     }
 
     /// Deletes a set of regions.

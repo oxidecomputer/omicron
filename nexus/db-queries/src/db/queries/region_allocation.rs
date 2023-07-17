@@ -34,24 +34,16 @@ const NOT_ENOUGH_ZPOOL_SPACE_SENTINEL: &'static str = "Not enough space";
 const NOT_ENOUGH_UNIQUE_ZPOOLS_SENTINEL: &'static str =
     "Not enough unique zpools selected";
 
-/// Certain errors may be resolvable by retrying the query. If this returns
-/// true, the query can be retried and may succeed on the next attempt.
-///
-/// Specifically right now this is for the case that we selected 3 datasets, but
-/// fewer than 3 zpools. But there are 3 distinct zpools that could hold our our
-/// data. So, retrying the allocation with a different seed may solve the issue.
-pub fn can_be_retried(e: &async_bb8_diesel::PoolError) -> bool {
-    let sentinels = [NOT_ENOUGH_UNIQUE_ZPOOLS_SENTINEL];
-    matches_sentinel(e, &sentinels).is_some()
-}
-
 /// Translates a generic pool error to an external error based
 /// on messages which may be emitted during region provisioning.
 pub fn from_pool(e: async_bb8_diesel::PoolError) -> external::Error {
     use crate::db::error;
 
-    let sentinels =
-        [NOT_ENOUGH_DATASETS_SENTINEL, NOT_ENOUGH_ZPOOL_SPACE_SENTINEL];
+    let sentinels = [
+        NOT_ENOUGH_DATASETS_SENTINEL,
+        NOT_ENOUGH_ZPOOL_SPACE_SENTINEL,
+        NOT_ENOUGH_UNIQUE_ZPOOLS_SENTINEL,
+    ];
     if let Some(sentinel) = matches_sentinel(&e, &sentinels) {
         match sentinel {
             NOT_ENOUGH_DATASETS_SENTINEL => {
@@ -370,7 +362,7 @@ impl DoInsert {
             .assume_not_null()
             .ge(redundancy);
 
-        // We want to ensure that we do not allocate two regions on the same
+        // We want to ensure that we do not allocate on two datasets in the same
         // zpool, for two reasons
         // - Data redundancy: If a drive fails it should only take one of the 3
         //   regions with it
@@ -378,9 +370,13 @@ impl DoInsert {
         //   room for one region, so we should not allocate more than one region
         //   to it.
         //
-        // If we have enough candidate zpools, but we allocated two regions on
-        // the same pool, then the code running the query will catch this error
-        // and try again to see if a different dataset shuffle works out.
+        // Selecting two datasets on the same zpool will not initially be
+        // possible, as at the time of writing each zpool only has one dataset.
+        // Additionally, we intend to modify the allocation strategy to select
+        // from 3 distinct sleds, removing the possibility entirely. But, if we
+        // introduce a change that adds another crucible dataset to zpools
+        // before we improve the allocation strategy, this check will make sure
+        // we don't violate drive redundancy, and generate an error instead.
         use crate::db::schema::dataset::dsl as dataset_dsl;
         use candidate_regions::dsl as candidate_dsl;
         let enough_unique_candidate_zpools = candidate_regions

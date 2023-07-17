@@ -122,10 +122,6 @@ table! {
     }
 }
 
-// XXX These could do for some cleanup
-
-diesel::allow_tables_to_appear_in_same_query!(candidate_datasets, zpool,);
-
 diesel::allow_tables_to_appear_in_same_query!(
     proposed_dataset_changes,
     dataset,
