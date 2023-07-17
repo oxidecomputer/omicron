@@ -498,7 +498,7 @@ pub async fn spawn_accepted_connection_management_task(
             Ok(val) => val,
             Err(e) => {
                 warn!(log, "Handshake error: {:?}", e; "addr" => client_addr.to_string());
-                // This is a server so we bail and wait for a new connection
+                // This is a server so we bail and wait for a new connection.
                 // We must inform the main task so it can clean up any metadata.
                 let _ = main_tx
                     .send(ConnToMainMsg {
@@ -515,13 +515,13 @@ pub async fn spawn_accepted_connection_management_task(
         // Connections are only supposed to come from peers with `ip:port`
         // values that sort higher than the peer they are connecting to. We
         // don't know the canonical port of the connecting peer until the
-        // handshake completes though as the connecting port is ephemeral.
+        // handshake completes though, as the connecting port is ephemeral.
         // Therefore we do the check here.
         //
-        // Note: We don't do the check in `perform_hanshake` because that method
-        // is called for both the accept and connect side and we don't need to
-        // do it for the connector, which by definition shouldn't be connecting
-        // to a higher sorted peer.
+        // Note: We don't do the check in `perform_hadnshake` because that
+        // method is called for both the accept and connect side and we don't
+        // need to do it for the connector. The connector, by definition,
+        // shouldn't be connecting to a higher sorted peer.
         if identify.addr < my_addr {
             error!(
                 log,
@@ -531,7 +531,7 @@ pub async fn spawn_accepted_connection_management_task(
                 ),
                 identify.addr
             );
-            // This is a server so we bail and wait for a new connection
+            // This is a server so we bail and wait for a new connection.
             // We must inform the main task so it can clean up any metadata.
             let _ = main_tx
                 .send(ConnToMainMsg {
