@@ -256,10 +256,7 @@ fn verify_graceful_exit(
 // Exercises the normal use case of `omicron-dev db-run`: the database starts
 // up, we can connect to it and query it, then we simulate the user typing ^C at
 // the shell, and then it cleans up its temporary directory.
-//
-// This test is currently ignored by default.  See omicron#3639.
 #[tokio::test]
-#[ignore]
 async fn test_db_run() {
     let cmd_path = path_to_omicron_dev();
 
@@ -285,8 +282,12 @@ async fn test_db_run() {
     //
     // Finally, we set listen-port=0 to avoid conflicting with concurrent
     // invocations.
+    //
+    // The `&& true` looks redundant but it prevents recent versions of bash
+    // from optimising away the fork() and causing cargo itself to receive
+    // the ^C that we send during testing.
     let cmdstr = format!(
-        "( set -o monitor; {} db-run --listen-port 0)",
+        "( set -o monitor; {} db-run --listen-port 0 && true )",
         cmd_path.display()
     );
     let exec =
@@ -394,12 +395,11 @@ async fn test_db_run() {
 //
 // This mirrors the `test_db_run()` test.
 #[tokio::test]
-#[ignore]
 async fn test_run_all() {
     let cmd_path = path_to_omicron_dev();
 
     let cmdstr = format!(
-        "( set -o monitor; {} run-all --nexus-listen-port 0)",
+        "( set -o monitor; {} run-all --nexus-listen-port 0 && true )",
         cmd_path.display()
     );
     let exec =
