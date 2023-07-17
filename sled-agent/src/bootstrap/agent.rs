@@ -520,20 +520,6 @@ impl Agent {
             let agent = make_bootstrap_agent(true);
             info!(agent.log, "Sled already configured, loading sled agent");
             let sled_request = ledger.data();
-
-            // Initialize the secret retriever used by the `KeyManager`
-            if agent.bootstore.get_status().await?.fsm_state == "uninitialized"
-            {
-                // We aren't using LRTQ as this is a single node system
-                LrtqOrHardcodedSecretRetriever::init_hardcoded();
-            } else {
-                let salt = sled_request.request.hash_id_and_rack_id();
-                LrtqOrHardcodedSecretRetriever::init_lrtq(
-                    salt,
-                    agent.bootstore.clone(),
-                )
-            }
-
             agent.request_sled_agent(&sled_request.request).await?;
             agent
         } else {
@@ -658,6 +644,18 @@ impl Agent {
         request: &StartSledAgentRequest,
     ) -> Result<SledAgentResponse, BootstrapError> {
         info!(&self.log, "Loading Sled Agent: {:?}", request);
+
+        // Initialize the secret retriever used by the `KeyManager`
+        if self.bootstore.get_status().await?.fsm_state == "uninitialized" {
+            // We aren't using LRTQ as this is a single node system
+            LrtqOrHardcodedSecretRetriever::init_hardcoded();
+        } else {
+            let salt = request.hash_id_and_rack_id();
+            LrtqOrHardcodedSecretRetriever::init_lrtq(
+                salt,
+                self.bootstore.clone(),
+            )
+        }
 
         let sled_address = request.sled_address();
 

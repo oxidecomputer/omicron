@@ -165,7 +165,7 @@ pub enum SetupServiceError {
     #[error("Error during DNS lookup: {0}")]
     DnsResolver(#[from] internal_dns::resolver::ResolveError),
 
-    #[error("Failed to save early network config to bootstore")]
+    #[error("Bootstore error: {0}")]
     Bootstore(#[from] bootstore::NodeRequestError),
 }
 
