@@ -4877,6 +4877,7 @@ dependencies = [
  "crucible-agent-client",
  "crucible-client-types",
  "ddm-admin-client",
+ "derive_more",
  "dns-server",
  "dns-service-client 0.1.0",
  "dpd-client",

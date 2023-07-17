@@ -21,6 +21,7 @@ clap.workspace = true
 crucible-client-types.workspace = true
 crucible-agent-client.workspace = true
 ddm-admin-client.workspace = true
+derive_more.workspace = true
 dns-server.workspace = true
 dns-service-client.workspace = true
 dpd-client.workspace = true

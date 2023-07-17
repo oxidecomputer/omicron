@@ -629,8 +629,6 @@ impl StorageWorker {
         >,
         disk: DiskWrapper,
     ) -> Result<(), Error> {
-        let log = self.log.clone();
-
         disks.insert(disk.identity(), disk.clone());
         self.physical_disk_notify(NotifyDiskRequest::Add {
             identity: disk.identity(),
@@ -640,7 +638,7 @@ impl StorageWorker {
         self.upsert_zpool(&resources, disk.identity(), disk.zpool_name())
             .await?;
 
-        self.dump_setup.update_dumpdev_setup(disks, log).await;
+        self.dump_setup.update_dumpdev_setup(disks).await;
 
         Ok(())
     }
@@ -675,6 +673,9 @@ impl StorageWorker {
             self.physical_disk_notify(NotifyDiskRequest::Remove(key.clone()))
                 .await;
         }
+
+        self.dump_setup.update_dumpdev_setup(disks).await;
+
         Ok(())
     }
 
@@ -971,13 +972,14 @@ impl StorageManager {
                 resources: resources.clone(),
                 tx,
                 task: tokio::task::spawn(async move {
+                    let dump_setup = Arc::new(DumpSetup::new(&log));
                     let mut worker = StorageWorker {
                         log,
                         nexus_notifications: FuturesOrdered::new(),
                         rx,
                         underlay: Arc::new(Mutex::new(None)),
                         key_requester,
-                        dump_setup: Arc::new(DumpSetup::default()),
+                        dump_setup,
                     };
 
                     worker.do_work(resources).await
