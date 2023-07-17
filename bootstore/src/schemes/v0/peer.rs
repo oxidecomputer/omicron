@@ -391,14 +391,6 @@ impl Node {
                     warn!(self.log, "Got connection from IPv4 address {addr}");
                     return;
                 };
-                if addr < self.config.addr {
-                    error!(
-                        self.log,
-                        "Misbehaving peer: Connection from peer
-            with lower valued address: {addr}"
-                    );
-                    return;
-                }
                 // Remove any existing connection
                 self.remove_accepted_connection(&addr).await;
                 info!(self.log, "Accepted connection from {addr}");

@@ -625,7 +625,10 @@ impl SledAgent {
                 .await?;
         }
 
-        self.inner.services.ensure_all_services(requested_services).await?;
+        self.inner
+            .services
+            .ensure_all_services_persistent(requested_services)
+            .await?;
         Ok(())
     }
 
