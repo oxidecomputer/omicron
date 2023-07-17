@@ -2251,7 +2251,7 @@ mod test {
                 network_interfaces:
                     params::InstanceNetworkInterfaceAttachment::None,
                 disks: vec![params::InstanceDiskAttachment::Attach(
-                    params::InstanceDiskAttach { name: Name::from_str(DISK_NAME).unwrap() },
+                    params::InstanceDiskAttach { disk: DISK_NAME.parse::<Name>().unwrap().into() },
                 )],
                 external_ips: vec![],
                 start: true,

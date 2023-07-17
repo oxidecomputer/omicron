@@ -359,6 +359,7 @@ mod test {
     use nexus_test_utils::resource_helpers::DiskTest;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::identity::Resource;
+    use omicron_common::api::external::Name;
     use omicron_common::api::external::{
         ByteCount, IdentityMetadataCreateParams, InstanceCpuCount,
     };
@@ -419,7 +420,9 @@ mod test {
                 pool_name: None,
             }],
             disks: vec![params::InstanceDiskAttachment::Attach(
-                params::InstanceDiskAttach { name: DISK_NAME.parse().unwrap() },
+                params::InstanceDiskAttach {
+                    disk: DISK_NAME.parse::<Name>().unwrap().into(),
+                },
             )],
             start: false,
         }

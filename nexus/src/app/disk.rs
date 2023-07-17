@@ -187,6 +187,36 @@ impl super::Nexus {
         Ok(())
     }
 
+    pub(super) async fn validate_disk_attach_params(
+        self: &Arc<Self>,
+        opctx: &OpContext,
+        authz_project: &authz::Project,
+        params: &params::InstanceDiskAttach,
+    ) -> Result<(), Error> {
+        match &params.disk {
+            NameOrId::Id(disk_id) => {
+                let (.., authz_disk_project, _) =
+                    LookupPath::new(opctx, &self.db_datastore)
+                        .disk_id(*disk_id)
+                        .lookup_for(authz::Action::Read)
+                        .await?;
+
+                if authz_project.id() != authz_disk_project.id() {
+                    return Err(Error::invalid_request(
+                        format!(
+                            "disk {} does not belong to project {}",
+                            disk_id,
+                            authz_project.id()
+                        )
+                        .as_str(),
+                    ));
+                }
+                Ok(())
+            }
+            NameOrId::Name(_) => Ok(()),
+        }
+    }
+
     pub async fn project_create_disk(
         self: &Arc<Self>,
         opctx: &OpContext,
