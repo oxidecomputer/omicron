@@ -20,8 +20,8 @@
 //! of what other services Nexus wants to have executing on the sled.
 //!
 //! To accomplish this, the following interfaces are exposed:
-//! - [ServiceManager::ensure_all_services] exposes an API to request a set of
-//! services that should persist beyond reboot.
+//! - [ServiceManager::ensure_all_services_persistent] exposes an API to request
+//! a set of services that should persist beyond reboot.
 //! - [ServiceManager::activate_switch] exposes an API to specifically enable
 //! or disable (via [ServiceManager::deactivate_switch]) the switch zone.
 
@@ -39,6 +39,7 @@ use ddm_admin_client::{Client as DdmAdminClient, DdmError};
 use dpd_client::{types as DpdTypes, Client as DpdClient, Error as DpdError};
 use dropshot::HandlerTaskMode;
 use flate2::bufread::GzDecoder;
+use futures::stream::{self, StreamExt, TryStreamExt};
 use illumos_utils::addrobj::AddrObject;
 use illumos_utils::addrobj::IPV6_LINK_LOCAL_NAME;
 use illumos_utils::dladm::{Dladm, Etherstub, EtherstubVnic, PhysicalLink};
@@ -99,6 +100,7 @@ use tar::Header;
 use tokio::io::AsyncWriteExt;
 use tokio::sync::oneshot;
 use tokio::sync::Mutex;
+use tokio::sync::MutexGuard;
 use tokio::task::JoinHandle;
 use uuid::Uuid;
 
@@ -527,21 +529,26 @@ impl ServiceManager {
         // Initialize and DNS and NTP services first as they are required
         // for time synchronization, which is a pre-requisite for the other
         // services.
-        self.initialize_services_locked(
-            &mut existing_zones,
-            &services
-                .requests
-                .clone()
-                .into_iter()
-                .filter(|svc| {
-                    matches!(
-                        svc.zone.zone_type,
-                        ZoneType::InternalDns | ZoneType::Ntp
-                    )
-                })
-                .collect(),
-        )
-        .await?;
+        let all_zones_request = self
+            .ensure_all_services(
+                &mut existing_zones,
+                &AllZoneRequests::default(),
+                ServiceEnsureBody {
+                    services: services
+                        .requests
+                        .clone()
+                        .into_iter()
+                        .filter(|svc| {
+                            matches!(
+                                svc.zone.zone_type,
+                                ZoneType::InternalDns | ZoneType::Ntp
+                            )
+                        })
+                        .map(|zone_request| zone_request.zone)
+                        .collect(),
+                },
+            )
+            .await?;
 
         drop(existing_zones);
 
@@ -580,9 +587,17 @@ impl ServiceManager {
         let mut existing_zones = self.inner.zones.lock().await;
 
         // Initialize all remaining serivces
-        self.initialize_services_locked(
+        self.ensure_all_services(
             &mut existing_zones,
-            &services.requests,
+            &all_zones_request,
+            ServiceEnsureBody {
+                services: services
+                    .requests
+                    .clone()
+                    .into_iter()
+                    .map(|zone_request| zone_request.zone)
+                    .collect(),
+            },
         )
         .await?;
         Ok(())
@@ -1891,51 +1906,44 @@ impl ServiceManager {
     }
 
     // Populates `existing_zones` according to the requests in `services`.
-    //
-    // At the point this function is invoked, IP addresses have already been
-    // allocated (by either RSS or Nexus). However, this function explicitly
-    // assigns such addresses to interfaces within zones.
     async fn initialize_services_locked(
         &self,
         existing_zones: &mut Vec<RunningZone>,
         requests: &Vec<ZoneRequest>,
     ) -> Result<(), Error> {
-        // TODO(https://github.com/oxidecomputer/omicron/issues/726):
-        // As long as we ensure the requests don't overlap, we could
-        // parallelize this request.
-        for req in requests {
-            info!(
-                self.inner.log,
-                "Ensuring service zone is initialized: {:?}",
-                req.zone.zone_type
-            );
-            // Before we bother allocating anything for this request, check if
-            // this service has already been created.
-            let expected_zone_name = req.zone.zone_name();
-            if existing_zones.iter().any(|z| z.name() == expected_zone_name) {
-                info!(
-                    self.inner.log,
-                    "Service zone {} already exists", req.zone.zone_type
-                );
-                continue;
-            } else {
-                info!(
-                    self.inner.log,
-                    "Service zone {} does not yet exist", req.zone.zone_type
-                );
-            }
-
-            // TODO-correctness: It seems like we should continue with the other
-            // zones, rather than bail out of this method entirely.
-            let running_zone = self
-                .initialize_zone(
-                    req,
-                    // filesystems=
-                    &[],
-                )
-                .await?;
-            existing_zones.push(running_zone);
+        if let Some(name) = requests
+            .iter()
+            .map(|request| request.zone.zone_name())
+            .duplicates()
+            .next()
+        {
+            return Err(Error::BadServiceRequest {
+                service: name,
+                message: "Should initialize zone twice".to_string(),
+            });
         }
+
+        let local_existing_zones = Arc::new(Mutex::new(existing_zones));
+        stream::iter(requests)
+            .map(Ok::<_, Error>)
+            .try_for_each_concurrent(None, |request| {
+                let local_existing_zones = local_existing_zones.clone();
+                async move {
+                    // TODO-correctness: It seems like we should continue with the other
+                    // zones, rather than bail out of this method entirely.
+                    let running_zone = self
+                        .initialize_zone(
+                            request,
+                            // filesystems=
+                            &[],
+                        )
+                        .await?;
+                    local_existing_zones.lock().await.push(running_zone);
+                    Ok(())
+                }
+            })
+            .await?;
+
         Ok(())
     }
 
@@ -2409,7 +2417,7 @@ impl ServiceManager {
     /// These services will be instantiated by this function, and will be
     /// recorded to a local file to ensure they start automatically on next
     /// boot.
-    pub async fn ensure_all_services(
+    pub async fn ensure_all_services_persistent(
         &self,
         request: ServiceEnsureBody,
     ) -> Result<(), Error> {
@@ -2431,10 +2439,38 @@ impl ServiceManager {
             };
         let ledger_zone_requests = ledger.data_mut();
 
+        let mut zone_requests = self
+            .ensure_all_services(
+                &mut existing_zones,
+                ledger_zone_requests,
+                request,
+            )
+            .await?;
+
+        // Update the services in the ledger and write it back to both M.2s
+        ledger_zone_requests.requests.clear();
+        ledger_zone_requests.requests.append(&mut zone_requests.requests);
+        ledger.commit().await?;
+
+        Ok(())
+    }
+
+    // Ensures that only the following services are running.
+    //
+    // Does not record any information such that these services are
+    // re-instantiated on boot.
+    async fn ensure_all_services(
+        &self,
+        existing_zones: &mut MutexGuard<'_, Vec<RunningZone>>,
+        old_request: &AllZoneRequests,
+        request: ServiceEnsureBody,
+    ) -> Result<AllZoneRequests, Error> {
+        let log = &self.inner.log;
+
         // Do some data-normalization to ensure we can compare the "requested
         // set" vs the "existing set" as HashSets.
         let old_services_set: HashSet<ServiceZoneRequest> = HashSet::from_iter(
-            ledger_zone_requests.requests.iter().map(|r| r.zone.clone()),
+            old_request.requests.iter().map(|r| r.zone.clone()),
         );
         let requested_services_set =
             HashSet::from_iter(request.services.into_iter());
@@ -2481,16 +2517,17 @@ impl ServiceManager {
                 .push(ZoneRequest { zone: zone.clone(), root });
         }
         self.initialize_services_locked(
-            &mut existing_zones,
+            existing_zones,
             &zone_requests.requests,
         )
         .await?;
 
-        // Update the services in the ledger and write it back to both M.2s
-        ledger_zone_requests.requests.append(&mut zone_requests.requests);
-        ledger.commit().await?;
-
-        Ok(())
+        for old_zone in &old_request.requests {
+            if requested_services_set.contains(&old_zone.zone) {
+                zone_requests.requests.push(old_zone.clone());
+            }
+        }
+        Ok(zone_requests)
     }
 
     pub async fn cockroachdb_initialize(&self) -> Result<(), Error> {
@@ -3088,7 +3125,7 @@ mod test {
     async fn ensure_new_service(mgr: &ServiceManager, id: Uuid) {
         let _expectations = expect_new_service();
 
-        mgr.ensure_all_services(ServiceEnsureBody {
+        mgr.ensure_all_services_persistent(ServiceEnsureBody {
             services: vec![ServiceZoneRequest {
                 id,
                 zone_type: ZoneType::Oximeter,
@@ -3115,7 +3152,7 @@ mod test {
     // Prepare to call "ensure" for a service which already exists. We should
     // return the service without actually installing a new zone.
     async fn ensure_existing_service(mgr: &ServiceManager, id: Uuid) {
-        mgr.ensure_all_services(ServiceEnsureBody {
+        mgr.ensure_all_services_persistent(ServiceEnsureBody {
             services: vec![ServiceZoneRequest {
                 id,
                 zone_type: ZoneType::Oximeter,
