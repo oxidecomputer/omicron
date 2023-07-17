@@ -10,7 +10,7 @@ use slog::{debug, info, trace};
 use std::net::{IpAddr, Ipv6Addr, SocketAddr, SocketAddrV6};
 use trust_dns_proto::rr::record_type::RecordType;
 use trust_dns_resolver::config::{
-    NameServerConfig, Protocol, ResolverConfig, ResolverOpts,
+    LookupIpStrategy, NameServerConfig, Protocol, ResolverConfig, ResolverOpts,
 };
 use trust_dns_resolver::TokioAsyncResolver;
 
@@ -73,6 +73,9 @@ impl Resolver {
         let mut opts = ResolverOpts::default();
         opts.use_hosts_file = false;
         opts.num_concurrent_reqs = dns_server_count;
+        // The underlay is IPv6 only, so this helps avoid needless lookups of
+        // the IPv4 variant.
+        opts.ip_strategy = LookupIpStrategy::Ipv6Only;
         let resolver = TokioAsyncResolver::tokio(rc, opts)?;
 
         Ok(Self { log, resolver })
