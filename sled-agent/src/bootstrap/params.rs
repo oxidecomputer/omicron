@@ -206,15 +206,13 @@ impl StartSledAgentRequest {
         address::get_switch_zone_address(self.subnet)
     }
 
-    /// Compute the sha3_256 digest of `self.id || self.rack_id` to use as a
-    /// `salt` for disk encryption
-    pub fn hash_id_and_rack_id(&self) -> [u8; 32] {
-        let mut hasher = Sha3_256::new();
-        hasher.update(self.id.as_bytes());
-        hasher.update(self.rack_id.as_bytes());
-
-        // We know this succeeds as a Sha3_256 digest is 32 bytes
-        hasher.finalize().as_slice().try_into().unwrap()
+    /// Compute the sha3_256 digest of `self.rack_id` to use as a `salt`
+    /// for disk encryption. We don't want to include other values that are
+    /// consistent across sleds as it would prevent us from moving drives
+    /// between sleds.
+    pub fn hash_rack_id(&self) -> [u8; 32] {
+        // We know the unwrap succeeds as a Sha3_256 digest is 32 bytes
+        Sha3_256::digest(self.rack_id.as_bytes()).as_slice().try_into().unwrap()
     }
 }
 

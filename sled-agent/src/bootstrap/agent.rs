@@ -650,7 +650,7 @@ impl Agent {
             // We aren't using LRTQ as this is a single node system
             LrtqOrHardcodedSecretRetriever::init_hardcoded();
         } else {
-            let salt = request.hash_id_and_rack_id();
+            let salt = request.hash_rack_id();
             LrtqOrHardcodedSecretRetriever::init_lrtq(
                 salt,
                 self.bootstore.clone(),
