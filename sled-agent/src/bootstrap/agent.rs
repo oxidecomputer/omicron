@@ -12,7 +12,7 @@ use super::hardware::HardwareMonitor;
 use super::http_entrypoints::RackOperationStatus;
 use super::params::RackInitializeRequest;
 use super::params::StartSledAgentRequest;
-use super::secret_retriever::LocalSecretRetriever;
+use super::secret_retriever::{HardcodedSecretRetriever, LrtqSecretRetriever};
 use super::views::SledAgentResponse;
 use crate::config::Config as SledConfig;
 use crate::server::Server as SledServer;
@@ -421,7 +421,7 @@ impl Agent {
         // Spawn the `KeyManager` which is needed by the the StorageManager to
         // retrieve encryption keys.
         let (mut key_manager, storage_key_requester) =
-            KeyManager::new(&log, LocalSecretRetriever {});
+            KeyManager::new(&log, HardcodedSecretRetriever {});
 
         let handle = tokio::spawn(async move { key_manager.run().await });
 

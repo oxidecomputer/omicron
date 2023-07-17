@@ -305,6 +305,12 @@ pub enum SecretState {
 pub enum SecretRetrieverError {
     #[error("Secret does not exist for {0}")]
     NoSuchEpoch(u64),
+
+    #[error("Rack must be initialized for secret access")]
+    RackNotInitialized,
+
+    #[error("Bootstore error: {0}")]
+    Bootstore(String),
 }
 
 /// A mechanism for retrieving a secrets to use as input key material to HKDF-
