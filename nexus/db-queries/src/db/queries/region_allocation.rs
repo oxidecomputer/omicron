@@ -98,7 +98,10 @@ struct CandidateDatasets {
 }
 
 impl CandidateDatasets {
-    fn new(allocation_strategy: &RegionAllocationStrategy) -> Self {
+    fn new(
+        allocation_strategy: &RegionAllocationStrategy,
+        candidate_zpools: &CandidateZpools,
+    ) -> Self {
         use crate::db::schema::dataset::dsl as dataset_dsl;
         use candidate_zpools::dsl as candidate_zpool_dsl;
 
@@ -110,7 +113,8 @@ impl CandidateDatasets {
                 > = Box::new(
                     dataset_dsl::dataset
                         .inner_join(
-                            candidate_zpool_dsl::candidate_zpools
+                            candidate_zpools
+                                .query_source()
                                 .on(dataset_dsl::pool_id
                                     .eq(candidate_zpool_dsl::pool_id)),
                         )
@@ -138,7 +142,8 @@ impl CandidateDatasets {
                 > = Box::new(
                     dataset_dsl::dataset
                         .inner_join(
-                            candidate_zpool_dsl::candidate_zpools
+                            candidate_zpools
+                                .query_source()
                                 .on(dataset_dsl::pool_id
                                     .eq(candidate_zpool_dsl::pool_id)),
                         )
@@ -511,7 +516,8 @@ impl RegionAllocate {
         let candidate_zpools =
             CandidateZpools::new(&old_pool_usage, size_delta);
 
-        let candidate_datasets = CandidateDatasets::new(&allocation_strategy);
+        let candidate_datasets =
+            CandidateDatasets::new(&allocation_strategy, &candidate_zpools);
 
         let candidate_regions = CandidateRegions::new(
             &candidate_datasets,
