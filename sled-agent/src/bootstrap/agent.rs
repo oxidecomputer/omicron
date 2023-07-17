@@ -31,7 +31,7 @@ use illumos_utils::zfs::{
 };
 use illumos_utils::zone::Zones;
 use illumos_utils::{execute, PFEXEC};
-use key_manager::{KeyManager, StorageKeyRequester};
+use key_manager::{KeyManager, ReadinessSetter, StorageKeyRequester};
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::api::external::Error as ExternalError;
 use omicron_common::ledger::{self, Ledger, Ledgerable};
@@ -198,6 +198,10 @@ pub struct Agent {
     /// as the KeyManager task should run forever
     #[allow(unused)]
     key_manager_handle: JoinHandle<()>,
+
+    /// The ability to set when the KeyManager is ready to be used
+    /// In particular this should be set when the rack is initialized
+    key_manager_readiness: ReadinessSetter,
 
     /// We maintain a copy of the `StorageKeyRequester` so we can pass it through
     /// from the `HardwareManager` to the `StorageManager` when the `HardwareManger`
@@ -423,8 +427,10 @@ impl Agent {
 
         // Spawn the `KeyManager` which is needed by the the StorageManager to
         // retrieve encryption keys.
+        let (secret_retriever, key_manager_readiness) =
+            LrtqOrHardcodedSecretRetriever::new();
         let (mut key_manager, storage_key_requester) =
-            KeyManager::new(&log, LrtqOrHardcodedSecretRetriever {});
+            KeyManager::new(&log, secret_retriever);
 
         let handle = tokio::spawn(async move { key_manager.run().await });
 
@@ -511,6 +517,7 @@ impl Agent {
             global_zone_bootstrap_link_local_address,
             key_manager_handle: handle,
             storage_key_requester,
+            key_manager_readiness,
             baseboard,
             bootstore: bootstore_node_handle,
             bootstore_join_handle,
@@ -656,6 +663,7 @@ impl Agent {
                 self.bootstore.clone(),
             )
         }
+        self.key_manager_readiness.set();
 
         let sled_address = request.sled_address();
 

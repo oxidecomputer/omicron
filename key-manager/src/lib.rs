@@ -6,6 +6,8 @@
 
 use std::collections::BTreeMap;
 use std::fmt::Debug;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use hkdf::Hkdf;
@@ -95,6 +97,36 @@ enum StorageKeyRequest {
     },
 }
 
+/// A wrapper around an atomic bool that allows checking for whether the
+/// underlying `SecretRetriever` is capable of retrieving secrets.
+#[derive(Debug, Clone)]
+pub struct ReadinessGetter(Arc<AtomicBool>);
+
+impl ReadinessGetter {
+    pub fn new(val: Arc<AtomicBool>) -> ReadinessGetter {
+        ReadinessGetter(val)
+    }
+
+    pub fn is_ready(&self) -> bool {
+        self.0.load(Ordering::SeqCst)
+    }
+}
+
+/// A wrapper around an atomic bool that allows setting it only to true.
+/// Used by the bootstrap agent when the rack is initialized
+#[derive(Debug)]
+pub struct ReadinessSetter(Arc<AtomicBool>);
+
+impl ReadinessSetter {
+    pub fn new(val: Arc<AtomicBool>) -> ReadinessSetter {
+        ReadinessSetter(val)
+    }
+
+    pub fn set(&self) {
+        self.0.store(true, Ordering::SeqCst);
+    }
+}
+
 /// A client of [`KeyManager`] that can request generation of storage related keys
 ///
 /// The StorageKeyRequester only derives `Clone` because the `HardwareMonitor`
@@ -105,6 +137,7 @@ enum StorageKeyRequest {
 #[derive(Clone)]
 pub struct StorageKeyRequester {
     tx: mpsc::Sender<StorageKeyRequest>,
+    retriever_readiness: ReadinessGetter,
 }
 
 impl StorageKeyRequester {
@@ -136,6 +169,10 @@ impl StorageKeyRequester {
             .expect("Failed to send LoadLatestSecret request to KeyManager");
 
         rx.await.expect("KeyManager bug (dropped responder without responding)")
+    }
+
+    pub fn is_ready(&self) -> bool {
+        self.retriever_readiness.is_ready()
     }
 }
 
@@ -177,7 +214,9 @@ impl<S: SecretRetriever> KeyManager<S> {
         // may want to send in series.
         let (tx, rx) = mpsc::channel(10);
 
-        let storage_key_requester = StorageKeyRequester { tx };
+        let retriever_readiness = secret_retriever.readiness_getter();
+        let storage_key_requester =
+            StorageKeyRequester { tx, retriever_readiness };
         let key_manager = KeyManager {
             secret_retriever,
             prks: BTreeMap::new(),
@@ -335,14 +374,19 @@ pub trait SecretRetriever {
     ///
     /// Return an error if its not possible to recover the old secret given the
     /// latest secret.
-    ///
-    /// TODO(AJS): Ensure that we store the epoch of the actual key protecting
-    /// data in a ZFS property for each drive. This will allow us to retrieve
-    /// the correct keys when needed.
     async fn get(
         &self,
         epoch: u64,
     ) -> Result<SecretState, SecretRetrieverError>;
+
+    /// Return a `ReadynessCheck` that returns `true` if the secret retriever is capable of returning a secret
+    /// This must be implemented for trust quorum related retrievers, as  they
+    /// require rack initialization before they are ready to generate secrets.
+    /// It is not  necessary for hardcoded or test retrievers as they are always
+    /// ready.
+    fn readiness_getter(&self) -> ReadinessGetter {
+        ReadinessGetter(Arc::new(AtomicBool::new(true)))
+    }
 }
 
 #[cfg(test)]
