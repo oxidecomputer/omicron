@@ -73,14 +73,6 @@ pub enum DiskError {
         #[source]
         err: Box<zfs::SetValueError>,
     },
-    #[error(
-        "Encrypted dataset '{dataset}' missing 'oxide:agent' property: {err}"
-    )]
-    CannotParseAgentProperty {
-        dataset: String,
-        #[source]
-        err: zfs::GetValueError,
-    },
 }
 
 /// A partition (or 'slice') of a disk.
@@ -538,7 +530,7 @@ impl Disk {
             // we opt to remove the corresponding dataset.
             static AGENT_LOCAL_VALUE: OnceLock<String> = OnceLock::new();
             let agent_local_value = AGENT_LOCAL_VALUE.get_or_init(|| {
-                Alphanumeric.sample_string(&mut rand::thread_rng(), 12)
+                Alphanumeric.sample_string(&mut rand::thread_rng(), 20)
             });
 
             if dataset.wipe {
