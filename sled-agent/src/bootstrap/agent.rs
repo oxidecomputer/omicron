@@ -664,9 +664,6 @@ impl Agent {
         match &mut *state {
             // We have not previously initialized a sled agent.
             SledAgentState::Before(hardware_monitor) => {
-                // TODO(AJS): Re-insert trust quorum rack secret reconstruction
-                // and key-gen/disk-unlock here
-
                 // Stop the bootstrap agent from monitoring for hardware, and
                 // pass control of service management to the sled agent.
                 //
@@ -794,14 +791,6 @@ impl Agent {
                     );
                     return Err(BootstrapError::SledError(err_str));
                 }
-
-                // TODO(AJS): Re-implement this check described by the comment below?
-                //
-                // Bail out if this request includes a trust quorum share that
-                // doesn't match ours. TODO-correctness Do we need to handle a
-                // partially-initialized rack where we may have a share from a
-                // previously-started-but-not-completed init process? If rerunning
-                // it produces different shares this check will fail.
 
                 return Ok(SledAgentResponse { id: server.id() });
             }
