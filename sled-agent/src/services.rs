@@ -2431,37 +2431,40 @@ impl ServiceManager {
             };
         let ledger_zone_requests = ledger.data_mut();
 
-        let new_zone_requests: Vec<ServiceZoneRequest> = {
-            let known_set: HashSet<&ServiceZoneRequest> = HashSet::from_iter(
-                ledger_zone_requests.requests.iter().map(|r| &r.zone),
-            );
-            let requested_set = HashSet::from_iter(request.services.iter());
+        // Do some data-normalization to ensure we can compare the "requested
+        // set" vs the "existing set" as HashSets.
+        let old_services_set: HashSet<ServiceZoneRequest> = HashSet::from_iter(
+            ledger_zone_requests.requests.iter().map(|r| r.zone.clone()),
+        );
+        let requested_services_set =
+            HashSet::from_iter(request.services.into_iter());
 
-            // TODO: We probably want to handle this case.
-            if !requested_set.is_superset(&known_set) {
-                // The caller may only request services additively.
-                //
-                // We may want to use a different mechanism for zone removal, in
-                // the case of changing configurations, rather than just doing
-                // that removal implicitly.
-                warn!(
-                    log,
-                    "Cannot request services on this sled, differing configurations: {:#?}",
-                    known_set.symmetric_difference(&requested_set)
-                );
-                return Err(Error::ServicesAlreadyConfigured);
+        let zones_to_be_removed =
+            old_services_set.difference(&requested_services_set);
+        let zones_to_be_added =
+            requested_services_set.difference(&old_services_set);
+
+        // Destroy zones that should not be running
+        for zone in zones_to_be_removed {
+            let expected_zone_name = zone.zone_name();
+            if let Some(idx) = existing_zones
+                .iter()
+                .position(|z| z.name() == expected_zone_name)
+            {
+                let mut zone = existing_zones.remove(idx);
+                if let Err(e) = zone.stop().await {
+                    error!(log, "Failed to stop zone {}: {e}", zone.name());
+                }
+            } else {
+                warn!(log, "Expected to remove zone, but could not find it");
             }
-            requested_set
-                .difference(&known_set)
-                .map(|s| (*s).clone())
-                .collect::<Vec<ServiceZoneRequest>>()
-        };
+        }
 
+        // Create zones that should be running
         let mut zone_requests = AllZoneRequests::default();
         let all_u2_roots =
             self.inner.storage.all_u2_mountpoints(ZONE_DATASET).await;
-
-        for zone in new_zone_requests.into_iter() {
+        for zone in zones_to_be_added {
             // For each new zone request, we pick an arbitrary U.2 to store
             // the zone filesystem. Note: This isn't known to Nexus right now,
             // so it's a local-to-sled decision.
@@ -2473,9 +2476,10 @@ impl ServiceManager {
                 .choose(&mut rng)
                 .ok_or_else(|| Error::U2NotFound)?
                 .clone();
-            zone_requests.requests.push(ZoneRequest { zone, root });
+            zone_requests
+                .requests
+                .push(ZoneRequest { zone: zone.clone(), root });
         }
-
         self.initialize_services_locked(
             &mut existing_zones,
             &zone_requests.requests,
