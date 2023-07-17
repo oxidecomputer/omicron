@@ -446,6 +446,18 @@ source.sha256 = "af3c8a9eae07b0a55821292f2b1ac1e21fd8d8c39c3bac2be985fd201be223b
 output.type = "zone"
 output.intermediate_only = true
 
+[package.xcvradm]
+service_name = "xcvradm"
+only_for_targets.switch = "asic"
+only_for_targets.image = "standard"
+source.type = "local"
+source.paths = [
+  { from = "out/transceiver-control/root/opt/oxide/bin/xcvradm", to = "/opt/oxide/bin/xcvradm" }
+]
+output.type = "zone"
+output.intermediate_only = true
+setup_hint = "Run `./tools/ci_download_transceiver_control` to download the necessary binaries"
+
 # To package and install the asic variant of the switch, do:
 #
 # $ cargo run --release --bin omicron-package -- -t default target create -i standard -m gimlet -s asic
@@ -456,7 +468,15 @@ service_name = "switch"
 only_for_targets.switch = "asic"
 only_for_targets.image = "standard"
 source.type = "composite"
-source.packages = [ "omicron-gateway-asic.tar.gz", "dendrite-asic.tar.gz", "wicketd.tar.gz", "wicket.tar.gz", "mg-ddm.tar.gz", "switch_zone_setup.tar.gz" ]
+source.packages = [
+  "omicron-gateway-asic.tar.gz",
+  "dendrite-asic.tar.gz",
+  "wicketd.tar.gz",
+  "wicket.tar.gz",
+  "mg-ddm.tar.gz",
+  "switch_zone_setup.tar.gz",
+  "xcvradm.tar.gz"
+]
 output.type = "zone"
 
 # To package and install the stub variant of the switch, do the following:
