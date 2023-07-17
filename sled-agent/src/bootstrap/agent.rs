@@ -655,8 +655,10 @@ impl Agent {
         // Initialize the secret retriever used by the `KeyManager`
         if self.bootstore.get_status().await?.fsm_state == "uninitialized" {
             // We aren't using LRTQ as this a cluster with fewer than 3 sleds
+            info!(self.log, "KeyManager: using hardcoded secret retriever");
             LrtqOrHardcodedSecretRetriever::init_hardcoded();
         } else {
+            info!(self.log, "KeyManager: using lrtq secret retriever");
             let salt = request.hash_rack_id();
             LrtqOrHardcodedSecretRetriever::init_lrtq(
                 salt,
