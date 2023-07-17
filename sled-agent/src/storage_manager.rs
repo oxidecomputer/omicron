@@ -478,6 +478,13 @@ impl StorageWorker {
 
         // Ensure all disks conform to the expected partition layout.
         for disk in unparsed_disks.into_iter() {
+            // We need to encrypt external disks, and so we wait until
+            // the storage key requester is ready.
+            if disk.variant() == DiskVariant::U2
+                && !self.key_requester.is_ready()
+            {
+                continue;
+            }
             match sled_hardware::Disk::new(
                 &self.log,
                 disk,
@@ -574,6 +581,12 @@ impl StorageWorker {
         resources: &StorageResources,
         disk: UnparsedDisk,
     ) -> Result<(), Error> {
+        // We need to encrypt external disks, and so we wait until
+        // the storage key requester is ready.
+        if disk.variant() == DiskVariant::U2 && !self.key_requester.is_ready() {
+            return Ok(());
+        }
+
         info!(self.log, "Upserting disk: {disk:?}");
 
         // Ensure the disk conforms to an expected partition layout.
@@ -601,6 +614,13 @@ impl StorageWorker {
         resources: &StorageResources,
         zpool_name: ZpoolName,
     ) -> Result<(), Error> {
+        // We need to encrypt external disks, and so we wait until
+        // the storage key requester is ready.
+        if zpool_name.kind() == ZpoolKind::External
+            && !self.key_requester.is_ready()
+        {
+            return Ok(());
+        }
         info!(self.log, "Upserting synthetic disk for: {zpool_name:?}");
 
         let mut disks = resources.disks.lock().await;

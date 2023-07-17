@@ -379,7 +379,9 @@ pub trait SecretRetriever {
         epoch: u64,
     ) -> Result<SecretState, SecretRetrieverError>;
 
-    /// Return a `ReadynessCheck` that returns `true` if the secret retriever is capable of returning a secret
+    /// Return a `ReadynessCheck` that returns `true` if the secret retriever is
+    /// capable of returning a secret.
+    ///
     /// This must be implemented for trust quorum related retrievers, as  they
     /// require rack initialization before they are ready to generate secrets.
     /// It is not  necessary for hardcoded or test retrievers as they are always
