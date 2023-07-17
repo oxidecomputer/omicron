@@ -2009,7 +2009,7 @@ dependencies = [
 [[package]]
 name = "dropshot"
 version = "0.9.1-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#7622dc0eac7445e0b39b72140f22cdadca8276c4"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#64f3a3ba969802895e7a62ef08586d7789e54927"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -2054,7 +2054,7 @@ dependencies = [
 [[package]]
 name = "dropshot_endpoint"
 version = "0.9.1-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#7622dc0eac7445e0b39b72140f22cdadca8276c4"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#64f3a3ba969802895e7a62ef08586d7789e54927"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -6834,9 +6834,9 @@ dependencies = [
 
 [[package]]
 name = "rustls"
-version = "0.21.3"
+version = "0.21.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b19faa85ecb5197342b54f987b142fb3e30d0c90da40f80ef4fa9a726e6676ed"
+checksum = "79ea77c539259495ce8ca47f53e66ae0330a8819f67e23ac96ca02f50e7b7d36"
 dependencies = [
  "log",
  "ring",
