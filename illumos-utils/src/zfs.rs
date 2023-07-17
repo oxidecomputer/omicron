@@ -186,9 +186,6 @@ impl Zfs {
     /// Creates a new ZFS filesystem named `name`, unless one already exists.
     ///
     /// Applies an optional quota, provided _in bytes_.
-    ///
-    /// Returns "true" if the filesystem was mounted, when it previously was
-    /// not.
     pub fn ensure_filesystem(
         name: &str,
         mountpoint: Mountpoint,
@@ -196,21 +193,20 @@ impl Zfs {
         do_format: bool,
         encryption_details: Option<EncryptionDetails>,
         quota: Option<usize>,
-    ) -> Result<bool, EnsureFilesystemError> {
+    ) -> Result<(), EnsureFilesystemError> {
         let (exists, mounted) = Self::dataset_exists(name, &mountpoint)?;
         if exists {
             if encryption_details.is_none() {
                 // If the dataset exists, we're done. Unencrypted datasets are
                 // automatically mounted.
-                return Ok(false);
+                return Ok(());
             } else {
                 if mounted {
                     // The dataset exists and is mounted
-                    return Ok(false);
+                    return Ok(());
                 }
                 // We need to load the encryption key and mount the filesystem
-                Self::mount_encrypted_dataset(name, &mountpoint)?;
-                return Ok(true);
+                return Self::mount_encrypted_dataset(name, &mountpoint);
             }
         }
 
@@ -262,7 +258,7 @@ impl Zfs {
                 });
             }
         }
-        Ok(true)
+        Ok(())
     }
 
     fn mount_encrypted_dataset(

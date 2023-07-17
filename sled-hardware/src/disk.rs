@@ -4,6 +4,7 @@
 
 use camino::{Utf8Path, Utf8PathBuf};
 use illumos_utils::fstyp::Fstyp;
+use illumos_utils::zfs;
 use illumos_utils::zfs::DestroyDatasetErrorVariant;
 use illumos_utils::zfs::EncryptionDetails;
 use illumos_utils::zfs::Keypath;
@@ -14,8 +15,10 @@ use illumos_utils::zpool::ZpoolKind;
 use illumos_utils::zpool::ZpoolName;
 use key_manager::StorageKeyRequester;
 use omicron_common::disk::DiskIdentity;
+use rand::distributions::{Alphanumeric, DistString};
 use slog::Logger;
 use slog::{info, warn};
+use std::sync::OnceLock;
 use tokio::fs::{remove_file, File};
 use tokio::io::{AsyncSeekExt, AsyncWriteExt, SeekFrom};
 use uuid::Uuid;
@@ -64,6 +67,12 @@ pub enum DiskError {
     MissingStorageKeyRequester,
     #[error("Encrypted filesystem '{0}' missing 'oxide:epoch' property")]
     CannotParseEpochProperty(String),
+    #[error("Encrypted dataset '{dataset}' cannot set 'oxide:agent' property: {err}")]
+    CannotSetAgentProperty {
+        dataset: String,
+        #[source]
+        err: Box<zfs::SetValueError>,
+    },
 }
 
 /// A partition (or 'slice') of a disk.
@@ -441,7 +450,7 @@ impl Disk {
 
         // Ensure the root encrypted filesystem exists
         // Datasets below this in the hierarchy will inherit encryption
-        let newly_mounted_crypt = if let Some(dataset) = root {
+        if let Some(dataset) = root {
             let Some(key_requester) = key_requester else {
                 return Err(DiskError::MissingStorageKeyRequester);
             };
@@ -506,26 +515,50 @@ impl Disk {
                 DiskError::IoError { path: keyfile.path().0.clone(), error }
             })?;
 
-            result?
-        } else {
-            false
+            result?;
         };
 
         for dataset in datasets.into_iter() {
             let mountpoint = zpool_name.dataset_mountpoint(dataset.name);
             let name = &format!("{}/{}", zpool_name, dataset.name);
 
-            if dataset.wipe && newly_mounted_crypt {
-                info!(log, "Automatically destroying dataset {}", name);
-                Zfs::destroy_dataset(name).or_else(|err| {
-                    // If we can't find the dataset, that's fine -- it might
-                    // not have been formatted yet.
-                    if let DestroyDatasetErrorVariant::NotFound = err.err {
-                        Ok(())
-                    } else {
-                        Err(err)
+            // Use a value that's alive for the duration of this sled agent
+            // to answer the question: should we wipe this disk, or have
+            // we seen it before?
+            //
+            // If this value comes from a prior iteration of the sled agent,
+            // we opt to remove the corresponding dataset.
+            static AGENT_LOCAL_VALUE: OnceLock<String> = OnceLock::new();
+            let agent_local_value = AGENT_LOCAL_VALUE.get_or_init(|| {
+                Alphanumeric.sample_string(&mut rand::thread_rng(), 20)
+            });
+
+            if dataset.wipe {
+                match Zfs::get_oxide_value(name, "agent") {
+                    Ok(v) if &v == agent_local_value => {
+                        info!(
+                            log,
+                            "Skipping automatic wipe for dataset: {}", name
+                        );
                     }
-                })?;
+                    Ok(_) | Err(_) => {
+                        info!(
+                            log,
+                            "Automatically destroying dataset: {}", name
+                        );
+                        Zfs::destroy_dataset(name).or_else(|err| {
+                            // If we can't find the dataset, that's fine -- it might
+                            // not have been formatted yet.
+                            if let DestroyDatasetErrorVariant::NotFound =
+                                err.err
+                            {
+                                Ok(())
+                            } else {
+                                Err(err)
+                            }
+                        })?;
+                    }
+                }
             }
 
             let encryption_details = None;
@@ -537,6 +570,14 @@ impl Disk {
                 encryption_details,
                 dataset.quota,
             )?;
+
+            if dataset.wipe {
+                Zfs::set_oxide_value(name, "agent", agent_local_value)
+                    .map_err(|err| DiskError::CannotSetAgentProperty {
+                        dataset: name.clone(),
+                        err: Box::new(err),
+                    })?;
+            }
         }
         Ok(())
     }

@@ -16,6 +16,7 @@ libc.workspace = true
 macaddr.workspace = true
 nexus-client.workspace = true
 omicron-common.workspace = true
+rand.workspace = true
 schemars.workspace = true
 serde.workspace = true
 slog.workspace = true
