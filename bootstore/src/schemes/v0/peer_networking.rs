@@ -12,7 +12,7 @@ use bytes::Buf;
 use derive_more::From;
 use serde::{Deserialize, Serialize};
 use sled_hardware::Baseboard;
-use slog::{debug, info, o, warn, Logger};
+use slog::{debug, error, info, o, warn, Logger};
 use std::collections::VecDeque;
 use std::io::Cursor;
 use std::net::SocketAddrV6;
@@ -511,6 +511,38 @@ pub async fn spawn_accepted_connection_management_task(
                 return;
             }
         };
+
+        // Connections are only supposed to come from peers with `ip:port`
+        // values that sort higher than the peer they are connecting to. We
+        // don't know the canonical port of the connecting peer until the
+        // handshake completes though as the connecting port is ephemeral.
+        // Therefore we do the check here.
+        //
+        // Note: We don't do the check in `perform_hanshake` because that method
+        // is called for both the accept and connect side and we don't need to
+        // do it for the connector, which by definition shouldn't be connecting
+        // to a higher sorted peer.
+        if identify.addr < my_addr {
+            error!(
+                log,
+                concat!(
+                    "Misbehaving peer: Connection from peer ",
+                    "with lower valued address: {}"
+                ),
+                identify.addr
+            );
+            // This is a server so we bail and wait for a new connection
+            // We must inform the main task so it can clean up any metadata.
+            let _ = main_tx
+                .send(ConnToMainMsg {
+                    handle_unique_id: unique_id,
+                    msg: ConnToMainMsgInner::FailedAcceptorHandshake {
+                        addr: client_addr,
+                    },
+                })
+                .await;
+            return;
+        }
 
         // Inform the main task that we have connected to a peer
         let _ = main_tx
