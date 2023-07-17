@@ -75,7 +75,7 @@ impl Resolver {
         opts.num_concurrent_reqs = dns_server_count;
         // The underlay is IPv6 only, so this helps avoid needless lookups of
         // the IPv4 variant.
-        opts.strategy = LookupIpStrategy::Ipv6Only;
+        opts.ip_strategy = LookupIpStrategy::Ipv6Only;
         let resolver = TokioAsyncResolver::tokio(rc, opts)?;
 
         Ok(Self { log, resolver })
