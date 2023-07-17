@@ -14,6 +14,7 @@ use std::sync::OnceLock;
 /// A [`key-manager::SecretRetriever`] for use before trust quorum is production ready
 ///
 /// The local retriever only returns keys for epoch 0
+#[derive(Debug)]
 pub struct HardcodedSecretRetriever {}
 
 #[async_trait]
@@ -41,6 +42,7 @@ impl SecretRetriever for HardcodedSecretRetriever {
 /// A [`key-manager::SecretRetriever`] for use with LRTQ
 ///
 /// The LRTQ retriever only returns keys for epoch 1
+#[derive(Debug)]
 pub struct LrtqSecretRetriever {
     salt: [u8; 32],
     bootstore: NodeHandle,
@@ -76,9 +78,20 @@ impl SecretRetriever for LrtqSecretRetriever {
     }
 }
 
-pub enum LrtqOrHardcodedSecretRetrieverInner {
+#[derive(Debug)]
+enum LrtqOrHardcodedSecretRetrieverInner {
     Lrtq(LrtqSecretRetriever),
     Hardcoded(HardcodedSecretRetriever),
+}
+
+impl LrtqOrHardcodedSecretRetrieverInner {
+    pub fn new_hardcoded() -> Self {
+        Self::Hardcoded(HardcodedSecretRetriever {})
+    }
+
+    pub fn new_lrtq(salt: [u8; 32], bootstore: NodeHandle) -> Self {
+        Self::Lrtq(LrtqSecretRetriever::new(salt, bootstore))
+    }
 }
 
 #[async_trait]
@@ -115,7 +128,7 @@ static MAYBE_LRTQ_RETRIEVER: OnceLock<LrtqOrHardcodedSecretRetrieverInner> =
 /// A [`key-manager::SecretRetriever`] that either uses a
 /// [`LocalSecretRetriever`] or [`LrtqSecretRetriever`] under the hood depending
 /// upon how many sleds are in the cluster at rack init time.
-pub enum LrtqOrHardcodedSecretRetriever {}
+pub struct LrtqOrHardcodedSecretRetriever {}
 
 #[async_trait]
 impl SecretRetriever for LrtqOrHardcodedSecretRetriever {
@@ -134,5 +147,27 @@ impl SecretRetriever for LrtqOrHardcodedSecretRetriever {
             Some(retriever) => retriever.get(epoch).await,
             None => Err(SecretRetrieverError::RackNotInitialized),
         }
+    }
+}
+
+impl LrtqOrHardcodedSecretRetriever {
+    /// Set the type of secret retriever to `HardcodedSecretRetriever`
+    ///
+    /// Panics if called more than once or if `Self::init_lrtq` has already
+    /// been called.
+    pub fn init_hardcoded() {
+        MAYBE_LRTQ_RETRIEVER
+            .set(LrtqOrHardcodedSecretRetrieverInner::new_hardcoded())
+            .expect("Can only set secret retriever once")
+    }
+
+    /// Set the type of secret retriever to `LrtqSecretRetriever`
+    ///
+    /// Panics if called more than once or if `Self::init_hardcoded` has already
+    /// been called.
+    pub fn init_lrtq(salt: [u8; 32], bootstore: NodeHandle) {
+        MAYBE_LRTQ_RETRIEVER
+            .set(LrtqOrHardcodedSecretRetrieverInner::new_lrtq(salt, bootstore))
+            .expect("Can only set secret retriever once")
     }
 }

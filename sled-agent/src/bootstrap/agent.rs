@@ -12,7 +12,7 @@ use super::hardware::HardwareMonitor;
 use super::http_entrypoints::RackOperationStatus;
 use super::params::RackInitializeRequest;
 use super::params::StartSledAgentRequest;
-use super::secret_retriever::{HardcodedSecretRetriever, LrtqSecretRetriever};
+use super::secret_retriever::LrtqOrHardcodedSecretRetriever;
 use super::views::SledAgentResponse;
 use crate::config::Config as SledConfig;
 use crate::server::Server as SledServer;
@@ -117,6 +117,9 @@ pub enum BootstrapError {
 
     #[error("Error accessing version information: {0}")]
     Version(#[from] crate::updates::Error),
+
+    #[error("Bootstore Error: {0}")]
+    Bootstore(#[from] bootstore::NodeRequestError),
 }
 
 impl From<BootstrapError> for ExternalError {
@@ -421,7 +424,7 @@ impl Agent {
         // Spawn the `KeyManager` which is needed by the the StorageManager to
         // retrieve encryption keys.
         let (mut key_manager, storage_key_requester) =
-            KeyManager::new(&log, HardcodedSecretRetriever {});
+            KeyManager::new(&log, LrtqOrHardcodedSecretRetriever {});
 
         let handle = tokio::spawn(async move { key_manager.run().await });
 
@@ -517,6 +520,20 @@ impl Agent {
             let agent = make_bootstrap_agent(true);
             info!(agent.log, "Sled already configured, loading sled agent");
             let sled_request = ledger.data();
+
+            // Initialize the secret retriever used by the `KeyManager`
+            if agent.bootstore.get_status().await?.fsm_state == "uninitialized"
+            {
+                // We aren't using LRTQ as this is a single node system
+                LrtqOrHardcodedSecretRetriever::init_hardcoded();
+            } else {
+                let salt = sled_request.request.hash_id_and_rack_id();
+                LrtqOrHardcodedSecretRetriever::init_lrtq(
+                    salt,
+                    agent.bootstore.clone(),
+                )
+            }
+
             agent.request_sled_agent(&sled_request.request).await?;
             agent
         } else {

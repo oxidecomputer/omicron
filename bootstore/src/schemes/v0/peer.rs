@@ -108,7 +108,7 @@ pub enum NodeApiRequest {
 }
 
 /// A handle for interacting with a `Node` task
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct NodeHandle {
     tx: mpsc::Sender<NodeApiRequest>,
 }

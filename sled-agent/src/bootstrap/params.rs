@@ -9,6 +9,7 @@ use omicron_common::address::{self, Ipv6Subnet, SLED_PREFIX};
 use omicron_common::api::internal::shared::RackNetworkConfig;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use sha3::{Digest, Sha3_256};
 use sled_hardware::Baseboard;
 use std::borrow::Cow;
 use std::collections::HashSet;
@@ -203,6 +204,17 @@ impl StartSledAgentRequest {
 
     pub fn switch_zone_ip(&self) -> Ipv6Addr {
         address::get_switch_zone_address(self.subnet)
+    }
+
+    /// Compute the sha3_256 digest of `self.id || self.rack_id` to use as a
+    /// `salt` for disk encryption
+    pub fn hash_id_and_rack_id(&self) -> [u8; 32] {
+        let mut hasher = Sha3_256::new();
+        hasher.update(self.id.as_bytes());
+        hasher.update(self.rack_id.as_bytes());
+
+        // We know this succeeds as a Sha3_256 digest is 32 bytes
+        hasher.finalize().as_slice().try_into().unwrap()
     }
 }
 
