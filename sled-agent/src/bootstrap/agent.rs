@@ -194,18 +194,18 @@ pub struct Agent {
 
     global_zone_bootstrap_link_local_address: Ipv6Addr,
 
-    /// We maintain the handle just to show ownership, but don't use it
-    /// as the KeyManager task should run forever
+    /// We maintain the handle just to show ownership, but don't use it, as the
+    /// KeyManager task should run forever
     #[allow(unused)]
     key_manager_handle: JoinHandle<()>,
 
-    /// The ability to set when the KeyManager is ready to be used
+    /// Used to inofrm key requesters that the KeyManager is ready to be used.
     /// In particular this should be set when the rack is initialized
     key_manager_readiness: ReadinessSetter,
 
-    /// We maintain a copy of the `StorageKeyRequester` so we can pass it through
-    /// from the `HardwareManager` to the `StorageManager` when the `HardwareManger`
-    /// gets recreated.
+    /// We maintain a copy of the `StorageKeyRequester` so we can pass it
+    /// through from the `HardwareManager` to the `StorageManager` when the
+    /// `HardwareManager` gets recreated.
     storage_key_requester: StorageKeyRequester,
 
     /// Our sled's baseboard identity.
@@ -654,7 +654,7 @@ impl Agent {
 
         // Initialize the secret retriever used by the `KeyManager`
         if self.bootstore.get_status().await?.fsm_state == "uninitialized" {
-            // We aren't using LRTQ as this is a single node system
+            // We aren't using LRTQ as this a cluster with fewer than 3 sleds
             LrtqOrHardcodedSecretRetriever::init_hardcoded();
         } else {
             let salt = request.hash_rack_id();

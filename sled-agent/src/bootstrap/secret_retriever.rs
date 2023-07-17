@@ -100,7 +100,8 @@ impl LrtqOrHardcodedSecretRetriever {
     }
 }
 
-/// A [`key-manager::SecretRetriever`] for use before trust quorum is production ready
+/// A [`key-manager::SecretRetriever`] for use before trust quorum is production
+/// ready
 ///
 /// The local retriever only returns keys for epoch 0
 #[derive(Debug)]

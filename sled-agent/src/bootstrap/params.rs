@@ -58,7 +58,7 @@ pub struct RackInitializeRequest {
     /// These are only set when we are using
     /// `BootstrapAddressDiscovery::OnlyThese` and there are at least 3
     /// addresses. The addresses map 1:1 to the `Baseboard`s. LRTQ only
-    /// requires the `Baseboards` as it rediscovers the addresses from DDM.
+    /// requires the `Baseboard`s as it rediscovers the addresses from DDM.
     pub trust_quorum_peers: Option<Vec<Baseboard>>,
 
     /// Describes how bootstrap addresses should be collected during RSS.

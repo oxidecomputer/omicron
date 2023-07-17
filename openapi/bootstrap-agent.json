@@ -505,7 +505,7 @@
           },
           "trust_quorum_peers": {
             "nullable": true,
-            "description": "The set of peer_ids required to initialize lrtq\n\nThese are only set when we are using `BootstrapAddressDiscovery::OnlyThese` and there are at least 3 addresses. The addresses map 1:1 to the `Baseboard`s. LRTQ only requires the `Baseboards` as it rediscovers the addresses from DDM.",
+            "description": "The set of peer_ids required to initialize lrtq\n\nThese are only set when we are using `BootstrapAddressDiscovery::OnlyThese` and there are at least 3 addresses. The addresses map 1:1 to the `Baseboard`s. LRTQ only requires the `Baseboard`s as it rediscovers the addresses from DDM.",
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/Baseboard"

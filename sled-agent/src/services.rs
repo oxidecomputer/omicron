@@ -2937,9 +2937,12 @@ impl ServiceManager {
             return Ok(())
         };
 
-        // The switch zone must use the ramdisk in order to receive
-        // requests from RSS to initialize the rack and allow us to initialize
-        // trust quorum to derive disk encryption keys for U.2 devices.
+        // The switch zone must use the ramdisk in order to receive requests
+        // from RSS to initialize the rack. This enables the initialization of
+        // trust quorum to derive disk encryption keys for U.2 devices. If the
+        // switch zone were on a U.2 device we would not be able to run RSS, as
+        // we could not create the U.2 disks due to lack of encryption. To break
+        // the cycle we put the switch zone root fs on the ramdisk.
         let root = if request.zone_type == ZoneType::Switch {
             Utf8PathBuf::from(ZONE_ZFS_RAMDISK_DATASET_MOUNTPOINT)
         } else {
