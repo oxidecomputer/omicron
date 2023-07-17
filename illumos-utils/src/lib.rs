@@ -10,6 +10,7 @@ pub mod addrobj;
 pub mod destructor;
 pub mod dkio;
 pub mod dladm;
+pub mod dumpadm;
 pub mod fstyp;
 pub mod libc;
 pub mod link;

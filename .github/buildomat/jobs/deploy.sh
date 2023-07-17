@@ -5,9 +5,9 @@
 #: target = "lab-2.0-opte-0.23"
 #: output_rules = [
 #:  "%/var/svc/log/oxide-sled-agent:default.log",
-#:  "%/zone/oxz_*/root/var/svc/log/oxide-*.log",
-#:  "%/zone/oxz_*/root/var/svc/log/system-illumos-*.log",
-#:  "!/zone/oxz_propolis-server_*/root/var/svc/log/*.log"
+#:  "%/pool/ext/*/crypt/zone/oxz_*/root/var/svc/log/oxide-*.log",
+#:  "%/pool/ext/*/crypt/zone/oxz_*/root/var/svc/log/system-illumos-*.log",
+#:  "!/pool/ext/*/crypt/zone/oxz_propolis-server_*/root/var/svc/log/*.log"
 #: ]
 #: skip_clone = true
 #:

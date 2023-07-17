@@ -3231,6 +3231,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "bhyve_api",
+ "byteorder",
  "camino",
  "cfg-if 1.0.0",
  "futures",
