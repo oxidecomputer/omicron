@@ -48,9 +48,9 @@ function ensure_zpools {
             VDEV_PATH="$OMICRON_TOP/$ZPOOL.vdev"
             if ! [[ -f "$VDEV_PATH" ]]; then
                 if [[ $ZPOOL == oxp_* ]]; then
-                    dd if=/dev/zero of="$VDEV_PATH" bs=1 count=0 seek=8G
+                    dd if=/dev/zero of="$VDEV_PATH" bs=1 count=0 seek=20G
                 else
-                    dd if=/dev/zero of="$VDEV_PATH" bs=1 count=0 seek=6G
+                    dd if=/dev/zero of="$VDEV_PATH" bs=1 count=0 seek=20G
                 fi
             fi
             success "ZFS vdev $VDEV_PATH exists"
