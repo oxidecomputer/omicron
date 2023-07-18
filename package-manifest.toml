@@ -287,24 +287,6 @@ source.paths = [ { from = "smf/sp-sim", to = "/var/svc/manifest/site/sp-sim" } ]
 output.type = "zone"
 output.intermediate_only = true
 
-[package.sp-sim-stub]
-service_name = "sp-sim-customizations"
-only_for_targets.image = "standard"
-only_for_targets.switch = "stub"
-source.type = "composite"
-source.packages = [ "sp-sim.tar.gz" ]
-output.type = "zone"
-output.intermediate_only = true
-
-[package.sp-sim-softnpu]
-service_name = "sp-sim-customizations"
-only_for_targets.image = "standard"
-only_for_targets.switch = "softnpu"
-source.type = "composite"
-source.packages = [ "sp-sim.tar.gz" ]
-output.type = "zone"
-output.intermediate_only = true
-
 # Packages not built within Omicron, but which must be imported.
 
 # Refer to
@@ -456,7 +438,17 @@ service_name = "switch"
 only_for_targets.switch = "asic"
 only_for_targets.image = "standard"
 source.type = "composite"
-source.packages = [ "omicron-gateway-asic.tar.gz", "dendrite-asic.tar.gz", "wicketd.tar.gz", "wicket.tar.gz", "mg-ddm.tar.gz", "switch_zone_setup.tar.gz" ]
+source.packages = [
+  # TODO: this is "omicron-gateway-asic.tar.gz"
+  "omicron-gateway.tar.gz",
+  "omicron-gateway-asic-customizations.tar.gz",
+
+  "dendrite-asic.tar.gz",
+  "wicketd.tar.gz",
+  "wicket.tar.gz",
+  "mg-ddm.tar.gz",
+  "switch_zone_setup.tar.gz",
+]
 output.type = "zone"
 
 # To package and install the stub variant of the switch, do the following:
@@ -470,13 +462,16 @@ only_for_targets.switch = "stub"
 only_for_targets.image = "standard"
 source.type = "composite"
 source.packages = [
-  "omicron-gateway-stub.tar.gz",
+  # TODO: this is "omicron-gateway-stub.tar.gz"
+  "omicron-gateway.tar.gz",
+  "omicron-gateway-stub-customizations.tar.gz",
+
   "dendrite-stub.tar.gz",
   "wicketd.tar.gz",
   "wicket.tar.gz",
   "mg-ddm.tar.gz",
   "switch_zone_setup.tar.gz",
-  "sp-sim-stub.tar.gz"
+  "sp-sim.tar.gz"
 ]
 output.type = "zone"
 
@@ -491,12 +486,15 @@ only_for_targets.switch = "softnpu"
 only_for_targets.image = "standard"
 source.type = "composite"
 source.packages = [
-  "omicron-gateway-softnpu.tar.gz",
+  # TODO: this is "omicron-gateway-softnpu.tar.gz"
+  "omicron-gateway.tar.gz",
+  "omicron-gateway-softnpu-customizations.tar.gz",
+
   "dendrite-softnpu.tar.gz",
   "wicketd.tar.gz",
   "wicket.tar.gz",
   "mg-ddm.tar.gz",
   "switch_zone_setup.tar.gz",
-  "sp-sim-softnpu.tar.gz"
+  "sp-sim.tar.gz"
 ]
 output.type = "zone"
