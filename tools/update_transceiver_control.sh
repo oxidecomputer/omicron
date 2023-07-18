@@ -59,7 +59,6 @@ function main {
     done
 
     TARGET_COMMIT=$(get_latest_commit_from_gh "$REPO" "$TARGET_COMMIT")
-    install_toml2json
     update_transceiver_control "$TARGET_COMMIT" "$DRY_RUN"
 }
 
