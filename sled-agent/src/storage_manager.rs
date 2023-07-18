@@ -8,6 +8,7 @@ use crate::nexus::NexusClientWithResolver;
 use crate::storage::dataset::DatasetName;
 use crate::storage::dump_setup::DumpSetup;
 use camino::Utf8PathBuf;
+use derive_more::From;
 use futures::stream::FuturesOrdered;
 use futures::FutureExt;
 use futures::StreamExt;
@@ -25,6 +26,7 @@ use sled_hardware::{Disk, DiskVariant, UnparsedDisk};
 use slog::Logger;
 use std::collections::hash_map;
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::convert::TryFrom;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -130,6 +132,9 @@ pub enum Error {
 
     #[error("Encountered error checking dump device flags: {0}")]
     DumpHdr(#[from] DumpHdrError),
+
+    #[error("Failed to receive queued disks from watch")]
+    QueuedDiskRetrieval,
 }
 
 /// A ZFS storage pool.
@@ -354,6 +359,12 @@ enum NotifyDiskRequest {
     Remove(DiskIdentity),
 }
 
+#[derive(From, Clone, Debug, PartialEq, Eq, Hash)]
+enum QueuedDiskCreate {
+    Real(UnparsedDisk),
+    Synthetic(ZpoolName),
+}
+
 impl StorageWorker {
     // Ensures the named dataset exists as a filesystem with a UUID, optionally
     // creating it if `do_format` is true.
@@ -466,7 +477,14 @@ impl StorageWorker {
         &mut self,
         resources: &StorageResources,
         unparsed_disks: Vec<UnparsedDisk>,
+        queued_u2_drives: &mut Option<HashSet<QueuedDiskCreate>>,
     ) -> Result<(), Error> {
+        // Queue U.2 drives if necessary
+        // We clear all existing drives here and add new ones in the loop below
+        if let Some(queued) = queued_u2_drives {
+            queued.clear();
+        }
+
         let mut new_disks = HashMap::new();
 
         // We may encounter errors while parsing any of the disks; keep track of
@@ -478,12 +496,12 @@ impl StorageWorker {
 
         // Ensure all disks conform to the expected partition layout.
         for disk in unparsed_disks.into_iter() {
-            // We need to encrypt external disks, and so we wait until
-            // the storage key requester is ready.
-            if disk.variant() == DiskVariant::U2
-                && !self.key_requester.is_ready()
-            {
-                continue;
+            if disk.variant() == DiskVariant::U2 {
+                if let Some(queued) = queued_u2_drives {
+                    // We are queuing these to add later
+                    queued.insert(disk.into());
+                    continue;
+                }
             }
             match sled_hardware::Disk::new(
                 &self.log,
@@ -580,11 +598,14 @@ impl StorageWorker {
         &mut self,
         resources: &StorageResources,
         disk: UnparsedDisk,
+        queued_u2_drives: &mut Option<HashSet<QueuedDiskCreate>>,
     ) -> Result<(), Error> {
-        // We need to encrypt external disks, and so we wait until
-        // the storage key requester is ready.
-        if disk.variant() == DiskVariant::U2 && !self.key_requester.is_ready() {
-            return Ok(());
+        // Queue U.2 drives if necessary
+        if let Some(queued) = queued_u2_drives {
+            if disk.variant() == DiskVariant::U2 {
+                queued.insert(disk.into());
+                return Ok(());
+            }
         }
 
         info!(self.log, "Upserting disk: {disk:?}");
@@ -613,14 +634,16 @@ impl StorageWorker {
         &mut self,
         resources: &StorageResources,
         zpool_name: ZpoolName,
+        queued_u2_drives: &mut Option<HashSet<QueuedDiskCreate>>,
     ) -> Result<(), Error> {
-        // We need to encrypt external disks, and so we wait until
-        // the storage key requester is ready.
-        if zpool_name.kind() == ZpoolKind::External
-            && !self.key_requester.is_ready()
-        {
-            return Ok(());
+        // Queue U.2 drives if necessary
+        if let Some(queued) = queued_u2_drives {
+            if zpool_name.kind() == ZpoolKind::External {
+                queued.insert(zpool_name.into());
+                return Ok(());
+            }
         }
+
         info!(self.log, "Upserting synthetic disk for: {zpool_name:?}");
 
         let mut disks = resources.disks.lock().await;
@@ -886,8 +909,11 @@ impl StorageWorker {
         &mut self,
         resources: StorageResources,
     ) -> Result<(), Error> {
+        // We queue U.2 sleds until the StorageKeyRequester is ready to use.
+        let mut queued_u2_drives = Some(HashSet::new());
         loop {
-            match self.do_work_internal(&resources).await {
+            match self.do_work_internal(&resources, &mut queued_u2_drives).await
+            {
                 Ok(()) => {
                     info!(self.log, "StorageWorker exited successfully");
                     return Ok(());
@@ -906,18 +932,59 @@ impl StorageWorker {
     async fn do_work_internal(
         &mut self,
         resources: &StorageResources,
+        queued_u2_drives: &mut Option<HashSet<QueuedDiskCreate>>,
     ) -> Result<(), Error> {
+        let init = queued_u2_drives.clone().unwrap_or_default();
+        let (tx, mut rx) = tokio::sync::watch::channel(init);
         loop {
+            let ready = self.key_requester.is_ready();
             tokio::select! {
-                _ = self.nexus_notifications.next(), if !self.nexus_notifications.is_empty() => {},
+                _ = self.nexus_notifications.next(),
+                    if !self.nexus_notifications.is_empty() => {},
+                res = rx.changed(), if ready => {
+                    // The key requester is ready, now add the pending disks
+                    res.map_err(|_| Error::QueuedDiskRetrieval)?;
+                    let queued = rx.borrow().clone();
+                    for disk in queued {
+                        match disk {
+                            QueuedDiskCreate::Real(disk) => {
+                                self.upsert_disk(
+                                    &resources,
+                                    disk,
+                                    &mut None
+                                )
+                                .await?;
+                            }
+                            QueuedDiskCreate::Synthetic(zpool_name) => {
+                                self.upsert_synthetic_disk(
+                                    &resources,
+                                    zpool_name,
+                                    &mut None
+                                )
+                                .await?;
+                            }
+                        }
+                    }
+                    // We are done queueing
+                    *queued_u2_drives = None;
+                }
                 Some(request) = self.rx.recv() => {
                     use StorageWorkerRequest::*;
                     match request {
                         AddDisk(disk) => {
-                            self.upsert_disk(&resources, disk).await?;
+                            self.upsert_disk(
+                                &resources,
+                                disk,
+                                queued_u2_drives,
+                            )
+                            .await?;
                         },
                         AddSyntheticDisk(zpool_name) => {
-                            self.upsert_synthetic_disk(&resources, zpool_name).await?;
+                            self.upsert_synthetic_disk(
+                                &resources,
+                                zpool_name,
+                                queued_u2_drives,
+                            ).await?;
                         },
                         RemoveDisk(disk) => {
                             self.delete_disk(&resources, disk).await?;
@@ -927,7 +994,12 @@ impl StorageWorker {
                             let _ = request.responder.send(result);
                         },
                         DisksChanged(disks) => {
-                            self.ensure_using_exactly_these_disks(&resources, disks).await?;
+                            self.ensure_using_exactly_these_disks(
+                                &resources,
+                                disks,
+                                queued_u2_drives
+                            )
+                            .await?;
                         },
                         SetupUnderlayAccess(UnderlayRequest { underlay, responder }) => {
                             // If this is the first time establishing an
@@ -942,6 +1014,9 @@ impl StorageWorker {
                             }
                             let _ = responder.send(Ok(()));
                         }
+                    }
+                    if let Some(queued) = queued_u2_drives {
+                        tx.send(queued.clone()).unwrap();
                     }
                 },
             }
