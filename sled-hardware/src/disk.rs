@@ -9,6 +9,7 @@ use illumos_utils::zfs::DestroyDatasetErrorVariant;
 use illumos_utils::zfs::EncryptionDetails;
 use illumos_utils::zfs::Keypath;
 use illumos_utils::zfs::Mountpoint;
+use illumos_utils::zfs::SizeDetails;
 use illumos_utils::zfs::Zfs;
 use illumos_utils::zpool::Zpool;
 use illumos_utils::zpool::ZpoolKind;
@@ -522,7 +523,6 @@ impl Disk {
                 do_format,
                 Some(encryption_details),
                 None,
-                None,
             );
 
             keyfile.zero_and_unlink().await.map_err(|error| {
@@ -576,14 +576,17 @@ impl Disk {
             }
 
             let encryption_details = None;
+            let size_details = Some(SizeDetails {
+                quota: dataset.quota,
+                compression: dataset.compression,
+            });
             Zfs::ensure_filesystem(
                 name,
                 Mountpoint::Path(mountpoint),
                 zoned,
                 do_format,
                 encryption_details,
-                dataset.quota,
-                dataset.compression,
+                size_details,
             )?;
 
             if dataset.wipe {

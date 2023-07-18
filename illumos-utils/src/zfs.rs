@@ -144,6 +144,12 @@ pub struct EncryptionDetails {
     pub epoch: u64,
 }
 
+#[derive(Debug, Default)]
+pub struct SizeDetails {
+    pub quota: Option<usize>,
+    pub compression: Option<&'static str>,
+}
+
 #[cfg_attr(any(test, feature = "testing"), mockall::automock, allow(dead_code))]
 impl Zfs {
     /// Lists all datasets within a pool or existing dataset.
@@ -192,14 +198,15 @@ impl Zfs {
         zoned: bool,
         do_format: bool,
         encryption_details: Option<EncryptionDetails>,
-        quota: Option<usize>,
-        compression: Option<&'static str>,
+        size_details: Option<SizeDetails>,
     ) -> Result<(), EnsureFilesystemError> {
         let (exists, mounted) = Self::dataset_exists(name, &mountpoint)?;
         if exists {
-            // apply quota and compression mode (in case they've changed across
-            // sled-agent versions since creation)
-            Self::apply_properties(name, &mountpoint, quota, compression)?;
+            if let Some(SizeDetails { quota, compression }) = size_details {
+                // apply quota and compression mode (in case they've changed across
+                // sled-agent versions since creation)
+                Self::apply_properties(name, &mountpoint, quota, compression)?;
+            }
 
             if encryption_details.is_none() {
                 // If the dataset exists, we're done. Unencrypted datasets are
@@ -251,8 +258,10 @@ impl Zfs {
             err: err.into(),
         })?;
 
-        // Apply any quota and compression mode.
-        Self::apply_properties(name, &mountpoint, quota, compression)?;
+        if let Some(SizeDetails { quota, compression }) = size_details {
+            // Apply any quota and compression mode.
+            Self::apply_properties(name, &mountpoint, quota, compression)?;
+        }
 
         Ok(())
     }
