@@ -369,6 +369,7 @@ impl StorageWorker {
         let do_format = true;
         let encryption_details = None;
         let quota = None;
+        let compression = None;
         Zfs::ensure_filesystem(
             &dataset_name.full(),
             Mountpoint::Path(Utf8PathBuf::from("/data")),
@@ -376,6 +377,7 @@ impl StorageWorker {
             do_format,
             encryption_details,
             quota,
+            compression,
         )?;
         // Ensure the dataset has a usable UUID.
         if let Ok(id_str) = Zfs::get_oxide_value(&fs_name, "uuid") {
