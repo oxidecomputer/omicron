@@ -183,8 +183,8 @@ impl UpdatePane {
                 ("Update", "<Enter>"),
             ],
             not_started_help: vec![("Start", "<Ctrl-U>")],
-            running_help: vec![("Abort", "<Ctrl-Alt-A>")],
-            completed_help: vec![("Clear", "<Ctrl-Alt-R>")],
+            running_help: vec![("Abort", "<Ctrl-R Ctrl-A>")],
+            completed_help: vec![("Clear", "<Ctrl-R Ctrl-R>")],
             component_state: ALL_COMPONENT_IDS
                 .iter()
                 .map(|id| (*id, ComponentUpdateListState::default()))

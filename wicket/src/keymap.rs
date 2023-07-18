@@ -154,6 +154,7 @@ pub enum ShowPopupCmd {
 #[allow(non_camel_case_types)]
 enum MultiKeySeqStart {
     g,
+    CtrlR,
 }
 
 /// A Key Handler maintains any state that is needed across key presses,
@@ -185,6 +186,33 @@ impl KeyHandler {
                     }
                     _ => (),
                 },
+                MultiKeySeqStart::CtrlR => match event.code {
+                    KeyCode::Char('a')
+                        if event.modifiers == KeyModifiers::CONTROL =>
+                    {
+                        self.seq = None;
+                        return Some(Cmd::AbortUpdate);
+                    }
+                    KeyCode::Char('r')
+                        if event.modifiers == KeyModifiers::CONTROL =>
+                    {
+                        self.seq = None;
+                        return Some(Cmd::ResetState);
+                    }
+                    KeyCode::Char('s')
+                        if event.modifiers == KeyModifiers::CONTROL =>
+                    {
+                        self.seq = None;
+                        return Some(Cmd::DumpSnapshot);
+                    }
+                    KeyCode::Char('t')
+                        if event.modifiers == KeyModifiers::CONTROL =>
+                    {
+                        self.seq = None;
+                        return Some(Cmd::KnightRiderMode);
+                    }
+                    _ => (),
+                },
             }
         }
 
@@ -208,43 +236,16 @@ impl KeyHandler {
             KeyCode::Char('u') if event.modifiers == KeyModifiers::CONTROL => {
                 Cmd::StartUpdate
             }
-            // The CONTROL+ALT shortcuts are a bit harder to define because some
-            // terminals interpret them as well. However, as a heuristic we can
-            // rely on the fact that common Emacs shortcuts with the same
-            // modifiers (C-M-<char>) will not be interpreted by the terminal.
-            //
-            // C-M-a is "move to next function".
-            KeyCode::Char('a')
-                if event.modifiers
-                    == KeyModifiers::CONTROL | KeyModifiers::ALT =>
-            {
-                Cmd::AbortUpdate
+            KeyCode::Char('r') if event.modifiers == KeyModifiers::CONTROL => {
+                self.seq = Some(MultiKeySeqStart::CtrlR);
+                return None;
             }
-            // C-M-r is "reverse regular expression search".
-            KeyCode::Char('r')
-                if event.modifiers
-                    == KeyModifiers::CONTROL | KeyModifiers::ALT =>
-            {
-                Cmd::ResetState
-            }
-            // C-M-k is "kill sexp forward". (This was previously C-M-s, which
-            // is "regular expression search", but that is bound to other
-            // commands by default in both KDE Konsole and urxvt.)
-            KeyCode::Char('k')
-                if event.modifiers
-                    == KeyModifiers::CONTROL | KeyModifiers::ALT =>
-            {
+            KeyCode::Char('k') if event.modifiers == KeyModifiers::CONTROL => {
                 Cmd::StartRackSetup
             }
             KeyCode::Char('n') => Cmd::No,
-            KeyCode::Char('k') if event.modifiers == KeyModifiers::CONTROL => {
-                Cmd::KnightRiderMode
-            }
             KeyCode::Tab => Cmd::NextPane,
             KeyCode::BackTab => Cmd::PrevPane,
-            KeyCode::Char('r') if event.modifiers == KeyModifiers::CONTROL => {
-                Cmd::DumpSnapshot
-            }
 
             // Vim navigation
             KeyCode::Char('k') => Cmd::Up,

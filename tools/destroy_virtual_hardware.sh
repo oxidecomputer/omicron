@@ -106,7 +106,7 @@ function try_destroy_zpools {
     for ZPOOL_TYPE in "${ZPOOL_TYPES[@]}"; do
         readarray -t ZPOOLS < <(zfs list -d 0 -o name | grep "^$ZPOOL_TYPE")
         for ZPOOL in "${ZPOOLS[@]}"; do
-            VDEV_FILE="$OMICRON_TOP/$ZPOOL.vdev"
+            VDEV_FILE="${ZPOOL_VDEV_DIR:-$OMICRON_TOP}/$ZPOOL.vdev"
             zfs destroy -r "$ZPOOL" && \
                     zfs unmount "$ZPOOL" && \
                     zpool destroy "$ZPOOL" && \
