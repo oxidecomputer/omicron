@@ -4,7 +4,7 @@
 
 //! Workspace-related developer tools
 //!
-//! See https://github.com/matklad/cargo-xtask.
+//! See <https://github.com/matklad/cargo-xtask>.
 
 use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
