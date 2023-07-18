@@ -570,18 +570,30 @@ impl Agent {
         log: &Logger,
         bootstore_node_handle: bootstore::NodeHandle,
     ) -> JoinHandle<()> {
-        let log = log.clone();
+        let log = log.new(o!("component" => "bootstore_ddmd_poller"));
         tokio::spawn(async move {
-            // Explicit fail fast. We can't do anything without a DdmAdminClient.
-            // Do we need to loop as in wicketd?
-            let ddmd_client = DdmAdminClient::localhost(&log).unwrap();
             let mut current_peers: BTreeSet<SocketAddrV6> = BTreeSet::new();
+            // We're talking to a service's admin interface on localhost and
+            // we're only asking for its current state. We use a retry in a loop
+            // instead of `backoff`.
+            //
+            // We also use this timeout in the case of spurious ddmd failures
+            // that require a reconnection from the ddmd_client.
+            const RETRY: tokio::time::Duration =
+                tokio::time::Duration::from_secs(5);
+
             loop {
-                // We're talking to a service's admin interface on localhost and
-                // we're only asking for its current state. We use a retry in a
-                // loop instead of `backoff`.
-                const RETRY: tokio::time::Duration =
-                    tokio::time::Duration::from_secs(5);
+                let ddmd_client = match DdmAdminClient::localhost(&log) {
+                    Ok(client) => {
+                        info!(log, "Connected to ddmd");
+                        client
+                    }
+                    Err(err) => {
+                        warn!(log, "Failed to connect to ddmd:"; "err" => #%err);
+                        tokio::time::sleep(RETRY).await;
+                        continue;
+                    }
+                };
 
                 loop {
                     match ddmd_client
@@ -602,10 +614,10 @@ impl Agent {
                                     .load_peer_addresses(current_peers.clone())
                                     .await
                                 {
-                                    warn!(
+                                    error!(
                                         log,
                                         concat!("Bootstore comms error: {}. ",
-                                        "bootstrap agent must be terminating?.",
+                                        "bootstore::Node task must have paniced",
                                     ),
                                         e
                                     );
@@ -618,6 +630,7 @@ impl Agent {
                                 log, "Failed to get prefixes from ddmd";
                                 "err" => #%err,
                             );
+                            break;
                         }
                     }
                     tokio::time::sleep(RETRY).await;
