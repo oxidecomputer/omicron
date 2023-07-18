@@ -339,7 +339,7 @@ tokio-stream = "0.1.14"
 tokio-tungstenite = "0.18"
 tokio-util = "0.7.8"
 toml = "0.7.6"
-toml_edit = "0.19.12"
+toml_edit = "0.19.14"
 topological-sort = "0.2.2"
 tough = { version = "0.12", features = [ "http" ] }
 trust-dns-client = "0.22"
