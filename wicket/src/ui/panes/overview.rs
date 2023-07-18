@@ -8,12 +8,12 @@ use std::collections::BTreeMap;
 use super::help_text;
 use super::ComputedScrollOffset;
 use super::Control;
+use super::PendingScroll;
 use crate::state::Component;
 use crate::state::{ComponentId, ALL_COMPONENT_IDS};
 use crate::ui::defaults::colors::*;
 use crate::ui::defaults::style;
 use crate::ui::widgets::IgnitionPopup;
-use crate::ui::widgets::PopupScrollKind;
 use crate::ui::widgets::{BoxConnector, BoxConnectorKind, Rack};
 use crate::ui::wrap::wrap_text;
 use crate::{Action, Cmd, Frame, State};
@@ -220,6 +220,7 @@ pub struct InventoryView {
     help: Vec<(&'static str, &'static str)>,
     // Vertical offset used for scrolling
     scroll_offsets: BTreeMap<ComponentId, usize>,
+    pending_scroll: Option<PendingScroll>,
     ignition: IgnitionPopup,
     popup: Option<PopupKind>,
 }
@@ -237,6 +238,7 @@ impl InventoryView {
                 .iter()
                 .map(|id| (*id, 0))
                 .collect(),
+            pending_scroll: None,
             ignition: IgnitionPopup::default(),
             popup: None,
         }
@@ -268,7 +270,7 @@ impl InventoryView {
         let popup_builder =
             self.ignition.to_popup_builder(state.rack_state.selected);
         // Scrolling in the ignition popup is always disabled.
-        let popup = popup_builder.build(full_screen, PopupScrollKind::Disabled);
+        let popup = popup_builder.build(full_screen);
         frame.render_widget(popup, full_screen);
     }
 
@@ -319,6 +321,7 @@ impl Control for InventoryView {
             .constraints(
                 [
                     Constraint::Length(3),
+                    // This includes a top border but not the bottom border.
                     Constraint::Min(0),
                     Constraint::Length(3),
                 ]
@@ -366,11 +369,17 @@ impl Control for InventoryView {
             ),
         );
 
+        // chunks[1].height includes the top border, which means that the number
+        // of lines displayed is height - 1.
+        let num_lines = (chunks[1].height as usize).saturating_sub(1);
+
         let scroll_offset = self.scroll_offsets.get_mut(&component_id).unwrap();
+
         let y_offset = ComputedScrollOffset::new(
             *scroll_offset,
             text.height(),
-            chunks[1].height as usize,
+            num_lines,
+            self.pending_scroll.take(),
         )
         .into_offset();
         *scroll_offset = y_offset as usize;
@@ -400,6 +409,23 @@ impl Control for InventoryView {
         if self.popup.is_some() {
             return self.handle_cmd_in_popup(state, cmd);
         }
+
+        // For Up, Down, PageUp, PageDown, GotoTop and GotoBottom, a
+        // previous version of this code set the scroll offset directly.
+        // Sadly that doesn't work with page up/page down because we don't
+        // know the height of the viewport here.
+        //
+        // Instead, we now set a pending_scroll variable that is operated on
+        // while the view is drawn.
+        //
+        // The old scheme does work with the other commands (up, down, goto
+        // top and goto bottom), but use pending_scroll for all of these
+        // commands for uniformity.
+        if let Some(pending_scroll) = PendingScroll::from_cmd(&cmd) {
+            self.pending_scroll = Some(pending_scroll);
+            return Some(Action::Redraw);
+        }
+
         match cmd {
             Cmd::Left => {
                 state.rack_state.prev();
@@ -407,42 +433,6 @@ impl Control for InventoryView {
             }
             Cmd::Right => {
                 state.rack_state.next();
-                Some(Action::Redraw)
-            }
-            Cmd::Down => {
-                let component_id = state.rack_state.selected;
-
-                // We currently debug print inventory on each call to
-                // `draw`, so we don't know  how many lines the total text is.
-                // We also don't know the Rect containing this Control, since
-                // we don't keep track of them anymore, and only know during
-                // rendering. Therefore, we just increment and correct
-                // for more incrments than lines exist during render, since
-                // `self` is passed mutably.
-                //
-                // It's also worth noting that the inventory may update
-                // before rendering, and so this is a somewhat sensible
-                // strategy.
-                *self.scroll_offsets.get_mut(&component_id).unwrap() += 1;
-                Some(Action::Redraw)
-            }
-            Cmd::Up => {
-                let component_id = state.rack_state.selected;
-                let offset =
-                    self.scroll_offsets.get_mut(&component_id).unwrap();
-                *offset = offset.saturating_sub(1);
-                Some(Action::Redraw)
-            }
-            Cmd::GotoTop => {
-                let component_id = state.rack_state.selected;
-                *self.scroll_offsets.get_mut(&component_id).unwrap() = 0;
-                Some(Action::Redraw)
-            }
-            Cmd::GotoBottom => {
-                let component_id = state.rack_state.selected;
-                // This will get corrected to be the bottom line during `draw`
-                *self.scroll_offsets.get_mut(&component_id).unwrap() =
-                    usize::MAX;
                 Some(Action::Redraw)
             }
             Cmd::Tick => {
