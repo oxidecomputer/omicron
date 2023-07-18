@@ -412,7 +412,15 @@ async fn do_package(config: &Config, output_directory: &Path) -> Result<()> {
             PackageSource::Local { .. }
             | PackageSource::Prebuilt { .. }
             | PackageSource::Manual => {
-                outputs.insert(package_output);
+                // Skip intermediate leaf packages; if necessary they'll be
+                // added to the dependency graph by whatever composite package
+                // actually depends on them.
+                if !matches!(
+                    package.output,
+                    PackageOutput::Zone { intermediate_only: true }
+                ) {
+                    outputs.insert(package_output);
+                }
             }
             PackageSource::Composite { packages: deps } => {
                 for dep in deps {
