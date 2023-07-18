@@ -881,11 +881,11 @@ impl ServiceInner {
 
         // Initialize the trust quorum if there are peers configured.
         if let Some(peers) = &config.trust_quorum_peers {
-            // The value doesn't really matter here. It just needs to be unique.
-            let rack_uuid = Uuid::new_v4();
             let initial_membership: BTreeSet<_> =
                 peers.iter().cloned().collect();
-            bootstore.init_rack(rack_uuid.into(), initial_membership).await?;
+            bootstore
+                .init_rack(plan.rack_id.into(), initial_membership)
+                .await?;
         }
 
         // Forward the sled initialization requests to our sled-agent.
