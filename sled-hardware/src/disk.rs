@@ -9,6 +9,7 @@ use illumos_utils::zfs::DestroyDatasetErrorVariant;
 use illumos_utils::zfs::EncryptionDetails;
 use illumos_utils::zfs::Keypath;
 use illumos_utils::zfs::Mountpoint;
+use illumos_utils::zfs::SizeDetails;
 use illumos_utils::zfs::Zfs;
 use illumos_utils::zpool::Zpool;
 use illumos_utils::zpool::ZpoolKind;
@@ -225,11 +226,13 @@ struct ExpectedDataset {
     quota: Option<usize>,
     // Identifies if the dataset should be deleted on boot
     wipe: bool,
+    // Optional compression mode
+    compression: Option<&'static str>,
 }
 
 impl ExpectedDataset {
     const fn new(name: &'static str) -> Self {
-        ExpectedDataset { name, quota: None, wipe: false }
+        ExpectedDataset { name, quota: None, wipe: false, compression: None }
     }
 
     const fn quota(mut self, quota: usize) -> Self {
@@ -239,6 +242,11 @@ impl ExpectedDataset {
 
     const fn wipe(mut self) -> Self {
         self.wipe = true;
+        self
+    }
+
+    const fn compression(mut self, compression: &'static str) -> Self {
+        self.compression = Some(compression);
         self
     }
 }
@@ -251,6 +259,10 @@ pub const DEBUG_DATASET: &'static str = "debug";
 // TODO-correctness: This value of 100GiB is a pretty wild guess, and should be
 // tuned as needed.
 pub const DEBUG_DATASET_QUOTA: usize = 100 * (1 << 30);
+// ditto.
+pub const DUMP_DATASET_QUOTA: usize = 100 * (1 << 30);
+// passed to zfs create -o compression=
+pub const DUMP_DATASET_COMPRESSION: &'static str = "gzip-9";
 
 // U.2 datasets live under the encrypted dataset and inherit encryption
 pub const ZONE_DATASET: &'static str = "crypt/zone";
@@ -264,7 +276,9 @@ static U2_EXPECTED_DATASETS: [ExpectedDataset; U2_EXPECTED_DATASET_COUNT] = [
     // Stores filesystems for zones
     ExpectedDataset::new(ZONE_DATASET).wipe(),
     // For storing full kernel RAM dumps
-    ExpectedDataset::new(DUMP_DATASET),
+    ExpectedDataset::new(DUMP_DATASET)
+        .quota(DUMP_DATASET_QUOTA)
+        .compression(DUMP_DATASET_COMPRESSION),
 ];
 
 const M2_EXPECTED_DATASET_COUNT: usize = 5;
@@ -562,13 +576,17 @@ impl Disk {
             }
 
             let encryption_details = None;
+            let size_details = Some(SizeDetails {
+                quota: dataset.quota,
+                compression: dataset.compression,
+            });
             Zfs::ensure_filesystem(
                 name,
                 Mountpoint::Path(mountpoint),
                 zoned,
                 do_format,
                 encryption_details,
-                dataset.quota,
+                size_details,
             )?;
 
             if dataset.wipe {
