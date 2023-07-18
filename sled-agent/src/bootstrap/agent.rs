@@ -120,6 +120,9 @@ pub enum BootstrapError {
 
     #[error("Bootstore Error: {0}")]
     Bootstore(#[from] bootstore::NodeRequestError),
+
+    #[error("Missing M.2 Paths for dataset: {0}")]
+    MissingM2Paths(&'static str),
 }
 
 impl From<BootstrapError> for ExternalError {
@@ -199,7 +202,7 @@ pub struct Agent {
     #[allow(unused)]
     key_manager_handle: JoinHandle<()>,
 
-    /// Used to inofrm key requesters that the KeyManager is ready to be used.
+    /// Used to inform key requesters that the KeyManager is ready to be used.
     /// In particular this should be set when the rack is initialized
     key_manager_readiness: ReadinessSetter,
 
@@ -285,35 +288,58 @@ async fn cleanup_all_old_global_state(
     Ok(())
 }
 
-async fn sled_config_paths(storage: &StorageResources) -> Vec<Utf8PathBuf> {
-    storage
+async fn sled_config_paths(
+    storage: &StorageResources,
+) -> Result<Vec<Utf8PathBuf>, BootstrapError> {
+    let paths: Vec<_> = storage
         .all_m2_mountpoints(sled_hardware::disk::CONFIG_DATASET)
         .await
         .into_iter()
         .map(|p| p.join(SLED_AGENT_REQUEST_FILE))
-        .collect()
+        .collect();
+
+    if paths.is_empty() {
+        return Err(BootstrapError::MissingM2Paths(
+            sled_hardware::disk::CONFIG_DATASET,
+        ));
+    }
+    Ok(paths)
 }
 
 async fn bootstore_fsm_state_paths(
     storage: &StorageResources,
-) -> Vec<Utf8PathBuf> {
-    storage
+) -> Result<Vec<Utf8PathBuf>, BootstrapError> {
+    let paths: Vec<_> = storage
         .all_m2_mountpoints(sled_hardware::disk::CLUSTER_DATASET)
         .await
         .into_iter()
         .map(|p| p.join(BOOTSTORE_FSM_STATE_FILE))
-        .collect()
+        .collect();
+
+    if paths.is_empty() {
+        return Err(BootstrapError::MissingM2Paths(
+            sled_hardware::disk::CLUSTER_DATASET,
+        ));
+    }
+    Ok(paths)
 }
 
 async fn bootstore_network_config_paths(
     storage: &StorageResources,
-) -> Vec<Utf8PathBuf> {
-    storage
+) -> Result<Vec<Utf8PathBuf>, BootstrapError> {
+    let paths: Vec<_> = storage
         .all_m2_mountpoints(sled_hardware::disk::CLUSTER_DATASET)
         .await
         .into_iter()
         .map(|p| p.join(BOOTSTORE_NETWORK_CONFIG_FILE))
-        .collect()
+        .collect();
+
+    if paths.is_empty() {
+        return Err(BootstrapError::MissingM2Paths(
+            sled_hardware::disk::CLUSTER_DATASET,
+        ));
+    }
+    Ok(paths)
 }
 
 impl Agent {
@@ -479,11 +505,11 @@ impl Agent {
             fsm_state_ledger_paths: bootstore_fsm_state_paths(
                 &storage_resources,
             )
-            .await,
+            .await?,
             network_config_ledger_paths: bootstore_network_config_paths(
                 &storage_resources,
             )
-            .await,
+            .await?,
         };
         let (mut bootstore_node, bootstore_node_handle) =
             bootstore::Node::new(bootstore_config, &ba_log).await;
@@ -499,7 +525,7 @@ impl Agent {
             )
             .await;
 
-        let paths = sled_config_paths(&storage_resources).await;
+        let paths = sled_config_paths(&storage_resources).await?;
         let maybe_ledger =
             Ledger::<PersistentSledAgentRequest>::new(&ba_log, paths).await;
         let make_bootstrap_agent = move |initialized| Agent {
@@ -752,7 +778,7 @@ impl Agent {
 
                 // Record this request so the sled agent can be automatically
                 // initialized on the next boot.
-                let paths = sled_config_paths(&self.storage_resources).await;
+                let paths = sled_config_paths(&self.storage_resources).await?;
                 let mut ledger = Ledger::new_with(
                     &self.log,
                     paths,
