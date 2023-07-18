@@ -407,6 +407,7 @@ async fn post_run_rack_setup(
     rqctx: RequestContext<ServerContext>,
 ) -> Result<HttpResponseOk<RackInitId>, HttpError> {
     let ctx = rqctx.context();
+    let log = &rqctx.log;
 
     let sled_agent_addr = ctx
         .bootstrap_agent_addr()
