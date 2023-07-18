@@ -388,6 +388,8 @@ async fn get_package(
 }
 
 async fn do_package(config: &Config, output_directory: &Path) -> Result<()> {
+    use topological_sort::TopologicalSort;
+
     create_dir_all(&output_directory)
         .map_err(|err| anyhow!("Cannot create output directory: {}", err))?;
 
@@ -395,23 +397,54 @@ async fn do_package(config: &Config, output_directory: &Path) -> Result<()> {
 
     do_build(&config).await?;
 
-    // Assemble all the non-composite packages before the composite ones.
-    //
-    // Since there are not (yet) composite of composite packages, we can do
-    // this in a simple two-stage build.
-    let (base_pkgs, composite_pkgs): (Vec<_>, Vec<_>) = config
+    let mut all_packages = config
         .package_config
         .packages_to_build(&config.target)
         .into_iter()
-        .partition(|(_, pkg)| {
-            !matches!(pkg.source, PackageSource::Composite { .. })
+        .map(|(package_name, package)| {
+            (package.get_output_file(package_name), (package_name, package))
+        })
+        .collect::<std::collections::BTreeMap<_, _>>();
+
+    let mut outputs = TopologicalSort::<String>::new();
+    for (package_output, (_, package)) in &all_packages {
+        match &package.source {
+            PackageSource::Local { .. }
+            | PackageSource::Prebuilt { .. }
+            | PackageSource::Manual => {
+                // Skip intermediate leaf packages; if necessary they'll be
+                // added to the dependency graph by whatever composite package
+                // actually depends on them.
+                if !matches!(
+                    package.output,
+                    PackageOutput::Zone { intermediate_only: true }
+                ) {
+                    outputs.insert(package_output);
+                }
+            }
+            PackageSource::Composite { packages: deps } => {
+                for dep in deps {
+                    outputs.add_dependency(dep, package_output);
+                }
+            }
+        }
+    }
+
+    while !outputs.is_empty() {
+        let batch = outputs.pop_all();
+        assert!(
+            !batch.is_empty() || outputs.is_empty(),
+            "cyclic dependency in package manifest!"
+        );
+
+        let packages = batch.into_iter().map(|output| {
+            all_packages
+                .remove(&output)
+                .expect("package should've already been handled.")
         });
 
-    let groups = [base_pkgs, composite_pkgs];
-
-    for packages in groups {
         let ui_refs = vec![ui.clone(); packages.len()];
-        let pkg_stream = stream::iter(&packages)
+        let pkg_stream = stream::iter(packages)
             .zip(stream::iter(ui_refs))
             .map(Ok::<_, anyhow::Error>)
             .try_for_each_concurrent(

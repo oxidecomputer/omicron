@@ -45,6 +45,8 @@ jobs:
     - name: Check build of deployed Omicron packages
       run: cargo run --bin omicron-package -- -t default check
 
+  # Note that `cargo clippy` includes `cargo check, so this ends up checking all
+  # of our code.
   clippy-lint:
     runs-on: ubuntu-22.04
     steps:
