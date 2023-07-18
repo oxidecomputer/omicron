@@ -186,9 +186,12 @@ pub struct StartSledAgentRequest {
 
     /// The external NTP servers to use
     pub ntp_servers: Vec<String>,
-    //
+
     /// The external DNS servers to use
     pub dns_servers: Vec<String>,
+
+    /// Use trust quorum for key generation
+    pub use_trust_quorum: bool,
 
     // Note: The order of these fields is load bearing, because we serialize
     // `SledAgentRequest`s as toml. `subnet` serializes as a TOML table, so it
@@ -295,6 +298,7 @@ mod tests {
                     rack_id: Uuid::new_v4(),
                     ntp_servers: vec![String::from("test.pool.example.com")],
                     dns_servers: vec![String::from("1.1.1.1")],
+                    use_trust_quorum: false,
                     subnet: Ipv6Subnet::new(Ipv6Addr::LOCALHOST),
                 },
             )),

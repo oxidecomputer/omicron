@@ -109,7 +109,6 @@ use std::iter;
 use std::net::IpAddr;
 use std::net::{Ipv6Addr, SocketAddrV6};
 use thiserror::Error;
-use uuid::Uuid;
 
 static BOUNDARY_SERVICES_ADDR: &str = "fd00:99::1";
 
@@ -874,6 +873,7 @@ impl ServiceInner {
                 config,
                 &storage_resources,
                 bootstrap_addrs,
+                config.trust_quorum_peers.is_some(),
             )
             .await?
         };

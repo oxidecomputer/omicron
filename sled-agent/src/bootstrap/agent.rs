@@ -679,17 +679,16 @@ impl Agent {
         info!(&self.log, "Loading Sled Agent: {:?}", request);
 
         // Initialize the secret retriever used by the `KeyManager`
-        if self.bootstore.get_status().await?.fsm_state == "uninitialized" {
-            // We aren't using LRTQ as this a cluster with fewer than 3 sleds
-            info!(self.log, "KeyManager: using hardcoded secret retriever");
-            LrtqOrHardcodedSecretRetriever::init_hardcoded();
-        } else {
+        if request.use_trust_quorum {
             info!(self.log, "KeyManager: using lrtq secret retriever");
             let salt = request.hash_rack_id();
             LrtqOrHardcodedSecretRetriever::init_lrtq(
                 salt,
                 self.bootstore.clone(),
             )
+        } else {
+            info!(self.log, "KeyManager: using hardcoded secret retriever");
+            LrtqOrHardcodedSecretRetriever::init_hardcoded();
         }
         self.key_manager_readiness.set();
 
@@ -1067,6 +1066,7 @@ mod tests {
                 rack_id: Uuid::new_v4(),
                 ntp_servers: vec![String::from("test.pool.example.com")],
                 dns_servers: vec![String::from("1.1.1.1")],
+                use_trust_quorum: false,
                 subnet: Ipv6Subnet::new(Ipv6Addr::LOCALHOST),
             }),
         };

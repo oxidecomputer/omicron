@@ -78,6 +78,7 @@ impl Plan {
         config: &Config,
         storage: &StorageResources,
         bootstrap_addrs: HashSet<Ipv6Addr>,
+        use_trust_quorum: bool,
     ) -> Result<Self, PlanError> {
         let rack_id = Uuid::new_v4();
 
@@ -101,6 +102,7 @@ impl Plan {
                     subnet,
                     ntp_servers: config.ntp_servers.clone(),
                     dns_servers: config.dns_servers.clone(),
+                    use_trust_quorum,
                     rack_id,
                 },
             )
