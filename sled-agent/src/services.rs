@@ -2511,6 +2511,16 @@ impl ServiceManager {
             }
         }
 
+        // Filter out already running zones
+        let zones_to_be_added = zones_to_be_added.filter(|zone| {
+            let name = zone.zone_name();
+            let running = existing_zones.contains_key(&name);
+            if running {
+                info!(log, "skipping running: {name}");
+            }
+            !running
+        });
+
         // Create zones that should be running
         let mut zone_requests = AllZoneRequests::default();
         let all_u2_roots =
