@@ -84,6 +84,7 @@ use sled_hardware::underlay::BOOTSTRAP_PREFIX;
 use sled_hardware::Baseboard;
 use sled_hardware::SledMode;
 use slog::Logger;
+use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::collections::HashSet;
 use std::io::Cursor;
@@ -362,7 +363,7 @@ pub struct ServiceManagerInner {
     switch_zone_maghemite_links: Vec<PhysicalLink>,
     sidecar_revision: SidecarRevision,
     // Zones representing running services
-    zones: Mutex<Vec<RunningZone>>,
+    zones: Mutex<BTreeMap<String, RunningZone>>,
     underlay_vnic_allocator: VnicAllocator<Etherstub>,
     underlay_vnic: EtherstubVnic,
     bootstrap_vnic_allocator: VnicAllocator<Etherstub>,
@@ -431,7 +432,7 @@ impl ServiceManager {
                 time_synced: AtomicBool::new(false),
                 sidecar_revision,
                 switch_zone_maghemite_links,
-                zones: Mutex::new(vec![]),
+                zones: Mutex::new(BTreeMap::new()),
                 underlay_vnic_allocator: VnicAllocator::new(
                     "Service",
                     underlay_etherstub,
@@ -1908,7 +1909,7 @@ impl ServiceManager {
     // Populates `existing_zones` according to the requests in `services`.
     async fn initialize_services_locked(
         &self,
-        existing_zones: &mut Vec<RunningZone>,
+        existing_zones: &mut BTreeMap<String, RunningZone>,
         requests: &Vec<ZoneRequest>,
     ) -> Result<(), Error> {
         if let Some(name) = requests
@@ -1944,10 +1945,10 @@ impl ServiceManager {
                         .await
                     {
                         Ok(running_zone) => {
-                            local_existing_zones
-                                .lock()
-                                .await
-                                .push(running_zone);
+                            local_existing_zones.lock().await.insert(
+                                running_zone.name().to_string(),
+                                running_zone,
+                            );
                         }
                         Err(err) => {
                             *last_err.lock().await = Some(err);
@@ -2246,9 +2247,7 @@ impl ServiceManager {
                     .map_err(Error::from);
             }
         }
-        if let Some(zone) =
-            self.inner.zones.lock().await.iter().find(|z| z.name() == name)
-        {
+        if let Some(zone) = self.inner.zones.lock().await.get(name) {
             return self
                 .create_zone_bundle_impl(zone)
                 .await
@@ -2425,7 +2424,7 @@ impl ServiceManager {
         {
             zone_names.push(String::from(zone.name()))
         }
-        for zone in self.inner.zones.lock().await.iter() {
+        for zone in self.inner.zones.lock().await.values() {
             zone_names.push(String::from(zone.name()));
         }
         zone_names.sort();
@@ -2481,7 +2480,7 @@ impl ServiceManager {
     // re-instantiated on boot.
     async fn ensure_all_services(
         &self,
-        existing_zones: &mut MutexGuard<'_, Vec<RunningZone>>,
+        existing_zones: &mut MutexGuard<'_, BTreeMap<String, RunningZone>>,
         old_request: &AllZoneRequests,
         request: ServiceEnsureBody,
     ) -> Result<AllZoneRequests, Error> {
@@ -2503,11 +2502,7 @@ impl ServiceManager {
         // Destroy zones that should not be running
         for zone in zones_to_be_removed {
             let expected_zone_name = zone.zone_name();
-            if let Some(idx) = existing_zones
-                .iter()
-                .position(|z| z.name() == expected_zone_name)
-            {
-                let mut zone = existing_zones.remove(idx);
+            if let Some(mut zone) = existing_zones.remove(&expected_zone_name) {
                 if let Err(e) = zone.stop().await {
                     error!(log, "Failed to stop zone {}: {e}", zone.name());
                 }
@@ -2553,7 +2548,7 @@ impl ServiceManager {
     pub async fn cockroachdb_initialize(&self) -> Result<(), Error> {
         let log = &self.inner.log;
         let dataset_zones = self.inner.zones.lock().await;
-        for zone in dataset_zones.iter() {
+        for zone in dataset_zones.values() {
             // TODO: We could probably store the ZoneKind in the running zone to
             // make this "comparison to existing zones by name" mechanism a bit
             // safer.
@@ -2609,7 +2604,10 @@ impl ServiceManager {
         Ok(())
     }
 
-    pub fn boottime_rewrite(&self, zones: &Vec<RunningZone>) {
+    pub fn boottime_rewrite<'a>(
+        &self,
+        zones: impl Iterator<Item = &'a RunningZone>,
+    ) {
         if self
             .inner
             .time_synced
@@ -2627,7 +2625,6 @@ impl ServiceManager {
         info!(self.inner.log, "Setting boot time to {:?}", now);
 
         let files: Vec<Utf8PathBuf> = zones
-            .iter()
             .map(|z| z.root())
             .chain(iter::once(Utf8PathBuf::from("/")))
             .flat_map(|r| [r.join("var/adm/utmpx"), r.join("var/adm/wtmpx")])
@@ -2656,7 +2653,7 @@ impl ServiceManager {
 
         if let Some(true) = self.inner.skip_timesync {
             info!(self.inner.log, "Configured to skip timesync checks");
-            self.boottime_rewrite(&existing_zones);
+            self.boottime_rewrite(existing_zones.values());
             return Ok(TimeSync { sync: true, skew: 0.00, correction: 0.00 });
         };
 
@@ -2665,8 +2662,9 @@ impl ServiceManager {
 
         let ntp_zone = existing_zones
             .iter()
-            .find(|z| z.name().starts_with(&ntp_zone_name))
-            .ok_or_else(|| Error::NtpZoneNotReady)?;
+            .find(|(name, _)| name.starts_with(&ntp_zone_name))
+            .ok_or_else(|| Error::NtpZoneNotReady)?
+            .1;
 
         // XXXNTP - This could be replaced with a direct connection to the
         // daemon using a patched version of the chrony_candm crate to allow
@@ -2688,7 +2686,7 @@ impl ServiceManager {
                         && correction.abs() <= 0.05;
 
                     if sync {
-                        self.boottime_rewrite(&existing_zones);
+                        self.boottime_rewrite(existing_zones.values());
                     }
 
                     Ok(TimeSync { sync, skew, correction })
