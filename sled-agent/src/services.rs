@@ -2516,21 +2516,41 @@ impl ServiceManager {
             }
         }
 
-        // Filter out already running zones
-        let zones_to_be_added = zones_to_be_added.filter(|zone| {
-            let name = zone.zone_name();
-            let running = existing_zones.contains_key(&name);
-            if running {
-                info!(log, "skipping running zone: {name}");
-            }
-            !running
-        });
-
         // Create zones that should be running
         let mut zone_requests = AllZoneRequests::default();
         let all_u2_roots =
             self.inner.storage.all_u2_mountpoints(ZONE_DATASET).await;
         for zone in zones_to_be_added {
+            // Check if we think the zone should already be running
+            let name = zone.zone_name();
+            if existing_zones.contains_key(&name) {
+                // Make sure the zone actually exists in the right state too
+                match Zones::find(&name).await {
+                    Ok(Some(zone)) if zone.state() == zone::State::Running => {
+                        info!(log, "skipping running zone"; "zone" => &name);
+                        continue;
+                    }
+                    _ => {
+                        // Mismatch between SA's view and reality, let's try to
+                        // clean up any remanants and try initialize it again
+                        warn!(
+                            log,
+                            "expected to find existing zone in running state";
+                            "zone" => &name,
+                        );
+                        if let Err(e) =
+                            existing_zones.remove(&name).unwrap().stop().await
+                        {
+                            error!(
+                                log,
+                                "Failed to stop zone";
+                                "zone" => &name,
+                                "error" => %e,
+                            );
+                        }
+                    }
+                }
+            }
             // For each new zone request, we pick an arbitrary U.2 to store
             // the zone filesystem. Note: This isn't known to Nexus right now,
             // so it's a local-to-sled decision.
