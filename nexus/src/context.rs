@@ -197,7 +197,7 @@ impl ServerContext {
         let nexus = Nexus::new_with_id(
             rack_id,
             log.new(o!("component" => "nexus")),
-            Arc::new(tokio::sync::Mutex::new(resolver)),
+            resolver,
             pool,
             &producer_registry,
             config,

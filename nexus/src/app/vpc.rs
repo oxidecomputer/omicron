@@ -196,7 +196,8 @@ impl super::Nexus {
             .db_datastore
             .vpc_update_firewall_rules(opctx, &authz_vpc, rules)
             .await?;
-        self.send_sled_agents_firewall_rules(opctx, &db_vpc, &rules).await?;
+        self.send_sled_agents_firewall_rules(opctx, &db_vpc, &rules, &[])
+            .await?;
         Ok(rules)
     }
 
@@ -250,6 +251,7 @@ impl super::Nexus {
         opctx: &OpContext,
         vpc: &db::model::Vpc,
         rules: &[db::model::VpcFirewallRule],
+        sleds_filter: &[Uuid],
     ) -> Result<(), Error> {
         let rules_for_sled = self
             .resolve_firewall_rules_for_sled_agent(opctx, &vpc, rules)
@@ -261,8 +263,10 @@ impl super::Nexus {
                 rules: rules_for_sled,
             };
 
-        let vpc_to_sleds =
-            self.db_datastore.vpc_resolve_to_sleds(vpc.id()).await?;
+        let vpc_to_sleds = self
+            .db_datastore
+            .vpc_resolve_to_sleds(vpc.id(), sleds_filter)
+            .await?;
         debug!(self.log, "resolved sleds for vpc {}", vpc.name(); "vpc_to_sled" => ?vpc_to_sleds);
 
         let mut sled_requests = Vec::with_capacity(vpc_to_sleds.len());

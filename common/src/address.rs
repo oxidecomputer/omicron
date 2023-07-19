@@ -17,14 +17,14 @@ pub const AZ_PREFIX: u8 = 48;
 pub const RACK_PREFIX: u8 = 56;
 pub const SLED_PREFIX: u8 = 64;
 
-/// The amount of redundancy for DNS servers.
+/// The amount of redundancy for internal DNS servers.
 ///
-/// Must be less than MAX_DNS_REDUNDANCY.
-pub const DNS_REDUNDANCY: usize = 1;
+/// Must be less than or equal to MAX_DNS_REDUNDANCY.
+pub const DNS_REDUNDANCY: usize = 3;
+
 /// The maximum amount of redundancy for DNS servers.
 ///
-/// This determines the number of addresses which are
-/// reserved for DNS servers.
+/// This determines the number of addresses which are reserved for DNS servers.
 pub const MAX_DNS_REDUNDANCY: usize = 5;
 
 pub const DNS_PORT: u16 = 53;
@@ -39,6 +39,7 @@ pub const CLICKHOUSE_PORT: u16 = 8123;
 pub const CLICKHOUSE_KEEPER_PORT: u16 = 9181;
 pub const OXIMETER_PORT: u16 = 12223;
 pub const DENDRITE_PORT: u16 = 12224;
+pub const DDMD_PORT: u16 = 8000;
 pub const MGS_PORT: u16 = 12225;
 pub const WICKETD_PORT: u16 = 12226;
 pub const BOOTSTRAP_ARTIFACT_PORT: u16 = 12227;
@@ -206,10 +207,10 @@ impl ReservedRackSubnet {
 
     /// Returns the DNS addresses from this reserved rack subnet.
     ///
-    /// These addresses will come from the first [`DNS_REDUNDANCY`] `/64s` of the
+    /// These addresses will come from the first [`MAX_DNS_REDUNDANCY`] `/64s` of the
     /// [`RACK_PREFIX`] subnet.
     pub fn get_dns_subnets(&self) -> Vec<DnsSubnet> {
-        (0..DNS_REDUNDANCY)
+        (0..MAX_DNS_REDUNDANCY)
             .map(|idx| {
                 let subnet =
                     get_64_subnet(self.0, u8::try_from(idx + 1).unwrap());
@@ -299,6 +300,15 @@ impl JsonSchema for IpRange {
 }
 
 impl IpRange {
+    pub fn contains(&self, addr: IpAddr) -> bool {
+        match (self, addr) {
+            (IpRange::V4(r), IpAddr::V4(addr)) => r.contains(addr),
+            (IpRange::V6(r), IpAddr::V6(addr)) => r.contains(addr),
+            (IpRange::V6(_), IpAddr::V4(_))
+            | (IpRange::V4(_), IpAddr::V6(_)) => false,
+        }
+    }
+
     pub fn first_address(&self) -> IpAddr {
         match self {
             IpRange::V4(inner) => IpAddr::from(inner.first),
@@ -326,6 +336,20 @@ impl From<IpAddr> for IpRange {
         match addr {
             IpAddr::V4(addr) => IpRange::V4(Ipv4Range::from(addr)),
             IpAddr::V6(addr) => IpRange::V6(Ipv6Range::from(addr)),
+        }
+    }
+}
+
+impl TryFrom<(IpAddr, IpAddr)> for IpRange {
+    type Error = String;
+
+    fn try_from(pair: (IpAddr, IpAddr)) -> Result<Self, Self::Error> {
+        match (pair.0, pair.1) {
+            (IpAddr::V4(a), IpAddr::V4(b)) => Self::try_from((a, b)),
+            (IpAddr::V6(a), IpAddr::V6(b)) => Self::try_from((a, b)),
+            (IpAddr::V4(_), IpAddr::V6(_)) | (IpAddr::V6(_), IpAddr::V4(_)) => {
+                Err("IP address ranges cannot mix IPv4 and IPv6".to_string())
+            }
         }
     }
 }
@@ -363,6 +387,10 @@ impl Ipv4Range {
         } else {
             Err(String::from("IP address ranges must be non-decreasing"))
         }
+    }
+
+    pub fn contains(&self, addr: Ipv4Addr) -> bool {
+        self.first <= addr && addr <= self.last
     }
 
     pub fn first_address(&self) -> Ipv4Addr {
@@ -415,6 +443,10 @@ impl Ipv6Range {
         } else {
             Err(String::from("IP address ranges must be non-decreasing"))
         }
+    }
+
+    pub fn contains(&self, addr: Ipv6Addr) -> bool {
+        self.first <= addr && addr <= self.last
     }
 
     pub fn first_address(&self) -> Ipv6Addr {
@@ -524,7 +556,7 @@ mod test {
 
         // Observe the first DNS subnet within this reserved rack subnet.
         let dns_subnets = rack_subnet.get_dns_subnets();
-        assert_eq!(DNS_REDUNDANCY, dns_subnets.len());
+        assert_eq!(MAX_DNS_REDUNDANCY, dns_subnets.len());
 
         // The DNS address and GZ address should be only differing by one.
         assert_eq!(

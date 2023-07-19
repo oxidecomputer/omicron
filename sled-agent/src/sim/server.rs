@@ -23,6 +23,7 @@ use omicron_common::backoff::{
 };
 use omicron_common::nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
 use slog::{info, Drain, Logger};
+use std::collections::HashMap;
 use std::net::IpAddr;
 use std::net::SocketAddr;
 use std::net::SocketAddrV6;
@@ -330,6 +331,7 @@ pub async fn run_standalone_server(
     }];
 
     let mut internal_services_ip_pool_ranges = vec![];
+    let mut macs = MacAddr::iter_system();
     if let Some(nexus_external_addr) = rss_args.nexus_external_addr {
         let ip = nexus_external_addr.ip();
 
@@ -344,7 +346,7 @@ pub async fn run_standalone_server(
                         .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES as u32 + 1)
                         .unwrap()
                         .into(),
-                    mac: MacAddr::random_system(),
+                    mac: macs.next().unwrap(),
                 },
             },
             service_id: Uuid::new_v4(),
@@ -377,7 +379,7 @@ pub async fn run_standalone_server(
                         .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES as u32 + 1)
                         .unwrap()
                         .into(),
-                    mac: MacAddr::random_system(),
+                    mac: macs.next().unwrap(),
                 },
             },
             service_id: Uuid::new_v4(),
@@ -436,7 +438,9 @@ pub async fn run_standalone_server(
         external_dns_zone_name: internal_dns::names::DNS_ZONE_EXTERNAL_TESTING
             .to_owned(),
         recovery_silo,
-        external_port_count: 1,
+        external_port_count: NexusTypes::ExternalPortDiscovery::Static(
+            HashMap::new(),
+        ),
         rack_network_config: None,
     };
 

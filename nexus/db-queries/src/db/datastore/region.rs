@@ -5,6 +5,7 @@
 //! [`DataStore`] methods on [`Region`]s.
 
 use super::DataStore;
+use super::RegionAllocationStrategy;
 use super::RunnableQuery;
 use crate::context::OpContext;
 use crate::db;
@@ -88,17 +89,17 @@ impl DataStore {
 
     // TODO for now, extent size is fixed at 64 MiB. In the future, this may be
     // tunable at runtime.
-    pub const EXTENT_SIZE: i64 = 64_i64 << 20;
+    pub const EXTENT_SIZE: u64 = 64_u64 << 20;
 
     /// Given a block size and total disk size, get Crucible allocation values
     pub fn get_crucible_allocation(
         block_size: &db::model::BlockSize,
         size: external::ByteCount,
-    ) -> (i64, i64) {
+    ) -> (u64, u64) {
         let blocks_per_extent =
-            Self::EXTENT_SIZE / block_size.to_bytes() as i64;
+            Self::EXTENT_SIZE / block_size.to_bytes() as u64;
 
-        let size = size.to_bytes() as i64;
+        let size = size.to_bytes();
 
         // allocate enough extents to fit all the disk blocks, rounding up.
         let extent_count = size / Self::EXTENT_SIZE
@@ -118,27 +119,8 @@ impl DataStore {
         volume_id: Uuid,
         disk_source: &params::DiskSource,
         size: external::ByteCount,
+        allocation_strategy: &RegionAllocationStrategy,
     ) -> Result<Vec<(Dataset, Region)>, Error> {
-        // ALLOCATION POLICY
-        //
-        // NOTE: This policy can - and should! - be changed.
-        //
-        // See https://rfd.shared.oxide.computer/rfd/0205 for a more
-        // complete discussion.
-        //
-        // It is currently acting as a placeholder, showing a feasible
-        // interaction between datasets and regions.
-        //
-        // This policy allocates regions to distinct Crucible datasets,
-        // favoring datasets with the smallest existing (summed) region
-        // sizes. Basically, "pick the datasets with the smallest load first".
-        //
-        // Longer-term, we should consider:
-        // - Storage size + remaining free space
-        // - Sled placement of datasets
-        // - What sort of loads we'd like to create (even split across all disks
-        // may not be preferable, especially if maintenance is expected)
-
         let block_size =
             self.get_block_size_from_disk_source(opctx, &disk_source).await?;
         let (blocks_per_extent, extent_count) =
@@ -147,9 +129,10 @@ impl DataStore {
         let dataset_and_regions: Vec<(Dataset, Region)> =
             crate::db::queries::region_allocation::RegionAllocate::new(
                 volume_id,
-                block_size.into(),
+                block_size.to_bytes() as u64,
                 blocks_per_extent,
                 extent_count,
+                allocation_strategy,
             )
             .get_results_async(self.pool())
             .await

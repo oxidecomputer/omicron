@@ -7,8 +7,10 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_bool ON CLUSTER oximeter_cluste
     timestamp DateTime64(9, 'UTC'),
     datum UInt8
 )
+
 ENGINE = ReplicatedMergeTree()
-ORDER BY (timeseries_name, timeseries_key, timestamp);
+ORDER BY (timeseries_name, timeseries_key, timestamp)
+TTL toDateTime(timestamp) + INTERVAL 30 DAY;
 --
 CREATE TABLE IF NOT EXISTS oximeter.measurements_i64 ON CLUSTER oximeter_cluster
 (
@@ -18,7 +20,8 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_i64 ON CLUSTER oximeter_cluster
     datum Int64
 )
 ENGINE = ReplicatedMergeTree()
-ORDER BY (timeseries_name, timeseries_key, timestamp);
+ORDER BY (timeseries_name, timeseries_key, timestamp)
+TTL toDateTime(timestamp) + INTERVAL 30 DAY;
 --
 CREATE TABLE IF NOT EXISTS oximeter.measurements_f64 ON CLUSTER oximeter_cluster
 (
@@ -28,7 +31,8 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_f64 ON CLUSTER oximeter_cluster
     datum Float64
 )
 ENGINE = ReplicatedMergeTree()
-ORDER BY (timeseries_name, timeseries_key, timestamp);
+ORDER BY (timeseries_name, timeseries_key, timestamp)
+TTL toDateTime(timestamp) + INTERVAL 30 DAY;
 --
 CREATE TABLE IF NOT EXISTS oximeter.measurements_string ON CLUSTER oximeter_cluster
 (
@@ -38,7 +42,8 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_string ON CLUSTER oximeter_clus
     datum String
 )
 ENGINE = ReplicatedMergeTree()
-ORDER BY (timeseries_name, timeseries_key, timestamp);
+ORDER BY (timeseries_name, timeseries_key, timestamp)
+TTL toDateTime(timestamp) + INTERVAL 30 DAY;
 --
 CREATE TABLE IF NOT EXISTS oximeter.measurements_bytes ON CLUSTER oximeter_cluster
 (
@@ -48,7 +53,8 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_bytes ON CLUSTER oximeter_clust
     datum Array(UInt8)
 )
 ENGINE = ReplicatedMergeTree()
-ORDER BY (timeseries_name, timeseries_key, timestamp);
+ORDER BY (timeseries_name, timeseries_key, timestamp)
+TTL toDateTime(timestamp) + INTERVAL 30 DAY;
 --
 CREATE TABLE IF NOT EXISTS oximeter.measurements_cumulativei64 ON CLUSTER oximeter_cluster
 (
@@ -59,7 +65,8 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_cumulativei64 ON CLUSTER oximet
     datum Int64
 )
 ENGINE = ReplicatedMergeTree()
-ORDER BY (timeseries_name, timeseries_key, start_time, timestamp);
+ORDER BY (timeseries_name, timeseries_key, start_time, timestamp)
+TTL toDateTime(timestamp) + INTERVAL 30 DAY;
 --
 CREATE TABLE IF NOT EXISTS oximeter.measurements_cumulativef64 ON CLUSTER oximeter_cluster
 (
@@ -70,7 +77,8 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_cumulativef64 ON CLUSTER oximet
     datum Float64
 )
 ENGINE = ReplicatedMergeTree()
-ORDER BY (timeseries_name, timeseries_key, start_time, timestamp);
+ORDER BY (timeseries_name, timeseries_key, start_time, timestamp)
+TTL toDateTime(timestamp) + INTERVAL 30 DAY;
 --
 CREATE TABLE IF NOT EXISTS oximeter.measurements_histogrami64 ON CLUSTER oximeter_cluster
 (
@@ -82,7 +90,8 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_histogrami64 ON CLUSTER oximete
     counts Array(UInt64)
 )
 ENGINE = ReplicatedMergeTree()
-ORDER BY (timeseries_name, timeseries_key, start_time, timestamp);
+ORDER BY (timeseries_name, timeseries_key, start_time, timestamp)
+TTL toDateTime(timestamp) + INTERVAL 30 DAY;
 --
 CREATE TABLE IF NOT EXISTS oximeter.measurements_histogramf64 ON CLUSTER oximeter_cluster
 (
@@ -94,7 +103,8 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_histogramf64 ON CLUSTER oximete
     counts Array(UInt64)
 )
 ENGINE = ReplicatedMergeTree()
-ORDER BY (timeseries_name, timeseries_key, start_time, timestamp);
+ORDER BY (timeseries_name, timeseries_key, start_time, timestamp)
+TTL toDateTime(timestamp) + INTERVAL 30 DAY;
 --
 CREATE TABLE IF NOT EXISTS oximeter.fields_bool ON CLUSTER oximeter_cluster
 (

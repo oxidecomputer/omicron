@@ -111,6 +111,35 @@ pub struct Sp {
     rot: Option<RotInventory>,
 }
 
+impl Sp {
+    pub fn ignition(&self) -> Option<&SpIgnition> {
+        self.ignition.as_ref()
+    }
+
+    pub fn state(&self) -> Option<&SpState> {
+        self.state.as_ref()
+    }
+
+    pub fn caboose_active(&self) -> Option<&SpComponentCaboose> {
+        self.caboose_active.as_ref()
+    }
+
+    pub fn caboose_inactive(&self) -> Option<&SpComponentCaboose> {
+        self.caboose_inactive.as_ref()
+    }
+
+    pub fn rot(&self) -> Option<&RotInventory> {
+        self.rot.as_ref()
+    }
+
+    pub fn components(&self) -> &[SpComponentInfo] {
+        match self.components.as_ref() {
+            Some(components) => components,
+            None => &[],
+        }
+    }
+}
+
 // XXX: Eventually a Sled will have a host component.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Component {

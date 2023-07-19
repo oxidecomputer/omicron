@@ -17,6 +17,13 @@ if [[ $DATALINK == unknown ]] || [[ $GATEWAY == unknown ]]; then
     exit "$SMF_EXIT_ERR_CONFIG"
 fi
 
+# TODO remove when https://github.com/oxidecomputer/stlouis/issues/435 is addressed
+ipadm delete-if "$DATALINK" || true
+ipadm create-if -t "$DATALINK"
+
+ipadm set-ifprop -t -p mtu=9000 -m ipv4 "$DATALINK"
+ipadm set-ifprop -t -p mtu=9000 -m ipv6 "$DATALINK"
+
 ipadm show-addr "$DATALINK/ll" || ipadm create-addr -t -T addrconf "$DATALINK/ll"
 ipadm show-addr "$DATALINK/omicron6"  || ipadm create-addr -t -T static -a "$LISTEN_ADDR" "$DATALINK/omicron6"
 route get -inet6 default -inet6 "$GATEWAY" || route add -inet6 default -inet6 "$GATEWAY"

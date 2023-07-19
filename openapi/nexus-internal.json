@@ -1498,6 +1498,44 @@
           "request_id"
         ]
       },
+      "ExternalPortDiscovery": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "auto": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string",
+                  "format": "ipv6"
+                }
+              }
+            },
+            "required": [
+              "auto"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "static": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Name"
+                  }
+                }
+              }
+            },
+            "required": [
+              "static"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      },
       "Field": {
         "description": "A `Field` is a named aspect of a target or metric.",
         "type": "object",
@@ -2218,36 +2256,11 @@
         ]
       },
       "PhysicalDiskKind": {
-        "description": "Describes the type of physical disk.",
-        "oneOf": [
-          {
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "m2"
-                ]
-              }
-            },
-            "required": [
-              "type"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "u2"
-                ]
-              }
-            },
-            "required": [
-              "type"
-            ]
-          }
+        "description": "Describes the form factor of physical disks.",
+        "type": "string",
+        "enum": [
+          "m2",
+          "u2"
         ]
       },
       "PhysicalDiskPutRequest": {
@@ -2395,10 +2408,12 @@
             "type": "string"
           },
           "external_port_count": {
-            "description": "The number of external qsfp ports per sidecar",
-            "type": "integer",
-            "format": "uint8",
-            "minimum": 0
+            "description": "The external qsfp ports per sidecar",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ExternalPortDiscovery"
+              }
+            ]
           },
           "internal_dns_zone_config": {
             "description": "initial internal DNS config",
@@ -2455,11 +2470,6 @@
         "description": "Initial network configuration",
         "type": "object",
         "properties": {
-          "gateway_ip": {
-            "description": "Gateway address",
-            "type": "string",
-            "format": "ipv4"
-          },
           "infra_ip_first": {
             "description": "First ip address to be used for configuring network infrastructure",
             "type": "string",
@@ -2470,47 +2480,18 @@
             "type": "string",
             "format": "ipv4"
           },
-          "uplink_ip": {
-            "description": "IP Address to apply to switchport (must be in infra_ip pool)",
-            "type": "string",
-            "format": "ipv4"
-          },
-          "uplink_port": {
-            "description": "Switchport to use for external connectivity",
-            "type": "string"
-          },
-          "uplink_port_fec": {
-            "description": "Forward Error Correction setting for the uplink port",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/PortFec"
-              }
-            ]
-          },
-          "uplink_port_speed": {
-            "description": "Speed for the Switchport",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/PortSpeed"
-              }
-            ]
-          },
-          "uplink_vid": {
-            "nullable": true,
-            "description": "VLAN id to use for uplink",
-            "type": "integer",
-            "format": "uint16",
-            "minimum": 0
+          "uplinks": {
+            "description": "Uplinks for connecting the rack to external networks",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UplinkConfig"
+            }
           }
         },
         "required": [
-          "gateway_ip",
           "infra_ip_first",
           "infra_ip_last",
-          "uplink_ip",
-          "uplink_port",
-          "uplink_port_fec",
-          "uplink_port_speed"
+          "uplinks"
         ]
       },
       "RecoverySiloConfig": {
@@ -3206,6 +3187,25 @@
           "weight"
         ]
       },
+      "SwitchLocation": {
+        "description": "Identifies switch physical location",
+        "oneOf": [
+          {
+            "description": "Switch in upper slot",
+            "type": "string",
+            "enum": [
+              "switch0"
+            ]
+          },
+          {
+            "description": "Switch in lower slot",
+            "type": "string",
+            "enum": [
+              "switch1"
+            ]
+          }
+        ]
+      },
       "SwitchPutRequest": {
         "type": "object",
         "properties": {
@@ -3224,6 +3224,64 @@
       },
       "SwitchPutResponse": {
         "type": "object"
+      },
+      "UplinkConfig": {
+        "type": "object",
+        "properties": {
+          "gateway_ip": {
+            "description": "Gateway address",
+            "type": "string",
+            "format": "ipv4"
+          },
+          "switch": {
+            "description": "Switch to use for uplink",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SwitchLocation"
+              }
+            ]
+          },
+          "uplink_ip": {
+            "description": "IP Address to apply to switchport (must be in infra_ip pool)",
+            "type": "string",
+            "format": "ipv4"
+          },
+          "uplink_port": {
+            "description": "Switchport to use for external connectivity",
+            "type": "string"
+          },
+          "uplink_port_fec": {
+            "description": "Forward Error Correction setting for the uplink port",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PortFec"
+              }
+            ]
+          },
+          "uplink_port_speed": {
+            "description": "Speed for the Switchport",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PortSpeed"
+              }
+            ]
+          },
+          "uplink_vid": {
+            "nullable": true,
+            "description": "VLAN id to use for uplink",
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "gateway_ip",
+          "switch",
+          "uplink_ip",
+          "uplink_port",
+          "uplink_port_fec",
+          "uplink_port_speed"
+        ]
       },
       "UserId": {
         "title": "A name unique within the parent collection",

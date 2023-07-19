@@ -565,6 +565,7 @@ impl DataStore {
     pub async fn vpc_resolve_to_sleds(
         &self,
         vpc_id: Uuid,
+        sleds_filter: &[Uuid],
     ) -> Result<Vec<Sled>, Error> {
         // Resolve each VNIC in the VPC to the Sled it's on, so we know which
         // Sleds to notify when firewall rules change.
@@ -595,8 +596,16 @@ impl DataStore {
             .filter(service_network_interface::time_deleted.is_null())
             .select(Sled::as_select());
 
-        instance_query
-            .union(service_query)
+        let mut sleds = sled::table
+            .select(Sled::as_select())
+            .filter(sled::time_deleted.is_null())
+            .into_boxed();
+        if !sleds_filter.is_empty() {
+            sleds = sleds.filter(sled::id.eq_any(sleds_filter.to_vec()));
+        }
+
+        sleds
+            .intersect(instance_query.union(service_query))
             .get_results_async(self.pool())
             .await
             .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))

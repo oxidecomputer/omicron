@@ -57,6 +57,7 @@ impl DataStore {
                 crate::db::datastore::address_lot::try_reserve_block(
                     lot_id,
                     inet.ip().into(),
+                    params.anycast,
                     &conn,
                 )
                 .await
@@ -78,6 +79,7 @@ impl DataStore {
                 params.rack_id,
                 params.switch_location.to_string(),
                 inet,
+                params.anycast,
             );
 
             let db_addr: LoopbackAddress =

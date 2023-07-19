@@ -4,11 +4,13 @@
 
 //! Params define the request bodies of API endpoints for creating or updating resources.
 
+use crate::external_api::params::PhysicalDiskKind;
 use crate::external_api::params::UserId;
 use crate::external_api::shared::IpRange;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::MacAddr;
 use omicron_common::api::external::Name;
+use omicron_common::api::internal::shared::ExternalPortDiscovery;
 use omicron_common::api::internal::shared::RackNetworkConfig;
 use omicron_common::api::internal::shared::SourceNatConfig;
 use schemars::JsonSchema;
@@ -64,16 +66,6 @@ pub struct SledAgentStartupInfo {
     ///
     /// Must be smaller than "usable_physical_ram"
     pub reservoir_size: ByteCount,
-}
-
-/// Describes the type of physical disk.
-#[derive(
-    Debug, Serialize, Deserialize, JsonSchema, Clone, Copy, PartialEq, Eq,
-)]
-#[serde(rename_all = "snake_case", tag = "type", content = "content")]
-pub enum PhysicalDiskKind {
-    M2,
-    U2,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
@@ -264,8 +256,8 @@ pub struct RackInitializationRequest {
     pub external_dns_zone_name: String,
     /// configuration for the initial (recovery) Silo
     pub recovery_silo: RecoverySiloConfig,
-    /// The number of external qsfp ports per sidecar
-    pub external_port_count: u8,
+    /// The external qsfp ports per sidecar
+    pub external_port_count: ExternalPortDiscovery,
     /// Initial rack network configuration
     pub rack_network_config: Option<RackNetworkConfig>,
 }

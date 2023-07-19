@@ -104,7 +104,7 @@ impl ArtifactGetter for WicketdArtifactServer {
         update_id: Uuid,
         report: installinator_common::EventReport,
     ) -> Result<EventReportStatus, HttpError> {
-        Ok(self.ipr_artifact.report_progress(update_id, report).await)
+        Ok(self.ipr_artifact.report_progress(update_id, report))
     }
 }
 

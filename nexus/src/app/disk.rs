@@ -28,48 +28,8 @@ use sled_agent_client::Client as SledAgentClient;
 use std::sync::Arc;
 use uuid::Uuid;
 
-fn validate_disk_create_params(
-    params: &params::DiskCreate,
-    block_size: u64,
-) -> Result<(), Error> {
-    // Reject disks where the block size doesn't evenly divide the
-    // total size
-    if (params.size.to_bytes() % block_size) != 0 {
-        return Err(Error::InvalidValue {
-            label: String::from("size and block_size"),
-            message: format!(
-                "total size must be a multiple of block size {}",
-                block_size,
-            ),
-        });
-    }
-
-    // Reject disks where the size isn't at least
-    // MIN_DISK_SIZE_BYTES
-    if params.size.to_bytes() < params::MIN_DISK_SIZE_BYTES as u64 {
-        return Err(Error::InvalidValue {
-            label: String::from("size"),
-            message: format!(
-                "total size must be at least {}",
-                ByteCount::from(params::MIN_DISK_SIZE_BYTES)
-            ),
-        });
-    }
-
-    // Reject disks where the MIN_DISK_SIZE_BYTES doesn't evenly
-    // divide the size
-    if (params.size.to_bytes() % params::MIN_DISK_SIZE_BYTES as u64) != 0 {
-        return Err(Error::InvalidValue {
-            label: String::from("size"),
-            message: format!(
-                "total size must be a multiple of {}",
-                ByteCount::from(params::MIN_DISK_SIZE_BYTES)
-            ),
-        });
-    }
-
-    Ok(())
-}
+use super::MAX_DISK_SIZE_BYTES;
+use super::MIN_DISK_SIZE_BYTES;
 
 impl super::Nexus {
     // Disks
@@ -105,30 +65,31 @@ impl super::Nexus {
         }
     }
 
-    pub async fn project_create_disk(
+    pub(super) async fn validate_disk_create_params(
         self: &Arc<Self>,
         opctx: &OpContext,
-        project_lookup: &lookup::Project<'_>,
+        authz_project: &authz::Project,
         params: &params::DiskCreate,
-    ) -> CreateResult<db::model::Disk> {
-        let (.., authz_project) =
-            project_lookup.lookup_for(authz::Action::CreateChild).await?;
-
-        match &params.disk_source {
-            params::DiskSource::Blank { block_size } => {
-                validate_disk_create_params(&params, (*block_size).into())?;
+    ) -> Result<(), Error> {
+        let block_size: u64 = match params.disk_source {
+            params::DiskSource::Blank { block_size }
+            | params::DiskSource::ImportingBlocks { block_size } => {
+                block_size.into()
             }
             params::DiskSource::Snapshot { snapshot_id } => {
                 let (.., db_snapshot) =
                     LookupPath::new(opctx, &self.db_datastore)
-                        .snapshot_id(*snapshot_id)
+                        .snapshot_id(snapshot_id)
                         .fetch()
                         .await?;
 
-                validate_disk_create_params(
-                    &params,
-                    db_snapshot.block_size.to_bytes().into(),
-                )?;
+                // Return an error if the snapshot does not belong to our
+                // project.
+                if db_snapshot.project_id != authz_project.id() {
+                    return Err(Error::invalid_request(
+                        "snapshot does not belong to this project",
+                    ));
+                }
 
                 // If the size of the snapshot is greater than the size of the
                 // disk, return an error.
@@ -141,17 +102,24 @@ impl super::Nexus {
                         ),
                     ));
                 }
+
+                db_snapshot.block_size.to_bytes().into()
             }
             params::DiskSource::Image { image_id } => {
                 let (.., db_image) = LookupPath::new(opctx, &self.db_datastore)
-                    .image_id(*image_id)
+                    .image_id(image_id)
                     .fetch()
                     .await?;
 
-                validate_disk_create_params(
-                    &params,
-                    db_image.block_size.to_bytes().into(),
-                )?;
+                // The image either needs to belong to our project or be
+                // promoted to our silo. If not, return an error.
+                if let Some(project) = db_image.project_id {
+                    if project != authz_project.id() {
+                        return Err(Error::invalid_request(
+                            "image does not belong to this project",
+                        ));
+                    }
+                }
 
                 // If the size of the image is greater than the size of the
                 // disk, return an error.
@@ -164,11 +132,70 @@ impl super::Nexus {
                         ),
                     ));
                 }
+
+                db_image.block_size.to_bytes().into()
             }
-            params::DiskSource::ImportingBlocks { block_size } => {
-                validate_disk_create_params(&params, (*block_size).into())?;
-            }
+        };
+
+        // Reject disks where the block size doesn't evenly divide the
+        // total size
+        if (params.size.to_bytes() % block_size) != 0 {
+            return Err(Error::InvalidValue {
+                label: String::from("size and block_size"),
+                message: format!(
+                    "total size must be a multiple of block size {}",
+                    block_size,
+                ),
+            });
         }
+
+        // Reject disks where the size isn't at least
+        // MIN_DISK_SIZE_BYTES
+        if params.size.to_bytes() < MIN_DISK_SIZE_BYTES as u64 {
+            return Err(Error::InvalidValue {
+                label: String::from("size"),
+                message: format!(
+                    "total size must be at least {}",
+                    ByteCount::from(MIN_DISK_SIZE_BYTES)
+                ),
+            });
+        }
+
+        // Reject disks where the MIN_DISK_SIZE_BYTES doesn't evenly
+        // divide the size
+        if (params.size.to_bytes() % MIN_DISK_SIZE_BYTES as u64) != 0 {
+            return Err(Error::InvalidValue {
+                label: String::from("size"),
+                message: format!(
+                    "total size must be a multiple of {}",
+                    ByteCount::from(MIN_DISK_SIZE_BYTES)
+                ),
+            });
+        }
+
+        // Reject disks where the size is greated than MAX_DISK_SIZE_BYTES
+        if params.size.to_bytes() > MAX_DISK_SIZE_BYTES {
+            return Err(Error::InvalidValue {
+                label: String::from("size"),
+                message: format!(
+                    "total size must be less than {}",
+                    ByteCount::try_from(MAX_DISK_SIZE_BYTES).unwrap()
+                ),
+            });
+        }
+
+        Ok(())
+    }
+
+    pub async fn project_create_disk(
+        self: &Arc<Self>,
+        opctx: &OpContext,
+        project_lookup: &lookup::Project<'_>,
+        params: &params::DiskCreate,
+    ) -> CreateResult<db::model::Disk> {
+        let (.., authz_project) =
+            project_lookup.lookup_for(authz::Action::CreateChild).await?;
+        self.validate_disk_create_params(opctx, &authz_project, params).await?;
 
         let saga_params = sagas::disk_create::Params {
             serialized_authn: authn::saga::Serialized::for_opctx(opctx),
@@ -304,10 +331,16 @@ impl super::Nexus {
         let (.., project, authz_disk) =
             disk_lookup.lookup_for(authz::Action::Delete).await?;
 
+        let (.., db_disk) = LookupPath::new(opctx, &self.db_datastore)
+            .disk_id(authz_disk.id())
+            .fetch()
+            .await?;
+
         let saga_params = sagas::disk_delete::Params {
             serialized_authn: authn::saga::Serialized::for_opctx(opctx),
             project_id: project.id(),
             disk_id: authz_disk.id(),
+            volume_id: db_disk.volume_id,
         };
         self.execute_saga::<sagas::disk_delete::SagaDiskDelete>(saga_params)
             .await?;
