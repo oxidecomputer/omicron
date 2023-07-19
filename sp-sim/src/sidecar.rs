@@ -6,6 +6,8 @@ use crate::config::Config;
 use crate::config::SidecarConfig;
 use crate::config::SimulatedSpsConfig;
 use crate::config::SpComponentConfig;
+use crate::helpers::rot_slot_id_from_u16;
+use crate::helpers::rot_slot_id_to_u16;
 use crate::rot::RotSprocketExt;
 use crate::serial_number_padded;
 use crate::server;
@@ -297,6 +299,10 @@ struct Handler {
 
     serial_number: String,
     ignition: FakeIgnition,
+    // Use RotSlotId for both RoT and SP slots since they both have two elements
+    // each.
+    rot_active_slot: RotSlotId,
+    sp_active_slot: RotSlotId,
     power_state: PowerState,
 }
 
@@ -326,6 +332,8 @@ impl Handler {
             leaked_component_description_strings,
             serial_number,
             ignition,
+            rot_active_slot: RotSlotId::A,
+            sp_active_slot: RotSlotId::A,
             power_state: PowerState::A2,
         }
     }
@@ -828,12 +836,18 @@ impl SpHandler for Handler {
         component: SpComponent,
     ) -> Result<u16, SpError> {
         warn!(
-            &self.log, "asked for component active slot (not supported for sim components)";
+            &self.log, "asked for component active slot";
             "sender" => %sender,
             "port" => ?port,
             "component" => ?component,
         );
-        Err(SpError::RequestUnsupportedForComponent)
+        if component == SpComponent::ROT {
+            Ok(rot_slot_id_to_u16(self.rot_active_slot))
+        } else if component == SpComponent::SP_ITSELF {
+            Ok(rot_slot_id_to_u16(self.sp_active_slot))
+        } else {
+            Err(SpError::RequestUnsupportedForComponent)
+        }
     }
 
     fn component_set_active_slot(
@@ -845,14 +859,22 @@ impl SpHandler for Handler {
         persist: bool,
     ) -> Result<(), SpError> {
         warn!(
-            &self.log, "asked to set component active slot (not supported for sim components)";
+            &self.log, "asked to set component active slot";
             "sender" => %sender,
             "port" => ?port,
             "component" => ?component,
             "slot" => slot,
             "persist" => persist,
         );
-        Err(SpError::RequestUnsupportedForComponent)
+        if component == SpComponent::ROT {
+            self.rot_active_slot = rot_slot_id_from_u16(slot)?;
+            Ok(())
+        } else if component == SpComponent::SP_ITSELF {
+            self.sp_active_slot = rot_slot_id_from_u16(slot)?;
+            Ok(())
+        } else {
+            Err(SpError::RequestUnsupportedForComponent)
+        }
     }
 
     fn component_action(

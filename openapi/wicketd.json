@@ -2521,6 +2521,24 @@
               }
             ]
           },
+          "test_simulate_rot_result": {
+            "nullable": true,
+            "description": "If passed in, simulates a result for the RoT update.\n\nThis is used for testing.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/UpdateSimulatedResult"
+              }
+            ]
+          },
+          "test_simulate_sp_result": {
+            "nullable": true,
+            "description": "If passed in, simulates a result for the SP update.\n\nThis is used for testing.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/UpdateSimulatedResult"
+              }
+            ]
+          },
           "test_step_seconds": {
             "nullable": true,
             "description": "If passed in, creates a test step that lasts these many seconds long.\n\nThis is used for testing.",
@@ -3982,6 +4000,16 @@
               "component"
             ]
           }
+        ]
+      },
+      "UpdateSimulatedResult": {
+        "description": "A simulated result for a component update.\n\nUsed by [`StartUpdateOptions`].",
+        "type": "string",
+        "enum": [
+          "success",
+          "warning",
+          "skipped",
+          "failure"
         ]
       },
       "UpdateStepId": {
