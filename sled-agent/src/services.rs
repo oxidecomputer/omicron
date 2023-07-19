@@ -2424,9 +2424,14 @@ impl ServiceManager {
         {
             zone_names.push(String::from(zone.name()))
         }
-        for zone in self.inner.zones.lock().await.values() {
-            zone_names.push(String::from(zone.name()));
-        }
+        zone_names.extend(
+            self.inner
+                .zones
+                .lock()
+                .await
+                .values()
+                .map(|zone| zone.name().to_string()),
+        );
         zone_names.sort();
         Ok(zone_names)
     }
