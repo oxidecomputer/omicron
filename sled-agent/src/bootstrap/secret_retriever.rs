@@ -7,11 +7,8 @@
 use async_trait::async_trait;
 use bootstore::schemes::v0::NodeHandle;
 use key_manager::{
-    ReadinessGetter, ReadinessSetter, SecretRetriever, SecretRetrieverError,
-    SecretState, VersionedIkm,
+    SecretRetriever, SecretRetrieverError, SecretState, VersionedIkm,
 };
-use std::sync::atomic::AtomicBool;
-use std::sync::Arc;
 use std::sync::OnceLock;
 
 static MAYBE_LRTQ_RETRIEVER: OnceLock<LrtqOrHardcodedSecretRetrieverInner> =
@@ -20,17 +17,11 @@ static MAYBE_LRTQ_RETRIEVER: OnceLock<LrtqOrHardcodedSecretRetrieverInner> =
 /// A [`key-manager::SecretRetriever`] that either uses a
 /// [`LocalSecretRetriever`] or [`LrtqSecretRetriever`] under the hood depending
 /// upon how many sleds are in the cluster at rack init time.
-pub struct LrtqOrHardcodedSecretRetriever {
-    is_ready: Arc<AtomicBool>,
-}
+pub struct LrtqOrHardcodedSecretRetriever {}
 
 impl LrtqOrHardcodedSecretRetriever {
-    pub fn new() -> (LrtqOrHardcodedSecretRetriever, ReadinessSetter) {
-        let is_ready = Arc::new(AtomicBool::new(false));
-        (
-            LrtqOrHardcodedSecretRetriever { is_ready: is_ready.clone() },
-            ReadinessSetter::new(is_ready),
-        )
+    pub fn new() -> LrtqOrHardcodedSecretRetriever {
+        LrtqOrHardcodedSecretRetriever {}
     }
 }
 
@@ -51,10 +42,6 @@ impl SecretRetriever for LrtqOrHardcodedSecretRetriever {
             Some(retriever) => retriever.get(epoch).await,
             None => Err(SecretRetrieverError::RackNotInitialized),
         }
-    }
-
-    fn readiness_getter(&self) -> ReadinessGetter {
-        ReadinessGetter::new(self.is_ready.clone())
     }
 }
 

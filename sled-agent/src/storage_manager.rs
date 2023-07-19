@@ -365,6 +365,16 @@ enum QueuedDiskCreate {
     Synthetic(ZpoolName),
 }
 
+impl QueuedDiskCreate {
+    fn is_synthetic(&self) -> bool {
+        if let QueuedDiskCreate::Synthetic(_) = self {
+            true
+        } else {
+            false
+        }
+    }
+}
+
 impl StorageWorker {
     // Ensures the named dataset exists as a filesystem with a UUID, optionally
     // creating it if `do_format` is true.
@@ -480,9 +490,14 @@ impl StorageWorker {
         queued_u2_drives: &mut Option<HashSet<QueuedDiskCreate>>,
     ) -> Result<(), Error> {
         // Queue U.2 drives if necessary
-        // We clear all existing drives here and add new ones in the loop below
+        // We clear all existing queued drives that are not synthetic and add
+        // new ones in the loop below
         if let Some(queued) = queued_u2_drives {
-            queued.clear();
+            info!(
+                self.log,
+                "Ensure exact disks: clearing non-synthetic queued disks."
+            );
+            queued.retain(|d| d.is_synthetic());
         }
 
         let mut new_disks = HashMap::new();
@@ -498,7 +513,7 @@ impl StorageWorker {
         for disk in unparsed_disks.into_iter() {
             if disk.variant() == DiskVariant::U2 {
                 if let Some(queued) = queued_u2_drives {
-                    // We are queuing these to add later
+                    info!(self.log, "Queuing disk for upsert: {disk:?}");
                     queued.insert(disk.into());
                     continue;
                 }
@@ -603,6 +618,7 @@ impl StorageWorker {
         // Queue U.2 drives if necessary
         if let Some(queued) = queued_u2_drives {
             if disk.variant() == DiskVariant::U2 {
+                info!(self.log, "Queuing disk for upsert: {disk:?}");
                 queued.insert(disk.into());
                 return Ok(());
             }
@@ -639,6 +655,10 @@ impl StorageWorker {
         // Queue U.2 drives if necessary
         if let Some(queued) = queued_u2_drives {
             if zpool_name.kind() == ZpoolKind::External {
+                info!(
+                    self.log,
+                    "Queuing synthetic disk for upsert: {zpool_name:?}"
+                );
                 queued.insert(zpool_name.into());
                 return Ok(());
             }
@@ -934,40 +954,10 @@ impl StorageWorker {
         resources: &StorageResources,
         queued_u2_drives: &mut Option<HashSet<QueuedDiskCreate>>,
     ) -> Result<(), Error> {
-        let init = queued_u2_drives.clone().unwrap_or_default();
-        let (tx, mut rx) = tokio::sync::watch::channel(init);
         loop {
-            let ready = self.key_requester.is_ready();
             tokio::select! {
                 _ = self.nexus_notifications.next(),
                     if !self.nexus_notifications.is_empty() => {},
-                res = rx.changed(), if ready => {
-                    // The key requester is ready, now add the pending disks
-                    res.map_err(|_| Error::QueuedDiskRetrieval)?;
-                    let queued = rx.borrow().clone();
-                    for disk in queued {
-                        match disk {
-                            QueuedDiskCreate::Real(disk) => {
-                                self.upsert_disk(
-                                    &resources,
-                                    disk,
-                                    &mut None
-                                )
-                                .await?;
-                            }
-                            QueuedDiskCreate::Synthetic(zpool_name) => {
-                                self.upsert_synthetic_disk(
-                                    &resources,
-                                    zpool_name,
-                                    &mut None
-                                )
-                                .await?;
-                            }
-                        }
-                    }
-                    // We are done queueing
-                    *queued_u2_drives = None;
-                }
                 Some(request) = self.rx.recv() => {
                     use StorageWorkerRequest::*;
                     match request {
@@ -1014,9 +1004,30 @@ impl StorageWorker {
                             }
                             let _ = responder.send(Ok(()));
                         }
-                    }
-                    if let Some(queued) = queued_u2_drives {
-                        tx.send(queued.clone()).unwrap();
+                        KeyManagerReady => {
+                            if let Some(queued) = queued_u2_drives.take() {
+                                for disk in queued {
+                                    match disk {
+                                        QueuedDiskCreate::Real(disk) => {
+                                            self.upsert_disk(
+                                                &resources,
+                                                disk,
+                                                &mut None
+                                            )
+                                            .await?;
+                                        }
+                                        QueuedDiskCreate::Synthetic(zpool_name) => {
+                                            self.upsert_synthetic_disk(
+                                                &resources,
+                                                zpool_name,
+                                                &mut None
+                                            )
+                                            .await?;
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                 },
             }
@@ -1031,6 +1042,7 @@ enum StorageWorkerRequest {
     DisksChanged(Vec<UnparsedDisk>),
     NewFilesystem(NewFilesystemRequest),
     SetupUnderlayAccess(UnderlayRequest),
+    KeyManagerReady,
 }
 
 struct StorageManagerInner {
@@ -1200,6 +1212,18 @@ impl StorageManager {
         )?;
 
         Ok(dataset_name)
+    }
+
+    /// Inform the storage worker that the KeyManager is capable of retrieving
+    /// secrets now and that any queued disks can be upserted.
+    pub async fn key_manager_ready(&self) {
+        info!(self.inner.log, "KeyManger ready");
+        self.inner
+            .tx
+            .send(StorageWorkerRequest::KeyManagerReady)
+            .await
+            .map_err(|e| e.to_string())
+            .expect("Failed to send KeyManagerReady request");
     }
 
     pub fn resources(&self) -> &StorageResources {

@@ -31,7 +31,7 @@ use illumos_utils::zfs::{
 };
 use illumos_utils::zone::Zones;
 use illumos_utils::{execute, PFEXEC};
-use key_manager::{KeyManager, ReadinessSetter, StorageKeyRequester};
+use key_manager::{KeyManager, StorageKeyRequester};
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::api::external::Error as ExternalError;
 use omicron_common::ledger::{self, Ledger, Ledgerable};
@@ -201,10 +201,6 @@ pub struct Agent {
     /// KeyManager task should run forever
     #[allow(unused)]
     key_manager_handle: JoinHandle<()>,
-
-    /// Used to inform key requesters that the KeyManager is ready to be used.
-    /// In particular this should be set when the rack is initialized
-    key_manager_readiness: ReadinessSetter,
 
     /// We maintain a copy of the `StorageKeyRequester` so we can pass it
     /// through from the `HardwareManager` to the `StorageManager` when the
@@ -453,8 +449,7 @@ impl Agent {
 
         // Spawn the `KeyManager` which is needed by the the StorageManager to
         // retrieve encryption keys.
-        let (secret_retriever, key_manager_readiness) =
-            LrtqOrHardcodedSecretRetriever::new();
+        let secret_retriever = LrtqOrHardcodedSecretRetriever::new();
         let (mut key_manager, storage_key_requester) =
             KeyManager::new(&log, secret_retriever);
 
@@ -543,7 +538,6 @@ impl Agent {
             global_zone_bootstrap_link_local_address,
             key_manager_handle: handle,
             storage_key_requester,
-            key_manager_readiness,
             baseboard,
             bootstore: bootstore_node_handle,
             bootstore_join_handle,
@@ -703,7 +697,6 @@ impl Agent {
             info!(self.log, "KeyManager: using hardcoded secret retriever");
             LrtqOrHardcodedSecretRetriever::init_hardcoded();
         }
-        self.key_manager_readiness.set();
 
         let sled_address = request.sled_address();
 
@@ -731,6 +724,9 @@ impl Agent {
                     .stop()
                     .await
                     .expect("Failed to stop hardware monitor");
+
+                // Inform the storage service that the key manager is available
+                storage.key_manager_ready().await;
 
                 // This acts like a "run-on-drop" closure, to restart the
                 // hardware monitor in the bootstrap agent if we fail to
