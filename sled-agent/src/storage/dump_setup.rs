@@ -2,12 +2,14 @@ use crate::storage_manager::DiskWrapper;
 use camino::Utf8PathBuf;
 use derive_more::{AsRef, Deref};
 use illumos_utils::dumpadm::DumpAdmError;
+use illumos_utils::zone::{AdmError, Zones};
 use illumos_utils::zpool::ZpoolHealth;
 use omicron_common::disk::DiskIdentity;
 use sled_hardware::DiskVariant;
 use slog::Logger;
 use std::collections::{HashMap, HashSet};
 use std::ffi::OsString;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Weak};
 use tokio::sync::MutexGuard;
 
@@ -140,7 +142,7 @@ impl DumpSetup {
                 match mutex.lock() {
                     Ok(mut guard) => {
                         guard.reevaluate_choices();
-                        if let Err(err) = guard.rotate_files(&log) {
+                        if let Err(err) = guard.rotate_files() {
                             error!(
                                 log,
                                 "Failed to rotate debug/dump files: {err:?}"
@@ -411,10 +413,10 @@ impl DumpSetupWorker {
         }
     }
 
-    fn rotate_files(&self, log: &Logger) -> Result<(), std::io::Error> {
+    fn rotate_files(&self) -> std::io::Result<()> {
         if let Some(debug_dir) = &self.chosen_debug_dir {
             if self.known_core_dirs.is_empty() {
-                info!(log, "No core dump locations yet known.");
+                info!(self.log, "No core dump locations yet known.");
             }
             for core_dir in &self.known_core_dirs {
                 if let Ok(dir) = core_dir.read_dir() {
@@ -422,32 +424,103 @@ impl DumpSetupWorker {
                         if let Some(path) = entry.file_name().to_str() {
                             let dest = debug_dir.join(path);
 
-                            let mut dest_f = std::fs::File::create(&dest)?;
-                            let mut src_f = std::fs::File::open(&entry.path())?;
+                            Self::copy_sync_and_remove(&entry.path(), &dest)?;
 
-                            std::io::copy(&mut src_f, &mut dest_f)?;
-                            dest_f.sync_all()?;
-
-                            drop(src_f);
-                            drop(dest_f);
-
-                            if let Err(err) = std::fs::remove_file(entry.path())
-                            {
-                                warn!(log, "Could not remove {entry:?} after copying it to {dest:?}: {err:?}");
-                            } else {
-                                info!(
-                                    log,
-                                    "Relocated core {entry:?} to {dest:?}"
-                                );
-                            }
+                            info!(self.log, "Relocated {entry:?} to {dest:?}");
                         } else {
-                            error!(log, "Non-UTF8 path found while rotating core dumps: {entry:?}");
+                            error!(self.log, "Non-UTF8 path found while rotating core dumps: {entry:?}");
                         }
                     }
                 }
             }
         } else {
-            info!(log, "No rotation destination for crash dumps yet chosen.");
+            info!(
+                self.log,
+                "No rotation destination for crash dumps yet chosen."
+            );
+        }
+
+        if let Err(err) = self.rotate_logs() {
+            error!(
+                self.log,
+                "Failure while trying to rotate logs to debug dataset: {err:?}"
+            );
+        }
+
+        Ok(())
+    }
+
+    fn copy_sync_and_remove(
+        source: impl AsRef<Path>,
+        dest: impl AsRef<Path>,
+    ) -> std::io::Result<()> {
+        let source = source.as_ref();
+        let dest = dest.as_ref();
+        let mut dest_f = std::fs::File::create(&dest)?;
+        let mut src_f = std::fs::File::open(&source)?;
+
+        std::io::copy(&mut src_f, &mut dest_f)?;
+
+        dest_f.sync_all()?;
+
+        drop(src_f);
+        drop(dest_f);
+
+        std::fs::remove_file(source)?;
+        Ok(())
+    }
+
+    fn rotate_logs(&self) -> Result<(), RotateLogsError> {
+        let debug_dir = self
+            .chosen_debug_dir
+            .as_ref()
+            .ok_or(RotateLogsError::NoDebugDirYet)?;
+        // zone crate's 'deprecated' functions collide if you try to enable
+        // its 'sync' and 'async' features simultaneously :(
+        let rt =
+            tokio::runtime::Runtime::new().map_err(RotateLogsError::Tokio)?;
+        let oxz_zones = rt.block_on(Zones::get())?;
+        Self::rotate_logs_inner(
+            debug_dir,
+            PathBuf::from("/var/svc/log"),
+            "global",
+        )?;
+        for zone in oxz_zones {
+            let logdir = zone.path().join("root/var/svc/log");
+            let zone_name = zone.name();
+            Self::rotate_logs_inner(debug_dir, logdir, zone_name)?;
+        }
+        Ok(())
+    }
+
+    fn rotate_logs_inner(
+        debug_dir: &DebugDirPath,
+        logdir: PathBuf,
+        zone_name: &str,
+    ) -> Result<(), RotateLogsError> {
+        // pattern matching rotated logs, e.g. foo.log.3
+        let pattern = logdir
+            .join("*.log.*")
+            .to_str()
+            .ok_or_else(|| RotateLogsError::Utf8(zone_name.to_string()))?
+            .to_string();
+        let glob = glob::glob(&pattern)?;
+        for entry in glob.flatten() {
+            let dest_dir = debug_dir.join(zone_name).into_std_path_buf();
+            std::fs::create_dir_all(&dest_dir)?;
+            let src_name = entry.file_name().unwrap();
+            // as we rotate them out, logadm will keep resetting to .log.0,
+            // so we need to maintain our own numbering in the dest dataset
+            let mut n = 0;
+            while dest_dir
+                .join(src_name)
+                .with_extension(format!("{n}"))
+                .exists()
+            {
+                n += 1;
+            }
+            let dest = dest_dir.join(src_name).with_extension(format!("{n}"));
+            Self::copy_sync_and_remove(entry, dest)?;
         }
         Ok(())
     }
@@ -479,4 +552,22 @@ impl DumpSetupWorker {
             Err(err) => Err(err),
         }
     }
+}
+
+#[derive(thiserror::Error, Debug)]
+enum RotateLogsError {
+    #[error("Couldn't make an async runtime to get zone info: {0}")]
+    Tokio(std::io::Error),
+    #[error("I/O error: {0}")]
+    IoError(#[from] std::io::Error),
+    #[error("Error calling zoneadm: {0}")]
+    Zoneadm(#[from] AdmError),
+    #[error("Non-UTF8 zone path for zone {0}")]
+    Utf8(String),
+    #[error("Glob pattern invalid: {0}")]
+    Glob(#[from] glob::PatternError),
+    #[error(
+        "No debug dir into which we should rotate logs has yet been chosen"
+    )]
+    NoDebugDirYet,
 }
