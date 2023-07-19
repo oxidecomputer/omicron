@@ -2521,7 +2521,7 @@ impl ServiceManager {
             let name = zone.zone_name();
             let running = existing_zones.contains_key(&name);
             if running {
-                info!(log, "skipping running: {name}");
+                info!(log, "skipping running zone: {name}");
             }
             !running
         });
