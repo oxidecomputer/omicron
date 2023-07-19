@@ -47,7 +47,7 @@ function ensure_zpools {
             echo "Zpool: [$ZPOOL]"
             VDEV_PATH="${ZPOOL_VDEV_DIR:-$OMICRON_TOP}/$ZPOOL.vdev"
             if ! [[ -f "$VDEV_PATH" ]]; then
-                dd if=/dev/zero of="$VDEV_PATH" bs=1 count=0 seek=10G
+                dd if=/dev/zero of="$VDEV_PATH" bs=1 count=0 seek=15G
             fi
             success "ZFS vdev $VDEV_PATH exists"
             if [[ -z "$(zpool list -o name | grep $ZPOOL)" ]]; then
