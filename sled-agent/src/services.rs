@@ -279,7 +279,7 @@ const ZONE_BUNDLE_METADATA_FILENAME: &str = "metadata.toml";
 
 // A wrapper around `ZoneRequest`, which allows it to be serialized
 // to a toml file.
-#[derive(Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 struct AllZoneRequests {
     generation: Generation,
     requests: Vec<ZoneRequest>,
@@ -303,10 +303,11 @@ impl Ledgerable for AllZoneRequests {
 
 // This struct represents the combo of "what zone did you ask for" + "where did
 // we put it".
-#[derive(Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 struct ZoneRequest {
     zone: ServiceZoneRequest,
     // TODO: Consider collapsing "root" into ServiceZoneRequest
+    #[schemars(with = "String")]
     root: Utf8PathBuf,
 }
 
@@ -3577,5 +3578,14 @@ mod test {
         assert_eq!(prefix1.segments()[1..], ba.segments()[1..]);
         assert_eq!(prefix0.segments()[0], 0xfdb1);
         assert_eq!(prefix1.segments()[0], 0xfdb2);
+    }
+
+    #[test]
+    fn test_all_zone_requests_schema() {
+        let schema = schemars::schema_for!(AllZoneRequests);
+        expectorate::assert_contents(
+            "../schema/all-zone-requests.json",
+            &serde_json::to_string_pretty(&schema).unwrap(),
+        );
     }
 }
