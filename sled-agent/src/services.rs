@@ -2046,6 +2046,8 @@ impl ServiceManager {
                     request,
                     // filesystems=
                     &[],
+                    // data_links=
+                    &[],
                 )
                 .await
                 .map_err(|error| (request.zone.zone_name(), error))
