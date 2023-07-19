@@ -1923,16 +1923,17 @@ impl ServiceManager {
             });
         }
 
-        // We initialize all the zones we can, but only return the first error.
+        // We initialize all the zones we can, but only return one error, if
+        // any.
         let local_existing_zones = Arc::new(Mutex::new(existing_zones));
-        let first_err = Arc::new(Mutex::new(None));
+        let last_err = Arc::new(Mutex::new(None));
         stream::iter(requests)
             // WARNING: Do not use "try_for_each_concurrent" here -- if you do,
             // it's possible that the future will cancel other ongoing requests
             // to "initialize_zone".
             .for_each_concurrent(None, |request| {
                 let local_existing_zones = local_existing_zones.clone();
-                let first_err = first_err.clone();
+                let last_err = last_err.clone();
                 async move {
                     match self
                         .initialize_zone(
@@ -1949,14 +1950,14 @@ impl ServiceManager {
                                 .push(running_zone);
                         }
                         Err(err) => {
-                            *first_err.lock().await = Some(err);
+                            *last_err.lock().await = Some(err);
                         }
                     }
                 }
             })
             .await;
 
-        if let Some(err) = Arc::into_inner(first_err)
+        if let Some(err) = Arc::into_inner(last_err)
             .expect("Should have last reference")
             .into_inner()
         {
