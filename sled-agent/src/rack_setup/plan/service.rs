@@ -61,7 +61,7 @@ const CLICKHOUSE_COUNT: usize = 1;
 const MINIMUM_U2_ZPOOL_COUNT: usize = 3;
 // TODO(https://github.com/oxidecomputer/omicron/issues/732): Remove.
 // when Nexus provisions the Pantry.
-const PANTRY_COUNT: usize = 1;
+const PANTRY_COUNT: usize = 3;
 
 /// Describes errors which may occur while generating a plan for services.
 #[derive(Error, Debug)]

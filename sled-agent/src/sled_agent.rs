@@ -210,6 +210,7 @@ impl SledAgentInner {
 #[derive(Clone)]
 pub struct SledAgent {
     inner: Arc<SledAgentInner>,
+    log: Logger,
 }
 
 impl SledAgent {
@@ -351,6 +352,7 @@ impl SledAgent {
                 // Also, we could maybe de-dup some of the backoff code in the request queue?
                 nexus_request_queue: NexusRequestQueue::new(),
             }),
+            log: log.clone(),
         };
 
         // We immediately add a notification to the request queue about our
@@ -473,6 +475,10 @@ impl SledAgent {
 
     pub fn id(&self) -> Uuid {
         self.inner.id
+    }
+
+    pub fn logger(&self) -> &Logger {
+        &self.log
     }
 
     // Sends a request to Nexus informing it that the current sled exists.

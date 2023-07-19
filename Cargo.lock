@@ -4823,6 +4823,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "toml 0.7.6",
+ "topological-sort",
  "walkdir",
 ]
 
@@ -8457,6 +8458,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "topological-sort"
+version = "0.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ea68304e134ecd095ac6c3574494fc62b909f416c4fca77e440530221e549d3d"
+
+[[package]]
 name = "tough"
 version = "0.12.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -9650,6 +9657,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6d1526bbe5aaeb5eb06885f4d987bcdfa5e23187055de9b83fe00156a821fabc"
 dependencies = [
  "libc",
+]
+
+[[package]]
+name = "xtask"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap 4.3.8",
 ]
 
 [[package]]
