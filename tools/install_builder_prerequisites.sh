@@ -197,6 +197,9 @@ retry ./tools/ci_download_dendrite_openapi
 # asic and running dendrite instance
 retry ./tools/ci_download_dendrite_stub
 
+# Download transceiver-control. This is used as the source for the
+# xcvradm binary which is bundled with the switch zone.
+retry ./tools/ci_download_transceiver_control
 
 # Validate the PATH:
 expected_in_path=(

@@ -228,9 +228,9 @@ impl InventoryView {
     pub fn new() -> InventoryView {
         InventoryView {
             help: vec![
-                ("Rack View", "<ESC>"),
-                ("Switch Component", "<LEFT/RIGHT>"),
-                ("Scroll", "<UP/DOWN>"),
+                ("Rack View", "<Esc>"),
+                ("Switch Component", "<Left/Right>"),
+                ("Scroll", "<Up/Down>"),
                 ("Ignition", "<I>"),
             ],
             scroll_offsets: ALL_COMPONENT_IDS

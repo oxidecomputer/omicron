@@ -114,16 +114,16 @@ impl Default for RackSetupPane {
     fn default() -> Self {
         Self {
             help: vec![
-                ("Scroll", "<UP/DOWN>"),
+                ("Scroll", "<Up/Down>"),
                 ("Current Status Details", "<D>"),
             ],
             rack_uninitialized_help: vec![
-                ("Scroll", "<UP/DOWN>"),
+                ("Scroll", "<Up/Down>"),
                 ("Current Status Details", "<D>"),
                 ("Start Rack Setup", "<Ctrl-K>"),
             ],
             rack_initialized_help: vec![
-                ("Scroll", "<UP/DOWN>"),
+                ("Scroll", "<Up/Down>"),
                 ("Current Status Details", "<D>"),
                 ("Start Rack Reset", "<Ctrl-R Ctrl-R>"),
             ],

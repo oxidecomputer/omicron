@@ -39,7 +39,7 @@ use ddm_admin_client::{Client as DdmAdminClient, DdmError};
 use dpd_client::{types as DpdTypes, Client as DpdClient, Error as DpdError};
 use dropshot::HandlerTaskMode;
 use flate2::bufread::GzDecoder;
-use futures::stream::{self, StreamExt, TryStreamExt};
+use futures::stream::{self, StreamExt};
 use illumos_utils::addrobj::AddrObject;
 use illumos_utils::addrobj::IPV6_LINK_LOCAL_NAME;
 use illumos_utils::dladm::{Dladm, Etherstub, EtherstubVnic, PhysicalLink};
@@ -1920,30 +1920,49 @@ impl ServiceManager {
         {
             return Err(Error::BadServiceRequest {
                 service: name,
-                message: "Should initialize zone twice".to_string(),
+                message: "Should not initialize zone twice".to_string(),
             });
         }
 
+        // We initialize all the zones we can, but only return the first error.
         let local_existing_zones = Arc::new(Mutex::new(existing_zones));
+        let first_err = Arc::new(Mutex::new(None));
         stream::iter(requests)
-            .map(Ok::<_, Error>)
-            .try_for_each_concurrent(None, |request| {
+            // WARNING: Do not use "try_for_each_concurrent" here -- if you do,
+            // it's possible that the future will cancel other ongoing requests
+            // to "initialize_zone".
+            .for_each_concurrent(None, |request| {
                 let local_existing_zones = local_existing_zones.clone();
+                let first_err = first_err.clone();
                 async move {
-                    // TODO-correctness: It seems like we should continue with the other
-                    // zones, rather than bail out of this method entirely.
-                    let running_zone = self
+                    match self
                         .initialize_zone(
                             request,
                             // filesystems=
                             &[],
                         )
-                        .await?;
-                    local_existing_zones.lock().await.push(running_zone);
-                    Ok(())
+                        .await
+                    {
+                        Ok(running_zone) => {
+                            local_existing_zones
+                                .lock()
+                                .await
+                                .push(running_zone);
+                        }
+                        Err(err) => {
+                            *first_err.lock().await = Some(err);
+                        }
+                    }
                 }
             })
-            .await?;
+            .await;
+
+        if let Some(err) = Arc::into_inner(first_err)
+            .expect("Should have last reference")
+            .into_inner()
+        {
+            return Err(err);
+        }
 
         Ok(())
     }
