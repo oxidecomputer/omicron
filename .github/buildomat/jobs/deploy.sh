@@ -141,6 +141,14 @@ export GATEWAY_IP=192.168.1.199
 export PXA_START="192.168.1.50"
 export PXA_END="192.168.1.90"
 
+# Nexus (and any instances using the above IP pool) are configured to use external
+# IPs from a fixed subnet (192.168.1.0/24). OPTE/SoftNPU/Boundary Services take care
+# of NATing between the private VPC networks and this "external network".
+# We create a static IP in this subnet in the global zone and configure the switch
+# to use it as the default gateway.
+# NOTE: Keep in sync with $[SERVICE_]IP_POOL_{START,END}
+pfexec ipadm create-addr -T static -a $GATEWAY_IP/24 igb0/sidehatch
+
 pfexec zpool create -f scratch c1t1d0 c2t1d0
 ZPOOL_VDEV_DIR=/scratch ptime -m pfexec ./tools/create_virtual_hardware.sh
 
@@ -192,7 +200,6 @@ rmdir pkg
 # will end up once installed.
 E2E_TLS_CERT="/opt/oxide/sled-agent/pkg/initial-tls-cert.pem"
 
-
 #
 # Image-related tests use images served by catacomb. The lab network is
 # IPv4-only; the propolis zones are IPv6-only. These steps set up tcpproxy
@@ -228,16 +235,10 @@ do
 	retry=$((retry + 1))
 done
 
-# Nexus (and any instances using the above IP pool) are configured to use external
-# IPs from a fixed subnet (192.168.1.0/24). OPTE/SoftNPU/Boundary Services take care
-# of NATing between the private VPC networks and this "external network".
-# We create a static IP in this subnet in the global zone and configure the switch
-# to use it as the default gateway.
-# NOTE: Keep in sync with $[SERVICE_]IP_POOL_{START,END}
-pfexec ipadm create-addr -T static -a $GATEWAY_IP/24 igb0/sidehatch
 
 # We also need to configure proxy arp for any services which use OPTE for external connectivity (e.g. Nexus)
 tar xf out/omicron-sled-agent.tar pkg/config-rss.toml
+SOFTNPU_MAC=$(dladm show-vnic sc0_1 -p -o macaddress | sed -E 's/[ :]/&0/g; s/0([^:]{2}(:|$))/\1/g')
 SERVICE_IP_POOL_START="$(sed -n 's/^first = "\(.*\)"/\1/p' pkg/config-rss.toml)"
 SERVICE_IP_POOL_END="$(sed -n 's/^last = "\(.*\)"/\1/p' pkg/config-rss.toml)"
 rm -r pkg

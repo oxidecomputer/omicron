@@ -51,6 +51,7 @@ function ensure_simulated_links {
 function ensure_softnpu_zone {
     zoneadm list | grep -q sidecar_softnpu || {
         out/npuzone/npuzone create sidecar \
+            --softnpu-branch npuzone-tool \
             --omicron-zone \
             --ports sc0_0,tfportrear0_0 \
             --ports sc0_1,tfportqsfp0_0
