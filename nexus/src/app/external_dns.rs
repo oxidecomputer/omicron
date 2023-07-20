@@ -44,8 +44,15 @@ impl reqwest::dns::Resolve for Resolver {
         let resolver = self.0.clone();
         Box::pin(async move {
             let ips = resolver.lookup_ip(name.as_str()).await?;
-            Ok(Box::new(ips.into_iter().map(|ip| SocketAddr::new(ip, 0)))
-                as Box<_>)
+            let addrs = ips
+                .into_iter()
+                // trust-dns-resolver returns `IpAddr`s but reqwest wants
+                // `SocketAddr`s (useful if you have a custom resolver that
+                // returns a scoped IPv6 address). The port provided here
+                // is ignored in favour of the scheme default (http/80,
+                // https/443) or any custom port provided in the URL.
+                .map(|ip| SocketAddr::new(ip, 0));
+            Ok(Box::new(addrs) as Box<_>)
         })
     }
 }
