@@ -135,15 +135,14 @@ for p in /input/ci-tools/work/end-to-end-tests/*.gz; do
 	chmod a+x "tests/$(basename "${p%.gz}")"
 done
 
-pfexec zpool create -f scratch c1t1d0 c2t1d0
-ZPOOL_VDEV_DIR=/scratch ptime -m pfexec ./tools/create_virtual_hardware.sh
-
 # Lab gateway ip
 export GATEWAY_IP=192.168.1.199
 # Proxy arp settings.
 export PXA_START="192.168.1.50"
 export PXA_END="192.168.1.90"
-ptime -m pfexec ./tools/create_virtual_hardware.sh
+
+pfexec zpool create -f scratch c1t1d0 c2t1d0
+ZPOOL_VDEV_DIR=/scratch ptime -m pfexec ./tools/create_virtual_hardware.sh
 
 #
 # Generate a self-signed certificate to use as the initial TLS certificate for
