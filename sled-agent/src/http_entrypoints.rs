@@ -167,8 +167,18 @@ async fn services_put(
     // times out) could result in leaving zones partially configured and the
     // in-memory state of the service manager invalid. See:
     // oxidecomputer/omicron#3098.
-    match tokio::spawn(async move { sa.services_ensure(body_args).await }).await
-    {
+    let handler = async move {
+        match sa.services_ensure(body_args).await {
+            Ok(()) => Ok(()),
+            Err(e) => {
+                // Log the error here to make things clear even if the client
+                // has already disconnected.
+                error!(sa.logger(), "failed to initialize services: {e}");
+                Err(e)
+            }
+        }
+    };
+    match tokio::spawn(handler).await {
         Ok(result) => result.map_err(|e| Error::from(e))?,
 
         Err(e) => {

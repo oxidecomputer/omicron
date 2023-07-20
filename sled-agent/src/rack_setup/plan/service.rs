@@ -1128,6 +1128,7 @@ mod tests {
         ];
         let config = Config {
             rack_subnet: Ipv6Addr::LOCALHOST,
+            trust_quorum_peers: None,
             bootstrap_discovery: BootstrapAddressDiscovery::OnlyOurs,
             ntp_servers: Vec::new(),
             dns_servers: Vec::new(),
