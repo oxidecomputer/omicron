@@ -296,7 +296,6 @@ impl ServiceInner {
         let dur = std::time::Duration::from_secs(60);
         let client = reqwest::ClientBuilder::new()
             .connect_timeout(dur)
-            .timeout(dur)
             .build()
             .map_err(SetupServiceError::HttpClient)?;
         let client = SledAgentClient::new_with_client(
@@ -324,8 +323,13 @@ impl ServiceInner {
                 .map_err(BackoffError::transient)?;
             Ok::<(), BackoffError<SledAgentError<SledAgentTypes::Error>>>(())
         };
-        let log_failure = |error, _| {
-            warn!(self.log, "failed to initialize services"; "error" => ?error);
+        let log_failure = |error, delay| {
+            warn!(
+                self.log,
+                "failed to initialize services";
+                "error" => ?error,
+                "retry_after" => ?delay,
+            );
         };
         retry_notify(
             retry_policy_internal_service_aggressive(),

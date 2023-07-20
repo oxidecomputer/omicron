@@ -125,8 +125,13 @@ EOF
 done
 
 source "$TOP/tools/dvt_dock_version"
-git clone --depth 1 https://github.com/oxidecomputer/dvt-dock.git /work/dvt-dock
-(cd /work/dvt-dock; git checkout "$COMMIT")
+git init /work/dvt-dock
+(
+    cd /work/dvt-dock
+    git remote add origin https://github.com/oxidecomputer/dvt-dock.git
+    git fetch --depth 1 origin "$COMMIT"
+    git checkout FETCH_HEAD
+)
 
 add_hubris_artifacts() {
     series="$1"

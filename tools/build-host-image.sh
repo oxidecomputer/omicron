@@ -71,7 +71,7 @@ function main
     fi
     trap 'cd /; rm -rf "$tmp_gz"' EXIT
 
-    # Extract the trampoline global zone tarball into a tmp_gz directory
+    # Extract the global zone tarball into a tmp_gz directory
     echo "Extracting gz packages into $tmp_gz"
     ptime -m tar xvzf $GLOBAL_ZONE_TARBALL_PATH -C $tmp_gz
 
@@ -81,6 +81,12 @@ function main
     if [ "x$SWITCH_ZONE" != "x" ]; then
         mkdir -p "$tmp_gz/root/opt/oxide"
         cp "$SWITCH_ZONE" "$tmp_gz/root/opt/oxide/switch.tar.gz"
+    fi
+
+    if [ "x$BUILD_STANDARD" != "x" ]; then
+        mkdir -p "$tmp_gz/root/root"
+        echo "# Add opteadm, ddmadm to PATH" >> "$tmp_gz/root/root/.profile"
+        echo 'export PATH=$PATH:/opt/oxide/opte/bin:/opt/oxide/mg-ddm' >> "$tmp_gz/root/root/.profile"
     fi
 
     # Move to the helios checkout
