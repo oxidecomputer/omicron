@@ -4,6 +4,7 @@ use derive_more::{AsRef, Deref};
 use illumos_utils::dumpadm::DumpAdmError;
 use illumos_utils::zone::{AdmError, Zones};
 use illumos_utils::zpool::ZpoolHealth;
+use itertools::Itertools;
 use omicron_common::disk::DiskIdentity;
 use sled_hardware::DiskVariant;
 use slog::Logger;
@@ -11,6 +12,7 @@ use std::collections::{HashMap, HashSet};
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Weak};
+use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::MutexGuard;
 
 pub struct DumpSetup {
@@ -25,9 +27,9 @@ impl DumpSetup {
             log.new(o!("component" => "DumpSetup-worker")),
         )));
         let worker_weak = Arc::downgrade(&worker);
-        let log_poll = log.new(o!("component" => "DumpSetup-rotation"));
+        let log_poll = log.new(o!("component" => "DumpSetup-archival"));
         let _poller = std::thread::spawn(move || {
-            Self::poll_file_rotation(worker_weak, log_poll)
+            Self::poll_file_archival(worker_weak, log_poll)
         });
         let log = log.new(o!("component" => "DumpSetup"));
         Self { worker, _poller, log }
@@ -56,7 +58,7 @@ struct DumpSetupWorker {
     log: Logger,
 }
 
-const ROTATION_DURATION: std::time::Duration =
+const ARCHIVAL_INTERVAL: std::time::Duration =
     std::time::Duration::from_secs(300);
 
 impl DumpSetup {
@@ -132,7 +134,7 @@ impl DumpSetup {
         });
     }
 
-    fn poll_file_rotation(
+    fn poll_file_archival(
         worker: Weak<std::sync::Mutex<DumpSetupWorker>>,
         log: Logger,
     ) {
@@ -142,10 +144,10 @@ impl DumpSetup {
                 match mutex.lock() {
                     Ok(mut guard) => {
                         guard.reevaluate_choices();
-                        if let Err(err) = guard.rotate_files() {
+                        if let Err(err) = guard.archive_files() {
                             error!(
                                 log,
-                                "Failed to rotate debug/dump files: {err:?}"
+                                "Failed to archive debug/dump files: {err:?}"
                             );
                         }
                     }
@@ -164,7 +166,7 @@ impl DumpSetup {
                 );
                 break;
             }
-            std::thread::sleep(ROTATION_DURATION);
+            std::thread::sleep(ARCHIVAL_INTERVAL);
         }
     }
 }
@@ -249,7 +251,7 @@ impl DumpSetupWorker {
             },
         );
         self.known_core_dirs.sort_by_cached_key(|mnt| {
-            // these get rotated out periodically anyway, pick one with room
+            // these get archived periodically anyway, pick one with room
             let available = zfs_get_integer(&**mnt, "available").unwrap_or(0);
             (u64::MAX - available, mnt.clone())
         });
@@ -413,7 +415,7 @@ impl DumpSetupWorker {
         }
     }
 
-    fn rotate_files(&self) -> std::io::Result<()> {
+    fn archive_files(&self) -> std::io::Result<()> {
         if let Some(debug_dir) = &self.chosen_debug_dir {
             if self.known_core_dirs.is_empty() {
                 info!(self.log, "No core dump locations yet known.");
@@ -428,7 +430,7 @@ impl DumpSetupWorker {
 
                             info!(self.log, "Relocated {entry:?} to {dest:?}");
                         } else {
-                            error!(self.log, "Non-UTF8 path found while rotating core dumps: {entry:?}");
+                            error!(self.log, "Non-UTF8 path found while archiving core dumps: {entry:?}");
                         }
                     }
                 }
@@ -436,14 +438,14 @@ impl DumpSetupWorker {
         } else {
             info!(
                 self.log,
-                "No rotation destination for crash dumps yet chosen."
+                "No archival destination for crash dumps yet chosen."
             );
         }
 
-        if let Err(err) = self.rotate_logs() {
+        if let Err(err) = self.archive_logs() {
             error!(
                 self.log,
-                "Failure while trying to rotate logs to debug dataset: {err:?}"
+                "Failure while trying to archive logs to debug dataset: {err:?}"
             );
         }
 
@@ -470,17 +472,17 @@ impl DumpSetupWorker {
         Ok(())
     }
 
-    fn rotate_logs(&self) -> Result<(), RotateLogsError> {
+    fn archive_logs(&self) -> Result<(), ArchiveLogsError> {
         let debug_dir = self
             .chosen_debug_dir
             .as_ref()
-            .ok_or(RotateLogsError::NoDebugDirYet)?;
+            .ok_or(ArchiveLogsError::NoDebugDirYet)?;
         // zone crate's 'deprecated' functions collide if you try to enable
         // its 'sync' and 'async' features simultaneously :(
         let rt =
-            tokio::runtime::Runtime::new().map_err(RotateLogsError::Tokio)?;
+            tokio::runtime::Runtime::new().map_err(ArchiveLogsError::Tokio)?;
         let oxz_zones = rt.block_on(Zones::get())?;
-        Self::rotate_logs_inner(
+        Self::archive_logs_inner(
             debug_dir,
             PathBuf::from("/var/svc/log"),
             "global",
@@ -488,30 +490,45 @@ impl DumpSetupWorker {
         for zone in oxz_zones {
             let logdir = zone.path().join("root/var/svc/log");
             let zone_name = zone.name();
-            Self::rotate_logs_inner(debug_dir, logdir, zone_name)?;
+            Self::archive_logs_inner(debug_dir, logdir, zone_name)?;
         }
         Ok(())
     }
 
-    fn rotate_logs_inner(
+    fn archive_logs_inner(
         debug_dir: &DebugDirPath,
         logdir: PathBuf,
         zone_name: &str,
-    ) -> Result<(), RotateLogsError> {
-        // pattern matching rotated logs, e.g. foo.log.3
-        let pattern = logdir
-            .join("*.log.*")
-            .to_str()
-            .ok_or_else(|| RotateLogsError::Utf8(zone_name.to_string()))?
-            .to_string();
-        let glob = glob::glob(&pattern)?;
-        for entry in glob.flatten() {
-            let dest_dir = debug_dir.join(zone_name).into_std_path_buf();
-            std::fs::create_dir_all(&dest_dir)?;
+    ) -> Result<(), ArchiveLogsError> {
+        let mut rotated_log_files = Vec::new();
+        // patterns matching archived logs, e.g. foo.log.3
+        for n in 1..9 {
+            let pattern = logdir
+                .join(format!("*.log.{}", "[0-9]".repeat(n)))
+                .to_str()
+                .ok_or_else(|| ArchiveLogsError::Utf8(zone_name.to_string()))?
+                .to_string();
+            let matches = glob::glob(&pattern)?.flatten().collect_vec();
+            if matches.is_empty() {
+                break;
+            } else {
+                rotated_log_files.extend(matches);
+            }
+        }
+        let dest_dir = debug_dir.join(zone_name).into_std_path_buf();
+        std::fs::create_dir_all(&dest_dir)?;
+        for entry in rotated_log_files {
             let src_name = entry.file_name().unwrap();
-            // as we rotate them out, logadm will keep resetting to .log.0,
-            // so we need to maintain our own numbering in the dest dataset
-            let mut n = 0;
+            // as we archive them, logadm will keep resetting to .log.0,
+            // so we need to maintain our own numbering in the dest dataset.
+            // we'll use the modified date of the rotated log file, or try
+            // falling back to the time of archival if that fails.
+            let mut n = entry
+                .metadata()
+                .and_then(|m| m.modified())
+                .unwrap_or_else(|_| SystemTime::now())
+                .duration_since(UNIX_EPOCH)?
+                .as_secs();
             while dest_dir
                 .join(src_name)
                 .with_extension(format!("{n}"))
@@ -555,7 +572,7 @@ impl DumpSetupWorker {
 }
 
 #[derive(thiserror::Error, Debug)]
-enum RotateLogsError {
+enum ArchiveLogsError {
     #[error("Couldn't make an async runtime to get zone info: {0}")]
     Tokio(std::io::Error),
     #[error("I/O error: {0}")]
@@ -567,7 +584,9 @@ enum RotateLogsError {
     #[error("Glob pattern invalid: {0}")]
     Glob(#[from] glob::PatternError),
     #[error(
-        "No debug dir into which we should rotate logs has yet been chosen"
+        "No debug dir into which we should archive logs has yet been chosen"
     )]
     NoDebugDirYet,
+    #[error("Somehow encountered a timestamp before Unix epoch")]
+    TimelineSideways(#[from] std::time::SystemTimeError),
 }
