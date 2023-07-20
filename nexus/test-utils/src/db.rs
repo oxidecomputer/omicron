@@ -24,7 +24,16 @@ fn seed_dir() -> PathBuf {
 /// seed directory provided at build-time.
 pub async fn test_setup_database(log: &Logger) -> dev::db::CockroachInstance {
     let dir = seed_dir();
-    dev::test_setup_database(log, &dir).await
+    dev::test_setup_database(log, dev::StorageSource::CopyFromSeed {
+        input_dir: dir
+    }).await
+}
+
+/// Creates a new database with no data populated.
+///
+/// Primarily used for schema change and migration testing.
+pub async fn test_setup_database_empty(log: &Logger) -> dev::db::CockroachInstance {
+    dev::test_setup_database(log, dev::StorageSource::DoNotPopulate).await
 }
 
 /// See the definition of this constant in nexus_db_queries.

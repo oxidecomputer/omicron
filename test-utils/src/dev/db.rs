@@ -34,11 +34,11 @@ const COCKROACHDB_START_TIMEOUT_DEFAULT: Duration = Duration::from_secs(30);
 const COCKROACHDB_DEFAULT_LISTEN_PORT: u16 = 0;
 
 /// CockroachDB database name
-// This MUST be kept in sync with src/sql/dbinit.sql and src/sql/dbwipe.sql.
+// This MUST be kept in sync with dbinit.sql and dbwipe.sql.
 const COCKROACHDB_DATABASE: &'static str = "omicron";
 /// CockroachDB user name
 // TODO-security This should really use "omicron", which is created in
-// src/sql/dbinit.sql.  Doing that requires either hardcoding a password or
+// dbinit.sql.  Doing that requires either hardcoding a password or
 // (better) using `cockroach cert` to set up a CA and certificates for this
 // user.  We should modify the infrastructure here to do that rather than use
 // "root" here.
@@ -747,7 +747,7 @@ fn interpret_exit(
 pub async fn populate(
     client: &tokio_postgres::Client,
 ) -> Result<(), anyhow::Error> {
-    let sql = include_str!("../../../common/src/sql/dbinit.sql");
+    let sql = include_str!("../../../schema/crdb/dbinit.sql");
     client.batch_execute(sql).await.context("populating Omicron database")
 
     // It's tempting to put hardcoded data in here (like builtin users).  That
@@ -762,7 +762,7 @@ pub async fn populate(
 pub async fn wipe(
     client: &tokio_postgres::Client,
 ) -> Result<(), anyhow::Error> {
-    let sql = include_str!("../../../common/src/sql/dbwipe.sql");
+    let sql = include_str!("../../../schema/crdb/dbwipe.sql");
     client.batch_execute(sql).await.context("wiping Omicron database")
 }
 

@@ -18,6 +18,7 @@ mod instances;
 mod ip_pools;
 mod loopback_address;
 mod metrics;
+mod migration;
 mod oximeter;
 mod pantry;
 mod password_login;

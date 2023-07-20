@@ -60,7 +60,8 @@ async fn test_nexus_boots_before_cockroach() {
     //
     // This is necessary for the prior call to "start Nexus" to succeed.
     info!(log, "Starting CRDB");
-    builder.start_crdb().await;
+    let populate = true;
+    builder.start_crdb(populate).await;
     info!(log, "Started CRDB");
 
     info!(log, "Populating internal DNS records");
@@ -98,7 +99,8 @@ async fn test_nexus_boots_before_dendrite() {
 
     let log = builder.logctx.log.new(o!("component" => "test"));
 
-    builder.start_crdb().await;
+    let populate = true;
+    builder.start_crdb(populate).await;
     builder.start_internal_dns().await;
     builder.start_external_dns().await;
 
@@ -158,7 +160,8 @@ async fn test_nexus_boots_before_dendrite() {
 async fn nexus_schema_test_setup(
     builder: &mut ControlPlaneTestContextBuilder<'_, omicron_nexus::Server>,
 ) {
-    builder.start_crdb().await;
+    let populate = true;
+    builder.start_crdb(populate).await;
     builder.start_internal_dns().await;
     builder.start_external_dns().await;
     builder.start_dendrite(SwitchLocation::Switch0).await;
