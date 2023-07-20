@@ -4,6 +4,9 @@
 
 //! Sled agent implementation
 
+use crate::bootstrap::early_networking::{
+    EarlyNetworkConfig, EarlyNetworkSetup, EarlyNetworkSetupError,
+};
 use crate::bootstrap::params::StartSledAgentRequest;
 use crate::config::Config;
 use crate::instance_manager::InstanceManager;
@@ -17,6 +20,7 @@ use crate::params::{
 use crate::services::{self, ServiceManager};
 use crate::storage_manager::{self, StorageManager};
 use crate::updates::{ConfigUpdates, UpdateManager};
+use bootstore::schemes::v0 as bootstore;
 use camino::Utf8PathBuf;
 use dropshot::HttpError;
 use illumos_utils::opte::params::SetVirtualNetworkInterfaceHost;
@@ -35,6 +39,7 @@ use omicron_common::backoff::{
 use sled_hardware::underlay;
 use sled_hardware::HardwareManager;
 use slog::Logger;
+use std::collections::HashSet;
 use std::net::{Ipv6Addr, SocketAddrV6};
 use std::sync::Arc;
 use uuid::Uuid;
@@ -93,6 +98,15 @@ pub enum Error {
 
     #[error(transparent)]
     ZpoolList(#[from] illumos_utils::zpool::ListError),
+
+    #[error(transparent)]
+    EarlyNetworkError(#[from] EarlyNetworkSetupError),
+
+    #[error("Bootstore Error: {0}")]
+    Bootstore(#[from] bootstore::NodeRequestError),
+
+    #[error("Failed to deserialize early network config: {0}")]
+    EarlyNetworkDeserialize(serde_json::Error),
 }
 
 impl From<Error> for omicron_common::api::external::Error {
@@ -222,6 +236,7 @@ impl SledAgent {
         request: StartSledAgentRequest,
         services: ServiceManager,
         storage: StorageManager,
+        bootstore: bootstore::NodeHandle,
     ) -> Result<SledAgent, Error> {
         // Pass the "parent_log" to all subcomponents that want to set their own
         // "component" value.
@@ -368,11 +383,46 @@ impl SledAgent {
             sa.hardware_monitor_task(hardware_log).await;
         });
 
+        // Initialize early networking
+        info!(log, "Attempting to load early network config from bootstore");
+        // Pull the early network config out of the bootstore
+        let boundary_switch_addrs = if let Some(serialized_config) =
+            bootstore.get_network_config().await?
+        {
+            let mut early_networking = EarlyNetworkSetup::new(&log);
+            info!(
+                log,
+                concat!(
+                    "Loaded serialized early network config from bootstore ",
+                    "with generation {}"
+                ),
+                serialized_config.generation,
+            );
+
+            let early_network_config: EarlyNetworkConfig = serialized_config
+                .try_into()
+                .map_err(|e| Error::EarlyNetworkDeserialize(e))?;
+            info!(
+                log,
+                "Successfully deserialized network config: {:?}",
+                early_network_config
+            );
+
+            early_networking
+                .init_rack_network(
+                    &early_network_config.rack_network_config,
+                    &early_network_config.switch_mgmt_addrs,
+                )
+                .await?
+        } else {
+            HashSet::new()
+        };
+
         // Finally, load services for which we're already responsible.
         //
         // Do this *after* monitoring for harware, to enable the switch zone to
         // establish an underlay address before proceeding.
-        sled_agent.inner.services.load_services().await?;
+        sled_agent.inner.services.load_services(boundary_switch_addrs).await?;
 
         // Now that we've initialized the sled services, notify nexus again
         // at which point it'll plumb any necessary firewall rules back to us.

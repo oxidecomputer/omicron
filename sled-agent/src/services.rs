@@ -512,13 +512,16 @@ impl ServiceManager {
     // These will fail if the disks aren't attached.
     // Should we have a retry loop here? Kinda like we have with the switch
     // / NTP zone?
-    pub async fn load_services(&self) -> Result<(), Error> {
+    pub async fn load_services(
+        &self,
+        boundary_switch_addrs: HashSet<Ipv6Addr>,
+    ) -> Result<(), Error> {
         let log = &self.inner.log;
         let ledger_paths = self.all_service_ledgers().await;
         info!(log, "Loading services from: {ledger_paths:?}");
 
         let mut existing_zones = self.inner.zones.lock().await;
-        let Some(ledger) = Ledger::<AllZoneRequests>::new(
+        let Some(mut ledger) = Ledger::<AllZoneRequests>::new(
             log,
             ledger_paths,
         )
@@ -526,7 +529,18 @@ impl ServiceManager {
             info!(log, "Loading services - No services detected");
             return Ok(());
         };
-        let services = ledger.data();
+        let services = ledger.data_mut();
+
+        // Inject boundary_switch_addrs into ServiceZoneRequests
+        // When the opte interface is created for the service,
+        // nat entries will be created using the switches present here
+        //let switch_addrs: Vec<Ipv6Addr> = Vec::from_iter(boundary_switch_addrs);
+        for zone_request in &mut services.requests {
+            zone_request
+                .zone
+                .boundary_switches
+                .extend(boundary_switch_addrs.iter());
+        }
 
         // Initialize and DNS and NTP services first as they are required
         // for time synchronization, which is a pre-requisite for the other
