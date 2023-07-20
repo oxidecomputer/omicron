@@ -26,6 +26,7 @@ use omicron_common::address;
 use omicron_common::address::Ipv4Range;
 use omicron_common::api::internal::shared::RackNetworkConfig;
 use sled_hardware::Baseboard;
+use slog::warn;
 use std::collections::BTreeSet;
 use std::mem;
 use std::net::IpAddr;
@@ -116,6 +117,7 @@ impl CurrentRssConfig {
     pub(crate) fn start_rss_request(
         &self,
         bootstrap_peers: &BootstrapPeers,
+        log: &slog::Logger,
     ) -> Result<RackInitializeRequest> {
         // Basic "client-side" checks.
         if self.bootstrap_sleds.is_empty() {
@@ -164,6 +166,27 @@ impl CurrentRssConfig {
             bootstrap_ips.push(ip);
         }
 
+        // LRTQ requires at least 3 sleds
+        //
+        // TODO: Warn users in the wicket UI if they are configuring
+        // a small rack cluster that does not support trust quorum.
+        // https://github.com/oxidecomputer/omicron/issues/3690
+        const TRUST_QUORUM_MIN_SIZE: usize = 3;
+        let trust_quorum_peers: Option<
+            Vec<bootstrap_agent_client::types::Baseboard>,
+        > = if known_bootstrap_sleds.len() >= TRUST_QUORUM_MIN_SIZE {
+            Some(
+                known_bootstrap_sleds.keys().cloned().map(Into::into).collect(),
+            )
+        } else {
+            warn!(
+                log,
+                "Trust quorum disabled: requires at least {} sleds",
+                TRUST_QUORUM_MIN_SIZE
+            );
+            None
+        };
+
         // Convert between internal and progenitor types.
         let user_password_hash = bootstrap_agent_client::types::NewPasswordHash(
             recovery_silo_password_hash.to_string(),
@@ -190,6 +213,7 @@ impl CurrentRssConfig {
 
         let request = RackInitializeRequest {
             rack_subnet: RACK_SUBNET,
+            trust_quorum_peers,
             bootstrap_discovery: BootstrapAddressDiscovery::OnlyThese(
                 bootstrap_ips,
             ),

@@ -11,6 +11,7 @@ use crate::rack_setup::service::RackSetupService;
 use crate::rack_setup::service::SetupServiceError;
 use crate::storage_manager::StorageResources;
 use ::bootstrap_agent_client::Client as BootstrapAgentClient;
+use bootstore::schemes::v0 as bootstore;
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
 use omicron_common::backoff::retry_notify;
@@ -46,6 +47,7 @@ impl RssHandle {
         config: SetupServiceConfig,
         our_bootstrap_address: Ipv6Addr,
         storage_resources: StorageResources,
+        bootstore: bootstore::NodeHandle,
     ) -> Result<(), SetupServiceError> {
         let (tx, rx) = rss_channel(our_bootstrap_address);
 
@@ -54,6 +56,7 @@ impl RssHandle {
             config,
             storage_resources,
             tx,
+            bootstore,
         );
         let log = log.new(o!("component" => "BootstrapAgentRssHandler"));
         rx.await_local_rss_request(&log).await;
