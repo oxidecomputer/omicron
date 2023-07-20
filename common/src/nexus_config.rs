@@ -138,6 +138,8 @@ pub struct DeploymentConfig {
     pub internal_dns: InternalDns,
     /// DB configuration.
     pub database: Database,
+    /// External DNS servers Nexus can use to resolve external hosts.
+    pub external_dns_servers: Vec<String>,
 }
 
 impl DeploymentConfig {
@@ -554,6 +556,7 @@ mod test {
             [deployment]
             id = "28b90dc4-c22a-65ba-f49a-f051fe01208f"
             rack_id = "38b90dc4-c22a-65ba-f49a-f051fe01208f"
+            external_dns_servers = [ "1.1.1.1", "9.9.9.9" ]
             [deployment.dropshot_external]
             bind_address = "10.1.2.3:4567"
             request_body_max_bytes = 1024
@@ -610,6 +613,10 @@ mod test {
                         )
                     },
                     database: Database::FromDns,
+                    external_dns_servers: vec![
+                        "1.1.1.1".to_string(),
+                        "9.9.9.9".to_string(),
+                    ],
                 },
                 pkg: PackageConfig {
                     console: ConsoleConfig {
@@ -678,6 +685,7 @@ mod test {
             [deployment]
             id = "28b90dc4-c22a-65ba-f49a-f051fe01208f"
             rack_id = "38b90dc4-c22a-65ba-f49a-f051fe01208f"
+            external_dns_servers = [ "1.1.1.1", "9.9.9.9" ]
             [deployment.dropshot_external]
             bind_address = "10.1.2.3:4567"
             request_body_max_bytes = 1024
@@ -732,6 +740,7 @@ mod test {
             [deployment]
             id = "28b90dc4-c22a-65ba-f49a-f051fe01208f"
             rack_id = "38b90dc4-c22a-65ba-f49a-f051fe01208f"
+            external_dns_servers = [ "1.1.1.1", "9.9.9.9" ]
             [deployment.dropshot_external]
             bind_address = "10.1.2.3:4567"
             request_body_max_bytes = 1024
@@ -788,6 +797,7 @@ mod test {
             [deployment]
             id = "28b90dc4-c22a-65ba-f49a-f051fe01208f"
             rack_id = "38b90dc4-c22a-65ba-f49a-f051fe01208f"
+            external_dns_servers = [ "1.1.1.1", "9.9.9.9" ]
             [deployment.dropshot_external]
             bind_address = "10.1.2.3:4567"
             request_body_max_bytes = 1024

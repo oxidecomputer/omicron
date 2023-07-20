@@ -1913,6 +1913,13 @@
           {
             "type": "object",
             "properties": {
+              "external_dns_servers": {
+                "description": "External DNS servers Nexus can use to resolve external hosts.",
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
               "external_ip": {
                 "description": "The address at which the external nexus server is reachable.",
                 "type": "string",
@@ -1942,6 +1949,7 @@
               }
             },
             "required": [
+              "external_dns_servers",
               "external_ip",
               "external_tls",
               "internal_address",

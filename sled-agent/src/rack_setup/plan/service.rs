@@ -475,6 +475,7 @@ impl Plan {
                         // always expect TLS to be enabled.  It's only in
                         // development that it might not be.
                         external_tls: !config.external_certificates.is_empty(),
+                        external_dns_servers: config.dns_servers.clone(),
                     },
                 }],
                 boundary_switches: vec![],

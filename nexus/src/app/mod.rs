@@ -25,6 +25,7 @@ use omicron_common::api::external::Error;
 use omicron_common::api::internal::shared::SwitchLocation;
 use slog::Logger;
 use std::collections::HashMap;
+use std::net::IpAddr;
 use std::net::Ipv6Addr;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -141,6 +142,10 @@ pub struct Nexus {
     samael_max_issue_delay: std::sync::Mutex<Option<chrono::Duration>>,
 
     resolver: internal_dns::resolver::Resolver,
+
+    /// List of external DNS servers to use when Nexus needs to resolve an
+    /// external host, e.g. grabbing the IdP metadata via a URL.
+    external_dns_servers: Vec<IpAddr>,
 
     /// Mapping of SwitchLocations to their respective Dendrite Clients
     dpd_clients: HashMap<SwitchLocation, Arc<dpd_client::Client>>,
@@ -274,6 +279,22 @@ impl Nexus {
             &config.pkg.background_tasks,
         );
 
+        let external_dns_servers = {
+            if config.deployment.external_dns_servers.is_empty() {
+                return Err("expected at least 1 external DNS server".into());
+            }
+            config
+                .deployment
+                .external_dns_servers
+                .iter()
+                // TODO(luqman): pass this in as an IpAddr to begin with
+                .map(|addr| addr.parse())
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|e| {
+                    format!("expected IP address for external DNS servers: {e}")
+                })?
+        };
+
         let nexus = Nexus {
             id: config.deployment.id,
             rack_id,
@@ -302,6 +323,7 @@ impl Nexus {
             ),
             samael_max_issue_delay: std::sync::Mutex::new(None),
             resolver,
+            external_dns_servers,
             dpd_clients,
             background_tasks,
         };

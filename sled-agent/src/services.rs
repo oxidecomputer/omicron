@@ -1336,7 +1336,10 @@ impl ServiceManager {
 
             match &service.details {
                 ServiceType::Nexus {
-                    internal_address, external_tls, ..
+                    internal_address,
+                    external_tls,
+                    external_dns_servers,
+                    ..
                 } => {
                     info!(self.inner.log, "Setting up Nexus service");
 
@@ -1390,6 +1393,7 @@ impl ServiceManager {
                             ),
                         },
                         database: nexus_config::Database::FromDns,
+                        external_dns_servers: external_dns_servers.clone(),
                     };
 
                     // Copy the partial config file to the expected location.

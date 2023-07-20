@@ -277,6 +277,8 @@ pub enum ServiceType {
         nic: NetworkInterface,
         /// Whether Nexus's external endpoint should use TLS
         external_tls: bool,
+        /// External DNS servers Nexus can use to resolve external hosts.
+        external_dns_servers: Vec<String>,
     },
     ExternalDns {
         /// The address at which the external DNS server API is reachable.
@@ -414,14 +416,19 @@ impl TryFrom<ServiceType> for sled_agent_client::types::ServiceType {
         use ServiceType as St;
 
         match s {
-            St::Nexus { internal_address, external_ip, nic, external_tls } => {
-                Ok(AutoSt::Nexus {
-                    internal_address: internal_address.to_string(),
-                    external_ip,
-                    nic: nic.into(),
-                    external_tls,
-                })
-            }
+            St::Nexus {
+                internal_address,
+                external_ip,
+                nic,
+                external_tls,
+                external_dns_servers,
+            } => Ok(AutoSt::Nexus {
+                internal_address: internal_address.to_string(),
+                external_ip,
+                nic: nic.into(),
+                external_tls,
+                external_dns_servers,
+            }),
             St::ExternalDns { http_address, dns_address, nic } => {
                 Ok(AutoSt::ExternalDns {
                     http_address: http_address.to_string(),
