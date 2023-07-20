@@ -865,7 +865,7 @@ mod test {
     }
 
     #[test]
-    fn test_zone_bundle_metadata() {
+    fn test_deployment_config_schema() {
         let schema = schemars::schema_for!(DeploymentConfig);
         expectorate::assert_contents(
             "../schema/deployment-config.json",
