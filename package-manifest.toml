@@ -102,16 +102,15 @@ source.paths = [
 output.type = "zone"
 setup_hint = "Run `./tools/ci_download_clickhouse` to download the necessary binaries"
 
-[package.clickhouse-keeper]
-service_name = "clickhouse-keeper"
+[package.clickhouse_keeper]
+service_name = "clickhouse_keeper"
 only_for_targets.image = "standard"
-source.packages = [ "clickhouse-keeper.tar.gz"]
 source.type = "local"
 source.paths = [
-  { from = "out/clickhouse", to = "/opt/oxide/clickhouse-keeper" },
-  { from = "smf/clickhouse-keeper/manifest.xml", to = "/var/svc/manifest/site/clickhouse-keeper/manifest.xml" },
-  { from = "smf/clickhouse-keeper/method_script.sh", to = "/opt/oxide/lib/svc/manifest/clickhouse-keeper.sh" },
-  { from = "smf/clickhouse-keeper/keeper_config.xml", to = "/opt/oxide/clickhouse-keeper/keeper_config.xml" }
+  { from = "out/clickhouse", to = "/opt/oxide/clickhouse_keeper" },
+  { from = "smf/clickhouse_keeper/manifest.xml", to = "/var/svc/manifest/site/clickhouse_keeper/manifest.xml" },
+  { from = "smf/clickhouse_keeper/method_script.sh", to = "/opt/oxide/lib/svc/manifest/clickhouse_keeper.sh" },
+  { from = "smf/clickhouse_keeper/keeper_config.xml", to = "/opt/oxide/clickhouse_keeper/keeper_config.xml" }
 ]
 output.type = "zone"
 setup_hint = "Run `./tools/ci_download_clickhouse` to download the necessary binaries"

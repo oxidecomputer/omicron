@@ -66,7 +66,7 @@ else
 fi
 
 # Populate corresponding template and copy to /opt/oxide/clickhouse/clickhouse/config.d/
-# or /opt/oxide/clickhouse/clickhouse/keeper_config.xml
+# or /opt/oxide/clickhouse_keeper/clickhouse/keeper_config.xml
 # Clickhouse recommends to have these files in `/etc/clickhouse-keeper/` and `/etc/clickhouse-server/config.d/`,
 # but I'm not sure this makes sense to us since we're building the entire clickhouse binary instead of separate
 # `clickhouse-server`, 'clickhouse-keeper' and 'clickhouse-client' binaries.
@@ -78,7 +78,7 @@ sed -i "s/LISTEN_PORT/$LISTEN_PORT; \
     s/KEEPER_HOST_02/$KEEPER_HOST_02/g; \
     s/KEEPER_ID_03/$KEEPER_ID_03/g; \
     s/KEEPER_HOST_03/$KEEPER_HOST_03/g" \
-    /opt/oxide/clickhouse-keeper/clickhouse/keeper_config.xml
+    /opt/oxide/clickhouse_keeper/clickhouse/keeper_config.xml
 
 exec /opt/oxide/clickhouse-keeper/clickhouse keeper enable \
- --config /opt/oxide/clickhouse-keeper/clickhouse/keeper_config.xml &
+ --config /opt/oxide/clickhouse_keeper/clickhouse/keeper_config.xml &

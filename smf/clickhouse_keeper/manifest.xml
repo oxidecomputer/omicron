@@ -12,7 +12,7 @@
   </dependency>
 
   <exec_method type='method' name='start'
-    exec='/opt/oxide/lib/svc/manifest/clickhouse-keeper.sh'
+    exec='/opt/oxide/lib/svc/manifest/clickhouse_keeper.sh'
     timeout_seconds='0' />
   <exec_method type='method' name='stop' exec=':kill' timeout_seconds='0' />
 

@@ -610,6 +610,7 @@ impl ServiceZoneRequest {
             ZoneType::Switch => None,
             // All other zones should be identified by their zone UUID.
             ZoneType::Clickhouse
+            | ZoneType::ClickhouseKeeper
             | ZoneType::CockroachDb
             | ZoneType::Crucible
             | ZoneType::ExternalDns
@@ -758,6 +759,15 @@ impl ServiceZoneRequest {
                         sled_id,
                         address: address.to_string(),
                         kind: NexusTypes::ServiceKind::Clickhouse,
+                    });
+                }
+                ServiceType::ClickhouseKeeper { address } => {
+                    services.push(NexusTypes::ServicePutRequest {
+                        service_id,
+                        zone_id,
+                        sled_id,
+                        address: address.to_string(),
+                        kind: NexusTypes::ServiceKind::ClickhouseKeeper,
                     });
                 }
                 ServiceType::Crucible { address } => {
