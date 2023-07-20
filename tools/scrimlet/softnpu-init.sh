@@ -8,14 +8,16 @@ set -x
 GATEWAY_IP=${GATEWAY_IP:=$(netstat -rn -f inet | grep default | awk -F ' ' '{print $2}')}
 echo "Using $GATEWAY_IP as gateway ip"
 
-ping $GATEWAY_IP
-sleep 1
-ping $GATEWAY_IP
-sleep 1
-ping $GATEWAY_IP
-sleep 1
-ping $GATEWAY_IP
-sleep 1
+if [[ ! -v GATEWAY_MAC ]]; then
+    ping $GATEWAY_IP
+    sleep 1
+    ping $GATEWAY_IP
+    sleep 1
+    ping $GATEWAY_IP
+    sleep 1
+    ping $GATEWAY_IP
+    sleep 1
+fi
 
 # Gateway mac is determined automatically by inspecting the arp table on the development machine
 # Can be overridden by setting GATEWAY_MAC
