@@ -3588,4 +3588,13 @@ mod test {
             &serde_json::to_string_pretty(&schema).unwrap(),
         );
     }
+
+    #[test]
+    fn test_zone_bundle_metadata_schema() {
+        let schema = schemars::schema_for!(ZoneBundleMetadata);
+        expectorate::assert_contents(
+            "../schema/zone-bundle-metadata.json",
+            &serde_json::to_string_pretty(&schema).unwrap(),
+        );
+    }
 }

@@ -11,6 +11,7 @@ use crate::rack_setup::config::SetupServiceConfig as Config;
 use crate::storage_manager::StorageResources;
 use camino::Utf8PathBuf;
 use omicron_common::ledger::{self, Ledger, Ledgerable};
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use slog::Logger;
 use std::collections::{HashMap, HashSet};
@@ -40,7 +41,7 @@ impl Ledgerable for Plan {
 }
 const RSS_SLED_PLAN_FILENAME: &str = "rss-sled-plan.toml";
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct Plan {
     pub rack_id: Uuid,
     pub sleds: HashMap<SocketAddrV6, StartSledAgentRequest>,
@@ -127,5 +128,19 @@ impl Plan {
         ledger.commit().await?;
         info!(log, "Sled plan written to storage");
         Ok(plan)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_rss_sled_plan_schema() {
+        let schema = schemars::schema_for!(Plan);
+        expectorate::assert_contents(
+            "../schema/rss-sled-plan.json",
+            &serde_json::to_string_pretty(&schema).unwrap(),
+        );
     }
 }

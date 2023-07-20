@@ -1,0 +1,462 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Plan",
+  "type": "object",
+  "required": [
+    "config",
+    "rack_id",
+    "sleds"
+  ],
+  "properties": {
+    "config": {
+      "$ref": "#/definitions/RackInitializeRequest"
+    },
+    "rack_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "sleds": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/definitions/StartSledAgentRequest"
+      }
+    }
+  },
+  "definitions": {
+    "BootstrapAddressDiscovery": {
+      "oneOf": [
+        {
+          "description": "Ignore all bootstrap addresses except our own.",
+          "type": "object",
+          "required": [
+            "type"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "only_ours"
+              ]
+            }
+          }
+        },
+        {
+          "description": "Ignore all bootstrap addresses except the following.",
+          "type": "object",
+          "required": [
+            "addrs",
+            "type"
+          ],
+          "properties": {
+            "addrs": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "format": "ipv6"
+              },
+              "uniqueItems": true
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "only_these"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "Certificate": {
+      "type": "object",
+      "required": [
+        "cert",
+        "key"
+      ],
+      "properties": {
+        "cert": {
+          "type": "string"
+        },
+        "key": {
+          "type": "string"
+        }
+      }
+    },
+    "IpRange": {
+      "oneOf": [
+        {
+          "title": "v4",
+          "allOf": [
+            {
+              "$ref": "#/definitions/Ipv4Range"
+            }
+          ]
+        },
+        {
+          "title": "v6",
+          "allOf": [
+            {
+              "$ref": "#/definitions/Ipv6Range"
+            }
+          ]
+        }
+      ]
+    },
+    "Ipv4Range": {
+      "description": "A non-decreasing IPv4 address range, inclusive of both ends.\n\nThe first address must be less than or equal to the last address.",
+      "type": "object",
+      "required": [
+        "first",
+        "last"
+      ],
+      "properties": {
+        "first": {
+          "type": "string",
+          "format": "ipv4"
+        },
+        "last": {
+          "type": "string",
+          "format": "ipv4"
+        }
+      }
+    },
+    "Ipv6Net": {
+      "title": "An IPv6 subnet",
+      "description": "An IPv6 subnet, including prefix and subnet mask",
+      "examples": [
+        "fd12:3456::/64"
+      ],
+      "type": "string",
+      "pattern": "^([fF][dD])[0-9a-fA-F]{2}:(([0-9a-fA-F]{1,4}:){6}[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,6}:)([0-9a-fA-F]{1,4})?\\/([0-9]|[1-9][0-9]|1[0-1][0-9]|12[0-8])$"
+    },
+    "Ipv6Range": {
+      "description": "A non-decreasing IPv6 address range, inclusive of both ends.\n\nThe first address must be less than or equal to the last address.",
+      "type": "object",
+      "required": [
+        "first",
+        "last"
+      ],
+      "properties": {
+        "first": {
+          "type": "string",
+          "format": "ipv6"
+        },
+        "last": {
+          "type": "string",
+          "format": "ipv6"
+        }
+      }
+    },
+    "Ipv6Subnet": {
+      "description": "Wraps an [`Ipv6Network`] with a compile-time prefix length.",
+      "type": "object",
+      "required": [
+        "net"
+      ],
+      "properties": {
+        "net": {
+          "$ref": "#/definitions/Ipv6Net"
+        }
+      }
+    },
+    "Name": {
+      "title": "A name unique within the parent collection",
+      "description": "Names must begin with a lower case ASCII letter, be composed exclusively of lowercase ASCII, uppercase ASCII, numbers, and '-', and may not end with a '-'. Names cannot be a UUID though they may contain a UUID.",
+      "type": "string",
+      "maxLength": 63,
+      "minLength": 1,
+      "pattern": "^(?![0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$)^[a-z][a-z0-9-]*[a-zA-Z0-9]*$"
+    },
+    "NewPasswordHash": {
+      "title": "A password hash in PHC string format",
+      "description": "Password hashes must be in PHC (Password Hashing Competition) string format.  Passwords must be hashed with Argon2id.  Password hashes may be rejected if the parameters appear not to be secure enough.",
+      "type": "string"
+    },
+    "PortFec": {
+      "description": "Switchport FEC options",
+      "type": "string",
+      "enum": [
+        "firecode",
+        "none",
+        "rs"
+      ]
+    },
+    "PortSpeed": {
+      "description": "Switchport Speed options",
+      "type": "string",
+      "enum": [
+        "speed0_g",
+        "speed1_g",
+        "speed10_g",
+        "speed25_g",
+        "speed40_g",
+        "speed50_g",
+        "speed100_g",
+        "speed200_g",
+        "speed400_g"
+      ]
+    },
+    "RackInitializeRequest": {
+      "description": "Configuration for the \"rack setup service\".\n\nThe Rack Setup Service should be responsible for one-time setup actions, such as CockroachDB placement and initialization.  Without operator intervention, however, these actions need a way to be automated in our deployment.",
+      "type": "object",
+      "required": [
+        "bootstrap_discovery",
+        "dns_servers",
+        "external_certificates",
+        "external_dns_ips",
+        "external_dns_zone_name",
+        "internal_services_ip_pool_ranges",
+        "ntp_servers",
+        "rack_subnet",
+        "recovery_silo"
+      ],
+      "properties": {
+        "bootstrap_discovery": {
+          "description": "Describes how bootstrap addresses should be collected during RSS.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/BootstrapAddressDiscovery"
+            }
+          ]
+        },
+        "dns_servers": {
+          "description": "The external DNS server addresses.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "external_certificates": {
+          "description": "initial TLS certificates for the external API",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/Certificate"
+          }
+        },
+        "external_dns_ips": {
+          "description": "Service IP addresses on which we run external DNS servers.\n\nEach address must be present in `internal_services_ip_pool_ranges`.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "format": "ip"
+          }
+        },
+        "external_dns_zone_name": {
+          "description": "DNS name for the DNS zone delegated to the rack for external DNS",
+          "type": "string"
+        },
+        "internal_services_ip_pool_ranges": {
+          "description": "Ranges of the service IP pool which may be used for internal services.",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/IpRange"
+          }
+        },
+        "ntp_servers": {
+          "description": "The external NTP server addresses.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "rack_network_config": {
+          "description": "Initial rack network configuration",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RackNetworkConfig"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "rack_subnet": {
+          "type": "string",
+          "format": "ipv6"
+        },
+        "recovery_silo": {
+          "description": "Configuration of the Recovery Silo (the initial Silo)",
+          "allOf": [
+            {
+              "$ref": "#/definitions/RecoverySiloConfig"
+            }
+          ]
+        }
+      }
+    },
+    "RackNetworkConfig": {
+      "description": "Initial network configuration",
+      "type": "object",
+      "required": [
+        "infra_ip_first",
+        "infra_ip_last",
+        "uplinks"
+      ],
+      "properties": {
+        "infra_ip_first": {
+          "description": "First ip address to be used for configuring network infrastructure",
+          "type": "string",
+          "format": "ipv4"
+        },
+        "infra_ip_last": {
+          "description": "Last ip address to be used for configuring network infrastructure",
+          "type": "string",
+          "format": "ipv4"
+        },
+        "uplinks": {
+          "description": "Uplinks for connecting the rack to external networks",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/UplinkConfig"
+          }
+        }
+      }
+    },
+    "RecoverySiloConfig": {
+      "type": "object",
+      "required": [
+        "silo_name",
+        "user_name",
+        "user_password_hash"
+      ],
+      "properties": {
+        "silo_name": {
+          "$ref": "#/definitions/Name"
+        },
+        "user_name": {
+          "$ref": "#/definitions/UserId"
+        },
+        "user_password_hash": {
+          "$ref": "#/definitions/NewPasswordHash"
+        }
+      }
+    },
+    "StartSledAgentRequest": {
+      "description": "Configuration information for launching a Sled Agent.",
+      "type": "object",
+      "required": [
+        "dns_servers",
+        "id",
+        "ntp_servers",
+        "rack_id",
+        "subnet"
+      ],
+      "properties": {
+        "dns_servers": {
+          "description": "The external DNS servers to use",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "id": {
+          "description": "Uuid of the Sled Agent to be created.",
+          "type": "string",
+          "format": "uuid"
+        },
+        "ntp_servers": {
+          "description": "The external NTP servers to use",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "rack_id": {
+          "description": "Uuid of the rack to which this sled agent belongs.",
+          "type": "string",
+          "format": "uuid"
+        },
+        "subnet": {
+          "description": "Portion of the IP space to be managed by the Sled Agent.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/Ipv6Subnet"
+            }
+          ]
+        }
+      }
+    },
+    "SwitchLocation": {
+      "description": "Identifies switch physical location",
+      "oneOf": [
+        {
+          "description": "Switch in upper slot",
+          "type": "string",
+          "enum": [
+            "switch0"
+          ]
+        },
+        {
+          "description": "Switch in lower slot",
+          "type": "string",
+          "enum": [
+            "switch1"
+          ]
+        }
+      ]
+    },
+    "UplinkConfig": {
+      "type": "object",
+      "required": [
+        "gateway_ip",
+        "switch",
+        "uplink_ip",
+        "uplink_port",
+        "uplink_port_fec",
+        "uplink_port_speed"
+      ],
+      "properties": {
+        "gateway_ip": {
+          "description": "Gateway address",
+          "type": "string",
+          "format": "ipv4"
+        },
+        "switch": {
+          "description": "Switch to use for uplink",
+          "allOf": [
+            {
+              "$ref": "#/definitions/SwitchLocation"
+            }
+          ]
+        },
+        "uplink_ip": {
+          "description": "IP Address to apply to switchport (must be in infra_ip pool)",
+          "type": "string",
+          "format": "ipv4"
+        },
+        "uplink_port": {
+          "description": "Switchport to use for external connectivity",
+          "type": "string"
+        },
+        "uplink_port_fec": {
+          "description": "Forward Error Correction setting for the uplink port",
+          "allOf": [
+            {
+              "$ref": "#/definitions/PortFec"
+            }
+          ]
+        },
+        "uplink_port_speed": {
+          "description": "Speed for the Switchport",
+          "allOf": [
+            {
+              "$ref": "#/definitions/PortSpeed"
+            }
+          ]
+        },
+        "uplink_vid": {
+          "description": "VLAN id to use for uplink",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint16",
+          "minimum": 0.0
+        }
+      }
+    },
+    "UserId": {
+      "description": "Names must begin with a lower case ASCII letter, be composed exclusively of lowercase ASCII, uppercase ASCII, numbers, and '-', and may not end with a '-'. Names cannot be a UUID though they may contain a UUID.",
+      "type": "string"
+    }
+  }
+}
