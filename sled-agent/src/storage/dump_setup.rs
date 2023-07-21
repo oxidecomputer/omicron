@@ -425,10 +425,18 @@ impl DumpSetupWorker {
                         if let Some(path) = entry.file_name().to_str() {
                             let dest = debug_dir.join(path);
 
-                            if let Err(err) = Self::copy_sync_and_remove(&entry.path(), &dest) {
-                                error!(self.log, "Failed to archive {entry:?}: {err:?}");
+                            if let Err(err) =
+                                Self::copy_sync_and_remove(&entry.path(), &dest)
+                            {
+                                error!(
+                                    self.log,
+                                    "Failed to archive {entry:?}: {err:?}"
+                                );
                             } else {
-                                info!(self.log, "Relocated {entry:?} to {dest:?}");
+                                info!(
+                                    self.log,
+                                    "Relocated {entry:?} to {dest:?}"
+                                );
                             }
                         } else {
                             error!(self.log, "Non-UTF8 path found while archiving core dumps: {entry:?}");
@@ -519,7 +527,10 @@ impl DumpSetupWorker {
         if !rotated_log_files.is_empty() {
             std::fs::create_dir_all(&dest_dir)?;
             let count = rotated_log_files.len();
-            info!(self.log, "Archiving {count} log files from {zone_name} zone");
+            info!(
+                self.log,
+                "Archiving {count} log files from {zone_name} zone"
+            );
         }
         for entry in rotated_log_files {
             let src_name = entry.file_name().unwrap();
