@@ -1917,7 +1917,8 @@
                 "description": "External DNS servers Nexus can use to resolve external hosts.",
                 "type": "array",
                 "items": {
-                  "type": "string"
+                  "type": "string",
+                  "format": "ip"
                 }
               },
               "external_ip": {
@@ -2070,7 +2071,8 @@
               "dns_servers": {
                 "type": "array",
                 "items": {
-                  "type": "string"
+                  "type": "string",
+                  "format": "ip"
                 }
               },
               "domain": {
@@ -2124,7 +2126,8 @@
               "dns_servers": {
                 "type": "array",
                 "items": {
-                  "type": "string"
+                  "type": "string",
+                  "format": "ip"
                 }
               },
               "domain": {

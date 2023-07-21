@@ -912,7 +912,7 @@ impl ServiceManager {
     async fn configure_dns_client(
         &self,
         running_zone: &RunningZone,
-        dns_servers: &Vec<String>,
+        dns_servers: &[IpAddr],
         domain: &Option<String>,
     ) -> Result<(), Error> {
         struct DnsClient {}
@@ -1815,7 +1815,7 @@ impl ServiceManager {
                     }
                     self.configure_dns_client(
                         &running_zone,
-                        &dns_servers,
+                        dns_servers,
                         &domain,
                     )
                     .await?;

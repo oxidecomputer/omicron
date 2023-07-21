@@ -20,6 +20,7 @@ use serde_with::DurationSeconds;
 use serde_with::SerializeDisplay;
 use std::collections::HashMap;
 use std::fmt;
+use std::net::IpAddr;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -139,7 +140,7 @@ pub struct DeploymentConfig {
     /// DB configuration.
     pub database: Database,
     /// External DNS servers Nexus can use to resolve external hosts.
-    pub external_dns_servers: Vec<String>,
+    pub external_dns_servers: Vec<IpAddr>,
 }
 
 impl DeploymentConfig {
@@ -614,8 +615,8 @@ mod test {
                     },
                     database: Database::FromDns,
                     external_dns_servers: vec![
-                        "1.1.1.1".to_string(),
-                        "9.9.9.9".to_string(),
+                        "1.1.1.1".parse().unwrap(),
+                        "9.9.9.9".parse().unwrap(),
                     ],
                 },
                 pkg: PackageConfig {

@@ -56,7 +56,7 @@ pub(crate) struct CurrentRssConfig {
 
     bootstrap_sleds: BTreeSet<BootstrapSledDescription>,
     ntp_servers: Vec<String>,
-    dns_servers: Vec<String>,
+    dns_servers: Vec<IpAddr>,
     internal_services_ip_pool_ranges: Vec<address::IpRange>,
     external_dns_ips: Vec<IpAddr>,
     external_dns_zone_name: String,

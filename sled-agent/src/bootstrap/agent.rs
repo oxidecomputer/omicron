@@ -1074,7 +1074,7 @@ mod tests {
                 id: Uuid::new_v4(),
                 rack_id: Uuid::new_v4(),
                 ntp_servers: vec![String::from("test.pool.example.com")],
-                dns_servers: vec![String::from("1.1.1.1")],
+                dns_servers: vec!["1.1.1.1".parse().unwrap()],
                 use_trust_quorum: false,
                 subnet: Ipv6Subnet::new(Ipv6Addr::LOCALHOST),
             }),

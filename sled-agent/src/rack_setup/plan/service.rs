@@ -301,8 +301,8 @@ impl Plan {
             &reserved_rack_subnet.get_dns_subnets()[0..DNS_REDUNDANCY];
         let rack_dns_servers = dns_subnets
             .into_iter()
-            .map(|dns_subnet| dns_subnet.dns_address().ip().to_string())
-            .collect::<Vec<String>>();
+            .map(|dns_subnet| dns_subnet.dns_address().ip().into())
+            .collect::<Vec<IpAddr>>();
         for i in 0..dns_subnets.len() {
             let dns_subnet = &dns_subnets[i];
             let ip = dns_subnet.dns_address().ip();

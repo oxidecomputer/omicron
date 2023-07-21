@@ -278,7 +278,7 @@ pub enum ServiceType {
         /// Whether Nexus's external endpoint should use TLS
         external_tls: bool,
         /// External DNS servers Nexus can use to resolve external hosts.
-        external_dns_servers: Vec<String>,
+        external_dns_servers: Vec<IpAddr>,
     },
     ExternalDns {
         /// The address at which the external DNS server API is reachable.
@@ -336,7 +336,7 @@ pub enum ServiceType {
     BoundaryNtp {
         address: SocketAddrV6,
         ntp_servers: Vec<String>,
-        dns_servers: Vec<String>,
+        dns_servers: Vec<IpAddr>,
         domain: Option<String>,
         /// The service vNIC providing outbound connectivity using OPTE.
         nic: NetworkInterface,
@@ -346,7 +346,7 @@ pub enum ServiceType {
     InternalNtp {
         address: SocketAddrV6,
         ntp_servers: Vec<String>,
-        dns_servers: Vec<String>,
+        dns_servers: Vec<IpAddr>,
         domain: Option<String>,
     },
     Clickhouse {

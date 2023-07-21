@@ -283,17 +283,9 @@ impl Nexus {
             if config.deployment.external_dns_servers.is_empty() {
                 return Err("expected at least 1 external DNS server".into());
             }
-            let servers = config
-                .deployment
-                .external_dns_servers
-                .iter()
-                // TODO(luqman): pass this in as an IpAddr to begin with
-                .map(|addr| addr.parse())
-                .collect::<Result<Vec<_>, _>>()
-                .map_err(|e| {
-                    format!("expected IP address for external DNS servers: {e}")
-                })?;
-            Arc::new(external_dns::Resolver::new(&servers))
+            Arc::new(external_dns::Resolver::new(
+                &config.deployment.external_dns_servers,
+            ))
         };
 
         let nexus = Nexus {
