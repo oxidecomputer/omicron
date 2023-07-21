@@ -2,8 +2,6 @@
 :toc: left
 :icons: font
 
-// XXX-dap need a diagram of components and which networks they're on
-
 = Omicron Networking
 
 This is a very rough introduction to how networking works within the Oxide system and particularly the control plane (Omicron).  Much more information is available in various RFDs, particularly <<rfd63>>.
@@ -129,84 +127,50 @@ We talk about a few major networks in a single-rack Oxide system:
 * the **management network**.  This is the network that service processors (SPs) are connected to.  It's constrained, in part because the devices on it have limited capabilities (e.g., limited throughput, generally no TCP, etc.) and also because those devices are critical to the safety of the system (like keeping sleds from melting).  The only control plane component on this network is the Management Gateway Service (MGS).  See <<rfd210>> for more on MGS and the management network.
 * the **external network** or **customer network**.  The Oxide system exposes services directly to customers: namely, external DNS (which serves as a directory for services provided by the rack) and the external API/web console.  The rack's NTP servers (not for external consumption) also connect to other NTP servers using this network.  All of these services use addresses on the customer's network.  This is the only network that can be IPv4.
 
-TODO this should be a diagram
+```mermaid
+graph RL
 
-.Summary of what components are on what networks
-[cols="1,1,1,1,1",options="header"]
-|===
-|Component
-|Bootstrap?
-|Management?
-|Underlay?
-|External?
+    net_external --- ExternalDns
+    net_external --- Nexus
+    net_external --- BoundaryNtp
 
-|Sled Agent
-|Yes
-|No
-|No
-|No
+    ExternalDns --- net_underlay
+    Nexus --- net_underlay
+    BoundaryNtp --- net_underlay
+    InternalNtp --- net_underlay
+    CockroachDB --- net_underlay
+    InternalDns --- net_underlay
+    Oximeter --- net_underlay
+    Dendrite --- net_underlay
+    Clickhouse --- net_underlay
+    SledAgent --- net_underlay
+    MGS --- net_underlay
 
-|Management Gateway Service (MGS)
-|No
-|Yes
-|Yes
-|No
+    net_management --- MGS
+    SPs --- net_management
 
-|Nexus
-|No
-|No
-|Yes
-|Yes (for external API/console)
+    net_bootstrap --- SledAgent
 
-|External DNS
-|No
-|No
-|Yes
-|Yes (for customer-facing DNS)
+    %% Labels are defined as needed at the end here to avoid changing the layout.
+    ExternalDns["External DNS"]
+    BoundaryNtp["Boundary NTP"]
+    InternalNtp["Internal NTP"]
+    InternalDns["Internal DNS"]
+    SledAgent["Sled Agent"]
+    MGS["Management Gateway Service"]
+    SPs["Service Processors"]
 
-|NTP (Boundary)
-|No
-|No
-|Yes
-|Yes (NAT only, for reaching external NTP servers)
+    net_underlay["underlay network"]
+    net_external["external network"]
+    net_management["management network"]
+    net_bootstrap["bootstrap network"]
 
-|NTP (Internal)
-|No
-|No
-|Yes
-|No
-
-|Internal DNS
-|No
-|No
-|Yes
-|No
-
-|CockroachDB
-|No
-|No
-|Yes
-|No
-
-|Clickhouse
-|No
-|No
-|Yes
-|No
-
-|Oximeter
-|No
-|No
-|Yes
-|No
-
-|Dendrite
-|No
-|No
-|Yes
-|No
-
-|===
+    classDef network fill:#f96
+    class net_external network
+    class net_management network
+    class net_underlay network
+    class net_bootstrap network
+```
 
 Most of these components run in a dedicated non-global zone.  Sled Agent runs in the global zone because it needs to manage other zones and other resources that aren't available inside zones.  All components thus have their own netstack with their own datalinks, IPs, etc.
 
