@@ -1946,8 +1946,6 @@ impl ServiceManager {
             });
         }
 
-        // We initialize all the zones we can, but only return one error, if
-        // any.
         let futures = requests.iter().map(|request| {
             async move {
                 self.initialize_zone(
@@ -1960,8 +1958,8 @@ impl ServiceManager {
             }
         });
         let results = futures::future::join_all(futures).await;
+
         let mut errors = Vec::new();
-        // TODO: maybe merge and return errors?
         for result in results {
             match result {
                 Ok(zone) => {
