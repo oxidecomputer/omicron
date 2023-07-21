@@ -446,7 +446,8 @@
             "description": "The external DNS server addresses.",
             "type": "array",
             "items": {
-              "type": "string"
+              "type": "string",
+              "format": "ip"
             }
           },
           "external_certificates": {

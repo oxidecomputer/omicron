@@ -912,7 +912,7 @@ impl ServiceManager {
     async fn configure_dns_client(
         &self,
         running_zone: &RunningZone,
-        dns_servers: &Vec<String>,
+        dns_servers: &[IpAddr],
         domain: &Option<String>,
     ) -> Result<(), Error> {
         struct DnsClient {}
@@ -1336,7 +1336,10 @@ impl ServiceManager {
 
             match &service.details {
                 ServiceType::Nexus {
-                    internal_address, external_tls, ..
+                    internal_address,
+                    external_tls,
+                    external_dns_servers,
+                    ..
                 } => {
                     info!(self.inner.log, "Setting up Nexus service");
 
@@ -1390,6 +1393,7 @@ impl ServiceManager {
                             ),
                         },
                         database: nexus_config::Database::FromDns,
+                        external_dns_servers: external_dns_servers.clone(),
                     };
 
                     // Copy the partial config file to the expected location.
@@ -1811,7 +1815,7 @@ impl ServiceManager {
                     }
                     self.configure_dns_client(
                         &running_zone,
-                        &dns_servers,
+                        dns_servers,
                         &domain,
                     )
                     .await?;

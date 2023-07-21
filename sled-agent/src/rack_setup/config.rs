@@ -101,7 +101,7 @@ mod test {
             trust_quorum_peers: None,
             bootstrap_discovery: BootstrapAddressDiscovery::OnlyOurs,
             ntp_servers: vec![String::from("test.pool.example.com")],
-            dns_servers: vec![String::from("1.1.1.1")],
+            dns_servers: vec!["1.1.1.1".parse().unwrap()],
             external_dns_zone_name: String::from("oxide.test"),
             internal_services_ip_pool_ranges: vec![IpRange::from(IpAddr::V4(
                 Ipv4Addr::new(129, 168, 1, 20),
