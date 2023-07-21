@@ -22,15 +22,15 @@ IPv6 addresses can be used in most places that an IPv4 address can be.  That inc
 
 The IPv6 address space is huge.  Many blocks are assigned specific purposes.  Some that are notable for us:
 
-* `fe80::/10`: https://en.wikipedia.org/wiki/Link-local_address[Link-local addresses].  Every IPv6 interface has one of these and it's assigned automatically without DHCP or anything.  However, these addresses are only valid on the network segment that the interface is attached to.
+* `fe80::/10`: https://en.wikipedia.org/wiki/Link-local_address[Link-local addresses].  Every IPv6 interface has one of these and it's assigned automatically without DHCP or anything.  However, these addresses are only valid on the network segment (L2) that the interface is attached to.
 * `fc00::/7`: https://en.wikipedia.org/wiki/Unique_local_address[Unique local address (ULA)], "somewhat analogous to IPv4 private network addressing" (e.g., `10.0.0.0/8`).
-** `fd00::/8`: the part of the ULA that's _not_ centrally assigned.  The control plane primarily uses addresses in this range.
+** `fd00::/8`: the part of the ULA that's _not_ centrally assigned.  The control plane primarily uses addresses in this range.  ULAs are broken up into `/48` subnets.  The 40 other bits that make up the prefix are supposed to be randomly generated.
 
 Because link-local addresses are only valid for the network that the link is attached to, whenever you use a link-local address, you usually have to specify which link's network you mean.  You might see `fe80::aa40:25ff:fe04:3d5%cxgbe0`, where `fe80::aa40:25ff:fe04:3d5` is the link-local address and `cxgbe0` is the **scope_id** (denoting "the network attached to cxgbe0").  We'll look at an example below.
 
 == Inspecting networking configuration on illumos
 
-illumos supports lightweight OS-based virtualization in the form of **zones**.  Each system has a **global zone** (GZ) that contains all other **non-global zones.**  Each zone looks like its own separate illumos system with its own root filesystem and (importantly for us) its own netstack.  It has its own set of datalinks, IP interfaces, addresses, etc.
+illumos supports lightweight OS-based virtualization in the form of **zones**.  Each system has a **global zone** (GZ) that contains all other **non-global zones.**  Each zone looks like its own separate illumos system with its own root filesystem, datalinks, and (importantly for us) its own netstack.  It has its own set of IP interfaces, addresses, etc.
 
 Let's start at the link layer (L2) in the GZ of a sled.  https://illumos.org/man/8/dladm[dladm(8)] shows all the L2 links in the system:
 
@@ -53,7 +53,7 @@ We can see:
 * Two `etherstub` devices, `bootstrap_stub0` and `underlay_stub0`.  Etherstubs function like a synthetic Ethernet network.  We can create VNICs over an etherstub and those VNICs will act as though connected through a (virtual) switch.
 * Two `vnic` devices.  VNICs function like virtualized network links created _over_ some other link.  For example, we could create two VNICs over `cxgbe0`.  Each would have its own MAC address and IP addresses and would be functionally like having another device on the same network that `cxgbe0` is plugged into.  As we'll see, a single system might have a bunch of zones, each with an Omicron component running in it, and each having a VNIC on the underlay network.
 
-We'll discuss these in more detail later.  There are also many other kinds of links.  See the manual page for more details.
+We'll discuss these in more detail later.  There are also many other kinds of links and commands to listing specific types.  See the manual page for more details.
 
 Moving up to the IP layer (L3), https://illumos.org/man/8/ipadm[ipadm(8)] shows the IP interfaces configured on the system:
 
@@ -116,6 +116,8 @@ fd00:1122:3344:105::/64     fe80::aa40:25ff:fe05:41c    UG      1       0 cxgbe1
 
 We'll talk about this more later.
 
+Finally, you can use the portable `ifconfig` tool to list much of the same information.  We'll be sticking to the illumos tools.
+
 == Networking in Omicron
 
 === Networks
@@ -124,7 +126,7 @@ We talk about a few major networks in a single-rack Oxide system:
 
 * the **underlay network**.  This is the main network used by Omicron components like Nexus, internal/external DNS, CockroachDB, Sled Agents, Dendrite, and Management Gateway Service to talk to each other.  (See <<rfd61>>.)  Customer traffic is also encapsulated and sent between components on this network.
 * the **bootstrap** network.  This network is used by bootstrap agents (part of the sled agent) to reach other bootstrap agents so that sleds can discover each other and form a trust quorum.  Once the trust quorum is established, sleds can unlock encrypted local storage and start the rest of the control plane, which enables the underlay network to be configured.
-* the **management network**.  This is the network that service processors (SPs) are connected to.  It's constrained, in part because the devices on it have limited capabilities (e.g., limited throughput, generally no TCP, etc.) and also because those devices are critical to the safety of the system (like keeping sleds from melting).  The only control plane component on this network is the Management Gateway Service (MGS).  See <<rfd210>> for more on MGS and the management network.
+* the **management network**.  This is the network that service processors (SPs) and the technician ports on the Sidecars are connected to.  It's constrained, in part because the devices on it have limited capabilities (e.g., limited throughput, generally no TCP, etc.) and also because those devices are critical to the safety of the system (like keeping sleds from melting).  The only control plane component on this network is the Management Gateway Service (MGS).  See <<rfd210>> for more on MGS and the management network.
 * the **external network** or **customer network**.  The Oxide system exposes services directly to customers: namely, external DNS (which serves as a directory for services provided by the rack) and the external API/web console.  The rack's NTP servers (not for external consumption) also connect to other NTP servers using this network.  All of these services use addresses on the customer's network.  This is the only network that can be IPv4.
 
 ```mermaid
@@ -436,7 +438,7 @@ graph TD;
     underlay0["underlay0 (VNIC, GZ)"]
     underlay0_ip["underlay0 (IP, GZ)\naddresses:\nLL: fe80::..."]
 
-    subgraph cpzone["Every control plane zone\n(Nexus, CockroachDB,\nDNS, etc. and oxz_switch)"]
+    subgraph cpzone["Every control plane zone"]
         oxControlServiceN["oxControlServiceN (VNIC)"]
         oxControlServiceN_ip["oxControlServiceN (IP)\naddresses:\nLL: fe80::...\nomicron6: «underlay address»\n"]
         oxControlServiceN_ip --- oxControlServiceN
@@ -602,7 +604,7 @@ Once set up, the bootstrap network works largely the same way as the underlay ne
 * each sled has an etherstub that implements the per-sled bootstrap network
 * each sled in the rack has two routes to each other sled: one through each switch
 
-It's simpler than the underlay network because only global zones have addresses on the bootstrap network.  None of the per-zone datalinks, routing tables, and netstack stuff from the underlay network applies to the bootstrap network.
+It's simpler than the underlay network because there are many fewer components on it: only global zones and the switch zones have addresses on the bootstrap network.
 
 === Connectivity to the Management Network
 
@@ -657,7 +659,7 @@ oxControlService12/omicron6 static ok   fd00:1122:3344:104::4/64
 
 External connectivity uses the (aptly-named) `vopte0/public` address.  But the address there is 172.30.2.6, not in the configured range of 172.20.26.1 - 172.26.1.10.  It's a coincidence that these ranges look so similar.  No matter the actual customer-provided addresses, Nexus always uses fixed 172.30 prefixes for DNS, Nexus, and Boundary NTP.  Customers can choose what range is used for their VPCs.
 
-Still, one of the real external addresses must map to this Nexus zone.  How do we find out what that is?  We can use `opteadm` in the GZ:
+Still, one of the real external addresses must map to this Nexus zone.  How do we find out what that is?  Because boundary services uses OPTE, we can use `opteadm` in the GZ to shed some light:
 
 [source,console]
 ----
@@ -673,7 +675,7 @@ opte6                            A8:40:25:F7:19:71        172.30.0.41      172.2
 opte7                            A8:40:25:F2:BB:4B        192.168.0.17     172.20.26.45     None                                     None                                     running
 ----
 
-Recall that OPTE is part of boundary services.  This command lists key configuration: it says that external IP 172.20.26.4 maps to an internal IPv4 address 172.30.2.6 on `opte0`.  This corresponds with `vopte0` in the Nexus zone (because it's the same-numbered device name).
+This command lists key configuration: it says that external IP 172.20.26.4 maps to an internal IPv4 address 172.30.2.6 on `opte0`.  This corresponds with `vopte0` in the Nexus zone (because it's the same-numbered device name).
 
 Okay, so given incoming external traffic for 172.20.26.4, we can see how this sled translates that to 172.30.2.6 and gets it to the right zone.  How did it get to this sled in the first place?  For that, we look at the configuration in one of the `oxz_switch` zones, which manage the Tofino switch:
 
