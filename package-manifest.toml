@@ -189,9 +189,60 @@ only_for_targets.image = "standard"
 source.type = "local"
 source.rust.binary_names = ["mgs"]
 source.rust.release = true
-source.paths = [ { from = "smf/mgs", to = "/var/svc/manifest/site/mgs" } ]
+source.paths = [ ]
 output.type = "zone"
 output.intermediate_only = true
+
+[package.omicron-gateway-asic-customizations]
+service_name = "mgs"
+only_for_targets.image = "standard"
+only_for_targets.switch = "asic"
+source.type = "local"
+source.paths = [ { from = "smf/mgs", to = "/var/svc/manifest/site/mgs" } ]
+output.intermediate_only = true
+output.type = "zone"
+
+[package.omicron-gateway-stub-customizations]
+service_name = "mgs"
+only_for_targets.image = "standard"
+only_for_targets.switch = "stub"
+source.type = "local"
+source.paths = [ { from = "smf/mgs-sim", to = "/var/svc/manifest/site/mgs" } ]
+output.intermediate_only = true
+output.type = "zone"
+
+[package.omicron-gateway-softnpu-customizations]
+service_name = "mgs"
+only_for_targets.image = "standard"
+only_for_targets.switch = "softnpu"
+source.type = "local"
+source.paths = [ { from = "smf/mgs-sim", to = "/var/svc/manifest/site/mgs" } ]
+output.intermediate_only = true
+output.type = "zone"
+
+[package.omicron-gateway-asic]
+service_name = "mgs"
+only_for_targets.image = "standard"
+only_for_targets.switch = "asic"
+source.type = "composite"
+source.packages = [ "omicron-gateway.tar.gz", "omicron-gateway-asic-customizations.tar.gz" ]
+output.type = "zone"
+
+[package.omicron-gateway-stub]
+service_name = "mgs"
+only_for_targets.image = "standard"
+only_for_targets.switch = "stub"
+source.type = "composite"
+source.packages = [ "omicron-gateway.tar.gz", "omicron-gateway-stub-customizations.tar.gz" ]
+output.type = "zone"
+
+[package.omicron-gateway-softnpu]
+service_name = "mgs"
+only_for_targets.image = "standard"
+only_for_targets.switch = "softnpu"
+source.type = "composite"
+source.packages = [ "omicron-gateway.tar.gz", "omicron-gateway-softnpu-customizations.tar.gz" ]
+output.type = "zone"
 
 [package.wicketd]
 service_name = "wicketd"
@@ -221,7 +272,37 @@ source.type = "local"
 source.paths = [
   { from = "smf/switch_zone_setup/manifest.xml", to = "/var/svc/manifest/site/switch_zone_setup/manifest.xml" },
   { from = "smf/switch_zone_setup/switch_zone_setup", to = "/opt/oxide/bin/switch_zone_setup" },
+  { from = "smf/switch_zone_setup/support_authorized_keys", to = "/opt/oxide/support/authorized_keys" },
+  { from = "smf/switch_zone_setup/root.profile", to = "/root/.profile" },
 ]
+output.type = "zone"
+output.intermediate_only = true
+
+[package.sp-sim]
+service_name = "sp-sim"
+only_for_targets.image = "standard"
+source.type = "local"
+source.rust.binary_names = ["sp-sim"]
+source.rust.release = true
+source.paths = [ { from = "smf/sp-sim", to = "/var/svc/manifest/site/sp-sim" } ]
+output.type = "zone"
+output.intermediate_only = true
+
+[package.sp-sim-stub]
+service_name = "sp-sim-customizations"
+only_for_targets.image = "standard"
+only_for_targets.switch = "stub"
+source.type = "composite"
+source.packages = [ "sp-sim.tar.gz" ]
+output.type = "zone"
+output.intermediate_only = true
+
+[package.sp-sim-softnpu]
+service_name = "sp-sim-customizations"
+only_for_targets.image = "standard"
+only_for_targets.switch = "softnpu"
+source.type = "composite"
+source.packages = [ "sp-sim.tar.gz" ]
 output.type = "zone"
 output.intermediate_only = true
 
@@ -241,10 +322,10 @@ only_for_targets.image = "standard"
 # 3. Use source.type = "manual" instead of "prebuilt"
 source.type = "prebuilt"
 source.repo = "crucible"
-source.commit = "df7e274edf0a1df287770e9567b27676f3ae4cc5"
+source.commit = "179e68b8718d24673893dac46a8ab4a9249ec318"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/crucible/image/<commit>/crucible.sha256.txt
-source.sha256 = "c1a7996dfdded9476d5a595f16fcd07e902bb02f2ec0858bb3625f9b2195a919"
+source.sha256 = "92d83450a48c3bca7775a8b00b453dfb48d1c6a3519bc1a4a75c9f9c46543e8f"
 output.type = "zone"
 
 [package.crucible-pantry]
@@ -252,10 +333,10 @@ service_name = "crucible_pantry"
 only_for_targets.image = "standard"
 source.type = "prebuilt"
 source.repo = "crucible"
-source.commit = "df7e274edf0a1df287770e9567b27676f3ae4cc5"
+source.commit = "179e68b8718d24673893dac46a8ab4a9249ec318"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/crucible/image/<commit>/crucible-pantry.sha256.txt
-source.sha256 = "23611f3770a797b829c340e6dba25a4898678ece79db8534e06f76e438214e4c"
+source.sha256 = "88d86e90f1c0e45eb371b57ecf05f15ac869d642adf343b76217bb2cdb7a928d"
 output.type = "zone"
 
 # Refer to
@@ -266,10 +347,10 @@ service_name = "propolis-server"
 only_for_targets.image = "standard"
 source.type = "prebuilt"
 source.repo = "propolis"
-source.commit = "04a275736e9f3316de6bf2a4077d03acfa4e2cdf"
+source.commit = "fbd701c0a54f25208712b0b3b2dc7931c875d347"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/propolis/image/<commit>/propolis-server.sha256.txt
-source.sha256 = "3b52f303d7f0a687fd895e7129c93ca1d683d2cb676bff9c6c9d15bd3d2b3b5e"
+source.sha256 = "1bc7c6fc6a029d34493adef16457029bc2cd3b3624beab376136f0e08e4550e7"
 output.type = "zone"
 
 [package.maghemite]
@@ -282,10 +363,10 @@ source.repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "38735f1f1c8101121553e271e9da0d7a38485687"
+source.commit = "12703675393459e74139f8140e0b3c4c4f129d5d"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/maghemite.sha256.txt
-source.sha256 = "f28c44e4b4e53aeb001027be1f8029d515d8f58bbe0380c0fd95574e73a322e7"
+source.sha256 = "e57fe791ee898d59890c5779fbd4dce598250fb6ed53832024212bcdeec0cc5b"
 output.type = "tarball"
 
 [package.mg-ddm]
@@ -298,10 +379,10 @@ source.repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "38735f1f1c8101121553e271e9da0d7a38485687"
+source.commit = "12703675393459e74139f8140e0b3c4c4f129d5d"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mg-ddm.sha256.txt
-source.sha256 = "4e2de09e8a323be6858b4c3102347c3e455a3106f679dbd632c4aebcde64958c"
+source.sha256 = "3aa0d32b1d2b6be7091b9c665657296e924a86a00ca38756e9f45a1e629fd92b"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -318,8 +399,8 @@ only_for_targets.image = "standard"
 # 2. Copy dendrite.tar.gz from dendrite/out to omicron/out
 source.type = "prebuilt"
 source.repo = "dendrite"
-source.commit = "b419dfb6dbcabbf9d20b4d001de59eaaed42d2e5"
-source.sha256 = "50c27f558b9820b1bf77b892c01df99924a89f6fd2114b1f01a16d5334abce3d"
+source.commit = "db270160e514a14dd409a8e1455756d017d54ae0"
+source.sha256 = "72233bc4d7b2d47b7cb170ac366b94abcb25f32a8edadaf3d85d17fd0cc22230"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -343,8 +424,8 @@ only_for_targets.image = "standard"
 # 2. Copy the output zone image from dendrite/out to omicron/out
 source.type = "prebuilt"
 source.repo = "dendrite"
-source.commit = "b419dfb6dbcabbf9d20b4d001de59eaaed42d2e5"
-source.sha256 = "91c0559ea00f1df38faced0b68f9231795682de55be2d91cb4b90a72e2f8093c"
+source.commit = "db270160e514a14dd409a8e1455756d017d54ae0"
+source.sha256 = "e844ad779fe1e390fa5de707e2be66c2882cb36e96c489009a8609516df09d6b"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -361,10 +442,22 @@ only_for_targets.image = "standard"
 # 2. Copy dendrite.tar.gz from dendrite/out to omicron/out/dendrite-softnpu.tar.gz
 source.type = "prebuilt"
 source.repo = "dendrite"
-source.commit = "b419dfb6dbcabbf9d20b4d001de59eaaed42d2e5"
-source.sha256 = "1a7004ec3c4419fec5d58b0909e1cdd197a64396f1775e8b4a114682c74e5fea"
+source.commit = "db270160e514a14dd409a8e1455756d017d54ae0"
+source.sha256 = "24098c91ba9057d0c33571ee28a859bc480009bc55bdf7fa03882b4ab1542dbe"
 output.type = "zone"
 output.intermediate_only = true
+
+[package.xcvradm]
+service_name = "xcvradm"
+only_for_targets.switch = "asic"
+only_for_targets.image = "standard"
+source.type = "local"
+source.paths = [
+  { from = "out/transceiver-control/root/opt/oxide/bin/xcvradm", to = "/opt/oxide/bin/xcvradm" }
+]
+output.type = "zone"
+output.intermediate_only = true
+setup_hint = "Run `./tools/ci_download_transceiver_control` to download the necessary binaries"
 
 # To package and install the asic variant of the switch, do:
 #
@@ -376,7 +469,15 @@ service_name = "switch"
 only_for_targets.switch = "asic"
 only_for_targets.image = "standard"
 source.type = "composite"
-source.packages = [ "omicron-gateway.tar.gz", "dendrite-asic.tar.gz", "wicketd.tar.gz", "wicket.tar.gz", "mg-ddm.tar.gz", "switch_zone_setup.tar.gz" ]
+source.packages = [
+  "omicron-gateway-asic.tar.gz",
+  "dendrite-asic.tar.gz",
+  "wicketd.tar.gz",
+  "wicket.tar.gz",
+  "mg-ddm.tar.gz",
+  "switch_zone_setup.tar.gz",
+  "xcvradm.tar.gz"
+]
 output.type = "zone"
 
 # To package and install the stub variant of the switch, do the following:
@@ -389,7 +490,15 @@ service_name = "switch"
 only_for_targets.switch = "stub"
 only_for_targets.image = "standard"
 source.type = "composite"
-source.packages = [ "omicron-gateway.tar.gz", "dendrite-stub.tar.gz", "wicketd.tar.gz", "wicket.tar.gz", "mg-ddm.tar.gz", "switch_zone_setup.tar.gz" ]
+source.packages = [
+  "omicron-gateway-stub.tar.gz",
+  "dendrite-stub.tar.gz",
+  "wicketd.tar.gz",
+  "wicket.tar.gz",
+  "mg-ddm.tar.gz",
+  "switch_zone_setup.tar.gz",
+  "sp-sim-stub.tar.gz"
+]
 output.type = "zone"
 
 # To package and install the softnpu variant of the switch, do the following:
@@ -402,5 +511,13 @@ service_name = "switch"
 only_for_targets.switch = "softnpu"
 only_for_targets.image = "standard"
 source.type = "composite"
-source.packages = [ "omicron-gateway.tar.gz", "dendrite-softnpu.tar.gz", "wicketd.tar.gz", "wicket.tar.gz", "mg-ddm.tar.gz", "switch_zone_setup.tar.gz" ]
+source.packages = [
+  "omicron-gateway-softnpu.tar.gz",
+  "dendrite-softnpu.tar.gz",
+  "wicketd.tar.gz",
+  "wicket.tar.gz",
+  "mg-ddm.tar.gz",
+  "switch_zone_setup.tar.gz",
+  "sp-sim-softnpu.tar.gz"
+]
 output.type = "zone"

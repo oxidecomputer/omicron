@@ -120,3 +120,19 @@ pub fn bold() -> Style {
 pub fn faded_background() -> Style {
     Style::default().bg(TUI_BLACK).fg(TUI_GREY)
 }
+
+pub fn text_label() -> Style {
+    Style::default().fg(OX_OFF_WHITE)
+}
+
+pub fn text_success() -> Style {
+    Style::default().fg(OX_GREEN_LIGHT)
+}
+
+pub fn text_failure() -> Style {
+    Style::default().fg(OX_RED)
+}
+
+pub fn text_warning() -> Style {
+    Style::default().fg(OX_YELLOW)
+}

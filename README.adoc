@@ -8,7 +8,7 @@ This repo houses the work-in-progress Oxide Rack control plane.
 
 image::https://github.com/oxidecomputer/omicron/workflows/Rust/badge.svg[]
 
-Omicron is open-source.  But we're pretty focused on our own goals for the foreseeable future and not able to help external contributors.  Please see xref:CONTRIBUTING.md[] for more information.
+Omicron is open-source. But we're pretty focused on our own goals for the foreseeable future and not able to help external contributors.  Please see xref:CONTRIBUTING.md[] for more information.
 
 == Documentation
 
@@ -47,7 +47,7 @@ To build and run the non-simulated version of Omicron, see: xref:docs/how-to-run
 
 You can **format the code** using `cargo fmt`.  Make sure to run this before pushing changes.  The CI checks that the code is correctly formatted.
 
-You can **run the https://github.com/rust-lang/rust-clippy[Clippy linter]** using `cargo clippy --all-targets \-- --deny warnings --allow clippy::style`.  Make sure to run this before pushing changes.  The CI checks that the code is clippy-clean.
+You can **run the https://github.com/rust-lang/rust-clippy[Clippy linter]** using `cargo xtask clippy`.  CI checks that code is clippy-clean.
 
 == Working in Omicron
 

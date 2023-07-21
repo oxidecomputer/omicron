@@ -4,17 +4,22 @@
 
 use camino::{Utf8Path, Utf8PathBuf};
 use illumos_utils::fstyp::Fstyp;
+use illumos_utils::zfs;
+use illumos_utils::zfs::DestroyDatasetErrorVariant;
 use illumos_utils::zfs::EncryptionDetails;
 use illumos_utils::zfs::Keypath;
 use illumos_utils::zfs::Mountpoint;
+use illumos_utils::zfs::SizeDetails;
 use illumos_utils::zfs::Zfs;
 use illumos_utils::zpool::Zpool;
 use illumos_utils::zpool::ZpoolKind;
 use illumos_utils::zpool::ZpoolName;
 use key_manager::StorageKeyRequester;
 use omicron_common::disk::DiskIdentity;
+use rand::distributions::{Alphanumeric, DistString};
 use slog::Logger;
 use slog::{info, warn};
+use std::sync::OnceLock;
 use tokio::fs::{remove_file, File};
 use tokio::io::{AsyncSeekExt, AsyncWriteExt, SeekFrom};
 use uuid::Uuid;
@@ -46,6 +51,8 @@ pub enum DiskError {
     #[error("Requested partition {partition:?} not found on device {path}")]
     NotFound { path: Utf8PathBuf, partition: Partition },
     #[error(transparent)]
+    DestroyFilesystem(#[from] illumos_utils::zfs::DestroyDatasetError),
+    #[error(transparent)]
     EnsureFilesystem(#[from] illumos_utils::zfs::EnsureFilesystemError),
     #[error(transparent)]
     ZpoolCreate(#[from] illumos_utils::zpool::CreateError),
@@ -61,6 +68,12 @@ pub enum DiskError {
     MissingStorageKeyRequester,
     #[error("Encrypted filesystem '{0}' missing 'oxide:epoch' property")]
     CannotParseEpochProperty(String),
+    #[error("Encrypted dataset '{dataset}' cannot set 'oxide:agent' property: {err}")]
+    CannotSetAgentProperty {
+        dataset: String,
+        #[source]
+        err: Box<zfs::SetValueError>,
+    },
 }
 
 /// A partition (or 'slice') of a disk.
@@ -206,22 +219,35 @@ pub struct Disk {
 
 // Helper type for describing expected datasets and their optional quota.
 #[derive(Clone, Copy, Debug)]
-struct QuotaLimitedDataset {
+struct ExpectedDataset {
     // Name for the dataset
     name: &'static str,
     // Optional quota, in _bytes_
     quota: Option<usize>,
+    // Identifies if the dataset should be deleted on boot
+    wipe: bool,
+    // Optional compression mode
+    compression: Option<&'static str>,
 }
 
-impl QuotaLimitedDataset {
-    // Create a new dataset with quota.
-    const fn new(name: &'static str, quota: usize) -> Self {
-        QuotaLimitedDataset { name, quota: Some(quota) }
+impl ExpectedDataset {
+    const fn new(name: &'static str) -> Self {
+        ExpectedDataset { name, quota: None, wipe: false, compression: None }
     }
 
-    // Create a new dataset with no quota.
-    const fn no_quota(name: &'static str) -> Self {
-        Self { name, quota: None }
+    const fn quota(mut self, quota: usize) -> Self {
+        self.quota = Some(quota);
+        self
+    }
+
+    const fn wipe(mut self) -> Self {
+        self.wipe = true;
+        self
+    }
+
+    const fn compression(mut self, compression: &'static str) -> Self {
+        self.compression = Some(compression);
+        self
     }
 }
 
@@ -233,40 +259,49 @@ pub const DEBUG_DATASET: &'static str = "debug";
 // TODO-correctness: This value of 100GiB is a pretty wild guess, and should be
 // tuned as needed.
 pub const DEBUG_DATASET_QUOTA: usize = 100 * (1 << 30);
+// ditto.
+pub const DUMP_DATASET_QUOTA: usize = 100 * (1 << 30);
+// passed to zfs create -o compression=
+pub const DUMP_DATASET_COMPRESSION: &'static str = "gzip-9";
 
 // U.2 datasets live under the encrypted dataset and inherit encryption
 pub const ZONE_DATASET: &'static str = "crypt/zone";
+pub const DUMP_DATASET: &'static str = "crypt/debug";
 
 // This is the root dataset for all U.2 drives. Encryption is inherited.
 pub const CRYPT_DATASET: &'static str = "crypt";
 
-const U2_EXPECTED_DATASET_COUNT: usize = 1;
-static U2_EXPECTED_DATASETS: [QuotaLimitedDataset; U2_EXPECTED_DATASET_COUNT] = [
+const U2_EXPECTED_DATASET_COUNT: usize = 2;
+static U2_EXPECTED_DATASETS: [ExpectedDataset; U2_EXPECTED_DATASET_COUNT] = [
     // Stores filesystems for zones
-    QuotaLimitedDataset::no_quota(ZONE_DATASET),
+    ExpectedDataset::new(ZONE_DATASET).wipe(),
+    // For storing full kernel RAM dumps
+    ExpectedDataset::new(DUMP_DATASET)
+        .quota(DUMP_DATASET_QUOTA)
+        .compression(DUMP_DATASET_COMPRESSION),
 ];
 
 const M2_EXPECTED_DATASET_COUNT: usize = 5;
-static M2_EXPECTED_DATASETS: [QuotaLimitedDataset; M2_EXPECTED_DATASET_COUNT] = [
+static M2_EXPECTED_DATASETS: [ExpectedDataset; M2_EXPECTED_DATASET_COUNT] = [
     // Stores software images.
     //
     // Should be duplicated to both M.2s.
-    QuotaLimitedDataset::no_quota(INSTALL_DATASET),
+    ExpectedDataset::new(INSTALL_DATASET),
     // Stores crash dumps.
-    QuotaLimitedDataset::no_quota(CRASH_DATASET),
+    ExpectedDataset::new(CRASH_DATASET),
     // Stores cluter configuration information.
     //
     // Should be duplicated to both M.2s.
-    QuotaLimitedDataset::no_quota(CLUSTER_DATASET),
+    ExpectedDataset::new(CLUSTER_DATASET),
     // Stores configuration data, including:
     // - What services should be launched on this sled
     // - Information about how to initialize the Sled Agent
     // - (For scrimlets) RSS setup information
     //
     // Should be duplicated to both M.2s.
-    QuotaLimitedDataset::no_quota(CONFIG_DATASET),
+    ExpectedDataset::new(CONFIG_DATASET),
     // Store debugging data, such as service bundles.
-    QuotaLimitedDataset::new(DEBUG_DATASET, DEBUG_DATASET_QUOTA),
+    ExpectedDataset::new(DEBUG_DATASET).quota(DEBUG_DATASET_QUOTA),
 ];
 
 impl Disk {
@@ -477,7 +512,9 @@ impl Disk {
 
             info!(
                 log,
-                "Ensuring encryted filesystem: {} for epoch {}", dataset, epoch
+                "Ensuring encrypted filesystem: {} for epoch {}",
+                dataset,
+                epoch
             );
             let result = Zfs::ensure_filesystem(
                 &format!("{}/{}", zpool_name, dataset),
@@ -493,19 +530,72 @@ impl Disk {
             })?;
 
             result?;
-        }
+        };
 
         for dataset in datasets.into_iter() {
             let mountpoint = zpool_name.dataset_mountpoint(dataset.name);
+            let name = &format!("{}/{}", zpool_name, dataset.name);
+
+            // Use a value that's alive for the duration of this sled agent
+            // to answer the question: should we wipe this disk, or have
+            // we seen it before?
+            //
+            // If this value comes from a prior iteration of the sled agent,
+            // we opt to remove the corresponding dataset.
+            static AGENT_LOCAL_VALUE: OnceLock<String> = OnceLock::new();
+            let agent_local_value = AGENT_LOCAL_VALUE.get_or_init(|| {
+                Alphanumeric.sample_string(&mut rand::thread_rng(), 20)
+            });
+
+            if dataset.wipe {
+                match Zfs::get_oxide_value(name, "agent") {
+                    Ok(v) if &v == agent_local_value => {
+                        info!(
+                            log,
+                            "Skipping automatic wipe for dataset: {}", name
+                        );
+                    }
+                    Ok(_) | Err(_) => {
+                        info!(
+                            log,
+                            "Automatically destroying dataset: {}", name
+                        );
+                        Zfs::destroy_dataset(name).or_else(|err| {
+                            // If we can't find the dataset, that's fine -- it might
+                            // not have been formatted yet.
+                            if let DestroyDatasetErrorVariant::NotFound =
+                                err.err
+                            {
+                                Ok(())
+                            } else {
+                                Err(err)
+                            }
+                        })?;
+                    }
+                }
+            }
+
             let encryption_details = None;
+            let size_details = Some(SizeDetails {
+                quota: dataset.quota,
+                compression: dataset.compression,
+            });
             Zfs::ensure_filesystem(
-                &format!("{}/{}", zpool_name, dataset.name),
+                name,
                 Mountpoint::Path(mountpoint),
                 zoned,
                 do_format,
                 encryption_details,
-                dataset.quota,
+                size_details,
             )?;
+
+            if dataset.wipe {
+                Zfs::set_oxide_value(name, "agent", agent_local_value)
+                    .map_err(|err| DiskError::CannotSetAgentProperty {
+                        dataset: name.clone(),
+                        err: Box::new(err),
+                    })?;
+            }
         }
         Ok(())
     }
@@ -537,6 +627,17 @@ impl Disk {
         self.paths.partition_device_path(
             &self.partitions,
             Partition::BootImage,
+            raw,
+        )
+    }
+
+    pub fn dump_device_devfs_path(
+        &self,
+        raw: bool,
+    ) -> Result<Utf8PathBuf, DiskError> {
+        self.paths.partition_device_path(
+            &self.partitions,
+            Partition::DumpDevice,
             raw,
         )
     }

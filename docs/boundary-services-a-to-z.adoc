@@ -1,49 +1,12 @@
 = Boundary Services A-Z
 
-This document describes how to run an environment with boundary services.
-It's a quick rundown and assumes knowledge of the basic setup described in the
-Running Omicron (Non-Simulated) document.
+NOTE: The instructions for _deploying_ SoftNPU with Omicron have been folded into xref:how-to-run.adoc[the main how-to-run docs].
 
-== 0. Download SoftNPU ASIC emulator machinery
-
-Grab the SoftNPU (ASIC simulator, scadm, P4 program, etc.) from CI:
-
-----
-./tools/ci_download_softnpu_machinery
-----
-
-(By default `install_runner_prerequisites.sh` will take care of running
-`ci_download_softnpu_machinery` for you.)
-
-== 1. Setup virtual hardware
-
-----
-PHYSICAL_LINK=<wan interface> pfexec ./tools/create_virtual_hardware.sh
-----
-Note that the `PHYSICAL_LINK` environment variable is optional. If not supplied,
-the first link in `dladm show-phys` will be used.
-
-The virtual hardware is a bit different than what has previously been used. What
-we now have looks like this.
+The virtual hardware making up SoftNPU is a bit different than what was previously used. What we now have looks like this.
 
 image::plumbing.png[]
 
-The `softnpu` zone will be configured and launched during the `create_virtual_hardware.sh`
-script.
-
-== 2. Build and install the control plane.
-
-----
-./tools/create_self_signed_cert.sh
-
-cargo build --release --bin omicron-package
-./target/release/omicron-package -t <target_name> target create -i standard -m non-gimlet -s softnpu
-./target/release/omicron-package package
-pfexec ./target/release/omicron-package install
-----
-
-The control plane is now starting, reference the Running Omicron (Non-Simulated)
-doc for more details on determining when things are ready to go.
+The `softnpu` zone will be configured and launched during the `create_virtual_hardware.sh` script.
 
 Once the control plane is running, `softnpu` can be configured via `dendrite`
 using the `swadm` binary located in the `oxz_switch` zone.
@@ -105,12 +68,10 @@ host                            mac                age
 fe80::aae1:deff:fe00:1          a8:e1:de:00:00:01  0s
 ----
 
-== 4. Populating the system
-
-Follow the
+While following
 https://github.com/oxidecomputer/omicron/blob/main/docs/how-to-run.adoc[how-to-run.adoc]
-to set up IPs, images, disks, instances etc. Things to pay particular attention
-to here are the following.
+to set up IPs, images, disks, instances etc, pay particular attention to the
+following.
 
 - The address range in the IP pool should be on a subnet in your local network that
   can NAT out to the Internet.
@@ -129,9 +90,7 @@ pfexec /opt/oxide/softnpu/stuff/scadm \
   $softnpu_mac
 ----
 
-== 5. Configuring scrimlet/sidecar
-
-A this point we have an instance up and running with external connectivity
+By the end, we have an instance up and running with external connectivity
 configured via boundary services:
 ----
 ry@korgano:~/omicron$ ~/propolis/target/release/propolis-cli --server fd00:1122:3344:101::c serial

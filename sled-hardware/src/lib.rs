@@ -147,6 +147,20 @@ impl Baseboard {
     }
 }
 
+impl std::fmt::Display for Baseboard {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Baseboard::Gimlet { identifier, model, revision } => {
+                write!(f, "gimlet-{identifier}-{model}-{revision}")
+            }
+            Baseboard::Unknown => write!(f, "unknown"),
+            Baseboard::Pc { identifier, model } => {
+                write!(f, "pc-{identifier}-{model}")
+            }
+        }
+    }
+}
+
 impl From<Baseboard> for nexus_client::types::Baseboard {
     fn from(b: Baseboard) -> nexus_client::types::Baseboard {
         nexus_client::types::Baseboard {

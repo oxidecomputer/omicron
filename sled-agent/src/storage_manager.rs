@@ -4,9 +4,11 @@
 
 //! Management of sled-local storage.
 
-use crate::nexus::LazyNexusClient;
+use crate::nexus::NexusClientWithResolver;
 use crate::storage::dataset::DatasetName;
+use crate::storage::dump_setup::DumpSetup;
 use camino::Utf8PathBuf;
+use derive_more::From;
 use futures::stream::FuturesOrdered;
 use futures::FutureExt;
 use futures::StreamExt;
@@ -24,6 +26,7 @@ use sled_hardware::{Disk, DiskVariant, UnparsedDisk};
 use slog::Logger;
 use std::collections::hash_map;
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::convert::TryFrom;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -31,6 +34,7 @@ use tokio::sync::{mpsc, oneshot, Mutex};
 use tokio::task::JoinHandle;
 use uuid::Uuid;
 
+use illumos_utils::dumpadm::DumpHdrError;
 #[cfg(test)]
 use illumos_utils::{zfs::MockZfs as Zfs, zpool::MockZpool as Zpool};
 #[cfg(not(test))]
@@ -125,6 +129,12 @@ pub enum Error {
 
     #[error("Underlay not yet initialized")]
     UnderlayNotInitialized,
+
+    #[error("Encountered error checking dump device flags: {0}")]
+    DumpHdr(#[from] DumpHdrError),
+
+    #[error("Failed to receive queued disks from watch")]
+    QueuedDiskRetrieval,
 }
 
 /// A ZFS storage pool.
@@ -165,7 +175,7 @@ struct UnderlayRequest {
 }
 
 #[derive(PartialEq, Eq, Clone)]
-enum DiskWrapper {
+pub(crate) enum DiskWrapper {
     Real { disk: Disk, devfs_path: Utf8PathBuf },
     Synthetic { zpool_name: ZpoolName },
 }
@@ -220,6 +230,37 @@ pub struct StorageResources {
 }
 
 impl StorageResources {
+    /// Creates a fabricated view of storage resources.
+    ///
+    /// Use this only when you want to reference the disks, but not actually
+    /// access them. Creates one internal and one external disk.
+    #[cfg(test)]
+    pub fn new_for_test() -> Self {
+        let new_disk_identity = || DiskIdentity {
+            vendor: "vendor".to_string(),
+            serial: Uuid::new_v4().to_string(),
+            model: "model".to_string(),
+        };
+
+        Self {
+            disks: Arc::new(Mutex::new(HashMap::from([
+                (
+                    new_disk_identity(),
+                    DiskWrapper::Synthetic {
+                        zpool_name: ZpoolName::new_internal(Uuid::new_v4()),
+                    },
+                ),
+                (
+                    new_disk_identity(),
+                    DiskWrapper::Synthetic {
+                        zpool_name: ZpoolName::new_external(Uuid::new_v4()),
+                    },
+                ),
+            ]))),
+            pools: Arc::new(Mutex::new(HashMap::new())),
+        }
+    }
+
     /// Returns the identity of the boot disk.
     ///
     /// If this returns `None`, we have not processed the boot disk yet.
@@ -246,15 +287,31 @@ impl StorageResources {
         })
     }
 
+    // TODO: Could be generic over DiskVariant
+
     /// Returns all M.2 zpools
     pub async fn all_m2_zpools(&self) -> Vec<ZpoolName> {
         self.all_zpools(DiskVariant::M2).await
+    }
+
+    /// Returns all U.2 zpools
+    pub async fn all_u2_zpools(&self) -> Vec<ZpoolName> {
+        self.all_zpools(DiskVariant::U2).await
     }
 
     /// Returns all mountpoints within all M.2s for a particular dataset.
     pub async fn all_m2_mountpoints(&self, dataset: &str) -> Vec<Utf8PathBuf> {
         let m2_zpools = self.all_m2_zpools().await;
         m2_zpools
+            .iter()
+            .map(|zpool| zpool.dataset_mountpoint(dataset))
+            .collect()
+    }
+
+    /// Returns all mountpoints within all U.2s for a particular dataset.
+    pub async fn all_u2_mountpoints(&self, dataset: &str) -> Vec<Utf8PathBuf> {
+        let u2_zpools = self.all_u2_zpools().await;
+        u2_zpools
             .iter()
             .map(|zpool| zpool.dataset_mountpoint(dataset))
             .collect()
@@ -277,7 +334,7 @@ impl StorageResources {
 
 /// Describes the access to the underlay used by the StorageManager.
 pub struct UnderlayAccess {
-    pub lazy_nexus_client: LazyNexusClient,
+    pub nexus_client: NexusClientWithResolver,
     pub sled_id: Uuid,
 }
 
@@ -291,12 +348,31 @@ struct StorageWorker {
     // A mechanism for requesting disk encryption keys from the
     // [`key_manager::KeyManager`]
     key_requester: StorageKeyRequester,
+
+    // Invokes dumpadm(8) and savecore(8) when new disks are encountered
+    dump_setup: Arc<DumpSetup>,
 }
 
 #[derive(Clone, Debug)]
 enum NotifyDiskRequest {
     Add { identity: DiskIdentity, variant: DiskVariant },
     Remove(DiskIdentity),
+}
+
+#[derive(From, Clone, Debug, PartialEq, Eq, Hash)]
+enum QueuedDiskCreate {
+    Real(UnparsedDisk),
+    Synthetic(ZpoolName),
+}
+
+impl QueuedDiskCreate {
+    fn is_synthetic(&self) -> bool {
+        if let QueuedDiskCreate::Synthetic(_) = self {
+            true
+        } else {
+            false
+        }
+    }
 }
 
 impl StorageWorker {
@@ -313,14 +389,14 @@ impl StorageWorker {
         let fs_name = &dataset_name.full();
         let do_format = true;
         let encryption_details = None;
-        let quota = None;
+        let size_details = None;
         Zfs::ensure_filesystem(
             &dataset_name.full(),
             Mountpoint::Path(Utf8PathBuf::from("/data")),
             zoned,
             do_format,
             encryption_details,
-            quota,
+            size_details,
         )?;
         // Ensure the dataset has a usable UUID.
         if let Ok(id_str) = Zfs::get_oxide_value(&fs_name, "uuid") {
@@ -374,15 +450,10 @@ impl StorageWorker {
                     return Err(backoff::BackoffError::transient(Error::UnderlayNotInitialized.to_string()));
                 };
                 let sled_id = underlay.sled_id;
-                let lazy_nexus_client = underlay.lazy_nexus_client.clone();
+                let nexus_client = underlay.nexus_client.client().clone();
                 drop(underlay_guard);
 
-                lazy_nexus_client
-                    .get()
-                    .await
-                    .map_err(|e| {
-                        backoff::BackoffError::transient(e.to_string())
-                    })?
+                nexus_client
                     .zpool_put(&sled_id, &pool_id, &zpool_request)
                     .await
                     .map_err(|e| {
@@ -416,7 +487,19 @@ impl StorageWorker {
         &mut self,
         resources: &StorageResources,
         unparsed_disks: Vec<UnparsedDisk>,
+        queued_u2_drives: &mut Option<HashSet<QueuedDiskCreate>>,
     ) -> Result<(), Error> {
+        // Queue U.2 drives if necessary
+        // We clear all existing queued drives that are not synthetic and add
+        // new ones in the loop below
+        if let Some(queued) = queued_u2_drives {
+            info!(
+                self.log,
+                "Ensure exact disks: clearing non-synthetic queued disks."
+            );
+            queued.retain(|d| d.is_synthetic());
+        }
+
         let mut new_disks = HashMap::new();
 
         // We may encounter errors while parsing any of the disks; keep track of
@@ -428,6 +511,13 @@ impl StorageWorker {
 
         // Ensure all disks conform to the expected partition layout.
         for disk in unparsed_disks.into_iter() {
+            if disk.variant() == DiskVariant::U2 {
+                if let Some(queued) = queued_u2_drives {
+                    info!(self.log, "Queuing disk for upsert: {disk:?}");
+                    queued.insert(disk.into());
+                    continue;
+                }
+            }
             match sled_hardware::Disk::new(
                 &self.log,
                 disk,
@@ -523,7 +613,17 @@ impl StorageWorker {
         &mut self,
         resources: &StorageResources,
         disk: UnparsedDisk,
+        queued_u2_drives: &mut Option<HashSet<QueuedDiskCreate>>,
     ) -> Result<(), Error> {
+        // Queue U.2 drives if necessary
+        if let Some(queued) = queued_u2_drives {
+            if disk.variant() == DiskVariant::U2 {
+                info!(self.log, "Queuing disk for upsert: {disk:?}");
+                queued.insert(disk.into());
+                return Ok(());
+            }
+        }
+
         info!(self.log, "Upserting disk: {disk:?}");
 
         // Ensure the disk conforms to an expected partition layout.
@@ -550,7 +650,20 @@ impl StorageWorker {
         &mut self,
         resources: &StorageResources,
         zpool_name: ZpoolName,
+        queued_u2_drives: &mut Option<HashSet<QueuedDiskCreate>>,
     ) -> Result<(), Error> {
+        // Queue U.2 drives if necessary
+        if let Some(queued) = queued_u2_drives {
+            if zpool_name.kind() == ZpoolKind::External {
+                info!(
+                    self.log,
+                    "Queuing synthetic disk for upsert: {zpool_name:?}"
+                );
+                queued.insert(zpool_name.into());
+                return Ok(());
+            }
+        }
+
         info!(self.log, "Upserting synthetic disk for: {zpool_name:?}");
 
         let mut disks = resources.disks.lock().await;
@@ -579,6 +692,8 @@ impl StorageWorker {
         >,
         disk: DiskWrapper,
     ) -> Result<(), Error> {
+        let log = self.log.clone();
+
         disks.insert(disk.identity(), disk.clone());
         self.physical_disk_notify(NotifyDiskRequest::Add {
             identity: disk.identity(),
@@ -587,6 +702,8 @@ impl StorageWorker {
         .await;
         self.upsert_zpool(&resources, disk.identity(), disk.zpool_name())
             .await?;
+
+        self.dump_setup.update_dumpdev_setup(disks, log).await;
 
         Ok(())
     }
@@ -693,12 +810,8 @@ impl StorageWorker {
                     return Err(backoff::BackoffError::transient(Error::UnderlayNotInitialized.to_string()));
                 };
                 let sled_id = underlay.sled_id;
-                let lazy_nexus_client = underlay.lazy_nexus_client.clone();
+                let nexus_client = underlay.nexus_client.client().clone();
                 drop(underlay_guard);
-
-                let nexus = lazy_nexus_client.get().await.map_err(|e| {
-                    backoff::BackoffError::transient(e.to_string())
-                })?;
 
                 match &disk {
                     NotifyDiskRequest::Add { identity, variant } => {
@@ -712,9 +825,12 @@ impl StorageWorker {
                             },
                             sled_id,
                         };
-                        nexus.physical_disk_put(&request).await.map_err(
-                            |e| backoff::BackoffError::transient(e.to_string()),
-                        )?;
+                        nexus_client
+                            .physical_disk_put(&request)
+                            .await
+                            .map_err(|e| {
+                                backoff::BackoffError::transient(e.to_string())
+                            })?;
                     }
                     NotifyDiskRequest::Remove(disk_identity) => {
                         let request = PhysicalDiskDeleteRequest {
@@ -723,9 +839,12 @@ impl StorageWorker {
                             vendor: disk_identity.vendor.clone(),
                             sled_id,
                         };
-                        nexus.physical_disk_delete(&request).await.map_err(
-                            |e| backoff::BackoffError::transient(e.to_string()),
-                        )?;
+                        nexus_client
+                            .physical_disk_delete(&request)
+                            .await
+                            .map_err(|e| {
+                                backoff::BackoffError::transient(e.to_string())
+                            })?;
                     }
                 }
                 Ok(())
@@ -810,8 +929,11 @@ impl StorageWorker {
         &mut self,
         resources: StorageResources,
     ) -> Result<(), Error> {
+        // We queue U.2 sleds until the StorageKeyRequester is ready to use.
+        let mut queued_u2_drives = Some(HashSet::new());
         loop {
-            match self.do_work_internal(&resources).await {
+            match self.do_work_internal(&resources, &mut queued_u2_drives).await
+            {
                 Ok(()) => {
                     info!(self.log, "StorageWorker exited successfully");
                     return Ok(());
@@ -830,18 +952,29 @@ impl StorageWorker {
     async fn do_work_internal(
         &mut self,
         resources: &StorageResources,
+        queued_u2_drives: &mut Option<HashSet<QueuedDiskCreate>>,
     ) -> Result<(), Error> {
         loop {
             tokio::select! {
-                _ = self.nexus_notifications.next(), if !self.nexus_notifications.is_empty() => {},
+                _ = self.nexus_notifications.next(),
+                    if !self.nexus_notifications.is_empty() => {},
                 Some(request) = self.rx.recv() => {
                     use StorageWorkerRequest::*;
                     match request {
                         AddDisk(disk) => {
-                            self.upsert_disk(&resources, disk).await?;
+                            self.upsert_disk(
+                                &resources,
+                                disk,
+                                queued_u2_drives,
+                            )
+                            .await?;
                         },
                         AddSyntheticDisk(zpool_name) => {
-                            self.upsert_synthetic_disk(&resources, zpool_name).await?;
+                            self.upsert_synthetic_disk(
+                                &resources,
+                                zpool_name,
+                                queued_u2_drives,
+                            ).await?;
                         },
                         RemoveDisk(disk) => {
                             self.delete_disk(&resources, disk).await?;
@@ -851,7 +984,12 @@ impl StorageWorker {
                             let _ = request.responder.send(result);
                         },
                         DisksChanged(disks) => {
-                            self.ensure_using_exactly_these_disks(&resources, disks).await?;
+                            self.ensure_using_exactly_these_disks(
+                                &resources,
+                                disks,
+                                queued_u2_drives
+                            )
+                            .await?;
                         },
                         SetupUnderlayAccess(UnderlayRequest { underlay, responder }) => {
                             // If this is the first time establishing an
@@ -865,6 +1003,30 @@ impl StorageWorker {
                                 self.notify_nexus_about_existing_resources(&resources).await?;
                             }
                             let _ = responder.send(Ok(()));
+                        }
+                        KeyManagerReady => {
+                            if let Some(queued) = queued_u2_drives.take() {
+                                for disk in queued {
+                                    match disk {
+                                        QueuedDiskCreate::Real(disk) => {
+                                            self.upsert_disk(
+                                                &resources,
+                                                disk,
+                                                &mut None
+                                            )
+                                            .await?;
+                                        }
+                                        QueuedDiskCreate::Synthetic(zpool_name) => {
+                                            self.upsert_synthetic_disk(
+                                                &resources,
+                                                zpool_name,
+                                                &mut None
+                                            )
+                                            .await?;
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 },
@@ -880,6 +1042,7 @@ enum StorageWorkerRequest {
     DisksChanged(Vec<UnparsedDisk>),
     NewFilesystem(NewFilesystemRequest),
     SetupUnderlayAccess(UnderlayRequest),
+    KeyManagerReady,
 }
 
 struct StorageManagerInner {
@@ -921,6 +1084,7 @@ impl StorageManager {
                         rx,
                         underlay: Arc::new(Mutex::new(None)),
                         key_requester,
+                        dump_setup: Arc::new(DumpSetup::default()),
                     };
 
                     worker.do_work(resources).await
@@ -1048,6 +1212,18 @@ impl StorageManager {
         )?;
 
         Ok(dataset_name)
+    }
+
+    /// Inform the storage worker that the KeyManager is capable of retrieving
+    /// secrets now and that any queued disks can be upserted.
+    pub async fn key_manager_ready(&self) {
+        info!(self.inner.log, "KeyManger ready");
+        self.inner
+            .tx
+            .send(StorageWorkerRequest::KeyManagerReady)
+            .await
+            .map_err(|e| e.to_string())
+            .expect("Failed to send KeyManagerReady request");
     }
 
     pub fn resources(&self) -> &StorageResources {

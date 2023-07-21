@@ -2,12 +2,12 @@
 #:
 #: name = "helios / deploy"
 #: variety = "basic"
-#: target = "lab-opte-0.23"
+#: target = "lab-2.0-opte-0.23"
 #: output_rules = [
 #:  "%/var/svc/log/oxide-sled-agent:default.log",
-#:  "%/zone/oxz_*/root/var/svc/log/oxide-*.log",
-#:  "%/zone/oxz_*/root/var/svc/log/system-illumos-*.log",
-#:  "!/zone/oxz_propolis-server_*/root/var/svc/log/*.log"
+#:  "%/pool/ext/*/crypt/zone/oxz_*/root/var/svc/log/oxide-*.log",
+#:  "%/pool/ext/*/crypt/zone/oxz_*/root/var/svc/log/system-illumos-*.log",
+#:  "!/pool/ext/*/crypt/zone/oxz_propolis-server_*/root/var/svc/log/*.log"
 #: ]
 #: skip_clone = true
 #:
@@ -135,7 +135,8 @@ for p in /input/ci-tools/work/end-to-end-tests/*.gz; do
 	chmod a+x "tests/$(basename "${p%.gz}")"
 done
 
-ptime -m pfexec ./tools/create_virtual_hardware.sh
+pfexec zpool create -f scratch c1t1d0 c2t1d0
+ZPOOL_VDEV_DIR=/scratch ptime -m pfexec ./tools/create_virtual_hardware.sh
 
 #
 # Generate a self-signed certificate to use as the initial TLS certificate for

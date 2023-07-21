@@ -38,6 +38,7 @@ use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::NameOrId;
+use omicron_common::api::internal::shared::ExternalPortDiscovery;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::collections::HashMap;
@@ -128,7 +129,6 @@ impl super::Nexus {
 
         // internally ignores ObjectAlreadyExists, so will not error on repeat runs
         let _ = self.populate_mock_system_updates(&opctx).await?;
-        self.populate_switch_ports(&opctx, request.external_port_count).await?;
 
         let dns_zone = request
             .internal_dns_zone_config
@@ -220,13 +220,7 @@ impl super::Nexus {
             .await?;
 
         // Plumb the firewall rules for the built-in services
-        let svcs_vpc = db::lookup::LookupPath::new(opctx, &self.db_datastore)
-            .vpc_id(*db::fixed_data::vpc::SERVICES_VPC_ID);
-        let svcs_fw_rules =
-            self.vpc_list_firewall_rules(opctx, &svcs_vpc).await?;
-        let (_, _, _, svcs_vpc) = svcs_vpc.fetch().await?;
-        self.send_sled_agents_firewall_rules(opctx, &svcs_vpc, &svcs_fw_rules)
-            .await?;
+        self.plumb_service_firewall_rules(opctx, &[]).await?;
 
         // We've potentially updated the list of DNS servers and the DNS
         // configuration for both internal and external DNS, plus the Silo
@@ -239,6 +233,77 @@ impl super::Nexus {
             &self.background_tasks.task_external_endpoints,
         ] {
             self.background_tasks.activate(task);
+        }
+
+        // TODO - https://github.com/oxidecomputer/omicron/pull/3359
+        // register all switches found during rack initialization
+        // identify requested switch from config and associate
+        // uplink records to that switch
+        match request.external_port_count {
+            ExternalPortDiscovery::Auto(switch_mgmt_addrs) => {
+                use dpd_client::Client as DpdClient;
+                info!(
+                    self.log,
+                    "Using automatic external switchport discovery"
+                );
+
+                for (switch, addr) in switch_mgmt_addrs {
+                    let dpd_client = DpdClient::new(
+                        &format!(
+                            "http://[{}]:{}",
+                            addr,
+                            omicron_common::address::DENDRITE_PORT
+                        ),
+                        dpd_client::ClientState {
+                            tag: "nexus".to_string(),
+                            log: self.log.new(o!("component" => "DpdClient")),
+                        },
+                    );
+
+                    let all_ports =
+                        dpd_client.port_list().await.map_err(|e| {
+                            Error::internal_error(&format!("encountered error while discovering ports for {switch:#?}: {e}"))
+                        })?;
+
+                    info!(
+                        self.log,
+                        "discovered ports for {switch}: {all_ports:#?}"
+                    );
+
+                    let qsfp_ports: Vec<Name> = all_ports
+                        .iter()
+                        .filter(|port| port.starts_with("qsfp"))
+                        .map(|port| port.to_string().parse().unwrap())
+                        .collect();
+
+                    info!(
+                        self.log,
+                        "populating ports for {switch}: {qsfp_ports:#?}"
+                    );
+
+                    self.populate_switch_ports(
+                        &opctx,
+                        &qsfp_ports,
+                        switch.to_string().parse().unwrap(),
+                    )
+                    .await?;
+                }
+            }
+            // TODO: #3602 Eliminate need for static port mappings for switch ports
+            ExternalPortDiscovery::Static(port_mappings) => {
+                info!(
+                    self.log,
+                    "Using static configuration for external switchports"
+                );
+                for (switch, ports) in port_mappings {
+                    self.populate_switch_ports(
+                        &opctx,
+                        &ports,
+                        switch.to_string().parse().unwrap(),
+                    )
+                    .await?;
+                }
+            }
         }
 
         // TODO
@@ -305,24 +370,10 @@ impl super::Nexus {
                 },
             }?;
 
-            let switch_location = Name::from_str("switch0").map_err(|e| {
-                Error::internal_error(&format!(
-                    "unable to use `switch0` as Name: {e}"
-                ))
-            })?;
-
-            let loopback_address_params = LoopbackAddressCreate {
-                address_lot: NameOrId::Name(address_lot_name.clone()),
-                rack_id,
-                switch_location: switch_location.clone(),
-                address: first_address,
-                mask: 64,
-            };
-
             let address_lot_lookup = self
                 .address_lot_lookup(
                     &opctx,
-                    loopback_address_params.address_lot.clone(),
+                    NameOrId::Name(address_lot_name.clone()),
                 )
                 .map_err(|e| {
                     Error::internal_error(&format!(
@@ -330,113 +381,151 @@ impl super::Nexus {
                     ))
                 })?;
 
-            let (.., authz_address_lot) =
-                address_lot_lookup.lookup_for(authz::Action::Modify)
+            let (.., authz_address_lot) = address_lot_lookup
+                .lookup_for(authz::Action::Modify)
                 .await
                 .map_err(|e| {
                     Error::internal_error(&format!("unable to retrieve authz_address_lot for infra address_lot: {e}"))
                 })?;
 
-            if self
-                .loopback_address_lookup(
-                    &opctx,
-                    rack_id,
-                    switch_location.into(),
-                    ipnetwork::IpNetwork::new(
-                        loopback_address_params.address,
-                        loopback_address_params.mask,
-                    )
-                    .map_err(|_| {
-                        Error::invalid_request("invalid loopback address")
-                    })?
-                    .into(),
-                )?
-                .lookup_for(authz::Action::Read)
-                .await
-                .is_err()
+            for (idx, uplink_config) in
+                rack_network_config.uplinks.iter().enumerate()
             {
-                self.db_datastore
-                    .loopback_address_create(
-                        opctx,
-                        &loopback_address_params,
-                        None,
-                        &authz_address_lot,
-                    )
-                    .await?;
-            }
+                let switch = uplink_config.switch.to_string();
+                let switch_location = Name::from_str(&switch).map_err(|e| {
+                    Error::internal_error(&format!(
+                        "unable to use {switch} as Name: {e}"
+                    ))
+                })?;
 
-            let name = Name::from_str("default-uplink").map_err(|e| {
-                Error::internal_error(&format!(
-                    "unable to use `default-uplink` as `Name`: {e}"
-                ))
-            })?;
+                // TODO: #3603 Use separate address lots for loopback addresses and infra ips
+                let loopback_address_params = LoopbackAddressCreate {
+                    address_lot: NameOrId::Name(address_lot_name.clone()),
+                    rack_id,
+                    switch_location: switch_location.clone(),
+                    address: first_address,
+                    mask: 64,
+                    anycast: true,
+                };
 
-            let identity = IdentityMetadataCreateParams {
-                name: name.clone(),
-                description: "initial uplink configuration".to_string(),
-            };
+                if self
+                    .loopback_address_lookup(
+                        &opctx,
+                        rack_id,
+                        switch_location.clone().into(),
+                        ipnetwork::IpNetwork::new(
+                            loopback_address_params.address,
+                            loopback_address_params.mask,
+                        )
+                        .map_err(|_| {
+                            Error::invalid_request("invalid loopback address")
+                        })?
+                        .into(),
+                    )?
+                    .lookup_for(authz::Action::Read)
+                    .await
+                    .is_err()
+                {
+                    self.db_datastore
+                        .loopback_address_create(
+                            opctx,
+                            &loopback_address_params,
+                            None,
+                            &authz_address_lot,
+                        )
+                        .await?;
+                }
+                let uplink_name = format!("default-uplink{idx}");
+                let name = Name::from_str(&uplink_name).unwrap();
 
-            let port_config = SwitchPortConfig {
-                geometry:
-                    nexus_types::external_api::params::SwitchPortGeometry::Qsfp28x1,
-            };
+                let identity = IdentityMetadataCreateParams {
+                    name: name.clone(),
+                    description: "initial uplink configuration".to_string(),
+                };
 
-            let mut port_settings_params = SwitchPortSettingsCreate {
-                identity,
-                port_config,
-                groups: vec![],
-                links: HashMap::new(),
-                interfaces: HashMap::new(),
-                routes: HashMap::new(),
-                bgp_peers: HashMap::new(),
-                addresses: HashMap::new(),
-            };
+                let port_config = SwitchPortConfig {
+                    geometry: nexus_types::external_api::params::SwitchPortGeometry::Qsfp28x1,
+                };
 
-            let uplink_address = IpNet::from_str(&format!(
-                    "{}/32",
-                    rack_network_config.uplink_ip
-                ))
-                .map_err(|e| Error::internal_error(&format!(
+                let mut port_settings_params = SwitchPortSettingsCreate {
+                    identity,
+                    port_config,
+                    groups: vec![],
+                    links: HashMap::new(),
+                    interfaces: HashMap::new(),
+                    routes: HashMap::new(),
+                    bgp_peers: HashMap::new(),
+                    addresses: HashMap::new(),
+                };
+
+                let uplink_address = IpNet::from_str(&format!("{}/32", uplink_config.uplink_ip))
+                    .map_err(|e| Error::internal_error(&format!(
                     "failed to parse value provided for `rack_network_config.uplink_ip` as `IpNet`: {e}"
                 )))?;
 
-            let address = Address {
-                address_lot: NameOrId::Name(address_lot_name),
-                address: uplink_address,
-            };
-            port_settings_params.addresses.insert(
-                "phy0".to_string(),
-                AddressConfig { addresses: vec![address] },
-            );
+                let address = Address {
+                    address_lot: NameOrId::Name(address_lot_name.clone()),
+                    address: uplink_address,
+                };
+                port_settings_params.addresses.insert(
+                    "phy0".to_string(),
+                    AddressConfig { addresses: vec![address] },
+                );
 
-            let dst = IpNet::from_str("0.0.0.0/0").map_err(|e| {
-                Error::internal_error(&format!(
-                    "failed to parse provided default route CIDR: {e}"
-                ))
-            })?;
+                let dst = IpNet::from_str("0.0.0.0/0").map_err(|e| {
+                    Error::internal_error(&format!(
+                        "failed to parse provided default route CIDR: {e}"
+                    ))
+                })?;
 
-            let gw = IpAddr::V4(rack_network_config.gateway_ip);
-            let vid = rack_network_config.uplink_vid;
-            let route = Route { dst, gw, vid };
+                let gw = IpAddr::V4(uplink_config.gateway_ip);
+                let vid = uplink_config.uplink_vid;
+                let route = Route { dst, gw, vid };
 
-            port_settings_params.routes.insert(
-                "phy0".to_string(),
-                RouteConfig { routes: vec![route] },
-            );
+                port_settings_params.routes.insert(
+                    "phy0".to_string(),
+                    RouteConfig { routes: vec![route] },
+                );
 
-            if self
-                .db_datastore
-                .switch_port_settings_get(opctx, &name.into())
-                .await
-                .is_err()
-            {
-                self.db_datastore
+                match self
+                    .db_datastore
                     .switch_port_settings_create(opctx, &port_settings_params)
-                    .await?;
-            }
+                    .await
+                {
+                    Ok(_) | Err(Error::ObjectAlreadyExists { .. }) => Ok(()),
+                    Err(e) => Err(e),
+                }?;
 
-            // TODO - https://github.com/oxidecomputer/omicron/issues/3277
-            // record port speed
+                let port_settings_id = self
+                    .db_datastore
+                    .switch_port_settings_get_id(
+                        opctx,
+                        nexus_db_model::Name(name.clone()),
+                    )
+                    .await?;
+
+                let switch_port_id = self
+                    .db_datastore
+                    .switch_port_get_id(
+                        opctx,
+                        rack_id,
+                        switch_location.into(),
+                        Name::from_str(&uplink_config.uplink_port)
+                            .unwrap()
+                            .into(),
+                    )
+                    .await?;
+
+                self.db_datastore
+                    .switch_port_set_settings_id(
+                        opctx,
+                        switch_port_id,
+                        Some(port_settings_id),
+                        db::datastore::UpdatePrecondition::Null,
+                    )
+                    .await?;
+            } // TODO - https://github.com/oxidecomputer/omicron/issues/3277
+              // record port speed
         };
 
         Ok(())

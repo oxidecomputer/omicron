@@ -7,7 +7,7 @@
 use derive_more::From;
 use thiserror::Error;
 
-#[derive(From, Debug, Error)]
+#[derive(From, Debug, Error, PartialEq, Eq, Clone)]
 pub enum TrustQuorumError {
     // Temporary until the using code is written
     #[error("Rack secret construction failed: {0:?}")]

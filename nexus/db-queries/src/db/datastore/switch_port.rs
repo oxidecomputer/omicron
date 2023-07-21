@@ -24,7 +24,10 @@ use async_bb8_diesel::{
     AsyncConnection, AsyncRunQueryDsl, ConnectionError, PoolError,
 };
 use diesel::result::Error as DieselError;
-use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
+use diesel::{
+    ExpressionMethods, JoinOnDsl, NullableExpressionMethods, QueryDsl,
+    SelectableHelper,
+};
 use nexus_types::external_api::params;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::{
@@ -356,6 +359,9 @@ impl DataStore {
                         crate::db::datastore::address_lot::try_reserve_block(
                             address_lot_id,
                             address.address.ip().into(),
+                            // TODO: Should we allow anycast addresses for switch_ports?
+                            // anycast
+                            false,
                             &conn
                         )
                         .await
@@ -1094,5 +1100,30 @@ impl DataStore {
             })?;
 
         Ok(id)
+    }
+
+    pub async fn switch_ports_with_uplinks(
+        &self,
+        opctx: &OpContext,
+    ) -> ListResultVec<SwitchPort> {
+        use db::schema::switch_port::dsl as switch_port_dsl;
+        use db::schema::switch_port_settings_route_config::dsl as route_config_dsl;
+
+        switch_port_dsl::switch_port
+            .filter(switch_port_dsl::port_settings_id.is_not_null())
+            .inner_join(
+                route_config_dsl::switch_port_settings_route_config
+                    .on(switch_port_dsl::port_settings_id
+                        .eq(route_config_dsl::port_settings_id.nullable())),
+            )
+            .select(SwitchPort::as_select())
+            // TODO: #3592 Correctness
+            // In single rack deployments there are only 64 ports. We'll need
+            // pagination in the future, or maybe a way to constrain the query to
+            // a rack?
+            .limit(64)
+            .load_async::<SwitchPort>(self.pool_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 }

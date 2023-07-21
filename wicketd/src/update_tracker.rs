@@ -202,7 +202,7 @@ impl UpdateTracker {
 
             let event_buffer = Arc::new(StdMutex::new(EventBuffer::new(16)));
             let ipr_start_receiver =
-                self.ipr_update_tracker.register(update_id).await;
+                self.ipr_update_tracker.register(update_id);
 
             let update_cx = UpdateContext {
                 update_id,
@@ -1287,7 +1287,9 @@ impl UpdateContext {
     async fn process_installinator_reports<'engine>(
         &self,
         cx: &StepContext,
-        mut ipr_receiver: mpsc::Receiver<EventReport<InstallinatorSpec>>,
+        mut ipr_receiver: mpsc::UnboundedReceiver<
+            EventReport<InstallinatorSpec>,
+        >,
     ) -> anyhow::Result<WriteOutput> {
         let mut write_output = None;
 
@@ -1404,7 +1406,8 @@ impl UpdateContext {
         cx: &StepContext,
         mut ipr_start_receiver: IprStartReceiver,
         image_id: HostPhase2RecoveryImageId,
-    ) -> anyhow::Result<mpsc::Receiver<EventReport<InstallinatorSpec>>> {
+    ) -> anyhow::Result<mpsc::UnboundedReceiver<EventReport<InstallinatorSpec>>>
+    {
         const MGS_PROGRESS_POLL_INTERVAL: Duration = Duration::from_secs(3);
 
         // Waiting for the installinator to start is a little strange. It can't

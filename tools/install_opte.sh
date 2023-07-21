@@ -21,28 +21,6 @@ SOURCE_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 cd "${SOURCE_DIR}/.."
 OMICRON_TOP="$PWD"
 
-# Add the `helios-netdev` publisher, which provides the xde kernel driver
-# and the `opteadm` userland tool for interacting with it. If that publisher
-# already exists (e.g. from a previous path based setup), update it.
-function add_netdev_publisher {
-    local PUBLISHER_NAME="helios-netdev"
-    local PUBLISHER_ORIGIN="https://pkg.oxide.computer/helios-netdev/"
-    local N_PUBLISHERS="$(pkg publisher | grep -c "$PUBLISHER_NAME")"
-
-    if [[ "$N_PUBLISHERS" -gt 1 ]]; then
-        echo "More than one publisher named \"$PUBLISHER_NAME\" found"
-        echo "Removing all publishers and installing from scratch"
-        pfexec pkg unset-publisher "$PUBLISHER_NAME"
-    elif [[ "$N_PUBLISHERS" -eq 1 ]]; then
-        echo "Publisher \"$PUBLISHER_NAME\" already exists, setting"
-        echo "the origin to \"$PUBLISHER_ORIGIN\""
-    else
-        echo "Publisher \"$PUBLISHER_NAME\" does not exist, adding"
-    fi
-
-    pfexec pkg set-publisher -O "$PUBLISHER_ORIGIN" $PUBLISHER_NAME
-}
-
 # The xde driver no longer requires separate kernel bits as of API version 21
 # see https://github.com/oxidecomputer/opte/pull/321. Check if an older version
 # of the driver is installed and prompt the user to remove it first.
@@ -70,15 +48,12 @@ if [[ "$RC" -ne 0 ]]; then
     exit 1
 fi
 
-# Add the netdev publisher (if it doesn't already exist)
-add_netdev_publisher
-
 # Grab the version of the opte package to install
 OPTE_VERSION="$(cat "$OMICRON_TOP/tools/opte_version")"
 
 # Actually install the xde kernel module and opteadm tool
 RC=0
-pfexec pkg install -v pkg://helios-netdev/driver/network/opte@$OPTE_VERSION || RC=$?
+pfexec pkg install -v pkg://helios-dev/driver/network/opte@$OPTE_VERSION || RC=$?
 if [[ "$RC" -eq 0 ]]; then
     echo "xde driver installed successfully"
 elif [[ "$RC" -eq 4 ]]; then

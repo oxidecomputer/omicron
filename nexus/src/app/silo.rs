@@ -472,7 +472,7 @@ impl super::Nexus {
         password_value: params::UserPassword,
     ) -> UpdateResult<()> {
         let password_hash = match password_value {
-            params::UserPassword::InvalidPassword => None,
+            params::UserPassword::LoginDisallowed => None,
             params::UserPassword::Password(password) => {
                 let mut hasher = omicron_passwords::Hasher::default();
                 let password_hash = hasher
@@ -781,6 +781,7 @@ impl super::Nexus {
                 let client = reqwest::ClientBuilder::new()
                     .connect_timeout(dur)
                     .timeout(dur)
+                    .dns_resolver(self.external_resolver.clone())
                     .build()
                     .map_err(|e| {
                         Error::internal_error(&format!(

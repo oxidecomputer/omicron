@@ -19,10 +19,14 @@ use ::oximeter::types::ProducerRegistry;
 use anyhow::anyhow;
 use internal_dns::ServiceName;
 use nexus_db_queries::context::OpContext;
+use omicron_common::address::DENDRITE_PORT;
+use omicron_common::address::MGS_PORT;
 use omicron_common::api::external::Error;
+use omicron_common::api::internal::shared::SwitchLocation;
 use slog::Logger;
+use std::collections::HashMap;
+use std::net::Ipv6Addr;
 use std::sync::Arc;
-use tokio::sync::Mutex;
 use uuid::Uuid;
 
 // The implementation of Nexus is large, and split into a number of submodules
@@ -32,6 +36,7 @@ pub mod background;
 mod certificate;
 mod device_auth;
 mod disk;
+mod external_dns;
 pub mod external_endpoints;
 mod external_ip;
 mod iam;
@@ -72,6 +77,14 @@ pub(crate) const MAX_NICS_PER_INSTANCE: usize = 8;
 
 // TODO-completeness: Support multiple external IPs
 pub(crate) const MAX_EXTERNAL_IPS_PER_INSTANCE: usize = 1;
+
+pub const MAX_VCPU_PER_INSTANCE: u16 = 32;
+
+pub const MIN_MEMORY_BYTES_PER_INSTANCE: u32 = 1 << 30; // 1 GiB
+pub const MAX_MEMORY_BYTES_PER_INSTANCE: u64 = 64 * (1 << 30); // 64 GiB
+
+pub const MIN_DISK_SIZE_BYTES: u32 = 1 << 30; // 1 GiB
+pub const MAX_DISK_SIZE_BYTES: u64 = 1 << 40; // 1 TiB
 
 /// Manages an Oxide fleet -- the heart of the control plane
 pub struct Nexus {
@@ -128,10 +141,14 @@ pub struct Nexus {
     // Nexus to not all fail.
     samael_max_issue_delay: std::sync::Mutex<Option<chrono::Duration>>,
 
-    resolver: Arc<Mutex<internal_dns::resolver::Resolver>>,
+    /// DNS resolver for internal services
+    internal_resolver: internal_dns::resolver::Resolver,
 
-    /// Client for dataplane daemon / switch management API
-    dpd_client: Arc<dpd_client::Client>,
+    /// DNS resolver Nexus uses to resolve an external host
+    external_resolver: Arc<external_dns::Resolver>,
+
+    /// Mapping of SwitchLocations to their respective Dendrite Clients
+    dpd_clients: HashMap<SwitchLocation, Arc<dpd_client::Client>>,
 
     /// Background tasks
     background_tasks: background::BackgroundTasks,
@@ -143,14 +160,15 @@ impl Nexus {
     pub async fn new_with_id(
         rack_id: Uuid,
         log: Logger,
-        resolver: Arc<Mutex<internal_dns::resolver::Resolver>>,
+        resolver: internal_dns::resolver::Resolver,
         pool: db::Pool,
         producer_registry: &ProducerRegistry,
         config: &config::Config,
         authz: Arc<authz::Authz>,
     ) -> Result<Arc<Nexus>, String> {
         let pool = Arc::new(pool);
-        let db_datastore = Arc::new(db::DataStore::new(Arc::clone(&pool)));
+        let db_datastore =
+            Arc::new(db::DataStore::new(&log, Arc::clone(&pool)).await?);
         db_datastore.register_producers(&producer_registry);
 
         let my_sec_id = db::SecId::from(config.deployment.id);
@@ -173,32 +191,54 @@ impl Nexus {
                 "component" => "DpdClient"
             )),
         };
-        let (dpd_host, dpd_port) = if let Some(dpd_address) =
-            &config.pkg.dendrite.address
-        {
-            (dpd_address.ip().to_string(), dpd_address.port())
-        } else {
+
+        let mut dpd_clients: HashMap<SwitchLocation, Arc<dpd_client::Client>> =
+            HashMap::new();
+
+        // Currently static dpd configuration mappings are still required for testing
+        for (location, config) in &config.pkg.dendrite {
+            let address = config.address.ip().to_string();
+            let port = config.address.port();
+            let dpd_client = dpd_client::Client::new(
+                &format!("http://[{address}]:{port}"),
+                client_state.clone(),
+            );
+            dpd_clients.insert(location.clone(), Arc::new(dpd_client));
+        }
+        if config.pkg.dendrite.is_empty() {
             loop {
-                match resolver
-                    .lock()
+                let result = resolver
+                    .lookup_all_ipv6(ServiceName::Dendrite)
                     .await
-                    .lookup_socket_v6(ServiceName::Dendrite)
-                    .await
-                    .map_err(|e| format!("Cannot access Dendrite address: {e}"))
-                {
-                    Ok(addr) => break (addr.ip().to_string(), addr.port()),
+                    .map_err(|e| {
+                        format!("Cannot lookup Dendrite addresses: {e}")
+                    });
+                match result {
+                    Ok(addrs) => {
+                        let mappings = map_switch_zone_addrs(
+                            &log.new(o!("component" => "Nexus")),
+                            addrs,
+                        )
+                        .await;
+                        for (location, addr) in &mappings {
+                            let port = DENDRITE_PORT;
+                            let dpd_client = dpd_client::Client::new(
+                                &format!("http://[{addr}]:{port}"),
+                                client_state.clone(),
+                            );
+                            dpd_clients
+                                .insert(location.clone(), Arc::new(dpd_client));
+                        }
+                        break;
+                    }
                     Err(e) => {
-                        warn!(log, "Failed to access Dendrite address: {e}");
+                        warn!(log, "Failed to lookup Dendrite address: {e}");
                         tokio::time::sleep(std::time::Duration::from_secs(1))
                             .await;
                     }
                 }
             }
-        };
-        let dpd_client = Arc::new(dpd_client::Client::new(
-            &format!("http://[{dpd_host}]:{dpd_port}"),
-            client_state,
-        ));
+        }
 
         // Connect to clickhouse - but do so lazily.
         // Clickhouse may not be executing when Nexus starts.
@@ -239,6 +279,15 @@ impl Nexus {
             &config.pkg.background_tasks,
         );
 
+        let external_resolver = {
+            if config.deployment.external_dns_servers.is_empty() {
+                return Err("expected at least 1 external DNS server".into());
+            }
+            Arc::new(external_dns::Resolver::new(
+                &config.deployment.external_dns_servers,
+            ))
+        };
+
         let nexus = Nexus {
             id: config.deployment.id,
             rack_id,
@@ -266,8 +315,9 @@ impl Nexus {
                 Arc::clone(&db_datastore),
             ),
             samael_max_issue_delay: std::sync::Mutex::new(None),
-            resolver,
-            dpd_client,
+            internal_resolver: resolver,
+            external_resolver,
+            dpd_clients,
             background_tasks,
         };
 
@@ -665,8 +715,7 @@ impl Nexus {
     }
 
     pub async fn resolver(&self) -> internal_dns::resolver::Resolver {
-        let resolver = self.resolver.lock().await;
-        resolver.clone()
+        self.internal_resolver.clone()
     }
 }
 
@@ -683,4 +732,70 @@ impl Nexus {
 pub enum Unimpl {
     Public,
     ProtectedLookup(Error),
+}
+
+// TODO: #3596 Allow updating of Nexus from `handoff_to_nexus()`
+// This logic is duplicated from RSS
+// RSS needs to know which addresses are managing which slots, and so does Nexus,
+// but it doesn't seem like we can just pass the discovered information off
+// from RSS once Nexus is running since we can't mutate the state in Nexus
+// via an API call. We probably will need to rethink how we're looking
+// up switch addresses as a whole, since how DNS is currently setup for
+// Dendrite is insufficient for what we need.
+async fn map_switch_zone_addrs(
+    log: &Logger,
+    switch_zone_addresses: Vec<Ipv6Addr>,
+) -> HashMap<SwitchLocation, Ipv6Addr> {
+    use gateway_client::Client as MgsClient;
+    info!(log, "Determining switch slots managed by switch zones");
+    let mut switch_zone_addrs = HashMap::new();
+    for addr in switch_zone_addresses {
+        let mgs_client = MgsClient::new(
+            &format!("http://[{}]:{}", addr, MGS_PORT),
+            log.new(o!("component" => "MgsClient")),
+        );
+
+        info!(log, "determining switch slot managed by dendrite zone"; "zone_address" => #?addr);
+        // TODO: #3599 Use retry function instead of looping on a fixed timer
+        let switch_slot = loop {
+            match mgs_client.sp_local_switch_id().await {
+                Ok(switch) => {
+                    info!(
+                        log,
+                        "identified switch slot for dendrite zone";
+                        "slot" => #?switch,
+                        "zone_address" => #?addr
+                    );
+                    break switch.slot;
+                }
+                Err(e) => {
+                    warn!(
+                        log,
+                        "failed to identify switch slot for dendrite, will retry in 2 seconds";
+                        "zone_address" => #?addr,
+                        "reason" => #?e
+                    );
+                }
+            }
+            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+        };
+
+        match switch_slot {
+            0 => {
+                switch_zone_addrs.insert(SwitchLocation::Switch0, addr);
+            }
+            1 => {
+                switch_zone_addrs.insert(SwitchLocation::Switch1, addr);
+            }
+            _ => {
+                warn!(log, "Expected a slot number of 0 or 1, found {switch_slot:#?} when querying {addr:#?}");
+            }
+        };
+    }
+    info!(
+        log,
+        "completed mapping dendrite zones to switch slots";
+        "mappings" => #?switch_zone_addrs
+    );
+    switch_zone_addrs
 }

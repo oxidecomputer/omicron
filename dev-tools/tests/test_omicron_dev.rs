@@ -282,8 +282,12 @@ async fn test_db_run() {
     //
     // Finally, we set listen-port=0 to avoid conflicting with concurrent
     // invocations.
+    //
+    // The `&& true` looks redundant but it prevents recent versions of bash
+    // from optimising away the fork() and causing cargo itself to receive
+    // the ^C that we send during testing.
     let cmdstr = format!(
-        "( set -o monitor; {} db-run --listen-port 0)",
+        "( set -o monitor; {} db-run --listen-port 0 && true )",
         cmd_path.display()
     );
     let exec =
@@ -395,7 +399,7 @@ async fn test_run_all() {
     let cmd_path = path_to_omicron_dev();
 
     let cmdstr = format!(
-        "( set -o monitor; {} run-all --nexus-listen-port 0)",
+        "( set -o monitor; {} run-all --nexus-listen-port 0 && true )",
         cmd_path.display()
     );
     let exec =

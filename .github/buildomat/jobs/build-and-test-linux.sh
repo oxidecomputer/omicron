@@ -47,22 +47,17 @@ ptime -m bash ./tools/install_builder_prerequisites.sh -y
 #   run.  Building with `--locked` ensures that the checked-in Cargo.lock
 #   is up to date.
 #
-banner build
+# We don't use `--workspace` here because we're not prepared to run tests
+# from end-to-end-tests.
+#
+# We apply our own timeout to ensure that we get a normal failure on timeout
+# rather than a buildomat timeout.  See oxidecomputer/buildomat#8.
+banner test
 export RUSTFLAGS="-D warnings"
 export RUSTDOCFLAGS="-D warnings"
 export TMPDIR=$TEST_TMPDIR
-ptime -m cargo build --locked --all-targets --verbose
-
-#
-# NOTE: We're using using the same RUSTFLAGS and RUSTDOCFLAGS as above to avoid
-# having to rebuild here.
-#
-# We also don't use `--workspace` here because we're not prepared to run tests
-# from end-to-end-tests.
-#
-
-banner test
-RUST_BACKTRACE=1 ptime -m cargo test --locked --verbose --no-fail-fast
+export RUST_BACKTRACE=1
+ptime -m timeout 2h cargo test --locked --verbose --no-fail-fast
 
 #
 # Make sure that we have left nothing around in $TEST_TMPDIR.  The easiest way
