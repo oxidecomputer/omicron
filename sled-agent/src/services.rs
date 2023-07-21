@@ -39,7 +39,6 @@ use ddm_admin_client::{Client as DdmAdminClient, DdmError};
 use dpd_client::{types as DpdTypes, Client as DpdClient, Error as DpdError};
 use dropshot::HandlerTaskMode;
 use flate2::bufread::GzDecoder;
-use futures::stream::{self, StreamExt};
 use illumos_utils::addrobj::AddrObject;
 use illumos_utils::addrobj::IPV6_LINK_LOCAL_NAME;
 use illumos_utils::dladm::{Dladm, Etherstub, EtherstubVnic, PhysicalLink};
@@ -142,6 +141,9 @@ pub enum Error {
     #[error("Failed to issue SMF command: {0}")]
     SmfCommand(#[from] crate::smf_helper::Error),
 
+    #[error("{}", display_zone_init_errors(.0))]
+    ZoneInitialize(Vec<(String, Box<Error>)>),
+
     #[error("Failed to do '{intent}' by running command in zone: {err}")]
     ZoneCommand {
         intent: String,
@@ -225,6 +227,21 @@ impl From<Error> for omicron_common::api::external::Error {
             internal_message: err.to_string(),
         }
     }
+}
+
+fn display_zone_init_errors(errors: &[(String, Box<Error>)]) -> String {
+    if errors.len() == 1 {
+        return format!(
+            "Failed to initialize zone: {} errored with {}",
+            errors[0].0, errors[0].1
+        );
+    }
+
+    let mut output = format!("Failed to initialize {} zones:\n", errors.len());
+    for (zone_name, error) in errors {
+        output.push_str(&format!("  - {}: {}\n", zone_name, error));
+    }
+    output
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -1930,45 +1947,33 @@ impl ServiceManager {
             });
         }
 
-        // We initialize all the zones we can, but only return one error, if
-        // any.
-        let local_existing_zones = Arc::new(Mutex::new(existing_zones));
-        let last_err = Arc::new(Mutex::new(None));
-        stream::iter(requests)
-            // WARNING: Do not use "try_for_each_concurrent" here -- if you do,
-            // it's possible that the future will cancel other ongoing requests
-            // to "initialize_zone".
-            .for_each_concurrent(None, |request| {
-                let local_existing_zones = local_existing_zones.clone();
-                let last_err = last_err.clone();
-                async move {
-                    match self
-                        .initialize_zone(
-                            request,
-                            // filesystems=
-                            &[],
-                        )
-                        .await
-                    {
-                        Ok(running_zone) => {
-                            local_existing_zones.lock().await.insert(
-                                running_zone.name().to_string(),
-                                running_zone,
-                            );
-                        }
-                        Err(err) => {
-                            *last_err.lock().await = Some(err);
-                        }
-                    }
-                }
-            })
-            .await;
+        let futures = requests.iter().map(|request| {
+            async move {
+                self.initialize_zone(
+                    request,
+                    // filesystems=
+                    &[],
+                )
+                .await
+                .map_err(|error| (request.zone.zone_name(), error))
+            }
+        });
+        let results = futures::future::join_all(futures).await;
 
-        if let Some(err) = Arc::into_inner(last_err)
-            .expect("Should have last reference")
-            .into_inner()
-        {
-            return Err(err);
+        let mut errors = Vec::new();
+        for result in results {
+            match result {
+                Ok(zone) => {
+                    existing_zones.insert(zone.name().to_string(), zone);
+                }
+                Err((zone_name, error)) => {
+                    errors.push((zone_name, Box::new(error)));
+                }
+            }
+        }
+
+        if !errors.is_empty() {
+            return Err(Error::ZoneInitialize(errors));
         }
 
         Ok(())
