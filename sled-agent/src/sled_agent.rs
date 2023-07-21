@@ -209,6 +209,9 @@ struct SledAgentInner {
 
     // A serialized request queue for operations interacting with Nexus.
     nexus_request_queue: NexusRequestQueue,
+
+    // Addresses used by services for uplink access
+    boundary_switch_addrs: HashSet<Ipv6Addr>,
 }
 
 impl SledAgentInner {
@@ -349,40 +352,6 @@ impl SledAgent {
             )
             .await?;
 
-        let sled_agent = SledAgent {
-            inner: Arc::new(SledAgentInner {
-                id: request.id,
-                subnet: request.subnet,
-                storage,
-                instances,
-                hardware,
-                updates,
-                port_manager,
-                services,
-                nexus_client,
-
-                // TODO(https://github.com/oxidecomputer/omicron/issues/1917):
-                // Propagate usage of this request queue throughout the Sled Agent.
-                //
-                // Also, we could maybe de-dup some of the backoff code in the request queue?
-                nexus_request_queue: NexusRequestQueue::new(),
-            }),
-            log: log.clone(),
-        };
-
-        // We immediately add a notification to the request queue about our
-        // existence. If inspection of the hardware later informs us that we're
-        // actually running on a scrimlet, that's fine, the updated value will
-        // be received by Nexus eventually.
-        sled_agent.notify_nexus_about_self(&log);
-
-        // Begin monitoring the underlying hardware, and reacting to changes.
-        let sa = sled_agent.clone();
-        let hardware_log = log.clone();
-        tokio::spawn(async move {
-            sa.hardware_monitor_task(hardware_log).await;
-        });
-
         // Initialize early networking
         info!(log, "Attempting to load early network config from bootstore");
         // Pull the early network config out of the bootstore
@@ -418,11 +387,52 @@ impl SledAgent {
             HashSet::new()
         };
 
+        let sled_agent = SledAgent {
+            inner: Arc::new(SledAgentInner {
+                id: request.id,
+                subnet: request.subnet,
+                storage,
+                instances,
+                hardware,
+                updates,
+                port_manager,
+                services,
+                nexus_client,
+
+                // TODO(https://github.com/oxidecomputer/omicron/issues/1917):
+                // Propagate usage of this request queue throughout the Sled
+                // Agent.
+                //
+                // Also, we could maybe de-dup some of the backoff code in the
+                // request queue?
+                nexus_request_queue: NexusRequestQueue::new(),
+                boundary_switch_addrs: boundary_switch_addrs.clone(),
+            }),
+            log: log.clone(),
+        };
+
+        // We immediately add a notification to the request queue about our
+        // existence. If inspection of the hardware later informs us that we're
+        // actually running on a scrimlet, that's fine, the updated value will
+        // be received by Nexus eventually.
+        sled_agent.notify_nexus_about_self(&log);
+
+        // Begin monitoring the underlying hardware, and reacting to changes.
+        let sa = sled_agent.clone();
+        let hardware_log = log.clone();
+        tokio::spawn(async move {
+            sa.hardware_monitor_task(hardware_log).await;
+        });
+
         // Finally, load services for which we're already responsible.
         //
         // Do this *after* monitoring for harware, to enable the switch zone to
         // establish an underlay address before proceeding.
-        sled_agent.inner.services.load_services(boundary_switch_addrs).await?;
+        sled_agent
+            .inner
+            .services
+            .load_services(&sled_agent.inner.boundary_switch_addrs)
+            .await?;
 
         // Now that we've initialized the sled services, notify nexus again
         // at which point it'll plumb any necessary firewall rules back to us.
@@ -683,7 +693,10 @@ impl SledAgent {
 
         self.inner
             .services
-            .ensure_all_services_persistent(requested_services)
+            .ensure_all_services_persistent(
+                requested_services,
+                &self.inner.boundary_switch_addrs,
+            )
             .await?;
         Ok(())
     }

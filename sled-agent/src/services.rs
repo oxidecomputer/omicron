@@ -514,7 +514,7 @@ impl ServiceManager {
     // / NTP zone?
     pub async fn load_services(
         &self,
-        boundary_switch_addrs: HashSet<Ipv6Addr>,
+        boundary_switch_addrs: &HashSet<Ipv6Addr>,
     ) -> Result<(), Error> {
         let log = &self.inner.log;
         let ledger_paths = self.all_service_ledgers().await;
@@ -530,17 +530,6 @@ impl ServiceManager {
             return Ok(());
         };
         let services = ledger.data_mut();
-
-        // Inject boundary_switch_addrs into ServiceZoneRequests
-        // When the opte interface is created for the service,
-        // nat entries will be created using the switches present here
-        //let switch_addrs: Vec<Ipv6Addr> = Vec::from_iter(boundary_switch_addrs);
-        for zone_request in &mut services.requests {
-            zone_request
-                .zone
-                .boundary_switches
-                .extend(boundary_switch_addrs.iter());
-        }
 
         // Initialize and DNS and NTP services first as they are required
         // for time synchronization, which is a pre-requisite for the other
@@ -563,6 +552,7 @@ impl ServiceManager {
                         .map(|zone_request| zone_request.zone)
                         .collect(),
                 },
+                boundary_switch_addrs,
             )
             .await?;
 
@@ -614,6 +604,7 @@ impl ServiceManager {
                     .map(|zone_request| zone_request.zone)
                     .collect(),
             },
+            boundary_switch_addrs,
         )
         .await?;
         Ok(())
@@ -2459,6 +2450,7 @@ impl ServiceManager {
     pub async fn ensure_all_services_persistent(
         &self,
         request: ServiceEnsureBody,
+        boundary_switch_addrs: &HashSet<Ipv6Addr>,
     ) -> Result<(), Error> {
         let log = &self.inner.log;
         let mut existing_zones = self.inner.zones.lock().await;
@@ -2483,6 +2475,7 @@ impl ServiceManager {
                 &mut existing_zones,
                 ledger_zone_requests,
                 request,
+                boundary_switch_addrs,
             )
             .await?;
 
@@ -2503,6 +2496,7 @@ impl ServiceManager {
         existing_zones: &mut MutexGuard<'_, BTreeMap<String, RunningZone>>,
         old_request: &AllZoneRequests,
         request: ServiceEnsureBody,
+        boundary_switch_addrs: &HashSet<Ipv6Addr>,
     ) -> Result<AllZoneRequests, Error> {
         let log = &self.inner.log;
 
@@ -2577,6 +2571,13 @@ impl ServiceManager {
                 .choose(&mut rng)
                 .ok_or_else(|| Error::U2NotFound)?
                 .clone();
+
+            // Inject boundary_switch_addrs into ServiceZoneRequests. When the opte
+            // interface is created for the service, nat entries will be created
+            // using the switches present here
+            let mut zone = zone.clone();
+            zone.boundary_switches.extend(boundary_switch_addrs.iter());
+
             zone_requests
                 .requests
                 .push(ZoneRequest { zone: zone.clone(), root });
@@ -3204,26 +3205,29 @@ mod test {
     async fn ensure_new_service(mgr: &ServiceManager, id: Uuid) {
         let _expectations = expect_new_service();
 
-        mgr.ensure_all_services_persistent(ServiceEnsureBody {
-            services: vec![ServiceZoneRequest {
-                id,
-                zone_type: ZoneType::Oximeter,
-                addresses: vec![Ipv6Addr::LOCALHOST],
-                dataset: None,
-                services: vec![ServiceZoneService {
+        mgr.ensure_all_services_persistent(
+            ServiceEnsureBody {
+                services: vec![ServiceZoneRequest {
                     id,
-                    details: ServiceType::Oximeter {
-                        address: SocketAddrV6::new(
-                            Ipv6Addr::LOCALHOST,
-                            OXIMETER_PORT,
-                            0,
-                            0,
-                        ),
-                    },
+                    zone_type: ZoneType::Oximeter,
+                    addresses: vec![Ipv6Addr::LOCALHOST],
+                    dataset: None,
+                    services: vec![ServiceZoneService {
+                        id,
+                        details: ServiceType::Oximeter {
+                            address: SocketAddrV6::new(
+                                Ipv6Addr::LOCALHOST,
+                                OXIMETER_PORT,
+                                0,
+                                0,
+                            ),
+                        },
+                    }],
+                    boundary_switches: vec![],
                 }],
-                boundary_switches: vec![],
-            }],
-        })
+            },
+            &HashSet::new(),
+        )
         .await
         .unwrap();
     }
@@ -3231,26 +3235,29 @@ mod test {
     // Prepare to call "ensure" for a service which already exists. We should
     // return the service without actually installing a new zone.
     async fn ensure_existing_service(mgr: &ServiceManager, id: Uuid) {
-        mgr.ensure_all_services_persistent(ServiceEnsureBody {
-            services: vec![ServiceZoneRequest {
-                id,
-                zone_type: ZoneType::Oximeter,
-                addresses: vec![Ipv6Addr::LOCALHOST],
-                dataset: None,
-                services: vec![ServiceZoneService {
+        mgr.ensure_all_services_persistent(
+            ServiceEnsureBody {
+                services: vec![ServiceZoneRequest {
                     id,
-                    details: ServiceType::Oximeter {
-                        address: SocketAddrV6::new(
-                            Ipv6Addr::LOCALHOST,
-                            OXIMETER_PORT,
-                            0,
-                            0,
-                        ),
-                    },
+                    zone_type: ZoneType::Oximeter,
+                    addresses: vec![Ipv6Addr::LOCALHOST],
+                    dataset: None,
+                    services: vec![ServiceZoneService {
+                        id,
+                        details: ServiceType::Oximeter {
+                            address: SocketAddrV6::new(
+                                Ipv6Addr::LOCALHOST,
+                                OXIMETER_PORT,
+                                0,
+                                0,
+                            ),
+                        },
+                    }],
+                    boundary_switches: vec![],
                 }],
-                boundary_switches: vec![],
-            }],
-        })
+            },
+            &HashSet::new(),
+        )
         .await
         .unwrap();
     }

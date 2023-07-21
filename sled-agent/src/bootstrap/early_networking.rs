@@ -64,18 +64,18 @@ impl EarlyNetworkSetup {
         info!(self.log, "Initializing Rack Network");
         let dpd_clients = self.initialize_dpd_clients(&switch_mgmt_addrs);
 
-        // set of switches from uplinks, these are our targets for initial NAT configurations
+        // set of switches from uplinks, these are our targets for initial NAT
+        // configurations
         let mut boundary_switch_addrs: HashSet<Ipv6Addr> = HashSet::new();
 
         // configure uplink for each requested uplink in configuration
         for uplink_config in &rack_network_config.uplinks {
             // Configure the switch requested by the user
             // Raise error if requested switch is not found
-            let dpd = dpd_clients
-                .get(&uplink_config.switch)
-                .ok_or_else(|| {
+            let dpd =
+                dpd_clients.get(&uplink_config.switch).ok_or_else(|| {
                     EarlyNetworkSetupError::BadConfig(format!(
-                        "Switch requested by rack network config not found: {:#?}",
+                        "Switch in rack network config not found: {:#?}",
                         uplink_config.switch
                     ))
                 })?;
@@ -83,7 +83,8 @@ impl EarlyNetworkSetup {
             let zone_addr =
                 switch_mgmt_addrs.get(&uplink_config.switch).unwrap();
 
-            // This switch will have an uplink configured, so lets add it to our boundary_switch_addrs
+            // This switch will have an uplink configured, so lets add it to our
+            // boundary_switch_addrs
             boundary_switch_addrs.insert(*zone_addr);
 
             let (ipv6_entry, dpd_port_settings, port_id) =
@@ -91,19 +92,29 @@ impl EarlyNetworkSetup {
 
             self.wait_for_dendrite(dpd).await;
 
-            info!(self.log, "Configuring boundary services loopback address on switch"; "config" => #?ipv6_entry);
+            info!(
+                self.log,
+                "Configuring boundary services loopback address on switch";
+                "config" => #?ipv6_entry
+            );
             dpd.loopback_ipv6_create(&ipv6_entry).await.map_err(|e| {
                 EarlyNetworkSetupError::Dendrite(format!(
                     "unable to create inital switch loopback address: {e}"
                 ))
             })?;
 
-            info!(self.log, "Configuring default uplink on switch"; "config" => #?dpd_port_settings);
+            info!(
+                self.log,
+                "Configuring default uplink on switch";
+                "config" => #?dpd_port_settings
+            );
             dpd.port_settings_apply(&port_id, &dpd_port_settings)
-                    .await
-                    .map_err(|e| {
-                        EarlyNetworkSetupError::Dendrite(format!("unable to apply initial uplink port configuration: {e}"))
-                    })?;
+                .await
+                .map_err(|e| {
+                    EarlyNetworkSetupError::Dendrite(format!(
+                        "unable to apply uplink port configuration: {e}"
+                    ))
+                })?;
 
             info!(self.log, "advertising boundary services loopback address");
 
@@ -168,11 +179,16 @@ impl EarlyNetworkSetup {
             addrs: vec![addr],
         };
         dpd_port_settings.links.insert(link_id.to_string(), link_settings);
-        let port_id: PortId = uplink_config
-            .uplink_port
-            .parse()
-            .map_err(|e| EarlyNetworkSetupError::BadConfig(
-            format!("could not use value provided to rack_network_config.uplink_port as PortID: {e}")))?;
+        let port_id: PortId =
+            uplink_config.uplink_port.parse().map_err(|e| {
+                EarlyNetworkSetupError::BadConfig(format!(
+                    concat!(
+                        "could not use value provided to",
+                        "rack_network_config.uplink_port as PortID: {}"
+                    ),
+                    e
+                ))
+            })?;
         let nexthop = Some(uplink_config.gateway_ip);
         dpd_port_settings.v4_routes.insert(
             Ipv4Cidr { prefix: "0.0.0.0".parse().unwrap(), prefix_len: 0 }
@@ -191,11 +207,19 @@ impl EarlyNetworkSetup {
             info!(self.log, "Checking dendrite uptime");
             match dpd.dpd_uptime().await {
                 Ok(uptime) => {
-                    info!(self.log, "Dendrite online"; "uptime" => uptime.to_string());
+                    info!(
+                        self.log,
+                        "Dendrite online";
+                        "uptime" => uptime.to_string()
+                    );
                     break;
                 }
                 Err(e) => {
-                    info!(self.log, "Unable to check Dendrite uptime"; "reason" => #?e);
+                    info!(
+                        self.log,
+                        "Unable to check Dendrite uptime";
+                        "reason" => #?e
+                    );
                 }
             }
             info!(self.log, "Waiting for dendrite to come online");
@@ -206,9 +230,10 @@ impl EarlyNetworkSetup {
 
 /// Network configuration required to bring up the control plane
 ///
-/// The fields in this structure are those from [`RackInitializeRequest`]
-/// necessary for use beyond RSS. This is just for the initial rack configuration
-/// and cold boot purposes. Updates will come from Nexus in the future.
+/// The fields in this structure are those from
+/// [`super::params::RackInitializeRequest`] necessary for use beyond RSS. This
+/// is just for the initial rack configuration and cold boot purposes. Updates
+/// will come from Nexus in the future.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct EarlyNetworkConfig {
     // The version of data. Always `1` when created from RSS.
@@ -256,7 +281,7 @@ impl TryFrom<bootstore::NetworkConfig> for EarlyNetworkConfig {
     fn try_from(
         value: bootstore::NetworkConfig,
     ) -> std::result::Result<Self, Self::Error> {
-        Ok(serde_json::from_slice(&value.blob)?)
+        serde_json::from_slice(&value.blob)
     }
 }
 
