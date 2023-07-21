@@ -10,6 +10,7 @@ async-trait.workspace = true
 buf-list.workspace = true
 bytes.workspace = true
 camino.workspace = true
+cancel-safe-futures.workspace = true
 clap.workspace = true
 ddm-admin-client.workspace = true
 display-error-chain.workspace = true
