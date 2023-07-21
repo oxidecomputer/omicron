@@ -53,7 +53,7 @@ We can see:
 * Two `etherstub` devices, `bootstrap_stub0` and `underlay_stub0`.  Etherstubs function like a synthetic Ethernet network.  We can create VNICs over an etherstub and those VNICs will act as though connected through a (virtual) switch.
 * Two `vnic` devices.  VNICs function like virtualized network links created _over_ some other link.  For example, we could create two VNICs over `cxgbe0`.  Each would have its own MAC address and IP addresses and would be functionally like having another device on the same network that `cxgbe0` is plugged into.  As we'll see, a single system might have a bunch of zones, each with an Omicron component running in it, and each having a VNIC on the underlay network.
 
-We'll discuss these in more detail later.  There are also many other kinds of links and commands to listing specific types.  See the manual page for more details.
+We'll discuss these in more detail later.  There are also many other kinds of links and commands to list specific types.  See the manual page for more details.
 
 Moving up to the IP layer (L3), https://illumos.org/man/8/ipadm[ipadm(8)] shows the IP interfaces configured on the system:
 
@@ -150,6 +150,7 @@ graph RL
 
     net_management --- MGS
     SPs --- net_management
+    TechPorts --- net_management
 
     net_bootstrap --- SledAgent
 
@@ -161,6 +162,7 @@ graph RL
     SledAgent["Sled Agent"]
     MGS["Management Gateway Service"]
     SPs["Service Processors"]
+    TechPorts["Technician Ports"]
 
     net_underlay["underlay network"]
     net_external["external network"]
