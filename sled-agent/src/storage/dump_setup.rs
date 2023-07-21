@@ -4,7 +4,6 @@ use derive_more::{AsRef, Deref};
 use illumos_utils::dumpadm::DumpAdmError;
 use illumos_utils::zone::{AdmError, Zones};
 use illumos_utils::zpool::ZpoolHealth;
-use itertools::Itertools;
 use omicron_common::disk::DiskIdentity;
 use sled_hardware::DiskVariant;
 use slog::Logger;
@@ -426,9 +425,11 @@ impl DumpSetupWorker {
                         if let Some(path) = entry.file_name().to_str() {
                             let dest = debug_dir.join(path);
 
-                            Self::copy_sync_and_remove(&entry.path(), &dest)?;
-
-                            info!(self.log, "Relocated {entry:?} to {dest:?}");
+                            if let Err(err) = Self::copy_sync_and_remove(&entry.path(), &dest) {
+                                error!(self.log, "Failed to archive {entry:?}: {err:?}");
+                            } else {
+                                info!(self.log, "Relocated {entry:?} to {dest:?}");
+                            }
                         } else {
                             error!(self.log, "Non-UTF8 path found while archiving core dumps: {entry:?}");
                         }
@@ -443,10 +444,12 @@ impl DumpSetupWorker {
         }
 
         if let Err(err) = self.archive_logs() {
-            error!(
-                self.log,
-                "Failure while trying to archive logs to debug dataset: {err:?}"
-            );
+            if !matches!(err, ArchiveLogsError::NoDebugDirYet) {
+                error!(
+                    self.log,
+                    "Failure while trying to archive logs to debug dataset: {err:?}"
+                );
+            }
         }
 
         Ok(())
@@ -482,7 +485,7 @@ impl DumpSetupWorker {
         let rt =
             tokio::runtime::Runtime::new().map_err(ArchiveLogsError::Tokio)?;
         let oxz_zones = rt.block_on(Zones::get())?;
-        Self::archive_logs_inner(
+        self.archive_logs_inner(
             debug_dir,
             PathBuf::from("/var/svc/log"),
             "global",
@@ -490,54 +493,60 @@ impl DumpSetupWorker {
         for zone in oxz_zones {
             let logdir = zone.path().join("root/var/svc/log");
             let zone_name = zone.name();
-            Self::archive_logs_inner(debug_dir, logdir, zone_name)?;
+            self.archive_logs_inner(debug_dir, logdir, zone_name)?;
         }
         Ok(())
     }
 
     fn archive_logs_inner(
+        &self,
         debug_dir: &DebugDirPath,
         logdir: PathBuf,
         zone_name: &str,
     ) -> Result<(), ArchiveLogsError> {
         let mut rotated_log_files = Vec::new();
         // patterns matching archived logs, e.g. foo.log.3
+        // keep checking for greater numbers of digits until we don't find any
         for n in 1..9 {
             let pattern = logdir
                 .join(format!("*.log.{}", "[0-9]".repeat(n)))
                 .to_str()
                 .ok_or_else(|| ArchiveLogsError::Utf8(zone_name.to_string()))?
                 .to_string();
-            let matches = glob::glob(&pattern)?.flatten().collect_vec();
-            if matches.is_empty() {
-                break;
-            } else {
-                rotated_log_files.extend(matches);
-            }
+            rotated_log_files.extend(glob::glob(&pattern)?.flatten());
         }
         let dest_dir = debug_dir.join(zone_name).into_std_path_buf();
-        std::fs::create_dir_all(&dest_dir)?;
+        if !rotated_log_files.is_empty() {
+            std::fs::create_dir_all(&dest_dir)?;
+            let count = rotated_log_files.len();
+            info!(self.log, "Archiving {count} log files from {zone_name} zone");
+        }
         for entry in rotated_log_files {
             let src_name = entry.file_name().unwrap();
             // as we archive them, logadm will keep resetting to .log.0,
             // so we need to maintain our own numbering in the dest dataset.
             // we'll use the modified date of the rotated log file, or try
-            // falling back to the time of archival if that fails.
+            // falling back to the time of archival if that fails, and
+            // falling back to counting up from 0 if *that* somehow fails.
             let mut n = entry
                 .metadata()
                 .and_then(|m| m.modified())
                 .unwrap_or_else(|_| SystemTime::now())
-                .duration_since(UNIX_EPOCH)?
-                .as_secs();
-            while dest_dir
-                .join(src_name)
-                .with_extension(format!("{n}"))
-                .exists()
-            {
-                n += 1;
+                .duration_since(UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+            let mut dest;
+            loop {
+                dest = dest_dir.join(src_name).with_extension(format!("{n}"));
+                if dest.exists() {
+                    n += 1;
+                } else {
+                    break;
+                }
             }
-            let dest = dest_dir.join(src_name).with_extension(format!("{n}"));
-            Self::copy_sync_and_remove(entry, dest)?;
+            if let Err(err) = Self::copy_sync_and_remove(&entry, dest) {
+                warn!(self.log, "Failed to archive {entry:?}: {err:?}");
+            }
         }
         Ok(())
     }
@@ -587,6 +596,4 @@ enum ArchiveLogsError {
         "No debug dir into which we should archive logs has yet been chosen"
     )]
     NoDebugDirYet,
-    #[error("Somehow encountered a timestamp before Unix epoch")]
-    TimelineSideways(#[from] std::time::SystemTimeError),
 }
