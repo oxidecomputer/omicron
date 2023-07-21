@@ -11,7 +11,7 @@ In examples used here, we had two K.2 cards each with a network connection to a
 different network.  This is not a requirement for running a bench gimlet.  Some
 examples will be different depending on if you have one or two network interfaces.
 
-If you're okay with the omicron ip pools (both internal services & instances)
+If you're okay with the omicron IP pools (both internal services & instances)
 existing on the same L2 segment with the network used to access the gimlet, then
 just one NIC is fine.  That's basically the setup described in the main how-to-run doc.
 
@@ -33,12 +33,17 @@ xref:how-to-run.adoc[How to Run].
 You will need to compile Omicron somewhere else, then copy the files over
 to the gimlet.
 
+For this setup you are installing a basic helios image on a gimlet that does
+not contain Omicron, and will install and configure Omicron manually in later
+steps.  This may or may not suit your needs as a reboot of the gimlet will
+erase all changes made.
+
 == Gimlet setup
 
-You gimlet should have the M.2 devices formatted and setup with 4k sector
+Your gimlet should have the M.2 devices formatted and setup with 4k sector
 sizes.  Info on how to do that is:  <TBD>
 
-== A helios image for your bench gimlet
+== Make a helios v2 image for your bench gimlet
 
 To run Omicron, you require a helios image on your gimlet constructed with
 some required libraries.  If your gimlet is lacking these, you will need to
@@ -59,10 +64,19 @@ example command used to build the image for gimlet-sn21.
 
 The optional `-P` argument arranges for anything in that directory to be laid
 on top of the base image, which we presently use to, say, add in the
-sled-agent SMF manifest and binaries etc.  For example if you `mkdir /tmp/proto`
+sled-agent SMF manifest and binaries etc.  You could do this if you wanted
+your self built Omicron (see below) to be part of the ramdisk.  In my example,
+I have a directory that includes a postboot script that configures an
+interface on the gimlet for me.
+
+For example if you `mkdir /tmp/proto`
 and create `/tmp/proto/usr/bin/blah` then passing the `-P /tmp/proto` to your
 build command would make `/tmp/proto/usr/bin/blah` appear in the image at
 `/usr/bin/blah`
+
+If your `-P` directory does not include Omicron, then you can copy over
+the Omicron files (as described below) and install them manually (as described
+below).
 
 You should update `-N` (name of your image) and `-o` (output location of build
 files) for your setup and needs.
@@ -72,14 +86,15 @@ files) for your setup and needs.
 ds=$(TZ=US/Pacific date +%Y%m%d-%H%M%S)
 ./helios-build experiment-image \
   -N "gimlet-sn21-$ds" \
-  -p helios-netdev=https://pkg.oxide.computer/helios-netdev \
+  -p helios-dev=https://pkg.oxide.computer/helios/2/dev \
   -o "/net/catacomb/data/staff/dock/gimlet-sn21/os-$ds" \
   -F optever=0.23 \
   -B \
   -P alanproto
 ----
 
-The `-F optever=0.23` is subject to change.
+The `-F optever=0.23` is subject to change.  You can discover the current
+Omicron required version by looking in the Omicron repo in `tools/opte_version`
 Once this image is built, you must install it on your gimlet.
 
 == Building Omicron for a bench gimlet
@@ -124,7 +139,9 @@ cargo build --release
 These changes are how we tell Nexus/Omicron what IP addresses it will use
 for internal services that require external network access, and what addresses
 we use for ingress and egress of network traffic from virtual machines we
-create.
+create.  The use of `non-gimlet` here is a bit confusing, as we actually
+are on a gimlet.  It's a side effect of the `non-gimlet` code paths being
+used for a gimlet that is in a rack, but won't participate in the cluster.
 
 Update these sections of `smf/sled-agent/non-gimlet/config-rss.toml` with
 the appropriate network information.  These values are for gimlet-sn21
@@ -243,6 +260,14 @@ tools/scrimlet/softnpu-init.sh
 ----
 
 === Additional configuration after starting Omicron
+
+In the case where an entire subnet is allocated to us and the upstream
+router is configured to route said subnet to us, we don't actually need
+to configure proxy arp for the ip pools as described next.
+That is except for uplink_ip itself (on a real sidecar we add the
+address on the qsfp0 link in the switch zone and so ARPs for it get
+handled normally).  If you have an entire subnet allocated to you, then
+these steps may not be required.
 
 Internal services that require external connectivity (e.g. Nexus, Boundary NTP,
 External DNS) do so via OPTE. When using SoftNPU we'll need to configure Proxy ARP for
