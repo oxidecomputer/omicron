@@ -1,0 +1,46 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ZoneBundleMetadata",
+  "description": "Metadata about a zone bundle.",
+  "type": "object",
+  "required": [
+    "id",
+    "time_created"
+  ],
+  "properties": {
+    "id": {
+      "description": "Identifier for this zone bundle",
+      "allOf": [
+        {
+          "$ref": "#/definitions/ZoneBundleId"
+        }
+      ]
+    },
+    "time_created": {
+      "description": "The time at which this zone bundle was created.",
+      "type": "string",
+      "format": "date-time"
+    }
+  },
+  "definitions": {
+    "ZoneBundleId": {
+      "description": "An identifier for a zone bundle.",
+      "type": "object",
+      "required": [
+        "bundle_id",
+        "zone_name"
+      ],
+      "properties": {
+        "bundle_id": {
+          "description": "The ID for this bundle itself.",
+          "type": "string",
+          "format": "uuid"
+        },
+        "zone_name": {
+          "description": "The name of the zone this bundle is derived from.",
+          "type": "string"
+        }
+      }
+    }
+  }
+}

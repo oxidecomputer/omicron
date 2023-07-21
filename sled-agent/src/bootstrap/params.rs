@@ -173,7 +173,7 @@ pub type Certificate = nexus_client::types::Certificate;
 pub type RecoverySiloConfig = nexus_client::types::RecoverySiloConfig;
 
 /// Configuration information for launching a Sled Agent.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, JsonSchema)]
 pub struct StartSledAgentRequest {
     /// Uuid of the Sled Agent to be created.
     pub id: Uuid,

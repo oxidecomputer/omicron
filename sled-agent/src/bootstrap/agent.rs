@@ -35,6 +35,7 @@ use key_manager::{KeyManager, StorageKeyRequester};
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::api::external::Error as ExternalError;
 use omicron_common::ledger::{self, Ledger, Ledgerable};
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sled_hardware::underlay::BootstrapInterface;
 use sled_hardware::{Baseboard, HardwareManager};
@@ -1045,7 +1046,7 @@ impl Agent {
     }
 }
 
-#[derive(Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
 struct PersistentSledAgentRequest<'a> {
     request: Cow<'a, StartSledAgentRequest>,
 }
@@ -1092,5 +1093,14 @@ mod tests {
 
         assert!(&request == ledger.data(), "serialization round trip failed");
         logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn test_persistent_sled_agent_request_schema() {
+        let schema = schemars::schema_for!(PersistentSledAgentRequest<'_>);
+        expectorate::assert_contents(
+            "../schema/persistent-sled-agent-request.json",
+            &serde_json::to_string_pretty(&schema).unwrap(),
+        );
     }
 }

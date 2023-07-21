@@ -12,6 +12,7 @@ use super::postgres_config::PostgresConfigWithUrl;
 use anyhow::anyhow;
 use dropshot::ConfigDropshot;
 use dropshot::ConfigLogging;
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
 use serde_with::DeserializeFromStr;
@@ -98,19 +99,20 @@ impl std::cmp::PartialEq<std::io::Error> for LoadError {
 }
 
 #[serde_as]
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 #[allow(clippy::large_enum_variant)]
 pub enum Database {
     FromDns,
     FromUrl {
         #[serde_as(as = "DisplayFromStr")]
+        #[schemars(with = "String")]
         url: PostgresConfigWithUrl,
     },
 }
 
 /// The mechanism Nexus should use to contact the internal DNS servers.
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum InternalDns {
     /// Nexus should infer the DNS server addresses from this subnet.
@@ -124,15 +126,17 @@ pub enum InternalDns {
     FromAddress { address: SocketAddr },
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, JsonSchema)]
 pub struct DeploymentConfig {
     /// Uuid of the Nexus instance
     pub id: Uuid,
     /// Uuid of the Rack where Nexus is executing.
     pub rack_id: Uuid,
     /// Dropshot configuration for the external API server.
+    #[schemars(skip)] // TODO we're protected against dropshot changes
     pub dropshot_external: ConfigDropshotWithTls,
     /// Dropshot configuration for internal API server.
+    #[schemars(skip)] // TODO we're protected against dropshot changes
     pub dropshot_internal: ConfigDropshot,
     /// Describes how Nexus should find internal DNS servers
     /// for bootstrapping.
@@ -869,5 +873,14 @@ mod test {
         contents.push_str(&example_deployment);
         let _: Config = toml::from_str(&contents)
             .expect("Nexus SMF config file is not valid");
+    }
+
+    #[test]
+    fn test_deployment_config_schema() {
+        let schema = schemars::schema_for!(DeploymentConfig);
+        expectorate::assert_contents(
+            "../schema/deployment-config.json",
+            &serde_json::to_string_pretty(&schema).unwrap(),
+        );
     }
 }
