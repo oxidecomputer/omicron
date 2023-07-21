@@ -456,7 +456,7 @@ Traffic aimed at `fd00:1122:3344:104::22` will match the rule for `fd00:1122:334
 
 We can summarize the underlay networking configuration on a typical sled like this:
 
-```
+```mermaid
 graph TD;
     Sidecar0
     Sidecar1
