@@ -39,7 +39,6 @@ use ddm_admin_client::{Client as DdmAdminClient, DdmError};
 use dpd_client::{types as DpdTypes, Client as DpdClient, Error as DpdError};
 use dropshot::HandlerTaskMode;
 use flate2::bufread::GzDecoder;
-use futures::stream::{self, StreamExt};
 use illumos_utils::addrobj::AddrObject;
 use illumos_utils::addrobj::IPV6_LINK_LOCAL_NAME;
 use illumos_utils::dladm::{Dladm, Etherstub, EtherstubVnic, PhysicalLink};
@@ -48,6 +47,7 @@ use illumos_utils::opte::{Port, PortManager, PortTicket};
 use illumos_utils::running_zone::{
     InstalledZone, RunCommandError, RunningZone,
 };
+use illumos_utils::zfs::ZONE_ZFS_RAMDISK_DATASET_MOUNTPOINT;
 use illumos_utils::zone::AddressRequest;
 use illumos_utils::zone::Zones;
 use illumos_utils::{execute, PFEXEC};
@@ -141,6 +141,9 @@ pub enum Error {
     #[error("Failed to issue SMF command: {0}")]
     SmfCommand(#[from] crate::smf_helper::Error),
 
+    #[error("{}", display_zone_init_errors(.0))]
+    ZoneInitialize(Vec<(String, Box<Error>)>),
+
     #[error("Failed to do '{intent}' by running command in zone: {err}")]
     ZoneCommand {
         intent: String,
@@ -226,6 +229,21 @@ impl From<Error> for omicron_common::api::external::Error {
     }
 }
 
+fn display_zone_init_errors(errors: &[(String, Box<Error>)]) -> String {
+    if errors.len() == 1 {
+        return format!(
+            "Failed to initialize zone: {} errored with {}",
+            errors[0].0, errors[0].1
+        );
+    }
+
+    let mut output = format!("Failed to initialize {} zones:\n", errors.len());
+    for (zone_name, error) in errors {
+        output.push_str(&format!("  - {}: {}\n", zone_name, error));
+    }
+    output
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum BundleError {
     #[error("I/O error")]
@@ -279,7 +297,7 @@ const ZONE_BUNDLE_METADATA_FILENAME: &str = "metadata.toml";
 
 // A wrapper around `ZoneRequest`, which allows it to be serialized
 // to a toml file.
-#[derive(Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 struct AllZoneRequests {
     generation: Generation,
     requests: Vec<ZoneRequest>,
@@ -303,10 +321,11 @@ impl Ledgerable for AllZoneRequests {
 
 // This struct represents the combo of "what zone did you ask for" + "where did
 // we put it".
-#[derive(Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 struct ZoneRequest {
     zone: ServiceZoneRequest,
     // TODO: Consider collapsing "root" into ServiceZoneRequest
+    #[schemars(with = "String")]
     root: Utf8PathBuf,
 }
 
@@ -911,7 +930,7 @@ impl ServiceManager {
     async fn configure_dns_client(
         &self,
         running_zone: &RunningZone,
-        dns_servers: &Vec<String>,
+        dns_servers: &[IpAddr],
         domain: &Option<String>,
     ) -> Result<(), Error> {
         struct DnsClient {}
@@ -1335,7 +1354,10 @@ impl ServiceManager {
 
             match &service.details {
                 ServiceType::Nexus {
-                    internal_address, external_tls, ..
+                    internal_address,
+                    external_tls,
+                    external_dns_servers,
+                    ..
                 } => {
                     info!(self.inner.log, "Setting up Nexus service");
 
@@ -1389,6 +1411,7 @@ impl ServiceManager {
                             ),
                         },
                         database: nexus_config::Database::FromDns,
+                        external_dns_servers: external_dns_servers.clone(),
                     };
 
                     // Copy the partial config file to the expected location.
@@ -1810,7 +1833,7 @@ impl ServiceManager {
                     }
                     self.configure_dns_client(
                         &running_zone,
-                        &dns_servers,
+                        dns_servers,
                         &domain,
                     )
                     .await?;
@@ -1924,45 +1947,33 @@ impl ServiceManager {
             });
         }
 
-        // We initialize all the zones we can, but only return one error, if
-        // any.
-        let local_existing_zones = Arc::new(Mutex::new(existing_zones));
-        let last_err = Arc::new(Mutex::new(None));
-        stream::iter(requests)
-            // WARNING: Do not use "try_for_each_concurrent" here -- if you do,
-            // it's possible that the future will cancel other ongoing requests
-            // to "initialize_zone".
-            .for_each_concurrent(None, |request| {
-                let local_existing_zones = local_existing_zones.clone();
-                let last_err = last_err.clone();
-                async move {
-                    match self
-                        .initialize_zone(
-                            request,
-                            // filesystems=
-                            &[],
-                        )
-                        .await
-                    {
-                        Ok(running_zone) => {
-                            local_existing_zones.lock().await.insert(
-                                running_zone.name().to_string(),
-                                running_zone,
-                            );
-                        }
-                        Err(err) => {
-                            *last_err.lock().await = Some(err);
-                        }
-                    }
-                }
-            })
-            .await;
+        let futures = requests.iter().map(|request| {
+            async move {
+                self.initialize_zone(
+                    request,
+                    // filesystems=
+                    &[],
+                )
+                .await
+                .map_err(|error| (request.zone.zone_name(), error))
+            }
+        });
+        let results = futures::future::join_all(futures).await;
 
-        if let Some(err) = Arc::into_inner(last_err)
-            .expect("Should have last reference")
-            .into_inner()
-        {
-            return Err(err);
+        let mut errors = Vec::new();
+        for result in results {
+            match result {
+                Ok(zone) => {
+                    existing_zones.insert(zone.name().to_string(), zone);
+                }
+                Err((zone_name, error)) => {
+                    errors.push((zone_name, Box::new(error)));
+                }
+            }
+        }
+
+        if !errors.is_empty() {
+            return Err(Error::ZoneInitialize(errors));
         }
 
         Ok(())
@@ -3029,13 +3040,24 @@ impl ServiceManager {
         let SledLocalZone::Initializing { request, filesystems, .. } = &*sled_zone else {
             return Ok(())
         };
-        let all_u2_roots =
-            self.inner.storage.all_u2_mountpoints(ZONE_DATASET).await;
-        let mut rng = rand::rngs::StdRng::from_entropy();
-        let root = all_u2_roots
-            .choose(&mut rng)
-            .ok_or_else(|| Error::U2NotFound)?
-            .clone();
+
+        // The switch zone must use the ramdisk in order to receive requests
+        // from RSS to initialize the rack. This enables the initialization of
+        // trust quorum to derive disk encryption keys for U.2 devices. If the
+        // switch zone were on a U.2 device we would not be able to run RSS, as
+        // we could not create the U.2 disks due to lack of encryption. To break
+        // the cycle we put the switch zone root fs on the ramdisk.
+        let root = if request.zone_type == ZoneType::Switch {
+            Utf8PathBuf::from(ZONE_ZFS_RAMDISK_DATASET_MOUNTPOINT)
+        } else {
+            let all_u2_roots =
+                self.inner.storage.all_u2_mountpoints(ZONE_DATASET).await;
+            let mut rng = rand::rngs::StdRng::from_entropy();
+            all_u2_roots
+                .choose(&mut rng)
+                .ok_or_else(|| Error::U2NotFound)?
+                .clone()
+        };
 
         let request = ZoneRequest { zone: request.clone(), root };
         let zone = self.initialize_zone(&request, filesystems).await?;
@@ -3577,5 +3599,23 @@ mod test {
         assert_eq!(prefix1.segments()[1..], ba.segments()[1..]);
         assert_eq!(prefix0.segments()[0], 0xfdb1);
         assert_eq!(prefix1.segments()[0], 0xfdb2);
+    }
+
+    #[test]
+    fn test_all_zone_requests_schema() {
+        let schema = schemars::schema_for!(AllZoneRequests);
+        expectorate::assert_contents(
+            "../schema/all-zone-requests.json",
+            &serde_json::to_string_pretty(&schema).unwrap(),
+        );
+    }
+
+    #[test]
+    fn test_zone_bundle_metadata_schema() {
+        let schema = schemars::schema_for!(ZoneBundleMetadata);
+        expectorate::assert_contents(
+            "../schema/zone-bundle-metadata.json",
+            &serde_json::to_string_pretty(&schema).unwrap(),
+        );
     }
 }
