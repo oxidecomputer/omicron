@@ -23,6 +23,74 @@
     }
   },
   "definitions": {
+    "Baseboard": {
+      "description": "Describes properties that should uniquely identify a Gimlet.",
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "identifier",
+            "model",
+            "revision",
+            "type"
+          ],
+          "properties": {
+            "identifier": {
+              "type": "string"
+            },
+            "model": {
+              "type": "string"
+            },
+            "revision": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "gimlet"
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "type"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "unknown"
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "identifier",
+            "model",
+            "type"
+          ],
+          "properties": {
+            "identifier": {
+              "type": "string"
+            },
+            "model": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "pc"
+              ]
+            }
+          }
+        }
+      ]
+    },
     "BootstrapAddressDiscovery": {
       "oneOf": [
         {
@@ -222,7 +290,8 @@
           "description": "The external DNS server addresses.",
           "type": "array",
           "items": {
-            "type": "string"
+            "type": "string",
+            "format": "ip"
           }
         },
         "external_certificates": {
@@ -280,6 +349,16 @@
               "$ref": "#/definitions/RecoverySiloConfig"
             }
           ]
+        },
+        "trust_quorum_peers": {
+          "description": "The set of peer_ids required to initialize trust quorum\n\nThe value is `None` if we are not using trust quorum",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/definitions/Baseboard"
+          }
         }
       }
     },
@@ -338,14 +417,16 @@
         "id",
         "ntp_servers",
         "rack_id",
-        "subnet"
+        "subnet",
+        "use_trust_quorum"
       ],
       "properties": {
         "dns_servers": {
           "description": "The external DNS servers to use",
           "type": "array",
           "items": {
-            "type": "string"
+            "type": "string",
+            "format": "ip"
           }
         },
         "id": {
@@ -372,6 +453,10 @@
               "$ref": "#/definitions/Ipv6Subnet"
             }
           ]
+        },
+        "use_trust_quorum": {
+          "description": "Use trust quorum for key generation",
+          "type": "boolean"
         }
       }
     },
