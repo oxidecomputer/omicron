@@ -356,6 +356,7 @@ table! {
         ncpus -> Int8,
         memory -> Int8,
         hostname -> Text,
+        boot_on_fault -> Bool,
     }
 }
 
@@ -1122,7 +1123,7 @@ table! {
 
 /// The version of the database schema this particular version of Nexus was
 /// built against.
-pub const SCHEMA_VERSION: SemverVersion = SemverVersion::new(1, 0, 0);
+pub const SCHEMA_VERSION: SemverVersion = SemverVersion::new(1, 0, 1);
 
 allow_tables_to_appear_in_same_query!(
     system_update,

@@ -1,0 +1,54 @@
+:showtitle:
+:numbered:
+
+= Database Schemas
+
+This directory describes the schema(s) used by CockroachDB.
+
+We use the following conventions:
+
+* `schema/crdb/VERSION/up.sql`: The necessary migrations to transition from the
+  previous version of cockroachdb to this version.
+* `schema/crdb/VERSION/down.sql`: The necessary migrations to transition from
+  the current version of CockroachDB to the immediately preceding version.
+* `schema/crdb/dbinit.sql`: The necessary operations to create the latest version
+  of the schema. Should be equivalent to running all `up.sql` migrations, in-order.
+* `schema/crdb/dbwipe.sql`: The necessary operations to delete the latest version
+  of the schema.
+
+== Offline Upgrade
+
+Nexus currently supports **offline** schema migrations.
+This means we're operating with the following constraints:
+
+* We assume that downtime is acceptable to perform an update.
+* We assume that while an update is occuring, all Nexus services
+are running the same version of software.
+* We assume that no concurrent database requests will happen for
+the duration of the migration.
+
+This is not an acceptable long-term solution - we must be able to update
+without downtime - but it is a short-term solution, and one which provides a
+fall-back pathway for performing upgrades without data loss.
+
+See RFD 319 for more discussion of the online upgrade plans.
+
+=== How to perform an offline upgrade
+
+Assumptions:
+
+* The (previously) latest schema version is referred to as `OLD_VERSION`
+* Your new changes will bring the schema to a new version, `NEW_VERSION`
+
+Process:
+
+* Add a file to `schema/crdb/NEW_VERSION/up.sql` with your changes to the schema.
+  The last step of this migration should be updating `omicron.public.db_metadata`,
+  in particular, by setting the `schema_version` to `NEW_VERSION`.
+* Add a file to `schema/crdb/OLD_VERSION/down.sql` with the changes to undo your
+  schema changes. This should be a reversal of `NEW_VERSION/up.sql`.
+* Update `schema/crdb/dbinit.sql` to match what the database should look like
+  after your update is applied.
+** If necessary, do the same thing for `schema/crdb/dbwipe.sql`.
+* Update Nexus's idea of the latest schema, by updating it's `SCHEMA_VERSION` to
+  `NEW_VERSION`.

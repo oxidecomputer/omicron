@@ -385,7 +385,7 @@ mod test {
         let cfg = db::Config { url: db.pg_config().clone() };
         let pool = Arc::new(db::Pool::new(&logctx.log, &cfg));
         let datastore =
-            Arc::new(db::DataStore::new(&logctx.log, pool).await.unwrap());
+            Arc::new(db::DataStore::new(&logctx.log, pool, None).await.unwrap());
         let opctx = OpContext::for_background(
             logctx.log.clone(),
             Arc::new(authz::Authz::new(&logctx.log)),
@@ -440,7 +440,7 @@ mod test {
         // We need to create the datastore before tearing down the database, as
         // it verifies the schema version of the DB while booting.
         let datastore =
-            Arc::new(db::DataStore::new(&logctx.log, pool).await.unwrap());
+            Arc::new(db::DataStore::new(&logctx.log, pool, None).await.unwrap());
         let opctx = OpContext::for_background(
             logctx.log.clone(),
             Arc::new(authz::Authz::new(&logctx.log)),

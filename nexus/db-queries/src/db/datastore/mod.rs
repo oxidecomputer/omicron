@@ -27,7 +27,7 @@ use crate::db::{
     error::{public_error_from_diesel_pool, ErrorHandler},
 };
 use ::oximeter::types::ProducerRegistry;
-use async_bb8_diesel::{AsyncRunQueryDsl, ConnectionManager};
+use async_bb8_diesel::{AsyncRunQueryDsl, AsyncSimpleConnection, ConnectionManager};
 use diesel::pg::Pg;
 use diesel::prelude::*;
 use diesel::query_builder::{QueryFragment, QueryId};
@@ -41,8 +41,11 @@ use omicron_common::api::external::SemverVersion;
 use omicron_common::backoff::{
     retry_notify, retry_policy_internal_service, BackoffError,
 };
+use omicron_common::nexus_config::SchemaConfig;
 use slog::Logger;
+use std::collections::BTreeSet;
 use std::net::Ipv6Addr;
+use std::ops::Bound;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -141,7 +144,7 @@ impl DataStore {
     ///
     /// Only returns if the database schema is compatible with Nexus's known
     /// schema version.
-    pub async fn new(log: &Logger, pool: Arc<Pool>) -> Result<Self, String> {
+    pub async fn new(log: &Logger, pool: Arc<Pool>, config: Option<&SchemaConfig>) -> Result<Self, String> {
         let datastore = DataStore {
             pool,
             virtual_provisioning_collection_producer:
@@ -149,20 +152,14 @@ impl DataStore {
         };
 
         // Keep looping until we find that the schema matches our expectation.
-        const EXPECTED_VERSION: SemverVersion = SemverVersion::new(1, 0, 0);
+        const EXPECTED_VERSION: SemverVersion = nexus_db_model::schema::SCHEMA_VERSION;
         retry_notify(
             retry_policy_internal_service(),
             || async {
-                match datastore.database_schema_version().await {
-                    Ok(version) => {
-                        if version == nexus_db_model::schema::SCHEMA_VERSION {
-                            return Ok(());
-                        }
-                        let observed = version.0;
-                        warn!(log, "Incompatible database schema: Saw {observed}, expected {EXPECTED_VERSION}");
-                    }
+                match datastore.ensure_schema(&log, EXPECTED_VERSION, config).await {
+                    Ok(()) => return Ok(()),
                     Err(e) => {
-                        warn!(log, "Cannot read database schema version: {e}");
+                        warn!(log, "Failed to ensure schema version: {e}");
                     }
                 };
                 return Err(BackoffError::transient(()));
@@ -171,6 +168,102 @@ impl DataStore {
         ).await.map_err(|_| "Failed to read valid DB schema".to_string())?;
 
         Ok(datastore)
+    }
+
+    // Ensures that the database schema matches "desired_version"
+    async fn ensure_schema(
+        &self,
+        log: &Logger,
+        desired_version: SemverVersion,
+        config: Option<&SchemaConfig>,
+    ) -> Result<(), String> {
+        let version = match self.database_schema_version().await {
+            Ok(version) => {
+                if version == desired_version {
+                    info!(log, "Compatible database schema: {version}");
+                    return Ok(());
+                }
+                let observed = &version.0;
+                warn!(log, "Incompatible database schema: Saw {observed}, expected {desired_version}");
+                version
+            }
+            Err(e) => {
+                return Err(format!("Cannot read schema version: {e}"));
+            }
+        };
+
+        let Some(config) = config else {
+            return Err("Not configured to automatically update schema".to_string());
+        };
+
+        if version > desired_version {
+            return Err("Nexus older than DB version: automatic downgrades are unsupported".to_string());
+        }
+
+        // If we're here, we know the following:
+        //
+        // - The schema does not match our expected version (or at least, it
+        // didn't when we read it moments ago).
+        // - We should attempt to automatically upgrade the schema.
+        //
+        // We do the following:
+        // - Look in the schema directory for all the changes, in-order, to
+        // migrate from our current version to the desired version.
+
+        info!(log, "Reading schemas from {}", config.schema_dir.display());
+        let mut dir = tokio::fs::read_dir(&config.schema_dir)
+            .await
+            .map_err(|e| format!("Failed to read schema config dir: {e}"))?;
+        let mut all_versions = BTreeSet::new();
+        while let Some(entry) = dir.next_entry().await.map_err(|e| format!("Failed to read schema dir: {e}"))? {
+            if entry.file_type().await.map_err(|e| e.to_string())?.is_dir() {
+                let name = entry.file_name().into_string().map_err(|_| format!("Non-unicode schema dir"))?;
+                if let Ok(observed_version) = name.parse::<SemverVersion>() {
+                    all_versions.insert(observed_version);
+                } else {
+                    warn!(log, "Failed to parse {name} as a semver version");
+                }
+            }
+        }
+
+        if all_versions.get(&version).is_none() {
+            return Err(format!("Current DB version {version} is not known"));
+        }
+
+        let upgrades = all_versions.range((
+            Bound::Excluded(version),
+            Bound::Included(desired_version),
+        ));
+
+        // NOTE:
+        //
+        // MULTIPLE DISJOINT UPDATES
+        // - E.g., if we perform an "add column" in v2, and then we remove that
+        // column in v3. When upgrading from 1 -> 2 -> 3, we'd serially expect
+        // to add the column, then remove it. However, in the context of
+        // parallel nexus execution, it's possible for one Nexus to try
+        // applying the v2 migrations while the v3 migrations are also being
+        // executed.
+        let client = self.pool()
+            .get()
+            .await
+            .map_err(|e| format!("Cannot get db connection: {e}"))?;
+        for upgrade in upgrades {
+            info!(log, "Applying upgrade to version {}", upgrade);
+
+            let up = config.schema_dir.join(upgrade.to_string()).join("up.sql");
+            let sql = tokio::fs::read_to_string(&up)
+                .await
+                .map_err(|e| format!("Cannot read {up}: {e}", up = up.display()))?;
+            client.batch_execute_async(&sql).await.map_err(|e| {
+                format!("Failed to execute upgrade: {e}")
+            })?;
+
+            // NOTE: If you'd like to perform any offline, post-update
+            // operations between versions, this is where you could do so.
+        }
+
+        Ok(())
     }
 
     pub fn register_producers(&self, registry: &ProducerRegistry) {
@@ -319,7 +412,7 @@ pub async fn datastore_test(
 
     let cfg = db::Config { url: db.pg_config().clone() };
     let pool = Arc::new(db::Pool::new(&logctx.log, &cfg));
-    let datastore = Arc::new(DataStore::new(&logctx.log, pool).await.unwrap());
+    let datastore = Arc::new(DataStore::new(&logctx.log, pool, None).await.unwrap());
 
     // Create an OpContext with the credentials of "db-init" just for the
     // purpose of loading the built-in users, roles, and assignments.
@@ -979,7 +1072,7 @@ mod test {
         let cfg = db::Config { url: db.pg_config().clone() };
         let pool = db::Pool::new(&logctx.log, &cfg);
         let datastore =
-            DataStore::new(&logctx.log, Arc::new(pool)).await.unwrap();
+            DataStore::new(&logctx.log, Arc::new(pool), None).await.unwrap();
 
         let explanation = DataStore::get_allocated_regions_query(Uuid::nil())
             .explain_async(datastore.pool())
@@ -1029,7 +1122,7 @@ mod test {
         let cfg = db::Config { url: db.pg_config().clone() };
         let pool = Arc::new(db::Pool::new(&logctx.log, &cfg));
         let datastore =
-            Arc::new(DataStore::new(&logctx.log, pool).await.unwrap());
+            Arc::new(DataStore::new(&logctx.log, pool, None).await.unwrap());
         let opctx =
             OpContext::for_tests(logctx.log.new(o!()), datastore.clone());
 

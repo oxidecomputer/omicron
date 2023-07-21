@@ -330,7 +330,7 @@ mod test {
         let cfg = crate::db::Config { url: db.pg_config().clone() };
         let pool = Arc::new(db::Pool::new(log, &cfg));
         let db_datastore = Arc::new(
-            db::DataStore::new(&log, Arc::clone(&pool)).await.unwrap(),
+            db::DataStore::new(&log, Arc::clone(&pool), None).await.unwrap(),
         );
         (db, db_datastore)
     }
