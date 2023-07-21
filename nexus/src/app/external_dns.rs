@@ -19,6 +19,7 @@ pub struct Resolver(TokioAsyncResolver);
 
 impl Resolver {
     pub fn new(dns_servers: &[IpAddr]) -> Resolver {
+        assert!(!dns_servers.is_empty());
         let mut rc = ResolverConfig::new();
         for addr in dns_servers {
             rc.add_name_server(NameServerConfig {
@@ -31,6 +32,7 @@ impl Resolver {
         }
         let mut opts = ResolverOpts::default();
         opts.use_hosts_file = false;
+        // Do as many requests in parallel as we have configured servers
         opts.num_concurrent_reqs = dns_servers.len();
         Resolver(
             TokioAsyncResolver::tokio(rc, opts)
