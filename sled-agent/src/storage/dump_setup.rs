@@ -102,6 +102,34 @@ impl DumpSetup {
                             &name.to_string(),
                         ) {
                             if info.health() == ZpoolHealth::Online {
+                                let crypt_debug_ds = format!(
+                                    "{name}/{}",
+                                    sled_hardware::disk::DUMP_DATASET
+                                );
+                                match zfs_get_prop(&crypt_debug_ds, "mounted") {
+                                    Ok(x) if x == "yes" => {
+                                        debug!(log, "{crypt_debug_ds} was already mounted.");
+                                    }
+                                    Ok(x) if x == "no" => {
+                                        warn!(log, "{crypt_debug_ds} wasn't mounted, mounting now");
+                                        if let Err(err) =
+                                            std::process::Command::new(
+                                                illumos_utils::zfs::ZFS,
+                                            )
+                                            .arg("mount")
+                                            .arg(&crypt_debug_ds)
+                                            .output()
+                                        {
+                                            error!(log, "Failed to mount {crypt_debug_ds}: {err:?}");
+                                        }
+                                    }
+                                    Ok(wat) => {
+                                        error!(log, "Asked a yes-or-no question about whether {crypt_debug_ds} was mounted, got {wat}");
+                                    }
+                                    Err(err) => {
+                                        error!(log, "Couldn't query if {crypt_debug_ds} was mounted: {err:?}")
+                                    }
+                                }
                                 u2_debug_dirs.push(DebugDirPath(
                                     name.dataset_mountpoint(
                                         sled_hardware::disk::DUMP_DATASET,
@@ -184,16 +212,23 @@ const ZFS_PROP_USED: &str = "used";
 const ZFS_PROP_AVAILABLE: &str = "available";
 
 fn zfs_get_integer(
-    mountpoint: impl AsRef<str>,
+    mountpoint_or_name: impl AsRef<str>,
     property: &str,
 ) -> Result<u64, ZfsGetError> {
-    let mountpoint = mountpoint.as_ref();
+    zfs_get_prop(mountpoint_or_name, property)?.parse().map_err(Into::into)
+}
+
+fn zfs_get_prop(
+    mountpoint_or_name: impl AsRef<str> + Sized,
+    property: &str,
+) -> Result<String, ZfsGetError> {
+    let mountpoint = mountpoint_or_name.as_ref();
     let mut cmd = std::process::Command::new(illumos_utils::zfs::ZFS);
     cmd.arg("get").arg("-Hpo").arg("value");
     cmd.arg(property);
     cmd.arg(mountpoint);
     let output = cmd.output()?;
-    String::from_utf8(output.stdout)?.trim().parse().map_err(Into::into)
+    Ok(String::from_utf8(output.stdout)?.trim().to_string())
 }
 
 const DATASET_USAGE_PERCENT_CHOICE: u64 = 70;
