@@ -1,9 +1,9 @@
 use crate::storage_manager::DiskWrapper;
 use camino::Utf8PathBuf;
-use derive_more::{AsRef, Deref};
+use derive_more::{AsRef, Deref, From};
 use illumos_utils::dumpadm::DumpAdmError;
 use illumos_utils::zone::{AdmError, Zones};
-use illumos_utils::zpool::ZpoolHealth;
+use illumos_utils::zpool::{ZpoolHealth, ZpoolName};
 use omicron_common::disk::DiskIdentity;
 use sled_hardware::DiskVariant;
 use slog::Logger;
@@ -36,29 +36,65 @@ impl DumpSetup {
 }
 
 // we sure are passing a lot of Utf8PathBufs around, let's be careful about it
-#[derive(AsRef, Clone, Debug, Deref, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[derive(
+    AsRef, Clone, Debug, Deref, Eq, From, Hash, Ord, PartialEq, PartialOrd,
+)]
 struct DumpSlicePath(Utf8PathBuf);
-#[derive(AsRef, Clone, Debug, Deref, Eq, Hash, Ord, PartialEq, PartialOrd)]
-struct DebugDirPath(Utf8PathBuf);
-#[derive(AsRef, Clone, Debug, Deref, Eq, Hash, Ord, PartialEq, PartialOrd)]
-struct CorePath(Utf8PathBuf);
+#[derive(
+    AsRef, Clone, Debug, Deref, Eq, From, Hash, Ord, PartialEq, PartialOrd,
+)]
+struct DebugDataset(Utf8PathBuf);
+#[derive(
+    AsRef, Clone, Debug, Deref, Eq, From, Hash, Ord, PartialEq, PartialOrd,
+)]
+struct CoreDataset(Utf8PathBuf);
+
+#[derive(Deref)]
+struct CoreZpool(ZpoolName);
+#[derive(Deref)]
+struct DebugZpool(ZpoolName);
+
+// only want to access these directories after they're mounted!
+trait GetMountpoint: std::ops::Deref<Target = ZpoolName> {
+    type NewType: From<Utf8PathBuf>;
+    const MOUNTPOINT: &'static str;
+    fn mountpoint(&self) -> Result<Option<Self::NewType>, ZfsGetError> {
+        if zfs_get_prop(self.to_string(), "mounted")? == "yes" {
+            Ok(Some(Self::NewType::from(
+                self.dataset_mountpoint(Self::MOUNTPOINT),
+            )))
+        } else {
+            Ok(None)
+        }
+    }
+}
+impl GetMountpoint for DebugZpool {
+    type NewType = DebugDataset;
+    const MOUNTPOINT: &'static str = sled_hardware::disk::DUMP_DATASET;
+}
+impl GetMountpoint for CoreZpool {
+    type NewType = CoreDataset;
+    const MOUNTPOINT: &'static str = sled_hardware::disk::CRASH_DATASET;
+}
 
 struct DumpSetupWorker {
+    core_dataset_names: Vec<CoreZpool>,
+    debug_dataset_names: Vec<DebugZpool>,
+
     chosen_dump_slice: Option<DumpSlicePath>,
-    chosen_debug_dir: Option<DebugDirPath>,
-    chosen_core_dir: Option<CorePath>,
+    chosen_debug_dir: Option<DebugDataset>,
+    chosen_core_dir: Option<CoreDataset>,
 
     known_dump_slices: Vec<DumpSlicePath>,
-    known_debug_dirs: Vec<DebugDirPath>,
-    known_core_dirs: Vec<CorePath>,
+    known_debug_dirs: Vec<DebugDataset>,
+    known_core_dirs: Vec<CoreDataset>,
 
     savecored_slices: HashSet<DumpSlicePath>,
 
     log: Logger,
 }
 
-const ARCHIVAL_INTERVAL: std::time::Duration =
-    std::time::Duration::from_secs(300);
+const ARCHIVAL_INTERVAL: Duration = Duration::from_secs(300);
 
 impl DumpSetup {
     pub(crate) async fn update_dumpdev_setup(
@@ -67,8 +103,8 @@ impl DumpSetup {
     ) {
         let log = &self.log;
         let mut m2_dump_slices = Vec::new();
-        let mut u2_debug_dirs = Vec::new();
-        let mut m2_core_dirs = Vec::new();
+        let mut u2_debug_datasets = Vec::new();
+        let mut m2_core_datasets = Vec::new();
         for (_id, disk_wrapper) in disks.iter() {
             match disk_wrapper {
                 DiskWrapper::Real { disk, .. } => match disk.variant() {
@@ -86,11 +122,7 @@ impl DumpSetup {
                             &name.to_string(),
                         ) {
                             if info.health() == ZpoolHealth::Online {
-                                m2_core_dirs.push(CorePath(
-                                    name.dataset_mountpoint(
-                                        sled_hardware::disk::CRASH_DATASET,
-                                    ),
-                                ));
+                                m2_core_datasets.push(CoreZpool(name.clone()));
                             } else {
                                 warn!(log, "Zpool {name:?} not online, won't attempt to save process core dumps there");
                             }
@@ -102,39 +134,8 @@ impl DumpSetup {
                             &name.to_string(),
                         ) {
                             if info.health() == ZpoolHealth::Online {
-                                let crypt_debug_ds = format!(
-                                    "{name}/{}",
-                                    sled_hardware::disk::DUMP_DATASET
-                                );
-                                match zfs_get_prop(&crypt_debug_ds, "mounted") {
-                                    Ok(x) if x == "yes" => {
-                                        debug!(log, "{crypt_debug_ds} was already mounted.");
-                                    }
-                                    Ok(x) if x == "no" => {
-                                        warn!(log, "{crypt_debug_ds} wasn't mounted, mounting now");
-                                        if let Err(err) =
-                                            std::process::Command::new(
-                                                illumos_utils::zfs::ZFS,
-                                            )
-                                            .arg("mount")
-                                            .arg(&crypt_debug_ds)
-                                            .output()
-                                        {
-                                            error!(log, "Failed to mount {crypt_debug_ds}: {err:?}");
-                                        }
-                                    }
-                                    Ok(wat) => {
-                                        error!(log, "Asked a yes-or-no question about whether {crypt_debug_ds} was mounted, got {wat}");
-                                    }
-                                    Err(err) => {
-                                        error!(log, "Couldn't query if {crypt_debug_ds} was mounted: {err:?}")
-                                    }
-                                }
-                                u2_debug_dirs.push(DebugDirPath(
-                                    name.dataset_mountpoint(
-                                        sled_hardware::disk::DUMP_DATASET,
-                                    ),
-                                ));
+                                u2_debug_datasets
+                                    .push(DebugZpool(name.clone()));
                             } else {
                                 warn!(log, "Zpool {name:?} not online, won't attempt to save kernel core dumps there");
                             }
@@ -151,8 +152,8 @@ impl DumpSetup {
             Ok(mut guard) => {
                 guard.update_disk_loadout(
                     m2_dump_slices,
-                    u2_debug_dirs,
-                    m2_core_dirs,
+                    u2_debug_datasets,
+                    m2_core_datasets,
                 );
             }
             Err(err) => {
@@ -248,6 +249,8 @@ fn below_thresh(
 impl DumpSetupWorker {
     fn new(log: Logger) -> Self {
         Self {
+            core_dataset_names: vec![],
+            debug_dataset_names: vec![],
             chosen_dump_slice: None,
             chosen_debug_dir: None,
             chosen_core_dir: None,
@@ -262,23 +265,43 @@ impl DumpSetupWorker {
     fn update_disk_loadout(
         &mut self,
         dump_slices: Vec<DumpSlicePath>,
-        debug_dirs: Vec<DebugDirPath>,
-        core_dirs: Vec<CorePath>,
+        debug_datasets: Vec<DebugZpool>,
+        core_datasets: Vec<CoreZpool>,
     ) {
+        self.core_dataset_names = core_datasets;
+        self.debug_dataset_names = debug_datasets;
+
         self.known_dump_slices = dump_slices;
-        self.known_debug_dirs = debug_dirs;
-        self.known_core_dirs = core_dirs;
 
         self.reevaluate_choices();
     }
 
+    // only allow mounted zfs datasets into 'known_*_dirs',
+    // such that we don't render them non-auto-mountable by zfs
+    fn update_mounted_dirs(&mut self) {
+        self.known_debug_dirs = self
+            .debug_dataset_names
+            .iter()
+            .flat_map(|ds| ds.mountpoint())
+            .flatten()
+            .collect();
+        self.known_core_dirs = self
+            .core_dataset_names
+            .iter()
+            .flat_map(|ds| ds.mountpoint())
+            .flatten()
+            .collect();
+    }
+
     fn reevaluate_choices(&mut self) {
+        self.update_mounted_dirs();
+
         self.known_dump_slices.sort();
         // sort key: prefer to choose a dataset where there's already other
         // dumps so we don't shotgun them across every U.2, but only if they're
         // below a certain usage threshold.
         self.known_debug_dirs.sort_by_cached_key(
-            |mountpoint: &DebugDirPath| {
+            |mountpoint: &DebugDataset| {
                 match below_thresh(mountpoint.as_ref(), DATASET_USAGE_PERCENT_CHOICE) {
                     Ok((below, used)) => {
                         let priority = if below { 0 } else { 1 };
@@ -567,7 +590,7 @@ impl DumpSetupWorker {
 
     fn archive_logs_inner(
         &self,
-        debug_dir: &DebugDirPath,
+        debug_dir: &DebugDataset,
         logdir: PathBuf,
         zone_name: &str,
     ) -> Result<(), ArchiveLogsError> {
@@ -690,7 +713,7 @@ impl DumpSetupWorker {
     }
 
     fn scope_dir_for_cleanup(
-        debug_dir: &DebugDirPath,
+        debug_dir: &DebugDataset,
     ) -> Result<CleanupDirInfo, CleanupError> {
         let used = zfs_get_integer(&**debug_dir, ZFS_PROP_USED)?;
         let available = zfs_get_integer(&**debug_dir, ZFS_PROP_AVAILABLE)?;
