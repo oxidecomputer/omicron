@@ -1,26 +1,5 @@
-/*
- * dbinit.sql: raw SQL to initialize a database for use by Omicron
- *
- * It's not clear what the long-term story for managing the database schema will
- * be.  For now, this file can be used by the test suite and by developers (via
- * the "omicron-dev" program) to set up a local database with which to run the
- * system.
- */
-
-/*
- * Important CockroachDB notes:
- *
- *    For timestamps, CockroachDB's docs recommend TIMESTAMPTZ rather than
- *    TIMESTAMP.  This does not change what is stored with each datum, but
- *    rather how it's interpreted when clients use it.  It should make no
- *    difference to us, so we stick with the recommendation.
- *
- *    We avoid explicit foreign keys due to this warning from the docs: "Foreign
- *    key dependencies can significantly impact query performance, as queries
- *    involving tables with foreign keys, or tables referenced by foreign keys,
- *    require CockroachDB to check two separate tables. We recommend using them
- *    sparingly."
- */
+-- DO NOT EDIT THIS SCHEMA.
+-- This file is a point-in-time snapshot of revision "1.0.0" of the database.
 
 BEGIN;
 

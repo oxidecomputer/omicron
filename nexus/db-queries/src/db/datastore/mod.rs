@@ -235,15 +235,19 @@ impl DataStore {
             Bound::Included(desired_version),
         ));
 
-        // NOTE:
+        // Lease ideas:
         //
-        // MULTIPLE DISJOINT UPDATES
-        // - E.g., if we perform an "add column" in v2, and then we remove that
-        // column in v3. When upgrading from 1 -> 2 -> 3, we'd serially expect
-        // to add the column, then remove it. However, in the context of
-        // parallel nexus execution, it's possible for one Nexus to try
-        // applying the v2 migrations while the v3 migrations are also being
-        // executed.
+        // - 
+        //
+        //
+        // IDEAS:
+        // - Start transition ('up.sql', but remove the schema update)
+        //   - This will start a background job in CRDB to perform the online
+        //   schema update.
+        // - Use SHOW JOBS to query the status of the update.
+        //  - WITH x AS (SHOW AUTOMATIC JOBS) SELECT * FROM x WHERE job_type = 'SCHEMA CHANGE' AND status != 'succeeded';
+        // - Only update db_metadata's schema version once "SHOW JOBS" is empty,
+        // for jobs of type "NEW SCHEMA CHANGE".
         let client = self.pool()
             .get()
             .await
@@ -258,9 +262,6 @@ impl DataStore {
             client.batch_execute_async(&sql).await.map_err(|e| {
                 format!("Failed to execute upgrade: {e}")
             })?;
-
-            // NOTE: If you'd like to perform any offline, post-update
-            // operations between versions, this is where you could do so.
         }
 
         Ok(())

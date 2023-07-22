@@ -111,6 +111,7 @@ openapiv3.workspace = true
 oxide-client.workspace = true
 pem.workspace = true
 petgraph.workspace = true
+pretty_assertions.workspace = true
 rcgen.workspace = true
 regex.workspace = true
 rustls = { workspace = true }
