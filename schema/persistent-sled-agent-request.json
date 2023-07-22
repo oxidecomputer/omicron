@@ -40,14 +40,16 @@
         "id",
         "ntp_servers",
         "rack_id",
-        "subnet"
+        "subnet",
+        "use_trust_quorum"
       ],
       "properties": {
         "dns_servers": {
           "description": "The external DNS servers to use",
           "type": "array",
           "items": {
-            "type": "string"
+            "type": "string",
+            "format": "ip"
           }
         },
         "id": {
@@ -74,6 +76,10 @@
               "$ref": "#/definitions/Ipv6Subnet"
             }
           ]
+        },
+        "use_trust_quorum": {
+          "description": "Use trust quorum for key generation",
+          "type": "boolean"
         }
       }
     }
