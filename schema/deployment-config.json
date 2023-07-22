@@ -4,6 +4,7 @@
   "type": "object",
   "required": [
     "database",
+    "external_dns_servers",
     "id",
     "internal_dns",
     "rack_id"
@@ -16,6 +17,14 @@
           "$ref": "#/definitions/Database"
         }
       ]
+    },
+    "external_dns_servers": {
+      "description": "External DNS servers Nexus can use to resolve external hosts.",
+      "type": "array",
+      "items": {
+        "type": "string",
+        "format": "ip"
+      }
     },
     "id": {
       "description": "Uuid of the Nexus instance",
