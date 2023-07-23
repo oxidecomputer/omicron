@@ -77,14 +77,10 @@ pub enum StorageSource {
     /// Do not populate anything. This is primarily used for migration testing.
     DoNotPopulate,
     /// Populate the latest version of the database.
-    PopulateLatest {
-        output_dir: PathBuf
-    },
+    PopulateLatest { output_dir: PathBuf },
     /// Copy the database from a seed directory, which has previously
     /// been created with `PopulateLatest`.
-    CopyFromSeed {
-        input_dir: PathBuf
-    },
+    CopyFromSeed { input_dir: PathBuf },
 }
 
 /// Creates a [`db::CockroachInstance`] with a populated storage directory.
@@ -94,9 +90,11 @@ pub enum StorageSource {
 pub async fn test_setup_database_seed(log: &Logger, dir: &Path) {
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
-    let mut db = setup_database(log, StorageSource::PopulateLatest {
-        output_dir: dir.to_path_buf(),
-    }).await;
+    let mut db = setup_database(
+        log,
+        StorageSource::PopulateLatest { output_dir: dir.to_path_buf() },
+    )
+    .await;
     db.cleanup().await.unwrap();
 
     // See https://github.com/cockroachdb/cockroach/issues/74231 for context on
@@ -145,7 +143,8 @@ async fn setup_database(
     // If we're going to copy the storage directory from the seed,
     // it is critical we do so before starting the DB.
     match &storage_source {
-        StorageSource::DoNotPopulate | StorageSource::PopulateLatest { .. } => {},
+        StorageSource::DoNotPopulate | StorageSource::PopulateLatest { .. } => {
+        }
         StorageSource::CopyFromSeed { input_dir } => {
             info!(&log,
                 "cockroach: copying from seed directory ({}) to storage directory ({})",
@@ -153,7 +152,6 @@ async fn setup_database(
             );
             copy_dir(input_dir, starter.store_dir())
                 .expect("Cannot copy storage from seed directory");
-
         }
     }
 
@@ -177,8 +175,8 @@ async fn setup_database(
     // If we populate the storage directory by importing the '.sql'
     // file, we must do so after the DB has started.
     match &storage_source {
-        StorageSource::DoNotPopulate | StorageSource::CopyFromSeed { .. } => {},
-        StorageSource::PopulateLatest { .. }  => {
+        StorageSource::DoNotPopulate | StorageSource::CopyFromSeed { .. } => {}
+        StorageSource::PopulateLatest { .. } => {
             info!(&log, "cockroach: populating");
             database.populate().await.expect("failed to populate database");
             info!(&log, "cockroach: populated");

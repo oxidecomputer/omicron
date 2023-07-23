@@ -2,6 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use chrono::{DateTime, Utc};
 use dropshot::test_util::LogContext;
 use nexus_db_model::schema::SCHEMA_VERSION as LATEST_SCHEMA_VERSION;
 use nexus_test_utils::{db, load_test_config, ControlPlaneTestContextBuilder};
@@ -12,12 +13,14 @@ use omicron_common::nexus_config::SchemaConfig;
 use omicron_test_utils::dev::db::CockroachInstance;
 use pretty_assertions::assert_eq;
 use slog::Logger;
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use tokio::time::timeout;
 use tokio::time::Duration;
+use uuid::Uuid;
 
-const SCHEMA_DIR: &'static str = concat!(env!("CARGO_MANIFEST_DIR"), "/../schema/crdb");
+const SCHEMA_DIR: &'static str =
+    concat!(env!("CARGO_MANIFEST_DIR"), "/../schema/crdb");
 const FIRST_VERSION: &'static str = "1.0.0";
 
 async fn test_setup_just_crdb<'a>(
@@ -41,15 +44,12 @@ async fn test_setup<'a>(
 ) -> ControlPlaneTestContextBuilder<'a, omicron_nexus::Server> {
     let mut builder =
         ControlPlaneTestContextBuilder::<omicron_nexus::Server>::new(
-            name,
-            config,
+            name, config,
         );
     let populate = false;
     builder.start_crdb(populate).await;
     let schema_dir = PathBuf::from(SCHEMA_DIR);
-    builder.config.pkg.schema = Some(SchemaConfig {
-        schema_dir,
-    });
+    builder.config.pkg.schema = Some(SchemaConfig { schema_dir });
     builder.start_internal_dns().await;
     builder.start_external_dns().await;
     builder.start_dendrite(SwitchLocation::Switch0).await;
@@ -64,11 +64,7 @@ enum Update {
     Remove,
 }
 
-async fn apply_update(
-    crdb: &CockroachInstance,
-    version: &str,
-    up: Update,
-) {
+async fn apply_update(crdb: &CockroachInstance, version: &str, up: Update) {
     println!("Performing {up:?} on {version}");
     let client = crdb.connect().await.expect("failed to connect");
 
@@ -76,14 +72,16 @@ async fn apply_update(
         Update::Apply => "up.sql",
         Update::Remove => "down.sql",
     };
-    let sql = tokio::fs::read_to_string(PathBuf::from(SCHEMA_DIR).join(version).join(file)).await.unwrap();
+    let sql = tokio::fs::read_to_string(
+        PathBuf::from(SCHEMA_DIR).join(version).join(file),
+    )
+    .await
+    .unwrap();
     client.batch_execute(&sql).await.expect("failed to apply update");
     client.cleanup().await.expect("cleaning up after wipe");
 }
 
-async fn query_crdb_schema_version(
-    crdb: &CockroachInstance,
-) -> String {
+async fn query_crdb_schema_version(crdb: &CockroachInstance) -> String {
     let client = crdb.connect().await.expect("failed to connect");
     let sql = "SELECT value FROM omicron.public.db_metadata WHERE name = 'schema_version'";
 
@@ -93,25 +91,90 @@ async fn query_crdb_schema_version(
     version
 }
 
-// An incredibly generic representation of a row of SQL data
+// A newtype wrapper around a string, which allows us to more liberally
+// interpret SQL types.
+//
+// Note that for the purposes of schema comparisons, we don't care about parsing
+// the contents of the database, merely the schema and equality of contained data.
+#[derive(Eq, PartialEq, Clone, Debug)]
+enum AnySqlType {
+    DateTime,
+    String(String),
+    Uuid(Uuid),
+    // TODO: This isn't exhaustive, feel free to add more.
+}
+
+impl AnySqlType {
+    fn as_str(&self) -> &str {
+        match self {
+            AnySqlType::String(s) => s,
+            _ => panic!("Not a string type"),
+        }
+    }
+}
+
+impl<'a> tokio_postgres::types::FromSql<'a> for AnySqlType {
+    fn from_sql(
+        ty: &tokio_postgres::types::Type,
+        raw: &'a [u8],
+    ) -> Result<Self, Box<dyn std::error::Error + Send + Sync + 'static>> {
+        if String::accepts(ty) {
+            return Ok(AnySqlType::String(String::from_sql(ty, raw)?));
+        }
+        if DateTime::<Utc>::accepts(ty) {
+            // We intentionally drop the time here -- we only care that there
+            // is some value present.
+            let _ = DateTime::<Utc>::from_sql(ty, raw)?;
+            return Ok(AnySqlType::DateTime);
+        }
+        if Uuid::accepts(ty) {
+            return Ok(AnySqlType::Uuid(Uuid::from_sql(ty, raw)?));
+        }
+        Err(anyhow::anyhow!(
+            "Cannot parse type {ty}. If you're trying to use this type in a table which is populated \
+during a schema migration, consider adding it to `AnySqlType`."
+            ).into())
+    }
+
+    fn accepts(_ty: &tokio_postgres::types::Type) -> bool {
+        true
+    }
+}
+
 #[derive(Eq, PartialEq, Debug)]
-struct Row {
+struct NamedSqlValue {
     // It's a little redunant to include the column name alongside each value,
     // but it results in a prettier diff.
-    values: Vec<(String, Option<String>)>,
+    column: String,
+    value: Option<AnySqlType>,
+}
+
+// A generic representation of a row of SQL data
+#[derive(Eq, PartialEq, Debug)]
+struct Row {
+    values: Vec<NamedSqlValue>,
 }
 
 impl Row {
     fn new() -> Self {
-        Self {
-            values: vec![],
-        }
+        Self { values: vec![] }
+    }
+}
+
+enum ColumnSelector<'a> {
+    ByName(&'a [&'static str]),
+    Star,
+}
+
+impl<'a> From<&'a [&'static str]> for ColumnSelector<'a> {
+    fn from(columns: &'a [&'static str]) -> Self {
+        Self::ByName(columns)
     }
 }
 
 async fn query_crdb_for_rows_of_strings(
     crdb: &CockroachInstance,
-    columns: &[&str],
+    columns: ColumnSelector<'_>,
     table: &str,
     constraints: Option<&str>,
 ) -> Vec<Row> {
@@ -122,22 +185,37 @@ async fn query_crdb_for_rows_of_strings(
         "".to_string()
     };
 
-    let values = columns.join(",");
+    let cols = match &columns {
+        ColumnSelector::ByName(columns) => columns.join(","),
+        ColumnSelector::Star => "*".to_string(),
+    };
 
     // We insert the ORDER BY as a simple mechanism to ensure that we're
     // comparing equivalent data. We care about the contents of the retreived
     // rows, so normalize the order in which they are returned.
-    let sql = format!("SELECT {values} FROM {table} {constraints} ORDER BY {values}");
-    let rows = client.query(&sql, &[]).await.expect(&format!("failed to query {table}"));
+    let order = match &columns {
+        ColumnSelector::ByName(_) => cols.clone(),
+        ColumnSelector::Star => format!("PRIMARY KEY {table}"),
+    };
+
+    let sql =
+        format!("SELECT {cols} FROM {table} {constraints} ORDER BY {order}");
+    let rows = client
+        .query(&sql, &[])
+        .await
+        .expect(&format!("failed to query {table}"));
     client.cleanup().await.expect("cleaning up after wipe");
 
     let mut result = vec![];
     for row in rows {
         let mut row_result = Row::new();
         for i in 0..row.len() {
-            row_result.values.push((columns[i].to_string(), row.get(i)));
+            let column_name = row.columns()[i].name();
+            row_result.values.push(NamedSqlValue {
+                column: column_name.to_string(),
+                value: row.get(i),
+            });
         }
-        assert_eq!(row_result.values.len(), columns.len());
         result.push(row_result);
     }
     result
@@ -146,9 +224,8 @@ async fn query_crdb_for_rows_of_strings(
 async fn read_all_schema_versions() -> BTreeSet<SemverVersion> {
     let mut all_versions = BTreeSet::new();
 
-    let mut dir = tokio::fs::read_dir(SCHEMA_DIR)
-        .await
-        .expect("Access schema dir");
+    let mut dir =
+        tokio::fs::read_dir(SCHEMA_DIR).await.expect("Access schema dir");
     while let Some(entry) = dir.next_entry().await.expect("Read dirent") {
         if entry.file_type().await.unwrap().is_dir() {
             let name = entry.file_name().into_string().unwrap();
@@ -169,7 +246,8 @@ async fn read_all_schema_versions() -> BTreeSet<SemverVersion> {
 #[tokio::test]
 async fn nexus_applies_update_on_boot() {
     let mut config = load_test_config();
-    let mut builder = test_setup(&mut config, "nexus_applies_update_on_boot").await;
+    let mut builder =
+        test_setup(&mut config, "nexus_applies_update_on_boot").await;
     let crdb = builder.database.as_ref().expect("Should have started CRDB");
 
     apply_update(&crdb, FIRST_VERSION, Update::Apply).await;
@@ -189,7 +267,10 @@ async fn nexus_applies_update_on_boot() {
 
     // After Nexus boots, it should have upgraded to the latest schema.
     let crdb = builder.database.as_ref().expect("Should have started CRDB");
-    assert_eq!(LATEST_SCHEMA_VERSION.to_string(), query_crdb_schema_version(&crdb).await);
+    assert_eq!(
+        LATEST_SCHEMA_VERSION.to_string(),
+        query_crdb_schema_version(&crdb).await
+    );
 
     builder.teardown().await;
 }
@@ -199,7 +280,11 @@ async fn nexus_applies_update_on_boot() {
 #[tokio::test]
 async fn nexus_cannot_apply_update_from_unknown_version() {
     let mut config = load_test_config();
-    let mut builder = test_setup(&mut config, "nexus_cannot_apply_update_from_unknown_version").await;
+    let mut builder = test_setup(
+        &mut config,
+        "nexus_cannot_apply_update_from_unknown_version",
+    )
+    .await;
     let crdb = builder.database.as_ref().expect("Should have started CRDB");
 
     apply_update(&crdb, FIRST_VERSION, Update::Apply).await;
@@ -219,7 +304,6 @@ async fn nexus_cannot_apply_update_from_unknown_version() {
         "Nexus should not have started"
     );
 
-
     // The version remains invalid.
     let crdb = builder.database.as_ref().expect("Should have started CRDB");
     assert_eq!("0.0.0", query_crdb_schema_version(&crdb).await);
@@ -235,7 +319,8 @@ async fn nexus_cannot_apply_update_from_unknown_version() {
 #[tokio::test]
 async fn versions_have_idempotent_up() {
     let config = load_test_config();
-    let logctx = LogContext::new("versions_have_idempotent_up", &config.pkg.log);
+    let logctx =
+        LogContext::new("versions_have_idempotent_up", &config.pkg.log);
     let populate = false;
     let mut crdb = test_setup_just_crdb(&logctx.log, populate).await;
 
@@ -246,7 +331,10 @@ async fn versions_have_idempotent_up() {
         apply_update(&crdb, &version.to_string(), Update::Apply).await;
         assert_eq!(version.to_string(), query_crdb_schema_version(&crdb).await);
     }
-    assert_eq!(LATEST_SCHEMA_VERSION.to_string(), query_crdb_schema_version(&crdb).await);
+    assert_eq!(
+        LATEST_SCHEMA_VERSION.to_string(),
+        query_crdb_schema_version(&crdb).await
+    );
 
     crdb.cleanup().await.unwrap();
     logctx.cleanup_successful();
@@ -259,7 +347,8 @@ async fn versions_have_idempotent_up() {
 #[tokio::test]
 async fn versions_have_idempotent_down() {
     let config = load_test_config();
-    let logctx = LogContext::new("versions_have_idempotent_down", &config.pkg.log);
+    let logctx =
+        LogContext::new("versions_have_idempotent_down", &config.pkg.log);
     let populate = false;
     let mut crdb = test_setup_just_crdb(&logctx.log, populate).await;
 
@@ -270,7 +359,10 @@ async fn versions_have_idempotent_down() {
         apply_update(&crdb, &version.to_string(), Update::Apply).await;
         assert_eq!(version.to_string(), query_crdb_schema_version(&crdb).await);
     }
-    assert_eq!(LATEST_SCHEMA_VERSION.to_string(), query_crdb_schema_version(&crdb).await);
+    assert_eq!(
+        LATEST_SCHEMA_VERSION.to_string(),
+        query_crdb_schema_version(&crdb).await
+    );
 
     // Go from the latest version to the first version.
     //
@@ -292,7 +384,7 @@ const COLUMNS: [&'static str; 6] = [
     "table_name",
     "column_name",
     "column_default",
-    "data_type"
+    "data_type",
 ];
 
 const CHECK_CONSTRAINTS: [&'static str; 4] = [
@@ -323,12 +415,8 @@ const REFERENTIAL_CONSTRAINTS: [&'static str; 8] = [
     "referenced_table_name",
 ];
 
-const VIEWS: [&'static str; 4] = [
-    "table_catalog",
-    "table_schema",
-    "table_name",
-    "view_definition",
-];
+const VIEWS: [&'static str; 4] =
+    ["table_catalog", "table_schema", "table_name", "view_definition"];
 
 const STATISTICS: [&'static str; 8] = [
     "table_catalog",
@@ -341,12 +429,8 @@ const STATISTICS: [&'static str; 8] = [
     "direction",
 ];
 
-const TABLES: [&'static str; 4] = [
-    "table_catalog",
-    "table_schema",
-    "table_name",
-    "table_type",
-];
+const TABLES: [&'static str; 4] =
+    ["table_catalog", "table_schema", "table_name", "table_type"];
 
 #[derive(Eq, PartialEq, Debug)]
 struct InformationSchema {
@@ -380,52 +464,59 @@ impl InformationSchema {
         // For details on each of these tables.
         let columns = query_crdb_for_rows_of_strings(
             crdb,
-            &COLUMNS,
+            COLUMNS.as_slice().into(),
             "information_schema.columns",
             Some("table_schema = 'public'"),
-        ).await;
+        )
+        .await;
 
         let check_constraints = query_crdb_for_rows_of_strings(
             crdb,
-            &CHECK_CONSTRAINTS,
+            CHECK_CONSTRAINTS.as_slice().into(),
             "information_schema.check_constraints",
             None,
-        ).await;
+        )
+        .await;
 
         let key_column_usage = query_crdb_for_rows_of_strings(
             crdb,
-            &KEY_COLUMN_USAGE,
+            KEY_COLUMN_USAGE.as_slice().into(),
             "information_schema.key_column_usage",
             None,
-        ).await;
+        )
+        .await;
 
         let referential_constraints = query_crdb_for_rows_of_strings(
             crdb,
-            &REFERENTIAL_CONSTRAINTS,
+            REFERENTIAL_CONSTRAINTS.as_slice().into(),
             "information_schema.referential_constraints",
             None,
-        ).await;
+        )
+        .await;
 
         let views = query_crdb_for_rows_of_strings(
             crdb,
-            &VIEWS,
+            VIEWS.as_slice().into(),
             "information_schema.views",
             None,
-        ).await;
+        )
+        .await;
 
         let statistics = query_crdb_for_rows_of_strings(
             crdb,
-            &STATISTICS,
+            STATISTICS.as_slice().into(),
             "information_schema.statistics",
             None,
-        ).await;
+        )
+        .await;
 
         let tables = query_crdb_for_rows_of_strings(
             crdb,
-            &TABLES,
+            TABLES.as_slice().into(),
             "information_schema.tables",
             Some("table_schema = 'public'"),
-        ).await;
+        )
+        .await;
 
         Self {
             columns,
@@ -441,12 +532,39 @@ impl InformationSchema {
     // This would normally be quite an expensive operation, but we expect it'll
     // at least be slightly cheaper for the freshly populated DB, which
     // shouldn't have that many records yet.
-    async fn query_all_tables(&self, crdb: &CockroachInstance) -> HashMap<String, Vec<Row>> {
-        let map = HashMap::new();
+    async fn query_all_tables(
+        &self,
+        crdb: &CockroachInstance,
+    ) -> BTreeMap<String, Vec<Row>> {
+        let mut map = BTreeMap::new();
 
         for table in &self.tables {
-//            query_crdb_for_rows_of_strings(crdb, 
+            let table = &table.values;
+            assert_eq!(table[0].column, "table_catalog");
+            let table_catalog = table[0].value.as_ref().unwrap().as_str();
+            assert_eq!(table[1].column, "table_schema");
+            let table_schema = table[1].value.as_ref().unwrap().as_str();
+            assert_eq!(table[2].column, "table_name");
+            let table_name = table[2].value.as_ref().unwrap().as_str();
+            assert_eq!(table[3].column, "table_type");
+            let table_type = table[3].value.as_ref().unwrap().as_str();
 
+            if table_type != "BASE TABLE" {
+                continue;
+            }
+
+            let table_name =
+                format!("{}.{}.{}", table_catalog, table_schema, table_name);
+            println!("Querying table: {table_name}");
+            let rows = query_crdb_for_rows_of_strings(
+                crdb,
+                ColumnSelector::Star,
+                &table_name,
+                None,
+            )
+            .await;
+            println!("Saw data: {rows:?}");
+            map.insert(table_name, rows);
         }
 
         map
@@ -458,7 +576,8 @@ impl InformationSchema {
 #[tokio::test]
 async fn dbinit_equals_sum_of_all_up() {
     let config = load_test_config();
-    let logctx = LogContext::new("dbinit_equals_sum_of_all_up", &config.pkg.log);
+    let logctx =
+        LogContext::new("dbinit_equals_sum_of_all_up", &config.pkg.log);
 
     let populate = false;
     let mut crdb = test_setup_just_crdb(&logctx.log, populate).await;
@@ -470,22 +589,58 @@ async fn dbinit_equals_sum_of_all_up() {
         apply_update(&crdb, &version.to_string(), Update::Apply).await;
         assert_eq!(version.to_string(), query_crdb_schema_version(&crdb).await);
     }
-    assert_eq!(LATEST_SCHEMA_VERSION.to_string(), query_crdb_schema_version(&crdb).await);
+    assert_eq!(
+        LATEST_SCHEMA_VERSION.to_string(),
+        query_crdb_schema_version(&crdb).await
+    );
 
     // Query the newly constructed DB for information about its schema
-    let observed = InformationSchema::new(&crdb).await;
+    let observed_schema = InformationSchema::new(&crdb).await;
+    let observed_data = observed_schema.query_all_tables(&crdb).await;
     crdb.cleanup().await.unwrap();
 
     // Create a new DB with data populated from dbinit.sql for comparison
     let populate = true;
     let mut crdb = test_setup_just_crdb(&logctx.log, populate).await;
-    let expected = InformationSchema::new(&crdb).await;
+    let expected_schema = InformationSchema::new(&crdb).await;
+    let mut expected_data = expected_schema.query_all_tables(&crdb).await;
 
-    observed.pretty_assert_eq(&expected);
+    // Validate that the schema is identical
+    observed_schema.pretty_assert_eq(&expected_schema);
 
-    // TODO: Query for built-in rows. See:
-    // - omicron.public.user_builtin
+    // Validate that the pre-populated data is identical.
     //
+    // However, before we do so, fudge the date-related fields so they appear
+    // identical.
+    let observed_schema_time_created = observed_data
+        ["omicron.public.db_metadata"]
+        .iter()
+        .find_map(|row| {
+            let name = &row.values[0];
+            assert_eq!(name.column, "name", "Unexpected column name");
+            if name.value.as_ref().unwrap().as_str() == "schema_time_created" {
+                let value = &row.values[1];
+                assert_eq!(value.column, "value", "Unexpected column name");
+                Some(value.value.clone())
+            } else {
+                None
+            }
+        })
+        .expect("Failed to find schema_time_created in db_metadata");
+    for row in &mut expected_data
+        .get_mut("omicron.public.db_metadata")
+        .unwrap()
+        .into_iter()
+    {
+        let name = &row.values[0];
+
+        if name.value.as_ref().unwrap().as_str() == "schema_time_created" {
+            let value = &mut row.values[1];
+            value.value = observed_schema_time_created.clone();
+        }
+    }
+
+    assert_eq!(observed_data, expected_data);
 
     crdb.cleanup().await.unwrap();
     logctx.cleanup_successful();

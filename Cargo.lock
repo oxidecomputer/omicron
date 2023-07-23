@@ -4757,6 +4757,7 @@ dependencies = [
  "pem",
  "petgraph",
  "pq-sys",
+ "pretty_assertions",
  "progenitor-client",
  "propolis-client",
  "rand 0.8.5",

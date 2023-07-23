@@ -2527,7 +2527,7 @@ INSERT INTO omicron.public.db_metadata (
     name,
     value
 ) VALUES
-    ( 'schema_version', '1.0.0' ),
+    ( 'schema_version', '1.0.1' ),
     ( 'schema_time_created', CAST(NOW() AS STRING) )
 ON CONFLICT DO NOTHING;
 

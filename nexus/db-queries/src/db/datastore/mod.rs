@@ -27,7 +27,9 @@ use crate::db::{
     error::{public_error_from_diesel_pool, ErrorHandler},
 };
 use ::oximeter::types::ProducerRegistry;
-use async_bb8_diesel::{AsyncRunQueryDsl, AsyncSimpleConnection, ConnectionManager};
+use async_bb8_diesel::{
+    AsyncRunQueryDsl, AsyncSimpleConnection, ConnectionManager,
+};
 use diesel::pg::Pg;
 use diesel::prelude::*;
 use diesel::query_builder::{QueryFragment, QueryId};
@@ -144,7 +146,11 @@ impl DataStore {
     ///
     /// Only returns if the database schema is compatible with Nexus's known
     /// schema version.
-    pub async fn new(log: &Logger, pool: Arc<Pool>, config: Option<&SchemaConfig>) -> Result<Self, String> {
+    pub async fn new(
+        log: &Logger,
+        pool: Arc<Pool>,
+        config: Option<&SchemaConfig>,
+    ) -> Result<Self, String> {
         let datastore = DataStore {
             pool,
             virtual_provisioning_collection_producer:
@@ -152,11 +158,15 @@ impl DataStore {
         };
 
         // Keep looping until we find that the schema matches our expectation.
-        const EXPECTED_VERSION: SemverVersion = nexus_db_model::schema::SCHEMA_VERSION;
+        const EXPECTED_VERSION: SemverVersion =
+            nexus_db_model::schema::SCHEMA_VERSION;
         retry_notify(
             retry_policy_internal_service(),
             || async {
-                match datastore.ensure_schema(&log, EXPECTED_VERSION, config).await {
+                match datastore
+                    .ensure_schema(&log, EXPECTED_VERSION, config)
+                    .await
+                {
                     Ok(()) => return Ok(()),
                     Err(e) => {
                         warn!(log, "Failed to ensure schema version: {e}");
@@ -165,7 +175,9 @@ impl DataStore {
                 return Err(BackoffError::transient(()));
             },
             |_, _| {},
-        ).await.map_err(|_| "Failed to read valid DB schema".to_string())?;
+        )
+        .await
+        .map_err(|_| "Failed to read valid DB schema".to_string())?;
 
         Ok(datastore)
     }
@@ -215,9 +227,16 @@ impl DataStore {
             .await
             .map_err(|e| format!("Failed to read schema config dir: {e}"))?;
         let mut all_versions = BTreeSet::new();
-        while let Some(entry) = dir.next_entry().await.map_err(|e| format!("Failed to read schema dir: {e}"))? {
+        while let Some(entry) = dir
+            .next_entry()
+            .await
+            .map_err(|e| format!("Failed to read schema dir: {e}"))?
+        {
             if entry.file_type().await.map_err(|e| e.to_string())?.is_dir() {
-                let name = entry.file_name().into_string().map_err(|_| format!("Non-unicode schema dir"))?;
+                let name = entry
+                    .file_name()
+                    .into_string()
+                    .map_err(|_| format!("Non-unicode schema dir"))?;
                 if let Ok(observed_version) = name.parse::<SemverVersion>() {
                     all_versions.insert(observed_version);
                 } else {
@@ -237,7 +256,7 @@ impl DataStore {
 
         // Lease ideas:
         //
-        // - 
+        // -
         //
         //
         // IDEAS:
@@ -248,7 +267,8 @@ impl DataStore {
         //  - WITH x AS (SHOW AUTOMATIC JOBS) SELECT * FROM x WHERE job_type = 'SCHEMA CHANGE' AND status != 'succeeded';
         // - Only update db_metadata's schema version once "SHOW JOBS" is empty,
         // for jobs of type "NEW SCHEMA CHANGE".
-        let client = self.pool()
+        let client = self
+            .pool()
             .get()
             .await
             .map_err(|e| format!("Cannot get db connection: {e}"))?;
@@ -256,12 +276,13 @@ impl DataStore {
             info!(log, "Applying upgrade to version {}", upgrade);
 
             let up = config.schema_dir.join(upgrade.to_string()).join("up.sql");
-            let sql = tokio::fs::read_to_string(&up)
-                .await
-                .map_err(|e| format!("Cannot read {up}: {e}", up = up.display()))?;
-            client.batch_execute_async(&sql).await.map_err(|e| {
-                format!("Failed to execute upgrade: {e}")
+            let sql = tokio::fs::read_to_string(&up).await.map_err(|e| {
+                format!("Cannot read {up}: {e}", up = up.display())
             })?;
+            client
+                .batch_execute_async(&sql)
+                .await
+                .map_err(|e| format!("Failed to execute upgrade: {e}"))?;
         }
 
         Ok(())
@@ -413,7 +434,8 @@ pub async fn datastore_test(
 
     let cfg = db::Config { url: db.pg_config().clone() };
     let pool = Arc::new(db::Pool::new(&logctx.log, &cfg));
-    let datastore = Arc::new(DataStore::new(&logctx.log, pool, None).await.unwrap());
+    let datastore =
+        Arc::new(DataStore::new(&logctx.log, pool, None).await.unwrap());
 
     // Create an OpContext with the credentials of "db-init" just for the
     // purpose of loading the built-in users, roles, and assignments.
