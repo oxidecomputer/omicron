@@ -64,8 +64,13 @@ enum Update {
     Remove,
 }
 
-async fn apply_update(crdb: &CockroachInstance, version: &str, up: Update) {
-    println!("Performing {up:?} on {version}");
+async fn apply_update(
+    log: &Logger,
+    crdb: &CockroachInstance,
+    version: &str,
+    up: Update,
+) {
+    info!(log, "Performing {up:?} on {version}");
     let client = crdb.connect().await.expect("failed to connect");
 
     let file = match up {
@@ -248,9 +253,10 @@ async fn nexus_applies_update_on_boot() {
     let mut config = load_test_config();
     let mut builder =
         test_setup(&mut config, "nexus_applies_update_on_boot").await;
+    let log = &builder.logctx.log;
     let crdb = builder.database.as_ref().expect("Should have started CRDB");
 
-    apply_update(&crdb, FIRST_VERSION, Update::Apply).await;
+    apply_update(log, &crdb, FIRST_VERSION, Update::Apply).await;
     assert_eq!(FIRST_VERSION, query_crdb_schema_version(&crdb).await);
 
     // Start Nexus. It should auto-format itself to the latest version,
@@ -285,9 +291,10 @@ async fn nexus_cannot_apply_update_from_unknown_version() {
         "nexus_cannot_apply_update_from_unknown_version",
     )
     .await;
+    let log = &builder.logctx.log;
     let crdb = builder.database.as_ref().expect("Should have started CRDB");
 
-    apply_update(&crdb, FIRST_VERSION, Update::Apply).await;
+    apply_update(log, &crdb, FIRST_VERSION, Update::Apply).await;
     assert_eq!(FIRST_VERSION, query_crdb_schema_version(&crdb).await);
 
     // This version is not valid; it does not exist.
@@ -321,14 +328,15 @@ async fn versions_have_idempotent_up() {
     let config = load_test_config();
     let logctx =
         LogContext::new("versions_have_idempotent_up", &config.pkg.log);
+    let log = &logctx.log;
     let populate = false;
     let mut crdb = test_setup_just_crdb(&logctx.log, populate).await;
 
     let all_versions = read_all_schema_versions().await;
 
     for version in &all_versions {
-        apply_update(&crdb, &version.to_string(), Update::Apply).await;
-        apply_update(&crdb, &version.to_string(), Update::Apply).await;
+        apply_update(log, &crdb, &version.to_string(), Update::Apply).await;
+        apply_update(log, &crdb, &version.to_string(), Update::Apply).await;
         assert_eq!(version.to_string(), query_crdb_schema_version(&crdb).await);
     }
     assert_eq!(
@@ -349,6 +357,7 @@ async fn versions_have_idempotent_down() {
     let config = load_test_config();
     let logctx =
         LogContext::new("versions_have_idempotent_down", &config.pkg.log);
+    let log = &logctx.log;
     let populate = false;
     let mut crdb = test_setup_just_crdb(&logctx.log, populate).await;
 
@@ -356,7 +365,7 @@ async fn versions_have_idempotent_down() {
 
     // Go from the first version to the latest version.
     for version in &all_versions {
-        apply_update(&crdb, &version.to_string(), Update::Apply).await;
+        apply_update(log, &crdb, &version.to_string(), Update::Apply).await;
         assert_eq!(version.to_string(), query_crdb_schema_version(&crdb).await);
     }
     assert_eq!(
@@ -370,8 +379,8 @@ async fn versions_have_idempotent_down() {
     // up dropping the database too.
     for version in all_versions.iter().rev() {
         assert_eq!(version.to_string(), query_crdb_schema_version(&crdb).await);
-        apply_update(&crdb, &version.to_string(), Update::Remove).await;
-        apply_update(&crdb, &version.to_string(), Update::Remove).await;
+        apply_update(log, &crdb, &version.to_string(), Update::Remove).await;
+        apply_update(log, &crdb, &version.to_string(), Update::Remove).await;
     }
 
     crdb.cleanup().await.unwrap();
@@ -534,6 +543,7 @@ impl InformationSchema {
     // shouldn't have that many records yet.
     async fn query_all_tables(
         &self,
+        log: &Logger,
         crdb: &CockroachInstance,
     ) -> BTreeMap<String, Vec<Row>> {
         let mut map = BTreeMap::new();
@@ -555,7 +565,7 @@ impl InformationSchema {
 
             let table_name =
                 format!("{}.{}.{}", table_catalog, table_schema, table_name);
-            println!("Querying table: {table_name}");
+            info!(log, "Querying table: {table_name}");
             let rows = query_crdb_for_rows_of_strings(
                 crdb,
                 ColumnSelector::Star,
@@ -563,7 +573,7 @@ impl InformationSchema {
                 None,
             )
             .await;
-            println!("Saw data: {rows:?}");
+            info!(log, "Saw data: {rows:?}");
             map.insert(table_name, rows);
         }
 
@@ -578,6 +588,7 @@ async fn dbinit_equals_sum_of_all_up() {
     let config = load_test_config();
     let logctx =
         LogContext::new("dbinit_equals_sum_of_all_up", &config.pkg.log);
+    let log = &logctx.log;
 
     let populate = false;
     let mut crdb = test_setup_just_crdb(&logctx.log, populate).await;
@@ -586,7 +597,7 @@ async fn dbinit_equals_sum_of_all_up() {
 
     // Go from the first version to the latest version.
     for version in &all_versions {
-        apply_update(&crdb, &version.to_string(), Update::Apply).await;
+        apply_update(log, &crdb, &version.to_string(), Update::Apply).await;
         assert_eq!(version.to_string(), query_crdb_schema_version(&crdb).await);
     }
     assert_eq!(
@@ -596,14 +607,14 @@ async fn dbinit_equals_sum_of_all_up() {
 
     // Query the newly constructed DB for information about its schema
     let observed_schema = InformationSchema::new(&crdb).await;
-    let observed_data = observed_schema.query_all_tables(&crdb).await;
+    let observed_data = observed_schema.query_all_tables(log, &crdb).await;
     crdb.cleanup().await.unwrap();
 
     // Create a new DB with data populated from dbinit.sql for comparison
     let populate = true;
     let mut crdb = test_setup_just_crdb(&logctx.log, populate).await;
     let expected_schema = InformationSchema::new(&crdb).await;
-    let mut expected_data = expected_schema.query_all_tables(&crdb).await;
+    let mut expected_data = expected_schema.query_all_tables(log, &crdb).await;
 
     // Validate that the schema is identical
     observed_schema.pretty_assert_eq(&expected_schema);
