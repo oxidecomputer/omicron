@@ -154,6 +154,13 @@ struct NamedSqlValue {
     value: Option<AnySqlType>,
 }
 
+impl NamedSqlValue {
+    fn expect(&self, column: &str) -> Option<&AnySqlType> {
+        assert_eq!(self.column, column);
+        self.value.as_ref()
+    }
+}
+
 // A generic representation of a row of SQL data
 #[derive(Eq, PartialEq, Debug)]
 struct Row {
@@ -550,14 +557,12 @@ impl InformationSchema {
 
         for table in &self.tables {
             let table = &table.values;
-            assert_eq!(table[0].column, "table_catalog");
-            let table_catalog = table[0].value.as_ref().unwrap().as_str();
-            assert_eq!(table[1].column, "table_schema");
-            let table_schema = table[1].value.as_ref().unwrap().as_str();
-            assert_eq!(table[2].column, "table_name");
-            let table_name = table[2].value.as_ref().unwrap().as_str();
-            assert_eq!(table[3].column, "table_type");
-            let table_type = table[3].value.as_ref().unwrap().as_str();
+            let table_catalog =
+                table[0].expect("table_catalog").unwrap().as_str();
+            let table_schema =
+                table[1].expect("table_schema").unwrap().as_str();
+            let table_name = table[2].expect("table_name").unwrap().as_str();
+            let table_type = table[3].expect("table_type").unwrap().as_str();
 
             if table_type != "BASE TABLE" {
                 continue;
@@ -628,11 +633,9 @@ async fn dbinit_equals_sum_of_all_up() {
         .iter()
         .find_map(|row| {
             let name = &row.values[0];
-            assert_eq!(name.column, "name", "Unexpected column name");
-            if name.value.as_ref().unwrap().as_str() == "schema_time_created" {
+            if name.expect("name").unwrap().as_str() == "schema_time_created" {
                 let value = &row.values[1];
-                assert_eq!(value.column, "value", "Unexpected column name");
-                Some(value.value.clone())
+                Some(value.expect("value").cloned())
             } else {
                 None
             }
