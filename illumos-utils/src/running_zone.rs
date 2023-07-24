@@ -156,10 +156,15 @@ pub enum GetZoneError {
 // inside a non-global zone.
 #[cfg(target_os = "illumos")]
 mod zenter {
+    use libc::ctid_t;
+    use libc::pid_t;
     use libc::zoneid_t;
     use std::ffi::c_int;
     use std::ffi::c_uint;
-    use std::ffi::CStr;
+    use std::ffi::{CStr, CString};
+    use std::fs::File;
+    use std::io::{Read, Seek, SeekFrom};
+    use std::process;
 
     #[link(name = "contract")]
     extern "C" {
@@ -169,11 +174,37 @@ mod zenter {
         fn ct_pr_tmpl_set_param(fd: c_int, params: c_uint) -> c_int;
         fn ct_tmpl_activate(fd: c_int) -> c_int;
         fn ct_tmpl_clear(fd: c_int) -> c_int;
+        fn ct_ctl_abandon(fd: c_int) -> c_int;
     }
 
     #[link(name = "c")]
     extern "C" {
         pub fn zone_enter(zid: zoneid_t) -> c_int;
+    }
+
+    pub fn get_contract(pid: pid_t) -> std::io::Result<ctid_t> {
+        // The offset of "id_t pr_contract" in struct psinfo which is an
+        // interface documented in proc(5).
+        const CONTRACT_OFFSET: u64 = 280;
+
+        let path = format!("/proc/{}/psinfo", pid);
+
+        let mut file = File::open(path)?;
+        file.seek(SeekFrom::Start(CONTRACT_OFFSET))?;
+        let mut buffer = [0; 4];
+        file.read_exact(&mut buffer)?;
+        Ok(ctid_t::from_ne_bytes(buffer))
+    }
+
+    pub fn abandon_contract(ctid: ctid_t) {
+        let path = format!("/proc/{}/contracts/{}/ctl", process::id(), ctid);
+
+        let cpath = CString::new(path).unwrap();
+        let fd = unsafe { libc::open(cpath.as_ptr(), libc::O_WRONLY) };
+        if fd >= 0 {
+            unsafe { ct_ctl_abandon(fd) };
+            unsafe { libc::close(fd) };
+        }
     }
 
     // A Rust wrapper around the process contract template.
@@ -277,11 +308,11 @@ impl RunningZone {
     // another, if the task is swapped out at an await point. That would leave
     // the first thread's template in a modified state.
     //
-    // If we do need to make this method asynchronous, we will need to change the
-    // internals to avoid changing the thread's contract. One possible approach
-    // here would be to use `libscf` directly, rather than `exec`-ing `svccfg`
-    // directly in a forked child. That would obviate the need to work on the
-    // contract at all.
+    // If we do need to make this method asynchronous, we will need to change
+    // the internals to avoid changing the thread's contract. One possible
+    // approach here would be to use `libscf` directly, rather than `exec`-ing
+    // `svccfg` directly in a forked child. That would obviate the need to work
+    // on the contract at all.
     #[cfg(target_os = "illumos")]
     pub fn run_cmd<I, S>(&self, args: I) -> Result<String, RunCommandError>
     where
@@ -319,13 +350,29 @@ impl RunningZone {
         }
         let command = command.args(args);
 
-        // Capture the result, and be sure to clear the template for this
-        // process itself before returning.
-        let res = crate::execute(command).map_err(|err| RunCommandError {
+        let child = crate::spawn(command).map_err(|err| RunCommandError {
             zone: self.name().to_string(),
             err,
+        })?;
+
+        // Record the process contract now in use by the child; the contract
+        // just created from the template that we applied to this thread
+        // moments ago. We need to abandon it once the child is finished
+        // executing.
+        let contract = zenter::get_contract(child.id().try_into().unwrap());
+
+        // Capture the result, and be sure to clear the template for this
+        // process itself before returning.
+        let res = crate::run_child(command, child).map_err(|err| {
+            RunCommandError { zone: self.name().to_string(), err }
         });
         template.clear();
+
+        // Now abandon the contract that was used for the child.
+        if let Ok(ctid) = contract {
+            zenter::abandon_contract(ctid);
+        }
+
         res.map(|output| String::from_utf8_lossy(&output.stdout).to_string())
     }
 
@@ -342,7 +389,11 @@ impl RunningZone {
         // that's actually run is irrelevant.
         let mut command = std::process::Command::new("echo");
         let command = command.args(args);
-        crate::execute(command)
+        let child = crate::spawn(command).map_err(|err| RunCommandError {
+            zone: self.name().to_string(),
+            err,
+        })?;
+        crate::run_child(command, child)
             .map_err(|err| RunCommandError {
                 zone: self.name().to_string(),
                 err,

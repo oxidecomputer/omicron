@@ -90,8 +90,34 @@ mod inner {
         }))
     }
 
-    // Helper function for starting the process and checking the
+    // Helper functions for starting the process and checking the
     // exit code result.
+
+    pub fn spawn(
+        command: &mut std::process::Command,
+    ) -> Result<std::process::Child, ExecutionError> {
+        let child = command.spawn().map_err(|err| {
+            ExecutionError::ExecutionStart { command: to_string(command), err }
+        })?;
+
+        Ok(child)
+    }
+
+    pub fn run_child(
+        command: &mut std::process::Command,
+        child: std::process::Child,
+    ) -> Result<std::process::Output, ExecutionError> {
+        let output = child.wait_with_output().map_err(|err| {
+            ExecutionError::ExecutionStart { command: to_string(command), err }
+        })?;
+
+        if !output.status.success() {
+            return Err(output_to_exec_error(command, &output));
+        }
+
+        Ok(output)
+    }
+
     pub fn execute(
         command: &mut std::process::Command,
     ) -> Result<std::process::Output, ExecutionError> {
