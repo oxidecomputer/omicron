@@ -27,7 +27,7 @@ route get -inet6 default -inet6 "$GATEWAY" || route add -inet6 default -inet6 "$
 #
 # This should probably be 5 keepers?
 CH_ADDRS="$(/opt/oxide/internal-dns-cli/bin/dnswait clickhouse-keeper \
-    | head -n 5 \
+    | head -n 3 \
     | tr '\n' ,)"
 
 if [[ -z "$CH_ADDRS" ]]; then

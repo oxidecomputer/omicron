@@ -566,26 +566,24 @@ impl Plan {
                 &mut sled_info[which_sled]
             };
             let id = Uuid::new_v4();
-            let address = sled.addr_alloc.next().expect("Not enough addrs");
-            let zone = dns_builder.host_zone(id, address).unwrap();
+            let ip = sled.addr_alloc.next().expect("Not enough addrs");
+            let port = omicron_common::address::CLICKHOUSE_KEEPER_PORT;
+            let address = SocketAddrV6::new(ip, port, 0, 0);
+            let zone = dns_builder.host_zone(id, ip).unwrap();
             dns_builder
-                .service_backend_zone(
-                    ServiceName::ClickhouseKeeper,
-                    &zone,
-                    omicron_common::address::CLICKHOUSE_KEEPER_PORT,
-                )
+                .service_backend_zone(ServiceName::ClickhouseKeeper, &zone, port)
                 .unwrap();
             sled.request.services.push(ServiceZoneRequest {
                 id,
                 zone_type: ZoneType::ClickhouseKeeper,
-                addresses: vec![address],
+                addresses: vec![ip],
                 dataset: None,
-                gz_addresses: vec![],
                 services: vec![ServiceZoneService {
                     id,
-                    details: ServiceType::ClickhouseKeeper,
+                    details: ServiceType::ClickhouseKeeper { address },
                 }],
-            })
+                boundary_switches: vec![],
+            });
         }
 
         // Provision Crucible Pantry zones, continuing to stripe across sleds.

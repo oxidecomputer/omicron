@@ -2175,12 +2175,16 @@
               }
             },
             "required": [
+              "address",
               "type"
             ]
           },
           {
             "type": "object",
             "properties": {
+              "address": {
+                "type": "string"
+              },
               "type": {
                 "type": "string",
                 "enum": [

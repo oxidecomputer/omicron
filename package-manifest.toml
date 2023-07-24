@@ -92,6 +92,13 @@ output.type = "zone"
 [package.clickhouse]
 service_name = "clickhouse"
 only_for_targets.image = "standard"
+source.type = "composite"
+source.packages = [ "clickhouse_svc.tar.gz", "internal-dns-cli.tar.gz" ]
+output.type = "zone"
+
+[package.clickhouse_svc]
+service_name = "clickhouse_svc"
+only_for_targets.image = "standard"
 source.type = "local"
 source.paths = [
   { from = "out/clickhouse", to = "/opt/oxide/clickhouse" },
@@ -100,10 +107,18 @@ source.paths = [
   { from = "smf/clickhouse/config_replica.xml", to = "/opt/oxide/clickhouse/config.d/config_replica.xml" }
 ]
 output.type = "zone"
+output.intermediate_only = true
 setup_hint = "Run `./tools/ci_download_clickhouse` to download the necessary binaries"
 
 [package.clickhouse_keeper]
 service_name = "clickhouse_keeper"
+only_for_targets.image = "standard"
+source.type = "composite"
+source.packages = [ "clickhouse_keeper_svc.tar.gz", "internal-dns-cli.tar.gz" ]
+output.type = "zone"
+
+[package.clickhouse_keeper_svc]
+service_name = "clickhouse_keeper_svc"
 only_for_targets.image = "standard"
 source.type = "local"
 source.paths = [
@@ -113,6 +128,7 @@ source.paths = [
   { from = "smf/clickhouse_keeper/keeper_config.xml", to = "/opt/oxide/clickhouse_keeper/keeper_config.xml" }
 ]
 output.type = "zone"
+output.intermediate_only = true
 setup_hint = "Run `./tools/ci_download_clickhouse` to download the necessary binaries"
 
 [package.cockroachdb]

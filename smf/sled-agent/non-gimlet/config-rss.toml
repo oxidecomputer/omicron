@@ -41,7 +41,9 @@ external_dns_zone_name = "oxide.test"
 # the DNS domain delegated to the rack by the customer. Each of these addresses
 # must be contained in one of the "internal services" IP Pool ranges listed
 # below.
-external_dns_ips = [ "192.168.1.20", "192.168.1.21" ]
+# external_dns_ips = [ "192.168.1.20", "192.168.1.21" ]
+# TODO: Restore to previous settings before setting PR to review
+external_dns_ips = [ "172.20.24.10", "172.20.24.11" ]
 
 # Initial TLS certificates for the external API
 #

@@ -1,9 +1,9 @@
 <?xml version="1.0"?>
 <!DOCTYPE service_bundle SYSTEM "/usr/share/lib/xml/dtd/service_bundle.dtd.1">
 
-<service_bundle type='manifest' name='clickhouse-keeper'>
+<service_bundle type='manifest' name='clickhouse_keeper'>
 
-  <service name='oxide/clickhouse-keeper' type='service' version='1'>
+  <service name='oxide/clickhouse_keeper' type='service' version='1'>
   <create_default_instance enabled='true' />
 
   <dependency name='multi_user' grouping='require_all' restart_on='none'
