@@ -1,9 +1,9 @@
 use crate::storage_manager::DiskWrapper;
 use camino::Utf8PathBuf;
-use derive_more::{AsRef, Deref};
+use derive_more::{AsRef, Deref, From};
 use illumos_utils::dumpadm::DumpAdmError;
 use illumos_utils::zone::{AdmError, Zones};
-use illumos_utils::zpool::ZpoolHealth;
+use illumos_utils::zpool::{ZpoolHealth, ZpoolName};
 use omicron_common::disk::DiskIdentity;
 use sled_hardware::DiskVariant;
 use slog::Logger;
@@ -11,7 +11,7 @@ use std::collections::{HashMap, HashSet};
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Weak};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, SystemTimeError, UNIX_EPOCH};
 use tokio::sync::MutexGuard;
 
 pub struct DumpSetup {
@@ -36,29 +36,65 @@ impl DumpSetup {
 }
 
 // we sure are passing a lot of Utf8PathBufs around, let's be careful about it
-#[derive(AsRef, Clone, Debug, Deref, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[derive(
+    AsRef, Clone, Debug, Deref, Eq, From, Hash, Ord, PartialEq, PartialOrd,
+)]
 struct DumpSlicePath(Utf8PathBuf);
-#[derive(AsRef, Clone, Debug, Deref, Eq, Hash, Ord, PartialEq, PartialOrd)]
-struct DebugDirPath(Utf8PathBuf);
-#[derive(AsRef, Clone, Debug, Deref, Eq, Hash, Ord, PartialEq, PartialOrd)]
-struct CorePath(Utf8PathBuf);
+#[derive(
+    AsRef, Clone, Debug, Deref, Eq, From, Hash, Ord, PartialEq, PartialOrd,
+)]
+struct DebugDataset(Utf8PathBuf);
+#[derive(
+    AsRef, Clone, Debug, Deref, Eq, From, Hash, Ord, PartialEq, PartialOrd,
+)]
+struct CoreDataset(Utf8PathBuf);
+
+#[derive(Deref)]
+struct CoreZpool(ZpoolName);
+#[derive(Deref)]
+struct DebugZpool(ZpoolName);
+
+// only want to access these directories after they're mounted!
+trait GetMountpoint: std::ops::Deref<Target = ZpoolName> {
+    type NewType: From<Utf8PathBuf>;
+    const MOUNTPOINT: &'static str;
+    fn mountpoint(&self) -> Result<Option<Self::NewType>, ZfsGetError> {
+        if zfs_get_prop(self.to_string(), "mounted")? == "yes" {
+            Ok(Some(Self::NewType::from(
+                self.dataset_mountpoint(Self::MOUNTPOINT),
+            )))
+        } else {
+            Ok(None)
+        }
+    }
+}
+impl GetMountpoint for DebugZpool {
+    type NewType = DebugDataset;
+    const MOUNTPOINT: &'static str = sled_hardware::disk::DUMP_DATASET;
+}
+impl GetMountpoint for CoreZpool {
+    type NewType = CoreDataset;
+    const MOUNTPOINT: &'static str = sled_hardware::disk::CRASH_DATASET;
+}
 
 struct DumpSetupWorker {
+    core_dataset_names: Vec<CoreZpool>,
+    debug_dataset_names: Vec<DebugZpool>,
+
     chosen_dump_slice: Option<DumpSlicePath>,
-    chosen_debug_dir: Option<DebugDirPath>,
-    chosen_core_dir: Option<CorePath>,
+    chosen_debug_dir: Option<DebugDataset>,
+    chosen_core_dir: Option<CoreDataset>,
 
     known_dump_slices: Vec<DumpSlicePath>,
-    known_debug_dirs: Vec<DebugDirPath>,
-    known_core_dirs: Vec<CorePath>,
+    known_debug_dirs: Vec<DebugDataset>,
+    known_core_dirs: Vec<CoreDataset>,
 
     savecored_slices: HashSet<DumpSlicePath>,
 
     log: Logger,
 }
 
-const ARCHIVAL_INTERVAL: std::time::Duration =
-    std::time::Duration::from_secs(300);
+const ARCHIVAL_INTERVAL: Duration = Duration::from_secs(300);
 
 impl DumpSetup {
     pub(crate) async fn update_dumpdev_setup(
@@ -67,8 +103,8 @@ impl DumpSetup {
     ) {
         let log = &self.log;
         let mut m2_dump_slices = Vec::new();
-        let mut u2_debug_dirs = Vec::new();
-        let mut m2_core_dirs = Vec::new();
+        let mut u2_debug_datasets = Vec::new();
+        let mut m2_core_datasets = Vec::new();
         for (_id, disk_wrapper) in disks.iter() {
             match disk_wrapper {
                 DiskWrapper::Real { disk, .. } => match disk.variant() {
@@ -86,11 +122,7 @@ impl DumpSetup {
                             &name.to_string(),
                         ) {
                             if info.health() == ZpoolHealth::Online {
-                                m2_core_dirs.push(CorePath(
-                                    name.dataset_mountpoint(
-                                        sled_hardware::disk::CRASH_DATASET,
-                                    ),
-                                ));
+                                m2_core_datasets.push(CoreZpool(name.clone()));
                             } else {
                                 warn!(log, "Zpool {name:?} not online, won't attempt to save process core dumps there");
                             }
@@ -102,11 +134,8 @@ impl DumpSetup {
                             &name.to_string(),
                         ) {
                             if info.health() == ZpoolHealth::Online {
-                                u2_debug_dirs.push(DebugDirPath(
-                                    name.dataset_mountpoint(
-                                        sled_hardware::disk::DUMP_DATASET,
-                                    ),
-                                ));
+                                u2_debug_datasets
+                                    .push(DebugZpool(name.clone()));
                             } else {
                                 warn!(log, "Zpool {name:?} not online, won't attempt to save kernel core dumps there");
                             }
@@ -123,8 +152,8 @@ impl DumpSetup {
             Ok(mut guard) => {
                 guard.update_disk_loadout(
                     m2_dump_slices,
-                    u2_debug_dirs,
-                    m2_core_dirs,
+                    u2_debug_datasets,
+                    m2_core_datasets,
                 );
             }
             Err(err) => {
@@ -180,31 +209,48 @@ enum ZfsGetError {
     Parse(#[from] std::num::ParseIntError),
 }
 
+const ZFS_PROP_USED: &str = "used";
+const ZFS_PROP_AVAILABLE: &str = "available";
+
 fn zfs_get_integer(
-    mountpoint: impl AsRef<str>,
+    mountpoint_or_name: impl AsRef<str>,
     property: &str,
 ) -> Result<u64, ZfsGetError> {
-    let mountpoint = mountpoint.as_ref();
+    zfs_get_prop(mountpoint_or_name, property)?.parse().map_err(Into::into)
+}
+
+fn zfs_get_prop(
+    mountpoint_or_name: impl AsRef<str> + Sized,
+    property: &str,
+) -> Result<String, ZfsGetError> {
+    let mountpoint = mountpoint_or_name.as_ref();
     let mut cmd = std::process::Command::new(illumos_utils::zfs::ZFS);
     cmd.arg("get").arg("-Hpo").arg("value");
     cmd.arg(property);
     cmd.arg(mountpoint);
     let output = cmd.output()?;
-    String::from_utf8(output.stdout)?.trim().parse().map_err(Into::into)
+    Ok(String::from_utf8(output.stdout)?.trim().to_string())
 }
 
-const DATASET_USAGE_THRESHOLD_PERCENT: u64 = 70;
-fn below_thresh(mountpoint: &Utf8PathBuf) -> Result<(bool, u64), ZfsGetError> {
-    let used = zfs_get_integer(mountpoint, "used")?;
-    let available = zfs_get_integer(mountpoint, "available")?;
+const DATASET_USAGE_PERCENT_CHOICE: u64 = 70;
+const DATASET_USAGE_PERCENT_CLEANUP: u64 = 80;
+
+fn below_thresh(
+    mountpoint: &Utf8PathBuf,
+    percent: u64,
+) -> Result<(bool, u64), ZfsGetError> {
+    let used = zfs_get_integer(mountpoint, ZFS_PROP_USED)?;
+    let available = zfs_get_integer(mountpoint, ZFS_PROP_AVAILABLE)?;
     let capacity = used + available;
-    let below = (used * 100) / capacity < DATASET_USAGE_THRESHOLD_PERCENT;
+    let below = (used * 100) / capacity < percent;
     Ok((below, used))
 }
 
 impl DumpSetupWorker {
     fn new(log: Logger) -> Self {
         Self {
+            core_dataset_names: vec![],
+            debug_dataset_names: vec![],
             chosen_dump_slice: None,
             chosen_debug_dir: None,
             chosen_core_dir: None,
@@ -219,24 +265,44 @@ impl DumpSetupWorker {
     fn update_disk_loadout(
         &mut self,
         dump_slices: Vec<DumpSlicePath>,
-        debug_dirs: Vec<DebugDirPath>,
-        core_dirs: Vec<CorePath>,
+        debug_datasets: Vec<DebugZpool>,
+        core_datasets: Vec<CoreZpool>,
     ) {
+        self.core_dataset_names = core_datasets;
+        self.debug_dataset_names = debug_datasets;
+
         self.known_dump_slices = dump_slices;
-        self.known_debug_dirs = debug_dirs;
-        self.known_core_dirs = core_dirs;
 
         self.reevaluate_choices();
     }
 
+    // only allow mounted zfs datasets into 'known_*_dirs',
+    // such that we don't render them non-auto-mountable by zfs
+    fn update_mounted_dirs(&mut self) {
+        self.known_debug_dirs = self
+            .debug_dataset_names
+            .iter()
+            .flat_map(|ds| ds.mountpoint())
+            .flatten()
+            .collect();
+        self.known_core_dirs = self
+            .core_dataset_names
+            .iter()
+            .flat_map(|ds| ds.mountpoint())
+            .flatten()
+            .collect();
+    }
+
     fn reevaluate_choices(&mut self) {
+        self.update_mounted_dirs();
+
         self.known_dump_slices.sort();
         // sort key: prefer to choose a dataset where there's already other
         // dumps so we don't shotgun them across every U.2, but only if they're
         // below a certain usage threshold.
         self.known_debug_dirs.sort_by_cached_key(
-            |mountpoint: &DebugDirPath| {
-                match below_thresh(mountpoint.as_ref()) {
+            |mountpoint: &DebugDataset| {
+                match below_thresh(mountpoint.as_ref(), DATASET_USAGE_PERCENT_CHOICE) {
                     Ok((below, used)) => {
                         let priority = if below { 0 } else { 1 };
                         (priority, used, mountpoint.clone())
@@ -260,11 +326,27 @@ impl DumpSetupWorker {
                 warn!(self.log, "Previously-chosen debug/dump dir {x:?} no longer exists in our view of reality");
                 self.chosen_debug_dir = None;
             } else {
-                match below_thresh(x.as_ref()) {
+                match below_thresh(x.as_ref(), DATASET_USAGE_PERCENT_CLEANUP) {
                     Ok((true, _)) => {}
                     Ok((false, _)) => {
-                        warn!(self.log, "Previously-chosen debug/dump dir {x:?} is over usage threshold, checking other disks for space");
-                        self.chosen_debug_dir = None;
+                        if self.known_debug_dirs.iter().any(|x| {
+                            below_thresh(
+                                x.as_ref(),
+                                DATASET_USAGE_PERCENT_CHOICE,
+                            )
+                            .unwrap_or((false, 0))
+                            .0
+                        }) {
+                            info!(self.log, "Previously-chosen debug/dump dir {x:?} is over usage threshold, choosing a more vacant disk");
+                            self.chosen_debug_dir = None;
+                        } else {
+                            warn!(self.log, "All candidate debug/dump dirs are over usage threshold, removing older archived files");
+                            if let Err(err) = self.cleanup() {
+                                error!(self.log, "Couldn't clean up any debug/dump dirs, may hit dataset quota in {x:?}: {err:?}");
+                            } else {
+                                self.chosen_debug_dir = None;
+                            }
+                        }
                     }
                     Err(err) => {
                         error!(self.log, "Previously-chosen debug/dump dir {x:?} couldn't be queried for zfs properties!  Choosing another. {err:?}");
@@ -508,7 +590,7 @@ impl DumpSetupWorker {
 
     fn archive_logs_inner(
         &self,
-        debug_dir: &DebugDirPath,
+        debug_dir: &DebugDataset,
         logdir: PathBuf,
         zone_name: &str,
     ) -> Result<(), ArchiveLogsError> {
@@ -589,6 +671,88 @@ impl DumpSetupWorker {
             Err(err) => Err(err),
         }
     }
+
+    fn cleanup(&self) -> Result<(), CleanupError> {
+        let mut dir_info = Vec::new();
+        for dir in &self.known_debug_dirs {
+            match Self::scope_dir_for_cleanup(dir) {
+                Ok(info) => {
+                    dir_info.push((info, dir));
+                }
+                Err(err) => {
+                    error!(self.log, "Could not analyze {dir:?} for debug dataset cleanup task: {err:?}");
+                }
+            }
+        }
+        if dir_info.is_empty() {
+            return Err(CleanupError::NoDatasetsToClean);
+        }
+        // find dir with oldest average time of files that must be deleted
+        // to achieve desired threshold, and reclaim that space.
+        dir_info.sort();
+        'outer: for (dir_info, dir) in dir_info {
+            let CleanupDirInfo { average_time: _, num_to_delete, file_list } =
+                dir_info;
+            for (_time, _bytes, path) in &file_list[..num_to_delete as usize] {
+                // if we are unable to remove a file, we cannot guarantee
+                // that we will reach our target size threshold, and suspect
+                // the i/o error *may* be an issue with the underlying disk, so
+                // we continue to the dataset with the next-oldest average age
+                // of files-to-delete in the sorted list.
+                if let Err(err) = std::fs::remove_file(&path) {
+                    error!(self.log, "Couldn't delete {path:?} from debug dataset, skipping {dir:?}. {err:?}");
+                    continue 'outer;
+                }
+            }
+            // we made it through all the files we planned to remove, thereby
+            // freeing up enough space on one of the debug datasets for it to
+            // be chosen when reevaluating targets.
+            break;
+        }
+        Ok(())
+    }
+
+    fn scope_dir_for_cleanup(
+        debug_dir: &DebugDataset,
+    ) -> Result<CleanupDirInfo, CleanupError> {
+        let used = zfs_get_integer(&**debug_dir, ZFS_PROP_USED)?;
+        let available = zfs_get_integer(&**debug_dir, ZFS_PROP_AVAILABLE)?;
+        let capacity = used + available;
+
+        let target_used = capacity * DATASET_USAGE_PERCENT_CHOICE / 100;
+
+        let mut file_list = Vec::new();
+        // find all files in the debug dataset and sort by modified time
+        for path in glob::glob(debug_dir.join("**/*").as_str())?.flatten() {
+            let meta = std::fs::metadata(&path)?;
+            // we need this to be a Duration rather than SystemTime so we can
+            // do math to it later.
+            let time = meta.modified()?.duration_since(UNIX_EPOCH)?;
+            let size = meta.len();
+
+            file_list.push((time, size, path))
+        }
+        file_list.sort();
+
+        // find how many old files must be deleted to get the dataset under
+        // the limit, and what the average age of that set is.
+        let mut possible_bytes = 0;
+        let mut total_time = Duration::ZERO;
+        let mut num_to_delete = 0;
+        for (time, size, _path) in &file_list {
+            if used - possible_bytes < target_used {
+                break;
+            } else {
+                total_time += *time;
+                num_to_delete += 1;
+                possible_bytes += size;
+            }
+        }
+        let average_time =
+            total_time.checked_div(num_to_delete).unwrap_or(Duration::MAX);
+
+        Ok(CleanupDirInfo { average_time, num_to_delete, file_list })
+    }
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -607,4 +771,25 @@ enum ArchiveLogsError {
         "No debug dir into which we should archive logs has yet been chosen"
     )]
     NoDebugDirYet,
+}
+
+#[derive(thiserror::Error, Debug)]
+enum CleanupError {
+    #[error("No debug datasets were successfully evaluated for cleanup")]
+    NoDatasetsToClean,
+    #[error("Failed to query ZFS properties: {0}")]
+    ZfsError(#[from] ZfsGetError),
+    #[error("I/O error: {0}")]
+    IoError(#[from] std::io::Error),
+    #[error("Glob pattern invalid: {0}")]
+    Glob(#[from] glob::PatternError),
+    #[error("A file's observed modified time was before the Unix epoch: {0}")]
+    TimelineWentSideways(#[from] SystemTimeError),
+}
+
+#[derive(Ord, PartialOrd, Eq, PartialEq)]
+struct CleanupDirInfo {
+    average_time: Duration,
+    num_to_delete: u32,
+    file_list: Vec<(Duration, u64, PathBuf)>,
 }
