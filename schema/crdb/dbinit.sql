@@ -2519,16 +2519,22 @@ CREATE TABLE IF NOT EXISTS omicron.public.switch_port_settings_address_config (
  */
 
 CREATE TABLE IF NOT EXISTS omicron.public.db_metadata (
-    name  STRING(63) NOT NULL PRIMARY KEY,
-    value STRING(1023) NOT NULL
+    singleton BOOL NOT NULL PRIMARY KEY,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+    -- Semver representation of the DB version
+    version STRING(64) NOT NULL,
+
+    CHECK (singleton = true)
 );
 
 INSERT INTO omicron.public.db_metadata (
-    name,
-    value
+    singleton,
+    time_created,
+    time_modified,
+    version
 ) VALUES
-    ( 'schema_version', '1.0.1' ),
-    ( 'schema_time_created', CAST(NOW() AS STRING) )
+    ( TRUE, NOW(), NOW(), '1.0.1' )
 ON CONFLICT DO NOTHING;
 
 COMMIT;

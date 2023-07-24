@@ -3,25 +3,29 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::schema::db_metadata;
+use crate::SemverVersion;
+use chrono::{DateTime, Utc};
 
 /// Internal database metadata
 #[derive(Queryable, Insertable, Debug, Clone, Selectable)]
 #[diesel(table_name = db_metadata)]
 pub struct DbMetadata {
-    name: String,
-    value: String,
+    singleton: bool,
+    time_created: DateTime<Utc>,
+    time_modified: DateTime<Utc>,
+    version: SemverVersion,
 }
 
 impl DbMetadata {
-    pub fn new(name: String, value: String) -> Self {
-        Self { name, value }
+    pub fn time_created(&self) -> &DateTime<Utc> {
+        &self.time_created
     }
 
-    pub fn name(&self) -> &str {
-        &self.name
+    pub fn time_modified(&self) -> &DateTime<Utc> {
+        &self.time_modified
     }
 
-    pub fn value(&self) -> &str {
-        &self.value
+    pub fn version(&self) -> &SemverVersion {
+        &self.version
     }
 }

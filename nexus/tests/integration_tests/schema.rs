@@ -21,7 +21,7 @@ use uuid::Uuid;
 
 const SCHEMA_DIR: &'static str =
     concat!(env!("CARGO_MANIFEST_DIR"), "/../schema/crdb");
-const FIRST_VERSION: &'static str = "1.0.0";
+const EARLIEST_SUPPORTED_VERSION: &'static str = "1.0.0";
 
 async fn test_setup_just_crdb<'a>(
     log: &Logger,
@@ -88,7 +88,8 @@ async fn apply_update(
 
 async fn query_crdb_schema_version(crdb: &CockroachInstance) -> String {
     let client = crdb.connect().await.expect("failed to connect");
-    let sql = "SELECT value FROM omicron.public.db_metadata WHERE name = 'schema_version'";
+    let sql =
+        "SELECT version FROM omicron.public.db_metadata WHERE singleton = true";
 
     let row = client.query_one(sql, &[]).await.expect("failed to query schema");
     let version = row.get(0);
@@ -105,8 +106,12 @@ async fn query_crdb_schema_version(crdb: &CockroachInstance) -> String {
 enum AnySqlType {
     DateTime,
     String(String),
+    Bool(bool),
     Uuid(Uuid),
     // TODO: This isn't exhaustive, feel free to add more.
+    //
+    // These should only be necessary for rows where the database schema changes also choose to
+    // populate data.
 }
 
 impl AnySqlType {
@@ -131,6 +136,9 @@ impl<'a> tokio_postgres::types::FromSql<'a> for AnySqlType {
             // is some value present.
             let _ = DateTime::<Utc>::from_sql(ty, raw)?;
             return Ok(AnySqlType::DateTime);
+        }
+        if bool::accepts(ty) {
+            return Ok(AnySqlType::Bool(bool::from_sql(ty, raw)?));
         }
         if Uuid::accepts(ty) {
             return Ok(AnySqlType::Uuid(Uuid::from_sql(ty, raw)?));
@@ -263,8 +271,11 @@ async fn nexus_applies_update_on_boot() {
     let log = &builder.logctx.log;
     let crdb = builder.database.as_ref().expect("Should have started CRDB");
 
-    apply_update(log, &crdb, FIRST_VERSION, Update::Apply).await;
-    assert_eq!(FIRST_VERSION, query_crdb_schema_version(&crdb).await);
+    apply_update(log, &crdb, EARLIEST_SUPPORTED_VERSION, Update::Apply).await;
+    assert_eq!(
+        EARLIEST_SUPPORTED_VERSION,
+        query_crdb_schema_version(&crdb).await
+    );
 
     // Start Nexus. It should auto-format itself to the latest version,
     // upgrading through each intermediate update.
@@ -301,13 +312,16 @@ async fn nexus_cannot_apply_update_from_unknown_version() {
     let log = &builder.logctx.log;
     let crdb = builder.database.as_ref().expect("Should have started CRDB");
 
-    apply_update(log, &crdb, FIRST_VERSION, Update::Apply).await;
-    assert_eq!(FIRST_VERSION, query_crdb_schema_version(&crdb).await);
+    apply_update(log, &crdb, EARLIEST_SUPPORTED_VERSION, Update::Apply).await;
+    assert_eq!(
+        EARLIEST_SUPPORTED_VERSION,
+        query_crdb_schema_version(&crdb).await
+    );
 
     // This version is not valid; it does not exist.
     let version = "0.0.0";
     crdb.connect().await.expect("Failed to connect")
-        .batch_execute(&format!("UPDATE omicron.public.db_metadata SET value = '{version}' WHERE name = 'schema_version'"))
+        .batch_execute(&format!("UPDATE omicron.public.db_metadata SET version = '{version}' WHERE singleton = true"))
         .await
         .expect("Failed to update schema");
 
@@ -619,40 +633,10 @@ async fn dbinit_equals_sum_of_all_up() {
     let populate = true;
     let mut crdb = test_setup_just_crdb(&logctx.log, populate).await;
     let expected_schema = InformationSchema::new(&crdb).await;
-    let mut expected_data = expected_schema.query_all_tables(log, &crdb).await;
+    let expected_data = expected_schema.query_all_tables(log, &crdb).await;
 
     // Validate that the schema is identical
     observed_schema.pretty_assert_eq(&expected_schema);
-
-    // Validate that the pre-populated data is identical.
-    //
-    // However, before we do so, fudge the date-related fields so they appear
-    // identical.
-    let observed_schema_time_created = observed_data
-        ["omicron.public.db_metadata"]
-        .iter()
-        .find_map(|row| {
-            let name = &row.values[0];
-            if name.expect("name").unwrap().as_str() == "schema_time_created" {
-                let value = &row.values[1];
-                Some(value.expect("value").cloned())
-            } else {
-                None
-            }
-        })
-        .expect("Failed to find schema_time_created in db_metadata");
-    for row in &mut expected_data
-        .get_mut("omicron.public.db_metadata")
-        .unwrap()
-        .into_iter()
-    {
-        let name = &row.values[0];
-
-        if name.value.as_ref().unwrap().as_str() == "schema_time_created" {
-            let value = &mut row.values[1];
-            value.value = observed_schema_time_created.clone();
-        }
-    }
 
     assert_eq!(observed_data, expected_data);
 

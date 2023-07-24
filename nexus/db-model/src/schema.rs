@@ -1115,9 +1115,11 @@ table! {
 }
 
 table! {
-    db_metadata (name) {
-        name -> Text,
-        value -> Text,
+    db_metadata (singleton) {
+        singleton -> Bool,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        version -> Text,
     }
 }
 

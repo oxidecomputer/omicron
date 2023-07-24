@@ -21,8 +21,8 @@ impl DataStore {
         use db::schema::db_metadata::dsl;
 
         let version: String = dsl::db_metadata
-            .filter(dsl::name.eq("schema_version"))
-            .select(dsl::value)
+            .filter(dsl::singleton.eq(true))
+            .select(dsl::version)
             .get_result_async(self.pool())
             .await
             .map_err(|e| {
