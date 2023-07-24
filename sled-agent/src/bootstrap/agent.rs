@@ -769,6 +769,19 @@ impl Agent {
                     monitor: hardware_monitor,
                 };
 
+                // Start trying to notify ddmd of our sled prefix so it can
+                // advertise it to other sleds.
+                //
+                // TODO-security This ddmd_client is used to advertise both this
+                // (underlay) address and our bootstrap address. Bootstrap addresses are
+                // unauthenticated (connections made on them are auth'd via sprockets),
+                // but underlay addresses should be exchanged via authenticated channels
+                // between ddmd instances. It's TBD how that will work, but presumably
+                // we'll need to do something different here for underlay vs bootstrap
+                // addrs (either talk to a differently-configured ddmd, or include info
+                // indicating which kind of address we're advertising).
+                self.ddmd_client.advertise_prefix(request.subnet);
+
                 // Server does not exist, initialize it.
                 let server = SledServer::start(
                     &self.sled_config,
@@ -801,19 +814,6 @@ impl Agent {
                 // sled agent starting.
                 restarter.cancel();
                 *state = SledAgentState::After(server);
-
-                // Start trying to notify ddmd of our sled prefix so it can
-                // advertise it to other sleds.
-                //
-                // TODO-security This ddmd_client is used to advertise both this
-                // (underlay) address and our bootstrap address. Bootstrap addresses are
-                // unauthenticated (connections made on them are auth'd via sprockets),
-                // but underlay addresses should be exchanged via authenticated channels
-                // between ddmd instances. It's TBD how that will work, but presumably
-                // we'll need to do something different here for underlay vs bootstrap
-                // addrs (either talk to a differently-configured ddmd, or include info
-                // indicating which kind of address we're advertising).
-                self.ddmd_client.advertise_prefix(request.subnet);
 
                 Ok(SledAgentResponse { id: request.id })
             }
