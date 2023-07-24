@@ -29,6 +29,7 @@ dpd-client.workspace = true
 dropshot.workspace = true
 flate2.workspace = true
 futures.workspace = true
+glob.workspace = true
 http.workspace = true
 hyper-staticfile.workspace = true
 gateway-client.workspace = true

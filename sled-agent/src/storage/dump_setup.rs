@@ -2,13 +2,16 @@ use crate::storage_manager::DiskWrapper;
 use camino::Utf8PathBuf;
 use derive_more::{AsRef, Deref};
 use illumos_utils::dumpadm::DumpAdmError;
+use illumos_utils::zone::{AdmError, Zones};
 use illumos_utils::zpool::ZpoolHealth;
 use omicron_common::disk::DiskIdentity;
 use sled_hardware::DiskVariant;
 use slog::Logger;
 use std::collections::{HashMap, HashSet};
 use std::ffi::OsString;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Weak};
+use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::MutexGuard;
 
 pub struct DumpSetup {
@@ -23,9 +26,9 @@ impl DumpSetup {
             log.new(o!("component" => "DumpSetup-worker")),
         )));
         let worker_weak = Arc::downgrade(&worker);
-        let log_poll = log.new(o!("component" => "DumpSetup-rotation"));
+        let log_poll = log.new(o!("component" => "DumpSetup-archival"));
         let _poller = std::thread::spawn(move || {
-            Self::poll_file_rotation(worker_weak, log_poll)
+            Self::poll_file_archival(worker_weak, log_poll)
         });
         let log = log.new(o!("component" => "DumpSetup"));
         Self { worker, _poller, log }
@@ -54,7 +57,7 @@ struct DumpSetupWorker {
     log: Logger,
 }
 
-const ROTATION_DURATION: std::time::Duration =
+const ARCHIVAL_INTERVAL: std::time::Duration =
     std::time::Duration::from_secs(300);
 
 impl DumpSetup {
@@ -130,7 +133,7 @@ impl DumpSetup {
         });
     }
 
-    fn poll_file_rotation(
+    fn poll_file_archival(
         worker: Weak<std::sync::Mutex<DumpSetupWorker>>,
         log: Logger,
     ) {
@@ -140,10 +143,10 @@ impl DumpSetup {
                 match mutex.lock() {
                     Ok(mut guard) => {
                         guard.reevaluate_choices();
-                        if let Err(err) = guard.rotate_files(&log) {
+                        if let Err(err) = guard.archive_files() {
                             error!(
                                 log,
-                                "Failed to rotate debug/dump files: {err:?}"
+                                "Failed to archive debug/dump files: {err:?}"
                             );
                         }
                     }
@@ -162,7 +165,7 @@ impl DumpSetup {
                 );
                 break;
             }
-            std::thread::sleep(ROTATION_DURATION);
+            std::thread::sleep(ARCHIVAL_INTERVAL);
         }
     }
 }
@@ -247,7 +250,7 @@ impl DumpSetupWorker {
             },
         );
         self.known_core_dirs.sort_by_cached_key(|mnt| {
-            // these get rotated out periodically anyway, pick one with room
+            // these get archived periodically anyway, pick one with room
             let available = zfs_get_integer(&**mnt, "available").unwrap_or(0);
             (u64::MAX - available, mnt.clone())
         });
@@ -411,10 +414,10 @@ impl DumpSetupWorker {
         }
     }
 
-    fn rotate_files(&self, log: &Logger) -> Result<(), std::io::Error> {
+    fn archive_files(&self) -> std::io::Result<()> {
         if let Some(debug_dir) = &self.chosen_debug_dir {
             if self.known_core_dirs.is_empty() {
-                info!(log, "No core dump locations yet known.");
+                info!(self.log, "No core dump locations yet known.");
             }
             for core_dir in &self.known_core_dirs {
                 if let Ok(dir) = core_dir.read_dir() {
@@ -422,32 +425,139 @@ impl DumpSetupWorker {
                         if let Some(path) = entry.file_name().to_str() {
                             let dest = debug_dir.join(path);
 
-                            let mut dest_f = std::fs::File::create(&dest)?;
-                            let mut src_f = std::fs::File::open(&entry.path())?;
-
-                            std::io::copy(&mut src_f, &mut dest_f)?;
-                            dest_f.sync_all()?;
-
-                            drop(src_f);
-                            drop(dest_f);
-
-                            if let Err(err) = std::fs::remove_file(entry.path())
+                            if let Err(err) =
+                                Self::copy_sync_and_remove(&entry.path(), &dest)
                             {
-                                warn!(log, "Could not remove {entry:?} after copying it to {dest:?}: {err:?}");
+                                error!(
+                                    self.log,
+                                    "Failed to archive {entry:?}: {err:?}"
+                                );
                             } else {
                                 info!(
-                                    log,
-                                    "Relocated core {entry:?} to {dest:?}"
+                                    self.log,
+                                    "Relocated {entry:?} to {dest:?}"
                                 );
                             }
                         } else {
-                            error!(log, "Non-UTF8 path found while rotating core dumps: {entry:?}");
+                            error!(self.log, "Non-UTF8 path found while archiving core dumps: {entry:?}");
                         }
                     }
                 }
             }
         } else {
-            info!(log, "No rotation destination for crash dumps yet chosen.");
+            info!(
+                self.log,
+                "No archival destination for crash dumps yet chosen."
+            );
+        }
+
+        if let Err(err) = self.archive_logs() {
+            if !matches!(err, ArchiveLogsError::NoDebugDirYet) {
+                error!(
+                    self.log,
+                    "Failure while trying to archive logs to debug dataset: {err:?}"
+                );
+            }
+        }
+
+        Ok(())
+    }
+
+    fn copy_sync_and_remove(
+        source: impl AsRef<Path>,
+        dest: impl AsRef<Path>,
+    ) -> std::io::Result<()> {
+        let source = source.as_ref();
+        let dest = dest.as_ref();
+        let mut dest_f = std::fs::File::create(&dest)?;
+        let mut src_f = std::fs::File::open(&source)?;
+
+        std::io::copy(&mut src_f, &mut dest_f)?;
+
+        dest_f.sync_all()?;
+
+        drop(src_f);
+        drop(dest_f);
+
+        std::fs::remove_file(source)?;
+        Ok(())
+    }
+
+    fn archive_logs(&self) -> Result<(), ArchiveLogsError> {
+        let debug_dir = self
+            .chosen_debug_dir
+            .as_ref()
+            .ok_or(ArchiveLogsError::NoDebugDirYet)?;
+        // zone crate's 'deprecated' functions collide if you try to enable
+        // its 'sync' and 'async' features simultaneously :(
+        let rt =
+            tokio::runtime::Runtime::new().map_err(ArchiveLogsError::Tokio)?;
+        let oxz_zones = rt.block_on(Zones::get())?;
+        self.archive_logs_inner(
+            debug_dir,
+            PathBuf::from("/var/svc/log"),
+            "global",
+        )?;
+        for zone in oxz_zones {
+            let logdir = zone.path().join("root/var/svc/log");
+            let zone_name = zone.name();
+            self.archive_logs_inner(debug_dir, logdir, zone_name)?;
+        }
+        Ok(())
+    }
+
+    fn archive_logs_inner(
+        &self,
+        debug_dir: &DebugDirPath,
+        logdir: PathBuf,
+        zone_name: &str,
+    ) -> Result<(), ArchiveLogsError> {
+        let mut rotated_log_files = Vec::new();
+        // patterns matching archived logs, e.g. foo.log.3
+        // keep checking for greater numbers of digits until we don't find any
+        for n in 1..9 {
+            let pattern = logdir
+                .join(format!("*.log.{}", "[0-9]".repeat(n)))
+                .to_str()
+                .ok_or_else(|| ArchiveLogsError::Utf8(zone_name.to_string()))?
+                .to_string();
+            rotated_log_files.extend(glob::glob(&pattern)?.flatten());
+        }
+        let dest_dir = debug_dir.join(zone_name).into_std_path_buf();
+        if !rotated_log_files.is_empty() {
+            std::fs::create_dir_all(&dest_dir)?;
+            let count = rotated_log_files.len();
+            info!(
+                self.log,
+                "Archiving {count} log files from {zone_name} zone"
+            );
+        }
+        for entry in rotated_log_files {
+            let src_name = entry.file_name().unwrap();
+            // as we archive them, logadm will keep resetting to .log.0,
+            // so we need to maintain our own numbering in the dest dataset.
+            // we'll use the modified date of the rotated log file, or try
+            // falling back to the time of archival if that fails, and
+            // falling back to counting up from 0 if *that* somehow fails.
+            let mut n = entry
+                .metadata()
+                .and_then(|m| m.modified())
+                .unwrap_or_else(|_| SystemTime::now())
+                .duration_since(UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+            let mut dest;
+            loop {
+                dest = dest_dir.join(src_name).with_extension(format!("{n}"));
+                if dest.exists() {
+                    n += 1;
+                } else {
+                    break;
+                }
+            }
+            if let Err(err) = Self::copy_sync_and_remove(&entry, dest) {
+                warn!(self.log, "Failed to archive {entry:?}: {err:?}");
+            }
         }
         Ok(())
     }
@@ -479,4 +589,22 @@ impl DumpSetupWorker {
             Err(err) => Err(err),
         }
     }
+}
+
+#[derive(thiserror::Error, Debug)]
+enum ArchiveLogsError {
+    #[error("Couldn't make an async runtime to get zone info: {0}")]
+    Tokio(std::io::Error),
+    #[error("I/O error: {0}")]
+    IoError(#[from] std::io::Error),
+    #[error("Error calling zoneadm: {0}")]
+    Zoneadm(#[from] AdmError),
+    #[error("Non-UTF8 zone path for zone {0}")]
+    Utf8(String),
+    #[error("Glob pattern invalid: {0}")]
+    Glob(#[from] glob::PatternError),
+    #[error(
+        "No debug dir into which we should archive logs has yet been chosen"
+    )]
+    NoDebugDirYet,
 }
