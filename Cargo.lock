@@ -4891,6 +4891,7 @@ dependencies = [
  "flate2",
  "futures",
  "gateway-client",
+ "glob",
  "http",
  "hyper",
  "hyper-staticfile",
