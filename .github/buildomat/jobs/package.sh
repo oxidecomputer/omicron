@@ -85,7 +85,7 @@ ptime -m cargo run --locked --release --bin omicron-package -- \
   -t host target create -i standard -m gimlet -s asic
 ptime -m cargo run --locked --release --bin omicron-package -- \
   -t host package
-stamp_packages omicron-sled-agent maghemite propolis-server
+stamp_packages omicron-sled-agent maghemite propolis-server overlay
 
 # Create global zone package @ /work/global-zone-packages.tar.gz
 ptime -m ./tools/build-global-zone-packages.sh "$tarball_src_dir" /work
@@ -115,6 +115,7 @@ zones=(
   out/ntp.tar.gz
   out/omicron-gateway-softnpu.tar.gz
   out/omicron-gateway-asic.tar.gz
+  out/overlay.tar.gz
 )
 cp "${zones[@]}" /work/zones/
 

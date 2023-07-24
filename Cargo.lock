@@ -672,6 +672,7 @@ dependencies = [
  "reqwest",
  "schemars",
  "serde",
+ "sled-hardware",
  "slog",
  "uuid",
 ]
@@ -790,11 +791,13 @@ dependencies = [
 [[package]]
 name = "cancel-safe-futures"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/cancel-safe-futures?rev=c15ea7069dc547434ee772f08ce040f71db9b453#c15ea7069dc547434ee772f08ce040f71db9b453"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f7e43b6f1b63c6cc2619bd76db89cd1d011ef993af74ed28e305d36d6b056abd"
 dependencies = [
  "futures-core",
  "futures-sink",
  "futures-util",
+ "pin-project-lite",
 ]
 
 [[package]]
@@ -3326,6 +3329,7 @@ dependencies = [
  "buf-list",
  "bytes",
  "camino",
+ "cancel-safe-futures",
  "clap 4.3.8",
  "ddm-admin-client",
  "display-error-chain",
@@ -4867,6 +4871,7 @@ dependencies = [
  "async-trait",
  "base64 0.21.2",
  "bincode",
+ "bootstore",
  "bootstrap-agent-client",
  "bytes",
  "camino",
@@ -4877,6 +4882,7 @@ dependencies = [
  "crucible-agent-client",
  "crucible-client-types",
  "ddm-admin-client",
+ "derive_more",
  "dns-server",
  "dns-service-client 0.1.0",
  "dpd-client",
@@ -4885,6 +4891,7 @@ dependencies = [
  "flate2",
  "futures",
  "gateway-client",
+ "glob",
  "http",
  "hyper",
  "hyper-staticfile",
@@ -4918,6 +4925,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serial_test",
+ "sha3",
  "sled-agent-client",
  "sled-hardware",
  "slog",

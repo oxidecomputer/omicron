@@ -331,6 +331,7 @@ async fn rack_initialize(
         request,
         agent.ip,
         agent.storage_resources.clone(),
+        agent.get_bootstore_node_handle(),
     )
     .await
 }

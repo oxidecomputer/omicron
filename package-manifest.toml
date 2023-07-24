@@ -63,6 +63,27 @@ source.rust.release = true
 source.paths = [ { from = "smf/installinator", to = "pkg" } ]
 output.type = "tarball"
 
+# overlay is a set of packages that are overlaid onto all non-global zones.
+[package.overlay]
+service_name = "overlay"
+source.type = "composite"
+source.packages = [
+  "logadm.tar.gz",
+]
+output.type = "zone"
+
+# The logadm package is an overlay for all non-global zones to reconfigure log
+# rotation and the frequency with which it runs.
+[package.logadm]
+service_name = "logadm"
+source.type = "local"
+source.paths = [
+  { from = "smf/logadm/crontab.root", to = "/var/spool/cron/crontabs/root" },
+  { from = "smf/logadm/logadm.conf", to = "/etc/logadm.conf" },
+]
+output.type = "zone"
+output.intermediate_only = true
+
 [package.omicron-nexus]
 service_name = "nexus"
 only_for_targets.image = "standard"
@@ -273,6 +294,7 @@ source.paths = [
   { from = "smf/switch_zone_setup/manifest.xml", to = "/var/svc/manifest/site/switch_zone_setup/manifest.xml" },
   { from = "smf/switch_zone_setup/switch_zone_setup", to = "/opt/oxide/bin/switch_zone_setup" },
   { from = "smf/switch_zone_setup/support_authorized_keys", to = "/opt/oxide/support/authorized_keys" },
+  { from = "smf/switch_zone_setup/root.profile", to = "/root/.profile" },
 ]
 output.type = "zone"
 output.intermediate_only = true

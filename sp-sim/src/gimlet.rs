@@ -496,10 +496,7 @@ struct Handler {
 
     attached_mgs: Arc<Mutex<Option<(SpComponent, SpPort, SocketAddrV6)>>>,
     incoming_serial_console: HashMap<SpComponent, UnboundedSender<Vec<u8>>>,
-    // Use RotSlotId for both RoT and SP slots since they both have two elements
-    // each.
     rot_active_slot: RotSlotId,
-    sp_active_slot: RotSlotId,
     power_state: PowerState,
     startup_options: StartupOptions,
     update_state: UpdateState,
@@ -534,7 +531,6 @@ impl Handler {
             attached_mgs,
             incoming_serial_console,
             rot_active_slot: RotSlotId::A,
-            sp_active_slot: RotSlotId::A,
             power_state: PowerState::A2,
             startup_options: StartupOptions::empty(),
             update_state: UpdateState::NotPrepared,
@@ -1122,9 +1118,9 @@ impl SpHandler for Handler {
         );
         if component == SpComponent::ROT {
             Ok(rot_slot_id_to_u16(self.rot_active_slot))
-        } else if component == SpComponent::SP_ITSELF {
-            Ok(rot_slot_id_to_u16(self.sp_active_slot))
         } else {
+            // The real SP returns `RequestUnsupportedForComponent` for anything
+            // other than the RoT, including SP_ITSELF.
             Err(SpError::RequestUnsupportedForComponent)
         }
     }
@@ -1148,10 +1144,9 @@ impl SpHandler for Handler {
         if component == SpComponent::ROT {
             self.rot_active_slot = rot_slot_id_from_u16(slot)?;
             Ok(())
-        } else if component == SpComponent::SP_ITSELF {
-            self.sp_active_slot = rot_slot_id_from_u16(slot)?;
-            Ok(())
         } else {
+            // The real SP returns `RequestUnsupportedForComponent` for anything
+            // other than the RoT, including SP_ITSELF.
             Err(SpError::RequestUnsupportedForComponent)
         }
     }
