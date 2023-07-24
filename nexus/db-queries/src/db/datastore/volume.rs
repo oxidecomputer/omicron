@@ -147,7 +147,7 @@ impl DataStore {
             })
     }
 
-    /// Return a Option<Volume> based on id, even if it's soft deleted.
+    /// Return a `Option<Volume>` based on id, even if it's soft deleted.
     pub async fn volume_get(
         &self,
         volume_id: Uuid,
