@@ -446,7 +446,8 @@
             "description": "The external DNS server addresses.",
             "type": "array",
             "items": {
-              "type": "string"
+              "type": "string",
+              "format": "ip"
             }
           },
           "external_certificates": {
@@ -502,6 +503,14 @@
                 "$ref": "#/components/schemas/RecoverySiloConfig"
               }
             ]
+          },
+          "trust_quorum_peers": {
+            "nullable": true,
+            "description": "The set of peer_ids required to initialize trust quorum\n\nThe value is `None` if we are not using trust quorum",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Baseboard"
+            }
           }
         },
         "required": [

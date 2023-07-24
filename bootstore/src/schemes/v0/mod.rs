@@ -23,9 +23,10 @@ pub use fsm::{ApiError, ApiOutput, Fsm, State};
 pub use messages::{
     Envelope, Msg, MsgError, Request, RequestType, Response, ResponseType,
 };
-pub use peer::{Node, NodeHandle, NodeRequestError, Status};
+pub use peer::{Config, Node, NodeHandle, NodeRequestError, Status};
 pub use request_manager::{RequestManager, TrackableRequest};
 pub use share_pkg::{create_pkgs, LearnedSharePkg, SharePkg, SharePkgCommon};
+pub use storage::NetworkConfig;
 
 /// The current version of supported messages within the v0 scheme
 ///

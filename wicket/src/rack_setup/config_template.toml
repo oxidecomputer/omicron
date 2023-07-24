@@ -19,7 +19,7 @@ external_dns_ips = []
 ntp_servers = [
 ]
 
-# External DNS servers; e.g., "1.1.1.1", "9.9.9.9".
+# External DNS server IP Addresses; e.g., "1.1.1.1", "9.9.9.9".
 dns_servers = []
 
 # Ranges of the service IP pool which may be used for internal services.
