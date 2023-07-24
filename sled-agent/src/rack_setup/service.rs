@@ -610,7 +610,7 @@ impl ServiceInner {
                         .map(|config| NexusTypes::UplinkConfig {
                             gateway_ip: config.gateway_ip,
                             switch: config.switch.clone().into(),
-                            uplink_ip: config.uplink_ip,
+                            uplink_cidr: config.uplink_cidr,
                             uplink_port: config.uplink_port.clone(),
                             uplink_port_speed: config
                                 .uplink_port_speed
@@ -1188,7 +1188,10 @@ impl ServiceInner {
             v6_routes: HashMap::new(),
         };
         let link_id = LinkId(0);
-        let addr = IpAddr::V4(uplink_config.uplink_ip);
+        // TODO We're discarding the `uplink_cidr.prefix()` here and only using
+        // the IP address; this needs to be fixed as part of
+        // https://github.com/oxidecomputer/omicron/issues/3588.
+        let addr = IpAddr::V4(uplink_config.uplink_cidr.ip());
         let link_settings = LinkSettings {
             // TODO Allow user to configure link properties
             // https://github.com/oxidecomputer/omicron/issues/3061

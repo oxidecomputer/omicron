@@ -205,7 +205,7 @@ installinator-artifact-client = { path = "installinator-artifact-client" }
 installinator-common = { path = "installinator-common" }
 internal-dns = { path = "internal-dns" }
 ipcc-key-value = { path = "ipcc-key-value" }
-ipnetwork = "0.20"
+ipnetwork = { version = "0.20", features = ["schemars"] }
 itertools = "0.10.5"
 key-manager = { path = "key-manager" }
 lazy_static = "1.4.0"
