@@ -103,7 +103,7 @@ impl DataStore {
                 } else {
                     let err_msg =
                         format!("Failed to parse {name} as a semver version");
-                    warn!(log, err_msg);
+                    warn!(log, "{err_msg}");
                     return Err(err_msg);
                 }
             }
@@ -112,7 +112,7 @@ impl DataStore {
         if !all_versions.contains(&current_version) {
             return Err(format!(
                 "Current DB version {current_version} was not found in {}",
-                config.schema_dir
+                config.schema_dir.display()
             ));
         }
 
