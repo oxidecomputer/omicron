@@ -1894,6 +1894,15 @@ impl ServiceManager {
 
                     smfh.refresh()?;
                 }
+                ServiceType::Uplink => {
+                    // Placeholder, proof-of-concept, whatever
+                    smfh.addpropvalue_type(
+                        "uplinks/qsfp0",
+                        "10.10.10.57/21",
+                        "astring",
+                    )?;
+                    smfh.refresh()?;
+                }
                 ServiceType::Maghemite { mode } => {
                     info!(self.inner.log, "Setting up Maghemite service");
 
@@ -2848,6 +2857,7 @@ impl ServiceManager {
                     ServiceType::Dendrite { asic: DendriteAsic::TofinoAsic },
                     ServiceType::ManagementGatewayService,
                     ServiceType::Tfport { pkt_source: "tfpkt0".to_string() },
+                    ServiceType::Uplink,
                     ServiceType::Wicketd { baseboard },
                     ServiceType::Maghemite { mode: "transit".to_string() },
                 ]
@@ -3157,6 +3167,9 @@ impl ServiceManager {
                         ServiceType::Tfport { .. } => {
                             // Since tfport and dpd communicate using localhost,
                             // the tfport service shouldn't need to be restarted.
+                        }
+                        ServiceType::Uplink { .. } => {
+                            // Placeholder
                         }
                         ServiceType::Maghemite { mode } => {
                             smfh.delpropvalue("config/mode", "*")?;

@@ -325,6 +325,8 @@ pub enum ServiceType {
         pkt_source: String,
     },
     #[serde(skip)]
+    Uplink,
+    #[serde(skip)]
     Maghemite {
         mode: String,
     },
@@ -371,6 +373,7 @@ impl std::fmt::Display for ServiceType {
             ServiceType::Wicketd { .. } => write!(f, "wicketd"),
             ServiceType::Dendrite { .. } => write!(f, "dendrite"),
             ServiceType::Tfport { .. } => write!(f, "tfport"),
+            ServiceType::Uplink { .. } => write!(f, "uplink"),
             ServiceType::CruciblePantry { .. } => write!(f, "crucible/pantry"),
             ServiceType::BoundaryNtp { .. }
             | ServiceType::InternalNtp { .. } => write!(f, "ntp"),
@@ -490,6 +493,7 @@ impl TryFrom<ServiceType> for sled_agent_client::types::ServiceType {
             | St::Wicketd { .. }
             | St::Dendrite { .. }
             | St::Tfport { .. }
+            | St::Uplink
             | St::Maghemite { .. } => Err(AutonomousServiceOnlyError),
         }
     }
@@ -780,7 +784,8 @@ impl ServiceZoneRequest {
                 | ServiceType::Wicketd { .. }
                 | ServiceType::Dendrite { .. }
                 | ServiceType::Maghemite { .. }
-                | ServiceType::Tfport { .. } => {
+                | ServiceType::Tfport { .. }
+                | ServiceType::Uplink => {
                     return Err(AutonomousServiceOnlyError);
                 }
             }
