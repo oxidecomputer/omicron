@@ -1330,7 +1330,7 @@ WHERE
  */
 
 /* Ensure we do not assign the same address twice within a subnet */
-CREATE UNIQUE INDEX IF NOT EXISTS lookup_nic_by_subnet ON omicron.public.network_interface (
+CREATE UNIQUE INDEX IF NOT EXISTS network_interface_subnet_id_ip_key ON omicron.public.network_interface (
     subnet_id,
     ip
 ) WHERE
@@ -1339,7 +1339,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS lookup_nic_by_subnet ON omicron.public.network
 /* Ensure we do not assign the same MAC twice within a VPC
  * See RFD174's discussion on the scope of virtual MACs
  */
-CREATE UNIQUE INDEX IF NOT EXISTS lookup_nic_by_vpc ON omicron.public.network_interface (
+CREATE UNIQUE INDEX IF NOT EXISTS network_interface_vpc_id_mac_key ON omicron.public.network_interface (
     vpc_id,
     mac
 ) WHERE
@@ -1354,7 +1354,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS lookup_nic_by_vpc ON omicron.public.network_in
  * we store the `is_primary` column. Such queries are mostly used
  * when setting a new primary interface.
  */
-CREATE UNIQUE INDEX IF NOT EXISTS lookup_nic_by_parent ON omicron.public.network_interface (
+CREATE UNIQUE INDEX IF NOT EXISTS network_interface_parent_id_name_kind_key ON omicron.public.network_interface (
     parent_id,
     name,
     kind
