@@ -367,15 +367,16 @@ impl InstallOpts {
 
         // Wait for both the engine to complete and all progress reports to be
         // sent, then possibly return an error to our caller if either failed.
-        // We intentionally do not use `try_join!` here: we want both futures to
-        // complete, _then_ we will check for failures from either, so any
-        // errors from the engine that need to be reported to wicketd are
-        // reported before we return.
-        let (engine_result, progress_result) =
-            tokio::join!(engine.execute(), progress_handle);
-
-        engine_result.context("failed to execute installinator")?;
-        progress_result.context("progress reporter failed")?;
+        // Use `join_then_try!` to ensure this.
+        cancel_safe_futures::join_then_try!(
+            async {
+                engine
+                    .execute()
+                    .await
+                    .context("failed to execute installinator")
+            },
+            async { progress_handle.await.context("progress reporter failed") },
+        )?;
 
         if self.stay_alive {
             loop {

@@ -51,7 +51,7 @@ impl TomlTemplate {
         *doc.get_mut("dns_servers").unwrap().as_array_mut().unwrap() = config
             .dns_servers
             .iter()
-            .map(|s| Value::String(Formatted::new(s.into())))
+            .map(|s| Value::String(Formatted::new(s.to_string())))
             .collect();
 
         *doc.get_mut("internal_services_ip_pool_ranges")
@@ -380,7 +380,10 @@ mod tests {
                     bootstrap_ip: Some(Ipv6Addr::LOCALHOST),
                 },
             ],
-            dns_servers: vec!["1.1.1.1".into(), "2.2.2.2".into()],
+            dns_servers: vec![
+                "1.1.1.1".parse().unwrap(),
+                "2.2.2.2".parse().unwrap(),
+            ],
             external_dns_zone_name: "oxide.computer".into(),
             internal_services_ip_pool_ranges: vec![IpRange::V4(
                 wicketd_client::types::Ipv4Range {

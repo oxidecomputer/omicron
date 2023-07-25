@@ -33,6 +33,10 @@ address = "[::1]:8123"
 id = "e6bff1ff-24fb-49dc-a54e-c6a350cd4d6c"
 rack_id = "c19a698f-c6f9-4a17-ae30-20d711b8f7dc"
 
+# Nexus may need to resolve external hosts (e.g. to grab IdP metadata).
+# These are the DNS servers it should use.
+external_dns_servers = [ "1.1.1.1", "9.9.9.9" ]
+
 [deployment.dropshot_external]
 # IP Address and TCP port on which to listen for the external API
 bind_address = "127.0.0.1:12220"

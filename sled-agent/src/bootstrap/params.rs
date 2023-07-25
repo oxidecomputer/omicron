@@ -9,6 +9,8 @@ use omicron_common::address::{self, Ipv6Subnet, SLED_PREFIX};
 use omicron_common::api::internal::shared::RackNetworkConfig;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use sha3::{Digest, Sha3_256};
+use sled_hardware::Baseboard;
 use std::borrow::Cow;
 use std::collections::HashSet;
 use std::net::{IpAddr, Ipv6Addr, SocketAddrV6};
@@ -28,9 +30,10 @@ pub enum BootstrapAddressDiscovery {
 #[derive(Clone, Deserialize)]
 struct UnvalidatedRackInitializeRequest {
     rack_subnet: Ipv6Addr,
+    trust_quorum_peers: Option<Vec<Baseboard>>,
     bootstrap_discovery: BootstrapAddressDiscovery,
     ntp_servers: Vec<String>,
-    dns_servers: Vec<String>,
+    dns_servers: Vec<IpAddr>,
     internal_services_ip_pool_ranges: Vec<address::IpRange>,
     external_dns_ips: Vec<IpAddr>,
     external_dns_zone_name: String,
@@ -50,6 +53,11 @@ struct UnvalidatedRackInitializeRequest {
 pub struct RackInitializeRequest {
     pub rack_subnet: Ipv6Addr,
 
+    /// The set of peer_ids required to initialize trust quorum
+    ///
+    /// The value is `None` if we are not using trust quorum
+    pub trust_quorum_peers: Option<Vec<Baseboard>>,
+
     /// Describes how bootstrap addresses should be collected during RSS.
     pub bootstrap_discovery: BootstrapAddressDiscovery,
 
@@ -57,7 +65,7 @@ pub struct RackInitializeRequest {
     pub ntp_servers: Vec<String>,
 
     /// The external DNS server addresses.
-    pub dns_servers: Vec<String>,
+    pub dns_servers: Vec<IpAddr>,
 
     /// Ranges of the service IP pool which may be used for internal services.
     // TODO(https://github.com/oxidecomputer/omicron/issues/1530): Eventually,
@@ -89,6 +97,7 @@ impl std::fmt::Debug for RackInitializeRequest {
         // struct, be sure to add it to the Debug impl below!
         let RackInitializeRequest {
             rack_subnet,
+            trust_quorum_peers: trust_qurorum_peers,
             bootstrap_discovery,
             ntp_servers,
             dns_servers,
@@ -102,6 +111,7 @@ impl std::fmt::Debug for RackInitializeRequest {
 
         f.debug_struct("RackInitializeRequest")
             .field("rack_subnet", rack_subnet)
+            .field("trust_quorum_peers", trust_qurorum_peers)
             .field("bootstrap_discovery", bootstrap_discovery)
             .field("ntp_servers", ntp_servers)
             .field("dns_servers", dns_servers)
@@ -144,6 +154,7 @@ impl TryFrom<UnvalidatedRackInitializeRequest> for RackInitializeRequest {
 
         Ok(RackInitializeRequest {
             rack_subnet: value.rack_subnet,
+            trust_quorum_peers: value.trust_quorum_peers,
             bootstrap_discovery: value.bootstrap_discovery,
             ntp_servers: value.ntp_servers,
             dns_servers: value.dns_servers,
@@ -162,7 +173,7 @@ pub type Certificate = nexus_client::types::Certificate;
 pub type RecoverySiloConfig = nexus_client::types::RecoverySiloConfig;
 
 /// Configuration information for launching a Sled Agent.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, JsonSchema)]
 pub struct StartSledAgentRequest {
     /// Uuid of the Sled Agent to be created.
     pub id: Uuid,
@@ -172,9 +183,12 @@ pub struct StartSledAgentRequest {
 
     /// The external NTP servers to use
     pub ntp_servers: Vec<String>,
-    //
+
     /// The external DNS servers to use
-    pub dns_servers: Vec<String>,
+    pub dns_servers: Vec<IpAddr>,
+
+    /// Use trust quorum for key generation
+    pub use_trust_quorum: bool,
 
     // Note: The order of these fields is load bearing, because we serialize
     // `SledAgentRequest`s as toml. `subnet` serializes as a TOML table, so it
@@ -190,6 +204,15 @@ impl StartSledAgentRequest {
 
     pub fn switch_zone_ip(&self) -> Ipv6Addr {
         address::get_switch_zone_address(self.subnet)
+    }
+
+    /// Compute the sha3_256 digest of `self.rack_id` to use as a `salt`
+    /// for disk encryption. We don't want to include other values that are
+    /// consistent across sleds as it would prevent us from moving drives
+    /// between sleds.
+    pub fn hash_rack_id(&self) -> [u8; 32] {
+        // We know the unwrap succeeds as a Sha3_256 digest is 32 bytes
+        Sha3_256::digest(self.rack_id.as_bytes()).as_slice().try_into().unwrap()
     }
 }
 
@@ -271,7 +294,8 @@ mod tests {
                     id: Uuid::new_v4(),
                     rack_id: Uuid::new_v4(),
                     ntp_servers: vec![String::from("test.pool.example.com")],
-                    dns_servers: vec![String::from("1.1.1.1")],
+                    dns_servers: vec!["1.1.1.1".parse().unwrap()],
+                    use_trust_quorum: false,
                     subnet: Ipv6Subnet::new(Ipv6Addr::LOCALHOST),
                 },
             )),
@@ -290,6 +314,7 @@ mod tests {
         // external DNS IPs, but no other fields matter.
         let mut config = UnvalidatedRackInitializeRequest {
             rack_subnet: Ipv6Addr::LOCALHOST,
+            trust_quorum_peers: None,
             bootstrap_discovery: BootstrapAddressDiscovery::OnlyOurs,
             ntp_servers: Vec::new(),
             dns_servers: Vec::new(),
