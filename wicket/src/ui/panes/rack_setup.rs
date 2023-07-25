@@ -755,8 +755,8 @@ fn rss_config_text<'a>(
                     Span::styled(uplink.gateway_ip.to_string(), ok_style),
                 ],
                 vec![
-                    Span::styled("  • Uplink IP        : ", label_style),
-                    Span::styled(uplink.uplink_ip.to_string(), ok_style),
+                    Span::styled("  • Uplink CIDR        : ", label_style),
+                    Span::styled(uplink.uplink_cidr.to_string(), ok_style),
                 ],
                 vec![
                     Span::styled("  • Uplink port      : ", label_style),

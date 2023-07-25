@@ -3545,6 +3545,7 @@ version = "0.20.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bf466541e9d546596ee94f9f69590f89473455f88372423e0008fc1a7daf100e"
 dependencies = [
+ "schemars",
  "serde",
 ]
 
@@ -4054,6 +4055,7 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "futures",
+ "ipnetwork",
  "omicron-common 0.1.0",
  "omicron-passwords 0.1.0",
  "progenitor",
@@ -9425,6 +9427,7 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "installinator-common",
+ "ipnetwork",
  "progenitor",
  "regress",
  "reqwest",
