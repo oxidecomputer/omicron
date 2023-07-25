@@ -456,11 +456,14 @@ impl SledAgent {
 
         if scrimlet {
             let baseboard = self.inner.hardware.baseboard();
-            let switch_zone_ip = Some(self.inner.switch_zone_ip());
+            let switch_zone_ip = self.inner.switch_zone_ip();
             if let Err(e) = self
                 .inner
                 .services
-                .activate_switch(switch_zone_ip, baseboard)
+                .activate_switch(
+                    Some((switch_zone_ip, &self.inner.rack_network_config)),
+                    baseboard,
+                )
                 .await
             {
                 warn!(log, "Failed to activate switch: {e}");
@@ -500,11 +503,17 @@ impl SledAgent {
                     }
                     HardwareUpdate::TofinoLoaded => {
                         let baseboard = self.inner.hardware.baseboard();
-                        let switch_zone_ip = Some(self.inner.switch_zone_ip());
+                        let switch_zone_ip = self.inner.switch_zone_ip();
                         if let Err(e) = self
                             .inner
                             .services
-                            .activate_switch(switch_zone_ip, baseboard)
+                            .activate_switch(
+                                Some((
+                                    switch_zone_ip,
+                                    &self.inner.rack_network_config,
+                                )),
+                                baseboard,
+                            )
                             .await
                         {
                             warn!(log, "Failed to activate switch: {e}");

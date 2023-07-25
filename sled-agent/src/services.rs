@@ -35,11 +35,13 @@ use crate::profile::*;
 use crate::smf_helper::Service;
 use crate::smf_helper::SmfHelper;
 use crate::storage_manager::StorageResources;
+use anyhow::anyhow;
 use camino::{Utf8Path, Utf8PathBuf};
 use ddm_admin_client::{Client as DdmAdminClient, DdmError};
 use dpd_client::{types as DpdTypes, Client as DpdClient, Error as DpdError};
 use dropshot::HandlerTaskMode;
 use flate2::bufread::GzDecoder;
+use gateway_client::Client as MgsClient;
 use illumos_utils::addrobj::AddrObject;
 use illumos_utils::addrobj::IPV6_LINK_LOCAL_NAME;
 use illumos_utils::dladm::{Dladm, Etherstub, EtherstubVnic, PhysicalLink};
@@ -67,7 +69,9 @@ use omicron_common::address::RACK_PREFIX;
 use omicron_common::address::SLED_PREFIX;
 use omicron_common::address::WICKETD_PORT;
 use omicron_common::api::external::Generation;
-use omicron_common::api::internal::shared::RackNetworkConfig;
+use omicron_common::api::internal::shared::{
+    RackNetworkConfig, SwitchLocation,
+};
 use omicron_common::backoff::{
     retry_notify, retry_policy_internal_service_aggressive, retry_policy_local,
     BackoffError,
@@ -2821,7 +2825,9 @@ impl ServiceManager {
     /// Ensures that a switch zone exists with the provided IP adddress.
     pub async fn activate_switch(
         &self,
-        switch_zone_ip: Option<Ipv6Addr>,
+        // If we're reconfiguring the switch zone with an underlay address, we
+        // also need the rack network config to set tfport uplinks.
+        underlay_info: Option<(Ipv6Addr, &RackNetworkConfig)>,
         baseboard: Baseboard,
     ) -> Result<(), Error> {
         info!(self.inner.log, "Ensuring scrimlet services (enabling services)");
@@ -2871,7 +2877,7 @@ impl ServiceManager {
         };
 
         let mut addresses =
-            if let Some(ip) = switch_zone_ip { vec![ip] } else { vec![] };
+            if let Some((ip, _)) = underlay_info { vec![ip] } else { vec![] };
         addresses.push(Ipv6Addr::LOCALHOST);
 
         let request = ServiceZoneRequest {
@@ -2893,7 +2899,84 @@ impl ServiceManager {
             // filesystems=
             filesystems,
         )
+        .await?;
+
+        // If we've given the switch an underlay address, we also need to inject
+        // SMF properties so that tfport uplinks can be created.
+        if let Some((ip, rack_network_config)) = underlay_info {
+            self.ensure_switch_zone_uplinks_configured(ip, rack_network_config)
+                .await?;
+        }
+
+        Ok(())
+    }
+
+    // Ensure our switch zone (at the given IP address) has its uplinks
+    // configured based on `rack_network_config`. This first requires us to ask
+    // MGS running in the switch zone which switch we are, so we know which
+    // uplinks from `rack_network_config` to assign.
+    async fn ensure_switch_zone_uplinks_configured(
+        &self,
+        switch_zone_ip: Ipv6Addr,
+        rack_network_config: &RackNetworkConfig,
+    ) -> Result<(), Error> {
+        let log = &self.inner.log;
+
+        let mgs_client = MgsClient::new(
+            &format!("http://[{}]:{}", switch_zone_ip, MGS_PORT),
+            log.new(o!("component" => "MgsClient")),
+        );
+        let switch_slot = retry_notify(
+            retry_policy_local(),
+            || async {
+                mgs_client
+                    .sp_local_switch_id()
+                    .await
+                    .map_err(BackoffError::transient)
+                    .map(|response| response.into_inner().slot)
+            },
+            |error, delay| {
+                warn!(
+                    log,
+                    "Failed to get switch ID from MGS (retrying in {delay:?})";
+                    "error" => ?error,
+                );
+            },
+        )
         .await
+        .expect("Expected an infinite retry loop getting our switch ID");
+
+        // Filter rack_network_config uplinks down to just those for our switch.
+        let our_uplinks = rack_network_config.uplinks.iter().filter(|uplink| {
+            matches!(
+                (&uplink.switch, switch_slot),
+                (SwitchLocation::Switch0, 0) | (SwitchLocation::Switch1, 1)
+            )
+        });
+
+        // We expect the switch zone to be running, as we're called immediately
+        // after `ensure_zone()` above and we just successfully asked MGS (which
+        // is running in our switch zone!) for our switch slot. If somehow we're
+        // in any other state, bail out.
+        let mut switch_zone = self.inner.switch_zone.lock().await;
+
+        let zone = match &mut *switch_zone {
+            SledLocalZone::Running { zone, .. } => zone,
+            SledLocalZone::Disabled => {
+                return Err(Error::SledLocalZone(anyhow!(
+                    "Cannot configure switch zone uplinks: \
+                     switch zone disabled"
+                )));
+            }
+            SledLocalZone::Initializing { .. } => {
+                return Err(Error::SledLocalZone(anyhow!(
+                    "Cannot configure switch zone uplinks: \
+                     switch zone still initializing"
+                )));
+            }
+        };
+
+        todo!()
     }
 
     /// Ensures that no switch zone is active.
