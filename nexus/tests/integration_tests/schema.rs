@@ -287,6 +287,8 @@ async fn nexus_applies_update_on_boot() {
     let log = &builder.logctx.log;
     let crdb = builder.database.as_ref().expect("Should have started CRDB");
 
+    // We started with an empty database -- apply an update here to bring
+    // us forward to our oldest supported schema version before trying to boot nexus.
     apply_update(log, &crdb, EARLIEST_SUPPORTED_VERSION, Update::Apply).await;
     assert_eq!(
         EARLIEST_SUPPORTED_VERSION,
@@ -313,6 +315,28 @@ async fn nexus_applies_update_on_boot() {
     );
 
     builder.teardown().await;
+}
+
+// Confirm that "dbinit.sql" results in the same semver version in the DB as the one embedded into
+// the Nexus binary.
+#[tokio::test]
+async fn dbinit_version_matches_version_known_to_nexus() {
+    let config = load_test_config();
+    let logctx = LogContext::new(
+        "dbinit_version_matches_version_known_to_nexus",
+        &config.pkg.log,
+    );
+    let log = &logctx.log;
+    let populate = true;
+    let mut crdb = test_setup_just_crdb(&log, populate).await;
+
+    assert_eq!(
+        LATEST_SCHEMA_VERSION.to_string(),
+        query_crdb_schema_version(&crdb).await
+    );
+
+    crdb.cleanup().await.unwrap();
+    logctx.cleanup_successful();
 }
 
 // This test verifies that booting with an unknown version prevents us from
@@ -672,6 +696,3 @@ async fn dbinit_equals_sum_of_all_up() {
     crdb.cleanup().await.unwrap();
     logctx.cleanup_successful();
 }
-
-// TODO: (idk if this is possible but) test that multiple migrations cannot
-// occur at the same time?
