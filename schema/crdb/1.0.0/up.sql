@@ -2497,11 +2497,22 @@ CREATE TABLE IF NOT EXISTS omicron.public.switch_port_settings_address_config (
  */
 
 CREATE TABLE IF NOT EXISTS omicron.public.db_metadata (
+    -- There should only be one row of this table for the whole DB.
+    -- It's a little goofy, but filter on "singleton = true" before querying
+    -- or applying updates, and you'll access the singleton row.
+    --
+    -- We also add a constraint on this table to ensure it's not possible to
+    -- access the version of this table with "singleton = false".
     singleton BOOL NOT NULL PRIMARY KEY,
     time_created TIMESTAMPTZ NOT NULL,
     time_modified TIMESTAMPTZ NOT NULL,
     -- Semver representation of the DB version
     version STRING(64) NOT NULL,
+
+    -- (Optional) Semver representation of the DB version to which we're upgrading
+    target_version STRING(64),
+    -- (Optional) UUID representing the Nexus instance driving the schema update.
+    nexus_upgrade_driver UUID,
 
     CHECK (singleton = true)
 );
@@ -2510,9 +2521,11 @@ INSERT INTO omicron.public.db_metadata (
     singleton,
     time_created,
     time_modified,
-    version
+    version,
+    target_version,
+    nexus_upgrade_driver
 ) VALUES
-    ( TRUE, NOW(), NOW(), '1.0.0' )
+    ( TRUE, NOW(), NOW(), '1.0.0', NULL, NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

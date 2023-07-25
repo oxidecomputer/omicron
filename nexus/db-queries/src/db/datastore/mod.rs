@@ -27,9 +27,7 @@ use crate::db::{
     error::{public_error_from_diesel_pool, ErrorHandler},
 };
 use ::oximeter::types::ProducerRegistry;
-use async_bb8_diesel::{
-    AsyncRunQueryDsl, AsyncSimpleConnection, ConnectionManager,
-};
+use async_bb8_diesel::{AsyncRunQueryDsl, ConnectionManager};
 use diesel::pg::Pg;
 use diesel::prelude::*;
 use diesel::query_builder::{QueryFragment, QueryId};
@@ -189,15 +187,22 @@ impl DataStore {
         desired_version: SemverVersion,
         config: Option<&SchemaConfig>,
     ) -> Result<(), String> {
-        let version = match self.database_schema_version().await {
-            Ok(version) => {
-                if version == desired_version {
-                    info!(log, "Compatible database schema: {version}");
+        let mut current_version = match self.database_schema_version().await {
+            Ok(current_version) => {
+                // NOTE: We could run with a less tight restriction.
+                //
+                // If we respect the meaning of the semver version, it should be possible
+                // to use subsequent versions, as long as they do not introduce breaking changes.
+                //
+                // However, at the moment, we opt for conservatism: if the database does not
+                // exactly match the schema version, we refuse to continue without modification.
+                if current_version == desired_version {
+                    info!(log, "Compatible database schema: {current_version}");
                     return Ok(());
                 }
-                let observed = &version.0;
+                let observed = &current_version.0;
                 warn!(log, "Incompatible database schema: Saw {observed}, expected {desired_version}");
-                version
+                current_version
             }
             Err(e) => {
                 return Err(format!("Cannot read schema version: {e}"));
@@ -208,7 +213,7 @@ impl DataStore {
             return Err("Not configured to automatically update schema".to_string());
         };
 
-        if version > desired_version {
+        if current_version > desired_version {
             return Err("Nexus older than DB version: automatic downgrades are unsupported".to_string());
         }
 
@@ -245,44 +250,69 @@ impl DataStore {
             }
         }
 
-        if all_versions.get(&version).is_none() {
-            return Err(format!("Current DB version {version} is not known"));
+        if all_versions.get(&current_version).is_none() {
+            return Err(format!(
+                "Current DB version {current_version} is not known"
+            ));
         }
 
-        let upgrades = all_versions.range((
-            Bound::Excluded(version),
-            Bound::Included(desired_version),
+        let target_versions = all_versions.range((
+            Bound::Excluded(&current_version),
+            Bound::Included(&desired_version),
         ));
 
-        // Lease ideas:
-        //
-        // -
-        //
-        //
-        // IDEAS:
-        // - Start transition ('up.sql', but remove the schema update)
-        //   - This will start a background job in CRDB to perform the online
-        //   schema update.
-        // - Use SHOW JOBS to query the status of the update.
-        //  - WITH x AS (SHOW AUTOMATIC JOBS) SELECT * FROM x WHERE job_type = 'SCHEMA CHANGE' AND status != 'succeeded';
-        // - Only update db_metadata's schema version once "SHOW JOBS" is empty,
-        // for jobs of type "NEW SCHEMA CHANGE".
-        let client = self
-            .pool()
-            .get()
-            .await
-            .map_err(|e| format!("Cannot get db connection: {e}"))?;
-        for upgrade in upgrades {
-            info!(log, "Applying upgrade to version {}", upgrade);
+        for target_version in target_versions.into_iter() {
+            info!(log, "Applying upgrade to version {}", target_version);
 
-            let up = config.schema_dir.join(upgrade.to_string()).join("up.sql");
+            // Before we attempt to perform an update, grab a lease to allow
+            // this Nexus instance to perform the update.
+            //
+            // If another instance is performing an update, we will fail, and
+            // let them to the work on our behalf.
+            let lease = self
+                .grab_schema_update_lease(&current_version, &target_version)
+                .await
+                .map_err(|e| e.to_string())?;
+
+            // Start the schema change to the new version.
+            let up = config
+                .schema_dir
+                .join(target_version.to_string())
+                .join("up.sql");
             let sql = tokio::fs::read_to_string(&up).await.map_err(|e| {
                 format!("Cannot read {up}: {e}", up = up.display())
             })?;
-            client
-                .batch_execute_async(&sql)
+            self.apply_schema_update(&lease, &sql)
                 .await
-                .map_err(|e| format!("Failed to execute upgrade: {e}"))?;
+                .map_err(|e| e.to_string())?;
+
+            // NOTE: We could execute the schema change in a background task,
+            // and let it propagate, while observing it with the following
+            // snippet of SQL:
+            //
+            // WITH
+            //   x AS (SHOW JOBS)
+            // SELECT * FROM x WHERE
+            //   job_type = 'SCHEMA CHANGE' AND
+            //   status != 'succeeded';
+            //
+            // This would enable concurrent operations to happen on the database
+            // while we're mid-update. However, there is subtlety here around
+            // the visibility of renamed / deleted fields, unique indices, etc,
+            // so in the short-term we simply block on this job performing the
+            // update.
+
+            // NOTE: If we wanted to back-fill data manually, we could do so
+            // here.
+
+            self.release_schema_update_lease(
+                lease,
+                &current_version,
+                &target_version,
+            )
+            .await
+            .map_err(|e| e.to_string())?;
+            current_version = target_version.clone();
         }
 
         Ok(())

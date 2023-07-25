@@ -4,6 +4,7 @@
 
 use chrono::{DateTime, Utc};
 use dropshot::test_util::LogContext;
+use itertools::Itertools;
 use nexus_db_model::schema::SCHEMA_VERSION as LATEST_SCHEMA_VERSION;
 use nexus_test_utils::{db, load_test_config, ControlPlaneTestContextBuilder};
 use omicron_common::api::external::SemverVersion;
@@ -61,7 +62,11 @@ async fn test_setup<'a>(
 #[derive(Debug)]
 enum Update {
     Apply,
-    Remove,
+    Remove {
+        // Just a little help for the tests, which don't necessarily know what
+        // the prior version was.
+        prior_version: String,
+    },
 }
 
 async fn apply_update(
@@ -75,7 +80,7 @@ async fn apply_update(
 
     let file = match up {
         Update::Apply => "up.sql",
-        Update::Remove => "down.sql",
+        Update::Remove { .. } => "down.sql",
     };
     let sql = tokio::fs::read_to_string(
         PathBuf::from(SCHEMA_DIR).join(version).join(file),
@@ -83,6 +88,17 @@ async fn apply_update(
     .await
     .unwrap();
     client.batch_execute(&sql).await.expect("failed to apply update");
+
+    // Normally, Nexus actually bumps the version number.
+    //
+    // We do so explicitly here.
+    let target_version = match &up {
+        Update::Apply => version,
+        Update::Remove { prior_version } => prior_version.as_str(),
+    };
+    let sql = format!("UPDATE omicron.public.db_metadata SET version = '{}' WHERE singleton = true;", target_version);
+    client.batch_execute(&sql).await.expect("Failed to bump version number");
+
     client.cleanup().await.expect("cleaning up after wipe");
 }
 
@@ -395,13 +411,26 @@ async fn versions_have_idempotent_down() {
     );
 
     // Go from the latest version to the first version.
-    //
-    // This actually also issues "down.sql" for the first version, to it ends
-    // up dropping the database too.
-    for version in all_versions.iter().rev() {
-        assert_eq!(version.to_string(), query_crdb_schema_version(&crdb).await);
-        apply_update(log, &crdb, &version.to_string(), Update::Remove).await;
-        apply_update(log, &crdb, &version.to_string(), Update::Remove).await;
+    let all_versions = all_versions.into_iter().tuples().collect::<Vec<_>>();
+    for (prior_version, current_version) in all_versions.into_iter().rev() {
+        assert_eq!(
+            current_version.to_string(),
+            query_crdb_schema_version(&crdb).await
+        );
+        apply_update(
+            log,
+            &crdb,
+            &current_version.to_string(),
+            Update::Remove { prior_version: prior_version.to_string() },
+        )
+        .await;
+        apply_update(
+            log,
+            &crdb,
+            &current_version.to_string(),
+            Update::Remove { prior_version: prior_version.to_string() },
+        )
+        .await;
     }
 
     crdb.cleanup().await.unwrap();
@@ -643,9 +672,6 @@ async fn dbinit_equals_sum_of_all_up() {
     crdb.cleanup().await.unwrap();
     logctx.cleanup_successful();
 }
-
-// TODO: use "generate_series" to make a bunch of fake data, try to catch "SHOW
-// JOBS" from CRDB when using that?
 
 // TODO: (idk if this is possible but) test that multiple migrations cannot
 // occur at the same time?

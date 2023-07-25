@@ -1120,6 +1120,8 @@ table! {
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
         version -> Text,
+        target_version -> Nullable<Text>,
+        nexus_upgrade_driver -> Nullable<Uuid>,
     }
 }
 
