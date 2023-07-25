@@ -783,14 +783,19 @@ impl ServiceInner {
                 .await?
                 .expect("Service plan should exist if completed marker exists");
 
+            let switch_mgmt_addrs = EarlyNetworkSetup::new(&self.log)
+                .lookup_switch_zone_addrs(&resolver)
+                .await?;
+            /*
             info!(self.log, "Finding switch zone addresses in DNS");
             let switch_zone_addresses =
                 resolver.lookup_all_ipv6(ServiceName::Dendrite).await?;
-            info!(self.log, "Detected switch zone addresses"; 
+            info!(self.log, "Detected switch zone addresses";
                 "addresses" => #?switch_zone_addresses);
 
             let switch_mgmt_addrs =
                 self.map_switch_zone_addrs(switch_zone_addresses).await;
+                */
 
             let nexus_address =
                 resolver.lookup_socket_v6(ServiceName::Nexus).await?;
@@ -867,6 +872,30 @@ impl ServiceInner {
                 .await?;
         }
 
+        // Save the relevant network config in the bootstore. We want this to
+        // happen before we `initialize_sleds` so each scrimlet (including us)
+        // can use its normal boot path of "read network config for our switch
+        // from the bootstore".
+        if let Some(rack_network_config) = &config.rack_network_config {
+            let early_network_config = EarlyNetworkConfig {
+                generation: 1,
+                rack_subnet: config.rack_subnet,
+                ntp_servers: config.ntp_servers.clone(),
+                rack_network_config: rack_network_config.clone(),
+            };
+            info!(self.log, "Writing Rack Network Configuration to bootstore");
+            bootstore
+                .update_network_config(early_network_config.into())
+                .await?;
+            // TODO: Wait for bootstore to sync to all `plan.sleds`
+        } else {
+            warn!(
+                self.log,
+                "Proceeding without rack network config for uplinks; \
+                 no external connectivity expected",
+            );
+        }
+
         // Forward the sled initialization requests to our sled-agent.
         local_bootstrap_agent
             .initialize_sleds(
@@ -910,6 +939,7 @@ impl ServiceInner {
         self.ensure_all_services_of_type(&service_plan, &zone_types).await?;
         self.initialize_internal_dns_records(&service_plan).await?;
 
+        /*
         info!(self.log, "Finding switch zone addresses in DNS");
         let switch_zone_addresses =
             resolver.lookup_all_ipv6(ServiceName::Dendrite).await?;
@@ -918,30 +948,32 @@ impl ServiceInner {
             "Detected switch zone addresses";
             "addresses" => #?switch_zone_addresses
         );
+        */
 
+        // Ask MGS in each switch zone which switch it is.
+        let switch_mgmt_addrs = EarlyNetworkSetup::new(&self.log)
+            .lookup_switch_zone_addrs(&resolver)
+            .await?;
+        /*
         let switch_mgmt_addrs =
             self.map_switch_zone_addrs(switch_zone_addresses).await;
+            */
 
-        // Initialize rack network before NTP comes online, otherwise boundary
-        // services will not be available and NTP will fail to sync
-        info!(self.log, "Checking for Rack Network Configuration");
         if let Some(rack_network_config) = &config.rack_network_config {
-            let mut early_networking = EarlyNetworkSetup::new(&self.log);
-            let boundary_switch_addrs = early_networking
-                .init_rack_network(&rack_network_config, &switch_mgmt_addrs)
-                .await?;
-
-            // Save the relevant network config in the bootstore
-            let early_network_config = EarlyNetworkConfig {
-                generation: 1,
-                rack_subnet: config.rack_subnet,
-                ntp_servers: config.ntp_servers.clone(),
-                rack_network_config: rack_network_config.clone(),
-                switch_mgmt_addrs: switch_mgmt_addrs.clone(),
-            };
-            bootstore
-                .update_network_config(early_network_config.into())
-                .await?;
+            // `boundary_switch_addrs` contains the switch zone addrs for
+            // managing switches that are configured with uplinks.
+            let mut boundary_switch_addrs: HashSet<Ipv6Addr> = HashSet::new();
+            for uplink_config in &rack_network_config.uplinks {
+                let zone_addr = switch_mgmt_addrs
+                    .get(&uplink_config.switch)
+                    .ok_or_else(|| {
+                        SetupServiceError::BadConfig(format!(
+                            "No switch zone found for uplink switch {:?}",
+                            uplink_config.switch
+                        ))
+                    })?;
+                boundary_switch_addrs.insert(*zone_addr);
+            }
 
             // Inject boundary_switch_addrs into ServiceZoneRequests
             // When the opte interface is created for the service,
@@ -950,7 +982,8 @@ impl ServiceInner {
                 Vec::from_iter(boundary_switch_addrs);
             for (_, request) in &mut service_plan.services {
                 for zone_request in &mut request.services {
-                    // Do not modify any services that have already been deployed
+                    // Do not modify any services that have already been
+                    // deployed
                     if zone_types.contains(&zone_request.zone_type) {
                         continue;
                     }
@@ -1035,6 +1068,7 @@ impl ServiceInner {
         Ok(())
     }
 
+    /*
     // TODO: #3601 Audit switch location discovery logic for robustness
     // in multi-rack deployments. Query MGS servers in each switch zone to
     // determine which switch slot they are managing. This logic does not handle
@@ -1105,4 +1139,5 @@ impl ServiceInner {
         }
         switch_zone_addrs
     }
+    */
 }

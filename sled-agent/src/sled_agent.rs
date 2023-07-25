@@ -36,6 +36,7 @@ use omicron_common::api::{
 use omicron_common::backoff::{
     retry_notify_ext, retry_policy_internal_service_aggressive, BackoffError,
 };
+use once_cell::sync::OnceCell;
 use sled_hardware::underlay;
 use sled_hardware::HardwareManager;
 use slog::Logger;
@@ -209,9 +210,6 @@ struct SledAgentInner {
 
     // A serialized request queue for operations interacting with Nexus.
     nexus_request_queue: NexusRequestQueue,
-
-    // Addresses used by services for uplink access
-    boundary_switch_addrs: HashSet<Ipv6Addr>,
 }
 
 impl SledAgentInner {
@@ -352,6 +350,7 @@ impl SledAgent {
             )
             .await?;
 
+        /*
         // Initialize early networking
         info!(log, "Attempting to load early network config from bootstore");
         // Pull the early network config out of the bootstore
@@ -387,6 +386,7 @@ impl SledAgent {
             info!(log, "No early network config found in bootstore");
             HashSet::new()
         };
+        */
 
         let sled_agent = SledAgent {
             inner: Arc::new(SledAgentInner {
@@ -407,7 +407,7 @@ impl SledAgent {
                 // Also, we could maybe de-dup some of the backoff code in the
                 // request queue?
                 nexus_request_queue: NexusRequestQueue::new(),
-                boundary_switch_addrs: boundary_switch_addrs.clone(),
+                //boundary_switch_addrs: boundary_switch_addrs.clone(),
             }),
             log: log.clone(),
         };
@@ -429,11 +429,7 @@ impl SledAgent {
         //
         // Do this *after* monitoring for harware, to enable the switch zone to
         // establish an underlay address before proceeding.
-        sled_agent
-            .inner
-            .services
-            .load_services(&sled_agent.inner.boundary_switch_addrs)
-            .await?;
+        sled_agent.inner.services.load_services().await?;
 
         // Now that we've initialized the sled services, notify nexus again
         // at which point it'll plumb any necessary firewall rules back to us.
@@ -694,10 +690,7 @@ impl SledAgent {
 
         self.inner
             .services
-            .ensure_all_services_persistent(
-                requested_services,
-                &self.inner.boundary_switch_addrs,
-            )
+            .ensure_all_services_persistent(requested_services)
             .await?;
         Ok(())
     }

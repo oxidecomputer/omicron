@@ -25,6 +25,7 @@
 //! - [ServiceManager::activate_switch] exposes an API to specifically enable
 //! or disable (via [ServiceManager::deactivate_switch]) the switch zone.
 
+use crate::bootstrap::early_networking::EarlyNetworkSetup;
 use crate::config::SidecarRevision;
 use crate::params::{
     DendriteAsic, ServiceEnsureBody, ServiceType, ServiceZoneRequest,
@@ -526,14 +527,31 @@ impl ServiceManager {
             .collect()
     }
 
+    async fn lookup_boundary_switch_addrs(
+        &self,
+    ) -> Result<HashSet<Ipv6Addr>, Error> {
+        let resolver = &self
+            .inner
+            .sled_info
+            .get()
+            .ok_or(Error::SledAgentNotReady)?
+            .resolver;
+
+        let switch_zone_addrs = EarlyNetworkSetup::new(&self.inner.log)
+            .lookup_switch_zone_addrs(resolver)
+            .await?;
+
+        // TODO-correctness: This assumes all switches have uplinks. This is
+        // wrong, but should be harmless: we'll create useless NAT entries on
+        // switches without uplinks.
+        Ok(switch_zone_addrs.values().copied().collect::<HashSet<_>>())
+    }
+
     // TODO(https://github.com/oxidecomputer/omicron/issues/2973):
     // These will fail if the disks aren't attached.
     // Should we have a retry loop here? Kinda like we have with the switch
     // / NTP zone?
-    pub async fn load_services(
-        &self,
-        boundary_switch_addrs: &HashSet<Ipv6Addr>,
-    ) -> Result<(), Error> {
+    pub async fn load_services(&self) -> Result<(), Error> {
         let log = &self.inner.log;
         let ledger_paths = self.all_service_ledgers().await;
         info!(log, "Loading services from: {ledger_paths:?}");
@@ -549,9 +567,8 @@ impl ServiceManager {
         };
         let services = ledger.data_mut();
 
-        // Initialize and DNS and NTP services first as they are required
-        // for time synchronization, which is a pre-requisite for the other
-        // services.
+        // Initialize internal DNS only first: we need it to look up the
+        // boundary switch addresses.
         let all_zones_request = self
             .ensure_all_services(
                 &mut existing_zones,
@@ -570,7 +587,42 @@ impl ServiceManager {
                         .map(|zone_request| zone_request.zone)
                         .collect(),
                 },
-                boundary_switch_addrs,
+                // Internal DNS does not need boundary switch zone addrs, and we
+                // _use_ it to find them for every other service.
+                &HashSet::default(),
+            )
+            .await?;
+
+        drop(existing_zones);
+
+        // With internal DNS running, look up the switch zone addresses.
+        let boundary_switch_addrs = self.lookup_boundary_switch_addrs().await?;
+
+        let mut existing_zones = self.inner.zones.lock().await;
+
+        // Initialize NTP services next as they are required for time
+        // synchronization, which is a pre-requisite for the other services. We
+        // keep `ZoneType::InternalDns` because `ensure_all_services` is
+        // additive.
+        let all_zones_request = self
+            .ensure_all_services(
+                &mut existing_zones,
+                &AllZoneRequests::default(),
+                ServiceEnsureBody {
+                    services: services
+                        .requests
+                        .clone()
+                        .into_iter()
+                        .filter(|svc| {
+                            matches!(
+                                svc.zone.zone_type,
+                                ZoneType::InternalDns | ZoneType::Ntp
+                            )
+                        })
+                        .map(|zone_request| zone_request.zone)
+                        .collect(),
+                },
+                &boundary_switch_addrs,
             )
             .await?;
 
@@ -610,7 +662,7 @@ impl ServiceManager {
 
         let mut existing_zones = self.inner.zones.lock().await;
 
-        // Initialize all remaining serivces
+        // Initialize all remaining services
         self.ensure_all_services(
             &mut existing_zones,
             &all_zones_request,
@@ -622,7 +674,7 @@ impl ServiceManager {
                     .map(|zone_request| zone_request.zone)
                     .collect(),
             },
-            boundary_switch_addrs,
+            &boundary_switch_addrs,
         )
         .await?;
         Ok(())
@@ -2460,9 +2512,11 @@ impl ServiceManager {
     pub async fn ensure_all_services_persistent(
         &self,
         request: ServiceEnsureBody,
-        boundary_switch_addrs: &HashSet<Ipv6Addr>,
     ) -> Result<(), Error> {
         let log = &self.inner.log;
+
+        let boundary_switch_addrs = self.lookup_boundary_switch_addrs().await?;
+
         let mut existing_zones = self.inner.zones.lock().await;
 
         // Read the existing set of services from the ledger.
@@ -2485,7 +2539,7 @@ impl ServiceManager {
                 &mut existing_zones,
                 ledger_zone_requests,
                 request,
-                boundary_switch_addrs,
+                &boundary_switch_addrs,
             )
             .await?;
 
