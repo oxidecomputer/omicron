@@ -136,6 +136,34 @@ an appropriate value. For example:
 WICKET_UPDATE_TEST_STEP_SECONDS=15 cargo run --bin wicket
 ```
 
+## Adding simulated results to individual steps
+
+Some individual steps support having simulated results via environment variables.
+
+Environment variables supported are:
+
+* `WICKET_UPDATE_TEST_SIMULATE_ROT_RESULT`: Simulates a result for the "Updating RoT" step.
+* `WICKET_UPDATE_TEST_SIMULATE_SP_RESULT`: Simulates a result for the "Updating SP" step.
+
+The environment variable can be set to:
+
+* `success`: A success outcome.
+* `warning`: Success with warning.
+* `failure`: A failure.
+* `skipped`: A skipped outcome.
+
+### Example
+
+If wicket is invoked as:
+
+```
+WICKET_UPDATE_TEST_SIMULATE_ROT_RESULT=skipped cargo run --bin wicket
+```
+
+Then, while performing an update, the "Updating RoT" step will be simulated as skipped.
+
+![Screenshot showing that the "Updating RoT" step has a "skipped" status with a message saying "Simulated skipped result"](https://user-images.githubusercontent.com/180618/254689686-99259bc0-4e68-421d-98ca-362774eef155.png).
+
 ## Testing upload functionality
 
 Test upload functionality without setting up wicket as an SSH captive shell (see below for instructions). (This is the most common use case.)

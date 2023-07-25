@@ -790,9 +790,9 @@ dependencies = [
 
 [[package]]
 name = "cancel-safe-futures"
-version = "0.1.0"
+version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f7e43b6f1b63c6cc2619bd76db89cd1d011ef993af74ed28e305d36d6b056abd"
+checksum = "20e5267a71ddf9a29ae221073d32f42ee6665be1a61134ff47e7275a250b8d22"
 dependencies = [
  "futures-core",
  "futures-sink",
@@ -3545,6 +3545,7 @@ version = "0.20.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bf466541e9d546596ee94f9f69590f89473455f88372423e0008fc1a7daf100e"
 dependencies = [
+ "schemars",
  "serde",
 ]
 
@@ -4054,6 +4055,7 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "futures",
+ "ipnetwork",
  "omicron-common 0.1.0",
  "omicron-passwords 0.1.0",
  "progenitor",
@@ -4876,6 +4878,7 @@ dependencies = [
  "bytes",
  "camino",
  "camino-tempfile",
+ "cancel-safe-futures",
  "cfg-if 1.0.0",
  "chrono",
  "clap 4.3.8",
@@ -9424,6 +9427,7 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "installinator-common",
+ "ipnetwork",
  "progenitor",
  "regress",
  "reqwest",

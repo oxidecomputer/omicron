@@ -22,6 +22,7 @@ progenitor::generate_api!(
         slog::debug!(log, "client response"; "result" => ?result);
     }),
     replace = {
+        Ipv4Network = ipnetwork::Ipv4Network,
         MacAddr = omicron_common::api::external::MacAddr,
         Name = omicron_common::api::external::Name,
         NewPasswordHash = omicron_passwords::NewPasswordHash,
