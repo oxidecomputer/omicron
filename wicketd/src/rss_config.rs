@@ -428,12 +428,12 @@ fn validate_rack_network_config(
     // iterate through each UplinkConfig
     for uplink_config in &config.uplinks {
         // ... and check that it contains `uplink_ip`.
-        if uplink_config.uplink_ip < infra_ip_range.first
-            || uplink_config.uplink_ip > infra_ip_range.last
+        if uplink_config.uplink_cidr.ip() < infra_ip_range.first
+            || uplink_config.uplink_cidr.ip() > infra_ip_range.last
         {
             bail!(
-                "`uplink_ip` must be in the range defined by `infra_ip_first` \
-                and `infra_ip_last`"
+                "`uplink_cidr`'s IP address must be in the range defined by \
+                `infra_ip_first` and `infra_ip_last`"
             );
         }
     }
@@ -451,7 +451,7 @@ fn validate_rack_network_config(
                     SwitchLocation::Switch0 => BaSwitchLocation::Switch0,
                     SwitchLocation::Switch1 => BaSwitchLocation::Switch1,
                 },
-                uplink_ip: config.uplink_ip,
+                uplink_cidr: config.uplink_cidr,
                 uplink_port: config.uplink_port.clone(),
                 uplink_port_speed: match config.uplink_port_speed {
                     PortSpeed::Speed0G => BaPortSpeed::Speed0G,

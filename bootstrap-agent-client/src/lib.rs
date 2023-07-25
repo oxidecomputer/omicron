@@ -18,6 +18,9 @@ progenitor::generate_api!(
         slog::debug!(log, "client response"; "result" => ?result);
     }),
     derives = [schemars::JsonSchema],
+    replace = {
+        Ipv4Network = ipnetwork::Ipv4Network,
+    }
 );
 
 impl omicron_common::api::external::ClientError for types::Error {

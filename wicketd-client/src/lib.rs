@@ -50,6 +50,7 @@ progenitor::generate_api!(
     },
     replace = {
         Duration = std::time::Duration,
+        Ipv4Network = ipnetwork::Ipv4Network,
         PutRssUserConfigInsensitive = wicket_common::rack_setup::PutRssUserConfigInsensitive,
         EventReportForWicketdEngineSpec = wicket_common::update_events::EventReport,
         StepEventForWicketdEngineSpec = wicket_common::update_events::StepEvent,

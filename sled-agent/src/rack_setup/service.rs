@@ -580,7 +580,7 @@ impl ServiceInner {
                         .map(|config| NexusTypes::UplinkConfig {
                             gateway_ip: config.gateway_ip,
                             switch: config.switch.clone().into(),
-                            uplink_ip: config.uplink_ip,
+                            uplink_cidr: config.uplink_cidr,
                             uplink_port: config.uplink_port.clone(),
                             uplink_port_speed: config
                                 .uplink_port_speed

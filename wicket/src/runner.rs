@@ -28,6 +28,7 @@ use tui::Terminal;
 use wicketd_client::types::AbortUpdateOptions;
 use wicketd_client::types::ClearUpdateStateOptions;
 use wicketd_client::types::StartUpdateOptions;
+use wicketd_client::types::UpdateSimulatedResult;
 use wicketd_client::types::UpdateTestError;
 
 use crate::events::EventReportMap;
@@ -191,9 +192,18 @@ impl RunnerCore {
                                 )
                             });
 
+                    let test_simulate_rot_result = get_update_simulated_result(
+                        "WICKET_UPDATE_TEST_SIMULATE_ROT_RESULT",
+                    )?;
+                    let test_simulate_sp_result = get_update_simulated_result(
+                        "WICKET_UPDATE_TEST_SIMULATE_SP_RESULT",
+                    )?;
+
                     let options = StartUpdateOptions {
                         test_error,
                         test_step_seconds,
+                        test_simulate_rot_result,
+                        test_simulate_sp_result,
                         skip_rot_version_check: self
                             .state
                             .force_update_state
@@ -305,6 +315,26 @@ fn get_update_test_error(
         }
     };
     Ok(test_error)
+}
+
+fn get_update_simulated_result(
+    env_var: &str,
+) -> Result<Option<UpdateSimulatedResult>, anyhow::Error> {
+    let result = match std::env::var(env_var) {
+        Ok(v) if v == "success" => Some(UpdateSimulatedResult::Success),
+        Ok(v) if v == "warning" => Some(UpdateSimulatedResult::Warning),
+        Ok(v) if v == "skipped" => Some(UpdateSimulatedResult::Skipped),
+        Ok(v) if v == "failure" => Some(UpdateSimulatedResult::Failure),
+        Ok(value) => {
+            bail!("unrecognized value for {env_var}: {value}");
+        }
+        Err(VarError::NotPresent) => None,
+        Err(VarError::NotUnicode(value)) => {
+            bail!("invalid Unicode for {env_var}: {}", value.to_string_lossy());
+        }
+    };
+
+    Ok(result)
 }
 
 /// The `Runner` owns the main UI thread, and starts a tokio runtime

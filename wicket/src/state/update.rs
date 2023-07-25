@@ -5,6 +5,7 @@
 use tui::style::Style;
 use wicket_common::update_events::{
     EventReport, ProgressEventKind, StepEventKind, UpdateComponent,
+    UpdateStepId,
 };
 
 use crate::{events::EventReportMap, ui::defaults::style};
@@ -250,10 +251,33 @@ impl UpdateItem {
                 | StepEventKind::Unknown => (),
 
                 StepEventKind::ExecutionCompleted {
-                    last_step: step, ..
+                    last_step: step,
+                    last_outcome: outcome,
+                    ..
                 }
-                | StepEventKind::StepCompleted { step, .. } => {
+                | StepEventKind::StepCompleted { step, outcome, .. } => {
                     if step.info.is_last_step_in_component() {
+                        // The RoT and SP components each have two steps in
+                        // them. If the second step ("Updating RoT/SP") is
+                        // skipped, then treat the component as skipped.
+                        if matches!(
+                            step.info.component,
+                            UpdateComponent::Sp | UpdateComponent::Rot
+                        ) {
+                            assert_eq!(
+                                step.info.id,
+                                UpdateStepId::SpComponentUpdate,
+                                "The last step must be the SpComponentUpdate step"
+                            );
+                            if outcome.is_skipped() {
+                                update_component_state(
+                                    components,
+                                    Some(step.info.component),
+                                    UpdateRunningState::Skipped,
+                                );
+                                continue;
+                            }
+                        }
                         update_component_state(
                             components,
                             Some(step.info.component),
@@ -361,6 +385,7 @@ pub enum UpdateRunningState {
     Waiting,
     Updated,
     Updating,
+    Skipped,
     Failed,
     Aborted,
 }
@@ -371,6 +396,7 @@ impl Display for UpdateRunningState {
             UpdateRunningState::Waiting => write!(f, "WAITING"),
             UpdateRunningState::Updated => write!(f, "UPDATED"),
             UpdateRunningState::Updating => write!(f, "UPDATING"),
+            UpdateRunningState::Skipped => write!(f, "SKIPPED"),
             UpdateRunningState::Failed => write!(f, "FAILED"),
             UpdateRunningState::Aborted => write!(f, "ABORTED"),
         }
@@ -382,7 +408,9 @@ impl UpdateRunningState {
         match self {
             UpdateRunningState::Waiting => style::deselected(),
             UpdateRunningState::Updated => style::successful_update(),
-            UpdateRunningState::Updating => style::start_update(),
+            UpdateRunningState::Updating | UpdateRunningState::Skipped => {
+                style::start_update()
+            }
             UpdateRunningState::Failed | UpdateRunningState::Aborted => {
                 style::failed_update()
             }
