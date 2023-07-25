@@ -599,6 +599,16 @@ pub(crate) struct StartUpdateOptions {
     /// This is used for testing.
     pub(crate) test_step_seconds: Option<u64>,
 
+    /// If passed in, simulates a result for the RoT update.
+    ///
+    /// This is used for testing.
+    pub(crate) test_simulate_rot_result: Option<UpdateSimulatedResult>,
+
+    /// If passed in, simulates a result for the SP update.
+    ///
+    /// This is used for testing.
+    pub(crate) test_simulate_sp_result: Option<UpdateSimulatedResult>,
+
     /// If true, skip the check on the current RoT version and always update it
     /// regardless of whether the update appears to be neeeded.
     #[allow(dead_code)] // TODO actually use this
@@ -607,6 +617,18 @@ pub(crate) struct StartUpdateOptions {
     /// If true, skip the check on the current SP version and always update it
     /// regardless of whether the update appears to be neeeded.
     pub(crate) skip_sp_version_check: bool,
+}
+
+/// A simulated result for a component update.
+///
+/// Used by [`StartUpdateOptions`].
+#[derive(Clone, Debug, JsonSchema, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum UpdateSimulatedResult {
+    Success,
+    Warning,
+    Skipped,
+    Failure,
 }
 
 #[derive(Clone, Debug, JsonSchema, Deserialize)]
