@@ -96,11 +96,10 @@ mod inner {
     pub fn spawn(
         command: &mut std::process::Command,
     ) -> Result<std::process::Child, ExecutionError> {
-        let child = command.spawn().map_err(|err| {
-            ExecutionError::ExecutionStart { command: to_string(command), err }
-        })?;
-
-        Ok(child)
+        command.spawn().map_err(|err| ExecutionError::ExecutionStart {
+            command: to_string(command),
+            err,
+        })
     }
 
     pub fn run_child(
