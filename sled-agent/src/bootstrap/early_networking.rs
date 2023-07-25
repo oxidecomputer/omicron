@@ -166,7 +166,7 @@ impl EarlyNetworkSetup {
             v6_routes: HashMap::new(),
         };
         let link_id = LinkId(0);
-        let addr = IpAddr::V4(uplink_config.uplink_ip);
+        let addr = IpAddr::V4(uplink_config.uplink_cidr.ip());
         let link_settings = LinkSettings {
             // TODO Allow user to configure link properties
             // https://github.com/oxidecomputer/omicron/issues/3061
