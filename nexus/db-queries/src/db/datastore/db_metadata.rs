@@ -101,14 +101,18 @@ impl DataStore {
                 if let Ok(observed_version) = name.parse::<SemverVersion>() {
                     all_versions.insert(observed_version);
                 } else {
-                    warn!(log, "Failed to parse {name} as a semver version");
+                    let err_msg =
+                        format!("Failed to parse {name} as a semver version");
+                    warn!(log, err_msg);
+                    return Err(err_msg);
                 }
             }
         }
 
-        if all_versions.get(&current_version).is_none() {
+        if !all_versions.contains(&current_version) {
             return Err(format!(
-                "Current DB version {current_version} is not known"
+                "Current DB version {current_version} was not found in {}",
+                config.schema_dir
             ));
         }
 
