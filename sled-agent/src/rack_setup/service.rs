@@ -785,7 +785,7 @@ impl ServiceInner {
 
             let switch_mgmt_addrs = EarlyNetworkSetup::new(&self.log)
                 .lookup_switch_zone_addrs(&resolver)
-                .await?;
+                .await;
             /*
             info!(self.log, "Finding switch zone addresses in DNS");
             let switch_zone_addresses =
@@ -953,7 +953,7 @@ impl ServiceInner {
         // Ask MGS in each switch zone which switch it is.
         let switch_mgmt_addrs = EarlyNetworkSetup::new(&self.log)
             .lookup_switch_zone_addrs(&resolver)
-            .await?;
+            .await;
         /*
         let switch_mgmt_addrs =
             self.map_switch_zone_addrs(switch_zone_addresses).await;

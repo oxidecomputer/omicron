@@ -29,12 +29,14 @@ use omicron_common::address::{
     get_sled_address, get_switch_zone_address, Ipv6Subnet, SLED_PREFIX,
 };
 use omicron_common::api::external::Vni;
+use omicron_common::api::internal::shared::RackNetworkConfig;
 use omicron_common::api::{
     internal::nexus::DiskRuntimeState, internal::nexus::InstanceRuntimeState,
     internal::nexus::UpdateArtifactId,
 };
 use omicron_common::backoff::{
-    retry_notify_ext, retry_policy_internal_service_aggressive, BackoffError,
+    retry_notify, retry_notify_ext, retry_policy_internal_service_aggressive,
+    BackoffError,
 };
 use once_cell::sync::OnceCell;
 use sled_hardware::underlay;
@@ -210,6 +212,9 @@ struct SledAgentInner {
 
     // A serialized request queue for operations interacting with Nexus.
     nexus_request_queue: NexusRequestQueue,
+
+    // The rack network config provided at RSS time.
+    rack_network_config: RackNetworkConfig,
 }
 
 impl SledAgentInner {
@@ -350,43 +355,44 @@ impl SledAgent {
             )
             .await?;
 
-        /*
-        // Initialize early networking
-        info!(log, "Attempting to load early network config from bootstore");
-        // Pull the early network config out of the bootstore
-        let boundary_switch_addrs = if let Some(serialized_config) =
-            bootstore.get_network_config().await?
-        {
-            let mut early_networking = EarlyNetworkSetup::new(&log);
-            info!(
-                log,
-                concat!(
-                    "Loaded serialized early network config from bootstore ",
-                    "with generation {}"
-                ),
-                serialized_config.generation,
-            );
+        // Get our rack network config from the bootstore; we cannot proceed
+        // until we have this, as we need to know which switches have uplinks to
+        // correctly set up services.
+        let get_network_config = || async {
+            let serialized_config = bootstore
+                .get_network_config()
+                .await
+                .map_err(|err| BackoffError::transient(err.to_string()))?
+                .ok_or_else(|| {
+                    BackoffError::transient(
+                        "Missing early network config in bootstore".to_string(),
+                    )
+                })?;
 
-            let early_network_config: EarlyNetworkConfig = serialized_config
-                .try_into()
-                .map_err(|e| Error::EarlyNetworkDeserialize(e))?;
-            info!(
-                log,
-                "Successfully deserialized network config: {:?}",
-                early_network_config
-            );
+            let early_network_config =
+                EarlyNetworkConfig::try_from(serialized_config)
+                    .map_err(|err| BackoffError::transient(err.to_string()))?;
 
-            early_networking
-                .init_rack_network(
-                    &early_network_config.rack_network_config,
-                    &early_network_config.switch_mgmt_addrs,
-                )
-                .await?
-        } else {
-            info!(log, "No early network config found in bootstore");
-            HashSet::new()
+            Ok(early_network_config.rack_network_config)
         };
-        */
+        let rack_network_config: RackNetworkConfig =
+            retry_notify::<_, String, _, _, _, _>(
+                retry_policy_internal_service_aggressive(),
+                get_network_config,
+                |error, delay| {
+                    warn!(
+                        log,
+                        "failed to get network config from bootstore";
+                        "error" => ?error,
+                        "retry_after" => ?delay,
+                    );
+                },
+            )
+            .await
+            .expect(
+                "Expected an infinite retry loop getting \
+             network config from bootstore",
+            );
 
         let sled_agent = SledAgent {
             inner: Arc::new(SledAgentInner {
@@ -407,7 +413,7 @@ impl SledAgent {
                 // Also, we could maybe de-dup some of the backoff code in the
                 // request queue?
                 nexus_request_queue: NexusRequestQueue::new(),
-                //boundary_switch_addrs: boundary_switch_addrs.clone(),
+                rack_network_config: rack_network_config.clone(),
             }),
             log: log.clone(),
         };
@@ -429,7 +435,7 @@ impl SledAgent {
         //
         // Do this *after* monitoring for harware, to enable the switch zone to
         // establish an underlay address before proceeding.
-        sled_agent.inner.services.load_services().await?;
+        sled_agent.inner.services.load_services(&rack_network_config).await?;
 
         // Now that we've initialized the sled services, notify nexus again
         // at which point it'll plumb any necessary firewall rules back to us.
@@ -690,7 +696,10 @@ impl SledAgent {
 
         self.inner
             .services
-            .ensure_all_services_persistent(requested_services)
+            .ensure_all_services_persistent(
+                requested_services,
+                &self.inner.rack_network_config,
+            )
             .await?;
         Ok(())
     }

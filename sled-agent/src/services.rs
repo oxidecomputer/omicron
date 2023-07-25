@@ -67,6 +67,7 @@ use omicron_common::address::RACK_PREFIX;
 use omicron_common::address::SLED_PREFIX;
 use omicron_common::address::WICKETD_PORT;
 use omicron_common::api::external::Generation;
+use omicron_common::api::internal::shared::RackNetworkConfig;
 use omicron_common::backoff::{
     retry_notify, retry_policy_internal_service_aggressive, retry_policy_local,
     BackoffError,
@@ -527,9 +528,14 @@ impl ServiceManager {
             .collect()
     }
 
-    async fn lookup_boundary_switch_addrs(
+    // TODO(https://github.com/oxidecomputer/omicron/issues/2973):
+    // These will fail if the disks aren't attached.
+    // Should we have a retry loop here? Kinda like we have with the switch
+    // / NTP zone?
+    pub async fn load_services(
         &self,
-    ) -> Result<HashSet<Ipv6Addr>, Error> {
+        rack_network_config: &RackNetworkConfig,
+    ) -> Result<(), Error> {
         let resolver = &self
             .inner
             .sled_info
@@ -537,21 +543,6 @@ impl ServiceManager {
             .ok_or(Error::SledAgentNotReady)?
             .resolver;
 
-        let switch_zone_addrs = EarlyNetworkSetup::new(&self.inner.log)
-            .lookup_switch_zone_addrs(resolver)
-            .await?;
-
-        // TODO-correctness: This assumes all switches have uplinks. This is
-        // wrong, but should be harmless: we'll create useless NAT entries on
-        // switches without uplinks.
-        Ok(switch_zone_addrs.values().copied().collect::<HashSet<_>>())
-    }
-
-    // TODO(https://github.com/oxidecomputer/omicron/issues/2973):
-    // These will fail if the disks aren't attached.
-    // Should we have a retry loop here? Kinda like we have with the switch
-    // / NTP zone?
-    pub async fn load_services(&self) -> Result<(), Error> {
         let log = &self.inner.log;
         let ledger_paths = self.all_service_ledgers().await;
         info!(log, "Loading services from: {ledger_paths:?}");
@@ -596,7 +587,9 @@ impl ServiceManager {
         drop(existing_zones);
 
         // With internal DNS running, look up the switch zone addresses.
-        let boundary_switch_addrs = self.lookup_boundary_switch_addrs().await?;
+        let boundary_switch_addrs = EarlyNetworkSetup::new(&self.inner.log)
+            .lookup_boundary_switch_addrs(resolver, &rack_network_config)
+            .await;
 
         let mut existing_zones = self.inner.zones.lock().await;
 
@@ -2512,10 +2505,19 @@ impl ServiceManager {
     pub async fn ensure_all_services_persistent(
         &self,
         request: ServiceEnsureBody,
+        rack_network_config: &RackNetworkConfig,
     ) -> Result<(), Error> {
         let log = &self.inner.log;
 
-        let boundary_switch_addrs = self.lookup_boundary_switch_addrs().await?;
+        let resolver = &self
+            .inner
+            .sled_info
+            .get()
+            .ok_or(Error::SledAgentNotReady)?
+            .resolver;
+        let boundary_switch_addrs = EarlyNetworkSetup::new(&self.inner.log)
+            .lookup_boundary_switch_addrs(resolver, &rack_network_config)
+            .await;
 
         let mut existing_zones = self.inner.zones.lock().await;
 

@@ -20,6 +20,9 @@ use omicron_common::address::{DDMD_PORT, DENDRITE_PORT};
 use omicron_common::api::internal::shared::{
     PortFec, PortSpeed, RackNetworkConfig, SwitchLocation, UplinkConfig,
 };
+use omicron_common::backoff::{
+    retry_notify, retry_policy_internal_service_aggressive, BackoffError,
+};
 use serde::{Deserialize, Serialize};
 use slog::Logger;
 use std::collections::{HashMap, HashSet};
@@ -55,20 +58,69 @@ impl<'a> EarlyNetworkSetup<'a> {
         EarlyNetworkSetup { log }
     }
 
+    pub async fn lookup_boundary_switch_addrs(
+        &self,
+        resolver: &DnsResolver,
+        config: &RackNetworkConfig,
+    ) -> HashSet<Ipv6Addr> {
+        let switch_zone_addrs = self.lookup_switch_zone_addrs(resolver).await;
+        let mut boundary_switch_addrs = HashSet::new();
+
+        for uplink_config in &config.uplinks {
+            if let Some(&zone_addr) =
+                switch_zone_addrs.get(&uplink_config.switch)
+            {
+                boundary_switch_addrs.insert(zone_addr);
+            } else {
+                // TODO-correctness is it okay to just return here if the config
+                // specifies a switch that we don't have in DNS? This shouldn't
+                // happen...
+                warn!(
+                    self.log,
+                    "No switch zone address found for {:?}",
+                    uplink_config.switch,
+                );
+            }
+        }
+
+        boundary_switch_addrs
+    }
+
     pub async fn lookup_switch_zone_addrs(
         &self,
         resolver: &DnsResolver,
-    ) -> Result<HashMap<SwitchLocation, Ipv6Addr>, ResolveError> {
-        info!(self.log, "Finding switch zone addresses in DNS");
-        let switch_zone_addresses =
-            resolver.lookup_all_ipv6(ServiceName::Dendrite).await?;
+    ) -> HashMap<SwitchLocation, Ipv6Addr> {
+        let lookup = || async {
+            info!(self.log, "Finding switch zone addresses in DNS");
+            resolver
+                .lookup_all_ipv6(ServiceName::Dendrite)
+                .await
+                .map_err(BackoffError::transient)
+        };
+        let log_failure = |error, delay| {
+            warn!(
+                self.log,
+                "failed to look up switch zone addresses in DNS";
+                "error" => ?error,
+                "retry_after" => ?delay,
+            );
+        };
+        let switch_zone_addresses = retry_notify(
+            retry_policy_internal_service_aggressive(),
+            lookup,
+            log_failure,
+        )
+        .await
+        .expect(
+            "Expected an infinite retry loop looking up switch zone addresses",
+        );
 
         info!(
             self.log, "Detected switch zone addresses";
             "addresses" => #?switch_zone_addresses,
         );
 
-        Ok(self.map_switch_zone_addrs(switch_zone_addresses).await)
+        self.map_switch_zone_addrs(switch_zone_addresses).await
     }
 
     // TODO: #3601 Audit switch location discovery logic for robustness
