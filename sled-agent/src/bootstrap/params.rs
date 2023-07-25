@@ -33,7 +33,7 @@ struct UnvalidatedRackInitializeRequest {
     trust_quorum_peers: Option<Vec<Baseboard>>,
     bootstrap_discovery: BootstrapAddressDiscovery,
     ntp_servers: Vec<String>,
-    dns_servers: Vec<String>,
+    dns_servers: Vec<IpAddr>,
     internal_services_ip_pool_ranges: Vec<address::IpRange>,
     external_dns_ips: Vec<IpAddr>,
     external_dns_zone_name: String,
@@ -65,7 +65,7 @@ pub struct RackInitializeRequest {
     pub ntp_servers: Vec<String>,
 
     /// The external DNS server addresses.
-    pub dns_servers: Vec<String>,
+    pub dns_servers: Vec<IpAddr>,
 
     /// Ranges of the service IP pool which may be used for internal services.
     // TODO(https://github.com/oxidecomputer/omicron/issues/1530): Eventually,
@@ -173,7 +173,7 @@ pub type Certificate = nexus_client::types::Certificate;
 pub type RecoverySiloConfig = nexus_client::types::RecoverySiloConfig;
 
 /// Configuration information for launching a Sled Agent.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, JsonSchema)]
 pub struct StartSledAgentRequest {
     /// Uuid of the Sled Agent to be created.
     pub id: Uuid,
@@ -185,7 +185,7 @@ pub struct StartSledAgentRequest {
     pub ntp_servers: Vec<String>,
 
     /// The external DNS servers to use
-    pub dns_servers: Vec<String>,
+    pub dns_servers: Vec<IpAddr>,
 
     /// Use trust quorum for key generation
     pub use_trust_quorum: bool,
@@ -294,7 +294,7 @@ mod tests {
                     id: Uuid::new_v4(),
                     rack_id: Uuid::new_v4(),
                     ntp_servers: vec![String::from("test.pool.example.com")],
-                    dns_servers: vec![String::from("1.1.1.1")],
+                    dns_servers: vec!["1.1.1.1".parse().unwrap()],
                     use_trust_quorum: false,
                     subnet: Ipv6Subnet::new(Ipv6Addr::LOCALHOST),
                 },

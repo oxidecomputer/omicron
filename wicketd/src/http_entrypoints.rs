@@ -156,7 +156,7 @@ pub struct BootstrapSledDescription {
 pub struct CurrentRssUserConfigInsensitive {
     pub bootstrap_sleds: BTreeSet<BootstrapSledDescription>,
     pub ntp_servers: Vec<String>,
-    pub dns_servers: Vec<String>,
+    pub dns_servers: Vec<IpAddr>,
     pub internal_services_ip_pool_ranges: Vec<address::IpRange>,
     pub external_dns_ips: Vec<IpAddr>,
     pub external_dns_zone_name: String,

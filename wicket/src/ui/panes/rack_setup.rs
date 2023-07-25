@@ -804,7 +804,11 @@ fn rss_config_text<'a>(
     append_list(
         &mut spans,
         "DNS servers: ".into(),
-        insensitive.dns_servers.iter().cloned().map(plain_list_item).collect(),
+        insensitive
+            .dns_servers
+            .iter()
+            .map(|s| plain_list_item(s.to_string()))
+            .collect(),
     );
     append_list(
         &mut spans,

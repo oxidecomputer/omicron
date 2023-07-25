@@ -35,6 +35,7 @@ use key_manager::{KeyManager, StorageKeyRequester};
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::api::external::Error as ExternalError;
 use omicron_common::ledger::{self, Ledger, Ledgerable};
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sled_hardware::underlay::BootstrapInterface;
 use sled_hardware::{Baseboard, HardwareManager};
@@ -768,6 +769,19 @@ impl Agent {
                     monitor: hardware_monitor,
                 };
 
+                // Start trying to notify ddmd of our sled prefix so it can
+                // advertise it to other sleds.
+                //
+                // TODO-security This ddmd_client is used to advertise both this
+                // (underlay) address and our bootstrap address. Bootstrap addresses are
+                // unauthenticated (connections made on them are auth'd via sprockets),
+                // but underlay addresses should be exchanged via authenticated channels
+                // between ddmd instances. It's TBD how that will work, but presumably
+                // we'll need to do something different here for underlay vs bootstrap
+                // addrs (either talk to a differently-configured ddmd, or include info
+                // indicating which kind of address we're advertising).
+                self.ddmd_client.advertise_prefix(request.subnet);
+
                 // Server does not exist, initialize it.
                 let server = SledServer::start(
                     &self.sled_config,
@@ -801,19 +815,6 @@ impl Agent {
                 // sled agent starting.
                 restarter.cancel();
                 *state = SledAgentState::After(server);
-
-                // Start trying to notify ddmd of our sled prefix so it can
-                // advertise it to other sleds.
-                //
-                // TODO-security This ddmd_client is used to advertise both this
-                // (underlay) address and our bootstrap address. Bootstrap addresses are
-                // unauthenticated (connections made on them are auth'd via sprockets),
-                // but underlay addresses should be exchanged via authenticated channels
-                // between ddmd instances. It's TBD how that will work, but presumably
-                // we'll need to do something different here for underlay vs bootstrap
-                // addrs (either talk to a differently-configured ddmd, or include info
-                // indicating which kind of address we're advertising).
-                self.ddmd_client.advertise_prefix(request.subnet);
 
                 Ok(SledAgentResponse { id: request.id })
             }
@@ -1046,7 +1047,7 @@ impl Agent {
     }
 }
 
-#[derive(Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
 struct PersistentSledAgentRequest<'a> {
     request: Cow<'a, StartSledAgentRequest>,
 }
@@ -1075,7 +1076,7 @@ mod tests {
                 id: Uuid::new_v4(),
                 rack_id: Uuid::new_v4(),
                 ntp_servers: vec![String::from("test.pool.example.com")],
-                dns_servers: vec![String::from("1.1.1.1")],
+                dns_servers: vec!["1.1.1.1".parse().unwrap()],
                 use_trust_quorum: false,
                 subnet: Ipv6Subnet::new(Ipv6Addr::LOCALHOST),
             }),
@@ -1093,5 +1094,14 @@ mod tests {
 
         assert!(&request == ledger.data(), "serialization round trip failed");
         logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn test_persistent_sled_agent_request_schema() {
+        let schema = schemars::schema_for!(PersistentSledAgentRequest<'_>);
+        expectorate::assert_contents(
+            "../schema/persistent-sled-agent-request.json",
+            &serde_json::to_string_pretty(&schema).unwrap(),
+        );
     }
 }
