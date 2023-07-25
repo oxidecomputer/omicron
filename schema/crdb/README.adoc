@@ -28,8 +28,8 @@ are running the same version of software.
 the duration of the migration.
 
 This is not an acceptable long-term solution - we must be able to update
-without downtime - but it is a short-term solution, and one which provides a
-fall-back pathway for performing upgrades without data loss.
+without downtime - but it is an interim solution, and one which provides a
+fall-back pathway for performing upgrades.
 
 See RFD 319 for more discussion of the online upgrade plans.
 

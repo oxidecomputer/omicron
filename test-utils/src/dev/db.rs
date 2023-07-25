@@ -1353,14 +1353,13 @@ mod test {
             eprintln!("populating database (1)");
             database.populate().await.expect("populating database (1)");
             assert!(has_omicron_schema(&client).await);
-            // populate() fails if the database is already populated.  We don't
-            // want to accidentally destroy data by wiping it first
-            // automatically.
-            database.populate().await.expect_err("populated database twice");
+            // The populate step is idempotent, and should not cause
+            // changes if executed twice.
+            database.populate().await.expect("populated database twice");
             eprintln!("wiping database (1)");
             database.wipe().await.expect("wiping database (1)");
             assert!(!has_omicron_schema(&client).await);
-            // On the other hand, wipe() is idempotent.
+            // wipe() is idempotent.
             database.wipe().await.expect("wiping database (2)");
             assert!(!has_omicron_schema(&client).await);
             // populate() should work again after a wipe().

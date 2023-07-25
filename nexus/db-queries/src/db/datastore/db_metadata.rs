@@ -29,7 +29,14 @@ pub struct SchemaUpdateLease {
 }
 
 impl DataStore {
-    // Ensures that the database schema matches "desired_version"
+    // Ensures that the database schema matches "desired_version".
+    //
+    // TODO: This function assumes that all concurrently executing Nexus
+    // instances on the rack are operating on the same version of software.
+    // If that assumption is broken, nothing would stop a "new deployment"
+    // from making a change that invalidates the queries used by an "old
+    // deployment". This is fixable, but it requires slightly more knowledge
+    // about the deployment and liveness of Nexus services within the rack.
     pub async fn ensure_schema(
         &self,
         log: &Logger,
