@@ -1193,7 +1193,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.vpc_subnet (
 );
 
 /* Subnet and network interface names are unique per VPC, not project */
-CREATE UNIQUE INDEX IF NOT EXISTS lookup_subnet_by_vpc ON omicron.public.vpc_subnet (
+CREATE UNIQUE INDEX IF NOT EXISTS vpc_subnet_vpc_id_name_key ON omicron.public.vpc_subnet (
     vpc_id,
     name
 ) WHERE
