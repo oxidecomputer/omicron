@@ -239,7 +239,7 @@ async fn query_crdb_for_rows_of_strings(
     let rows = client
         .query(&sql, &[])
         .await
-        .expect(&format!("failed to query {table}"));
+        .unwrap_or_else(|_| panic!("failed to query {table}"));
     client.cleanup().await.expect("cleaning up after wipe");
 
     let mut result = vec![];

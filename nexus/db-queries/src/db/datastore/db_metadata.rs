@@ -90,7 +90,7 @@ impl DataStore {
                 let name = entry
                     .file_name()
                     .into_string()
-                    .map_err(|_| format!("Non-unicode schema dir"))?;
+                    .map_err(|_| "Non-unicode schema dir".to_string())?;
                 if let Ok(observed_version) = name.parse::<SemverVersion>() {
                     all_versions.insert(observed_version);
                 } else {
