@@ -384,6 +384,7 @@ impl SledAgent {
                 )
                 .await?
         } else {
+            info!(log, "No early network config found in bootstore");
             HashSet::new()
         };
 
