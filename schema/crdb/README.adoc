@@ -16,6 +16,10 @@ We use the following conventions:
 * `schema/crdb/dbwipe.sql`: The necessary operations to delete the latest version
   of the schema.
 
+Note that to upgrade from version N to version N+2, we always need to apply the
+N+1 upgrade first, before applying the N+2 upgrade. This simplifies our model
+of DB schema changes as an incremental linear history.
+
 == Offline Upgrade
 
 Nexus currently supports **offline** schema migrations.
