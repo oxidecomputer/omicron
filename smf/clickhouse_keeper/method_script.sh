@@ -38,9 +38,9 @@ fi
 readarray -td, nodes <<<"$CH_ADDRS,"; declare -p nodes
 
 # Assign addresses to replicas and keeper nodes
-KEEPER_HOST_01=${nodes[2]}
-KEEPER_HOST_02=${nodes[3]}
-KEEPER_HOST_03=${nodes[4]}
+KEEPER_HOST_01="$(echo "${nodes[0]}" | sed -En s/:9181//p)"
+KEEPER_HOST_02="$(echo "${nodes[1]}" | sed -En s/:9181//p)"
+KEEPER_HOST_03="$(echo "${nodes[2]}" | sed -En s/:9181//p)"
 # Making Keeper IDs dynamic instead of hardcoding them in the config as we may 
 # want to name them something other than 01, 02, and 03 in the future. 
 # Also, when a keeper node is unrecoverable the ID must be changed to something new. 
@@ -51,13 +51,19 @@ KEEPER_ID_02="02"
 KEEPER_ID_03="03"
 
 # Identify the node type this is as this will influence how the config is constructed
-if [[ $KEEPER_HOST_01 == $LISTEN_ADDR ]]
+# TODO: There are probably much better ways to do this service discovery, but this works
+# for now
+KEEPER_SVC="$(zoneadm list | sed -En s/oxz_clickhouse_keeper_//p)"
+KEEPER_IDENTIFIER_01="$( echo "${KEEPER_HOST_01}" | sed -En s/.host.control-plane.oxide.internal.//p)"
+KEEPER_IDENTIFIER_02="$( echo "${KEEPER_HOST_02}" | sed -En s/.host.control-plane.oxide.internal.//p)"
+KEEPER_IDENTIFIER_03="$( echo "${KEEPER_HOST_03}" | sed -En s/.host.control-plane.oxide.internal.//p)"
+if [[ $KEEPER_IDENTIFIER_01 == $KEEPER_SVC ]]
 then
     KEEPER_ID_CURRENT=$KEEPER_ID_01
-elif [[ $KEEPER_HOST_02 == $LISTEN_ADDR ]]
+elif [[ $KEEPER_IDENTIFIER_02 == $KEEPER_SVC ]]
 then
     KEEPER_ID_CURRENT=$KEEPER_ID_02
-elif [[ $KEEPER_HOST_03 == $LISTEN_ADDR ]]
+elif [[ $KEEPER_IDENTIFIER_03 == $KEEPER_SVC ]]
 then
     KEEPER_ID_CURRENT=$KEEPER_ID_03
 else
@@ -65,20 +71,23 @@ else
     exit "$SMF_EXIT_ERR_CONFIG"
 fi
 
+# TODO: Looks like I have to create the /var/lib/clickhouse/coordination here. Clickhouse is supposed
+# to do this itself, but for some reason it's not creating it
+
 # Populate corresponding template and copy to /opt/oxide/clickhouse/clickhouse/config.d/
 # or /opt/oxide/clickhouse_keeper/clickhouse/keeper_config.xml
 # Clickhouse recommends to have these files in `/etc/clickhouse-keeper/` and `/etc/clickhouse-server/config.d/`,
 # but I'm not sure this makes sense to us since we're building the entire clickhouse binary instead of separate
 # `clickhouse-server`, 'clickhouse-keeper' and 'clickhouse-client' binaries.
-sed -i "s/LISTEN_PORT/$LISTEN_PORT; \
-    s/KEEPER_ID_CURRENT/$KEEPER_ID_CURRENT; \
-    s/KEEPER_ID_01/$KEEPER_ID_01/g; \
-    s/KEEPER_HOST_01/$KEEPER_HOST_01/g; \
-    s/KEEPER_ID_02/$KEEPER_ID_02/g; \
-    s/KEEPER_HOST_02/$KEEPER_HOST_02/g; \
-    s/KEEPER_ID_03/$KEEPER_ID_03/g; \
-    s/KEEPER_HOST_03/$KEEPER_HOST_03/g" \
-    /opt/oxide/clickhouse_keeper/clickhouse/keeper_config.xml
+sed -i "s~LISTEN_PORT~$LISTEN_PORT~g; \
+    s~KEEPER_ID_CURRENT~$KEEPER_ID_CURRENT~g; \
+    s~KEEPER_ID_01~$KEEPER_ID_01~g; \
+    s~KEEPER_HOST_01~$KEEPER_HOST_01~g; \
+    s~KEEPER_ID_02~$KEEPER_ID_02~g; \
+    s~KEEPER_HOST_02~$KEEPER_HOST_02~g; \
+    s~KEEPER_ID_03~$KEEPER_ID_03~g; \
+    s~KEEPER_HOST_03~$KEEPER_HOST_03~g" \
+    /opt/oxide/clickhouse_keeper/keeper_config.xml
 
-exec /opt/oxide/clickhouse-keeper/clickhouse keeper enable \
- --config /opt/oxide/clickhouse_keeper/clickhouse/keeper_config.xml &
+exec /opt/oxide/clickhouse_keeper/clickhouse keeper enable \
+ --config /opt/oxide/clickhouse_keeper/keeper_config.xml &

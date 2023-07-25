@@ -76,6 +76,7 @@ async fn main() -> Result<()> {
         omicron_common::backoff::retry_policy_internal_service(),
         || async {
             let dns_name = internal_dns::ServiceName::from(opt.srv_name);
+            // TODO: Use lookup_ip to avoid having to strip out ports?
             resolver.lookup_srv(dns_name).await.map_err(|error| match error {
                 ResolveError::Resolve(_)
                 | ResolveError::NotFound(_)

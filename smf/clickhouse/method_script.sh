@@ -43,9 +43,30 @@ fi
 
 readarray -td, nodes <<<"$CH_ADDRS,"; declare -p nodes
 
+# Assign addresses to replicas without port
+REPLICA_HOST_01="$(echo "${nodes[0]}" | sed -En s/:8123//p)"
+REPLICA_HOST_02="$(echo "${nodes[1]}" | sed -En s/:8123//p)"
+
+# Retrieve addresses of the other clickhouse nodes, order them and assign them to be a replica or keeper node.
+# In a follow up PR, keepers will be their own service.
+#
+# This should probably be 5 keepers?
+K_ADDRS="$(/opt/oxide/internal-dns-cli/bin/dnswait clickhouse-keeper \
+    | head -n 3 \
+    | tr '\n' ,)"
+
+if [[ -z "$K_ADDRS" ]]; then
+    printf 'ERROR: found no addresses for other ClickHouse Keeper nodes\n' >&2
+    exit "$SMF_EXIT_ERR_CONFIG"
+fi
+
+readarray -td, keepers <<<"$K_ADDRS,"; declare -p keepers
+
 # Assign addresses to replicas and keeper nodes
-REPLICA_HOST_01=${nodes[0]}
-REPLICA_HOST_02=${nodes[1]}
+KEEPER_HOST_01="$(echo "${keepers[0]}" | sed -En s/:9181//p)"
+KEEPER_HOST_02="$(echo "${keepers[1]}" | sed -En s/:9181//p)"
+KEEPER_HOST_03="$(echo "${keepers[2]}" | sed -En s/:9181//p)"
+
 # Making Keeper IDs dynamic instead of hardcoding them in the config as we may 
 # want to name them something other than 01, 02, and 03 in the future. 
 # Also, when a keeper node is unrecoverable the ID must be changed to something new. 
@@ -56,15 +77,19 @@ KEEPER_ID_02="02"
 KEEPER_ID_03="03"
 
 # Identify the node type this is as this will influence how the config is constructed
-if [[ $REPLICA_HOST_01 == $LISTEN_ADDR ]]
+# TODO: There are probably much better ways to do this service discovery, but this works
+# for now
+CLICKHOUSE_SVC="$(zoneadm list | sed -En s/oxz_clickhouse_//p)"
+REPLICA_IDENTIFIER_01="$( echo "${REPLICA_HOST_01}" | sed -En s/.host.control-plane.oxide.internal.//p)"
+REPLICA_IDENTIFIER_02="$( echo "${REPLICA_HOST_02}" | sed -En s/.host.control-plane.oxide.internal.//p)"
+if [[ $REPLICA_IDENTIFIER_01 == $CLICKHOUSE_SVC ]]
 then
     REPLICA_DISPLAY_NAME="oximeter_cluster node 1"
     REPLICA_NUMBER="01"
-elif [[ $REPLICA_HOST_02 == $LISTEN_ADDR ]]
+elif [[ $REPLICA_IDENTIFIER_02 == $CLICKHOUSE_SVC ]]
 then
     REPLICA_DISPLAY_NAME="oximeter_cluster node 2"
     REPLICA_NUMBER="02"
-elif [[ $KEEPER_HOST_01 == $LISTEN_ADDR ]]
 else
     printf 'ERROR: listen address does not match any of the identified ClickHouse addresses\n' >&2
     exit "$SMF_EXIT_ERR_CONFIG"
@@ -76,16 +101,16 @@ fi
 # but I'm not sure this makes sense to us since we're building the entire clickhouse binary instead of separate
 # `clickhouse-server`, 'clickhouse-keeper' and 'clickhouse-client' binaries.
 
-sed -i "s/REPLICA_DISPLAY_NAME/$REPLICA_DISPLAY_NAME/g; \
-    s/LISTEN_ADDR/$LISTEN_ADDR/g; \
-    s/LISTEN_PORT/$LISTEN_PORT/g; \
-    s/DATASTORE/$DATASTORE/g; \
-    s/REPLICA_NUMBER/$REPLICA_NUMBER/g; \
-    s/REPLICA_HOST_01/$REPLICA_HOST_01/g; \
-    s/REPLICA_HOST_02/$REPLICA_HOST_02/g; \
-    s/KEEPER_HOST_01/$KEEPER_HOST_01/g; \
-    s/KEEPER_HOST_02/$KEEPER_HOST_02/g; \
-    s/KEEPER_HOST_03/$KEEPER_HOST_03/g" \
+sed -i "s~REPLICA_DISPLAY_NAME~$REPLICA_DISPLAY_NAME~g; \
+    s~LISTEN_ADDR~$LISTEN_ADDR~g; \
+    s~LISTEN_PORT~$LISTEN_PORT~g; \
+    s~DATASTORE~$DATASTORE~g; \
+    s~REPLICA_NUMBER~$REPLICA_NUMBER~g; \
+    s~REPLICA_HOST_01~$REPLICA_HOST_01~g; \
+    s~REPLICA_HOST_02~$REPLICA_HOST_02~g; \
+    s~KEEPER_HOST_01~$KEEPER_HOST_01~g; \
+    s~KEEPER_HOST_02~$KEEPER_HOST_02~g; \
+    s~KEEPER_HOST_03~$KEEPER_HOST_03~g" \
     /opt/oxide/clickhouse/config.d/config_replica.xml
     
     exec /opt/oxide/clickhouse/clickhouse server \

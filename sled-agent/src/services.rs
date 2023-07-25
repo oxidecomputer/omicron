@@ -1048,6 +1048,39 @@ impl ServiceManager {
                 let Some(info) = self.inner.sled_info.get() else {
                     return Err(Error::SledAgentNotReady);
                 };
+
+                // We want to configure the dns/install SMF service inside the
+                // zone with the list of DNS nameservers.  This will cause
+                // /etc/resolv.conf to be populated inside the zone.  To do
+                // this, we need the full list of nameservers.  Fortunately, the
+                // nameservers provide a DNS name for the full list of
+                // nameservers.
+                //
+                // Note that when we configure the dns/install service, we're
+                // supplying values for an existing property group on the SMF
+                // *service*.  We're not creating a new property group, nor are
+                // we configuring a property group on the instance.
+                let all_nameservers = info
+                    .resolver
+                    .lookup_all_ipv6(internal_dns::ServiceName::InternalDns)
+                    .await?;
+                let mut dns_config_builder =
+                    PropertyGroupBuilder::new("install_props");
+                for ns_addr in &all_nameservers {
+                    dns_config_builder = dns_config_builder.add_property(
+                        "nameserver",
+                        "net_address",
+                        &ns_addr.to_string(),
+                    );
+                }
+                let dns_install = ServiceBuilder::new("network/dns/install")
+                    .add_property_group(dns_config_builder)
+                    // We do need to enable the default instance of the
+                    // dns/install service.  It's enough to just mention it
+                    // here, as the ServiceInstanceBuilder always enables the
+                    // instance being added.
+                    .add_instance(ServiceInstanceBuilder::new("default"));
+
                 let datalink = installed_zone.get_control_vnic_name();
                 let gateway = &info.underlay_address.to_string();
                 assert_eq!(request.zone.addresses.len(), 1);
@@ -1060,13 +1093,14 @@ impl ServiceManager {
                     .add_property("listen_addr", "astring", listen_addr)
                     .add_property("listen_port", "astring", listen_port)
                     .add_property("store", "astring", "/data");
-
-                let profile = ProfileBuilder::new("omicron").add_service(
-                    ServiceBuilder::new("oxide/clickhouse").add_instance(
-                        ServiceInstanceBuilder::new("default")
-                            .add_property_group(config),
-                    ),
+                let clickhouse_service = ServiceBuilder::new("oxide/clickhouse").add_instance(
+                    ServiceInstanceBuilder::new("default")
+                        .add_property_group(config),
                 );
+
+                let profile = ProfileBuilder::new("omicron")
+                .add_service(clickhouse_service)
+                .add_service(dns_install);
                 profile
                     .add_to_zone(&self.inner.log, &installed_zone)
                     .await
@@ -1079,6 +1113,38 @@ impl ServiceManager {
                 let Some(info) = self.inner.sled_info.get() else {
                     return Err(Error::SledAgentNotReady);
                 };
+                 // We want to configure the dns/install SMF service inside the
+                // zone with the list of DNS nameservers.  This will cause
+                // /etc/resolv.conf to be populated inside the zone.  To do
+                // this, we need the full list of nameservers.  Fortunately, the
+                // nameservers provide a DNS name for the full list of
+                // nameservers.
+                //
+                // Note that when we configure the dns/install service, we're
+                // supplying values for an existing property group on the SMF
+                // *service*.  We're not creating a new property group, nor are
+                // we configuring a property group on the instance.
+                let all_nameservers = info
+                    .resolver
+                    .lookup_all_ipv6(internal_dns::ServiceName::InternalDns)
+                    .await?;
+                let mut dns_config_builder =
+                    PropertyGroupBuilder::new("install_props");
+                for ns_addr in &all_nameservers {
+                    dns_config_builder = dns_config_builder.add_property(
+                        "nameserver",
+                        "net_address",
+                        &ns_addr.to_string(),
+                    );
+                }
+                let dns_install = ServiceBuilder::new("network/dns/install")
+                    .add_property_group(dns_config_builder)
+                    // We do need to enable the default instance of the
+                    // dns/install service.  It's enough to just mention it
+                    // here, as the ServiceInstanceBuilder always enables the
+                    // instance being added.
+                    .add_instance(ServiceInstanceBuilder::new("default"));
+
                 let datalink = installed_zone.get_control_vnic_name();
                 let gateway = &info.underlay_address.to_string();
                 assert_eq!(request.zone.addresses.len(), 1);
@@ -1092,19 +1158,19 @@ impl ServiceManager {
                     .add_property("listen_port", "astring", listen_port);
                 // TODO: This is probably not necessary
                 // .add_property("store", "astring", "/data");
-
-                let profile = ProfileBuilder::new("omicron").add_service(
-                    ServiceBuilder::new("oxide/clickhouse-keeper")
-                        .add_instance(
-                            ServiceInstanceBuilder::new("default")
-                                .add_property_group(config),
-                        ),
+                let clickhouse_keeper_service =  ServiceBuilder::new("oxide/clickhouse_keeper")
+                .add_instance(
+                    ServiceInstanceBuilder::new("default")
+                        .add_property_group(config),
                 );
+                let profile = ProfileBuilder::new("omicron")
+                .add_service(clickhouse_keeper_service)
+                .add_service(dns_install);
                 profile
                     .add_to_zone(&self.inner.log, &installed_zone)
                     .await
                     .map_err(|err| {
-                        Error::io("Failed to setup clickhouse profile", err)
+                        Error::io("Failed to setup clickhouse keeper profile", err)
                     })?;
                 return Ok(RunningZone::boot(installed_zone).await?);
             }
