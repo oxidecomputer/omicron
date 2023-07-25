@@ -3322,7 +3322,7 @@ mod test {
         SecretRetriever, SecretRetrieverError, SecretState, VersionedIkm,
     };
     use omicron_common::address::OXIMETER_PORT;
-    use std::net::{Ipv6Addr, SocketAddrV6};
+    use std::net::{Ipv4Addr, Ipv6Addr, SocketAddrV6};
     use std::os::unix::process::ExitStatusExt;
     use uuid::Uuid;
 
@@ -3422,7 +3422,11 @@ mod test {
                     boundary_switches: vec![],
                 }],
             },
-            &HashSet::new(),
+            &RackNetworkConfig {
+                infra_ip_first: Ipv4Addr::LOCALHOST,
+                infra_ip_last: Ipv4Addr::LOCALHOST,
+                uplinks: vec![],
+            },
         )
         .await
         .unwrap();
@@ -3452,7 +3456,11 @@ mod test {
                     boundary_switches: vec![],
                 }],
             },
-            &HashSet::new(),
+            &RackNetworkConfig {
+                infra_ip_first: Ipv4Addr::LOCALHOST,
+                infra_ip_last: Ipv4Addr::LOCALHOST,
+                uplinks: vec![],
+            },
         )
         .await
         .unwrap();
