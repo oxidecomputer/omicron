@@ -18,6 +18,9 @@ mode = "file"
 path = "/dev/stdout"
 if_exists = "append"
 
+[schema]
+schema_dir = "/var/nexus/schema/crdb"
+
 [background_tasks]
 dns_internal.period_secs_config = 60
 dns_internal.period_secs_servers = 60
