@@ -194,45 +194,35 @@ impl<'a> EarlyNetworkSetup<'a> {
         switch_zone_addrs
     }
 
-    // Initialize the rack network and return the boundary switch addresses to
-    // be injected into zone requests
-    pub async fn init_rack_network(
+    // Initialize a single switch via DPD.
+    pub async fn init_switch_config(
         &mut self,
         rack_network_config: &RackNetworkConfig,
-        switch_mgmt_addrs: &HashMap<SwitchLocation, Ipv6Addr>,
-    ) -> Result<HashSet<Ipv6Addr>, EarlyNetworkSetupError> {
+        switch_ip: Ipv6Addr,
+        switch_location: SwitchLocation,
+    ) -> Result<(), EarlyNetworkSetupError> {
         // Initialize rack network before NTP comes online, otherwise boundary
         // services will not be available and NTP will fail to sync
         info!(self.log, "Initializing Rack Network");
-        let dpd_clients = self.initialize_dpd_clients(&switch_mgmt_addrs);
+        let dpd = DpdClient::new(
+            &format!("http://[{}]:{}", switch_ip, DENDRITE_PORT),
+            dpd_client::ClientState {
+                tag: "early_networking".to_string(),
+                log: self.log.new(o!("component" => "DpdClient")),
+            },
+        );
 
-        // set of switches from uplinks, these are our targets for initial NAT
-        // configurations
-        let mut boundary_switch_addrs: HashSet<Ipv6Addr> = HashSet::new();
-
-        // configure uplink for each requested uplink in configuration
-        for uplink_config in &rack_network_config.uplinks {
-            // Configure the switch requested by the user
-            // Raise error if requested switch is not found
-            let dpd =
-                dpd_clients.get(&uplink_config.switch).ok_or_else(|| {
-                    EarlyNetworkSetupError::BadConfig(format!(
-                        "Switch in rack network config not found: {:#?}",
-                        uplink_config.switch
-                    ))
-                })?;
-
-            let zone_addr =
-                switch_mgmt_addrs.get(&uplink_config.switch).unwrap();
-
-            // This switch will have an uplink configured, so lets add it to our
-            // boundary_switch_addrs
-            boundary_switch_addrs.insert(*zone_addr);
-
+        // configure uplink for each requested uplink in configuration that
+        // matches our switch_location
+        for uplink_config in rack_network_config
+            .uplinks
+            .iter()
+            .filter(|uplink| uplink.switch == switch_location)
+        {
             let (ipv6_entry, dpd_port_settings, port_id) =
                 self.build_uplink_config(uplink_config)?;
 
-            self.wait_for_dendrite(dpd).await;
+            self.wait_for_dendrite(&dpd).await;
 
             info!(
                 self.log,
@@ -260,32 +250,11 @@ impl<'a> EarlyNetworkSetup<'a> {
 
             info!(self.log, "advertising boundary services loopback address");
 
-            let ddmd_addr = SocketAddrV6::new(*zone_addr, DDMD_PORT, 0, 0);
+            let ddmd_addr = SocketAddrV6::new(switch_ip, DDMD_PORT, 0, 0);
             let ddmd_client = DdmAdminClient::new(&self.log, ddmd_addr)?;
             ddmd_client.advertise_prefix(Ipv6Subnet::new(ipv6_entry.addr));
         }
-        Ok(boundary_switch_addrs)
-    }
-
-    fn initialize_dpd_clients(
-        &self,
-        switch_mgmt_addrs: &HashMap<SwitchLocation, Ipv6Addr>,
-    ) -> HashMap<SwitchLocation, DpdClient> {
-        switch_mgmt_addrs
-            .iter()
-            .map(|(location, addr)| {
-                (
-                    location.clone(),
-                    DpdClient::new(
-                        &format!("http://[{}]:{}", addr, DENDRITE_PORT),
-                        dpd_client::ClientState {
-                            tag: "rss".to_string(),
-                            log: self.log.new(o!("component" => "DpdClient")),
-                        },
-                    ),
-                )
-            })
-            .collect()
+        Ok(())
     }
 
     fn build_uplink_config(

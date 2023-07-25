@@ -25,7 +25,9 @@
 //! - [ServiceManager::activate_switch] exposes an API to specifically enable
 //! or disable (via [ServiceManager::deactivate_switch]) the switch zone.
 
-use crate::bootstrap::early_networking::EarlyNetworkSetup;
+use crate::bootstrap::early_networking::{
+    EarlyNetworkSetup, EarlyNetworkSetupError,
+};
 use crate::config::SidecarRevision;
 use crate::params::{
     DendriteAsic, ServiceEnsureBody, ServiceType, ServiceZoneRequest,
@@ -216,6 +218,9 @@ pub enum Error {
 
     #[error("Zone bundle error")]
     Bundle(#[from] BundleError),
+
+    #[error("Early networking setup error")]
+    EarlyNetworkSetupError(#[from] EarlyNetworkSetupError),
 }
 
 impl Error {
@@ -604,7 +609,7 @@ impl ServiceManager {
         let all_zones_request = self
             .ensure_all_services(
                 &mut existing_zones,
-                &AllZoneRequests::default(),
+                &all_zones_request,
                 ServiceEnsureBody {
                     services: services
                         .requests
@@ -1895,13 +1900,8 @@ impl ServiceManager {
                     smfh.refresh()?;
                 }
                 ServiceType::Uplink => {
-                    // Placeholder, proof-of-concept, whatever
-                    smfh.addpropvalue_type(
-                        "uplinks/qsfp0",
-                        "10.10.10.57/21",
-                        "astring",
-                    )?;
-                    smfh.refresh()?;
+                    // Nothing to do here - this service is special and
+                    // configured in `ensure_switch_zone_uplinks_configured`
                 }
                 ServiceType::Maghemite { mode } => {
                     info!(self.inner.log, "Setting up Maghemite service");
@@ -2956,13 +2956,31 @@ impl ServiceManager {
         .await
         .expect("Expected an infinite retry loop getting our switch ID");
 
-        // Filter rack_network_config uplinks down to just those for our switch.
-        let our_uplinks = rack_network_config.uplinks.iter().filter(|uplink| {
-            matches!(
-                (&uplink.switch, switch_slot),
-                (SwitchLocation::Switch0, 0) | (SwitchLocation::Switch1, 1)
+        let switch_location = match switch_slot {
+            0 => SwitchLocation::Switch0,
+            1 => SwitchLocation::Switch1,
+            _ => {
+                return Err(Error::SledLocalZone(anyhow!(
+                    "Local switch zone returned nonsense switch \
+                     slot {switch_slot}"
+                )));
+            }
+        };
+
+        // Configure DPD.
+        EarlyNetworkSetup::new(log)
+            .init_switch_config(
+                rack_network_config,
+                switch_zone_ip,
+                switch_location,
             )
-        });
+            .await?;
+
+        // Filter rack_network_config uplinks down to just those for our switch.
+        let our_uplinks = rack_network_config
+            .uplinks
+            .iter()
+            .filter(|uplink| uplink.switch == switch_location);
 
         // We expect the switch zone to be running, as we're called immediately
         // after `ensure_zone()` above and we just successfully asked MGS (which
@@ -2986,7 +3004,22 @@ impl ServiceManager {
             }
         };
 
-        todo!()
+        let smfh = SmfHelper::new(&zone, &ServiceType::Uplink);
+
+        // TODO-correctness We ought to delete any old `uplinks/*` properties,
+        // but today we don't actually support changing the uplinks live, so we
+        // treat this as "append only" (where we always append exactly the same
+        // thing).
+        for uplink_config in our_uplinks {
+            smfh.addpropvalue_type(
+                &format!("uplinks/{}", uplink_config.uplink_port),
+                &uplink_config.uplink_cidr.to_string(),
+                "astring",
+            )?;
+        }
+        smfh.refresh()?;
+
+        Ok(())
     }
 
     /// Ensures that no switch zone is active.
@@ -3169,7 +3202,8 @@ impl ServiceManager {
                             // the tfport service shouldn't need to be restarted.
                         }
                         ServiceType::Uplink { .. } => {
-                            // Placeholder
+                            // Only configured in
+                            // `ensure_switch_zone_uplinks_configured`
                         }
                         ServiceType::Maghemite { mode } => {
                             smfh.delpropvalue("config/mode", "*")?;

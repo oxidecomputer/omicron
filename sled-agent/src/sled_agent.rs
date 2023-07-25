@@ -5,7 +5,7 @@
 //! Sled agent implementation
 
 use crate::bootstrap::early_networking::{
-    EarlyNetworkConfig, EarlyNetworkSetup, EarlyNetworkSetupError,
+    EarlyNetworkConfig, EarlyNetworkSetupError,
 };
 use crate::bootstrap::params::StartSledAgentRequest;
 use crate::config::Config;
@@ -38,11 +38,9 @@ use omicron_common::backoff::{
     retry_notify, retry_notify_ext, retry_policy_internal_service_aggressive,
     BackoffError,
 };
-use once_cell::sync::OnceCell;
 use sled_hardware::underlay;
 use sled_hardware::HardwareManager;
 use slog::Logger;
-use std::collections::HashSet;
 use std::net::{Ipv6Addr, SocketAddrV6};
 use std::sync::Arc;
 use uuid::Uuid;

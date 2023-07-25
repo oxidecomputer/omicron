@@ -77,16 +77,13 @@ use crate::storage_manager::StorageResources;
 use bootstore::schemes::v0 as bootstore;
 use camino::Utf8PathBuf;
 use ddm_admin_client::{Client as DdmAdminClient, DdmError};
-use gateway_client::Client as MgsClient;
 use internal_dns::resolver::{DnsError, Resolver as DnsResolver};
 use internal_dns::ServiceName;
 use nexus_client::{
     types as NexusTypes, Client as NexusClient, Error as NexusError,
 };
 use omicron_common::address::get_sled_address;
-use omicron_common::address::MGS_PORT;
 use omicron_common::api::internal::shared::ExternalPortDiscovery;
-use omicron_common::api::internal::shared::SwitchLocation;
 use omicron_common::backoff::{
     retry_notify, retry_policy_internal_service_aggressive, BackoffError,
 };
@@ -786,16 +783,6 @@ impl ServiceInner {
             let switch_mgmt_addrs = EarlyNetworkSetup::new(&self.log)
                 .lookup_switch_zone_addrs(&resolver)
                 .await;
-            /*
-            info!(self.log, "Finding switch zone addresses in DNS");
-            let switch_zone_addresses =
-                resolver.lookup_all_ipv6(ServiceName::Dendrite).await?;
-            info!(self.log, "Detected switch zone addresses";
-                "addresses" => #?switch_zone_addresses);
-
-            let switch_mgmt_addrs =
-                self.map_switch_zone_addrs(switch_zone_addresses).await;
-                */
 
             let nexus_address =
                 resolver.lookup_socket_v6(ServiceName::Nexus).await?;
@@ -887,7 +874,10 @@ impl ServiceInner {
             bootstore
                 .update_network_config(early_network_config.into())
                 .await?;
-            // TODO: Wait for bootstore to sync to all `plan.sleds`
+            // TODO: Wait for bootstore to sync to all `plan.sleds`? Every
+            // sled-agent will wait to receive its bootstore on startup, so we
+            // may not need an explicit wait here: waiting on `initialize_sleds`
+            // also transitively waits on bootstore replication.
         } else {
             warn!(
                 self.log,
@@ -939,25 +929,10 @@ impl ServiceInner {
         self.ensure_all_services_of_type(&service_plan, &zone_types).await?;
         self.initialize_internal_dns_records(&service_plan).await?;
 
-        /*
-        info!(self.log, "Finding switch zone addresses in DNS");
-        let switch_zone_addresses =
-            resolver.lookup_all_ipv6(ServiceName::Dendrite).await?;
-        info!(
-            self.log,
-            "Detected switch zone addresses";
-            "addresses" => #?switch_zone_addresses
-        );
-        */
-
         // Ask MGS in each switch zone which switch it is.
         let switch_mgmt_addrs = EarlyNetworkSetup::new(&self.log)
             .lookup_switch_zone_addrs(&resolver)
             .await;
-        /*
-        let switch_mgmt_addrs =
-            self.map_switch_zone_addrs(switch_zone_addresses).await;
-            */
 
         if let Some(rack_network_config) = &config.rack_network_config {
             // `boundary_switch_addrs` contains the switch zone addrs for
@@ -1067,77 +1042,4 @@ impl ServiceInner {
 
         Ok(())
     }
-
-    /*
-    // TODO: #3601 Audit switch location discovery logic for robustness
-    // in multi-rack deployments. Query MGS servers in each switch zone to
-    // determine which switch slot they are managing. This logic does not handle
-    // an event where there are multiple racks. Is that ok?
-    async fn map_switch_zone_addrs(
-        &self,
-        switch_zone_addresses: Vec<Ipv6Addr>,
-    ) -> HashMap<SwitchLocation, Ipv6Addr> {
-        info!(self.log, "Determining switch slots managed by switch zones");
-        let mut switch_zone_addrs = HashMap::new();
-        for addr in switch_zone_addresses {
-            let mgs_client = MgsClient::new(
-                &format!("http://[{}]:{}", addr, MGS_PORT),
-                self.log.new(o!("component" => "MgsClient")),
-            );
-
-            info!(
-                self.log,
-                "determining switch slot managed by dendrite zone";
-                "zone_address" => #?addr
-            );
-            // TODO: #3599 Use retry function instead of looping on a fixed timer
-            let switch_slot = loop {
-                match mgs_client.sp_local_switch_id().await {
-                    Ok(switch) => {
-                        info!(
-                            self.log,
-                            "identified switch slot for dendrite zone";
-                            "slot" => #?switch,
-                            "zone_address" => #?addr
-                        );
-                        break switch.slot;
-                    }
-                    Err(e) => {
-                        warn!(
-                            self.log,
-                            concat!(
-                                "failed to identify switch slot for dendrite, ",
-                                "will retry in 2 seconds"
-                            );
-                            "zone_address" => #?addr,
-                            "reason" => #?e
-                        );
-                    }
-                }
-                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-            };
-
-            match switch_slot {
-                0 => {
-                    switch_zone_addrs.insert(SwitchLocation::Switch0, addr);
-                }
-                1 => {
-                    switch_zone_addrs.insert(SwitchLocation::Switch1, addr);
-                }
-                _ => {
-                    warn!(
-                        self.log,
-                        concat!(
-                            "Expected a slot number of 0 or 1, ",
-                            "found {:#?} when querying {:#?}"
-                        ),
-                        switch_slot,
-                        addr
-                    );
-                }
-            };
-        }
-        switch_zone_addrs
-    }
-    */
 }
