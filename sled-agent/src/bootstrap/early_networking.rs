@@ -360,7 +360,7 @@ pub struct EarlyNetworkConfig {
 
     /// A copy of the initial rack network configuration when we are in
     /// generation `1`.
-    pub rack_network_config: RackNetworkConfig,
+    pub rack_network_config: Option<RackNetworkConfig>,
 }
 
 impl EarlyNetworkConfig {

@@ -212,7 +212,7 @@ struct SledAgentInner {
     nexus_request_queue: NexusRequestQueue,
 
     // The rack network config provided at RSS time.
-    rack_network_config: RackNetworkConfig,
+    rack_network_config: Option<RackNetworkConfig>,
 }
 
 impl SledAgentInner {
@@ -373,7 +373,7 @@ impl SledAgent {
 
             Ok(early_network_config.rack_network_config)
         };
-        let rack_network_config: RackNetworkConfig =
+        let rack_network_config: Option<RackNetworkConfig> =
             retry_notify::<_, String, _, _, _, _>(
                 retry_policy_internal_service_aggressive(),
                 get_network_config,
@@ -433,7 +433,11 @@ impl SledAgent {
         //
         // Do this *after* monitoring for harware, to enable the switch zone to
         // establish an underlay address before proceeding.
-        sled_agent.inner.services.load_services(&rack_network_config).await?;
+        sled_agent
+            .inner
+            .services
+            .load_services(rack_network_config.as_ref())
+            .await?;
 
         // Now that we've initialized the sled services, notify nexus again
         // at which point it'll plumb any necessary firewall rules back to us.
@@ -459,7 +463,10 @@ impl SledAgent {
                 .inner
                 .services
                 .activate_switch(
-                    Some((switch_zone_ip, &self.inner.rack_network_config)),
+                    Some((
+                        switch_zone_ip,
+                        self.inner.rack_network_config.as_ref(),
+                    )),
                     baseboard,
                 )
                 .await
@@ -508,7 +515,7 @@ impl SledAgent {
                             .activate_switch(
                                 Some((
                                     switch_zone_ip,
-                                    &self.inner.rack_network_config,
+                                    self.inner.rack_network_config.as_ref(),
                                 )),
                                 baseboard,
                             )
@@ -705,7 +712,7 @@ impl SledAgent {
             .services
             .ensure_all_services_persistent(
                 requested_services,
-                &self.inner.rack_network_config,
+                self.inner.rack_network_config.as_ref(),
             )
             .await?;
         Ok(())

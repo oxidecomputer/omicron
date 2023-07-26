@@ -863,28 +863,18 @@ impl ServiceInner {
         // happen before we `initialize_sleds` so each scrimlet (including us)
         // can use its normal boot path of "read network config for our switch
         // from the bootstore".
-        if let Some(rack_network_config) = &config.rack_network_config {
-            let early_network_config = EarlyNetworkConfig {
-                generation: 1,
-                rack_subnet: config.rack_subnet,
-                ntp_servers: config.ntp_servers.clone(),
-                rack_network_config: rack_network_config.clone(),
-            };
-            info!(self.log, "Writing Rack Network Configuration to bootstore");
-            bootstore
-                .update_network_config(early_network_config.into())
-                .await?;
-            // TODO: Wait for bootstore to sync to all `plan.sleds`? Every
-            // sled-agent will wait to receive its bootstore on startup, so we
-            // may not need an explicit wait here: waiting on `initialize_sleds`
-            // also transitively waits on bootstore replication.
-        } else {
-            warn!(
-                self.log,
-                "Proceeding without rack network config for uplinks; \
-                 no external connectivity expected",
-            );
-        }
+        let early_network_config = EarlyNetworkConfig {
+            generation: 1,
+            rack_subnet: config.rack_subnet,
+            ntp_servers: config.ntp_servers.clone(),
+            rack_network_config: config.rack_network_config.clone(),
+        };
+        info!(self.log, "Writing Rack Network Configuration to bootstore");
+        bootstore.update_network_config(early_network_config.into()).await?;
+        // TODO: Wait for bootstore to sync to all `plan.sleds`? Every
+        // sled-agent will wait to receive its bootstore on startup, so we
+        // may not need an explicit wait here: waiting on `initialize_sleds`
+        // also transitively waits on bootstore replication.
 
         // Forward the sled initialization requests to our sled-agent.
         local_bootstrap_agent

@@ -543,15 +543,8 @@ impl ServiceManager {
     // / NTP zone?
     pub async fn load_services(
         &self,
-        rack_network_config: &RackNetworkConfig,
+        rack_network_config: Option<&RackNetworkConfig>,
     ) -> Result<(), Error> {
-        let resolver = &self
-            .inner
-            .sled_info
-            .get()
-            .ok_or(Error::SledAgentNotReady)?
-            .resolver;
-
         let log = &self.inner.log;
         let ledger_paths = self.all_service_ledgers().await;
         info!(log, "Loading services from: {ledger_paths:?}");
@@ -596,9 +589,22 @@ impl ServiceManager {
         drop(existing_zones);
 
         // With internal DNS running, look up the switch zone addresses.
-        let boundary_switch_addrs = EarlyNetworkSetup::new(&self.inner.log)
-            .lookup_boundary_switch_addrs(resolver, &rack_network_config)
-            .await;
+        let boundary_switch_addrs = if let Some(rack_network_config) =
+            rack_network_config
+        {
+            let resolver = &self
+                .inner
+                .sled_info
+                .get()
+                .ok_or(Error::SledAgentNotReady)?
+                .resolver;
+
+            EarlyNetworkSetup::new(&self.inner.log)
+                .lookup_boundary_switch_addrs(resolver, &rack_network_config)
+                .await
+        } else {
+            HashSet::new()
+        };
 
         let mut existing_zones = self.inner.zones.lock().await;
 
@@ -2518,26 +2524,34 @@ impl ServiceManager {
     pub async fn ensure_all_services_persistent(
         &self,
         request: ServiceEnsureBody,
-        rack_network_config: &RackNetworkConfig,
+        rack_network_config: Option<&RackNetworkConfig>,
     ) -> Result<(), Error> {
         let log = &self.inner.log;
 
-        let boundary_switch_addrs = if rack_network_config.uplinks.is_empty() {
-            // Unit tests pass an empty rack network config; skip DNS lookups
-            // for them.
-            HashSet::new()
-        } else {
-            // We have at least one uplink; we need to find the corresponding
-            // switch IP addr(s) to configure our boundary NAT.
-            let resolver = &self
-                .inner
-                .sled_info
-                .get()
-                .ok_or(Error::SledAgentNotReady)?
-                .resolver;
-            EarlyNetworkSetup::new(&self.inner.log)
-                .lookup_boundary_switch_addrs(resolver, &rack_network_config)
-                .await
+        let boundary_switch_addrs = match rack_network_config {
+            None => HashSet::new(),
+            Some(rack_network_config)
+                if rack_network_config.uplinks.is_empty() =>
+            {
+                HashSet::new()
+            }
+            Some(rack_network_config) => {
+                // We have at least one uplink; we need to find the
+                // corresponding switch IP addr(s) to configure our boundary
+                // NAT.
+                let resolver = &self
+                    .inner
+                    .sled_info
+                    .get()
+                    .ok_or(Error::SledAgentNotReady)?
+                    .resolver;
+                EarlyNetworkSetup::new(&self.inner.log)
+                    .lookup_boundary_switch_addrs(
+                        resolver,
+                        &rack_network_config,
+                    )
+                    .await
+            }
         };
 
         let mut existing_zones = self.inner.zones.lock().await;
@@ -2844,7 +2858,7 @@ impl ServiceManager {
         &self,
         // If we're reconfiguring the switch zone with an underlay address, we
         // also need the rack network config to set tfport uplinks.
-        underlay_info: Option<(Ipv6Addr, &RackNetworkConfig)>,
+        underlay_info: Option<(Ipv6Addr, Option<&RackNetworkConfig>)>,
         baseboard: Baseboard,
     ) -> Result<(), Error> {
         info!(self.inner.log, "Ensuring scrimlet services (enabling services)");
@@ -2921,7 +2935,7 @@ impl ServiceManager {
 
         // If we've given the switch an underlay address, we also need to inject
         // SMF properties so that tfport uplinks can be created.
-        if let Some((ip, rack_network_config)) = underlay_info {
+        if let Some((ip, Some(rack_network_config))) = underlay_info {
             self.ensure_switch_zone_uplinks_configured(ip, rack_network_config)
                 .await?;
         }
@@ -3330,7 +3344,7 @@ mod test {
         SecretRetriever, SecretRetrieverError, SecretState, VersionedIkm,
     };
     use omicron_common::address::OXIMETER_PORT;
-    use std::net::{Ipv4Addr, Ipv6Addr, SocketAddrV6};
+    use std::net::{Ipv6Addr, SocketAddrV6};
     use std::os::unix::process::ExitStatusExt;
     use uuid::Uuid;
 
@@ -3430,11 +3444,7 @@ mod test {
                     boundary_switches: vec![],
                 }],
             },
-            &RackNetworkConfig {
-                infra_ip_first: Ipv4Addr::LOCALHOST,
-                infra_ip_last: Ipv4Addr::LOCALHOST,
-                uplinks: vec![],
-            },
+            None,
         )
         .await
         .unwrap();
@@ -3464,11 +3474,7 @@ mod test {
                     boundary_switches: vec![],
                 }],
             },
-            &RackNetworkConfig {
-                infra_ip_first: Ipv4Addr::LOCALHOST,
-                infra_ip_last: Ipv4Addr::LOCALHOST,
-                uplinks: vec![],
-            },
+            None,
         )
         .await
         .unwrap();
