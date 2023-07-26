@@ -21,8 +21,9 @@ use crate::storage_manager::{StorageManager, StorageResources};
 use crate::updates::UpdateManager;
 use bootstore::schemes::v0 as bootstore;
 use camino::Utf8PathBuf;
+use cancel_safe_futures::TryStreamExt;
 use ddm_admin_client::{Client as DdmAdminClient, DdmError};
-use futures::stream::{self, StreamExt, TryStreamExt};
+use futures::stream::{self, StreamExt};
 use illumos_utils::addrobj::AddrObject;
 use illumos_utils::dladm::{Dladm, Etherstub, EtherstubVnic, GetMacError};
 use illumos_utils::zfs::{
@@ -250,7 +251,10 @@ async fn cleanup_all_old_global_state(
     stream::iter(zones)
         .zip(stream::iter(std::iter::repeat(log.clone())))
         .map(Ok::<_, illumos_utils::zone::AdmError>)
-        .try_for_each_concurrent(None, |(zone, log)| async move {
+        // Use for_each_concurrent_then_try to delete as much as possible. We
+        // only return one error though -- hopefully that's enough to signal to
+        // the caller that this failed.
+        .for_each_concurrent_then_try(None, |(zone, log)| async move {
             warn!(log, "Deleting existing zone"; "zone_name" => zone.name());
             Zones::halt_and_remove_logged(&log, zone.name()).await
         })
@@ -769,6 +773,19 @@ impl Agent {
                     monitor: hardware_monitor,
                 };
 
+                // Start trying to notify ddmd of our sled prefix so it can
+                // advertise it to other sleds.
+                //
+                // TODO-security This ddmd_client is used to advertise both this
+                // (underlay) address and our bootstrap address. Bootstrap addresses are
+                // unauthenticated (connections made on them are auth'd via sprockets),
+                // but underlay addresses should be exchanged via authenticated channels
+                // between ddmd instances. It's TBD how that will work, but presumably
+                // we'll need to do something different here for underlay vs bootstrap
+                // addrs (either talk to a differently-configured ddmd, or include info
+                // indicating which kind of address we're advertising).
+                self.ddmd_client.advertise_prefix(request.subnet);
+
                 // Server does not exist, initialize it.
                 let server = SledServer::start(
                     &self.sled_config,
@@ -801,19 +818,6 @@ impl Agent {
                 // sled agent starting.
                 restarter.cancel();
                 *state = SledAgentState::After(server);
-
-                // Start trying to notify ddmd of our sled prefix so it can
-                // advertise it to other sleds.
-                //
-                // TODO-security This ddmd_client is used to advertise both this
-                // (underlay) address and our bootstrap address. Bootstrap addresses are
-                // unauthenticated (connections made on them are auth'd via sprockets),
-                // but underlay addresses should be exchanged via authenticated channels
-                // between ddmd instances. It's TBD how that will work, but presumably
-                // we'll need to do something different here for underlay vs bootstrap
-                // addrs (either talk to a differently-configured ddmd, or include info
-                // indicating which kind of address we're advertising).
-                self.ddmd_client.advertise_prefix(request.subnet);
 
                 Ok(SledAgentResponse { id: request.id })
             }
@@ -877,7 +881,10 @@ impl Agent {
         const CONCURRENCY_CAP: usize = 32;
         futures::stream::iter(Zones::get().await?)
             .map(Ok::<_, anyhow::Error>)
-            .try_for_each_concurrent(CONCURRENCY_CAP, |zone| async move {
+            // Use for_each_concurrent_then_try to delete as much as possible.
+            // We only return one error though -- hopefully that's enough to
+            // signal to the caller that this failed.
+            .for_each_concurrent_then_try(CONCURRENCY_CAP, |zone| async move {
                 if zone.name() != "oxz_switch" {
                     Zones::halt_and_remove(zone.name()).await?;
                 }

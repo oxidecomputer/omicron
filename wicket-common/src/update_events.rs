@@ -146,6 +146,8 @@ pub enum UpdateTerminalError {
         #[from]
         error: NestedEngineError<TestStepSpec>,
     },
+    #[error("simulated failure result")]
+    SimulatedFailure,
     #[error("error updating component")]
     ComponentNestedError {
         #[from]

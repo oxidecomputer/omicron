@@ -14,6 +14,7 @@ deps=(
     $tarball_src_dir/omicron-sled-agent.tar
     $tarball_src_dir/maghemite.tar
     $tarball_src_dir/propolis-server.tar.gz
+    $tarball_src_dir/overlay.tar.gz
 )
 for dep in ${deps[@]}; do
     if [[ ! -e $dep ]]; then
@@ -51,6 +52,9 @@ cd -
 # propolis should be bundled with this OS: Put the propolis-server zone image
 # under /opt/oxide in the gz.
 cp "$tarball_src_dir/propolis-server.tar.gz" "$tmp_gz/root/opt/oxide"
+
+# The zone overlay should also be bundled.
+cp "$tarball_src_dir/overlay.tar.gz" "$tmp_gz/root/opt/oxide"
 
 # Create the final output and we're done
 cd "$tmp_gz" && tar cvfz $out_dir/global-zone-packages.tar.gz oxide.json root
