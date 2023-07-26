@@ -2522,15 +2522,23 @@ impl ServiceManager {
     ) -> Result<(), Error> {
         let log = &self.inner.log;
 
-        let resolver = &self
-            .inner
-            .sled_info
-            .get()
-            .ok_or(Error::SledAgentNotReady)?
-            .resolver;
-        let boundary_switch_addrs = EarlyNetworkSetup::new(&self.inner.log)
-            .lookup_boundary_switch_addrs(resolver, &rack_network_config)
-            .await;
+        let boundary_switch_addrs = if rack_network_config.uplinks.is_empty() {
+            // Unit tests pass an empty rack network config; skip DNS lookups
+            // for them.
+            HashSet::new()
+        } else {
+            // We have at least one uplink; we need to find the corresponding
+            // switch IP addr(s) to configure our boundary NAT.
+            let resolver = &self
+                .inner
+                .sled_info
+                .get()
+                .ok_or(Error::SledAgentNotReady)?
+                .resolver;
+            EarlyNetworkSetup::new(&self.inner.log)
+                .lookup_boundary_switch_addrs(resolver, &rack_network_config)
+                .await
+        };
 
         let mut existing_zones = self.inner.zones.lock().await;
 
