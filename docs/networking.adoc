@@ -338,14 +338,14 @@ In our example deployment:
 [source,text]
 ----
 AZ subnet: fd00:1122:3344::/48
-internal : fd00:1122:3344::1/56
-    DNS 1: fd00:1122:3344::1/64
-    DNS 2: fd00:1122:3344::2/64
-    DNS 3: fd00:1122:3344::3/64
-rack:      fd00:1122:3344::100/56
-sleds:     fd00:1122:3344::101/64
-           fd00:1122:3344::102/64
-           fd00:1122:3344::103/64
+internal : fd00:1122:3344::/56
+    DNS 1: fd00:1122:3344:1::/64
+    DNS 2: fd00:1122:3344:2::/64
+    DNS 3: fd00:1122:3344:3::/64
+rack:      fd00:1122:3344:100::/56
+sleds:     fd00:1122:3344:101::/64
+           fd00:1122:3344:102::/64
+           fd00:1122:3344:103::/64
 	   ...
 ----
 
@@ -700,9 +700,11 @@ fe80::/10                   fe80::aa40:25ff:fe04:357    U       3   59075 cxgbe0
 
 There's a lot to unpack here.  There are two important groups of routes here:
 
-* `fd00:1122:3344::101/64` through `fd00:1122:3344::107/64`: routes for the underlay network (12 routes)
-* `fd00:1122:3344::1/64` through `fd00:1122:3344::3/64`: routes for the internal DNS servers (6 routes)
+* `fd00:1122:3344:101::/64` through `fd00:1122:3344:107::/64`: routes for the underlay network (12 routes)
+* `fd00:1122:3344:1::/64` through `fd00:1122:3344:3::/64`: routes for the internal DNS servers (6 routes)
 * `fdb0:...`: routes for the bootstrap network (21 routes)
+
+NOTE: DNS servers each get their own /64 subnet.  The reason is a little subtle: IPv6 only allows routes for /64 or larger subnets.  And we're distributing per-sled routes.  So if we want different DNS servers to be on different sleds (which we do), they have to have separate routes.  And the smallest route we can have is a /64.  So each DNS server gets its own /64.
 
 If we sort the underlay routes by destination address, we notice that each prefix has two routes: one through cxgbe0 and one through cxgbe1:
 
