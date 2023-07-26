@@ -203,7 +203,7 @@ impl Nexus {
                 &format!("http://[{address}]:{port}"),
                 client_state.clone(),
             );
-            dpd_clients.insert(location.clone(), Arc::new(dpd_client));
+            dpd_clients.insert(*location, Arc::new(dpd_client));
         }
         if config.pkg.dendrite.is_empty() {
             loop {
@@ -226,8 +226,7 @@ impl Nexus {
                                 &format!("http://[{addr}]:{port}"),
                                 client_state.clone(),
                             );
-                            dpd_clients
-                                .insert(location.clone(), Arc::new(dpd_client));
+                            dpd_clients.insert(*location, Arc::new(dpd_client));
                         }
                         break;
                     }
