@@ -116,7 +116,7 @@ fd00:1122:3344:105::/64     fe80::aa40:25ff:fe05:41c    UG      1       0 cxgbe1
 
 We'll talk about this more later.
 
-Finally, you can use the portable `ifconfig` tool to list much of the same information.  We'll be sticking to the illumos tools.
+Finally, if you're used to using `ifconfig` to look at this information, you can use that on illumos, too.  However, we prefer using `ipadm` for managing this and stick to it throughout this document.
 
 == Networking in Omicron
 
@@ -154,7 +154,10 @@ graph RL
 
     net_bootstrap --- SledAgent
 
+    Custs --- net_external
+
     %% Labels are defined as needed at the end here to avoid changing the layout.
+    Custs["Customer systems\n(outside the rack)"]
     ExternalDns["External DNS"]
     BoundaryNtp["Boundary NTP"]
     InternalNtp["Internal NTP"]
