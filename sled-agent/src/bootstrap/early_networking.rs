@@ -169,6 +169,9 @@ impl<'a> EarlyNetworkSetup<'a> {
         &self,
         resolver: &DnsResolver,
     ) -> Result<LookupSwitchZoneAddrsResult, BackoffError<String>> {
+        // We might have stale DNS results; clear our resolver's cache.
+        resolver.clear_cache();
+
         info!(self.log, "Resolving switch zone addresses in DNS");
         let switch_zone_addrs = resolver
             .lookup_all_ipv6(ServiceName::Dendrite)
