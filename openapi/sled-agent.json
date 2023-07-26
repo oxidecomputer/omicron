@@ -792,6 +792,20 @@
               "type": {
                 "type": "string",
                 "enum": [
+                  "clickhouse_keeper"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
                   "external_dns"
                 ]
               }

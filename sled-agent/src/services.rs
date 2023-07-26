@@ -1155,9 +1155,8 @@ impl ServiceManager {
                     .add_property("datalink", "astring", datalink)
                     .add_property("gateway", "astring", gateway)
                     .add_property("listen_addr", "astring", listen_addr)
-                    .add_property("listen_port", "astring", listen_port);
-                // TODO: This is probably not necessary
-                // .add_property("store", "astring", "/data");
+                    .add_property("listen_port", "astring", listen_port)
+                    .add_property("store", "astring", "/data");
                 let clickhouse_keeper_service =  ServiceBuilder::new("oxide/clickhouse_keeper")
                 .add_instance(
                     ServiceInstanceBuilder::new("default")

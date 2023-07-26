@@ -3,9 +3,8 @@
     <logger>
         <level>trace</level>
         <console>true</console>
-        <!-- TODO: Shouldn't this be /var/log/ ???-->
-        <log>/var/tmp/clickhouse-server.log</log>
-        <errorlog>/var/tmp/clickhouse-server.errlog</errorlog>
+        <log>DATASTORE/clickhouse-server.log</log>
+        <errorlog>DATASTORE/clickhouse-server.errlog</errorlog>
         <size>1000M</size>
         <count>3</count>
     </logger>

@@ -922,6 +922,7 @@
           "crucible",
           "cockroach",
           "clickhouse",
+          "clickhouse_keeper",
           "external_dns",
           "internal_dns"
         ]

@@ -218,6 +218,7 @@ pub enum DatasetKind {
     CockroachDb,
     Crucible,
     Clickhouse,
+    ClickhouseKeeper,
     ExternalDns,
     InternalDns,
 }
@@ -229,6 +230,7 @@ impl From<DatasetKind> for sled_agent_client::types::DatasetKind {
             CockroachDb => Self::CockroachDb,
             Crucible => Self::Crucible,
             Clickhouse => Self::Clickhouse,
+            ClickhouseKeeper => Self::ClickhouseKeeper,
             ExternalDns => Self::ExternalDns,
             InternalDns => Self::InternalDns,
         }
@@ -242,6 +244,7 @@ impl From<DatasetKind> for nexus_client::types::DatasetKind {
             CockroachDb => Self::Cockroach,
             Crucible => Self::Crucible,
             Clickhouse => Self::Clickhouse,
+            ClickhouseKeeper => Self::ClickhouseKeeper,
             ExternalDns => Self::ExternalDns,
             InternalDns => Self::InternalDns,
         }
@@ -255,6 +258,7 @@ impl std::fmt::Display for DatasetKind {
             Crucible => "crucible",
             CockroachDb { .. } => "cockroachdb",
             Clickhouse => "clickhouse",
+            ClickhouseKeeper => "clickhouse_keeper",
             ExternalDns { .. } => "external_dns",
             InternalDns { .. } => "internal_dns",
         };

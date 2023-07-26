@@ -573,11 +573,17 @@ impl Plan {
             dns_builder
                 .service_backend_zone(ServiceName::ClickhouseKeeper, &zone, port)
                 .unwrap();
+            let dataset_name =
+                sled.alloc_from_u2_zpool(DatasetKind::ClickhouseKeeper)?;
             sled.request.services.push(ServiceZoneRequest {
                 id,
                 zone_type: ZoneType::ClickhouseKeeper,
                 addresses: vec![ip],
-                dataset: None,
+                dataset: Some(DatasetRequest {
+                    id,
+                    name: dataset_name,
+                    service_address: address,
+                }),
                 services: vec![ServiceZoneService {
                     id,
                     details: ServiceType::ClickhouseKeeper { address },

@@ -2,18 +2,22 @@
 
     <logger>
         <level>trace</level>
-        <log>/var/log/clickhouse-keeper/clickhouse-keeper.log</log>
-        <errorlog>/var/log/clickhouse-keeper/clickhouse-keeper.err.log</errorlog>
+        <log>DATASTORE/clickhouse-keeper.log</log>
+        <errorlog>DATASTORE/clickhouse-keeper.err.log</errorlog>
         <size>1000M</size>
         <count>3</count>
     </logger>
+
+    <!-- To trial locally use ./ -->
+    <path>DATASTORE</path>
 
     <keeper_server>
         <tcp_port>LISTEN_PORT</tcp_port>
         <!-- This was previously set to 1, 2 or 3 -->
         <server_id>KEEPER_ID_CURRENT</server_id>
-        <log_storage_path>/var/lib/clickhouse/coordination/log</log_storage_path>
-        <snapshot_storage_path>/var/lib/clickhouse/coordination/snapshots</snapshot_storage_path>
+        <!-- TODO: Use datastore -> /var/lib/clickhouse/coordination or /var/lib/clickhouse/ -->
+        <log_storage_path>DATASTORE/log</log_storage_path>
+        <snapshot_storage_path>DATASTORE/snapshots</snapshot_storage_path>
         <coordination_settings>
             <operation_timeout_ms>10000</operation_timeout_ms>
             <session_timeout_ms>30000</session_timeout_ms>

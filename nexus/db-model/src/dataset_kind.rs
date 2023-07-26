@@ -19,6 +19,7 @@ impl_enum_type!(
     Crucible => b"crucible"
     Cockroach => b"cockroach"
     Clickhouse => b"clickhouse"
+    ClickhouseKeeper => b"clickhouse_keeper"
     ExternalDns => b"external_dns"
     InternalDns => b"internal_dns"
 );
@@ -34,6 +35,9 @@ impl From<internal_api::params::DatasetKind> for DatasetKind {
             }
             internal_api::params::DatasetKind::Clickhouse => {
                 DatasetKind::Clickhouse
+            }
+            internal_api::params::DatasetKind::ClickhouseKeeper => {
+                DatasetKind::ClickhouseKeeper
             }
             internal_api::params::DatasetKind::ExternalDns => {
                 DatasetKind::ExternalDns

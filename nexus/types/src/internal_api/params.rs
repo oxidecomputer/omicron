@@ -125,6 +125,7 @@ pub enum DatasetKind {
     Crucible,
     Cockroach,
     Clickhouse,
+    ClickhouseKeeper,
     ExternalDns,
     InternalDns,
 }
@@ -136,6 +137,7 @@ impl fmt::Display for DatasetKind {
             Crucible => "crucible",
             Cockroach => "cockroach",
             Clickhouse => "clickhouse",
+            ClickhouseKeeper => "clickhouse_keeper",
             ExternalDns => "external_dns",
             InternalDns => "internal_dns",
         };

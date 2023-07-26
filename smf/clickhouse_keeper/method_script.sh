@@ -8,8 +8,7 @@ set -o pipefail
 
 LISTEN_ADDR="$(svcprop -c -p config/listen_addr "${SMF_FMRI}")"
 LISTEN_PORT="$(svcprop -c -p config/listen_port "${SMF_FMRI}")"
-# TODO: Not sure if I need these?
-# DATASTORE="$(svcprop -c -p config/store "${SMF_FMRI}")"
+DATASTORE="$(svcprop -c -p config/store "${SMF_FMRI}")"
 DATALINK="$(svcprop -c -p config/datalink "${SMF_FMRI}")"
 GATEWAY="$(svcprop -c -p config/gateway "${SMF_FMRI}")"
 
@@ -17,6 +16,13 @@ if [[ $DATALINK == unknown ]] || [[ $GATEWAY == unknown ]]; then
     printf 'ERROR: missing datalink or gateway\n' >&2
     exit "$SMF_EXIT_ERR_CONFIG"
 fi
+
+# TODO remove when https://github.com/oxidecomputer/stlouis/issues/435 is addressed
+ipadm delete-if "$DATALINK" || true
+ipadm create-if -t "$DATALINK"
+
+ipadm set-ifprop -t -p mtu=9000 -m ipv4 "$DATALINK"
+ipadm set-ifprop -t -p mtu=9000 -m ipv6 "$DATALINK"
 
 ipadm show-addr "$DATALINK/ll" || ipadm create-addr -t -T addrconf "$DATALINK/ll"
 ipadm show-addr "$DATALINK/omicron6"  || ipadm create-addr -t -T static -a "$LISTEN_ADDR" "$DATALINK/omicron6"
@@ -80,6 +86,7 @@ fi
 # but I'm not sure this makes sense to us since we're building the entire clickhouse binary instead of separate
 # `clickhouse-server`, 'clickhouse-keeper' and 'clickhouse-client' binaries.
 sed -i "s~LISTEN_PORT~$LISTEN_PORT~g; \
+    s~DATASTORE~$DATASTORE~g; \
     s~KEEPER_ID_CURRENT~$KEEPER_ID_CURRENT~g; \
     s~KEEPER_ID_01~$KEEPER_ID_01~g; \
     s~KEEPER_HOST_01~$KEEPER_HOST_01~g; \

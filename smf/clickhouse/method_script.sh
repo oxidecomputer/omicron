@@ -28,8 +28,7 @@ ipadm show-addr "$DATALINK/ll" || ipadm create-addr -t -T addrconf "$DATALINK/ll
 ipadm show-addr "$DATALINK/omicron6"  || ipadm create-addr -t -T static -a "$LISTEN_ADDR" "$DATALINK/omicron6"
 route get -inet6 default -inet6 "$GATEWAY" || route add -inet6 default -inet6 "$GATEWAY"
 
-# Retrieve addresses of the other clickhouse nodes, order them and assign them to be a replica or keeper node.
-# In a follow up PR, keepers will be their own service.
+# Retrieve addresses of the other clickhouse nodes, order them and assign them to be a replica node.
 #
 # TODO: This should probably be 3 replicas
 CH_ADDRS="$(/opt/oxide/internal-dns-cli/bin/dnswait clickhouse \
@@ -47,8 +46,7 @@ readarray -td, nodes <<<"$CH_ADDRS,"; declare -p nodes
 REPLICA_HOST_01="$(echo "${nodes[0]}" | sed -En s/:8123//p)"
 REPLICA_HOST_02="$(echo "${nodes[1]}" | sed -En s/:8123//p)"
 
-# Retrieve addresses of the other clickhouse nodes, order them and assign them to be a replica or keeper node.
-# In a follow up PR, keepers will be their own service.
+# Retrieve addresses of the other clickhouse nodes, order them and assign them to be a keeper node.
 #
 # This should probably be 5 keepers?
 K_ADDRS="$(/opt/oxide/internal-dns-cli/bin/dnswait clickhouse-keeper \
