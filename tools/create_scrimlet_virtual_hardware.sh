@@ -48,6 +48,7 @@ function ensure_uplink_vnic {
 function ensure_softnpu_zone {
     zoneadm list | grep -q sidecar_softnpu || {
         out/softnpu/npuzone create sidecar \
+            --omicron-zone \
             --ports $TFP0,tfportrear0_0 \
             --ports $TFP1,tfportrear1_0 \
             --ports $TFP2,tfportrear2_0 \

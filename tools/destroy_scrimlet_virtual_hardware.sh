@@ -33,6 +33,7 @@ function try_remove_vnics {
 
 function remove_softnpu_zone {
     out/softnpu/npuzone destroy sidecar \
+        --omicron-zone \
         --ports $TFP0,tfportrear0_0 \
         --ports $TFP1,tfportrear1_0 \
         --ports $TFP2,tfportrear2_0 \
