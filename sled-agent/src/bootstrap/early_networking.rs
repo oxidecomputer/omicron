@@ -4,6 +4,7 @@
 
 //! Network setup required to bring up the control plane
 
+use anyhow::{anyhow, Context};
 use bootstore::schemes::v0 as bootstore;
 use ddm_admin_client::{Client as DdmAdminClient, DdmError};
 use dpd_client::types::Ipv6Entry;
@@ -12,6 +13,7 @@ use dpd_client::types::{
 };
 use dpd_client::Client as DpdClient;
 use dpd_client::Ipv4Cidr;
+use futures::future;
 use gateway_client::Client as MgsClient;
 use internal_dns::resolver::{ResolveError, Resolver as DnsResolver};
 use internal_dns::ServiceName;
@@ -21,12 +23,13 @@ use omicron_common::api::internal::shared::{
     PortFec, PortSpeed, RackNetworkConfig, SwitchLocation, UplinkConfig,
 };
 use omicron_common::backoff::{
-    retry_notify, retry_policy_internal_service_aggressive, BackoffError,
+    retry_notify, BackoffError, ExponentialBackoff, ExponentialBackoffBuilder,
 };
 use serde::{Deserialize, Serialize};
 use slog::Logger;
 use std::collections::{HashMap, HashSet};
 use std::net::{IpAddr, Ipv6Addr, SocketAddrV6};
+use std::time::{Duration, Instant};
 use thiserror::Error;
 
 static BOUNDARY_SERVICES_ADDR: &str = "fd00:99::1";
@@ -45,6 +48,13 @@ pub enum EarlyNetworkSetupError {
 
     #[error("Error during DNS lookup: {0}")]
     DnsResolver(#[from] ResolveError),
+}
+
+enum LookupSwitchZoneAddrsResult {
+    // We found every switch zone reported by internal DNS.
+    TotalSuccess(HashMap<SwitchLocation, Ipv6Addr>),
+    // We found some (but not all) switch zones reported by internal DNS.
+    PartialSuccess(HashMap<SwitchLocation, Ipv6Addr>),
 }
 
 /// Code for configuring the necessary network bits to bring up the control
@@ -72,9 +82,10 @@ impl<'a> EarlyNetworkSetup<'a> {
             {
                 boundary_switch_addrs.insert(zone_addr);
             } else {
-                // TODO-correctness is it okay to just return here if the config
-                // specifies a switch that we don't have in DNS? This shouldn't
-                // happen...
+                // `lookup_boundary_switch_addrs` is best effort: if one of the
+                // switches is offline (or we can't find it for any number of
+                // reasons), we may not have the address for this
+                // `uplink_config`. Just log a warning and move on.
                 warn!(
                     self.log,
                     "No switch zone address found for {:?}",
@@ -83,6 +94,13 @@ impl<'a> EarlyNetworkSetup<'a> {
             }
         }
 
+        // TODO-correctness: Could `boundary_switch_addrs` be _empty_ here?
+        // `lookup_switch_zone_addrs` does not return unless it finds at least
+        // one switch location, so the only way this could happen is if there
+        // are no uplinks configured at all, or there are only uplinks
+        // configured for one switch location and we found the other one. Both
+        // of those are misconfiguration issues that we cannot overcome here, so
+        // we will return what we have.
         boundary_switch_addrs
     }
 
@@ -90,108 +108,143 @@ impl<'a> EarlyNetworkSetup<'a> {
         &self,
         resolver: &DnsResolver,
     ) -> HashMap<SwitchLocation, Ipv6Addr> {
-        let lookup = || async {
-            info!(self.log, "Finding switch zone addresses in DNS");
-            resolver
-                .lookup_all_ipv6(ServiceName::Dendrite)
-                .await
-                .map_err(BackoffError::transient)
-        };
-        let log_failure = |error, delay| {
-            warn!(
-                self.log,
-                "failed to look up switch zone addresses in DNS";
-                "error" => ?error,
-                "retry_after" => ?delay,
-            );
-        };
-        let switch_zone_addresses = retry_notify(
-            retry_policy_internal_service_aggressive(),
-            lookup,
-            log_failure,
+        // We will wait up to 5 minutes to try to find all switches; if we pass
+        // the 5 minute mark, we will return as soon as we find at least one
+        // switch.
+        const MAX_SWITCH_ZONE_WAIT_TIME: Duration = Duration::from_secs(60 * 5);
+
+        let query_start = Instant::now();
+        retry_notify(
+            retry_policy_switch_mapping(),
+            || async {
+                match self
+                    .lookup_switch_zone_addrs_one_attempt(resolver)
+                    .await?
+                {
+                    LookupSwitchZoneAddrsResult::TotalSuccess(map) => Ok(map),
+                    LookupSwitchZoneAddrsResult::PartialSuccess(map) => {
+                        let elapsed = query_start.elapsed();
+                        if elapsed >= MAX_SWITCH_ZONE_WAIT_TIME {
+                            // We only found one switch when we are expecting
+                            // two, but we've been waiting for too long: go with
+                            // just one.
+                            warn!(
+                                self.log,
+                                "Only found one switch (expected two), \
+                                 but passed wait time of \
+                                 {MAX_SWITCH_ZONE_WAIT_TIME:?}: returning";
+                                "switch_found" => ?map,
+                                "total_elapsed" => ?elapsed,
+                            );
+                            Ok(map)
+                        } else {
+                            // We only found one switch when we are expecting
+                            // two; retry after a backoff. Our logging closure
+                            // below will `warn!` with this error.
+                            Err(BackoffError::transient(format!(
+                                "Only found one switch (expected two): {map:?}"
+                            )))
+                        }
+                    }
+                }
+            },
+            |error, delay| {
+                warn!(
+                    self.log,
+                    "Failed to look up switch zone locations";
+                    "error" => #%error,
+                    "retry_after" => ?delay,
+                );
+            },
         )
         .await
-        .expect(
-            "Expected an infinite retry loop looking up switch zone addresses",
-        );
-
-        info!(
-            self.log, "Detected switch zone addresses";
-            "addresses" => #?switch_zone_addresses,
-        );
-
-        self.map_switch_zone_addrs(switch_zone_addresses).await
+        .expect("Expected an infinite retry loop finding switch zones")
     }
 
     // TODO: #3601 Audit switch location discovery logic for robustness
     // in multi-rack deployments. Query MGS servers in each switch zone to
     // determine which switch slot they are managing. This logic does not handle
     // an event where there are multiple racks. Is that ok?
-    async fn map_switch_zone_addrs(
+    async fn lookup_switch_zone_addrs_one_attempt(
         &self,
-        switch_zone_addresses: Vec<Ipv6Addr>,
-    ) -> HashMap<SwitchLocation, Ipv6Addr> {
-        info!(self.log, "Determining switch slots managed by switch zones");
-        let mut switch_zone_addrs = HashMap::new();
-        for addr in switch_zone_addresses {
-            let mgs_client = MgsClient::new(
-                &format!("http://[{}]:{}", addr, MGS_PORT),
-                self.log.new(o!("component" => "MgsClient")),
-            );
+        resolver: &DnsResolver,
+    ) -> Result<LookupSwitchZoneAddrsResult, BackoffError<String>> {
+        info!(self.log, "Resolving switch zone addresses in DNS");
+        let switch_zone_addrs = resolver
+            .lookup_all_ipv6(ServiceName::Dendrite)
+            .await
+            .map_err(|err| {
+                BackoffError::transient(format!(
+                    "Error resolving dendrite services in internal DNS: {err}",
+                ))
+            })?;
 
-            info!(
-                self.log,
-                "determining switch slot managed by dendrite zone";
-                "zone_address" => #?addr
-            );
-            // TODO: #3599 Use retry function instead of looping on a fixed timer
-            let switch_slot = loop {
-                match mgs_client.sp_local_switch_id().await {
-                    Ok(switch) => {
-                        info!(
-                            self.log,
-                            "identified switch slot for dendrite zone";
-                            "slot" => #?switch,
-                            "zone_address" => #?addr
-                        );
-                        break switch.slot;
-                    }
-                    Err(e) => {
-                        warn!(
-                            self.log,
-                            concat!(
-                                "failed to identify switch slot for dendrite, ",
-                                "will retry in 2 seconds"
-                            );
-                            "zone_address" => #?addr,
-                            "reason" => #?e
-                        );
-                    }
-                }
-                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-            };
+        let mgs_query_futures =
+            switch_zone_addrs.iter().copied().map(|addr| async move {
+                let mgs_client = MgsClient::new(
+                    &format!("http://[{}]:{}", addr, MGS_PORT),
+                    self.log.new(o!("component" => "MgsClient")),
+                );
 
-            match switch_slot {
-                0 => {
-                    switch_zone_addrs.insert(SwitchLocation::Switch0, addr);
+                info!(
+                    self.log, "Querying MGS to determine switch location";
+                    "addr" => %addr,
+                );
+                let switch_slot = mgs_client
+                    .sp_local_switch_id()
+                    .await
+                    .with_context(|| format!("Failed to query MGS at {addr}"))?
+                    .into_inner()
+                    .slot;
+
+                match switch_slot {
+                    0 => Ok((SwitchLocation::Switch0, addr)),
+                    1 => Ok((SwitchLocation::Switch1, addr)),
+                    _ => Err(anyhow!(
+                        "Nonsense switch slot returned by MGS at \
+                         {addr}: {switch_slot}"
+                    )),
                 }
-                1 => {
-                    switch_zone_addrs.insert(SwitchLocation::Switch1, addr);
+            });
+
+        let mut switch_location_map = HashMap::new();
+        for mgs_query_result in future::join_all(mgs_query_futures).await {
+            match mgs_query_result {
+                Ok((location, addr)) => {
+                    info!(self.log, "Found {location:?} at {addr}");
+                    switch_location_map.insert(location, addr);
                 }
-                _ => {
-                    warn!(
-                        self.log,
-                        concat!(
-                            "Expected a slot number of 0 or 1, ",
-                            "found {:#?} when querying {:#?}"
-                        ),
-                        switch_slot,
-                        addr
-                    );
+                Err(err) => {
+                    warn!(self.log, "{err}");
                 }
-            };
+            }
         }
-        switch_zone_addrs
+
+        // Are we done? If we found 2 switch locations we're done (we only have
+        // at most 2 switches); we could also be done if we only have 1 switch,
+        // if internal DNS reported there is only one switch to find.
+        match switch_location_map.len() {
+            2 => Ok(LookupSwitchZoneAddrsResult::TotalSuccess(
+                switch_location_map,
+            )),
+            1 => {
+                if switch_zone_addrs.len() == 1 {
+                    Ok(LookupSwitchZoneAddrsResult::TotalSuccess(
+                        switch_location_map,
+                    ))
+                } else {
+                    Ok(LookupSwitchZoneAddrsResult::PartialSuccess(
+                        switch_location_map,
+                    ))
+                }
+            }
+            0 => Err(BackoffError::transient(
+                "No switch locations found".to_string(),
+            )),
+            _ => unreachable!(
+                "HashMap keyed on `SwitchLocation` can have at most 2 entries"
+            ),
+        }
     }
 
     // Initialize a single switch via DPD.
@@ -340,6 +393,18 @@ impl<'a> EarlyNetworkSetup<'a> {
             tokio::time::sleep(std::time::Duration::from_secs(2)).await;
         }
     }
+}
+
+// This is derived from `retry_policy_internal_service_aggressive` with a
+// much lower `max_interval`, because we are not going to retry forever: once we
+// pass `MAX_SWITCH_ZONE_WAIT_TIME` we will stop as soon as we can talk to _any_
+// switch zone (whereas we stop earlier if we can talk to _all_ switch zones).
+fn retry_policy_switch_mapping() -> ExponentialBackoff {
+    ExponentialBackoffBuilder::new()
+        .with_initial_interval(Duration::from_millis(100))
+        .with_multiplier(1.2)
+        .with_max_interval(Duration::from_secs(15))
+        .build()
 }
 
 /// Network configuration required to bring up the control plane
