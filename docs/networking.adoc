@@ -55,7 +55,7 @@ We can see:
 
 **VNICs** are virtual NICs created _over_ some other link.  These behaves as though each VNIC were plugged into the same network as that other link.  For example, suppose we create three VNICs over `cxgbe0`.  This logically looks like this:
 
-```
+```mermaid
 graph TD
     subgraph "illumos host"
         vnic1 --- vswitch1
@@ -94,7 +94,7 @@ That is: when we create three VNICs over `cxgbe0`, the system behaves as though 
 
 To make this more concrete, imagine this is on a typical home network, where the "physical switch" is a router that's also running DHCP using 192.168.0.1/24.  Now let's draw the IP interfaces in green atop these datalinks:
 
-```
+```mermaid
 graph TD
     subgraph "illumos host"
         if1 --- vnic1
@@ -144,7 +144,7 @@ As far as the physical network is concerned, it looks like there are _three_ dev
 
 **Etherstubs** are devices over which you can create VNICs that will appear connected to each other, but not to anything else.  Logically, it looks like this:
 
-```
+```mermaid
 graph TD
     subgraph "illumos host"
         vnic1 --- vswitch1
@@ -567,7 +567,7 @@ Traffic aimed at `fd00:1122:3344:104::22` will match the rule for `fd00:1122:334
 We can summarize the underlay networking configuration on a typical sled like this:
 
 ```mermaid
-graph TD;
+graph TD
     Sidecar0
     Sidecar1
     cxgbe0["cxgbe0 (phys)"]
