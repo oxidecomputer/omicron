@@ -50,8 +50,147 @@ underlay0   vnic      9000   up       --         underlay_stub0
 We can see:
 
 * Three `phys` links that correspond to physical devices.  We're interested in `cxgbe0` and `cxgbe1`, which correspond to the two ports provided by the Chelsio NIC on Gimlets.
-* Two `etherstub` devices, `bootstrap_stub0` and `underlay_stub0`.  Etherstubs function like a synthetic Ethernet network.  We can create VNICs over an etherstub and those VNICs will act as though connected through a (virtual) switch.
-* Two `vnic` devices.  VNICs function like virtualized network links created _over_ some other link.  For example, we could create two VNICs over `cxgbe0`.  Each would have its own MAC address and IP addresses and would be functionally like having another device on the same network that `cxgbe0` is plugged into.  As we'll see, a single system might have a bunch of zones, each with an Omicron component running in it, and each having a VNIC on the underlay network.
+* Two `vnic` devices, `bootstrap0` and `underlay0`.
+* Two `etherstub` devices, `bootstrap_stub0` and `underlay_stub0`.
+
+**VNICs** are virtual NICs created _over_ some other link.  These behaves as though each VNIC were plugged into the same network as that other link.  For example, suppose we create three VNICs over `cxgbe0`.  This logically looks like this:
+
+```
+graph TD
+    subgraph "illumos host"
+        vnic1 --- vswitch1
+        vnic2 --- vswitch1
+        vnic3 --- vswitch1
+        vswitch1 --- cxgbe0
+    end
+
+    cxgbe0 --- switch
+    switch --- exthost1
+    switch --- exthost2
+
+    %% Labels are defined as needed at the end here to avoid changing the layout.
+    vnic1["net1\n(vnic over cxgb0)"]
+    vnic2["net2\n(vnic over cxgb0)"]
+    vnic3["net3\n(vnic over cxgb0)"]
+    vswitch1["virtual switch"]
+    cxgbe0["cxgbe0\n(physical NIC)"]
+
+    switch["physical switch"]
+    exthost1["other host"]
+    exthost2["other host"]
+
+    classDef switch fill:#f96
+    class vswitch1 switch
+    class switch switch
+
+    classDef datalink fill:#6df
+    class vnic1 datalink
+    class vnic2 datalink
+    class vnic3 datalink
+    class cxgbe0 datalink
+```
+
+That is: when we create three VNICs over `cxgbe0`, the system behaves as though there's a virtual switch connecting these VNICs and `cxgbe0`.  Traffic flowing out `net1` destined for the MAC of either `net2` or `net3` goes directly to those VNICs.  Traffic destined for the rest of the network goes out `cxgbe0`.  Traffic incoming to `cxgbe0` is sent to the VNIC with the corresponding MAC.
+
+To make this more concrete, imagine this is on a typical home network, where the "physical switch" is a router that's also running DHCP using 192.168.0.1/24.  Now let's draw the IP interfaces in green atop these datalinks:
+
+```
+graph TD
+    subgraph "illumos host"
+        if1 --- vnic1
+        if2 --- vnic2
+        if3 --- vnic3
+        vnic1 --- vswitch1
+        vnic2 --- vswitch1
+        vnic3 --- vswitch1
+        vswitch1 --- cxgbe0
+    end
+
+    cxgbe0 --- switch
+    switch --- exthost1
+    switch --- exthost2
+
+    %% Labels are defined as needed at the end here to avoid changing the layout.
+    vnic1["net1\n(vnic over cxgb0)"]
+    vnic2["net2\n(vnic over cxgb0)"]
+    vnic3["net3\n(vnic over cxgb0)"]
+    vswitch1["virtual switch"]
+    if1["net1\n192.168.1.105"]
+    if2["net2\n192.168.1.106"]
+    if3["net3\n192.168.1.107"]
+
+    switch["physical switch"]
+    exthost1["other host\n192.168.1.102"]
+    exthost2["other host\n192.168.1.103"]
+
+    classDef switch fill:#f96
+    class vswitch1 switch
+    class switch switch
+
+    classDef if fill:#9d6
+    class if0 if
+    class if1 if
+    class if2 if
+    class if3 if
+
+    classDef datalink fill:#6df
+    class vnic1 datalink
+    class vnic2 datalink
+    class vnic3 datalink
+    class cxgbe0 datalink
+```
+
+As far as the physical network is concerned, it looks like there are _three_ devices there.  As we'll see, this allows us to put each Omicron component into its own zone with its own VNIC, IP interface, and IP address, allowing us to treat them like separate hosts whether they're deployed on the same physical system or not.
+
+**Etherstubs** are devices over which you can create VNICs that will appear connected to each other, but not to anything else.  Logically, it looks like this:
+
+```
+graph TD
+    subgraph "illumos host"
+        vnic1 --- vswitch1
+        vnic2 --- vswitch1
+        vnic3 --- vswitch1
+        vswitch1 --- etherstub
+    end
+
+    %% Labels are defined as needed at the end here to avoid changing the layout.
+    vnic1["net1\n(vnic over cxgb0)"]
+    vnic2["net2\n(vnic over cxgb0)"]
+    vnic3["net3\n(vnic over cxgb0)"]
+    vswitch1["virtual switch"]
+    etherstub["etherstub\n"]
+
+    classDef switch fill:#f96
+    class vswitch1 switch
+    class switch switch
+
+    classDef datalink fill:#6df
+    class vnic1 datalink
+    class vnic2 datalink
+    class vnic3 datalink
+    class etherstub datalink
+```
+
+Going back to the `dladm` output from our example above:
+
+[source,console]
+----
+BRM44220011 # dladm
+LINK        CLASS     MTU    STATE    BRIDGE     OVER
+tfpkt0      phys      1500   down     --         --
+cxgbe0      phys      9000   up       --         --
+cxgbe1      phys      9000   up       --         --
+bootstrap_stub0 etherstub 9000 up     --         --
+bootstrap0  vnic      1500   up       --         bootstrap_stub0
+underlay_stub0 etherstub 9000 up      --         --
+underlay0   vnic      9000   up       --         underlay_stub0
+----
+
+We see now that we have:
+
+* the three physical devices mentioned earlier
+* an etherstub `underlay_stub0` with a VNIC `underlay0` over it
+* an etherstub `bootstrap_stub0` with a VNIC `boostrap0` over it
 
 We'll discuss these in more detail later.  There are also many other kinds of links and commands to list specific types.  See the manual page for more details.
 
