@@ -392,7 +392,19 @@ impl Node {
                     return;
                 };
                 // Remove any existing connection
-                self.remove_accepted_connection(&addr).await;
+                if let Some(handle) = self.accepted_connections.remove(&addr) {
+                    info!(
+                        self.log,
+                        concat!(
+                            "Removing acccepted connection from {}: ",
+                            "new connection accepted from same address"
+                        ),
+                        addr
+                    );
+
+                    // The connection has not yet completed its handshake
+                    let _ = handle.tx.send(MainToConnMsg::Close).await;
+                }
                 info!(self.log, "Accepted connection from {addr}");
                 self.handle_unique_id_counter += 1;
                 let handle = spawn_accepted_connection_management_task(
@@ -765,9 +777,12 @@ impl Node {
                     return;
                 };
 
-                // Ignore the stale message if the unique_id doesn't match what
-                // we have stored.
+                // Put back the non-matching connection we removed
+                // The received message is stale, so we return.
                 if unique_id != accepted_handle.unique_id {
+                    self.accepted_connections
+                        .insert(accepted_addr, accepted_handle);
+
                     return;
                 }
 
@@ -803,9 +818,10 @@ impl Node {
             ConnToMainMsgInner::ConnectedInitiator { addr, peer_id } => {
                 if let Some(handle) = self.initiating_connections.remove(&addr)
                 {
-                    // Ignore the stale message if the unique_id doesn't match what
-                    // we have stored.
+                    // Put back the non-matching connection we removed
+                    // The received message is stale, so we return.
                     if unique_id != handle.unique_id {
+                        self.initiating_connections.insert(addr, handle);
                         return;
                     }
 
@@ -859,8 +875,10 @@ impl Node {
                 warn!(self.log, "peer disconnected {peer_id}");
                 let handle =
                     self.established_connections.remove(&peer_id).unwrap();
-                if peer_id < self.config.id {
-                    // Put the connection handle back in initiating state
+                // We always connect to peers lower than ourselves, and the
+                // connecting task never exits, it just loops. Therefore we know
+                // that we are initiating this connection again.
+                if handle.addr < self.config.addr {
                     self.initiating_connections.insert(handle.addr, handle);
                 }
                 self.fsm.on_disconnected(&peer_id);
@@ -943,13 +961,6 @@ impl Node {
         // Remove each peer that we no longer need a connection to
         for addr in peers_to_remove {
             self.remove_peer(addr).await;
-        }
-    }
-
-    async fn remove_accepted_connection(&mut self, addr: &SocketAddrV6) {
-        if let Some(handle) = self.accepted_connections.remove(&addr) {
-            // The connection has not yet completed its handshake
-            let _ = handle.tx.send(MainToConnMsg::Close).await;
         }
     }
 
