@@ -898,7 +898,7 @@ impl ServiceInner {
                 get_sled_address(initialization_request.subnet)
             })
             .collect();
-        let mut service_plan = if let Some(plan) =
+        let service_plan = if let Some(plan) =
             ServicePlan::load(&self.log, storage_resources).await?
         {
             plan
@@ -923,42 +923,6 @@ impl ServiceInner {
         let switch_mgmt_addrs = EarlyNetworkSetup::new(&self.log)
             .lookup_switch_zone_addrs(&resolver)
             .await;
-
-        if let Some(rack_network_config) = &config.rack_network_config {
-            // `boundary_switch_addrs` contains the switch zone addrs for
-            // managing switches that are configured with uplinks.
-            let mut boundary_switch_addrs: HashSet<Ipv6Addr> = HashSet::new();
-            for uplink_config in &rack_network_config.uplinks {
-                let zone_addr = switch_mgmt_addrs
-                    .get(&uplink_config.switch)
-                    .ok_or_else(|| {
-                        SetupServiceError::BadConfig(format!(
-                            "No switch zone found for uplink switch {:?}",
-                            uplink_config.switch
-                        ))
-                    })?;
-                boundary_switch_addrs.insert(*zone_addr);
-            }
-
-            // Inject boundary_switch_addrs into ServiceZoneRequests
-            // When the opte interface is created for the service,
-            // nat entries will be created using the switches present here
-            let switch_addrs: Vec<Ipv6Addr> =
-                Vec::from_iter(boundary_switch_addrs);
-            for (_, request) in &mut service_plan.services {
-                for zone_request in &mut request.services {
-                    // Do not modify any services that have already been
-                    // deployed
-                    if zone_types.contains(&zone_request.zone_type) {
-                        continue;
-                    }
-
-                    zone_request
-                        .boundary_switches
-                        .extend_from_slice(&switch_addrs);
-                }
-            }
-        }
 
         // Next start up the NTP services.
         // Note we also specify internal DNS services again because it

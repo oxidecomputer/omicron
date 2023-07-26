@@ -591,8 +591,6 @@ pub struct ServiceZoneRequest {
     pub dataset: Option<DatasetRequest>,
     // Services that should be run in the zone
     pub services: Vec<ServiceZoneService>,
-    // Switch addresses for SNAT configuration, if required
-    pub boundary_switches: Vec<Ipv6Addr>,
 }
 
 impl ServiceZoneRequest {
@@ -640,7 +638,6 @@ impl TryFrom<ServiceZoneRequest>
             addresses: s.addresses,
             dataset: s.dataset.map(|d| d.into()),
             services,
-            boundary_switches: s.boundary_switches,
         })
     }
 }

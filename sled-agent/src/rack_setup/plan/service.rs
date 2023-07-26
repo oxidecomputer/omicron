@@ -347,7 +347,6 @@ impl Plan {
                         gz_address_index: i.try_into().expect("Giant indices?"),
                     },
                 }],
-                boundary_switches: vec![],
             });
         }
 
@@ -381,7 +380,6 @@ impl Plan {
                     id,
                     details: ServiceType::CockroachDb { address },
                 }],
-                boundary_switches: vec![],
             });
         }
 
@@ -433,7 +431,6 @@ impl Plan {
                         nic,
                     },
                 }],
-                boundary_switches: vec![],
             });
         }
 
@@ -481,7 +478,6 @@ impl Plan {
                         external_dns_servers: config.dns_servers.clone(),
                     },
                 }],
-                boundary_switches: vec![],
             })
         }
 
@@ -519,7 +515,6 @@ impl Plan {
                         ),
                     },
                 }],
-                boundary_switches: vec![],
             })
         }
 
@@ -554,7 +549,6 @@ impl Plan {
                     id,
                     details: ServiceType::Clickhouse { address },
                 }],
-                boundary_switches: vec![],
             });
         }
 
@@ -584,7 +578,6 @@ impl Plan {
                         address: SocketAddrV6::new(address, port, 0, 0),
                     },
                 }],
-                boundary_switches: vec![],
             })
         }
 
@@ -621,7 +614,6 @@ impl Plan {
                         id,
                         details: ServiceType::Crucible { address },
                     }],
-                    boundary_switches: vec![],
                 });
             }
         }
@@ -675,7 +667,6 @@ impl Plan {
                 addresses: vec![address],
                 dataset: None,
                 services,
-                boundary_switches: vec![],
             });
         }
 

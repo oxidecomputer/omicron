@@ -344,14 +344,6 @@ impl SledAgent {
 
         let svc_config =
             services::Config::new(request.id, config.sidecar_revision.clone());
-        services
-            .sled_agent_started(
-                svc_config,
-                port_manager.clone(),
-                *sled_address.ip(),
-                request.rack_id,
-            )
-            .await?;
 
         // Get our rack network config from the bootstore; we cannot proceed
         // until we have this, as we need to know which switches have uplinks to
@@ -392,6 +384,14 @@ impl SledAgent {
              network config from bootstore",
             );
 
+        services.sled_agent_started(
+            svc_config,
+            port_manager.clone(),
+            *sled_address.ip(),
+            request.rack_id,
+            rack_network_config.clone(),
+        )?;
+
         let sled_agent = SledAgent {
             inner: Arc::new(SledAgentInner {
                 id: request.id,
@@ -411,7 +411,7 @@ impl SledAgent {
                 // Also, we could maybe de-dup some of the backoff code in the
                 // request queue?
                 nexus_request_queue: NexusRequestQueue::new(),
-                rack_network_config: rack_network_config.clone(),
+                rack_network_config,
             }),
             log: log.clone(),
         };
@@ -433,11 +433,7 @@ impl SledAgent {
         //
         // Do this *after* monitoring for harware, to enable the switch zone to
         // establish an underlay address before proceeding.
-        sled_agent
-            .inner
-            .services
-            .load_services(rack_network_config.as_ref())
-            .await?;
+        sled_agent.inner.services.load_services().await?;
 
         // Now that we've initialized the sled services, notify nexus again
         // at which point it'll plumb any necessary firewall rules back to us.
@@ -710,10 +706,7 @@ impl SledAgent {
 
         self.inner
             .services
-            .ensure_all_services_persistent(
-                requested_services,
-                self.inner.rack_network_config.as_ref(),
-            )
+            .ensure_all_services_persistent(requested_services)
             .await?;
         Ok(())
     }

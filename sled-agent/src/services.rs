@@ -414,6 +414,7 @@ struct SledAgentInfo {
     resolver: Resolver,
     underlay_address: Ipv6Addr,
     rack_id: Uuid,
+    rack_network_config: Option<RackNetworkConfig>,
 }
 
 #[derive(Clone)]
@@ -541,10 +542,7 @@ impl ServiceManager {
     // These will fail if the disks aren't attached.
     // Should we have a retry loop here? Kinda like we have with the switch
     // / NTP zone?
-    pub async fn load_services(
-        &self,
-        rack_network_config: Option<&RackNetworkConfig>,
-    ) -> Result<(), Error> {
+    pub async fn load_services(&self) -> Result<(), Error> {
         let log = &self.inner.log;
         let ledger_paths = self.all_service_ledgers().await;
         info!(log, "Loading services from: {ledger_paths:?}");
@@ -561,7 +559,10 @@ impl ServiceManager {
         let services = ledger.data_mut();
 
         // Initialize internal DNS only first: we need it to look up the
-        // boundary switch addresses.
+        // boundary switch addresses. This dependency is implicit: when we call
+        // `ensure_all_services` below, we eventually land in
+        // `opte_ports_needed()`, which for some service types (including Ntp
+        // but _not_ including InternalDns), we perform internal DNS lookups.
         let all_zones_request = self
             .ensure_all_services(
                 &mut existing_zones,
@@ -580,33 +581,8 @@ impl ServiceManager {
                         .map(|zone_request| zone_request.zone)
                         .collect(),
                 },
-                // Internal DNS does not need boundary switch zone addrs, and we
-                // _use_ it to find them for every other service.
-                &HashSet::default(),
             )
             .await?;
-
-        drop(existing_zones);
-
-        // With internal DNS running, look up the switch zone addresses.
-        let boundary_switch_addrs = if let Some(rack_network_config) =
-            rack_network_config
-        {
-            let resolver = &self
-                .inner
-                .sled_info
-                .get()
-                .ok_or(Error::SledAgentNotReady)?
-                .resolver;
-
-            EarlyNetworkSetup::new(&self.inner.log)
-                .lookup_boundary_switch_addrs(resolver, &rack_network_config)
-                .await
-        } else {
-            HashSet::new()
-        };
-
-        let mut existing_zones = self.inner.zones.lock().await;
 
         // Initialize NTP services next as they are required for time
         // synchronization, which is a pre-requisite for the other services. We
@@ -630,7 +606,6 @@ impl ServiceManager {
                         .map(|zone_request| zone_request.zone)
                         .collect(),
                 },
-                &boundary_switch_addrs,
             )
             .await?;
 
@@ -682,7 +657,6 @@ impl ServiceManager {
                     .map(|zone_request| zone_request.zone)
                     .collect(),
             },
-            &boundary_switch_addrs,
         )
         .await?;
         Ok(())
@@ -691,12 +665,13 @@ impl ServiceManager {
     /// Sets up "Sled Agent" information, including underlay info.
     ///
     /// Any subsequent calls after the first invocation return an error.
-    pub async fn sled_agent_started(
+    pub fn sled_agent_started(
         &self,
         config: Config,
         port_manager: PortManager,
         underlay_address: Ipv6Addr,
         rack_id: Uuid,
+        rack_network_config: Option<RackNetworkConfig>,
     ) -> Result<(), Error> {
         info!(&self.inner.log, "sled agent started"; "underlay_address" => underlay_address.to_string());
         self.inner
@@ -710,6 +685,7 @@ impl ServiceManager {
                 )?,
                 underlay_address,
                 rack_id,
+                rack_network_config,
             })
             .map_err(|_| "already set".to_string())
             .expect("Sled Agent should only start once");
@@ -869,11 +845,30 @@ impl ServiceManager {
             return Ok(vec![]);
         }
 
-        let SledAgentInfo { port_manager, underlay_address, .. } =
-            &self.inner.sled_info.get().ok_or(Error::SledAgentNotReady)?;
+        let SledAgentInfo {
+            port_manager,
+            underlay_address,
+            resolver,
+            rack_network_config,
+            ..
+        } = &self.inner.sled_info.get().ok_or(Error::SledAgentNotReady)?;
 
-        let dpd_clients: Vec<DpdClient> = req
-            .boundary_switches
+        let Some(rack_network_config) = rack_network_config.as_ref() else {
+            // If we're in a test/dev environments with no uplinks, we have
+            // nothing to do; print a warning in the (hopefully unlikely) event
+            // we land here on a real rack.
+            warn!(
+                self.inner.log,
+                "No rack network config present; skipping OPTE NAT config",
+            );
+            return Ok(vec![]);
+        };
+
+        let boundary_switches = EarlyNetworkSetup::new(&self.inner.log)
+            .lookup_boundary_switch_addrs(resolver, rack_network_config)
+            .await;
+
+        let dpd_clients: Vec<DpdClient> = boundary_switches
             .iter()
             .map(|addr| {
                 DpdClient::new(
@@ -2524,35 +2519,8 @@ impl ServiceManager {
     pub async fn ensure_all_services_persistent(
         &self,
         request: ServiceEnsureBody,
-        rack_network_config: Option<&RackNetworkConfig>,
     ) -> Result<(), Error> {
         let log = &self.inner.log;
-
-        let boundary_switch_addrs = match rack_network_config {
-            None => HashSet::new(),
-            Some(rack_network_config)
-                if rack_network_config.uplinks.is_empty() =>
-            {
-                HashSet::new()
-            }
-            Some(rack_network_config) => {
-                // We have at least one uplink; we need to find the
-                // corresponding switch IP addr(s) to configure our boundary
-                // NAT.
-                let resolver = &self
-                    .inner
-                    .sled_info
-                    .get()
-                    .ok_or(Error::SledAgentNotReady)?
-                    .resolver;
-                EarlyNetworkSetup::new(&self.inner.log)
-                    .lookup_boundary_switch_addrs(
-                        resolver,
-                        &rack_network_config,
-                    )
-                    .await
-            }
-        };
 
         let mut existing_zones = self.inner.zones.lock().await;
 
@@ -2576,7 +2544,6 @@ impl ServiceManager {
                 &mut existing_zones,
                 ledger_zone_requests,
                 request,
-                &boundary_switch_addrs,
             )
             .await?;
 
@@ -2597,7 +2564,6 @@ impl ServiceManager {
         existing_zones: &mut MutexGuard<'_, BTreeMap<String, RunningZone>>,
         old_request: &AllZoneRequests,
         request: ServiceEnsureBody,
-        boundary_switch_addrs: &HashSet<Ipv6Addr>,
     ) -> Result<AllZoneRequests, Error> {
         let log = &self.inner.log;
 
@@ -2672,12 +2638,6 @@ impl ServiceManager {
                 .choose(&mut rng)
                 .ok_or_else(|| Error::U2NotFound)?
                 .clone();
-
-            // Inject boundary_switch_addrs into ServiceZoneRequests. When the opte
-            // interface is created for the service, nat entries will be created
-            // using the switches present here
-            let mut zone = zone.clone();
-            zone.boundary_switches.extend(boundary_switch_addrs.iter());
 
             zone_requests
                 .requests
@@ -2921,7 +2881,6 @@ impl ServiceManager {
                 .into_iter()
                 .map(|s| ServiceZoneService { id: Uuid::new_v4(), details: s })
                 .collect(),
-            boundary_switches: vec![],
         };
 
         self.ensure_zone(
@@ -3423,29 +3382,25 @@ mod test {
     async fn ensure_new_service(mgr: &ServiceManager, id: Uuid) {
         let _expectations = expect_new_service();
 
-        mgr.ensure_all_services_persistent(
-            ServiceEnsureBody {
-                services: vec![ServiceZoneRequest {
+        mgr.ensure_all_services_persistent(ServiceEnsureBody {
+            services: vec![ServiceZoneRequest {
+                id,
+                zone_type: ZoneType::Oximeter,
+                addresses: vec![Ipv6Addr::LOCALHOST],
+                dataset: None,
+                services: vec![ServiceZoneService {
                     id,
-                    zone_type: ZoneType::Oximeter,
-                    addresses: vec![Ipv6Addr::LOCALHOST],
-                    dataset: None,
-                    services: vec![ServiceZoneService {
-                        id,
-                        details: ServiceType::Oximeter {
-                            address: SocketAddrV6::new(
-                                Ipv6Addr::LOCALHOST,
-                                OXIMETER_PORT,
-                                0,
-                                0,
-                            ),
-                        },
-                    }],
-                    boundary_switches: vec![],
+                    details: ServiceType::Oximeter {
+                        address: SocketAddrV6::new(
+                            Ipv6Addr::LOCALHOST,
+                            OXIMETER_PORT,
+                            0,
+                            0,
+                        ),
+                    },
                 }],
-            },
-            None,
-        )
+            }],
+        })
         .await
         .unwrap();
     }
@@ -3453,29 +3408,25 @@ mod test {
     // Prepare to call "ensure" for a service which already exists. We should
     // return the service without actually installing a new zone.
     async fn ensure_existing_service(mgr: &ServiceManager, id: Uuid) {
-        mgr.ensure_all_services_persistent(
-            ServiceEnsureBody {
-                services: vec![ServiceZoneRequest {
+        mgr.ensure_all_services_persistent(ServiceEnsureBody {
+            services: vec![ServiceZoneRequest {
+                id,
+                zone_type: ZoneType::Oximeter,
+                addresses: vec![Ipv6Addr::LOCALHOST],
+                dataset: None,
+                services: vec![ServiceZoneService {
                     id,
-                    zone_type: ZoneType::Oximeter,
-                    addresses: vec![Ipv6Addr::LOCALHOST],
-                    dataset: None,
-                    services: vec![ServiceZoneService {
-                        id,
-                        details: ServiceType::Oximeter {
-                            address: SocketAddrV6::new(
-                                Ipv6Addr::LOCALHOST,
-                                OXIMETER_PORT,
-                                0,
-                                0,
-                            ),
-                        },
-                    }],
-                    boundary_switches: vec![],
+                    details: ServiceType::Oximeter {
+                        address: SocketAddrV6::new(
+                            Ipv6Addr::LOCALHOST,
+                            OXIMETER_PORT,
+                            0,
+                            0,
+                        ),
+                    },
                 }],
-            },
-            None,
-        )
+            }],
+        })
         .await
         .unwrap();
     }
@@ -3588,8 +3539,8 @@ mod test {
             port_manager,
             Ipv6Addr::LOCALHOST,
             Uuid::new_v4(),
+            None,
         )
-        .await
         .unwrap();
 
         let id = Uuid::new_v4();
@@ -3634,8 +3585,8 @@ mod test {
             port_manager,
             Ipv6Addr::LOCALHOST,
             Uuid::new_v4(),
+            None,
         )
-        .await
         .unwrap();
 
         let id = Uuid::new_v4();
@@ -3683,8 +3634,8 @@ mod test {
             port_manager,
             Ipv6Addr::LOCALHOST,
             Uuid::new_v4(),
+            None,
         )
-        .await
         .unwrap();
 
         let id = Uuid::new_v4();
@@ -3720,8 +3671,8 @@ mod test {
             port_manager,
             Ipv6Addr::LOCALHOST,
             Uuid::new_v4(),
+            None,
         )
-        .await
         .unwrap();
 
         drop_service_manager(mgr);
@@ -3766,8 +3717,8 @@ mod test {
             port_manager,
             Ipv6Addr::LOCALHOST,
             Uuid::new_v4(),
+            None,
         )
-        .await
         .unwrap();
 
         let id = Uuid::new_v4();
@@ -3808,8 +3759,8 @@ mod test {
             port_manager,
             Ipv6Addr::LOCALHOST,
             Uuid::new_v4(),
+            None,
         )
-        .await
         .unwrap();
 
         drop_service_manager(mgr);
