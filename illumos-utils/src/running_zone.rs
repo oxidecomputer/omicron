@@ -12,6 +12,8 @@ use crate::svc::wait_for_service;
 use crate::zone::{AddressRequest, IPADM, ZONE_PREFIX};
 use camino::{Utf8Path, Utf8PathBuf};
 use ipnetwork::IpNetwork;
+#[cfg(target_os = "illumos")]
+use libc::pid_t;
 use omicron_common::backoff;
 use slog::error;
 use slog::info;
@@ -163,7 +165,7 @@ mod zenter {
     use std::ffi::c_uint;
     use std::ffi::{CStr, CString};
     use std::fs::File;
-    use std::io::{Read, Seek, SeekFrom};
+    use std::os::unix::prelude::FileExt;
     use std::process;
 
     #[link(name = "contract")]
@@ -182,6 +184,18 @@ mod zenter {
         pub fn zone_enter(zid: zoneid_t) -> c_int;
     }
 
+    #[derive(thiserror::Error, Debug)]
+    pub enum AbandonContractError {
+        #[error("Error opening file {file}: {error}")]
+        Open { file: String, error: std::io::Error },
+
+        #[error("Error abandoning contract {ctid}: {error}")]
+        Abandon { ctid: ctid_t, error: std::io::Error },
+
+        #[error("Error closing file {file}: {error}")]
+        Close { file: String, error: std::io::Error },
+    }
+
     pub fn get_contract(pid: pid_t) -> std::io::Result<ctid_t> {
         // The offset of "id_t pr_contract" in struct psinfo which is an
         // interface documented in proc(5).
@@ -189,22 +203,39 @@ mod zenter {
 
         let path = format!("/proc/{}/psinfo", pid);
 
-        let mut file = File::open(path)?;
-        file.seek(SeekFrom::Start(CONTRACT_OFFSET))?;
+        let file = File::open(path)?;
         let mut buffer = [0; 4];
-        file.read_exact(&mut buffer)?;
+        file.read_exact_at(&mut buffer, CONTRACT_OFFSET)?;
         Ok(ctid_t::from_ne_bytes(buffer))
     }
 
-    pub fn abandon_contract(ctid: ctid_t) {
+    pub fn abandon_contract(ctid: ctid_t) -> Result<(), AbandonContractError> {
         let path = format!("/proc/{}/contracts/{}/ctl", process::id(), ctid);
 
-        let cpath = CString::new(path).unwrap();
+        let cpath = CString::new(path.clone()).unwrap();
         let fd = unsafe { libc::open(cpath.as_ptr(), libc::O_WRONLY) };
-        if fd >= 0 {
-            unsafe { ct_ctl_abandon(fd) };
-            unsafe { libc::close(fd) };
+        if fd < 0 {
+            return Err(AbandonContractError::Open {
+                file: path,
+                error: std::io::Error::last_os_error(),
+            });
         }
+        let ret = unsafe { ct_ctl_abandon(fd) };
+        if ret != 0 {
+            unsafe { libc::close(fd) };
+            return Err(AbandonContractError::Abandon {
+                ctid,
+                error: std::io::Error::from_raw_os_error(ret),
+            });
+        }
+        if unsafe { libc::close(fd) } != 0 {
+            return Err(AbandonContractError::Close {
+                file: path,
+                error: std::io::Error::last_os_error(),
+            });
+        }
+
+        Ok(())
     }
 
     // A Rust wrapper around the process contract template.
@@ -359,7 +390,10 @@ impl RunningZone {
         // just created from the template that we applied to this thread
         // moments ago. We need to abandon it once the child is finished
         // executing.
-        let contract = zenter::get_contract(child.id().try_into().unwrap());
+        // unwrap() safety - child.id() returns u32 but pid_t is i32.
+        // PID_MAX is 999999 so this will not overflow.
+        let child_pid: pid_t = child.id().try_into().unwrap();
+        let contract = zenter::get_contract(child_pid);
 
         // Capture the result, and be sure to clear the template for this
         // process itself before returning.
@@ -369,8 +403,22 @@ impl RunningZone {
         template.clear();
 
         // Now abandon the contract that was used for the child.
-        if let Ok(ctid) = contract {
-            zenter::abandon_contract(ctid);
+        match contract {
+            Err(e) => error!(
+                self.inner.log,
+                "Could not retrieve contract for pid {}: {}", child_pid, e
+            ),
+            Ok(ctid) => {
+                if let Err(e) = zenter::abandon_contract(ctid) {
+                    error!(
+                        self.inner.log,
+                        "Failed to abandon contract {} for pid {}: {}",
+                        ctid,
+                        child_pid,
+                        e
+                    );
+                }
+            }
         }
 
         res.map(|output| String::from_utf8_lossy(&output.stdout).to_string())
