@@ -32,10 +32,11 @@ fn parse_log_level(s: &str) -> anyhow::Result<Level> {
 struct Cli {
     /// URL to access CockroachDB
     // TODO: Set a default that makes this a little easier to use?
+    #[arg(long = "crdb")]
     url: PostgresConfigWithUrl,
 
     /// Path to schema changes
-    #[arg(default_value_t = Utf8PathBuf::from("/var/nexus/schema/crdb"))]
+    #[arg(short = 's', long, default_value_t = Utf8PathBuf::from("/var/nexus/schema/crdb"))]
     schema_directory: Utf8PathBuf,
 
     /// The log level for the command.
