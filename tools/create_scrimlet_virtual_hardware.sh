@@ -47,7 +47,7 @@ function ensure_uplink_vnic {
 
 function ensure_softnpu_zone {
     zoneadm list | grep -q sidecar_softnpu || {
-        out/softnpu/npuzone create sidecar \
+        out/npuzone/npuzone create sidecar \
             --omicron-zone \
             --ports $TFP0,tfportrear0_0 \
             --ports $TFP1,tfportrear1_0 \
@@ -55,6 +55,7 @@ function ensure_softnpu_zone {
             --ports $TFP3,tfportrear3_0 \
             --ports up0,tfportqsfp0_0
     }
+    $SOURCE_DIR/scrimlet/softnpu-init.sh
     success "softnpu zone exists"
 }
 

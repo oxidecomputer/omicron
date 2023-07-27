@@ -8,7 +8,6 @@
 # printed. The user is responsible for deleting these entirely.
 
 set -u
-set -x
 
 SOURCE_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 cd "${SOURCE_DIR}/.."
@@ -32,7 +31,7 @@ function try_remove_vnics {
 }
 
 function remove_softnpu_zone {
-    out/softnpu/npuzone destroy sidecar \
+    out/npuzone/npuzone destroy sidecar \
         --omicron-zone \
         --ports $TFP0,tfportrear0_0 \
         --ports $TFP1,tfportrear1_0 \
