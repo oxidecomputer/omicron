@@ -138,6 +138,19 @@ pub struct DataStore {
 // to compilation times; changing a query only requires incremental
 // recompilation of that query's module instead of all queries on `DataStore`.
 impl DataStore {
+    /// Constructs a new Datastore object, without any version validation.
+    ///
+    /// Ignores the underlying DB version. Should be used with caution, as usage
+    /// of this method can result in incompatible schemas.
+    pub fn new_unchecked(pool: Arc<Pool>) -> Result<Self, String> {
+        let datastore = DataStore {
+            pool,
+            virtual_provisioning_collection_producer:
+                crate::provisioning::Producer::new(),
+        };
+        Ok(datastore)
+    }
+
     /// Constructs a new Datastore object.
     ///
     /// Only returns if the database schema is compatible with Nexus's known
@@ -147,11 +160,7 @@ impl DataStore {
         pool: Arc<Pool>,
         config: Option<&SchemaConfig>,
     ) -> Result<Self, String> {
-        let datastore = DataStore {
-            pool,
-            virtual_provisioning_collection_producer:
-                crate::provisioning::Producer::new(),
-        };
+        let datastore = Self::new_unchecked(pool)?;
 
         // Keep looping until we find that the schema matches our expectation.
         const EXPECTED_VERSION: SemverVersion =

@@ -106,6 +106,13 @@ impl DataStore {
                 config.schema_dir.display()
             ));
         }
+        // TODO: Test this?
+        if !all_versions.contains(&desired_version) {
+            return Err(format!(
+                "Target DB version {desired_version} was not found in {}",
+                config.schema_dir.display()
+            ));
+        }
 
         let target_versions = all_versions.range((
             Bound::Excluded(&current_version),
