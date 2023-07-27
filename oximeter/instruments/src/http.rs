@@ -11,6 +11,7 @@ use dropshot::{
 };
 use futures::Future;
 use http::StatusCode;
+use http::Uri;
 use oximeter::histogram::Histogram;
 use oximeter::{Metric, MetricsError, Producer, Sample, Target};
 use std::collections::BTreeMap;
@@ -36,6 +37,12 @@ pub struct RequestLatencyHistogram {
     pub latency: Histogram<f64>,
 }
 
+// Return the route portion of the request, normalized to include a single
+// leading slash and no trailing slashes.
+fn normalized_uri_path(uri: &Uri) -> String {
+    format!("/{}", uri.path().trim_end_matches('/').trim_start_matches('/'))
+}
+
 impl RequestLatencyHistogram {
     /// Build a new `RequestLatencyHistogram` with a specified histogram.
     ///
@@ -46,7 +53,7 @@ impl RequestLatencyHistogram {
         histogram: Histogram<f64>,
     ) -> Self {
         Self {
-            route: request.uri().path().to_string(),
+            route: normalized_uri_path(request.uri()),
             method: request.method().to_string(),
             status_code: status_code.as_u16().into(),
             latency: histogram,
@@ -77,7 +84,7 @@ impl RequestLatencyHistogram {
     fn key_for(request: &RequestInfo, status_code: StatusCode) -> String {
         format!(
             "{}:{}:{}",
-            request.uri().path(),
+            normalized_uri_path(request.uri()),
             request.method(),
             status_code.as_u16()
         )
@@ -239,5 +246,22 @@ mod tests {
         assert_eq!(actual_hist.n_samples(), 1);
         let bins = actual_hist.iter().collect::<Vec<_>>();
         assert_eq!(bins[1].count, 1);
+    }
+
+    #[test]
+    fn test_normalize_uri_path() {
+        const EXPECTED: &str = "/foo/bar";
+        const TESTS: &[&str] = &[
+            "/foo/bar",
+            "/foo/bar/",
+            "//foo/bar",
+            "//foo/bar/",
+            "/foo/bar//",
+            "////foo/bar/////",
+        ];
+        for test in TESTS.iter() {
+            println!("{test}");
+            assert_eq!(normalized_uri_path(&test.parse().unwrap()), EXPECTED);
+        }
     }
 }
