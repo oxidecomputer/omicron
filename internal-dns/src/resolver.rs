@@ -201,27 +201,16 @@ impl Resolver {
         // SRV records have a target, which is itself another DNS name that
         // needs to be looked up in order to get to the actual IP addresses.
         // Many DNS servers return these IP addresses directly in the response
-        // to the SRV query as Additional records.  Ours does not.  See
-        // omicron#3434.  So we need to do another round of lookups separately.
+        // to the SRV query as Additional records.  Ours does as well.
+        // Unfortunately, trust-dns does not properly handle multiple targets.
+        //
+        // So we need to do another round of lookups separately.
         //
         // According to the docs` for
         // `trust_dns_resolver::lookup::SrvLookup::ip_iter()`, it sounds like
-        // trust-dns would have done this for us.  It doesn't.  See
-        // bluejekyll/trust-dns#1980.
+        // trust-dns would have done this for us.  It doesn't.
         //
-        // So if we have gotten any IPs, then we assume that one of the above
-        // issues has been addressed and so we have all the IPs and we're done.
-        // Otherwise, explicitly do the extra lookups.
-        let addresses: Vec<Ipv6Addr> = response
-            .ip_iter()
-            .filter_map(|addr| match addr {
-                IpAddr::V4(_) => None,
-                IpAddr::V6(addr) => Some(addr),
-            })
-            .collect();
-        if !addresses.is_empty() {
-            return Ok(addresses);
-        }
+        // See bluejekyll/trust-dns#1980.
 
         // What do we do if some of these queries succeed while others fail?  We
         // may have some addresses, but the list might be incomplete.  That
