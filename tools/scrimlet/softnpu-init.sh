@@ -19,9 +19,15 @@ if [[ ! -v GATEWAY_MAC ]]; then
     sleep 1
 fi
 
-# Gateway mac is determined automatically by inspecting the arp table on the development machine
-# Can be overridden by setting GATEWAY_MAC
-GATEWAY_MAC=${GATEWAY_MAC:=$(arp "$GATEWAY_IP" | awk -F ' ' '{print $4}')}
+# Gateway mac is determined automatically by inspecting the arp table on the
+# development machine. Can be overridden by setting GATEWAY_MAC
+# TODO arp without -a seems broken on illumos
+#   $ arp 192.168.21.1
+#   192.168.21.1 (192.168.21.1) -- no entry
+
+#   $ arp -a | grep 192.168.21.1
+#   e1000g1 192.168.21.1         255.255.255.255          90:ec:77:2e:70:27
+GATEWAY_MAC=${GATEWAY_MAC:=$(arp -a | grep "$GATEWAY_IP" | awk -F ' ' '{print $4}')}
 echo "Using $GATEWAY_MAC as gateway mac"
 
 z_scadm () {
