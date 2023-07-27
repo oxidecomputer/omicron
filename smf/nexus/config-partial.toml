@@ -18,8 +18,11 @@ mode = "file"
 path = "/dev/stdout"
 if_exists = "append"
 
-[schema]
-schema_dir = "/var/nexus/schema/crdb"
+# TODO: Uncomment the following lines to enable automatic schema
+# migration on boot.
+#
+# [schema]
+# schema_dir = "/var/nexus/schema/crdb"
 
 [background_tasks]
 dns_internal.period_secs_config = 60
