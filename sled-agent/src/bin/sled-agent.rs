@@ -122,9 +122,9 @@ async fn do_run() -> Result<(), CmdError> {
                     // If the rack has already been initialized, we shouldn't
                     // abandon the server.
                     Ok(_)
-                        | Err(
-                            bootstrap_agent::RssAccessError::AlreadyInitialized,
-                        ) => {}
+                    | Err(
+                        bootstrap_agent::RssAccessError::AlreadyInitialized,
+                    ) => {}
                     Err(e) => {
                         return Err(CmdError::Failure(e.to_string()));
                     }
