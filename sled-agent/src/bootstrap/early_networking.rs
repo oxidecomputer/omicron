@@ -122,7 +122,15 @@ impl<'a> EarlyNetworkSetup<'a> {
                     .lookup_switch_zone_underlay_addrs_one_attempt(resolver)
                     .await?
                 {
-                    LookupSwitchZoneAddrsResult::TotalSuccess(map) => Ok(map),
+                    LookupSwitchZoneAddrsResult::TotalSuccess(map) => {
+                        info!(
+                            self.log,
+                            "Successfully looked up all expected switch zone \
+                             underlay addresses";
+                            "addrs" => ?map,
+                        );
+                        Ok(map)
+                    }
                     LookupSwitchZoneAddrsResult::PartialSuccess(map) => {
                         let elapsed = query_start.elapsed();
                         if elapsed >= MAX_SWITCH_ZONE_WAIT_TIME {
