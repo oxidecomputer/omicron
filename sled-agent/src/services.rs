@@ -865,7 +865,10 @@ impl ServiceManager {
         };
 
         let boundary_switches = EarlyNetworkSetup::new(&self.inner.log)
-            .lookup_boundary_switch_addrs(resolver, rack_network_config)
+            .lookup_uplinked_switch_zone_underlay_addrs(
+                resolver,
+                rack_network_config,
+            )
             .await;
 
         let dpd_clients: Vec<DpdClient> = boundary_switches
