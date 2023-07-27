@@ -73,7 +73,8 @@ impl<'a> EarlyNetworkSetup<'a> {
         resolver: &DnsResolver,
         config: &RackNetworkConfig,
     ) -> HashSet<Ipv6Addr> {
-        let switch_zone_addrs = self.lookup_switch_zone_addrs(resolver).await;
+        let switch_zone_addrs =
+            self.lookup_switch_zone_underlay_addrs(resolver).await;
         let mut boundary_switch_addrs = HashSet::new();
 
         for uplink_config in &config.uplinks {
@@ -95,16 +96,16 @@ impl<'a> EarlyNetworkSetup<'a> {
         }
 
         // TODO-correctness: Could `boundary_switch_addrs` be _empty_ here?
-        // `lookup_switch_zone_addrs` does not return unless it finds at least
-        // one switch location, so the only way this could happen is if there
-        // are no uplinks configured at all, or there are only uplinks
+        // `lookup_switch_zone_underlay_addrs` does not return unless it finds
+        // at least one switch location, so the only way this could happen is if
+        // there are no uplinks configured at all, or there are only uplinks
         // configured for one switch location and we found the other one. Both
         // of those are misconfiguration issues that we cannot overcome here, so
         // we will return what we have.
         boundary_switch_addrs
     }
 
-    pub async fn lookup_switch_zone_addrs(
+    pub async fn lookup_switch_zone_underlay_addrs(
         &self,
         resolver: &DnsResolver,
     ) -> HashMap<SwitchLocation, Ipv6Addr> {
@@ -118,7 +119,7 @@ impl<'a> EarlyNetworkSetup<'a> {
             retry_policy_switch_mapping(),
             || async {
                 match self
-                    .lookup_switch_zone_addrs_one_attempt(resolver)
+                    .lookup_switch_zone_underlay_addrs_one_attempt(resolver)
                     .await?
                 {
                     LookupSwitchZoneAddrsResult::TotalSuccess(map) => Ok(map),
@@ -165,7 +166,7 @@ impl<'a> EarlyNetworkSetup<'a> {
     // in multi-rack deployments. Query MGS servers in each switch zone to
     // determine which switch slot they are managing. This logic does not handle
     // an event where there are multiple racks. Is that ok?
-    async fn lookup_switch_zone_addrs_one_attempt(
+    async fn lookup_switch_zone_underlay_addrs_one_attempt(
         &self,
         resolver: &DnsResolver,
     ) -> Result<LookupSwitchZoneAddrsResult, BackoffError<String>> {

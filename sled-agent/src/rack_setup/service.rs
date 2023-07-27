@@ -781,7 +781,7 @@ impl ServiceInner {
                 .expect("Service plan should exist if completed marker exists");
 
             let switch_mgmt_addrs = EarlyNetworkSetup::new(&self.log)
-                .lookup_switch_zone_addrs(&resolver)
+                .lookup_switch_zone_underlay_addrs(&resolver)
                 .await;
 
             let nexus_address =
@@ -921,7 +921,7 @@ impl ServiceInner {
 
         // Ask MGS in each switch zone which switch it is.
         let switch_mgmt_addrs = EarlyNetworkSetup::new(&self.log)
-            .lookup_switch_zone_addrs(&resolver)
+            .lookup_switch_zone_underlay_addrs(&resolver)
             .await;
 
         // Next start up the NTP services.
