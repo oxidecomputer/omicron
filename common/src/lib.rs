@@ -55,7 +55,7 @@ macro_rules! generate_logging_api {
 /// automatically. It should be instantiated at the root logger of each
 /// executable that desires this functionality, as in the following example.
 /// ```ignore
-///     slog::Logger::root(drain, o!(FileLocationKv))
+///     slog::Logger::root(drain, o!(FileKv))
 /// ```
 pub struct FileKv;
 
@@ -65,9 +65,13 @@ impl slog::KV for FileKv {
         record: &slog::Record,
         serializer: &mut dyn slog::Serializer,
     ) -> slog::Result {
-        serializer.emit_str(
+        // Only log file information when severity is at least info level
+        if record.level() > slog::Level::Info {
+            return Ok(());
+        }
+        serializer.emit_arguments(
             "file".into(),
-            &format!("{}:{}", record.file(), record.line()),
+            &format_args!("{}:{}", record.file(), record.line()),
         )
     }
 }
