@@ -58,9 +58,24 @@ async fn test_setup<'a>(
     builder
 }
 
-async fn apply_update(log: &Logger, crdb: &CockroachInstance, version: &str) {
+async fn apply_update(
+    log: &Logger,
+    crdb: &CockroachInstance,
+    version: &str,
+    times_to_apply: usize,
+) {
     info!(log, "Performing upgrade to {version}");
     let client = crdb.connect().await.expect("failed to connect");
+
+    // We skip this for the earliest supported version because these tables
+    // might not exist yet.
+    if version != EARLIEST_SUPPORTED_VERSION {
+        let sql = format!("UPDATE omicron.public.db_metadata SET target_version = '{}' WHERE singleton = true;", version);
+        client
+            .batch_execute(&sql)
+            .await
+            .expect("Failed to bump version number");
+    }
 
     let file = "up.sql";
     let sql = tokio::fs::read_to_string(
@@ -68,12 +83,15 @@ async fn apply_update(log: &Logger, crdb: &CockroachInstance, version: &str) {
     )
     .await
     .unwrap();
-    client.batch_execute(&sql).await.expect("failed to apply update");
+
+    for _ in 0..times_to_apply {
+        client.batch_execute(&sql).await.expect("failed to apply update");
+    }
 
     // Normally, Nexus actually bumps the version number.
     //
     // We do so explicitly here.
-    let sql = format!("UPDATE omicron.public.db_metadata SET version = '{}' WHERE singleton = true;", version);
+    let sql = format!("UPDATE omicron.public.db_metadata SET version = '{}', target_version = NULL WHERE singleton = true;", version);
     client.batch_execute(&sql).await.expect("Failed to bump version number");
 
     client.cleanup().await.expect("cleaning up after wipe");
@@ -266,7 +284,7 @@ async fn nexus_applies_update_on_boot() {
 
     // We started with an empty database -- apply an update here to bring
     // us forward to our oldest supported schema version before trying to boot nexus.
-    apply_update(log, &crdb, EARLIEST_SUPPORTED_VERSION).await;
+    apply_update(log, &crdb, EARLIEST_SUPPORTED_VERSION, 1).await;
     assert_eq!(
         EARLIEST_SUPPORTED_VERSION,
         query_crdb_schema_version(&crdb).await
@@ -329,7 +347,7 @@ async fn nexus_cannot_apply_update_from_unknown_version() {
     let log = &builder.logctx.log;
     let crdb = builder.database.as_ref().expect("Should have started CRDB");
 
-    apply_update(log, &crdb, EARLIEST_SUPPORTED_VERSION).await;
+    apply_update(log, &crdb, EARLIEST_SUPPORTED_VERSION, 1).await;
     assert_eq!(
         EARLIEST_SUPPORTED_VERSION,
         query_crdb_schema_version(&crdb).await
@@ -373,8 +391,7 @@ async fn versions_have_idempotent_up() {
     let all_versions = read_all_schema_versions().await;
 
     for version in &all_versions {
-        apply_update(log, &crdb, &version.to_string()).await;
-        apply_update(log, &crdb, &version.to_string()).await;
+        apply_update(log, &crdb, &version.to_string(), 2).await;
         assert_eq!(version.to_string(), query_crdb_schema_version(&crdb).await);
     }
     assert_eq!(
@@ -594,7 +611,7 @@ async fn dbinit_equals_sum_of_all_up() {
 
     // Go from the first version to the latest version.
     for version in &all_versions {
-        apply_update(log, &crdb, &version.to_string()).await;
+        apply_update(log, &crdb, &version.to_string(), 1).await;
         assert_eq!(version.to_string(), query_crdb_schema_version(&crdb).await);
     }
     assert_eq!(

@@ -212,15 +212,15 @@ impl DataStore {
         })
     }
 
-    /// Updates the DB metadata to indicate that a transition from
-    /// `from_version` to `to_version` is occuring.
-    ///
-    /// This is only valid if the current version matches `from_version`.
-    ///
-    /// NOTE: This function should be idempotent -- if Nexus crashes mid-update,
-    /// a new Nexus instance should be able to re-call this function and
-    /// make progress.
-    pub async fn prepare_schema_update(
+    // Updates the DB metadata to indicate that a transition from
+    // `from_version` to `to_version` is occuring.
+    //
+    // This is only valid if the current version matches `from_version`.
+    //
+    // NOTE: This function should be idempotent -- if Nexus crashes mid-update,
+    // a new Nexus instance should be able to re-call this function and
+    // make progress.
+    async fn prepare_schema_update(
         &self,
         from_version: &SemverVersion,
         to_version: &SemverVersion,
@@ -255,17 +255,17 @@ impl DataStore {
         Ok(())
     }
 
-    /// Applies a schema update, using raw SQL read from a caller-supplied
-    /// configuration file.
-    pub async fn apply_schema_update(&self, sql: &String) -> Result<(), Error> {
+    // Applies a schema update, using raw SQL read from a caller-supplied
+    // configuration file.
+    async fn apply_schema_update(&self, sql: &String) -> Result<(), Error> {
         self.pool().batch_execute_async(&sql).await.map_err(|e| {
             Error::internal_error(&format!("Failed to execute upgrade: {e}"))
         })?;
         Ok(())
     }
 
-    /// Completes a schema migration, upgrading to the new version.
-    pub async fn finalize_schema_update(
+    // Completes a schema migration, upgrading to the new version.
+    async fn finalize_schema_update(
         &self,
         from_version: &SemverVersion,
         to_version: &SemverVersion,
