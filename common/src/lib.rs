@@ -54,7 +54,7 @@ macro_rules! generate_logging_api {
 /// A type that allows adding file and line numbers to log messages
 /// automatically. It should be instantiated at the root logger of each
 /// executable that desires this functionality, as in the following example.
-/// ```
+/// ```ignore
 ///     slog::Logger::root(drain, o!(FileLocationKv))
 /// ```
 pub struct FileKv;
