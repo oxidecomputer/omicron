@@ -392,7 +392,19 @@ impl Node {
                     return;
                 };
                 // Remove any existing connection
-                self.remove_accepted_connection(&addr).await;
+                if let Some(handle) = self.accepted_connections.remove(&addr) {
+                    info!(
+                        self.log,
+                        concat!(
+                            "Removing acccepted connection from {}: ",
+                            "new connection accepted from same address"
+                        ),
+                        addr
+                    );
+
+                    // The connection has not yet completed its handshake
+                    let _ = handle.tx.send(MainToConnMsg::Close).await;
+                }
                 info!(self.log, "Accepted connection from {addr}");
                 self.handle_unique_id_counter += 1;
                 let handle = spawn_accepted_connection_management_task(
@@ -752,19 +764,25 @@ impl Node {
                 let Some(accepted_handle) =
                    self.accepted_connections.remove(&accepted_addr) else
                 {
-                    error!(
+                    warn!(
                         self.log,
-                        "Missing AcceptedConnHandle";
+                        concat!(
+                            "Missing AcceptedConnHandle: ",
+                            "Stale ConnectedAcceptor msg"
+                        );
                         "accepted_addr" => accepted_addr.to_string(),
                         "addr" => addr.to_string(),
                         "remote_peer_id" => peer_id.to_string()
                     );
-                    panic!("Missing AcceptedConnHandle");
+                    return;
                 };
 
-                // Ignore the stale message if the unique_id doesn't match what
-                // we have stored.
+                // Put back the non-matching connection we removed
+                // The received message is stale, so we return.
                 if unique_id != accepted_handle.unique_id {
+                    self.accepted_connections
+                        .insert(accepted_addr, accepted_handle);
+
                     return;
                 }
 
@@ -800,9 +818,10 @@ impl Node {
             ConnToMainMsgInner::ConnectedInitiator { addr, peer_id } => {
                 if let Some(handle) = self.initiating_connections.remove(&addr)
                 {
-                    // Ignore the stale message if the unique_id doesn't match what
-                    // we have stored.
+                    // Put back the non-matching connection we removed
+                    // The received message is stale, so we return.
                     if unique_id != handle.unique_id {
+                        self.initiating_connections.insert(addr, handle);
                         return;
                     }
 
@@ -818,13 +837,13 @@ impl Node {
                     self.established_connections
                         .insert(peer_id.clone(), handle);
                 } else {
-                    error!(
+                    warn!(
                         self.log,
-                        "Missing PeerConnHandle";
+                        "Missing PeerConnHandle; Stale ConnectedInitiator msg";
                         "addr" => addr.to_string(),
                         "remote_peer_id" => peer_id.to_string()
                     );
-                    panic!("Missing PeerConnHandle");
+                    return;
                 }
 
                 if let Err(e) =
@@ -846,18 +865,20 @@ impl Node {
                         return;
                     }
                 } else {
-                    error!(
+                    warn!(
                         self.log,
-                        "Missing PeerConnHandle";
+                        "Missing PeerConnHandle: Stale Disconnected msg";
                         "remote_peer_id" => peer_id.to_string()
                     );
-                    panic!("Missing PeerConnHandle");
+                    return;
                 }
                 warn!(self.log, "peer disconnected {peer_id}");
                 let handle =
                     self.established_connections.remove(&peer_id).unwrap();
-                if peer_id < self.config.id {
-                    // Put the connection handle back in initiating state
+                // We always connect to peers lower than ourselves, and the
+                // connecting task never exits, it just loops. Therefore we know
+                // that we are initiating this connection again.
+                if handle.addr < self.config.addr {
                     self.initiating_connections.insert(handle.addr, handle);
                 }
                 self.fsm.on_disconnected(&peer_id);
@@ -932,6 +953,7 @@ impl Node {
                     self.conn_tx.clone(),
                 )
                 .await;
+                info!(self.log, "Initiating connection to new peer: {addr}");
                 self.initiating_connections.insert(addr, handle);
             }
         }
@@ -942,16 +964,14 @@ impl Node {
         }
     }
 
-    async fn remove_accepted_connection(&mut self, addr: &SocketAddrV6) {
-        if let Some(handle) = self.accepted_connections.remove(&addr) {
-            // The connection has not yet completed its handshake
-            let _ = handle.tx.send(MainToConnMsg::Close).await;
-        }
-    }
-
     async fn remove_peer(&mut self, addr: SocketAddrV6) {
         if let Some(handle) = self.initiating_connections.remove(&addr) {
             // The connection has not yet completed its handshake
+            info!(
+                self.log,
+                "Peer removed: deleting initiating connection";
+                "remote_addr" => addr.to_string()
+            );
             let _ = handle.tx.send(MainToConnMsg::Close).await;
         } else {
             // Do we have an established connection?
@@ -960,6 +980,12 @@ impl Node {
                 .iter()
                 .find(|(_, handle)| handle.addr == addr)
             {
+                info!(
+                    self.log,
+                    "Peer removed: deleting established connection";
+                    "remote_addr" => addr.to_string(),
+                    "remote_peer_id" => id.to_string(),
+                );
                 let _ = handle.tx.send(MainToConnMsg::Close).await;
                 // probably a better way to avoid borrowck issues
                 let id = id.clone();
