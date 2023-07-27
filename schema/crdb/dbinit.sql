@@ -2533,8 +2533,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.db_metadata (
 
     -- (Optional) Semver representation of the DB version to which we're upgrading
     target_version STRING(64),
-    -- (Optional) UUID representing the Nexus instance driving the schema update.
-    nexus_upgrade_driver UUID,
 
     CHECK (singleton = true)
 );
@@ -2544,10 +2542,9 @@ INSERT INTO omicron.public.db_metadata (
     time_created,
     time_modified,
     version,
-    target_version,
-    nexus_upgrade_driver
+    target_version
 ) VALUES
-    ( TRUE, NOW(), NOW(), '1.0.1', NULL, NULL)
+    ( TRUE, NOW(), NOW(), '1.0.1', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

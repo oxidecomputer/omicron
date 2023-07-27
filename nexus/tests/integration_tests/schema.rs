@@ -4,7 +4,6 @@
 
 use chrono::{DateTime, Utc};
 use dropshot::test_util::LogContext;
-use itertools::Itertools;
 use nexus_db_model::schema::SCHEMA_VERSION as LATEST_SCHEMA_VERSION;
 use nexus_test_utils::{db, load_test_config, ControlPlaneTestContextBuilder};
 use omicron_common::api::external::SemverVersion;
@@ -59,29 +58,11 @@ async fn test_setup<'a>(
     builder
 }
 
-#[derive(Debug)]
-enum Update {
-    Apply,
-    Remove {
-        // Just a little help for the tests, which don't necessarily know what
-        // the prior version was.
-        prior_version: String,
-    },
-}
-
-async fn apply_update(
-    log: &Logger,
-    crdb: &CockroachInstance,
-    version: &str,
-    up: Update,
-) {
-    info!(log, "Performing {up:?} on {version}");
+async fn apply_update(log: &Logger, crdb: &CockroachInstance, version: &str) {
+    info!(log, "Performing upgrade to {version}");
     let client = crdb.connect().await.expect("failed to connect");
 
-    let file = match up {
-        Update::Apply => "up.sql",
-        Update::Remove { .. } => "down.sql",
-    };
+    let file = "up.sql";
     let sql = tokio::fs::read_to_string(
         PathBuf::from(SCHEMA_DIR).join(version).join(file),
     )
@@ -92,11 +73,7 @@ async fn apply_update(
     // Normally, Nexus actually bumps the version number.
     //
     // We do so explicitly here.
-    let target_version = match &up {
-        Update::Apply => version,
-        Update::Remove { prior_version } => prior_version.as_str(),
-    };
-    let sql = format!("UPDATE omicron.public.db_metadata SET version = '{}' WHERE singleton = true;", target_version);
+    let sql = format!("UPDATE omicron.public.db_metadata SET version = '{}' WHERE singleton = true;", version);
     client.batch_execute(&sql).await.expect("Failed to bump version number");
 
     client.cleanup().await.expect("cleaning up after wipe");
@@ -289,7 +266,7 @@ async fn nexus_applies_update_on_boot() {
 
     // We started with an empty database -- apply an update here to bring
     // us forward to our oldest supported schema version before trying to boot nexus.
-    apply_update(log, &crdb, EARLIEST_SUPPORTED_VERSION, Update::Apply).await;
+    apply_update(log, &crdb, EARLIEST_SUPPORTED_VERSION).await;
     assert_eq!(
         EARLIEST_SUPPORTED_VERSION,
         query_crdb_schema_version(&crdb).await
@@ -352,7 +329,7 @@ async fn nexus_cannot_apply_update_from_unknown_version() {
     let log = &builder.logctx.log;
     let crdb = builder.database.as_ref().expect("Should have started CRDB");
 
-    apply_update(log, &crdb, EARLIEST_SUPPORTED_VERSION, Update::Apply).await;
+    apply_update(log, &crdb, EARLIEST_SUPPORTED_VERSION).await;
     assert_eq!(
         EARLIEST_SUPPORTED_VERSION,
         query_crdb_schema_version(&crdb).await
@@ -396,66 +373,14 @@ async fn versions_have_idempotent_up() {
     let all_versions = read_all_schema_versions().await;
 
     for version in &all_versions {
-        apply_update(log, &crdb, &version.to_string(), Update::Apply).await;
-        apply_update(log, &crdb, &version.to_string(), Update::Apply).await;
+        apply_update(log, &crdb, &version.to_string()).await;
+        apply_update(log, &crdb, &version.to_string()).await;
         assert_eq!(version.to_string(), query_crdb_schema_version(&crdb).await);
     }
     assert_eq!(
         LATEST_SCHEMA_VERSION.to_string(),
         query_crdb_schema_version(&crdb).await
     );
-
-    crdb.cleanup().await.unwrap();
-    logctx.cleanup_successful();
-}
-
-// This test verifies that we can execute all upgrades, and that we can also
-// undo all those upgrades.
-//
-// It also tests that we can idempotently perform the downgrade.
-#[tokio::test]
-async fn versions_have_idempotent_down() {
-    let config = load_test_config();
-    let logctx =
-        LogContext::new("versions_have_idempotent_down", &config.pkg.log);
-    let log = &logctx.log;
-    let populate = false;
-    let mut crdb = test_setup_just_crdb(&logctx.log, populate).await;
-
-    let all_versions = read_all_schema_versions().await;
-
-    // Go from the first version to the latest version.
-    for version in &all_versions {
-        apply_update(log, &crdb, &version.to_string(), Update::Apply).await;
-        assert_eq!(version.to_string(), query_crdb_schema_version(&crdb).await);
-    }
-    assert_eq!(
-        LATEST_SCHEMA_VERSION.to_string(),
-        query_crdb_schema_version(&crdb).await
-    );
-
-    // Go from the latest version to the first version.
-    let all_versions = all_versions.into_iter().tuples().collect::<Vec<_>>();
-    for (prior_version, current_version) in all_versions.into_iter().rev() {
-        assert_eq!(
-            current_version.to_string(),
-            query_crdb_schema_version(&crdb).await
-        );
-        apply_update(
-            log,
-            &crdb,
-            &current_version.to_string(),
-            Update::Remove { prior_version: prior_version.to_string() },
-        )
-        .await;
-        apply_update(
-            log,
-            &crdb,
-            &current_version.to_string(),
-            Update::Remove { prior_version: prior_version.to_string() },
-        )
-        .await;
-    }
 
     crdb.cleanup().await.unwrap();
     logctx.cleanup_successful();
@@ -669,7 +594,7 @@ async fn dbinit_equals_sum_of_all_up() {
 
     // Go from the first version to the latest version.
     for version in &all_versions {
-        apply_update(log, &crdb, &version.to_string(), Update::Apply).await;
+        apply_update(log, &crdb, &version.to_string()).await;
         assert_eq!(version.to_string(), query_crdb_schema_version(&crdb).await);
     }
     assert_eq!(

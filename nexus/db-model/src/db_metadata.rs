@@ -6,7 +6,6 @@ use crate::schema::db_metadata;
 use crate::SemverVersion;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 
 /// Internal database metadata
 #[derive(
@@ -19,7 +18,6 @@ pub struct DbMetadata {
     time_modified: DateTime<Utc>,
     version: SemverVersion,
     target_version: Option<SemverVersion>,
-    nexus_upgrade_driver: Option<Uuid>,
 }
 
 impl DbMetadata {

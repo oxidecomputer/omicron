@@ -18,15 +18,6 @@ use slog::Logger;
 use std::collections::BTreeSet;
 use std::ops::Bound;
 use std::str::FromStr;
-use uuid::Uuid;
-
-/// Represents the ability of this Nexus to update the database schema.
-///
-/// Should not be constructed unless this Nexus instance successfully modified
-/// the db_metadata table to identify that a schema migration is in progress.
-pub struct SchemaUpdateLease {
-    our_id: Uuid,
-}
 
 impl DataStore {
     // Ensures that the database schema matches "desired_version".
@@ -124,27 +115,11 @@ impl DataStore {
         for target_version in target_versions.into_iter() {
             info!(
                 log,
-                "Attempting to grab lease for upgrade to version {}",
-                target_version
+                "Attempting to upgrade schema";
+                "current_version" => current_version.to_string(),
+                "target_version" => target_version.to_string(),
             );
 
-            // Before we attempt to perform an update, grab a lease to allow
-            // this Nexus instance to perform the update.
-            //
-            // If another instance is performing an update, we will fail, and
-            // let them to the work on our behalf.
-            let lease = self
-                .grab_schema_update_lease(&current_version, &target_version)
-                .await
-                .map_err(|e| e.to_string())?;
-
-            info!(
-                log,
-                "Acquired lease, applying upgrade to version {}",
-                target_version
-            );
-
-            // Start the schema change to the new version.
             let up = config
                 .schema_dir
                 .join(target_version.to_string())
@@ -152,9 +127,32 @@ impl DataStore {
             let sql = tokio::fs::read_to_string(&up).await.map_err(|e| {
                 format!("Cannot read {up}: {e}", up = up.display())
             })?;
-            self.apply_schema_update(&lease, &sql)
+
+            // Confirm the current version, set the "target_version"
+            // column to indicate that a schema update is in-progress.
+            //
+            // Sets the following:
+            // - db_metadata.target_version = new version
+            self.prepare_schema_update(&current_version, &target_version)
                 .await
                 .map_err(|e| e.to_string())?;
+
+            info!(
+                log,
+                "Marked schema upgrade as prepared";
+                "current_version" => current_version.to_string(),
+                "target_version" => target_version.to_string(),
+            );
+
+            // Perform the schema change.
+            self.apply_schema_update(&sql).await.map_err(|e| e.to_string())?;
+
+            info!(
+                log,
+                "Applied schema upgrade";
+                "current_version" => current_version.to_string(),
+                "target_version" => target_version.to_string(),
+            );
 
             // NOTE: We could execute the schema change in a background task,
             // and let it propagate, while observing it with the following
@@ -171,17 +169,24 @@ impl DataStore {
             // the visibility of renamed / deleted fields, unique indices, etc,
             // so in the short-term we simply block on this job performing the
             // update.
-
+            //
             // NOTE: If we wanted to back-fill data manually, we could do so
             // here.
 
-            self.release_schema_update_lease(
-                lease,
-                &current_version,
-                &target_version,
-            )
-            .await
-            .map_err(|e| e.to_string())?;
+            // Now that the schema change has completed, set the following:
+            // - db_metadata.version = new version
+            // - db_metadata.target_version = NULL
+            self.finalize_schema_update(&current_version, &target_version)
+                .await
+                .map_err(|e| e.to_string())?;
+
+            info!(
+                log,
+                "Finalized schema upgrade";
+                "current_version" => current_version.to_string(),
+                "target_version" => target_version.to_string(),
+            );
+
             current_version = target_version.clone();
         }
 
@@ -207,46 +212,36 @@ impl DataStore {
         })
     }
 
-    /// Grants a "lease" to the currently running Nexus instance if the
-    /// following is true:
-    /// - The current DB version is `from_version`
-    /// - No other Nexus instances are attempting to perform an update.
-    // CockroachDB documentation strongly advises against performing updates
-    // within transactions:
-    //
-    // <https://www.cockroachlabs.com/docs/stable/online-schema-changes#schema-changes-within-transactions>
-    //
-    // However, with multiple concurrent instantiations of Nexus, this means
-    // that a "really slow Nexus", seeing version N of the database, could
-    // attempt to apply the N -> N + 1 migration after we've already applied
-    // several subsequent migrations. In the case that we "add a column, and
-    // later remove it", this could put the database schema in an inconsistent
-    // state.
-    //
-    // Unfortunately, without transactions (or CTEs) at our disposal, it's
-    // difficult to coordinate between multiple Nexus nodes.
-    //
-    // To mitigate, we use the concept of a "lease": A single Nexus instance
-    // granted the ability to modify the database schema for a limited period
-    // of time.
-    pub async fn grab_schema_update_lease(
+    /// Updates the DB metadata to indicate that a transition from
+    /// `from_version` to `to_version` is occuring.
+    ///
+    /// This is only valid if the current version matches `from_version`.
+    ///
+    /// NOTE: This function should be idempotent -- if Nexus crashes mid-update,
+    /// a new Nexus instance should be able to re-call this function and
+    /// make progress.
+    pub async fn prepare_schema_update(
         &self,
         from_version: &SemverVersion,
         to_version: &SemverVersion,
-    ) -> Result<SchemaUpdateLease, Error> {
+    ) -> Result<(), Error> {
         use db::schema::db_metadata::dsl;
 
-        let our_id = Uuid::new_v4();
         let rows_updated = diesel::update(
             dsl::db_metadata
                 .filter(dsl::singleton.eq(true))
                 .filter(dsl::version.eq(from_version.to_string()))
-                .filter(dsl::nexus_upgrade_driver.is_null()),
+                // Either we're updating to the same version, or no update is
+                // in-progress.
+                .filter(
+                    dsl::target_version
+                        .eq(Some(to_version.to_string()))
+                        .or(dsl::target_version.is_null()),
+                ),
         )
         .set((
             dsl::time_modified.eq(Utc::now()),
             dsl::target_version.eq(Some(to_version.to_string())),
-            dsl::nexus_upgrade_driver.eq(Some(our_id)),
         ))
         .execute_async(self.pool())
         .await
@@ -254,33 +249,24 @@ impl DataStore {
 
         if rows_updated != 1 {
             return Err(Error::internal_error(
-                "Failed to grab schema update lease",
+                "Failed to prepare schema for update",
             ));
         }
-        Ok(SchemaUpdateLease { our_id })
+        Ok(())
     }
 
     /// Applies a schema update, using raw SQL read from a caller-supplied
     /// configuration file.
-    ///
-    /// Calling this function requires the caller to have successfully invoked
-    /// [Self::grab_schema_update_lease].
-    pub async fn apply_schema_update(
-        &self,
-        _: &SchemaUpdateLease,
-        sql: &String,
-    ) -> Result<(), Error> {
+    pub async fn apply_schema_update(&self, sql: &String) -> Result<(), Error> {
         self.pool().batch_execute_async(&sql).await.map_err(|e| {
             Error::internal_error(&format!("Failed to execute upgrade: {e}"))
         })?;
         Ok(())
     }
 
-    /// Completes a schema migration, releasing the lease, and updating the
-    /// DB schema version.
-    pub async fn release_schema_update_lease(
+    /// Completes a schema migration, upgrading to the new version.
+    pub async fn finalize_schema_update(
         &self,
-        lease: SchemaUpdateLease,
         from_version: &SemverVersion,
         to_version: &SemverVersion,
     ) -> Result<(), Error> {
@@ -290,14 +276,12 @@ impl DataStore {
             dsl::db_metadata
                 .filter(dsl::singleton.eq(true))
                 .filter(dsl::version.eq(from_version.to_string()))
-                .filter(dsl::target_version.eq(to_version.to_string()))
-                .filter(dsl::nexus_upgrade_driver.eq(Some(lease.our_id))),
+                .filter(dsl::target_version.eq(to_version.to_string())),
         )
         .set((
             dsl::time_modified.eq(Utc::now()),
             dsl::version.eq(to_version.to_string()),
             dsl::target_version.eq(None as Option<String>),
-            dsl::nexus_upgrade_driver.eq(None as Option<Uuid>),
         ))
         .execute_async(self.pool())
         .await
@@ -305,7 +289,7 @@ impl DataStore {
 
         if rows_updated != 1 {
             return Err(Error::internal_error(
-                "Failed to release schema update lease",
+                &format!("Failed to finalize schema update from version {from_version} to {to_version}"),
             ));
         }
         Ok(())
@@ -341,13 +325,13 @@ mod test {
         logctx.cleanup_successful();
     }
 
-    // Confirms that calling ensure_schema from concurrent Nexus instances only
-    // lets a single Nexus perform the update operation.
+    // Confirms that calling ensure_schema from concurrent Nexus instances
+    // only permit the latest schema migration, rather than re-applying old
+    // schema updates.
     #[tokio::test]
-    async fn concurrent_nexus_instances_only_update_schema_once() {
-        let logctx = dev::test_setup_log(
-            "concurrent_nexus_instances_only_update_schema_once",
-        );
+    async fn concurrent_nexus_instances_only_move_forward() {
+        let logctx =
+            dev::test_setup_log("concurrent_nexus_instances_only_move_forward");
         let log = &logctx.log;
         let mut crdb = test_db::test_setup_database(&logctx.log).await;
 
@@ -357,52 +341,113 @@ mod test {
         // Mimic the layout of "schema/crdb".
         let config_dir = tempfile::TempDir::new().unwrap();
 
+        // Helper to create the version directory and "up.sql".
+        let add_upgrade = |version: SemverVersion, sql: String| {
+            let config_dir_path = config_dir.path().clone();
+            async move {
+                let dir = config_dir_path.join(version.to_string());
+                tokio::fs::create_dir_all(&dir).await.unwrap();
+
+                tokio::fs::write(dir.join("up.sql"), sql).await.unwrap();
+            }
+        };
+
         // Create the old version directory, and also update the on-disk "current version" to
         // this value.
         //
-        // Nexus will decide to ugprade to, at most, the version that its own binary understands.
+        // Nexus will decide to upgrade to, at most, the version that its own binary understands.
         //
-        // To trigger this action within a test, we manually set the "known to DB" version back
-        // one.
-        let old_version = SemverVersion::new(0, 0, 0);
+        // To trigger this action within a test, we manually set the "known to DB" version.
+        let v0 = SemverVersion::new(0, 0, 0);
         use db::schema::db_metadata::dsl;
         diesel::update(dsl::db_metadata.filter(dsl::singleton.eq(true)))
-            .set(dsl::version.eq(old_version.to_string()))
+            .set(dsl::version.eq(v0.to_string()))
             .execute_async(pool.pool())
             .await
-            .expect("Failed to set version back");
+            .expect("Failed to set version back to 0.0.0");
 
-        let current_version_dir =
-            config_dir.path().join(old_version.to_string());
-        tokio::fs::create_dir_all(&current_version_dir).await.unwrap();
+        let v1 = SemverVersion::new(0, 0, 1);
+        let v2 = SCHEMA_VERSION;
 
-        // Create the current version directory.
-        let next_version = SCHEMA_VERSION;
-        let next_version_dir = config_dir.path().join(next_version.to_string());
-        tokio::fs::create_dir_all(&next_version_dir).await.unwrap();
+        assert!(v0 < v1);
+        assert!(v1 < v2);
 
-        // This upgrade is not idempotent.
+        // This version must exist so Nexus can see the sequence of updates from
+        // v0 to v1 to v2, but it doesn't need to re-apply it.
+        add_upgrade(v0.clone(), "SELECT true;".to_string()).await;
+
+        // Ensure that all schema changes also validate the expected version
+        // information.
+        let wrap_in_version_checking_txn = |version, target, sql| -> String {
+            format!("BEGIN; \
+                SELECT CAST(\
+                    IF(\
+                        (\
+                            SELECT version = '{version}' and target_version = '{target}'\
+                            FROM omicron.public.db_metadata WHERE singleton = true\
+                        ),\
+                        'true',\
+                        'Invalid starting version for schema change'\
+                    ) AS BOOL\
+                );\
+                {sql};\
+                COMMIT;")
+        };
+
+        // This version adds a new table, but it takes a little while.
         //
-        // Normally that's a bug, but here, we exploit that fact to validate that
-        // when we create multiple datastores, only one actually issues the upgrade
-        // operation, but all datastores are regardless constructed successfully.
-        tokio::fs::write(
-            next_version_dir.join("up.sql"),
-            "CREATE TABLE Widget ( Thing INT );",
+        // This delay is intentional, so that some Nexus instances issuing
+        // the update act quickly, while others lag behind.
+        add_upgrade(
+            v1.clone(),
+            wrap_in_version_checking_txn(
+                &v0,
+                &v1,
+                "SELECT pg_sleep(RANDOM()); \
+                 CREATE TABLE IF NOT EXISTS widget(); \
+                 SELECT pg_sleep(RANDOM());",
+            ),
         )
-        .await
-        .unwrap();
+        .await;
 
-        let config =
-            SchemaConfig { schema_dir: config_dir.path().to_path_buf() };
+        // The table we just created is deleted by a subsequent update.
+        add_upgrade(
+            v2.clone(),
+            wrap_in_version_checking_txn(
+                &v1,
+                &v2,
+                "DROP TABLE IF EXISTS widget;",
+            ),
+        )
+        .await;
 
         // Show that the datastores can be created concurrently.
+        let config =
+            SchemaConfig { schema_dir: config_dir.path().to_path_buf() };
         let _ = futures::future::join_all((0..10).map(|_| {
             let log = log.clone();
             let pool = pool.clone();
             let config = config.clone();
             tokio::task::spawn(async move {
-                DataStore::new(&log, pool, Some(&config)).await
+                let datastore = DataStore::new(&log, pool, Some(&config)).await
+                    .map_err(|e| e.to_string())?;
+
+                // This is the crux of this test: confirm that, as each
+                // migration completes, it's not possible to see any artifacts
+                // of the "v1" migration (namely: the 'Widget' table should not
+                // exist).
+                let result = diesel::select(
+                        diesel::dsl::sql::<diesel::sql_types::Bool>(
+                            "EXISTS (SELECT * FROM pg_tables WHERE tablename = 'widget')"
+                        )
+                    )
+                    .get_result_async::<bool>(datastore.pool())
+                    .await
+                    .expect("Failed to query for table");
+                assert_eq!(result, false, "The 'widget' table should have been deleted, but it exists.\
+                    This failure means an old update was re-applied after a newer update started.");
+
+                Ok::<_, String>(datastore)
             })
         }))
         .await
@@ -411,7 +456,7 @@ mod test {
         .expect("Failed to await datastore creation task")
         .into_iter()
         .collect::<Result<Vec<DataStore>, _>>()
-        .expect("Failed to create datastore: {e}");
+        .expect("Failed to create datastore");
 
         crdb.cleanup().await.unwrap();
         logctx.cleanup_successful();
