@@ -871,10 +871,6 @@ impl ServiceInner {
         };
         info!(self.log, "Writing Rack Network Configuration to bootstore");
         bootstore.update_network_config(early_network_config.into()).await?;
-        // TODO: Wait for bootstore to sync to all `plan.sleds`? Every
-        // sled-agent will wait to receive its bootstore on startup, so we
-        // may not need an explicit wait here: waiting on `initialize_sleds`
-        // also transitively waits on bootstore replication.
 
         // Forward the sled initialization requests to our sled-agent.
         local_bootstrap_agent
