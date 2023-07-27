@@ -60,8 +60,6 @@ switch_zone_maghemite_links = ["tfportrear0_0"]
 
 data_links = ["net0", "net1"]
 
-rss_initiator = true
-
 [log]
 level = "info"
 mode = "file"

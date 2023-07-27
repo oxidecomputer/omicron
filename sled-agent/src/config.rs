@@ -87,10 +87,6 @@ pub struct Config {
     /// mode maghemite there.
     #[serde(default)]
     pub switch_zone_maghemite_links: Vec<PhysicalLink>,
-
-    /// Set to true if the sled-agent should look for an RSS config file and
-    /// automatically initiate RSS.
-    pub rss_initiator: bool,
 }
 
 #[derive(Debug, thiserror::Error)]

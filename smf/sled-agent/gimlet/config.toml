@@ -32,7 +32,6 @@ vmm_reservoir_percentage = 80
 swap_device_size_gb = 256
 
 data_links = ["cxgbe0", "cxgbe1"]
-rss_initiator = true
 
 [log]
 level = "info"

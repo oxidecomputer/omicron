@@ -31,8 +31,6 @@ vmm_reservoir_percentage = 0
 
 data_links = ["net0", "net1"]
 
-rss_initiator = true
-
 [log]
 level = "info"
 mode = "file"
