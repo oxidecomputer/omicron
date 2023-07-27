@@ -1,8 +1,10 @@
 use camino::Utf8PathBuf;
-use derive_more::{AsRef, Deref, From};
-use illumos_utils::dumpadm::DumpAdmError;
-use illumos_utils::zone::{AdmError, Zones};
+use derive_more::{AsRef, From};
+use illumos_utils::coreadm::{CoreAdm, CoreFileOption};
+use illumos_utils::dumpadm::{DumpAdm, DumpContentType};
+use illumos_utils::zone::ZONE_PREFIX;
 use illumos_utils::zpool::{ZpoolHealth, ZpoolName};
+use illumos_utils::ExecutionError;
 use omicron_common::disk::DiskIdentity;
 use sled_hardware::DiskVariant;
 use sled_storage::dataset::{CRASH_DATASET, DUMP_DATASET};
@@ -14,61 +16,29 @@ use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Weak};
 use std::time::{Duration, SystemTime, SystemTimeError, UNIX_EPOCH};
+use zone::{Zone, ZoneError};
 
-pub struct DumpSetup {
-    worker: Arc<std::sync::Mutex<DumpSetupWorker>>,
-    _poller: std::thread::JoinHandle<()>,
-    log: Logger,
-}
+const ZFS_PROP_USED: &str = "used";
+const ZFS_PROP_AVAILABLE: &str = "available";
 
-impl DumpSetup {
-    pub fn new(log: &Logger) -> Self {
-        let worker = Arc::new(std::sync::Mutex::new(DumpSetupWorker::new(
-            log.new(o!("component" => "DumpSetup-worker")),
-        )));
-        let worker_weak = Arc::downgrade(&worker);
-        let log_poll = log.new(o!("component" => "DumpSetup-archival"));
-        let _poller = std::thread::spawn(move || {
-            Self::poll_file_archival(worker_weak, log_poll)
-        });
-        let log = log.new(o!("component" => "DumpSetup"));
-        Self { worker, _poller, log }
-    }
-}
+const DATASET_USAGE_PERCENT_CHOICE: u64 = 70;
+const DATASET_USAGE_PERCENT_CLEANUP: u64 = 80;
+
+const ARCHIVAL_INTERVAL: Duration = Duration::from_secs(300);
 
 // we sure are passing a lot of Utf8PathBufs around, let's be careful about it
-#[derive(
-    AsRef, Clone, Debug, Deref, Eq, From, Hash, Ord, PartialEq, PartialOrd,
-)]
-struct DumpSlicePath(Utf8PathBuf);
-#[derive(
-    AsRef, Clone, Debug, Deref, Eq, From, Hash, Ord, PartialEq, PartialOrd,
-)]
-struct DebugDataset(Utf8PathBuf);
-#[derive(
-    AsRef, Clone, Debug, Deref, Eq, From, Hash, Ord, PartialEq, PartialOrd,
-)]
-struct CoreDataset(Utf8PathBuf);
+#[derive(AsRef, Clone, Debug, Eq, From, Hash, Ord, PartialEq, PartialOrd)]
+pub(self) struct DumpSlicePath(Utf8PathBuf);
+#[derive(AsRef, Clone, Debug, Eq, From, Hash, Ord, PartialEq, PartialOrd)]
+pub(self) struct DebugDataset(Utf8PathBuf);
+#[derive(AsRef, Clone, Debug, Eq, From, Hash, Ord, PartialEq, PartialOrd)]
+pub(self) struct CoreDataset(Utf8PathBuf);
 
-#[derive(Deref)]
-struct CoreZpool(ZpoolName);
-#[derive(Deref)]
-struct DebugZpool(ZpoolName);
+#[derive(AsRef, Clone, From)]
+pub(super) struct CoreZpool(pub ZpoolName);
+#[derive(AsRef, Clone, From)]
+pub(super) struct DebugZpool(pub ZpoolName);
 
-// only want to access these directories after they're mounted!
-trait GetMountpoint: std::ops::Deref<Target = ZpoolName> {
-    type NewType: From<Utf8PathBuf>;
-    const MOUNTPOINT: &'static str;
-    fn mountpoint(&self) -> Result<Option<Self::NewType>, ZfsGetError> {
-        if zfs_get_prop(self.to_string(), "mounted")? == "yes" {
-            Ok(Some(Self::NewType::from(
-                self.dataset_mountpoint(Self::MOUNTPOINT),
-            )))
-        } else {
-            Ok(None)
-        }
-    }
-}
 impl GetMountpoint for DebugZpool {
     type NewType = DebugDataset;
     const MOUNTPOINT: &'static str = DUMP_DATASET;
@@ -78,7 +48,25 @@ impl GetMountpoint for CoreZpool {
     const MOUNTPOINT: &'static str = CRASH_DATASET;
 }
 
-struct DumpSetupWorker {
+// only want to access these directories after they're mounted!
+trait GetMountpoint: AsRef<ZpoolName> {
+    type NewType: From<Utf8PathBuf>;
+    const MOUNTPOINT: &'static str;
+    fn mountpoint(
+        &self,
+        invoker: &impl Invoker,
+    ) -> Result<Option<Self::NewType>, ZfsGetError> {
+        if invoker.zfs_get_prop(self.as_ref().to_string(), "mounted")? == "yes"
+        {
+            Ok(Some(Self::NewType::from(
+                invoker.mountpoint(self.as_ref(), Self::MOUNTPOINT),
+            )))
+        } else {
+            Ok(None)
+        }
+    }
+}
+struct DumpSetupWorker<I: Invoker> {
     core_dataset_names: Vec<CoreZpool>,
     debug_dataset_names: Vec<DebugZpool>,
 
@@ -93,11 +81,30 @@ struct DumpSetupWorker {
     savecored_slices: HashSet<DumpSlicePath>,
 
     log: Logger,
+    invoker: I,
 }
 
-const ARCHIVAL_INTERVAL: Duration = Duration::from_secs(300);
+pub struct DumpSetup {
+    worker: Arc<std::sync::Mutex<DumpSetupWorker<Real>>>,
+    _poller: std::thread::JoinHandle<()>,
+    log: Logger,
+}
 
 impl DumpSetup {
+    pub fn new(log: &Logger) -> Self {
+        let worker = Arc::new(std::sync::Mutex::new(DumpSetupWorker::new(
+            Real {},
+            log.new(o!("component" => "DumpSetup-worker")),
+        )));
+        let worker_weak = Arc::downgrade(&worker);
+        let log_poll = log.new(o!("component" => "DumpSetup-archival"));
+        let _poller = std::thread::spawn(move || {
+            Self::poll_file_archival(worker_weak, log_poll)
+        });
+        let log = log.new(o!("component" => "DumpSetup"));
+        Self { worker, _poller, log }
+    }
+
     pub(crate) async fn update_dumpdev_setup(
         &self,
         disks: &BTreeMap<DiskIdentity, (Disk, Pool)>,
@@ -127,7 +134,8 @@ impl DumpSetup {
                         illumos_utils::zpool::Zpool::get_info(&name.to_string())
                     {
                         if info.health() == ZpoolHealth::Online {
-                            m2_core_datasets.push(CoreZpool(name.clone()));
+                            m2_core_datasets
+                                .push(CoreZpool::from(name.clone()));
                         } else {
                             warn!(log, "Zpool {name:?} not online, won't attempt to save process core dumps there");
                         }
@@ -139,7 +147,8 @@ impl DumpSetup {
                         illumos_utils::zpool::Zpool::get_info(&name.to_string())
                     {
                         if info.health() == ZpoolHealth::Online {
-                            u2_debug_datasets.push(DebugZpool(name.clone()));
+                            u2_debug_datasets
+                                .push(DebugZpool::from(name.clone()));
                         } else {
                             warn!(log, "Zpool {name:?} not online, won't attempt to save kernel core dumps there");
                         }
@@ -164,8 +173,8 @@ impl DumpSetup {
         });
     }
 
-    fn poll_file_archival(
-        worker: Weak<std::sync::Mutex<DumpSetupWorker>>,
+    fn poll_file_archival<I: Invoker>(
+        worker: Weak<std::sync::Mutex<DumpSetupWorker<I>>>,
         log: Logger,
     ) {
         info!(log, "DumpSetup poll loop started.");
@@ -202,7 +211,7 @@ impl DumpSetup {
 }
 
 #[derive(Debug, thiserror::Error)]
-enum ZfsGetError {
+pub(self) enum ZfsGetError {
     #[error("Error executing 'zfs get' command: {0}")]
     IoError(#[from] std::io::Error),
     #[error("Output of 'zfs get' was not only not an integer string, it wasn't even UTF-8: {0}")]
@@ -211,45 +220,257 @@ enum ZfsGetError {
     Parse(#[from] std::num::ParseIntError),
 }
 
-const ZFS_PROP_USED: &str = "used";
-const ZFS_PROP_AVAILABLE: &str = "available";
-
-fn zfs_get_integer(
-    mountpoint_or_name: impl AsRef<str>,
-    property: &str,
-) -> Result<u64, ZfsGetError> {
-    zfs_get_prop(mountpoint_or_name, property)?.parse().map_err(Into::into)
+#[cfg(test)]
+impl Clone for ZfsGetError {
+    fn clone(&self) -> Self {
+        match self {
+            ZfsGetError::IoError(_err) => unimplemented!(),
+            ZfsGetError::Utf8(err) => ZfsGetError::Utf8(err.clone()),
+            ZfsGetError::Parse(err) => ZfsGetError::Parse(err.clone()),
+        }
+    }
 }
 
-fn zfs_get_prop(
-    mountpoint_or_name: impl AsRef<str> + Sized,
-    property: &str,
-) -> Result<String, ZfsGetError> {
-    let mountpoint = mountpoint_or_name.as_ref();
-    let mut cmd = std::process::Command::new(illumos_utils::zfs::ZFS);
-    cmd.arg("get").arg("-Hpo").arg("value");
-    cmd.arg(property);
-    cmd.arg(mountpoint);
-    let output = cmd.output()?;
-    Ok(String::from_utf8(output.stdout)?.trim().to_string())
+#[cfg(test)]
+#[derive(Default)]
+struct Fake {
+    pub zpool_props: HashMap<
+        &'static str,
+        HashMap<&'static str, Result<String, ZfsGetError>>,
+    >,
+    pub zones: Vec<Zone>,
+}
+struct Real {}
+
+trait Invoker {
+    fn coreadm(&self, core_dir: &Utf8PathBuf) -> Result<(), ExecutionError>;
+    fn dumpadm(
+        &self,
+        dump_slice: &Utf8PathBuf,
+        savecore_dir: Option<&Utf8PathBuf>,
+    ) -> Result<Option<OsString>, ExecutionError>;
+    fn zfs_get_prop(
+        &self,
+        mountpoint_or_name: impl AsRef<str> + Sized,
+        property: &str,
+    ) -> Result<String, ZfsGetError>;
+
+    fn zfs_get_integer(
+        &self,
+        mountpoint_or_name: impl AsRef<str>,
+        property: &str,
+    ) -> Result<u64, ZfsGetError> {
+        self.zfs_get_prop(mountpoint_or_name, property)?
+            .parse()
+            .map_err(Into::into)
+    }
+
+    fn below_thresh(
+        &self,
+        mountpoint: &Utf8PathBuf,
+        percent: u64,
+    ) -> Result<(bool, u64), ZfsGetError> {
+        let used = self.zfs_get_integer(mountpoint, ZFS_PROP_USED)?;
+        let available = self.zfs_get_integer(mountpoint, ZFS_PROP_AVAILABLE)?;
+        let capacity = used + available;
+        let below = (used * 100) / capacity < percent;
+        Ok((below, used))
+    }
+
+    fn mountpoint(
+        &self,
+        zpool: &ZpoolName,
+        mountpoint: &'static str,
+    ) -> Utf8PathBuf;
+
+    fn get_zones(&self) -> Result<Vec<Zone>, ArchiveLogsError>;
 }
 
-const DATASET_USAGE_PERCENT_CHOICE: u64 = 70;
-const DATASET_USAGE_PERCENT_CLEANUP: u64 = 80;
+#[cfg(test)]
+impl Invoker for Fake {
+    fn coreadm(&self, _core_dir: &Utf8PathBuf) -> Result<(), ExecutionError> {
+        Ok(())
+    }
 
-fn below_thresh(
-    mountpoint: &Utf8PathBuf,
-    percent: u64,
-) -> Result<(bool, u64), ZfsGetError> {
-    let used = zfs_get_integer(mountpoint, ZFS_PROP_USED)?;
-    let available = zfs_get_integer(mountpoint, ZFS_PROP_AVAILABLE)?;
-    let capacity = used + available;
-    let below = (used * 100) / capacity < percent;
-    Ok((below, used))
+    fn dumpadm(
+        &self,
+        _dump_slice: &Utf8PathBuf,
+        _savecore_dir: Option<&Utf8PathBuf>,
+    ) -> Result<Option<OsString>, ExecutionError> {
+        Ok(None)
+    }
+
+    fn zfs_get_prop(
+        &self,
+        mountpoint_or_name: impl AsRef<str> + Sized,
+        property: &str,
+    ) -> Result<String, ZfsGetError> {
+        self.zpool_props
+            .get(mountpoint_or_name.as_ref())
+            .unwrap_or_else(|| {
+                panic!(
+                    "Test did not provide fake zpool {}",
+                    mountpoint_or_name.as_ref()
+                )
+            })
+            .get(property)
+            .unwrap_or_else(|| {
+                panic!(
+                "Test did not provide property {property} for fake zpool {}",
+                mountpoint_or_name.as_ref()
+            )
+            })
+            .clone()
+    }
+
+    fn mountpoint(
+        &self,
+        zpool: &ZpoolName,
+        mountpoint: &'static str,
+    ) -> Utf8PathBuf {
+        Utf8PathBuf::from(
+            self.zpool_props
+                .get(zpool.to_string().as_str())
+                .unwrap_or_else(|| {
+                    panic!("Test did not provide fake zpool {}", zpool)
+                })
+                .get("mountpoint")
+                .unwrap_or_else(|| {
+                    panic!(
+                        "Test did not provide mountpoint for fake zpool {}",
+                        zpool
+                    )
+                })
+                .clone()
+                .unwrap(),
+        )
+        .join(mountpoint)
+    }
+
+    fn get_zones(&self) -> Result<Vec<Zone>, ArchiveLogsError> {
+        Ok(self.zones.clone())
+    }
 }
 
-impl DumpSetupWorker {
-    fn new(log: Logger) -> Self {
+impl Invoker for Real {
+    fn coreadm(&self, core_dir: &Utf8PathBuf) -> Result<(), ExecutionError> {
+        let mut cmd = CoreAdm::new();
+
+        // disable per-process core patterns
+        cmd.disable(CoreFileOption::Process);
+        cmd.disable(CoreFileOption::ProcSetid);
+
+        // use the global core pattern
+        cmd.enable(CoreFileOption::Global);
+        cmd.enable(CoreFileOption::GlobalSetid);
+
+        // set the global pattern to place all cores into core_dir,
+        // with filenames of "core.[zone-name].[exe-filename].[pid].[time]"
+        cmd.global_pattern(core_dir.join("core.%z.%f.%p.%t"));
+
+        // also collect DWARF data from the exe and its library deps
+        cmd.global_contents("default+debug");
+
+        cmd.execute()
+    }
+
+    // Invokes `dumpadm(8)` to configure the kernel to dump core into the given
+    // `dump_slice` block device in the event of a panic. If a core is already
+    // present in that block device, and a `savecore_dir` is provided, this
+    // function also invokes `savecore(8)` to save it into that directory.
+    // On success, returns Ok(Some(stdout)) if `savecore(8)` was invoked, or
+    // Ok(None) if it wasn't.
+    fn dumpadm(
+        &self,
+        dump_slice: &Utf8PathBuf,
+        savecore_dir: Option<&Utf8PathBuf>,
+    ) -> Result<Option<OsString>, ExecutionError> {
+        let savecore_dir_cloned = if let Some(dir) = savecore_dir.cloned() {
+            dir
+        } else {
+            // if we don't have a savecore destination yet, still create and use
+            // a tmpfs path (rather than the default location under /var/crash,
+            // which is in the ramdisk pool), because dumpadm refuses to do what
+            // we ask otherwise.
+            let tmp_crash = "/tmp/crash";
+            std::fs::create_dir_all(tmp_crash).map_err(|err| {
+                ExecutionError::ExecutionStart {
+                    command: format!("mkdir {tmp_crash:?}"),
+                    err,
+                }
+            })?;
+            Utf8PathBuf::from(tmp_crash)
+        };
+
+        // Use the given block device path for dump storage:
+        let mut cmd = DumpAdm::new(dump_slice.to_owned(), savecore_dir_cloned);
+
+        // Include memory from the current process if there is one for the panic
+        // context, in addition to kernel memory:
+        cmd.content_type(DumpContentType::CurProc);
+
+        // Compress crash dumps:
+        cmd.compress(true);
+
+        // Do not run savecore(8) automatically on boot (irrelevant anyhow, as the
+        // config file being mutated by dumpadm won't survive reboots on gimlets).
+        // The sled-agent will invoke it manually instead.
+        cmd.no_boot_time_savecore();
+
+        cmd.execute()?;
+
+        // do we have a destination for the saved dump
+        if savecore_dir.is_some() {
+            // and does the dump slice have one to save off
+            if let Ok(true) =
+                illumos_utils::dumpadm::dump_flag_is_valid(dump_slice)
+            {
+                return illumos_utils::dumpadm::savecore();
+            }
+        }
+        Ok(None)
+    }
+
+    fn zfs_get_prop(
+        &self,
+        mountpoint_or_name: impl AsRef<str> + Sized,
+        property: &str,
+    ) -> Result<String, ZfsGetError> {
+        let mountpoint = mountpoint_or_name.as_ref();
+        let mut cmd = std::process::Command::new(illumos_utils::zfs::ZFS);
+        cmd.arg("get").arg("-Hpo").arg("value");
+        cmd.arg(property);
+        cmd.arg(mountpoint);
+        let output = cmd.output()?;
+        Ok(String::from_utf8(output.stdout)?.trim().to_string())
+    }
+
+    fn mountpoint(
+        &self,
+        zpool: &ZpoolName,
+        mountpoint: &'static str,
+    ) -> Utf8PathBuf {
+        zpool.dataset_mountpoint(mountpoint)
+    }
+
+    fn get_zones(&self) -> Result<Vec<Zone>, ArchiveLogsError> {
+        // zone crate's 'deprecated' functions collide if you try to enable
+        // its 'sync' and 'async' features simultaneously :(
+        let rt =
+            tokio::runtime::Runtime::new().map_err(ArchiveLogsError::Tokio)?;
+
+        rt.block_on(async {
+            Ok(zone::Adm::list()
+                .await?
+                .into_iter()
+                .filter(|z| z.global() || z.name().starts_with(ZONE_PREFIX))
+                .collect::<Vec<_>>())
+        })
+    }
+}
+
+impl<I: Invoker> DumpSetupWorker<I> {
+    fn new(invoker: I, log: Logger) -> Self {
         Self {
             core_dataset_names: vec![],
             debug_dataset_names: vec![],
@@ -261,6 +482,7 @@ impl DumpSetupWorker {
             known_core_dirs: vec![],
             savecored_slices: Default::default(),
             log,
+            invoker,
         }
     }
 
@@ -284,13 +506,13 @@ impl DumpSetupWorker {
         self.known_debug_dirs = self
             .debug_dataset_names
             .iter()
-            .flat_map(|ds| ds.mountpoint())
+            .flat_map(|ds| ds.mountpoint(&self.invoker))
             .flatten()
             .collect();
         self.known_core_dirs = self
             .core_dataset_names
             .iter()
-            .flat_map(|ds| ds.mountpoint())
+            .flat_map(|ds| ds.mountpoint(&self.invoker))
             .flatten()
             .collect();
     }
@@ -304,7 +526,7 @@ impl DumpSetupWorker {
         // below a certain usage threshold.
         self.known_debug_dirs.sort_by_cached_key(
             |mountpoint: &DebugDataset| {
-                match below_thresh(mountpoint.as_ref(), DATASET_USAGE_PERCENT_CHOICE) {
+                match self.invoker.below_thresh(mountpoint.as_ref(), DATASET_USAGE_PERCENT_CHOICE) {
                     Ok((below, used)) => {
                         let priority = if below { 0 } else { 1 };
                         (priority, used, mountpoint.clone())
@@ -319,7 +541,10 @@ impl DumpSetupWorker {
         );
         self.known_core_dirs.sort_by_cached_key(|mnt| {
             // these get archived periodically anyway, pick one with room
-            let available = zfs_get_integer(&**mnt, "available").unwrap_or(0);
+            let available = self
+                .invoker
+                .zfs_get_integer(mnt.as_ref(), "available")
+                .unwrap_or(0);
             (u64::MAX - available, mnt.clone())
         });
 
@@ -328,16 +553,20 @@ impl DumpSetupWorker {
                 warn!(self.log, "Previously-chosen debug/dump dir {x:?} no longer exists in our view of reality");
                 self.chosen_debug_dir = None;
             } else {
-                match below_thresh(x.as_ref(), DATASET_USAGE_PERCENT_CLEANUP) {
+                match self
+                    .invoker
+                    .below_thresh(x.as_ref(), DATASET_USAGE_PERCENT_CLEANUP)
+                {
                     Ok((true, _)) => {}
                     Ok((false, _)) => {
                         if self.known_debug_dirs.iter().any(|x| {
-                            below_thresh(
-                                x.as_ref(),
-                                DATASET_USAGE_PERCENT_CHOICE,
-                            )
-                            .unwrap_or((false, 0))
-                            .0
+                            self.invoker
+                                .below_thresh(
+                                    x.as_ref(),
+                                    DATASET_USAGE_PERCENT_CHOICE,
+                                )
+                                .unwrap_or((false, 0))
+                                .0
                         }) {
                             info!(self.log, "Previously-chosen debug/dump dir {x:?} is over usage threshold, choosing a more vacant disk");
                             self.chosen_debug_dir = None;
@@ -377,7 +606,7 @@ impl DumpSetupWorker {
         if self.chosen_core_dir.is_none() {
             for core_dir in &self.known_core_dirs {
                 // tell the system to write *userspace process* cores here.
-                match illumos_utils::coreadm::coreadm(core_dir) {
+                match self.invoker.coreadm(core_dir.as_ref()) {
                     Ok(()) => {
                         self.chosen_core_dir = Some(core_dir.clone());
                         info!(
@@ -398,7 +627,7 @@ impl DumpSetupWorker {
                 for dump_slice in self.known_dump_slices.clone() {
                     // Let's try to see if it appears to have a kernel dump already
                     match illumos_utils::dumpadm::dump_flag_is_valid(
-                        &dump_slice,
+                        dump_slice.as_ref(),
                     ) {
                         Ok(true) => {
                             debug!(self.log, "Dump slice {dump_slice:?} appears to have a valid header; will attempt to savecore");
@@ -423,14 +652,16 @@ impl DumpSetupWorker {
                 // already one there until we can attempt to savecore(8)
                 // it away and clear the flag to make room.
                 for dump_slice in &self.known_dump_slices {
-                    match illumos_utils::dumpadm::dump_flag_is_valid(dump_slice)
-                    {
+                    match illumos_utils::dumpadm::dump_flag_is_valid(
+                        dump_slice.as_ref(),
+                    ) {
                         Ok(false) => {
                             // Have dumpadm write the config for crash dumps to be
                             // on this slice, at least, until a U.2 comes along.
-                            match illumos_utils::dumpadm::dumpadm(
-                                dump_slice, None,
-                            ) {
+                            match self
+                                .invoker
+                                .dumpadm(dump_slice.as_ref(), None)
+                            {
                                 Ok(_) => {
                                     info!(self.log, "Using dump device {dump_slice:?} with no savecore destination (no U.2 debug zvol yet)");
                                     self.chosen_dump_slice =
@@ -489,7 +720,7 @@ impl DumpSetupWorker {
             if changed_slice {
                 if let Some(dump_slice) = &self.chosen_dump_slice {
                     if let Err(err) =
-                        illumos_utils::dumpadm::dumpadm(dump_slice, None)
+                        self.invoker.dumpadm(dump_slice.as_ref(), None)
                     {
                         error!(self.log, "Could not restore dump slice to {dump_slice:?}: {err:?}");
                     }
@@ -504,10 +735,10 @@ impl DumpSetupWorker {
                 info!(self.log, "No core dump locations yet known.");
             }
             for core_dir in &self.known_core_dirs {
-                if let Ok(dir) = core_dir.read_dir() {
+                if let Ok(dir) = core_dir.as_ref().read_dir() {
                     for entry in dir.flatten() {
                         if let Some(path) = entry.file_name().to_str() {
-                            let dest = debug_dir.join(path);
+                            let dest = debug_dir.as_ref().join(path);
 
                             if let Err(err) =
                                 Self::copy_sync_and_remove(&entry.path(), &dest)
@@ -572,18 +803,13 @@ impl DumpSetupWorker {
             .chosen_debug_dir
             .as_ref()
             .ok_or(ArchiveLogsError::NoDebugDirYet)?;
-        // zone crate's 'deprecated' functions collide if you try to enable
-        // its 'sync' and 'async' features simultaneously :(
-        let rt =
-            tokio::runtime::Runtime::new().map_err(ArchiveLogsError::Tokio)?;
-        let oxz_zones = rt.block_on(Zones::get())?;
-        self.archive_logs_inner(
-            debug_dir,
-            PathBuf::from("/var/svc/log"),
-            "global",
-        )?;
+        let oxz_zones = self.invoker.get_zones()?;
         for zone in oxz_zones {
-            let logdir = zone.path().join("root/var/svc/log");
+            let logdir = if zone.global() {
+                PathBuf::from("/var/svc/log")
+            } else {
+                zone.path().join("root/var/svc/log")
+            };
             let zone_name = zone.name();
             self.archive_logs_inner(debug_dir, logdir, zone_name)?;
         }
@@ -607,7 +833,7 @@ impl DumpSetupWorker {
                 .to_string();
             rotated_log_files.extend(glob::glob(&pattern)?.flatten());
         }
-        let dest_dir = debug_dir.join(zone_name).into_std_path_buf();
+        let dest_dir = debug_dir.as_ref().join(zone_name).into_std_path_buf();
         if !rotated_log_files.is_empty() {
             std::fs::create_dir_all(&dest_dir)?;
             let count = rotated_log_files.len();
@@ -658,14 +884,13 @@ impl DumpSetupWorker {
     fn dumpadm_and_savecore(
         &mut self,
         dump_slice: &DumpSlicePath,
-    ) -> Result<Option<OsString>, DumpAdmError> {
+    ) -> Result<Option<OsString>, ExecutionError> {
         // TODO: untangle savecore from illumos_utils::dumpadm
         assert!(self.chosen_debug_dir.is_some());
 
         let savecore_dir = self.chosen_debug_dir.clone().unwrap().0;
 
-        match illumos_utils::dumpadm::dumpadm(&dump_slice, Some(&savecore_dir))
-        {
+        match self.invoker.dumpadm(dump_slice.as_ref(), Some(&savecore_dir)) {
             Ok(saved) => {
                 self.savecored_slices.insert(dump_slice.clone());
                 Ok(saved)
@@ -677,7 +902,7 @@ impl DumpSetupWorker {
     fn cleanup(&self) -> Result<(), CleanupError> {
         let mut dir_info = Vec::new();
         for dir in &self.known_debug_dirs {
-            match Self::scope_dir_for_cleanup(dir) {
+            match self.scope_dir_for_cleanup(dir) {
                 Ok(info) => {
                     dir_info.push((info, dir));
                 }
@@ -715,17 +940,23 @@ impl DumpSetupWorker {
     }
 
     fn scope_dir_for_cleanup(
+        &self,
         debug_dir: &DebugDataset,
     ) -> Result<CleanupDirInfo, CleanupError> {
-        let used = zfs_get_integer(&**debug_dir, ZFS_PROP_USED)?;
-        let available = zfs_get_integer(&**debug_dir, ZFS_PROP_AVAILABLE)?;
+        let used =
+            self.invoker.zfs_get_integer(debug_dir.as_ref(), ZFS_PROP_USED)?;
+        let available = self
+            .invoker
+            .zfs_get_integer(debug_dir.as_ref(), ZFS_PROP_AVAILABLE)?;
         let capacity = used + available;
 
         let target_used = capacity * DATASET_USAGE_PERCENT_CHOICE / 100;
 
         let mut file_list = Vec::new();
         // find all files in the debug dataset and sort by modified time
-        for path in glob::glob(debug_dir.join("**/*").as_str())?.flatten() {
+        for path in
+            glob::glob(debug_dir.as_ref().join("**/*").as_str())?.flatten()
+        {
             let meta = std::fs::metadata(&path)?;
             // we need this to be a Duration rather than SystemTime so we can
             // do math to it later.
@@ -757,14 +988,15 @@ impl DumpSetupWorker {
     }
 }
 
+#[cfg_attr(test, allow(dead_code))] // mock doesn't construct Tokio variant
 #[derive(thiserror::Error, Debug)]
-enum ArchiveLogsError {
+pub enum ArchiveLogsError {
     #[error("Couldn't make an async runtime to get zone info: {0}")]
     Tokio(std::io::Error),
     #[error("I/O error: {0}")]
     IoError(#[from] std::io::Error),
     #[error("Error calling zoneadm: {0}")]
-    Zoneadm(#[from] AdmError),
+    Zoneadm(#[from] ZoneError),
     #[error("Non-UTF8 zone path for zone {0}")]
     Utf8(String),
     #[error("Glob pattern invalid: {0}")]
@@ -794,4 +1026,328 @@ struct CleanupDirInfo {
     average_time: Duration,
     num_to_delete: u32,
     file_list: Vec<(Duration, u64, PathBuf)>,
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+    use super::*;
+    use illumos_utils::dumpadm::{
+        DF_VALID, DUMP_MAGIC, DUMP_OFFSET, DUMP_VERSION,
+    };
+    use sled_storage::dataset::{CRASH_DATASET, DUMP_DATASET};
+    use std::io::Write;
+    use std::str::FromStr;
+    use tempfile::TempDir;
+
+    #[test]
+    fn test_does_not_configure_coreadm_when_no_crash_dataset_mounted() {
+        let logctx = omicron_test_utils::dev::test_setup_log(
+            "test_does_not_configure_coreadm_when_no_crash_dataset_mounted",
+        );
+        const NOT_MOUNTED_INTERNAL: &str =
+            "oxi_acab2069-6e63-6c75-de73-20c06c756db0";
+        let mut worker = DumpSetupWorker::new(
+            Fake {
+                zpool_props: [(
+                    NOT_MOUNTED_INTERNAL,
+                    [("mounted", Ok("no".to_string()))].into_iter().collect(),
+                )]
+                .into_iter()
+                .collect(),
+                ..Default::default()
+            },
+            logctx.log.clone(),
+        );
+
+        // nothing when no disks
+        worker.update_disk_loadout(vec![], vec![], vec![]);
+        assert_eq!(worker.chosen_core_dir, None);
+
+        // nothing when only a disk that's not ready
+        let non_mounted_zpool =
+            CoreZpool(ZpoolName::from_str(NOT_MOUNTED_INTERNAL).unwrap());
+        worker.update_disk_loadout(vec![], vec![], vec![non_mounted_zpool]);
+        assert_eq!(worker.chosen_core_dir, None);
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn test_configures_coreadm_only_when_crash_dataset_mounted() {
+        let logctx = omicron_test_utils::dev::test_setup_log(
+            "test_configures_coreadm_only_when_crash_dataset_mounted",
+        );
+        const NOT_MOUNTED_INTERNAL: &str =
+            "oxi_acab2069-6e63-6c75-de73-20c06c756db0";
+        const MOUNTED_INTERNAL: &str =
+            "oxi_474e554e-6174-616c-6965-4e677579656e";
+        const ERROR_INTERNAL: &str = "oxi_4861636b-2054-6865-2050-6c616e657421";
+        let mounted_zpool =
+            CoreZpool(ZpoolName::from_str(MOUNTED_INTERNAL).unwrap());
+        let non_mounted_zpool =
+            CoreZpool(ZpoolName::from_str(NOT_MOUNTED_INTERNAL).unwrap());
+        let err_zpool = CoreZpool(ZpoolName::from_str(ERROR_INTERNAL).unwrap());
+        const ZPOOL_MNT: &str = "/path/to/internal/zpool";
+        let mut worker = DumpSetupWorker::new(
+            Fake {
+                zpool_props: [
+                    (
+                        NOT_MOUNTED_INTERNAL,
+                        [("mounted", Ok("no".to_string()))]
+                            .into_iter()
+                            .collect(),
+                    ),
+                    (
+                        MOUNTED_INTERNAL,
+                        [
+                            ("mounted", Ok("yes".to_string())),
+                            ("mountpoint", Ok(ZPOOL_MNT.to_string())),
+                        ]
+                        .into_iter()
+                        .collect(),
+                    ),
+                    (
+                        ERROR_INTERNAL,
+                        [(
+                            "mounted",
+                            Err("asdf".parse::<u32>().unwrap_err().into()),
+                        )]
+                        .into_iter()
+                        .collect(),
+                    ),
+                ]
+                .into_iter()
+                .collect(),
+                ..Default::default()
+            },
+            logctx.log.clone(),
+        );
+
+        // something when there's one that's ready!
+        worker.update_disk_loadout(
+            vec![],
+            vec![],
+            vec![non_mounted_zpool.clone(), mounted_zpool],
+        );
+        assert_eq!(
+            worker.chosen_core_dir.as_ref().unwrap().0,
+            Utf8PathBuf::from(ZPOOL_MNT).join(CRASH_DATASET)
+        );
+
+        // back to nothing if it becomes unavailable
+        worker.update_disk_loadout(
+            vec![],
+            vec![],
+            vec![non_mounted_zpool, err_zpool],
+        );
+        assert_eq!(worker.chosen_core_dir, None);
+        logctx.cleanup_successful();
+    }
+
+    // we make these so illumos_utils::dumpadm::dump_flag_is_valid returns what we want
+    fn populate_tempdir_with_fake_dumps(
+        tempdir: &TempDir,
+    ) -> (DumpSlicePath, DumpSlicePath) {
+        let occupied = DumpSlicePath(
+            Utf8PathBuf::from_path_buf(tempdir.path().join("occupied.bin"))
+                .unwrap(),
+        );
+        let mut f = std::fs::File::create(occupied.as_ref()).unwrap();
+        f.write_all(&[0u8; DUMP_OFFSET as usize]).unwrap();
+        f.write_all(&DUMP_MAGIC.to_le_bytes()).unwrap();
+        f.write_all(&DUMP_VERSION.to_le_bytes()).unwrap();
+        f.write_all(&DF_VALID.to_le_bytes()).unwrap();
+        drop(f);
+
+        let vacant = DumpSlicePath(
+            Utf8PathBuf::from_path_buf(tempdir.path().join("vacant.bin"))
+                .unwrap(),
+        );
+        let mut f = std::fs::File::create(vacant.as_ref()).unwrap();
+        f.write_all(&[0u8; DUMP_OFFSET as usize]).unwrap();
+        f.write_all(&DUMP_MAGIC.to_le_bytes()).unwrap();
+        f.write_all(&DUMP_VERSION.to_le_bytes()).unwrap();
+        f.write_all(&0u32.to_le_bytes()).unwrap();
+        drop(f);
+
+        (occupied, vacant)
+    }
+
+    // if we only have two filled dump slices and nowhere to evacuate them,
+    // don't configure a dump slice at all.
+    #[test]
+    fn test_savecore_and_dumpadm_not_called_when_occupied_and_no_dir() {
+        let logctx = omicron_test_utils::dev::test_setup_log(
+            "test_savecore_and_dumpadm_not_called_when_occupied_and_no_dir",
+        );
+        let mut worker =
+            DumpSetupWorker::new(Fake::default(), logctx.log.clone());
+        let tempdir = TempDir::new().unwrap();
+        let (occupied, _) = populate_tempdir_with_fake_dumps(&tempdir);
+
+        worker.update_disk_loadout(
+            vec![occupied.clone(), occupied],
+            vec![],
+            vec![],
+        );
+        assert!(worker.chosen_dump_slice.is_none());
+        logctx.cleanup_successful();
+    }
+
+    // if we have one dump slice that's free and one that's full,
+    // and nowhere to savecore the full one,
+    // we should always call dumpadm with the free one.
+    #[test]
+    fn test_dumpadm_called_when_vacant_slice_but_no_dir() {
+        let logctx = omicron_test_utils::dev::test_setup_log(
+            "test_dumpadm_called_when_vacant_slice_but_no_dir",
+        );
+        let mut worker = DumpSetupWorker::new(
+            Fake { zpool_props: Default::default(), ..Default::default() },
+            logctx.log.clone(),
+        );
+        let tempdir = TempDir::new().unwrap();
+        let (occupied, vacant) = populate_tempdir_with_fake_dumps(&tempdir);
+        worker.update_disk_loadout(
+            vec![occupied, vacant.clone()],
+            vec![],
+            vec![],
+        );
+        assert_eq!(worker.chosen_dump_slice.as_ref(), Some(&vacant));
+        logctx.cleanup_successful();
+    }
+
+    // if we have two occupied dump slices,
+    // but we also have somewhere to unload them,
+    // call dumpadm and savecore.
+    #[test]
+    fn test_savecore_and_dumpadm_invoked_when_slices_occupied_and_dir_is_available(
+    ) {
+        let logctx = omicron_test_utils::dev::test_setup_log("test_savecore_and_dumpadm_invoked_when_slices_occupied_and_dir_is_available");
+        const MOUNTED_EXTERNAL: &str =
+            "oxp_446f6e74-4469-6557-6f6e-646572696e67";
+        const ZPOOL_MNT: &str = "/path/to/external/zpool";
+        let mut worker = DumpSetupWorker::new(
+            Fake {
+                zpool_props: [(
+                    MOUNTED_EXTERNAL,
+                    [
+                        ("mounted", Ok("yes".to_string())),
+                        ("mountpoint", Ok(ZPOOL_MNT.to_string())),
+                    ]
+                    .into_iter()
+                    .collect(),
+                )]
+                .into_iter()
+                .collect(),
+                ..Default::default()
+            },
+            logctx.log.clone(),
+        );
+        let tempdir = TempDir::new().unwrap();
+        let (occupied, _) = populate_tempdir_with_fake_dumps(&tempdir);
+
+        let mounted_zpool =
+            DebugZpool(ZpoolName::from_str(MOUNTED_EXTERNAL).unwrap());
+        worker.update_disk_loadout(
+            vec![occupied.clone()],
+            vec![mounted_zpool],
+            vec![],
+        );
+        assert_eq!(worker.chosen_dump_slice.as_ref(), Some(&occupied));
+        assert_eq!(
+            worker.chosen_debug_dir.unwrap().0,
+            Utf8PathBuf::from(ZPOOL_MNT).join(DUMP_DATASET)
+        );
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn test_archives_rotated_logs_and_cores() {
+        let logctx = omicron_test_utils::dev::test_setup_log(
+            "test_archives_rotated_logs_and_cores",
+        );
+
+        let tempdir = TempDir::new().unwrap();
+        let core_dir = tempdir.path().join(CRASH_DATASET);
+        let debug_dir = tempdir.path().join(DUMP_DATASET);
+        let zone_logs = tempdir.path().join("root/var/svc/log");
+
+        let tempdir_path = tempdir.path().to_str().unwrap().to_string();
+        let zone = Zone::from_str(&format!(
+            "1:myzone:running:{tempdir_path}::ipkg:shared"
+        ))
+        .unwrap();
+
+        const MOUNTED_INTERNAL: &str =
+            "oxi_474e554e-6174-616c-6965-4e677579656e";
+        const MOUNTED_EXTERNAL: &str =
+            "oxp_446f6e74-4469-6557-6f6e-646572696e67";
+        let mut worker = DumpSetupWorker::new(
+            Fake {
+                zpool_props: [
+                    (
+                        MOUNTED_INTERNAL,
+                        [
+                            ("mounted", Ok("yes".to_string())),
+                            ("mountpoint", Ok(tempdir_path.clone())),
+                        ]
+                        .into_iter()
+                        .collect(),
+                    ),
+                    (
+                        MOUNTED_EXTERNAL,
+                        [
+                            ("mounted", Ok("yes".to_string())),
+                            ("mountpoint", Ok(tempdir_path)),
+                        ]
+                        .into_iter()
+                        .collect(),
+                    ),
+                ]
+                .into_iter()
+                .collect(),
+                zones: vec![zone.clone()],
+            },
+            logctx.log.clone(),
+        );
+
+        std::fs::create_dir_all(&core_dir).unwrap();
+        std::fs::create_dir_all(&debug_dir).unwrap();
+        std::fs::create_dir_all(&zone_logs).unwrap();
+        const LOG_NAME: &'static str = "foo.log.0";
+        writeln!(
+            std::fs::File::create(zone_logs.join(LOG_NAME)).unwrap(),
+            "hello"
+        )
+        .unwrap();
+
+        const CORE_NAME: &str = "core.myzone.myexe.123.1690540950";
+        writeln!(
+            std::fs::File::create(core_dir.join(CORE_NAME)).unwrap(),
+            "crunch"
+        )
+        .unwrap();
+
+        let mounted_core_zpool =
+            CoreZpool(ZpoolName::from_str(MOUNTED_INTERNAL).unwrap());
+        let mounted_debug_zpool =
+            DebugZpool(ZpoolName::from_str(MOUNTED_EXTERNAL).unwrap());
+
+        worker.update_disk_loadout(
+            vec![],
+            vec![mounted_debug_zpool],
+            vec![mounted_core_zpool],
+        );
+        worker.archive_files().unwrap();
+
+        // it'll be renamed to use an epoch timestamp instead of .0
+        let log_glob =
+            debug_dir.join(zone.name()).join(LOG_NAME.replace(".0", ".*"));
+        assert_eq!(glob::glob(log_glob.to_str().unwrap()).unwrap().count(), 1);
+        assert!(!zone_logs.join(LOG_NAME).is_file());
+        assert!(debug_dir.join(CORE_NAME).is_file());
+        assert!(!core_dir.join(CORE_NAME).is_file());
+        logctx.cleanup_successful();
+    }
 }
