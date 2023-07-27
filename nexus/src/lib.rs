@@ -34,6 +34,7 @@ use omicron_common::address::IpRange;
 use omicron_common::api::internal::shared::{
     ExternalPortDiscovery, SwitchLocation,
 };
+use omicron_common::FileKv;
 use slog::Logger;
 use std::collections::HashMap;
 use std::net::{SocketAddr, SocketAddrV6};
@@ -311,7 +312,7 @@ pub async fn run_server(config: &Config) -> Result<(), String> {
                 format!("initializing logger: {}", message)
             })?,
         );
-    let log = slog::Logger::root(drain.fuse(), slog::o!());
+    let log = slog::Logger::root(drain.fuse(), slog::o!(FileKv));
     if let slog_dtrace::ProbeRegistration::Failed(e) = registration {
         let msg = format!("failed to register DTrace probes: {}", e);
         error!(log, "{}", msg);

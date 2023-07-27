@@ -50,3 +50,24 @@ macro_rules! generate_logging_api {
         );
     };
 }
+
+/// A type that allows adding file and line numbers to log messages
+/// automatically. It should be instantiated at the root logger of each
+/// executable that desires this functionality, as in the following example.
+/// ```
+///     slog::Logger::root(drain, o!(FileLocationKv))
+/// ```
+pub struct FileKv;
+
+impl slog::KV for FileKv {
+    fn serialize(
+        &self,
+        record: &slog::Record,
+        serializer: &mut dyn slog::Serializer,
+    ) -> slog::Result {
+        serializer.emit_str(
+            "file".into(),
+            &format!("{}:{}", record.file(), record.line()),
+        )
+    }
+}

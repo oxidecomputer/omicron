@@ -25,6 +25,7 @@ pub use management_switch::SpIdentifier;
 pub use management_switch::SpType;
 pub use management_switch::SwitchPortConfig;
 pub use management_switch::SwitchPortDescription;
+use omicron_common::FileKv;
 
 use dropshot::ConfigDropshot;
 use dropshot::HandlerTaskMode;
@@ -302,7 +303,7 @@ pub async fn start_server(
             .to_logger("gateway")
             .map_err(|message| format!("initializing logger: {}", message))?,
     );
-    let log = slog::Logger::root(drain.fuse(), slog::o!());
+    let log = slog::Logger::root(drain.fuse(), slog::o!(FileKv));
     if let slog_dtrace::ProbeRegistration::Failed(e) = registration {
         let msg = format!("failed to register DTrace probes: {}", e);
         error!(log, "{}", msg);

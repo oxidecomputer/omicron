@@ -13,6 +13,7 @@ use installinator_common::{
     InstallinatorStepId, StepContext, StepHandle, StepProgress, StepSuccess,
     StepWarning, UpdateEngine,
 };
+use omicron_common::FileKv;
 use omicron_common::{
     api::internal::nexus::KnownArtifactKind,
     update::{ArtifactHash, ArtifactHashId, ArtifactKind},
@@ -66,7 +67,7 @@ impl InstallinatorApp {
 
         let drain = slog::Duplicate::new(file_drain, stderr_drain).fuse();
         let drain = slog_async::Async::new(drain).build().fuse();
-        Ok(slog::Logger::root(drain, slog::o!()))
+        Ok(slog::Logger::root(drain, slog::o!(FileKv)))
     }
 }
 
