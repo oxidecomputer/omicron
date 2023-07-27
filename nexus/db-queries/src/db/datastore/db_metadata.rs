@@ -343,7 +343,7 @@ mod test {
 
         // Helper to create the version directory and "up.sql".
         let add_upgrade = |version: SemverVersion, sql: String| {
-            let config_dir_path = config_dir.path().clone();
+            let config_dir_path = config_dir.path();
             async move {
                 let dir = config_dir_path.join(version.to_string());
                 tokio::fs::create_dir_all(&dir).await.unwrap();
@@ -429,8 +429,7 @@ mod test {
             let pool = pool.clone();
             let config = config.clone();
             tokio::task::spawn(async move {
-                let datastore = DataStore::new(&log, pool, Some(&config)).await
-                    .map_err(|e| e.to_string())?;
+                let datastore = DataStore::new(&log, pool, Some(&config)).await?;
 
                 // This is the crux of this test: confirm that, as each
                 // migration completes, it's not possible to see any artifacts
