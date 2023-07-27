@@ -63,6 +63,23 @@ pub struct EarlyNetworkSetup<'a> {
     log: &'a Logger,
 }
 
+/// `EarlyNetworkSetup` provides three helper methods primarily used for cold
+/// boot and RSS networking configuration (i.e., prior to the control plane
+/// being up). The first two are related to finding the switch zones:
+///
+/// * `lookup_switch_zone_underlay_addrs` attempts to find the underlay
+///   addresses and locations of all switch zones reported by internal DNS,
+///   which must already be up and populated with the switch zone services.
+/// * `lookup_uplinked_switch_zone_underlay_addrs` attempts to find the underlay
+///   addresses of all switch zones that are configured with an uplink. Internal
+///   DNS must already be up and populated with the switch zone services.
+///
+/// There are additional details about how these fail behave if one or both
+/// switch zones are unresponse; see their respective documentation.
+///
+/// The third function provided is `init_switch_config`. It is intended to be
+/// called by a scrimlet to configure _its own_ switch by talking to dendrite on
+/// its own switch zone's underlay address.
 impl<'a> EarlyNetworkSetup<'a> {
     pub fn new(log: &'a Logger) -> Self {
         EarlyNetworkSetup { log }
@@ -310,18 +327,25 @@ impl<'a> EarlyNetworkSetup<'a> {
         }
     }
 
-    // Initialize a single switch via DPD.
+    /// Initialize a single switch via DPD.
+    ///
+    /// This should be called by a scrimlet after it brings up its own switch
+    /// zone. `switch_zone_underlay_ip` should be the IP address of the switch
+    /// zone it brought up, and `switch_location` must be determined by
+    /// communicating with MGS in the switch zone.
     pub async fn init_switch_config(
         &mut self,
         rack_network_config: &RackNetworkConfig,
-        switch_ip: Ipv6Addr,
+        switch_zone_underlay_ip: Ipv6Addr,
         switch_location: SwitchLocation,
     ) -> Result<(), EarlyNetworkSetupError> {
-        // Initialize rack network before NTP comes online, otherwise boundary
-        // services will not be available and NTP will fail to sync
-        info!(self.log, "Initializing Rack Network");
+        info!(
+            self.log,
+            "Initializing Uplinks on {switch_location:?} at \
+             {switch_zone_underlay_ip}",
+        );
         let dpd = DpdClient::new(
-            &format!("http://[{}]:{}", switch_ip, DENDRITE_PORT),
+            &format!("http://[{}]:{}", switch_zone_underlay_ip, DENDRITE_PORT),
             dpd_client::ClientState {
                 tag: "early_networking".to_string(),
                 log: self.log.new(o!("component" => "DpdClient")),
@@ -366,7 +390,8 @@ impl<'a> EarlyNetworkSetup<'a> {
 
             info!(self.log, "advertising boundary services loopback address");
 
-            let ddmd_addr = SocketAddrV6::new(switch_ip, DDMD_PORT, 0, 0);
+            let ddmd_addr =
+                SocketAddrV6::new(switch_zone_underlay_ip, DDMD_PORT, 0, 0);
             let ddmd_client = DdmAdminClient::new(&self.log, ddmd_addr)?;
             ddmd_client.advertise_prefix(Ipv6Subnet::new(ipv6_entry.addr));
         }

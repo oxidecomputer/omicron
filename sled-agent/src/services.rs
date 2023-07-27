@@ -864,14 +864,15 @@ impl ServiceManager {
             return Ok(vec![]);
         };
 
-        let boundary_switches = EarlyNetworkSetup::new(&self.inner.log)
-            .lookup_uplinked_switch_zone_underlay_addrs(
-                resolver,
-                rack_network_config,
-            )
-            .await;
+        let uplinked_switch_zone_addrs =
+            EarlyNetworkSetup::new(&self.inner.log)
+                .lookup_uplinked_switch_zone_underlay_addrs(
+                    resolver,
+                    rack_network_config,
+                )
+                .await;
 
-        let dpd_clients: Vec<DpdClient> = boundary_switches
+        let dpd_clients: Vec<DpdClient> = uplinked_switch_zone_addrs
             .iter()
             .map(|addr| {
                 DpdClient::new(
