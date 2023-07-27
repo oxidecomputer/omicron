@@ -3327,7 +3327,8 @@ mod test {
         wait_ctx.expect().return_once(|_, _| Ok(()));
 
         // Import the manifest, enable the service
-        let spawn_ctx = illumos_utils::spawn_context();
+        let spawn_ctx =
+            illumos_utils::spawn_with_piped_stdout_and_stderr_context();
         spawn_ctx.expect().times(..).returning(|_| {
             std::process::Command::new("/bin/false").spawn().map_err(|err| {
                 illumos_utils::ExecutionError::ExecutionStart {
