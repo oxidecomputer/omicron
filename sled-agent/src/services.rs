@@ -2862,6 +2862,7 @@ impl ServiceManager {
                 vec![
                     ServiceType::Dendrite { asic },
                     ServiceType::ManagementGatewayService,
+                    ServiceType::Uplink,
                     ServiceType::Wicketd { baseboard },
                     ServiceType::Maghemite { mode: "transit".to_string() },
                     ServiceType::SpSim,
