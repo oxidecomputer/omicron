@@ -1,1 +1,1 @@
-*/15 * * * /usr/sbin/logadm
+*/15 * * * * /usr/sbin/logadm
