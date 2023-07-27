@@ -43,7 +43,6 @@ use ddm_admin_client::{Client as DdmAdminClient, DdmError};
 use dpd_client::{types as DpdTypes, Client as DpdClient, Error as DpdError};
 use dropshot::HandlerTaskMode;
 use flate2::bufread::GzDecoder;
-use gateway_client::Client as MgsClient;
 use illumos_utils::addrobj::AddrObject;
 use illumos_utils::addrobj::IPV6_LINK_LOCAL_NAME;
 use illumos_utils::dladm::{Dladm, Etherstub, EtherstubVnic, PhysicalLink};
@@ -71,9 +70,7 @@ use omicron_common::address::RACK_PREFIX;
 use omicron_common::address::SLED_PREFIX;
 use omicron_common::address::WICKETD_PORT;
 use omicron_common::api::external::Generation;
-use omicron_common::api::internal::shared::{
-    RackNetworkConfig, SwitchLocation,
-};
+use omicron_common::api::internal::shared::RackNetworkConfig;
 use omicron_common::backoff::{
     retry_notify, retry_policy_internal_service_aggressive, retry_policy_local,
     BackoffError,
@@ -92,9 +89,9 @@ use sled_hardware::underlay::BOOTSTRAP_PREFIX;
 use sled_hardware::Baseboard;
 use sled_hardware::SledMode;
 use slog::Logger;
-use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::collections::HashSet;
+use std::collections::{BTreeMap, HashMap};
 use std::io::Cursor;
 use std::iter;
 use std::iter::FromIterator;
@@ -2917,60 +2914,15 @@ impl ServiceManager {
     ) -> Result<(), Error> {
         let log = &self.inner.log;
 
-        let mgs_client = MgsClient::new(
-            &format!("http://[{}]:{}", switch_zone_ip, MGS_PORT),
-            log.new(o!("component" => "MgsClient")),
-        );
-        let switch_slot = retry_notify(
-            retry_policy_local(),
-            || async {
-                mgs_client
-                    .sp_local_switch_id()
-                    .await
-                    .map_err(BackoffError::transient)
-                    .map(|response| response.into_inner().slot)
-            },
-            |error, delay| {
-                warn!(
-                    log,
-                    "Failed to get switch ID from MGS (retrying in {delay:?})";
-                    "error" => ?error,
-                );
-            },
-        )
-        .await
-        .expect("Expected an infinite retry loop getting our switch ID");
-
-        let switch_location = match switch_slot {
-            0 => SwitchLocation::Switch0,
-            1 => SwitchLocation::Switch1,
-            _ => {
-                return Err(Error::SledLocalZone(anyhow!(
-                    "Local switch zone returned nonsense switch \
-                     slot {switch_slot}"
-                )));
-            }
-        };
-
-        // Configure DPD.
-        EarlyNetworkSetup::new(log)
-            .init_switch_config(
-                rack_network_config,
-                switch_zone_ip,
-                switch_location,
-            )
+        // Configure uplinks via DPD in our switch zone.
+        let our_uplinks = EarlyNetworkSetup::new(log)
+            .init_switch_config(rack_network_config, switch_zone_ip)
             .await?;
 
-        // Filter rack_network_config uplinks down to just those for our switch.
-        let our_uplinks = rack_network_config
-            .uplinks
-            .iter()
-            .filter(|uplink| uplink.switch == switch_location);
-
         // We expect the switch zone to be running, as we're called immediately
-        // after `ensure_zone()` above and we just successfully asked MGS (which
-        // is running in our switch zone!) for our switch slot. If somehow we're
-        // in any other state, bail out.
+        // after `ensure_zone()` above and we just successfully configured
+        // uplinks via DPD running in our switch zone. If somehow we're in any
+        // other state, bail out.
         let mut switch_zone = self.inner.switch_zone.lock().await;
 
         let zone = match &mut *switch_zone {
@@ -2991,16 +2943,28 @@ impl ServiceManager {
 
         let smfh = SmfHelper::new(&zone, &ServiceType::Uplink);
 
-        // TODO-correctness We ought to delete any old `uplinks/*` properties,
-        // but today we don't actually support changing the uplinks live, so we
-        // treat this as "append only" (where we always append exactly the same
-        // thing).
-        for uplink_config in our_uplinks {
+        // We want to delete all the properties in the `uplinks` group, but we
+        // don't know their names, so instead we'll delete and recreate the
+        // group, then add all our properties.
+        smfh.delpropgroup("uplinks")?;
+        smfh.addpropgroup("uplinks", "application")?;
+
+        // When naming the uplink ports, we need to append `_0`, `_1`, etc., for
+        // each use of any given port. We use a hashmap of counters of port name
+        // -> number of uplinks to correctly supply that suffix.
+        let mut port_count = HashMap::new();
+        for uplink_config in &our_uplinks {
+            let this_port_count: &mut usize =
+                port_count.entry(&uplink_config.uplink_port).or_insert(0);
             smfh.addpropvalue_type(
-                &format!("uplinks/{}", uplink_config.uplink_port),
+                &format!(
+                    "uplinks/{}_{}",
+                    uplink_config.uplink_port, *this_port_count
+                ),
                 &uplink_config.uplink_cidr.to_string(),
                 "astring",
             )?;
+            *this_port_count += 1;
         }
         smfh.refresh()?;
 

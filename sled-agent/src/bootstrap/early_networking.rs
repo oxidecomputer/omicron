@@ -23,7 +23,8 @@ use omicron_common::api::internal::shared::{
     PortFec, PortSpeed, RackNetworkConfig, SwitchLocation, UplinkConfig,
 };
 use omicron_common::backoff::{
-    retry_notify, BackoffError, ExponentialBackoff, ExponentialBackoffBuilder,
+    retry_notify, retry_policy_local, BackoffError, ExponentialBackoff,
+    ExponentialBackoffBuilder,
 };
 use serde::{Deserialize, Serialize};
 use slog::Logger;
@@ -42,6 +43,9 @@ pub enum EarlyNetworkSetupError {
 
     #[error("Error contacting ddmd: {0}")]
     DdmError(#[from] DdmError),
+
+    #[error("Error during request to MGS: {0}")]
+    Mgs(String),
 
     #[error("Error during request to Dendrite: {0}")]
     Dendrite(String),
@@ -331,18 +335,68 @@ impl<'a> EarlyNetworkSetup<'a> {
     ///
     /// This should be called by a scrimlet after it brings up its own switch
     /// zone. `switch_zone_underlay_ip` should be the IP address of the switch
-    /// zone it brought up, and `switch_location` must be determined by
-    /// communicating with MGS in the switch zone.
+    /// zone it brought up.
+    ///
+    /// Returns the list of uplinks configured via DPD.
     pub async fn init_switch_config(
         &mut self,
         rack_network_config: &RackNetworkConfig,
         switch_zone_underlay_ip: Ipv6Addr,
-        switch_location: SwitchLocation,
-    ) -> Result<(), EarlyNetworkSetupError> {
+    ) -> Result<Vec<UplinkConfig>, EarlyNetworkSetupError> {
+        // First, we have to know which switch we are: ask MGS.
         info!(
             self.log,
-            "Initializing Uplinks on {switch_location:?} at \
+            "Determining physical location of our switch zone at \
              {switch_zone_underlay_ip}",
+        );
+        let mgs_client = MgsClient::new(
+            &format!("http://[{}]:{}", switch_zone_underlay_ip, MGS_PORT),
+            self.log.new(o!("component" => "MgsClient")),
+        );
+        let switch_slot = retry_notify(
+            retry_policy_local(),
+            || async {
+                mgs_client
+                    .sp_local_switch_id()
+                    .await
+                    .map_err(BackoffError::transient)
+                    .map(|response| response.into_inner().slot)
+            },
+            |error, delay| {
+                warn!(
+                    self.log,
+                    "Failed to get switch ID from MGS (retrying in {delay:?})";
+                    "error" => ?error,
+                );
+            },
+        )
+        .await
+        .expect("Expected an infinite retry loop getting our switch ID");
+
+        let switch_location = match switch_slot {
+            0 => SwitchLocation::Switch0,
+            1 => SwitchLocation::Switch1,
+            _ => {
+                return Err(EarlyNetworkSetupError::Mgs(format!(
+                    "Local switch zone returned nonsense switch \
+                     slot {switch_slot}"
+                )));
+            }
+        };
+
+        // We now know which switch we are: filter the uplinks to just ours.
+        let our_uplinks = rack_network_config
+            .uplinks
+            .iter()
+            .filter(|uplink| uplink.switch == switch_location)
+            .cloned()
+            .collect::<Vec<_>>();
+
+        info!(
+            self.log,
+            "Initializing {} Uplinks on {switch_location:?} at \
+             {switch_zone_underlay_ip}",
+            our_uplinks.len(),
         );
         let dpd = DpdClient::new(
             &format!("http://[{}]:{}", switch_zone_underlay_ip, DENDRITE_PORT),
@@ -354,11 +408,7 @@ impl<'a> EarlyNetworkSetup<'a> {
 
         // configure uplink for each requested uplink in configuration that
         // matches our switch_location
-        for uplink_config in rack_network_config
-            .uplinks
-            .iter()
-            .filter(|uplink| uplink.switch == switch_location)
-        {
+        for uplink_config in &our_uplinks {
             let (ipv6_entry, dpd_port_settings, port_id) =
                 self.build_uplink_config(uplink_config)?;
 
@@ -395,7 +445,8 @@ impl<'a> EarlyNetworkSetup<'a> {
             let ddmd_client = DdmAdminClient::new(&self.log, ddmd_addr)?;
             ddmd_client.advertise_prefix(Ipv6Subnet::new(ipv6_entry.addr));
         }
-        Ok(())
+
+        Ok(our_uplinks)
     }
 
     fn build_uplink_config(
