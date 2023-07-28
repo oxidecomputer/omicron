@@ -114,7 +114,7 @@ impl Ledgerable for Plan {
     }
     fn generation_bump(&mut self) {}
 }
-const RSS_SERVICE_PLAN_FILENAME: &str = "rss-service-plan.toml";
+const RSS_SERVICE_PLAN_FILENAME: &str = "rss-service-plan.json";
 
 impl Plan {
     pub async fn load(

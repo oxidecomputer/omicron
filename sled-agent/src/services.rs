@@ -284,7 +284,7 @@ impl Config {
 }
 
 // The filename of the ledger, within the provided directory.
-const SERVICES_LEDGER_FILENAME: &str = "services.toml";
+const SERVICES_LEDGER_FILENAME: &str = "services.json";
 
 // The directory within the debug dataset in which bundles are created.
 const BUNDLE_DIRECTORY: &str = "bundle";
@@ -296,7 +296,7 @@ const ZONE_BUNDLE_DIRECTORY: &str = "zone";
 const ZONE_BUNDLE_METADATA_FILENAME: &str = "metadata.toml";
 
 // A wrapper around `ZoneRequest`, which allows it to be serialized
-// to a toml file.
+// to a JSON file.
 #[derive(Clone, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 struct AllZoneRequests {
     generation: Generation,
