@@ -16,6 +16,7 @@ use crate::bootstrap::http_entrypoints::api as http_api;
 use crate::bootstrap::maghemite;
 use crate::config::Config as SledConfig;
 use cancel_safe_futures::coop_cancel;
+use omicron_common::FileKv;
 use sled_hardware::underlay;
 use slog::Drain;
 use slog::Logger;
@@ -48,7 +49,7 @@ impl Server {
                 format!("initializing logger: {}", message)
             })?,
         );
-        let log = slog::Logger::root(drain.fuse(), slog::o!());
+        let log = slog::Logger::root(drain.fuse(), slog::o!(FileKv));
         if let slog_dtrace::ProbeRegistration::Failed(e) = registration {
             let msg = format!("Failed to register DTrace probes: {}", e);
             error!(log, "{}", msg);
