@@ -27,7 +27,7 @@ fi
 
 #   $ arp -a | grep 192.168.21.1
 #   e1000g1 192.168.21.1         255.255.255.255          90:ec:77:2e:70:27
-GATEWAY_MAC=${GATEWAY_MAC:=$(arp -a | grep "$GATEWAY_IP" | awk -F ' ' '{print $4}')}
+GATEWAY_MAC=${GATEWAY_MAC:=$(arp -a | grep "$GATEWAY_IP" | awk -F ' ' '{print $NF}')}
 echo "Using $GATEWAY_MAC as gateway mac"
 
 z_scadm () {
