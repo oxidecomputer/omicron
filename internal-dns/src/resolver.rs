@@ -213,7 +213,7 @@ impl Resolver {
     /// Returns an error if the record does not exist.
     // TODO-robustness: any callers of this should probably be using
     // all the targets for a given SRV and not just the first one
-    // we get.
+    // we get, see [`Resolver::lookup_all_socket_v6`].
     pub async fn lookup_socket_v6(
         &self,
         service: crate::ServiceName,
@@ -232,6 +232,33 @@ impl Resolver {
             .await
             .next()
             .ok_or_else(|| ResolveError::NotFound(service))
+    }
+
+    /// Returns the targets of the SRV records for a DNS name.
+    ///
+    /// Unlike [`Resolver::lookup_srv`], this will further lookup the returned
+    /// targets and return a list of [`SocketAddrV6`].
+    pub async fn lookup_all_socket_v6(
+        &self,
+        service: crate::ServiceName,
+    ) -> Result<Vec<SocketAddrV6>, ResolveError> {
+        let name = service.srv_name();
+        trace!(self.log, "lookup_all_socket_v6 srv"; "dns_name" => &name);
+        let response = self.resolver.srv_lookup(&name).await?;
+        debug!(
+            self.log,
+            "lookup_all_socket_v6 srv";
+            "dns_name" => &name,
+            "response" => ?response
+        );
+
+        let results =
+            self.lookup_service_targets(response).await.collect::<Vec<_>>();
+        if !results.is_empty() {
+            Ok(results)
+        } else {
+            Err(ResolveError::NotFound(service))
+        }
     }
 
     // Returns an iterator of SocketAddrs for the specified SRV name.
