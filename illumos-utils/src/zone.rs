@@ -205,6 +205,33 @@ fn parse_ip_network(s: &str) -> Result<IpNetwork, IpNetworkError> {
 
 #[cfg_attr(any(test, feature = "testing"), mockall::automock, allow(dead_code))]
 impl Zones {
+    /// Ensures a zone is halted, but does not uninstall it or delete its
+    /// configuration.
+    ///
+    /// Returns the state the zone was in before it was halted, or None if the
+    /// zone did not exist.
+    pub async fn halt(name: &str) -> Result<Option<zone::State>, AdmError> {
+        match Self::find(name).await? {
+            None => Ok(None),
+            Some(zone) => {
+                let state = zone.state();
+                let halt = match state {
+                    // For states where we could be running, attempt to halt.
+                    zone::State::Running | zone::State::Ready => true,
+                    // Other zone states are assumed to be halting or halted.
+                    // XXX: does this apply to ShuttingDown? A zone can be stuck
+                    // in this state and require operator intervention.
+                    // Ref: https://illumos.org/man/7/zones
+                    _ => false,
+                };
+
+                Self::halt_and_remove_impl(&zone, halt, false, false).await?;
+
+                Ok(Some(state))
+            }
+        }
+    }
+
     /// Ensures a zone is halted before both uninstalling and deleting it.
     ///
     /// Returns the state the zone was in before it was removed, or None if the
@@ -226,37 +253,51 @@ impl Zones {
                     _ => (false, true),
                 };
 
-                if halt {
-                    zone::Adm::new(name).halt().await.map_err(|err| {
-                        AdmError {
-                            op: Operation::Halt,
-                            zone: name.to_string(),
-                            err,
-                        }
-                    })?;
-                }
-                if uninstall {
-                    zone::Adm::new(name)
-                        .uninstall(/* force= */ true)
-                        .await
-                        .map_err(|err| AdmError {
-                            op: Operation::Uninstall,
-                            zone: name.to_string(),
-                            err,
-                        })?;
-                }
-                zone::Config::new(name)
-                    .delete(/* force= */ true)
-                    .run()
-                    .await
-                    .map_err(|err| AdmError {
-                    op: Operation::Delete,
-                    zone: name.to_string(),
-                    err,
-                })?;
+                Self::halt_and_remove_impl(&zone, halt, uninstall, true)
+                    .await?;
+
                 Ok(Some(state))
             }
         }
+    }
+
+    async fn halt_and_remove_impl(
+        zone: &zone::Zone,
+        halt: bool,
+        uninstall: bool,
+        delete_config: bool,
+    ) -> Result<(), AdmError> {
+        if halt {
+            zone::Adm::new(zone.name()).halt().await.map_err(|err| {
+                AdmError {
+                    op: Operation::Halt,
+                    zone: zone.name().to_string(),
+                    err,
+                }
+            })?;
+        }
+        if uninstall {
+            zone::Adm::new(zone.name())
+                .uninstall(/* force= */ true)
+                .await
+                .map_err(|err| AdmError {
+                    op: Operation::Uninstall,
+                    zone: zone.name().to_string(),
+                    err,
+                })?;
+        }
+        if delete_config {
+            zone::Config::new(zone.name())
+                .delete(/* force= */ true)
+                .run()
+                .await
+                .map_err(|err| AdmError {
+                    op: Operation::Delete,
+                    zone: zone.name().to_string(),
+                    err,
+                })?;
+        }
+        Ok(())
     }
 
     /// Halt and remove the zone, logging the state in which the zone was found.

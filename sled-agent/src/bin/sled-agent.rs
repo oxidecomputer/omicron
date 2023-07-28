@@ -131,7 +131,14 @@ async fn do_run() -> Result<(), CmdError> {
                 }
             }
 
-            server.wait_for_finish().await.map_err(CmdError::Failure)?;
+            let cancel_reason =
+                server.wait_for_finish().await.map_err(CmdError::Failure)?;
+            eprintln!(
+                "Server finished execution with cancel reason: {}",
+                cancel_reason
+            );
+            // Once https://www.illumos.org/issues/15320 is addressed, here is
+            // where we'd maybe exit with SMF_EXIT_TEMP_DISABLE.
 
             Ok(())
         }

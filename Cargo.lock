@@ -790,14 +790,15 @@ dependencies = [
 
 [[package]]
 name = "cancel-safe-futures"
-version = "0.1.1"
+version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "20e5267a71ddf9a29ae221073d32f42ee6665be1a61134ff47e7275a250b8d22"
+checksum = "84f4df1b54bc954b71be3baaa0771d7fbfebc0b291d2875892f49287f3b5c73d"
 dependencies = [
  "futures-core",
  "futures-sink",
  "futures-util",
  "pin-project-lite",
+ "tokio",
 ]
 
 [[package]]

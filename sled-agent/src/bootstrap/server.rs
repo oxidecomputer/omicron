@@ -5,6 +5,7 @@
 //! Server API for bootstrap-related functionality.
 
 use super::agent::Agent;
+use super::agent::CancelReason;
 use super::config::Config;
 use super::params::version;
 use super::params::Request;
@@ -14,6 +15,7 @@ use super::views::ResponseEnvelope;
 use crate::bootstrap::http_entrypoints::api as http_api;
 use crate::bootstrap::maghemite;
 use crate::config::Config as SledConfig;
+use cancel_safe_futures::coop_cancel;
 use sled_hardware::underlay;
 use slog::Drain;
 use slog::Logger;
@@ -29,8 +31,10 @@ use tokio::task::JoinHandle;
 /// Wraps a [Agent] object, and provides helper methods for exposing it
 /// via an HTTP interface and a tcp server used for rack initialization.
 pub struct Server {
+    log: Logger,
     bootstrap_agent: Arc<Agent>,
-    rack_init_server_handle: JoinHandle<Result<(), String>>,
+    rack_init_server_handle: JoinHandle<Result<CancelReason, String>>,
+    canceler: coop_cancel::Canceler<CancelReason>,
     _http_server: dropshot::HttpServer<Arc<Agent>>,
 }
 
@@ -68,11 +72,18 @@ impl Server {
             .await
             .map_err(|err| format!("Failed to start mg-ddm: {err}"))?;
 
+        let (canceler, cancel_receiver) =
+            cancel_safe_futures::coop_cancel::new_pair();
+
         info!(log, "setting up bootstrap agent server");
-        let bootstrap_agent =
-            Agent::new(log.clone(), config.clone(), sled_config)
-                .await
-                .map_err(|e| e.to_string())?;
+        let bootstrap_agent = Agent::new(
+            log.clone(),
+            config.clone(),
+            sled_config,
+            canceler.clone(),
+        )
+        .await
+        .map_err(|e| e.to_string())?;
         info!(log, "bootstrap agent finished initialization successfully");
         let bootstrap_agent = Arc::new(bootstrap_agent);
 
@@ -95,13 +106,17 @@ impl Server {
             log.new(o!("component" => "rack init server (BootstrapAgent)"));
         let rack_init_server_handle = Inner::start_rack_init_server(
             Arc::clone(&bootstrap_agent),
+            cancel_receiver,
             inner_log,
         )
         .await?;
 
+        let log = log.new(o!("component" => "bootstrap::servere"));
         let server = Server {
+            log,
             bootstrap_agent,
             rack_init_server_handle,
+            canceler,
             _http_server: http_server,
         };
         Ok(server)
@@ -111,24 +126,44 @@ impl Server {
         &self.bootstrap_agent
     }
 
-    pub async fn wait_for_finish(self) -> Result<(), String> {
+    pub async fn wait_for_finish(self) -> Result<CancelReason, String> {
+        // Note that self.rack_init_server_handle does not exit unless either:
+        // * accept() errors out, or
+        // * the abort receiver is called.
         match self.rack_init_server_handle.await {
-            Ok(result) => result,
-            Err(err) => {
-                if err.is_cancelled() {
-                    // We control cancellation of `rack_init_server_handle`,
-                    // which only happens if we intentionally abort it in
-                    // `close()`; that should not result in an error here.
-                    Ok(())
-                } else {
-                    Err(format!("Join on server tokio task failed: {err}"))
+            Ok(result) => match result {
+                Ok(cancel_reason) => {
+                    info!(self.log, "Rack init server cancelled"; "cancel_reason" => %cancel_reason);
+                    Ok(cancel_reason)
                 }
+                Err(error) => {
+                    let error =
+                        format!("Rack init server tokio task failed: {error}");
+                    error!(self.log, "{error}");
+                    Err(error)
+                }
+            },
+            Err(err) => {
+                // We previously checked err.is_cancelled() after aborting in
+                // Self::close. However, after we switched to cooperative
+                // cancellation, this should never happen in practice. That's
+                // because we never call `rack_init_server_handle.abort()`. But
+                // in case it does happen for some reason, log it.
+                if err.is_cancelled() {
+                    warn!(self.log, "Join on rack_init_server_handle unexpectedly cancelled");
+                }
+                let error =
+                    format!("Rack init server tokio task failed: {err}");
+                error!(self.log, "{error}");
+                Err(error)
             }
         }
     }
 
-    pub async fn close(self) -> Result<(), String> {
-        self.rack_init_server_handle.abort();
+    pub async fn close(self) -> Result<CancelReason, String> {
+        self.canceler
+            .cancel(CancelReason::CloseCalled)
+            .expect("receiver held open by self");
         self.wait_for_finish().await
     }
 }
@@ -142,8 +177,9 @@ struct Inner {
 impl Inner {
     async fn start_rack_init_server(
         bootstrap_agent: Arc<Agent>,
+        cancel_receiver: coop_cancel::Receiver<CancelReason>,
         log: Logger,
-    ) -> Result<JoinHandle<Result<(), String>>, String> {
+    ) -> Result<JoinHandle<Result<CancelReason, String>>, String> {
         let bind_address = bootstrap_agent.rack_init_address();
 
         let listener =
@@ -152,15 +188,26 @@ impl Inner {
             })?;
         info!(log, "Started listening"; "local_addr" => %bind_address);
         let inner = Inner { listener, bootstrap_agent, log };
-        Ok(tokio::spawn(inner.run()))
+
+        Ok(tokio::spawn(inner.run(cancel_receiver)))
     }
 
-    async fn run(self) -> Result<(), String> {
+    async fn run(
+        self,
+        mut cancel_receiver: coop_cancel::Receiver<CancelReason>,
+    ) -> Result<CancelReason, String> {
         loop {
-            let (stream, remote_addr) =
-                self.listener.accept().await.map_err(|err| {
-                    format!("accept() on already-bound socket failed: {err}")
-                })?;
+            let (stream, remote_addr) = tokio::select! {
+                result = self.listener.accept() => {
+                    result.map_err(|err| {
+                        format!("accept() on already-bound socket failed: {err}")
+                    })?
+                }
+                Some(kind) = cancel_receiver.recv() => {
+                    info!(self.log, "Aborting server"; "kind" => ?kind);
+                    return Ok(kind);
+                }
+            };
 
             let log = self.log.new(o!("remote_addr" => remote_addr));
             info!(log, "Accepted connection");

@@ -9,7 +9,7 @@ use super::config::{
     BOOTSTRAP_AGENT_RACK_INIT_PORT,
 };
 use super::hardware::HardwareMonitor;
-use super::http_entrypoints::RackOperationStatus;
+use super::http_entrypoints::{RackOperationStatus, SledShutdownRequest};
 use super::params::RackInitializeRequest;
 use super::params::StartSledAgentRequest;
 use super::secret_retriever::LrtqOrHardcodedSecretRetriever;
@@ -21,6 +21,7 @@ use crate::storage_manager::{StorageManager, StorageResources};
 use crate::updates::UpdateManager;
 use bootstore::schemes::v0 as bootstore;
 use camino::Utf8PathBuf;
+use cancel_safe_futures::coop_cancel;
 use cancel_safe_futures::TryStreamExt;
 use ddm_admin_client::{Client as DdmAdminClient, DdmError};
 use futures::stream::{self, StreamExt};
@@ -43,8 +44,10 @@ use sled_hardware::{Baseboard, HardwareManager};
 use slog::Logger;
 use std::borrow::Cow;
 use std::collections::BTreeSet;
+use std::fmt;
 use std::net::{IpAddr, Ipv6Addr, SocketAddrV6};
 use std::sync::Arc;
+use std::time::Duration;
 use thiserror::Error;
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
@@ -66,8 +69,20 @@ pub enum BootstrapError {
         err: std::io::Error,
     },
 
+    #[error("Error halting zone: {0}")]
+    Halt(anyhow::Error),
+
+    #[error("Error uninstalling zone: {0}")]
+    Uninstall(anyhow::Error),
+
     #[error("Error cleaning up old state: {0}")]
     Cleanup(anyhow::Error),
+
+    #[error("SMF_FMRI environment variable error (is sled-agent running under smf?): {0}")]
+    SmfFmriEnvError(std::env::VarError),
+
+    #[error("Error disabling sled-agent service: {0}")]
+    DisablingSledAgent(illumos_utils::ExecutionError),
 
     #[error("Failed to enable routing: {0}")]
     EnablingRouting(illumos_utils::ExecutionError),
@@ -198,6 +213,8 @@ pub struct Agent {
     ddmd_client: DdmAdminClient,
 
     global_zone_bootstrap_link_local_address: Ipv6Addr,
+
+    canceler: coop_cancel::Canceler<CancelReason>,
 
     /// We maintain the handle just to show ownership, but don't use it, as the
     /// KeyManager task should run forever
@@ -348,6 +365,7 @@ impl Agent {
         log: Logger,
         config: Config,
         sled_config: SledConfig,
+        canceler: coop_cancel::Canceler<CancelReason>,
     ) -> Result<Self, BootstrapError> {
         let ba_log = log.new(o!(
             "component" => "BootstrapAgent",
@@ -541,6 +559,7 @@ impl Agent {
             sled_config,
             ddmd_client,
             global_zone_bootstrap_link_local_address,
+            canceler,
             key_manager_handle: handle,
             storage_key_requester,
             baseboard,
@@ -873,6 +892,27 @@ impl Agent {
     // method should only be called when the sled agent has been
     // dismantled, and is not concurrently executing!
 
+    // Halt all zones (except the switch zone)
+    async fn halt_zones_locked(
+        &self,
+        _state: &tokio::sync::MutexGuard<'_, SledAgentState>,
+    ) -> Result<(), BootstrapError> {
+        futures::stream::iter(Zones::get().await?)
+            .map(Ok::<_, anyhow::Error>)
+            // Use for_each_concurrent_then_try to delete as much as possible.
+            // We only return one error though -- hopefully that's enough to
+            // signal to the caller that this failed.
+            .for_each_concurrent_then_try(None, |zone| async move {
+                if zone.name() != "oxz_switch" {
+                    Zones::halt(zone.name()).await?;
+                }
+                Ok(())
+            })
+            .await
+            .map_err(BootstrapError::Halt)?;
+        Ok(())
+    }
+
     // Uninstall all oxide zones (except the switch zone)
     async fn uninstall_zones_locked(
         &self,
@@ -891,7 +931,7 @@ impl Agent {
                 Ok(())
             })
             .await
-            .map_err(BootstrapError::Cleanup)?;
+            .map_err(BootstrapError::Uninstall)?;
         Ok(())
     }
 
@@ -1029,6 +1069,76 @@ impl Agent {
         result
     }
 
+    /// Shuts down this sled, halting all control plane zones, disabling the
+    /// sled-agent service, and causing the sled agent to exit.
+    ///
+    /// This API is intended to put the sled into a state where an offline
+    /// update can happen. Notably, this API _does not_ move the sled into
+    /// A2, because the switch zone (if there is one) is left running.
+    pub async fn sled_shutdown(
+        &self,
+        args: SledShutdownRequest,
+    ) -> Result<(), BootstrapError> {
+        let mut state = self.sled_state.lock().await;
+
+        if let SledAgentState::After(_) = &mut *state {
+            // We'd like to stop the old sled agent before starting a new
+            // hardware monitor -- however, if we cannot start a new hardware
+            // monitor, the bootstrap agent may be in a degraded state.
+            let server = match std::mem::replace(
+                &mut *state,
+                SledAgentState::Before(None),
+            ) {
+                SledAgentState::After(server) => server,
+                _ => panic!(
+                    "Unexpected state (we should have just matched on it)"
+                ),
+            };
+            server.close().await.map_err(BootstrapError::SledError)?;
+        };
+
+        self.halt_zones_locked(&state).await?;
+
+        // Disable the sled-agent service so that smf doesn't try and bring it
+        // back online again.
+        //
+        // An alternative approach here is rather than shutting down the
+        // service, go back to the Before state (possibly without the hardware
+        // monitor spun up). But it's safer to just shut the sled-agent down
+        // because there might be remnant references to external state that
+        // haven't been invalidated.
+        let mut command =
+            std::process::Command::new(illumos_utils::zone::SVCADM);
+        let self_fmri = std::env::var("SMF_FMRI")
+            .map_err(BootstrapError::SmfFmriEnvError)?;
+        command.args([
+            "disable",
+            // Note: cannot use -s/synchronous here because it waits until the
+            // method (i.e. this process) has exited, which results in a deadlock.
+            //
+            // Use -t to ensure that the service is only disabled until next
+            // reboot, not permanently.
+            "-t",
+            &self_fmri,
+            "-c",
+            "Sled-agent disabling itself due to shutdown",
+        ]);
+        illumos_utils::execute(&mut command)
+            .map_err(BootstrapError::DisablingSledAgent)?;
+
+        // Put in a 5 second timeout as described in
+        // https://www.illumos.org/issues/15320.
+        tokio::time::sleep(Duration::from_secs(5)).await;
+
+        // Finally, cancel the server. (Ignore the error, it just means that the
+        // receiver was dropped which should never happen in practice.)
+        _ = self
+            .canceler
+            .cancel(CancelReason::ShutdownApiCalled { reason: args.reason });
+
+        Ok(())
+    }
+
     pub fn get_bootstore_node_handle(&self) -> bootstore::NodeHandle {
         self.bootstore.clone()
     }
@@ -1063,6 +1173,29 @@ impl<'a> Ledgerable for PersistentSledAgentRequest<'a> {
         true
     }
     fn generation_bump(&mut self) {}
+}
+
+#[derive(Clone, Debug)]
+#[must_use]
+pub enum CancelReason {
+    ShutdownApiCalled {
+        /// The reason as provided by the shutdown API.
+        reason: String,
+    },
+    CloseCalled,
+}
+
+impl fmt::Display for CancelReason {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::ShutdownApiCalled { reason } => {
+                write!(f, "sled_shutdown API called with reason: {reason}")
+            }
+            Self::CloseCalled => {
+                write!(f, "Server::close() called")
+            }
+        }
+    }
 }
 
 #[cfg(test)]
