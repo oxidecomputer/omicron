@@ -6,12 +6,12 @@ use hyper::client::connect::dns::Name;
 use omicron_common::address::{
     Ipv6Subnet, ReservedRackSubnet, AZ_PREFIX, DNS_PORT,
 };
-use slog::{debug, info, trace};
+use slog::{debug, error, info, trace};
 use std::net::{IpAddr, Ipv6Addr, SocketAddr, SocketAddrV6};
-use trust_dns_proto::rr::record_type::RecordType;
 use trust_dns_resolver::config::{
     LookupIpStrategy, NameServerConfig, Protocol, ResolverConfig, ResolverOpts,
 };
+use trust_dns_resolver::lookup::SrvLookup;
 use trust_dns_resolver::TokioAsyncResolver;
 
 pub type DnsError = dns_service_client::Error<dns_service_client::types::Error>;
@@ -193,87 +193,45 @@ impl Resolver {
         let response = self.resolver.srv_lookup(&name).await?;
         debug!(
             self.log,
-            "lookup_ipv6 srv";
+            "lookup_all_ipv6 srv";
             "dns_name" => &name,
             "response" => ?response
         );
-
-        // SRV records have a target, which is itself another DNS name that
-        // needs to be looked up in order to get to the actual IP addresses.
-        // Many DNS servers return these IP addresses directly in the response
-        // to the SRV query as Additional records.  Ours does as well.
-        // Unfortunately, trust-dns does not properly handle multiple targets.
-        //
-        // So we need to do another round of lookups separately.
-        //
-        // According to the docs` for
-        // `trust_dns_resolver::lookup::SrvLookup::ip_iter()`, it sounds like
-        // trust-dns would have done this for us.  It doesn't.
-        //
-        // See bluejekyll/trust-dns#1980.
-
-        // What do we do if some of these queries succeed while others fail?  We
-        // may have some addresses, but the list might be incomplete.  That
-        // might be okay for some use cases but not others.  For now, we do the
-        // simple thing.  In the future, we'll want a more cueball-like resolver
-        // interface that better deals with these cases.
-        let log = &self.log;
-        let futures = response.iter().map(|srv| async {
-            let target = srv.target();
-            trace!(
-                log,
-                "lookup_all_ipv6: looking up SRV target";
-                "name" => ?target,
-            );
-            self.resolver.ipv6_lookup(target.clone()).await
-        });
-        let results = futures::future::try_join_all(futures).await?;
-        let results = results
-            .into_iter()
-            .flat_map(|ipv6| ipv6.into_iter())
+        let addrs = self
+            .lookup_service_targets(response)
+            .await
+            .map(|addrv6| *addrv6.ip())
             .collect::<Vec<_>>();
-        if results.is_empty() {
-            Err(ResolveError::NotFound(srv))
+        if !addrs.is_empty() {
+            Ok(addrs)
         } else {
-            Ok(results)
+            Err(ResolveError::NotFound(srv))
         }
     }
 
     /// Looks up a single [`SocketAddrV6`] based on the SRV name
     /// Returns an error if the record does not exist.
+    // TODO-robustness: any callers of this should probably be using
+    // all the targets for a given SRV and not just the first one
+    // we get.
     pub async fn lookup_socket_v6(
         &self,
         service: crate::ServiceName,
     ) -> Result<SocketAddrV6, ResolveError> {
         let name = service.srv_name();
-        debug!(self.log, "lookup_socket_v6 srv"; "dns_name" => &name);
-        let response = self.resolver.lookup(&name, RecordType::SRV).await?;
+        trace!(self.log, "lookup_socket_v6 srv"; "dns_name" => &name);
+        let response = self.resolver.srv_lookup(&name).await?;
+        debug!(
+            self.log,
+            "lookup_socket_v6 srv";
+            "dns_name" => &name,
+            "response" => ?response
+        );
 
-        let rdata = response
-            .iter()
+        self.lookup_service_targets(response)
+            .await
             .next()
-            .ok_or_else(|| ResolveError::NotFound(service.clone()))?;
-
-        Ok(match rdata {
-            trust_dns_proto::rr::record_data::RData::SRV(srv) => {
-                let name = srv.target();
-                let response =
-                    self.resolver.ipv6_lookup(&name.to_string()).await?;
-
-                let address = response
-                    .iter()
-                    .next()
-                    .ok_or_else(|| ResolveError::NotFound(service))?;
-
-                SocketAddrV6::new(*address, srv.port(), 0, 0)
-            }
-
-            _ => {
-                return Err(ResolveError::Resolve(
-                    "SRV query did not return SRV RData!".into(),
-                ));
-            }
-        })
+            .ok_or_else(|| ResolveError::NotFound(service))
     }
 
     // Returns an iterator of SocketAddrs for the specified SRV name.
@@ -285,34 +243,17 @@ impl Resolver {
         name: &str,
     ) -> Result<Box<dyn Iterator<Item = SocketAddr> + Send>, ResolveError> {
         debug!(self.log, "lookup_sockets_v6_raw srv"; "dns_name" => &name);
-        let response = self.resolver.lookup(name, RecordType::SRV).await?;
-
-        let rdata = response
-            .into_iter()
-            .next()
-            .ok_or_else(|| ResolveError::NotFoundByString(name.to_string()))?;
-
-        Ok(match rdata {
-            trust_dns_proto::rr::record_data::RData::SRV(srv) => {
-                let name = srv.target();
-                let port = srv.port();
-                Box::new(
-                    self.resolver
-                        .ipv6_lookup(&name.to_string())
-                        .await?
-                        .into_iter()
-                        .map(move |ip| {
-                            SocketAddr::V6(SocketAddrV6::new(ip, port, 0, 0))
-                        }),
-                )
-            }
-
-            _ => {
-                return Err(ResolveError::Resolve(
-                    "SRV query did not return SRV RData!".into(),
-                ));
-            }
-        })
+        let response = self.resolver.srv_lookup(name).await?;
+        let mut results = self
+            .lookup_service_targets(response)
+            .await
+            .map(|addrv6| SocketAddr::V6(addrv6))
+            .peekable();
+        if results.peek().is_some() {
+            Ok(Box::new(results))
+        } else {
+            Err(ResolveError::NotFoundByString(name.to_string()))
+        }
     }
 
     pub async fn lookup_ip(
@@ -327,6 +268,70 @@ impl Resolver {
             .next()
             .ok_or_else(|| ResolveError::NotFound(srv))?;
         Ok(address)
+    }
+
+    /// Returns an iterator of [`SocketAddrV6`]'s for the targets of the given
+    /// SRV lookup response.
+    // SRV records have a target, which is itself another DNS name that needs
+    // to be looked up in order to get to the actual IP addresses. Many DNS
+    // servers (including ours) return these IP addresses directly in the
+    // response to the SRV query as Additional records. In theory
+    // `SrvLookup::ip_iter()` would suffice but some issues:
+    //   (1) it returns `IpAddr`'s rather than `SocketAddr`'s
+    //   (2) it doesn't actually return all the addresses from the Additional
+    //       section of the DNS server's response.
+    //       See bluejekyll/trust-dns#1980
+    //
+    // (1) is not a huge deal as we can try to match up the targets ourselves
+    // to grab the port for creating a `SocketAddr` but (2) means we need to do
+    // the lookups explicitly.
+    async fn lookup_service_targets(
+        &self,
+        service_lookup: SrvLookup,
+    ) -> impl Iterator<Item = SocketAddrV6> + Send {
+        let futures =
+            std::iter::repeat((self.log.clone(), self.resolver.clone()))
+                .zip(service_lookup.into_iter())
+                .map(|((log, resolver), srv)| async move {
+                    let target = srv.target();
+                    let port = srv.port();
+                    trace!(
+                        log,
+                        "lookup_service_targets: looking up SRV target";
+                        "name" => ?target,
+                    );
+                    resolver
+                        .ipv6_lookup(target.clone())
+                        .await
+                        .map(|ips| (ips, port))
+                        .map_err(|err| (target.clone(), err))
+                });
+        // What do we do if some of these queries succeed while others fail?  We
+        // may have some addresses, but the list might be incomplete.  That
+        // might be okay for some use cases but not others.  For now, we do the
+        // simple thing and return as many as we got and log any errors.
+        // In the future, we'll want a more cueball-like resolver interface
+        // that better deals with these cases.
+        let log = self.log.clone();
+        futures::future::join_all(futures)
+            .await
+            .into_iter()
+            .flat_map(move |target| match target {
+                Ok((ips, port)) => Some(
+                    ips.into_iter()
+                        .map(move |ip| SocketAddrV6::new(ip, port, 0, 0)),
+                ),
+                Err((target, err)) => {
+                    error!(
+                        log,
+                        "lookup_service_targets: failed looking up target";
+                        "name" => ?target,
+                        "error" => ?err,
+                    );
+                    None
+                }
+            })
+            .flatten()
     }
 }
 
