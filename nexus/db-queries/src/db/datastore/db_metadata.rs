@@ -22,6 +22,13 @@ use std::str::FromStr;
 impl DataStore {
     // Ensures that the database schema matches "desired_version".
     //
+    // - Updating the schema makes the database incompatible with older
+    // versions of Nexus, which are not running "desired_version".
+    // - This is a one-way operation that cannot be undone.
+    // - The caller is responsible for ensuring that the new version is valid,
+    // and that all running Nexus instances can understand the new schema
+    // version.
+    //
     // TODO: This function assumes that all concurrently executing Nexus
     // instances on the rack are operating on the same version of software.
     // If that assumption is broken, nothing would stop a "new deployment"

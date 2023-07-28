@@ -141,7 +141,8 @@ impl DataStore {
     /// Constructs a new Datastore object, without any version validation.
     ///
     /// Ignores the underlying DB version. Should be used with caution, as usage
-    /// of this method can result in incompatible schemas.
+    /// of this method can construct a Datastore which does not understand
+    /// the underlying CockroachDB schema. Data corruption could result.
     pub fn new_unchecked(pool: Arc<Pool>) -> Result<Self, String> {
         let datastore = DataStore {
             pool,
