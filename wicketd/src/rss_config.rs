@@ -174,9 +174,12 @@ impl CurrentRssConfig {
         const TRUST_QUORUM_MIN_SIZE: usize = 3;
         let trust_quorum_peers: Option<
             Vec<bootstrap_agent_client::types::Baseboard>,
-        > = if known_bootstrap_sleds.len() >= TRUST_QUORUM_MIN_SIZE {
+        > = if self.bootstrap_sleds.len() >= TRUST_QUORUM_MIN_SIZE {
             Some(
-                known_bootstrap_sleds.keys().cloned().map(Into::into).collect(),
+                self.bootstrap_sleds
+                    .iter()
+                    .map(|sled| sled.baseboard.clone().into())
+                    .collect(),
             )
         } else {
             warn!(

@@ -17,6 +17,7 @@ use dropshot::HttpServerStarter;
 use dropshot::Path;
 use dropshot::RequestContext;
 use omicron_common::api::internal::nexus::ProducerEndpoint;
+use omicron_common::FileKv;
 use oximeter::types::ProducerRegistry;
 use oximeter::types::ProducerResults;
 use schemars::JsonSchema;
@@ -95,7 +96,7 @@ impl Server {
             LogConfig::Logger(log) => log.clone(),
         };
         let (drain, registration) = slog_dtrace::with_drain(base_logger);
-        let log = Logger::root(drain.fuse(), slog::o!());
+        let log = Logger::root(drain.fuse(), slog::o!(FileKv));
         if let slog_dtrace::ProbeRegistration::Failed(e) = registration {
             let msg = format!("failed to register DTrace probes: {}", e);
             error!(log, "failed to register DTrace probes: {}", e);
