@@ -16,8 +16,8 @@
 //! Rack setup occurs in distinct phases which are denoted by the prescence of
 //! configuration files.
 //!
-//! - /pool/int/UUID/config/rss-sled-plan.toml (Sled Plan)
-//! - /pool/int/UUID/config/rss-service-plan.toml (Service Plan)
+//! - /pool/int/UUID/config/rss-sled-plan.json (Sled Plan)
+//! - /pool/int/UUID/config/rss-service-plan.json (Service Plan)
 //! - /pool/int/UUID/config/rss-plan-completed.marker (Plan Execution Complete)
 //!
 //! ## Sled Plan

@@ -20,7 +20,7 @@ use std::path::Path;
 #[tokio::main]
 async fn main() {
     println!("cargo:rerun-if-changed=build.rs");
-    println!("cargo:rerun-if-changed=../../common/src/sql/dbinit.sql");
+    println!("cargo:rerun-if-changed=../../schema/crdb/dbinit.sql");
     println!("cargo:rerun-if-changed=../../tools/cockroachdb_checksums");
     println!("cargo:rerun-if-changed=../../tools/cockroachdb_version");
 

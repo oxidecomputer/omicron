@@ -204,6 +204,12 @@ pub struct UpdatesConfig {
     pub default_base_url: String,
 }
 
+/// Options to tweak database schema changes.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct SchemaConfig {
+    pub schema_dir: PathBuf,
+}
+
 /// Optional configuration for the timeseries database.
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
 pub struct TimeseriesDbConfig {
@@ -355,6 +361,9 @@ pub struct PackageConfig {
     /// this is unconfigured.
     #[serde(default)]
     pub updates: Option<UpdatesConfig>,
+    /// Describes how to handle and perform schema changes.
+    #[serde(default)]
+    pub schema: Option<SchemaConfig>,
     /// Tunable configuration for testing and experimentation
     #[serde(default)]
     pub tunables: Tunables,
@@ -642,6 +651,7 @@ mod test {
                         trusted_root: PathBuf::from("/path/to/root.json"),
                         default_base_url: "http://example.invalid/".into(),
                     }),
+                    schema: None,
                     tunables: Tunables { max_vpc_ipv4_subnet_prefix: 27 },
                     dendrite: HashMap::from([(
                         SwitchLocation::Switch0,

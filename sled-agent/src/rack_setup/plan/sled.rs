@@ -39,7 +39,7 @@ impl Ledgerable for Plan {
     }
     fn generation_bump(&mut self) {}
 }
-const RSS_SLED_PLAN_FILENAME: &str = "rss-sled-plan.toml";
+const RSS_SLED_PLAN_FILENAME: &str = "rss-sled-plan.json";
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct Plan {

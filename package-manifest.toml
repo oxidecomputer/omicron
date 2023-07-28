@@ -88,12 +88,13 @@ output.intermediate_only = true
 service_name = "nexus"
 only_for_targets.image = "standard"
 source.type = "local"
-source.rust.binary_names = ["nexus"]
+source.rust.binary_names = ["nexus", "schema-updater"]
 source.rust.release = true
 source.paths = [
   { from = "/opt/ooce/pgsql-13/lib/amd64", to = "/opt/ooce/pgsql-13/lib/amd64" },
   { from = "smf/nexus", to = "/var/svc/manifest/site/nexus" },
   { from = "out/console-assets", to = "/var/nexus/static" },
+  { from = "schema/crdb", to = "/var/nexus/schema/crdb" },
 ]
 output.type = "zone"
 setup_hint = """
@@ -135,7 +136,7 @@ only_for_targets.image = "standard"
 source.type = "local"
 source.paths = [
   { from = "out/cockroachdb", to = "/opt/oxide/cockroachdb" },
-  { from = "common/src/sql", to = "/opt/oxide/cockroachdb/sql" },
+  { from = "schema/crdb", to = "/opt/oxide/cockroachdb/sql" },
   { from = "smf/cockroachdb/manifest.xml", to = "/var/svc/manifest/site/cockroachdb/manifest.xml" },
   { from = "smf/cockroachdb/method_script.sh", to = "/opt/oxide/lib/svc/manifest/cockroachdb.sh" },
 ]

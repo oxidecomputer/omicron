@@ -167,8 +167,14 @@ impl Nexus {
         authz: Arc<authz::Authz>,
     ) -> Result<Arc<Nexus>, String> {
         let pool = Arc::new(pool);
-        let db_datastore =
-            Arc::new(db::DataStore::new(&log, Arc::clone(&pool)).await?);
+        let db_datastore = Arc::new(
+            db::DataStore::new(
+                &log,
+                Arc::clone(&pool),
+                config.pkg.schema.as_ref(),
+            )
+            .await?,
+        );
         db_datastore.register_producers(&producer_registry);
 
         let my_sec_id = db::SecId::from(config.deployment.id);
