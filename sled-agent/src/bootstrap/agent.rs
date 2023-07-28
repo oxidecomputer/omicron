@@ -227,7 +227,7 @@ pub struct Agent {
     bootstore_peer_update_handle: JoinHandle<()>,
 }
 
-const SLED_AGENT_REQUEST_FILE: &str = "sled-agent-request.toml";
+const SLED_AGENT_REQUEST_FILE: &str = "sled-agent-request.json";
 const BOOTSTORE_FSM_STATE_FILE: &str = "bootstore-fsm-state.json";
 const BOOTSTORE_NETWORK_CONFIG_FILE: &str = "bootstore-network-config.json";
 
