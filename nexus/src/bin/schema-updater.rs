@@ -114,14 +114,14 @@ async fn main() -> anyhow::Result<()> {
                 }
             }
 
-            println!("Available Versions:");
+            println!("Known Versions:");
             for version in &all_versions {
                 let mut extra = String::new();
                 if version.to_string() == current_version {
-                    extra.push_str(" (current)");
+                    extra.push_str(" (reported by database)");
                 };
                 if version == &SCHEMA_VERSION {
-                    extra.push_str(" (expected)");
+                    extra.push_str(" (expected by Nexus)");
                 };
 
                 println!("  {version}{extra}")

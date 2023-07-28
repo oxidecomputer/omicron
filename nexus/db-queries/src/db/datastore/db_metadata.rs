@@ -48,7 +48,7 @@ impl DataStore {
                     return Ok(());
                 }
                 let observed = &current_version.0;
-                warn!(log, "Incompatible database schema: Saw {observed}, expected {desired_version}");
+                warn!(log, "Database schema {observed} does not match expected {desired_version}");
                 current_version
             }
             Err(e) => {
