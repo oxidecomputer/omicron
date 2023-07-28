@@ -527,9 +527,13 @@ impl ServiceManager {
     }
 
     // TODO(https://github.com/oxidecomputer/omicron/issues/2973):
-    // These will fail if the disks aren't attached.
-    // Should we have a retry loop here? Kinda like we have with the switch
-    // / NTP zone?
+    //
+    // The sled agent retries this function indefinitely at the call-site, but
+    // we could be smarter.
+    //
+    // - If we know that disks are missing, we could wait for them
+    // - We could permanently fail if we are able to distinguish other errors
+    // more clearly.
     pub async fn load_services(&self) -> Result<(), Error> {
         let log = &self.inner.log;
         let ledger_paths = self.all_service_ledgers().await;

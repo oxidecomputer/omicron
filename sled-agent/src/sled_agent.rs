@@ -30,7 +30,8 @@ use omicron_common::api::{
     internal::nexus::UpdateArtifactId,
 };
 use omicron_common::backoff::{
-    retry_notify_ext, retry_policy_internal_service_aggressive, BackoffError,
+    retry_notify, retry_notify_ext, retry_policy_internal_service_aggressive,
+    BackoffError,
 };
 use sled_hardware::underlay;
 use sled_hardware::HardwareManager;
@@ -372,7 +373,25 @@ impl SledAgent {
         //
         // Do this *after* monitoring for harware, to enable the switch zone to
         // establish an underlay address before proceeding.
-        sled_agent.inner.services.load_services().await?;
+        retry_notify(
+            retry_policy_internal_service_aggressive(),
+            || async {
+                sled_agent
+                    .inner
+                    .services
+                    .load_services()
+                    .await
+                    .map_err(|err| BackoffError::transient(err))
+            },
+            |err, delay| {
+                warn!(
+                    log,
+                    "Failed to load services, will retry in {:?}", delay;
+                    "error" => %err,
+                );
+            },
+        )
+        .await?;
 
         // Now that we've initialized the sled services, notify nexus again
         // at which point it'll plumb any necessary firewall rules back to us.
