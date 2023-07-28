@@ -384,8 +384,9 @@ mod test {
         let mut db = test_setup_database(&logctx.log).await;
         let cfg = db::Config { url: db.pg_config().clone() };
         let pool = Arc::new(db::Pool::new(&logctx.log, &cfg));
-        let datastore =
-            Arc::new(db::DataStore::new(&logctx.log, pool).await.unwrap());
+        let datastore = Arc::new(
+            db::DataStore::new(&logctx.log, pool, None).await.unwrap(),
+        );
         let opctx = OpContext::for_background(
             logctx.log.clone(),
             Arc::new(authz::Authz::new(&logctx.log)),
@@ -439,8 +440,9 @@ mod test {
             Arc::new(db::Pool::new_failfast_for_tests(&logctx.log, &cfg));
         // We need to create the datastore before tearing down the database, as
         // it verifies the schema version of the DB while booting.
-        let datastore =
-            Arc::new(db::DataStore::new(&logctx.log, pool).await.unwrap());
+        let datastore = Arc::new(
+            db::DataStore::new(&logctx.log, pool, None).await.unwrap(),
+        );
         let opctx = OpContext::for_background(
             logctx.log.clone(),
             Arc::new(authz::Authz::new(&logctx.log)),

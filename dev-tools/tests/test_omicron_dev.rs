@@ -303,8 +303,7 @@ async fn test_db_run() {
 
         anyhow::ensure!(has_omicron_schema(&client).await);
 
-        // Now run db-populate.  It should fail because the database is already
-        // populated.
+        // Now run db-populate.
         eprintln!("running db-populate");
         let populate_result = Exec::cmd(&cmd_path)
             .arg("db-populate")
@@ -317,13 +316,6 @@ async fn test_db_run() {
         eprintln!("exit status: {:?}", populate_result.exit_status);
         eprintln!("stdout: {:?}", populate_result.stdout_str());
         eprintln!("stdout: {:?}", populate_result.stderr_str());
-        anyhow::ensure!(matches!(
-            populate_result.exit_status,
-            ExitStatus::Exited(1)
-        ));
-        anyhow::ensure!(populate_result
-            .stderr_str()
-            .contains("database \"omicron\" already exists"),);
         anyhow::ensure!(has_omicron_schema(&client).await);
 
         // Try again, but with the --wipe flag.

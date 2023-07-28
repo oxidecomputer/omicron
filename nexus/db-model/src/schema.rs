@@ -356,6 +356,7 @@ table! {
         ncpus -> Int8,
         memory -> Int8,
         hostname -> Text,
+        boot_on_fault -> Bool,
     }
 }
 
@@ -1114,15 +1115,21 @@ table! {
 }
 
 table! {
-    db_metadata (name) {
-        name -> Text,
-        value -> Text,
+    db_metadata (singleton) {
+        singleton -> Bool,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        version -> Text,
+        target_version -> Nullable<Text>,
     }
 }
 
 /// The version of the database schema this particular version of Nexus was
 /// built against.
-pub const SCHEMA_VERSION: SemverVersion = SemverVersion::new(1, 0, 0);
+///
+/// This should be updated whenever the schema is changed. For more details,
+/// refer to: schema/crdb/README.adoc
+pub const SCHEMA_VERSION: SemverVersion = SemverVersion::new(2, 0, 0);
 
 allow_tables_to_appear_in_same_query!(
     system_update,

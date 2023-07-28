@@ -279,12 +279,16 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
         }
     }
 
-    pub async fn start_crdb(&mut self) {
+    pub async fn start_crdb(&mut self, populate: bool) {
         let log = &self.logctx.log;
         debug!(log, "Starting CRDB");
 
         // Start up CockroachDB.
-        let database = db::test_setup_database(log).await;
+        let database = if populate {
+            db::test_setup_database(log).await
+        } else {
+            db::test_setup_database_empty(log).await
+        };
 
         eprintln!("DB URL: {}", database.pg_config());
         let address = database
@@ -757,7 +761,8 @@ pub async fn test_setup_with_config<N: NexusServer>(
     let mut builder =
         ControlPlaneTestContextBuilder::<N>::new(test_name, config);
 
-    builder.start_crdb().await;
+    let populate = true;
+    builder.start_crdb(populate).await;
     builder.start_clickhouse().await;
     builder.start_dendrite(SwitchLocation::Switch0).await;
     builder.start_dendrite(SwitchLocation::Switch1).await;
