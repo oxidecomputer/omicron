@@ -139,6 +139,11 @@ impl Resolver {
         Resolver::new_from_addrs(log, dns_ips)
     }
 
+    /// Remove all entries from the resolver's cache.
+    pub fn clear_cache(&self) {
+        self.resolver.clear_cache();
+    }
+
     /// Looks up a single [`Ipv6Addr`] based on the SRV name.
     /// Returns an error if the record does not exist.
     // TODO: There are lots of ways this API can expand: Caching,

@@ -381,10 +381,10 @@ impl RunningZone {
         }
         let command = command.args(args);
 
-        let child = crate::spawn(command).map_err(|err| RunCommandError {
-            zone: self.name().to_string(),
-            err,
-        })?;
+        let child =
+            crate::spawn_with_piped_stdout_and_stderr(command).map_err(
+                |err| RunCommandError { zone: self.name().to_string(), err },
+            )?;
 
         // Record the process contract now in use by the child; the contract
         // just created from the template that we applied to this thread
@@ -437,10 +437,10 @@ impl RunningZone {
         // that's actually run is irrelevant.
         let mut command = std::process::Command::new("echo");
         let command = command.args(args);
-        let child = crate::spawn(command).map_err(|err| RunCommandError {
-            zone: self.name().to_string(),
-            err,
-        })?;
+        let child =
+            crate::spawn_with_piped_stdout_and_stderr(command).map_err(
+                |err| RunCommandError { zone: self.name().to_string(), err },
+            )?;
         crate::run_child(command, child)
             .map_err(|err| RunCommandError {
                 zone: self.name().to_string(),

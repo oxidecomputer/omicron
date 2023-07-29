@@ -793,6 +793,7 @@ impl Agent {
                     request.clone(),
                     services.clone(),
                     storage.clone(),
+                    self.bootstore.clone(),
                 )
                 .await
                 .map_err(|e| {

@@ -25,6 +25,9 @@
 //! - [ServiceManager::activate_switch] exposes an API to specifically enable
 //! or disable (via [ServiceManager::deactivate_switch]) the switch zone.
 
+use crate::bootstrap::early_networking::{
+    EarlyNetworkSetup, EarlyNetworkSetupError,
+};
 use crate::config::SidecarRevision;
 use crate::params::{
     DendriteAsic, ServiceEnsureBody, ServiceType, ServiceZoneRequest,
@@ -34,6 +37,7 @@ use crate::profile::*;
 use crate::smf_helper::Service;
 use crate::smf_helper::SmfHelper;
 use crate::storage_manager::StorageResources;
+use anyhow::anyhow;
 use camino::{Utf8Path, Utf8PathBuf};
 use ddm_admin_client::{Client as DdmAdminClient, DdmError};
 use dpd_client::{types as DpdTypes, Client as DpdClient, Error as DpdError};
@@ -66,6 +70,7 @@ use omicron_common::address::RACK_PREFIX;
 use omicron_common::address::SLED_PREFIX;
 use omicron_common::address::WICKETD_PORT;
 use omicron_common::api::external::Generation;
+use omicron_common::api::internal::shared::RackNetworkConfig;
 use omicron_common::backoff::{
     retry_notify, retry_policy_internal_service_aggressive, retry_policy_local,
     BackoffError,
@@ -84,9 +89,9 @@ use sled_hardware::underlay::BOOTSTRAP_PREFIX;
 use sled_hardware::Baseboard;
 use sled_hardware::SledMode;
 use slog::Logger;
-use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::collections::HashSet;
+use std::collections::{BTreeMap, HashMap};
 use std::io::Cursor;
 use std::iter;
 use std::iter::FromIterator;
@@ -210,6 +215,9 @@ pub enum Error {
 
     #[error("Zone bundle error")]
     Bundle(#[from] BundleError),
+
+    #[error("Early networking setup error")]
+    EarlyNetworkSetupError(#[from] EarlyNetworkSetupError),
 }
 
 impl Error {
@@ -403,6 +411,7 @@ struct SledAgentInfo {
     resolver: Resolver,
     underlay_address: Ipv6Addr,
     rack_id: Uuid,
+    rack_network_config: Option<RackNetworkConfig>,
 }
 
 #[derive(Clone)]
@@ -540,7 +549,7 @@ impl ServiceManager {
         info!(log, "Loading services from: {ledger_paths:?}");
 
         let mut existing_zones = self.inner.zones.lock().await;
-        let Some(ledger) = Ledger::<AllZoneRequests>::new(
+        let Some(mut ledger) = Ledger::<AllZoneRequests>::new(
             log,
             ledger_paths,
         )
@@ -548,15 +557,42 @@ impl ServiceManager {
             info!(log, "Loading services - No services detected");
             return Ok(());
         };
-        let services = ledger.data();
+        let services = ledger.data_mut();
 
-        // Initialize and DNS and NTP services first as they are required
-        // for time synchronization, which is a pre-requisite for the other
-        // services.
+        // Initialize internal DNS only first: we need it to look up the
+        // boundary switch addresses. This dependency is implicit: when we call
+        // `ensure_all_services` below, we eventually land in
+        // `opte_ports_needed()`, which for some service types (including Ntp
+        // but _not_ including InternalDns), we perform internal DNS lookups.
         let all_zones_request = self
             .ensure_all_services(
                 &mut existing_zones,
                 &AllZoneRequests::default(),
+                ServiceEnsureBody {
+                    services: services
+                        .requests
+                        .clone()
+                        .into_iter()
+                        .filter(|svc| {
+                            matches!(
+                                svc.zone.zone_type,
+                                ZoneType::InternalDns | ZoneType::Ntp
+                            )
+                        })
+                        .map(|zone_request| zone_request.zone)
+                        .collect(),
+                },
+            )
+            .await?;
+
+        // Initialize NTP services next as they are required for time
+        // synchronization, which is a pre-requisite for the other services. We
+        // keep `ZoneType::InternalDns` because `ensure_all_services` is
+        // additive.
+        let all_zones_request = self
+            .ensure_all_services(
+                &mut existing_zones,
+                &all_zones_request,
                 ServiceEnsureBody {
                     services: services
                         .requests
@@ -610,7 +646,7 @@ impl ServiceManager {
 
         let mut existing_zones = self.inner.zones.lock().await;
 
-        // Initialize all remaining serivces
+        // Initialize all remaining services
         self.ensure_all_services(
             &mut existing_zones,
             &all_zones_request,
@@ -630,12 +666,13 @@ impl ServiceManager {
     /// Sets up "Sled Agent" information, including underlay info.
     ///
     /// Any subsequent calls after the first invocation return an error.
-    pub async fn sled_agent_started(
+    pub fn sled_agent_started(
         &self,
         config: Config,
         port_manager: PortManager,
         underlay_address: Ipv6Addr,
         rack_id: Uuid,
+        rack_network_config: Option<RackNetworkConfig>,
     ) -> Result<(), Error> {
         info!(&self.inner.log, "sled agent started"; "underlay_address" => underlay_address.to_string());
         self.inner
@@ -649,6 +686,7 @@ impl ServiceManager {
                 )?,
                 underlay_address,
                 rack_id,
+                rack_network_config,
             })
             .map_err(|_| "already set".to_string())
             .expect("Sled Agent should only start once");
@@ -808,11 +846,34 @@ impl ServiceManager {
             return Ok(vec![]);
         }
 
-        let SledAgentInfo { port_manager, underlay_address, .. } =
-            &self.inner.sled_info.get().ok_or(Error::SledAgentNotReady)?;
+        let SledAgentInfo {
+            port_manager,
+            underlay_address,
+            resolver,
+            rack_network_config,
+            ..
+        } = &self.inner.sled_info.get().ok_or(Error::SledAgentNotReady)?;
 
-        let dpd_clients: Vec<DpdClient> = req
-            .boundary_switches
+        let Some(rack_network_config) = rack_network_config.as_ref() else {
+            // If we're in a test/dev environments with no uplinks, we have
+            // nothing to do; print a warning in the (hopefully unlikely) event
+            // we land here on a real rack.
+            warn!(
+                self.inner.log,
+                "No rack network config present; skipping OPTE NAT config",
+            );
+            return Ok(vec![]);
+        };
+
+        let uplinked_switch_zone_addrs =
+            EarlyNetworkSetup::new(&self.inner.log)
+                .lookup_uplinked_switch_zone_underlay_addrs(
+                    resolver,
+                    rack_network_config,
+                )
+                .await;
+
+        let dpd_clients: Vec<DpdClient> = uplinked_switch_zone_addrs
             .iter()
             .map(|addr| {
                 DpdClient::new(
@@ -1844,6 +1905,10 @@ impl ServiceManager {
 
                     smfh.refresh()?;
                 }
+                ServiceType::Uplink => {
+                    // Nothing to do here - this service is special and
+                    // configured in `ensure_switch_zone_uplinks_configured`
+                }
                 ServiceType::Maghemite { mode } => {
                     info!(self.inner.log, "Setting up Maghemite service");
 
@@ -2461,6 +2526,7 @@ impl ServiceManager {
         request: ServiceEnsureBody,
     ) -> Result<(), Error> {
         let log = &self.inner.log;
+
         let mut existing_zones = self.inner.zones.lock().await;
 
         // Read the existing set of services from the ledger.
@@ -2577,6 +2643,7 @@ impl ServiceManager {
                 .choose(&mut rng)
                 .ok_or_else(|| Error::U2NotFound)?
                 .clone();
+
             zone_requests
                 .requests
                 .push(ZoneRequest { zone: zone.clone(), root });
@@ -2754,7 +2821,9 @@ impl ServiceManager {
     /// Ensures that a switch zone exists with the provided IP adddress.
     pub async fn activate_switch(
         &self,
-        switch_zone_ip: Option<Ipv6Addr>,
+        // If we're reconfiguring the switch zone with an underlay address, we
+        // also need the rack network config to set tfport uplinks.
+        underlay_info: Option<(Ipv6Addr, Option<&RackNetworkConfig>)>,
         baseboard: Baseboard,
     ) -> Result<(), Error> {
         info!(self.inner.log, "Ensuring scrimlet services (enabling services)");
@@ -2775,6 +2844,7 @@ impl ServiceManager {
                     ServiceType::Dendrite { asic: DendriteAsic::TofinoAsic },
                     ServiceType::ManagementGatewayService,
                     ServiceType::Tfport { pkt_source: "tfpkt0".to_string() },
+                    ServiceType::Uplink,
                     ServiceType::Wicketd { baseboard },
                     ServiceType::Maghemite { mode: "transit".to_string() },
                 ]
@@ -2796,6 +2866,7 @@ impl ServiceManager {
                 vec![
                     ServiceType::Dendrite { asic },
                     ServiceType::ManagementGatewayService,
+                    ServiceType::Uplink,
                     ServiceType::Wicketd { baseboard },
                     ServiceType::Maghemite { mode: "transit".to_string() },
                     ServiceType::SpSim,
@@ -2804,7 +2875,7 @@ impl ServiceManager {
         };
 
         let mut addresses =
-            if let Some(ip) = switch_zone_ip { vec![ip] } else { vec![] };
+            if let Some((ip, _)) = underlay_info { vec![ip] } else { vec![] };
         addresses.push(Ipv6Addr::LOCALHOST);
 
         let request = ServiceZoneRequest {
@@ -2816,7 +2887,6 @@ impl ServiceManager {
                 .into_iter()
                 .map(|s| ServiceZoneService { id: Uuid::new_v4(), details: s })
                 .collect(),
-            boundary_switches: vec![],
         };
 
         self.ensure_zone(
@@ -2826,7 +2896,84 @@ impl ServiceManager {
             // filesystems=
             filesystems,
         )
-        .await
+        .await?;
+
+        // If we've given the switch an underlay address, we also need to inject
+        // SMF properties so that tfport uplinks can be created.
+        if let Some((ip, Some(rack_network_config))) = underlay_info {
+            self.ensure_switch_zone_uplinks_configured(ip, rack_network_config)
+                .await?;
+        }
+
+        Ok(())
+    }
+
+    // Ensure our switch zone (at the given IP address) has its uplinks
+    // configured based on `rack_network_config`. This first requires us to ask
+    // MGS running in the switch zone which switch we are, so we know which
+    // uplinks from `rack_network_config` to assign.
+    async fn ensure_switch_zone_uplinks_configured(
+        &self,
+        switch_zone_ip: Ipv6Addr,
+        rack_network_config: &RackNetworkConfig,
+    ) -> Result<(), Error> {
+        let log = &self.inner.log;
+
+        // Configure uplinks via DPD in our switch zone.
+        let our_uplinks = EarlyNetworkSetup::new(log)
+            .init_switch_config(rack_network_config, switch_zone_ip)
+            .await?;
+
+        // We expect the switch zone to be running, as we're called immediately
+        // after `ensure_zone()` above and we just successfully configured
+        // uplinks via DPD running in our switch zone. If somehow we're in any
+        // other state, bail out.
+        let mut switch_zone = self.inner.switch_zone.lock().await;
+
+        let zone = match &mut *switch_zone {
+            SledLocalZone::Running { zone, .. } => zone,
+            SledLocalZone::Disabled => {
+                return Err(Error::SledLocalZone(anyhow!(
+                    "Cannot configure switch zone uplinks: \
+                     switch zone disabled"
+                )));
+            }
+            SledLocalZone::Initializing { .. } => {
+                return Err(Error::SledLocalZone(anyhow!(
+                    "Cannot configure switch zone uplinks: \
+                     switch zone still initializing"
+                )));
+            }
+        };
+
+        let smfh = SmfHelper::new(&zone, &ServiceType::Uplink);
+
+        // We want to delete all the properties in the `uplinks` group, but we
+        // don't know their names, so instead we'll delete and recreate the
+        // group, then add all our properties.
+        smfh.delpropgroup("uplinks")?;
+        smfh.addpropgroup("uplinks", "application")?;
+
+        // When naming the uplink ports, we need to append `_0`, `_1`, etc., for
+        // each use of any given port. We use a hashmap of counters of port name
+        // -> number of uplinks to correctly supply that suffix.
+        let mut port_count = HashMap::new();
+        for uplink_config in &our_uplinks {
+            let this_port_count: &mut usize =
+                port_count.entry(&uplink_config.uplink_port).or_insert(0);
+            smfh.addpropvalue_type(
+                &format!(
+                    "uplinks/{}_{}",
+                    uplink_config.uplink_port, *this_port_count
+                ),
+                &uplink_config.uplink_cidr.to_string(),
+                "astring",
+            )?;
+            *this_port_count += 1;
+        }
+        smfh.refresh()?;
+
+        Ok(())
     }
 
     /// Ensures that no switch zone is active.
@@ -3008,6 +3155,10 @@ impl ServiceManager {
                             // Since tfport and dpd communicate using localhost,
                             // the tfport service shouldn't need to be restarted.
                         }
+                        ServiceType::Uplink { .. } => {
+                            // Only configured in
+                            // `ensure_switch_zone_uplinks_configured`
+                        }
                         ServiceType::Maghemite { mode } => {
                             smfh.delpropvalue("config/mode", "*")?;
                             smfh.addpropvalue("config/mode", &mode)?;
@@ -3180,7 +3331,8 @@ mod test {
         wait_ctx.expect().return_once(|_, _| Ok(()));
 
         // Import the manifest, enable the service
-        let spawn_ctx = illumos_utils::spawn_context();
+        let spawn_ctx =
+            illumos_utils::spawn_with_piped_stdout_and_stderr_context();
         spawn_ctx.expect().times(..).returning(|_| {
             std::process::Command::new("/bin/false").spawn().map_err(|err| {
                 illumos_utils::ExecutionError::ExecutionStart {
@@ -3233,7 +3385,6 @@ mod test {
                         ),
                     },
                 }],
-                boundary_switches: vec![],
             }],
         })
         .await
@@ -3260,7 +3411,6 @@ mod test {
                         ),
                     },
                 }],
-                boundary_switches: vec![],
             }],
         })
         .await
@@ -3375,8 +3525,8 @@ mod test {
             port_manager,
             Ipv6Addr::LOCALHOST,
             Uuid::new_v4(),
+            None,
         )
-        .await
         .unwrap();
 
         let id = Uuid::new_v4();
@@ -3421,8 +3571,8 @@ mod test {
             port_manager,
             Ipv6Addr::LOCALHOST,
             Uuid::new_v4(),
+            None,
         )
-        .await
         .unwrap();
 
         let id = Uuid::new_v4();
@@ -3470,8 +3620,8 @@ mod test {
             port_manager,
             Ipv6Addr::LOCALHOST,
             Uuid::new_v4(),
+            None,
         )
-        .await
         .unwrap();
 
         let id = Uuid::new_v4();
@@ -3507,8 +3657,8 @@ mod test {
             port_manager,
             Ipv6Addr::LOCALHOST,
             Uuid::new_v4(),
+            None,
         )
-        .await
         .unwrap();
 
         drop_service_manager(mgr);
@@ -3553,8 +3703,8 @@ mod test {
             port_manager,
             Ipv6Addr::LOCALHOST,
             Uuid::new_v4(),
+            None,
         )
-        .await
         .unwrap();
 
         let id = Uuid::new_v4();
@@ -3595,8 +3745,8 @@ mod test {
             port_manager,
             Ipv6Addr::LOCALHOST,
             Uuid::new_v4(),
+            None,
         )
-        .await
         .unwrap();
 
         drop_service_manager(mgr);
