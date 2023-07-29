@@ -30,8 +30,11 @@ use std::collections::HashSet;
 use std::convert::TryFrom;
 use std::pin::Pin;
 use std::sync::Arc;
+use std::sync::OnceLock;
+use std::time::Duration;
 use tokio::sync::{mpsc, oneshot, Mutex};
 use tokio::task::JoinHandle;
+use tokio::time::{interval, MissedTickBehavior};
 use uuid::Uuid;
 
 use illumos_utils::dumpadm::DumpHdrError;
@@ -39,6 +42,10 @@ use illumos_utils::dumpadm::DumpHdrError;
 use illumos_utils::{zfs::MockZfs as Zfs, zpool::MockZpool as Zpool};
 #[cfg(not(test))]
 use illumos_utils::{zfs::Zfs, zpool::Zpool};
+
+// A key manager can only become ready once. This occurs during RSS or cold
+// boot when the bootstore has detected it has a key share.
+static KEY_MANAGER_READY: OnceLock<bool> = OnceLock::new();
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -132,9 +139,6 @@ pub enum Error {
 
     #[error("Encountered error checking dump device flags: {0}")]
     DumpHdr(#[from] DumpHdrError),
-
-    #[error("Failed to receive queued disks from watch")]
-    QueuedDiskRetrieval,
 }
 
 /// A ZFS storage pool.
@@ -518,16 +522,12 @@ impl StorageWorker {
                     continue;
                 }
             }
-            match sled_hardware::Disk::new(
-                &self.log,
-                disk,
-                Some(&self.key_requester),
-            )
-            .await
-            .map_err(|err| {
-                warn!(self.log, "Could not ensure partitions: {err}");
-                err
-            }) {
+            match self.add_new_disk(disk, queued_u2_drives).await.map_err(
+                |err| {
+                    warn!(self.log, "Could not ensure partitions: {err}");
+                    err
+                },
+            ) {
                 Ok(disk) => {
                     new_disks.insert(disk.identity().clone(), disk);
                 }
@@ -609,6 +609,97 @@ impl StorageWorker {
         }
     }
 
+    // Attempt to create a new disk via `sled_hardware::Disk::new()`. If the
+    // disk addition fails because the the key manager cannot load a secret,
+    // this indicates a transient error, and so we queue the disk so we can
+    // try again.
+    async fn add_new_disk(
+        &mut self,
+        unparsed_disk: UnparsedDisk,
+        queued_u2_drives: &mut Option<HashSet<QueuedDiskCreate>>,
+    ) -> Result<Disk, sled_hardware::DiskError> {
+        // Ensure the disk conforms to an expected partition layout.
+        match sled_hardware::Disk::new(
+            &self.log,
+            unparsed_disk.clone(),
+            Some(&self.key_requester),
+        )
+        .await
+        {
+            Ok(disk) => Ok(disk),
+            Err(sled_hardware::DiskError::KeyManager(err)) => {
+                warn!(
+                    self.log,
+                    "Transient error: {err} - queuing disk {:?}", unparsed_disk
+                );
+                if let Some(queued) = queued_u2_drives {
+                    queued.insert(unparsed_disk.into());
+                } else {
+                    *queued_u2_drives =
+                        Some(HashSet::from([unparsed_disk.into()]));
+                }
+                Err(sled_hardware::DiskError::KeyManager(err))
+            }
+            Err(err) => {
+                error!(
+                    self.log,
+                    "Persistent error: {err} - not queueing disk {:?}",
+                    unparsed_disk
+                );
+                Err(err)
+            }
+        }
+    }
+
+    // Attempt to create a new synthetic disk via
+    // `sled_hardware::Disk::ensure_zpool_ready()`. If the disk addition fails
+    // because the the key manager cannot load a secret, this indicates a
+    // transient error, and so we queue the disk so we can try again.
+    async fn add_new_synthetic_disk(
+        &mut self,
+        zpool_name: ZpoolName,
+        queued_u2_drives: &mut Option<HashSet<QueuedDiskCreate>>,
+    ) -> Result<(), sled_hardware::DiskError> {
+        let synthetic_id = DiskIdentity {
+            vendor: "fake_vendor".to_string(),
+            serial: "fake_serial".to_string(),
+            model: zpool_name.id().to_string(),
+        };
+        match sled_hardware::Disk::ensure_zpool_ready(
+            &self.log,
+            &zpool_name,
+            &synthetic_id,
+            Some(&self.key_requester),
+        )
+        .await
+        {
+            Ok(()) => Ok(()),
+            Err(sled_hardware::DiskError::KeyManager(err)) => {
+                warn!(
+                    self.log,
+                    "Transient error: {err} - queuing synthetic disk: {:?}",
+                    zpool_name
+                );
+                if let Some(queued) = queued_u2_drives {
+                    queued.insert(zpool_name.into());
+                } else {
+                    *queued_u2_drives =
+                        Some(HashSet::from([zpool_name.into()]));
+                }
+                Err(sled_hardware::DiskError::KeyManager(err))
+            }
+            Err(err) => {
+                error!(
+                    self.log,
+                    "Persistent error: {} - not queueing synthetic disk {:?}",
+                    err,
+                    zpool_name
+                );
+                Err(err)
+            }
+        }
+    }
+
     async fn upsert_disk(
         &mut self,
         resources: &StorageResources,
@@ -627,16 +718,11 @@ impl StorageWorker {
         info!(self.log, "Upserting disk: {disk:?}");
 
         // Ensure the disk conforms to an expected partition layout.
-        let disk = sled_hardware::Disk::new(
-            &self.log,
-            disk,
-            Some(&self.key_requester),
-        )
-        .await
-        .map_err(|err| {
-            warn!(self.log, "Could not ensure partitions: {err}");
-            err
-        })?;
+        let disk =
+            self.add_new_disk(disk, queued_u2_drives).await.map_err(|err| {
+                warn!(self.log, "Could not ensure partitions: {err}");
+                err
+            })?;
 
         let mut disks = resources.disks.lock().await;
         let disk = DiskWrapper::Real {
@@ -666,20 +752,10 @@ impl StorageWorker {
 
         info!(self.log, "Upserting synthetic disk for: {zpool_name:?}");
 
-        let mut disks = resources.disks.lock().await;
-        let synthetic_id = DiskIdentity {
-            vendor: "fake_vendor".to_string(),
-            serial: "fake_serial".to_string(),
-            model: zpool_name.id().to_string(),
-        };
-        sled_hardware::Disk::ensure_zpool_ready(
-            &self.log,
-            &zpool_name,
-            &synthetic_id,
-            Some(&self.key_requester),
-        )
-        .await?;
+        self.add_new_synthetic_disk(zpool_name.clone(), queued_u2_drives)
+            .await?;
         let disk = DiskWrapper::Synthetic { zpool_name };
+        let mut disks = resources.disks.lock().await;
         self.upsert_disk_locked(resources, &mut disks, disk).await
     }
 
@@ -955,84 +1031,160 @@ impl StorageWorker {
         resources: &StorageResources,
         queued_u2_drives: &mut Option<HashSet<QueuedDiskCreate>>,
     ) -> Result<(), Error> {
+        const QUEUED_DISK_RETRY_TIMEOUT: Duration = Duration::from_secs(5);
+        let mut interval = interval(QUEUED_DISK_RETRY_TIMEOUT);
+        interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
         loop {
             tokio::select! {
                 _ = self.nexus_notifications.next(),
                     if !self.nexus_notifications.is_empty() => {},
                 Some(request) = self.rx.recv() => {
-                    use StorageWorkerRequest::*;
-                    match request {
-                        AddDisk(disk) => {
-                            self.upsert_disk(
-                                &resources,
-                                disk,
-                                queued_u2_drives,
-                            )
-                            .await?;
-                        },
-                        AddSyntheticDisk(zpool_name) => {
-                            self.upsert_synthetic_disk(
-                                &resources,
-                                zpool_name,
-                                queued_u2_drives,
-                            ).await?;
-                        },
-                        RemoveDisk(disk) => {
-                            self.delete_disk(&resources, disk).await?;
-                        },
-                        NewFilesystem(request) => {
-                            let result = self.add_dataset(&resources, &request).await;
-                            let _ = request.responder.send(result);
-                        },
-                        DisksChanged(disks) => {
-                            self.ensure_using_exactly_these_disks(
-                                &resources,
-                                disks,
-                                queued_u2_drives
-                            )
-                            .await?;
-                        },
-                        SetupUnderlayAccess(UnderlayRequest { underlay, responder }) => {
-                            // If this is the first time establishing an
-                            // underlay we should notify nexus of all existing
-                            // disks and zpools.
-                            //
-                            // Instead of individual notifications, we should
-                            // send a bulk notification as described in https://
-                            // github.com/oxidecomputer/omicron/issues/1917
-                            if self.underlay.lock().await.replace(underlay).is_none() {
-                                self.notify_nexus_about_existing_resources(&resources).await?;
-                            }
-                            let _ = responder.send(Ok(()));
+                    // We want to queue failed requests related to the key manager
+                    match self.handle_storage_worker_request(
+                        resources, queued_u2_drives, request)
+                    .await {
+                        Err(Error::DiskError(_)) => {
+                            // We already handle and log disk errors, no need to
+                            // return here.
                         }
-                        KeyManagerReady => {
-                            if let Some(queued) = queued_u2_drives.take() {
-                                for disk in queued {
-                                    match disk {
-                                        QueuedDiskCreate::Real(disk) => {
-                                            self.upsert_disk(
-                                                &resources,
-                                                disk,
-                                                &mut None
-                                            )
-                                            .await?;
-                                        }
-                                        QueuedDiskCreate::Synthetic(zpool_name) => {
-                                            self.upsert_synthetic_disk(
-                                                &resources,
-                                                zpool_name,
-                                                &mut None
-                                            )
-                                            .await?;
-                                        }
-                                    }
-                                }
-                            }
-                        }
+                        Err(e) => return Err(e),
+                        Ok(()) => {}
                     }
-                },
+               }
+               _ = interval.tick(), if queued_u2_drives.is_some() &&
+                   KEY_MANAGER_READY.get().is_some()=>
+                {
+                    self.upsert_queued_disks(resources, queued_u2_drives).await;
+                }
             }
         }
+    }
+
+    async fn handle_storage_worker_request(
+        &mut self,
+        resources: &StorageResources,
+        queued_u2_drives: &mut Option<HashSet<QueuedDiskCreate>>,
+        request: StorageWorkerRequest,
+    ) -> Result<(), Error> {
+        use StorageWorkerRequest::*;
+        match request {
+            AddDisk(disk) => {
+                self.upsert_disk(&resources, disk, queued_u2_drives).await?;
+            }
+            AddSyntheticDisk(zpool_name) => {
+                self.upsert_synthetic_disk(
+                    &resources,
+                    zpool_name,
+                    queued_u2_drives,
+                )
+                .await?;
+            }
+            RemoveDisk(disk) => {
+                self.delete_disk(&resources, disk).await?;
+            }
+            NewFilesystem(request) => {
+                let result = self.add_dataset(&resources, &request).await;
+                let _ = request.responder.send(result);
+            }
+            DisksChanged(disks) => {
+                self.ensure_using_exactly_these_disks(
+                    &resources,
+                    disks,
+                    queued_u2_drives,
+                )
+                .await?;
+            }
+            SetupUnderlayAccess(UnderlayRequest { underlay, responder }) => {
+                // If this is the first time establishing an
+                // underlay we should notify nexus of all existing
+                // disks and zpools.
+                //
+                // Instead of individual notifications, we should
+                // send a bulk notification as described in https://
+                // github.com/oxidecomputer/omicron/issues/1917
+                if self.underlay.lock().await.replace(underlay).is_none() {
+                    self.notify_nexus_about_existing_resources(&resources)
+                        .await?;
+                }
+                let _ = responder.send(Ok(()));
+            }
+            KeyManagerReady => {
+                let _ = KEY_MANAGER_READY.set(true);
+                self.upsert_queued_disks(resources, queued_u2_drives).await;
+            }
+        }
+        Ok(())
+    }
+
+    async fn upsert_queued_disks(
+        &mut self,
+        resources: &StorageResources,
+        queued_u2_drives: &mut Option<HashSet<QueuedDiskCreate>>,
+    ) {
+        let queued = queued_u2_drives.take();
+        if let Some(queued) = queued {
+            for disk in queued {
+                if let Some(saved) = queued_u2_drives {
+                    // We already hit a transient error and recreated our queue.
+                    // Add any remaining queued disks back on the queue so we
+                    // can try again later.
+                    saved.insert(disk);
+                } else {
+                    match self.upsert_queued_disk(disk, resources).await {
+                        Ok(()) => {}
+                        Err((_, None)) => {
+                            // We already logged this as a persistent error in
+                            // `add_new_disk` or `add_new_synthetic_disk`
+                        }
+                        Err((_, Some(disk))) => {
+                            // We already logged this as a transient error in
+                            // `add_new_disk` or `add_new_synthetic_disk`
+                            *queued_u2_drives = Some(HashSet::from([disk]));
+                        }
+                    }
+                }
+            }
+        }
+        if queued_u2_drives.is_none() {
+            info!(self.log, "upserted all queued disks");
+        } else {
+            warn!(
+                self.log,
+                "failed to upsert all queued disks - will try again"
+            );
+        }
+    }
+
+    // Attempt to upsert a queued disk. Return the disk and error if the upsert
+    // fails due to a transient error. Examples of transient errors are key
+    // manager errors which indicate that there are not enough sleds available
+    // to unlock the rack.
+    async fn upsert_queued_disk(
+        &mut self,
+        disk: QueuedDiskCreate,
+        resources: &StorageResources,
+    ) -> Result<(), (Error, Option<QueuedDiskCreate>)> {
+        let mut temp: Option<HashSet<QueuedDiskCreate>> = None;
+        let res = match disk {
+            QueuedDiskCreate::Real(disk) => {
+                self.upsert_disk(&resources, disk, &mut temp).await
+            }
+            QueuedDiskCreate::Synthetic(zpool_name) => {
+                self.upsert_synthetic_disk(&resources, zpool_name, &mut temp)
+                    .await
+            }
+        };
+        if let Some(mut disks) = temp.take() {
+            assert!(res.is_err());
+            assert_eq!(disks.len(), 1);
+            return Err((
+                res.unwrap_err(),
+                disks.drain().next().unwrap().into(),
+            ));
+        }
+        // Any error at this point is not transient.
+        // We don't requeue the disk.
+        res.map_err(|e| (e, None))
     }
 }
 
