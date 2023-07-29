@@ -6,7 +6,7 @@ set -o xtrace
 
 cargo --version
 rustc --version
-curl -sSfL https://get.nexte.st/0.9.54/"$1" | gunzip | tar -xvf - -C ~/.cargo/bin
+curl -sSfL --retry 10 https://get.nexte.st/0.9.54/"$1" | gunzip | tar -xvf - -C ~/.cargo/bin
 
 #
 # Set up a custom temporary directory within whatever one we were given so that
@@ -53,7 +53,7 @@ ptime -m cargo test --locked --verbose --no-run
 # rather than a buildomat timeout.  See oxidecomputer/buildomat#8.
 #
 banner test
-ptime -m timeout 2h cargo nextest run --locked --verbose --no-fail-fast
+ptime -m timeout 2h cargo nextest run --profile ci --locked --verbose
 
 #
 # https://github.com/nextest-rs/nextest/issues/16
