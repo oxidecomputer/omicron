@@ -366,6 +366,7 @@ impl Resolver {
 mod test {
     use super::ResolveError;
     use super::Resolver;
+    use crate::DNS_ZONE;
     use crate::{DnsConfigBuilder, ServiceName};
     use anyhow::Context;
     use assert_matches::assert_matches;
@@ -935,5 +936,125 @@ mod test {
         server.close().await.expect("Failed to stop test server");
         dns_server2.cleanup_successful();
         logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn resolver_doesnt_bail_on_missing_targets() {
+        let logctx = test_setup_log("resolver_doesnt_bail_on_missing_targets");
+
+        // Confirm that we can create a progenitor client for this server.
+        expect_openapi_json_valid_for_test_server();
+
+        // Next, create a DNS server, and a corresponding resolver.
+        let dns_server = DnsServer::create(&logctx.log).await;
+        let resolver = Resolver::new_from_addrs(
+            logctx.log.clone(),
+            vec![*dns_server.dns_server.local_address()],
+        )
+        .unwrap();
+
+        // Create DNS config with a single service and multiple backends.
+        let mut dns_config = DnsConfigBuilder::new();
+
+        let id1 = Uuid::new_v4();
+        let ip1 = Ipv6Addr::new(0xfd, 0, 0, 0, 0, 0, 0, 0x1);
+        let addr1 = SocketAddrV6::new(ip1, 15001, 0, 0);
+        let zone1 = dns_config.host_zone(id1, ip1).unwrap();
+        dns_config
+            .service_backend_zone(ServiceName::Cockroach, &zone1, addr1.port())
+            .unwrap();
+
+        let id2 = Uuid::new_v4();
+        let ip2 = Ipv6Addr::new(0xfd, 0, 0, 0, 0, 0, 0, 0x2);
+        let addr2 = SocketAddrV6::new(ip2, 15002, 0, 0);
+        let zone2 = dns_config.host_zone(id2, ip2).unwrap();
+        dns_config
+            .service_backend_zone(ServiceName::Cockroach, &zone2, addr2.port())
+            .unwrap();
+
+        // Plumb records onto DNS server
+        let mut dns_config = dns_config.build();
+        dns_server.update(&dns_config).await.unwrap();
+
+        // Using the resolver we should get back both addresses
+        let mut addrs =
+            resolver.lookup_all_socket_v6(ServiceName::Cockroach).await.expect(
+                "Should have been able to look up all CockroachDB addresses",
+            );
+        addrs.sort();
+        assert_eq!(addrs, [addr1, addr2]);
+
+        // Now let's remove one of the AAAA records for a zone/target.
+        // The lookup should still succeed and return the other address.
+        dns_config.generation += 1;
+        let root = dns_config
+            .zones
+            .iter_mut()
+            .find(|zone| zone.zone_name == DNS_ZONE)
+            .expect("root dns zone missing?");
+        let zone1_records = root
+            .records
+            .remove(&zone1.dns_name())
+            .expect("Cockroach Zone record missing?");
+        // There should've been just the one address in this record
+        assert_eq!(zone1_records, [ip1.into()]);
+
+        // Both SRV records should stil exist
+        let srv_records = root
+            .records
+            .get(&ServiceName::Cockroach.dns_name())
+            .expect("Cockroach SRV records missing?");
+        assert_eq!(srv_records.len(), 2);
+
+        // Update DNS server
+        dns_server.update(&dns_config).await.unwrap();
+
+        // This time the resolver should only return one address
+        let addrs = resolver
+            .lookup_all_socket_v6(ServiceName::Cockroach)
+            .await
+            .expect("CockroachDB addresses lookup take 2");
+        assert_eq!(addrs, [addr2]);
+
+        // But both targets should still be there
+        let mut targets =
+            resolver.lookup_srv(ServiceName::Cockroach).await.unwrap();
+        targets.sort();
+        let mut expected_targets = [
+            (format!("{}.{DNS_ZONE}.", zone1.dns_name()), addr1.port()),
+            (format!("{}.{DNS_ZONE}.", zone2.dns_name()), addr2.port()),
+        ];
+        expected_targets.sort();
+        assert_eq!(targets, expected_targets);
+
+        // Finally, let's remove the last AAAA record as well
+        dns_config.generation += 1;
+        let root = dns_config
+            .zones
+            .iter_mut()
+            .find(|zone| zone.zone_name == DNS_ZONE)
+            .expect("root dns zone missing?");
+        let zone2_records = root
+            .records
+            .remove(&zone2.dns_name())
+            .expect("Cockroach Zone record missing?");
+        // There should've been just the one address in this record
+        assert_eq!(zone2_records, [ip2.into()]);
+
+        // Update DNS server
+        dns_server.update(&dns_config).await.unwrap();
+
+        // This time the resolver should return an error
+        let err = resolver
+            .lookup_all_socket_v6(ServiceName::Cockroach)
+            .await
+            .expect_err("CockroachDB addresses lookup take 3 worked??");
+        assert!(matches!(err, ResolveError::NotFound(ServiceName::Cockroach)));
+
+        // But both targets should still be there
+        let mut targets =
+            resolver.lookup_srv(ServiceName::Cockroach).await.unwrap();
+        targets.sort();
+        assert_eq!(targets, expected_targets);
     }
 }
