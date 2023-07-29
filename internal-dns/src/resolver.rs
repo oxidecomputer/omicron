@@ -1056,5 +1056,8 @@ mod test {
             resolver.lookup_srv(ServiceName::Cockroach).await.unwrap();
         targets.sort();
         assert_eq!(targets, expected_targets);
+
+        dns_server.cleanup_successful();
+        logctx.cleanup_successful();
     }
 }
