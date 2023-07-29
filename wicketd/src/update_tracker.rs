@@ -462,9 +462,17 @@ impl UpdateTrackerData {
             return Err(AbortUpdateError::UpdateFinished);
         }
 
-        let waiter = update_data.abort_handle.abort(message);
-        waiter.await;
-        Ok(())
+        match update_data.abort_handle.abort(message) {
+            Ok(waiter) => {
+                waiter.await;
+                Ok(())
+            }
+            Err(_) => {
+                // This occurs if the engine has finished execution and has been
+                // dropped.
+                Err(AbortUpdateError::UpdateFinished)
+            }
+        }
     }
 
     fn put_repository(&mut self, bytes: BufList) -> Result<(), HttpError> {
