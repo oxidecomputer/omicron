@@ -618,7 +618,6 @@ impl StorageWorker {
         unparsed_disk: UnparsedDisk,
         queued_u2_drives: &mut Option<HashSet<QueuedDiskCreate>>,
     ) -> Result<Disk, sled_hardware::DiskError> {
-        // Ensure the disk conforms to an expected partition layout.
         match sled_hardware::Disk::new(
             &self.log,
             unparsed_disk.clone(),
