@@ -45,7 +45,7 @@ use illumos_utils::{zfs::Zfs, zpool::Zpool};
 
 // A key manager can only become ready once. This occurs during RSS or cold
 // boot when the bootstore has detected it has a key share.
-static KEY_MANAGER_READY: OnceLock<bool> = OnceLock::new();
+static KEY_MANAGER_READY: OnceLock<()> = OnceLock::new();
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -1108,7 +1108,7 @@ impl StorageWorker {
                 let _ = responder.send(Ok(()));
             }
             KeyManagerReady => {
-                let _ = KEY_MANAGER_READY.set(true);
+                let _ = KEY_MANAGER_READY.set(());
                 self.upsert_queued_disks(resources, queued_u2_drives).await;
             }
         }
