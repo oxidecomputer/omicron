@@ -71,6 +71,10 @@ pub struct Config {
     /// systems.
     pub data_link: Option<PhysicalLink>,
 
+    /// The data links that sled-agent will treat as a real gimlet cxgbe0/cxgbe1
+    /// links.
+    pub data_links: [String; 2],
+
     #[serde(default)]
     pub updates: ConfigUpdates,
 

@@ -76,6 +76,7 @@ impl Resolver {
         // The underlay is IPv6 only, so this helps avoid needless lookups of
         // the IPv4 variant.
         opts.ip_strategy = LookupIpStrategy::Ipv6Only;
+        opts.negative_max_ttl = Some(std::time::Duration::from_secs(15));
         let resolver = TokioAsyncResolver::tokio(rc, opts)?;
 
         Ok(Self { log, resolver })

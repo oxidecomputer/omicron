@@ -846,6 +846,8 @@ impl Instance {
             &[],
             // filesystems=
             &[],
+            // data_links=
+            &[],
             &[
                 zone::Device { name: "/dev/vmm/*".to_string() },
                 zone::Device { name: "/dev/vmmctl".to_string() },

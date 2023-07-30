@@ -236,6 +236,10 @@ async fn test_installinator_fetch() {
         "--control-plane",
         control_plane_hash.as_str(),
         dest_path.as_str(),
+        "--data-link0",
+        "cxgbe0",
+        "--data-link1",
+        "cxgbe1",
     ])
     .expect("installinator args parsed successfully");
 

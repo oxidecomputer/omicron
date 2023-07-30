@@ -55,11 +55,12 @@ ptime -m cargo run --locked --release --bin omicron-package -- \
 files=(
 	out/*.tar
 	out/target/test
-	out/softnpu/*
+	out/npuzone/*
 	package-manifest.toml
 	smf/sled-agent/non-gimlet/config.toml
 	target/release/omicron-package
 	tools/create_virtual_hardware.sh
+    tools/virtual_hardware.sh
 	tools/scrimlet/*
 )
 
