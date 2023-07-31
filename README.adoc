@@ -43,7 +43,7 @@ This mode of operation will be used in production.
 
 To build and run the non-simulated version of Omicron, see: xref:docs/how-to-run.adoc[].
 
-== Run tests with nextest
+=== Run tests with nextest
 
 The supported way to run tests is via https://nexte.st/[cargo-nextest].
 
