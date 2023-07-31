@@ -500,8 +500,8 @@ impl Agent {
             addr: SocketAddrV6::new(ip, BOOTSTORE_PORT, 0, 0),
             time_per_tick: std::time::Duration::from_millis(250),
             learn_timeout: std::time::Duration::from_secs(5),
-            rack_init_timeout: std::time::Duration::from_secs(60),
-            rack_secret_request_timeout: std::time::Duration::from_secs(30),
+            rack_init_timeout: std::time::Duration::from_secs(300),
+            rack_secret_request_timeout: std::time::Duration::from_secs(5),
             fsm_state_ledger_paths: bootstore_fsm_state_paths(
                 &storage_resources,
             )
