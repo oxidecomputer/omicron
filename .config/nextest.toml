@@ -7,6 +7,9 @@ nextest-version = { required = "0.9.59", recommended = "0.9.59" }
 
 experimental = ["setup-scripts"]
 
+[profile.default]
+slow-timeout = { period = "60s", terminate-after = 3 }
+
 [[profile.default.scripts]]
 # Exclude omicron-dev tests from crdb-seed as we explicitly want to simulate an
 # environment where the seed file doesn't exist.

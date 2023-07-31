@@ -10,6 +10,7 @@ mod dns_propagation;
 mod dns_servers;
 mod external_endpoints;
 mod init;
+mod nat_cleanup;
 mod status;
 
 pub use common::Driver;

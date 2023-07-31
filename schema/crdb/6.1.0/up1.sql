@@ -1,0 +1,1 @@
+CREATE SEQUENCE IF NOT EXISTS omicron.public.nat_gen START 1 INCREMENT 1;

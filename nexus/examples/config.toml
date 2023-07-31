@@ -92,6 +92,7 @@ dns_external.max_concurrent_server_updates = 5
 # certificates it will take _other_ Nexus instances to notice and stop serving
 # them (on a sunny day).
 external_endpoints.period_secs = 60
+nat_cleanup.period_secs = 30
 
 [default_region_allocation_strategy]
 # allocate region on 3 random distinct zpools, on 3 random distinct sleds.

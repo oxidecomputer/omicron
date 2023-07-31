@@ -483,6 +483,31 @@ table! {
 }
 
 table! {
+    ipv4_nat_entry (id) {
+        id -> Uuid,
+        external_address -> Inet,
+        first_port -> Int4,
+        last_port -> Int4,
+        sled_address -> Inet,
+        vni -> Int4,
+        mac -> Int8,
+        gen -> Int8,
+        time_created -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+    }
+}
+
+// This is the sequence used for the generation number
+// in ipv4_nat_entry.
+table! {
+    nat_gen (last_value) {
+        last_value -> Int8,
+        log_cnt -> Int8,
+        is_called -> Bool,
+    }
+}
+
+table! {
     external_ip (id) {
         id -> Uuid,
         name -> Nullable<Text>,

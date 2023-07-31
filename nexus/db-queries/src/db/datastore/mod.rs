@@ -60,6 +60,7 @@ mod identity_provider;
 mod image;
 mod instance;
 mod ip_pool;
+mod ipv4_nat_entry;
 mod network_interface;
 mod oximeter;
 mod physical_disk;

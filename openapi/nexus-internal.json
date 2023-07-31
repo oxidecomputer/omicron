@@ -421,6 +421,82 @@
         }
       }
     },
+    "/rpw/nat/ipv4/changeset/{from_gen}": {
+      "get": {
+        "summary": "Fetch NAT ChangeSet",
+        "description": "Caller provides their generation as `from_gen`, along with a query parameter for the page size (`limit`). Endpoint will return changes that have occured since the caller's generation number up to the latest change or until the `limit` is reached. If there are no changes, an empty vec is returned.",
+        "operationId": "ipv4_nat_changeset",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "from_gen",
+            "description": "which change number to start generating the change set from",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Array_of_Ipv4NatEntryView",
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Ipv4NatEntryView"
+                  }
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/rpw/nat/ipv4/gen": {
+      "get": {
+        "summary": "Fetch NAT generation",
+        "operationId": "ipv4_nat_gen",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Ipv4NatGenView"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/sagas": {
       "get": {
         "summary": "List sagas",
@@ -3673,6 +3749,68 @@
           }
         ]
       },
+      "Ipv4NatEntryView": {
+        "description": "NAT Record",
+        "type": "object",
+        "properties": {
+          "deleted": {
+            "type": "boolean"
+          },
+          "external_address": {
+            "type": "string",
+            "format": "ipv4"
+          },
+          "first_port": {
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          },
+          "gen": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "last_port": {
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          },
+          "mac": {
+            "$ref": "#/components/schemas/MacAddr"
+          },
+          "sled_address": {
+            "type": "string",
+            "format": "ipv6"
+          },
+          "vni": {
+            "$ref": "#/components/schemas/Vni"
+          }
+        },
+        "required": [
+          "deleted",
+          "external_address",
+          "first_port",
+          "gen",
+          "last_port",
+          "mac",
+          "sled_address",
+          "vni"
+        ]
+      },
+      "Ipv4NatGenView": {
+        "description": "NAT Generation",
+        "type": "object",
+        "properties": {
+          "gen": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "gen"
+        ]
+      },
       "Ipv4Network": {
         "type": "string",
         "pattern": "^((25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.){3}(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\/(3[0-2]|[0-2]?[0-9])$"
@@ -5190,6 +5328,12 @@
           "state",
           "time_updated"
         ]
+      },
+      "Vni": {
+        "description": "A Geneve Virtual Network Identifier",
+        "type": "integer",
+        "format": "uint32",
+        "minimum": 0
       },
       "ZpoolPutRequest": {
         "description": "Sent by a sled agent on startup to Nexus to request further instruction",

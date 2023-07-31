@@ -311,6 +311,8 @@ pub struct BackgroundTaskConfig {
     pub dns_external: DnsTasksConfig,
     /// configuration for external endpoint list watcher
     pub external_endpoints: ExternalEndpointsConfig,
+    /// configuration for nat table garbage collector
+    pub nat_cleanup: NatCleanupConfig,
 }
 
 #[serde_as]
@@ -343,6 +345,14 @@ pub struct ExternalEndpointsConfig {
     pub period_secs: Duration,
     // Other policy around the TLS certificates could go here (e.g.,
     // allow/disallow wildcard certs, don't serve expired certs, etc.)
+}
+
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct NatCleanupConfig {
+    /// period (in seconds) for periodic activations of this background task
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs: Duration,
 }
 
 /// Configuration for a nexus server
@@ -450,7 +460,7 @@ mod test {
     use crate::nexus_config::{
         BackgroundTaskConfig, ConfigDropshotWithTls, Database,
         DeploymentConfig, DnsTasksConfig, DpdConfig, ExternalEndpointsConfig,
-        InternalDns, LoadErrorKind,
+        InternalDns, LoadErrorKind, NatCleanupConfig,
     };
     use dropshot::ConfigDropshot;
     use dropshot::ConfigLogging;
@@ -596,6 +606,7 @@ mod test {
             dns_external.period_secs_propagation = 7
             dns_external.max_concurrent_server_updates = 8
             external_endpoints.period_secs = 9
+            nat_cleanup.period_secs = 30
             [default_region_allocation_strategy]
             type = "random"
             seed = 0
@@ -680,7 +691,10 @@ mod test {
                         },
                         external_endpoints: ExternalEndpointsConfig {
                             period_secs: Duration::from_secs(9),
-                        }
+                        },
+                        nat_cleanup: NatCleanupConfig {
+                            period_secs: Duration::from_secs(30),
+                        },
                     },
                     default_region_allocation_strategy:
                         crate::nexus_config::RegionAllocationStrategy::Random {
@@ -733,6 +747,7 @@ mod test {
             dns_external.period_secs_propagation = 7
             dns_external.max_concurrent_server_updates = 8
             external_endpoints.period_secs = 9
+            nat_cleanup.period_secs = 30
             [default_region_allocation_strategy]
             type = "random"
             "##,

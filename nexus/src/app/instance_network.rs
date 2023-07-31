@@ -5,6 +5,9 @@
 //! Routines that manage instance-related networking state.
 
 use crate::app::sagas::retry_until_known_result;
+use ipnetwork::IpNetwork;
+use nexus_db_model::Ipv4NatValues;
+use nexus_db_model::Vni as DbVni;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
@@ -17,6 +20,7 @@ use omicron_common::api::internal::shared::SwitchLocation;
 use sled_agent_client::types::DeleteVirtualNetworkInterfaceHost;
 use sled_agent_client::types::SetVirtualNetworkInterfaceHost;
 use std::collections::HashSet;
+use std::net::IpAddr;
 use std::str::FromStr;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -330,8 +334,6 @@ impl super::Nexus {
                     ))
                 })?;
 
-        let vni: u32 = network_interface.vni.into();
-
         info!(log, "looking up instance's external IPs";
               "instance_id" => %instance_id);
 
@@ -361,28 +363,30 @@ impl super::Nexus {
             })
             .map(|(_, ip)| ip)
         {
-            retry_until_known_result(log, || async {
-                dpd_client
-                    .ensure_nat_entry(
-                        &log,
-                        target_ip.ip,
-                        dpd_client::types::MacAddr {
-                            a: mac_address.into_array(),
-                        },
-                        *target_ip.first_port,
-                        *target_ip.last_port,
-                        vni,
-                        sled_ip_address.ip(),
-                    )
-                    .await
-            })
-            .await
-            .map_err(|e| {
-                Error::internal_error(&format!(
-                    "failed to ensure dpd entry: {e}"
-                ))
-            })?;
+            // For each external ip, add a nat entry to the database
+            let nat_entry = Ipv4NatValues {
+                external_address: target_ip.ip,
+                first_port: target_ip.first_port,
+                last_port: target_ip.last_port,
+                sled_address: IpNetwork::new(
+                    IpAddr::V6(*sled_ip_address.ip()),
+                    128,
+                )
+                .unwrap(),
+                vni: DbVni(network_interface.vni.clone().into()),
+                mac: nexus_db_model::MacAddr(
+                    omicron_common::api::external::MacAddr(mac_address),
+                ),
+            };
+            self.db_datastore.ensure_ipv4_nat_entry(opctx, nat_entry).await?;
         }
+
+        // Notify dendrite that there are changes for it to reconcile.
+        // In the event of a failure to notify dendrite, we'll log an error
+        // and rely on dendrite's RPW timer to catch it up.
+        if let Err(e) = dpd_client.ipv4_nat_trigger_update().await {
+            error!(self.log, "failed to notify dendrite of nat updates"; "error" => ?e);
+        };
 
         Ok(())
     }
@@ -419,55 +423,54 @@ impl super::Nexus {
 
         let mut errors = vec![];
         for entry in external_ips {
-            for switch in &boundary_switches {
-                debug!(log, "deleting instance nat mapping";
-                       "instance_id" => %instance_id,
-                       "switch" => switch.to_string(),
-                       "entry" => #?entry);
-
-                let client_result =
-                    self.dpd_clients.get(switch).ok_or_else(|| {
-                        Error::internal_error(&format!(
-                            "unable to find dendrite client for {switch}"
-                        ))
-                    });
-
-                let dpd_client = match client_result {
-                    Ok(client) => client,
-                    Err(new_error) => {
-                        errors.push(new_error);
-                        continue;
+            // Soft delete the NAT entry
+            match self
+                .db_datastore
+                .ipv4_nat_delete_by_external_ip(&opctx, &entry)
+                .await
+            {
+                Ok(_) => Ok(()),
+                Err(err) => match err {
+                    Error::ObjectNotFound { .. } => {
+                        warn!(log, "no matching nat entries to soft delete");
+                        Ok(())
                     }
-                };
+                    _ => {
+                        let message = format!(
+                            "failed to delete nat entry due to error: {err:?}"
+                        );
+                        error!(log, "{}", message);
+                        Err(Error::internal_error(&message))
+                    }
+                },
+            }?;
+        }
 
-                let result = retry_until_known_result(log, || async {
-                    dpd_client
-                        .ensure_nat_entry_deleted(
-                            log,
-                            entry.ip,
-                            *entry.first_port,
-                        )
-                        .await
-                })
-                .await;
+        for switch in &boundary_switches {
+            debug!(&self.log, "notifying dendrite of updates";
+                       "instance_id" => %authz_instance.id(),
+                       "switch" => switch.to_string());
 
-                if let Err(e) = result {
-                    let e = Error::internal_error(&format!(
-                        "failed to delete nat entry via dpd: {e}"
-                    ));
+            let client_result = self.dpd_clients.get(switch).ok_or_else(|| {
+                Error::internal_error(&format!(
+                    "unable to find dendrite client for {switch}"
+                ))
+            });
 
-                    error!(log, "error deleting nat mapping: {e:#?}";
-                           "instance_id" => %instance_id,
-                           "switch" => switch.to_string(),
-                           "entry" => #?entry);
-                    errors.push(e);
-                } else {
-                    debug!(log, "deleting nat mapping successful";
-                           "instance_id" => %instance_id,
-                           "switch" => switch.to_string(),
-                           "entry" => #?entry);
+            let dpd_client = match client_result {
+                Ok(client) => client,
+                Err(new_error) => {
+                    errors.push(new_error);
+                    continue;
                 }
-            }
+            };
+
+            // Notify dendrite that there are changes for it to reconcile.
+            // In the event of a failure to notify dendrite, we'll log an error
+            // and rely on dendrite's RPW timer to catch it up.
+            if let Err(e) = dpd_client.ipv4_nat_trigger_update().await {
+                error!(self.log, "failed to notify dendrite of nat updates"; "error" => ?e);
+            };
         }
 
         if let Some(e) = errors.into_iter().nth(0) {
@@ -496,32 +499,48 @@ impl super::Nexus {
 
         let boundary_switches = self.boundary_switches(opctx).await?;
         for external_ip in external_ips {
-            for switch in &boundary_switches {
-                debug!(&self.log, "deleting instance nat mapping";
+            match self
+                .db_datastore
+                .ipv4_nat_delete_by_external_ip(&opctx, &external_ip)
+                .await
+            {
+                Ok(_) => Ok(()),
+                Err(err) => match err {
+                    Error::ObjectNotFound { .. } => {
+                        warn!(
+                            self.log,
+                            "no matching nat entries to soft delete"
+                        );
+                        Ok(())
+                    }
+                    _ => {
+                        let message = format!(
+                            "failed to delete nat entry due to error: {err:?}"
+                        );
+                        error!(self.log, "{}", message);
+                        Err(Error::internal_error(&message))
+                    }
+                },
+            }?;
+        }
+
+        for switch in &boundary_switches {
+            debug!(&self.log, "notifying dendrite of updates";
                        "instance_id" => %authz_instance.id(),
-                       "switch" => switch.to_string(),
-                       "entry" => #?external_ip);
+                       "switch" => switch.to_string());
 
-                let dpd_client =
-                    self.dpd_clients.get(switch).ok_or_else(|| {
-                        Error::internal_error(&format!(
-                            "unable to find dendrite client for {switch}"
-                        ))
-                    })?;
+            let dpd_client = self.dpd_clients.get(switch).ok_or_else(|| {
+                Error::internal_error(&format!(
+                    "unable to find dendrite client for {switch}"
+                ))
+            })?;
 
-                dpd_client
-                    .ensure_nat_entry_deleted(
-                        &self.log,
-                        external_ip.ip,
-                        *external_ip.first_port,
-                    )
-                    .await
-                    .map_err(|e| {
-                        Error::internal_error(&format!(
-                            "failed to delete nat entry via dpd: {e}"
-                        ))
-                    })?;
-            }
+            // Notify dendrite that there are changes for it to reconcile.
+            // In the event of a failure to notify dendrite, we'll log an error
+            // and rely on dendrite's RPW timer to catch it up.
+            if let Err(e) = dpd_client.ipv4_nat_trigger_update().await {
+                error!(self.log, "failed to notify dendrite of nat updates"; "error" => ?e);
+            };
         }
 
         Ok(())
