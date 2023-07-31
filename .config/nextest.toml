@@ -1,2 +1,4 @@
+nextest-version = "0.9.55"
+
 [profile.ci]
 fail-fast = false

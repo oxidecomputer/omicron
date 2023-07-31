@@ -6,7 +6,7 @@ set -o xtrace
 
 cargo --version
 rustc --version
-curl -sSfL --retry 10 https://get.nexte.st/0.9.54/"$1" | gunzip | tar -xvf - -C ~/.cargo/bin
+curl -sSfL --retry 10 https://get.nexte.st/0.9.55/"$1" | gunzip | tar -xvf - -C ~/.cargo/bin
 
 #
 # Set up a custom temporary directory within whatever one we were given so that
