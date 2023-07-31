@@ -65,15 +65,6 @@ KEEPER_HOST_01="$(echo "${keepers[0]}" | sed -En s/:9181//p)"
 KEEPER_HOST_02="$(echo "${keepers[1]}" | sed -En s/:9181//p)"
 KEEPER_HOST_03="$(echo "${keepers[2]}" | sed -En s/:9181//p)"
 
-# Making Keeper IDs dynamic instead of hardcoding them in the config as we may 
-# want to name them something other than 01, 02, and 03 in the future. 
-# Also, when a keeper node is unrecoverable the ID must be changed to something new. 
-# I am not sure how we'll handle this in the future, but making these dynamic 
-# seems sensible for the time being.
-KEEPER_ID_01="01"
-KEEPER_ID_02="02"
-KEEPER_ID_03="03"
-
 # Identify the node type this is as this will influence how the config is constructed
 # TODO: There are probably much better ways to do this service discovery, but this works
 # for now
@@ -99,6 +90,7 @@ fi
 # but I'm not sure this makes sense to us since we're building the entire clickhouse binary instead of separate
 # `clickhouse-server`, 'clickhouse-keeper' and 'clickhouse-client' binaries.
 
+# TODO: Substitute with env variables https://clickhouse.com/docs/en/operations/configuration-files#substitution
 sed -i "s~REPLICA_DISPLAY_NAME~$REPLICA_DISPLAY_NAME~g; \
     s~LISTEN_ADDR~$LISTEN_ADDR~g; \
     s~LISTEN_PORT~$LISTEN_PORT~g; \
@@ -110,6 +102,9 @@ sed -i "s~REPLICA_DISPLAY_NAME~$REPLICA_DISPLAY_NAME~g; \
     s~KEEPER_HOST_02~$KEEPER_HOST_02~g; \
     s~KEEPER_HOST_03~$KEEPER_HOST_03~g" \
     /opt/oxide/clickhouse/config.d/config_replica.xml
-    
-    exec /opt/oxide/clickhouse/clickhouse server \
-     --config /opt/oxide/clickhouse/config.d/config_replica.xml &
+
+# The clickhouse binary must be run from within the directory that contains it. 
+# Otherwise, it does not automatically detect the configuration files, nor does
+# it append them when necessary
+cd /opt/oxide/clickhouse/  
+exec ./clickhouse server &

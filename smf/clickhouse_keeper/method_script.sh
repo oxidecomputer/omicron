@@ -52,12 +52,18 @@ KEEPER_HOST_03="$(echo "${nodes[2]}" | sed -En s/:9181//p)"
 # Also, when a keeper node is unrecoverable the ID must be changed to something new. 
 # I am not sure how we'll handle this in the future, but making these dynamic 
 # seems sensible for the time being.
+#
+# TODO: generate unique reproduceable number IDs by removing letters from KEEPER_IDENTIFIER_*
+# to define the KEEPER_ID_*
+# $ export TESTID=1a2d3f4
+# $ echo $TESTID | tr -dc [:digit:]
+
 KEEPER_ID_01="01"
 KEEPER_ID_02="02"
 KEEPER_ID_03="03"
 
 # Identify the node type this is as this will influence how the config is constructed
-# TODO: There are probably much better ways to do this service discovery, but this works
+# TODO: There are probably much better ways to do this service name lookup, but this works
 # for now
 KEEPER_SVC="$(zoneadm list | sed -En s/oxz_clickhouse_keeper_//p)"
 KEEPER_IDENTIFIER_01="$( echo "${KEEPER_HOST_01}" | sed -En s/.host.control-plane.oxide.internal.//p)"
@@ -77,15 +83,13 @@ else
     exit "$SMF_EXIT_ERR_CONFIG"
 fi
 
-# TODO: Looks like I have to create the /var/lib/clickhouse/coordination here. Clickhouse is supposed
-# to do this itself, but for some reason it's not creating it
-
 # Populate corresponding template and copy to /opt/oxide/clickhouse/clickhouse/config.d/
 # or /opt/oxide/clickhouse_keeper/clickhouse/keeper_config.xml
 # Clickhouse recommends to have these files in `/etc/clickhouse-keeper/` and `/etc/clickhouse-server/config.d/`,
 # but I'm not sure this makes sense to us since we're building the entire clickhouse binary instead of separate
 # `clickhouse-server`, 'clickhouse-keeper' and 'clickhouse-client' binaries.
 sed -i "s~LISTEN_PORT~$LISTEN_PORT~g; \
+    s~LISTEN_ADDR~$LISTEN_ADDR~g; \
     s~DATASTORE~$DATASTORE~g; \
     s~KEEPER_ID_CURRENT~$KEEPER_ID_CURRENT~g; \
     s~KEEPER_ID_01~$KEEPER_ID_01~g; \
@@ -96,5 +100,8 @@ sed -i "s~LISTEN_PORT~$LISTEN_PORT~g; \
     s~KEEPER_HOST_03~$KEEPER_HOST_03~g" \
     /opt/oxide/clickhouse_keeper/keeper_config.xml
 
-exec /opt/oxide/clickhouse_keeper/clickhouse keeper enable \
- --config /opt/oxide/clickhouse_keeper/keeper_config.xml &
+# The clickhouse binary must be run from within the directory that contains it. 
+# Otherwise, it does not automatically detect the configuration files, nor does
+# it append them when necessary
+cd /opt/oxide/clickhouse_keeper/
+exec ./clickhouse keeper &

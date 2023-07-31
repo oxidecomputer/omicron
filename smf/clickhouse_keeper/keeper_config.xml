@@ -8,6 +8,8 @@
         <count>3</count>
     </logger>
 
+    <!-- To allow all use :: -->
+    <listen_host>LISTEN_ADDR</listen_host> 
     <!-- To trial locally use ./ -->
     <path>DATASTORE</path>
 
