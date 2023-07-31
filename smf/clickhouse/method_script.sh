@@ -67,10 +67,10 @@ KEEPER_HOST_03="$(echo "${keepers[2]}" | sed -En s/:9181//p)"
 
 # Identify the node type this is as this will influence how the config is constructed
 # TODO: There are probably much better ways to do this service discovery, but this works
-# for now
-CLICKHOUSE_SVC="$(zoneadm list | sed -En s/oxz_clickhouse_//p)"
-REPLICA_IDENTIFIER_01="$( echo "${REPLICA_HOST_01}" | sed -En s/.host.control-plane.oxide.internal.//p)"
-REPLICA_IDENTIFIER_02="$( echo "${REPLICA_HOST_02}" | sed -En s/.host.control-plane.oxide.internal.//p)"
+# for now. The services contain the same IDs as the hostnames.
+CLICKHOUSE_SVC="$(zoneadm list | tr -dc [:digit:])"
+REPLICA_IDENTIFIER_01="$( echo "${REPLICA_HOST_01}" | tr -dc [:digit:])"
+REPLICA_IDENTIFIER_02="$( echo "${REPLICA_HOST_02}" | tr -dc [:digit:])"
 if [[ $REPLICA_IDENTIFIER_01 == $CLICKHOUSE_SVC ]]
 then
     REPLICA_DISPLAY_NAME="oximeter_cluster node 1"

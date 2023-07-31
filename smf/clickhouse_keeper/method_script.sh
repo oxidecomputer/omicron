@@ -53,29 +53,30 @@ KEEPER_HOST_03="$(echo "${nodes[2]}" | sed -En s/:9181//p)"
 # I am not sure how we'll handle this in the future, but making these dynamic 
 # seems sensible for the time being.
 #
-# TODO: generate unique reproduceable number IDs by removing letters from KEEPER_IDENTIFIER_*
-# to define the KEEPER_ID_*
-# $ export TESTID=1a2d3f4
-# $ echo $TESTID | tr -dc [:digit:]
-
-KEEPER_ID_01="01"
-KEEPER_ID_02="02"
-KEEPER_ID_03="03"
+# Generate unique reproduceable number IDs by removing letters from KEEPER_IDENTIFIER_*
+# Keeper IDs must be numbers, and they cannot be reused. 
+# By trimming the hosts we can make sure all keepers will always be up to date when 
+# a new keeper is spun up. Clickhouse does not allow very large numbers, so we will
+# be reducing to 7 characters. This should be enough entropy given the small amount
+# of keepers we have.
+KEEPER_ID_01="$( echo "${KEEPER_HOST_01}" | tr -dc [:digit:] | cut -c1-7)"
+KEEPER_ID_02="$( echo "${KEEPER_HOST_02}" | tr -dc [:digit:] | cut -c1-7)"
+KEEPER_ID_03="$( echo "${KEEPER_HOST_03}" | tr -dc [:digit:] | cut -c1-7)"
 
 # Identify the node type this is as this will influence how the config is constructed
 # TODO: There are probably much better ways to do this service name lookup, but this works
-# for now
-KEEPER_SVC="$(zoneadm list | sed -En s/oxz_clickhouse_keeper_//p)"
-KEEPER_IDENTIFIER_01="$( echo "${KEEPER_HOST_01}" | sed -En s/.host.control-plane.oxide.internal.//p)"
-KEEPER_IDENTIFIER_02="$( echo "${KEEPER_HOST_02}" | sed -En s/.host.control-plane.oxide.internal.//p)"
-KEEPER_IDENTIFIER_03="$( echo "${KEEPER_HOST_03}" | sed -En s/.host.control-plane.oxide.internal.//p)"
-if [[ $KEEPER_IDENTIFIER_01 == $KEEPER_SVC ]]
+# for now. The services contain the same IDs as the hostnames.
+KEEPER_SVC="$(zoneadm list | tr -dc [:digit:] | cut -c1-7)"
+#KEEPER_IDENTIFIER_01="$( echo "${KEEPER_HOST_01}" | sed -En s/.host.control-plane.oxide.internal.//p)"
+#KEEPER_IDENTIFIER_02="$( echo "${KEEPER_HOST_02}" | sed -En s/.host.control-plane.oxide.internal.//p)"
+#KEEPER_IDENTIFIER_03="$( echo "${KEEPER_HOST_03}" | sed -En s/.host.control-plane.oxide.internal.//p)"
+if [[ $KEEPER_ID_01 == $KEEPER_SVC ]]
 then
     KEEPER_ID_CURRENT=$KEEPER_ID_01
-elif [[ $KEEPER_IDENTIFIER_02 == $KEEPER_SVC ]]
+elif [[ $KEEPER_ID_02 == $KEEPER_SVC ]]
 then
     KEEPER_ID_CURRENT=$KEEPER_ID_02
-elif [[ $KEEPER_IDENTIFIER_03 == $KEEPER_SVC ]]
+elif [[ $KEEPER_ID_03 == $KEEPER_SVC ]]
 then
     KEEPER_ID_CURRENT=$KEEPER_ID_03
 else
