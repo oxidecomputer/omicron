@@ -103,12 +103,6 @@
       "external_docs": {
         "url": "http://docs.oxide.computer/api/system-silos"
       }
-    },
-    "system/update": {
-      "description": "This includes operations related to system updates.",
-      "external_docs": {
-        "url": "http://docs.oxide.computer/api/system-update"
-      }
     }
   }
 }

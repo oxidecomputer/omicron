@@ -83,10 +83,10 @@ async fn create_image(client: &ClientTestContext) -> views::Image {
         },
         source: params::ImageSource::Url {
             url: server.url("/image.raw").to_string(),
+            block_size: params::BlockSize::try_from(512).unwrap(),
         },
         os: "alpine".to_string(),
         version: "edge".to_string(),
-        block_size: params::BlockSize::try_from(512).unwrap(),
     };
 
     let images_url = format!("/v1/images?project={}", PROJECT_NAME);
@@ -1009,7 +1009,6 @@ async fn test_create_image_from_snapshot(cptestctx: &ControlPlaneTestContext) {
         source: params::ImageSource::Snapshot { id: snapshot.identity.id },
         os: "debian".parse().unwrap(),
         version: "11".into(),
-        block_size: params::BlockSize::try_from(512).unwrap(),
     };
 
     let _image: views::Image =
@@ -1069,7 +1068,6 @@ async fn test_create_image_from_snapshot_delete(
         source: params::ImageSource::Snapshot { id: snapshot.identity.id },
         os: "debian".parse().unwrap(),
         version: "11".into(),
-        block_size: params::BlockSize::try_from(512).unwrap(),
     };
 
     let _image: views::Image =
