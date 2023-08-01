@@ -6236,7 +6236,7 @@ dependencies = [
 [[package]]
 name = "progenitor"
 version = "0.3.0"
-source = "git+https://github.com/oxidecomputer/progenitor?branch=main#9fc3bfce8e7709df40bb62022fd33d166626e022"
+source = "git+https://github.com/oxidecomputer/progenitor?branch=main#56da9799ef9ccea6017bf141b7b5c960d7736ef1"
 dependencies = [
  "progenitor-client",
  "progenitor-impl",
@@ -6247,7 +6247,7 @@ dependencies = [
 [[package]]
 name = "progenitor-client"
 version = "0.3.0"
-source = "git+https://github.com/oxidecomputer/progenitor?branch=main#9fc3bfce8e7709df40bb62022fd33d166626e022"
+source = "git+https://github.com/oxidecomputer/progenitor?branch=main#56da9799ef9ccea6017bf141b7b5c960d7736ef1"
 dependencies = [
  "bytes",
  "futures-core",
@@ -6261,7 +6261,7 @@ dependencies = [
 [[package]]
 name = "progenitor-impl"
 version = "0.3.0"
-source = "git+https://github.com/oxidecomputer/progenitor?branch=main#9fc3bfce8e7709df40bb62022fd33d166626e022"
+source = "git+https://github.com/oxidecomputer/progenitor?branch=main#56da9799ef9ccea6017bf141b7b5c960d7736ef1"
 dependencies = [
  "getopts",
  "heck 0.4.1",
@@ -6283,7 +6283,7 @@ dependencies = [
 [[package]]
 name = "progenitor-macro"
 version = "0.3.0"
-source = "git+https://github.com/oxidecomputer/progenitor?branch=main#9fc3bfce8e7709df40bb62022fd33d166626e022"
+source = "git+https://github.com/oxidecomputer/progenitor?branch=main#56da9799ef9ccea6017bf141b7b5c960d7736ef1"
 dependencies = [
  "openapiv3",
  "proc-macro2",
@@ -9074,7 +9074,7 @@ checksum = "497961ef93d974e23eb6f433eb5fe1b7930b659f06d12dec6fc44a8f554c0bba"
 [[package]]
 name = "typify"
 version = "0.0.13"
-source = "git+https://github.com/oxidecomputer/typify#f2435214aa625e6130a85fa5b289b813fd371415"
+source = "git+https://github.com/oxidecomputer/typify#6cc08a71d32d57dfefad254aa0d186d82e29bc11"
 dependencies = [
  "typify-impl",
  "typify-macro",
@@ -9083,7 +9083,7 @@ dependencies = [
 [[package]]
 name = "typify-impl"
 version = "0.0.13"
-source = "git+https://github.com/oxidecomputer/typify#f2435214aa625e6130a85fa5b289b813fd371415"
+source = "git+https://github.com/oxidecomputer/typify#6cc08a71d32d57dfefad254aa0d186d82e29bc11"
 dependencies = [
  "heck 0.4.1",
  "log",
@@ -9100,7 +9100,7 @@ dependencies = [
 [[package]]
 name = "typify-macro"
 version = "0.0.13"
-source = "git+https://github.com/oxidecomputer/typify#f2435214aa625e6130a85fa5b289b813fd371415"
+source = "git+https://github.com/oxidecomputer/typify#6cc08a71d32d57dfefad254aa0d186d82e29bc11"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -9141,9 +9141,9 @@ checksum = "524b68aca1d05e03fdf03fcdce2c6c94b6daf6d16861ddaa7e4f2b6638a9052c"
 
 [[package]]
 name = "unicode-ident"
-version = "1.0.9"
+version = "1.0.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b15811caf2415fb889178633e7724bad2509101cde276048e013b9def5e51fa0"
+checksum = "301abaae475aa91687eb82514b328ab47a211a533026cb25fc3e519b86adfc3c"
 
 [[package]]
 name = "unicode-linebreak"
