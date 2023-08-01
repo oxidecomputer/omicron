@@ -2,50 +2,40 @@
 
     <logger>
         <level>trace</level>
-        <log>DATASTORE/clickhouse-keeper.log</log>
-        <errorlog>DATASTORE/clickhouse-keeper.err.log</errorlog>
+        <log from_env="CH_LOG"/>
+        <errorlog from_env="CH_ERROR_LOG"/>
         <size>1000M</size>
         <count>3</count>
     </logger>
 
     <!-- To allow all use :: -->
-    <listen_host>LISTEN_ADDR</listen_host> 
-    <!-- To trial locally use ./ -->
-    <path>DATASTORE</path>
+    <listen_host from_env="CH_LISTEN_ADDR"/> 
+    <path replace="true" from_env="CH_DATASTORE"/>
 
     <keeper_server>
-        <tcp_port>LISTEN_PORT</tcp_port>
-        <!-- This was previously set to 1, 2 or 3 -->
-        <server_id>KEEPER_ID_CURRENT</server_id>
-        <!-- TODO: Use datastore -> /var/lib/clickhouse/coordination or /var/lib/clickhouse/ -->
-        <log_storage_path>DATASTORE/log</log_storage_path>
-        <snapshot_storage_path>DATASTORE/snapshots</snapshot_storage_path>
+        <tcp_port from_env="CH_LISTEN_PORT"/>
+        <server_id from_env="CH_KEEPER_ID_CURRENT"/>
+        <log_storage_path from_env="CH_LOG_STORAGE_PATH"/>
+        <snapshot_storage_path from_env="CH_SNAPSHOT_STORAGE_PATH"/>
         <coordination_settings>
             <operation_timeout_ms>10000</operation_timeout_ms>
             <session_timeout_ms>30000</session_timeout_ms>
             <raft_logs_level>trace</raft_logs_level>
         </coordination_settings>
         <raft_configuration>
-        <!-- TODO: Add each of these items dynamically in case we want more than 3 keepers-->
             <server>
-            <!-- This was previously set to 1 -->
-                <id>KEEPER_ID_01</id>
-                <hostname>KEEPER_HOST_01</hostname>
-                <!-- In the future we may want to make these dynamic-->
+                <id from_env="CH_KEEPER_ID_01"/>
+                <hostname from_env="CH_KEEPER_HOST_01"/>
                 <port>9234</port>
             </server>
             <server>
-            <!-- This was previously set to 2 -->
-                <id>KEEPER_ID_02</id>
-                <hostname>KEEPER_HOST_02</hostname>
-                <!-- In the future we may want to make these dynamic-->
+                <id from_env="CH_KEEPER_ID_02"/>
+                <hostname from_env="CH_KEEPER_HOST_02"/>
                 <port>9234</port>
             </server>
             <server>
-            <!-- This was previously set to 3 -->
-                <id>KEEPER_ID_03</id>
-                <hostname>KEEPER_HOST_03</hostname>
-                <!-- In the future we may want to make these dynamic-->
+                <id from_env="CH_KEEPER_ID_03"/>
+                <hostname from_env="CH_KEEPER_HOST_03"/>
                 <port>9234</port>
             </server>
         </raft_configuration>

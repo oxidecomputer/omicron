@@ -84,24 +84,24 @@ else
     exit "$SMF_EXIT_ERR_CONFIG"
 fi
 
-# Populate corresponding template and copy to /opt/oxide/clickhouse/clickhouse/config.d/
-# or /opt/oxide/clickhouse/clickhouse/keeper_config.xml
-# Clickhouse recommends to have these files in `/etc/clickhouse-keeper/` and `/etc/clickhouse-server/config.d/`,
-# but I'm not sure this makes sense to us since we're building the entire clickhouse binary instead of separate
-# `clickhouse-server`, 'clickhouse-keeper' and 'clickhouse-client' binaries.
-
-# TODO: Substitute with env variables https://clickhouse.com/docs/en/operations/configuration-files#substitution
-sed -i "s~REPLICA_DISPLAY_NAME~$REPLICA_DISPLAY_NAME~g; \
-    s~LISTEN_ADDR~$LISTEN_ADDR~g; \
-    s~LISTEN_PORT~$LISTEN_PORT~g; \
-    s~DATASTORE~$DATASTORE~g; \
-    s~REPLICA_NUMBER~$REPLICA_NUMBER~g; \
-    s~REPLICA_HOST_01~$REPLICA_HOST_01~g; \
-    s~REPLICA_HOST_02~$REPLICA_HOST_02~g; \
-    s~KEEPER_HOST_01~$KEEPER_HOST_01~g; \
-    s~KEEPER_HOST_02~$KEEPER_HOST_02~g; \
-    s~KEEPER_HOST_03~$KEEPER_HOST_03~g" \
-    /opt/oxide/clickhouse/config.d/config_replica.xml
+# Setting environment variables this way is best practice, but has the downside of
+# obscuring the field values to anyone ssh=ing into the zone.
+export CH_LOG="${DATASTORE}/clickhouse-server.log"
+export CH_ERROR_LOG="${DATASTORE}/clickhouse-server.errlog"
+export CH_REPLICA_DISPLAY_NAME=${REPLICA_DISPLAY_NAME}
+export CH_LISTEN_ADDR=${LISTEN_ADDR}
+export CH_LISTEN_PORT=${LISTEN_PORT}
+export CH_DATASTORE=${DATASTORE}
+export CH_TMP_PATH="${DATASTORE}/tmp/"
+export CH_USER_FILES_PATH="${DATASTORE}/user_files/"
+export CH_USER_LOCAL_DIR="${DATASTORE}/access/"
+export CH_FORMAT_SCHEMA_PATH="${DATASTORE}/format_schemas/"
+export CH_REPLICA_NUMBER=${REPLICA_NUMBER}
+export CH_REPLICA_HOST_01=${REPLICA_HOST_01}
+export CH_REPLICA_HOST_02=${REPLICA_HOST_02}
+export CH_KEEPER_HOST_01=${KEEPER_HOST_01}
+export CH_KEEPER_HOST_02=${KEEPER_HOST_02}
+export CH_KEEPER_HOST_03=${KEEPER_HOST_03}
 
 # The clickhouse binary must be run from within the directory that contains it. 
 # Otherwise, it does not automatically detect the configuration files, nor does

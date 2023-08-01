@@ -2,38 +2,36 @@
     <logger replace="true">
         <level>trace</level>
         <console>true</console>
-        <log>DATASTORE/clickhouse-server.log</log>
-        <errorlog>DATASTORE/clickhouse-server.errlog</errorlog>
+        <log from_env="CH_LOG"/>
+        <errorlog from_env="CH_ERROR_LOG"/>
         <size>1000M</size>
         <count>3</count>
     </logger>
-    <!-- Was oximeter_cluster node 1 (or 2, 3 etc)-->
-    <display_name>REPLICA_DISPLAY_NAME</display_name>
+    <display_name from_env="CH_REPLICA_DISPLAY_NAME"/>
     <!-- To allow all use :: -->
-    <listen_host>LISTEN_ADDR</listen_host> 
+    <listen_host from_env="CH_LISTEN_ADDR"/> 
     <!-- Default is 8123 -->
-    <http_port replace="true">LISTEN_PORT</http_port>
-    <!-- TODO: Should this be dynamic as well? -->
-    <tcp_port replace="true">9000</tcp_port>
+    <http_port replace="true" from_env="CH_LISTEN_PORT"/>
 
-    <path replace="true">DATASTORE</path>
-    <tmp_path replace="true">DATASTORE/tmp/</tmp_path>
-    <user_files_path replace="true">DATASTORE/user_files/</user_files_path>
+    <interserver_http_host from_env="CH_LISTEN_ADDR"/>
+
+    <path replace="true" from_env="CH_DATASTORE"/>
+    <tmp_path replace="true" from_env="CH_TMP_PATH"/>
+    <user_files_path replace="true" from_env="CH_USER_FILES_PATH"/>
 
     <user_directories>
         <local_directory>
             <!-- Path to folder where users created by SQL commands are stored. -->
-            <path replace="true">DATASTORE/access/</path>
+            <path replace="true" from_env="CH_USER_LOCAL_DIR"/>
         </local_directory>
     </user_directories>
 
-    <format_schema_path replace="true">DATASTORE/format_schemas/</format_schema_path>
+    <format_schema_path replace="true" from_env="CH_FORMAT_SCHEMA_PATH"/>
 
     <!-- replication settings -->
     <macros>
         <shard>01</shard>
-        <!-- Replica number (e.g. 01, 02 etc) -->
-        <replica>REPLICA_NUMBER</replica>
+        <replica from_env="CH_REPLICA_NUMBER"/>
         <cluster>oximeter_cluster</cluster>
     </macros>
 
@@ -44,12 +42,11 @@
             <shard>
                 <internal_replication>true</internal_replication>
                 <replica>
-                    <host>REPLICA_HOST_01</host>
-                    <!-- TODO: Make replica ports dynamic? -->               
+                    <host from_env="CH_REPLICA_HOST_01"/>             
                     <port>9000</port>
                 </replica>
                 <replica>
-                    <host>REPLICA_HOST_02</host>
+                    <host from_env="CH_REPLICA_HOST_02"/>
                     <port>9000</port>
                 </replica>
             </shard>
@@ -57,16 +54,15 @@
     </remote_servers>
     <zookeeper>
         <node>
-            <host>KEEPER_HOST_01</host>
-            <!-- TODO: Make keeper ports dynamic? -->
+            <host from_env="CH_KEEPER_HOST_01"/>
             <port>9181</port>
         </node>
         <node>
-            <host>KEEPER_HOST_02</host>
+            <host from_env="CH_KEEPER_HOST_02"/>
             <port>9181</port>
         </node>
         <node>
-            <host>KEEPER_HOST_03</host>
+            <host from_env="CH_KEEPER_HOST_03"/>
             <port>9181</port>
         </node>
     </zookeeper>

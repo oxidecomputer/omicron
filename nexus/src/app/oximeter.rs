@@ -331,6 +331,7 @@ impl super::Nexus {
             limit: std::num::NonZeroU32::new(1).unwrap(),
         };
         let oxs = self.db_datastore.oximeter_list(&page_params).await?;
+        // TODO: Make sure client can connect to alternative replica if the primary one is down
         let info = oxs.first().ok_or_else(|| Error::ServiceUnavailable {
             internal_message: String::from("no oximeter collectors available"),
         })?;

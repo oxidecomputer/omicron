@@ -47,14 +47,10 @@ readarray -td, nodes <<<"$CH_ADDRS,"; declare -p nodes
 KEEPER_HOST_01="$(echo "${nodes[0]}" | sed -En s/:9181//p)"
 KEEPER_HOST_02="$(echo "${nodes[1]}" | sed -En s/:9181//p)"
 KEEPER_HOST_03="$(echo "${nodes[2]}" | sed -En s/:9181//p)"
-# Making Keeper IDs dynamic instead of hardcoding them in the config as we may 
-# want to name them something other than 01, 02, and 03 in the future. 
-# Also, when a keeper node is unrecoverable the ID must be changed to something new. 
-# I am not sure how we'll handle this in the future, but making these dynamic 
-# seems sensible for the time being.
-#
+
 # Generate unique reproduceable number IDs by removing letters from KEEPER_IDENTIFIER_*
-# Keeper IDs must be numbers, and they cannot be reused. 
+# Keeper IDs must be numbers, and they cannot be reused (i.e. when a keeper node is 
+# unrecoverable the ID must be changed to something new.). 
 # By trimming the hosts we can make sure all keepers will always be up to date when 
 # a new keeper is spun up. Clickhouse does not allow very large numbers, so we will
 # be reducing to 7 characters. This should be enough entropy given the small amount
@@ -67,9 +63,6 @@ KEEPER_ID_03="$( echo "${KEEPER_HOST_03}" | tr -dc [:digit:] | cut -c1-7)"
 # TODO: There are probably much better ways to do this service name lookup, but this works
 # for now. The services contain the same IDs as the hostnames.
 KEEPER_SVC="$(zoneadm list | tr -dc [:digit:] | cut -c1-7)"
-#KEEPER_IDENTIFIER_01="$( echo "${KEEPER_HOST_01}" | sed -En s/.host.control-plane.oxide.internal.//p)"
-#KEEPER_IDENTIFIER_02="$( echo "${KEEPER_HOST_02}" | sed -En s/.host.control-plane.oxide.internal.//p)"
-#KEEPER_IDENTIFIER_03="$( echo "${KEEPER_HOST_03}" | sed -En s/.host.control-plane.oxide.internal.//p)"
 if [[ $KEEPER_ID_01 == $KEEPER_SVC ]]
 then
     KEEPER_ID_CURRENT=$KEEPER_ID_01
@@ -84,22 +77,22 @@ else
     exit "$SMF_EXIT_ERR_CONFIG"
 fi
 
-# Populate corresponding template and copy to /opt/oxide/clickhouse/clickhouse/config.d/
-# or /opt/oxide/clickhouse_keeper/clickhouse/keeper_config.xml
-# Clickhouse recommends to have these files in `/etc/clickhouse-keeper/` and `/etc/clickhouse-server/config.d/`,
-# but I'm not sure this makes sense to us since we're building the entire clickhouse binary instead of separate
-# `clickhouse-server`, 'clickhouse-keeper' and 'clickhouse-client' binaries.
-sed -i "s~LISTEN_PORT~$LISTEN_PORT~g; \
-    s~LISTEN_ADDR~$LISTEN_ADDR~g; \
-    s~DATASTORE~$DATASTORE~g; \
-    s~KEEPER_ID_CURRENT~$KEEPER_ID_CURRENT~g; \
-    s~KEEPER_ID_01~$KEEPER_ID_01~g; \
-    s~KEEPER_HOST_01~$KEEPER_HOST_01~g; \
-    s~KEEPER_ID_02~$KEEPER_ID_02~g; \
-    s~KEEPER_HOST_02~$KEEPER_HOST_02~g; \
-    s~KEEPER_ID_03~$KEEPER_ID_03~g; \
-    s~KEEPER_HOST_03~$KEEPER_HOST_03~g" \
-    /opt/oxide/clickhouse_keeper/keeper_config.xml
+# Setting environment variables this way is best practice, but has the downside of
+# obscuring the field values to anyone ssh=ing into the zone.
+export CH_LOG="${DATASTORE}/clickhouse-keeper.log"
+export CH_ERROR_LOG="${DATASTORE}/clickhouse-keeper.err.log"
+export CH_LISTEN_ADDR=${LISTEN_ADDR}
+export CH_DATASTORE=${DATASTORE}
+export CH_LISTEN_PORT=${LISTEN_PORT}
+export CH_KEEPER_ID_CURRENT=${KEEPER_ID_CURRENT}
+export CH_LOG_STORAGE_PATH="${DATASTORE}/log"
+export CH_SNAPSHOT_STORAGE_PATH="${DATASTORE}/snapshots"
+export CH_KEEPER_ID_01=${KEEPER_ID_01}
+export CH_KEEPER_ID_02=${KEEPER_ID_02}
+export CH_KEEPER_ID_03=${KEEPER_ID_03}
+export CH_KEEPER_HOST_01=${KEEPER_HOST_01}
+export CH_KEEPER_HOST_02=${KEEPER_HOST_02}
+export CH_KEEPER_HOST_03=${KEEPER_HOST_03}
 
 # The clickhouse binary must be run from within the directory that contains it. 
 # Otherwise, it does not automatically detect the configuration files, nor does
