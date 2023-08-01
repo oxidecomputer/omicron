@@ -148,7 +148,7 @@ async fn make_client(
     let address = SocketAddr::new(address, port);
     let client = Client::new(address, &log);
     client
-        .init_db()
+        .init_single_node_db()
         .await
         .context("Failed to initialize timeseries database")?;
     Ok(client)

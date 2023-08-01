@@ -432,8 +432,11 @@ pub trait DbWrite {
     /// Insert the given samples into the database.
     async fn insert_samples(&self, samples: &[Sample]) -> Result<(), Error>;
 
-    /// Initialize the telemetry database, creating tables as needed.
+    /// Initialize the replicated telemetry database, creating tables as needed.
     async fn init_db(&self) -> Result<(), Error>;
+
+    /// Initialize a single node telemetry database, creating tables as needed.
+    async fn init_single_node_db(&self) -> Result<(), Error>;
 
     /// Wipe the ClickHouse database entirely.
     async fn wipe_db(&self) -> Result<(), Error>;
@@ -538,12 +541,24 @@ impl DbWrite for Client {
         Ok(())
     }
 
-    /// Initialize the telemetry database, creating tables as needed.
+    /// Initialize the replicated telemetry database, creating tables as needed.
     async fn init_db(&self) -> Result<(), Error> {
         // The HTTP client doesn't support multiple statements per query, so we break them out here
         // manually.
         debug!(self.log, "initializing ClickHouse database");
         let sql = include_str!("./db-init.sql");
+        for query in sql.split("\n--\n") {
+            self.execute(query.to_string()).await?;
+        }
+        Ok(())
+    }
+
+    /// Initialize a single node telemetry database, creating tables as needed.
+    async fn init_single_node_db(&self) -> Result<(), Error> {
+        // The HTTP client doesn't support multiple statements per query, so we break them out here
+        // manually.
+        debug!(self.log, "initializing ClickHouse database");
+        let sql = include_str!("./db-single-node-init.sql");
         for query in sql.split("\n--\n") {
             self.execute(query.to_string()).await?;
         }
@@ -642,7 +657,7 @@ mod tests {
 
         let client = Client::new(address, &log);
         client
-            .init_db()
+            .init_single_node_db()
             .await
             .expect("Failed to initialize timeseries database");
         let samples = {
@@ -688,7 +703,7 @@ mod tests {
 
         let client = Client::new(address, &log);
         client
-            .init_db()
+            .init_single_node_db()
             .await
             .expect("Failed to initialize timeseries database");
         let sample = test_util::make_sample();
@@ -722,7 +737,7 @@ mod tests {
 
         let client = Client::new(address, &log);
         client
-            .init_db()
+            .init_single_node_db()
             .await
             .expect("Failed to initialize timeseries database");
         let sample = test_util::make_sample();
@@ -800,7 +815,7 @@ mod tests {
 
         let client = Client::new(address, &log);
         client
-            .init_db()
+            .init_single_node_db()
             .await
             .expect("Failed to initialize timeseries database");
 
@@ -995,7 +1010,7 @@ mod tests {
 
         let client = Client::new(address, &log);
         client
-            .init_db()
+            .init_single_node_db()
             .await
             .expect("Failed to initialize timeseries database");
 
@@ -1094,7 +1109,7 @@ mod tests {
         let log = Logger::root(slog::Discard, o!());
         let client = Client::new(address, &log);
         client
-            .init_db()
+            .init_single_node_db()
             .await
             .expect("Failed to initialize timeseries database");
         client
@@ -1351,7 +1366,7 @@ mod tests {
         let log = Logger::root(slog::Discard, o!());
         let client = Client::new(address, &log);
         client
-            .init_db()
+            .init_single_node_db()
             .await
             .expect("Failed to initialize timeseries database");
         client
@@ -1395,7 +1410,7 @@ mod tests {
         let log = Logger::root(slog::Discard, o!());
         let client = Client::new(address, &log);
         client
-            .init_db()
+            .init_single_node_db()
             .await
             .expect("Failed to initialize timeseries database");
         client
@@ -1513,7 +1528,7 @@ mod tests {
         let log = Logger::root(slog::Discard, o!());
         let client = Client::new(address, &log);
         client
-            .init_db()
+            .init_single_node_db()
             .await
             .expect("Failed to initialize timeseries database");
         client
