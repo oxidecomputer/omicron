@@ -1093,14 +1093,15 @@ impl ServiceManager {
                     .add_property("listen_addr", "astring", listen_addr)
                     .add_property("listen_port", "astring", listen_port)
                     .add_property("store", "astring", "/data");
-                let clickhouse_service = ServiceBuilder::new("oxide/clickhouse").add_instance(
-                    ServiceInstanceBuilder::new("default")
-                        .add_property_group(config),
-                );
+                let clickhouse_service =
+                    ServiceBuilder::new("oxide/clickhouse").add_instance(
+                        ServiceInstanceBuilder::new("default")
+                            .add_property_group(config),
+                    );
 
                 let profile = ProfileBuilder::new("omicron")
-                .add_service(clickhouse_service)
-                .add_service(dns_install);
+                    .add_service(clickhouse_service)
+                    .add_service(dns_install);
                 profile
                     .add_to_zone(&self.inner.log, &installed_zone)
                     .await
@@ -1113,7 +1114,7 @@ impl ServiceManager {
                 let Some(info) = self.inner.sled_info.get() else {
                     return Err(Error::SledAgentNotReady);
                 };
-                 // We want to configure the dns/install SMF service inside the
+                // We want to configure the dns/install SMF service inside the
                 // zone with the list of DNS nameservers.  This will cause
                 // /etc/resolv.conf to be populated inside the zone.  To do
                 // this, we need the full list of nameservers.  Fortunately, the
@@ -1157,19 +1158,23 @@ impl ServiceManager {
                     .add_property("listen_addr", "astring", listen_addr)
                     .add_property("listen_port", "astring", listen_port)
                     .add_property("store", "astring", "/data");
-                let clickhouse_keeper_service =  ServiceBuilder::new("oxide/clickhouse_keeper")
-                .add_instance(
-                    ServiceInstanceBuilder::new("default")
-                        .add_property_group(config),
-                );
+                let clickhouse_keeper_service =
+                    ServiceBuilder::new("oxide/clickhouse_keeper")
+                        .add_instance(
+                            ServiceInstanceBuilder::new("default")
+                                .add_property_group(config),
+                        );
                 let profile = ProfileBuilder::new("omicron")
-                .add_service(clickhouse_keeper_service)
-                .add_service(dns_install);
+                    .add_service(clickhouse_keeper_service)
+                    .add_service(dns_install);
                 profile
                     .add_to_zone(&self.inner.log, &installed_zone)
                     .await
                     .map_err(|err| {
-                        Error::io("Failed to setup clickhouse keeper profile", err)
+                        Error::io(
+                            "Failed to setup clickhouse keeper profile",
+                            err,
+                        )
                     })?;
                 return Ok(RunningZone::boot(installed_zone).await?);
             }

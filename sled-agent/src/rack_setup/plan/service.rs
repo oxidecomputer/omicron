@@ -571,7 +571,11 @@ impl Plan {
             let address = SocketAddrV6::new(ip, port, 0, 0);
             let zone = dns_builder.host_zone(id, ip).unwrap();
             dns_builder
-                .service_backend_zone(ServiceName::ClickhouseKeeper, &zone, port)
+                .service_backend_zone(
+                    ServiceName::ClickhouseKeeper,
+                    &zone,
+                    port,
+                )
                 .unwrap();
             let dataset_name =
                 sled.alloc_from_u2_zpool(DatasetKind::ClickhouseKeeper)?;

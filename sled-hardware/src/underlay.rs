@@ -4,7 +4,8 @@
 
 //! Finding the underlay network physical links and address objects.
 
-use crate::is_gimlet;
+// TODO: Remove before setting PR to review
+// use crate::is_gimlet;
 use illumos_utils::addrobj;
 use illumos_utils::addrobj::AddrObject;
 use illumos_utils::dladm;
@@ -13,7 +14,8 @@ use illumos_utils::dladm::FindPhysicalLinkError;
 use illumos_utils::dladm::GetLinkpropError;
 use illumos_utils::dladm::PhysicalLink;
 use illumos_utils::dladm::SetLinkpropError;
-use illumos_utils::dladm::CHELSIO_LINK_PREFIX;
+// TODO: Remove before setting PR to review
+// use illumos_utils::dladm::CHELSIO_LINK_PREFIX;
 use illumos_utils::zone::Zones;
 use omicron_common::api::external::MacAddr;
 use std::net::Ipv6Addr;

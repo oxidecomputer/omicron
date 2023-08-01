@@ -382,7 +382,9 @@ impl std::fmt::Display for ServiceType {
             ServiceType::Maghemite { .. } => write!(f, "mg-ddm"),
             ServiceType::SpSim => write!(f, "sp-sim"),
             ServiceType::Clickhouse { .. } => write!(f, "clickhouse"),
-            ServiceType::ClickhouseKeeper { .. } => write!(f, "clickhouse_keeper"),
+            ServiceType::ClickhouseKeeper { .. } => {
+                write!(f, "clickhouse_keeper")
+            }
             ServiceType::CockroachDb { .. } => write!(f, "cockroachdb"),
             ServiceType::Crucible { .. } => write!(f, "crucible"),
         }
