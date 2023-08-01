@@ -66,3 +66,29 @@ progenitor::generate_api!(
 
 /// A type alias for errors returned by this crate.
 pub type ClientError = crate::Error<crate::types::Error>;
+
+impl types::Baseboard {
+    pub fn identifier(&self) -> &str {
+        match &self {
+            Self::Gimlet { identifier, .. } => &identifier,
+            Self::Pc { identifier, .. } => &identifier,
+            Self::Unknown => "unknown",
+        }
+    }
+
+    pub fn model(&self) -> &str {
+        match self {
+            Self::Gimlet { model, .. } => &model,
+            Self::Pc { model, .. } => &model,
+            Self::Unknown => "unknown",
+        }
+    }
+
+    pub fn revision(&self) -> i64 {
+        match self {
+            Self::Gimlet { revision, .. } => *revision,
+            Self::Pc { .. } => 0,
+            Self::Unknown => 0,
+        }
+    }
+}
