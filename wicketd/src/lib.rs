@@ -18,14 +18,14 @@ use artifacts::{WicketdArtifactServer, WicketdArtifactStore};
 use bootstrap_addrs::BootstrapPeers;
 pub use config::Config;
 pub(crate) use context::ServerContext;
+use dropshot::{ConfigDropshot, HandlerTaskMode, HttpServer};
 pub use installinator_progress::{IprUpdateTracker, RunningUpdateState};
 pub use inventory::{RackV1Inventory, SpInventory};
 use mgs::make_mgs_client;
 pub(crate) use mgs::{MgsHandle, MgsManager};
 use omicron_common::FileKv;
+use once_cell::sync::OnceCell;
 use sled_hardware::Baseboard;
-
-use dropshot::{ConfigDropshot, HandlerTaskMode, HttpServer};
 use slog::{debug, error, o, Drain};
 use std::{
     net::{SocketAddr, SocketAddrV6},
@@ -112,6 +112,7 @@ impl Server {
                     mgs_handle,
                     mgs_client,
                     log: log.clone(),
+                    local_switch_id: OnceCell::new(),
                     bootstrap_peers,
                     update_tracker: update_tracker.clone(),
                     baseboard: args.baseboard,
