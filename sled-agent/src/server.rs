@@ -11,6 +11,7 @@ use crate::bootstrap::params::StartSledAgentRequest;
 use crate::nexus::NexusClientWithResolver;
 use crate::services::ServiceManager;
 use crate::storage_manager::StorageManager;
+use bootstore::schemes::v0 as bootstore;
 use internal_dns::resolver::Resolver;
 use slog::Logger;
 use std::net::SocketAddr;
@@ -40,6 +41,7 @@ impl Server {
         request: StartSledAgentRequest,
         services: ServiceManager,
         storage: StorageManager,
+        bootstore: bootstore::NodeHandle,
     ) -> Result<Server, String> {
         info!(log, "setting up sled agent server");
 
@@ -62,6 +64,7 @@ impl Server {
             request,
             services,
             storage,
+            bootstore,
         )
         .await
         .map_err(|e| e.to_string())?;

@@ -381,10 +381,10 @@ impl RunningZone {
         }
         let command = command.args(args);
 
-        let child = crate::spawn(command).map_err(|err| RunCommandError {
-            zone: self.name().to_string(),
-            err,
-        })?;
+        let child =
+            crate::spawn_with_piped_stdout_and_stderr(command).map_err(
+                |err| RunCommandError { zone: self.name().to_string(), err },
+            )?;
 
         // Record the process contract now in use by the child; the contract
         // just created from the template that we applied to this thread
@@ -437,10 +437,10 @@ impl RunningZone {
         // that's actually run is irrelevant.
         let mut command = std::process::Command::new("echo");
         let command = command.args(args);
-        let child = crate::spawn(command).map_err(|err| RunCommandError {
-            zone: self.name().to_string(),
-            err,
-        })?;
+        let child =
+            crate::spawn_with_piped_stdout_and_stderr(command).map_err(
+                |err| RunCommandError { zone: self.name().to_string(), err },
+            )?;
         crate::run_child(command, child)
             .map_err(|err| RunCommandError {
                 zone: self.name().to_string(),
@@ -1104,6 +1104,7 @@ impl InstalledZone {
         unique_name: Option<Uuid>,
         datasets: &[zone::Dataset],
         filesystems: &[zone::Fs],
+        data_links: &[String],
         devices: &[zone::Device],
         opte_ports: Vec<(Port, PortTicket)>,
         bootstrap_vnic: Option<Link>,
@@ -1140,13 +1141,20 @@ impl InstalledZone {
                     .collect(),
             })?;
 
-        let net_device_names: Vec<String> = opte_ports
+        let mut net_device_names: Vec<String> = opte_ports
             .iter()
             .map(|(port, _)| port.vnic_name().to_string())
             .chain(std::iter::once(control_vnic.name().to_string()))
             .chain(bootstrap_vnic.as_ref().map(|vnic| vnic.name().to_string()))
             .chain(links.iter().map(|nic| nic.name().to_string()))
+            .chain(data_links.iter().map(|x| x.to_string()))
             .collect();
+
+        // There are many sources for device names. In some cases they can
+        // overlap, depending on the contents of user defined config files. This
+        // can cause zones to fail to start if duplicate data links are given.
+        net_device_names.sort();
+        net_device_names.dedup();
 
         Zones::install_omicron_zone(
             log,

@@ -68,7 +68,7 @@ use std::net::Ipv6Addr;
 use uuid::Uuid;
 
 /// Zones that can be referenced within the internal DNS system.
-#[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Copy, Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ZoneVariant {
     /// This non-global zone runs an instance of Dendrite.
     ///
@@ -162,6 +162,12 @@ pub struct Sled(Uuid);
 pub struct Zone {
     id: Uuid,
     variant: ZoneVariant,
+}
+
+impl Zone {
+    pub(crate) fn dns_name(&self) -> String {
+        Host::Zone { id: self.id, variant: self.variant }.dns_name()
+    }
 }
 
 impl DnsConfigBuilder {
@@ -342,9 +348,7 @@ impl DnsConfigBuilder {
 
         // Assemble the set of AAAA records for zones.
         let zone_records = self.zones.into_iter().map(|(zone, zone_ip)| {
-            let name =
-                Host::Zone { id: zone.id, variant: zone.variant }.dns_name();
-            (name, vec![DnsRecord::Aaaa(zone_ip)])
+            (zone.dns_name(), vec![DnsRecord::Aaaa(zone_ip)])
         });
 
         // Assemble the set of SRV records, which implicitly point back at
@@ -359,15 +363,7 @@ impl DnsConfigBuilder {
                             prio: 0,
                             weight: 0,
                             port,
-                            target: format!(
-                                "{}.{}",
-                                Host::Zone {
-                                    id: zone.id,
-                                    variant: zone.variant
-                                }
-                                .dns_name(),
-                                DNS_ZONE
-                            ),
+                            target: format!("{}.{}", zone.dns_name(), DNS_ZONE),
                         })
                     })
                     .collect();

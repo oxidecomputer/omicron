@@ -597,20 +597,12 @@
       "type": "object",
       "required": [
         "addresses",
-        "boundary_switches",
         "id",
         "services",
         "zone_type"
       ],
       "properties": {
         "addresses": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "format": "ipv6"
-          }
-        },
-        "boundary_switches": {
           "type": "array",
           "items": {
             "type": "string",

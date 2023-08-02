@@ -354,7 +354,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
         // Set up a stub instance of dendrite
         let dendrite = dev::dendrite::DendriteInstance::start(0).await.unwrap();
         let port = dendrite.port;
-        self.dendrite.insert(switch_location.clone(), dendrite);
+        self.dendrite.insert(switch_location, dendrite);
 
         let address = SocketAddrV6::new(Ipv6Addr::LOCALHOST, port, 0, 0);
 

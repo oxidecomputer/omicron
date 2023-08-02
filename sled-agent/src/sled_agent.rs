@@ -4,6 +4,9 @@
 
 //! Sled agent implementation
 
+use crate::bootstrap::early_networking::{
+    EarlyNetworkConfig, EarlyNetworkSetupError,
+};
 use crate::bootstrap::params::StartSledAgentRequest;
 use crate::config::Config;
 use crate::instance_manager::InstanceManager;
@@ -17,6 +20,7 @@ use crate::params::{
 use crate::services::{self, ServiceManager};
 use crate::storage_manager::{self, StorageManager};
 use crate::updates::{ConfigUpdates, UpdateManager};
+use bootstore::schemes::v0 as bootstore;
 use camino::Utf8PathBuf;
 use dropshot::HttpError;
 use illumos_utils::opte::params::SetVirtualNetworkInterfaceHost;
@@ -25,12 +29,14 @@ use omicron_common::address::{
     get_sled_address, get_switch_zone_address, Ipv6Subnet, SLED_PREFIX,
 };
 use omicron_common::api::external::Vni;
+use omicron_common::api::internal::shared::RackNetworkConfig;
 use omicron_common::api::{
     internal::nexus::DiskRuntimeState, internal::nexus::InstanceRuntimeState,
     internal::nexus::UpdateArtifactId,
 };
 use omicron_common::backoff::{
-    retry_notify_ext, retry_policy_internal_service_aggressive, BackoffError,
+    retry_notify, retry_notify_ext, retry_policy_internal_service_aggressive,
+    BackoffError,
 };
 use sled_hardware::underlay;
 use sled_hardware::HardwareManager;
@@ -93,6 +99,15 @@ pub enum Error {
 
     #[error(transparent)]
     ZpoolList(#[from] illumos_utils::zpool::ListError),
+
+    #[error(transparent)]
+    EarlyNetworkError(#[from] EarlyNetworkSetupError),
+
+    #[error("Bootstore Error: {0}")]
+    Bootstore(#[from] bootstore::NodeRequestError),
+
+    #[error("Failed to deserialize early network config: {0}")]
+    EarlyNetworkDeserialize(serde_json::Error),
 }
 
 impl From<Error> for omicron_common::api::external::Error {
@@ -195,6 +210,9 @@ struct SledAgentInner {
 
     // A serialized request queue for operations interacting with Nexus.
     nexus_request_queue: NexusRequestQueue,
+
+    // The rack network config provided at RSS time.
+    rack_network_config: Option<RackNetworkConfig>,
 }
 
 impl SledAgentInner {
@@ -222,6 +240,7 @@ impl SledAgent {
         request: StartSledAgentRequest,
         services: ServiceManager,
         storage: StorageManager,
+        bootstore: bootstore::NodeHandle,
     ) -> Result<SledAgent, Error> {
         // Pass the "parent_log" to all subcomponents that want to set their own
         // "component" value.
@@ -273,7 +292,7 @@ impl SledAgent {
         .map_err(|err| Error::SledSubnet { err })?;
 
         // Initialize the xde kernel driver with the underlay devices.
-        let underlay_nics = underlay::find_nics()?;
+        let underlay_nics = underlay::find_nics(&config.data_links)?;
         illumos_utils::opte::initialize_xde_driver(&log, &underlay_nics)?;
 
         // Create the PortManager to manage all the OPTE ports on the sled.
@@ -325,14 +344,53 @@ impl SledAgent {
 
         let svc_config =
             services::Config::new(request.id, config.sidecar_revision.clone());
-        services
-            .sled_agent_started(
-                svc_config,
-                port_manager.clone(),
-                *sled_address.ip(),
-                request.rack_id,
+
+        // Get our rack network config from the bootstore; we cannot proceed
+        // until we have this, as we need to know which switches have uplinks to
+        // correctly set up services.
+        let get_network_config = || async {
+            let serialized_config = bootstore
+                .get_network_config()
+                .await
+                .map_err(|err| BackoffError::transient(err.to_string()))?
+                .ok_or_else(|| {
+                    BackoffError::transient(
+                        "Missing early network config in bootstore".to_string(),
+                    )
+                })?;
+
+            let early_network_config =
+                EarlyNetworkConfig::try_from(serialized_config)
+                    .map_err(|err| BackoffError::transient(err.to_string()))?;
+
+            Ok(early_network_config.rack_network_config)
+        };
+        let rack_network_config: Option<RackNetworkConfig> =
+            retry_notify::<_, String, _, _, _, _>(
+                retry_policy_internal_service_aggressive(),
+                get_network_config,
+                |error, delay| {
+                    warn!(
+                        log,
+                        "failed to get network config from bootstore";
+                        "error" => ?error,
+                        "retry_after" => ?delay,
+                    );
+                },
             )
-            .await?;
+            .await
+            .expect(
+                "Expected an infinite retry loop getting \
+             network config from bootstore",
+            );
+
+        services.sled_agent_started(
+            svc_config,
+            port_manager.clone(),
+            *sled_address.ip(),
+            request.rack_id,
+            rack_network_config.clone(),
+        )?;
 
         let sled_agent = SledAgent {
             inner: Arc::new(SledAgentInner {
@@ -347,10 +405,13 @@ impl SledAgent {
                 nexus_client,
 
                 // TODO(https://github.com/oxidecomputer/omicron/issues/1917):
-                // Propagate usage of this request queue throughout the Sled Agent.
+                // Propagate usage of this request queue throughout the Sled
+                // Agent.
                 //
-                // Also, we could maybe de-dup some of the backoff code in the request queue?
+                // Also, we could maybe de-dup some of the backoff code in the
+                // request queue?
                 nexus_request_queue: NexusRequestQueue::new(),
+                rack_network_config,
             }),
             log: log.clone(),
         };
@@ -372,7 +433,25 @@ impl SledAgent {
         //
         // Do this *after* monitoring for harware, to enable the switch zone to
         // establish an underlay address before proceeding.
-        sled_agent.inner.services.load_services().await?;
+        retry_notify(
+            retry_policy_internal_service_aggressive(),
+            || async {
+                sled_agent
+                    .inner
+                    .services
+                    .load_services()
+                    .await
+                    .map_err(|err| BackoffError::transient(err))
+            },
+            |err, delay| {
+                warn!(
+                    log,
+                    "Failed to load services, will retry in {:?}", delay;
+                    "error" => %err,
+                );
+            },
+        )
+        .await?;
 
         // Now that we've initialized the sled services, notify nexus again
         // at which point it'll plumb any necessary firewall rules back to us.
@@ -393,11 +472,17 @@ impl SledAgent {
 
         if scrimlet {
             let baseboard = self.inner.hardware.baseboard();
-            let switch_zone_ip = Some(self.inner.switch_zone_ip());
+            let switch_zone_ip = self.inner.switch_zone_ip();
             if let Err(e) = self
                 .inner
                 .services
-                .activate_switch(switch_zone_ip, baseboard)
+                .activate_switch(
+                    Some((
+                        switch_zone_ip,
+                        self.inner.rack_network_config.as_ref(),
+                    )),
+                    baseboard,
+                )
                 .await
             {
                 warn!(log, "Failed to activate switch: {e}");
@@ -437,11 +522,17 @@ impl SledAgent {
                     }
                     HardwareUpdate::TofinoLoaded => {
                         let baseboard = self.inner.hardware.baseboard();
-                        let switch_zone_ip = Some(self.inner.switch_zone_ip());
+                        let switch_zone_ip = self.inner.switch_zone_ip();
                         if let Err(e) = self
                             .inner
                             .services
-                            .activate_switch(switch_zone_ip, baseboard)
+                            .activate_switch(
+                                Some((
+                                    switch_zone_ip,
+                                    self.inner.rack_network_config.as_ref(),
+                                )),
+                                baseboard,
+                            )
                             .await
                         {
                             warn!(log, "Failed to activate switch: {e}");

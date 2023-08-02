@@ -101,11 +101,12 @@ version = "$VERSION"
 kind = "composite-control-plane"
 EOF
 
-# Exclude `propolis-server` from the list of control plane zones: it is bundled
-# into the OS ramdisk. It still shows up under `.../install` for development
-# workflows using `omicron-package install` that don't build a full omicron OS
-# ramdisk, so we filter it out here.
-for zone in $(find /work/package/install -maxdepth 1 -type f -name '*.tar.gz' | grep -v propolis-server.tar.gz); do
+# Exclude a handful of tarballs from the list of control plane zones because
+# they are bundled into the OS ramdisk. They still show up under `.../install`
+# for development workflows using `omicron-package install` that don't build a
+# full omicron OS ramdisk, so we filter them out here.
+for zone in $(find /work/package/install -maxdepth 1 -type f -name '*.tar.gz' \
+    | egrep -v '(propolis-server|mgs|overlay|switch)\.tar\.gz'); do
     cat >>/work/manifest.toml <<EOF
 [[artifact.control_plane.source.zones]]
 kind = "file"
