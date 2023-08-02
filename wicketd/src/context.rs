@@ -12,13 +12,13 @@ use anyhow::anyhow;
 use anyhow::bail;
 use anyhow::Result;
 use gateway_client::types::SpIdentifier;
-use once_cell::sync::OnceCell;
 use sled_hardware::Baseboard;
 use slog::info;
 use std::net::Ipv6Addr;
 use std::net::SocketAddrV6;
 use std::sync::Arc;
 use std::sync::Mutex;
+use std::sync::OnceLock;
 
 /// Shared state used by API handlers
 pub struct ServerContext {
@@ -29,7 +29,7 @@ pub struct ServerContext {
     /// identifies whether we're connected to switch 0 or 1 and cannot change
     /// (plugging us into a different switch would require powering off our sled
     /// and physically moving it).
-    pub(crate) local_switch_id: OnceCell<SpIdentifier>,
+    pub(crate) local_switch_id: OnceLock<SpIdentifier>,
     pub(crate) bootstrap_peers: BootstrapPeers,
     pub(crate) update_tracker: Arc<UpdateTracker>,
     pub(crate) baseboard: Option<Baseboard>,

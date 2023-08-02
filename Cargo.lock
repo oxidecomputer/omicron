@@ -9709,7 +9709,6 @@ dependencies = [
  "omicron-common 0.1.0",
  "omicron-passwords 0.1.0",
  "omicron-test-utils",
- "once_cell",
  "openapi-lint",
  "openapiv3",
  "rand 0.8.5",
