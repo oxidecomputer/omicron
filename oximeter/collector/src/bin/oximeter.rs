@@ -41,6 +41,12 @@ enum Args {
 
         #[clap(short, long, action)]
         address: SocketAddrV6,
+
+        /// Set to start the client with a replicated ClickHouse
+        /// environment. Otherwise, it will be configured for a
+        /// single node set up
+        #[clap(long, short, action)]
+        replicated: bool,
     },
 }
 
@@ -55,10 +61,10 @@ async fn do_run() -> Result<(), CmdError> {
     let args = Args::parse();
     match args {
         Args::Openapi => run_openapi().map_err(CmdError::Failure),
-        Args::Run { config_file, id, address } => {
+        Args::Run { config_file, id, address , replicated} => {
             let config = Config::from_file(config_file).unwrap();
             let args = OximeterArguments { id, address };
-            Oximeter::new(&config, &args)
+            Oximeter::new(&config, &args, replicated)
                 .await
                 .unwrap()
                 .serve_forever()

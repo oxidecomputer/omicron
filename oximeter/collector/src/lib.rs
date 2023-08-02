@@ -305,6 +305,7 @@ impl OximeterAgent {
         db_config: DbConfig,
         resolver: &Resolver,
         log: &Logger,
+        replicated: bool,
     ) -> Result<Self, Error> {
         let (result_sender, result_receiver) = mpsc::channel(8);
         let log = log.new(o!("component" => "oximeter-agent", "collector_id" => id.to_string()));
@@ -321,7 +322,11 @@ impl OximeterAgent {
             )
         };
         let client = Client::new(db_address, &log);
-        client.init_db().await?;
+        if !replicated {
+            client.init_single_node_db().await?;
+        } else {
+            client.init_db().await?;
+        }
 
         // Spawn the task for aggregating and inserting all metrics
         tokio::spawn(async move {
@@ -454,12 +459,13 @@ impl Oximeter {
     pub async fn new(
         config: &Config,
         args: &OximeterArguments,
+        replicated: bool,
     ) -> Result<Self, Error> {
         let log = config
             .log
             .to_logger("oximeter")
             .map_err(|msg| Error::Server(msg.to_string()))?;
-        Self::with_logger(config, args, log).await
+        Self::with_logger(config, args, log, replicated).await
     }
 
     /// Create a new `Oximeter`, specifying an alternative logger to use.
@@ -470,6 +476,7 @@ impl Oximeter {
         config: &Config,
         args: &OximeterArguments,
         log: Logger,
+        replicated: bool,
     ) -> Result<Self, Error> {
         let (drain, registration) = slog_dtrace::with_drain(log);
         let log = slog::Logger::root(drain.fuse(), o!());
@@ -490,8 +497,10 @@ impl Oximeter {
         let make_agent = || async {
             debug!(log, "creating ClickHouse client");
             Ok(Arc::new(
-                OximeterAgent::with_id(args.id, config.db, &resolver, &log)
-                    .await?,
+                OximeterAgent::with_id(
+                    args.id, config.db, &resolver, &log, replicated,
+                )
+                .await?,
             ))
         };
         let log_client_failure = |error, delay| {

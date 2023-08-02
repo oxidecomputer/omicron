@@ -836,7 +836,9 @@ pub async fn start_oximeter(
         id,
         address: SocketAddrV6::new(Ipv6Addr::LOCALHOST, 0, 0, 0),
     };
-    Oximeter::with_logger(&config, &args, log).await.map_err(|e| e.to_string())
+    Oximeter::with_logger(&config, &args, log, false)
+        .await
+        .map_err(|e| e.to_string())
 }
 
 #[derive(Debug, Clone, oximeter::Target)]

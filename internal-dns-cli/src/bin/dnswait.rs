@@ -27,7 +27,7 @@ struct Opt {
     #[arg(value_enum)]
     srv_name: ServiceName,
 
-    /// Output service host names only 
+    /// Output service host names only
     #[clap(long, short = 'H', action)]
     hostname: bool,
 }
@@ -102,7 +102,7 @@ async fn main() -> Result<()> {
 
     for (target, port) in result {
         if opt.hostname {
-            println!("{}", target)    
+            println!("{}", target)
         } else {
             println!("{}:{}", target, port)
         }
