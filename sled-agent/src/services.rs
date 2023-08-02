@@ -489,6 +489,7 @@ impl ServiceManager {
         Ok(mgr)
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new_v2(
         log: &Logger,
         ddmd_client: DdmAdminClient,
