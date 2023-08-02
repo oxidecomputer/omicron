@@ -101,7 +101,7 @@ pub struct UplinkConfig {
 
 /// Identifies switch physical location
 #[derive(
-    Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema, Hash, Eq,
+    Clone, Copy, Debug, Deserialize, Serialize, PartialEq, JsonSchema, Hash, Eq,
 )]
 #[serde(rename_all = "snake_case")]
 pub enum SwitchLocation {

@@ -2221,13 +2221,6 @@
               "format": "ipv6"
             }
           },
-          "boundary_switches": {
-            "type": "array",
-            "items": {
-              "type": "string",
-              "format": "ipv6"
-            }
-          },
           "dataset": {
             "nullable": true,
             "default": null,
@@ -2253,7 +2246,6 @@
         },
         "required": [
           "addresses",
-          "boundary_switches",
           "id",
           "services",
           "zone_type"
