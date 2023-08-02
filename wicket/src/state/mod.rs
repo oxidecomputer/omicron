@@ -23,7 +23,9 @@ pub use update::{
 };
 
 use serde::{Deserialize, Serialize};
-use wicketd_client::types::{CurrentRssUserConfig, RackOperationStatus};
+use wicketd_client::types::{
+    CurrentRssUserConfig, GetLocationResponse, RackOperationStatus,
+};
 
 /// The global state of wicket
 ///
@@ -40,6 +42,7 @@ pub struct State {
     pub force_update_state: ForceUpdateState,
     pub rss_config: Option<CurrentRssUserConfig>,
     pub rack_setup_state: Result<RackOperationStatus, String>,
+    pub wicketd_location: GetLocationResponse,
 }
 
 impl State {
@@ -54,6 +57,12 @@ impl State {
             force_update_state: ForceUpdateState::default(),
             rss_config: None,
             rack_setup_state: Err("status not yet polled from wicketd".into()),
+            wicketd_location: GetLocationResponse {
+                sled_baseboard: None,
+                sled_id: None,
+                switch_baseboard: None,
+                switch_id: None,
+            },
         }
     }
 }
