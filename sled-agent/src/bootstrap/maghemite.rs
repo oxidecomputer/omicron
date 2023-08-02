@@ -36,7 +36,7 @@ pub async fn enable_mg_ddm_service(
     .await?
 }
 
-fn enable_mg_ddm_service_blocking(
+pub fn enable_mg_ddm_service_blocking(
     log: Logger,
     interfaces: Vec<AddrObject>,
 ) -> Result<(), Error> {

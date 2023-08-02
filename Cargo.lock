@@ -5189,6 +5189,7 @@ dependencies = [
  "tokio",
  "tokio-tungstenite 0.18.0",
  "toml 0.7.6",
+ "usdt",
  "uuid",
  "zeroize",
  "zone",
