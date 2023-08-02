@@ -88,10 +88,10 @@ pub fn find_chelsio_links() -> Result<Vec<PhysicalLink>, Error> {
                 .collect()
         })
     } else {
-    Ok(XDE_VNIC_NAMES
-        .into_iter()
-        .map(|name| PhysicalLink(name.to_string()))
-        .collect())
+        Ok(XDE_VNIC_NAMES
+            .into_iter()
+            .map(|name| PhysicalLink(name.to_string()))
+            .collect())
     }
 }
 
