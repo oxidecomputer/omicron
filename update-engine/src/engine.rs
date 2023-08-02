@@ -5,15 +5,7 @@
 // Copyright 2023 Oxide Computer Company
 
 use std::{
-    borrow::Cow,
-    fmt,
-    ops::ControlFlow,
-    pin::Pin,
-    sync::{
-        atomic::{AtomicUsize, Ordering},
-        Mutex,
-    },
-    task::Poll,
+    borrow::Cow, fmt, ops::ControlFlow, pin::Pin, sync::Mutex, task::Poll,
 };
 
 use cancel_safe_futures::coop_cancel;
@@ -184,14 +176,12 @@ impl<'a, S: StepSpec + 'a> UpdateEngine<'a, S> {
     async fn execute_impl(
         mut self,
     ) -> Result<CompletionContext<S>, ExecutionError<S>> {
-        // TODO: this absolutely does not need to be an atomic! However it is
-        // currently so because of a bug in rustc, fixed in Rust 1.70. Fix this
-        // once omicron is on Rust 1.70.
-        //
-        // https://github.com/rust-lang/rust/pull/107844
-        let event_index = AtomicUsize::new(0);
-        let next_event_index = || event_index.fetch_add(1, Ordering::SeqCst);
-        let exec_cx = ExecutionContext::new(
+        let mut event_index = 0;
+        let next_event_index = || {
+            event_index += 1;
+            event_index - 1
+        };
+        let mut exec_cx = ExecutionContext::new(
             self.execution_id,
             next_event_index,
             self.sender.clone(),
@@ -243,7 +233,7 @@ impl<'a, S: StepSpec + 'a> UpdateEngine<'a, S> {
             self.sender.send(Event::Step(StepEvent {
                 spec: S::schema_name(),
                 execution_id: self.execution_id,
-                event_index: next_event_index(),
+                event_index: (exec_cx.next_event_index)(),
                 total_elapsed: exec_cx.total_start.elapsed(),
                 kind: StepEventKind::NoStepsDefined,
             })).await?;
@@ -264,7 +254,7 @@ impl<'a, S: StepSpec + 'a> UpdateEngine<'a, S> {
         let event = Event::Step(StepEvent {
             spec: S::schema_name(),
             execution_id: self.execution_id,
-            event_index: next_event_index(),
+            event_index: (exec_cx.next_event_index)(),
             total_elapsed: exec_cx.total_start.elapsed(),
             kind: StepEventKind::ExecutionStarted {
                 steps: step_infos,
@@ -771,7 +761,7 @@ struct StepExec<'a, S: StepSpec> {
 }
 
 impl<'a, S: StepSpec> StepExec<'a, S> {
-    async fn execute<F: Fn() -> usize>(
+    async fn execute<F: FnMut() -> usize>(
         self,
         log: &slog::Logger,
         step_exec_cx: StepExecutionContext<S, F>,
@@ -884,12 +874,12 @@ impl<S: StepSpec, F> ExecutionContext<S, F> {
     }
 
     fn create(
-        &self,
+        &mut self,
         step_info: StepInfoWithMetadata<S>,
-    ) -> StepExecutionContext<S, &F> {
+    ) -> StepExecutionContext<S, &mut F> {
         StepExecutionContext {
             execution_id: self.execution_id,
-            next_event_index: DebugIgnore(&self.next_event_index.0),
+            next_event_index: DebugIgnore(&mut self.next_event_index.0),
             total_start: self.total_start,
             step_info,
             sender: self.sender.clone(),
@@ -941,7 +931,7 @@ struct StepProgressReporter<S: StepSpec, F> {
     sender: mpsc::Sender<Event<S>>,
 }
 
-impl<S: StepSpec, F: Fn() -> usize> StepProgressReporter<S, F> {
+impl<S: StepSpec, F: FnMut() -> usize> StepProgressReporter<S, F> {
     fn new(step_exec_cx: StepExecutionContext<S, F>) -> Self {
         let step_start = Instant::now();
         Self {
@@ -1069,7 +1059,7 @@ impl<S: StepSpec, F: Fn() -> usize> StepProgressReporter<S, F> {
         }
     }
 
-    async fn handle_abort(self, message: String) -> ExecutionError<S> {
+    async fn handle_abort(mut self, message: String) -> ExecutionError<S> {
         // Send the abort message over the channel.
         //
         // The only way this can fail is if the event receiver is closed or
@@ -1104,7 +1094,7 @@ impl<S: StepSpec, F: Fn() -> usize> StepProgressReporter<S, F> {
     }
 
     async fn next_step(
-        self,
+        mut self,
         step_res: Result<StepOutcome<S>, S::Error>,
         next_step_info: &StepInfoWithMetadata<S>,
     ) -> Result<(), ExecutionError<S>> {
@@ -1144,7 +1134,7 @@ impl<S: StepSpec, F: Fn() -> usize> StepProgressReporter<S, F> {
     }
 
     async fn last_step(
-        self,
+        mut self,
         step_res: Result<StepOutcome<S>, S::Error>,
     ) -> Result<(), ExecutionError<S>> {
         match step_res {
@@ -1182,7 +1172,7 @@ impl<S: StepSpec, F: Fn() -> usize> StepProgressReporter<S, F> {
     }
 
     async fn send_error(
-        self,
+        mut self,
         error: &S::Error,
     ) -> Result<(), mpsc::error::SendError<Event<S>>> {
         // Stringify `error` into a message + list causes; this is written the
