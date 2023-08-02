@@ -45,7 +45,11 @@ impl SledAgent {
         // potentially start the switch zone and be notified of new disks.
         let mut hardware_monitor = setup.hardware_manager.monitor();
 
+        // Wait for our boot M.2 to show up.
+        startup::wait_for_boot_m2(&setup, &mut hardware_monitor).await;
+
         // Wait for the bootstore to start.
+        //
         let mut pre_bootstore = PreBootstore {
             global_zone_bootstrap_ip: setup.global_zone_bootstrap_ip,
             hardware_monitor: &mut hardware_monitor,
