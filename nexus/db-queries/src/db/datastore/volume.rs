@@ -165,25 +165,13 @@ impl DataStore {
     /// Delete the volume if it exists. If it was already deleted, this is a
     /// no-op.
     pub async fn volume_hard_delete(&self, volume_id: Uuid) -> DeleteResult {
-        self.pool()
-            .transaction(move |conn| {
-                use db::schema::volume::dsl;
+        use db::schema::volume::dsl;
 
-                let volume = dsl::volume
-                    .filter(dsl::id.eq(volume_id))
-                    .select(Volume::as_select())
-                    .first::<Volume>(conn)
-                    .optional()?;
-
-                if volume.is_some() {
-                    diesel::delete(dsl::volume)
-                        .filter(dsl::id.eq(volume_id))
-                        .execute(conn)?;
-                }
-
-                Ok(())
-            })
+        diesel::delete(dsl::volume)
+            .filter(dsl::id.eq(volume_id))
+            .execute_async(self.pool())
             .await
+            .map(|_| ())
             .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
