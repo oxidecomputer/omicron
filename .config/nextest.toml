@@ -1,6 +1,6 @@
 # NOTE: The recommended version should be in sync with the version in
 # .config/nextest.toml. Bump up the required version as necessary.
-nextest-version = { required = "0.9.55", recommended = "0.9.56" }
+nextest-version = { required = "0.9.55", recommended = "0.9.57" }
 
 [profile.ci]
 fail-fast = false
