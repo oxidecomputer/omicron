@@ -22,6 +22,7 @@ use omicron_common::backoff::{
     retry_notify, retry_policy_internal_service_aggressive, BackoffError,
 };
 use omicron_common::nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
+use omicron_common::FileKv;
 use slog::{info, Drain, Logger};
 use std::collections::HashMap;
 use std::net::IpAddr;
@@ -269,7 +270,7 @@ pub async fn run_standalone_server(
             .to_logger("sled-agent")
             .map_err(|message| anyhow!("initializing logger: {}", message))?,
     );
-    let log = slog::Logger::root(drain.fuse(), slog::o!());
+    let log = slog::Logger::root(drain.fuse(), slog::o!(FileKv));
     if let slog_dtrace::ProbeRegistration::Failed(e) = registration {
         let msg = format!("failed to register DTrace probes: {}", e);
         error!(log, "{}", msg);

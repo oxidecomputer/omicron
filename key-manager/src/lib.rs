@@ -209,8 +209,12 @@ impl<S: SecretRetriever> KeyManager<S> {
             } else {
                 warn!(
                     self.log,
-                    "Failed to receive from a storage key requester",
+                    concat!(
+                        "KeyManager shutting down: ",
+                        "all storage key requesters dropped.",
+                    )
                 );
+                return;
             }
         }
     }

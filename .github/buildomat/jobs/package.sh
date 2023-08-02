@@ -37,7 +37,7 @@ rustc --version
 # trampoline global zone images.
 #
 COMMIT=$(git rev-parse HEAD)
-VERSION="1.0.0-0.ci+git${COMMIT:0:11}"
+VERSION="1.0.1-0.ci+git${COMMIT:0:11}"
 echo "$VERSION" >/work/version.txt
 
 ptime -m ./tools/install_builder_prerequisites.sh -yp
@@ -55,11 +55,12 @@ ptime -m cargo run --locked --release --bin omicron-package -- \
 files=(
 	out/*.tar
 	out/target/test
-	out/softnpu/*
+	out/npuzone/*
 	package-manifest.toml
 	smf/sled-agent/non-gimlet/config.toml
 	target/release/omicron-package
 	tools/create_virtual_hardware.sh
+    tools/virtual_hardware.sh
 	tools/scrimlet/*
 )
 
@@ -85,7 +86,7 @@ ptime -m cargo run --locked --release --bin omicron-package -- \
   -t host target create -i standard -m gimlet -s asic
 ptime -m cargo run --locked --release --bin omicron-package -- \
   -t host package
-stamp_packages omicron-sled-agent maghemite propolis-server
+stamp_packages omicron-sled-agent maghemite propolis-server overlay
 
 # Create global zone package @ /work/global-zone-packages.tar.gz
 ptime -m ./tools/build-global-zone-packages.sh "$tarball_src_dir" /work
@@ -116,6 +117,7 @@ zones=(
   out/ntp.tar.gz
   out/omicron-gateway-softnpu.tar.gz
   out/omicron-gateway-asic.tar.gz
+  out/overlay.tar.gz
 )
 cp "${zones[@]}" /work/zones/
 

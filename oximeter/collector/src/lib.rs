@@ -15,7 +15,7 @@ use internal_dns::resolver::{ResolveError, Resolver};
 use internal_dns::ServiceName;
 use omicron_common::address::{CLICKHOUSE_PORT, NEXUS_INTERNAL_PORT};
 use omicron_common::api::internal::nexus::ProducerEndpoint;
-use omicron_common::backoff;
+use omicron_common::{backoff, FileKv};
 use oximeter::types::{ProducerResults, ProducerResultsItem};
 use oximeter_db::{Client, DbWrite};
 use serde::{Deserialize, Serialize};
@@ -479,7 +479,7 @@ impl Oximeter {
         replicated: bool,
     ) -> Result<Self, Error> {
         let (drain, registration) = slog_dtrace::with_drain(log);
-        let log = slog::Logger::root(drain.fuse(), o!());
+        let log = slog::Logger::root(drain.fuse(), o!(FileKv));
         if let slog_dtrace::ProbeRegistration::Failed(e) = registration {
             let msg = format!("failed to register DTrace probes: {}", e);
             error!(log, "{}", msg);

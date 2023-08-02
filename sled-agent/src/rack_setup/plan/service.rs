@@ -30,6 +30,7 @@ use omicron_common::backoff::{
     retry_notify_ext, retry_policy_internal_service_aggressive, BackoffError,
 };
 use omicron_common::ledger::{self, Ledger, Ledgerable};
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sled_agent_client::{
     types as SledAgentTypes, Client as SledAgentClient, Error as SledAgentError,
@@ -95,14 +96,16 @@ pub enum PlanError {
     NotEnoughSleds,
 }
 
-#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
+#[derive(
+    Clone, Debug, Default, Deserialize, Serialize, PartialEq, JsonSchema,
+)]
 pub struct SledRequest {
     /// Services to be instantiated.
     #[serde(default, rename = "service")]
     pub services: Vec<ServiceZoneRequest>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct Plan {
     pub services: HashMap<SocketAddrV6, SledRequest>,
     pub dns_config: DnsConfigParams,
@@ -114,7 +117,7 @@ impl Ledgerable for Plan {
     }
     fn generation_bump(&mut self) {}
 }
-const RSS_SERVICE_PLAN_FILENAME: &str = "rss-service-plan.toml";
+const RSS_SERVICE_PLAN_FILENAME: &str = "rss-service-plan.json";
 
 impl Plan {
     pub async fn load(
@@ -304,8 +307,8 @@ impl Plan {
             &reserved_rack_subnet.get_dns_subnets()[0..DNS_REDUNDANCY];
         let rack_dns_servers = dns_subnets
             .into_iter()
-            .map(|dns_subnet| dns_subnet.dns_address().ip().to_string())
-            .collect::<Vec<String>>();
+            .map(|dns_subnet| dns_subnet.dns_address().ip().into())
+            .collect::<Vec<IpAddr>>();
         for i in 0..dns_subnets.len() {
             let dns_subnet = &dns_subnets[i];
             let ip = dns_subnet.dns_address().ip();
@@ -347,7 +350,6 @@ impl Plan {
                         gz_address_index: i.try_into().expect("Giant indices?"),
                     },
                 }],
-                boundary_switches: vec![],
             });
         }
 
@@ -381,7 +383,6 @@ impl Plan {
                     id,
                     details: ServiceType::CockroachDb { address },
                 }],
-                boundary_switches: vec![],
             });
         }
 
@@ -433,7 +434,6 @@ impl Plan {
                         nic,
                     },
                 }],
-                boundary_switches: vec![],
             });
         }
 
@@ -478,9 +478,9 @@ impl Plan {
                         // always expect TLS to be enabled.  It's only in
                         // development that it might not be.
                         external_tls: !config.external_certificates.is_empty(),
+                        external_dns_servers: config.dns_servers.clone(),
                     },
                 }],
-                boundary_switches: vec![],
             })
         }
 
@@ -518,7 +518,6 @@ impl Plan {
                         ),
                     },
                 }],
-                boundary_switches: vec![],
             })
         }
 
@@ -553,7 +552,6 @@ impl Plan {
                     id,
                     details: ServiceType::Clickhouse { address },
                 }],
-                boundary_switches: vec![],
             });
         }
 
@@ -622,7 +620,6 @@ impl Plan {
                         address: SocketAddrV6::new(address, port, 0, 0),
                     },
                 }],
-                boundary_switches: vec![],
             })
         }
 
@@ -659,7 +656,6 @@ impl Plan {
                         id,
                         details: ServiceType::Crucible { address },
                     }],
-                    boundary_switches: vec![],
                 });
             }
         }
@@ -713,7 +709,6 @@ impl Plan {
                 addresses: vec![address],
                 dataset: None,
                 services,
-                boundary_switches: vec![],
             });
         }
 
@@ -1193,5 +1188,14 @@ mod tests {
             internal_service_ips.push(ip.to_string());
         }
         assert_eq!(internal_service_ips, expected_internal_service_ips);
+    }
+
+    #[test]
+    fn test_rss_service_plan_schema() {
+        let schema = schemars::schema_for!(Plan);
+        expectorate::assert_contents(
+            "../schema/rss-service-plan.json",
+            &serde_json::to_string_pretty(&schema).unwrap(),
+        );
     }
 }

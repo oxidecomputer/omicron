@@ -56,7 +56,7 @@ pub(crate) struct CurrentRssConfig {
 
     bootstrap_sleds: BTreeSet<BootstrapSledDescription>,
     ntp_servers: Vec<String>,
-    dns_servers: Vec<String>,
+    dns_servers: Vec<IpAddr>,
     internal_services_ip_pool_ranges: Vec<address::IpRange>,
     external_dns_ips: Vec<IpAddr>,
     external_dns_zone_name: String,
@@ -174,9 +174,12 @@ impl CurrentRssConfig {
         const TRUST_QUORUM_MIN_SIZE: usize = 3;
         let trust_quorum_peers: Option<
             Vec<bootstrap_agent_client::types::Baseboard>,
-        > = if known_bootstrap_sleds.len() >= TRUST_QUORUM_MIN_SIZE {
+        > = if self.bootstrap_sleds.len() >= TRUST_QUORUM_MIN_SIZE {
             Some(
-                known_bootstrap_sleds.keys().cloned().map(Into::into).collect(),
+                self.bootstrap_sleds
+                    .iter()
+                    .map(|sled| sled.baseboard.clone().into())
+                    .collect(),
             )
         } else {
             warn!(
@@ -428,12 +431,12 @@ fn validate_rack_network_config(
     // iterate through each UplinkConfig
     for uplink_config in &config.uplinks {
         // ... and check that it contains `uplink_ip`.
-        if uplink_config.uplink_ip < infra_ip_range.first
-            || uplink_config.uplink_ip > infra_ip_range.last
+        if uplink_config.uplink_cidr.ip() < infra_ip_range.first
+            || uplink_config.uplink_cidr.ip() > infra_ip_range.last
         {
             bail!(
-                "`uplink_ip` must be in the range defined by `infra_ip_first` \
-                and `infra_ip_last`"
+                "`uplink_cidr`'s IP address must be in the range defined by \
+                `infra_ip_first` and `infra_ip_last`"
             );
         }
     }
@@ -451,7 +454,7 @@ fn validate_rack_network_config(
                     SwitchLocation::Switch0 => BaSwitchLocation::Switch0,
                     SwitchLocation::Switch1 => BaSwitchLocation::Switch1,
                 },
-                uplink_ip: config.uplink_ip,
+                uplink_cidr: config.uplink_cidr,
                 uplink_port: config.uplink_port.clone(),
                 uplink_port_speed: match config.uplink_port_speed {
                     PortSpeed::Speed0G => BaPortSpeed::Speed0G,

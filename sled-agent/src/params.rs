@@ -281,6 +281,8 @@ pub enum ServiceType {
         nic: NetworkInterface,
         /// Whether Nexus's external endpoint should use TLS
         external_tls: bool,
+        /// External DNS servers Nexus can use to resolve external hosts.
+        external_dns_servers: Vec<IpAddr>,
     },
     ExternalDns {
         /// The address at which the external DNS server API is reachable.
@@ -327,6 +329,8 @@ pub enum ServiceType {
         pkt_source: String,
     },
     #[serde(skip)]
+    Uplink,
+    #[serde(skip)]
     Maghemite {
         mode: String,
     },
@@ -338,7 +342,7 @@ pub enum ServiceType {
     BoundaryNtp {
         address: SocketAddrV6,
         ntp_servers: Vec<String>,
-        dns_servers: Vec<String>,
+        dns_servers: Vec<IpAddr>,
         domain: Option<String>,
         /// The service vNIC providing outbound connectivity using OPTE.
         nic: NetworkInterface,
@@ -348,7 +352,7 @@ pub enum ServiceType {
     InternalNtp {
         address: SocketAddrV6,
         ntp_servers: Vec<String>,
-        dns_servers: Vec<String>,
+        dns_servers: Vec<IpAddr>,
         domain: Option<String>,
     },
     Clickhouse {
@@ -376,6 +380,7 @@ impl std::fmt::Display for ServiceType {
             ServiceType::Wicketd { .. } => write!(f, "wicketd"),
             ServiceType::Dendrite { .. } => write!(f, "dendrite"),
             ServiceType::Tfport { .. } => write!(f, "tfport"),
+            ServiceType::Uplink { .. } => write!(f, "uplink"),
             ServiceType::CruciblePantry { .. } => write!(f, "crucible/pantry"),
             ServiceType::BoundaryNtp { .. }
             | ServiceType::InternalNtp { .. } => write!(f, "ntp"),
@@ -424,14 +429,19 @@ impl TryFrom<ServiceType> for sled_agent_client::types::ServiceType {
         use ServiceType as St;
 
         match s {
-            St::Nexus { internal_address, external_ip, nic, external_tls } => {
-                Ok(AutoSt::Nexus {
-                    internal_address: internal_address.to_string(),
-                    external_ip,
-                    nic: nic.into(),
-                    external_tls,
-                })
-            }
+            St::Nexus {
+                internal_address,
+                external_ip,
+                nic,
+                external_tls,
+                external_dns_servers,
+            } => Ok(AutoSt::Nexus {
+                internal_address: internal_address.to_string(),
+                external_ip,
+                nic: nic.into(),
+                external_tls,
+                external_dns_servers,
+            }),
             St::ExternalDns { http_address, dns_address, nic } => {
                 Ok(AutoSt::ExternalDns {
                     http_address: http_address.to_string(),
@@ -496,6 +506,7 @@ impl TryFrom<ServiceType> for sled_agent_client::types::ServiceType {
             | St::Wicketd { .. }
             | St::Dendrite { .. }
             | St::Tfport { .. }
+            | St::Uplink
             | St::Maghemite { .. } => Err(AutonomousServiceOnlyError),
         }
     }
@@ -596,8 +607,6 @@ pub struct ServiceZoneRequest {
     pub dataset: Option<DatasetRequest>,
     // Services that should be run in the zone
     pub services: Vec<ServiceZoneService>,
-    // Switch addresses for SNAT configuration, if required
-    pub boundary_switches: Vec<Ipv6Addr>,
 }
 
 impl ServiceZoneRequest {
@@ -646,7 +655,6 @@ impl TryFrom<ServiceZoneRequest>
             addresses: s.addresses,
             dataset: s.dataset.map(|d| d.into()),
             services,
-            boundary_switches: s.boundary_switches,
         })
     }
 }
@@ -799,7 +807,8 @@ impl ServiceZoneRequest {
                 | ServiceType::Wicketd { .. }
                 | ServiceType::Dendrite { .. }
                 | ServiceType::Maghemite { .. }
-                | ServiceType::Tfport { .. } => {
+                | ServiceType::Tfport { .. }
+                | ServiceType::Uplink => {
                     return Err(AutonomousServiceOnlyError);
                 }
             }

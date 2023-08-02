@@ -9,6 +9,7 @@ use crate::artifacts::UpdatePlan;
 use crate::artifacts::WicketdArtifactStore;
 use crate::http_entrypoints::GetArtifactsAndEventReportsResponse;
 use crate::http_entrypoints::StartUpdateOptions;
+use crate::http_entrypoints::UpdateSimulatedResult;
 use crate::installinator_progress::IprStartReceiver;
 use crate::installinator_progress::IprUpdateTracker;
 use crate::mgs::make_mgs_client;
@@ -461,9 +462,17 @@ impl UpdateTrackerData {
             return Err(AbortUpdateError::UpdateFinished);
         }
 
-        let waiter = update_data.abort_handle.abort(message);
-        waiter.await;
-        Ok(())
+        match update_data.abort_handle.abort(message) {
+            Ok(waiter) => {
+                waiter.await;
+                Ok(())
+            }
+            Err(_) => {
+                // This occurs if the engine has finished execution and has been
+                // dropped.
+                Err(AbortUpdateError::UpdateFinished)
+            }
+        }
     }
 
     fn put_repository(&mut self, bytes: BufList) -> Result<(), HttpError> {
@@ -635,6 +644,10 @@ impl UpdateDriver {
                 UpdateStepId::SpComponentUpdate,
                 "Updating RoT",
                 move |cx| async move {
+                    if let Some(result) = opts.test_simulate_rot_result {
+                        return simulate_result(result);
+                    }
+
                     let rot_interrogation =
                         rot_interrogation.into_value(cx.token()).await;
 
@@ -738,6 +751,10 @@ impl UpdateDriver {
                 UpdateStepId::SpComponentUpdate,
                 "Updating SP",
                 move |cx| async move {
+                    if let Some(result) = opts.test_simulate_sp_result {
+                        return simulate_result(result);
+                    }
+
                     let sp_current_version =
                         sp_current_version.into_value(cx.token()).await;
 
@@ -1271,6 +1288,25 @@ struct RotInterrogation {
 impl RotInterrogation {
     fn active_version_matches_artifact_to_apply(&self) -> bool {
         Some(&self.artifact_to_apply.id.version) == self.active_version.as_ref()
+    }
+}
+
+fn simulate_result(
+    result: UpdateSimulatedResult,
+) -> Result<StepResult<()>, UpdateTerminalError> {
+    match result {
+        UpdateSimulatedResult::Success => {
+            StepSuccess::new(()).with_message("Simulated success result").into()
+        }
+        UpdateSimulatedResult::Warning => {
+            StepWarning::new((), "Simulated warning result").into()
+        }
+        UpdateSimulatedResult::Skipped => {
+            StepSkipped::new((), "Simulated skipped result").into()
+        }
+        UpdateSimulatedResult::Failure => {
+            Err(UpdateTerminalError::SimulatedFailure)
+        }
     }
 }
 

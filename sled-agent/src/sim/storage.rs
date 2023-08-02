@@ -34,8 +34,9 @@ use uuid::Uuid;
 type CreateCallback = Box<dyn Fn(&CreateRegion) -> State + Send + 'static>;
 
 struct CrucibleDataInner {
+    log: Logger,
     regions: HashMap<Uuid, Region>,
-    snapshots: HashMap<Uuid, Vec<Snapshot>>,
+    snapshots: HashMap<Uuid, HashMap<String, Snapshot>>,
     running_snapshots: HashMap<Uuid, HashMap<String, RunningSnapshot>>,
     on_create: Option<CreateCallback>,
     creating_a_running_snapshot_should_fail: bool,
@@ -43,8 +44,9 @@ struct CrucibleDataInner {
 }
 
 impl CrucibleDataInner {
-    fn new(crucible_port: u16) -> Self {
+    fn new(log: Logger, crucible_port: u16) -> Self {
         Self {
+            log,
             regions: HashMap::new(),
             snapshots: HashMap::new(),
             running_snapshots: HashMap::new(),
@@ -126,31 +128,36 @@ impl CrucibleDataInner {
         }
     }
 
-    fn create_snapshot(
-        &mut self,
-        id: Uuid,
-        snapshot_id: Uuid,
-    ) -> Result<Snapshot> {
-        let vec = self.snapshots.entry(id).or_insert_with(|| Vec::new());
-
-        if vec.iter().any(|x| x.name == snapshot_id.to_string()) {
-            bail!("region {} snapshot {} exists already", id, snapshot_id);
-        }
-
-        let snap =
-            Snapshot { name: snapshot_id.to_string(), created: Utc::now() };
-
-        vec.push(snap.clone());
-
-        Ok(snap)
+    fn create_snapshot(&mut self, id: Uuid, snapshot_id: Uuid) -> Snapshot {
+        info!(self.log, "Creating region {} snapshot {}", id, snapshot_id);
+        self.snapshots
+            .entry(id)
+            .or_insert_with(|| HashMap::new())
+            .entry(snapshot_id.to_string())
+            .or_insert_with(|| Snapshot {
+                name: snapshot_id.to_string(),
+                created: Utc::now(),
+            })
+            .clone()
     }
 
     fn snapshots_for_region(&self, id: &RegionId) -> Vec<Snapshot> {
         let id = Uuid::from_str(&id.0).unwrap();
         match self.snapshots.get(&id) {
-            Some(vec) => vec.clone(),
+            Some(map) => map.values().cloned().collect(),
             None => vec![],
         }
+    }
+
+    fn get_snapshot_for_region(
+        &self,
+        id: &RegionId,
+        snapshot_id: &str,
+    ) -> Option<Snapshot> {
+        let id = Uuid::from_str(&id.0).unwrap();
+        self.snapshots
+            .get(&id)
+            .and_then(|hm| hm.get(&snapshot_id.to_string()).cloned())
     }
 
     fn running_snapshots_for_id(
@@ -166,15 +173,35 @@ impl CrucibleDataInner {
 
     fn delete_snapshot(&mut self, id: &RegionId, name: &str) -> Result<()> {
         let running_snapshots_for_id = self.running_snapshots_for_id(id);
-        if running_snapshots_for_id.contains_key(name) {
-            bail!("downstairs running for region {} snapshot {}", id.0, name,);
+        if let Some(running_snapshot) = running_snapshots_for_id.get(name) {
+            match &running_snapshot.state {
+                State::Created | State::Requested | State::Tombstoned => {
+                    bail!(
+                        "downstairs running for region {} snapshot {}",
+                        id.0,
+                        name
+                    );
+                }
+
+                State::Destroyed => {
+                    // ok
+                }
+
+                State::Failed => {
+                    bail!(
+                        "failed downstairs running for region {} snapshot {}",
+                        id.0,
+                        name
+                    );
+                }
+            }
         }
 
-        let id = Uuid::from_str(&id.0).unwrap();
-        if let Some(vec) = self.snapshots.get_mut(&id) {
-            vec.retain(|x| x.name != name);
+        info!(self.log, "Deleting region {} snapshot {}", id.0, name);
+        let region_id = Uuid::from_str(&id.0).unwrap();
+        if let Some(map) = self.snapshots.get_mut(&region_id) {
+            map.remove(name);
         }
-
         Ok(())
     }
 
@@ -206,7 +233,7 @@ impl CrucibleDataInner {
             id: RegionId(Uuid::new_v4().to_string()),
             name: name.to_string(),
             port_number: self.next_port,
-            state: State::Requested,
+            state: State::Created,
         };
 
         map.insert(name.to_string(), running_snapshot.clone());
@@ -226,12 +253,9 @@ impl CrucibleDataInner {
         let map =
             self.running_snapshots.entry(id).or_insert_with(|| HashMap::new());
 
-        // If the running snapshot was already deleted, then return Ok
-        if !map.contains_key(&name.to_string()) {
-            return Ok(());
+        if let Some(running_snapshot) = map.get_mut(&name.to_string()) {
+            running_snapshot.state = State::Destroyed;
         }
-
-        map.remove(&name.to_string());
 
         Ok(())
     }
@@ -246,8 +270,20 @@ impl CrucibleDataInner {
 
         let snapshots = self.snapshots.values().flatten().count();
 
-        let running_snapshots =
-            self.running_snapshots.values().flat_map(|hm| hm.values()).count();
+        let running_snapshots = self
+            .running_snapshots
+            .values()
+            .flat_map(|hm| hm.values())
+            .filter(|rs| rs.state != State::Destroyed)
+            .count();
+
+        info!(
+            self.log,
+            "is_empty non_destroyed_regions {} snapshots {} running_snapshots {}",
+            non_destroyed_regions,
+            snapshots,
+            running_snapshots,
+        );
 
         non_destroyed_regions == 0 && snapshots == 0 && running_snapshots == 0
     }
@@ -259,8 +295,8 @@ pub struct CrucibleData {
 }
 
 impl CrucibleData {
-    fn new(crucible_port: u16) -> Self {
-        Self { inner: Mutex::new(CrucibleDataInner::new(crucible_port)) }
+    fn new(log: Logger, crucible_port: u16) -> Self {
+        Self { inner: Mutex::new(CrucibleDataInner::new(log, crucible_port)) }
     }
 
     pub async fn set_create_callback(&self, callback: CreateCallback) {
@@ -296,12 +332,20 @@ impl CrucibleData {
         &self,
         id: Uuid,
         snapshot_id: Uuid,
-    ) -> Result<Snapshot> {
+    ) -> Snapshot {
         self.inner.lock().await.create_snapshot(id, snapshot_id)
     }
 
     pub async fn snapshots_for_region(&self, id: &RegionId) -> Vec<Snapshot> {
         self.inner.lock().await.snapshots_for_region(id)
+    }
+
+    pub async fn get_snapshot_for_region(
+        &self,
+        id: &RegionId,
+        snapshot_id: &str,
+    ) -> Option<Snapshot> {
+        self.inner.lock().await.get_snapshot_for_region(id, snapshot_id)
     }
 
     pub async fn running_snapshots_for_id(
@@ -357,7 +401,10 @@ impl CrucibleServer {
         // SocketAddr::new with port set to 0 will grab any open port to host
         // the emulated crucible agent, but set the fake downstairs listen ports
         // to start at `crucible_port`.
-        let data = Arc::new(CrucibleData::new(crucible_port));
+        let data = Arc::new(CrucibleData::new(
+            log.new(slog::o!("port" => format!("{crucible_port}"))),
+            crucible_port,
+        ));
         let config = dropshot::ConfigDropshot {
             bind_address: SocketAddr::new(crucible_ip, 0),
             ..Default::default()

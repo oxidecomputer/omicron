@@ -36,6 +36,7 @@ pub mod background;
 mod certificate;
 mod device_auth;
 mod disk;
+mod external_dns;
 pub mod external_endpoints;
 mod external_ip;
 mod iam;
@@ -140,7 +141,11 @@ pub struct Nexus {
     // Nexus to not all fail.
     samael_max_issue_delay: std::sync::Mutex<Option<chrono::Duration>>,
 
-    resolver: internal_dns::resolver::Resolver,
+    /// DNS resolver for internal services
+    internal_resolver: internal_dns::resolver::Resolver,
+
+    /// DNS resolver Nexus uses to resolve an external host
+    external_resolver: Arc<external_dns::Resolver>,
 
     /// Mapping of SwitchLocations to their respective Dendrite Clients
     dpd_clients: HashMap<SwitchLocation, Arc<dpd_client::Client>>,
@@ -162,8 +167,14 @@ impl Nexus {
         authz: Arc<authz::Authz>,
     ) -> Result<Arc<Nexus>, String> {
         let pool = Arc::new(pool);
-        let db_datastore =
-            Arc::new(db::DataStore::new(&log, Arc::clone(&pool)).await?);
+        let db_datastore = Arc::new(
+            db::DataStore::new(
+                &log,
+                Arc::clone(&pool),
+                config.pkg.schema.as_ref(),
+            )
+            .await?,
+        );
         db_datastore.register_producers(&producer_registry);
 
         let my_sec_id = db::SecId::from(config.deployment.id);
@@ -198,7 +209,7 @@ impl Nexus {
                 &format!("http://[{address}]:{port}"),
                 client_state.clone(),
             );
-            dpd_clients.insert(location.clone(), Arc::new(dpd_client));
+            dpd_clients.insert(*location, Arc::new(dpd_client));
         }
         if config.pkg.dendrite.is_empty() {
             loop {
@@ -221,8 +232,7 @@ impl Nexus {
                                 &format!("http://[{addr}]:{port}"),
                                 client_state.clone(),
                             );
-                            dpd_clients
-                                .insert(location.clone(), Arc::new(dpd_client));
+                            dpd_clients.insert(*location, Arc::new(dpd_client));
                         }
                         break;
                     }
@@ -274,6 +284,15 @@ impl Nexus {
             &config.pkg.background_tasks,
         );
 
+        let external_resolver = {
+            if config.deployment.external_dns_servers.is_empty() {
+                return Err("expected at least 1 external DNS server".into());
+            }
+            Arc::new(external_dns::Resolver::new(
+                &config.deployment.external_dns_servers,
+            ))
+        };
+
         let nexus = Nexus {
             id: config.deployment.id,
             rack_id,
@@ -301,7 +320,8 @@ impl Nexus {
                 Arc::clone(&db_datastore),
             ),
             samael_max_issue_delay: std::sync::Mutex::new(None),
-            resolver,
+            internal_resolver: resolver,
+            external_resolver,
             dpd_clients,
             background_tasks,
         };
@@ -700,7 +720,7 @@ impl Nexus {
     }
 
     pub async fn resolver(&self) -> internal_dns::resolver::Resolver {
-        self.resolver.clone()
+        self.internal_resolver.clone()
     }
 }
 

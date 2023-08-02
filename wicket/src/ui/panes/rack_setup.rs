@@ -755,8 +755,8 @@ fn rss_config_text<'a>(
                     Span::styled(uplink.gateway_ip.to_string(), ok_style),
                 ],
                 vec![
-                    Span::styled("  • Uplink IP        : ", label_style),
-                    Span::styled(uplink.uplink_ip.to_string(), ok_style),
+                    Span::styled("  • Uplink CIDR      : ", label_style),
+                    Span::styled(uplink.uplink_cidr.to_string(), ok_style),
                 ],
                 vec![
                     Span::styled("  • Uplink port      : ", label_style),
@@ -804,7 +804,11 @@ fn rss_config_text<'a>(
     append_list(
         &mut spans,
         "DNS servers: ".into(),
-        insensitive.dns_servers.iter().cloned().map(plain_list_item).collect(),
+        insensitive
+            .dns_servers
+            .iter()
+            .map(|s| plain_list_item(s.to_string()))
+            .collect(),
     );
     append_list(
         &mut spans,

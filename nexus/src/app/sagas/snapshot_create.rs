@@ -91,7 +91,8 @@
 use super::{
     common_storage::{
         call_pantry_attach_for_disk, call_pantry_detach_for_disk,
-        delete_crucible_regions, ensure_all_datasets_and_regions,
+        delete_crucible_regions, delete_crucible_running_snapshot,
+        delete_crucible_snapshot, ensure_all_datasets_and_regions,
         get_pantry_address,
     },
     ActionRegistry, NexusActionContext, NexusSaga, SagaInitError,
@@ -351,6 +352,7 @@ async fn ssc_alloc_regions_undo(
     sagactx: NexusActionContext,
 ) -> Result<(), anyhow::Error> {
     let osagactx = sagactx.user_data();
+    let log = osagactx.log();
 
     let region_ids = sagactx
         .lookup::<Vec<(db::model::Dataset, db::model::Region)>>(
@@ -360,7 +362,7 @@ async fn ssc_alloc_regions_undo(
         .map(|(_, region)| region.id())
         .collect::<Vec<Uuid>>();
 
-    osagactx.datastore().regions_hard_delete(region_ids).await?;
+    osagactx.datastore().regions_hard_delete(log, region_ids).await?;
     Ok(())
 }
 
@@ -453,6 +455,7 @@ async fn ssc_regions_ensure_undo(
     let log = sagactx.user_data().log();
     warn!(log, "ssc_regions_ensure_undo: Deleting crucible regions");
     delete_crucible_regions(
+        log,
         sagactx.lookup::<Vec<(db::model::Dataset, db::model::Region)>>(
             "datasets_and_regions",
         )?,
@@ -464,7 +467,7 @@ async fn ssc_regions_ensure_undo(
 
 async fn ssc_create_destination_volume_record(
     sagactx: NexusActionContext,
-) -> Result<db::model::Volume, ActionError> {
+) -> Result<(), ActionError> {
     let osagactx = sagactx.user_data();
 
     let destination_volume_id =
@@ -475,28 +478,31 @@ async fn ssc_create_destination_volume_record(
     let volume =
         db::model::Volume::new(destination_volume_id, destination_volume_data);
 
-    let volume_created = osagactx
+    osagactx
         .datastore()
         .volume_create(volume)
         .await
         .map_err(ActionError::action_failed)?;
 
-    Ok(volume_created)
+    Ok(())
 }
 
 async fn ssc_create_destination_volume_record_undo(
     sagactx: NexusActionContext,
 ) -> Result<(), anyhow::Error> {
     let osagactx = sagactx.user_data();
-    let params = sagactx.saga_params::<Params>()?;
-    let opctx = crate::context::op_context_for_saga_action(
-        &sagactx,
-        &params.serialized_authn,
-    );
 
     let destination_volume_id =
         sagactx.lookup::<Uuid>("destination_volume_id")?;
-    osagactx.nexus().volume_delete(&opctx, destination_volume_id).await?;
+
+    osagactx
+        .datastore()
+        .decrease_crucible_resource_count_and_soft_delete_volume(
+            destination_volume_id,
+        )
+        .await?;
+
+    osagactx.datastore().volume_hard_delete(destination_volume_id).await?;
 
     Ok(())
 }
@@ -739,16 +745,10 @@ async fn ssc_send_snapshot_request_to_sled_agent_undo(
         let url = format!("http://{}", dataset.address());
         let client = CrucibleAgentClient::new(&url);
 
-        retry_until_known_result(log, || async {
-            client
-                .region_delete_snapshot(
-                    &RegionId(region.id().to_string()),
-                    &snapshot_id.to_string(),
-                )
-                .await
-        })
-        .await?;
+        delete_crucible_snapshot(log, &client, region.id(), snapshot_id)
+            .await?;
     }
+
     Ok(())
 }
 
@@ -1061,15 +1061,8 @@ async fn ssc_call_pantry_snapshot_for_disk_undo(
         let url = format!("http://{}", dataset.address());
         let client = CrucibleAgentClient::new(&url);
 
-        retry_until_known_result(log, || async {
-            client
-                .region_delete_snapshot(
-                    &RegionId(region.id().to_string()),
-                    &snapshot_id.to_string(),
-                )
-                .await
-        })
-        .await?;
+        delete_crucible_snapshot(log, &client, region.id(), snapshot_id)
+            .await?;
     }
     Ok(())
 }
@@ -1300,6 +1293,7 @@ async fn ssc_start_running_snapshot_undo(
         .disk_id(params.disk_id)
         .fetch()
         .await?;
+
     let datasets_and_regions =
         osagactx.datastore().get_allocated_regions(disk.volume_id).await?;
 
@@ -1308,29 +1302,14 @@ async fn ssc_start_running_snapshot_undo(
         let url = format!("http://{}", dataset.address());
         let client = CrucibleAgentClient::new(&url);
 
-        use crucible_agent_client::Error::ErrorResponse;
-        use http::status::StatusCode;
+        delete_crucible_running_snapshot(
+            &log,
+            &client,
+            region.id(),
+            snapshot_id,
+        )
+        .await?;
 
-        retry_until_known_result(log, || async {
-            client
-                .region_delete_running_snapshot(
-                    &RegionId(region.id().to_string()),
-                    &snapshot_id.to_string(),
-                )
-                .await
-        })
-        .await
-        .map(|_| ())
-        // NOTE: If we later create a volume record and delete it, the
-        // running snapshot may be deleted (see:
-        // ssc_create_volume_record_undo).
-        //
-        // To cope, we treat "running snapshot not found" as "Ok", since it
-        // may just be the result of the volume deletion steps completing.
-        .or_else(|err| match err {
-            ErrorResponse(r) if r.status() == StatusCode::NOT_FOUND => Ok(()),
-            _ => Err(err),
-        })?;
         osagactx
             .datastore()
             .region_snapshot_remove(dataset.id(), region.id(), snapshot_id)
@@ -1341,7 +1320,7 @@ async fn ssc_start_running_snapshot_undo(
 
 async fn ssc_create_volume_record(
     sagactx: NexusActionContext,
-) -> Result<db::model::Volume, ActionError> {
+) -> Result<(), ActionError> {
     let log = sagactx.user_data().log();
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
@@ -1403,7 +1382,7 @@ async fn ssc_create_volume_record(
     let volume = db::model::Volume::new(volume_id, volume_data);
 
     // Insert volume record into the DB
-    let volume_created = osagactx
+    osagactx
         .datastore()
         .volume_create(volume)
         .await
@@ -1411,7 +1390,7 @@ async fn ssc_create_volume_record(
 
     info!(log, "volume {} created ok", volume_id);
 
-    Ok(volume_created)
+    Ok(())
 }
 
 async fn ssc_create_volume_record_undo(
@@ -1419,15 +1398,18 @@ async fn ssc_create_volume_record_undo(
 ) -> Result<(), anyhow::Error> {
     let log = sagactx.user_data().log();
     let osagactx = sagactx.user_data();
-    let params = sagactx.saga_params::<Params>()?;
-    let opctx = crate::context::op_context_for_saga_action(
-        &sagactx,
-        &params.serialized_authn,
-    );
     let volume_id = sagactx.lookup::<Uuid>("volume_id")?;
 
-    info!(log, "deleting volume {}", volume_id);
-    osagactx.nexus().volume_delete(&opctx, volume_id).await?;
+    info!(
+        log,
+        "calling decrease crucible resource count for volume {}", volume_id
+    );
+    osagactx
+        .datastore()
+        .decrease_crucible_resource_count_and_soft_delete_volume(volume_id)
+        .await?;
+
+    osagactx.datastore().volume_hard_delete(volume_id).await?;
 
     Ok(())
 }
