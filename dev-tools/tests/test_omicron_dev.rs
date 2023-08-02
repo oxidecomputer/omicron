@@ -277,8 +277,9 @@ async fn test_db_run() {
     // would pass because in the test case omicron-dev would never have gotten
     // the SIGINT.
     //
-    // We also redirect stderr to stdout just so that it doesn't get dumped to
-    // the user's terminal during regular `cargo test` runs.
+    // We also redirect stderr to stdout. Originally this was so that the output
+    // doesn't get dumped to the user's terminal during regular `cargo test`
+    // runs, though with nextest this is less of an issue.
     //
     // Finally, we set listen-port=0 to avoid conflicting with concurrent
     // invocations.
