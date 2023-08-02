@@ -196,7 +196,7 @@ impl MainScreen {
         let location_spans = location_spans(&state.wicketd_location);
         let wicketd_spans = state.service_status.wicketd_liveness().to_spans();
         let mgs_spans = state.service_status.mgs_liveness().to_spans();
-        let mut spans = vec![Span::styled("Location: ", style::service())];
+        let mut spans = vec![Span::styled("You are here: ", style::service())];
         spans.extend_from_slice(&location_spans);
         spans.push(Span::styled(" | ", style::divider()));
         spans.push(Span::styled("WICKETD: ", style::service()));
@@ -243,7 +243,7 @@ fn location_spans(location: &GetLocationResponse) -> Vec<Span<'static>> {
     } else {
         spans.push(Span::styled("Sled UNKNOWN", style::delayed()));
     };
-    spans.push(Span::styled(", ", style::divider()));
+    spans.push(Span::styled("/", style::divider()));
     if let Some(id) = location.switch_id.as_ref() {
         spans.push(Span::styled(
             format!("Switch {}", id.slot),
