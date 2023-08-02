@@ -23,9 +23,13 @@ struct Opt {
     #[clap(long, action)]
     nameserver_addresses: Vec<SocketAddr>,
 
-    /// service name to be resolved (should be the target of a DNS name)
+    /// Service name to be resolved (should be the target of a DNS name)
     #[arg(value_enum)]
     srv_name: ServiceName,
+
+    /// Output service host names only 
+    #[clap(long, short = 'H', action)]
+    hostname: bool,
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -76,7 +80,6 @@ async fn main() -> Result<()> {
         omicron_common::backoff::retry_policy_internal_service(),
         || async {
             let dns_name = internal_dns::ServiceName::from(opt.srv_name);
-            // TODO: Use lookup_ip to avoid having to strip out ports?
             resolver.lookup_srv(dns_name).await.map_err(|error| match error {
                 ResolveError::Resolve(_)
                 | ResolveError::NotFound(_)
@@ -98,7 +101,11 @@ async fn main() -> Result<()> {
     .context("unexpectedly gave up")?;
 
     for (target, port) in result {
-        println!("{}:{}", target, port)
+        if opt.hostname {
+            println!("{}", target)    
+        } else {
+            println!("{}:{}", target, port)
+        }
     }
 
     Ok(())

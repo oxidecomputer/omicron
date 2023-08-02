@@ -31,7 +31,7 @@ route get -inet6 default -inet6 "$GATEWAY" || route add -inet6 default -inet6 "$
 # Retrieve addresses of the other clickhouse nodes, order them and assign them to be a replica node.
 #
 # TODO: This should probably be 3 replicas
-CH_ADDRS="$(/opt/oxide/internal-dns-cli/bin/dnswait clickhouse \
+CH_ADDRS="$(/opt/oxide/internal-dns-cli/bin/dnswait clickhouse -H \
     | head -n 2 \
     | tr '\n' ,)"
 
@@ -42,14 +42,14 @@ fi
 
 readarray -td, nodes <<<"$CH_ADDRS,"; declare -p nodes
 
-# Assign addresses to replicas without port
-REPLICA_HOST_01="$(echo "${nodes[0]}" | sed -En s/:8123//p)"
-REPLICA_HOST_02="$(echo "${nodes[1]}" | sed -En s/:8123//p)"
+# Assign addresses to replicas
+REPLICA_HOST_01="${nodes[0]}"
+REPLICA_HOST_02="${nodes[1]}"
 
 # Retrieve addresses of the other clickhouse nodes, order them and assign them to be a keeper node.
 #
 # This should probably be 5 keepers?
-K_ADDRS="$(/opt/oxide/internal-dns-cli/bin/dnswait clickhouse-keeper \
+K_ADDRS="$(/opt/oxide/internal-dns-cli/bin/dnswait clickhouse-keeper -H \
     | head -n 3 \
     | tr '\n' ,)"
 
@@ -59,11 +59,6 @@ if [[ -z "$K_ADDRS" ]]; then
 fi
 
 readarray -td, keepers <<<"$K_ADDRS,"; declare -p keepers
-
-# Assign addresses to replicas and keeper nodes
-KEEPER_HOST_01="$(echo "${keepers[0]}" | sed -En s/:9181//p)"
-KEEPER_HOST_02="$(echo "${keepers[1]}" | sed -En s/:9181//p)"
-KEEPER_HOST_03="$(echo "${keepers[2]}" | sed -En s/:9181//p)"
 
 # Identify the node type this is as this will influence how the config is constructed
 # TODO: There are probably much better ways to do this service discovery, but this works
@@ -99,9 +94,9 @@ export CH_FORMAT_SCHEMA_PATH="${DATASTORE}/format_schemas/"
 export CH_REPLICA_NUMBER=${REPLICA_NUMBER}
 export CH_REPLICA_HOST_01=${REPLICA_HOST_01}
 export CH_REPLICA_HOST_02=${REPLICA_HOST_02}
-export CH_KEEPER_HOST_01=${KEEPER_HOST_01}
-export CH_KEEPER_HOST_02=${KEEPER_HOST_02}
-export CH_KEEPER_HOST_03=${KEEPER_HOST_03}
+export CH_KEEPER_HOST_01="${keepers[0]}"
+export CH_KEEPER_HOST_02="${keepers[1]}"
+export CH_KEEPER_HOST_03="${keepers[2]}"
 
 # The clickhouse binary must be run from within the directory that contains it. 
 # Otherwise, it does not automatically detect the configuration files, nor does
