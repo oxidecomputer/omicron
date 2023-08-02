@@ -22,18 +22,20 @@ use std::net::Ipv6Addr;
 use tokio::sync::broadcast;
 use tokio::task::JoinHandle;
 
-mod pre_bootstore;
+//mod pre_bootstore;
 mod startup;
 
-use pre_bootstore::PreBootstore;
-use startup::SledAgentSetup;
-use startup::StartError;
+//use pre_bootstore::PreBootstore;
+use self::startup::BootstoreJoinHandles;
+use self::startup::SledAgentSetup;
+use self::startup::StartError;
 
 // Re-export this so `ServiceManager` can use it.
-pub(crate) use startup::StartupNetworking;
+pub(crate) use self::startup::StartupNetworking;
 
 pub struct SledAgent {
     sled_agent_main_task: JoinHandle<()>,
+    bootstore_tasks: BootstoreJoinHandles,
 }
 
 impl SledAgent {
@@ -46,20 +48,11 @@ impl SledAgent {
         let mut hardware_monitor = setup.hardware_manager.monitor();
 
         // Wait for our boot M.2 to show up.
-        startup::wait_for_boot_m2(&setup, &mut hardware_monitor).await;
+        setup.wait_for_boot_m2(&mut hardware_monitor).await;
 
-        // Wait for the bootstore to start.
-        //
-        let mut pre_bootstore = PreBootstore {
-            global_zone_bootstrap_ip: setup.global_zone_bootstrap_ip,
-            hardware_monitor: &mut hardware_monitor,
-            hardware_manager: &setup.hardware_manager,
-            service_manager: &setup.service_manager,
-            storage_manager: &setup.storage_manager,
-            log: setup.base_log.new(o!("component" => "PreBootstore")),
-            base_log: &setup.base_log,
-        };
-        pre_bootstore.run().await?;
+        // Wait for the bootstore to start. If this fails, we fail to start.
+        let bootstore_tasks =
+            setup.spawn_bootstore_tasks(&mut hardware_monitor).await?;
 
         // Spawn our version of `main()`; it runs until told to exit.
         // TODO-FIXME how do we tell it to exit?
@@ -67,7 +60,7 @@ impl SledAgent {
         // startup errors?
         let sled_agent_main_task = tokio::spawn(sled_agent_main(setup));
 
-        Ok(Self { sled_agent_main_task })
+        Ok(Self { sled_agent_main_task, bootstore_tasks })
     }
 }
 
@@ -125,7 +118,7 @@ async fn handle_hardware_update(
                 }
             }
             HardwareUpdate::TofinoDeviceChange => {
-                // TODO-correctness What do we do here?
+                // TODO-correctness What should we do here?
             }
             HardwareUpdate::DiskAdded(disk) => {
                 storage_manager.upsert_disk(disk).await;
