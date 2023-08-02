@@ -4,8 +4,7 @@
 
 //! Finding the underlay network physical links and address objects.
 
-// TODO: Remove before setting PR to review
-// use crate::is_gimlet;
+use crate::is_gimlet;
 use illumos_utils::addrobj;
 use illumos_utils::addrobj::AddrObject;
 use illumos_utils::dladm;
@@ -14,8 +13,7 @@ use illumos_utils::dladm::FindPhysicalLinkError;
 use illumos_utils::dladm::GetLinkpropError;
 use illumos_utils::dladm::PhysicalLink;
 use illumos_utils::dladm::SetLinkpropError;
-// TODO: Remove before setting PR to review
-// use illumos_utils::dladm::CHELSIO_LINK_PREFIX;
+use illumos_utils::dladm::CHELSIO_LINK_PREFIX;
 use illumos_utils::zone::Zones;
 use omicron_common::api::external::MacAddr;
 use std::net::Ipv6Addr;
@@ -82,8 +80,6 @@ pub fn find_nics() -> Result<Vec<AddrObject>, Error> {
 /// developer machine, or generally a non-Gimlet, this will return the
 /// VNICs we use to emulate those Chelsio links.
 pub fn find_chelsio_links() -> Result<Vec<PhysicalLink>, Error> {
-    // TODO: Remove before setting PR to review
-    /*
     if is_gimlet().map_err(Error::SystemDetection)? {
         Dladm::list_physical().map_err(Error::FindLinks).map(|links| {
             links
@@ -92,12 +88,11 @@ pub fn find_chelsio_links() -> Result<Vec<PhysicalLink>, Error> {
                 .collect()
         })
     } else {
-        */
     Ok(XDE_VNIC_NAMES
         .into_iter()
         .map(|name| PhysicalLink(name.to_string()))
         .collect())
-    // }
+    }
 }
 
 /// Ensure each of the `PhysicalLink`s has a link local IPv6 address in the
