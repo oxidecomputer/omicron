@@ -151,6 +151,18 @@ struct InstallOpts {
     #[clap(long)]
     install_on_gimlet: bool,
 
+    //TODO(ry) this probably needs to get plumbed somewhere instead of relying
+    //on a default.
+    /// The first gimlet data link to use.
+    #[clap(long, default_value = "cxgbe0")]
+    data_link0: String,
+
+    //TODO(ry) this probably needs to get plumbed somewhere instead of relying
+    //on a default.
+    /// The second gimlet data link to use.
+    #[clap(long, default_value = "cxgbe1")]
+    data_link1: String,
+
     // TODO: checksum?
 
     // The destination to write to.
@@ -164,7 +176,8 @@ struct InstallOpts {
 impl InstallOpts {
     async fn exec(self, log: &slog::Logger) -> Result<()> {
         if self.bootstrap_sled {
-            crate::bootstrap::bootstrap_sled(log.clone()).await?;
+            let data_links = [self.data_link0.clone(), self.data_link1.clone()];
+            crate::bootstrap::bootstrap_sled(&data_links, log.clone()).await?;
         }
 
         let image_id = self.artifact_ids.resolve()?;

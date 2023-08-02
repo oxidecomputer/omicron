@@ -330,7 +330,7 @@ impl NexusSaga for SagaInstanceCreate {
         // If a primary NIC exists, create a NAT entry for the default external IP,
         // as well as additional NAT entries for each requested ephemeral IP
         for i in 0..(params.create_params.external_ips.len() + 1) {
-            for switch_location in &params.boundary_switches {
+            for &switch_location in &params.boundary_switches {
                 let subsaga_name = SagaName::new(&format!(
                     "instance-configure-nat-{i}-{switch_location}"
                 ));
@@ -346,7 +346,7 @@ impl NexusSaga for SagaInstanceCreate {
                     saga_params: params.clone(),
                     instance_id,
                     which: i,
-                    switch_location: switch_location.clone(),
+                    switch_location,
                 };
                 subsaga_append(
                     basename,

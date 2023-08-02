@@ -39,7 +39,11 @@ zpools = [
 
 # Percentage of usable physical DRAM to use for the VMM reservoir, which
 # guest memory is pulled from.
-vmm_reservoir_percentage = 0
+vmm_reservoir_percentage = 50
+
+# Create a 64GB swap device. The VMM reservoir will not function without a swap
+# device.
+swap_device_size_gb = 64
 
 # An optional data link from which we extract a MAC address.
 # This is used as a unique identifier for the bootstrap address.
@@ -54,8 +58,11 @@ vmm_reservoir_percentage = 0
 # tfportd will create the necessary links and Maghemite will be configured to
 # use those.  But on non-Gimlet systems, you need to specify physical links to
 # be passed into the `oxz_switch` zone for this purpose.  You can skip this if
-# you're deploying a single-sled system.
-#switch_zone_maghemite_links = ["ixgbe0", "ixgbe1"]
+# you're deploying a single-sled system and just leave the single tfportrear
+# as-is.
+switch_zone_maghemite_links = ["tfportrear0_0"]
+
+data_links = ["net0", "net1"]
 
 [log]
 level = "info"

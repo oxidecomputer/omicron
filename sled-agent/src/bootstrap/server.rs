@@ -55,9 +55,10 @@ impl Server {
         }
 
         // Find address objects to pass to maghemite.
-        let mg_addr_objs = underlay::find_nics().map_err(|err| {
-            format!("Failed to find address objects for maghemite: {err}")
-        })?;
+        let mg_addr_objs = underlay::find_nics(&sled_config.data_links)
+            .map_err(|err| {
+                format!("Failed to find address objects for maghemite: {err}")
+            })?;
         if mg_addr_objs.is_empty() {
             return Err(
                 "underlay::find_nics() returned 0 address objects".to_string()
