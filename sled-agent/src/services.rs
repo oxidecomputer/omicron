@@ -489,6 +489,52 @@ impl ServiceManager {
         Ok(mgr)
     }
 
+    pub(crate) fn new_v2(
+        log: &Logger,
+        ddmd_client: DdmAdminClient,
+        startup_networking: crate::lifecycle::StartupNetworking,
+        sled_mode: SledMode,
+        skip_timesync: Option<bool>,
+        sidecar_revision: SidecarRevision,
+        switch_zone_maghemite_links: Vec<PhysicalLink>,
+        storage: StorageResources,
+    ) -> Self {
+        let log = log.new(o!("component" => "ServiceManager"));
+        Self {
+            inner: Arc::new(ServiceManagerInner {
+                log: log.clone(),
+                global_zone_bootstrap_link_local_address: startup_networking
+                    .global_zone_bootstrap_link_local_ip,
+                // TODO(https://github.com/oxidecomputer/omicron/issues/725):
+                // Load the switch zone if it already exists?
+                switch_zone: Mutex::new(SledLocalZone::Disabled),
+                sled_mode,
+                skip_timesync,
+                time_synced: AtomicBool::new(false),
+                sidecar_revision,
+                switch_zone_maghemite_links,
+                zones: Mutex::new(BTreeMap::new()),
+                underlay_vnic_allocator: VnicAllocator::new(
+                    "Service",
+                    startup_networking.underlay_etherstub,
+                ),
+                underlay_vnic: startup_networking.underlay_etherstub_vnic,
+                bootstrap_vnic_allocator: VnicAllocator::new(
+                    "Bootstrap",
+                    startup_networking.bootstrap_etherstub,
+                ),
+                ddmd_client,
+                advertised_prefixes: Mutex::new(HashSet::new()),
+                sled_info: OnceCell::new(),
+                switch_zone_bootstrap_address: startup_networking
+                    .switch_zone_bootstrap_ip,
+                storage,
+                ledger_directory_override: OnceCell::new(),
+                image_directory_override: OnceCell::new(),
+            }),
+        }
+    }
+
     #[cfg(test)]
     fn override_ledger_directory(&self, path: Utf8PathBuf) {
         self.inner.ledger_directory_override.set(path).unwrap();
