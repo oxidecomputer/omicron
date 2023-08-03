@@ -930,6 +930,13 @@ impl UpdatePane {
                 state.update_state.status_view_displayed = false;
                 Some(Action::Redraw)
             }
+            // Ignore update-related commands if we're on the sled or switch
+            // where wicketd is running.
+            Cmd::StartUpdate | Cmd::AbortUpdate | Cmd::ResetState
+                if state.selected_component_matches_wicked_location() =>
+            {
+                None
+            }
             Cmd::StartUpdate => {
                 let selected = state.rack_state.selected;
                 match state.update_state.item_state(selected) {
@@ -1492,6 +1499,42 @@ impl UpdatePane {
                 let paragraph = Paragraph::new(text)
                     .alignment(Alignment::Center)
                     .block(block.clone().title("AWAITING REPOSITORY"));
+                frame.render_widget(paragraph, rect);
+            }
+            UpdateItemState::NotStarted
+                if state.selected_component_matches_wicked_location() =>
+            {
+                // No status bar, so make the main rect bigger.
+                let mut rect = self.status_view_main_rect;
+                rect.height += 3;
+
+                let sled_or_switch = match state.rack_state.selected {
+                    ComponentId::Sled(_) => "sled",
+                    ComponentId::Switch(_) => "switch",
+                    ComponentId::Psc(_) => {
+                        unreachable!("wicketd cannot be running on a PSC")
+                    }
+                };
+
+                // Show note that this component cannot be updated because it's
+                // related to where wicketd is running (either the sled wicketd
+                // is running on, which wicketd will never support updating, or
+                // the switch through which we're connected, which we do not
+                // support today because updating the switch requires rebooting
+                // the sled).
+                let text = Text::from(vec![
+                    Spans::from(Vec::new()),
+                    Spans::from(vec![Span::styled(
+                        format!(
+                            "Update unavailable: You are connected to wicket \
+                             via this {sled_or_switch}."
+                        ),
+                        style::plain_text(),
+                    )]),
+                ]);
+                let paragraph = Paragraph::new(text)
+                    .alignment(Alignment::Center)
+                    .block(block.clone().title("YOU ARE HERE"));
                 frame.render_widget(paragraph, rect);
             }
             UpdateItemState::NotStarted => {
