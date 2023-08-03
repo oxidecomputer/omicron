@@ -34,6 +34,7 @@ pub(crate) fn api() -> BootstrapApiDescription {
         api.register(rack_initialize)?;
         api.register(rack_reset)?;
         api.register(sled_reset)?;
+        api.register(sled_shutdown)?;
         Ok(())
     }
 
@@ -166,5 +167,25 @@ async fn sled_reset(
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let ba = rqctx.context();
     ba.sled_reset().await.map_err(|e| Error::from(e))?;
+    Ok(HttpResponseUpdatedNoContent())
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct SledShutdownRequest {
+    /// The reason for the shutdown.
+    pub reason: String,
+}
+
+/// Shuts down the sled, deleting all zones but not user data.
+#[endpoint {
+    method = POST,
+    path = "/sled-shutdown",
+}]
+async fn sled_shutdown(
+    rqctx: RequestContext<Arc<Agent>>,
+    args: TypedBody<SledShutdownRequest>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let ba = rqctx.context();
+    ba.sled_shutdown(args.into_inner()).await.map_err(|e| Error::from(e))?;
     Ok(HttpResponseUpdatedNoContent())
 }
