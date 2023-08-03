@@ -1055,7 +1055,7 @@ impl Agent {
 }
 
 #[derive(Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
-struct PersistentSledAgentRequest<'a> {
+pub(crate) struct PersistentSledAgentRequest<'a> {
     request: Cow<'a, StartSledAgentRequest>,
 }
 

@@ -47,12 +47,23 @@ impl SledAgent {
         // potentially start the switch zone and be notified of new disks.
         let mut hardware_monitor = setup.hardware_manager.monitor();
 
-        // Wait for our boot M.2 to show up.
+        // Wait for our boot M.2 to show up (while handling any messages from
+        // `hardware_monitor`).
         setup.wait_for_boot_m2(&mut hardware_monitor).await;
 
-        // Wait for the bootstore to start. If this fails, we fail to start.
+        // Wait for the bootstore to start (while handling any messages from
+        // `hardware_monitor`). If this fails, we fail to start.
         let bootstore_tasks =
             setup.spawn_bootstore_tasks(&mut hardware_monitor).await?;
+
+        // Do we have a StartSledAgentRequest stored in the ledger? If we fail
+        // to read the ledger at all, we fail to start. While attempting to read
+        // the ledger, continue handling any messages from `hardware_monitor`.
+        let maybe_ledger = setup
+            .read_persistent_sled_agent_request_from_ledger(
+                &mut hardware_monitor,
+            )
+            .await?;
 
         // Spawn our version of `main()`; it runs until told to exit.
         // TODO-FIXME how do we tell it to exit?
