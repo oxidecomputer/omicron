@@ -129,7 +129,7 @@ pub struct UpdateArtifactId {
 // 5. Regenerate the OpenAPI specs for nexus and sled-agent:
 //
 //    ```
-//    EXPECTORATE=overwrite cargo test -p omicron-nexus -p omicron-sled-agent openapi
+//    EXPECTORATE=overwrite cargo nextest run -p omicron-nexus -p omicron-sled-agent openapi
 //    ```
 //
 // 6. Return to <repo root>/{nexus-client,sled-agent-client}/lib.rs from step 2

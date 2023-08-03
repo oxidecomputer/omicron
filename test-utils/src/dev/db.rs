@@ -138,8 +138,8 @@ impl CockroachStarterBuilder {
 
     /// Redirect stdout and stderr for the "cockroach" process to files within
     /// the temporary directory.  This is used by the test suite so that people
-    /// don't get reams of irrelevant output when running `cargo test`.  This
-    /// will be cleaned up as usual on success.
+    /// don't get reams of irrelevant output when running `cargo nextest run`.
+    /// This will be cleaned up as usual on success.
     pub fn redirect_stdio_to_files(&mut self) -> &mut Self {
         self.redirect_stdio = true;
         self

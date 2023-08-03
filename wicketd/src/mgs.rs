@@ -61,6 +61,10 @@ pub enum GetInventoryResponse {
     Unavailable,
 }
 
+/// Channel errors result only from system shutdown.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ShutdownInProgress;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GetInventoryError {
     /// Channel errors result only from system shutdown.
@@ -72,7 +76,23 @@ pub enum GetInventoryError {
 }
 
 impl MgsHandle {
-    pub async fn get_inventory(
+    pub async fn get_cached_inventory(
+        &self,
+    ) -> Result<GetInventoryResponse, ShutdownInProgress> {
+        match self.get_inventory_refreshing_sps(Vec::new()).await {
+            Ok(response) => Ok(response),
+            Err(GetInventoryError::ShutdownInProgress) => {
+                Err(ShutdownInProgress)
+            }
+            Err(GetInventoryError::InvalidSpIdentifier) => {
+                // We pass no SP identifiers to refresh, so it's not possible
+                // for one of them to be invalid.
+                unreachable!("empty SP list cannot contain an invalid ID");
+            }
+        }
+    }
+
+    pub async fn get_inventory_refreshing_sps(
         &self,
         force_refresh: Vec<SpIdentifier>,
     ) -> Result<GetInventoryResponse, GetInventoryError> {

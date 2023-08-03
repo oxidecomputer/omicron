@@ -126,7 +126,7 @@ impl NexusSaga for SagaVolumeRemoveROP {
 
 async fn svr_create_temp_volume(
     sagactx: NexusActionContext,
-) -> Result<db::model::Volume, ActionError> {
+) -> Result<(), ActionError> {
     let osagactx = sagactx.user_data();
 
     let temp_volume_id = sagactx.lookup::<Uuid>("temp_volume_id")?;
@@ -148,13 +148,13 @@ async fn svr_create_temp_volume(
         })?;
 
     let volume = db::model::Volume::new(temp_volume_id, temp_volume_data);
-    let volume_created = osagactx
+    osagactx
         .datastore()
         .volume_create(volume)
         .await
         .map_err(ActionError::action_failed)?;
 
-    Ok(volume_created)
+    Ok(())
 }
 
 async fn svr_create_temp_volume_undo(
