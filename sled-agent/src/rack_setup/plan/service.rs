@@ -590,7 +590,6 @@ impl Plan {
                     id,
                     details: ServiceType::ClickhouseKeeper { address },
                 }],
-                boundary_switches: vec![],
             });
         }
 
