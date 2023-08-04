@@ -31,13 +31,14 @@ use illumos_utils::zone;
 use illumos_utils::zone::Zones;
 use key_manager::{KeyManager, StorageKeyRequester};
 use omicron_common::address::Ipv6Subnet;
+use omicron_common::ledger;
 use omicron_common::ledger::Ledger;
 use omicron_common::FileKv;
 use sled_hardware::underlay;
 use sled_hardware::underlay::BootstrapInterface;
+use sled_hardware::Baseboard;
 use sled_hardware::DendriteAsic;
 use sled_hardware::HardwareManager;
-use sled_hardware::HardwareUpdate;
 use sled_hardware::SledMode;
 use slog::Drain;
 use slog::Logger;
@@ -49,11 +50,10 @@ use std::net::Ipv6Addr;
 use std::net::SocketAddrV6;
 use std::time::Duration;
 use thiserror::Error;
-use tokio::sync::broadcast;
 use tokio::task::JoinHandle;
-use tokio::time::MissedTickBehavior;
 
-const SLED_AGENT_REQUEST_FILE: &str = "sled-agent-request.json";
+use super::sled_agent::SledAgentServerStartError;
+
 const BOOTSTORE_FSM_STATE_FILE: &str = "bootstore-fsm-state.json";
 const BOOTSTORE_NETWORK_CONFIG_FILE: &str = "bootstore-network-config.json";
 
@@ -139,6 +139,37 @@ pub enum StartError {
 
     #[error("Missing M.2 Paths for dataset: {0}")]
     MissingM2Paths(&'static str),
+
+    #[error("Failed to start sled-agent server: {0}")]
+    FailedStartingServer(String),
+
+    #[error("Failed to commit sled agent request to ledger")]
+    CommitToLedger(#[from] ledger::Error),
+
+    #[error("Failed to initialize bootstrap dropshot server: {0}")]
+    InitBootstrapDropshotServer(String),
+}
+
+impl From<super::MissingM2Paths> for StartError {
+    fn from(value: super::MissingM2Paths) -> Self {
+        Self::MissingM2Paths(value.0)
+    }
+}
+
+impl From<SledAgentServerStartError> for StartError {
+    fn from(value: SledAgentServerStartError) -> Self {
+        match value {
+            SledAgentServerStartError::FailedStartingServer(s) => {
+                Self::FailedStartingServer(s)
+            }
+            SledAgentServerStartError::MissingM2Paths(dataset) => {
+                Self::MissingM2Paths(dataset)
+            }
+            SledAgentServerStartError::CommitToLedger(err) => {
+                Self::CommitToLedger(err)
+            }
+        }
+    }
 }
 
 pub(super) struct SledAgentSetup {
@@ -261,194 +292,83 @@ impl SledAgentSetup {
             key_manager_handle,
         })
     }
+}
 
-    /// Wait for at least the M.2 we booted from to show up.
-    ///
-    /// TODO-correctness Subsequent steps may assume all M.2s that will ever be
-    /// present are present once we return from this function; see
-    /// https://github.com/oxidecomputer/omicron/issues/3815.
-    pub(super) async fn wait_for_boot_m2(
-        &self,
-        hardware_monitor: &mut broadcast::Receiver<HardwareUpdate>,
-    ) {
-        // Wait for at least the M.2 we booted from to show up.
-        let mut check_boot_disk_interval =
-            tokio::time::interval(Duration::from_millis(250));
-        check_boot_disk_interval
-            .set_missed_tick_behavior(MissedTickBehavior::Delay);
-
-        loop {
-            tokio::select! {
-                // Cancel-safe per the docs on `broadcast::Receiver::recv()`.
-                hardware_update = hardware_monitor.recv() => {
-                    info!(
-                        self.startup_log,
-                        "Handling hardware update while waiting for boot M.2";
-                        "update" => ?hardware_update,
-                    );
-                    self.handle_hardware_update(hardware_update).await;
-                }
-
-                // Cancel-safe per the docs on `Interval::tick()`.
-                _instant = check_boot_disk_interval.tick() => {
-                    match self.storage_manager.resources().boot_disk().await {
-                        Some(disk) => {
-                            info!(
-                                self.startup_log,
-                                "Found boot disk M.2: {disk:?}"
-                            );
-                            return;
-                        }
-                        None => {
-                            info!(
-                                self.startup_log,
-                                "Waiting for boot disk M.2...",
-                            );
-                        }
-                    }
-                }
+/// Wait for at least the M.2 we booted from to show up.
+///
+/// TODO-correctness Subsequent steps may assume all M.2s that will ever be
+/// present are present once we return from this function; see
+/// https://github.com/oxidecomputer/omicron/issues/3815.
+pub(super) async fn wait_for_boot_m2(
+    storage_resources: &StorageResources,
+    log: &Logger,
+) {
+    // Wait for at least the M.2 we booted from to show up.
+    loop {
+        match storage_resources.boot_disk().await {
+            Some(disk) => {
+                info!(log, "Found boot disk M.2: {disk:?}");
+                break;
+            }
+            None => {
+                info!(log, "Waiting for boot disk M.2...");
+                tokio::time::sleep(core::time::Duration::from_millis(250))
+                    .await;
             }
         }
-    }
-
-    pub(super) async fn spawn_bootstore_tasks(
-        &self,
-        hardware_monitor: &mut broadcast::Receiver<HardwareUpdate>,
-    ) -> Result<BootstoreJoinHandles, StartError> {
-        // Spawn bootstore setup onto a background task so we can concurrently
-        // handle hardware updates.
-        let storage_resources = self.storage_manager.resources().clone();
-        let baseboard = self.hardware_manager.baseboard();
-        let global_zone_bootstrap_ip = self.global_zone_bootstrap_ip;
-        let base_log = self.base_log.clone();
-        let ddm_admin_client = self.ddm_admin_localhost_client.clone();
-
-        let mut bootstore_setup = tokio::spawn(async move {
-            let bootstore_config = bootstore::Config {
-                id: baseboard,
-                addr: SocketAddrV6::new(
-                    global_zone_bootstrap_ip,
-                    BOOTSTORE_PORT,
-                    0,
-                    0,
-                ),
-                time_per_tick: Duration::from_millis(250),
-                learn_timeout: Duration::from_secs(5),
-                rack_init_timeout: Duration::from_secs(300),
-                rack_secret_request_timeout: Duration::from_secs(5),
-                fsm_state_ledger_paths: bootstore_fsm_state_paths(
-                    &storage_resources,
-                )
-                .await?,
-                network_config_ledger_paths: bootstore_network_config_paths(
-                    &storage_resources,
-                )
-                .await?,
-            };
-
-            let (mut bootstore_node, bootstore_node_handle) =
-                bootstore::Node::new(bootstore_config, &base_log).await;
-
-            let bootstore_join_handle =
-                tokio::spawn(async move { bootstore_node.run().await });
-
-            // Spawn a task for polling DDMD and updating bootstore
-            let bootstore_peer_update_handle =
-                tokio::spawn(poll_ddmd_for_bootstore_peer_update(
-                    base_log.new(o!("component" => "boostore_ddmd_poller")),
-                    bootstore_node_handle,
-                    ddm_admin_client,
-                ));
-
-            Ok(BootstoreJoinHandles {
-                bootstore_join_handle,
-                bootstore_peer_update_handle,
-            })
-        });
-
-        loop {
-            tokio::select! {
-                // Cancel-safe per the docs on `broadcast::Receiver::recv()`.
-                hardware_update = hardware_monitor.recv() => {
-                    info!(
-                        self.startup_log,
-                        "Handling hardware update while waiting for bootstore setup";
-                        "update" => ?hardware_update,
-                    );
-                    self.handle_hardware_update(hardware_update).await;
-                }
-
-                // Cancel-safe: we're using a `&mut Future`; dropping the
-                // reference does not cancel the underlying future.
-                task_result = &mut bootstore_setup => {
-                    let result = task_result.unwrap();
-                    return result;
-                }
-            }
-        }
-    }
-
-    pub(super) async fn read_persistent_sled_agent_request_from_ledger(
-        &self,
-        hardware_monitor: &mut broadcast::Receiver<HardwareUpdate>,
-    ) -> Result<Option<Ledger<PersistentSledAgentRequest<'static>>>, StartError>
-    {
-        let read_ledger_fut = async {
-            let paths =
-                sled_config_paths(self.storage_manager.resources()).await?;
-            let maybe_ledger =
-                Ledger::<PersistentSledAgentRequest<'static>>::new(
-                    &self.startup_log,
-                    paths,
-                )
-                .await;
-            Ok(maybe_ledger)
-        };
-        tokio::pin!(read_ledger_fut);
-
-        loop {
-            tokio::select! {
-                // Cancel-safe per the docs on `broadcast::Receiver::recv()`.
-                hardware_update = hardware_monitor.recv() => {
-                    info!(
-                        self.startup_log,
-                        "Handling hardware update while waiting to read ledger";
-                        "update" => ?hardware_update,
-                    );
-                    self.handle_hardware_update(hardware_update).await;
-                }
-
-                // Cancel-safe: we're using a `&mut Future`; dropping the
-                // reference does not cancel the underlying future.
-                result = &mut read_ledger_fut => {
-                    return result;
-                }
-            }
-        }
-    }
-
-    async fn handle_hardware_update(
-        &self,
-        hardware_update: Result<HardwareUpdate, broadcast::error::RecvError>,
-    ) {
-        // We are pre-trust-quorum and therefore do not yet want to set up the
-        // underlay network.
-        let underlay_network = None;
-        super::handle_hardware_update(
-            hardware_update,
-            &self.hardware_manager,
-            &self.service_manager,
-            &self.storage_manager,
-            underlay_network,
-            &self.startup_log,
-        )
-        .await;
     }
 }
 
-pub(super) struct BootstoreJoinHandles {
-    bootstore_join_handle: JoinHandle<()>,
-    bootstore_peer_update_handle: JoinHandle<()>,
+pub(super) async fn spawn_bootstore_tasks(
+    storage_resources: &StorageResources,
+    ddm_admin_client: DdmAdminClient,
+    baseboard: Baseboard,
+    global_zone_bootstrap_ip: Ipv6Addr,
+    base_log: &Logger,
+) -> Result<BootstoreHandles, StartError> {
+    let config = bootstore::Config {
+        id: baseboard,
+        addr: SocketAddrV6::new(global_zone_bootstrap_ip, BOOTSTORE_PORT, 0, 0),
+        time_per_tick: Duration::from_millis(250),
+        learn_timeout: Duration::from_secs(5),
+        rack_init_timeout: Duration::from_secs(300),
+        rack_secret_request_timeout: Duration::from_secs(5),
+        fsm_state_ledger_paths: bootstore_fsm_state_paths(&storage_resources)
+            .await?,
+        network_config_ledger_paths: bootstore_network_config_paths(
+            &storage_resources,
+        )
+        .await?,
+    };
+
+    let (mut node, node_handle) = bootstore::Node::new(config, base_log).await;
+
+    let join_handle = tokio::spawn(async move { node.run().await });
+
+    // Spawn a task for polling DDMD and updating bootstore
+    let peer_update_handle = tokio::spawn(poll_ddmd_for_bootstore_peer_update(
+        base_log.new(o!("component" => "bootstore_ddmd_poller")),
+        node_handle.clone(),
+        ddm_admin_client,
+    ));
+
+    Ok(BootstoreHandles { node_handle, join_handle, peer_update_handle })
+}
+
+pub(super) async fn read_persistent_sled_agent_request_from_ledger(
+    storage_resources: &StorageResources,
+    log: &Logger,
+) -> Result<Option<Ledger<PersistentSledAgentRequest<'static>>>, StartError> {
+    let paths = super::sled_config_paths(storage_resources).await?;
+    let maybe_ledger =
+        Ledger::<PersistentSledAgentRequest<'static>>::new(log, paths).await;
+    Ok(maybe_ledger)
+}
+
+pub(super) struct BootstoreHandles {
+    pub(super) node_handle: bootstore::NodeHandle,
+    pub(super) join_handle: JoinHandle<()>,
+    pub(super) peer_update_handle: JoinHandle<()>,
 }
 
 fn build_logger(config: &Config) -> Result<Logger, StartError> {
@@ -820,22 +740,4 @@ async fn poll_ddmd_for_bootstore_peer_update(
         }
         tokio::time::sleep(RETRY).await;
     }
-}
-
-async fn sled_config_paths(
-    storage: &StorageResources,
-) -> Result<Vec<Utf8PathBuf>, StartError> {
-    let paths: Vec<_> = storage
-        .all_m2_mountpoints(sled_hardware::disk::CONFIG_DATASET)
-        .await
-        .into_iter()
-        .map(|p| p.join(SLED_AGENT_REQUEST_FILE))
-        .collect();
-
-    if paths.is_empty() {
-        return Err(StartError::MissingM2Paths(
-            sled_hardware::disk::CONFIG_DATASET,
-        ));
-    }
-    Ok(paths)
 }

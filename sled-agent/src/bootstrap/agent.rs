@@ -53,7 +53,7 @@ mod rack_ops;
 
 pub use rack_ops::RackInitId;
 pub use rack_ops::RackResetId;
-use rack_ops::RssAccess;
+pub(crate) use rack_ops::RssAccess;
 pub use rack_ops::RssAccessError;
 
 /// Describes errors which may occur while operating the bootstrap service.
@@ -1056,7 +1056,7 @@ impl Agent {
 
 #[derive(Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
 pub(crate) struct PersistentSledAgentRequest<'a> {
-    request: Cow<'a, StartSledAgentRequest>,
+    pub(crate) request: Cow<'a, StartSledAgentRequest>,
 }
 
 impl<'a> Ledgerable for PersistentSledAgentRequest<'a> {

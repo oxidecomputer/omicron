@@ -16,3 +16,5 @@ pub(crate) mod rss_handle;
 pub(crate) mod secret_retriever;
 pub mod server;
 mod views;
+
+pub use http_entrypoints::RackOperationStatus;
