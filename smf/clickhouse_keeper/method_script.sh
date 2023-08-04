@@ -28,20 +28,25 @@ ipadm show-addr "$DATALINK/ll" || ipadm create-addr -t -T addrconf "$DATALINK/ll
 ipadm show-addr "$DATALINK/omicron6"  || ipadm create-addr -t -T static -a "$LISTEN_ADDR" "$DATALINK/omicron6"
 route get -inet6 default -inet6 "$GATEWAY" || route add -inet6 default -inet6 "$GATEWAY"
 
-# Retrieve addresses of the other clickhouse nodes, order them and assign them to be a replica or keeper node.
-# In a follow up PR, keepers will be their own service.
-#
-# This should probably be 5 keepers?
-CH_ADDRS="$(/opt/oxide/internal-dns-cli/bin/dnswait clickhouse-keeper -H \
+# Retrieve addresses of all keeper nodes.
+K_ADDRS="$(/opt/oxide/internal-dns-cli/bin/dnswait clickhouse-keeper -H \
     | head -n 3 \
     | tr '\n' ,)"
 
-if [[ -z "$CH_ADDRS" ]]; then
+if [[ -z "$K_ADDRS" ]]; then
     printf 'ERROR: found no addresses for other ClickHouse Keeper nodes\n' >&2
     exit "$SMF_EXIT_ERR_CONFIG"
 fi
 
-readarray -td, nodes <<<"$CH_ADDRS,"; declare -p nodes
+readarray -td, nodes <<<"$K_ADDRS,"; declare -p nodes
+
+for i in {0..2}
+do
+  if ! grep -q "host.control-plane.oxide.internal" <<< "${nodes["${i}"]}"; then
+    printf 'ERROR: retrieved ClickHouse Keeper address does not match the expected format\n' >&2
+    exit "$SMF_EXIT_ERR_CONFIG"
+  fi
+done
 
 # Assign addresses to replicas and keeper nodes
 KEEPER_HOST_01="${nodes[0]}"
@@ -62,7 +67,7 @@ KEEPER_ID_03="$( echo "${KEEPER_HOST_03}" | tr -dc [:digit:] | cut -c1-7)"
 # Identify the node type this is as this will influence how the config is constructed
 # TODO: There are probably much better ways to do this service name lookup, but this works
 # for now. The services contain the same IDs as the hostnames.
-KEEPER_SVC="$(zoneadm list | tr -dc [:digit:] | cut -c1-7)"
+KEEPER_SVC="$(zonename | tr -dc [:digit:] | cut -c1-7)"
 if [[ $KEEPER_ID_01 == $KEEPER_SVC ]]
 then
     KEEPER_ID_CURRENT=$KEEPER_ID_01

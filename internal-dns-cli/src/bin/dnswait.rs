@@ -27,9 +27,9 @@ struct Opt {
     #[arg(value_enum)]
     srv_name: ServiceName,
 
-    /// Output service host names only
+    /// Output service host names only, omitting the port
     #[clap(long, short = 'H', action)]
-    hostname: bool,
+    hostname_only: bool,
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -101,7 +101,7 @@ async fn main() -> Result<()> {
     .context("unexpectedly gave up")?;
 
     for (target, port) in result {
-        if opt.hostname {
+        if opt.hostname_only {
             println!("{}", target)
         } else {
             println!("{}:{}", target, port)
