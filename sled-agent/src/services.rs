@@ -1062,7 +1062,9 @@ impl ServiceManager {
         Ok(())
     }
 
-    async fn dns_install(info: &SledAgentInfo) -> Result<ServiceBuilder, Error> {
+    async fn dns_install(
+        info: &SledAgentInfo,
+    ) -> Result<ServiceBuilder, Error> {
         // We want to configure the dns/install SMF service inside the
         // zone with the list of DNS nameservers.  This will cause
         // /etc/resolv.conf to be populated inside the zone.  To do
