@@ -228,7 +228,7 @@ pub struct RequestEnvelope<'a> {
     pub request: Request<'a>,
 }
 
-pub(super) mod version {
+pub(crate) mod version {
     pub(crate) const V1: u32 = 1;
 }
 

@@ -460,6 +460,43 @@ impl SledAgent {
         Ok(sled_agent)
     }
 
+    pub(crate) fn switch_zone_underlay_info(
+        &self,
+    ) -> (Ipv6Addr, Option<&RackNetworkConfig>) {
+        (self.inner.switch_zone_ip(), self.inner.rack_network_config.as_ref())
+    }
+
+    /// Load services for which we're responsible; only meaningful to call
+    /// during a cold boot.
+    ///
+    /// Blocks until all services have started, retrying indefinitely on
+    /// failure.
+    pub(crate) async fn cold_boot_load_services(&self) {
+        retry_notify(
+            retry_policy_internal_service_aggressive(),
+            || async {
+                self.inner
+                    .services
+                    .load_services()
+                    .await
+                    .map_err(|err| BackoffError::transient(err))
+            },
+            |err, delay| {
+                warn!(
+                    self.log,
+                    "Failed to load services, will retry in {:?}", delay;
+                    "error" => %err,
+                );
+            },
+        )
+        .await
+        .unwrap(); // we retry forever, so this can't fail
+
+        // Now that we've initialized the sled services, notify nexus again
+        // at which point it'll plumb any necessary firewall rules back to us.
+        self.notify_nexus_about_self(&self.log);
+    }
+
     // Observe the current hardware state manually.
     //
     // We use this when we're monitoring hardware for the first
@@ -472,15 +509,11 @@ impl SledAgent {
 
         if scrimlet {
             let baseboard = self.inner.hardware.baseboard();
-            let switch_zone_ip = self.inner.switch_zone_ip();
             if let Err(e) = self
                 .inner
                 .services
                 .activate_switch(
-                    Some((
-                        switch_zone_ip,
-                        self.inner.rack_network_config.as_ref(),
-                    )),
+                    Some(self.switch_zone_underlay_info()),
                     baseboard,
                 )
                 .await
@@ -522,15 +555,11 @@ impl SledAgent {
                     }
                     HardwareUpdate::TofinoLoaded => {
                         let baseboard = self.inner.hardware.baseboard();
-                        let switch_zone_ip = self.inner.switch_zone_ip();
                         if let Err(e) = self
                             .inner
                             .services
                             .activate_switch(
-                                Some((
-                                    switch_zone_ip,
-                                    self.inner.rack_network_config.as_ref(),
-                                )),
+                                Some(self.switch_zone_underlay_info()),
                                 baseboard,
                             )
                             .await

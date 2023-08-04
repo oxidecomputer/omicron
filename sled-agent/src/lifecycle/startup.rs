@@ -148,6 +148,9 @@ pub enum StartError {
 
     #[error("Failed to initialize bootstrap dropshot server: {0}")]
     InitBootstrapDropshotServer(String),
+
+    #[error("Failed to bind sprocket server")]
+    BindSprocketsServer(#[source] io::Error),
 }
 
 impl From<super::MissingM2Paths> for StartError {
@@ -172,7 +175,7 @@ impl From<SledAgentServerStartError> for StartError {
     }
 }
 
-pub(super) struct SledAgentSetup {
+pub(super) struct SledAgentStartup {
     pub(super) config: Config,
     pub(super) global_zone_bootstrap_ip: Ipv6Addr,
     pub(super) ddm_admin_localhost_client: DdmAdminClient,
@@ -184,7 +187,7 @@ pub(super) struct SledAgentSetup {
     pub(super) key_manager_handle: JoinHandle<()>,
 }
 
-impl SledAgentSetup {
+impl SledAgentStartup {
     pub(super) async fn run(config: Config) -> Result<Self, StartError> {
         let base_log = build_logger(&config)?;
 

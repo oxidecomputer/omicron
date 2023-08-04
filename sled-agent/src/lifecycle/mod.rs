@@ -11,14 +11,14 @@
 // allow if that changes (https://github.com/oxidecomputer/usdt/issues/133).
 #![allow(clippy::result_large_err)]
 
-use crate::bootstrap::agent::RssAccess;
 use crate::config::Config;
-use crate::lifecycle::bootstrap::BootstrapServerContext;
 use crate::server::Server;
 use crate::services::ServiceManager;
 use crate::storage_manager::StorageManager;
 use crate::storage_manager::StorageResources;
 use camino::Utf8PathBuf;
+use dropshot::HttpServer;
+use futures::Future;
 use omicron_common::api::internal::shared::RackNetworkConfig;
 use sled_hardware::HardwareManager;
 use sled_hardware::HardwareUpdate;
@@ -31,9 +31,9 @@ mod bootstrap;
 mod sled_agent;
 mod startup;
 
-//use pre_bootstore::PreBootstore;
-use self::startup::BootstoreHandles;
-use self::startup::SledAgentSetup;
+use self::bootstrap::BootstrapServerContext;
+use self::bootstrap::SledAgentBootstrap;
+use self::startup::SledAgentStartup;
 use self::startup::StartError;
 
 // Re-export this so `ServiceManager` can use it.
@@ -48,7 +48,7 @@ pub struct SledAgent {
 impl SledAgent {
     pub async fn start(config: Config) -> Result<Self, StartError> {
         // Do all initial setup - if any step of this fails, we fail to start.
-        let SledAgentSetup {
+        let SledAgentStartup {
             config,
             global_zone_bootstrap_ip,
             ddm_admin_localhost_client,
@@ -58,102 +58,45 @@ impl SledAgent {
             storage_manager,
             service_manager,
             key_manager_handle,
-        } = SledAgentSetup::run(config).await?;
+        } = SledAgentStartup::run(config).await?;
 
         // From this point on we will listen for hardware notifications and
         // potentially start the switch zone and be notified of new disks.
         let mut hardware_monitor = hardware_manager.monitor();
 
-        // Put the rest of startup in a future that will run concurrently with
-        // us monitoring for hardware events.
-        let rest_of_start_fut = {
-            let service_manager = service_manager.clone();
-            let storage_manager = storage_manager.clone();
-            let baseboard = hardware_manager.baseboard();
-            let startup_log = startup_log.clone();
-            tokio::spawn(async move {
-                let storage_resources = storage_manager.resources();
+        // Run bootstrapping in a concurrent future with monitoring for hardware
+        // updates.
+        let bootstrap_fut = SledAgentBootstrap::run(
+            storage_manager.resources(),
+            hardware_manager.baseboard(),
+            global_zone_bootstrap_ip,
+            config.updates.clone(),
+            ddm_admin_localhost_client.clone(),
+            &base_log,
+        );
 
-                // Wait for our boot M.2 to show up.
-                startup::wait_for_boot_m2(&storage_resources, &startup_log)
-                    .await;
-
-                // Wait for the bootstore to start. If this fails, we fail to
-                // start.
-                let bootstore = startup::spawn_bootstore_tasks(
-                    &storage_resources,
-                    ddm_admin_localhost_client.clone(),
-                    baseboard.clone(),
-                    global_zone_bootstrap_ip,
-                    &base_log,
-                )
-                .await?;
-
-                // Do we have a StartSledAgentRequest stored in the ledger? If
-                // we fail to read the ledger at all, we fail to start.
-                let maybe_ledger =
-                    startup::read_persistent_sled_agent_request_from_ledger(
-                        &storage_resources,
-                        &startup_log,
-                    )
-                    .await?;
-
-                // If we have a request stored in the ledger, start the
-                // sled-agent server. If this fails, we fail to start.
-                //
-                // If we have no request in the ledger, we remain in the
-                // `Bootstrapping` state and are finished starting.
-                let state = match maybe_ledger {
-                    Some(ledger) => {
-                        let sled_request = ledger.data();
-                        let server = sled_agent::start(
-                            &config,
-                            &sled_request.request,
-                            &bootstore.node_handle,
-                            &service_manager,
-                            &storage_manager,
-                            &ddm_admin_localhost_client,
-                            &base_log,
-                            &startup_log,
-                        )
-                        .await?;
-                        SledAgentState::ServerStarted(server)
-                    }
-                    None => SledAgentState::Bootstrapping,
-                };
-
-                // Construct an RssAccess based on whether or not we're already
-                // initialized.
-                let rss_access = match &state {
-                    SledAgentState::Bootstrapping => RssAccess::new(false),
-                    SledAgentState::ServerStarted(_) => RssAccess::new(true),
-                };
-
-                // Start the bootstrap dropshot server.
-                let bootstrap_context = BootstrapServerContext {
-                    base_log,
-                    global_zone_bootstrap_ip,
-                    storage_resources: storage_resources.clone(),
-                    bootstore_node_handle: bootstore.node_handle.clone(),
-                    baseboard,
-                    rss_access,
-                    updates: config.updates,
-                };
-                let bootstrap_http_server =
-                    bootstrap::start_dropshot_server(bootstrap_context);
-
-                Ok::<_, StartError>((state, bootstore))
-            })
-        };
-        tokio::pin!(rest_of_start_fut);
-
-        let (state, bootstore) = loop {
+        // Wait for bootstrapping while handling hardware updates. We are
+        // pre-trust-quorum and therefore do not yet want to set up the underlay
+        // network.
+        let bootstrap = wait_while_handling_hardware_updates(
+            bootstrap_fut,
+            &mut hardware_monitor,
+            &hardware_manager,
+            &service_manager,
+            &storage_manager,
+            None, // no underlay network
+            &startup_log,
+            "bootstrapping",
+        )
+        .await?;
+        /*
+        let bootstrap = loop {
             tokio::select! {
                 // Cancel-safe per the docs on `broadcast::Receiver::recv()`.
                 hardware_update = hardware_monitor.recv() => {
                     info!(
                         startup_log,
-                        "Handling hardware update message";
+                        "Handling hardware update message while bootstrapping";
                         "update" => ?hardware_update,
                     );
 
@@ -171,19 +114,96 @@ impl SledAgent {
 
                 // Cancel-safe: we're using a `&mut Future`; dropping the
                 // reference does not cancel the underlying future.
-                task_result = &mut rest_of_start_fut => {
-                    let result = task_result.unwrap()?;
-                    break result;
+                bootstrap_result = &mut bootstrap_fut => {
+                    let bootstrap = bootstrap_result?;
+                    break bootstrap;
                 }
             }
+        };
+        */
+
+        // Bootstrapping complete: we're now running the bootstrap servers, but
+        // not yet receiving on the channels that those use to init or reset our
+        // sled.
+        let SledAgentBootstrap {
+            maybe_ledger,
+            bootstrap_http_server,
+            bootstore_node_handle,
+            sprockets_server_handle,
+            sled_reset_rx,
+            sled_init_rx,
+        } = bootstrap;
+
+        // Do we have a persistent sled-agent request that we need to restore?
+        let state = if let Some(ledger) = maybe_ledger {
+            let sled_request = ledger.data();
+            let start_sled_agent_fut = sled_agent::start(
+                &config,
+                &sled_request.request,
+                &bootstore_node_handle,
+                &service_manager,
+                &storage_manager,
+                &ddm_admin_localhost_client,
+                &base_log,
+                &startup_log,
+            );
+            let sled_agent_server = wait_while_handling_hardware_updates(
+                start_sled_agent_fut,
+                &mut hardware_monitor,
+                &hardware_manager,
+                &service_manager,
+                &storage_manager,
+                None, // no underlay network
+                &startup_log,
+                "restoring sled-agent",
+            )
+            .await?;
+
+            // We've created sled-agent; we need to (possibly) configure the
+            // switch zone, if we're a scrimlet, to give it our underlay
+            // network information.
+            let sled_agent = sled_agent_server.sled_agent();
+            let switch_zone_underlay_info =
+                Some(sled_agent.switch_zone_underlay_info());
+            update_from_current_hardware_snapshot(
+                &hardware_manager,
+                &service_manager,
+                &storage_manager,
+                switch_zone_underlay_info,
+                &startup_log,
+            )
+            .await;
+
+            // Finally, we need to load the services we're responsible for,
+            // while continuing to handle hardware notifications (for which we
+            // now have underlay info to provide). This cannot fail: we retry
+            // indefinitely until we're done loading services.
+            let load_services_fut = sled_agent.cold_boot_load_services();
+            wait_while_handling_hardware_updates(
+                load_services_fut,
+                &mut hardware_monitor,
+                &hardware_manager,
+                &service_manager,
+                &storage_manager,
+                switch_zone_underlay_info,
+                &startup_log,
+                "restoring sled-agent",
+            )
+            .await;
+
+            SledAgentState::ServerStarted(sled_agent_server)
+        } else {
+            SledAgentState::Bootstrapping
         };
 
         // Spawn our version of `main()`; it runs until told to exit.
         // TODO-FIXME how do we tell it to exit?
-        // TODO-FIXME wait until this task tell us to return to catch other
-        // startup errors?
-        let sled_agent_main_task =
-            tokio::spawn(sled_agent_main(state, bootstore, key_manager_handle));
+        let sled_agent_main_task = tokio::spawn(sled_agent_main(
+            state,
+            bootstrap_http_server,
+            sprockets_server_handle,
+            key_manager_handle,
+        ));
 
         Ok(Self { sled_agent_main_task })
     }
@@ -200,35 +220,51 @@ enum SledAgentState {
 
 async fn sled_agent_main(
     _state: SledAgentState,
-    _bootstore: BootstoreHandles,
+    //_bootstore: BootstoreHandles,
+    _bootstrap_http_server: HttpServer<BootstrapServerContext>,
+    _sprockets_server_handle: JoinHandle<()>,
     _key_manager_handle: JoinHandle<()>,
 ) {
-    /*
-    // Unpack all the handles and managers we already set up.
-    let SledAgentSetup {
-        config,
-        ddm_admin_localhost_client,
-        base_log,
-        hardware_manager,
-        storage_manager,
-        service_manager,
-        key_manager_handle,
-    } = &setup;
-    let mut hardware_monitor = hardware_manager.monitor();
+}
 
-    // Early lifecycle: We have not yet started the bootstore, and are waiting
-    // for `hardware_manager` to tell us it has found our boot M.2. It may also
-    // tell us we have a switch attached, in which case we start the switch
-    // zone.
-    let mut pre_bootstore = PreBootstore {
-        hardware_monitor: &mut hardware_monitor,
-        hardware_manager,
-        service_manager,
-        storage_manager,
-        log: base_log.new(o!("component" => "PreBootstore")),
-    };
-    pre_bootstore.run().await;
-    */
+// Helper function to wait for `fut` while handling any updates about hardware.
+async fn wait_while_handling_hardware_updates<F: Future<Output = T>, T>(
+    fut: F,
+    hardware_monitor: &mut broadcast::Receiver<HardwareUpdate>,
+    hardware_manager: &HardwareManager,
+    service_manager: &ServiceManager,
+    storage_manager: &StorageManager,
+    underlay_network: Option<(Ipv6Addr, Option<&RackNetworkConfig>)>,
+    log: &Logger,
+    log_phase: &str,
+) -> T {
+    tokio::pin!(fut);
+    loop {
+        tokio::select! {
+            // Cancel-safe per the docs on `broadcast::Receiver::recv()`.
+            hardware_update = hardware_monitor.recv() => {
+                info!(
+                    log,
+                    "Handling hardware update message";
+                    "phase" => log_phase,
+                    "update" => ?hardware_update,
+                );
+
+                handle_hardware_update(
+                    hardware_update,
+                    hardware_manager,
+                    service_manager,
+                    storage_manager,
+                    underlay_network,
+                    log,
+                ).await;
+            }
+
+            // Cancel-safe: we're using a `&mut Future`; dropping the
+            // reference does not cancel the underlying future.
+            result = &mut fut => return result,
+        }
+    }
 }
 
 async fn handle_hardware_update(
