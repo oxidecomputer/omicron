@@ -20,9 +20,13 @@ use crate::updates::ConfigUpdates;
 use crate::updates::UpdateManager;
 use bootstore::schemes::v0 as bootstore;
 use camino::Utf8PathBuf;
+use cancel_safe_futures::TryStreamExt;
 use ddm_admin_client::Client as DdmAdminClient;
 use dropshot::HttpServer;
+use futures::StreamExt;
 use http::StatusCode;
+use illumos_utils::zfs;
+use illumos_utils::zone::Zones;
 use omicron_common::ledger::Ledger;
 use sled_hardware::underlay::BootstrapInterface;
 use slog::Logger;
@@ -340,6 +344,97 @@ pub(crate) struct BootstrapServerContext {
     rss_access: RssAccess,
     updates: ConfigUpdates,
     sled_reset_tx: mpsc::Sender<oneshot::Sender<Result<(), BootstrapError>>>,
+}
+
+// Uninstall all oxide zones (except the switch zone)
+pub(super) async fn uninstall_zones() -> Result<(), BootstrapError> {
+    const CONCURRENCY_CAP: usize = 32;
+    futures::stream::iter(Zones::get().await?)
+        .map(Ok::<_, anyhow::Error>)
+        // Use for_each_concurrent_then_try to delete as much as possible.
+        // We only return one error though -- hopefully that's enough to
+        // signal to the caller that this failed.
+        .for_each_concurrent_then_try(CONCURRENCY_CAP, |zone| async move {
+            if zone.name() != "oxz_switch" {
+                Zones::halt_and_remove(zone.name()).await?;
+            }
+            Ok(())
+        })
+        .await
+        .map_err(BootstrapError::Cleanup)?;
+    Ok(())
+}
+
+pub(super) async fn uninstall_sled_local_config(
+    storage_resources: &StorageResources,
+) -> Result<(), BootstrapError> {
+    let config_dirs = storage_resources
+        .all_m2_mountpoints(sled_hardware::disk::CONFIG_DATASET)
+        .await
+        .into_iter();
+
+    for dir in config_dirs {
+        for entry in dir.read_dir_utf8().map_err(|err| BootstrapError::Io {
+            message: format!("Deleting {dir}"),
+            err,
+        })? {
+            let entry = entry.map_err(|err| BootstrapError::Io {
+                message: format!("Deleting {dir}"),
+                err,
+            })?;
+
+            let path = entry.path();
+            let file_type = entry.file_type().map_err(|err| {
+                BootstrapError::Io { message: format!("Deleting {path}"), err }
+            })?;
+
+            if file_type.is_dir() {
+                tokio::fs::remove_dir_all(path).await
+            } else {
+                tokio::fs::remove_file(path).await
+            }
+            .map_err(|err| BootstrapError::Io {
+                message: format!("Deleting {path}"),
+                err,
+            })?;
+        }
+    }
+    Ok(())
+}
+
+pub(super) async fn uninstall_networking(
+    log: &Logger,
+) -> Result<(), BootstrapError> {
+    // NOTE: This is very similar to the invocations
+    // in "sled_hardware::cleanup::cleanup_networking_resources",
+    // with a few notable differences:
+    //
+    // - We can't remove bootstrap-related networking -- this operation
+    // is performed via a request on the bootstrap network.
+    // - We avoid deleting addresses using the chelsio link. Removing
+    // these addresses would delete "cxgbe0/ll", and could render
+    // the sled inaccessible via a local interface.
+
+    sled_hardware::cleanup::delete_underlay_addresses(log)
+        .map_err(BootstrapError::Cleanup)?;
+    sled_hardware::cleanup::delete_omicron_vnics(log)
+        .await
+        .map_err(BootstrapError::Cleanup)?;
+    illumos_utils::opte::delete_all_xde_devices(log)?;
+    Ok(())
+}
+
+pub(super) async fn uninstall_storage(
+    log: &Logger,
+) -> Result<(), BootstrapError> {
+    let datasets = zfs::get_all_omicron_datasets_for_delete()
+        .map_err(BootstrapError::ZfsDatasetsList)?;
+    for dataset in &datasets {
+        info!(log, "Removing dataset: {dataset}");
+        zfs::Zfs::destroy_dataset(dataset)?;
+    }
+
+    Ok(())
 }
 
 // --------------------------------------------

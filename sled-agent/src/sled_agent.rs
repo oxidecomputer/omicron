@@ -422,6 +422,7 @@ impl SledAgent {
         // be received by Nexus eventually.
         sled_agent.notify_nexus_about_self(&log);
 
+        /*
         // Begin monitoring the underlying hardware, and reacting to changes.
         let sa = sled_agent.clone();
         let hardware_log = log.clone();
@@ -456,6 +457,7 @@ impl SledAgent {
         // Now that we've initialized the sled services, notify nexus again
         // at which point it'll plumb any necessary firewall rules back to us.
         sled_agent.notify_nexus_about_self(&log);
+        */
 
         Ok(sled_agent)
     }
@@ -497,6 +499,7 @@ impl SledAgent {
         self.notify_nexus_about_self(&self.log);
     }
 
+    /*
     // Observe the current hardware state manually.
     //
     // We use this when we're monitoring hardware for the first
@@ -592,6 +595,7 @@ impl SledAgent {
             }
         }
     }
+    */
 
     pub fn id(&self) -> Uuid {
         self.inner.id
@@ -602,7 +606,7 @@ impl SledAgent {
     }
 
     // Sends a request to Nexus informing it that the current sled exists.
-    fn notify_nexus_about_self(&self, log: &Logger) {
+    pub(crate) fn notify_nexus_about_self(&self, log: &Logger) {
         let sled_id = self.inner.id;
         let nexus_client = self.inner.nexus_client.clone();
         let sled_address = self.inner.sled_address();

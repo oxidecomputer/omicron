@@ -11,12 +11,17 @@
 // allow if that changes (https://github.com/oxidecomputer/usdt/issues/133).
 #![allow(clippy::result_large_err)]
 
+use crate::bootstrap::agent::BootstrapError;
+use crate::bootstrap::params::StartSledAgentRequest;
+use crate::bootstrap::views::SledAgentResponse;
 use crate::config::Config;
 use crate::server::Server;
 use crate::services::ServiceManager;
 use crate::storage_manager::StorageManager;
 use crate::storage_manager::StorageResources;
+use bootstore::schemes::v0 as bootstore;
 use camino::Utf8PathBuf;
+use ddm_admin_client::Client as DdmAdminClient;
 use dropshot::HttpServer;
 use futures::Future;
 use omicron_common::api::internal::shared::RackNetworkConfig;
@@ -25,6 +30,8 @@ use sled_hardware::HardwareUpdate;
 use slog::Logger;
 use std::net::Ipv6Addr;
 use tokio::sync::broadcast;
+use tokio::sync::mpsc;
+use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 
 mod bootstrap;
@@ -89,38 +96,6 @@ impl SledAgent {
             "bootstrapping",
         )
         .await?;
-        /*
-        let bootstrap = loop {
-            tokio::select! {
-                // Cancel-safe per the docs on `broadcast::Receiver::recv()`.
-                hardware_update = hardware_monitor.recv() => {
-                    info!(
-                        startup_log,
-                        "Handling hardware update message while bootstrapping";
-                        "update" => ?hardware_update,
-                    );
-
-                    // We are pre-trust-quorum and therefore do not yet want to
-                    // set up the underlay network.
-                    let underlay_network = None;
-                    handle_hardware_update(hardware_update,
-                        &hardware_manager,
-                        &service_manager,
-                        &storage_manager,
-                        underlay_network,
-                        &startup_log,
-                    ).await;
-                }
-
-                // Cancel-safe: we're using a `&mut Future`; dropping the
-                // reference does not cancel the underlying future.
-                bootstrap_result = &mut bootstrap_fut => {
-                    let bootstrap = bootstrap_result?;
-                    break bootstrap;
-                }
-            }
-        };
-        */
 
         // Bootstrapping complete: we're now running the bootstrap servers, but
         // not yet receiving on the channels that those use to init or reset our
@@ -199,10 +174,20 @@ impl SledAgent {
         // Spawn our version of `main()`; it runs until told to exit.
         // TODO-FIXME how do we tell it to exit?
         let sled_agent_main_task = tokio::spawn(sled_agent_main(
+            config,
+            hardware_monitor,
             state,
+            sled_init_rx,
+            sled_reset_rx,
+            hardware_manager,
+            service_manager,
+            storage_manager,
+            ddm_admin_localhost_client,
             bootstrap_http_server,
+            bootstore_node_handle,
             sprockets_server_handle,
             key_manager_handle,
+            base_log,
         ));
 
         Ok(Self { sled_agent_main_task })
@@ -218,16 +203,155 @@ enum SledAgentState {
     ServerStarted(Server),
 }
 
+impl SledAgentState {
+    fn switch_zone_underlay_info(
+        &self,
+    ) -> Option<(Ipv6Addr, Option<&RackNetworkConfig>)> {
+        match self {
+            SledAgentState::Bootstrapping => None,
+            SledAgentState::ServerStarted(server) => {
+                Some(server.sled_agent().switch_zone_underlay_info())
+            }
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)] // TODO-john FIXME
 async fn sled_agent_main(
-    _state: SledAgentState,
-    //_bootstore: BootstoreHandles,
+    config: Config,
+    mut hardware_monitor: broadcast::Receiver<HardwareUpdate>,
+    mut state: SledAgentState,
+    mut sled_init_rx: mpsc::Receiver<(
+        StartSledAgentRequest,
+        oneshot::Sender<Result<SledAgentResponse, String>>,
+    )>,
+    mut sled_reset_rx: mpsc::Receiver<
+        oneshot::Sender<Result<(), BootstrapError>>,
+    >,
+    hardware_manager: HardwareManager,
+    service_manager: ServiceManager,
+    storage_manager: StorageManager,
+    ddm_admin_localhost_client: DdmAdminClient,
     _bootstrap_http_server: HttpServer<BootstrapServerContext>,
+    bootstore_node_handle: bootstore::NodeHandle,
     _sprockets_server_handle: JoinHandle<()>,
     _key_manager_handle: JoinHandle<()>,
+    base_log: Logger,
 ) {
+    let log = base_log.new(o!("component" => "SledAgentMain"));
+    loop {
+        // TODO-correctness We pause handling hardware update messages while we
+        // handle sled init/reset requests - is that okay?
+        tokio::select! {
+            // Cancel-safe per the docs on `broadcast::Receiver::recv()`.
+            hardware_update = hardware_monitor.recv() => {
+                info!(
+                    log,
+                    "Handling hardware update message";
+                    "phase" => "sled-agent-main",
+                    "update" => ?hardware_update,
+                );
+
+                // TODO are these choices correct? This tries to match the
+                // previous behavior when SledAgent monitored hardware itself.
+                let should_notify_nexus = match &hardware_update {
+                    Ok(HardwareUpdate::TofinoDeviceChange)
+                    | Err(broadcast::error::RecvError::Lagged(_)) => true,
+                    _ => false,
+                };
+
+                handle_hardware_update(
+                    hardware_update,
+                    &hardware_manager,
+                    &service_manager,
+                    &storage_manager,
+                    state.switch_zone_underlay_info(),
+                    &log,
+                ).await;
+
+                if should_notify_nexus {
+                    match &state {
+                        SledAgentState::Bootstrapping => (),
+                        SledAgentState::ServerStarted(server) => {
+                            server.sled_agent().notify_nexus_about_self(&log);
+                        }
+                    }
+                }
+            }
+
+            // Cancel-safe per the docs on `mpsc::Receiver::recv()`.
+            Some((request, response_tx)) = sled_init_rx.recv() => {
+                match &state {
+                    SledAgentState::Bootstrapping => {
+                        let response = match sled_agent::start(
+                            &config,
+                            &request,
+                            &bootstore_node_handle,
+                            &service_manager,
+                            &storage_manager,
+                            &ddm_admin_localhost_client,
+                            &base_log,
+                            &log,
+                        ).await {
+                            Ok(server) => {
+                                state = SledAgentState::ServerStarted(server);
+                                Ok(SledAgentResponse { id: request.id })
+                            }
+                            Err(err) => {
+                                Err(format!("{err:#}"))
+                            }
+                        };
+                        _ = response_tx.send(response);
+                    }
+                    SledAgentState::ServerStarted(server) => {
+                        info!(log, "Sled Agent already loaded");
+
+                        let sled_address = request.sled_address();
+                        let response = if server.id() != request.id {
+                            Err(format!(
+                                "Sled Agent already running with UUID {}, \
+                                 but {} was requested",
+                                server.id(),
+                                request.id,
+                            ))
+                        } else if &server.address().ip() != sled_address.ip() {
+                            Err(format!(
+                                "Sled Agent already running on address {}, \
+                                 but {} was requested",
+                                server.address().ip(),
+                                sled_address.ip(),
+                            ))
+                        } else {
+                            Ok(SledAgentResponse { id: server.id() })
+                        };
+
+                        _ = response_tx.send(response);
+                    }
+                }
+            }
+
+            // Cancel-safe per the docs on `mpsc::Receiver::recv()`.
+            Some(response_tx) = sled_reset_rx.recv() => {
+                // Try to reset the sled, but do not exit early on error.
+                let result = async {
+                    bootstrap::uninstall_zones().await?;
+                    bootstrap::uninstall_sled_local_config(
+                        storage_manager.resources(),
+                    ).await?;
+                    bootstrap::uninstall_networking(&log).await?;
+                    bootstrap::uninstall_storage(&log).await?;
+                    Ok::<(), BootstrapError>(())
+                }
+                .await;
+
+                _ = response_tx.send(result);
+            }
+        }
+    }
 }
 
 // Helper function to wait for `fut` while handling any updates about hardware.
+#[allow(clippy::too_many_arguments)] // TODO maybe combine some into a struct?
 async fn wait_while_handling_hardware_updates<F: Future<Output = T>, T>(
     fut: F,
     hardware_monitor: &mut broadcast::Receiver<HardwareUpdate>,
