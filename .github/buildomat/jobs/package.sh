@@ -2,7 +2,7 @@
 #:
 #: name = "helios / package"
 #: variety = "basic"
-#: target = "helios-latest"
+#: target = "helios-2.0"
 #: rust_toolchain = "1.70.0"
 #: output_rules = [
 #:	"=/work/version.txt",
@@ -55,11 +55,12 @@ ptime -m cargo run --locked --release --bin omicron-package -- \
 files=(
 	out/*.tar
 	out/target/test
-	out/softnpu/*
+	out/npuzone/*
 	package-manifest.toml
 	smf/sled-agent/non-gimlet/config.toml
 	target/release/omicron-package
 	tools/create_virtual_hardware.sh
+    tools/virtual_hardware.sh
 	tools/scrimlet/*
 )
 
@@ -85,7 +86,7 @@ ptime -m cargo run --locked --release --bin omicron-package -- \
   -t host target create -i standard -m gimlet -s asic
 ptime -m cargo run --locked --release --bin omicron-package -- \
   -t host package
-stamp_packages omicron-sled-agent maghemite propolis-server
+stamp_packages omicron-sled-agent maghemite propolis-server overlay
 
 # Create global zone package @ /work/global-zone-packages.tar.gz
 ptime -m ./tools/build-global-zone-packages.sh "$tarball_src_dir" /work
@@ -102,18 +103,20 @@ ptime -m ./tools/build-global-zone-packages.sh "$tarball_src_dir" /work
 # should be included in the OS ramdisk.
 mkdir -p /work/zones
 zones=(
-	out/clickhouse.tar.gz
-	out/cockroachdb.tar.gz
-	out/crucible-pantry.tar.gz
-	out/crucible.tar.gz
-	out/external-dns.tar.gz
-	out/internal-dns.tar.gz
-	out/omicron-nexus.tar.gz
-	out/oximeter-collector.tar.gz
-	out/propolis-server.tar.gz
-	out/switch-asic.tar.gz
-	out/switch-softnpu.tar.gz
-	out/ntp.tar.gz
+  out/clickhouse.tar.gz
+  out/cockroachdb.tar.gz
+  out/crucible-pantry.tar.gz
+  out/crucible.tar.gz
+  out/external-dns.tar.gz
+  out/internal-dns.tar.gz
+  out/omicron-nexus.tar.gz
+  out/oximeter-collector.tar.gz
+  out/propolis-server.tar.gz
+  out/switch-*.tar.gz
+  out/ntp.tar.gz
+  out/omicron-gateway-softnpu.tar.gz
+  out/omicron-gateway-asic.tar.gz
+  out/overlay.tar.gz
 )
 cp "${zones[@]}" /work/zones/
 

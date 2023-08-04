@@ -22,6 +22,8 @@ use std::collections::BTreeSet;
 use std::net::IpAddr;
 use uuid::Uuid;
 
+use super::params::PhysicalDiskKind;
+
 // SILOS
 
 /// View of a Silo
@@ -340,6 +342,8 @@ pub struct PhysicalDisk {
     pub vendor: String,
     pub serial: String,
     pub model: String,
+
+    pub form_factor: PhysicalDiskKind,
 }
 
 // SILO USERS

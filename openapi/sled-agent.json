@@ -841,11 +841,15 @@
           },
           "name": {
             "$ref": "#/components/schemas/DatasetName"
+          },
+          "service_address": {
+            "type": "string"
           }
         },
         "required": [
           "id",
-          "name"
+          "name",
+          "service_address"
         ]
       },
       "DiskEnsureBody": {
@@ -1909,6 +1913,14 @@
           {
             "type": "object",
             "properties": {
+              "external_dns_servers": {
+                "description": "External DNS servers Nexus can use to resolve external hosts.",
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "format": "ip"
+                }
+              },
               "external_ip": {
                 "description": "The address at which the external nexus server is reachable.",
                 "type": "string",
@@ -1918,10 +1930,9 @@
                 "description": "Whether Nexus's external endpoint should use TLS",
                 "type": "boolean"
               },
-              "internal_ip": {
+              "internal_address": {
                 "description": "The address at which the internal nexus server is reachable.",
-                "type": "string",
-                "format": "ipv6"
+                "type": "string"
               },
               "nic": {
                 "description": "The service vNIC providing external connectivity using OPTE.",
@@ -1939,9 +1950,10 @@
               }
             },
             "required": [
+              "external_dns_servers",
               "external_ip",
               "external_tls",
-              "internal_ip",
+              "internal_address",
               "nic",
               "type"
             ]
@@ -1985,6 +1997,17 @@
               "dns_address": {
                 "type": "string"
               },
+              "gz_address": {
+                "description": "The addresses in the global zone which should be created\n\nFor the DNS service, which exists outside the sleds's typical subnet - adding an address in the GZ is necessary to allow inter-zone traffic routing.",
+                "type": "string",
+                "format": "ipv6"
+              },
+              "gz_address_index": {
+                "description": "The address is also identified with an auxiliary bit of information to ensure that the created global zone address can have a unique name.",
+                "type": "integer",
+                "format": "uint32",
+                "minimum": 0
+              },
               "http_address": {
                 "type": "string"
               },
@@ -1997,6 +2020,8 @@
             },
             "required": [
               "dns_address",
+              "gz_address",
+              "gz_address_index",
               "http_address",
               "type"
             ]
@@ -2004,6 +2029,9 @@
           {
             "type": "object",
             "properties": {
+              "address": {
+                "type": "string"
+              },
               "type": {
                 "type": "string",
                 "enum": [
@@ -2012,12 +2040,16 @@
               }
             },
             "required": [
+              "address",
               "type"
             ]
           },
           {
             "type": "object",
             "properties": {
+              "address": {
+                "type": "string"
+              },
               "type": {
                 "type": "string",
                 "enum": [
@@ -2026,16 +2058,21 @@
               }
             },
             "required": [
+              "address",
               "type"
             ]
           },
           {
             "type": "object",
             "properties": {
+              "address": {
+                "type": "string"
+              },
               "dns_servers": {
                 "type": "array",
                 "items": {
-                  "type": "string"
+                  "type": "string",
+                  "format": "ip"
                 }
               },
               "domain": {
@@ -2072,6 +2109,7 @@
               }
             },
             "required": [
+              "address",
               "dns_servers",
               "nic",
               "ntp_servers",
@@ -2082,10 +2120,14 @@
           {
             "type": "object",
             "properties": {
+              "address": {
+                "type": "string"
+              },
               "dns_servers": {
                 "type": "array",
                 "items": {
-                  "type": "string"
+                  "type": "string",
+                  "format": "ip"
                 }
               },
               "domain": {
@@ -2106,6 +2148,7 @@
               }
             },
             "required": [
+              "address",
               "dns_servers",
               "ntp_servers",
               "type"
@@ -2114,6 +2157,9 @@
           {
             "type": "object",
             "properties": {
+              "address": {
+                "type": "string"
+              },
               "type": {
                 "type": "string",
                 "enum": [
@@ -2122,12 +2168,16 @@
               }
             },
             "required": [
+              "address",
               "type"
             ]
           },
           {
             "type": "object",
             "properties": {
+              "address": {
+                "type": "string"
+              },
               "type": {
                 "type": "string",
                 "enum": [
@@ -2136,12 +2186,16 @@
               }
             },
             "required": [
+              "address",
               "type"
             ]
           },
           {
             "type": "object",
             "properties": {
+              "address": {
+                "type": "string"
+              },
               "type": {
                 "type": "string",
                 "enum": [
@@ -2150,6 +2204,7 @@
               }
             },
             "required": [
+              "address",
               "type"
             ]
           }
@@ -2174,14 +2229,6 @@
                 "$ref": "#/components/schemas/DatasetRequest"
               }
             ]
-          },
-          "gz_addresses": {
-            "default": [],
-            "type": "array",
-            "items": {
-              "type": "string",
-              "format": "ipv6"
-            }
           },
           "id": {
             "type": "string",

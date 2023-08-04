@@ -353,6 +353,10 @@
           }
         ]
       },
+      "Ipv4Network": {
+        "type": "string",
+        "pattern": "^((25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.){3}(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\/(3[0-2]|[0-2]?[0-9])$"
+      },
       "Ipv4Range": {
         "description": "A non-decreasing IPv4 address range, inclusive of both ends.\n\nThe first address must be less than or equal to the last address.",
         "type": "object",
@@ -446,7 +450,8 @@
             "description": "The external DNS server addresses.",
             "type": "array",
             "items": {
-              "type": "string"
+              "type": "string",
+              "format": "ip"
             }
           },
           "external_certificates": {
@@ -454,6 +459,14 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/Certificate"
+            }
+          },
+          "external_dns_ips": {
+            "description": "Service IP addresses on which we run external DNS servers.\n\nEach address must be present in `internal_services_ip_pool_ranges`.",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "ip"
             }
           },
           "external_dns_zone_name": {
@@ -483,12 +496,6 @@
               }
             ]
           },
-          "rack_secret_threshold": {
-            "description": "The minimum number of sleds required to unlock the rack secret.\n\nIf this value is less than 2, no rack secret will be created on startup; this is the typical case for single-server test/development.",
-            "type": "integer",
-            "format": "uint",
-            "minimum": 0
-          },
           "rack_subnet": {
             "type": "string",
             "format": "ipv6"
@@ -500,16 +507,24 @@
                 "$ref": "#/components/schemas/RecoverySiloConfig"
               }
             ]
+          },
+          "trust_quorum_peers": {
+            "nullable": true,
+            "description": "The set of peer_ids required to initialize trust quorum\n\nThe value is `None` if we are not using trust quorum",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Baseboard"
+            }
           }
         },
         "required": [
           "bootstrap_discovery",
           "dns_servers",
           "external_certificates",
+          "external_dns_ips",
           "external_dns_zone_name",
           "internal_services_ip_pool_ranges",
           "ntp_servers",
-          "rack_secret_threshold",
           "rack_subnet",
           "recovery_silo"
         ]
@@ -518,11 +533,6 @@
         "description": "Initial network configuration",
         "type": "object",
         "properties": {
-          "gateway_ip": {
-            "description": "Gateway address",
-            "type": "string",
-            "format": "ipv4"
-          },
           "infra_ip_first": {
             "description": "First ip address to be used for configuring network infrastructure",
             "type": "string",
@@ -533,47 +543,18 @@
             "type": "string",
             "format": "ipv4"
           },
-          "uplink_ip": {
-            "description": "IP Address to apply to switchport (must be in infra_ip pool)",
-            "type": "string",
-            "format": "ipv4"
-          },
-          "uplink_port": {
-            "description": "Switchport to use for external connectivity",
-            "type": "string"
-          },
-          "uplink_port_fec": {
-            "description": "Forward Error Correction setting for the uplink port",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/PortFec"
-              }
-            ]
-          },
-          "uplink_port_speed": {
-            "description": "Speed for the Switchport",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/PortSpeed"
-              }
-            ]
-          },
-          "uplink_vid": {
-            "nullable": true,
-            "description": "VLAN id to use for uplink",
-            "type": "integer",
-            "format": "uint16",
-            "minimum": 0
+          "uplinks": {
+            "description": "Uplinks for connecting the rack to external networks",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UplinkConfig"
+            }
           }
         },
         "required": [
-          "gateway_ip",
           "infra_ip_first",
           "infra_ip_last",
-          "uplink_ip",
-          "uplink_port",
-          "uplink_port_fec",
-          "uplink_port_speed"
+          "uplinks"
         ]
       },
       "RackOperationStatus": {
@@ -769,6 +750,86 @@
       "SemverVersion": {
         "type": "string",
         "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$"
+      },
+      "SwitchLocation": {
+        "description": "Identifies switch physical location",
+        "oneOf": [
+          {
+            "description": "Switch in upper slot",
+            "type": "string",
+            "enum": [
+              "switch0"
+            ]
+          },
+          {
+            "description": "Switch in lower slot",
+            "type": "string",
+            "enum": [
+              "switch1"
+            ]
+          }
+        ]
+      },
+      "UplinkConfig": {
+        "type": "object",
+        "properties": {
+          "gateway_ip": {
+            "description": "Gateway address",
+            "type": "string",
+            "format": "ipv4"
+          },
+          "switch": {
+            "description": "Switch to use for uplink",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SwitchLocation"
+              }
+            ]
+          },
+          "uplink_cidr": {
+            "description": "IP Address and prefix (e.g., `192.168.0.1/16`) to apply to switchport (must be in infra_ip pool)",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Ipv4Network"
+              }
+            ]
+          },
+          "uplink_port": {
+            "description": "Switchport to use for external connectivity",
+            "type": "string"
+          },
+          "uplink_port_fec": {
+            "description": "Forward Error Correction setting for the uplink port",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PortFec"
+              }
+            ]
+          },
+          "uplink_port_speed": {
+            "description": "Speed for the Switchport",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PortSpeed"
+              }
+            ]
+          },
+          "uplink_vid": {
+            "nullable": true,
+            "description": "VLAN id to use for uplink",
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "gateway_ip",
+          "switch",
+          "uplink_cidr",
+          "uplink_port",
+          "uplink_port_fec",
+          "uplink_port_speed"
+        ]
       },
       "UserId": {
         "description": "Names must begin with a lower case ASCII letter, be composed exclusively of lowercase ASCII, uppercase ASCII, numbers, and '-', and may not end with a '-'. Names cannot be a UUID though they may contain a UUID.",

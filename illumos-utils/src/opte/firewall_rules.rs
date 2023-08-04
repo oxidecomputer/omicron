@@ -61,41 +61,39 @@ impl FromVpcFirewallRule for VpcFirewallRule {
     }
 
     fn hosts(&self) -> Vec<Address> {
-        self.filter_hosts.as_ref().map_or_else(
-            || vec![Address::Any],
-            |hosts| {
-                hosts
-                    .iter()
-                    .map(|host| match host {
-                        HostIdentifier::Ip(IpNet::V4(net))
-                            if net.prefix() == 32 =>
-                        {
-                            Address::Ip(IpAddr::Ip4(net.ip().into()))
-                        }
-                        HostIdentifier::Ip(IpNet::V4(net)) => {
-                            Address::Subnet(IpCidr::Ip4(Ipv4Cidr::new(
-                                net.ip().into(),
-                                Ipv4PrefixLen::new(net.prefix()).unwrap(),
-                            )))
-                        }
-                        HostIdentifier::Ip(IpNet::V6(net))
-                            if net.prefix() == 128 =>
-                        {
-                            Address::Ip(IpAddr::Ip6(net.ip().into()))
-                        }
-                        HostIdentifier::Ip(IpNet::V6(net)) => {
-                            Address::Subnet(IpCidr::Ip6(Ipv6Cidr::new(
-                                net.ip().into(),
-                                Ipv6PrefixLen::new(net.prefix()).unwrap(),
-                            )))
-                        }
-                        HostIdentifier::Vpc(vni) => {
-                            Address::Vni(Vni::new(u32::from(*vni)).unwrap())
-                        }
-                    })
-                    .collect::<Vec<Address>>()
-            },
-        )
+        match self.filter_hosts {
+            Some(ref hosts) if hosts.len() > 0 => hosts
+                .iter()
+                .map(|host| match host {
+                    HostIdentifier::Ip(IpNet::V4(net))
+                        if net.prefix() == 32 =>
+                    {
+                        Address::Ip(IpAddr::Ip4(net.ip().into()))
+                    }
+                    HostIdentifier::Ip(IpNet::V4(net)) => {
+                        Address::Subnet(IpCidr::Ip4(Ipv4Cidr::new(
+                            net.ip().into(),
+                            Ipv4PrefixLen::new(net.prefix()).unwrap(),
+                        )))
+                    }
+                    HostIdentifier::Ip(IpNet::V6(net))
+                        if net.prefix() == 128 =>
+                    {
+                        Address::Ip(IpAddr::Ip6(net.ip().into()))
+                    }
+                    HostIdentifier::Ip(IpNet::V6(net)) => {
+                        Address::Subnet(IpCidr::Ip6(Ipv6Cidr::new(
+                            net.ip().into(),
+                            Ipv6PrefixLen::new(net.prefix()).unwrap(),
+                        )))
+                    }
+                    HostIdentifier::Vpc(vni) => {
+                        Address::Vni(Vni::new(u32::from(*vni)).unwrap())
+                    }
+                })
+                .collect(),
+            _ => vec![Address::Any],
+        }
     }
 
     fn ports(&self) -> Ports {
@@ -107,7 +105,7 @@ impl FromVpcFirewallRule for VpcFirewallRule {
                         (range.first.0.get()..=range.last.0.get())
                             .collect::<Vec<u16>>()
                     })
-                    .collect::<Vec<u16>>(),
+                    .collect(),
             ),
             _ => Ports::Any,
         }
@@ -118,21 +116,19 @@ impl FromVpcFirewallRule for VpcFirewallRule {
     }
 
     fn protos(&self) -> Vec<ProtoFilter> {
-        self.filter_protocols.as_ref().map_or_else(
-            || vec![ProtoFilter::Any],
-            |protos| {
-                protos
-                    .iter()
-                    .map(|proto| {
-                        ProtoFilter::Proto(match proto {
-                            VpcFirewallRuleProtocol::Tcp => Protocol::TCP,
-                            VpcFirewallRuleProtocol::Udp => Protocol::UDP,
-                            VpcFirewallRuleProtocol::Icmp => Protocol::ICMP,
-                        })
+        match self.filter_protocols {
+            Some(ref protos) if protos.len() > 0 => protos
+                .iter()
+                .map(|proto| {
+                    ProtoFilter::Proto(match proto {
+                        VpcFirewallRuleProtocol::Tcp => Protocol::TCP,
+                        VpcFirewallRuleProtocol::Udp => Protocol::UDP,
+                        VpcFirewallRuleProtocol::Icmp => Protocol::ICMP,
                     })
-                    .collect::<Vec<ProtoFilter>>()
-            },
-        )
+                })
+                .collect(),
+            _ => vec![ProtoFilter::Any],
+        }
     }
 }
 

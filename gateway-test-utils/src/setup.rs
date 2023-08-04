@@ -68,6 +68,7 @@ pub async fn test_setup(
         sp_port,
         server_config,
         &mut sp_sim_config,
+        None,
     )
     .await
 }
@@ -97,9 +98,14 @@ pub async fn test_setup_with_config(
     sp_port: SpPort,
     mut server_config: omicron_gateway::Config,
     sp_sim_config: &sp_sim::Config,
+    listen_addr: Option<SocketAddrV6>,
 ) -> GatewayTestContext {
     // Can't be `const` because `SocketAddrV6::new()` isn't const yet
     let localhost_port_0 = SocketAddrV6::new(Ipv6Addr::LOCALHOST, 0, 0, 0);
+    let mut addresses = vec![localhost_port_0];
+    if let Some(addr) = listen_addr {
+        addresses.push(addr);
+    };
 
     // Use log settings from the server config and ignore log settings in
     // sp_sim_config; we'll give it the same logger as the server
@@ -138,8 +144,7 @@ pub async fn test_setup_with_config(
     // Start gateway server
     let rack_id = Uuid::parse_str(RACK_UUID).unwrap();
 
-    let args =
-        MgsArguments { id: Uuid::new_v4(), addresses: vec![localhost_port_0] };
+    let args = MgsArguments { id: Uuid::new_v4(), addresses };
     let server = omicron_gateway::Server::start(
         server_config.clone(),
         args,

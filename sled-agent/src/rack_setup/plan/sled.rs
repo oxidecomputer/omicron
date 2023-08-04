@@ -7,10 +7,11 @@
 use crate::bootstrap::{
     config::BOOTSTRAP_AGENT_RACK_INIT_PORT, params::StartSledAgentRequest,
 };
-use crate::ledger::{Ledger, Ledgerable};
 use crate::rack_setup::config::SetupServiceConfig as Config;
 use crate::storage_manager::StorageResources;
 use camino::Utf8PathBuf;
+use omicron_common::ledger::{self, Ledger, Ledgerable};
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use slog::Logger;
 use std::collections::{HashMap, HashSet};
@@ -29,7 +30,7 @@ pub enum PlanError {
     },
 
     #[error("Failed to access ledger: {0}")]
-    Ledger(#[from] crate::ledger::Error),
+    Ledger(#[from] ledger::Error),
 }
 
 impl Ledgerable for Plan {
@@ -38,9 +39,9 @@ impl Ledgerable for Plan {
     }
     fn generation_bump(&mut self) {}
 }
-const RSS_SLED_PLAN_FILENAME: &str = "rss-sled-plan.toml";
+const RSS_SLED_PLAN_FILENAME: &str = "rss-sled-plan.json";
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct Plan {
     pub rack_id: Uuid,
     pub sleds: HashMap<SocketAddrV6, StartSledAgentRequest>,
@@ -78,6 +79,7 @@ impl Plan {
         config: &Config,
         storage: &StorageResources,
         bootstrap_addrs: HashSet<Ipv6Addr>,
+        use_trust_quorum: bool,
     ) -> Result<Self, PlanError> {
         let rack_id = Uuid::new_v4();
 
@@ -101,6 +103,7 @@ impl Plan {
                     subnet,
                     ntp_servers: config.ntp_servers.clone(),
                     dns_servers: config.dns_servers.clone(),
+                    use_trust_quorum,
                     rack_id,
                 },
             )
@@ -127,5 +130,19 @@ impl Plan {
         ledger.commit().await?;
         info!(log, "Sled plan written to storage");
         Ok(plan)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_rss_sled_plan_schema() {
+        let schema = schemars::schema_for!(Plan);
+        expectorate::assert_contents(
+            "../schema/rss-sled-plan.json",
+            &serde_json::to_string_pretty(&schema).unwrap(),
+        );
     }
 }

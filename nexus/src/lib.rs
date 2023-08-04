@@ -31,7 +31,12 @@ use external_api::http_entrypoints::external_api;
 use internal_api::http_entrypoints::internal_api;
 use nexus_types::internal_api::params::ServiceKind;
 use omicron_common::address::IpRange;
+use omicron_common::api::internal::shared::{
+    ExternalPortDiscovery, SwitchLocation,
+};
+use omicron_common::FileKv;
 use slog::Logger;
+use std::collections::HashMap;
 use std::net::{SocketAddr, SocketAddrV6};
 use std::sync::Arc;
 use uuid::Uuid;
@@ -246,7 +251,12 @@ impl nexus_test_interface::NexusServer for Server {
                     internal_dns_zone_config,
                     external_dns_zone_name: external_dns_zone_name.to_owned(),
                     recovery_silo,
-                    external_port_count: 1,
+                    external_port_count: ExternalPortDiscovery::Static(
+                        HashMap::from([(
+                            SwitchLocation::Switch0,
+                            vec!["qsfp0".parse().unwrap()],
+                        )]),
+                    ),
                     rack_network_config: None,
                 },
             )
@@ -302,7 +312,7 @@ pub async fn run_server(config: &Config) -> Result<(), String> {
                 format!("initializing logger: {}", message)
             })?,
         );
-    let log = slog::Logger::root(drain.fuse(), slog::o!());
+    let log = slog::Logger::root(drain.fuse(), slog::o!(FileKv));
     if let slog_dtrace::ProbeRegistration::Failed(e) = registration {
         let msg = format!("failed to register DTrace probes: {}", e);
         error!(log, "{}", msg);

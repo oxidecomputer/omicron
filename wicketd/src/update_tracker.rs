@@ -9,6 +9,7 @@ use crate::artifacts::UpdatePlan;
 use crate::artifacts::WicketdArtifactStore;
 use crate::http_entrypoints::GetArtifactsAndEventReportsResponse;
 use crate::http_entrypoints::StartUpdateOptions;
+use crate::http_entrypoints::UpdateSimulatedResult;
 use crate::installinator_progress::IprStartReceiver;
 use crate::installinator_progress::IprUpdateTracker;
 use crate::mgs::make_mgs_client;
@@ -202,7 +203,7 @@ impl UpdateTracker {
 
             let event_buffer = Arc::new(StdMutex::new(EventBuffer::new(16)));
             let ipr_start_receiver =
-                self.ipr_update_tracker.register(update_id).await;
+                self.ipr_update_tracker.register(update_id);
 
             let update_cx = UpdateContext {
                 update_id,
@@ -635,6 +636,10 @@ impl UpdateDriver {
                 UpdateStepId::SpComponentUpdate,
                 "Updating RoT",
                 move |cx| async move {
+                    if let Some(result) = opts.test_simulate_rot_result {
+                        return simulate_result(result);
+                    }
+
                     let rot_interrogation =
                         rot_interrogation.into_value(cx.token()).await;
 
@@ -738,6 +743,10 @@ impl UpdateDriver {
                 UpdateStepId::SpComponentUpdate,
                 "Updating SP",
                 move |cx| async move {
+                    if let Some(result) = opts.test_simulate_sp_result {
+                        return simulate_result(result);
+                    }
+
                     let sp_current_version =
                         sp_current_version.into_value(cx.token()).await;
 
@@ -1274,6 +1283,25 @@ impl RotInterrogation {
     }
 }
 
+fn simulate_result(
+    result: UpdateSimulatedResult,
+) -> Result<StepResult<()>, UpdateTerminalError> {
+    match result {
+        UpdateSimulatedResult::Success => {
+            StepSuccess::new(()).with_message("Simulated success result").into()
+        }
+        UpdateSimulatedResult::Warning => {
+            StepWarning::new((), "Simulated warning result").into()
+        }
+        UpdateSimulatedResult::Skipped => {
+            StepSkipped::new((), "Simulated skipped result").into()
+        }
+        UpdateSimulatedResult::Failure => {
+            Err(UpdateTerminalError::SimulatedFailure)
+        }
+    }
+}
+
 struct UpdateContext {
     update_id: Uuid,
     sp: SpIdentifier,
@@ -1287,7 +1315,9 @@ impl UpdateContext {
     async fn process_installinator_reports<'engine>(
         &self,
         cx: &StepContext,
-        mut ipr_receiver: mpsc::Receiver<EventReport<InstallinatorSpec>>,
+        mut ipr_receiver: mpsc::UnboundedReceiver<
+            EventReport<InstallinatorSpec>,
+        >,
     ) -> anyhow::Result<WriteOutput> {
         let mut write_output = None;
 
@@ -1404,7 +1434,8 @@ impl UpdateContext {
         cx: &StepContext,
         mut ipr_start_receiver: IprStartReceiver,
         image_id: HostPhase2RecoveryImageId,
-    ) -> anyhow::Result<mpsc::Receiver<EventReport<InstallinatorSpec>>> {
+    ) -> anyhow::Result<mpsc::UnboundedReceiver<EventReport<InstallinatorSpec>>>
+    {
         const MGS_PROGRESS_POLL_INTERVAL: Duration = Duration::from_secs(3);
 
         // Waiting for the installinator to start is a little strange. It can't

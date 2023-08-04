@@ -9,6 +9,7 @@ license = "MPL-2.0"
 anyhow.workspace = true
 async-trait.workspace = true
 bhyve_api.workspace = true
+byteorder.workspace = true
 camino.workspace = true
 cfg-if.workspace = true
 debug-ignore.workspace = true

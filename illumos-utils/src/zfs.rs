@@ -9,9 +9,17 @@ use camino::Utf8PathBuf;
 use omicron_common::disk::DiskIdentity;
 use std::fmt;
 
+// These locations in the ramdisk must only be used by the switch zone.
+//
+// We need the switch zone online before we can create the U.2 drives and
+// encrypt the zpools during rack initialization. Without the switch zone we
+// cannot get the rack initialization request from wicketd in RSS which allows
+// us to  initialize the trust quorum and derive the encryption keys needed for
+// the U.2 disks.
 pub const ZONE_ZFS_RAMDISK_DATASET_MOUNTPOINT: &str = "/zone";
 pub const ZONE_ZFS_RAMDISK_DATASET: &str = "rpool/zone";
-const ZFS: &str = "/usr/sbin/zfs";
+
+pub const ZFS: &str = "/usr/sbin/zfs";
 pub const KEYPATH_ROOT: &str = "/var/run/oxide/";
 
 /// Error returned by [`Zfs::list_datasets`].
@@ -23,13 +31,21 @@ pub struct ListDatasetsError {
     err: ExecutionError,
 }
 
+#[derive(thiserror::Error, Debug)]
+pub enum DestroyDatasetErrorVariant {
+    #[error("Dataset not found")]
+    NotFound,
+    #[error(transparent)]
+    Other(ExecutionError),
+}
+
 /// Error returned by [`Zfs::destroy_dataset`].
 #[derive(thiserror::Error, Debug)]
 #[error("Could not destroy dataset {name}: {err}")]
 pub struct DestroyDatasetError {
     name: String,
     #[source]
-    err: ExecutionError,
+    pub err: DestroyDatasetErrorVariant,
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -138,6 +154,12 @@ pub struct EncryptionDetails {
     pub epoch: u64,
 }
 
+#[derive(Debug, Default)]
+pub struct SizeDetails {
+    pub quota: Option<usize>,
+    pub compression: Option<&'static str>,
+}
+
 impl Zfs {
     /// Lists all datasets within a pool or existing dataset.
     pub fn list_datasets(
@@ -169,9 +191,16 @@ impl Zfs {
     ) -> Result<(), DestroyDatasetError> {
         let mut command = std::process::Command::new(PFEXEC);
         let cmd = command.args(&[ZFS, "destroy", "-r", name]);
-        executor.execute(cmd).map_err(|err| DestroyDatasetError {
-            name: name.to_string(),
-            err,
+        executor.execute(cmd).map_err(|err| {
+            let variant = match err {
+                ExecutionError::CommandFailure(info)
+                    if info.stderr.contains("does not exist") =>
+                {
+                    DestroyDatasetErrorVariant::NotFound
+                }
+                _ => DestroyDatasetErrorVariant::Other(err),
+            };
+            DestroyDatasetError { name: name.to_string(), err: variant }
         })?;
         Ok(())
     }
@@ -186,11 +215,23 @@ impl Zfs {
         zoned: bool,
         do_format: bool,
         encryption_details: Option<EncryptionDetails>,
-        quota: Option<usize>,
+        size_details: Option<SizeDetails>,
     ) -> Result<(), EnsureFilesystemError> {
         let (exists, mounted) =
             Self::dataset_exists(executor, name, &mountpoint)?;
         if exists {
+            if let Some(SizeDetails { quota, compression }) = size_details {
+                // apply quota and compression mode (in case they've changed across
+                // sled-agent versions since creation)
+                Self::apply_properties(
+                    executor,
+                    name,
+                    &mountpoint,
+                    quota,
+                    compression,
+                )?;
+            }
+
             if encryption_details.is_none() {
                 // If the dataset exists, we're done. Unencrypted datasets are
                 // automatically mounted.
@@ -237,6 +278,7 @@ impl Zfs {
                 &epoch,
             ]);
         }
+
         cmd.args(&["-o", &format!("mountpoint={}", mountpoint), name]);
         executor.execute(cmd).map_err(|err| EnsureFilesystemError {
             name: name.to_string(),
@@ -244,14 +286,46 @@ impl Zfs {
             err: err.into(),
         })?;
 
-        // Apply any quota.
+        if let Some(SizeDetails { quota, compression }) = size_details {
+            // Apply any quota and compression mode.
+            Self::apply_properties(
+                executor,
+                name,
+                &mountpoint,
+                quota,
+                compression,
+            )?;
+        }
+
+        Ok(())
+    }
+
+    fn apply_properties(
+        executor: &BoxedExecutor,
+        name: &str,
+        mountpoint: &Mountpoint,
+        quota: Option<usize>,
+        compression: Option<&'static str>,
+    ) -> Result<(), EnsureFilesystemError> {
         if let Some(quota) = quota {
             if let Err(err) =
                 Self::set_value(executor, name, "quota", &format!("{quota}"))
             {
                 return Err(EnsureFilesystemError {
                     name: name.to_string(),
-                    mountpoint,
+                    mountpoint: mountpoint.clone(),
+                    // Take the execution error from the SetValueError
+                    err: err.err.into(),
+                });
+            }
+        }
+        if let Some(compression) = compression {
+            if let Err(err) =
+                Self::set_value(executor, name, "compression", compression)
+            {
+                return Err(EnsureFilesystemError {
+                    name: name.to_string(),
+                    mountpoint: mountpoint.clone(),
                     // Take the execution error from the SetValueError
                     err: err.err.into(),
                 });
@@ -396,8 +470,7 @@ pub fn get_all_omicron_datasets_for_delete(
         }
     }
 
-    // Collect all datasets for ramdisk-based Oxide zones,
-    // if any exist.
+    // Collect all datasets for ramdisk-based Oxide zones, if any exist.
     if let Ok(ramdisk_datasets) =
         Zfs::list_datasets(executor, &ZONE_ZFS_RAMDISK_DATASET)
     {
@@ -405,5 +478,6 @@ pub fn get_all_omicron_datasets_for_delete(
             datasets.push(format!("{}/{dataset}", ZONE_ZFS_RAMDISK_DATASET));
         }
     };
+
     Ok(datasets)
 }

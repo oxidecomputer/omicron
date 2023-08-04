@@ -742,8 +742,6 @@ pub struct IpPoolUpdate {
 
 // INSTANCES
 
-pub const MIN_MEMORY_SIZE_BYTES: u32 = 1 << 30; // 1 GiB
-
 /// Describes an attachment of an `InstanceNetworkInterface` to an `Instance`,
 /// at the time the instance is created.
 // NOTE: VPC's are an organizing concept for networking resources, not for
@@ -1064,8 +1062,6 @@ pub struct RouterRouteUpdate {
 
 // DISKS
 
-pub const MIN_DISK_SIZE_BYTES: u32 = 1 << 30; // 1 GiB
-
 #[derive(Copy, Clone, Debug, Deserialize, Serialize)]
 #[serde(try_from = "u32")] // invoke the try_from validation routine below
 pub struct BlockSize(pub u32);
@@ -1116,6 +1112,16 @@ impl JsonSchema for BlockSize {
             ..Default::default()
         })
     }
+}
+
+/// Describes the form factor of physical disks.
+#[derive(
+    Debug, Serialize, Deserialize, JsonSchema, Clone, Copy, PartialEq, Eq,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum PhysicalDiskKind {
+    M2,
+    U2,
 }
 
 /// Different sources for a disk
@@ -1220,6 +1226,7 @@ pub struct LoopbackAddressCreate {
     /// The containing the switch this loopback address will be configured on.
     pub rack_id: Uuid,
 
+    // TODO: #3604 Consider using `SwitchLocation` type instead of `Name` for `LoopbackAddressCreate.switch_location`
     /// The location of the switch within the rack this loopback address will be
     /// configured on.
     pub switch_location: Name,
@@ -1229,6 +1236,10 @@ pub struct LoopbackAddressCreate {
 
     /// The subnet mask to use for the address.
     pub mask: u8,
+
+    /// Address is an anycast address.
+    /// This allows the address to be assigned to multiple locations simultaneously.
+    pub anycast: bool,
 }
 
 /// Parameters for creating a port settings group.

@@ -13,6 +13,8 @@ use crate::svc::wait_for_service;
 use crate::zone::{AddressRequest, IPADM, ZONE_PREFIX};
 use camino::{Utf8Path, Utf8PathBuf};
 use ipnetwork::IpNetwork;
+#[cfg(target_os = "illumos")]
+use libc::pid_t;
 use omicron_common::backoff;
 use slog::error;
 use slog::info;
@@ -20,6 +22,7 @@ use slog::o;
 use slog::warn;
 use slog::Logger;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use uuid::Uuid;
 
 #[cfg(any(test, feature = "testing"))]
 use crate::zone::MockZones as Zones;
@@ -157,10 +160,15 @@ pub enum GetZoneError {
 #[cfg(target_os = "illumos")]
 mod zenter {
     use super::*;
+    use libc::ctid_t;
+    use libc::pid_t;
     use libc::zoneid_t;
     use std::ffi::c_int;
     use std::ffi::c_uint;
-    use std::ffi::CStr;
+    use std::ffi::{CStr, CString};
+    use std::fs::File;
+    use std::os::unix::prelude::FileExt;
+    use std::process;
 
     #[link(name = "contract")]
     extern "C" {
@@ -170,11 +178,66 @@ mod zenter {
         fn ct_pr_tmpl_set_param(fd: c_int, params: c_uint) -> c_int;
         fn ct_tmpl_activate(fd: c_int) -> c_int;
         fn ct_tmpl_clear(fd: c_int) -> c_int;
+        fn ct_ctl_abandon(fd: c_int) -> c_int;
     }
 
     #[link(name = "c")]
     extern "C" {
         pub fn zone_enter(zid: zoneid_t) -> c_int;
+    }
+
+    #[derive(thiserror::Error, Debug)]
+    pub enum AbandonContractError {
+        #[error("Error opening file {file}: {error}")]
+        Open { file: String, error: std::io::Error },
+
+        #[error("Error abandoning contract {ctid}: {error}")]
+        Abandon { ctid: ctid_t, error: std::io::Error },
+
+        #[error("Error closing file {file}: {error}")]
+        Close { file: String, error: std::io::Error },
+    }
+
+    pub fn get_contract(pid: pid_t) -> std::io::Result<ctid_t> {
+        // The offset of "id_t pr_contract" in struct psinfo which is an
+        // interface documented in proc(5).
+        const CONTRACT_OFFSET: u64 = 280;
+
+        let path = format!("/proc/{}/psinfo", pid);
+
+        let file = File::open(path)?;
+        let mut buffer = [0; 4];
+        file.read_exact_at(&mut buffer, CONTRACT_OFFSET)?;
+        Ok(ctid_t::from_ne_bytes(buffer))
+    }
+
+    pub fn abandon_contract(ctid: ctid_t) -> Result<(), AbandonContractError> {
+        let path = format!("/proc/{}/contracts/{}/ctl", process::id(), ctid);
+
+        let cpath = CString::new(path.clone()).unwrap();
+        let fd = unsafe { libc::open(cpath.as_ptr(), libc::O_WRONLY) };
+        if fd < 0 {
+            return Err(AbandonContractError::Open {
+                file: path,
+                error: std::io::Error::last_os_error(),
+            });
+        }
+        let ret = unsafe { ct_ctl_abandon(fd) };
+        if ret != 0 {
+            unsafe { libc::close(fd) };
+            return Err(AbandonContractError::Abandon {
+                ctid,
+                error: std::io::Error::from_raw_os_error(ret),
+            });
+        }
+        if unsafe { libc::close(fd) } != 0 {
+            return Err(AbandonContractError::Close {
+                file: path,
+                error: std::io::Error::last_os_error(),
+            });
+        }
+
+        Ok(())
     }
 
     // A Rust wrapper around the process contract template.
@@ -278,11 +341,11 @@ impl RunningZone {
     // another, if the task is swapped out at an await point. That would leave
     // the first thread's template in a modified state.
     //
-    // If we do need to make this method asynchronous, we will need to change the
-    // internals to avoid changing the thread's contract. One possible approach
-    // here would be to use `libscf` directly, rather than `exec`-ing `svccfg`
-    // directly in a forked child. That would obviate the need to work on the
-    // contract at all.
+    // If we do need to make this method asynchronous, we will need to change
+    // the internals to avoid changing the thread's contract. One possible
+    // approach here would be to use `libscf` directly, rather than `exec`-ing
+    // `svccfg` directly in a forked child. That would obviate the need to work
+    // on the contract at all.
     #[cfg(target_os = "illumos")]
     pub fn run_cmd<I, S>(&self, args: I) -> Result<String, RunCommandError>
     where
@@ -320,12 +383,46 @@ impl RunningZone {
         }
         let command = command.args(args);
 
+        let mut spawn = self.inner.executor.spawn(command).map_err(|err| {
+            RunCommandError { zone: self.name().to_string(), err }
+        })?;
+
+        // Record the process contract now in use by the child; the contract
+        // just created from the template that we applied to this thread
+        // moments ago. We need to abandon it once the child is finished
+        // executing.
+        // unwrap() safety - child.id() returns u32 but pid_t is i32.
+        // PID_MAX is 999999 so this will not overflow.
+        let child_pid: pid_t = spawn.child.id().try_into().unwrap();
+        let contract = zenter::get_contract(child_pid);
+
         // Capture the result, and be sure to clear the template for this
         // process itself before returning.
-        let res = self.inner.executor.execute(command).map_err(|err| {
-            RunCommandError { zone: self.name().to_string(), err }
+        let res = spawn.wait().map_err(|err| RunCommandError {
+            zone: self.name().to_string(),
+            err,
         });
         template.clear();
+
+        // Now abandon the contract that was used for the child.
+        match contract {
+            Err(e) => error!(
+                self.inner.log,
+                "Could not retrieve contract for pid {}: {}", child_pid, e
+            ),
+            Ok(ctid) => {
+                if let Err(e) = zenter::abandon_contract(ctid) {
+                    error!(
+                        self.inner.log,
+                        "Failed to abandon contract {} for pid {}: {}",
+                        ctid,
+                        child_pid,
+                        e
+                    );
+                }
+            }
+        }
+
         res.map(|output| String::from_utf8_lossy(&output.stdout).to_string())
     }
 
@@ -342,9 +439,11 @@ impl RunningZone {
         // that's actually run is irrelevant.
         let mut command = std::process::Command::new("echo");
         let command = command.args(args);
-        self.inner
-            .executor
-            .execute(command)
+        let mut spawn = self.inner.executor.spawn(command).map_err(|err| {
+            RunCommandError { zone: self.name().to_string(), err }
+        })?;
+        spawn
+            .wait()
             .map_err(|err| RunCommandError {
                 zone: self.name().to_string(),
                 err,
@@ -992,11 +1091,11 @@ impl InstalledZone {
     /// The zone name is based on:
     /// - A unique Oxide prefix ("oxz_")
     /// - The name of the zone type being hosted (e.g., "nexus")
-    /// - An optional, zone-unique identifier (typically a UUID).
+    /// - An optional, zone-unique UUID
     ///
     /// This results in a zone name which is distinct across different zpools,
     /// but stable and predictable across reboots.
-    pub fn get_zone_name(zone_type: &str, unique_name: Option<&str>) -> String {
+    pub fn get_zone_name(zone_type: &str, unique_name: Option<Uuid>) -> String {
         let mut zone_name = format!("{}{}", ZONE_PREFIX, zone_type);
         if let Some(suffix) = unique_name {
             zone_name.push_str(&format!("_{}", suffix));
@@ -1026,9 +1125,10 @@ impl InstalledZone {
         zone_root_path: &Utf8Path,
         zone_image_paths: &[Utf8PathBuf],
         zone_type: &str,
-        unique_name: Option<&str>,
+        unique_name: Option<Uuid>,
         datasets: &[zone::Dataset],
         filesystems: &[zone::Fs],
+        data_links: &[String],
         devices: &[zone::Device],
         opte_ports: Vec<(Port, PortTicket)>,
         bootstrap_vnic: Option<Link>,
@@ -1065,13 +1165,20 @@ impl InstalledZone {
                     .collect(),
             })?;
 
-        let net_device_names: Vec<String> = opte_ports
+        let mut net_device_names: Vec<String> = opte_ports
             .iter()
             .map(|(port, _)| port.vnic_name().to_string())
             .chain(std::iter::once(control_vnic.name().to_string()))
             .chain(bootstrap_vnic.as_ref().map(|vnic| vnic.name().to_string()))
             .chain(links.iter().map(|nic| nic.name().to_string()))
+            .chain(data_links.iter().map(|x| x.to_string()))
             .collect();
+
+        // There are many sources for device names. In some cases they can
+        // overlap, depending on the contents of user defined config files. This
+        // can cause zones to fail to start if duplicate data links are given.
+        net_device_names.sort();
+        net_device_names.dedup();
 
         Zones::install_omicron_zone(
             log,

@@ -25,13 +25,6 @@ pub const BOOTSTRAP_PREFIX: u16 = 0xfdb0;
 /// IPv6 prefix mask for bootstrap addresses.
 pub const BOOTSTRAP_MASK: u8 = 64;
 
-// Names of VNICs used as underlay devices for the xde driver.
-//
-// NOTE: These are only used on non-Gimlet systems. In that case, they are
-// expected to have been created by a run of
-// `./tools/create_virtual_hardware.sh`.
-const XDE_VNIC_NAMES: [&str; 2] = ["net0", "net1"];
-
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
     #[error(
@@ -58,8 +51,11 @@ pub enum Error {
 /// Convenience function that calls
 /// `ensure_links_have_global_zone_link_local_v6_addresses()` with the links
 /// returned by `find_chelsio_links()`.
-pub fn find_nics(executor: &BoxedExecutor) -> Result<Vec<AddrObject>, Error> {
-    let underlay_nics = find_chelsio_links(executor)?;
+pub fn find_nics(
+    executor: &BoxedExecutor,
+    config_data_links: &[String; 2],
+) -> Result<Vec<AddrObject>, Error> {
+    let underlay_nics = find_chelsio_links(executor, config_data_links)?;
 
     // Before these links have any consumers (eg. IP interfaces), set the MTU.
     // If we have previously set the MTU, do not attempt to re-set.
@@ -86,6 +82,7 @@ pub fn find_nics(executor: &BoxedExecutor) -> Result<Vec<AddrObject>, Error> {
 /// VNICs we use to emulate those Chelsio links.
 pub fn find_chelsio_links(
     executor: &BoxedExecutor,
+    config_data_links: &[String; 2],
 ) -> Result<Vec<PhysicalLink>, Error> {
     if is_gimlet().map_err(Error::SystemDetection)? {
         Dladm::list_physical(executor).map_err(Error::FindLinks).map(|links| {
@@ -95,7 +92,7 @@ pub fn find_chelsio_links(
                 .collect()
         })
     } else {
-        Ok(XDE_VNIC_NAMES
+        Ok(config_data_links
             .into_iter()
             .map(|name| PhysicalLink(name.to_string()))
             .collect())

@@ -6,8 +6,9 @@
 
 use itertools::Itertools;
 use slog::{debug, error, info, Logger};
+use std::io::Write;
 use std::os::unix::process::ExitStatusExt;
-use std::process::{Command, ExitStatus, Output};
+use std::process::{Command, ExitStatus, Output, Stdio};
 use std::str::from_utf8;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -21,7 +22,86 @@ pub type BoxedExecutor = Arc<dyn Executor>;
 /// - In production, this is usually simply a [HostExecutor].
 /// - Under test, this can be customized, and a [FakeExecutor] may be used.
 pub trait Executor: Send + Sync {
+    /// Executes a task, waiting for it to complete, and returning output.
     fn execute(&self, command: &mut Command) -> Result<Output, ExecutionError>;
+
+    /// Spawns a task, without waiting for it to complete.
+    fn spawn(
+        &self,
+        command: &mut Command,
+    ) -> Result<BoxedChild, ExecutionError>;
+}
+
+/// A wrapper around a spawned [Child] process.
+pub type BoxedChild = Box<dyn Child>;
+
+/// A child process spawned by the executor.
+pub trait Child: Send + Sync {
+    /// Accesses the stdin of the spawned child, as a Writer.
+    fn stdin(&mut self) -> Option<Box<dyn Write + Send>>;
+
+    /// Waits for the child to complete, and returns the output.
+    fn wait(&mut self) -> Result<Output, ExecutionError>;
+}
+
+/// A real, host-controlled child process
+pub struct SpawnedChild {
+    command_str: String,
+    child: Option<std::process::Child>,
+}
+
+impl Child for SpawnedChild {
+    fn stdin(&mut self) -> Option<Box<dyn Write + Send>> {
+        self.child
+            .as_mut()?
+            .stdin
+            .take()
+            .map(|s| Box::new(s) as Box<dyn Write + Send>)
+    }
+
+    fn wait(&mut self) -> Result<Output, ExecutionError> {
+        let output =
+            self.child.take().unwrap().wait_with_output().map_err(|err| {
+                ExecutionError::ExecutionStart {
+                    command: self.command_str.clone(),
+                    err,
+                }
+            })?;
+
+        if !output.status.success() {
+            return Err(output_to_exec_error(
+                self.command_str.clone(),
+                &output,
+            ));
+        }
+
+        Ok(output)
+    }
+}
+
+/// A child spawned by a [FakeExecutor].
+pub struct FakeChild {
+    command_str: String,
+}
+
+impl Child for FakeChild {
+    fn stdin(&mut self) -> Option<Box<dyn Write + Send>> {
+        // TODO: maybe a vecdeque? need to hook into the fakexecutor from which
+        // we spawned.
+        todo!();
+    }
+
+    fn wait(&mut self) -> Result<Output, ExecutionError> {
+        todo!()
+    }
+}
+
+fn to_string(command: &std::process::Command) -> String {
+    command
+        .get_args()
+        .map(|s| s.to_string_lossy().into())
+        .collect::<Vec<String>>()
+        .join(" ")
 }
 
 fn log_command(log: &Logger, id: u64, command: &Command) {
@@ -258,6 +338,7 @@ impl FakeExecutor {
         self
     }
 
+    /// Returns the list of all commands that have executed on the executor.
     pub fn all_operations(&self) -> Vec<CompletedCommand> {
         (*self.all_operations.lock().unwrap()).clone()
     }
@@ -271,27 +352,24 @@ impl Executor for FakeExecutor {
         // Call our handler function with the caller-provided function.
         let output = self.handler.lock().unwrap()(command);
 
-        // TODO: De-duplicate this with the HostExecutor
-        if !output.status.success() {
-            return Err(ExecutionError::CommandFailure(Box::new(
-                FailureInfo {
-                    command: command
-                        .get_args()
-                        .map(|s| s.to_string_lossy().into())
-                        .collect::<Vec<String>>()
-                        .join(" "),
-                    status: output.status,
-                    stdout: String::from_utf8_lossy(&output.stdout).to_string(),
-                    stderr: String::from_utf8_lossy(&output.stderr).to_string(),
-                },
-            )));
-        }
         log_output(&self.log, id, &output);
         self.all_operations
             .lock()
             .unwrap()
             .push(CompletedCommand::new(command, output.clone()));
+
+        if !output.status.success() {
+            return Err(output_to_exec_error(to_string(command), &output));
+        }
         Ok(output)
+    }
+
+    fn spawn(
+        &self,
+        command: &mut Command,
+    ) -> Result<BoxedChild, ExecutionError> {
+        let command_str = to_string(&command);
+        Ok(Box::new(FakeChild { command_str }))
     }
 }
 
@@ -324,20 +402,29 @@ impl Executor for HostExecutor {
         log_output(&self.log, id, &output);
 
         if !output.status.success() {
-            return Err(ExecutionError::CommandFailure(Box::new(
-                FailureInfo {
-                    command: command
-                        .get_args()
-                        .map(|s| s.to_string_lossy().into())
-                        .collect::<Vec<String>>()
-                        .join(" "),
-                    status: output.status,
-                    stdout: String::from_utf8_lossy(&output.stdout).to_string(),
-                    stderr: String::from_utf8_lossy(&output.stderr).to_string(),
-                },
-            )));
+            return Err(output_to_exec_error(to_string(&command), &output));
         }
         Ok(output)
+    }
+
+    fn spawn(
+        &self,
+        command: &mut Command,
+    ) -> Result<BoxedChild, ExecutionError> {
+        let command_str = to_string(&command);
+        Ok(Box::new(SpawnedChild {
+            child: Some(
+                command
+                    .stdout(Stdio::piped())
+                    .stderr(Stdio::piped())
+                    .spawn()
+                    .map_err(|err| ExecutionError::ExecutionStart {
+                    command: command_str.clone(),
+                    err,
+                })?,
+            ),
+            command_str,
+        }))
     }
 }
 
@@ -376,6 +463,18 @@ pub enum ExecutionError {
 
     #[error("Zone not running")]
     NotRunning,
+}
+
+pub fn output_to_exec_error(
+    command_str: String,
+    output: &std::process::Output,
+) -> ExecutionError {
+    ExecutionError::CommandFailure(Box::new(FailureInfo {
+        command: command_str,
+        status: output.status,
+        stdout: String::from_utf8_lossy(&output.stdout).to_string(),
+        stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+    }))
 }
 
 // We wrap this method in an inner module to make it possible to mock

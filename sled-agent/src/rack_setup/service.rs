@@ -16,8 +16,8 @@
 //! Rack setup occurs in distinct phases which are denoted by the prescence of
 //! configuration files.
 //!
-//! - /pool/int/UUID/config/rss-sled-plan.toml (Sled Plan)
-//! - /pool/int/UUID/config/rss-service-plan.toml (Service Plan)
+//! - /pool/int/UUID/config/rss-sled-plan.json (Sled Plan)
+//! - /pool/int/UUID/config/rss-service-plan.json (Service Plan)
 //! - /pool/int/UUID/config/rss-plan-completed.marker (Plan Execution Complete)
 //!
 //! ## Sled Plan
@@ -56,13 +56,15 @@
 
 use super::config::SetupServiceConfig as Config;
 use crate::bootstrap::config::BOOTSTRAP_AGENT_HTTP_PORT;
+use crate::bootstrap::early_networking::{
+    EarlyNetworkConfig, EarlyNetworkSetup, EarlyNetworkSetupError,
+};
 use crate::bootstrap::params::BootstrapAddressDiscovery;
 use crate::bootstrap::params::StartSledAgentRequest;
 use crate::bootstrap::rss_handle::BootstrapAgentHandle;
-use crate::ledger::{Ledger, Ledgerable};
 use crate::nexus::d2n_params;
 use crate::params::{
-    AutonomousServiceOnlyError, DatasetKind, ServiceType, ServiceZoneRequest,
+    AutonomousServiceOnlyError, ServiceType, ServiceZoneRequest,
     ServiceZoneService, TimeSync, ZoneType,
 };
 use crate::rack_setup::plan::service::{
@@ -72,41 +74,31 @@ use crate::rack_setup::plan::sled::{
     Plan as SledPlan, PlanError as SledPlanError,
 };
 use crate::storage_manager::StorageResources;
+use bootstore::schemes::v0 as bootstore;
 use camino::Utf8PathBuf;
 use ddm_admin_client::{Client as DdmAdminClient, DdmError};
-use dpd_client::types::{
-    LinkCreate, LinkId, LinkSettings, PortId, PortSettings, RouteSettingsV4,
-};
-use dpd_client::Client as DpdClient;
-use dpd_client::Ipv4Cidr;
 use internal_dns::resolver::{DnsError, Resolver as DnsResolver};
 use internal_dns::ServiceName;
 use nexus_client::{
     types as NexusTypes, Client as NexusClient, Error as NexusError,
 };
-use omicron_common::address::Ipv6Subnet;
-use omicron_common::address::{
-    get_sled_address, CLICKHOUSE_PORT, COCKROACH_PORT, CRUCIBLE_PANTRY_PORT,
-    CRUCIBLE_PORT, DENDRITE_PORT, DNS_HTTP_PORT, NEXUS_INTERNAL_PORT, NTP_PORT,
-    OXIMETER_PORT,
-};
-use omicron_common::api::internal::shared::{PortFec, PortSpeed};
+use omicron_common::address::get_sled_address;
+use omicron_common::api::internal::shared::ExternalPortDiscovery;
 use omicron_common::backoff::{
     retry_notify, retry_policy_internal_service_aggressive, BackoffError,
 };
+use omicron_common::ledger::{self, Ledger, Ledgerable};
 use serde::{Deserialize, Serialize};
 use sled_agent_client::{
     types as SledAgentTypes, Client as SledAgentClient, Error as SledAgentError,
 };
 use sled_hardware::underlay::BootstrapInterface;
 use slog::Logger;
+use std::collections::BTreeSet;
 use std::collections::{HashMap, HashSet};
 use std::iter;
-use std::net::IpAddr;
-use std::net::{Ipv6Addr, SocketAddr, SocketAddrV6};
+use std::net::{Ipv6Addr, SocketAddrV6};
 use thiserror::Error;
-
-static BOUNDARY_SERVICES_ADDR: &str = "fd00:99::1";
 
 /// Describes errors which may occur while operating the setup service.
 #[derive(Error, Debug)]
@@ -119,7 +111,7 @@ pub enum SetupServiceError {
     },
 
     #[error("Failed to access ledger: {0}")]
-    Ledger(#[from] crate::ledger::Error),
+    Ledger(#[from] ledger::Error),
 
     #[error("Cannot create plan for sled services: {0}")]
     ServicePlan(#[from] ServicePlanError),
@@ -159,6 +151,14 @@ pub enum SetupServiceError {
 
     #[error("Error during DNS lookup: {0}")]
     DnsResolver(#[from] internal_dns::resolver::ResolveError),
+
+    #[error("Bootstore error: {0}")]
+    Bootstore(#[from] bootstore::NodeRequestError),
+
+    // We used transparent, because `EarlyNetworkSetupError` contains a subset
+    // of error variants already in this type
+    #[error(transparent)]
+    EarlyNetworkSetup(#[from] EarlyNetworkSetupError),
 }
 
 // The workload / information allocated to a single sled.
@@ -178,17 +178,17 @@ impl RackSetupService {
     /// Arguments:
     /// - `log`: The logger.
     /// - `config`: The config file, which is used to setup the rack.
-    /// - `peer_monitor`: The mechanism by which the setup service discovers
-    ///   bootstrap agents on nearby sleds.
+    /// - `storage_resources`: All the disks and zpools managed by this sled
     /// - `local_bootstrap_agent`: Communication channel by which we can send
     ///   commands to our local bootstrap-agent (e.g., to initialize sled
+    /// - `bootstore` - A handle to call bootstore APIs
     ///   agents).
     pub(crate) fn new(
         log: Logger,
         config: Config,
         storage_resources: StorageResources,
         local_bootstrap_agent: BootstrapAgentHandle,
-        external_port_count: u8,
+        bootstore: bootstore::NodeHandle,
     ) -> Self {
         let handle = tokio::task::spawn(async move {
             let svc = ServiceInner::new(log.clone());
@@ -197,7 +197,7 @@ impl RackSetupService {
                     &config,
                     &storage_resources,
                     local_bootstrap_agent,
-                    external_port_count,
+                    bootstore,
                 )
                 .await
             {
@@ -234,32 +234,6 @@ impl RackSetupService {
     }
 }
 
-// The following two conversion functions translate the speed and fec types used
-// in the internal API to the types used in the dpd-client API.  The conversion
-// is done here, rather than with "impl From" at the definition, to avoid a
-// circular dependency between omicron-common and dpd.
-fn convert_speed(speed: &PortSpeed) -> dpd_client::types::PortSpeed {
-    match speed {
-        PortSpeed::Speed0G => dpd_client::types::PortSpeed::Speed0G,
-        PortSpeed::Speed1G => dpd_client::types::PortSpeed::Speed1G,
-        PortSpeed::Speed10G => dpd_client::types::PortSpeed::Speed10G,
-        PortSpeed::Speed25G => dpd_client::types::PortSpeed::Speed25G,
-        PortSpeed::Speed40G => dpd_client::types::PortSpeed::Speed40G,
-        PortSpeed::Speed50G => dpd_client::types::PortSpeed::Speed50G,
-        PortSpeed::Speed100G => dpd_client::types::PortSpeed::Speed100G,
-        PortSpeed::Speed200G => dpd_client::types::PortSpeed::Speed200G,
-        PortSpeed::Speed400G => dpd_client::types::PortSpeed::Speed400G,
-    }
-}
-
-fn convert_fec(fec: &PortFec) -> dpd_client::types::PortFec {
-    match fec {
-        PortFec::Firecode => dpd_client::types::PortFec::Firecode,
-        PortFec::None => dpd_client::types::PortFec::None,
-        PortFec::Rs => dpd_client::types::PortFec::Rs,
-    }
-}
-
 #[derive(Clone, Serialize, Deserialize, Default)]
 struct RssCompleteMarker {}
 
@@ -289,7 +263,6 @@ impl ServiceInner {
         let dur = std::time::Duration::from_secs(60);
         let client = reqwest::ClientBuilder::new()
             .connect_timeout(dur)
-            .timeout(dur)
             .build()
             .map_err(SetupServiceError::HttpClient)?;
         let client = SledAgentClient::new_with_client(
@@ -317,8 +290,13 @@ impl ServiceInner {
                 .map_err(BackoffError::transient)?;
             Ok::<(), BackoffError<SledAgentError<SledAgentTypes::Error>>>(())
         };
-        let log_failure = |error, _| {
-            warn!(self.log, "failed to initialize services"; "error" => ?error);
+        let log_failure = |error, delay| {
+            warn!(
+                self.log,
+                "failed to initialize services";
+                "error" => ?error,
+                "retry_after" => ?delay,
+            );
         };
         retry_notify(
             retry_policy_internal_service_aggressive(),
@@ -532,20 +510,10 @@ impl ServiceInner {
         config: &Config,
         sled_plan: &SledPlan,
         service_plan: &ServicePlan,
-        external_port_count: u8,
+        port_discovery_mode: ExternalPortDiscovery,
+        nexus_address: SocketAddrV6,
     ) -> Result<(), SetupServiceError> {
         info!(self.log, "Handing off control to Nexus");
-
-        let resolver = DnsResolver::new_from_subnet(
-            self.log.new(o!("component" => "DnsResolver")),
-            config.az_subnet(),
-        )
-        .expect("Failed to create DNS resolver");
-        let ip = resolver
-            .lookup_ip(ServiceName::Nexus)
-            .await
-            .expect("Failed to lookup IP");
-        let nexus_address = SocketAddr::new(ip, NEXUS_INTERNAL_PORT);
 
         info!(self.log, "Nexus address: {}", nexus_address.to_string());
 
@@ -573,246 +541,18 @@ impl ServiceInner {
                 .expect("Sled address in service plan, but not sled plan");
 
             for zone in &service_request.services {
-                for svc in &zone.services {
-                    // TODO-cleanup Here, we take the ServiceZoneRequests that
-                    // were constructed with the ServicePlan and turn them into
-                    // Nexus ServicePutRequest objects.  For Nexus, we need to
-                    // specify a SocketAddr -- both an IP address and a port on
-                    // which the service is listening.  The code here hardcodes
-                    // the default ports for each service.  This happens to be
-                    // correct because the ServicePlan uses the same hardcoded
-                    // ports when it sets up the DNS zone and the Sled Agent
-                    // uses the same hardcoded ports when configuring each of
-                    // these services.  It would be more robust to pick the
-                    // (hardcoded) port when constructing the ServicePlan and
-                    // plumb the SocketAddr (with port) everywhere that needs it
-                    // (including both here and DNS).  That way we don't bake
-                    // the port assumption into multiple places and we can also
-                    // more easily support things running on different ports
-                    // (which is useful in dev/test situations).
-                    let service_id = svc.id;
-                    let zone_id = Some(zone.id);
-                    match &svc.details {
-                        ServiceType::Nexus {
-                            external_ip,
-                            internal_ip: _,
-                            nic,
-                            ..
-                        } => {
-                            services.push(NexusTypes::ServicePutRequest {
-                                service_id,
-                                zone_id,
-                                sled_id,
-                                address: SocketAddrV6::new(
-                                    zone.addresses[0],
-                                    NEXUS_INTERNAL_PORT,
-                                    0,
-                                    0,
-                                )
-                                .to_string(),
-                                kind: NexusTypes::ServiceKind::Nexus {
-                                    external_address: *external_ip,
-                                    nic: NexusTypes::ServiceNic {
-                                        id: nic.id,
-                                        name: nic.name.clone(),
-                                        ip: nic.ip,
-                                        mac: nic.mac,
-                                    },
-                                },
-                            });
-                        }
-                        ServiceType::Dendrite { .. } => {
-                            services.push(NexusTypes::ServicePutRequest {
-                                service_id,
-                                zone_id,
-                                sled_id,
-                                address: SocketAddrV6::new(
-                                    zone.addresses[0],
-                                    DENDRITE_PORT,
-                                    0,
-                                    0,
-                                )
-                                .to_string(),
-                                kind: NexusTypes::ServiceKind::Dendrite,
-                            });
-                        }
-                        ServiceType::ExternalDns {
-                            http_address,
-                            dns_address,
-                            nic,
-                        } => {
-                            services.push(NexusTypes::ServicePutRequest {
-                                service_id,
-                                zone_id,
-                                sled_id,
-                                address: http_address.to_string(),
-                                kind: NexusTypes::ServiceKind::ExternalDns {
-                                    external_address: dns_address.ip(),
-                                    nic: NexusTypes::ServiceNic {
-                                        id: nic.id,
-                                        name: nic.name.clone(),
-                                        ip: nic.ip,
-                                        mac: nic.mac,
-                                    },
-                                },
-                            });
-                        }
-                        ServiceType::InternalDns { http_address, .. } => {
-                            services.push(NexusTypes::ServicePutRequest {
-                                service_id,
-                                zone_id,
-                                sled_id,
-                                address: http_address.to_string(),
-                                kind: NexusTypes::ServiceKind::InternalDns,
-                            });
-                        }
-                        ServiceType::Oximeter => {
-                            services.push(NexusTypes::ServicePutRequest {
-                                service_id,
-                                zone_id,
-                                sled_id,
-                                address: SocketAddrV6::new(
-                                    zone.addresses[0],
-                                    OXIMETER_PORT,
-                                    0,
-                                    0,
-                                )
-                                .to_string(),
-                                kind: NexusTypes::ServiceKind::Oximeter,
-                            });
-                        }
-                        ServiceType::CruciblePantry => {
-                            services.push(NexusTypes::ServicePutRequest {
-                                service_id,
-                                zone_id,
-                                sled_id,
-                                address: SocketAddrV6::new(
-                                    zone.addresses[0],
-                                    CRUCIBLE_PANTRY_PORT,
-                                    0,
-                                    0,
-                                )
-                                .to_string(),
-                                kind: NexusTypes::ServiceKind::CruciblePantry,
-                            });
-                        }
-                        ServiceType::BoundaryNtp { snat_cfg, nic, .. } => {
-                            services.push(NexusTypes::ServicePutRequest {
-                                service_id,
-                                zone_id,
-                                sled_id,
-                                address: SocketAddrV6::new(
-                                    zone.addresses[0],
-                                    NTP_PORT,
-                                    0,
-                                    0,
-                                )
-                                .to_string(),
-                                kind: NexusTypes::ServiceKind::BoundaryNtp {
-                                    snat: snat_cfg.into(),
-                                    nic: NexusTypes::ServiceNic {
-                                        id: nic.id,
-                                        name: nic.name.clone(),
-                                        ip: nic.ip,
-                                        mac: nic.mac,
-                                    },
-                                },
-                            });
-                        }
-                        ServiceType::InternalNtp { .. } => {
-                            services.push(NexusTypes::ServicePutRequest {
-                                service_id,
-                                zone_id,
-                                sled_id,
-                                address: SocketAddrV6::new(
-                                    zone.addresses[0],
-                                    NTP_PORT,
-                                    0,
-                                    0,
-                                )
-                                .to_string(),
-                                kind: NexusTypes::ServiceKind::InternalNtp,
-                            });
-                        }
-                        ServiceType::Clickhouse => {
-                            services.push(NexusTypes::ServicePutRequest {
-                                service_id,
-                                zone_id,
-                                sled_id,
-                                address: SocketAddrV6::new(
-                                    zone.addresses[0],
-                                    CLICKHOUSE_PORT,
-                                    0,
-                                    0,
-                                )
-                                .to_string(),
-                                kind: NexusTypes::ServiceKind::Clickhouse,
-                            });
-                        }
-                        ServiceType::Crucible => {
-                            services.push(NexusTypes::ServicePutRequest {
-                                service_id,
-                                zone_id,
-                                sled_id,
-                                address: SocketAddrV6::new(
-                                    zone.addresses[0],
-                                    CRUCIBLE_PORT,
-                                    0,
-                                    0,
-                                )
-                                .to_string(),
-                                kind: NexusTypes::ServiceKind::Crucible,
-                            });
-                        }
-                        ServiceType::CockroachDb => {
-                            services.push(NexusTypes::ServicePutRequest {
-                                service_id,
-                                zone_id,
-                                sled_id,
-                                address: SocketAddrV6::new(
-                                    zone.addresses[0],
-                                    COCKROACH_PORT,
-                                    0,
-                                    0,
-                                )
-                                .to_string(),
-                                kind: NexusTypes::ServiceKind::Cockroach,
-                            });
-                        }
-                        ServiceType::ManagementGatewayService
-                        | ServiceType::Wicketd { .. }
-                        | ServiceType::Maghemite { .. }
-                        | ServiceType::Tfport { .. } => {
-                            return Err(SetupServiceError::BadConfig(format!(
-                                "RSS should not request service of type: {}",
-                                svc.details
-                            )));
-                        }
-                    }
-                }
+                services.extend(zone.into_nexus_service_req(sled_id).map_err(
+                    |err| SetupServiceError::BadConfig(err.to_string()),
+                )?);
             }
 
             for service in service_request.services.iter() {
                 if let Some(dataset) = &service.dataset {
-                    let port = match dataset.name.dataset() {
-                        DatasetKind::CockroachDb => COCKROACH_PORT,
-                        DatasetKind::Clickhouse => CLICKHOUSE_PORT,
-                        DatasetKind::Crucible => CRUCIBLE_PORT,
-                        DatasetKind::ExternalDns => DNS_HTTP_PORT,
-                        DatasetKind::InternalDns => DNS_HTTP_PORT,
-                    };
-
                     datasets.push(NexusTypes::DatasetCreateRequest {
                         zpool_id: dataset.name.pool().id(),
                         dataset_id: dataset.id,
                         request: NexusTypes::DatasetPutRequest {
-                            address: SocketAddrV6::new(
-                                service.addresses[0],
-                                port,
-                                0,
-                                0,
-                            )
-                            .to_string(),
+                            address: dataset.service_address.to_string(),
                             kind: dataset.name.dataset().clone().into(),
                         },
                     })
@@ -829,14 +569,27 @@ impl ServiceInner {
         let rack_network_config = match &config.rack_network_config {
             Some(config) => {
                 let value = NexusTypes::RackNetworkConfig {
-                    gateway_ip: config.gateway_ip,
                     infra_ip_first: config.infra_ip_first,
                     infra_ip_last: config.infra_ip_last,
-                    uplink_ip: config.uplink_ip,
-                    uplink_port: config.uplink_port.clone(),
-                    uplink_port_speed: config.uplink_port_speed.clone().into(),
-                    uplink_port_fec: config.uplink_port_fec.clone().into(),
-                    uplink_vid: config.uplink_vid,
+                    uplinks: config
+                        .uplinks
+                        .iter()
+                        .map(|config| NexusTypes::UplinkConfig {
+                            gateway_ip: config.gateway_ip,
+                            switch: config.switch.into(),
+                            uplink_cidr: config.uplink_cidr,
+                            uplink_port: config.uplink_port.clone(),
+                            uplink_port_speed: config
+                                .uplink_port_speed
+                                .clone()
+                                .into(),
+                            uplink_port_fec: config
+                                .uplink_port_fec
+                                .clone()
+                                .into(),
+                            uplink_vid: config.uplink_vid,
+                        })
+                        .collect(),
                 };
                 Some(value)
             }
@@ -853,8 +606,8 @@ impl ServiceInner {
             internal_dns_zone_config: d2n_params(&service_plan.dns_config),
             external_dns_zone_name: config.external_dns_zone_name.clone(),
             recovery_silo: config.recovery_silo.clone(),
-            external_port_count,
             rack_network_config,
+            external_port_count: port_discovery_mode.into(),
         };
 
         let notify_nexus = || async {
@@ -983,9 +736,14 @@ impl ServiceInner {
         config: &Config,
         storage_resources: &StorageResources,
         local_bootstrap_agent: BootstrapAgentHandle,
-        external_port_count: u8,
+        bootstore: bootstore::NodeHandle,
     ) -> Result<(), SetupServiceError> {
         info!(self.log, "Injecting RSS configuration: {:#?}", config);
+
+        let resolver = DnsResolver::new_from_subnet(
+            self.log.new(o!("component" => "DnsResolver")),
+            config.az_subnet(),
+        )?;
 
         let marker_paths: Vec<Utf8PathBuf> = storage_resources
             .all_m2_mountpoints(sled_hardware::disk::CONFIG_DATASET)
@@ -1021,16 +779,25 @@ impl ServiceInner {
             let service_plan = ServicePlan::load(&self.log, storage_resources)
                 .await?
                 .expect("Service plan should exist if completed marker exists");
+
+            let switch_mgmt_addrs = EarlyNetworkSetup::new(&self.log)
+                .lookup_switch_zone_underlay_addrs(&resolver)
+                .await;
+
+            let nexus_address =
+                resolver.lookup_socket_v6(ServiceName::Nexus).await?;
+
             self.handoff_to_nexus(
                 &config,
                 &sled_plan,
                 &service_plan,
-                external_port_count,
+                ExternalPortDiscovery::Auto(switch_mgmt_addrs),
+                nexus_address,
             )
             .await?;
             return Ok(());
         } else {
-            info!(self.log, "RSS configuration has not been fully applied yet",);
+            info!(self.log, "RSS configuration has not been fully applied yet");
         }
 
         // Wait for either:
@@ -1048,7 +815,11 @@ impl ServiceInner {
             let stored_peers: HashSet<Ipv6Addr> =
                 plan.sleds.keys().map(|a| *a.ip()).collect();
             if stored_peers != bootstrap_addrs {
-                return Err(SetupServiceError::BadConfig("Set of sleds requested does not match those in existing sled plan".to_string()));
+                let e = concat!(
+                    "Set of sleds requested does not match those in",
+                    " existing sled plan"
+                );
+                return Err(SetupServiceError::BadConfig(e.to_string()));
             }
         }
         if bootstrap_addrs.is_empty() {
@@ -1073,10 +844,33 @@ impl ServiceInner {
                 config,
                 &storage_resources,
                 bootstrap_addrs,
+                config.trust_quorum_peers.is_some(),
             )
             .await?
         };
         let config = &plan.config;
+
+        // Initialize the trust quorum if there are peers configured.
+        if let Some(peers) = &config.trust_quorum_peers {
+            let initial_membership: BTreeSet<_> =
+                peers.iter().cloned().collect();
+            bootstore
+                .init_rack(plan.rack_id.into(), initial_membership)
+                .await?;
+        }
+
+        // Save the relevant network config in the bootstore. We want this to
+        // happen before we `initialize_sleds` so each scrimlet (including us)
+        // can use its normal boot path of "read network config for our switch
+        // from the bootstore".
+        let early_network_config = EarlyNetworkConfig {
+            generation: 1,
+            rack_subnet: config.rack_subnet,
+            ntp_servers: config.ntp_servers.clone(),
+            rack_network_config: config.rack_network_config.clone(),
+        };
+        info!(self.log, "Writing Rack Network Configuration to bootstore");
+        bootstore.update_network_config(early_network_config.into()).await?;
 
         // Forward the sled initialization requests to our sled-agent.
         local_bootstrap_agent
@@ -1121,127 +915,10 @@ impl ServiceInner {
         self.ensure_all_services_of_type(&service_plan, &zone_types).await?;
         self.initialize_internal_dns_records(&service_plan).await?;
 
-        // Initialize rack network before NTP comes online, otherwise boundary
-        // services will not be available and NTP will fail to sync
-        info!(self.log, "Checking for Rack Network Configuration");
-        if let Some(rack_network_config) = &config.rack_network_config {
-            info!(self.log, "Initializing Rack Network");
-            info!(self.log, "Looking up address for Dendrite");
-            let resolver = DnsResolver::new_from_subnet(
-                self.log.new(o!("component" => "DnsResolver")),
-                config.az_subnet(),
-            )?;
-
-            let dpd_addr = resolver
-                .lookup_socket_v6(internal_dns::ServiceName::Dendrite)
-                .await?;
-
-            let dpd = DpdClient::new(
-                &format!("http://[{}]:{}", dpd_addr.ip(), dpd_addr.port()),
-                dpd_client::ClientState {
-                    tag: "sled-agent".to_string(),
-                    log: self.log.new(o!(
-                        "component" => "DpdClient"
-                    )),
-                },
-            );
-
-            info!(self.log, "Building Rack Network Configuration");
-            // TODO - https://github.com/oxidecomputer/omicron/issues/3278
-            // dynamically determine where boundary services address should be configured
-            let body = dpd_client::types::Ipv6Entry {
-                addr: BOUNDARY_SERVICES_ADDR.parse().map_err(|e| {
-                    SetupServiceError::BadConfig(format!(
-                        "failed to parse `BOUNDARY_SERVICES_ADDR` as `Ipv6Addr`: {e}"
-                    ))
-                })?,
-                tag: "rss".into(),
-            };
-
-            let mut dpd_port_settings = PortSettings {
-                tag: "rss".into(),
-                links: HashMap::new(),
-                v4_routes: HashMap::new(),
-                v6_routes: HashMap::new(),
-            };
-
-            // TODO handle breakouts
-            // https://github.com/oxidecomputer/omicron/issues/3062
-            let link_id = LinkId(0);
-            let addr = IpAddr::V4(rack_network_config.uplink_ip);
-
-            let link_settings = LinkSettings {
-                // TODO Allow user to configure link properties
-                // https://github.com/oxidecomputer/omicron/issues/3061
-                params: LinkCreate {
-                    autoneg: false,
-                    kr: false,
-                    fec: convert_fec(&rack_network_config.uplink_port_fec),
-                    speed: convert_speed(
-                        &rack_network_config.uplink_port_speed,
-                    ),
-                },
-                addrs: vec![addr],
-            };
-
-            dpd_port_settings.links.insert(link_id.to_string(), link_settings);
-
-            let port_id: PortId = rack_network_config.uplink_port.parse()
-                .map_err(|e| SetupServiceError::BadConfig(
-                        format!("could not use value provided to rack_network_config.uplink_port as PortID: {e}")
-                ))?;
-
-            let nexthop = Some(rack_network_config.gateway_ip);
-
-            dpd_port_settings.v4_routes.insert(
-                Ipv4Cidr { prefix: "0.0.0.0".parse().unwrap(), prefix_len: 0 }
-                    .to_string(),
-                RouteSettingsV4 {
-                    link_id: link_id.0,
-                    vid: rack_network_config.uplink_vid,
-                    nexthop,
-                },
-            );
-
-            loop {
-                info!(self.log, "Checking dendrite uptime");
-                match dpd.dpd_uptime().await {
-                    Ok(uptime) => {
-                        info!(self.log, "Dendrite online"; "uptime" => uptime.to_string());
-                        break;
-                    }
-                    Err(e) => {
-                        info!(self.log, "Unable to check Dendrite uptime"; "reason" => format!("{e}"));
-                    }
-                }
-                info!(self.log, "Waiting for dendrite to come online");
-                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-            }
-
-            info!(self.log, "Configuring boundary services loopback address on switch"; "config" => format!("{body:#?}"));
-            dpd.loopback_ipv6_create(&body).await.map_err(|e| {
-                SetupServiceError::Dendrite(format!(
-                    "unable to create inital switch loopback address: {e}"
-                ))
-            })?;
-
-            info!(self.log, "Configuring default uplink on switch"; "config" => format!("{dpd_port_settings:#?}"));
-            dpd.port_settings_apply(&port_id, &dpd_port_settings)
-                .await
-                .map_err(|e| {
-                    SetupServiceError::Dendrite(format!(
-                    "unable to apply initial uplink port configuration: {e}"
-                ))
-                })?;
-
-            info!(self.log, "advertising boundary services loopback address");
-            let mut ddmd_addr = dpd_addr;
-            ddmd_addr.set_port(8000);
-            let ddmd_client = DdmAdminClient::new(&self.log, ddmd_addr)?;
-            ddmd_client.advertise_prefix(Ipv6Subnet::new(
-                BOUNDARY_SERVICES_ADDR.parse().unwrap(),
-            ));
-        }
+        // Ask MGS in each switch zone which switch it is.
+        let switch_mgmt_addrs = EarlyNetworkSetup::new(&self.log)
+            .lookup_switch_zone_underlay_addrs(&resolver)
+            .await;
 
         // Next start up the NTP services.
         // Note we also specify internal DNS services again because it
@@ -1295,13 +972,17 @@ impl ServiceInner {
         );
         ledger.commit().await?;
 
+        let nexus_address =
+            resolver.lookup_socket_v6(ServiceName::Nexus).await?;
+
         // At this point, even if we reboot, we must not try to manage sleds,
         // services, or DNS records.
         self.handoff_to_nexus(
             &config,
             &plan,
             &service_plan,
-            external_port_count,
+            ExternalPortDiscovery::Auto(switch_mgmt_addrs),
+            nexus_address,
         )
         .await?;
 

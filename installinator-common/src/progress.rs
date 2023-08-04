@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::{collections::BTreeSet, fmt, net::SocketAddrV6};
+use std::{collections::BTreeSet, fmt, net::SocketAddr};
 
 use anyhow::bail;
 use camino::Utf8PathBuf;
@@ -104,7 +104,7 @@ pub enum InstallinatorProgressMetadata {
         /// The peer being downloaded from.
         ///
         /// Available with downlad events.
-        peer: SocketAddrV6,
+        peer: SocketAddr,
     },
 
     /// Future variants that might be unknown.
@@ -127,7 +127,7 @@ pub enum InstallinatorCompletionMetadata {
 
     Download {
         /// The address the artifact was downloaded from.
-        address: SocketAddrV6,
+        address: SocketAddr,
     },
     Write {
         /// The output of the write operation.

@@ -22,6 +22,8 @@
  *    sparingly."
  */
 
+BEGIN;
+
 /*
  * We assume the database and user do not already exist so that we don't
  * inadvertently clobber what's there.  If they might exist, the user has to
@@ -30,8 +32,8 @@
  * NOTE: the database and user names MUST be kept in sync with the
  * initialization code and dbwipe.sql.
  */
-CREATE DATABASE omicron;
-CREATE USER omicron;
+CREATE DATABASE IF NOT EXISTS omicron;
+CREATE USER IF NOT EXISTS omicron;
 ALTER DEFAULT PRIVILEGES GRANT INSERT, SELECT, UPDATE, DELETE ON TABLES to omicron;
 
 /*
@@ -43,7 +45,7 @@ ALTER RANGE default CONFIGURE ZONE USING num_replicas = 5;
 /*
  * Racks
  */
-CREATE TABLE omicron.public.rack (
+CREATE TABLE IF NOT EXISTS omicron.public.rack (
     /* Identity metadata (asset) */
     id UUID PRIMARY KEY,
     time_created TIMESTAMPTZ NOT NULL,
@@ -68,7 +70,7 @@ CREATE TABLE omicron.public.rack (
  * Sleds
  */
 
-CREATE TABLE omicron.public.sled (
+CREATE TABLE IF NOT EXISTS omicron.public.sled (
     /* Identity metadata (asset) */
     id UUID PRIMARY KEY,
     time_created TIMESTAMPTZ NOT NULL,
@@ -107,17 +109,13 @@ CREATE TABLE omicron.public.sled (
 );
 
 /* Add an index which lets us look up sleds on a rack */
-CREATE INDEX ON omicron.public.sled (
-    rack_id
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_sled_by_rack ON omicron.public.sled (
+    rack_id,
+    id
 ) WHERE time_deleted IS NULL;
 
-CREATE INDEX ON omicron.public.sled (
-    id
-) WHERE
-    time_deleted IS NULL;
-
-CREATE TYPE omicron.public.sled_resource_kind AS ENUM (
-    -- omicron.public.Dataset
+CREATE TYPE IF NOT EXISTS omicron.public.sled_resource_kind AS ENUM (
+    -- omicron.public.dataset
     'dataset',
     -- omicron.public.service
     'service',
@@ -131,7 +129,7 @@ CREATE TYPE omicron.public.sled_resource_kind AS ENUM (
 );
 
 -- Accounting for programs using resources on a sled
-CREATE TABLE omicron.public.sled_resource (
+CREATE TABLE IF NOT EXISTS omicron.public.sled_resource (
     -- Should match the UUID of the corresponding service
     id UUID PRIMARY KEY,
 
@@ -152,15 +150,16 @@ CREATE TABLE omicron.public.sled_resource (
 );
 
 -- Allow looking up all resources which reside on a sled
-CREATE INDEX ON omicron.public.sled_resource (
-    sled_id
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_resource_by_sled ON omicron.public.sled_resource (
+    sled_id,
+    id
 );
 
 /*
  * Switches
  */
 
-CREATE TABLE omicron.public.switch (
+CREATE TABLE IF NOT EXISTS omicron.public.switch (
     /* Identity metadata (asset) */
     id UUID PRIMARY KEY,
     time_created TIMESTAMPTZ NOT NULL,
@@ -178,20 +177,16 @@ CREATE TABLE omicron.public.switch (
 );
 
 /* Add an index which lets us look up switches on a rack */
-CREATE INDEX ON omicron.public.switch (
-    rack_id
-) WHERE time_deleted IS NULL;
-
-CREATE INDEX ON omicron.public.switch (
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_switch_by_rack ON omicron.public.switch (
+    rack_id,
     id
-) WHERE
-    time_deleted IS NULL;
+) WHERE time_deleted IS NULL;
 
 /*
  * Services
  */
 
-CREATE TYPE omicron.public.service_kind AS ENUM (
+CREATE TYPE IF NOT EXISTS omicron.public.service_kind AS ENUM (
   'clickhouse',
   'cockroach',
   'crucible',
@@ -205,7 +200,7 @@ CREATE TYPE omicron.public.service_kind AS ENUM (
   'tfport'
 );
 
-CREATE TABLE omicron.public.service (
+CREATE TABLE IF NOT EXISTS omicron.public.service (
     /* Identity metadata (asset) */
     id UUID PRIMARY KEY,
     time_created TIMESTAMPTZ NOT NULL,
@@ -224,23 +219,24 @@ CREATE TABLE omicron.public.service (
 );
 
 /* Add an index which lets us look up the services on a sled */
-CREATE INDEX ON omicron.public.service (
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_service_by_sled ON omicron.public.service (
     sled_id,
     id
 );
 
-CREATE INDEX ON omicron.public.service (
+/* Look up (and paginate) services of a given kind. */
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_service_by_kind ON omicron.public.service (
     kind,
     id
 );
 
-CREATE TYPE omicron.public.physical_disk_kind AS ENUM (
+CREATE TYPE IF NOT EXISTS omicron.public.physical_disk_kind AS ENUM (
   'm2',
   'u2'
 );
 
 -- A physical disk which exists inside the rack.
-CREATE TABLE omicron.public.physical_disk (
+CREATE TABLE IF NOT EXISTS omicron.public.physical_disk (
     id UUID PRIMARY KEY,
     time_created TIMESTAMPTZ NOT NULL,
     time_modified TIMESTAMPTZ NOT NULL,
@@ -263,19 +259,19 @@ CREATE TABLE omicron.public.physical_disk (
     )
 );
 
-CREATE INDEX ON omicron.public.physical_disk (
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_physical_disk_by_variant ON omicron.public.physical_disk (
     variant,
     id
 ) WHERE time_deleted IS NULL;
 
 -- Make it efficient to look up physical disks by Sled.
-CREATE INDEX ON omicron.public.physical_disk (
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_physical_disk_by_sled ON omicron.public.physical_disk (
     sled_id,
     id
 ) WHERE time_deleted IS NULL;
 
 -- x509 certificates which may be used by services
-CREATE TABLE omicron.public.certificate (
+CREATE TABLE IF NOT EXISTS omicron.public.certificate (
     -- Identity metadata (resource)
     id UUID PRIMARY KEY,
     name STRING(63) NOT NULL,
@@ -299,7 +295,7 @@ CREATE TABLE omicron.public.certificate (
 
 -- Add an index which lets us look up certificates for a particular service
 -- class.
-CREATE INDEX ON omicron.public.certificate (
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_certificate_by_service ON omicron.public.certificate (
     service,
     id
 ) WHERE
@@ -307,7 +303,7 @@ CREATE INDEX ON omicron.public.certificate (
 
 -- Add an index which enforces that certificates have unique names, and which
 -- allows pagination-by-name.
-CREATE UNIQUE INDEX ON omicron.public.certificate (
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_certificate_by_silo ON omicron.public.certificate (
     silo_id,
     name
 ) WHERE
@@ -318,7 +314,7 @@ CREATE UNIQUE INDEX ON omicron.public.certificate (
 -- - Projects
 -- - Silos
 -- - Fleet
-CREATE TABLE omicron.public.virtual_provisioning_collection (
+CREATE TABLE IF NOT EXISTS omicron.public.virtual_provisioning_collection (
     -- Should match the UUID of the corresponding collection.
     id UUID PRIMARY KEY,
     time_modified TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -351,7 +347,7 @@ CREATE TABLE omicron.public.virtual_provisioning_collection (
 -- this would not be allowed if they came from the same table due to:
 -- https://www.cockroachlabs.com/docs/v22.2/known-limitations#statements-containing-multiple-modification-subqueries-of-the-same-table-are-disallowed
 -- However, by using separate tables, the CTE is able to function correctly.
-CREATE TABLE omicron.public.virtual_provisioning_resource (
+CREATE TABLE IF NOT EXISTS omicron.public.virtual_provisioning_resource (
     -- Should match the UUID of the corresponding collection.
     id UUID PRIMARY KEY,
     time_modified TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -374,7 +370,7 @@ CREATE TABLE omicron.public.virtual_provisioning_resource (
  * ZPools of Storage, attached to Sleds.
  * These are backed by a single physical disk.
  */
-CREATE TABLE omicron.public.Zpool (
+CREATE TABLE IF NOT EXISTS omicron.public.zpool (
     /* Identity metadata (asset) */
     id UUID PRIMARY KEY,
     time_created TIMESTAMPTZ NOT NULL,
@@ -391,7 +387,7 @@ CREATE TABLE omicron.public.Zpool (
     total_size INT NOT NULL
 );
 
-CREATE TYPE omicron.public.dataset_kind AS ENUM (
+CREATE TYPE IF NOT EXISTS omicron.public.dataset_kind AS ENUM (
   'crucible',
   'cockroach',
   'clickhouse',
@@ -402,7 +398,7 @@ CREATE TYPE omicron.public.dataset_kind AS ENUM (
 /*
  * A dataset of allocated space within a zpool.
  */
-CREATE TABLE omicron.public.Dataset (
+CREATE TABLE IF NOT EXISTS omicron.public.dataset (
     /* Identity metadata (asset) */
     id UUID PRIMARY KEY,
     time_created TIMESTAMPTZ NOT NULL,
@@ -430,25 +426,25 @@ CREATE TABLE omicron.public.Dataset (
 );
 
 /* Create an index on the size usage for Crucible's allocation */
-CREATE INDEX on omicron.public.Dataset (
+CREATE INDEX IF NOT EXISTS lookup_dataset_by_size_used_crucible on omicron.public.dataset (
     size_used
 ) WHERE size_used IS NOT NULL AND time_deleted IS NULL AND kind = 'crucible';
 
 /* Create an index on the size usage for any dataset */
-CREATE INDEX on omicron.public.Dataset (
+CREATE INDEX IF NOT EXISTS lookup_dataset_by_size_used on omicron.public.dataset (
     size_used
 ) WHERE size_used IS NOT NULL AND time_deleted IS NULL;
 
 /*
  * A region of space allocated to Crucible Downstairs, within a dataset.
  */
-CREATE TABLE omicron.public.Region (
+CREATE TABLE IF NOT EXISTS omicron.public.region (
     /* Identity metadata (asset) */
     id UUID PRIMARY KEY,
     time_created TIMESTAMPTZ NOT NULL,
     time_modified TIMESTAMPTZ NOT NULL,
 
-    /* FK into the Dataset table */
+    /* FK into the dataset table */
     dataset_id UUID NOT NULL,
 
     /* FK into the volume table */
@@ -463,21 +459,23 @@ CREATE TABLE omicron.public.Region (
 /*
  * Allow all regions belonging to a disk to be accessed quickly.
  */
-CREATE INDEX on omicron.public.Region (
-    volume_id
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_region_by_volume on omicron.public.region (
+    volume_id,
+    id
 );
 
 /*
  * Allow all regions belonging to a dataset to be accessed quickly.
  */
-CREATE INDEX on omicron.public.Region (
-    dataset_id
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_region_by_dataset on omicron.public.region (
+    dataset_id,
+    id
 );
 
 /*
  * A snapshot of a region, within a dataset.
  */
-CREATE TABLE omicron.public.region_snapshot (
+CREATE TABLE IF NOT EXISTS omicron.public.region_snapshot (
     dataset_id UUID NOT NULL,
     region_id UUID NOT NULL,
 
@@ -497,7 +495,7 @@ CREATE TABLE omicron.public.region_snapshot (
 );
 
 /* Index for use during join with region table */
-CREATE INDEX on omicron.public.region_snapshot (
+CREATE INDEX IF NOT EXISTS lookup_region_by_dataset on omicron.public.region_snapshot (
     dataset_id, region_id
 );
 
@@ -505,18 +503,18 @@ CREATE INDEX on omicron.public.region_snapshot (
  * Index on volume_references and snapshot_addr for crucible
  * resource accounting lookup
  */
-CREATE INDEX on omicron.public.region_snapshot (
+CREATE INDEX IF NOT EXISTS lookup_region_snapshot_by_volume_reference on omicron.public.region_snapshot (
     volume_references
 );
 
-CREATE INDEX on omicron.public.region_snapshot (
+CREATE INDEX IF NOT EXISTS lookup_region_snapshot_by_snapshot_addr on omicron.public.region_snapshot (
     snapshot_addr
 );
 
 /*
  * A volume within Crucible
  */
-CREATE TABLE omicron.public.volume (
+CREATE TABLE IF NOT EXISTS omicron.public.volume (
     id UUID PRIMARY KEY,
     time_created TIMESTAMPTZ NOT NULL,
     time_modified TIMESTAMPTZ NOT NULL,
@@ -542,7 +540,7 @@ CREATE TABLE omicron.public.volume (
 );
 
 /* Quickly find deleted volumes */
-CREATE INDEX on omicron.public.volume (
+CREATE INDEX IF NOT EXISTS lookup_volume_by_deleted on omicron.public.volume (
     time_deleted
 );
 
@@ -550,17 +548,17 @@ CREATE INDEX on omicron.public.volume (
  * Silos
  */
 
-CREATE TYPE omicron.public.authentication_mode AS ENUM (
+CREATE TYPE IF NOT EXISTS omicron.public.authentication_mode AS ENUM (
   'local',
   'saml'
 );
 
-CREATE TYPE omicron.public.user_provision_type AS ENUM (
+CREATE TYPE IF NOT EXISTS omicron.public.user_provision_type AS ENUM (
   'api_only',
   'jit'
 );
 
-CREATE TABLE omicron.public.silo (
+CREATE TABLE IF NOT EXISTS omicron.public.silo (
     /* Identity metadata */
     id UUID PRIMARY KEY,
     name STRING(63) NOT NULL,
@@ -579,7 +577,7 @@ CREATE TABLE omicron.public.silo (
     rcgen INT NOT NULL
 );
 
-CREATE UNIQUE INDEX ON omicron.public.silo (
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_silo_by_name ON omicron.public.silo (
     name
 ) WHERE
     time_deleted IS NULL;
@@ -587,7 +585,7 @@ CREATE UNIQUE INDEX ON omicron.public.silo (
 /*
  * Silo users
  */
-CREATE TABLE omicron.public.silo_user (
+CREATE TABLE IF NOT EXISTS omicron.public.silo_user (
     id UUID PRIMARY KEY,
     time_created TIMESTAMPTZ NOT NULL,
     time_modified TIMESTAMPTZ NOT NULL,
@@ -598,13 +596,13 @@ CREATE TABLE omicron.public.silo_user (
 );
 
 /* This index lets us quickly find users for a given silo. */
-CREATE UNIQUE INDEX ON omicron.public.silo_user (
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_silo_user_by_silo ON omicron.public.silo_user (
     silo_id,
     external_id
 ) WHERE
     time_deleted IS NULL;
 
-CREATE TABLE omicron.public.silo_user_password_hash (
+CREATE TABLE IF NOT EXISTS omicron.public.silo_user_password_hash (
     silo_user_id UUID NOT NULL,
     hash TEXT NOT NULL,
     time_created TIMESTAMPTZ NOT NULL,
@@ -616,7 +614,7 @@ CREATE TABLE omicron.public.silo_user_password_hash (
  * Silo groups
  */
 
-CREATE TABLE omicron.public.silo_group (
+CREATE TABLE IF NOT EXISTS omicron.public.silo_group (
     id UUID PRIMARY KEY,
     time_created TIMESTAMPTZ NOT NULL,
     time_modified TIMESTAMPTZ NOT NULL,
@@ -626,7 +624,7 @@ CREATE TABLE omicron.public.silo_group (
     external_id TEXT NOT NULL
 );
 
-CREATE UNIQUE INDEX ON omicron.public.silo_group (
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_silo_group_by_silo ON omicron.public.silo_group (
     silo_id,
     external_id
 ) WHERE
@@ -636,14 +634,19 @@ CREATE UNIQUE INDEX ON omicron.public.silo_group (
  * Silo group membership
  */
 
-CREATE TABLE omicron.public.silo_group_membership (
+CREATE TABLE IF NOT EXISTS omicron.public.silo_group_membership (
     silo_group_id UUID NOT NULL,
     silo_user_id UUID NOT NULL,
 
     PRIMARY KEY (silo_group_id, silo_user_id)
 );
 
-CREATE INDEX ON omicron.public.silo_group_membership (
+/*
+ * The primary key lets us paginate through the users in a group.  We need to
+ * index the same fields in the reverse order to be able to paginate through the
+ * groups that a user is in.
+ */
+CREATE INDEX IF NOT EXISTS lookup_silo_group_by_user ON omicron.public.silo_group_membership (
     silo_user_id,
     silo_group_id
 );
@@ -652,11 +655,11 @@ CREATE INDEX ON omicron.public.silo_group_membership (
  * Silo identity provider list
  */
 
-CREATE TYPE omicron.public.provider_type AS ENUM (
+CREATE TYPE IF NOT EXISTS omicron.public.provider_type AS ENUM (
   'saml'
 );
 
-CREATE TABLE omicron.public.identity_provider (
+CREATE TABLE IF NOT EXISTS omicron.public.identity_provider (
     /* Identity metadata */
     id UUID PRIMARY KEY,
     name STRING(63) NOT NULL,
@@ -669,22 +672,22 @@ CREATE TABLE omicron.public.identity_provider (
     provider_type omicron.public.provider_type NOT NULL
 );
 
-CREATE INDEX ON omicron.public.identity_provider (
-    id,
-    silo_id
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_idp_by_silo_id ON omicron.public.identity_provider (
+    silo_id,
+    id
 ) WHERE
     time_deleted IS NULL;
 
-CREATE INDEX ON omicron.public.identity_provider (
-    name,
-    silo_id
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_idp_by_silo_name ON omicron.public.identity_provider (
+    silo_id,
+    name
 ) WHERE
     time_deleted IS NULL;
 
 /*
  * Silo SAML identity provider
  */
-CREATE TABLE omicron.public.saml_identity_provider (
+CREATE TABLE IF NOT EXISTS omicron.public.saml_identity_provider (
     /* Identity metadata */
     id UUID PRIMARY KEY,
     name STRING(63) NOT NULL,
@@ -709,16 +712,22 @@ CREATE TABLE omicron.public.saml_identity_provider (
     group_attribute_name TEXT
 );
 
-CREATE INDEX ON omicron.public.saml_identity_provider (
-    id,
-    silo_id
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_saml_idp_by_silo_id ON omicron.public.saml_identity_provider (
+    silo_id,
+    id
+) WHERE
+    time_deleted IS NULL;
+
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_saml_idp_by_silo_name ON omicron.public.saml_identity_provider (
+    silo_id,
+    name
 ) WHERE
     time_deleted IS NULL;
 
 /*
  * Users' public SSH keys, per RFD 44
  */
-CREATE TABLE omicron.public.ssh_key (
+CREATE TABLE IF NOT EXISTS omicron.public.ssh_key (
     id UUID PRIMARY KEY,
     name STRING(63) NOT NULL,
     description STRING(512) NOT NULL,
@@ -736,7 +745,7 @@ CREATE TABLE omicron.public.ssh_key (
     public_key STRING(1023) NOT NULL
 );
 
-CREATE UNIQUE INDEX ON omicron.public.ssh_key (
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_ssh_key_by_silo_user ON omicron.public.ssh_key (
     silo_user_id,
     name
 ) WHERE
@@ -746,7 +755,7 @@ CREATE UNIQUE INDEX ON omicron.public.ssh_key (
  * Projects
  */
 
-CREATE TABLE omicron.public.project (
+CREATE TABLE IF NOT EXISTS omicron.public.project (
     /* Identity metadata (resource) */
     id UUID PRIMARY KEY,
     name STRING(63) NOT NULL,
@@ -763,7 +772,7 @@ CREATE TABLE omicron.public.project (
     silo_id UUID NOT NULL /* foreign key into "silo" table */
 );
 
-CREATE UNIQUE INDEX ON omicron.public.project (
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_project_by_silo ON omicron.public.project (
     silo_id,
     name
 ) WHERE
@@ -773,7 +782,7 @@ CREATE UNIQUE INDEX ON omicron.public.project (
  * Instances
  */
 
-CREATE TYPE omicron.public.instance_state AS ENUM (
+CREATE TYPE IF NOT EXISTS omicron.public.instance_state AS ENUM (
     'creating',
     'starting',
     'running',
@@ -791,7 +800,7 @@ CREATE TYPE omicron.public.instance_state AS ENUM (
  * Instance -- e.g., reboot concurrent with destroy or concurrent reboots or the
  * like.  Or changing # of CPUs or memory size.
  */
-CREATE TABLE omicron.public.instance (
+CREATE TABLE IF NOT EXISTS omicron.public.instance (
     /* Identity metadata (resource) */
     id UUID PRIMARY KEY,
     name STRING(63) NOT NULL,
@@ -849,11 +858,12 @@ CREATE TABLE omicron.public.instance (
     /* Instance configuration */
     ncpus INT NOT NULL,
     memory INT NOT NULL,
-    hostname STRING(63) NOT NULL
+    hostname STRING(63) NOT NULL,
+    boot_on_fault BOOL NOT NULL DEFAULT false
 );
 
 -- Names for instances within a project should be unique
-CREATE UNIQUE INDEX ON omicron.public.instance (
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_instance_by_project ON omicron.public.instance (
     project_id,
     name
 ) WHERE
@@ -861,8 +871,9 @@ CREATE UNIQUE INDEX ON omicron.public.instance (
 
 -- Allow looking up instances by server. This is particularly
 -- useful for resource accounting within a sled.
-CREATE INDEX ON omicron.public.instance (
-    active_sled_id
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_instance_by_sled ON omicron.public.instance (
+    active_sled_id,
+    id
 ) WHERE
     time_deleted IS NULL;
 
@@ -871,7 +882,7 @@ CREATE INDEX ON omicron.public.instance (
  * on a sled.
  */
 
-CREATE VIEW omicron.public.sled_instance 
+CREATE VIEW IF NOT EXISTS omicron.public.sled_instance 
 AS SELECT
    instance.id,
    instance.name,
@@ -919,13 +930,13 @@ WHERE
 --     'faulted'
 -- );
 
-CREATE TYPE omicron.public.block_size AS ENUM (
+CREATE TYPE IF NOT EXISTS omicron.public.block_size AS ENUM (
   '512',
   '2048',
   '4096'
 );
 
-CREATE TABLE omicron.public.disk (
+CREATE TABLE IF NOT EXISTS omicron.public.disk (
     /* Identity metadata (resource) */
     id UUID PRIMARY KEY,
     name STRING(63) NOT NULL,
@@ -970,18 +981,19 @@ CREATE TABLE omicron.public.disk (
     pantry_address TEXT
 );
 
-CREATE UNIQUE INDEX ON omicron.public.disk (
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_disk_by_project ON omicron.public.disk (
     project_id,
     name
 ) WHERE
     time_deleted IS NULL;
 
-CREATE INDEX ON omicron.public.disk (
-    attach_instance_id
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_disk_by_instance ON omicron.public.disk (
+    attach_instance_id,
+    id
 ) WHERE
     time_deleted IS NULL AND attach_instance_id IS NOT NULL;
 
-CREATE TABLE omicron.public.image (
+CREATE TABLE IF NOT EXISTS omicron.public.image (
     /* Identity metadata (resource) */
     id UUID PRIMARY KEY,
     name STRING(63) NOT NULL,
@@ -1004,7 +1016,7 @@ CREATE TABLE omicron.public.image (
     size_bytes INT NOT NULL
 );
 
-CREATE VIEW omicron.public.project_image AS
+CREATE VIEW IF NOT EXISTS omicron.public.project_image AS
 SELECT
     id,
     name,
@@ -1026,7 +1038,7 @@ FROM
 WHERE 
     project_id IS NOT NULL;
 
-CREATE VIEW omicron.public.silo_image AS
+CREATE VIEW IF NOT EXISTS omicron.public.silo_image AS
 SELECT
     id,
     name,
@@ -1048,7 +1060,7 @@ WHERE
     project_id IS NULL;
 
 /* Index for silo images */
-CREATE UNIQUE INDEX on omicron.public.image (
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_image_by_silo on omicron.public.image (
     silo_id,
     name
 ) WHERE
@@ -1056,7 +1068,7 @@ CREATE UNIQUE INDEX on omicron.public.image (
     project_id is NULL;
 
 /* Index for project images */
-CREATE UNIQUE INDEX on omicron.public.image (
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_image_by_silo_and_project on omicron.public.image (
     silo_id,
     project_id,
     name
@@ -1064,14 +1076,14 @@ CREATE UNIQUE INDEX on omicron.public.image (
     time_deleted is NULL AND
     project_id is NOT NULL;
 
-CREATE TYPE omicron.public.snapshot_state AS ENUM (
+CREATE TYPE IF NOT EXISTS omicron.public.snapshot_state AS ENUM (
   'creating',
   'ready',
   'faulted',
   'destroyed'
 );
 
-CREATE TABLE omicron.public.snapshot (
+CREATE TABLE IF NOT EXISTS omicron.public.snapshot (
     /* Identity metadata (resource) */
     id UUID PRIMARY KEY,
     name STRING(63) NOT NULL,
@@ -1101,7 +1113,7 @@ CREATE TABLE omicron.public.snapshot (
     size_bytes INT NOT NULL
 );
 
-CREATE UNIQUE INDEX ON omicron.public.snapshot (
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_snapshot_by_project ON omicron.public.snapshot (
     project_id,
     name
 ) WHERE
@@ -1110,7 +1122,7 @@ CREATE UNIQUE INDEX ON omicron.public.snapshot (
 /*
  * Oximeter collector servers.
  */
-CREATE TABLE omicron.public.oximeter (
+CREATE TABLE IF NOT EXISTS omicron.public.oximeter (
     id UUID PRIMARY KEY,
     time_created TIMESTAMPTZ NOT NULL,
     time_modified TIMESTAMPTZ NOT NULL,
@@ -1121,7 +1133,7 @@ CREATE TABLE omicron.public.oximeter (
 /*
  * Information about registered metric producers.
  */
-CREATE TABLE omicron.public.metric_producer (
+CREATE TABLE IF NOT EXISTS omicron.public.metric_producer (
     id UUID PRIMARY KEY,
     time_created TIMESTAMPTZ NOT NULL,
     time_modified TIMESTAMPTZ NOT NULL,
@@ -1134,7 +1146,7 @@ CREATE TABLE omicron.public.metric_producer (
     oximeter_id UUID NOT NULL
 );
 
-CREATE UNIQUE INDEX ON omicron.public.metric_producer (
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_producer_by_oximeter ON omicron.public.metric_producer (
     oximeter_id,
     id
 );
@@ -1144,7 +1156,7 @@ CREATE UNIQUE INDEX ON omicron.public.metric_producer (
  */
 
 
-CREATE TABLE omicron.public.vpc (
+CREATE TABLE IF NOT EXISTS omicron.public.vpc (
     /* Identity metadata (resource) */
     id UUID PRIMARY KEY,
     name STRING(63) NOT NULL,
@@ -1175,18 +1187,18 @@ CREATE TABLE omicron.public.vpc (
     subnet_gen INT8 NOT NULL
 );
 
-CREATE UNIQUE INDEX ON omicron.public.vpc (
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_vpc_by_project ON omicron.public.vpc (
     project_id,
     name
 ) WHERE
     time_deleted IS NULL;
 
-CREATE UNIQUE INDEX ON omicron.public.vpc (
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_vpc_by_vni ON omicron.public.vpc (
     vni
 ) WHERE
     time_deleted IS NULL;
 
-CREATE TABLE omicron.public.vpc_subnet (
+CREATE TABLE IF NOT EXISTS omicron.public.vpc_subnet (
     /* Identity metadata (resource) */
     id UUID PRIMARY KEY,
     name STRING(63) NOT NULL,
@@ -1203,14 +1215,14 @@ CREATE TABLE omicron.public.vpc_subnet (
 );
 
 /* Subnet and network interface names are unique per VPC, not project */
-CREATE UNIQUE INDEX ON omicron.public.vpc_subnet (
+CREATE UNIQUE INDEX IF NOT EXISTS vpc_subnet_vpc_id_name_key ON omicron.public.vpc_subnet (
     vpc_id,
     name
 ) WHERE
     time_deleted IS NULL;
 
 /* The kind of network interface. */
-CREATE TYPE omicron.public.network_interface_kind AS ENUM (
+CREATE TYPE IF NOT EXISTS omicron.public.network_interface_kind AS ENUM (
     /* An interface attached to a guest instance. */
     'instance',
 
@@ -1218,7 +1230,7 @@ CREATE TYPE omicron.public.network_interface_kind AS ENUM (
     'service'
 );
 
-CREATE TABLE omicron.public.network_interface (
+CREATE TABLE IF NOT EXISTS omicron.public.network_interface (
     /* Identity metadata (resource) */
     id UUID PRIMARY KEY,
     name STRING(63) NOT NULL,
@@ -1268,7 +1280,7 @@ CREATE TABLE omicron.public.network_interface (
 );
 
 /* A view of the network_interface table for just instance-kind records. */
-CREATE VIEW omicron.public.instance_network_interface AS
+CREATE VIEW IF NOT EXISTS omicron.public.instance_network_interface AS
 SELECT
     id,
     name,
@@ -1289,7 +1301,7 @@ WHERE
     kind = 'instance';
 
 /* A view of the network_interface table for just service-kind records. */
-CREATE VIEW omicron.public.service_network_interface AS
+CREATE VIEW IF NOT EXISTS omicron.public.service_network_interface AS
 SELECT
     id,
     name,
@@ -1318,7 +1330,7 @@ WHERE
  */
 
 /* Ensure we do not assign the same address twice within a subnet */
-CREATE UNIQUE INDEX ON omicron.public.network_interface (
+CREATE UNIQUE INDEX IF NOT EXISTS network_interface_subnet_id_ip_key ON omicron.public.network_interface (
     subnet_id,
     ip
 ) WHERE
@@ -1327,7 +1339,7 @@ CREATE UNIQUE INDEX ON omicron.public.network_interface (
 /* Ensure we do not assign the same MAC twice within a VPC
  * See RFD174's discussion on the scope of virtual MACs
  */
-CREATE UNIQUE INDEX ON omicron.public.network_interface (
+CREATE UNIQUE INDEX IF NOT EXISTS network_interface_vpc_id_mac_key ON omicron.public.network_interface (
     vpc_id,
     mac
 ) WHERE
@@ -1342,7 +1354,7 @@ CREATE UNIQUE INDEX ON omicron.public.network_interface (
  * we store the `is_primary` column. Such queries are mostly used
  * when setting a new primary interface.
  */
-CREATE UNIQUE INDEX ON omicron.public.network_interface (
+CREATE UNIQUE INDEX IF NOT EXISTS network_interface_parent_id_name_kind_key ON omicron.public.network_interface (
     parent_id,
     name,
     kind
@@ -1351,28 +1363,28 @@ STORING (vpc_id, subnet_id, is_primary)
 WHERE
     time_deleted IS NULL;
 
-CREATE TYPE omicron.public.vpc_firewall_rule_status AS ENUM (
+CREATE TYPE IF NOT EXISTS omicron.public.vpc_firewall_rule_status AS ENUM (
     'disabled',
     'enabled'
 );
 
-CREATE TYPE omicron.public.vpc_firewall_rule_direction AS ENUM (
+CREATE TYPE IF NOT EXISTS omicron.public.vpc_firewall_rule_direction AS ENUM (
     'inbound',
     'outbound'
 );
 
-CREATE TYPE omicron.public.vpc_firewall_rule_action AS ENUM (
+CREATE TYPE IF NOT EXISTS omicron.public.vpc_firewall_rule_action AS ENUM (
     'allow',
     'deny'
 );
 
-CREATE TYPE omicron.public.vpc_firewall_rule_protocol AS ENUM (
+CREATE TYPE IF NOT EXISTS omicron.public.vpc_firewall_rule_protocol AS ENUM (
     'TCP',
     'UDP',
     'ICMP'
 );
 
-CREATE TABLE omicron.public.vpc_firewall_rule (
+CREATE TABLE IF NOT EXISTS omicron.public.vpc_firewall_rule (
     /* Identity metadata (resource) */
     id UUID PRIMARY KEY,
     name STRING(63) NOT NULL,
@@ -1396,18 +1408,18 @@ CREATE TABLE omicron.public.vpc_firewall_rule (
     priority INT4 CHECK (priority BETWEEN 0 AND 65535) NOT NULL
 );
 
-CREATE UNIQUE INDEX ON omicron.public.vpc_firewall_rule (
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_firewall_by_vpc ON omicron.public.vpc_firewall_rule (
     vpc_id,
     name
 ) WHERE
     time_deleted IS NULL;
 
-CREATE TYPE omicron.public.vpc_router_kind AS ENUM (
+CREATE TYPE IF NOT EXISTS omicron.public.vpc_router_kind AS ENUM (
     'system',
     'custom'
 );
 
-CREATE TABLE omicron.public.vpc_router (
+CREATE TABLE IF NOT EXISTS omicron.public.vpc_router (
     /* Identity metadata (resource) */
     id UUID PRIMARY KEY,
     name STRING(63) NOT NULL,
@@ -1421,20 +1433,20 @@ CREATE TABLE omicron.public.vpc_router (
     rcgen INT NOT NULL
 );
 
-CREATE UNIQUE INDEX ON omicron.public.vpc_router (
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_router_by_vpc ON omicron.public.vpc_router (
     vpc_id,
     name
 ) WHERE
     time_deleted IS NULL;
 
-CREATE TYPE omicron.public.router_route_kind AS ENUM (
+CREATE TYPE IF NOT EXISTS omicron.public.router_route_kind AS ENUM (
     'default',
     'vpc_subnet',
     'vpc_peering',
     'custom'
 );
 
-CREATE TABLE omicron.public.router_route (
+CREATE TABLE IF NOT EXISTS omicron.public.router_route (
     /* Identity metadata (resource) */
     id UUID PRIMARY KEY,
     name STRING(63) NOT NULL,
@@ -1450,7 +1462,7 @@ CREATE TABLE omicron.public.router_route (
     destination STRING(128) NOT NULL
 );
 
-CREATE UNIQUE INDEX ON omicron.public.router_route (
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_route_by_router ON omicron.public.router_route (
     vpc_router_id,
     name
 ) WHERE
@@ -1459,7 +1471,7 @@ CREATE UNIQUE INDEX ON omicron.public.router_route (
 /*
  * An IP Pool, a collection of zero or more IP ranges for external IPs.
  */
-CREATE TABLE omicron.public.ip_pool (
+CREATE TABLE IF NOT EXISTS omicron.public.ip_pool (
     /* Resource identity metadata */
     id UUID PRIMARY KEY,
     name STRING(63) NOT NULL,
@@ -1479,7 +1491,7 @@ CREATE TABLE omicron.public.ip_pool (
 /*
  * Index ensuring uniqueness of IP Pool names, globally.
  */
-CREATE UNIQUE INDEX ON omicron.public.ip_pool (
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_pool_by_name ON omicron.public.ip_pool (
     name
 ) WHERE
     time_deleted IS NULL;
@@ -1489,7 +1501,7 @@ CREATE UNIQUE INDEX ON omicron.public.ip_pool (
  * Note that these need not be CIDR blocks or well-behaved subnets with a
  * specific netmask.
  */
-CREATE TABLE omicron.public.ip_pool_range (
+CREATE TABLE IF NOT EXISTS omicron.public.ip_pool_range (
     id UUID PRIMARY KEY,
     time_created TIMESTAMPTZ NOT NULL,
     time_modified TIMESTAMPTZ NOT NULL,
@@ -1507,12 +1519,12 @@ CREATE TABLE omicron.public.ip_pool_range (
  * with any other ranges. See `nexus/src/db/queries/ip_pool.rs` for the actual
  * query which does that.
  */
-CREATE UNIQUE INDEX ON omicron.public.ip_pool_range (
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_pool_range_by_first_address ON omicron.public.ip_pool_range (
     first_address
 )
 STORING (last_address)
 WHERE time_deleted IS NULL;
-CREATE UNIQUE INDEX ON omicron.public.ip_pool_range (
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_pool_range_by_last_address ON omicron.public.ip_pool_range (
     last_address
 )
 STORING (first_address)
@@ -1520,7 +1532,7 @@ WHERE time_deleted IS NULL;
 
 
 /* The kind of external IP address. */
-CREATE TYPE omicron.public.ip_kind AS ENUM (
+CREATE TYPE IF NOT EXISTS omicron.public.ip_kind AS ENUM (
     /*
      * Source NAT provided to all guests by default or for services that
      * only require outbound external connectivity.
@@ -1545,7 +1557,7 @@ CREATE TYPE omicron.public.ip_kind AS ENUM (
  * External IP addresses used for guest instances and externally-facing
  * services.
  */
-CREATE TABLE omicron.public.external_ip (
+CREATE TABLE IF NOT EXISTS omicron.public.external_ip (
     /* Identity metadata */
     id UUID PRIMARY KEY,
 
@@ -1613,7 +1625,7 @@ CREATE TABLE omicron.public.external_ip (
  * Index used to support quickly looking up children of the IP Pool range table,
  * when checking for allocated addresses during deletion.
  */
-CREATE INDEX ON omicron.public.external_ip (
+CREATE INDEX IF NOT EXISTS external_ip_by_pool ON omicron.public.external_ip (
     ip_pool_id,
     ip_pool_range_id
 )
@@ -1626,13 +1638,13 @@ CREATE INDEX ON omicron.public.external_ip (
  * pools, _and_ on the fact that the number of ports assigned to each instance
  * is fixed at compile time.
  */
-CREATE UNIQUE INDEX ON omicron.public.external_ip (
+CREATE UNIQUE INDEX IF NOT EXISTS external_ip_unique ON omicron.public.external_ip (
     ip,
     first_port
 )
     WHERE time_deleted IS NULL;
 
-CREATE UNIQUE INDEX ON omicron.public.external_ip (
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_external_ip_by_parent ON omicron.public.external_ip (
     parent_id,
     id
 )
@@ -1644,14 +1656,14 @@ CREATE UNIQUE INDEX ON omicron.public.external_ip (
  * Sagas
  */
 
-CREATE TYPE omicron.public.saga_state AS ENUM (
+CREATE TYPE IF NOT EXISTS omicron.public.saga_state AS ENUM (
     'running',
     'unwinding',
     'done'
 );
 
 
-CREATE TABLE omicron.public.saga (
+CREATE TABLE IF NOT EXISTS omicron.public.saga (
     /* immutable fields */
 
     /* unique identifier for this execution */
@@ -1682,7 +1694,7 @@ CREATE TABLE omicron.public.saga (
  * For recovery (and probably takeover), we need to be able to list running
  * sagas by SEC.  We need to paginate this list by the id.
  */
-CREATE UNIQUE INDEX ON omicron.public.saga (
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_saga_by_sec ON omicron.public.saga (
     current_sec, id
 ) WHERE saga_state != 'done';
 
@@ -1703,7 +1715,7 @@ CREATE UNIQUE INDEX ON omicron.public.saga (
 --    'undo_finished'
 -- );
 
-CREATE TABLE omicron.public.saga_node_event (
+CREATE TABLE IF NOT EXISTS omicron.public.saga_node_event (
     saga_id UUID NOT NULL,
     node_id INT NOT NULL,
     -- event_type omicron.public.saga_node_event_type NOT NULL,
@@ -1728,7 +1740,7 @@ CREATE TABLE omicron.public.saga_node_event (
 /*
  * Sessions for use by web console.
  */
-CREATE TABLE omicron.public.console_session (
+CREATE TABLE IF NOT EXISTS omicron.public.console_session (
     token STRING(40) PRIMARY KEY,
     time_created TIMESTAMPTZ NOT NULL,
     time_last_used TIMESTAMPTZ NOT NULL,
@@ -1736,18 +1748,20 @@ CREATE TABLE omicron.public.console_session (
 );
 
 -- to be used for cleaning up old tokens
-CREATE INDEX ON omicron.public.console_session (
+-- It's okay that this index is non-unique because we don't need to page through
+-- this list.  We'll just grab the next N, delete them, then repeat.
+CREATE INDEX IF NOT EXISTS lookup_console_by_creation ON omicron.public.console_session (
     time_created
 );
 
 -- This index is used to remove sessions for a user that's being deleted.
-CREATE INDEX ON omicron.public.console_session (
+CREATE INDEX IF NOT EXISTS lookup_console_by_silo_user ON omicron.public.console_session (
     silo_user_id
 );
 
 /*******************************************************************/
 
-CREATE TYPE omicron.public.update_artifact_kind AS ENUM (
+CREATE TYPE IF NOT EXISTS omicron.public.update_artifact_kind AS ENUM (
     -- Sled artifacts
     'gimlet_sp',
     'gimlet_rot',
@@ -1764,7 +1778,7 @@ CREATE TYPE omicron.public.update_artifact_kind AS ENUM (
     'switch_rot'
 );
 
-CREATE TABLE omicron.public.update_artifact (
+CREATE TABLE IF NOT EXISTS omicron.public.update_artifact (
     name STRING(63) NOT NULL,
     version STRING(63) NOT NULL,
     kind omicron.public.update_artifact_kind NOT NULL,
@@ -1784,14 +1798,14 @@ CREATE TABLE omicron.public.update_artifact (
 );
 
 /* This index is used to quickly find outdated artifacts. */
-CREATE INDEX ON omicron.public.update_artifact (
+CREATE INDEX IF NOT EXISTS lookup_artifact_by_targets_role_version ON omicron.public.update_artifact (
     targets_role_version
 );
 
 /*
  * System updates
  */
-CREATE TABLE omicron.public.system_update (
+CREATE TABLE IF NOT EXISTS omicron.public.system_update (
     /* Identity metadata (asset) */
     id UUID PRIMARY KEY,
     time_created TIMESTAMPTZ NOT NULL,
@@ -1804,12 +1818,12 @@ CREATE TABLE omicron.public.system_update (
     version STRING(64) NOT NULL -- TODO: length
 );
 
-CREATE UNIQUE INDEX ON omicron.public.system_update (
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_update_by_version ON omicron.public.system_update (
     version
 );
 
  
-CREATE TYPE omicron.public.updateable_component_type AS ENUM (
+CREATE TYPE IF NOT EXISTS omicron.public.updateable_component_type AS ENUM (
     'bootloader_for_rot',
     'bootloader_for_sp',
     'bootloader_for_host_proc',
@@ -1828,7 +1842,7 @@ CREATE TYPE omicron.public.updateable_component_type AS ENUM (
  * Component updates. Associated with at least one system_update through
  * system_update_component_update.
  */
-CREATE TABLE omicron.public.component_update (
+CREATE TABLE IF NOT EXISTS omicron.public.component_update (
     /* Identity metadata (asset) */
     id UUID PRIMARY KEY,
     time_created TIMESTAMPTZ NOT NULL,
@@ -1845,7 +1859,7 @@ CREATE TABLE omicron.public.component_update (
 );
 
 -- version is unique per component type
-CREATE UNIQUE INDEX ON omicron.public.component_update (
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_component_by_type_and_version ON omicron.public.component_update (
     component_type, version
 );
 
@@ -1854,7 +1868,7 @@ CREATE UNIQUE INDEX ON omicron.public.component_update (
  * system_update_id field on component_update because the same component update
  * may be part of more than one system update.
  */
-CREATE TABLE omicron.public.system_update_component_update (
+CREATE TABLE IF NOT EXISTS omicron.public.system_update_component_update (
     system_update_id UUID NOT NULL,
     component_update_id UUID NOT NULL,
 
@@ -1865,7 +1879,7 @@ CREATE TABLE omicron.public.system_update_component_update (
 -- "steady" described by a "reason". But reason is not implemented yet.
 -- Obviously this could be a boolean, but boolean status fields never stay
 -- boolean for long.
-CREATE TYPE omicron.public.update_status AS ENUM (
+CREATE TYPE IF NOT EXISTS omicron.public.update_status AS ENUM (
     'updating',
     'steady'
 );
@@ -1873,7 +1887,7 @@ CREATE TYPE omicron.public.update_status AS ENUM (
 /*
  * Updateable components and their update status
  */
-CREATE TABLE omicron.public.updateable_component (
+CREATE TABLE IF NOT EXISTS omicron.public.updateable_component (
     /* Identity metadata (asset) */
     id UUID PRIMARY KEY,
     time_created TIMESTAMPTZ NOT NULL,
@@ -1897,18 +1911,18 @@ CREATE TABLE omicron.public.updateable_component (
 );
 
 -- can't have two components of the same type with the same device ID
-CREATE UNIQUE INDEX ON omicron.public.updateable_component (
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_component_by_type_and_device ON omicron.public.updateable_component (
     component_type, device_id
 );
 
-CREATE INDEX ON omicron.public.updateable_component (
+CREATE INDEX IF NOT EXISTS lookup_component_by_system_version ON omicron.public.updateable_component (
     system_version
 );
 
 /*
  * System updates
  */
-CREATE TABLE omicron.public.update_deployment (
+CREATE TABLE IF NOT EXISTS omicron.public.update_deployment (
     /* Identity metadata (asset) */
     id UUID PRIMARY KEY,
     time_created TIMESTAMPTZ NOT NULL,
@@ -1923,7 +1937,7 @@ CREATE TABLE omicron.public.update_deployment (
     -- TODO: status reason for update_deployment
 );
 
-CREATE INDEX on omicron.public.update_deployment (
+CREATE INDEX IF NOT EXISTS lookup_deployment_by_creation on omicron.public.update_deployment (
     time_created
 );
 
@@ -1946,7 +1960,7 @@ CREATE INDEX on omicron.public.update_deployment (
  * the entire contents of a DNS group (i.e., all of its zones and all of those
  * zones' DNS names and associated records) to every server in that group.
  */
-CREATE TYPE omicron.public.dns_group AS ENUM (
+CREATE TYPE IF NOT EXISTS omicron.public.dns_group AS ENUM (
     'internal',
     'external'
 );
@@ -1963,7 +1977,7 @@ CREATE TYPE omicron.public.dns_group AS ENUM (
  *     this zone to advertise addresses for the services we provide on the
  *     customer network (i.e., the API and console).
  */
-CREATE TABLE omicron.public.dns_zone (
+CREATE TABLE IF NOT EXISTS omicron.public.dns_zone (
     id UUID PRIMARY KEY,
     time_created TIMESTAMPTZ NOT NULL,
     dns_group omicron.public.dns_group NOT NULL,
@@ -1975,7 +1989,7 @@ CREATE TABLE omicron.public.dns_zone (
  * in both the internal and external groups.  It is not allowed to specify the
  * same DNS zone twice within the same group.
  */
-CREATE UNIQUE INDEX ON omicron.public.dns_zone (
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_dns_zone_by_group ON omicron.public.dns_zone (
     dns_group, zone_name
 );
 
@@ -1990,7 +2004,7 @@ CREATE UNIQUE INDEX ON omicron.public.dns_zone (
  * debugging record of all past generation updates, including metadata about who
  * created them and why.)
  */
-CREATE TABLE omicron.public.dns_version (
+CREATE TABLE IF NOT EXISTS omicron.public.dns_version (
     dns_group omicron.public.dns_group NOT NULL,
     version INT8 NOT NULL,
 
@@ -2013,7 +2027,7 @@ CREATE TABLE omicron.public.dns_version (
  * as removing the old name (setting "version_removed") and creating a new
  * record for the same name at a new version.
  */
-CREATE TABLE omicron.public.dns_name (
+CREATE TABLE IF NOT EXISTS omicron.public.dns_name (
     dns_zone_id UUID NOT NULL,
     version_added INT8 NOT NULL,
     version_removed INT8,
@@ -2029,7 +2043,7 @@ CREATE TABLE omicron.public.dns_name (
  * version.  But you should also not be able to add a name in any version if the
  * name is currently still live (i.e., version_removed IS NULL).
  */
-CREATE UNIQUE INDEX ON omicron.public.dns_name (
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_dns_name_by_zone ON omicron.public.dns_name (
     dns_zone_id, name
 ) WHERE version_removed IS NULL;
 
@@ -2048,7 +2062,7 @@ CREATE UNIQUE INDEX ON omicron.public.dns_name (
  * The ids and names for these users are well-known (i.e., they are used by
  * Nexus directly, so changing these would potentially break compatibility).
  */
-CREATE TABLE omicron.public.user_builtin (
+CREATE TABLE IF NOT EXISTS omicron.public.user_builtin (
     /*
      * Identity metadata
      *
@@ -2064,7 +2078,7 @@ CREATE TABLE omicron.public.user_builtin (
     time_deleted TIMESTAMPTZ
 );
 
-CREATE UNIQUE INDEX ON omicron.public.user_builtin (name);
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_user_builtin_by_name ON omicron.public.user_builtin (name);
 
 /* User used by Nexus to create other users.  Do NOT add more users here! */
 INSERT INTO omicron.public.user_builtin (
@@ -2080,7 +2094,7 @@ INSERT INTO omicron.public.user_builtin (
     'user used for database initialization',
     NOW(),
     NOW()
-);
+) ON CONFLICT DO NOTHING;
 
 /*
  * OAuth 2.0 Device Authorization Grant (RFC 8628)
@@ -2091,7 +2105,7 @@ INSERT INTO omicron.public.user_builtin (
 -- use the `user_code` as primary key, despite it not having very
 -- much entropy.
 -- TODO: A background task should remove unused expired records.
-CREATE TABLE omicron.public.device_auth_request (
+CREATE TABLE IF NOT EXISTS omicron.public.device_auth_request (
     user_code STRING(20) PRIMARY KEY,
     client_id UUID NOT NULL,
     device_code STRING(40) NOT NULL,
@@ -2100,7 +2114,7 @@ CREATE TABLE omicron.public.device_auth_request (
 );
 
 -- Access tokens granted in response to successful device authorization flows.
-CREATE TABLE omicron.public.device_access_token (
+CREATE TABLE IF NOT EXISTS omicron.public.device_access_token (
     token STRING(40) PRIMARY KEY,
     client_id UUID NOT NULL,
     device_code STRING(40) NOT NULL,
@@ -2112,12 +2126,12 @@ CREATE TABLE omicron.public.device_access_token (
 
 -- This UNIQUE constraint is critical for ensuring that at most
 -- one token is ever created for a given device authorization flow.
-CREATE UNIQUE INDEX ON omicron.public.device_access_token (
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_device_access_token_by_client ON omicron.public.device_access_token (
     client_id, device_code
 );
 
 -- This index is used to remove tokens for a user that's being deleted.
-CREATE INDEX ON omicron.public.device_access_token (
+CREATE INDEX IF NOT EXISTS lookup_device_access_token_by_silo_user ON omicron.public.device_access_token (
     silo_user_id
 );
 
@@ -2163,7 +2177,7 @@ CREATE INDEX ON omicron.public.device_access_token (
  * RESOURCE".  How do we represent the ROLE part of this association?  We use a
  * foreign key into this "role_builtin" table.
  */
-CREATE TABLE omicron.public.role_builtin (
+CREATE TABLE IF NOT EXISTS omicron.public.role_builtin (
     resource_type STRING(63),
     role_name STRING(63),
     description STRING(512),
@@ -2181,13 +2195,13 @@ CREATE TABLE omicron.public.role_builtin (
  * module-level documentation.
  */
 
-CREATE TYPE omicron.public.identity_type AS ENUM (
+CREATE TYPE IF NOT EXISTS omicron.public.identity_type AS ENUM (
   'user_builtin',
   'silo_user',
   'silo_group'
 );
 
-CREATE TABLE omicron.public.role_assignment (
+CREATE TABLE IF NOT EXISTS omicron.public.role_assignment (
     /* Composite foreign key into "role_builtin" table */
     resource_type STRING(63) NOT NULL,
     role_name STRING(63) NOT NULL,
@@ -2238,12 +2252,12 @@ CREATE TABLE omicron.public.role_assignment (
  * **For more details on external networking see RFD 267**
  */
 
-CREATE TYPE omicron.public.address_lot_kind AS ENUM (
+CREATE TYPE IF NOT EXISTS omicron.public.address_lot_kind AS ENUM (
     'infra',
     'pool'
 );
 
-CREATE TABLE omicron.public.address_lot (
+CREATE TABLE IF NOT EXISTS omicron.public.address_lot (
     id UUID PRIMARY KEY,
     name STRING(63) NOT NULL,
     description STRING(512) NOT NULL,
@@ -2253,34 +2267,39 @@ CREATE TABLE omicron.public.address_lot (
     kind omicron.public.address_lot_kind NOT NULL
 );
 
-CREATE UNIQUE INDEX ON omicron.public.address_lot (
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_address_lot_by_name ON omicron.public.address_lot (
     name
 ) WHERE
     time_deleted IS NULL;
 
-CREATE TABLE omicron.public.address_lot_block (
+CREATE TABLE IF NOT EXISTS omicron.public.address_lot_block (
     id UUID PRIMARY KEY,
     address_lot_id UUID NOT NULL,
     first_address INET NOT NULL,
     last_address INET NOT NULL
 );
 
-CREATE INDEX ON omicron.public.address_lot_block (
+CREATE INDEX IF NOT EXISTS lookup_address_lot_block_by_lot ON omicron.public.address_lot_block (
     address_lot_id
 );
 
-CREATE TABLE omicron.public.address_lot_rsvd_block (
+CREATE TABLE IF NOT EXISTS omicron.public.address_lot_rsvd_block (
     id UUID PRIMARY KEY,
     address_lot_id UUID NOT NULL,
     first_address INET NOT NULL,
-    last_address INET NOT NULL
+    last_address INET NOT NULL,
+    anycast BOOL NOT NULL
 );
 
-CREATE INDEX ON omicron.public.address_lot_rsvd_block (
+CREATE INDEX IF NOT EXISTS lookup_address_lot_rsvd_block_by_lot ON omicron.public.address_lot_rsvd_block (
     address_lot_id
 );
 
-CREATE TABLE omicron.public.loopback_address (
+CREATE INDEX IF NOT EXISTS lookup_address_lot_rsvd_block_by_anycast ON omicron.public.address_lot_rsvd_block (
+    anycast
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.loopback_address (
     id UUID PRIMARY KEY,
     time_created TIMESTAMPTZ NOT NULL,
     time_modified TIMESTAMPTZ NOT NULL,
@@ -2288,16 +2307,17 @@ CREATE TABLE omicron.public.loopback_address (
     rsvd_address_lot_block_id UUID NOT NULL,
     rack_id UUID NOT NULL,
     switch_location TEXT NOT NULL,
-    address INET NOT NULL
+    address INET NOT NULL,
+    anycast BOOL NOT NULL
 );
 
 /* TODO https://github.com/oxidecomputer/omicron/issues/3001 */
 
-CREATE UNIQUE INDEX ON omicron.public.loopback_address (
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_loopback_address ON omicron.public.loopback_address (
     address, rack_id, switch_location
 );
 
-CREATE TABLE omicron.public.switch_port (
+CREATE TABLE IF NOT EXISTS omicron.public.switch_port (
     id UUID PRIMARY KEY,
     rack_id UUID,
     switch_location TEXT,
@@ -2309,15 +2329,17 @@ CREATE TABLE omicron.public.switch_port (
     )
 );
 
+CREATE INDEX IF NOT EXISTS lookup_switch_port_by_port_settings ON omicron.public.switch_port (port_settings_id);
+
 /* port settings groups included from port settings objects */
-CREATE TABLE omicron.public.switch_port_settings_groups (
+CREATE TABLE IF NOT EXISTS omicron.public.switch_port_settings_groups (
     port_settings_id UUID,
     port_settings_group_id UUID,
 
     PRIMARY KEY (port_settings_id, port_settings_group_id)
 );
 
-CREATE TABLE omicron.public.switch_port_settings_group (
+CREATE TABLE IF NOT EXISTS omicron.public.switch_port_settings_group (
     id UUID PRIMARY KEY,
     /* port settings in this group */
     port_settings_id UUID NOT NULL,
@@ -2328,12 +2350,12 @@ CREATE TABLE omicron.public.switch_port_settings_group (
     time_deleted TIMESTAMPTZ
 );
 
-CREATE UNIQUE INDEX ON omicron.public.switch_port_settings_group (
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_switch_port_settings_group_by_name ON omicron.public.switch_port_settings_group (
     name
 ) WHERE
     time_deleted IS NULL;
 
-CREATE TABLE omicron.public.switch_port_settings (
+CREATE TABLE IF NOT EXISTS omicron.public.switch_port_settings (
     id UUID PRIMARY KEY,
     name STRING(63) NOT NULL,
     description STRING(512) NOT NULL,
@@ -2342,23 +2364,23 @@ CREATE TABLE omicron.public.switch_port_settings (
     time_deleted TIMESTAMPTZ
 );
 
-CREATE UNIQUE INDEX ON omicron.public.switch_port_settings (
+CREATE UNIQUE INDEX IF NOT EXISTS switch_port_settings_by_name ON omicron.public.switch_port_settings (
     name
 ) WHERE
     time_deleted IS NULL;
 
-CREATE TYPE omicron.public.switch_port_geometry AS ENUM (
+CREATE TYPE IF NOT EXISTS omicron.public.switch_port_geometry AS ENUM (
     'Qsfp28x1',
     'Qsfp28x2',
     'Sfp28x4'
 );
 
-CREATE TABLE omicron.public.switch_port_settings_port_config (
+CREATE TABLE IF NOT EXISTS omicron.public.switch_port_settings_port_config (
     port_settings_id UUID PRIMARY KEY,
     geometry omicron.public.switch_port_geometry
 );
 
-CREATE TABLE omicron.public.switch_port_settings_link_config (
+CREATE TABLE IF NOT EXISTS omicron.public.switch_port_settings_link_config (
     port_settings_id UUID,
     lldp_service_config_id UUID NOT NULL,
     link_name TEXT,
@@ -2367,13 +2389,13 @@ CREATE TABLE omicron.public.switch_port_settings_link_config (
     PRIMARY KEY (port_settings_id, link_name)
 );
 
-CREATE TABLE omicron.public.lldp_service_config (
+CREATE TABLE IF NOT EXISTS omicron.public.lldp_service_config (
     id UUID PRIMARY KEY,
     lldp_config_id UUID,
     enabled BOOL NOT NULL
 );
 
-CREATE TABLE omicron.public.lldp_config (
+CREATE TABLE IF NOT EXISTS omicron.public.lldp_config (
     id UUID PRIMARY KEY,
     name STRING(63) NOT NULL,
     description STRING(512) NOT NULL,
@@ -2386,18 +2408,18 @@ CREATE TABLE omicron.public.lldp_config (
     management_ip TEXT
 );
 
-CREATE UNIQUE INDEX ON omicron.public.lldp_config (
+CREATE UNIQUE INDEX IF NOT EXISTS lldp_config_by_name ON omicron.public.lldp_config (
     name
 ) WHERE
     time_deleted IS NULL;
 
-CREATE TYPE omicron.public.switch_interface_kind AS ENUM (
+CREATE TYPE IF NOT EXISTS omicron.public.switch_interface_kind AS ENUM (
     'primary',
     'vlan',
     'loopback'
 );
 
-CREATE TABLE omicron.public.switch_port_settings_interface_config (
+CREATE TABLE IF NOT EXISTS omicron.public.switch_port_settings_interface_config (
     port_settings_id UUID,
     id UUID PRIMARY KEY,
     interface_name TEXT NOT NULL,
@@ -2405,18 +2427,18 @@ CREATE TABLE omicron.public.switch_port_settings_interface_config (
     kind omicron.public.switch_interface_kind
 );
 
-CREATE UNIQUE INDEX ON omicron.public.switch_port_settings_interface_config (
+CREATE UNIQUE INDEX IF NOT EXISTS switch_port_settings_interface_config_by_id ON omicron.public.switch_port_settings_interface_config (
     port_settings_id, interface_name
 );
 
-CREATE TABLE omicron.public.switch_vlan_interface_config (
+CREATE TABLE IF NOT EXISTS omicron.public.switch_vlan_interface_config (
     interface_config_id UUID,
     vid INT4,
 
     PRIMARY KEY (interface_config_id, vid)
 );
 
-CREATE TABLE omicron.public.switch_port_settings_route_config (
+CREATE TABLE IF NOT EXISTS omicron.public.switch_port_settings_route_config (
     port_settings_id UUID,
     interface_name TEXT,
     dst INET,
@@ -2427,7 +2449,7 @@ CREATE TABLE omicron.public.switch_port_settings_route_config (
     PRIMARY KEY (port_settings_id, interface_name, dst, gw)
 );
 
-CREATE TABLE omicron.public.switch_port_settings_bgp_peer_config (
+CREATE TABLE IF NOT EXISTS omicron.public.switch_port_settings_bgp_peer_config (
     port_settings_id UUID,
     bgp_announce_set_id UUID NOT NULL,
     bgp_config_id UUID NOT NULL,
@@ -2438,7 +2460,7 @@ CREATE TABLE omicron.public.switch_port_settings_bgp_peer_config (
     PRIMARY KEY (port_settings_id, interface_name, addr)
 );
 
-CREATE TABLE omicron.public.bgp_config (
+CREATE TABLE IF NOT EXISTS omicron.public.bgp_config (
     id UUID PRIMARY KEY,
     name STRING(63) NOT NULL,
     description STRING(512) NOT NULL,
@@ -2449,12 +2471,12 @@ CREATE TABLE omicron.public.bgp_config (
     vrf TEXT
 );
 
-CREATE UNIQUE INDEX ON omicron.public.bgp_config (
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_bgp_config_by_name ON omicron.public.bgp_config (
     name
 ) WHERE
     time_deleted IS NULL;
 
-CREATE TABLE omicron.public.bgp_announce_set (
+CREATE TABLE IF NOT EXISTS omicron.public.bgp_announce_set (
     id UUID PRIMARY KEY,
     name STRING(63) NOT NULL,
     description STRING(512) NOT NULL,
@@ -2463,12 +2485,12 @@ CREATE TABLE omicron.public.bgp_announce_set (
     time_deleted TIMESTAMPTZ
 );
 
-CREATE UNIQUE INDEX ON omicron.public.bgp_announce_set (
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_bgp_announce_set_by_name ON omicron.public.bgp_announce_set (
     name
 ) WHERE
     time_deleted IS NULL;
 
-CREATE TABLE omicron.public.bgp_announcement (
+CREATE TABLE IF NOT EXISTS omicron.public.bgp_announcement (
     announce_set_id UUID,
     address_lot_block_id UUID NOT NULL,
     network INET,
@@ -2477,7 +2499,7 @@ CREATE TABLE omicron.public.bgp_announcement (
     PRIMARY KEY (announce_set_id, network)
 );
 
-CREATE TABLE omicron.public.switch_port_settings_address_config (
+CREATE TABLE IF NOT EXISTS omicron.public.switch_port_settings_address_config (
     port_settings_id UUID,
     address_lot_block_id UUID NOT NULL,
     rsvd_address_lot_block_id UUID NOT NULL,
@@ -2492,18 +2514,37 @@ CREATE TABLE omicron.public.switch_port_settings_address_config (
 /*******************************************************************/
 
 /*
- * Metadata for the schema itself.  This version number isn't great, as there's
+ * Metadata for the schema itself. This version number isn't great, as there's
  * nothing to ensure it gets bumped when it should be, but it's a start.
  */
 
-CREATE TABLE omicron.public.db_metadata (
-    name  STRING(63) NOT NULL,
-    value STRING(1023) NOT NULL
+CREATE TABLE IF NOT EXISTS omicron.public.db_metadata (
+    -- There should only be one row of this table for the whole DB.
+    -- It's a little goofy, but filter on "singleton = true" before querying
+    -- or applying updates, and you'll access the singleton row.
+    --
+    -- We also add a constraint on this table to ensure it's not possible to
+    -- access the version of this table with "singleton = false".
+    singleton BOOL NOT NULL PRIMARY KEY,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+    -- Semver representation of the DB version
+    version STRING(64) NOT NULL,
+
+    -- (Optional) Semver representation of the DB version to which we're upgrading
+    target_version STRING(64),
+
+    CHECK (singleton = true)
 );
 
 INSERT INTO omicron.public.db_metadata (
-    name,
-    value
+    singleton,
+    time_created,
+    time_modified,
+    version,
+    target_version
 ) VALUES
-    ( 'schema_version', '1.0.0' ),
-    ( 'schema_time_created', CAST(NOW() AS STRING) );
+    ( TRUE, NOW(), NOW(), '2.0.0', NULL)
+ON CONFLICT DO NOTHING;
+
+COMMIT;

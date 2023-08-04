@@ -781,6 +781,7 @@ impl super::Nexus {
                 let client = reqwest::ClientBuilder::new()
                     .connect_timeout(dur)
                     .timeout(dur)
+                    .dns_resolver(self.external_resolver.clone())
                     .build()
                     .map_err(|e| {
                         Error::internal_error(&format!(

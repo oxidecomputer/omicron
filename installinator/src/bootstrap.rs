@@ -28,11 +28,12 @@ const MG_DDM_MANIFEST_PATH: &str = "/opt/oxide/mg-ddm/pkg/ddm/manifest.xml";
 // `sled_agent::bootstrap::server::Server::start()`; consider whether we could
 // find a way for them to share it.
 pub(crate) async fn bootstrap_sled(
+    data_links: &[String; 2],
     log: Logger,
     executor: &BoxedExecutor,
 ) -> Result<()> {
     // Find address objects to pass to maghemite.
-    let links = underlay::find_chelsio_links(executor)
+    let links = underlay::find_chelsio_links(executor, data_links)
         .context("failed to find chelsio links")?;
     ensure!(
         !links.is_empty(),

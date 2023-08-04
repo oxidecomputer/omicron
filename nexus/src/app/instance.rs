@@ -6,7 +6,10 @@
 
 use super::MAX_DISKS_PER_INSTANCE;
 use super::MAX_EXTERNAL_IPS_PER_INSTANCE;
+use super::MAX_MEMORY_BYTES_PER_INSTANCE;
 use super::MAX_NICS_PER_INSTANCE;
+use super::MAX_VCPU_PER_INSTANCE;
+use super::MIN_MEMORY_BYTES_PER_INSTANCE;
 use crate::app::sagas;
 use crate::app::sagas::retry_until_known_result;
 use crate::authn;
@@ -38,6 +41,7 @@ use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::Vni;
 use omicron_common::api::internal::nexus;
+use omicron_common::api::internal::shared::SwitchLocation;
 use propolis_client::support::tungstenite::protocol::frame::coding::CloseCode;
 use propolis_client::support::tungstenite::protocol::CloseFrame;
 use propolis_client::support::tungstenite::Message as WebSocketMessage;
@@ -50,6 +54,7 @@ use sled_agent_client::types::InstancePutStateBody;
 use sled_agent_client::types::InstanceStateRequested;
 use sled_agent_client::types::SourceNatConfig;
 use sled_agent_client::Client as SledAgentClient;
+use std::collections::HashSet;
 use std::net::SocketAddr;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -115,7 +120,7 @@ impl super::Nexus {
         // Validate parameters
         if params.disks.len() > MAX_DISKS_PER_INSTANCE as usize {
             return Err(Error::invalid_request(&format!(
-                "cannot attach more than {} disks to instance!",
+                "cannot attach more than {} disks to instance",
                 MAX_DISKS_PER_INSTANCE
             )));
         }
@@ -124,6 +129,12 @@ impl super::Nexus {
                 self.validate_disk_create_params(opctx, &authz_project, create)
                     .await?;
             }
+        }
+        if params.ncpus.0 > MAX_VCPU_PER_INSTANCE {
+            return Err(Error::invalid_request(&format!(
+                "cannot have more than {} vCPUs per instance",
+                MAX_VCPU_PER_INSTANCE
+            )));
         }
         if params.external_ips.len() > MAX_EXTERNAL_IPS_PER_INSTANCE {
             return Err(Error::invalid_request(&format!(
@@ -158,27 +169,38 @@ impl super::Nexus {
         }
 
         // Reject instances where the memory is not at least
-        // MIN_MEMORY_SIZE_BYTES
-        if params.memory.to_bytes() < params::MIN_MEMORY_SIZE_BYTES as u64 {
+        // MIN_MEMORY_BYTES_PER_INSTANCE
+        if params.memory.to_bytes() < MIN_MEMORY_BYTES_PER_INSTANCE as u64 {
             return Err(Error::InvalidValue {
                 label: String::from("size"),
                 message: format!(
                     "memory must be at least {}",
-                    ByteCount::from(params::MIN_MEMORY_SIZE_BYTES)
+                    ByteCount::from(MIN_MEMORY_BYTES_PER_INSTANCE)
                 ),
             });
         }
 
         // Reject instances where the memory is not divisible by
-        // MIN_MEMORY_SIZE_BYTES
-        if (params.memory.to_bytes() % params::MIN_MEMORY_SIZE_BYTES as u64)
+        // MIN_MEMORY_BYTES_PER_INSTANCE
+        if (params.memory.to_bytes() % MIN_MEMORY_BYTES_PER_INSTANCE as u64)
             != 0
         {
             return Err(Error::InvalidValue {
                 label: String::from("size"),
                 message: format!(
                     "memory must be divisible by {}",
-                    ByteCount::from(params::MIN_MEMORY_SIZE_BYTES)
+                    ByteCount::from(MIN_MEMORY_BYTES_PER_INSTANCE)
+                ),
+            });
+        }
+
+        // Reject instances where the memory is greated than the limit
+        if params.memory.to_bytes() > MAX_MEMORY_BYTES_PER_INSTANCE {
+            return Err(Error::InvalidValue {
+                label: String::from("size"),
+                message: format!(
+                    "memory must be less than or equal to {}",
+                    ByteCount::try_from(MAX_MEMORY_BYTES_PER_INSTANCE).unwrap()
                 ),
             });
         }
@@ -187,6 +209,9 @@ impl super::Nexus {
             serialized_authn: authn::saga::Serialized::for_opctx(opctx),
             project_id: authz_project.id(),
             create_params: params.clone(),
+            boundary_switches: self
+                .boundary_switches(&self.opctx_alloc)
+                .await?,
         };
 
         let saga_outputs = self
@@ -267,10 +292,19 @@ impl super::Nexus {
         let (.., authz_instance, instance) =
             instance_lookup.fetch_for(authz::Action::Delete).await?;
 
+        // TODO: #3593 Correctness
+        // When the set of boundary switches changes, there is no cleanup /
+        // reconciliation logic performed to ensure that the NAT entries are
+        // propogated to new boundary switches / removed from former boundary
+        // switches, meaning we could end up with stale or missing entries.
+        let boundary_switches =
+            self.boundary_switches(&self.opctx_alloc).await?;
+
         let saga_params = sagas::instance_delete::Params {
             serialized_authn: authn::saga::Serialized::for_opctx(opctx),
             authz_instance,
             instance,
+            boundary_switches,
         };
         self.execute_saga::<sagas::instance_delete::SagaInstanceDelete>(
             saga_params,
@@ -1163,15 +1197,46 @@ impl super::Nexus {
             .fetch()
             .await?;
 
-        self.instance_ensure_dpd_config(
-            opctx,
-            db_instance.id(),
-            &sled.address(),
-            None,
-        )
-        .await?;
+        let boundary_switches =
+            self.boundary_switches(&self.opctx_alloc).await?;
+
+        for switch in &boundary_switches {
+            let dpd_client = self.dpd_clients.get(switch).ok_or_else(|| {
+                Error::internal_error(&format!(
+                    "could not find dpd client for {switch}"
+                ))
+            })?;
+            self.instance_ensure_dpd_config(
+                opctx,
+                db_instance.id(),
+                &sled.address(),
+                None,
+                dpd_client,
+            )
+            .await?;
+        }
 
         Ok(())
+    }
+
+    // Switches with uplinks configured and boundary services enabled
+    async fn boundary_switches(
+        &self,
+        opctx: &OpContext,
+    ) -> Result<HashSet<SwitchLocation>, Error> {
+        let mut boundary_switches: HashSet<SwitchLocation> = HashSet::new();
+        let uplinks = self.list_switch_ports_with_uplinks(opctx).await?;
+        for uplink in &uplinks {
+            let location: SwitchLocation =
+                uplink.switch_location.parse().map_err(|_| {
+                    Error::internal_error(&format!(
+                        "invalid switch location in uplink config: {}",
+                        uplink.switch_location
+                    ))
+                })?;
+            boundary_switches.insert(location);
+        }
+        Ok(boundary_switches)
     }
 
     /// Ensures that the Dendrite configuration for the supplied instance is
@@ -1198,9 +1263,9 @@ impl super::Nexus {
         instance_id: Uuid,
         sled_ip_address: &std::net::SocketAddrV6,
         ip_index_filter: Option<usize>,
+        dpd_client: &Arc<dpd_client::Client>,
     ) -> Result<(), Error> {
         let log = &self.log;
-        let dpd_client = &self.dpd_client;
 
         info!(log, "looking up instance's primary network interface";
               "instance_id" => %instance_id);

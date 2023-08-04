@@ -75,6 +75,7 @@ pub fn start_test_server(
 }
 
 /// Creates a transient DNS server pointing to a fake Nexus dropshot server.
+#[allow(unused)]
 pub async fn start_dns_server(
     log: &slog::Logger,
     nexus: &dropshot::HttpServer<ServerContext>,

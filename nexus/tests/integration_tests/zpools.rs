@@ -6,7 +6,7 @@ use dropshot::test_util::ClientTestContext;
 use http::method::Method;
 use http::StatusCode;
 use omicron_common::api::external::ByteCount;
-use omicron_nexus::internal_api::params::PhysicalDiskKind;
+use omicron_nexus::external_api::params::PhysicalDiskKind;
 use omicron_nexus::internal_api::params::PhysicalDiskPutRequest;
 use omicron_nexus::internal_api::params::ZpoolPutRequest;
 use uuid::Uuid;

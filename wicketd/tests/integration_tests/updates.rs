@@ -221,7 +221,7 @@ async fn test_installinator_fetch() {
     // Create a new update ID and register it. This is required to ensure the
     // installinator reaches completion.
     let update_id = Uuid::new_v4();
-    wicketd_testctx.server.ipr_update_tracker.register(update_id).await;
+    wicketd_testctx.server.ipr_update_tracker.register(update_id);
 
     let update_id_str = update_id.to_string();
     let dest_path = temp_dir.path().join("installinator-out");
@@ -237,6 +237,10 @@ async fn test_installinator_fetch() {
         "--control-plane",
         control_plane_hash.as_str(),
         dest_path.as_str(),
+        "--data-link0",
+        "cxgbe0",
+        "--data-link1",
+        "cxgbe1",
     ])
     .expect("installinator args parsed successfully");
 
@@ -247,7 +251,7 @@ async fn test_installinator_fetch() {
 
     // Check that the update status is marked as closed.
     assert_eq!(
-        wicketd_testctx.server.ipr_update_tracker.update_state(update_id).await,
+        wicketd_testctx.server.ipr_update_tracker.update_state(update_id),
         Some(RunningUpdateState::Closed),
         "update should be marked as closed at the end of the run"
     );

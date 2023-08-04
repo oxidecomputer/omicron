@@ -6,6 +6,8 @@
 //!
 //! NOTE: Should be kept up-to-date with dbinit.sql.
 
+use omicron_common::api::external::SemverVersion;
+
 table! {
     disk (id) {
         id -> Uuid,
@@ -274,6 +276,7 @@ table! {
         address_lot_id -> Uuid,
         first_address -> Inet,
         last_address -> Inet,
+        anycast -> Bool,
     }
 }
 
@@ -287,6 +290,7 @@ table! {
         rack_id -> Uuid,
         switch_location -> Text,
         address -> Inet,
+        anycast -> Bool,
     }
 }
 
@@ -352,6 +356,7 @@ table! {
         ncpus -> Int8,
         memory -> Int8,
         hostname -> Text,
+        boot_on_fault -> Bool,
     }
 }
 
@@ -1109,6 +1114,23 @@ table! {
     }
 }
 
+table! {
+    db_metadata (singleton) {
+        singleton -> Bool,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        version -> Text,
+        target_version -> Nullable<Text>,
+    }
+}
+
+/// The version of the database schema this particular version of Nexus was
+/// built against.
+///
+/// This should be updated whenever the schema is changed. For more details,
+/// refer to: schema/crdb/README.adoc
+pub const SCHEMA_VERSION: SemverVersion = SemverVersion::new(2, 0, 0);
+
 allow_tables_to_appear_in_same_query!(
     system_update,
     component_update,
@@ -1156,3 +1178,8 @@ allow_tables_to_appear_in_same_query!(
 
 allow_tables_to_appear_in_same_query!(dns_zone, dns_version, dns_name);
 allow_tables_to_appear_in_same_query!(external_ip, service);
+
+allow_tables_to_appear_in_same_query!(
+    switch_port,
+    switch_port_settings_route_config
+);

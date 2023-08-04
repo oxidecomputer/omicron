@@ -10444,6 +10444,10 @@
               }
             ]
           },
+          "anycast": {
+            "description": "Address is an anycast address. This allows the address to be assigned to multiple locations simultaneously.",
+            "type": "boolean"
+          },
           "mask": {
             "description": "The subnet mask to use for the address.",
             "type": "integer",
@@ -10467,6 +10471,7 @@
         "required": [
           "address",
           "address_lot",
+          "anycast",
           "mask",
           "rack_id",
           "switch_location"
@@ -10579,6 +10584,9 @@
         "description": "View of a Physical Disk\n\nPhysical disks reside in a particular sled and are used to store both Instance Disk data as well as internal metadata.",
         "type": "object",
         "properties": {
+          "form_factor": {
+            "$ref": "#/components/schemas/PhysicalDiskKind"
+          },
           "id": {
             "description": "unique, immutable, system-controlled identifier for each resource",
             "type": "string",
@@ -10611,12 +10619,21 @@
           }
         },
         "required": [
+          "form_factor",
           "id",
           "model",
           "serial",
           "time_created",
           "time_modified",
           "vendor"
+        ]
+      },
+      "PhysicalDiskKind": {
+        "description": "Describes the form factor of physical disks.",
+        "type": "string",
+        "enum": [
+          "m2",
+          "u2"
         ]
       },
       "PhysicalDiskResultsPage": {

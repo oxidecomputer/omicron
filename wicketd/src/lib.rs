@@ -22,6 +22,7 @@ pub use installinator_progress::{IprUpdateTracker, RunningUpdateState};
 pub use inventory::{RackV1Inventory, SpInventory};
 use mgs::make_mgs_client;
 pub(crate) use mgs::{MgsHandle, MgsManager};
+use omicron_common::FileKv;
 use sled_hardware::Baseboard;
 
 use dropshot::{ConfigDropshot, HandlerTaskMode, HttpServer};
@@ -65,7 +66,7 @@ impl Server {
     pub async fn start(log: slog::Logger, args: Args) -> Result<Self, String> {
         let (drain, registration) = slog_dtrace::with_drain(log);
 
-        let log = slog::Logger::root(drain.fuse(), slog::o!());
+        let log = slog::Logger::root(drain.fuse(), slog::o!(FileKv));
         if let slog_dtrace::ProbeRegistration::Failed(e) = registration {
             let msg = format!("failed to register DTrace probes: {}", e);
             error!(log, "{}", msg);

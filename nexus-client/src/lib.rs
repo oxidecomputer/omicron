@@ -5,6 +5,8 @@
 //! Interface for making API requests to the Oxide control plane at large
 //! from within the control plane
 
+use std::collections::HashMap;
+
 progenitor::generate_api!(
     spec = "../openapi/nexus-internal.json",
     derives = [schemars::JsonSchema, PartialEq],
@@ -20,6 +22,7 @@ progenitor::generate_api!(
         slog::debug!(log, "client response"; "result" => ?result);
     }),
     replace = {
+        Ipv4Network = ipnetwork::Ipv4Network,
         MacAddr = omicron_common::api::external::MacAddr,
         Name = omicron_common::api::external::Name,
         NewPasswordHash = omicron_passwords::NewPasswordHash,
@@ -323,6 +326,46 @@ impl From<omicron_common::api::internal::shared::PortFec> for types::PortFec {
             omicron_common::api::internal::shared::PortFec::Rs => {
                 types::PortFec::Rs
             }
+        }
+    }
+}
+
+impl From<omicron_common::api::internal::shared::SwitchLocation>
+    for types::SwitchLocation
+{
+    fn from(
+        value: omicron_common::api::internal::shared::SwitchLocation,
+    ) -> Self {
+        match value {
+            omicron_common::api::internal::shared::SwitchLocation::Switch0 => {
+                types::SwitchLocation::Switch0
+            }
+            omicron_common::api::internal::shared::SwitchLocation::Switch1 => {
+                types::SwitchLocation::Switch1
+            }
+        }
+    }
+}
+
+impl From<omicron_common::api::internal::shared::ExternalPortDiscovery>
+    for types::ExternalPortDiscovery
+{
+    fn from(
+        value: omicron_common::api::internal::shared::ExternalPortDiscovery,
+    ) -> Self {
+        match value {
+            omicron_common::api::internal::shared::ExternalPortDiscovery::Auto(val) => {
+                let new: HashMap<_, _> = val.iter().map(|(slot, addr)| {
+                    (slot.to_string(), *addr)
+                }).collect();
+                types::ExternalPortDiscovery::Auto(new)
+            },
+            omicron_common::api::internal::shared::ExternalPortDiscovery::Static(val) => {
+                let new: HashMap<_, _> = val.iter().map(|(slot, ports)| {
+                    (slot.to_string(), ports.clone())
+                }).collect();
+                types::ExternalPortDiscovery::Static(new)
+            },
         }
     }
 }

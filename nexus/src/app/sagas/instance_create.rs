@@ -28,10 +28,12 @@ use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::InstanceState;
 use omicron_common::api::external::Name;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
+use omicron_common::api::internal::shared::SwitchLocation;
 use serde::Deserialize;
 use serde::Serialize;
 use sled_agent_client::types::InstanceStateRequested;
 use slog::warn;
+use std::collections::HashSet;
 use std::convert::TryFrom;
 use std::fmt::Debug;
 use std::net::Ipv6Addr;
@@ -47,6 +49,7 @@ pub struct Params {
     pub serialized_authn: authn::saga::Serialized,
     pub project_id: Uuid,
     pub create_params: params::InstanceCreate,
+    pub boundary_switches: HashSet<SwitchLocation>,
 }
 
 // Several nodes in this saga are wrapped in their own subsaga so that they can
@@ -65,6 +68,7 @@ struct NetworkConfigParams {
     saga_params: Params,
     instance_id: Uuid,
     which: usize,
+    switch_location: SwitchLocation,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -170,7 +174,7 @@ impl NexusSaga for SagaInstanceCreate {
 
         // Helper function for appending subsagas to our parent saga.
         fn subsaga_append<S: Serialize>(
-            node_basename: &'static str,
+            node_basename: String,
             subsaga_dag: steno::Dag,
             parent_builder: &mut steno::DagBuilder,
             params: S,
@@ -234,7 +238,7 @@ impl NexusSaga for SagaInstanceCreate {
                 CREATE_NETWORK_INTERFACE.as_ref(),
             ));
             subsaga_append(
-                "network_interface",
+                "network_interface".into(),
                 subsaga_builder.build()?,
                 &mut builder,
                 repeat_params,
@@ -268,7 +272,7 @@ impl NexusSaga for SagaInstanceCreate {
                 CREATE_EXTERNAL_IP.as_ref(),
             ));
             subsaga_append(
-                "external_ip",
+                "external_ip".into(),
                 subsaga_builder.build()?,
                 &mut builder,
                 repeat_params,
@@ -288,7 +292,7 @@ impl NexusSaga for SagaInstanceCreate {
                     create_params: create_disk.clone(),
                 };
                 subsaga_append(
-                    "create_disk",
+                    "create_disk".into(),
                     SagaDiskCreate::make_saga_dag(&params, subsaga_builder)?,
                     &mut builder,
                     params,
@@ -315,7 +319,7 @@ impl NexusSaga for SagaInstanceCreate {
                 attach_params: disk_attach.clone(),
             };
             subsaga_append(
-                "attach_disk",
+                "attach_disk".into(),
                 subsaga_builder.build()?,
                 &mut builder,
                 params,
@@ -326,26 +330,32 @@ impl NexusSaga for SagaInstanceCreate {
         // If a primary NIC exists, create a NAT entry for the default external IP,
         // as well as additional NAT entries for each requested ephemeral IP
         for i in 0..(params.create_params.external_ips.len() + 1) {
-            let subsaga_name =
-                SagaName::new(&format!("instance-configure-nat-{i}"));
-            let mut subsaga_builder = DagBuilder::new(subsaga_name);
-            subsaga_builder.append(Node::action(
-                "configure_asic",
-                format!("ConfigureAsic-{i}").as_str(),
-                CONFIGURE_ASIC.as_ref(),
-            ));
-            let net_params = NetworkConfigParams {
-                saga_params: params.clone(),
-                instance_id,
-                which: i,
-            };
-            subsaga_append(
-                "configure_asic",
-                subsaga_builder.build()?,
-                &mut builder,
-                net_params,
-                i,
-            )?;
+            for &switch_location in &params.boundary_switches {
+                let subsaga_name = SagaName::new(&format!(
+                    "instance-configure-nat-{i}-{switch_location}"
+                ));
+                let mut subsaga_builder = DagBuilder::new(subsaga_name);
+
+                let basename = format!("ConfigureAsic-{i}-{switch_location}");
+                subsaga_builder.append(Node::action(
+                    "configure_asic",
+                    &basename,
+                    CONFIGURE_ASIC.as_ref(),
+                ));
+                let net_params = NetworkConfigParams {
+                    saga_params: params.clone(),
+                    instance_id,
+                    which: i,
+                    switch_location,
+                };
+                subsaga_append(
+                    basename,
+                    subsaga_builder.build()?,
+                    &mut builder,
+                    net_params,
+                    i,
+                )?;
+            }
         }
 
         // creating instance v2p mappings is not atomic - there are many calls
@@ -376,6 +386,14 @@ async fn sic_add_network_config(
     );
     let osagactx = sagactx.user_data();
     let datastore = osagactx.datastore();
+    let switch = net_params.switch_location;
+    let dpd_client =
+        osagactx.nexus().dpd_clients.get(&switch).ok_or_else(|| {
+            ActionError::action_failed(Error::internal_error(&format!(
+                "unable to find client for switch {switch}"
+            )))
+        })?;
+
     let (.., db_instance) = LookupPath::new(&opctx, &datastore)
         .instance_id(instance_id)
         .fetch()
@@ -401,6 +419,7 @@ async fn sic_add_network_config(
             instance_id,
             &sled.address(),
             Some(which),
+            dpd_client,
         )
         .await
         .map_err(ActionError::action_failed)
@@ -412,13 +431,19 @@ async fn sic_remove_network_config(
     let net_params = sagactx.saga_params::<NetworkConfigParams>()?;
     let which = net_params.which;
     let instance_id = net_params.instance_id;
+    let switch = net_params.switch_location;
     let params = net_params.saga_params;
     let opctx = crate::context::op_context_for_saga_action(
         &sagactx,
         &params.serialized_authn,
     );
     let osagactx = sagactx.user_data();
-    let dpd_client = &osagactx.nexus().dpd_client;
+    let dpd_client =
+        osagactx.nexus().dpd_clients.get(&switch).ok_or_else(|| {
+            Error::internal_error(&format!(
+                "unable to find client for switch {switch}"
+            ))
+        })?;
     let datastore = &osagactx.datastore();
     let log = sagactx.user_data().log();
 
@@ -1362,7 +1387,9 @@ pub mod test {
     use omicron_common::api::external::{
         ByteCount, IdentityMetadataCreateParams, InstanceCpuCount,
     };
+    use omicron_common::api::internal::shared::SwitchLocation;
     use omicron_sled_agent::sim::SledAgent;
+    use std::collections::HashSet;
     use std::num::NonZeroU32;
     use uuid::Uuid;
 
@@ -1406,6 +1433,7 @@ pub mod test {
                 )],
                 start: false,
             },
+            boundary_switches: HashSet::from([SwitchLocation::Switch0]),
         }
     }
 

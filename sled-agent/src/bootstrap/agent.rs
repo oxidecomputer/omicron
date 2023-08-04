@@ -5,23 +5,25 @@
 //! Bootstrap-related APIs.
 
 use super::config::{
-    Config, BOOTSTRAP_AGENT_HTTP_PORT, BOOTSTRAP_AGENT_RACK_INIT_PORT,
+    Config, BOOTSTORE_PORT, BOOTSTRAP_AGENT_HTTP_PORT,
+    BOOTSTRAP_AGENT_RACK_INIT_PORT,
 };
 use super::hardware::HardwareMonitor;
 use super::http_entrypoints::RackOperationStatus;
 use super::params::RackInitializeRequest;
 use super::params::StartSledAgentRequest;
-use super::secret_retriever::LocalSecretRetriever;
+use super::secret_retriever::LrtqOrHardcodedSecretRetriever;
 use super::views::SledAgentResponse;
 use crate::config::Config as SledConfig;
-use crate::ledger::{Ledger, Ledgerable};
 use crate::server::Server as SledServer;
 use crate::services::ServiceManager;
 use crate::storage_manager::{StorageManager, StorageResources};
 use crate::updates::UpdateManager;
+use bootstore::schemes::v0 as bootstore;
 use camino::Utf8PathBuf;
+use cancel_safe_futures::TryStreamExt;
 use ddm_admin_client::{Client as DdmAdminClient, DdmError};
-use futures::stream::{self, StreamExt, TryStreamExt};
+use futures::stream::{self, StreamExt};
 use illumos_utils::addrobj::AddrObject;
 use illumos_utils::dladm::{Dladm, Etherstub, EtherstubVnic, GetMacError};
 use illumos_utils::process::{BoxedExecutor, PFEXEC};
@@ -33,11 +35,14 @@ use illumos_utils::zone::Zones;
 use key_manager::{KeyManager, StorageKeyRequester};
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::api::external::Error as ExternalError;
+use omicron_common::ledger::{self, Ledger, Ledgerable};
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sled_hardware::underlay::BootstrapInterface;
 use sled_hardware::{Baseboard, HardwareManager};
 use slog::Logger;
 use std::borrow::Cow;
+use std::collections::BTreeSet;
 use std::net::{IpAddr, Ipv6Addr, SocketAddrV6};
 use std::sync::Arc;
 use thiserror::Error;
@@ -50,9 +55,6 @@ pub use rack_ops::RackInitId;
 pub use rack_ops::RackResetId;
 use rack_ops::RssAccess;
 pub use rack_ops::RssAccessError;
-
-/// The number of QSFP28 ports on sidecar revisions A and B
-const SIDECAR_REV_A_B_N_QSFP28_PORTS: u8 = 32;
 
 /// Describes errors which may occur while operating the bootstrap service.
 #[derive(Error, Debug)]
@@ -77,7 +79,7 @@ pub enum BootstrapError {
     Hardware(#[from] crate::bootstrap::hardware::Error),
 
     #[error("Failed to access ledger: {0}")]
-    Ledger(#[from] crate::ledger::Error),
+    Ledger(#[from] ledger::Error),
 
     #[error("Error managing sled agent: {0}")]
     SledError(String),
@@ -117,6 +119,12 @@ pub enum BootstrapError {
 
     #[error("Error accessing version information: {0}")]
     Version(#[from] crate::updates::Error),
+
+    #[error("Bootstore Error: {0}")]
+    Bootstore(#[from] bootstore::NodeRequestError),
+
+    #[error("Missing M.2 Paths for dataset: {0}")]
+    MissingM2Paths(&'static str),
 }
 
 impl From<BootstrapError> for ExternalError {
@@ -205,21 +213,37 @@ pub struct Agent {
 
     global_zone_bootstrap_link_local_address: Ipv6Addr,
 
-    // We maintain the handle just to show ownership, but don't use it
-    // as the KeyManager task should run forever
+    /// We maintain the handle just to show ownership, but don't use it, as the
+    /// KeyManager task should run forever
     #[allow(unused)]
     key_manager_handle: JoinHandle<()>,
 
-    // We maintain a copy of the `StorageKeyRequester` so we can pass it through
-    // from the `HardwareManager` to the `StorageManager` when the `HardwareManger`
-    // gets recreated.
+    /// We maintain a copy of the `StorageKeyRequester` so we can pass it
+    /// through from the `HardwareManager` to the `StorageManager` when the
+    /// `HardwareManager` gets recreated.
     storage_key_requester: StorageKeyRequester,
 
     /// Our sled's baseboard identity.
     baseboard: Baseboard,
+
+    /// Handle for interacting with the local `bootstore::Node`
+    bootstore: bootstore::NodeHandle,
+
+    /// The join handle of the `bootstore::Node` task
+    /// The bootstore main task runs forever. This handle field shows ownership.
+    #[allow(unused)]
+    bootstore_join_handle: JoinHandle<()>,
+
+    /// The join handle of a task that polls DDMD and updates the bootstore with
+    /// known peer addresses. This task runs forever. This handle field shows
+    /// ownership.
+    #[allow(unused)]
+    bootstore_peer_update_handle: JoinHandle<()>,
 }
 
-const SLED_AGENT_REQUEST_FILE: &str = "sled-agent-request.toml";
+const SLED_AGENT_REQUEST_FILE: &str = "sled-agent-request.json";
+const BOOTSTORE_FSM_STATE_FILE: &str = "bootstore-fsm-state.json";
+const BOOTSTORE_NETWORK_CONFIG_FILE: &str = "bootstore-network-config.json";
 
 // Deletes all state which may be left-over from a previous execution of the
 // Sled Agent.
@@ -242,7 +266,10 @@ async fn cleanup_all_old_global_state(
     stream::iter(zones)
         .zip(stream::iter(std::iter::repeat(log.clone())))
         .map(Ok::<_, illumos_utils::zone::AdmError>)
-        .try_for_each_concurrent(None, |(zone, log)| async move {
+        // Use for_each_concurrent_then_try to delete as much as possible. We
+        // only return one error though -- hopefully that's enough to signal to
+        // the caller that this failed.
+        .for_each_concurrent_then_try(None, |(zone, log)| async move {
             warn!(log, "Deleting existing zone"; "zone_name" => zone.name());
             Zones::halt_and_remove_logged(&log, zone.name()).await
         })
@@ -277,13 +304,58 @@ async fn cleanup_all_old_global_state(
     Ok(())
 }
 
-async fn sled_config_paths(storage: &StorageResources) -> Vec<Utf8PathBuf> {
-    storage
+async fn sled_config_paths(
+    storage: &StorageResources,
+) -> Result<Vec<Utf8PathBuf>, BootstrapError> {
+    let paths: Vec<_> = storage
         .all_m2_mountpoints(sled_hardware::disk::CONFIG_DATASET)
         .await
         .into_iter()
         .map(|p| p.join(SLED_AGENT_REQUEST_FILE))
-        .collect()
+        .collect();
+
+    if paths.is_empty() {
+        return Err(BootstrapError::MissingM2Paths(
+            sled_hardware::disk::CONFIG_DATASET,
+        ));
+    }
+    Ok(paths)
+}
+
+async fn bootstore_fsm_state_paths(
+    storage: &StorageResources,
+) -> Result<Vec<Utf8PathBuf>, BootstrapError> {
+    let paths: Vec<_> = storage
+        .all_m2_mountpoints(sled_hardware::disk::CLUSTER_DATASET)
+        .await
+        .into_iter()
+        .map(|p| p.join(BOOTSTORE_FSM_STATE_FILE))
+        .collect();
+
+    if paths.is_empty() {
+        return Err(BootstrapError::MissingM2Paths(
+            sled_hardware::disk::CLUSTER_DATASET,
+        ));
+    }
+    Ok(paths)
+}
+
+async fn bootstore_network_config_paths(
+    storage: &StorageResources,
+) -> Result<Vec<Utf8PathBuf>, BootstrapError> {
+    let paths: Vec<_> = storage
+        .all_m2_mountpoints(sled_hardware::disk::CLUSTER_DATASET)
+        .await
+        .into_iter()
+        .map(|p| p.join(BOOTSTORE_NETWORK_CONFIG_FILE))
+        .collect();
+
+    if paths.is_empty() {
+        return Err(BootstrapError::MissingM2Paths(
+            sled_hardware::disk::CLUSTER_DATASET,
+        ));
+    }
+    Ok(paths)
 }
 
 impl Agent {
@@ -358,12 +430,9 @@ impl Agent {
         let ddmd_client = DdmAdminClient::localhost(&log)?;
         ddmd_client.advertise_prefix(Ipv6Subnet::new(ip));
 
-        // Before we start creating zones, we need to ensure that the
-        // necessary ZFS and Zone resources are ready.
-        //
-        // TODO(https://github.com/oxidecomputer/omicron/issues/2888):
-        // We should carefully consider which dataset this is using; it's
-        // currently part of the ramdisk.
+        // Before we create the switch zone, we need to ensure that the
+        // necessary ZFS and Zone resources are ready. All other zones are
+        // created on U.2 drives.
         let zoned = true;
         let do_format = true;
         let encryption_details = None;
@@ -405,8 +474,9 @@ impl Agent {
 
         // Spawn the `KeyManager` which is needed by the the StorageManager to
         // retrieve encryption keys.
+        let secret_retriever = LrtqOrHardcodedSecretRetriever::new();
         let (mut key_manager, storage_key_requester) =
-            KeyManager::new(&log, LocalSecretRetriever {});
+            KeyManager::new(&log, secret_retriever);
 
         let handle = tokio::spawn(async move { key_manager.run().await });
 
@@ -445,7 +515,38 @@ impl Agent {
             }
         }
 
-        let paths = sled_config_paths(&storage_resources).await;
+        // Configure and start the bootstore
+        let bootstore_config = bootstore::Config {
+            id: baseboard.clone(),
+            addr: SocketAddrV6::new(ip, BOOTSTORE_PORT, 0, 0),
+            time_per_tick: std::time::Duration::from_millis(250),
+            learn_timeout: std::time::Duration::from_secs(5),
+            rack_init_timeout: std::time::Duration::from_secs(300),
+            rack_secret_request_timeout: std::time::Duration::from_secs(5),
+            fsm_state_ledger_paths: bootstore_fsm_state_paths(
+                &storage_resources,
+            )
+            .await?,
+            network_config_ledger_paths: bootstore_network_config_paths(
+                &storage_resources,
+            )
+            .await?,
+        };
+        let (mut bootstore_node, bootstore_node_handle) =
+            bootstore::Node::new(bootstore_config, &ba_log).await;
+
+        let bootstore_join_handle =
+            tokio::spawn(async move { bootstore_node.run().await });
+
+        // Spawn a task for polling DDMD and updating bootstore
+        let bootstore_peer_update_handle =
+            Self::poll_ddmd_for_bootstore_peer_update(
+                &ba_log,
+                bootstore_node_handle.clone(),
+            )
+            .await;
+
+        let paths = sled_config_paths(&storage_resources).await?;
         let maybe_ledger =
             Ledger::<PersistentSledAgentRequest>::new(&ba_log, paths).await;
         let make_bootstrap_agent = move |initialized| Agent {
@@ -465,6 +566,9 @@ impl Agent {
             key_manager_handle: handle,
             storage_key_requester,
             baseboard,
+            bootstore: bootstore_node_handle,
+            bootstore_join_handle,
+            bootstore_peer_update_handle,
         };
         let agent = if let Some(ledger) = maybe_ledger {
             let agent = make_bootstrap_agent(true);
@@ -481,6 +585,79 @@ impl Agent {
 
     pub fn baseboard(&self) -> &Baseboard {
         &self.baseboard
+    }
+
+    async fn poll_ddmd_for_bootstore_peer_update(
+        log: &Logger,
+        bootstore_node_handle: bootstore::NodeHandle,
+    ) -> JoinHandle<()> {
+        let log = log.new(o!("component" => "bootstore_ddmd_poller"));
+        tokio::spawn(async move {
+            let mut current_peers: BTreeSet<SocketAddrV6> = BTreeSet::new();
+            // We're talking to a service's admin interface on localhost and
+            // we're only asking for its current state. We use a retry in a loop
+            // instead of `backoff`.
+            //
+            // We also use this timeout in the case of spurious ddmd failures
+            // that require a reconnection from the ddmd_client.
+            const RETRY: tokio::time::Duration =
+                tokio::time::Duration::from_secs(5);
+
+            loop {
+                let ddmd_client = match DdmAdminClient::localhost(&log) {
+                    Ok(client) => {
+                        info!(log, "Connected to ddmd");
+                        client
+                    }
+                    Err(err) => {
+                        warn!(log, "Failed to connect to ddmd:"; "err" => #%err);
+                        tokio::time::sleep(RETRY).await;
+                        continue;
+                    }
+                };
+
+                loop {
+                    match ddmd_client
+                        .derive_bootstrap_addrs_from_prefixes(&[
+                            BootstrapInterface::GlobalZone,
+                        ])
+                        .await
+                    {
+                        Ok(addrs) => {
+                            let peers: BTreeSet<_> = addrs
+                                .map(|ip| {
+                                    SocketAddrV6::new(ip, BOOTSTORE_PORT, 0, 0)
+                                })
+                                .collect();
+                            if peers != current_peers {
+                                current_peers = peers;
+                                if let Err(e) = bootstore_node_handle
+                                    .load_peer_addresses(current_peers.clone())
+                                    .await
+                                {
+                                    error!(
+                                        log,
+                                        concat!("Bootstore comms error: {}. ",
+                                        "bootstore::Node task must have paniced",
+                                    ),
+                                        e
+                                    );
+                                    return;
+                                }
+                            }
+                        }
+                        Err(err) => {
+                            warn!(
+                                log, "Failed to get prefixes from ddmd";
+                                "err" => #%err,
+                            );
+                            break;
+                        }
+                    }
+                    tokio::time::sleep(RETRY).await;
+                }
+            }
+        })
     }
 
     async fn start_hardware_monitor(
@@ -538,6 +715,19 @@ impl Agent {
     ) -> Result<SledAgentResponse, BootstrapError> {
         info!(&self.log, "Loading Sled Agent: {:?}", request);
 
+        // Initialize the secret retriever used by the `KeyManager`
+        if request.use_trust_quorum {
+            info!(self.log, "KeyManager: using lrtq secret retriever");
+            let salt = request.hash_rack_id();
+            LrtqOrHardcodedSecretRetriever::init_lrtq(
+                salt,
+                self.bootstore.clone(),
+            )
+        } else {
+            info!(self.log, "KeyManager: using hardcoded secret retriever");
+            LrtqOrHardcodedSecretRetriever::init_hardcoded();
+        }
+
         let sled_address = request.sled_address();
 
         let mut state = self.sled_state.lock().await;
@@ -545,9 +735,6 @@ impl Agent {
         match &mut *state {
             // We have not previously initialized a sled agent.
             SledAgentState::Before(hardware_monitor) => {
-                // TODO(AJS): Re-insert trust quorum rack secret reconstruction
-                // and key-gen/disk-unlock here
-
                 // Stop the bootstrap agent from monitoring for hardware, and
                 // pass control of service management to the sled agent.
                 //
@@ -567,6 +754,9 @@ impl Agent {
                     .stop()
                     .await
                     .expect("Failed to stop hardware monitor");
+
+                // Inform the storage service that the key manager is available
+                storage.key_manager_ready().await;
 
                 // This acts like a "run-on-drop" closure, to restart the
                 // hardware monitor in the bootstrap agent if we fail to
@@ -608,6 +798,19 @@ impl Agent {
                     monitor: hardware_monitor,
                 };
 
+                // Start trying to notify ddmd of our sled prefix so it can
+                // advertise it to other sleds.
+                //
+                // TODO-security This ddmd_client is used to advertise both this
+                // (underlay) address and our bootstrap address. Bootstrap addresses are
+                // unauthenticated (connections made on them are auth'd via sprockets),
+                // but underlay addresses should be exchanged via authenticated channels
+                // between ddmd instances. It's TBD how that will work, but presumably
+                // we'll need to do something different here for underlay vs bootstrap
+                // addrs (either talk to a differently-configured ddmd, or include info
+                // indicating which kind of address we're advertising).
+                self.ddmd_client.advertise_prefix(request.subnet);
+
                 // Server does not exist, initialize it.
                 let server = SledServer::start(
                     &self.sled_config,
@@ -616,6 +819,7 @@ impl Agent {
                     request.clone(),
                     services.clone(),
                     storage.clone(),
+                    self.bootstore.clone(),
                 )
                 .await
                 .map_err(|e| {
@@ -627,7 +831,7 @@ impl Agent {
 
                 // Record this request so the sled agent can be automatically
                 // initialized on the next boot.
-                let paths = sled_config_paths(&self.storage_resources).await;
+                let paths = sled_config_paths(&self.storage_resources).await?;
                 let mut ledger = Ledger::new_with(
                     &self.log,
                     paths,
@@ -641,19 +845,6 @@ impl Agent {
                 // sled agent starting.
                 restarter.cancel();
                 *state = SledAgentState::After(server);
-
-                // Start trying to notify ddmd of our sled prefix so it can
-                // advertise it to other sleds.
-                //
-                // TODO-security This ddmd_client is used to advertise both this
-                // (underlay) address and our bootstrap address. Bootstrap addresses are
-                // unauthenticated (connections made on them are auth'd via sprockets),
-                // but underlay addresses should be exchanged via authenticated channels
-                // between ddmd instances. It's TBD how that will work, but presumably
-                // we'll need to do something different here for underlay vs bootstrap
-                // addrs (either talk to a differently-configured ddmd, or include info
-                // indicating which kind of address we're advertising).
-                self.ddmd_client.advertise_prefix(request.subnet);
 
                 Ok(SledAgentResponse { id: request.id })
             }
@@ -676,14 +867,6 @@ impl Agent {
                     );
                     return Err(BootstrapError::SledError(err_str));
                 }
-
-                // TODO(AJS): Re-implement this check described by the comment below?
-                //
-                // Bail out if this request includes a trust quorum share that
-                // doesn't match ours. TODO-correctness Do we need to handle a
-                // partially-initialized rack where we may have a share from a
-                // previously-started-but-not-completed init process? If rerunning
-                // it produces different shares this check will fail.
 
                 return Ok(SledAgentResponse { id: server.id() });
             }
@@ -725,7 +908,10 @@ impl Agent {
         const CONCURRENCY_CAP: usize = 32;
         futures::stream::iter(Zones::get().await?)
             .map(Ok::<_, anyhow::Error>)
-            .try_for_each_concurrent(CONCURRENCY_CAP, |zone| async move {
+            // Use for_each_concurrent_then_try to delete as much as possible.
+            // We only return one error though -- hopefully that's enough to
+            // signal to the caller that this failed.
+            .for_each_concurrent_then_try(CONCURRENCY_CAP, |zone| async move {
                 if zone.name() != "oxz_switch" {
                     Zones::halt_and_remove(zone.name()).await?;
                 }
@@ -873,6 +1059,10 @@ impl Agent {
         result
     }
 
+    pub fn get_bootstore_node_handle(&self) -> bootstore::NodeHandle {
+        self.bootstore.clone()
+    }
+
     pub async fn components_get(
         &self,
     ) -> Result<Vec<crate::updates::Component>, BootstrapError> {
@@ -893,7 +1083,7 @@ impl Agent {
     }
 }
 
-#[derive(Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
 struct PersistentSledAgentRequest<'a> {
     request: Cow<'a, StartSledAgentRequest>,
 }
@@ -922,7 +1112,8 @@ mod tests {
                 id: Uuid::new_v4(),
                 rack_id: Uuid::new_v4(),
                 ntp_servers: vec![String::from("test.pool.example.com")],
-                dns_servers: vec![String::from("1.1.1.1")],
+                dns_servers: vec!["1.1.1.1".parse().unwrap()],
+                use_trust_quorum: false,
                 subnet: Ipv6Subnet::new(Ipv6Addr::LOCALHOST),
             }),
         };
@@ -935,9 +1126,18 @@ mod tests {
 
         let ledger = Ledger::<PersistentSledAgentRequest>::new(log, paths)
             .await
-            .expect("Failt to read request");
+            .expect("Failed to read request");
 
         assert!(&request == ledger.data(), "serialization round trip failed");
         logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn test_persistent_sled_agent_request_schema() {
+        let schema = schemars::schema_for!(PersistentSledAgentRequest<'_>);
+        expectorate::assert_contents(
+            "../schema/persistent-sled-agent-request.json",
+            &serde_json::to_string_pretty(&schema).unwrap(),
+        );
     }
 }

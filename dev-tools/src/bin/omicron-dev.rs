@@ -154,9 +154,16 @@ async fn cmd_db_run(args: &DbRunArgs) -> Result<(), anyhow::Error> {
 
     if args.populate {
         // Populate the database with our schema.
+        let start = tokio::time::Instant::now();
         println!("omicron-dev: populating database");
         db_instance.populate().await.context("populating database")?;
-        println!("omicron-dev: populated database");
+        let end = tokio::time::Instant::now();
+        let duration = end.duration_since(start);
+        println!(
+            "omicron-dev: populated database in {}.{} seconds",
+            duration.as_secs(),
+            duration.subsec_millis()
+        );
     }
 
     // Wait for either the child process to shut down on its own or for us to

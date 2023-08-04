@@ -28,6 +28,7 @@ use omicron_common::address::NEXUS_OPTE_IPV4_SUBNET;
 use omicron_common::api::external::MacAddr;
 use omicron_common::api::external::{IdentityMetadata, Name};
 use omicron_common::api::internal::nexus::ProducerEndpoint;
+use omicron_common::api::internal::shared::SwitchLocation;
 use omicron_common::nexus_config;
 use omicron_common::nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
 use omicron_sled_agent::sim;
@@ -36,6 +37,7 @@ use oximeter_collector::Oximeter;
 use oximeter_producer::LogConfig;
 use oximeter_producer::Server as ProducerServer;
 use slog::{debug, o, Logger};
+use std::collections::HashMap;
 use std::fmt::Debug;
 use std::net::{IpAddr, Ipv6Addr, SocketAddr, SocketAddrV6};
 use std::time::Duration;
@@ -82,8 +84,7 @@ pub struct ControlPlaneTestContext<N> {
     pub sled_agent: sim::Server,
     pub oximeter: Oximeter,
     pub producer: ProducerServer,
-    pub dendrite: dev::dendrite::DendriteInstance,
-
+    pub dendrite: HashMap<SwitchLocation, dev::dendrite::DendriteInstance>,
     pub external_dns_zone_name: String,
     pub external_dns: dns_server::TransientServer,
     pub internal_dns: dns_server::TransientServer,
@@ -99,7 +100,9 @@ impl<N: NexusServer> ControlPlaneTestContext<N> {
         self.sled_agent.http_server.close().await.unwrap();
         self.oximeter.close().await.unwrap();
         self.producer.close().await.unwrap();
-        self.dendrite.cleanup().await.unwrap();
+        for (_, mut dendrite) in self.dendrite {
+            dendrite.cleanup().await.unwrap();
+        }
         self.logctx.cleanup_successful();
     }
 }
@@ -145,6 +148,7 @@ struct RackInitRequestBuilder {
     services: Vec<nexus_types::internal_api::params::ServicePutRequest>,
     datasets: Vec<nexus_types::internal_api::params::DatasetCreateRequest>,
     internal_dns_config: internal_dns::DnsConfigBuilder,
+    mac_addrs: Box<dyn Iterator<Item = MacAddr>>,
 }
 
 impl RackInitRequestBuilder {
@@ -153,6 +157,7 @@ impl RackInitRequestBuilder {
             services: vec![],
             datasets: vec![],
             internal_dns_config: internal_dns::DnsConfigBuilder::new(),
+            mac_addrs: Box::new(MacAddr::iter_system()),
         }
     }
 
@@ -226,7 +231,7 @@ pub struct ControlPlaneTestContextBuilder<'a, N: NexusServer> {
     pub sled_agent: Option<sim::Server>,
     pub oximeter: Option<Oximeter>,
     pub producer: Option<ProducerServer>,
-    pub dendrite: Option<dev::dendrite::DendriteInstance>,
+    pub dendrite: HashMap<SwitchLocation, dev::dendrite::DendriteInstance>,
 
     // NOTE: Only exists after starting Nexus, until external Nexus is
     // initialized.
@@ -263,7 +268,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             sled_agent: None,
             oximeter: None,
             producer: None,
-            dendrite: None,
+            dendrite: HashMap::new(),
             nexus_internal: None,
             nexus_internal_addr: None,
             external_dns_zone_name: None,
@@ -274,12 +279,16 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
         }
     }
 
-    pub async fn start_crdb(&mut self) {
+    pub async fn start_crdb(&mut self, populate: bool) {
         let log = &self.logctx.log;
         debug!(log, "Starting CRDB");
 
         // Start up CockroachDB.
-        let database = db::test_setup_database(log).await;
+        let database = if populate {
+            db::test_setup_database(log).await
+        } else {
+            db::test_setup_database_empty(log).await
+        };
 
         eprintln!("DB URL: {}", database.pg_config());
         let address = database
@@ -338,21 +347,24 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             .set_port(port);
     }
 
-    pub async fn start_dendrite(&mut self) {
+    pub async fn start_dendrite(&mut self, switch_location: SwitchLocation) {
         let log = &self.logctx.log;
-        debug!(log, "Starting Dendrite");
+        debug!(log, "Starting Dendrite for {switch_location}");
 
         // Set up a stub instance of dendrite
         let dendrite = dev::dendrite::DendriteInstance::start(0).await.unwrap();
         let port = dendrite.port;
-        self.dendrite = Some(dendrite);
+        self.dendrite.insert(switch_location, dendrite);
 
         let address = SocketAddrV6::new(Ipv6Addr::LOCALHOST, port, 0, 0);
 
         // Update the configuration options for Nexus, if it's launched later.
         //
         // NOTE: If dendrite is started after Nexus, this is ignored.
-        self.config.pkg.dendrite.address = Some(address.into());
+        let config = omicron_common::nexus_config::DpdConfig {
+            address: std::net::SocketAddr::V6(address),
+        };
+        self.config.pkg.dendrite.insert(switch_location, config);
 
         let sled_id = Uuid::parse_str(SLED_AGENT_UUID).unwrap();
         self.rack_init_builder.add_service(
@@ -445,6 +457,11 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
         );
 
         let sled_id = Uuid::parse_str(SLED_AGENT_UUID).unwrap();
+        let mac = self
+            .rack_init_builder
+            .mac_addrs
+            .next()
+            .expect("ran out of MAC addresses");
         self.rack_init_builder.add_service(
             address,
             ServiceKind::Nexus {
@@ -462,7 +479,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                         .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES as u32 + 1)
                         .unwrap()
                         .into(),
-                    mac: MacAddr::random_system(),
+                    mac,
                 },
             },
             internal_dns::ServiceName::Nexus,
@@ -643,6 +660,11 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             panic!("Unsupported IPv4 Dropshot address");
         };
 
+        let mac = self
+            .rack_init_builder
+            .mac_addrs
+            .next()
+            .expect("ran out of MAC addresses");
         self.rack_init_builder.add_service(
             dropshot_address,
             ServiceKind::ExternalDns {
@@ -654,7 +676,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                         .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES as u32 + 1)
                         .unwrap()
                         .into(),
-                    mac: MacAddr::random_system(),
+                    mac,
                 },
             },
             internal_dns::ServiceName::ExternalDns,
@@ -695,7 +717,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             oximeter: self.oximeter.unwrap(),
             producer: self.producer.unwrap(),
             logctx: self.logctx,
-            dendrite: self.dendrite.unwrap(),
+            dendrite: self.dendrite,
             external_dns_zone_name: self.external_dns_zone_name.unwrap(),
             external_dns: self.external_dns.unwrap(),
             internal_dns: self.internal_dns.unwrap(),
@@ -723,7 +745,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
         if let Some(producer) = self.producer {
             producer.close().await.unwrap();
         }
-        if let Some(mut dendrite) = self.dendrite {
+        for (_, mut dendrite) in self.dendrite {
             dendrite.cleanup().await.unwrap();
         }
         self.logctx.cleanup_successful();
@@ -739,9 +761,11 @@ pub async fn test_setup_with_config<N: NexusServer>(
     let mut builder =
         ControlPlaneTestContextBuilder::<N>::new(test_name, config);
 
-    builder.start_crdb().await;
+    let populate = true;
+    builder.start_crdb(populate).await;
     builder.start_clickhouse().await;
-    builder.start_dendrite().await;
+    builder.start_dendrite(SwitchLocation::Switch0).await;
+    builder.start_dendrite(SwitchLocation::Switch1).await;
     builder.start_internal_dns().await;
     builder.start_external_dns().await;
     builder.start_nexus_internal().await;

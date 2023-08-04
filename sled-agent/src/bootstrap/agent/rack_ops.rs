@@ -8,7 +8,6 @@ use super::Agent;
 use crate::bootstrap::http_entrypoints::RackOperationStatus;
 use crate::bootstrap::params::RackInitializeRequest;
 use crate::bootstrap::rss_handle::RssHandle;
-use crate::config::SidecarRevision;
 use crate::rack_setup::service::SetupServiceError;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -332,12 +331,7 @@ async fn rack_initialize(
         request,
         agent.ip,
         agent.storage_resources.clone(),
-        match &agent.sled_config.sidecar_revision {
-            SidecarRevision::Physical(_) => {
-                super::SIDECAR_REV_A_B_N_QSFP28_PORTS
-            }
-            SidecarRevision::Soft(config) => config.front_port_count,
-        },
+        agent.get_bootstore_node_handle(),
     )
     .await
 }

@@ -444,8 +444,11 @@ mod test {
         let mut db = test_setup_database(&log).await;
         let cfg = crate::db::Config { url: db.pg_config().clone() };
         let pool = Arc::new(crate::db::Pool::new(&logctx.log, &cfg));
-        let db_datastore =
-            Arc::new(crate::db::DataStore::new(Arc::clone(&pool)));
+        let db_datastore = Arc::new(
+            crate::db::DataStore::new(&log, Arc::clone(&pool), None)
+                .await
+                .unwrap(),
+        );
 
         // We should be able to insert anything into an empty table.
         assert!(

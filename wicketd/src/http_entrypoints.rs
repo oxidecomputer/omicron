@@ -35,6 +35,7 @@ use serde::Serialize;
 use sled_hardware::Baseboard;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
+use std::net::IpAddr;
 use std::net::Ipv6Addr;
 use std::time::Duration;
 use uuid::Uuid;
@@ -155,8 +156,9 @@ pub struct BootstrapSledDescription {
 pub struct CurrentRssUserConfigInsensitive {
     pub bootstrap_sleds: BTreeSet<BootstrapSledDescription>,
     pub ntp_servers: Vec<String>,
-    pub dns_servers: Vec<String>,
+    pub dns_servers: Vec<IpAddr>,
     pub internal_services_ip_pool_ranges: Vec<address::IpRange>,
+    pub external_dns_ips: Vec<IpAddr>,
     pub external_dns_zone_name: String,
     pub rack_network_config: Option<RackNetworkConfig>,
 }
@@ -405,6 +407,7 @@ async fn post_run_rack_setup(
     rqctx: RequestContext<ServerContext>,
 ) -> Result<HttpResponseOk<RackInitId>, HttpError> {
     let ctx = rqctx.context();
+    let log = &rqctx.log;
 
     let sled_agent_addr = ctx
         .bootstrap_agent_addr()
@@ -412,7 +415,7 @@ async fn post_run_rack_setup(
 
     let request = {
         let config = ctx.rss_config.lock().unwrap();
-        config.start_rss_request(&ctx.bootstrap_peers).map_err(|err| {
+        config.start_rss_request(&ctx.bootstrap_peers, log).map_err(|err| {
             HttpError::for_bad_request(None, format!("{err:#}"))
         })?
     };
@@ -596,6 +599,16 @@ pub(crate) struct StartUpdateOptions {
     /// This is used for testing.
     pub(crate) test_step_seconds: Option<u64>,
 
+    /// If passed in, simulates a result for the RoT update.
+    ///
+    /// This is used for testing.
+    pub(crate) test_simulate_rot_result: Option<UpdateSimulatedResult>,
+
+    /// If passed in, simulates a result for the SP update.
+    ///
+    /// This is used for testing.
+    pub(crate) test_simulate_sp_result: Option<UpdateSimulatedResult>,
+
     /// If true, skip the check on the current RoT version and always update it
     /// regardless of whether the update appears to be neeeded.
     #[allow(dead_code)] // TODO actually use this
@@ -604,6 +617,18 @@ pub(crate) struct StartUpdateOptions {
     /// If true, skip the check on the current SP version and always update it
     /// regardless of whether the update appears to be neeeded.
     pub(crate) skip_sp_version_check: bool,
+}
+
+/// A simulated result for a component update.
+///
+/// Used by [`StartUpdateOptions`].
+#[derive(Clone, Debug, JsonSchema, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum UpdateSimulatedResult {
+    Success,
+    Warning,
+    Skipped,
+    Failure,
 }
 
 #[derive(Clone, Debug, JsonSchema, Deserialize)]

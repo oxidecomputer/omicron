@@ -176,13 +176,19 @@ The Sled Agent supports operation on both:
 
 This script also sets up a "softnpu" zone to implement Boundary Services.  SoftNPU simulates the Tofino device that's used in real systems.  Just like Tofino, it can implement sled-to-sled networking, but that's beyond the scope of this doc.
 
-If you're running on a PC and using an existing network as your external network, you can usually just run:
+If you're running on a PC and using an existing network as your external network, you can usually just run this script with a few environment vaiables set. These environment varaibles tell SoftNPU about your local network. You'll need to carve out part of your network for the Oxide platform, making sure that the range you specify below is not occupied by other hosts on your network.
 
+[source,bash]
 ----
+export PHYSICAL_LINK=igb0           # The physical link for your local network.
+export GATEWAY_IP=192.168.1.199     # The gateway IP address for your local network.
+export PXA_START=192.168.1.2        # The first IP address your Oxide cluster can use.
+export PXA_END=192.168.1.100        # The last IP address your Oxide cluster can use.
+
 $ pfexec ./tools/create_virtual_hardware.sh
 ----
 
-If above you made up a new "external" network only accessible within the Sled, then you'll want to override PHYSICAL_LINK:
+If above you made up a new "external" network only accessible within the Sled, then you'll want to override PHYSICAL_LINK as follows:
 
 ----
 $ PHYSICAL_LINK=fake_external_stub0 pfexec ./tools/create_virtual_hardware.sh
@@ -347,47 +353,7 @@ You can also list the zones that have been created so far:
 $ zoneadm list -cnv
 
 # View logs for a service:
-$ pfexec tail -f $(pfexec svcs -z oxz_nexus -L nexus)
-----
-
-=== SoftNPU Configuration
-
-After installing omicron with `omicron-package install`, you can run the `softnpu-init.sh` script to configure SoftNPU.  If your external network is the one that your global zone is already on (i.e., an existing network), then you can likely just run:
-
-[source,console]
-----
-$ ./tools/scrimlet/softnpu-init.sh
-----
-
-In this case, `softnpu-init.sh` determines a network gateway by looking at your system's default gateway.  Again, the assumption for this use case is that your rack gets external connectivity the same way your system does because it's part of the same network.
-
-If your external network is one you made up above that's local to your own system, this won't be right.  In that case, you'll want to override the gateway IP to be the address of the global zone on your made-up network.  In our example:
-
-[source,console]
-----
-$ GATEWAY_IP=192.168.1.199 ./tools/scrimlet/softnpu-init.sh
-----
-
-In other configurations, you might use a different GATEWAY_IP.  You can also override GATEWAY_MAC if needed, but that shouldn't be necessary for the configurations described here.
-
-=== SoftNPU Proxy ARP Setup
-
-Services that require external connectivity (e.g. Nexus, Boundary NTP, External DNS) do so via OPTE using addresses from the services IP pool.  When using SoftNPU, we'll need to configure Proxy ARP for those addresses.
-
-In this snippet, `$SERVICE_IP_POOL_START` and `$SERVICE_IP_POOL_END` are the addresses you put into `config-rss.toml` above for `internal_services_ip_pool_ranges`:
-
-[source,console]
-----
-# dladm won't return leading zeroes but `scadm` expects them
-$ SOFTNPU_MAC=$(dladm show-vnic sc0_1 -p -o macaddress | gsed 's/\b\(\w\)\b/0\1/g')
-$ pfexec /opt/oxide/softnpu/stuff/scadm \
-  --server /opt/oxide/softnpu/stuff/server \
-  --client /opt/oxide/softnpu/stuff/client \
-  standalone \
-  add-proxy-arp \
-  $SERVICE_IP_POOL_START \
-  $SERVICE_IP_POOL_END \
-  $SOFTNPU_MAC
+$ pfexec tail -f $(pfexec svcs -z oxz_nexus_<UUID> -L nexus)
 ----
 
 == Using Omicron
@@ -440,9 +406,9 @@ With SoftNPU you will generally also need to configure Proxy ARP.  Below, `IP_PO
 ----
 # dladm won't return leading zeroes but `scadm` expects them
 $ SOFTNPU_MAC=$(dladm show-vnic sc0_1 -p -o macaddress | gsed 's/\b\(\w\)\b/0\1/g')
-$ pfexec /opt/oxide/softnpu/stuff/scadm \
-  --server /opt/oxide/softnpu/stuff/server \
-  --client /opt/oxide/softnpu/stuff/client \
+$ pfexec zlogin sidecar_softnpu /softnpu/scadm \
+  --server /softnpu/server \
+  --client /softnpu/client \
   standalone \
   add-proxy-arp \
   $IP_POOL_START \

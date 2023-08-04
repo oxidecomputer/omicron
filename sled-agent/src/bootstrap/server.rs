@@ -15,6 +15,7 @@ use crate::bootstrap::http_entrypoints::api as http_api;
 use crate::bootstrap::maghemite;
 use crate::config::Config as SledConfig;
 use illumos_utils::process::BoxedExecutor;
+use omicron_common::FileKv;
 use sled_hardware::underlay;
 use slog::Drain;
 use slog::Logger;
@@ -46,7 +47,7 @@ impl Server {
                 format!("initializing logger: {}", message)
             })?,
         );
-        let log = slog::Logger::root(drain.fuse(), slog::o!());
+        let log = slog::Logger::root(drain.fuse(), slog::o!(FileKv));
         if let slog_dtrace::ProbeRegistration::Failed(e) = registration {
             let msg = format!("Failed to register DTrace probes: {}", e);
             error!(log, "{}", msg);
@@ -56,7 +57,11 @@ impl Server {
         }
 
         // Find address objects to pass to maghemite.
-        let mg_addr_objs = underlay::find_nics(executor).map_err(|err| {
+        let mg_addr_objs = underlay::find_nics(
+            executor,
+            &sled_config.data_links,
+        )
+        .map_err(|err| {
             format!("Failed to find address objects for maghemite: {err}")
         })?;
         if mg_addr_objs.is_empty() {

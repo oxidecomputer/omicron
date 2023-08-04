@@ -5,18 +5,23 @@
 //! Configuration parameters to Nexus that are usually only known
 //! at deployment time.
 
+use crate::api::internal::shared::SwitchLocation;
+
 use super::address::{Ipv6Subnet, RACK_PREFIX};
 use super::postgres_config::PostgresConfigWithUrl;
 use anyhow::anyhow;
 use dropshot::ConfigDropshot;
 use dropshot::ConfigLogging;
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
 use serde_with::DeserializeFromStr;
 use serde_with::DisplayFromStr;
 use serde_with::DurationSeconds;
 use serde_with::SerializeDisplay;
+use std::collections::HashMap;
 use std::fmt;
+use std::net::IpAddr;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -94,19 +99,20 @@ impl std::cmp::PartialEq<std::io::Error> for LoadError {
 }
 
 #[serde_as]
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 #[allow(clippy::large_enum_variant)]
 pub enum Database {
     FromDns,
     FromUrl {
         #[serde_as(as = "DisplayFromStr")]
+        #[schemars(with = "String")]
         url: PostgresConfigWithUrl,
     },
 }
 
 /// The mechanism Nexus should use to contact the internal DNS servers.
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum InternalDns {
     /// Nexus should infer the DNS server addresses from this subnet.
@@ -120,21 +126,25 @@ pub enum InternalDns {
     FromAddress { address: SocketAddr },
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, JsonSchema)]
 pub struct DeploymentConfig {
     /// Uuid of the Nexus instance
     pub id: Uuid,
     /// Uuid of the Rack where Nexus is executing.
     pub rack_id: Uuid,
     /// Dropshot configuration for the external API server.
+    #[schemars(skip)] // TODO we're protected against dropshot changes
     pub dropshot_external: ConfigDropshotWithTls,
     /// Dropshot configuration for internal API server.
+    #[schemars(skip)] // TODO we're protected against dropshot changes
     pub dropshot_internal: ConfigDropshot,
     /// Describes how Nexus should find internal DNS servers
     /// for bootstrapping.
     pub internal_dns: InternalDns,
     /// DB configuration.
     pub database: Database,
+    /// External DNS servers Nexus can use to resolve external hosts.
+    pub external_dns_servers: Vec<IpAddr>,
 }
 
 impl DeploymentConfig {
@@ -194,6 +204,12 @@ pub struct UpdatesConfig {
     pub default_base_url: String,
 }
 
+/// Options to tweak database schema changes.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct SchemaConfig {
+    pub schema_dir: PathBuf,
+}
+
 /// Optional configuration for the timeseries database.
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
 pub struct TimeseriesDbConfig {
@@ -202,10 +218,9 @@ pub struct TimeseriesDbConfig {
 }
 
 /// Configuration for the `Dendrite` dataplane daemon.
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct DpdConfig {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub address: Option<SocketAddr>,
+    pub address: SocketAddr,
 }
 
 // A deserializable type that does no validation on the tunable parameters.
@@ -346,12 +361,15 @@ pub struct PackageConfig {
     /// this is unconfigured.
     #[serde(default)]
     pub updates: Option<UpdatesConfig>,
+    /// Describes how to handle and perform schema changes.
+    #[serde(default)]
+    pub schema: Option<SchemaConfig>,
     /// Tunable configuration for testing and experimentation
     #[serde(default)]
     pub tunables: Tunables,
     /// `Dendrite` dataplane daemon configuration
     #[serde(default)]
-    pub dendrite: DpdConfig,
+    pub dendrite: HashMap<SwitchLocation, DpdConfig>,
     /// Background task configuration
     pub background_tasks: BackgroundTaskConfig,
 }
@@ -426,6 +444,7 @@ mod test {
         SchemeName, TimeseriesDbConfig, UpdatesConfig,
     };
     use crate::address::{Ipv6Subnet, RACK_PREFIX};
+    use crate::api::internal::shared::SwitchLocation;
     use crate::nexus_config::{
         BackgroundTaskConfig, ConfigDropshotWithTls, Database,
         DeploymentConfig, DnsTasksConfig, DpdConfig, ExternalEndpointsConfig,
@@ -436,6 +455,7 @@ mod test {
     use dropshot::ConfigLoggingIfExists;
     use dropshot::ConfigLoggingLevel;
     use libc;
+    use std::collections::HashMap;
     use std::fs;
     use std::net::{Ipv6Addr, SocketAddr};
     use std::path::Path;
@@ -550,6 +570,7 @@ mod test {
             [deployment]
             id = "28b90dc4-c22a-65ba-f49a-f051fe01208f"
             rack_id = "38b90dc4-c22a-65ba-f49a-f051fe01208f"
+            external_dns_servers = [ "1.1.1.1", "9.9.9.9" ]
             [deployment.dropshot_external]
             bind_address = "10.1.2.3:4567"
             request_body_max_bytes = 1024
@@ -561,7 +582,7 @@ mod test {
             subnet.net = "::/56"
             [deployment.database]
             type = "from_dns"
-            [dendrite]
+            [dendrite.switch0]
             address = "[::1]:12224"
             [background_tasks]
             dns_internal.period_secs_config = 1
@@ -606,6 +627,10 @@ mod test {
                         )
                     },
                     database: Database::FromDns,
+                    external_dns_servers: vec![
+                        "1.1.1.1".parse().unwrap(),
+                        "9.9.9.9".parse().unwrap(),
+                    ],
                 },
                 pkg: PackageConfig {
                     console: ConsoleConfig {
@@ -626,12 +651,15 @@ mod test {
                         trusted_root: PathBuf::from("/path/to/root.json"),
                         default_base_url: "http://example.invalid/".into(),
                     }),
+                    schema: None,
                     tunables: Tunables { max_vpc_ipv4_subnet_prefix: 27 },
-                    dendrite: DpdConfig {
-                        address: Some(
-                            SocketAddr::from_str("[::1]:12224").unwrap()
-                        )
-                    },
+                    dendrite: HashMap::from([(
+                        SwitchLocation::Switch0,
+                        DpdConfig {
+                            address: SocketAddr::from_str("[::1]:12224")
+                                .unwrap(),
+                        }
+                    )]),
                     background_tasks: BackgroundTaskConfig {
                         dns_internal: DnsTasksConfig {
                             period_secs_config: Duration::from_secs(1),
@@ -672,6 +700,7 @@ mod test {
             [deployment]
             id = "28b90dc4-c22a-65ba-f49a-f051fe01208f"
             rack_id = "38b90dc4-c22a-65ba-f49a-f051fe01208f"
+            external_dns_servers = [ "1.1.1.1", "9.9.9.9" ]
             [deployment.dropshot_external]
             bind_address = "10.1.2.3:4567"
             request_body_max_bytes = 1024
@@ -683,7 +712,7 @@ mod test {
             subnet.net = "::/56"
             [deployment.database]
             type = "from_dns"
-            [dendrite]
+            [dendrite.switch0]
             address = "[::1]:12224"
             [background_tasks]
             dns_internal.period_secs_config = 1
@@ -726,6 +755,7 @@ mod test {
             [deployment]
             id = "28b90dc4-c22a-65ba-f49a-f051fe01208f"
             rack_id = "38b90dc4-c22a-65ba-f49a-f051fe01208f"
+            external_dns_servers = [ "1.1.1.1", "9.9.9.9" ]
             [deployment.dropshot_external]
             bind_address = "10.1.2.3:4567"
             request_body_max_bytes = 1024
@@ -782,6 +812,7 @@ mod test {
             [deployment]
             id = "28b90dc4-c22a-65ba-f49a-f051fe01208f"
             rack_id = "38b90dc4-c22a-65ba-f49a-f051fe01208f"
+            external_dns_servers = [ "1.1.1.1", "9.9.9.9" ]
             [deployment.dropshot_external]
             bind_address = "10.1.2.3:4567"
             request_body_max_bytes = 1024
@@ -852,5 +883,14 @@ mod test {
         contents.push_str(&example_deployment);
         let _: Config = toml::from_str(&contents)
             .expect("Nexus SMF config file is not valid");
+    }
+
+    #[test]
+    fn test_deployment_config_schema() {
+        let schema = schemars::schema_for!(DeploymentConfig);
+        expectorate::assert_contents(
+            "../schema/deployment-config.json",
+            &serde_json::to_string_pretty(&schema).unwrap(),
+        );
     }
 }

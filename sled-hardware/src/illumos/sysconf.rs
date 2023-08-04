@@ -7,39 +7,32 @@
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
     #[error("sysconf failed accessing {arg}: {e}")]
-    Sysconf { arg: String, e: std::io::Error },
+    Sysconf { arg: &'static str, e: std::io::Error },
 
     #[error("Integer conversion error: {0}")]
     Integer(#[from] std::num::TryFromIntError),
 }
 
-fn sysconf(argname: &str, arg: libc::c_int) -> Result<u64, Error> {
-    let r = unsafe { libc::sysconf(arg) };
-    if r == -1 {
-        return Err(Error::Sysconf {
-            arg: argname.to_string(),
-            e: std::io::Error::last_os_error(),
-        });
-    }
-    Ok(r.try_into()?)
-}
-
 /// Returns the number of online processors on this sled.
 pub fn online_processor_count() -> Result<u32, Error> {
-    // Although the value returned by sysconf is an i64, we parse
+    // Although the value returned by sysconf(3c) is an i64, we parse
     // the value as a u32.
     //
     // A value greater than u32::MAX (or a negative value) would return
     // an error here.
-    Ok(u32::try_from(sysconf(
-        "online processor count",
-        libc::_SC_NPROCESSORS_ONLN,
-    )?)?)
+    let res = illumos_utils::libc::sysconf(libc::_SC_NPROCESSORS_ONLN)
+        .map_err(|e| Error::Sysconf { arg: "online processor count", e })?;
+    Ok(u32::try_from(res)?)
 }
 
 /// Returns the amount of RAM on this sled, in bytes.
 pub fn usable_physical_ram_bytes() -> Result<u64, Error> {
-    let phys_pages = sysconf("physical pages", libc::_SC_PHYS_PAGES)?;
-    let page_size = sysconf("physical page size", libc::_SC_PAGESIZE)?;
+    let phys_pages: u64 = illumos_utils::libc::sysconf(libc::_SC_PHYS_PAGES)
+        .map_err(|e| Error::Sysconf { arg: "physical pages", e })?
+        .try_into()?;
+    let page_size: u64 = illumos_utils::libc::sysconf(libc::_SC_PAGESIZE)
+        .map_err(|e| Error::Sysconf { arg: "physical page size", e })?
+        .try_into()?;
+
     Ok(phys_pages * page_size)
 }
