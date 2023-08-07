@@ -92,10 +92,9 @@ async fn do_run() -> Result<(), CmdError> {
                 None
             };
 
-            let server =
-                bootstrap_server::Server::start(config)
-                    .await
-                    .map_err(|err| CmdError::Failure(format!("{err:#}")))?;
+            let server = bootstrap_server::Server::start(config)
+                .await
+                .map_err(|err| CmdError::Failure(format!("{err:#}")))?;
 
             // If requested, automatically supply the RSS configuration.
             //
