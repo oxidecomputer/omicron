@@ -592,7 +592,7 @@ impl SledAgent {
     }
 
     // Sends a request to Nexus informing it that the current sled exists.
-    fn notify_nexus_about_self(&self, log: &Logger) {
+    pub(crate) fn notify_nexus_about_self(&self, log: &Logger) {
         let sled_id = self.inner.id;
         let nexus_client = self.inner.nexus_client.clone();
         let sled_address = self.inner.sled_address();

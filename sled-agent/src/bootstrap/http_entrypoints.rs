@@ -7,6 +7,9 @@
 //! Note that the bootstrap agent also communicates over Sprockets,
 //! and has a separate interface for establishing the trust quorum.
 
+use super::agent::BootstrapError;
+use super::rack_ops::RssAccess;
+use super::RssAccessError;
 use crate::bootstrap::agent::Agent;
 use crate::bootstrap::params::RackInitializeRequest;
 use crate::bootstrap::rack_ops::{RackInitId, RackResetId};
@@ -28,9 +31,6 @@ use std::net::Ipv6Addr;
 use tokio::sync::mpsc::error::TrySendError;
 use tokio::sync::{mpsc, oneshot};
 
-use super::agent::BootstrapError;
-use super::rack_ops::RssAccess;
-
 pub(crate) struct BootstrapServerContext {
     pub(crate) base_log: Logger,
     pub(crate) global_zone_bootstrap_ip: Ipv6Addr,
@@ -41,6 +41,21 @@ pub(crate) struct BootstrapServerContext {
     pub(crate) updates: ConfigUpdates,
     pub(crate) sled_reset_tx:
         mpsc::Sender<oneshot::Sender<Result<(), BootstrapError>>>,
+}
+
+impl BootstrapServerContext {
+    pub(super) fn start_rack_initialize(
+        &self,
+        request: RackInitializeRequest,
+    ) -> Result<RackInitId, RssAccessError> {
+        self.rss_access.start_initializing(
+            &self.base_log,
+            self.global_zone_bootstrap_ip,
+            &self.storage_resources,
+            &self.bootstore_node_handle,
+            request,
+        )
+    }
 }
 
 type BootstrapApiDescription = ApiDescription<BootstrapServerContext>;
@@ -162,14 +177,7 @@ async fn rack_initialize(
     let ctx = rqctx.context();
     let request = body.into_inner();
     let id = ctx
-        .rss_access
-        .start_initializing(
-            &ctx.base_log,
-            ctx.global_zone_bootstrap_ip,
-            &ctx.storage_resources,
-            &ctx.bootstore_node_handle,
-            request,
-        )
+        .start_rack_initialize(request)
         .map_err(|err| HttpError::for_bad_request(None, err.to_string()))?;
     Ok(HttpResponseOk(id))
 }

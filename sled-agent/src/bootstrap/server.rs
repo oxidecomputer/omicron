@@ -4,11 +4,15 @@
 
 //! Server API for bootstrap-related functionality.
 
-use super::agent::Agent;
+use super::agent::BootstrapError;
 use super::config::BOOTSTRAP_AGENT_HTTP_PORT;
 use super::http_entrypoints;
+use super::params::RackInitializeRequest;
 use super::params::StartSledAgentRequest;
 use super::pre_server::BootstrapManagers;
+use super::rack_ops::RackInitId;
+use super::views::SledAgentResponse;
+use super::RssAccessError;
 use crate::bootstrap::bootstore::BootstoreHandles;
 use crate::bootstrap::config::BOOTSTRAP_AGENT_RACK_INIT_PORT;
 use crate::bootstrap::http_entrypoints::api as http_api;
@@ -24,13 +28,16 @@ use crate::server::Server as SledAgentServer;
 use crate::storage_manager::StorageResources;
 use bootstore::schemes::v0 as bootstore;
 use camino::Utf8PathBuf;
+use cancel_safe_futures::TryStreamExt;
 use ddm_admin_client::Client as DdmAdminClient;
 use ddm_admin_client::DdmError;
 use dropshot::HttpServer;
 use futures::Future;
+use futures::StreamExt;
 use illumos_utils::dladm;
 use illumos_utils::zfs;
 use illumos_utils::zone;
+use illumos_utils::zone::Zones;
 use omicron_common::api::internal::shared::RackNetworkConfig;
 use omicron_common::ledger;
 use omicron_common::ledger::Ledger;
@@ -46,9 +53,9 @@ use std::io;
 use std::net::Ipv6Addr;
 use std::net::SocketAddr;
 use std::net::SocketAddrV6;
-use std::sync::Arc;
 use tokio::sync::broadcast;
 use tokio::sync::mpsc;
+use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 
 const SLED_AGENT_REQUEST_FILE: &str = "sled-agent-request.json";
@@ -152,9 +159,8 @@ pub enum StartError {
 /// Wraps a [Agent] object, and provides helper methods for exposing it
 /// via an HTTP interface and a tcp server used for rack initialization.
 pub struct Server {
-    bootstrap_agent: Arc<Agent>,
-    sprockets_server_handle: JoinHandle<()>,
-    _http_server: dropshot::HttpServer<Arc<Agent>>,
+    inner_task: JoinHandle<()>,
+    bootstrap_http_server: HttpServer<BootstrapServerContext>,
 }
 
 impl Server {
@@ -322,103 +328,42 @@ impl Server {
         } else {
             SledAgentState::Bootstrapping
         };
-        todo!()
-        /*
-        let (drain, registration) = slog_dtrace::with_drain(
-            config.log.to_logger("SledAgent").map_err(|message| {
-                format!("initializing logger: {}", message)
-            })?,
-        );
-        let log = slog::Logger::root(drain.fuse(), slog::o!(FileKv));
-        if let slog_dtrace::ProbeRegistration::Failed(e) = registration {
-            let msg = format!("Failed to register DTrace probes: {}", e);
-            error!(log, "{}", msg);
-            return Err(msg);
-        } else {
-            debug!(log, "registered DTrace probes");
-        }
 
-        // Find address objects to pass to maghemite.
-        let mg_addr_objs = underlay::find_nics(&sled_config.data_links)
-            .map_err(|err| {
-                format!("Failed to find address objects for maghemite: {err}")
-            })?;
-        if mg_addr_objs.is_empty() {
-            return Err(
-                "underlay::find_nics() returned 0 address objects".to_string()
-            );
-        }
-
-        info!(log, "Starting mg-ddm service");
-        maghemite::enable_mg_ddm_service(log.clone(), mg_addr_objs.clone())
-            .await
-            .map_err(|err| format!("Failed to start mg-ddm: {err}"))?;
-
-        info!(log, "setting up bootstrap agent server");
-        let bootstrap_agent =
-            Agent::new(log.clone(), config.clone(), sled_config)
-                .await
-                .map_err(|e| e.to_string())?;
-        info!(log, "bootstrap agent finished initialization successfully");
-        let bootstrap_agent = Arc::new(bootstrap_agent);
-
-        let mut dropshot_config = dropshot::ConfigDropshot::default();
-        dropshot_config.request_body_max_bytes = 1024 * 1024;
-        dropshot_config.bind_address =
-            SocketAddr::V6(bootstrap_agent.http_address());
-        let dropshot_log =
-            log.new(o!("component" => "dropshot (BootstrapAgent)"));
-        let http_server = dropshot::HttpServerStarter::new(
-            &dropshot_config,
-            http_api(),
-            bootstrap_agent.clone(),
-            &dropshot_log,
-        )
-        .map_err(|error| format!("initializing server: {}", error))?
-        .start();
-
-        // Start the currently-misnamed sprockets server, which listens for raw
-        // TCP connections (which should ultimately be secured via sprockets).
-        let sprockets_server =
-            SprocketsServer::bind(Arc::clone(&bootstrap_agent), &log)
-                .await
-                .map_err(|err| {
-                    format!("Failed to bind sprockets server: {err}")
-                })?;
-        let sprockets_server_handle = tokio::spawn(sprockets_server.run());
-
-        let server = Server {
-            bootstrap_agent,
-            sprockets_server_handle,
-            _http_server: http_server,
+        // Spawn our inner task that handles any future hardware updates and any
+        // requests from our dropshot or sprockets server that affect the sled
+        // agent state.
+        let inner = Inner {
+            config,
+            hardware_monitor,
+            state,
+            sled_init_rx,
+            sled_reset_rx,
+            managers,
+            ddm_admin_localhost_client,
+            bootstore_handles,
+            _sprockets_server_handle: sprockets_server_handle,
+            _key_manager_handle: key_manager_handle,
+            base_log,
         };
-        Ok(server)
-        */
+        let inner_task = tokio::spawn(inner.run());
+
+        Ok(Self { inner_task, bootstrap_http_server })
     }
 
-    pub fn agent(&self) -> &Arc<Agent> {
-        &self.bootstrap_agent
+    pub fn start_rack_initialize(
+        &self,
+        request: RackInitializeRequest,
+    ) -> Result<RackInitId, RssAccessError> {
+        self.bootstrap_http_server.app_private().start_rack_initialize(request)
     }
 
     pub async fn wait_for_finish(self) -> Result<(), String> {
-        match self.sprockets_server_handle.await {
+        match self.inner_task.await {
             Ok(()) => Ok(()),
             Err(err) => {
-                if err.is_cancelled() {
-                    // We control cancellation of `sprockets_server_handle`,
-                    // which only happens if we intentionally abort it in
-                    // `close()`; that should not result in an error here.
-                    Ok(())
-                } else {
-                    Err(format!("Join on server tokio task failed: {err}"))
-                }
+                Err(format!("bootstrap agent inner task panicked: {err}"))
             }
         }
-    }
-
-    pub async fn close(self) -> Result<(), String> {
-        self.sprockets_server_handle.abort();
-        self.wait_for_finish().await
     }
 }
 
@@ -429,6 +374,19 @@ enum SledAgentState {
     Bootstrapping,
     // ... or the sled agent server is running.
     ServerStarted(SledAgentServer),
+}
+
+impl SledAgentState {
+    fn switch_zone_underlay_info(
+        &self,
+    ) -> Option<(Ipv6Addr, Option<&RackNetworkConfig>)> {
+        match self {
+            SledAgentState::Bootstrapping => None,
+            SledAgentState::ServerStarted(server) => {
+                Some(server.sled_agent().switch_zone_underlay_info())
+            }
+        }
+    }
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -663,4 +621,251 @@ pub fn run_openapi() -> Result<(), String> {
         .contact_email("api@oxide.computer")
         .write(&mut std::io::stdout())
         .map_err(|e| e.to_string())
+}
+
+struct Inner {
+    config: SledConfig,
+    hardware_monitor: broadcast::Receiver<HardwareUpdate>,
+    state: SledAgentState,
+    sled_init_rx: mpsc::Receiver<(
+        StartSledAgentRequest,
+        oneshot::Sender<Result<SledAgentResponse, String>>,
+    )>,
+    sled_reset_rx: mpsc::Receiver<oneshot::Sender<Result<(), BootstrapError>>>,
+    managers: BootstrapManagers,
+    ddm_admin_localhost_client: DdmAdminClient,
+    bootstore_handles: BootstoreHandles,
+    _sprockets_server_handle: JoinHandle<()>,
+    _key_manager_handle: JoinHandle<()>,
+    base_log: Logger,
+}
+
+impl Inner {
+    async fn run(mut self) {
+        let log = self.base_log.new(o!("component" => "SledAgentMain"));
+        loop {
+            // TODO-correctness We pause handling hardware update messages while
+            // we handle sled init/reset requests - is that okay?
+            tokio::select! {
+                // Cancel-safe per the docs on `broadcast::Receiver::recv()`.
+                hardware_update = self.hardware_monitor.recv() => {
+                    self.handle_hardware_update(hardware_update, &log).await;
+                }
+
+                // Cancel-safe per the docs on `mpsc::Receiver::recv()`.
+                Some((request, response_tx)) = self.sled_init_rx.recv() => {
+                    self.handle_start_sled_agent_request(
+                        request,
+                        response_tx,
+                        &log,
+                    ).await;
+                }
+
+                // Cancel-safe per the docs on `mpsc::Receiver::recv()`.
+                Some(response_tx) = self.sled_reset_rx.recv() => {
+                    // Try to reset the sled, but do not exit early on error.
+                    let result = async {
+                        self.uninstall_zones().await?;
+                        self.uninstall_sled_local_config().await?;
+                        self.uninstall_networking(&log).await?;
+                        self.uninstall_storage(&log).await?;
+                        Ok::<(), BootstrapError>(())
+                    }
+                    .await;
+
+                    _ = response_tx.send(result);
+                }
+            }
+        }
+    }
+
+    async fn handle_hardware_update(
+        &self,
+        hardware_update: Result<HardwareUpdate, broadcast::error::RecvError>,
+        log: &Logger,
+    ) {
+        info!(
+            log,
+            "Handling hardware update message";
+            "phase" => "bootstore-steady-state",
+            "update" => ?hardware_update,
+        );
+
+        // TODO are these choices correct? This tries to match the
+        // previous behavior when SledAgent monitored hardware
+        // itself.
+        // TODO-john maybe just remove this entirely? check
+        // sled-agent again
+        let should_notify_nexus = match &hardware_update {
+            Ok(HardwareUpdate::TofinoDeviceChange)
+            | Err(broadcast::error::RecvError::Lagged(_)) => true,
+            _ => false,
+        };
+
+        self.managers
+            .handle_hardware_update(
+                hardware_update,
+                self.state.switch_zone_underlay_info(),
+                &log,
+            )
+            .await;
+
+        if should_notify_nexus {
+            match &self.state {
+                SledAgentState::Bootstrapping => (),
+                SledAgentState::ServerStarted(server) => {
+                    server.sled_agent().notify_nexus_about_self(&log);
+                }
+            }
+        }
+    }
+
+    async fn handle_start_sled_agent_request(
+        &mut self,
+        request: StartSledAgentRequest,
+        response_tx: oneshot::Sender<Result<SledAgentResponse, String>>,
+        log: &Logger,
+    ) {
+        match &self.state {
+            SledAgentState::Bootstrapping => {
+                let response = match start_sled_agent(
+                    &self.config,
+                    &request,
+                    &self.bootstore_handles.node_handle,
+                    &self.managers,
+                    &self.ddm_admin_localhost_client,
+                    &self.base_log,
+                    &log,
+                )
+                .await
+                {
+                    Ok(server) => {
+                        self.state = SledAgentState::ServerStarted(server);
+                        Ok(SledAgentResponse { id: request.id })
+                    }
+                    Err(err) => Err(format!("{err:#}")),
+                };
+                _ = response_tx.send(response);
+            }
+            SledAgentState::ServerStarted(server) => {
+                info!(log, "Sled Agent already loaded");
+
+                let sled_address = request.sled_address();
+                let response = if server.id() != request.id {
+                    Err(format!(
+                        "Sled Agent already running with UUID {}, \
+                                     but {} was requested",
+                        server.id(),
+                        request.id,
+                    ))
+                } else if &server.address().ip() != sled_address.ip() {
+                    Err(format!(
+                        "Sled Agent already running on address {}, \
+                                     but {} was requested",
+                        server.address().ip(),
+                        sled_address.ip(),
+                    ))
+                } else {
+                    Ok(SledAgentResponse { id: server.id() })
+                };
+
+                _ = response_tx.send(response);
+            }
+        }
+    }
+
+    // Uninstall all oxide zones (except the switch zone)
+    async fn uninstall_zones(&self) -> Result<(), BootstrapError> {
+        const CONCURRENCY_CAP: usize = 32;
+        futures::stream::iter(Zones::get().await?)
+            .map(Ok::<_, anyhow::Error>)
+            // Use for_each_concurrent_then_try to delete as much as possible.
+            // We only return one error though -- hopefully that's enough to
+            // signal to the caller that this failed.
+            .for_each_concurrent_then_try(CONCURRENCY_CAP, |zone| async move {
+                if zone.name() != "oxz_switch" {
+                    Zones::halt_and_remove(zone.name()).await?;
+                }
+                Ok(())
+            })
+            .await
+            .map_err(BootstrapError::Cleanup)?;
+        Ok(())
+    }
+
+    async fn uninstall_sled_local_config(&self) -> Result<(), BootstrapError> {
+        let config_dirs = self
+            .managers
+            .storage
+            .resources()
+            .all_m2_mountpoints(sled_hardware::disk::CONFIG_DATASET)
+            .await
+            .into_iter();
+
+        for dir in config_dirs {
+            for entry in dir.read_dir_utf8().map_err(|err| {
+                BootstrapError::Io { message: format!("Deleting {dir}"), err }
+            })? {
+                let entry = entry.map_err(|err| BootstrapError::Io {
+                    message: format!("Deleting {dir}"),
+                    err,
+                })?;
+
+                let path = entry.path();
+                let file_type =
+                    entry.file_type().map_err(|err| BootstrapError::Io {
+                        message: format!("Deleting {path}"),
+                        err,
+                    })?;
+
+                if file_type.is_dir() {
+                    tokio::fs::remove_dir_all(path).await
+                } else {
+                    tokio::fs::remove_file(path).await
+                }
+                .map_err(|err| BootstrapError::Io {
+                    message: format!("Deleting {path}"),
+                    err,
+                })?;
+            }
+        }
+        Ok(())
+    }
+
+    async fn uninstall_networking(
+        &self,
+        log: &Logger,
+    ) -> Result<(), BootstrapError> {
+        // NOTE: This is very similar to the invocations
+        // in "sled_hardware::cleanup::cleanup_networking_resources",
+        // with a few notable differences:
+        //
+        // - We can't remove bootstrap-related networking -- this operation
+        // is performed via a request on the bootstrap network.
+        // - We avoid deleting addresses using the chelsio link. Removing
+        // these addresses would delete "cxgbe0/ll", and could render
+        // the sled inaccessible via a local interface.
+
+        sled_hardware::cleanup::delete_underlay_addresses(&log)
+            .map_err(BootstrapError::Cleanup)?;
+        sled_hardware::cleanup::delete_omicron_vnics(&log)
+            .await
+            .map_err(BootstrapError::Cleanup)?;
+        illumos_utils::opte::delete_all_xde_devices(&log)?;
+        Ok(())
+    }
+
+    async fn uninstall_storage(
+        &self,
+        log: &Logger,
+    ) -> Result<(), BootstrapError> {
+        let datasets = zfs::get_all_omicron_datasets_for_delete()
+            .map_err(BootstrapError::ZfsDatasetsList)?;
+        for dataset in &datasets {
+            info!(log, "Removing dataset: {dataset}");
+            zfs::Zfs::destroy_dataset(dataset)?;
+        }
+
+        Ok(())
+    }
 }

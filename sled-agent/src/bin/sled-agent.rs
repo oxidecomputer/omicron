@@ -101,7 +101,7 @@ async fn do_run() -> Result<(), CmdError> {
             // This should remain equivalent to the HTTP request which can
             // be invoked by Wicket.
             if let Some(rss_config) = rss_config {
-                match server.agent().start_rack_initialize(rss_config) {
+                match server.start_rack_initialize(rss_config) {
                     // If the rack has already been initialized, we shouldn't
                     // abandon the server.
                     Ok(_) | Err(RssAccessError::AlreadyInitialized) => {}
