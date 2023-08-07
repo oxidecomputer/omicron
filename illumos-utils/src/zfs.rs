@@ -427,6 +427,11 @@ pub fn get_all_omicron_datasets_for_delete() -> anyhow::Result<Vec<String>> {
                 continue;
             }
 
+            // The swap device might be in use, so don't assert that it can be deleted.
+            if dataset == "swap" && internal {
+                continue;
+            }
+
             datasets.push(format!("{pool}/{dataset}"));
         }
     }
