@@ -691,11 +691,9 @@ impl Inner {
             "update" => ?hardware_update,
         );
 
-        // TODO are these choices correct? This tries to match the
-        // previous behavior when SledAgent monitored hardware
-        // itself.
-        // TODO-john maybe just remove this entirely? check
-        // sled-agent again
+        // TODO are these choices correct? This tries to match the previous
+        // behavior when SledAgent monitored hardware itself. Could/should we
+        // notify nexus after any hardware update?
         let should_notify_nexus = match &hardware_update {
             Ok(HardwareUpdate::TofinoDeviceChange)
             | Err(broadcast::error::RecvError::Lagged(_)) => true,
@@ -873,6 +871,7 @@ impl Inner {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use omicron_common::address::Ipv6Subnet;
     use omicron_test_utils::dev::test_setup_log;
     use uuid::Uuid;
 

@@ -432,13 +432,6 @@ impl SledAgent {
         // be received by Nexus eventually.
         sled_agent.notify_nexus_about_self(&log);
 
-        // Begin monitoring the underlying hardware, and reacting to changes.
-        let sa = sled_agent.clone();
-        let hardware_log = log.clone();
-        tokio::spawn(async move {
-            sa.hardware_monitor_task(hardware_log).await;
-        });
-
         Ok(sled_agent)
     }
 
@@ -477,110 +470,6 @@ impl SledAgent {
         &self,
     ) -> (Ipv6Addr, Option<&RackNetworkConfig>) {
         (self.inner.switch_zone_ip(), self.inner.rack_network_config.as_ref())
-    }
-
-    // Observe the current hardware state manually.
-    //
-    // We use this when we're monitoring hardware for the first
-    // time, and if we miss notifications.
-    async fn full_hardware_scan(&self, log: &Logger) {
-        info!(log, "Performing full hardware scan");
-        self.notify_nexus_about_self(log);
-
-        let scrimlet = self.inner.hardware.is_scrimlet_driver_loaded();
-
-        if scrimlet {
-            let baseboard = self.inner.hardware.baseboard();
-            let switch_zone_ip = self.inner.switch_zone_ip();
-            if let Err(e) = self
-                .inner
-                .services
-                .activate_switch(
-                    Some((
-                        switch_zone_ip,
-                        self.inner.rack_network_config.as_ref(),
-                    )),
-                    baseboard,
-                )
-                .await
-            {
-                warn!(log, "Failed to activate switch: {e}");
-            }
-        } else {
-            if let Err(e) = self.inner.services.deactivate_switch().await {
-                warn!(log, "Failed to deactivate switch: {e}");
-            }
-        }
-
-        self.inner
-            .storage
-            .ensure_using_exactly_these_disks(self.inner.hardware.disks())
-            .await;
-    }
-
-    async fn hardware_monitor_task(&self, log: Logger) {
-        // Start monitoring the hardware for changes
-        let mut hardware_updates = self.inner.hardware.monitor();
-
-        // Scan the system manually for events we have have missed
-        // before we started monitoring.
-        self.full_hardware_scan(&log).await;
-
-        // Rely on monitoring for tracking all future updates.
-        loop {
-            use sled_hardware::HardwareUpdate;
-            use tokio::sync::broadcast::error::RecvError;
-            match hardware_updates.recv().await {
-                Ok(update) => match update {
-                    HardwareUpdate::TofinoDeviceChange => {
-                        // Inform Nexus that we're now a scrimlet, instead of a Gimlet.
-                        //
-                        // This won't block on Nexus responding; it may take while before
-                        // Nexus actually comes online.
-                        self.notify_nexus_about_self(&log);
-                    }
-                    HardwareUpdate::TofinoLoaded => {
-                        let baseboard = self.inner.hardware.baseboard();
-                        let switch_zone_ip = self.inner.switch_zone_ip();
-                        if let Err(e) = self
-                            .inner
-                            .services
-                            .activate_switch(
-                                Some((
-                                    switch_zone_ip,
-                                    self.inner.rack_network_config.as_ref(),
-                                )),
-                                baseboard,
-                            )
-                            .await
-                        {
-                            warn!(log, "Failed to activate switch: {e}");
-                        }
-                    }
-                    HardwareUpdate::TofinoUnloaded => {
-                        if let Err(e) =
-                            self.inner.services.deactivate_switch().await
-                        {
-                            warn!(log, "Failed to deactivate switch: {e}");
-                        }
-                    }
-                    HardwareUpdate::DiskAdded(disk) => {
-                        self.inner.storage.upsert_disk(disk).await;
-                    }
-                    HardwareUpdate::DiskRemoved(disk) => {
-                        self.inner.storage.delete_disk(disk).await;
-                    }
-                },
-                Err(RecvError::Lagged(count)) => {
-                    warn!(log, "Hardware monitor missed {count} messages");
-                    self.full_hardware_scan(&log).await;
-                }
-                Err(RecvError::Closed) => {
-                    warn!(log, "Hardware monitor receiver closed; exiting");
-                    return;
-                }
-            }
-        }
     }
 
     pub fn id(&self) -> Uuid {
