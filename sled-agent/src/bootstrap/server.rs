@@ -11,6 +11,7 @@ use crate::bootstrap::bootstore::BootstoreHandles;
 use crate::bootstrap::http_entrypoints::api as http_api;
 use crate::bootstrap::maghemite;
 use crate::bootstrap::pre_server::BootstrapAgentStartup;
+use crate::bootstrap::rack_ops::RssAccess;
 use crate::bootstrap::sprockets_server::SprocketsServer;
 use crate::config::Config as SledConfig;
 use crate::config::ConfigError;
@@ -213,6 +214,12 @@ impl Server {
             "waiting for boot M.2",
         )
         .await?;
+
+        // We don't yet _act_ on the `StartSledAgentRequest` if we have one, but
+        // if we have one we init our `RssAccess` noting that we're already
+        // initialized. We'll start the sled-agent described by `maybe_ledger`
+        // below.
+        let rss_access = RssAccess::new(maybe_ledger.is_some());
 
         todo!()
         /*
