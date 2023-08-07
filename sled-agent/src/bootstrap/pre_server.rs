@@ -5,6 +5,11 @@
 //! Functionality required to initialize the bootstrap agent even before it
 //! starts running servers on the bootstrap network.
 
+// Clippy doesn't like `StartError` due to
+// https://github.com/oxidecomputer/usdt/issues/133; remove this once that issue
+// is addressed.
+#![allow(clippy::result_large_err)]
+
 use super::maghemite;
 use super::secret_retriever::LrtqOrHardcodedSecretRetriever;
 use super::server::StartError;

@@ -486,6 +486,10 @@ async fn start_sled_agent(
     Ok(server)
 }
 
+// Clippy doesn't like `StartError` due to
+// https://github.com/oxidecomputer/usdt/issues/133; remove this once that issue
+// is addressed.
+#[allow(clippy::result_large_err)]
 fn start_dropshot_server(
     context: BootstrapServerContext,
 ) -> Result<HttpServer<BootstrapServerContext>, StartError> {
