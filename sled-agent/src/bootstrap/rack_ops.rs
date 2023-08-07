@@ -4,15 +4,18 @@
 
 //! Internal API for rack-level bootstrap agent operations.
 
-use super::Agent;
 use crate::bootstrap::http_entrypoints::RackOperationStatus;
 use crate::bootstrap::params::RackInitializeRequest;
 use crate::bootstrap::rss_handle::RssHandle;
 use crate::rack_setup::service::SetupServiceError;
+use crate::storage_manager::StorageResources;
+use bootstore::schemes::v0 as bootstore;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
+use slog::Logger;
 use std::mem;
+use std::net::Ipv6Addr;
 use std::sync::Arc;
 use std::sync::Mutex;
 use tokio::sync::oneshot;
@@ -164,9 +167,12 @@ impl RssAccess {
         }
     }
 
-    pub(super) fn start_initializing(
+    pub(crate) fn start_initializing(
         &self,
-        agent: &Arc<Agent>,
+        parent_log: &Logger,
+        global_zone_bootstrap_ip: Ipv6Addr,
+        storage_resources: &StorageResources,
+        bootstore_node_handle: &bootstore::NodeHandle,
         request: RackInitializeRequest,
     ) -> Result<RackInitId, RssAccessError> {
         let mut status = self.status.lock().unwrap();
@@ -200,10 +206,19 @@ impl RssAccess {
                 *status = RssStatus::Initializing { id, completion };
                 mem::drop(status);
 
-                let agent = Arc::clone(agent);
+                let parent_log = parent_log.clone();
+                let storage_resources = storage_resources.clone();
+                let bootstore_node_handle = bootstore_node_handle.clone();
                 let status = Arc::clone(&self.status);
                 tokio::spawn(async move {
-                    let result = rack_initialize(&agent, request).await;
+                    let result = rack_initialize(
+                        &parent_log,
+                        global_zone_bootstrap_ip,
+                        storage_resources,
+                        bootstore_node_handle,
+                        request,
+                    )
+                    .await;
                     let new_status = match result {
                         Ok(()) => RssStatus::Initialized { id: Some(id) },
                         Err(err) => RssStatus::InitializationFailed { id, err },
@@ -223,7 +238,8 @@ impl RssAccess {
 
     pub(super) fn start_reset(
         &self,
-        agent: &Arc<Agent>,
+        parent_log: &Logger,
+        global_zone_bootstrap_ip: Ipv6Addr,
     ) -> Result<RackResetId, RssAccessError> {
         let mut status = self.status.lock().unwrap();
 
@@ -255,10 +271,11 @@ impl RssAccess {
                 *status = RssStatus::Resetting { id, completion };
                 mem::drop(status);
 
-                let agent = Arc::clone(agent);
+                let parent_log = parent_log.clone();
                 let status = Arc::clone(&self.status);
                 tokio::spawn(async move {
-                    let result = rack_reset(&agent).await;
+                    let result =
+                        rack_reset(&parent_log, global_zone_bootstrap_ip).await;
                     let new_status = match result {
                         Ok(()) => {
                             RssStatus::Uninitialized { reset_id: Some(id) }
@@ -323,19 +340,25 @@ enum RssStatus {
 }
 
 async fn rack_initialize(
-    agent: &Agent,
+    parent_log: &Logger,
+    global_zone_bootstrap_ip: Ipv6Addr,
+    storage_resources: StorageResources,
+    bootstore_node_handle: bootstore::NodeHandle,
     request: RackInitializeRequest,
 ) -> Result<(), SetupServiceError> {
     RssHandle::run_rss(
-        &agent.parent_log,
+        parent_log,
         request,
-        agent.ip,
-        agent.storage_resources.clone(),
-        agent.get_bootstore_node_handle(),
+        global_zone_bootstrap_ip,
+        storage_resources,
+        bootstore_node_handle,
     )
     .await
 }
 
-async fn rack_reset(agent: &Agent) -> Result<(), SetupServiceError> {
-    RssHandle::run_rss_reset(&agent.parent_log, agent.ip).await
+async fn rack_reset(
+    parent_log: &Logger,
+    global_zone_bootstrap_ip: Ipv6Addr,
+) -> Result<(), SetupServiceError> {
+    RssHandle::run_rss_reset(parent_log, global_zone_bootstrap_ip).await
 }

@@ -7,9 +7,9 @@
 //! Note that the bootstrap agent also communicates over Sprockets,
 //! and has a separate interface for establishing the trust quorum.
 
-use super::agent::{RackInitId, RackResetId};
 use crate::bootstrap::agent::Agent;
 use crate::bootstrap::params::RackInitializeRequest;
+use crate::bootstrap::rack_ops::{RackInitId, RackResetId};
 use crate::updates::Component;
 use dropshot::{
     endpoint, ApiDescription, HttpError, HttpResponseOk,
