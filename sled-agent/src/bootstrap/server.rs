@@ -156,8 +156,11 @@ pub enum StartError {
     BindSprocketsServer(#[source] io::Error),
 }
 
-/// Wraps a [Agent] object, and provides helper methods for exposing it
-/// via an HTTP interface and a tcp server used for rack initialization.
+/// Server for the bootstrap agent.
+///
+/// Wraps an inner tokio task that handles low-level operations like
+/// initializating and resetting this sled (and starting / stopping the
+/// sled-agent server).
 pub struct Server {
     inner_task: JoinHandle<()>,
     bootstrap_http_server: HttpServer<BootstrapServerContext>,
