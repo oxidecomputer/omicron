@@ -7,36 +7,42 @@
 use crate::bootstrap::params::version;
 use crate::bootstrap::params::Request;
 use crate::bootstrap::params::RequestEnvelope;
+use crate::bootstrap::params::StartSledAgentRequest;
 use crate::bootstrap::views::Response;
 use crate::bootstrap::views::ResponseEnvelope;
+use crate::bootstrap::views::SledAgentResponse;
 use slog::Logger;
 use std::io;
-use std::sync::Arc;
+use std::net::SocketAddrV6;
 use tokio::io::AsyncReadExt;
 use tokio::io::AsyncWriteExt;
 use tokio::io::BufStream;
 use tokio::net::TcpListener;
 use tokio::net::TcpStream;
+use tokio::sync::mpsc;
+use tokio::sync::oneshot;
 
-use super::agent::Agent;
+type TxRequestsChannel = mpsc::Sender<(
+    StartSledAgentRequest,
+    oneshot::Sender<Result<SledAgentResponse, String>>,
+)>;
 
 pub(super) struct SprocketsServer {
     listener: TcpListener,
-    bootstrap_agent: Arc<Agent>,
+    tx_requests: TxRequestsChannel,
     log: Logger,
 }
 
 impl SprocketsServer {
     pub(super) async fn bind(
-        bootstrap_agent: Arc<Agent>,
+        bind_addr: SocketAddrV6,
+        tx_requests: TxRequestsChannel,
         base_log: &Logger,
     ) -> io::Result<Self> {
-        let bind_addr = bootstrap_agent.rack_init_address();
         let listener = TcpListener::bind(bind_addr).await?;
-        let log =
-            base_log.new(o!("component" => "BootstrapAgentSprocketsServer"));
+        let log = base_log.new(o!("component" => "SledAgentSprocketsServer"));
         info!(log, "Started listening"; "local_addr" => %bind_addr);
-        Ok(Self { listener, bootstrap_agent, log })
+        Ok(Self { listener, tx_requests, log })
     }
 
     /// Run the sprockets server.
@@ -59,14 +65,10 @@ impl SprocketsServer {
             let log = self.log.new(o!("remote_addr" => remote_addr));
             info!(log, "Accepted connection");
 
-            let bootstrap_agent = self.bootstrap_agent.clone();
+            let tx_requests = self.tx_requests.clone();
             tokio::spawn(async move {
-                match handle_start_sled_agent_request(
-                    stream,
-                    bootstrap_agent,
-                    &log,
-                )
-                .await
+                match handle_start_sled_agent_request(stream, tx_requests, &log)
+                    .await
                 {
                     Ok(()) => info!(log, "Connection closed"),
                     Err(err) => warn!(log, "Connection failed"; "err" => err),
@@ -78,27 +80,51 @@ impl SprocketsServer {
 
 async fn handle_start_sled_agent_request(
     stream: TcpStream,
-    bootstrap_agent: Arc<Agent>,
+    tx_requests: TxRequestsChannel,
     log: &Logger,
 ) -> Result<(), String> {
     let mut stream = Box::new(BufStream::new(stream));
 
     let response = match read_request(&mut stream).await? {
         Request::StartSledAgentRequest(request) => {
-            // The call to `request_sled_agent` should be idempotent if the
-            // request was the same.
-            bootstrap_agent
-                .request_sled_agent(&request)
-                .await
-                .map(|response| Response::SledAgentResponse(response))
-                .map_err(|err| {
-                    warn!(
-                        log, "Request to initialize sled agent failed";
-                        "request" => ?request,
-                        "err" => %err,
+            let (response_tx, response_rx) = oneshot::channel();
+
+            // TODO-john can we remove the Cow on request now?
+            match tx_requests.send((request.into_owned(), response_tx)).await {
+                Ok(()) => match response_rx.await {
+                    Ok(Ok(response)) => {
+                        Ok(Response::SledAgentResponse(response))
+                    }
+                    Ok(Err(message)) => {
+                        error!(
+                            log,
+                            "Request to initialize sled-agent failed";
+                            "err" => &message,
+                        );
+                        Err(message)
+                    }
+                    Err(_) => {
+                        error!(
+                            log,
+                            "Request to initialize sled-agent failed";
+                            "err" => "internal response channel closed",
+                        );
+                        Err("Failed to initialize sled-agent: \
+                             internal response channel closed"
+                            .to_string())
+                    }
+                },
+                Err(_) => {
+                    error!(
+                        log,
+                        "Request to initialize sled-agent failed";
+                        "err" => "internal request channel closed",
                     );
-                    format!("Failed to initialize sled agent: {err}")
-                })
+                    Err("Failed to initialize sled-agent: \
+                         internal request channel closed"
+                        .to_string())
+                }
+            }
         }
     };
 

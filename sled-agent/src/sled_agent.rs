@@ -439,15 +439,19 @@ impl SledAgent {
             sa.hardware_monitor_task(hardware_log).await;
         });
 
-        // Finally, load services for which we're already responsible.
-        //
-        // Do this *after* monitoring for harware, to enable the switch zone to
-        // establish an underlay address before proceeding.
+        Ok(sled_agent)
+    }
+
+    /// Load services for which we're responsible; only meaningful to call
+    /// during a cold boot.
+    ///
+    /// Blocks until all services have started, retrying indefinitely on
+    /// failure.
+    pub(crate) async fn cold_boot_load_services(&self) {
         retry_notify(
             retry_policy_internal_service_aggressive(),
             || async {
-                sled_agent
-                    .inner
+                self.inner
                     .services
                     .load_services()
                     .await
@@ -455,19 +459,24 @@ impl SledAgent {
             },
             |err, delay| {
                 warn!(
-                    log,
+                    self.log,
                     "Failed to load services, will retry in {:?}", delay;
                     "error" => %err,
                 );
             },
         )
-        .await?;
+        .await
+        .unwrap(); // we retry forever, so this can't fail
 
         // Now that we've initialized the sled services, notify nexus again
         // at which point it'll plumb any necessary firewall rules back to us.
-        sled_agent.notify_nexus_about_self(&log);
+        self.notify_nexus_about_self(&self.log);
+    }
 
-        Ok(sled_agent)
+    pub(crate) fn switch_zone_underlay_info(
+        &self,
+    ) -> (Ipv6Addr, Option<&RackNetworkConfig>) {
+        (self.inner.switch_zone_ip(), self.inner.rack_network_config.as_ref())
     }
 
     // Observe the current hardware state manually.

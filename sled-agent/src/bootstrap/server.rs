@@ -10,16 +10,21 @@ use super::http_entrypoints;
 use super::params::StartSledAgentRequest;
 use super::pre_server::BootstrapManagers;
 use crate::bootstrap::bootstore::BootstoreHandles;
+use crate::bootstrap::config::BOOTSTRAP_AGENT_RACK_INIT_PORT;
 use crate::bootstrap::http_entrypoints::api as http_api;
 use crate::bootstrap::http_entrypoints::BootstrapServerContext;
 use crate::bootstrap::maghemite;
 use crate::bootstrap::pre_server::BootstrapAgentStartup;
 use crate::bootstrap::rack_ops::RssAccess;
+use crate::bootstrap::secret_retriever::LrtqOrHardcodedSecretRetriever;
 use crate::bootstrap::sprockets_server::SprocketsServer;
 use crate::config::Config as SledConfig;
 use crate::config::ConfigError;
+use crate::server::Server as SledAgentServer;
 use crate::storage_manager::StorageResources;
+use bootstore::schemes::v0 as bootstore;
 use camino::Utf8PathBuf;
+use ddm_admin_client::Client as DdmAdminClient;
 use ddm_admin_client::DdmError;
 use dropshot::HttpServer;
 use futures::Future;
@@ -189,7 +194,7 @@ impl Server {
         let bootstore_handles = wait_while_handling_hardware_updates(
             BootstoreHandles::spawn(
                 storage_resources,
-                ddm_admin_localhost_client,
+                ddm_admin_localhost_client.clone(),
                 managers.hardware.baseboard(),
                 global_zone_bootstrap_ip,
                 &base_log,
@@ -198,7 +203,7 @@ impl Server {
             &managers,
             None, // No underlay network yet
             &startup_log,
-            "waiting for boot M.2",
+            "initializing bootstore",
         )
         .await?;
 
@@ -218,7 +223,7 @@ impl Server {
             &managers,
             None, // No underlay network yet
             &startup_log,
-            "waiting for boot M.2",
+            "loading sled-agent request from ledger",
         )
         .await?;
 
@@ -241,11 +246,82 @@ impl Server {
             bootstore_node_handle: bootstore_handles.node_handle.clone(),
             baseboard: managers.hardware.baseboard(),
             rss_access,
-            updates: config.updates,
+            updates: config.updates.clone(),
             sled_reset_tx,
         };
         let bootstrap_http_server = start_dropshot_server(bootstrap_context)?;
 
+        // Start the currently-misnamed sprockets server, which listens for raw
+        // TCP connections (which should ultimately be secured via sprockets).
+        let (sled_init_tx, sled_init_rx) = mpsc::channel(1);
+
+        // We don't bother to wrap this bind in a
+        // `wait_while_handling_hardware_updates()` because (a) binding should
+        // be fast and (b) can succeed regardless of any pending hardware
+        // updates; we'll resume monitoring and handling them shortly.
+        let sprockets_server = SprocketsServer::bind(
+            SocketAddrV6::new(
+                global_zone_bootstrap_ip,
+                BOOTSTRAP_AGENT_RACK_INIT_PORT,
+                0,
+                0,
+            ),
+            sled_init_tx,
+            &base_log,
+        )
+        .await
+        .map_err(StartError::BindSprocketsServer)?;
+        let sprockets_server_handle = tokio::spawn(sprockets_server.run());
+
+        // Do we have a persistent sled-agent request that we need to restore?
+        let state = if let Some(ledger) = maybe_ledger {
+            let sled_request = ledger.data();
+            let sled_agent_server = wait_while_handling_hardware_updates(
+                start_sled_agent(
+                    &config,
+                    &sled_request.request,
+                    &bootstore_handles.node_handle,
+                    &managers,
+                    &ddm_admin_localhost_client,
+                    &base_log,
+                    &startup_log,
+                ),
+                &mut hardware_monitor,
+                &managers,
+                None, // No underlay network yet
+                &startup_log,
+                "restoring sled-agent (cold boot)",
+            )
+            .await?;
+
+            // We've created sled-agent; we need to (possibly) configure the
+            // switch zone, if we're a scrimlet, to give it our underlay
+            // network information.
+            let sled_agent = sled_agent_server.sled_agent();
+            let switch_zone_underlay_info =
+                Some(sled_agent.switch_zone_underlay_info());
+            managers
+                .full_hardware_scan(switch_zone_underlay_info, &startup_log)
+                .await;
+
+            // Finally, we need to load the services we're responsible for,
+            // while continuing to handle hardware notifications (for which we
+            // now have underlay info to provide). This cannot fail: we retry
+            // indefinitely until we're done loading services.
+            wait_while_handling_hardware_updates(
+                sled_agent.cold_boot_load_services(),
+                &mut hardware_monitor,
+                &managers,
+                None, // No underlay network yet
+                &startup_log,
+                "restoring sled-agent services (cold boot)",
+            )
+            .await;
+
+            SledAgentState::ServerStarted(sled_agent_server)
+        } else {
+            SledAgentState::Bootstrapping
+        };
         todo!()
         /*
         let (drain, registration) = slog_dtrace::with_drain(
@@ -346,6 +422,112 @@ impl Server {
     }
 }
 
+// Describes the states the sled-agent server can be in; controlled by us (the
+// bootstrap server).
+enum SledAgentState {
+    // We're still in the bootstrapping phase, waiting for a sled-agent request.
+    Bootstrapping,
+    // ... or the sled agent server is running.
+    ServerStarted(SledAgentServer),
+}
+
+#[derive(thiserror::Error, Debug)]
+pub enum SledAgentServerStartError {
+    #[error("Failed to start sled-agent server: {0}")]
+    FailedStartingServer(String),
+
+    #[error("Missing M.2 Paths for dataset: {0}")]
+    MissingM2Paths(&'static str),
+
+    #[error("Failed to commit sled agent request to ledger")]
+    CommitToLedger(#[from] ledger::Error),
+}
+
+impl From<SledAgentServerStartError> for StartError {
+    fn from(value: SledAgentServerStartError) -> Self {
+        match value {
+            SledAgentServerStartError::FailedStartingServer(s) => {
+                Self::FailedStartingServer(s)
+            }
+            SledAgentServerStartError::MissingM2Paths(dataset) => {
+                Self::MissingM2Paths(dataset)
+            }
+            SledAgentServerStartError::CommitToLedger(err) => {
+                Self::CommitToLedger(err)
+            }
+        }
+    }
+}
+
+async fn start_sled_agent(
+    config: &SledConfig,
+    request: &StartSledAgentRequest,
+    bootstore: &bootstore::NodeHandle,
+    managers: &BootstrapManagers,
+    ddmd_client: &DdmAdminClient,
+    base_log: &Logger,
+    log: &Logger,
+) -> Result<SledAgentServer, SledAgentServerStartError> {
+    info!(log, "Loading Sled Agent: {:?}", request);
+
+    // TODO-correctness: If we fail partway through, we do not cleanly roll back
+    // all the changes we've made (e.g., initializing LRTQ, informing the
+    // storage manager about keys, advertising prefixes, ...).
+
+    // Initialize the secret retriever used by the `KeyManager`
+    if request.use_trust_quorum {
+        info!(log, "KeyManager: using lrtq secret retriever");
+        let salt = request.hash_rack_id();
+        LrtqOrHardcodedSecretRetriever::init_lrtq(salt, bootstore.clone())
+    } else {
+        info!(log, "KeyManager: using hardcoded secret retriever");
+        LrtqOrHardcodedSecretRetriever::init_hardcoded();
+    }
+
+    // Inform the storage service that the key manager is available
+    managers.storage.key_manager_ready().await;
+
+    // Start trying to notify ddmd of our sled prefix so it can
+    // advertise it to other sleds.
+    //
+    // TODO-security This ddmd_client is used to advertise both this
+    // (underlay) address and our bootstrap address. Bootstrap addresses are
+    // unauthenticated (connections made on them are auth'd via sprockets),
+    // but underlay addresses should be exchanged via authenticated channels
+    // between ddmd instances. It's TBD how that will work, but presumably
+    // we'll need to do something different here for underlay vs bootstrap
+    // addrs (either talk to a differently-configured ddmd, or include info
+    // indicating which kind of address we're advertising).
+    ddmd_client.advertise_prefix(request.subnet);
+
+    // Server does not exist, initialize it.
+    let server = SledAgentServer::start(
+        config,
+        base_log.clone(),
+        request.clone(),
+        managers.service.clone(),
+        managers.storage.clone(),
+        bootstore.clone(),
+    )
+    .await
+    .map_err(SledAgentServerStartError::FailedStartingServer)?;
+
+    info!(log, "Sled Agent loaded; recording configuration");
+
+    // Record this request so the sled agent can be automatically
+    // initialized on the next boot.
+    let paths = sled_config_paths(managers.storage.resources()).await?;
+
+    let mut ledger = Ledger::new_with(
+        &log,
+        paths,
+        PersistentSledAgentRequest { request: Cow::Borrowed(request) },
+    );
+    ledger.commit().await?;
+
+    Ok(server)
+}
+
 fn start_dropshot_server(
     context: BootstrapServerContext,
 ) -> Result<HttpServer<BootstrapServerContext>, StartError> {
@@ -399,7 +581,13 @@ struct MissingM2Paths(&'static str);
 
 impl From<MissingM2Paths> for StartError {
     fn from(value: MissingM2Paths) -> Self {
-        StartError::MissingM2Paths(value.0)
+        Self::MissingM2Paths(value.0)
+    }
+}
+
+impl From<MissingM2Paths> for SledAgentServerStartError {
+    fn from(value: MissingM2Paths) -> Self {
+        Self::MissingM2Paths(value.0)
     }
 }
 
