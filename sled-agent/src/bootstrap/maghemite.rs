@@ -26,7 +26,8 @@ pub enum Error {
     Argument(String),
 }
 
-pub async fn enable_mg_ddm_service(
+// TODO-john delete if no longer used
+pub(crate) async fn enable_mg_ddm_service(
     log: Logger,
     interfaces: Vec<AddrObject>,
 ) -> Result<(), Error> {
@@ -36,7 +37,7 @@ pub async fn enable_mg_ddm_service(
     .await?
 }
 
-fn enable_mg_ddm_service_blocking(
+pub(super) fn enable_mg_ddm_service_blocking(
     log: Logger,
     interfaces: Vec<AddrObject>,
 ) -> Result<(), Error> {

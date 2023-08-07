@@ -13,6 +13,7 @@ mod hardware;
 mod http_entrypoints;
 mod maghemite;
 pub(crate) mod params;
+mod pre_server;
 mod rack_ops;
 pub(crate) mod rss_handle;
 mod secret_retriever;
@@ -20,4 +21,5 @@ pub mod server;
 mod sprockets_server;
 mod views;
 
+pub(crate) use pre_server::BootstrapNetworking;
 pub use rack_ops::RssAccessError;

@@ -28,6 +28,7 @@
 use crate::bootstrap::early_networking::{
     EarlyNetworkSetup, EarlyNetworkSetupError,
 };
+use crate::bootstrap::BootstrapNetworking;
 use crate::config::SidecarRevision;
 use crate::params::{
     DendriteAsic, ServiceEnsureBody, ServiceType, ServiceZoneRequest,
@@ -448,6 +449,65 @@ impl ServiceManager {
             }),
         };
         Ok(mgr)
+    }
+
+    /// Creates a service manager.
+    ///
+    /// Args:
+    /// - `log`: The logger
+    /// - `ddm_client`: Client pointed to our localhost ddmd
+    /// - `bootstrap_networking`: Collection of etherstubs/VNICs set up when
+    ///    bootstrap agent begins
+    /// - `sled_mode`: The sled's mode of operation (Gimlet vs Scrimlet).
+    /// - `skip_timesync`: If true, the sled always reports synced time.
+    /// - `sidecar_revision`: Rev of attached sidecar, if present.
+    /// - `switch_zone_maghemite_links`: TODO
+    /// - `storage`: TODO
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn new_v2(
+        log: &Logger,
+        ddmd_client: DdmAdminClient,
+        bootstrap_networking: BootstrapNetworking,
+        sled_mode: SledMode,
+        skip_timesync: Option<bool>,
+        sidecar_revision: SidecarRevision,
+        switch_zone_maghemite_links: Vec<PhysicalLink>,
+        storage: StorageResources,
+    ) -> Self {
+        let log = log.new(o!("component" => "ServiceManager"));
+        Self {
+            inner: Arc::new(ServiceManagerInner {
+                log: log.clone(),
+                global_zone_bootstrap_link_local_address: bootstrap_networking
+                    .global_zone_bootstrap_link_local_ip,
+                // TODO(https://github.com/oxidecomputer/omicron/issues/725):
+                // Load the switch zone if it already exists?
+                switch_zone: Mutex::new(SledLocalZone::Disabled),
+                sled_mode,
+                skip_timesync,
+                time_synced: AtomicBool::new(false),
+                sidecar_revision,
+                switch_zone_maghemite_links,
+                zones: Mutex::new(BTreeMap::new()),
+                underlay_vnic_allocator: VnicAllocator::new(
+                    "Service",
+                    bootstrap_networking.underlay_etherstub,
+                ),
+                underlay_vnic: bootstrap_networking.underlay_etherstub_vnic,
+                bootstrap_vnic_allocator: VnicAllocator::new(
+                    "Bootstrap",
+                    bootstrap_networking.bootstrap_etherstub,
+                ),
+                ddmd_client,
+                advertised_prefixes: Mutex::new(HashSet::new()),
+                sled_info: OnceCell::new(),
+                switch_zone_bootstrap_address: bootstrap_networking
+                    .switch_zone_bootstrap_ip,
+                storage,
+                ledger_directory_override: OnceCell::new(),
+                image_directory_override: OnceCell::new(),
+            }),
+        }
     }
 
     #[cfg(test)]
