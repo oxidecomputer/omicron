@@ -8,6 +8,7 @@ use super::agent::Agent;
 use super::config::Config;
 use crate::bootstrap::http_entrypoints::api as http_api;
 use crate::bootstrap::maghemite;
+use crate::bootstrap::pre_server::BootstrapAgentStartup;
 use crate::bootstrap::sprockets_server::SprocketsServer;
 use crate::config::Config as SledConfig;
 use crate::config::ConfigError;
@@ -129,10 +130,23 @@ pub struct Server {
 }
 
 impl Server {
-    pub async fn start(
-        config: Config,
-        sled_config: SledConfig,
-    ) -> Result<Self, String> {
+    pub async fn start(config: SledConfig) -> Result<Self, StartError> {
+        // Do all initial setup that we can do even before we start listening
+        // for and handling hardware updates (e.g., discovery if we're a
+        // scrimlet or discovery of hard drives). If any step of this fails, we
+        // fail to start.
+        let BootstrapAgentStartup {
+            config,
+            global_zone_bootstrap_ip,
+            ddm_admin_localhost_client,
+            base_log,
+            startup_log,
+            managers,
+            key_manager_handle,
+        } = BootstrapAgentStartup::run(config).await?;
+
+        todo!()
+        /*
         let (drain, registration) = slog_dtrace::with_drain(
             config.log.to_logger("SledAgent").map_err(|message| {
                 format!("initializing logger: {}", message)
@@ -202,6 +216,7 @@ impl Server {
             _http_server: http_server,
         };
         Ok(server)
+        */
     }
 
     pub fn agent(&self) -> &Arc<Agent> {

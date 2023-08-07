@@ -15,6 +15,7 @@ pub const BOOTSTRAP_AGENT_HTTP_PORT: u16 = 80;
 pub const BOOTSTRAP_AGENT_RACK_INIT_PORT: u16 = 12346;
 pub const BOOTSTORE_PORT: u16 = 12347;
 
+// TODO-john remove?
 /// Configuration for a bootstrap agent
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 pub struct Config {

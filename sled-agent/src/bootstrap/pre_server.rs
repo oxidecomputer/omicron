@@ -37,15 +37,19 @@ use std::net::IpAddr;
 use std::net::Ipv6Addr;
 use tokio::task::JoinHandle;
 
+pub(super) struct BootstrapManagers {
+    pub(super) hardware_manager: HardwareManager,
+    pub(super) storage_manager: StorageManager,
+    pub(super) service_manager: ServiceManager,
+}
+
 pub(super) struct BootstrapAgentStartup {
     pub(super) config: Config,
     pub(super) global_zone_bootstrap_ip: Ipv6Addr,
     pub(super) ddm_admin_localhost_client: DdmAdminClient,
     pub(super) base_log: Logger,
     pub(super) startup_log: Logger,
-    pub(super) hardware_manager: HardwareManager,
-    pub(super) storage_manager: StorageManager,
-    pub(super) service_manager: ServiceManager,
+    pub(super) managers: BootstrapManagers,
     pub(super) key_manager_handle: JoinHandle<()>,
 }
 
@@ -151,9 +155,11 @@ impl BootstrapAgentStartup {
             ddm_admin_localhost_client,
             base_log,
             startup_log: log,
-            hardware_manager,
-            storage_manager,
-            service_manager,
+            managers: BootstrapManagers {
+                hardware_manager,
+                storage_manager,
+                service_manager,
+            },
             key_manager_handle,
         })
     }
