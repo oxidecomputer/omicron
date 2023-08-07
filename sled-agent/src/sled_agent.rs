@@ -284,6 +284,9 @@ impl SledAgent {
             }
         }
 
+        // TODO-correctness Bootstrap-agent already ensures the underlay
+        // etherstub and etherstub VNIC exist on startup - could it pass them
+        // through to us?
         let etherstub = Dladm::ensure_etherstub(
             illumos_utils::dladm::UNDERLAY_ETHERSTUB_NAME,
         )
@@ -317,6 +320,11 @@ impl SledAgent {
             })
             .await?;
 
+        // TODO-correctness The bootstrap agent _also_ has a `HardwareManager`.
+        // We only use it for reading properties, but it's not `Clone`able
+        // because it's holding an inner task handle. Could we add a way to get
+        // a read-only handle to it, and have bootstrap agent give us that
+        // instead of creating a new full one ourselves?
         let hardware = HardwareManager::new(&parent_log, services.sled_mode())
             .map_err(|e| Error::Hardware(e))?;
 
