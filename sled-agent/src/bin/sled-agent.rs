@@ -9,12 +9,10 @@ use clap::{Parser, Subcommand};
 use omicron_common::cmd::fatal;
 use omicron_common::cmd::CmdError;
 use omicron_sled_agent::bootstrap::{
-    agent as bootstrap_agent, config::Config as BootstrapConfig,
-    server as bootstrap_server,
+    agent as bootstrap_agent, server as bootstrap_server,
 };
 use omicron_sled_agent::rack_setup::config::SetupServiceConfig as RssConfig;
 use omicron_sled_agent::{config::Config as SledConfig, server as sled_server};
-use uuid::Uuid;
 
 #[derive(Subcommand, Debug)]
 enum OpenapiFlavor {
@@ -92,6 +90,7 @@ async fn do_run() -> Result<(), CmdError> {
                 None
             };
 
+            /*
             // Derive the bootstrap addresses from the data link's MAC address.
             let link = config
                 .get_link()
@@ -112,13 +111,18 @@ async fn do_run() -> Result<(), CmdError> {
                 bootstrap_server::Server::start(bootstrap_config, config)
                     .await
                     .map_err(CmdError::Failure)?;
+            */
+            let server =
+                omicron_sled_agent::lifecycle::SledAgent::start(config)
+                    .await
+                    .map_err(|err| CmdError::Failure(format!("{err:#}")))?;
 
             // If requested, automatically supply the RSS configuration.
             //
             // This should remain equivalent to the HTTP request which can
             // be invoked by Wicket.
             if let Some(rss_config) = rss_config {
-                match server.agent().start_rack_initialize(rss_config) {
+                match server.start_rack_initialize(rss_config) {
                     // If the rack has already been initialized, we shouldn't
                     // abandon the server.
                     Ok(_)

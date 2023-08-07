@@ -10,6 +10,7 @@ use super::StartError;
 use crate::bootstrap::agent::BootstrapError;
 use crate::bootstrap::agent::PersistentSledAgentRequest;
 use crate::bootstrap::agent::RssAccess;
+use crate::bootstrap::agent::RssAccessError;
 use crate::bootstrap::config::BOOTSTORE_PORT;
 use crate::bootstrap::config::BOOTSTRAP_AGENT_HTTP_PORT;
 use crate::bootstrap::config::BOOTSTRAP_AGENT_RACK_INIT_PORT;
@@ -344,6 +345,21 @@ pub(crate) struct BootstrapServerContext {
     rss_access: RssAccess,
     updates: ConfigUpdates,
     sled_reset_tx: mpsc::Sender<oneshot::Sender<Result<(), BootstrapError>>>,
+}
+
+impl BootstrapServerContext {
+    pub(super) fn start_rack_initialize(
+        &self,
+        request: RackInitializeRequest,
+    ) -> Result<RackInitId, RssAccessError> {
+        self.rss_access.start_initializing_v2(
+            &self.base_log,
+            self.global_zone_bootstrap_ip,
+            self.storage_resources.clone(),
+            self.bootstore_node_handle.clone(),
+            request,
+        )
+    }
 }
 
 // Uninstall all oxide zones (except the switch zone)

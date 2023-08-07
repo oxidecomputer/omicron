@@ -22,7 +22,7 @@ pub mod config;
 mod http_entrypoints;
 mod instance;
 mod instance_manager;
-mod lifecycle;
+pub mod lifecycle;
 mod nexus;
 pub mod params;
 mod profile;

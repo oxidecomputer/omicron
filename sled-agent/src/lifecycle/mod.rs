@@ -12,6 +12,9 @@
 #![allow(clippy::result_large_err)]
 
 use crate::bootstrap::agent::BootstrapError;
+use crate::bootstrap::agent::RackInitId;
+use crate::bootstrap::agent::RssAccessError;
+use crate::bootstrap::params::RackInitializeRequest;
 use crate::bootstrap::params::StartSledAgentRequest;
 use crate::bootstrap::views::SledAgentResponse;
 use crate::config::Config;
@@ -50,6 +53,7 @@ const SLED_AGENT_REQUEST_FILE: &str = "sled-agent-request.json";
 
 pub struct SledAgent {
     sled_agent_main_task: JoinHandle<()>,
+    bootstrap_http_server: HttpServer<BootstrapServerContext>,
 }
 
 impl SledAgent {
@@ -183,14 +187,27 @@ impl SledAgent {
             service_manager,
             storage_manager,
             ddm_admin_localhost_client,
-            bootstrap_http_server,
             bootstore_node_handle,
             sprockets_server_handle,
             key_manager_handle,
             base_log,
         ));
 
-        Ok(Self { sled_agent_main_task })
+        Ok(Self { sled_agent_main_task, bootstrap_http_server })
+    }
+
+    pub fn start_rack_initialize(
+        &self,
+        request: RackInitializeRequest,
+    ) -> Result<RackInitId, RssAccessError> {
+        self.bootstrap_http_server.app_private().start_rack_initialize(request)
+    }
+
+    pub async fn wait_for_finish(self) -> Result<(), String> {
+        match self.sled_agent_main_task.await {
+            Ok(()) => Ok(()),
+            Err(err) => Err(format!("sled-agent-main panicked: {err}")),
+        }
     }
 }
 
@@ -232,7 +249,6 @@ async fn sled_agent_main(
     service_manager: ServiceManager,
     storage_manager: StorageManager,
     ddm_admin_localhost_client: DdmAdminClient,
-    _bootstrap_http_server: HttpServer<BootstrapServerContext>,
     bootstore_node_handle: bootstore::NodeHandle,
     _sprockets_server_handle: JoinHandle<()>,
     _key_manager_handle: JoinHandle<()>,
