@@ -869,3 +869,50 @@ impl Inner {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use omicron_test_utils::dev::test_setup_log;
+    use uuid::Uuid;
+
+    #[tokio::test]
+    async fn persistent_sled_agent_request_serialization() {
+        let logctx =
+            test_setup_log("persistent_sled_agent_request_serialization");
+        let log = &logctx.log;
+
+        let request = PersistentSledAgentRequest {
+            request: Cow::Owned(StartSledAgentRequest {
+                id: Uuid::new_v4(),
+                rack_id: Uuid::new_v4(),
+                ntp_servers: vec![String::from("test.pool.example.com")],
+                dns_servers: vec!["1.1.1.1".parse().unwrap()],
+                use_trust_quorum: false,
+                subnet: Ipv6Subnet::new(Ipv6Addr::LOCALHOST),
+            }),
+        };
+
+        let tempdir = camino_tempfile::Utf8TempDir::new().unwrap();
+        let paths = vec![tempdir.path().join("test-file")];
+
+        let mut ledger = Ledger::new_with(log, paths.clone(), request.clone());
+        ledger.commit().await.expect("Failed to write to ledger");
+
+        let ledger = Ledger::<PersistentSledAgentRequest>::new(log, paths)
+            .await
+            .expect("Failed to read request");
+
+        assert!(&request == ledger.data(), "serialization round trip failed");
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn test_persistent_sled_agent_request_schema() {
+        let schema = schemars::schema_for!(PersistentSledAgentRequest<'_>);
+        expectorate::assert_contents(
+            "../schema/persistent-sled-agent-request.json",
+            &serde_json::to_string_pretty(&schema).unwrap(),
+        );
+    }
+}
