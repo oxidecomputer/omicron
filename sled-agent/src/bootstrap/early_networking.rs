@@ -543,6 +543,7 @@ fn retry_policy_switch_mapping() -> ExponentialBackoff {
         .with_initial_interval(Duration::from_millis(100))
         .with_multiplier(1.2)
         .with_max_interval(Duration::from_secs(15))
+        .with_max_elapsed_time(None)
         .build()
 }
 
