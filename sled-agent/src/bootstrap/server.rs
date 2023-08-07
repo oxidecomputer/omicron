@@ -188,6 +188,12 @@ impl Server {
         let mut hardware_monitor = managers.hardware.monitor();
         let storage_resources = managers.storage.resources();
 
+        // Check the latest hardware snapshot; we could have missed events
+        // between the creation of the hardware manager and our subscription of
+        // its monitor. We are pre-underlay network, so pass `None` for the
+        // underlay network info.
+        managers.full_hardware_scan(None, &startup_log).await;
+
         // Wait for our boot M.2 to show up.
         wait_while_handling_hardware_updates(
             wait_for_boot_m2(storage_resources, &startup_log),
