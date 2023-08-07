@@ -5,10 +5,13 @@
 //! Server API for bootstrap-related functionality.
 
 use super::agent::Agent;
+use super::config::BOOTSTRAP_AGENT_HTTP_PORT;
+use super::http_entrypoints;
 use super::params::StartSledAgentRequest;
 use super::pre_server::BootstrapManagers;
 use crate::bootstrap::bootstore::BootstoreHandles;
 use crate::bootstrap::http_entrypoints::api as http_api;
+use crate::bootstrap::http_entrypoints::BootstrapServerContext;
 use crate::bootstrap::maghemite;
 use crate::bootstrap::pre_server::BootstrapAgentStartup;
 use crate::bootstrap::rack_ops::RssAccess;
@@ -18,6 +21,7 @@ use crate::config::ConfigError;
 use crate::storage_manager::StorageResources;
 use camino::Utf8PathBuf;
 use ddm_admin_client::DdmError;
+use dropshot::HttpServer;
 use futures::Future;
 use illumos_utils::dladm;
 use illumos_utils::zfs;
@@ -35,8 +39,11 @@ use slog::Logger;
 use std::borrow::Cow;
 use std::io;
 use std::net::Ipv6Addr;
+use std::net::SocketAddr;
+use std::net::SocketAddrV6;
 use std::sync::Arc;
 use tokio::sync::broadcast;
+use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
 const SLED_AGENT_REQUEST_FILE: &str = "sled-agent-request.json";
@@ -179,7 +186,7 @@ impl Server {
         .await;
 
         // Wait for the bootstore to start.
-        wait_while_handling_hardware_updates(
+        let bootstore_handles = wait_while_handling_hardware_updates(
             BootstoreHandles::spawn(
                 storage_resources,
                 ddm_admin_localhost_client,
@@ -220,6 +227,24 @@ impl Server {
         // initialized. We'll start the sled-agent described by `maybe_ledger`
         // below.
         let rss_access = RssAccess::new(maybe_ledger.is_some());
+
+        // Create a channel for requesting sled reset. We use a channel depth
+        // of 1: if there's a pending sled reset request, there's no need to
+        // enqueue another, and we can send back an HTTP busy.
+        let (sled_reset_tx, sled_reset_rx) = mpsc::channel(1);
+
+        // Start the bootstrap dropshot server.
+        let bootstrap_context = BootstrapServerContext {
+            base_log: base_log.clone(),
+            global_zone_bootstrap_ip,
+            storage_resources: storage_resources.clone(),
+            bootstore_node_handle: bootstore_handles.node_handle.clone(),
+            baseboard: managers.hardware.baseboard(),
+            rss_access,
+            updates: config.updates,
+            sled_reset_tx,
+        };
+        let bootstrap_http_server = start_dropshot_server(bootstrap_context)?;
 
         todo!()
         /*
@@ -319,6 +344,33 @@ impl Server {
         self.sprockets_server_handle.abort();
         self.wait_for_finish().await
     }
+}
+
+fn start_dropshot_server(
+    context: BootstrapServerContext,
+) -> Result<HttpServer<BootstrapServerContext>, StartError> {
+    let mut dropshot_config = dropshot::ConfigDropshot::default();
+    dropshot_config.request_body_max_bytes = 1024 * 1024;
+    dropshot_config.bind_address = SocketAddr::V6(SocketAddrV6::new(
+        context.global_zone_bootstrap_ip,
+        BOOTSTRAP_AGENT_HTTP_PORT,
+        0,
+        0,
+    ));
+    let dropshot_log =
+        context.base_log.new(o!("component" => "dropshot (BootstrapAgent)"));
+    let http_server = dropshot::HttpServerStarter::new(
+        &dropshot_config,
+        http_entrypoints::api(),
+        context,
+        &dropshot_log,
+    )
+    .map_err(|error| {
+        StartError::InitBootstrapDropshotServer(error.to_string())
+    })?
+    .start();
+
+    Ok(http_server)
 }
 
 /// Wait for at least the M.2 we booted from to show up.
