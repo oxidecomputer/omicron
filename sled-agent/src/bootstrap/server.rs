@@ -309,22 +309,12 @@ impl Server {
             )
             .await?;
 
-            // We've created sled-agent; we need to (possibly) configure the
-            // switch zone, if we're a scrimlet, to give it our underlay
-            // network information.
-            let sled_agent = sled_agent_server.sled_agent();
-            let switch_zone_underlay_info =
-                Some(sled_agent.switch_zone_underlay_info());
-            managers
-                .full_hardware_scan(switch_zone_underlay_info, &startup_log)
-                .await;
-
-            // Finally, we need to load the services we're responsible for,
-            // while continuing to handle hardware notifications (for which we
-            // now have underlay info to provide). This cannot fail: we retry
-            // indefinitely until we're done loading services.
+            // For cold boot specifically, we now need to load the services
+            // we're responsible for, while continuing to handle hardware
+            // notifications. This cannot fail: we retry indefinitely until
+            // we're done loading services.
             wait_while_handling_hardware_updates(
-                sled_agent.cold_boot_load_services(),
+                sled_agent_server.sled_agent().cold_boot_load_services(),
                 &mut hardware_monitor,
                 &managers,
                 None, // No underlay network yet
@@ -491,6 +481,15 @@ async fn start_sled_agent(
         PersistentSledAgentRequest { request: Cow::Borrowed(request) },
     );
     ledger.commit().await?;
+
+    // We've created sled-agent; we need to (possibly) configure the switch
+    // zone, if we're a scrimlet, to give it our underlay network information.
+    let underlay_network_info = server.sled_agent().switch_zone_underlay_info();
+    info!(
+      log, "Sled Agent request written to ledger; rescanning hardware";
+      "underlay_network_info" => ?underlay_network_info,
+    );
+    managers.full_hardware_scan(Some(underlay_network_info), log).await;
 
     Ok(server)
 }
