@@ -28,49 +28,57 @@ ipadm show-addr "$DATALINK/ll" || ipadm create-addr -t -T addrconf "$DATALINK/ll
 ipadm show-addr "$DATALINK/omicron6"  || ipadm create-addr -t -T static -a "$LISTEN_ADDR" "$DATALINK/omicron6"
 route get -inet6 default -inet6 "$GATEWAY" || route add -inet6 default -inet6 "$GATEWAY"
 
-# Retrieve addresses of the clickhouse nodes.
-CH_ADDRS="$(/opt/oxide/internal-dns-cli/bin/dnswait clickhouse -H \
-    | head -n 2 \
-    | tr '\n' ,)"
+# Retrieve hostnames (SRV records in internal DNS) of the clickhouse nodes.
+CH_ADDRS="$(/opt/oxide/internal-dns-cli/bin/dnswait clickhouse -H)"
 
 if [[ -z "$CH_ADDRS" ]]; then
-    printf 'ERROR: found no addresses for other ClickHouse nodes\n' >&2
+    printf 'ERROR: found no hostnames for other ClickHouse nodes\n' >&2
     exit "$SMF_EXIT_ERR_CONFIG"
 fi
 
-readarray -td, nodes <<<"$CH_ADDRS,"; declare -p nodes
+declare -a nodes <<< "$CH_ADDRS"
 
-for i in {0..1}
+for i in "${nodes[@]}"
 do
-  if ! grep -q "host.control-plane.oxide.internal" <<< "${nodes["${i}"]}"; then
-    printf 'ERROR: retrieved ClickHouse address does not match the expected format\n' >&2
+  if ! grep -q "host.control-plane.oxide.internal" <<< "${i}"; then
+    printf 'ERROR: retrieved ClickHouse hostname does not match the expected format\n' >&2
     exit "$SMF_EXIT_ERR_CONFIG"
   fi
 done
 
-# Assign addresses to replicas
+if [[ "${#nodes[@]}" != 2 ]]
+then
+  printf "ERROR: expected 2 ClickHouse hosts, found "${#nodes[@]}" instead\n" >&2
+  exit "$SMF_EXIT_ERR_CONFIG"
+fi
+
+# Assign hostnames to replicas
 REPLICA_HOST_01="${nodes[0]}"
 REPLICA_HOST_02="${nodes[1]}"
 
-# Retrieve addresses of the keeper nodes.
-K_ADDRS="$(/opt/oxide/internal-dns-cli/bin/dnswait clickhouse-keeper -H \
-    | head -n 3 \
-    | tr '\n' ,)"
+# Retrieve hostnames (SRV records in internal DNS) of the keeper nodes.
+K_ADDRS="$(/opt/oxide/internal-dns-cli/bin/dnswait clickhouse-keeper -H)"
 
 if [[ -z "$K_ADDRS" ]]; then
-    printf 'ERROR: found no addresses for other ClickHouse Keeper nodes\n' >&2
+    printf 'ERROR: found no hostnames for other ClickHouse Keeper nodes\n' >&2
     exit "$SMF_EXIT_ERR_CONFIG"
 fi
 
-readarray -td, keepers <<<"$K_ADDRS,"; declare -p keepers
+declare -a keepers=($K_ADDRS)
 
-for i in {0..2}
+for i in "${keepers[@]}"
 do
-  if ! grep -q "host.control-plane.oxide.internal" <<< "${nodes["${i}"]}"; then
-    printf 'ERROR: retrieved ClickHouse Keeper address does not match the expected format\n' >&2
+  if ! grep -q "host.control-plane.oxide.internal" <<< "${i}"; then
+    printf 'ERROR: retrieved ClickHouse Keeper hostname does not match the expected format\n' >&2
     exit "$SMF_EXIT_ERR_CONFIG"
   fi
 done
+
+if [[ "${#keepers[@]}" != 3 ]]
+then
+  printf "ERROR: expected 3 ClickHouse Keeper hosts, found "${#keepers[@]}" instead\n" >&2
+  exit "$SMF_EXIT_ERR_CONFIG"
+fi
 
 # Identify the node type this is as this will influence how the config is constructed
 # TODO: There are probably much better ways to do this service discovery, but this works
@@ -87,7 +95,7 @@ then
     REPLICA_DISPLAY_NAME="oximeter_cluster node 2"
     REPLICA_NUMBER="02"
 else
-    printf 'ERROR: listen address does not match any of the identified ClickHouse addresses\n' >&2
+    printf 'ERROR: service name does not match any of the identified ClickHouse hostnames\n' >&2
     exit "$SMF_EXIT_ERR_CONFIG"
 fi
 

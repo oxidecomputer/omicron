@@ -28,34 +28,38 @@ ipadm show-addr "$DATALINK/ll" || ipadm create-addr -t -T addrconf "$DATALINK/ll
 ipadm show-addr "$DATALINK/omicron6"  || ipadm create-addr -t -T static -a "$LISTEN_ADDR" "$DATALINK/omicron6"
 route get -inet6 default -inet6 "$GATEWAY" || route add -inet6 default -inet6 "$GATEWAY"
 
-# Retrieve addresses of all keeper nodes.
-K_ADDRS="$(/opt/oxide/internal-dns-cli/bin/dnswait clickhouse-keeper -H \
-    | head -n 3 \
-    | tr '\n' ,)"
+# Retrieve hostnames (SRV records in internal DNS) of all keeper nodes.
+K_ADDRS="$(/opt/oxide/internal-dns-cli/bin/dnswait clickhouse-keeper -H)"
 
 if [[ -z "$K_ADDRS" ]]; then
-    printf 'ERROR: found no addresses for other ClickHouse Keeper nodes\n' >&2
+    printf 'ERROR: found no hostnames for other ClickHouse Keeper nodes\n' >&2
     exit "$SMF_EXIT_ERR_CONFIG"
 fi
 
-readarray -td, nodes <<<"$K_ADDRS,"; declare -p nodes
+declare -a keepers=($K_ADDRS)
 
-for i in {0..2}
+for i in "${keepers[@]}"
 do
-  if ! grep -q "host.control-plane.oxide.internal" <<< "${nodes["${i}"]}"; then
-    printf 'ERROR: retrieved ClickHouse Keeper address does not match the expected format\n' >&2
+  if ! grep -q "host.control-plane.oxide.internal" <<< "${i}"; then
+    printf 'ERROR: retrieved ClickHouse Keeper hostname does not match the expected format\n' >&2
     exit "$SMF_EXIT_ERR_CONFIG"
   fi
 done
 
-# Assign addresses to replicas and keeper nodes
-KEEPER_HOST_01="${nodes[0]}"
-KEEPER_HOST_02="${nodes[1]}"
-KEEPER_HOST_03="${nodes[2]}"
+if [[ "${#keepers[@]}" != 3 ]]
+then
+  printf "ERROR: expected 3 ClickHouse Keeper hosts, found "${#keepers[@]}" instead\n" >&2
+  exit "$SMF_EXIT_ERR_CONFIG"
+fi
+
+# Assign hostnames to replicas and keeper nodes
+KEEPER_HOST_01="${keepers[0]}"
+KEEPER_HOST_02="${keepers[1]}"
+KEEPER_HOST_03="${keepers[2]}"
 
 # Generate unique reproduceable number IDs by removing letters from KEEPER_IDENTIFIER_*
 # Keeper IDs must be numbers, and they cannot be reused (i.e. when a keeper node is 
-# unrecoverable the ID must be changed to something new.). 
+# unrecoverable the ID must be changed to something new). 
 # By trimming the hosts we can make sure all keepers will always be up to date when 
 # a new keeper is spun up. Clickhouse does not allow very large numbers, so we will
 # be reducing to 7 characters. This should be enough entropy given the small amount
@@ -78,7 +82,7 @@ elif [[ $KEEPER_ID_03 == $KEEPER_SVC ]]
 then
     KEEPER_ID_CURRENT=$KEEPER_ID_03
 else
-    printf 'ERROR: listen address does not match any of the identified ClickHouse Keeper addresses\n' >&2
+    printf 'ERROR: service name does not match any of the identified ClickHouse Keeper hostnames\n' >&2
     exit "$SMF_EXIT_ERR_CONFIG"
 fi
 
