@@ -8,13 +8,10 @@ use camino::Utf8PathBuf;
 use clap::{Parser, Subcommand};
 use omicron_common::cmd::fatal;
 use omicron_common::cmd::CmdError;
+use omicron_sled_agent::bootstrap::server as bootstrap_server;
 use omicron_sled_agent::bootstrap::RssAccessError;
-use omicron_sled_agent::bootstrap::{
-    config::Config as BootstrapConfig, server as bootstrap_server,
-};
 use omicron_sled_agent::rack_setup::config::SetupServiceConfig as RssConfig;
 use omicron_sled_agent::{config::Config as SledConfig, server as sled_server};
-use uuid::Uuid;
 
 #[derive(Subcommand, Debug)]
 enum OpenapiFlavor {

@@ -70,7 +70,7 @@ pub enum Error {
     EtherstubVnic(illumos_utils::dladm::CreateVnicError),
 
     #[error("Bootstrap error: {0}")]
-    Bootstrap(#[from] crate::bootstrap::agent::BootstrapError),
+    Bootstrap(#[from] crate::bootstrap::BootstrapError),
 
     #[error("Failed to remove Omicron address: {0}")]
     DeleteAddress(#[from] illumos_utils::ExecutionError),

@@ -4,7 +4,6 @@
 
 //! Server API for bootstrap-related functionality.
 
-use super::agent::BootstrapError;
 use super::config::BOOTSTRAP_AGENT_HTTP_PORT;
 use super::http_entrypoints;
 use super::params::RackInitializeRequest;
@@ -12,6 +11,7 @@ use super::params::StartSledAgentRequest;
 use super::pre_server::BootstrapManagers;
 use super::rack_ops::RackInitId;
 use super::views::SledAgentResponse;
+use super::BootstrapError;
 use super::RssAccessError;
 use crate::bootstrap::bootstore::BootstoreHandles;
 use crate::bootstrap::config::BOOTSTRAP_AGENT_RACK_INIT_PORT;

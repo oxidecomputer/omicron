@@ -434,7 +434,6 @@ fn spawn_key_manager_task(
 }
 
 pub(crate) struct BootstrapNetworking {
-    pub(crate) link_for_mac: dladm::PhysicalLink,
     pub(crate) bootstrap_etherstub: dladm::Etherstub,
     pub(crate) global_zone_bootstrap_ip: Ipv6Addr,
     pub(crate) global_zone_bootstrap_link_local_ip: Ipv6Addr,
@@ -503,7 +502,6 @@ impl BootstrapNetworking {
             Dladm::ensure_etherstub_vnic(&underlay_etherstub)?;
 
         Ok(Self {
-            link_for_mac,
             bootstrap_etherstub,
             global_zone_bootstrap_ip,
             global_zone_bootstrap_link_local_ip,

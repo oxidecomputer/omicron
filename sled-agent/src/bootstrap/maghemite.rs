@@ -26,17 +26,6 @@ pub enum Error {
     Argument(String),
 }
 
-// TODO-john delete if no longer used
-pub(crate) async fn enable_mg_ddm_service(
-    log: Logger,
-    interfaces: Vec<AddrObject>,
-) -> Result<(), Error> {
-    tokio::task::spawn_blocking(|| {
-        enable_mg_ddm_service_blocking(log, interfaces)
-    })
-    .await?
-}
-
 pub(super) fn enable_mg_ddm_service_blocking(
     log: Logger,
     interfaces: Vec<AddrObject>,
