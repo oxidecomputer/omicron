@@ -26,21 +26,103 @@ use illumos_utils::zone::Zones;
 use key_manager::KeyManager;
 use key_manager::StorageKeyRequester;
 use omicron_common::address::Ipv6Subnet;
+use omicron_common::api::internal::shared::RackNetworkConfig;
 use omicron_common::FileKv;
 use sled_hardware::underlay;
 use sled_hardware::DendriteAsic;
 use sled_hardware::HardwareManager;
+use sled_hardware::HardwareUpdate;
 use sled_hardware::SledMode;
 use slog::Drain;
 use slog::Logger;
 use std::net::IpAddr;
 use std::net::Ipv6Addr;
+use tokio::sync::broadcast;
 use tokio::task::JoinHandle;
 
 pub(super) struct BootstrapManagers {
-    pub(super) hardware_manager: HardwareManager,
-    pub(super) storage_manager: StorageManager,
-    pub(super) service_manager: ServiceManager,
+    pub(super) hardware: HardwareManager,
+    pub(super) storage: StorageManager,
+    pub(super) service: ServiceManager,
+}
+
+impl BootstrapManagers {
+    pub(super) async fn handle_hardware_update(
+        &self,
+        update: Result<HardwareUpdate, broadcast::error::RecvError>,
+        underlay_network: Option<(Ipv6Addr, Option<&RackNetworkConfig>)>,
+        log: &Logger,
+    ) {
+        match update {
+            Ok(update) => match update {
+                HardwareUpdate::TofinoLoaded => {
+                    let baseboard = self.hardware.baseboard();
+                    if let Err(e) = self
+                        .service
+                        .activate_switch(underlay_network, baseboard)
+                        .await
+                    {
+                        warn!(log, "Failed to activate switch: {e}");
+                    }
+                }
+                HardwareUpdate::TofinoUnloaded => {
+                    if let Err(e) = self.service.deactivate_switch().await {
+                        warn!(log, "Failed to deactivate switch: {e}");
+                    }
+                }
+                HardwareUpdate::TofinoDeviceChange => {
+                    // TODO-correctness What should we do here?
+                }
+                HardwareUpdate::DiskAdded(disk) => {
+                    self.storage.upsert_disk(disk).await;
+                }
+                HardwareUpdate::DiskRemoved(disk) => {
+                    self.storage.delete_disk(disk).await;
+                }
+            },
+            Err(broadcast::error::RecvError::Lagged(count)) => {
+                warn!(log, "Hardware monitor missed {count} messages");
+                self.full_hardware_scan(underlay_network, log).await;
+            }
+            Err(broadcast::error::RecvError::Closed) => {
+                // The `HardwareManager` monitoring task is an infinite loop -
+                // the only way for us to get `Closed` here is if it panicked,
+                // so we will propagate such a panic.
+                panic!("Hardware manager monitor task panicked");
+            }
+        }
+    }
+
+    // Observe the current hardware state manually.
+    //
+    // We use this when we're monitoring hardware for the first
+    // time, and if we miss notifications.
+    //
+    // TODO-clarity This doesn't actually _perform_ a scan; maybe it should be
+    // named something like "check latest hardware snapshot"?
+    pub(super) async fn full_hardware_scan(
+        &self,
+        underlay_network: Option<(Ipv6Addr, Option<&RackNetworkConfig>)>,
+        log: &Logger,
+    ) {
+        info!(log, "Checking current full hardware snapshot");
+        if self.hardware.is_scrimlet_driver_loaded() {
+            let baseboard = self.hardware.baseboard();
+            if let Err(e) =
+                self.service.activate_switch(underlay_network, baseboard).await
+            {
+                warn!(log, "Failed to activate switch: {e}");
+            }
+        } else {
+            if let Err(e) = self.service.deactivate_switch().await {
+                warn!(log, "Failed to deactivate switch: {e}");
+            }
+        }
+
+        self.storage
+            .ensure_using_exactly_these_disks(self.hardware.disks())
+            .await;
+    }
 }
 
 pub(super) struct BootstrapAgentStartup {
@@ -156,9 +238,9 @@ impl BootstrapAgentStartup {
             base_log,
             startup_log: log,
             managers: BootstrapManagers {
-                hardware_manager,
-                storage_manager,
-                service_manager,
+                hardware: hardware_manager,
+                storage: storage_manager,
+                service: service_manager,
             },
             key_manager_handle,
         })

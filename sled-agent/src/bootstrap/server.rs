@@ -5,25 +5,40 @@
 //! Server API for bootstrap-related functionality.
 
 use super::agent::Agent;
-use super::config::Config;
+use super::params::StartSledAgentRequest;
+use super::pre_server::BootstrapManagers;
+use crate::bootstrap::bootstore::BootstoreHandles;
 use crate::bootstrap::http_entrypoints::api as http_api;
 use crate::bootstrap::maghemite;
 use crate::bootstrap::pre_server::BootstrapAgentStartup;
 use crate::bootstrap::sprockets_server::SprocketsServer;
 use crate::config::Config as SledConfig;
 use crate::config::ConfigError;
+use crate::storage_manager::StorageResources;
+use camino::Utf8PathBuf;
 use ddm_admin_client::DdmError;
+use futures::Future;
 use illumos_utils::dladm;
 use illumos_utils::zfs;
 use illumos_utils::zone;
+use omicron_common::api::internal::shared::RackNetworkConfig;
 use omicron_common::ledger;
-use omicron_common::FileKv;
+use omicron_common::ledger::Ledger;
+use omicron_common::ledger::Ledgerable;
+use schemars::JsonSchema;
+use serde::Deserialize;
+use serde::Serialize;
 use sled_hardware::underlay;
-use slog::Drain;
+use sled_hardware::HardwareUpdate;
+use slog::Logger;
+use std::borrow::Cow;
 use std::io;
-use std::net::SocketAddr;
+use std::net::Ipv6Addr;
 use std::sync::Arc;
+use tokio::sync::broadcast;
 use tokio::task::JoinHandle;
+
+const SLED_AGENT_REQUEST_FILE: &str = "sled-agent-request.json";
 
 /// Describes errors which may occur while starting the bootstrap server.
 ///
@@ -145,6 +160,60 @@ impl Server {
             key_manager_handle,
         } = BootstrapAgentStartup::run(config).await?;
 
+        // From this point on we will listen for hardware notifications and
+        // potentially start the switch zone and be notified of new disks; we
+        // are responsible for responding to updates from this point on.
+        let mut hardware_monitor = managers.hardware.monitor();
+        let storage_resources = managers.storage.resources();
+
+        // Wait for our boot M.2 to show up.
+        wait_while_handling_hardware_updates(
+            wait_for_boot_m2(storage_resources, &startup_log),
+            &mut hardware_monitor,
+            &managers,
+            None, // No underlay network yet
+            &startup_log,
+            "waiting for boot M.2",
+        )
+        .await;
+
+        // Wait for the bootstore to start.
+        wait_while_handling_hardware_updates(
+            BootstoreHandles::spawn(
+                storage_resources,
+                ddm_admin_localhost_client,
+                managers.hardware.baseboard(),
+                global_zone_bootstrap_ip,
+                &base_log,
+            ),
+            &mut hardware_monitor,
+            &managers,
+            None, // No underlay network yet
+            &startup_log,
+            "waiting for boot M.2",
+        )
+        .await?;
+
+        // Do we have a StartSledAgentRequest stored in the ledger?
+        let maybe_ledger = wait_while_handling_hardware_updates(
+            async {
+                let paths = sled_config_paths(storage_resources).await?;
+                let maybe_ledger =
+                    Ledger::<PersistentSledAgentRequest<'static>>::new(
+                        &startup_log,
+                        paths,
+                    )
+                    .await;
+                Ok::<_, StartError>(maybe_ledger)
+            },
+            &mut hardware_monitor,
+            &managers,
+            None, // No underlay network yet
+            &startup_log,
+            "waiting for boot M.2",
+        )
+        .await?;
+
         todo!()
         /*
         let (drain, registration) = slog_dtrace::with_drain(
@@ -243,6 +312,99 @@ impl Server {
         self.sprockets_server_handle.abort();
         self.wait_for_finish().await
     }
+}
+
+/// Wait for at least the M.2 we booted from to show up.
+///
+/// TODO-correctness Subsequent steps may assume all M.2s that will ever be
+/// present are present once we return from this function; see
+/// https://github.com/oxidecomputer/omicron/issues/3815.
+async fn wait_for_boot_m2(storage_resources: &StorageResources, log: &Logger) {
+    // Wait for at least the M.2 we booted from to show up.
+    loop {
+        match storage_resources.boot_disk().await {
+            Some(disk) => {
+                info!(log, "Found boot disk M.2: {disk:?}");
+                break;
+            }
+            None => {
+                info!(log, "Waiting for boot disk M.2...");
+                tokio::time::sleep(core::time::Duration::from_millis(250))
+                    .await;
+            }
+        }
+    }
+}
+
+struct MissingM2Paths(&'static str);
+
+impl From<MissingM2Paths> for StartError {
+    fn from(value: MissingM2Paths) -> Self {
+        StartError::MissingM2Paths(value.0)
+    }
+}
+
+async fn sled_config_paths(
+    storage: &StorageResources,
+) -> Result<Vec<Utf8PathBuf>, MissingM2Paths> {
+    let paths: Vec<_> = storage
+        .all_m2_mountpoints(sled_hardware::disk::CONFIG_DATASET)
+        .await
+        .into_iter()
+        .map(|p| p.join(SLED_AGENT_REQUEST_FILE))
+        .collect();
+
+    if paths.is_empty() {
+        return Err(MissingM2Paths(sled_hardware::disk::CONFIG_DATASET));
+    }
+    Ok(paths)
+}
+
+// Helper function to wait for `fut` while handling any updates about hardware.
+async fn wait_while_handling_hardware_updates<F: Future<Output = T>, T>(
+    fut: F,
+    hardware_monitor: &mut broadcast::Receiver<HardwareUpdate>,
+    managers: &BootstrapManagers,
+    underlay_network: Option<(Ipv6Addr, Option<&RackNetworkConfig>)>,
+    log: &Logger,
+    log_phase: &str,
+) -> T {
+    tokio::pin!(fut);
+    loop {
+        tokio::select! {
+            // Cancel-safe per the docs on `broadcast::Receiver::recv()`.
+            hardware_update = hardware_monitor.recv() => {
+                info!(
+                    log,
+                    "Handling hardware update message";
+                    "phase" => log_phase,
+                    "update" => ?hardware_update,
+                );
+
+                managers.handle_hardware_update(
+                    hardware_update,
+                    underlay_network,
+                    log,
+                ).await;
+            }
+
+            // Cancel-safe: we're using a `&mut Future`; dropping the
+            // reference does not cancel the underlying future.
+            result = &mut fut => return result,
+        }
+    }
+}
+
+#[derive(Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
+struct PersistentSledAgentRequest<'a> {
+    request: Cow<'a, StartSledAgentRequest>,
+}
+
+impl<'a> Ledgerable for PersistentSledAgentRequest<'a> {
+    fn is_newer_than(&self, _other: &Self) -> bool {
+        true
+    }
+    fn generation_bump(&mut self) {}
 }
 
 /// Runs the OpenAPI generator, emitting the spec to stdout.
