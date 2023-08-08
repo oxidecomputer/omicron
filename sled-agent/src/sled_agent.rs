@@ -346,6 +346,8 @@ impl SledAgent {
             }
         }
 
+        illumos_utils::running_zone::init_contract_reaper(&log);
+
         let update_config = ConfigUpdates {
             zone_artifact_path: Utf8PathBuf::from("/opt/oxide"),
         };
