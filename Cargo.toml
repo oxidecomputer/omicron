@@ -258,7 +258,7 @@ oximeter-producer = { path = "oximeter/producer" }
 p256 = "0.11"
 parse-display = "0.7.0"
 partial-io = { version = "0.5.4", features = ["proptest1", "tokio1"] }
-paste = "1.0.13"
+paste = "1.0.14"
 percent-encoding = "2.2.0"
 pem = "1.1"
 petgraph = "0.6.3"
@@ -290,7 +290,7 @@ rustls = "0.21.3"
 samael = { git = "https://github.com/njaremko/samael", features = ["xmlsec"], branch = "master" }
 schemars = "0.8.12"
 secrecy = "0.8.0"
-semver = { version = "1.0.17", features = ["std", "serde"] }
+semver = { version = "1.0.18", features = ["std", "serde"] }
 serde = { version = "1.0", default-features = false, features = [ "derive" ] }
 serde_derive = "1.0"
 serde_human_bytes = { git = "http://github.com/oxidecomputer/serde_human_bytes" }
@@ -350,7 +350,7 @@ trust-dns-client = "0.22"
 trust-dns-proto = "0.22"
 trust-dns-resolver = "0.22"
 trust-dns-server = "0.22"
-trybuild = "1.0.80"
+trybuild = "1.0.82"
 tufaceous = { path = "tufaceous" }
 tufaceous-lib = { path = "tufaceous-lib" }
 tui = "0.19.0"
