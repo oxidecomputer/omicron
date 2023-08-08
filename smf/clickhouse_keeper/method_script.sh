@@ -87,7 +87,8 @@ else
 fi
 
 # Setting environment variables this way is best practice, but has the downside of
-# obscuring the field values to anyone ssh=ing into the zone.
+# obscuring the field values to anyone ssh=ing into the zone.  To mitigate this,
+# we will be saving them to ${DATASTORE}/config_env_vars
 export CH_LOG="${DATASTORE}/clickhouse-keeper.log"
 export CH_ERROR_LOG="${DATASTORE}/clickhouse-keeper.err.log"
 export CH_LISTEN_ADDR=${LISTEN_ADDR}
@@ -102,6 +103,23 @@ export CH_KEEPER_ID_03=${KEEPER_ID_03}
 export CH_KEEPER_HOST_01=${KEEPER_HOST_01}
 export CH_KEEPER_HOST_02=${KEEPER_HOST_02}
 export CH_KEEPER_HOST_03=${KEEPER_HOST_03}
+
+content="CH_LOG="${CH_LOG}"
+CH_ERROR_LOG="${CH_ERROR_LOG}"
+CH_LISTEN_ADDR="${CH_LISTEN_ADDR}"
+CH_DATASTORE="${CH_DATASTORE}"
+CH_LISTEN_PORT="${CH_LISTEN_PORT}"
+CH_KEEPER_ID_CURRENT="${CH_KEEPER_ID_CURRENT}"
+CH_LOG_STORAGE_PATH="${CH_LOG_STORAGE_PATH}"
+CH_SNAPSHOT_STORAGE_PATH="${CH_SNAPSHOT_STORAGE_PATH}"
+CH_KEEPER_ID_01="${CH_KEEPER_ID_01}"
+CH_KEEPER_ID_02="${CH_KEEPER_ID_02}"
+CH_KEEPER_ID_03="${CH_KEEPER_ID_03}"
+CH_KEEPER_HOST_01="${CH_KEEPER_HOST_01}"
+CH_KEEPER_HOST_02="${CH_KEEPER_HOST_02}"
+CH_KEEPER_HOST_03="${CH_KEEPER_HOST_03}""
+
+echo $content >> "${DATASTORE}/config_env_vars"
 
 # The clickhouse binary must be run from within the directory that contains it. 
 # Otherwise, it does not automatically detect the configuration files, nor does
