@@ -155,7 +155,7 @@ fn fmri_name() -> String {
     format!("{}:default", service_name())
 }
 
-/// Return the expected name of a Propolis zone managing an instace with the
+/// Return the expected name of a Propolis zone managing an instance with the
 /// provided ID.
 pub fn propolis_zone_name(id: &Uuid) -> String {
     format!("{}{}", PROPOLIS_ZONE_PREFIX, id)
