@@ -13,7 +13,6 @@ use crate::nexus::NexusClientWithResolver;
 use crate::params::{
     InstanceHardware, InstanceMigrationSourceParams,
     InstanceMigrationTargetParams, InstanceStateRequested, VpcFirewallRule,
-    ZoneBundleCause,
 };
 use crate::profile::*;
 use crate::storage_manager::StorageResources;
@@ -35,6 +34,7 @@ use omicron_common::api::internal::shared::{
 };
 use omicron_common::backoff;
 //use propolis_client::generated::DiskRequest;
+use crate::params::ZoneBundleCause;
 use crate::params::ZoneBundleMetadata;
 use crate::zone_bundle;
 use crate::zone_bundle::BundleError;
@@ -155,7 +155,9 @@ fn fmri_name() -> String {
     format!("{}:default", service_name())
 }
 
-fn propolis_zone_name(id: &Uuid) -> String {
+/// Return the expected name of a Propolis zone managing an instace with the
+/// provided ID.
+pub fn propolis_zone_name(id: &Uuid) -> String {
     format!("{}{}", PROPOLIS_ZONE_PREFIX, id)
 }
 
@@ -589,20 +591,6 @@ impl InstanceInner {
     }
 }
 
-/// A result asking an instance to generate a zone bundle.
-#[derive(Debug)]
-pub enum InstanceZoneBundleResult {
-    /// A zone bundle was operation was performed on the requested zone.
-    Ok(Result<ZoneBundleMetadata, BundleError>),
-
-    /// A request to create a bundle for a zone whose name does not match this
-    /// one's Propolis zone.
-    NotMe,
-
-    /// The zone is not currently running.
-    NotRunning,
-}
-
 /// A reference to a single instance running a running Propolis server.
 ///
 /// Cloning this object clones the reference - it does not create another
@@ -675,22 +663,15 @@ impl Instance {
         Ok(Instance { inner })
     }
 
-    /// Create bundle from a zone matching the provided name.
-    ///
-    /// This returns an [`InstanceZoneBundleResult`] to indicate whether the
-    /// bundle could be correctly taken. See that enum for details.
+    /// Create bundle from an instance zone.
     pub async fn request_zone_bundle(
         &self,
-        name: &str,
-    ) -> InstanceZoneBundleResult {
+    ) -> Result<ZoneBundleMetadata, BundleError> {
         let inner = self.inner.lock().await;
-        let zone_name = propolis_zone_name(inner.propolis_id());
-        if zone_name != name {
-            return InstanceZoneBundleResult::NotMe;
-        }
+        let name = propolis_zone_name(inner.propolis_id());
         match &*inner {
             InstanceInner { running_state: None, .. } => {
-                InstanceZoneBundleResult::NotRunning
+                Err(BundleError::Unavailable { name })
             }
             InstanceInner {
                 ref log,
@@ -699,11 +680,12 @@ impl Instance {
             } => {
                 let context = inner
                     .storage
-                    .zone_bundle_context(name, ZoneBundleCause::ExplicitRequest)
+                    .zone_bundle_context(
+                        &name,
+                        ZoneBundleCause::ExplicitRequest,
+                    )
                     .await;
-                InstanceZoneBundleResult::Ok(
-                    zone_bundle::create(log, running_zone, &context).await,
-                )
+                zone_bundle::create(log, running_zone, &context).await
             }
         }
     }

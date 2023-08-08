@@ -214,7 +214,7 @@ pub async fn create(
     }
 
     // Run any caller-requested zone-specific commands.
-    for cmd in context.zone_specific_commands.iter() {
+    for (i, cmd) in context.zone_specific_commands.iter().enumerate() {
         if cmd.is_empty() {
             continue;
         }
@@ -229,7 +229,12 @@ pub async fn create(
             Err(e) => format!("{}", e),
         };
         let contents = format!("Command: {:?}\n{}", cmd, output).into_bytes();
-        if let Err(e) = insert_data(&mut builder, &cmd[0], &contents) {
+
+        // We'll insert the index into the filename as well, since it's
+        // plausible that users will run multiple executions of the same
+        // command.
+        let filename = format!("zone-specific-{}-{}", i, &cmd[0]);
+        if let Err(e) = insert_data(&mut builder, &filename, &contents) {
             error!(
                 log,
                 "failed to save zone bundle command output";
