@@ -5,12 +5,18 @@
 //! Small CLI to view and inspect zone bundles from the sled agent.
 
 use anyhow::anyhow;
+use anyhow::bail;
 use anyhow::Context;
 use camino::Utf8PathBuf;
+use clap::Args;
 use clap::Parser;
 use clap::Subcommand;
 use futures::stream::StreamExt;
 use omicron_common::address::SLED_AGENT_PORT;
+use sled_agent_client::types::CleanupContextUpdate;
+use sled_agent_client::types::Duration;
+use sled_agent_client::types::PriorityDimension;
+use sled_agent_client::types::PriorityOrder;
 use sled_agent_client::Client;
 use slog::Drain;
 use slog::Level;
@@ -75,6 +81,44 @@ impl ListFields {
     }
 }
 
+#[derive(Clone, Copy, Debug, clap::ValueEnum)]
+enum UtilizationFields {
+    Directory,
+    BytesUsed,
+    BytesAvailable,
+    DatasetQuota,
+    PctAvailable,
+    PctQuota,
+}
+
+impl std::fmt::Display for UtilizationFields {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        use UtilizationFields::*;
+        match self {
+            Directory => write!(f, "directory"),
+            BytesUsed => write!(f, "bytes-used"),
+            BytesAvailable => write!(f, "bytes-available"),
+            DatasetQuota => write!(f, "dataset-quota"),
+            PctAvailable => write!(f, "pct-available"),
+            PctQuota => write!(f, "pct-quota"),
+        }
+    }
+}
+
+impl UtilizationFields {
+    fn all() -> Vec<Self> {
+        use UtilizationFields::*;
+        vec![
+            Directory,
+            BytesUsed,
+            BytesAvailable,
+            DatasetQuota,
+            PctAvailable,
+            PctQuota,
+        ]
+    }
+}
+
 #[derive(Clone, Debug, Subcommand)]
 enum Cmd {
     /// List the zones available for collecting bundles from.
@@ -124,6 +168,47 @@ enum Cmd {
         /// The ID of the bundle to delete.
         bundle_id: Uuid,
     },
+    /// Fetch the zone bundle cleanup context.
+    ///
+    /// This returns the data used to manage automatic cleanup of zone bundles,
+    /// including the period; the directories searched; and the strategy used to
+    /// preserve bundles.
+    #[clap(visible_alias = "context")]
+    CleanupContext,
+    /// Set parameters of the zone bundle cleanup context.
+    #[clap(visible_alias = "set-context")]
+    SetCleanupContext(SetCleanupContextArgs),
+    /// Return the utilization of the datasets allocated for zone bundles.
+    Utilization {
+        /// Generate parseable output.
+        #[arg(long, short, default_value_t = false)]
+        parseable: bool,
+        /// Fields to print.
+        #[arg(long, short = 'o', default_values_t = UtilizationFields::all(), value_delimiter = ',')]
+        fields: Vec<UtilizationFields>,
+    },
+    /// Trigger an explicit request to cleanup low-priority zone bundles.
+    Cleanup,
+}
+
+// Number of expected sort dimensions. Must match
+// `sled_agent::zone_bundle::PriorityOrder::EXPECTED_SIZE`.
+const EXPECTED_DIMENSIONS: usize = 2;
+
+#[derive(Args, Clone, Debug)]
+#[group(required = true, multiple = true)]
+struct SetCleanupContextArgs {
+    /// The new period on which to run automatic cleanups, in seconds.
+    #[arg(long)]
+    period: Option<u64>,
+    /// The new order used to determine priority when cleaning up bundles.
+    #[arg(long, value_delimiter = ',')]
+    priority: Option<Vec<PriorityDimension>>,
+    /// The limit on the underlying dataset quota allowed for zone bundles.
+    ///
+    /// This should be expressed as percentage of the dataset quota.
+    #[arg(long, value_parser = clap::value_parser!(u8).range(0..=100))]
+    storage_limit: Option<u8>,
 }
 
 #[tokio::main]
@@ -149,19 +234,10 @@ async fn main() -> anyhow::Result<()> {
         }
         Cmd::List { filter, parseable, fields } => {
             let bundles = client
-                .zone_bundle_list_all()
+                .zone_bundle_list_all(filter.as_deref())
                 .await
                 .context("failed to list zone bundles")?
-                .into_inner()
-                .into_iter()
-                .filter(|bundle| {
-                    if let Some(filter) = &filter {
-                        bundle.id.zone_name.contains(filter)
-                    } else {
-                        true
-                    }
-                })
-                .collect::<Vec<_>>();
+                .into_inner();
             if bundles.is_empty() {
                 return Ok(());
             }
@@ -293,6 +369,203 @@ async fn main() -> anyhow::Result<()> {
                 .await
                 .context("failed to delete zone bundle")?;
         }
+        Cmd::CleanupContext => {
+            let context = client
+                .zone_bundle_cleanup_context()
+                .await
+                .context("failed to fetch cleanup context")?;
+            println!("Period: {}s", context.period.0.secs);
+            println!("Priority: {:?}", context.priority.0);
+            println!("Storage limit: {}%", context.storage_limit.0);
+        }
+        Cmd::SetCleanupContext(args) => {
+            let priority = match args.priority {
+                None => None,
+                Some(pri) => {
+                    let Ok(arr): Result<[PriorityDimension; EXPECTED_DIMENSIONS], _> = pri.try_into() else {
+                        bail!("must provide {EXPECTED_DIMENSIONS} priority dimensions");
+                    };
+                    Some(PriorityOrder::from(arr))
+                }
+            };
+            let ctx = CleanupContextUpdate {
+                period: args.period.map(|secs| Duration { nanos: 0, secs }),
+                priority,
+                storage_limit: args.storage_limit,
+            };
+            client
+                .zone_bundle_cleanup_context_update(&ctx)
+                .await
+                .context("failed to update zone bundle cleanup context")?;
+        }
+        Cmd::Utilization { parseable, fields } => {
+            let utilization_by_dir = client
+                .zone_bundle_utilization()
+                .await
+                .context("failed to get zone bundle utilization")?;
+            const BYTES_USED_SIZE: usize = 16;
+            const BYTES_AVAIL_SIZE: usize = 16;
+            const QUOTA_SIZE: usize = 16;
+            const PCT_OF_AVAIL_SIZE: usize = 10;
+            const PCT_OF_QUOTA_SIZE: usize = 10;
+            if !utilization_by_dir.is_empty() {
+                use UtilizationFields::*;
+                if parseable {
+                    for (dir, utilization) in utilization_by_dir.iter() {
+                        for (i, field) in fields.iter().enumerate() {
+                            match field {
+                                Directory => print!("{}", dir),
+                                BytesUsed => {
+                                    print!("{}", utilization.bytes_used)
+                                }
+                                BytesAvailable => {
+                                    print!("{}", utilization.bytes_available)
+                                }
+                                DatasetQuota => {
+                                    print!("{}", utilization.dataset_quota)
+                                }
+                                PctAvailable => print!(
+                                    "{}",
+                                    as_pct(
+                                        utilization.bytes_used,
+                                        utilization.bytes_available
+                                    )
+                                ),
+                                PctQuota => print!(
+                                    "{}",
+                                    as_pct(
+                                        utilization.bytes_used,
+                                        utilization.dataset_quota
+                                    )
+                                ),
+                            }
+                            if i < fields.len() - 1 {
+                                print!(",");
+                            }
+                        }
+                        println!();
+                    }
+                } else {
+                    let dir_col_size = utilization_by_dir
+                        .keys()
+                        .map(|d| d.len())
+                        .max()
+                        .unwrap();
+                    for field in fields.iter() {
+                        match field {
+                            Directory => {
+                                print!("{:dir_col_size$}", "Directory")
+                            }
+                            BytesUsed => {
+                                print!("{:BYTES_USED_SIZE$}", "Bytes used")
+                            }
+                            BytesAvailable => print!(
+                                "{:BYTES_AVAIL_SIZE$}",
+                                "Bytes available"
+                            ),
+                            DatasetQuota => {
+                                print!("{:QUOTA_SIZE$}", "Dataset quota")
+                            }
+                            PctAvailable => {
+                                print!("{:PCT_OF_AVAIL_SIZE$}", "% of limit")
+                            }
+                            PctQuota => {
+                                print!("{:PCT_OF_QUOTA_SIZE$}", "% of quota")
+                            }
+                        }
+                        print!(" ");
+                    }
+                    println!();
+                    for (dir, utilization) in utilization_by_dir.iter() {
+                        for field in fields.iter() {
+                            match field {
+                                Directory => print!("{:dir_col_size$}", dir),
+                                BytesUsed => print!(
+                                    "{:BYTES_USED_SIZE$}",
+                                    as_human_bytes(utilization.bytes_used)
+                                ),
+                                BytesAvailable => print!(
+                                    "{:BYTES_AVAIL_SIZE$}",
+                                    as_human_bytes(utilization.bytes_available)
+                                ),
+                                DatasetQuota => print!(
+                                    "{:QUOTA_SIZE$}",
+                                    as_human_bytes(utilization.dataset_quota)
+                                ),
+                                PctAvailable => print!(
+                                    "{:PCT_OF_AVAIL_SIZE$}",
+                                    as_pct_str(
+                                        utilization.bytes_used,
+                                        utilization.bytes_available
+                                    )
+                                ),
+                                PctQuota => print!(
+                                    "{:PCT_OF_QUOTA_SIZE$}",
+                                    as_pct_str(
+                                        utilization.bytes_used,
+                                        utilization.dataset_quota
+                                    )
+                                ),
+                            }
+                            print!(" ");
+                        }
+                        println!();
+                    }
+                }
+            }
+        }
+        Cmd::Cleanup => {
+            let cleaned = client
+                .zone_bundle_cleanup()
+                .await
+                .context("failed to trigger zone bundle cleanup")?;
+            const COUNT_SIZE: usize = 5;
+            const BYTES_SIZE: usize = 16;
+            if !cleaned.is_empty() {
+                let dir_col_size =
+                    cleaned.keys().map(|d| d.len()).max().unwrap();
+                println!(
+                    "{:dir_col_size$} {:COUNT_SIZE$} {:BYTES_SIZE$}",
+                    "Directory", "Count", "Bytes",
+                );
+                for (dir, counts) in cleaned.iter() {
+                    println!(
+                        "{:dir_col_size$} {:<COUNT_SIZE$} {:<BYTES_SIZE$}",
+                        dir, counts.bundles, counts.bytes,
+                    );
+                }
+            }
+        }
     }
     Ok(())
+}
+
+// Compute used / avail as a percentage.
+fn as_pct(used: u64, avail: u64) -> u64 {
+    (used * 100) / avail
+}
+
+// Format used / avail as a percentage string.
+fn as_pct_str(used: u64, avail: u64) -> String {
+    format!("{}%", as_pct(used, avail))
+}
+
+// Format the provided `size` in bytes as a human-friendly byte estimate.
+fn as_human_bytes(size: u64) -> String {
+    const KIB: f64 = 1024.0;
+    const MIB: f64 = KIB * 1024.0;
+    const GIB: f64 = MIB * 1024.0;
+    const TIB: f64 = GIB * 1024.0;
+    let size = size as f64;
+    if size >= TIB {
+        format!("{:0.2} TiB", size / TIB)
+    } else if size >= GIB {
+        format!("{:0.2} GiB", size / GIB)
+    } else if size >= MIB {
+        format!("{:0.2} MiB", size / MIB)
+    } else if size >= KIB {
+        format!("{:0.2} KiB", size / KIB)
+    } else {
+        format!("{} B", size)
+    }
 }

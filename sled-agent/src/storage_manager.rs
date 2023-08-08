@@ -5,10 +5,9 @@
 //! Management of sled-local storage.
 
 use crate::nexus::NexusClientWithResolver;
-use crate::params::ZoneBundleCause;
 use crate::storage::dataset::DatasetName;
 use crate::storage::dump_setup::DumpSetup;
-use crate::zone_bundle::ZoneBundleContext;
+use crate::zone_bundle::ZoneBundler;
 use camino::Utf8PathBuf;
 use derive_more::From;
 use futures::stream::FuturesOrdered;
@@ -350,32 +349,6 @@ impl StorageResources {
             .into_iter()
             .map(|p| p.join(BUNDLE_DIRECTORY).join(ZONE_BUNDLE_DIRECTORY))
             .collect()
-    }
-
-    /// Return context for storing zone bundles.
-    ///
-    /// See [`ZoneBundleContext`] for details.
-    pub async fn zone_bundle_context(
-        &self,
-        zone_name: &str,
-        cause: ZoneBundleCause,
-    ) -> ZoneBundleContext {
-        // As of #3713, rotated log files are moved out of their original home,
-        // and onto longer-term storage some U.2s. Which one houses them is
-        // effectively random. Add the U.2 debug datasets into the
-        // `extra_log_dirs` field for search during the zone bundle process.
-        let extra_log_dirs = self
-            .all_u2_mountpoints(sled_hardware::disk::U2_DEBUG_DATASET)
-            .await
-            .into_iter()
-            .map(|p| p.join(zone_name))
-            .collect();
-        ZoneBundleContext {
-            cause,
-            storage_dirs: self.all_zone_bundle_directories().await,
-            extra_log_dirs,
-            ..Default::default()
-        }
     }
 }
 
@@ -1255,6 +1228,7 @@ struct StorageManagerInner {
 #[derive(Clone)]
 pub struct StorageManager {
     inner: Arc<StorageManagerInner>,
+    zone_bundler: ZoneBundler,
 }
 
 impl StorageManager {
@@ -1266,6 +1240,10 @@ impl StorageManager {
             pools: Arc::new(Mutex::new(HashMap::new())),
         };
         let (tx, rx) = mpsc::channel(30);
+
+        let zb_log = log.new(o!("component" => "ZoneBundler"));
+        let zone_bundler =
+            ZoneBundler::new(zb_log, resources.clone(), Default::default());
 
         StorageManager {
             inner: Arc::new(StorageManagerInner {
@@ -1286,7 +1264,16 @@ impl StorageManager {
                     worker.do_work(resources).await
                 }),
             }),
+            zone_bundler,
         }
+    }
+
+    /// Return a reference to the object used to manage zone bundles.
+    ///
+    /// This can be cloned by other code wishing to create and manage their own
+    /// zone bundles.
+    pub fn zone_bundler(&self) -> &ZoneBundler {
+        &self.zone_bundler
     }
 
     /// Ensures that the storage manager tracks exactly the provided disks.
