@@ -14,5 +14,6 @@ mod maghemite;
 pub(crate) mod params;
 pub(crate) mod rss_handle;
 mod secret_retriever;
+mod sprockets_server;
 pub mod server;
 mod views;
