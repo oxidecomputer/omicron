@@ -6,7 +6,8 @@
 
 use itertools::Itertools;
 use slog::{debug, error, info, Logger};
-use std::io::Write;
+use std::collections::VecDeque;
+use std::io::{Read, Write};
 use std::os::unix::process::ExitStatusExt;
 use std::process::{Command, ExitStatus, Output, Stdio};
 use std::str::from_utf8;
@@ -36,9 +37,15 @@ pub trait Executor: Send + Sync {
 pub type BoxedChild = Box<dyn Child>;
 
 /// A child process spawned by the executor.
-pub trait Child: Send + Sync {
+pub trait Child: Send {
     /// Accesses the stdin of the spawned child, as a Writer.
     fn stdin(&mut self) -> Option<Box<dyn Write + Send>>;
+
+    /// Accesses the stdout of the spawned child, as a Reader.
+    fn stdout(&mut self) -> Option<Box<dyn Read + Send>>;
+
+    /// Accesses the stderr of the spawned child, as a Reader.
+    fn stderr(&mut self) -> Option<Box<dyn Read + Send>>;
 
     /// Waits for the child to complete, and returns the output.
     fn wait(&mut self) -> Result<Output, ExecutionError>;
@@ -57,6 +64,22 @@ impl Child for SpawnedChild {
             .stdin
             .take()
             .map(|s| Box::new(s) as Box<dyn Write + Send>)
+    }
+
+    fn stdout(&mut self) -> Option<Box<dyn Read + Send>> {
+        self.child
+            .as_mut()?
+            .stdout
+            .take()
+            .map(|s| Box::new(s) as Box<dyn Read + Send>)
+    }
+
+    fn stderr(&mut self) -> Option<Box<dyn Read + Send>> {
+        self.child
+            .as_mut()?
+            .stderr
+            .take()
+            .map(|s| Box::new(s) as Box<dyn Read + Send>)
     }
 
     fn wait(&mut self) -> Result<Output, ExecutionError> {
@@ -79,24 +102,111 @@ impl Child for SpawnedChild {
     }
 }
 
+/// A queue of bytes that can selectively act as a reader or writer,
+/// which can also be cloned.
+///
+/// This is primarily used to emulate stdin / stdout / stderr.
+#[derive(Clone)]
+struct ByteQueue {
+    buf: Arc<Mutex<VecDeque<u8>>>,
+}
+
+impl ByteQueue {
+    fn new() -> Self {
+        Self { buf: Arc::new(Mutex::new(VecDeque::new())) }
+    }
+}
+
+impl std::io::Write for ByteQueue {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.buf.lock().unwrap().write(buf)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+impl std::io::Read for ByteQueue {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        self.buf.lock().unwrap().read(buf)
+    }
+}
+
 /// A child spawned by a [FakeExecutor].
 pub struct FakeChild {
-    command_str: String,
+    id: u64,
+    command: Command,
+    executor: Arc<FakeExecutorInner>,
+    stdin: ByteQueue,
+    stdout: ByteQueue,
+    stderr: ByteQueue,
+}
+
+impl FakeChild {
+    fn new(
+        id: u64,
+        command: &Command,
+        executor: Arc<FakeExecutorInner>,
+    ) -> Box<Self> {
+        // std::process::Command -- somewhat reasonably - doesn't implement Copy
+        // or Clone. However, we'd like to be able to reference it in the
+        // FakeChild, independently of where it was spawned.
+        //
+        // Manually copy the relevant pieces of the incoming command.
+        let mut copy_command = Command::new(command.get_program());
+        copy_command.args(command.get_args());
+        copy_command.envs(command.get_envs().filter_map(|(k, v)| {
+            if let Some(v) = v {
+                Some((k, v))
+            } else {
+                None
+            }
+        }));
+
+        Box::new(FakeChild {
+            id,
+            command: copy_command,
+            executor,
+            stdin: ByteQueue::new(),
+            stdout: ByteQueue::new(),
+            stderr: ByteQueue::new(),
+        })
+    }
+
+    fn command(&self) -> &Command {
+        &self.command
+    }
 }
 
 impl Child for FakeChild {
     fn stdin(&mut self) -> Option<Box<dyn Write + Send>> {
-        // TODO: maybe a vecdeque? need to hook into the fakexecutor from which
-        // we spawned.
-        todo!();
+        Some(Box::new(self.stdin.clone()))
+    }
+
+    fn stdout(&mut self) -> Option<Box<dyn Read + Send>> {
+        Some(Box::new(self.stdout.clone()))
+    }
+
+    fn stderr(&mut self) -> Option<Box<dyn Read + Send>> {
+        Some(Box::new(self.stderr.clone()))
     }
 
     fn wait(&mut self) -> Result<Output, ExecutionError> {
-        todo!()
+        let executor = self.executor.clone();
+        let output = executor.wait_handler.lock().unwrap()(self);
+        log_output(&self.executor.log, self.id, &output);
+        if !output.status.success() {
+            return Err(output_to_exec_error(
+                command_to_string(&self.command),
+                &output,
+            ));
+        }
+        Ok(output)
     }
 }
 
-fn to_string(command: &std::process::Command) -> String {
+pub fn command_to_string(command: &std::process::Command) -> String {
     command
         .get_args()
         .map(|s| s.to_string_lossy().into())
@@ -238,19 +348,6 @@ impl OutputExt for Output {
     }
 }
 
-/// Describes a fully-completed command.
-#[derive(Clone)]
-pub struct CompletedCommand {
-    pub input: Input,
-    pub output: Output,
-}
-
-impl CompletedCommand {
-    fn new(command: &Command, output: Output) -> Self {
-        Self { input: Input::from(command), output }
-    }
-}
-
 /// A handler that may be used for setting inputs/outputs to the executor
 /// when these commands are known ahead-of-time.
 ///
@@ -284,7 +381,7 @@ impl StaticHandler {
             .get(self.index)
             .unwrap_or_else(|| panic!("Unexpected command: {input}"));
         self.index += 1;
-        assert_eq!(input, expected.0);
+        assert_eq!(input, expected.0, "Unexpected input command");
         expected.1.clone()
     }
 }
@@ -300,36 +397,52 @@ impl Drop for StaticHandler {
     }
 }
 
-pub type ExecutorFn = dyn FnMut(&Command) -> Output + Send + Sync;
-pub type BoxedExecutorFn = Box<ExecutorFn>;
+/// Handler called when spawning a fake child process
+pub type SpawnFn = dyn FnMut(&mut FakeChild) + Send + Sync;
+pub type BoxedSpawnFn = Box<SpawnFn>;
+
+/// Handler called when awaiting a fake child process
+pub type WaitFn = dyn FnMut(&mut FakeChild) -> Output + Send + Sync;
+pub type BoxedWaitFn = Box<WaitFn>;
+
+struct FakeExecutorInner {
+    log: Logger,
+    counter: AtomicU64,
+    spawn_handler: Mutex<BoxedSpawnFn>,
+    wait_handler: Mutex<BoxedWaitFn>,
+}
 
 /// An executor which can expect certain inputs, and respond with specific outputs.
 pub struct FakeExecutor {
-    log: Logger,
-    counter: AtomicU64,
-    all_operations: Mutex<Vec<CompletedCommand>>,
-    handler: Mutex<BoxedExecutorFn>,
+    inner: Arc<FakeExecutorInner>,
 }
 
 impl FakeExecutor {
     pub fn new(log: Logger) -> Arc<FakeExecutor> {
         Arc::new(Self {
-            log,
-            counter: AtomicU64::new(0),
-            all_operations: Mutex::new(vec![]),
-            handler: Mutex::new(Box::new(|_cmd| Output::success())),
+            inner: Arc::new(FakeExecutorInner {
+                log,
+                counter: AtomicU64::new(0),
+                spawn_handler: Mutex::new(Box::new(|_cmd| ())),
+                wait_handler: Mutex::new(Box::new(|_cmd| Output::success())),
+            }),
         })
     }
 
+    /// Set the spawn handler to an arbitrary function.
+    pub fn set_spawn_handler(&self, f: BoxedSpawnFn) {
+        *self.inner.spawn_handler.lock().unwrap() = f;
+    }
+
     /// Set the request handler to an arbitrary function.
-    pub fn set_handler(&self, f: BoxedExecutorFn) {
-        *self.handler.lock().unwrap() = f;
+    pub fn set_wait_handler(&self, f: BoxedWaitFn) {
+        *self.inner.wait_handler.lock().unwrap() = f;
     }
 
     /// Set the request handler to a static set of inputs and outputs.
     pub fn set_static_handler(&self, mut handler: StaticHandler) {
-        self.set_handler(Box::new(move |cmd| -> Output {
-            handler.execute(cmd)
+        self.set_wait_handler(Box::new(move |child| -> Output {
+            handler.execute(child.command())
         }));
     }
 
@@ -337,29 +450,27 @@ impl FakeExecutor {
     pub fn as_executor(self: Arc<Self>) -> BoxedExecutor {
         self
     }
-
-    /// Returns the list of all commands that have executed on the executor.
-    pub fn all_operations(&self) -> Vec<CompletedCommand> {
-        (*self.all_operations.lock().unwrap()).clone()
-    }
 }
 
 impl Executor for FakeExecutor {
     fn execute(&self, command: &mut Command) -> Result<Output, ExecutionError> {
-        let id = self.counter.fetch_add(1, Ordering::SeqCst);
-        log_command(&self.log, id, command);
+        let id = self.inner.counter.fetch_add(1, Ordering::SeqCst);
+        log_command(&self.inner.log, id, command);
 
-        // Call our handler function with the caller-provided function.
-        let output = self.handler.lock().unwrap()(command);
+        let mut child = FakeChild::new(id, command, self.inner.clone());
 
-        log_output(&self.log, id, &output);
-        self.all_operations
-            .lock()
-            .unwrap()
-            .push(CompletedCommand::new(command, output.clone()));
+        // Call our handler function with the caller-provided functions.
+        //
+        // This performs both the "spawn" and "wait" actions back-to-back.
+        self.inner.spawn_handler.lock().unwrap()(&mut child);
+        let output = self.inner.wait_handler.lock().unwrap()(&mut child);
+        log_output(&self.inner.log, id, &output);
 
         if !output.status.success() {
-            return Err(output_to_exec_error(to_string(command), &output));
+            return Err(output_to_exec_error(
+                command_to_string(command),
+                &output,
+            ));
         }
         Ok(output)
     }
@@ -368,8 +479,10 @@ impl Executor for FakeExecutor {
         &self,
         command: &mut Command,
     ) -> Result<BoxedChild, ExecutionError> {
-        let command_str = to_string(&command);
-        Ok(Box::new(FakeChild { command_str }))
+        let id = self.inner.counter.fetch_add(1, Ordering::SeqCst);
+        log_command(&self.inner.log, id, command);
+
+        Ok(FakeChild::new(id, command, self.inner.clone()))
     }
 }
 
@@ -402,7 +515,10 @@ impl Executor for HostExecutor {
         log_output(&self.log, id, &output);
 
         if !output.status.success() {
-            return Err(output_to_exec_error(to_string(&command), &output));
+            return Err(output_to_exec_error(
+                command_to_string(&command),
+                &output,
+            ));
         }
         Ok(output)
     }
@@ -411,7 +527,7 @@ impl Executor for HostExecutor {
         &self,
         command: &mut Command,
     ) -> Result<BoxedChild, ExecutionError> {
-        let command_str = to_string(&command);
+        let command_str = command_to_string(&command);
         Ok(Box::new(SpawnedChild {
             child: Some(
                 command
