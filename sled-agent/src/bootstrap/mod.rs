@@ -5,6 +5,7 @@
 //! Bootstrap-related utilities
 
 pub mod agent;
+mod bootstore;
 pub mod client;
 pub mod config;
 pub mod early_networking;
