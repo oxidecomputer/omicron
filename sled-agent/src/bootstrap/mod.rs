@@ -12,7 +12,11 @@ mod hardware;
 mod http_entrypoints;
 mod maghemite;
 pub(crate) mod params;
+mod rack_ops;
 pub(crate) mod rss_handle;
 mod secret_retriever;
 pub mod server;
+mod sprockets_server;
 mod views;
+
+pub use rack_ops::RssAccessError;

@@ -39,7 +39,14 @@ zpools = [
 
 # Percentage of usable physical DRAM to use for the VMM reservoir, which
 # guest memory is pulled from.
-vmm_reservoir_percentage = 0
+vmm_reservoir_percentage = 50
+
+# Swap device size for the system. The device is a sparsely allocated zvol on
+# the internal zpool of the M.2 that we booted from.
+#
+# If use of the VMM reservoir is configured, it is likely the system will not
+# work without a swap device configured.
+swap_device_size_gb = 64
 
 # An optional data link from which we extract a MAC address.
 # This is used as a unique identifier for the bootstrap address.

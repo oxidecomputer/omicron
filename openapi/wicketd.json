@@ -260,6 +260,31 @@
         }
       }
     },
+    "/location": {
+      "get": {
+        "summary": "Report the identity of the sled and switch we're currently running on /",
+        "description": "connected to.",
+        "operationId": "get_location",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetLocationResponse"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/rack-setup": {
       "get": {
         "summary": "Query current state of rack setup.",
@@ -1146,6 +1171,48 @@
             ]
           }
         ]
+      },
+      "GetLocationResponse": {
+        "description": "All the fields of this response are optional, because it's possible we don't know any of them (yet) if MGS has not yet finished discovering its location or (ever) if we're running in a dev environment that doesn't support MGS-location / baseboard mapping.",
+        "type": "object",
+        "properties": {
+          "sled_baseboard": {
+            "nullable": true,
+            "description": "The baseboard of our sled (where wicketd is running).",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Baseboard"
+              }
+            ]
+          },
+          "sled_id": {
+            "nullable": true,
+            "description": "The identity of our sled (where wicketd is running).",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SpIdentifier"
+              }
+            ]
+          },
+          "switch_baseboard": {
+            "nullable": true,
+            "description": "The baseboard of the switch our sled is physically connected to.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Baseboard"
+              }
+            ]
+          },
+          "switch_id": {
+            "nullable": true,
+            "description": "The identity of the switch our sled is physically connected to.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SpIdentifier"
+              }
+            ]
+          }
+        }
       },
       "IpRange": {
         "oneOf": [

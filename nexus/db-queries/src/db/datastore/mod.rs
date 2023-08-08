@@ -93,6 +93,7 @@ pub use silo::Discoverability;
 pub use switch_port::SwitchPortSettingsCombinedResult;
 pub use virtual_provisioning_collection::StorageType;
 pub use volume::CrucibleResources;
+pub use volume::CrucibleTargets;
 
 // Number of unique datasets required to back a region.
 // TODO: This should likely turn into a configuration option.

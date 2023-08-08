@@ -9,9 +9,9 @@ use clap::{Parser, Subcommand};
 use illumos_utils::process::HostExecutor;
 use omicron_common::cmd::fatal;
 use omicron_common::cmd::CmdError;
+use omicron_sled_agent::bootstrap::RssAccessError;
 use omicron_sled_agent::bootstrap::{
-    agent as bootstrap_agent, config::Config as BootstrapConfig,
-    server as bootstrap_server,
+    config::Config as BootstrapConfig, server as bootstrap_server,
 };
 use omicron_sled_agent::rack_setup::config::SetupServiceConfig as RssConfig;
 use omicron_sled_agent::{config::Config as SledConfig, server as sled_server};
@@ -131,10 +131,7 @@ async fn do_run() -> Result<(), CmdError> {
                 match server.agent().start_rack_initialize(rss_config) {
                     // If the rack has already been initialized, we shouldn't
                     // abandon the server.
-                    Ok(_)
-                    | Err(
-                        bootstrap_agent::RssAccessError::AlreadyInitialized,
-                    ) => {}
+                    Ok(_) | Err(RssAccessError::AlreadyInitialized) => {}
                     Err(e) => {
                         return Err(CmdError::Failure(e.to_string()));
                     }

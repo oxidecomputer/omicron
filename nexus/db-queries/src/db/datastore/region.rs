@@ -22,6 +22,8 @@ use nexus_types::external_api::params;
 use omicron_common::api::external;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
+use omicron_common::backoff::{self, BackoffError};
+use slog::Logger;
 use uuid::Uuid;
 
 impl DataStore {
@@ -146,6 +148,7 @@ impl DataStore {
     /// Also updates the storage usage on their corresponding datasets.
     pub async fn regions_hard_delete(
         &self,
+        log: &Logger,
         region_ids: Vec<Uuid>,
     ) -> DeleteResult {
         if region_ids.is_empty() {
@@ -159,67 +162,95 @@ impl DataStore {
         }
         type TxnError = TransactionError<RegionDeleteError>;
 
-        self.pool()
-            .transaction(move |conn| {
-                use db::schema::dataset::dsl as dataset_dsl;
-                use db::schema::region::dsl as region_dsl;
+        // Retry this transaction until it succeeds. It's a little heavy in that
+        // there's a for loop inside that iterates over the datasets the
+        // argument regions belong to, and it often encounters the "retry
+        // transaction" error.
+        let transaction = {
+            |region_ids: Vec<Uuid>| async {
+                self.pool()
+                    .transaction(move |conn| {
+                        use db::schema::dataset::dsl as dataset_dsl;
+                        use db::schema::region::dsl as region_dsl;
 
-                // Remove the regions, collecting datasets they're from.
-                let datasets = diesel::delete(region_dsl::region)
-                    .filter(region_dsl::id.eq_any(region_ids))
-                    .returning(region_dsl::dataset_id)
-                    .get_results::<Uuid>(conn)?;
+                        // Remove the regions, collecting datasets they're from.
+                        let datasets = diesel::delete(region_dsl::region)
+                            .filter(region_dsl::id.eq_any(region_ids))
+                            .returning(region_dsl::dataset_id)
+                            .get_results::<Uuid>(conn)?;
 
-                // Update datasets to which the regions belonged.
-                for dataset in datasets {
-                    let dataset_total_occupied_size: Option<
-                        diesel::pg::data_types::PgNumeric,
-                    > = region_dsl::region
-                        .filter(region_dsl::dataset_id.eq(dataset))
-                        .select(diesel::dsl::sum(
-                            region_dsl::block_size
-                                * region_dsl::blocks_per_extent
-                                * region_dsl::extent_count,
-                        ))
-                        .nullable()
-                        .get_result(conn)?;
+                        // Update datasets to which the regions belonged.
+                        for dataset in datasets {
+                            let dataset_total_occupied_size: Option<
+                                diesel::pg::data_types::PgNumeric,
+                            > = region_dsl::region
+                                .filter(region_dsl::dataset_id.eq(dataset))
+                                .select(diesel::dsl::sum(
+                                    region_dsl::block_size
+                                        * region_dsl::blocks_per_extent
+                                        * region_dsl::extent_count,
+                                ))
+                                .nullable()
+                                .get_result(conn)?;
 
-                    let dataset_total_occupied_size: i64 = if let Some(
-                        dataset_total_occupied_size,
-                    ) =
-                        dataset_total_occupied_size
-                    {
-                        let dataset_total_occupied_size: db::model::ByteCount =
-                            dataset_total_occupied_size.try_into().map_err(
-                                |e: anyhow::Error| {
-                                    TxnError::CustomError(
-                                        RegionDeleteError::NumericError(
-                                            e.to_string(),
-                                        ),
-                                    )
-                                },
-                            )?;
+                            let dataset_total_occupied_size: i64 = if let Some(
+                                dataset_total_occupied_size,
+                            ) =
+                                dataset_total_occupied_size
+                            {
+                                let dataset_total_occupied_size: db::model::ByteCount =
+                                    dataset_total_occupied_size.try_into().map_err(
+                                        |e: anyhow::Error| {
+                                            TxnError::CustomError(
+                                                RegionDeleteError::NumericError(
+                                                    e.to_string(),
+                                                ),
+                                            )
+                                        },
+                                    )?;
 
-                        dataset_total_occupied_size.into()
-                    } else {
-                        0
-                    };
+                                dataset_total_occupied_size.into()
+                            } else {
+                                0
+                            };
 
-                    diesel::update(dataset_dsl::dataset)
-                        .filter(dataset_dsl::id.eq(dataset))
-                        .set(
-                            dataset_dsl::size_used
-                                .eq(dataset_total_occupied_size),
-                        )
-                        .execute(conn)?;
-                }
+                            diesel::update(dataset_dsl::dataset)
+                                .filter(dataset_dsl::id.eq(dataset))
+                                .set(
+                                    dataset_dsl::size_used
+                                        .eq(dataset_total_occupied_size),
+                                )
+                                .execute(conn)?;
+                        }
 
-                Ok(())
-            })
-            .await
-            .map_err(|e: TxnError| {
-                Error::internal_error(&format!("Transaction error: {}", e))
-            })
+                        Ok(())
+                    })
+                    .await
+                    .map_err(|e: TxnError| {
+                        if e.retry_transaction() {
+                            BackoffError::transient(Error::internal_error(
+                                &format!("Retryable transaction error {:?}", e)
+                            ))
+                        } else {
+                            BackoffError::Permanent(Error::internal_error(
+                                &format!("Transaction error: {}", e)
+                            ))
+                        }
+                    })
+            }
+        };
+
+        backoff::retry_notify(
+            backoff::retry_policy_internal_service_aggressive(),
+            || async {
+                let region_ids = region_ids.clone();
+                transaction(region_ids).await
+            },
+            |e: Error, delay| {
+                info!(log, "{:?}, trying again in {:?}", e, delay,);
+            },
+        )
+        .await
     }
 
     /// Return the total occupied size for a dataset

@@ -568,16 +568,11 @@ impl DataStore {
     pub async fn project_delete_disk_no_auth(
         &self,
         disk_id: &Uuid,
+        ok_to_delete_states: &[api::external::DiskState],
     ) -> Result<db::model::Disk, Error> {
         use db::schema::disk::dsl;
         let pool = self.pool();
         let now = Utc::now();
-
-        let ok_to_delete_states = vec![
-            api::external::DiskState::Detached,
-            api::external::DiskState::Faulted,
-            api::external::DiskState::Creating,
-        ];
 
         let ok_to_delete_state_labels: Vec<_> =
             ok_to_delete_states.iter().map(|s| s.label()).collect();

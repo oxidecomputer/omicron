@@ -17,6 +17,7 @@ use crate::db::lookup::LookupPath;
 use crate::external_api::params;
 use crate::{authn, authz, db};
 use nexus_db_queries::db::datastore::RegionAllocationStrategy;
+use omicron_common::api::external::DiskState;
 use omicron_common::api::external::Error;
 use rand::{rngs::StdRng, RngCore, SeedableRng};
 use serde::Deserialize;
@@ -218,7 +219,13 @@ async fn sdc_create_disk_record_undo(
     let osagactx = sagactx.user_data();
 
     let disk_id = sagactx.lookup::<Uuid>("disk_id")?;
-    osagactx.datastore().project_delete_disk_no_auth(&disk_id).await?;
+    osagactx
+        .datastore()
+        .project_delete_disk_no_auth(
+            &disk_id,
+            &[DiskState::Detached, DiskState::Faulted, DiskState::Creating],
+        )
+        .await?;
     Ok(())
 }
 
@@ -262,6 +269,7 @@ async fn sdc_alloc_regions_undo(
     sagactx: NexusActionContext,
 ) -> Result<(), anyhow::Error> {
     let osagactx = sagactx.user_data();
+    let log = osagactx.log();
 
     let region_ids = sagactx
         .lookup::<Vec<(db::model::Dataset, db::model::Region)>>(
@@ -271,7 +279,7 @@ async fn sdc_alloc_regions_undo(
         .map(|(_, region)| region.id())
         .collect::<Vec<Uuid>>();
 
-    osagactx.datastore().regions_hard_delete(region_ids).await?;
+    osagactx.datastore().regions_hard_delete(log, region_ids).await?;
     Ok(())
 }
 
@@ -518,6 +526,7 @@ async fn sdc_regions_ensure_undo(
     let log = sagactx.user_data().log();
     warn!(log, "sdc_regions_ensure_undo: Deleting crucible regions");
     delete_crucible_regions(
+        log,
         sagactx.lookup::<Vec<(db::model::Dataset, db::model::Region)>>(
             "datasets_and_regions",
         )?,
@@ -529,7 +538,7 @@ async fn sdc_regions_ensure_undo(
 
 async fn sdc_create_volume_record(
     sagactx: NexusActionContext,
-) -> Result<db::model::Volume, ActionError> {
+) -> Result<(), ActionError> {
     let osagactx = sagactx.user_data();
 
     let volume_id = sagactx.lookup::<Uuid>("volume_id")?;
@@ -537,27 +546,31 @@ async fn sdc_create_volume_record(
 
     let volume = db::model::Volume::new(volume_id, volume_data);
 
-    let volume_created = osagactx
+    osagactx
         .datastore()
         .volume_create(volume)
         .await
         .map_err(ActionError::action_failed)?;
 
-    Ok(volume_created)
+    Ok(())
 }
 
 async fn sdc_create_volume_record_undo(
     sagactx: NexusActionContext,
 ) -> Result<(), anyhow::Error> {
     let osagactx = sagactx.user_data();
-    let params = sagactx.saga_params::<Params>()?;
 
-    let opctx = crate::context::op_context_for_saga_action(
-        &sagactx,
-        &params.serialized_authn,
-    );
     let volume_id = sagactx.lookup::<Uuid>("volume_id")?;
-    osagactx.nexus().volume_delete(&opctx, volume_id).await?;
+
+    // Depending on the read only parent, there will some read only resources
+    // used, however this saga tracks them all.
+    osagactx
+        .datastore()
+        .decrease_crucible_resource_count_and_soft_delete_volume(volume_id)
+        .await?;
+
+    osagactx.datastore().volume_hard_delete(volume_id).await?;
+
     Ok(())
 }
 
@@ -782,6 +795,8 @@ pub(crate) mod test {
     use omicron_common::api::external::IdentityMetadataCreateParams;
     use omicron_common::api::external::Name;
     use omicron_sled_agent::sim::SledAgent;
+    use slog::error;
+    use slog::Logger;
     use std::num::NonZeroU32;
     use uuid::Uuid;
 
@@ -849,6 +864,41 @@ pub(crate) mod test {
             .lookup_node_output::<crate::db::model::Disk>("created_disk")
             .unwrap();
         assert_eq!(disk.project_id, project_id);
+    }
+
+    async fn no_stuck_sagas(log: &Logger, datastore: &DataStore) -> bool {
+        use crate::db::model::saga_types::SagaNodeEvent;
+
+        let saga_node_events: Vec<SagaNodeEvent> = datastore
+            .pool_for_tests()
+            .await
+            .unwrap()
+            .transaction_async(|conn| async move {
+                use crate::db::schema::saga_node_event::dsl;
+
+                conn.batch_execute_async(
+                    nexus_test_utils::db::ALLOW_FULL_TABLE_SCAN_SQL,
+                )
+                .await
+                .unwrap();
+
+                Ok::<_, crate::db::TransactionError<()>>(
+                    dsl::saga_node_event
+                        .filter(dsl::event_type.eq(String::from("undo_failed")))
+                        .select(SagaNodeEvent::as_select())
+                        .load_async::<SagaNodeEvent>(&conn)
+                        .await
+                        .unwrap(),
+                )
+            })
+            .await
+            .unwrap();
+
+        for saga_node_event in &saga_node_events {
+            error!(log, "saga {:?} is stuck!", saga_node_event.saga_id);
+        }
+
+        saga_node_events.is_empty()
     }
 
     async fn no_disk_records_exist(datastore: &DataStore) -> bool {
@@ -970,6 +1020,7 @@ pub(crate) mod test {
         let sled_agent = &cptestctx.sled_agent.sled_agent;
         let datastore = cptestctx.server.apictx().nexus.datastore();
 
+        assert!(no_stuck_sagas(&cptestctx.logctx.log, datastore).await);
         assert!(no_disk_records_exist(datastore).await);
         assert!(no_volume_records_exist(datastore).await);
         assert!(

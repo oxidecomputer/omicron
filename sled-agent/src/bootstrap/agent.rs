@@ -12,6 +12,7 @@ use super::hardware::HardwareMonitor;
 use super::http_entrypoints::RackOperationStatus;
 use super::params::RackInitializeRequest;
 use super::params::StartSledAgentRequest;
+use super::rack_ops::{RackInitId, RackResetId, RssAccess, RssAccessError};
 use super::secret_retriever::LrtqOrHardcodedSecretRetriever;
 use super::views::SledAgentResponse;
 use crate::config::Config as SledConfig;
@@ -48,13 +49,6 @@ use std::sync::Arc;
 use thiserror::Error;
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
-
-mod rack_ops;
-
-pub use rack_ops::RackInitId;
-pub use rack_ops::RackResetId;
-use rack_ops::RssAccess;
-pub use rack_ops::RssAccessError;
 
 /// Describes errors which may occur while operating the bootstrap service.
 #[derive(Error, Debug)]
@@ -878,14 +872,20 @@ impl Agent {
         self: &Arc<Self>,
         request: RackInitializeRequest,
     ) -> Result<RackInitId, RssAccessError> {
-        self.rss_access.start_initializing(self, request)
+        self.rss_access.start_initializing(
+            &self.parent_log,
+            self.ip,
+            &self.storage_resources,
+            &self.bootstore,
+            request,
+        )
     }
 
     /// Spawn a task to run rack reset.
     pub fn start_rack_reset(
         self: &Arc<Self>,
     ) -> Result<RackResetId, RssAccessError> {
-        self.rss_access.start_reset(self)
+        self.rss_access.start_reset(&self.parent_log, self.ip)
     }
 
     /// Get the status of a spawned initialize or reset operation.

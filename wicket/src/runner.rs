@@ -156,6 +156,10 @@ impl RunnerCore {
                 self.state.rack_setup_state = result;
                 self.screen.draw(&self.state, &mut self.terminal)?;
             }
+            Event::WicketdLocation(location) => {
+                self.state.wicketd_location = location;
+                self.screen.draw(&self.state, &mut self.terminal)?;
+            }
             Event::Shutdown => return Ok(true),
         }
         Ok(false)

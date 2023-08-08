@@ -1,0 +1,9 @@
+# NOTE: The recommended version should be in sync with the version in
+# .github/buildomat/build-and-test.sh.
+#
+# The required version should be bumped up if we need new features, performance
+# improvements or bugfixes that are present in newer versions of nextest.
+nextest-version = { required = "0.9.55", recommended = "0.9.57" }
+
+[profile.ci]
+fail-fast = false

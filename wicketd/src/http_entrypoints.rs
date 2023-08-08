@@ -7,6 +7,7 @@
 use crate::mgs::GetInventoryError;
 use crate::mgs::GetInventoryResponse;
 use crate::mgs::MgsHandle;
+use crate::mgs::ShutdownInProgress;
 use crate::RackV1Inventory;
 use bootstrap_agent_client::types::RackInitId;
 use bootstrap_agent_client::types::RackOperationStatus;
@@ -62,6 +63,7 @@ pub fn api() -> WicketdApiDescription {
         api.register(post_run_rack_setup)?;
         api.register(post_run_rack_reset)?;
         api.register(get_inventory)?;
+        api.register(get_location)?;
         api.register(put_repository)?;
         api.register(get_artifacts_and_event_reports)?;
         api.register(get_baseboard)?;
@@ -181,19 +183,14 @@ pub struct CurrentRssUserConfig {
 async fn inventory_or_unavail(
     mgs_handle: &MgsHandle,
 ) -> Result<RackV1Inventory, HttpError> {
-    match mgs_handle.get_inventory(Vec::new()).await {
+    match mgs_handle.get_cached_inventory().await {
         Ok(GetInventoryResponse::Response { inventory, .. }) => Ok(inventory),
         Ok(GetInventoryResponse::Unavailable) => Err(HttpError::for_unavail(
             None,
             "Rack inventory not yet available".into(),
         )),
-        Err(GetInventoryError::ShutdownInProgress) => {
+        Err(ShutdownInProgress) => {
             Err(HttpError::for_unavail(None, "Server is shutting down".into()))
-        }
-        Err(GetInventoryError::InvalidSpIdentifier) => {
-            // We didn't provide any SP identifiers to refresh, so they can't be
-            // invalid.
-            unreachable!()
         }
     }
 }
@@ -527,7 +524,12 @@ async fn get_inventory(
     body_params: TypedBody<GetInventoryParams>,
 ) -> Result<HttpResponseOk<GetInventoryResponse>, HttpError> {
     let GetInventoryParams { force_refresh } = body_params.into_inner();
-    match rqctx.context().mgs_handle.get_inventory(force_refresh).await {
+    match rqctx
+        .context()
+        .mgs_handle
+        .get_inventory_refreshing_sps(force_refresh)
+        .await
+    {
         Ok(response) => Ok(HttpResponseOk(response)),
         Err(GetInventoryError::InvalidSpIdentifier) => {
             Err(HttpError::for_unavail(
@@ -705,6 +707,72 @@ async fn get_baseboard(
     }))
 }
 
+/// All the fields of this response are optional, because it's possible we don't
+/// know any of them (yet) if MGS has not yet finished discovering its location
+/// or (ever) if we're running in a dev environment that doesn't support
+/// MGS-location / baseboard mapping.
+#[derive(Clone, Debug, JsonSchema, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub struct GetLocationResponse {
+    /// The identity of our sled (where wicketd is running).
+    pub sled_id: Option<SpIdentifier>,
+    /// The baseboard of our sled (where wicketd is running).
+    pub sled_baseboard: Option<Baseboard>,
+    /// The baseboard of the switch our sled is physically connected to.
+    pub switch_baseboard: Option<Baseboard>,
+    /// The identity of the switch our sled is physically connected to.
+    pub switch_id: Option<SpIdentifier>,
+}
+
+/// Report the identity of the sled and switch we're currently running on /
+/// connected to.
+#[endpoint {
+    method = GET,
+    path = "/location",
+}]
+async fn get_location(
+    rqctx: RequestContext<ServerContext>,
+) -> Result<HttpResponseOk<GetLocationResponse>, HttpError> {
+    let rqctx = rqctx.context();
+    let inventory = inventory_or_unavail(&rqctx.mgs_handle).await?;
+
+    let switch_id = rqctx.local_switch_id().await;
+    let sled_baseboard = rqctx.baseboard.clone();
+
+    let mut switch_baseboard = None;
+    let mut sled_id = None;
+
+    for sp in &inventory.sps {
+        if Some(sp.id) == switch_id {
+            switch_baseboard = sp.state.as_ref().map(|state| {
+                // TODO-correctness `new_gimlet` isn't the right name: this is a
+                // sidecar baseboard.
+                Baseboard::new_gimlet(
+                    state.serial_number.clone(),
+                    state.model.clone(),
+                    i64::from(state.revision),
+                )
+            });
+        } else if let (Some(sled_baseboard), Some(state)) =
+            (sled_baseboard.as_ref(), sp.state.as_ref())
+        {
+            if sled_baseboard.identifier() == state.serial_number
+                && sled_baseboard.model() == state.model
+                && sled_baseboard.revision() == i64::from(state.revision)
+            {
+                sled_id = Some(sp.id);
+            }
+        }
+    }
+
+    Ok(HttpResponseOk(GetLocationResponse {
+        sled_id,
+        sled_baseboard,
+        switch_baseboard,
+        switch_id,
+    }))
+}
+
 /// An endpoint to start updating a sled.
 #[endpoint {
     method = POST,
@@ -731,16 +799,14 @@ async fn post_start_update(
     //    an abundance of caution).
     //
     // First, get our most-recently-cached inventory view.
-    let inventory = match rqctx.mgs_handle.get_inventory(Vec::new()).await {
+    let inventory = match rqctx.mgs_handle.get_cached_inventory().await {
         Ok(inventory) => inventory,
-        Err(GetInventoryError::ShutdownInProgress) => {
+        Err(ShutdownInProgress) => {
             return Err(HttpError::for_unavail(
                 None,
                 "Server is shutting down".into(),
             ));
         }
-        // We didn't specify any SP ids to refresh, so this error is impossible.
-        Err(GetInventoryError::InvalidSpIdentifier) => unreachable!(),
     };
 
     // Next, do we have the state of the target SP?
