@@ -89,7 +89,6 @@ async fn handle_start_sled_agent_request(
         Request::StartSledAgentRequest(request) => {
             let (response_tx, response_rx) = oneshot::channel();
 
-            // TODO-john can we remove the Cow on request now?
             match tx_requests.send((request.into_owned(), response_tx)).await {
                 Ok(()) => match response_rx.await {
                     Ok(Ok(response)) => {
