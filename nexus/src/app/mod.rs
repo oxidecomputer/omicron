@@ -68,24 +68,6 @@ mod vpc_subnet;
 // application logic.
 pub mod sagas;
 
-// TODO: When referring to API types, we should try to include
-// the prefix unless it is unambiguous.
-
-pub(crate) use nexus_db_queries::db::queries::disk::MAX_DISKS_PER_INSTANCE;
-
-pub(crate) const MAX_NICS_PER_INSTANCE: usize = 8;
-
-// TODO-completeness: Support multiple external IPs
-pub(crate) const MAX_EXTERNAL_IPS_PER_INSTANCE: usize = 1;
-
-pub const MAX_VCPU_PER_INSTANCE: u16 = 64;
-
-pub const MIN_MEMORY_BYTES_PER_INSTANCE: u32 = 1 << 30; // 1 GiB
-pub const MAX_MEMORY_BYTES_PER_INSTANCE: u64 = 256 * (1 << 30); // 256 GiB
-
-pub const MIN_DISK_SIZE_BYTES: u32 = 1 << 30; // 1 GiB
-pub const MAX_DISK_SIZE_BYTES: u64 = 1023 * (1 << 30); // 1023 GiB
-
 /// Manages an Oxide fleet -- the heart of the control plane
 pub struct Nexus {
     /// uuid for this nexus instance.

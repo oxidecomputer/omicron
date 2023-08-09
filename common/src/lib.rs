@@ -26,6 +26,7 @@ pub mod backoff;
 pub mod cmd;
 pub mod disk;
 pub mod ledger;
+pub mod limits;
 pub mod nexus_config;
 pub mod postgres_config;
 pub mod update;

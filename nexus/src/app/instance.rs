@@ -4,12 +4,6 @@
 
 //! Virtual Machine Instances
 
-use super::MAX_DISKS_PER_INSTANCE;
-use super::MAX_EXTERNAL_IPS_PER_INSTANCE;
-use super::MAX_MEMORY_BYTES_PER_INSTANCE;
-use super::MAX_NICS_PER_INSTANCE;
-use super::MAX_VCPU_PER_INSTANCE;
-use super::MIN_MEMORY_BYTES_PER_INSTANCE;
 use crate::app::sagas;
 use crate::app::sagas::retry_until_known_result;
 use crate::authn;
@@ -42,6 +36,12 @@ use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::Vni;
 use omicron_common::api::internal::nexus;
 use omicron_common::api::internal::shared::SwitchLocation;
+use omicron_common::limits::MAX_DISKS_PER_INSTANCE;
+use omicron_common::limits::MAX_EXTERNAL_IPS_PER_INSTANCE;
+use omicron_common::limits::MAX_MEMORY_BYTES_PER_INSTANCE;
+use omicron_common::limits::MAX_NICS_PER_INSTANCE;
+use omicron_common::limits::MAX_VCPU_PER_INSTANCE;
+use omicron_common::limits::MIN_MEMORY_BYTES_PER_INSTANCE;
 use propolis_client::support::tungstenite::protocol::frame::coding::CloseCode;
 use propolis_client::support::tungstenite::protocol::CloseFrame;
 use propolis_client::support::tungstenite::Message as WebSocketMessage;

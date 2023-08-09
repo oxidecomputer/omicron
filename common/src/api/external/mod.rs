@@ -40,6 +40,8 @@ use std::num::{NonZeroU16, NonZeroU32};
 use std::str::FromStr;
 use uuid::Uuid;
 
+use crate::limits::MAX_VCPU_PER_INSTANCE;
+
 // The type aliases below exist primarily to ensure consistency among return
 // types for functions in the `nexus::Nexus` and `nexus::DataStore`.  The
 // type argument `T` generally implements `Object`.
@@ -881,8 +883,30 @@ impl InstanceState {
 }
 
 /// The number of CPUs in an Instance
-#[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(Copy, Clone, Debug, Deserialize, Serialize)]
 pub struct InstanceCpuCount(pub u16);
+
+impl JsonSchema for InstanceCpuCount {
+    fn schema_name() -> String {
+        "InstanceCpuCount".to_string()
+    }
+
+    fn json_schema(
+        _: &mut schemars::gen::SchemaGenerator,
+    ) -> schemars::schema::Schema {
+        schemars::schema::SchemaObject {
+            number: Some(Box::new(schemars::schema::NumberValidation {
+                multiple_of: None,
+                maximum: Some(MAX_VCPU_PER_INSTANCE.into()),
+                exclusive_maximum: None,
+                minimum: Some(1.0),
+                exclusive_minimum: None,
+            })),
+            ..Default::default()
+        }
+        .into()
+    }
+}
 
 impl TryFrom<i64> for InstanceCpuCount {
     type Error = anyhow::Error;

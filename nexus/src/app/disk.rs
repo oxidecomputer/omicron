@@ -24,12 +24,11 @@ use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
+use omicron_common::limits::MAX_DISK_SIZE_BYTES;
+use omicron_common::limits::MIN_DISK_SIZE_BYTES;
 use sled_agent_client::Client as SledAgentClient;
 use std::sync::Arc;
 use uuid::Uuid;
-
-use super::MAX_DISK_SIZE_BYTES;
-use super::MIN_DISK_SIZE_BYTES;
 
 impl super::Nexus {
     // Disks

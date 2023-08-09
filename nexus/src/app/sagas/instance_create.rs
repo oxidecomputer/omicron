@@ -7,10 +7,6 @@ use crate::app::instance::WriteBackUpdatedInstance;
 use crate::app::sagas::declare_saga_actions;
 use crate::app::sagas::disk_create::{self, SagaDiskCreate};
 use crate::app::sagas::retry_until_known_result;
-use crate::app::{
-    MAX_DISKS_PER_INSTANCE, MAX_EXTERNAL_IPS_PER_INSTANCE,
-    MAX_NICS_PER_INSTANCE,
-};
 use crate::db::identity::Resource;
 use crate::db::lookup::LookupPath;
 use crate::db::model::ByteCount as DbByteCount;
@@ -29,6 +25,10 @@ use omicron_common::api::external::InstanceState;
 use omicron_common::api::external::Name;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
 use omicron_common::api::internal::shared::SwitchLocation;
+use omicron_common::limits::{
+    MAX_DISKS_PER_INSTANCE, MAX_EXTERNAL_IPS_PER_INSTANCE,
+    MAX_NICS_PER_INSTANCE,
+};
 use serde::Deserialize;
 use serde::Serialize;
 use sled_agent_client::types::InstanceStateRequested;

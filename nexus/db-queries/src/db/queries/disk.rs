@@ -11,14 +11,8 @@ use diesel::{
     query_builder::{AstPass, QueryFragment, QueryId},
     sql_types, Column, QueryResult,
 };
+use omicron_common::limits::MAX_DISKS_PER_INSTANCE;
 use uuid::Uuid;
-
-/// The maximum number of disks that can be attached to an instance.
-//
-// This is defined here for layering reasons: the main Nexus crate depends on
-// the db-queries crate, so the disk-per-instance limit lives here and Nexus
-// proper re-exports it.
-pub const MAX_DISKS_PER_INSTANCE: u32 = 8;
 
 /// A wrapper for the query that selects a PCI slot for a newly-attached disk.
 ///
