@@ -325,7 +325,7 @@ impl OximeterAgent {
         if !replicated {
             client.init_single_node_db().await?;
         } else {
-            client.init_db().await?;
+            client.init_replicated_db().await?;
         }
 
         // Spawn the task for aggregating and inserting all metrics

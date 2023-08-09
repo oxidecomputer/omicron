@@ -433,7 +433,7 @@ pub trait DbWrite {
     async fn insert_samples(&self, samples: &[Sample]) -> Result<(), Error>;
 
     /// Initialize the replicated telemetry database, creating tables as needed.
-    async fn init_db(&self) -> Result<(), Error>;
+    async fn init_replicated_db(&self) -> Result<(), Error>;
 
     /// Initialize a single node telemetry database, creating tables as needed.
     async fn init_single_node_db(&self) -> Result<(), Error>;
@@ -542,11 +542,11 @@ impl DbWrite for Client {
     }
 
     /// Initialize the replicated telemetry database, creating tables as needed.
-    async fn init_db(&self) -> Result<(), Error> {
+    async fn init_replicated_db(&self) -> Result<(), Error> {
         // The HTTP client doesn't support multiple statements per query, so we break them out here
         // manually.
         debug!(self.log, "initializing ClickHouse database");
-        let sql = include_str!("./db-init.sql");
+        let sql = include_str!("./db-replicated-init.sql");
         for query in sql.split("\n--\n") {
             self.execute(query.to_string()).await?;
         }
@@ -616,7 +616,7 @@ fn error_for_schema_mismatch(
 mod tests {
     use super::*;
     use crate::query;
-    use omicron_test_utils::dev::clickhouse::ClickHouseInstance;
+    use omicron_test_utils::dev::clickhouse::ClickHouseSingleNodeInstance;
     use oximeter::test_util;
     use oximeter::{Metric, Target};
     use slog::o;
@@ -636,7 +636,7 @@ mod tests {
         let log = slog::Logger::root(slog::Discard, o!());
 
         // Let the OS assign a port and discover it after ClickHouse starts
-        let mut db = ClickHouseInstance::new(0)
+        let mut db = ClickHouseSingleNodeInstance::new(0)
             .await
             .expect("Failed to start ClickHouse");
         let address = SocketAddr::new("::1".parse().unwrap(), db.port());
@@ -650,7 +650,7 @@ mod tests {
         let log = slog::Logger::root(slog::Discard, o!());
 
         // Let the OS assign a port and discover it after ClickHouse starts
-        let mut db = ClickHouseInstance::new(0)
+        let mut db = ClickHouseSingleNodeInstance::new(0)
             .await
             .expect("Failed to start ClickHouse");
         let address = SocketAddr::new("::1".parse().unwrap(), db.port());
@@ -696,7 +696,7 @@ mod tests {
         let log = slog::Logger::root(slog::Discard, o!());
 
         // Let the OS assign a port and discover it after ClickHouse starts
-        let mut db = ClickHouseInstance::new(0)
+        let mut db = ClickHouseSingleNodeInstance::new(0)
             .await
             .expect("Failed to start ClickHouse");
         let address = SocketAddr::new("::1".parse().unwrap(), db.port());
@@ -730,7 +730,7 @@ mod tests {
         let log = slog::Logger::root(slog::Discard, o!());
 
         // Let the OS assign a port and discover it after ClickHouse starts
-        let mut db = ClickHouseInstance::new(0)
+        let mut db = ClickHouseSingleNodeInstance::new(0)
             .await
             .expect("Failed to start ClickHouse");
         let address = SocketAddr::new("::1".parse().unwrap(), db.port());
@@ -803,12 +803,12 @@ mod tests {
         db.cleanup().await.expect("Failed to cleanup ClickHouse server");
     }
 
-    async fn setup_filter_testcase() -> (ClickHouseInstance, Client, Vec<Sample>)
+    async fn setup_filter_testcase() -> (ClickHouseSingleNodeInstance, Client, Vec<Sample>)
     {
         let log = slog::Logger::root(slog_dtrace::Dtrace::new().0, o!());
 
         // Let the OS assign a port and discover it after ClickHouse starts
-        let db = ClickHouseInstance::new(0)
+        let db = ClickHouseSingleNodeInstance::new(0)
             .await
             .expect("Failed to start ClickHouse");
         let address = SocketAddr::new("::1".parse().unwrap(), db.port());
@@ -1003,7 +1003,7 @@ mod tests {
         let log = Logger::root(slog::Discard, o!());
 
         // Let the OS assign a port and discover it after ClickHouse starts
-        let db = ClickHouseInstance::new(0)
+        let db = ClickHouseSingleNodeInstance::new(0)
             .await
             .expect("Failed to start ClickHouse");
         let address = SocketAddr::new("::1".parse().unwrap(), db.port());
@@ -1102,7 +1102,7 @@ mod tests {
         test_fn: impl Fn(&Service, &[RequestLatency], &[Sample], &[Timeseries]),
     ) {
         let (target, metrics, samples) = setup_select_test();
-        let mut db = ClickHouseInstance::new(0)
+        let mut db = ClickHouseSingleNodeInstance::new(0)
             .await
             .expect("Failed to start ClickHouse");
         let address = SocketAddr::new("::1".parse().unwrap(), db.port());
@@ -1359,7 +1359,7 @@ mod tests {
     #[tokio::test]
     async fn test_select_timeseries_with_start_time() {
         let (_, metrics, samples) = setup_select_test();
-        let mut db = ClickHouseInstance::new(0)
+        let mut db = ClickHouseSingleNodeInstance::new(0)
             .await
             .expect("Failed to start ClickHouse");
         let address = SocketAddr::new("::1".parse().unwrap(), db.port());
@@ -1403,7 +1403,7 @@ mod tests {
     #[tokio::test]
     async fn test_select_timeseries_with_limit() {
         let (_, _, samples) = setup_select_test();
-        let mut db = ClickHouseInstance::new(0)
+        let mut db = ClickHouseSingleNodeInstance::new(0)
             .await
             .expect("Failed to start ClickHouse");
         let address = SocketAddr::new("::1".parse().unwrap(), db.port());
@@ -1521,7 +1521,7 @@ mod tests {
     #[tokio::test]
     async fn test_select_timeseries_with_order() {
         let (_, _, samples) = setup_select_test();
-        let mut db = ClickHouseInstance::new(0)
+        let mut db = ClickHouseSingleNodeInstance::new(0)
             .await
             .expect("Failed to start ClickHouse");
         let address = SocketAddr::new("::1".parse().unwrap(), db.port());

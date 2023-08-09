@@ -268,7 +268,7 @@ async fn cmd_clickhouse_run(args: &ChRunArgs) -> Result<(), anyhow::Error> {
 
     // Start the database server process, possibly on a specific port
     let mut db_instance =
-        dev::clickhouse::ClickHouseInstance::new(args.port).await?;
+        dev::clickhouse::ClickHouseSingleNodeInstance::new(args.port).await?;
     println!(
         "omicron-dev: running ClickHouse with full command:\n\"clickhouse {}\"",
         db_instance.cmdline().join(" ")

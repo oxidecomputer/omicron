@@ -22,9 +22,9 @@ use crate::dev::poll;
 // Timeout used when starting up ClickHouse subprocess.
 const CLICKHOUSE_TIMEOUT: Duration = Duration::from_secs(30);
 
-/// A `ClickHouseInstance` is used to start and manage a ClickHouse server process.
+/// A `ClickHouseSingleNodeInstance` is used to start and manage a ClickHouse single node server process.
 #[derive(Debug)]
-pub struct ClickHouseInstance {
+pub struct ClickHouseSingleNodeInstance {
     // Directory in which all data, logs, etc are stored.
     data_dir: Option<TempDir>,
     data_path: PathBuf,
@@ -51,7 +51,7 @@ pub enum ClickHouseError {
     Timeout,
 }
 
-impl ClickHouseInstance {
+impl ClickHouseSingleNodeInstance {
     /// Start a new ClickHouse server on the given IPv6 port.
     pub async fn new(port: u16) -> Result<Self, anyhow::Error> {
         let data_dir = TempDir::new()
@@ -186,7 +186,7 @@ impl ClickHouseInstance {
     }
 }
 
-impl Drop for ClickHouseInstance {
+impl Drop for ClickHouseSingleNodeInstance {
     fn drop(&mut self) {
         if self.child.is_some() || self.data_dir.is_some() {
             eprintln!(
