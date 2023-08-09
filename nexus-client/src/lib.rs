@@ -128,7 +128,7 @@ impl From<omicron_common::api::external::InstanceCpuCount>
     for types::InstanceCpuCount
 {
     fn from(s: omicron_common::api::external::InstanceCpuCount) -> Self {
-        Self(s.0)
+        Self(s.0.into())
     }
 }
 

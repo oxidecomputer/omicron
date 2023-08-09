@@ -895,6 +895,14 @@ impl JsonSchema for InstanceCpuCount {
         _: &mut schemars::gen::SchemaGenerator,
     ) -> schemars::schema::Schema {
         schemars::schema::SchemaObject {
+            metadata: Some(Box::new(schemars::schema::Metadata {
+                description: Some(
+                    "The number of CPUs in an Instance".to_string(),
+                ),
+                ..Default::default()
+            })),
+            format: Some("uint16".to_string()),
+            instance_type: Some(schemars::schema::InstanceType::Integer.into()),
             number: Some(Box::new(schemars::schema::NumberValidation {
                 multiple_of: None,
                 maximum: Some(MAX_VCPU_PER_INSTANCE.into()),

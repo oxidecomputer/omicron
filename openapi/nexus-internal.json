@@ -1850,7 +1850,8 @@
         "description": "The number of CPUs in an Instance",
         "type": "integer",
         "format": "uint16",
-        "minimum": 0
+        "minimum": 1,
+        "maximum": 64
       },
       "InstanceRuntimeState": {
         "description": "Runtime state of the Instance, including the actual running state and minimal metadata\n\nThis state is owned by the sled agent running that Instance.",
