@@ -27,7 +27,24 @@ fi
 
 #   $ arp -a | grep 192.168.21.1
 #   e1000g1 192.168.21.1         255.255.255.255          90:ec:77:2e:70:27
-GATEWAY_MAC=${GATEWAY_MAC:=$(arp -a | grep "$GATEWAY_IP" | awk -F ' ' '{print $NF}')}
+#
+# Add an extrac space at the end of the search pattern passed to `grep`, so that
+# we can be sure we're matching the exact $GATEWAY_IP, and not something that
+# shares the same string prefix.
+GATEWAY_MAC=${GATEWAY_MAC:=$(arp -a | grep "$GATEWAY_IP " | awk -F ' ' '{print $NF}')}
+
+# Check that the MAC appears to be exactly one MAC address.
+COUNT=$(grep -c -E '^([0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}$' <(echo "$GATEWAY_MAC"))
+if [[ $COUNT -ne 1 ]]; then
+    set +x
+    echo "GATEWAY_MAC does not appear to be a valid MAC address."
+    echo "It either could not be automatically determined from the"
+    echo "gateway IP, or the provided environment variable is malformed."
+    echo "GATEWAY_IP = $GATEWAY_IP"
+    echo "Extracted or set GATEWAY_MAC = $GATEWAY_MAC"
+    echo "Please set GATEWAY_MAC manually or use a different GATEWAY_IP"
+    exit 1
+fi
 echo "Using $GATEWAY_MAC as gateway mac"
 
 z_scadm () {

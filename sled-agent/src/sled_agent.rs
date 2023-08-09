@@ -20,11 +20,15 @@ use crate::params::{
 use crate::services::{self, ServiceManager};
 use crate::storage_manager::{self, StorageManager};
 use crate::updates::{ConfigUpdates, UpdateManager};
+use crate::zone_bundle;
+use crate::zone_bundle::BundleError;
 use bootstore::schemes::v0 as bootstore;
 use camino::Utf8PathBuf;
 use dropshot::HttpError;
 use illumos_utils::opte::params::SetVirtualNetworkInterfaceHost;
 use illumos_utils::opte::PortManager;
+use illumos_utils::zone::PROPOLIS_ZONE_PREFIX;
+use illumos_utils::zone::ZONE_PREFIX;
 use omicron_common::address::{
     get_sled_address, get_switch_zone_address, Ipv6Subnet, SLED_PREFIX,
 };
@@ -41,6 +45,7 @@ use omicron_common::backoff::{
 use sled_hardware::underlay;
 use sled_hardware::HardwareManager;
 use slog::Logger;
+use std::collections::BTreeSet;
 use std::net::{Ipv6Addr, SocketAddrV6};
 use std::sync::Arc;
 use uuid::Uuid;
@@ -108,6 +113,9 @@ pub enum Error {
 
     #[error("Failed to deserialize early network config: {0}")]
     EarlyNetworkDeserialize(serde_json::Error),
+
+    #[error("Zone bundle error: {0}")]
+    ZoneBundle(#[from] BundleError),
 }
 
 impl From<Error> for omicron_common::api::external::Error {
@@ -159,13 +167,11 @@ impl From<Error> for dropshot::HttpError {
                     e => HttpError::for_internal_error(e.to_string()),
                 }
             }
-            crate::sled_agent::Error::Services(
-                crate::services::Error::Bundle(ref inner),
-            ) => match inner {
-                crate::services::BundleError::NoStorage => {
+            crate::sled_agent::Error::ZoneBundle(ref inner) => match inner {
+                BundleError::NoStorage | BundleError::Unavailable { .. } => {
                     HttpError::for_unavail(None, inner.to_string())
                 }
-                crate::services::BundleError::NoSuchZone { .. } => {
+                BundleError::NoSuchZone { .. } => {
                     HttpError::for_not_found(None, inner.to_string())
                 }
                 _ => HttpError::for_internal_error(err.to_string()),
@@ -181,6 +187,9 @@ impl From<Error> for dropshot::HttpError {
 struct SledAgentInner {
     // ID of the Sled
     id: Uuid,
+
+    // Logger used for generic sled agent operations, e.g., zone bundles.
+    log: Logger,
 
     // Subnet of the Sled's underlay.
     //
@@ -199,7 +208,7 @@ struct SledAgentInner {
     // Component of Sled Agent responsible for managing updates.
     updates: UpdateManager,
 
-    /// Component of Sled Agent responsible for managing OPTE ports.
+    // Component of Sled Agent responsible for managing OPTE ports.
     port_manager: PortManager,
 
     // Other Oxide-controlled services running on this Sled.
@@ -395,6 +404,7 @@ impl SledAgent {
         let sled_agent = SledAgent {
             inner: Arc::new(SledAgentInner {
                 id: request.id,
+                log: log.clone(),
                 subnet: request.subnet,
                 storage,
                 instances,
@@ -661,12 +671,104 @@ impl SledAgent {
             });
     }
 
+    /// List all zone bundles on the system, for any zones live or dead.
+    pub async fn list_all_zone_bundles(
+        &self,
+    ) -> Result<Vec<ZoneBundleMetadata>, Error> {
+        let mut bundles = BTreeSet::new();
+        let log = &self.inner.log;
+        for path in
+            self.inner.storage.resources().all_zone_bundle_directories().await
+        {
+            debug!(log, "searching zone bundle directory"; "directory" => ?path);
+            // It's possible that the debug directories themselves do not exist,
+            // since we create them when we create the first bundles. Return an
+            // empty set in this case.
+            let mut entries = match tokio::fs::read_dir(path).await {
+                Ok(ent) => ent,
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(e) => {
+                    return Err(Error::from(BundleError::from(
+                        anyhow::anyhow!("failed to read bundle directory: {e}"),
+                    )));
+                }
+            };
+
+            // First iterate over all the possible zone-names here.
+            loop {
+                let Some(zone_name) = entries
+                    .next_entry()
+                    .await
+                    .map_err(|e| BundleError::from(anyhow::anyhow!("failed to read zone bundle dir entry: {e}")))? else {
+                    break;
+                };
+
+                // Enumerate and iterate over all the contained entries, which
+                // _should_ all be zone bundles.
+                let mut bundle_entries = tokio::fs::read_dir(zone_name.path())
+                    .await
+                    .map_err(|e| {
+                        BundleError::from(anyhow::anyhow!(
+                            "failed to read zone directory: {e}"
+                        ))
+                    })?;
+                loop {
+                    let Some(bundle) = bundle_entries
+                        .next_entry()
+                        .await
+                        .map_err(|e| BundleError::from(anyhow::anyhow!("failed to read zone bundle dir entry: {e}")))? else {
+                        break;
+                    };
+                    match zone_bundle::extract_zone_bundle_metadata(
+                        bundle.path(),
+                    )
+                    .await
+                    {
+                        Ok(metadata) => {
+                            debug!(
+                                log,
+                                "found zone bundle";
+                                "zone_name" => &metadata.id.zone_name,
+                                "id" => %&metadata.id.bundle_id,
+                                "path" => ?bundle.path(),
+                            );
+                            bundles.insert(metadata);
+                        }
+                        Err(e) => warn!(
+                            log,
+                            "found file in zone bundle directory which doesn't \
+                            appear to be a valid zone bundle";
+                            "path" => ?bundle.path(),
+                            "err" => ?e,
+                        ),
+                    }
+                }
+            }
+        }
+        Ok(bundles.into_iter().collect())
+    }
+
     /// List zone bundles for the provided zone.
     pub async fn list_zone_bundles(
         &self,
         name: &str,
     ) -> Result<Vec<ZoneBundleMetadata>, Error> {
-        self.inner.services.list_zone_bundles(name).await.map_err(Error::from)
+        // The zone bundles are replicated in several places, so we'll use a set
+        // to collect them all, to avoid duplicating.
+        let mut bundles = BTreeSet::new();
+        let log = &self.inner.log;
+        for path in
+            self.inner.storage.resources().all_zone_bundle_directories().await
+        {
+            debug!(log, "searching zone bundle directory"; "directory" => ?path);
+            bundles.extend(
+                zone_bundle::list_bundles_for_zone(log, &path, name)
+                    .await?
+                    .into_iter()
+                    .map(|(_path, bdl)| bdl),
+            );
+        }
+        Ok(bundles.into_iter().collect())
     }
 
     /// Create a zone bundle for the provided zone.
@@ -674,7 +776,21 @@ impl SledAgent {
         &self,
         name: &str,
     ) -> Result<ZoneBundleMetadata, Error> {
-        self.inner.services.create_zone_bundle(name).await.map_err(Error::from)
+        if name.starts_with(PROPOLIS_ZONE_PREFIX) {
+            self.inner
+                .instances
+                .create_zone_bundle(name)
+                .await
+                .map_err(Error::from)
+        } else if name.starts_with(ZONE_PREFIX) {
+            self.inner
+                .services
+                .create_zone_bundle(name)
+                .await
+                .map_err(Error::from)
+        } else {
+            Err(Error::from(BundleError::NoSuchZone { name: name.to_string() }))
+        }
     }
 
     /// Fetch the path to a zone bundle.
@@ -683,16 +799,33 @@ impl SledAgent {
         name: &str,
         id: &Uuid,
     ) -> Result<Option<Utf8PathBuf>, Error> {
-        self.inner
-            .services
-            .get_zone_bundle_path(name, id)
-            .await
-            .map_err(Error::from)
+        zone_bundle::get_zone_bundle_path(
+            &self.inner.log,
+            &self.inner.storage.resources().all_zone_bundle_directories().await,
+            name,
+            id,
+        )
+        .await
+        .map_err(Error::from)
     }
 
     /// List the zones that the sled agent is currently managing.
     pub async fn zones_list(&self) -> Result<Vec<String>, Error> {
-        self.inner.services.list_all_zones().await.map_err(Error::from)
+        Zones::get()
+            .await
+            .map(|zones| {
+                zones
+                    .into_iter()
+                    .filter_map(|zone| {
+                        if matches!(zone.state(), zone::State::Running) {
+                            Some(String::from(zone.name()))
+                        } else {
+                            None
+                        }
+                    })
+                    .collect()
+            })
+            .map_err(|e| Error::from(BundleError::from(e)))
     }
 
     /// Ensures that particular services should be initialized.

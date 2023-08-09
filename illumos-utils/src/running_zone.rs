@@ -933,11 +933,10 @@ impl RunningZone {
 
     /// Return the names of the Oxide SMF services this zone is intended to run.
     pub fn service_names(&self) -> Result<Vec<String>, ServiceError> {
-        const NEEDLES: [&str; 2] = ["/oxide", "/system/illumos"];
         let output = self.run_cmd(&["svcs", "-H", "-o", "fmri"])?;
         Ok(output
             .lines()
-            .filter(|line| NEEDLES.iter().any(|needle| line.contains(needle)))
+            .filter(|line| is_oxide_smf_log_file(line))
             .map(|line| line.trim().to_string())
             .collect())
     }
@@ -1190,4 +1189,12 @@ impl InstalledZone {
         path.push("root/var/svc/profile/site.xml");
         path
     }
+}
+
+/// Return true if the named file appears to be a log file for an Oxide SMF
+/// service.
+pub fn is_oxide_smf_log_file(name: impl AsRef<str>) -> bool {
+    const SMF_SERVICE_PREFIXES: [&str; 2] = ["/oxide", "/system/illumos"];
+    let name = name.as_ref();
+    SMF_SERVICE_PREFIXES.iter().any(|needle| name.contains(needle))
 }
