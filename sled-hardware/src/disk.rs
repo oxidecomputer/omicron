@@ -256,7 +256,7 @@ pub const INSTALL_DATASET: &'static str = "install";
 pub const CRASH_DATASET: &'static str = "crash";
 pub const CLUSTER_DATASET: &'static str = "cluster";
 pub const CONFIG_DATASET: &'static str = "config";
-pub const DEBUG_DATASET: &'static str = "debug";
+pub const M2_DEBUG_DATASET: &'static str = "debug";
 // TODO-correctness: This value of 100GiB is a pretty wild guess, and should be
 // tuned as needed.
 pub const DEBUG_DATASET_QUOTA: usize = 100 * (1 << 30);
@@ -268,6 +268,7 @@ pub const DUMP_DATASET_COMPRESSION: &'static str = "gzip-9";
 // U.2 datasets live under the encrypted dataset and inherit encryption
 pub const ZONE_DATASET: &'static str = "crypt/zone";
 pub const DUMP_DATASET: &'static str = "crypt/debug";
+pub const U2_DEBUG_DATASET: &'static str = "crypt/debug";
 
 // This is the root dataset for all U.2 drives. Encryption is inherited.
 pub const CRYPT_DATASET: &'static str = "crypt";
@@ -302,7 +303,7 @@ static M2_EXPECTED_DATASETS: [ExpectedDataset; M2_EXPECTED_DATASET_COUNT] = [
     // Should be duplicated to both M.2s.
     ExpectedDataset::new(CONFIG_DATASET),
     // Store debugging data, such as service bundles.
-    ExpectedDataset::new(DEBUG_DATASET).quota(DEBUG_DATASET_QUOTA),
+    ExpectedDataset::new(M2_DEBUG_DATASET).quota(DEBUG_DATASET_QUOTA),
 ];
 
 impl Disk {

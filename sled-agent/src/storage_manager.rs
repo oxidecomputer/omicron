@@ -5,8 +5,10 @@
 //! Management of sled-local storage.
 
 use crate::nexus::NexusClientWithResolver;
+use crate::params::ZoneBundleCause;
 use crate::storage::dataset::DatasetName;
 use crate::storage::dump_setup::DumpSetup;
+use crate::zone_bundle::ZoneBundleContext;
 use camino::Utf8PathBuf;
 use derive_more::From;
 use futures::stream::FuturesOrdered;
@@ -233,6 +235,12 @@ pub struct StorageResources {
     pools: Arc<Mutex<HashMap<Uuid, Pool>>>,
 }
 
+// The directory within the debug dataset in which bundles are created.
+const BUNDLE_DIRECTORY: &str = "bundle";
+
+// The directory for zone bundles.
+const ZONE_BUNDLE_DIRECTORY: &str = "zone";
+
 impl StorageResources {
     /// Creates a fabricated view of storage resources.
     ///
@@ -333,6 +341,41 @@ impl StorageResources {
                 None
             })
             .collect()
+    }
+
+    /// Return the directories for storing zone service bundles.
+    pub async fn all_zone_bundle_directories(&self) -> Vec<Utf8PathBuf> {
+        self.all_m2_mountpoints(sled_hardware::disk::M2_DEBUG_DATASET)
+            .await
+            .into_iter()
+            .map(|p| p.join(BUNDLE_DIRECTORY).join(ZONE_BUNDLE_DIRECTORY))
+            .collect()
+    }
+
+    /// Return context for storing zone bundles.
+    ///
+    /// See [`ZoneBundleContext`] for details.
+    pub async fn zone_bundle_context(
+        &self,
+        zone_name: &str,
+        cause: ZoneBundleCause,
+    ) -> ZoneBundleContext {
+        // As of #3713, rotated log files are moved out of their original home,
+        // and onto longer-term storage some U.2s. Which one houses them is
+        // effectively random. Add the U.2 debug datasets into the
+        // `extra_log_dirs` field for search during the zone bundle process.
+        let extra_log_dirs = self
+            .all_u2_mountpoints(sled_hardware::disk::U2_DEBUG_DATASET)
+            .await
+            .into_iter()
+            .map(|p| p.join(zone_name))
+            .collect();
+        ZoneBundleContext {
+            cause,
+            storage_dirs: self.all_zone_bundle_directories().await,
+            extra_log_dirs,
+            ..Default::default()
+        }
     }
 }
 

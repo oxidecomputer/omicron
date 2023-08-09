@@ -4,13 +4,16 @@
 
 //! API for controlling multiple instances on a sled.
 
+use crate::instance::propolis_zone_name;
 use crate::instance::Instance;
 use crate::nexus::NexusClientWithResolver;
+use crate::params::ZoneBundleMetadata;
 use crate::params::{
     InstanceHardware, InstanceMigrationSourceParams, InstancePutStateResponse,
     InstanceStateRequested, InstanceUnregisterResponse,
 };
 use crate::storage_manager::StorageResources;
+use crate::zone_bundle::BundleError;
 use illumos_utils::dladm::Etherstub;
 use illumos_utils::link::VnicAllocator;
 use illumos_utils::opte::PortManager;
@@ -39,6 +42,9 @@ pub enum Error {
 
     #[error("Cannot find data link: {0}")]
     Underlay(#[from] sled_hardware::underlay::Error),
+
+    #[error("Zone bundle error")]
+    ZoneBundle(#[from] BundleError),
 }
 
 struct InstanceManagerInternal {
@@ -326,6 +332,33 @@ impl InstanceManager {
             .issue_snapshot_request(disk_id, snapshot_id)
             .await
             .map_err(Error::from)
+    }
+
+    /// Create a zone bundle from a named instance zone, if it exists.
+    pub async fn create_zone_bundle(
+        &self,
+        name: &str,
+    ) -> Result<ZoneBundleMetadata, BundleError> {
+        // We need to find the instance and take its lock, but:
+        //
+        // 1. The instance-map lock is sync, and
+        // 2. we don't want to hold the instance-map lock for the entire
+        //    bundling duration.
+        //
+        // Instead, we cheaply clone the instance through its `Arc` around the
+        // `InstanceInner`, which is ultimately what we want.
+        let Some((_propolis_id, instance)) = self
+            .inner
+            .instances
+            .lock()
+            .unwrap()
+            .values()
+            .find(|(propolis_id, _instance)| name == propolis_zone_name(propolis_id))
+            .cloned()
+        else {
+            return Err(BundleError::NoSuchZone { name: name.to_string() });
+        };
+        instance.request_zone_bundle().await
     }
 }
 

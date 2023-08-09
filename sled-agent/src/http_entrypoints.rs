@@ -12,8 +12,8 @@ use crate::params::{
 };
 use dropshot::{
     endpoint, ApiDescription, FreeformBody, HttpError, HttpResponseCreated,
-    HttpResponseHeaders, HttpResponseOk, HttpResponseUpdatedNoContent, Path,
-    RequestContext, TypedBody,
+    HttpResponseDeleted, HttpResponseHeaders, HttpResponseOk,
+    HttpResponseUpdatedNoContent, Path, RequestContext, TypedBody,
 };
 use illumos_utils::opte::params::SetVirtualNetworkInterfaceHost;
 use omicron_common::api::external::Error;
@@ -41,8 +41,10 @@ pub fn api() -> SledApiDescription {
         api.register(services_put)?;
         api.register(zones_list)?;
         api.register(zone_bundle_list)?;
+        api.register(zone_bundle_list_all)?;
         api.register(zone_bundle_create)?;
         api.register(zone_bundle_get)?;
+        api.register(zone_bundle_delete)?;
         api.register(sled_role_get)?;
         api.register(set_v2p)?;
         api.register(del_v2p)?;
@@ -67,7 +69,22 @@ struct ZonePathParam {
     zone_name: String,
 }
 
-/// List the zone bundles that are current available for a zone.
+/// List all zone bundles that exist, even for now-deleted zones.
+#[endpoint {
+    method = GET,
+    path = "/all-zone-bundles",
+}]
+async fn zone_bundle_list_all(
+    rqctx: RequestContext<SledAgent>,
+) -> Result<HttpResponseOk<Vec<ZoneBundleMetadata>>, HttpError> {
+    let sa = rqctx.context();
+    sa.list_all_zone_bundles()
+        .await
+        .map(HttpResponseOk)
+        .map_err(HttpError::from)
+}
+
+/// List the zone bundles that are available for a running zone.
 #[endpoint {
     method = GET,
     path = "/zones/{zone_name}/bundles",
@@ -137,6 +154,35 @@ async fn zone_bundle_get(
         "application/gzip".try_into().unwrap(),
     );
     Ok(response)
+}
+
+/// Delete a zone bundle.
+#[endpoint {
+    method = DELETE,
+    path = "/zones/{zone_name}/bundles/{bundle_id}",
+}]
+async fn zone_bundle_delete(
+    rqctx: RequestContext<SledAgent>,
+    params: Path<ZoneBundleId>,
+) -> Result<HttpResponseDeleted, HttpError> {
+    let params = params.into_inner();
+    let zone_name = params.zone_name;
+    let bundle_id = params.bundle_id;
+    let sa = rqctx.context();
+    let Some(path) = sa.get_zone_bundle_path(&zone_name, &bundle_id)
+        .await
+        .map_err(HttpError::from)? else {
+        return Err(HttpError::for_not_found(
+                None,
+                format!("No zone bundle for zone '{}' with ID '{}'", zone_name, bundle_id)));
+    };
+    tokio::fs::remove_file(&path).await.map(|_| HttpResponseDeleted()).map_err(
+        |e| {
+            HttpError::for_internal_error(format!(
+                "Failed to delete zone bundle: {e}"
+            ))
+        },
+    )
 }
 
 /// List the zones that are currently managed by the sled agent.
