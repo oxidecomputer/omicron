@@ -78,7 +78,7 @@ pub struct ControlPlaneTestContext<N> {
     pub internal_client: ClientTestContext,
     pub server: N,
     pub database: dev::db::CockroachInstance,
-    pub clickhouse: dev::clickhouse::ClickHouseSingleNodeInstance,
+    pub clickhouse: dev::clickhouse::ClickHouseInstance,
     pub logctx: LogContext,
     pub sled_agent_storage: camino_tempfile::Utf8TempDir,
     pub sled_agent: sim::Server,
@@ -226,7 +226,7 @@ pub struct ControlPlaneTestContextBuilder<'a, N: NexusServer> {
 
     pub server: Option<N>,
     pub database: Option<dev::db::CockroachInstance>,
-    pub clickhouse: Option<dev::clickhouse::ClickHouseSingleNodeInstance>,
+    pub clickhouse: Option<dev::clickhouse::ClickHouseInstance>,
     pub sled_agent_storage: Option<camino_tempfile::Utf8TempDir>,
     pub sled_agent: Option<sim::Server>,
     pub oximeter: Option<Oximeter>,
@@ -321,7 +321,9 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
         let log = &self.logctx.log;
         debug!(log, "Starting Clickhouse");
         let clickhouse =
-            dev::clickhouse::ClickHouseSingleNodeInstance::new(0).await.unwrap();
+            dev::clickhouse::ClickHouseInstance::new_single_node(0)
+                .await
+                .unwrap();
         let port = clickhouse.port();
 
         let zpool_id = Uuid::new_v4();

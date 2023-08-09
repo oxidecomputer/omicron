@@ -102,6 +102,9 @@ fi
 # Setting environment variables this way is best practice, but has the downside of
 # obscuring the field values to anyone ssh-ing into the zone. To mitigate this,
 # we will be saving them to ${DATASTORE}/config_env_vars
+#
+# TODO: If the node crashes, and we want to manually restart it, we would have to 
+# export all of these variables before restarting the service. Is this what we want?
 export CH_LOG="${DATASTORE}/clickhouse-server.log"
 export CH_ERROR_LOG="${DATASTORE}/clickhouse-server.errlog"
 export CH_REPLICA_DISPLAY_NAME=${REPLICA_DISPLAY_NAME}

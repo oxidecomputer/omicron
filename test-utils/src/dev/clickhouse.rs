@@ -22,9 +22,9 @@ use crate::dev::poll;
 // Timeout used when starting up ClickHouse subprocess.
 const CLICKHOUSE_TIMEOUT: Duration = Duration::from_secs(30);
 
-/// A `ClickHouseSingleNodeInstance` is used to start and manage a ClickHouse single node server process.
+/// A `ClickHouseInstance` is used to start and manage a ClickHouse single node server process.
 #[derive(Debug)]
-pub struct ClickHouseSingleNodeInstance {
+pub struct ClickHouseInstance {
     // Directory in which all data, logs, etc are stored.
     data_dir: Option<TempDir>,
     data_path: PathBuf,
@@ -51,9 +51,9 @@ pub enum ClickHouseError {
     Timeout,
 }
 
-impl ClickHouseSingleNodeInstance {
-    /// Start a new ClickHouse server on the given IPv6 port.
-    pub async fn new(port: u16) -> Result<Self, anyhow::Error> {
+impl ClickHouseInstance {
+    /// Start a new single node ClickHouse server on the given IPv6 port.
+    pub async fn new_single_node(port: u16) -> Result<Self, anyhow::Error> {
         let data_dir = TempDir::new()
             .context("failed to create tempdir for ClickHouse data")?;
         let log_path = data_dir.path().join("clickhouse-server.log");
@@ -90,47 +90,67 @@ impl ClickHouseSingleNodeInstance {
                 format!("failed to spawn `clickhouse` (with args: {:?})", &args)
             })?;
 
-        // Wait for the ClickHouse log file to become available, including the
-        // port number.
-        //
-        // We extract the port number from the log-file regardless of whether we
-        // know it already, as this is a more reliable check that the server is
-        // up and listening. Previously we only did this in the case we need to
-        // _learn_ the port, which introduces the possibility that we return
-        // from this function successfully, but the server itself is not yet
-        // ready to accept connections.
         let data_path = data_dir.path().to_path_buf();
-        let port = poll::wait_for_condition(
-            || async {
-                let result = discover_local_listening_port(
-                    &log_path,
-                    CLICKHOUSE_TIMEOUT,
-                )
-                .await;
-                match result {
-                    // Successfully extracted the port, return it.
-                    Ok(port) => Ok(port),
-                    Err(e) => {
-                        match e {
-                            ClickHouseError::Io(ref inner) => {
-                                if matches!(
-                                    inner.kind(),
-                                    std::io::ErrorKind::NotFound
-                                ) {
-                                    return Err(poll::CondCheckError::NotYet);
-                                }
-                            }
-                            _ => {}
-                        }
-                        Err(poll::CondCheckError::from(e))
-                    }
-                }
-            },
-            &Duration::from_millis(500),
-            &CLICKHOUSE_TIMEOUT,
-        )
-        .await
-        .context("waiting to discover ClickHouse port")?;
+        let port = wait_for_port(log_path).await?;
+
+        Ok(Self {
+            data_dir: Some(data_dir),
+            data_path,
+            port,
+            args,
+            child: Some(child),
+        })
+    }
+
+    /// Start a new replicated ClickHouse server on the given IPv6 port.
+    pub async fn new_replicated(
+        port: String,
+        name: String,
+        r_number: String,
+    ) -> Result<Self, anyhow::Error> {
+        let data_dir = TempDir::new()
+            .context("failed to create tempdir for ClickHouse data")?;
+        let log_path = data_dir.path().join("clickhouse-server.log");
+        let err_log_path = data_dir.path().join("clickhouse-server.errlog");
+        let tmp_path = data_dir.path().join("/tmp/");
+        let user_files_path = data_dir.path().join("/user_files/");
+        let access_path = data_dir.path().join("/access/");
+        let format_schemas_path = data_dir.path().join("/format_schemas/");
+        let args = vec![
+            "server".to_string(),
+            // TODO: Link to specific config
+            // "-c config-file.xml".to_string(),
+        ];
+
+        let child = tokio::process::Command::new("clickhouse")
+            .args(&args)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .env("CLICKHOUSE_WATCHDOG_ENABLE", "0")
+            .env("CH_LOG", &log_path)
+            .env("CH_ERROR_LOG", err_log_path)
+            .env("CH_REPLICA_DISPLAY_NAME", name)
+            .env("CH_LISTEN_ADDR", "::1")
+            .env("CH_LISTEN_PORT", port)
+            .env("CH_DATASTORE", data_dir.path())
+            .env("CH_TMP_PATH", tmp_path)
+            .env("CH_USER_FILES_PATH", user_files_path)
+            .env("CH_USER_LOCAL_DIR", access_path)
+            .env("CH_FORMAT_SCHEMA_PATH", format_schemas_path)
+            .env("CH_REPLICA_NUMBER", r_number)
+            .env("CH_REPLICA_HOST_01", "::1")
+            .env("CH_REPLICA_HOST_02", "::1")
+            .env("CH_KEEPER_HOST_01", "::1")
+            .env("CH_KEEPER_HOST_02", "::1")
+            .env("CH_KEEPER_HOST_03", "::1")
+            .spawn()
+            .with_context(|| {
+                format!("failed to spawn `clickhouse` (with args: {:?})", &args)
+            })?;
+
+        let data_path = data_dir.path().to_path_buf();
+        let port = wait_for_port(log_path).await?;
 
         Ok(Self {
             data_dir: Some(data_dir),
@@ -186,7 +206,7 @@ impl ClickHouseSingleNodeInstance {
     }
 }
 
-impl Drop for ClickHouseSingleNodeInstance {
+impl Drop for ClickHouseInstance {
     fn drop(&mut self) {
         if self.child.is_some() || self.data_dir.is_some() {
             eprintln!(
@@ -202,6 +222,48 @@ impl Drop for ClickHouseSingleNodeInstance {
             }
         }
     }
+}
+
+// Wait for the ClickHouse log file to become available, including the
+// port number.
+//
+// We extract the port number from the log-file regardless of whether we
+// know it already, as this is a more reliable check that the server is
+// up and listening. Previously we only did this in the case we need to
+// _learn_ the port, which introduces the possibility that we return
+// from this function successfully, but the server itself is not yet
+// ready to accept connections.
+pub async fn wait_for_port(log_path: PathBuf) -> Result<u16, anyhow::Error> {
+    let p = poll::wait_for_condition(
+        || async {
+            let result =
+                discover_local_listening_port(&log_path, CLICKHOUSE_TIMEOUT)
+                    .await;
+            match result {
+                // Successfully extracted the port, return it.
+                Ok(port) => Ok(port),
+                Err(e) => {
+                    match e {
+                        ClickHouseError::Io(ref inner) => {
+                            if matches!(
+                                inner.kind(),
+                                std::io::ErrorKind::NotFound
+                            ) {
+                                return Err(poll::CondCheckError::NotYet);
+                            }
+                        }
+                        _ => {}
+                    }
+                    Err(poll::CondCheckError::from(e))
+                }
+            }
+        },
+        &Duration::from_millis(500),
+        &CLICKHOUSE_TIMEOUT,
+    )
+    .await
+    .context("waiting to discover ClickHouse port")?;
+    Ok(p)
 }
 
 // Parse the ClickHouse log file at the given path, looking for a line reporting the port number of

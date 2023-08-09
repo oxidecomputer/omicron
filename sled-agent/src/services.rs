@@ -86,7 +86,8 @@ use once_cell::sync::OnceCell;
 use rand::prelude::SliceRandom;
 use rand::SeedableRng;
 use sled_hardware::disk::ZONE_DATASET;
-use sled_hardware::is_gimlet;
+// TODO: Revert to original settings before merging
+// use sled_hardware::is_gimlet;
 use sled_hardware::underlay;
 use sled_hardware::underlay::BOOTSTRAP_PREFIX;
 use sled_hardware::Baseboard;
