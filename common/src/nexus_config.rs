@@ -372,6 +372,8 @@ pub struct PackageConfig {
     pub dendrite: HashMap<SwitchLocation, DpdConfig>,
     /// Background task configuration
     pub background_tasks: BackgroundTaskConfig,
+    /// Default Crucible region allocation strategy
+    pub default_region_allocation_strategy: RegionAllocationStrategy,
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
@@ -594,6 +596,9 @@ mod test {
             dns_external.period_secs_propagation = 7
             dns_external.max_concurrent_server_updates = 8
             external_endpoints.period_secs = 9
+            [default_region_allocation_strategy]
+            type = "random"
+            seed = 0
             "##,
         )
         .unwrap();
@@ -677,6 +682,10 @@ mod test {
                             period_secs: Duration::from_secs(9),
                         }
                     },
+                    default_region_allocation_strategy:
+                        crate::nexus_config::RegionAllocationStrategy::Random {
+                            seed: Some(0)
+                        }
                 },
             }
         );
@@ -724,6 +733,8 @@ mod test {
             dns_external.period_secs_propagation = 7
             dns_external.max_concurrent_server_updates = 8
             external_endpoints.period_secs = 9
+            [default_region_allocation_strategy]
+            type = "random"
             "##,
         )
         .unwrap();
@@ -893,4 +904,31 @@ mod test {
             &serde_json::to_string_pretty(&schema).unwrap(),
         );
     }
+}
+
+/// Defines a strategy for choosing what physical disks to use when allocating
+/// new crucible regions.
+///
+/// NOTE: More strategies can - and should! - be added.
+///
+/// See <https://rfd.shared.oxide.computer/rfd/0205> for a more
+/// complete discussion.
+///
+/// Longer-term, we should consider:
+/// - Storage size + remaining free space
+/// - Sled placement of datasets
+/// - What sort of loads we'd like to create (even split across all disks
+///   may not be preferable, especially if maintenance is expected)
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum RegionAllocationStrategy {
+    /// Choose disks pseudo-randomly. An optional seed may be provided to make
+    /// the ordering deterministic, otherwise the current time in nanoseconds
+    /// will be used. Ordering is based on sorting the output of `md5(UUID of
+    /// candidate dataset + seed)`. The seed does not need to come from a
+    /// cryptographically secure source.
+    Random { seed: Option<u64> },
+
+    /// Like Random, but ensures that each region is allocated on its own sled.
+    RandomWithDistinctSleds { seed: Option<u64> },
 }

@@ -16,7 +16,7 @@ use crate::external_api::params;
 use nexus_db_queries::db::datastore::RegionAllocationStrategy;
 use nexus_db_queries::db::identity::{Asset, Resource};
 use nexus_db_queries::db::lookup::LookupPath;
-use nexus_db_queries::{authn, authz, db};
+use crate::{authn, authz, db};
 use omicron_common::api::external::DiskState;
 use omicron_common::api::external::Error;
 use rand::{rngs::StdRng, RngCore, SeedableRng};
@@ -255,6 +255,9 @@ async fn sdc_alloc_regions(
         &sagactx,
         &params.serialized_authn,
     );
+
+    let strategy = &osagactx.nexus().default_region_allocation_strategy;
+
     let datasets_and_regions = osagactx
         .datastore()
         .region_allocate(
@@ -262,7 +265,7 @@ async fn sdc_alloc_regions(
             volume_id,
             &params.create_params.disk_source,
             params.create_params.size,
-            &RegionAllocationStrategy::Random(None),
+            &strategy,
         )
         .await
         .map_err(ActionError::action_failed)?;
