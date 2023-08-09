@@ -393,7 +393,7 @@ impl RunningZone {
         // executing.
         // unwrap() safety - child.id() returns u32 but pid_t is i32.
         // PID_MAX is 999999 so this will not overflow.
-        let child_pid: pid_t = spawn.child.id().try_into().unwrap();
+        let child_pid: pid_t = spawn.id().try_into().unwrap();
         let contract = zenter::get_contract(child_pid);
 
         // Capture the result, and be sure to clear the template for this

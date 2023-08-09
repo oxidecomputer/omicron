@@ -220,8 +220,8 @@ mod test {
         let executor = FakeExecutor::new(log.clone());
         let mut calls = 0;
         let mut zpool_name = None;
-        executor.set_handler(Box::new(move |cmd| -> Output {
-            let input = Input::from(cmd);
+        executor.set_wait_handler(Box::new(move |child| -> Output {
+            let input = Input::from(child.command());
             assert_eq!(input.program, PFEXEC);
 
             match calls {

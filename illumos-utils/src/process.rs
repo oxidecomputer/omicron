@@ -47,6 +47,9 @@ pub trait Child: Send {
     /// Accesses the stderr of the spawned child, as a Reader.
     fn stderr(&mut self) -> Option<Box<dyn Read + Send>>;
 
+    /// OS-assigned PID identifier for the child
+    fn id(&self) -> u32;
+
     /// Waits for the child to complete, and returns the output.
     fn wait(&mut self) -> Result<Output, ExecutionError>;
 }
@@ -80,6 +83,10 @@ impl Child for SpawnedChild {
             .stderr
             .take()
             .map(|s| Box::new(s) as Box<dyn Read + Send>)
+    }
+
+    fn id(&self) -> u32 {
+        self.child.as_ref().expect("No child").id()
     }
 
     fn wait(&mut self) -> Result<Output, ExecutionError> {
@@ -174,7 +181,7 @@ impl FakeChild {
         })
     }
 
-    fn command(&self) -> &Command {
+    pub fn command(&self) -> &Command {
         &self.command
     }
 }
@@ -190,6 +197,10 @@ impl Child for FakeChild {
 
     fn stderr(&mut self) -> Option<Box<dyn Read + Send>> {
         Some(Box::new(self.stderr.clone()))
+    }
+
+    fn id(&self) -> u32 {
+        self.id.try_into().expect("u32 overflow")
     }
 
     fn wait(&mut self) -> Result<Output, ExecutionError> {
