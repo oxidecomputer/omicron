@@ -26,7 +26,7 @@ use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::Instance;
 use omicron_common::api::external::InstanceCpuCount;
 use omicron_common::api::external::Name;
-use omicron_nexus::app::MIN_DISK_SIZE_BYTES;
+use omicron_common::limits::MIN_DISK_SIZE_BYTES;
 use omicron_nexus::authz;
 use omicron_nexus::db;
 use omicron_nexus::db::identity::Resource;
