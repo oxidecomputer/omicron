@@ -227,7 +227,7 @@ nexus-test-utils-macros = { path = "nexus/test-utils-macros" }
 nexus-test-utils = { path = "nexus/test-utils" }
 nexus-types = { path = "nexus/types" }
 num-integer = "0.1.45"
-num-traits = "0.2.15"
+num-traits = "0.2.16"
 omicron-common = { path = "common" }
 omicron-dev-tools = { path = "dev-tools" }
 omicron-gateway = { path = "gateway" }
