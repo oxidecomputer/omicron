@@ -3392,7 +3392,7 @@ dependencies = [
  "debug-ignore",
  "futures",
  "ipnetwork",
- "itertools",
+ "itertools 0.10.5",
  "libc",
  "macaddr",
  "mockall",

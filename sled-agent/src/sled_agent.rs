@@ -235,6 +235,7 @@ pub struct SledAgent {
 
 impl SledAgent {
     /// Initializes a new [`SledAgent`] object.
+    #[allow(clippy::too_many_arguments)]
     pub async fn new(
         config: &Config,
         log: Logger,
