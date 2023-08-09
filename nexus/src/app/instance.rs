@@ -475,41 +475,43 @@ impl super::Nexus {
         self.db_datastore.instance_refetch(opctx, &authz_instance).await
     }
 
-    /// Make sure the given Instance is running.
+    /// Attempts to start an instance if it is currently stopped.
     pub async fn instance_start(
-        &self,
+        self: &Arc<Self>,
         opctx: &OpContext,
         instance_lookup: &lookup::Instance<'_>,
     ) -> UpdateResult<db::model::Instance> {
-        // TODO(#2824): This needs to be a saga for crash resiliency
-        // purposes (otherwise the instance can be leaked if Nexus crashes
-        // between registration and instance start).
-        let (.., authz_instance, mut db_instance) =
-            instance_lookup.fetch().await?;
+        let (.., authz_instance, db_instance) =
+            instance_lookup.fetch_for(authz::Action::Modify).await?;
 
-        // The instance is not really being "created" (it already exists from
-        // the caller's perspective), but if it does not exist on its sled, the
-        // target sled agent will populate its instance manager with the
-        // contents of this modified record, and that record needs to allow a
-        // transition to the Starting state.
-        //
-        // If the instance does exist on this sled, this initial runtime state
-        // is ignored.
-        let initial_runtime = nexus_db_model::InstanceRuntimeState {
-            state: nexus_db_model::InstanceState(InstanceState::Creating),
-            ..db_instance.runtime_state
+        // If the instance is already starting or running, succeed immediately
+        // for idempotency. If the instance is stopped, try to start it. In all
+        // other cases return an error describing the state conflict.
+        match db_instance.runtime_state.state.0 {
+            InstanceState::Starting | InstanceState::Running => {
+                return Ok(db_instance)
+            }
+            InstanceState::Stopped => {}
+            _ => {
+                return Err(Error::conflict(&format!(
+                    "instance is in state {} but must be {} to be started",
+                    db_instance.runtime_state.state.0,
+                    InstanceState::Stopped
+                )))
+            }
+        }
+
+        let saga_params = sagas::instance_start::Params {
+            serialized_authn: authn::saga::Serialized::for_opctx(opctx),
+            instance: db_instance,
+            ensure_network: true,
         };
-        db_instance.runtime_state = initial_runtime;
-        self.instance_ensure_registered(opctx, &authz_instance, &db_instance)
-            .await?;
 
-        self.instance_request_state(
-            opctx,
-            &authz_instance,
-            &db_instance,
-            InstanceStateRequested::Running,
+        self.execute_saga::<sagas::instance_start::SagaInstanceStart>(
+            saga_params,
         )
         .await?;
+
         self.db_datastore.instance_refetch(opctx, &authz_instance).await
     }
 
@@ -1220,7 +1222,7 @@ impl super::Nexus {
     }
 
     // Switches with uplinks configured and boundary services enabled
-    async fn boundary_switches(
+    pub async fn boundary_switches(
         &self,
         opctx: &OpContext,
     ) -> Result<HashSet<SwitchLocation>, Error> {
