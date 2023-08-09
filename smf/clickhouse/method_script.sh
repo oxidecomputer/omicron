@@ -36,7 +36,7 @@ if [[ -z "$CH_ADDRS" ]]; then
     exit "$SMF_EXIT_ERR_CONFIG"
 fi
 
-declare -a nodes <<< "$CH_ADDRS"
+declare -a nodes=($CH_ADDRS)
 
 for i in "${nodes[@]}"
 do

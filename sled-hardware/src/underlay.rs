@@ -77,19 +77,20 @@ pub fn find_nics(
 pub fn find_chelsio_links(
     config_data_links: &[String; 2],
 ) -> Result<Vec<PhysicalLink>, Error> {
-    if is_gimlet().map_err(Error::SystemDetection)? {
-        Dladm::list_physical().map_err(Error::FindLinks).map(|links| {
-            links
-                .into_iter()
-                .filter(|link| link.0.starts_with(CHELSIO_LINK_PREFIX))
-                .collect()
-        })
-    } else {
+  // TODO: Revert to original settings before merging
+  //  if is_gimlet().map_err(Error::SystemDetection)? {
+  //      Dladm::list_physical().map_err(Error::FindLinks).map(|links| {
+  //          links
+  //              .into_iter()
+  //              .filter(|link| link.0.starts_with(CHELSIO_LINK_PREFIX))
+  //              .collect()
+  //      })
+  //  } else {
         Ok(config_data_links
             .into_iter()
             .map(|name| PhysicalLink(name.to_string()))
             .collect())
-    }
+  //  }
 }
 
 /// Ensure each of the `PhysicalLink`s has a link local IPv6 address in the

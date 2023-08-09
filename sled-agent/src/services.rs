@@ -795,9 +795,12 @@ impl ServiceManager {
     ) -> Result<Vec<(Link, bool)>, Error> {
         let mut links: Vec<(Link, bool)> = Vec::new();
 
-        let is_gimlet = is_gimlet().map_err(|e| {
-            Error::Underlay(underlay::Error::SystemDetection(e))
-        })?;
+        // TODO: Revert to original settings before merging
+        // let is_gimlet = is_gimlet().map_err(|e| {
+        //     Error::Underlay(underlay::Error::SystemDetection(e))
+        // })?;
+
+        let is_gimlet = false;
 
         for svc in &req.services {
             match &svc.details {
@@ -1878,9 +1881,12 @@ impl ServiceManager {
                 ServiceType::Tfport { pkt_source } => {
                     info!(self.inner.log, "Setting up tfport service");
 
-                    let is_gimlet = is_gimlet().map_err(|e| {
-                        Error::Underlay(underlay::Error::SystemDetection(e))
-                    })?;
+                    // TODO: Revert to original settings before merging
+                    // let is_gimlet = is_gimlet().map_err(|e| {
+                    //     Error::Underlay(underlay::Error::SystemDetection(e))
+                    // })?;
+
+                    let is_gimlet = false;
 
                     if is_gimlet {
                         // Collect the prefixes for each techport.
@@ -1989,9 +1995,11 @@ impl ServiceManager {
                     smfh.setprop("config/mode", &mode)?;
                     smfh.setprop("config/admin_host", "::")?;
 
-                    let is_gimlet = is_gimlet().map_err(|e| {
-                        Error::Underlay(underlay::Error::SystemDetection(e))
-                    })?;
+                    // TODO: Revert to original settings before merging
+                    // let is_gimlet = is_gimlet().map_err(|e| {
+                    //     Error::Underlay(underlay::Error::SystemDetection(e))
+                    // })?;
+                    let is_gimlet = false;
 
                     let maghemite_interfaces: Vec<AddrObject> = if is_gimlet {
                         (0..32)
