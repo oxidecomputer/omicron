@@ -352,7 +352,7 @@ mod zenter {
             // Initialize the contract template.
             //
             // Nothing is inherited, we do not allow the contract to be
-            // orphaned, and the only event which is delivered is EMPTY,
+            // orphaned, and the only event which is delivered is EV_EMPTY,
             // indicating that the contract has become empty. These events are
             // consumed by contract_reaper() above.
             //
