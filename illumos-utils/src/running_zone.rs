@@ -243,7 +243,9 @@ mod zenter {
                                 &log,
                                 "Failed to abandon contract {}: {}", ctid, e
                             ),
-                            Ok(_) => debug!(&log, "Abandoned contract {}", ctid),
+                            Ok(_) => {
+                                debug!(&log, "Abandoned contract {}", ctid)
+                            }
                         }
                     }
                     unsafe { ct_event_free(ev) };
