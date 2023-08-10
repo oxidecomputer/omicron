@@ -823,12 +823,14 @@ pub struct TimeSync {
     /// The synchronization state of the sled, true when the system clock
     /// and the NTP clock are in sync (to within a small window).
     pub sync: bool,
-    // These could both be f32, but there is a problem with progenitor/typify
+    /// The NTP reference ID.
+    pub ref_id: u32,
+    /// The NTP reference IP address.
+    pub ip_addr: IpAddr,
+    // This could be f32, but there is a problem with progenitor/typify
     // where, although the f32 correctly becomes "float" (and not "double") in
     // the API spec, that "float" gets converted back to f64 when generating
     // the client.
-    /// The estimated error bound on the frequency.
-    pub skew: f64,
     /// The current offset between the NTP clock and system clock.
     pub correction: f64,
 }

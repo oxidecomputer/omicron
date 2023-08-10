@@ -2418,10 +2418,16 @@
             "type": "number",
             "format": "double"
           },
-          "skew": {
-            "description": "The estimated error bound on the frequency.",
-            "type": "number",
-            "format": "double"
+          "ip_addr": {
+            "description": "The NTP reference IP address.",
+            "type": "string",
+            "format": "ip"
+          },
+          "ref_id": {
+            "description": "The NTP reference ID.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
           },
           "sync": {
             "description": "The synchronization state of the sled, true when the system clock and the NTP clock are in sync (to within a small window).",
@@ -2430,7 +2436,8 @@
         },
         "required": [
           "correction",
-          "skew",
+          "ip_addr",
+          "ref_id",
           "sync"
         ]
       },
