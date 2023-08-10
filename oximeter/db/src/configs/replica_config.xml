@@ -1,3 +1,4 @@
+<!-- This configuration file is used for testing only. -->
 <?xml version="1.0"?>
 <!--
   NOTE: User and query level settings are set up in "users.xml" file.
@@ -36,7 +37,7 @@
          (this protocol is also informally called as "the TCP protocol");
          See also 'tcp_port_secure' for secure connections.
     -->
-    <tcp_port>9000</tcp_port>
+    <tcp_portreplace="true" from_env="CH_TCP_PORT"/>
 
     <!-- Compatibility with MySQL protocol.
          ClickHouse will pretend to be MySQL for applications connecting to this port.
@@ -310,23 +311,26 @@
                 </replica>
                 <replica>
                     <host from_env="CH_REPLICA_HOST_02"/>
-                    <port>9000</port>
+                    <port>9001</port>
                 </replica>
             </shard>
         </oximeter_cluster>
     </remote_servers>
     <zookeeper>
+    <!-- Generally the ports would be the same, but we are installing on 
+    the same server so we need different ports.
+    -->
         <node>
             <host from_env="CH_KEEPER_HOST_01"/>
             <port>9181</port>
         </node>
         <node>
             <host from_env="CH_KEEPER_HOST_02"/>
-            <port>9181</port>
+            <port>9182</port>
         </node>
         <node>
             <host from_env="CH_KEEPER_HOST_03"/>
-            <port>9181</port>
+            <port>9183</port>
         </node>
     </zookeeper>
 

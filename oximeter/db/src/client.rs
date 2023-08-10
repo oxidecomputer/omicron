@@ -656,6 +656,102 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_build_replicated() {
+        let log = slog::Logger::root(slog::Discard, o!());
+
+        // Start all Keeper coordinator nodes
+        let keeper_config = String::from("./configs/keeper_config.xml");
+
+        // Start Keeper 1
+        let k1_port = String::from("9181");
+        let k1_id = String::from("1");
+
+        let mut k1 = ClickHouseInstance::new_keeper(
+            k1_port,
+            k1_id,
+            keeper_config.clone(),
+        )
+        .await
+        .expect("Failed to start ClickHouse keeper 1");
+
+        // Start Keeper 2
+        let k2_port = String::from("9182");
+        let k2_id = String::from("2");
+
+        let mut k2 = ClickHouseInstance::new_keeper(
+            k2_port,
+            k2_id,
+            keeper_config.clone(),
+        )
+        .await
+        .expect("Failed to start ClickHouse keeper 2");
+
+        // Start Keeper 3
+        let k3_port = String::from("9183");
+        let k3_id = String::from("3");
+
+        let mut k3 =
+            ClickHouseInstance::new_keeper(k3_port, k3_id, keeper_config)
+                .await
+                .expect("Failed to start ClickHouse keeper 3");
+
+        // Start all replica nodes
+        let replica_config = String::from("./configs/replica_config.xml");
+
+        // Start Replica 1
+        let r1_port = String::from("8123");
+        let r1_tcp_port = String::from("9000");
+        let r1_name = String::from("oximeter_cluster node 1");
+        let r1_number = String::from("01");
+        let mut db_1 = ClickHouseInstance::new_replicated(
+            r1_port,
+            r1_tcp_port,
+            r1_name,
+            r1_number,
+            replica_config.clone(),
+        )
+        .await
+        .expect("Failed to start ClickHouse node 1");
+        let r1_address = SocketAddr::new("::1".parse().unwrap(), db_1.port());
+
+        // Start Replica 2
+        let r2_port = String::from("8124");
+        let r2_tcp_port = String::from("9001");
+        let r2_name = String::from("oximeter_cluster node 2");
+        let r2_number = String::from("02");
+        let mut db_2 = ClickHouseInstance::new_replicated(
+            r2_port,
+            r2_tcp_port,
+            r2_name,
+            r2_number,
+            replica_config,
+        )
+        .await
+        .expect("Failed to start ClickHouse node 2");
+        let r2_address = SocketAddr::new("::1".parse().unwrap(), db_2.port());
+
+        // Create database in node 1
+        let client_1 = Client::new(r1_address, &log);
+        client_1
+            .init_replicated_db()
+            .await
+            .expect("Failed to initialize timeseries database");
+
+        // Verify database exists in node 2
+        let client_2 = Client::new(r2_address, &log);
+        let sql = String::from("SHOW DATABASES FORMAT JSONEachRow;");
+
+        let result = client_2.execute_with_body(sql).await.unwrap();
+        assert!(result.contains("oximeter"));
+
+        k1.cleanup().await.expect("Failed to cleanup ClickHouse keeper 1");
+        k2.cleanup().await.expect("Failed to cleanup ClickHouse keeper 2");
+        k3.cleanup().await.expect("Failed to cleanup ClickHouse keeper 3");
+        db_1.cleanup().await.expect("Failed to cleanup ClickHouse server 1");
+        db_2.cleanup().await.expect("Failed to cleanup ClickHouse server 2");
+    }
+
+    #[tokio::test]
     async fn test_client_insert() {
         let log = slog::Logger::root(slog::Discard, o!());
 

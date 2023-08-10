@@ -1,3 +1,4 @@
+<!-- This configuration file is used for testing only. -->
 <clickhouse>
 
     <logger>
@@ -31,12 +32,12 @@
             <server>
                 <id from_env="CH_KEEPER_ID_02"/>
                 <hostname from_env="CH_KEEPER_HOST_02"/>
-                <port>9234</port>
+                <port>9235</port>
             </server>
             <server>
                 <id from_env="CH_KEEPER_ID_03"/>
                 <hostname from_env="CH_KEEPER_HOST_03"/>
-                <port>9234</port>
+                <port>9236</port>
             </server>
         </raft_configuration>
     </keeper_server>

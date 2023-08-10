@@ -108,6 +108,7 @@ impl ClickHouseInstance {
     /// Start a new replicated ClickHouse server on the given IPv6 port.
     pub async fn new_replicated(
         port: String,
+        tcp_port: String,
         name: String,
         r_number: String,
         config_path: String,
@@ -137,6 +138,7 @@ impl ClickHouseInstance {
             .env("CH_REPLICA_DISPLAY_NAME", name)
             .env("CH_LISTEN_ADDR", "::1")
             .env("CH_LISTEN_PORT", port)
+            .env("CH_TCP_PORT", tcp_port)
             .env("CH_DATASTORE", data_dir.path())
             .env("CH_TMP_PATH", tmp_path)
             .env("CH_USER_FILES_PATH", user_files_path)
@@ -171,11 +173,11 @@ impl ClickHouseInstance {
         k_id: String,
         config_path: String,
     ) -> Result<Self, anyhow::Error> {
-        // We assume that only 3 keepers will be run, and the ID of the keeper can only 
+        // We assume that only 3 keepers will be run, and the ID of the keeper can only
         // be one of "1", "2" or "3". This is to avoid having to pass the IDs of the
         // other keepers as part of the function's parameters.
         if k_id != "1" || k_id != "2" || k_id != "3" {
-           return Err(ClickHouseError::InvalidKeeperId.into())
+            return Err(ClickHouseError::InvalidKeeperId.into());
         }
         let data_dir = TempDir::new()
             .context("failed to create tempdir for ClickHouse Keeper data")?;
@@ -211,7 +213,10 @@ impl ClickHouseInstance {
             .env("CH_KEEPER_HOST_03", "::1")
             .spawn()
             .with_context(|| {
-                format!("failed to spawn `clickhouse keeper` (with args: {:?})", &args)
+                format!(
+                    "failed to spawn `clickhouse keeper` (with args: {:?})",
+                    &args
+                )
             })?;
 
         let data_path = data_dir.path().to_path_buf();
