@@ -17,6 +17,7 @@ use slog::{error, info, o, warn, Logger};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 #[cfg(target_os = "illumos")]
 use std::sync::OnceLock;
+#[cfg(target_os = "illumos")]
 use std::thread;
 use uuid::Uuid;
 
@@ -164,7 +165,7 @@ pub fn ensure_contract_reaper(log: &Logger) {
 }
 
 #[cfg(not(target_os = "illumos"))]
-pub fn init_contract_reaper(log: &Logger) {
+pub fn ensure_contract_reaper(log: &Logger) {
     info!(log, "Not illumos, skipping contract reaper thread");
 }
 
