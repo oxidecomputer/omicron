@@ -798,7 +798,7 @@ name = "caboose-util"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "hubtools",
+ "hubtools 0.4.1 (git+https://github.com/oxidecomputer/hubtools.git?branch=main)",
 ]
 
 [[package]]
@@ -2754,7 +2754,7 @@ dependencies = [
 [[package]]
 name = "gateway-messages"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=146a687f7413bfe580869bb6017f3bfe8b4710b1#146a687f7413bfe580869bb6017f3bfe8b4710b1"
+source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=a954f3d1a42f56f985b4081ba6bedd0b6db8f330#a954f3d1a42f56f985b4081ba6bedd0b6db8f330"
 dependencies = [
  "bitflags 1.3.2",
  "hubpack 0.1.2",
@@ -2769,7 +2769,7 @@ dependencies = [
 [[package]]
 name = "gateway-sp-comms"
 version = "0.1.1"
-source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=146a687f7413bfe580869bb6017f3bfe8b4710b1#146a687f7413bfe580869bb6017f3bfe8b4710b1"
+source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=a954f3d1a42f56f985b4081ba6bedd0b6db8f330#a954f3d1a42f56f985b4081ba6bedd0b6db8f330"
 dependencies = [
  "async-trait",
  "backoff",
@@ -2778,7 +2778,7 @@ dependencies = [
  "gateway-messages",
  "hex",
  "hubpack 0.1.2",
- "hubtools",
+ "hubtools 0.4.1 (git+https://github.com/oxidecomputer/hubtools.git)",
  "lru-cache",
  "nix 0.26.2 (git+https://github.com/jgallagher/nix?branch=r0.26-illumos)",
  "once_cell",
@@ -3217,13 +3217,31 @@ dependencies = [
 
 [[package]]
 name = "hubtools"
-version = "0.3.0"
-source = "git+https://github.com/oxidecomputer/hubtools.git#8e233e193341a29ef52a23854803f481afe1e838"
+version = "0.4.1"
+source = "git+https://github.com/oxidecomputer/hubtools.git?branch=main#fbd499ceb440b838b9d8f6d9d73d046586bc24b8"
 dependencies = [
  "lpc55_areas",
  "lpc55_sign",
  "object",
- "packed_struct",
+ "path-slash",
+ "rsa",
+ "thiserror",
+ "tlvc",
+ "tlvc-text",
+ "toml 0.7.6",
+ "x509-cert",
+ "zerocopy 0.6.1",
+ "zip",
+]
+
+[[package]]
+name = "hubtools"
+version = "0.4.1"
+source = "git+https://github.com/oxidecomputer/hubtools.git#fbd499ceb440b838b9d8f6d9d73d046586bc24b8"
+dependencies = [
+ "lpc55_areas",
+ "lpc55_sign",
+ "object",
  "path-slash",
  "rsa",
  "thiserror",
@@ -4781,7 +4799,7 @@ dependencies = [
  "semver 1.0.18",
  "serde",
  "serde_derive",
- "serde_human_bytes",
+ "serde_human_bytes 0.1.0 (git+http://github.com/oxidecomputer/serde_human_bytes?branch=main)",
  "serde_json",
  "serde_urlencoded",
  "serde_with",
@@ -4822,7 +4840,7 @@ dependencies = [
  "semver 1.0.18",
  "serde",
  "serde_derive",
- "serde_human_bytes",
+ "serde_human_bytes 0.1.0 (git+http://github.com/oxidecomputer/serde_human_bytes)",
  "serde_json",
  "serde_with",
  "slog",
@@ -4909,7 +4927,7 @@ dependencies = [
  "openapiv3",
  "schemars",
  "serde",
- "serde_human_bytes",
+ "serde_human_bytes 0.1.0 (git+http://github.com/oxidecomputer/serde_human_bytes?branch=main)",
  "serde_json",
  "signal-hook",
  "signal-hook-tokio",
@@ -7441,6 +7459,15 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 1.0.109",
+]
+
+[[package]]
+name = "serde_human_bytes"
+version = "0.1.0"
+source = "git+http://github.com/oxidecomputer/serde_human_bytes?branch=main#0a09794501b6208120528c3b457d5f3a8cb17424"
+dependencies = [
+ "hex",
+ "serde",
 ]
 
 [[package]]
