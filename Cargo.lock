@@ -4339,7 +4339,7 @@ dependencies = [
  "serde_json",
  "sled-agent-client",
  "steno",
- "strum",
+ "strum 0.24.1",
  "thiserror",
  "uuid",
 ]
@@ -4411,7 +4411,7 @@ dependencies = [
  "sled-agent-client",
  "slog",
  "steno",
- "strum",
+ "strum 0.24.1",
  "subprocess",
  "tempfile",
  "term",
@@ -4517,7 +4517,7 @@ dependencies = [
  "serde",
  "serde_json",
  "steno",
- "strum",
+ "strum 0.24.1",
  "uuid",
 ]
 
@@ -4575,11 +4575,11 @@ checksum = "61807f77802ff30975e01f4f071c8ba10c022052f98b3294119f3e615d13e5be"
 
 [[package]]
 name = "nu-ansi-term"
-version = "0.47.0"
+version = "0.49.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1df031e117bca634c262e9bd3173776844b6c17a90b3741c9163663b4385af76"
+checksum = "c073d3c1930d0751774acf49e66653acecb416c3a54c6ec095a9b11caddb5a68"
 dependencies = [
- "windows-sys 0.45.0",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]
@@ -4805,7 +4805,7 @@ dependencies = [
  "serde_with",
  "slog",
  "steno",
- "strum",
+ "strum 0.24.1",
  "test-strategy",
  "thiserror",
  "tokio",
@@ -4845,7 +4845,7 @@ dependencies = [
  "serde_with",
  "slog",
  "steno",
- "strum",
+ "strum 0.24.1",
  "thiserror",
  "tokio",
  "tokio-postgres",
@@ -5043,7 +5043,7 @@ dependencies = [
  "slog-dtrace",
  "slog-term",
  "steno",
- "strum",
+ "strum 0.24.1",
  "subprocess",
  "tempfile",
  "term",
@@ -5083,7 +5083,7 @@ dependencies = [
  "slog-async",
  "slog-term",
  "smf",
- "strum",
+ "strum 0.24.1",
  "tar",
  "tempfile",
  "thiserror",
@@ -6028,7 +6028,7 @@ dependencies = [
  "lalrpop-util",
  "serde",
  "serde_derive",
- "strum_macros",
+ "strum_macros 0.24.3",
  "wasm-bindgen",
 ]
 
@@ -6698,9 +6698,9 @@ dependencies = [
 
 [[package]]
 name = "reedline"
-version = "0.21.0"
+version = "0.22.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a8022fd7e194d238a6af0f558aad44d874640151616f76e2250b8251c902d415"
+checksum = "c2fde955d11817fdcb79d703932fb6b473192cb36b6a92ba21f7f4ac0513374e"
 dependencies = [
  "chrono",
  "crossterm 0.26.1",
@@ -6709,8 +6709,8 @@ dependencies = [
  "nu-ansi-term",
  "serde",
  "strip-ansi-escapes",
- "strum",
- "strum_macros",
+ "strum 0.25.0",
+ "strum_macros 0.25.2",
  "thiserror",
  "unicode-segmentation",
  "unicode-width",
@@ -8236,8 +8236,14 @@ version = "0.24.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "063e6045c0e62079840579a7e47a355ae92f60eb74daaf156fb1e84ba164e63f"
 dependencies = [
- "strum_macros",
+ "strum_macros 0.24.3",
 ]
+
+[[package]]
+name = "strum"
+version = "0.25.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "290d54ea6f91c969195bdbcd7442c8c2a2ba87da8bf60a7ee86a235d4bc1e125"
 
 [[package]]
 name = "strum_macros"
@@ -8250,6 +8256,19 @@ dependencies = [
  "quote",
  "rustversion",
  "syn 1.0.109",
+]
+
+[[package]]
+name = "strum_macros"
+version = "0.25.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ad8d03b598d3d0fff69bf533ee3ef19b8eeb342729596df84bcc7e1f96ec4059"
+dependencies = [
+ "heck 0.4.1",
+ "proc-macro2",
+ "quote",
+ "rustversion",
+ "syn 2.0.28",
 ]
 
 [[package]]
