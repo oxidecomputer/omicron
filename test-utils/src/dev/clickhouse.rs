@@ -47,6 +47,9 @@ pub enum ClickHouseError {
     #[error("Invalid ClickHouse listening address")]
     InvalidAddress,
 
+    #[error("Invalid ClickHouse Keeper ID")]
+    InvalidKeeperId,
+
     #[error("Failed to detect ClickHouse subprocess within timeout")]
     Timeout,
 }
@@ -107,6 +110,7 @@ impl ClickHouseInstance {
         port: String,
         name: String,
         r_number: String,
+        config_path: String,
     ) -> Result<Self, anyhow::Error> {
         let data_dir = TempDir::new()
             .context("failed to create tempdir for ClickHouse data")?;
@@ -118,8 +122,8 @@ impl ClickHouseInstance {
         let format_schemas_path = data_dir.path().join("/format_schemas/");
         let args = vec![
             "server".to_string(),
-            // TODO: Link to specific config
-            // "-c config-file.xml".to_string(),
+            "--config-file".to_string(),
+            format!("{}", config_path),
         ];
 
         let child = tokio::process::Command::new("clickhouse")
@@ -151,6 +155,67 @@ impl ClickHouseInstance {
 
         let data_path = data_dir.path().to_path_buf();
         let port = wait_for_port(log_path).await?;
+
+        Ok(Self {
+            data_dir: Some(data_dir),
+            data_path,
+            port,
+            args,
+            child: Some(child),
+        })
+    }
+
+    /// Start a new ClickHouse keeper on the given IPv6 port.
+    pub async fn new_keeper(
+        port: String,
+        k_id: String,
+        config_path: String,
+    ) -> Result<Self, anyhow::Error> {
+        // We assume that only 3 keepers will be run, and the ID of the keeper can only 
+        // be one of "1", "2" or "3". This is to avoid having to pass the IDs of the
+        // other keepers as part of the function's parameters.
+        if k_id != "1" || k_id != "2" || k_id != "3" {
+           return Err(ClickHouseError::InvalidKeeperId.into())
+        }
+        let data_dir = TempDir::new()
+            .context("failed to create tempdir for ClickHouse Keeper data")?;
+        let log_path = data_dir.path().join("clickhouse-keeper.log");
+        let err_log_path = data_dir.path().join("clickhouse-keeper.err.log");
+        let log_storage_path = data_dir.path().join("/log");
+        let snapshot_storage_path = data_dir.path().join("/snapshots");
+        let args = vec![
+            "keeper".to_string(),
+            "--config-file".to_string(),
+            format!("{}", config_path),
+        ];
+
+        let child = tokio::process::Command::new("clickhouse")
+            .args(&args)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .env("CLICKHOUSE_WATCHDOG_ENABLE", "0")
+            .env("CH_LOG", &log_path)
+            .env("CH_ERROR_LOG", err_log_path)
+            .env("CH_LISTEN_ADDR", "::1")
+            .env("CH_LISTEN_PORT", &port)
+            .env("CH_KEEPER_ID_CURRENT", k_id)
+            .env("CH_DATASTORE", data_dir.path())
+            .env("CH_LOG_STORAGE_PATH", log_storage_path)
+            .env("CH_SNAPSHOT_STORAGE_PATH", snapshot_storage_path)
+            .env("CH_KEEPER_ID_01", "1")
+            .env("CH_KEEPER_ID_02", "2")
+            .env("CH_KEEPER_ID_03", "3")
+            .env("CH_KEEPER_HOST_01", "::1")
+            .env("CH_KEEPER_HOST_02", "::1")
+            .env("CH_KEEPER_HOST_03", "::1")
+            .spawn()
+            .with_context(|| {
+                format!("failed to spawn `clickhouse keeper` (with args: {:?})", &args)
+            })?;
+
+        let data_path = data_dir.path().to_path_buf();
+        let port: u16 = port.parse()?;
 
         Ok(Self {
             data_dir: Some(data_dir),

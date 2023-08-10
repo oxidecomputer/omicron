@@ -438,8 +438,11 @@ pub trait DbWrite {
     /// Initialize a single node telemetry database, creating tables as needed.
     async fn init_single_node_db(&self) -> Result<(), Error>;
 
-    /// Wipe the ClickHouse database entirely.
-    async fn wipe_db(&self) -> Result<(), Error>;
+    /// Wipe the ClickHouse database entirely from a single node set up.
+    async fn wipe_single_node_db(&self) -> Result<(), Error>;
+
+    /// Wipe the ClickHouse database entirely from a replicated set up.
+    async fn wipe_replicated_db(&self) -> Result<(), Error>;
 }
 
 #[async_trait]
@@ -565,10 +568,17 @@ impl DbWrite for Client {
         Ok(())
     }
 
-    /// Wipe the ClickHouse database entirely.
-    async fn wipe_db(&self) -> Result<(), Error> {
+    /// Wipe the ClickHouse database entirely from a single node set up.
+    async fn wipe_single_node_db(&self) -> Result<(), Error> {
         debug!(self.log, "wiping ClickHouse database");
-        let sql = include_str!("./db-wipe.sql").to_string();
+        let sql = include_str!("./db-wipe-single-node.sql").to_string();
+        self.execute(sql).await
+    }
+
+    /// Wipe the ClickHouse database entirely from a replicated set up.
+    async fn wipe_replicated_db(&self) -> Result<(), Error> {
+        debug!(self.log, "wiping ClickHouse database");
+        let sql = include_str!("./db-wipe-single-node.sql").to_string();
         self.execute(sql).await
     }
 }
@@ -641,7 +651,7 @@ mod tests {
             .expect("Failed to start ClickHouse");
         let address = SocketAddr::new("::1".parse().unwrap(), db.port());
 
-        Client::new(address, &log).wipe_db().await.unwrap();
+        Client::new(address, &log).wipe_single_node_db().await.unwrap();
         db.cleanup().await.expect("Failed to cleanup ClickHouse server");
     }
 
