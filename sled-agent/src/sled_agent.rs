@@ -284,6 +284,11 @@ impl SledAgent {
             }
         }
 
+        // Ensure we have a thread that automatically reaps process contracts
+        // when they become empty. See the comments in
+        // illumos-utils/src/running_zone.rs for more detail.
+        illumos_utils::running_zone::ensure_contract_reaper(&parent_log);
+
         let etherstub = Dladm::ensure_etherstub(
             illumos_utils::dladm::UNDERLAY_ETHERSTUB_NAME,
         )
@@ -345,8 +350,6 @@ impl SledAgent {
                 panic!("invalid requested VMM reservoir percentage: {}", sz);
             }
         }
-
-        illumos_utils::running_zone::init_contract_reaper(&log);
 
         let update_config = ConfigUpdates {
             zone_artifact_path: Utf8PathBuf::from("/opt/oxide"),

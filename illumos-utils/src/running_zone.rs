@@ -13,8 +13,11 @@ use crate::zone::{AddressRequest, IPADM, ZONE_PREFIX};
 use camino::{Utf8Path, Utf8PathBuf};
 use ipnetwork::IpNetwork;
 use omicron_common::backoff;
-use slog::{debug, error, info, o, warn, Logger};
+use slog::{error, info, o, warn, Logger};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+#[cfg(target_os = "illumos")]
+use std::sync::OnceLock;
+use std::thread;
 use uuid::Uuid;
 
 #[cfg(any(test, feature = "testing"))]
@@ -149,10 +152,15 @@ pub enum GetZoneError {
 }
 
 #[cfg(target_os = "illumos")]
-pub fn init_contract_reaper(log: &Logger) {
-    info!(log, "Starting contract reaper thread");
-    let log = log.clone();
-    let _ = std::thread::spawn(move || zenter::contract_reaper(&log));
+static REAPER_THREAD: OnceLock<thread::JoinHandle<()>> = OnceLock::new();
+
+#[cfg(target_os = "illumos")]
+pub fn ensure_contract_reaper(log: &Logger) {
+    info!(log, "Ensuring contract reaper thread");
+    REAPER_THREAD.get_or_init(|| {
+        let log = log.new(o!("component" => "ContractReaper"));
+        std::thread::spawn(move || zenter::contract_reaper(log))
+    });
 }
 
 #[cfg(not(target_os = "illumos"))]
@@ -166,12 +174,14 @@ pub fn init_contract_reaper(log: &Logger) {
 mod zenter {
     use libc::ctid_t;
     use libc::zoneid_t;
-    use slog::{error, Logger};
+    use slog::{debug, error, Logger};
     use std::ffi::c_int;
     use std::ffi::c_uint;
     use std::ffi::c_void;
     use std::ffi::{CStr, CString};
     use std::process;
+    use std::thread;
+    use std::time::Duration;
 
     #[allow(non_camel_case_types)]
     type ct_evthdl_t = *mut c_void;
@@ -202,29 +212,57 @@ mod zenter {
     // zone_enter() in order to run commands within non-global zones, and
     // the contracts used for this come from templates that define becoming
     // empty as a critical event.
-    pub fn contract_reaper(log: &Logger) {
+    pub fn contract_reaper(log: Logger) {
         const EVENT_PATH: &[u8] = b"/system/contract/process/pbundle";
         const CT_PR_EV_EMPTY: u64 = 1;
 
         let cpath = CString::new(EVENT_PATH).unwrap();
         let fd = unsafe { libc::open(cpath.as_ptr(), libc::O_RDONLY) };
 
+        if fd < 0 {
+            panic!(
+                "Could not open {:?}: {}",
+                cpath,
+                std::io::Error::last_os_error()
+            );
+        }
+
         loop {
             let mut ev: ct_evthdl_t = std::ptr::null_mut();
             let evp: *mut ct_evthdl_t = &mut ev;
-            if unsafe { ct_event_read_critical(fd, evp) } == 0 {
-                let typ = unsafe { ct_event_get_type(ev) };
-                if typ == CT_PR_EV_EMPTY {
-                    let ctid = unsafe { ct_event_get_ctid(ev) };
-                    match abandon_contract(ctid) {
-                        Err(e) => error!(
-                            log,
-                            "Failed to abandon contract {}: {}", ctid, e
-                        ),
-                        Ok(_) => debug!(log, "Abandoned contract {}", ctid),
+            // The event endpoint was not opened as non-blocking, so
+            // ct_event_read_critical(3CONTRACT) will block until a new
+            // critical event is available on the channel.
+            match unsafe { ct_event_read_critical(fd, evp) } {
+                0 => {
+                    let typ = unsafe { ct_event_get_type(ev) };
+                    if typ == CT_PR_EV_EMPTY {
+                        let ctid = unsafe { ct_event_get_ctid(ev) };
+                        match abandon_contract(ctid) {
+                            Err(e) => error!(
+                                &log,
+                                "Failed to abandon contract {}: {}", ctid, e
+                            ),
+                            Ok(_) => debug!(&log, "Abandoned contract {}", ctid),
+                        }
                     }
+                    unsafe { ct_event_free(ev) };
                 }
-                unsafe { ct_event_free(ev) };
+                err => {
+                    // ct_event_read_critical(3CONTRACT) does not state any
+                    // error values for this function if the file descriptor
+                    // was not opened non-blocking, but inspection of the
+                    // library code shows that various errnos could be returned
+                    // in situations such as failure to allocate memory. In
+                    // those cases, log a message and pause to avoid entering a
+                    // tight loop if the problem persists.
+                    error!(
+                        &log,
+                        "Unexpected response from contract event channel: {}",
+                        std::io::Error::from_raw_os_error(err)
+                    );
+                    thread::sleep(Duration::from_secs(1));
+                }
             }
         }
     }
@@ -311,8 +349,10 @@ mod zenter {
 
             // Initialize the contract template.
             //
-            // No events are delivered, nothing is inherited, and we do not
-            // allow the contract to be orphaned.
+            // Nothing is inherited, we do not allow the contract to be
+            // orphaned, and the only event which is delivered is EMPTY,
+            // indicating that the contract has become empty. These events are
+            // consumed by contract_reaper() above.
             //
             // See illumos sources in `usr/src/cmd/zlogin/zlogin.c` in the
             // implementation of `init_template()` for details.
