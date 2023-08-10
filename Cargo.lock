@@ -2132,7 +2132,7 @@ dependencies = [
 [[package]]
 name = "dropshot"
 version = "0.9.1-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#79c2a988ba7f89aaf4ac57c10b8bb85609ac42df"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#8ef2bd2ed815ec3ce505ff1f006cdf2ac8ad30c7"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -2177,7 +2177,7 @@ dependencies = [
 [[package]]
 name = "dropshot_endpoint"
 version = "0.9.1-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#79c2a988ba7f89aaf4ac57c10b8bb85609ac42df"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#8ef2bd2ed815ec3ce505ff1f006cdf2ac8ad30c7"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -9105,7 +9105,7 @@ version = "1.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "97fee6b57c6a41524a810daee9286c02d7752c4253064d0b05472833a438f675"
 dependencies = [
- "cfg-if 1.0.0",
+ "cfg-if 0.1.10",
  "rand 0.8.5",
  "static_assertions",
 ]
