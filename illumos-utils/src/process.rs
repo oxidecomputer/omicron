@@ -4,6 +4,7 @@
 
 //! A process executor
 
+use async_trait::async_trait;
 use itertools::Itertools;
 use slog::{debug, error, info, Logger};
 use std::collections::VecDeque;
@@ -22,13 +23,13 @@ pub type BoxedExecutor = Arc<dyn Executor>;
 ///
 /// - In production, this is usually simply a [HostExecutor].
 /// - Under test, this can be customized, and a [FakeExecutor] may be used.
+#[async_trait]
 pub trait Executor: Send + Sync {
-    // TODO: Would be nice to have an async variant of this?
-    // - Is that possible?
-    // - Could it be additive?
-    //
-    // XXX: If we don't have that, I think we're regressing for the
-    // zone commands, which were previously async.
+    /// Executes a task, waiting for it to complete, and returning output.
+    async fn execute_async(
+        &self,
+        command: &mut tokio::process::Command,
+    ) -> Result<Output, ExecutionError>;
 
     /// Executes a task, waiting for it to complete, and returning output.
     fn execute(&self, command: &mut Command) -> Result<Output, ExecutionError>;
@@ -500,10 +501,11 @@ impl FakeExecutor {
     pub fn as_executor(self: Arc<Self>) -> BoxedExecutor {
         self
     }
-}
 
-impl Executor for FakeExecutor {
-    fn execute(&self, command: &mut Command) -> Result<Output, ExecutionError> {
+    fn execute_internal(
+        &self,
+        command: &Command,
+    ) -> Result<Output, ExecutionError> {
         let id = self.inner.counter.fetch_add(1, Ordering::SeqCst);
         log_command(&self.inner.log, id, command);
 
@@ -523,6 +525,25 @@ impl Executor for FakeExecutor {
             ));
         }
         Ok(output)
+    }
+}
+
+#[async_trait]
+impl Executor for FakeExecutor {
+    // NOTE: We aren't actually performing any async operations -- it's up to
+    // the caller to control the (synchronous) handlers.
+    //
+    // However, this still provides testability, while letting the "real
+    // executor" make truly async calls while launching processes.
+    async fn execute_async(
+        &self,
+        command: &mut tokio::process::Command,
+    ) -> Result<Output, ExecutionError> {
+        self.execute_internal(command.as_std())
+    }
+
+    fn execute(&self, command: &mut Command) -> Result<Output, ExecutionError> {
+        self.execute_internal(command)
     }
 
     fn spawn(
@@ -549,12 +570,49 @@ impl HostExecutor {
     pub fn as_executor(self: Arc<Self>) -> BoxedExecutor {
         self
     }
-}
 
-impl Executor for HostExecutor {
-    fn execute(&self, command: &mut Command) -> Result<Output, ExecutionError> {
+    fn prepare(&self, command: &Command) -> u64 {
         let id = self.counter.fetch_add(1, Ordering::SeqCst);
         log_command(&self.log, id, command);
+        id
+    }
+
+    fn finalize(
+        &self,
+        command: &Command,
+        id: u64,
+        output: Output,
+    ) -> Result<Output, ExecutionError> {
+        log_output(&self.log, id, &output);
+        if !output.status.success() {
+            return Err(output_to_exec_error(
+                command_to_string(command),
+                &output,
+            ));
+        }
+        Ok(output)
+    }
+}
+
+#[async_trait]
+impl Executor for HostExecutor {
+    async fn execute_async(
+        &self,
+        command: &mut tokio::process::Command,
+    ) -> Result<Output, ExecutionError> {
+        let id = self.prepare(command.as_std());
+        let output = command.output().await.map_err(|err| {
+            error!(self.log, "{id} - Could not start program!");
+            ExecutionError::ExecutionStart {
+                command: Input::from(command.as_std()).to_string(),
+                err,
+            }
+        })?;
+        self.finalize(command.as_std(), id, output)
+    }
+
+    fn execute(&self, command: &mut Command) -> Result<Output, ExecutionError> {
+        let id = self.prepare(command);
         let output = command.output().map_err(|err| {
             error!(self.log, "{id} - Could not start program!");
             ExecutionError::ExecutionStart {
@@ -562,15 +620,7 @@ impl Executor for HostExecutor {
                 err,
             }
         })?;
-        log_output(&self.log, id, &output);
-
-        if !output.status.success() {
-            return Err(output_to_exec_error(
-                command_to_string(&command),
-                &output,
-            ));
-        }
-        Ok(output)
+        self.finalize(command, id, output)
     }
 
     fn spawn(

@@ -349,7 +349,8 @@ impl Zones {
                 ..Default::default()
             });
         }
-        executor.execute(&mut cfg.as_command()).map_err(|err| AdmError {
+        let mut cmd = tokio::process::Command::from(cfg.as_command());
+        executor.execute_async(&mut cmd).await.map_err(|err| AdmError {
             op: Operation::Configure,
             zone: zone_name.to_string(),
             err: Box::new(err),
@@ -357,16 +358,17 @@ impl Zones {
 
         info!(log, "Installing Omicron zone: {}", zone_name);
 
-        executor
-            .execute(&mut zone::Adm::new(zone_name).install_command(&[
+        let mut cmd = tokio::process::Command::from(
+            zone::Adm::new(zone_name).install_command(&[
                 zone_image.as_ref(),
                 "/opt/oxide/overlay.tar.gz".as_ref(),
-            ]))
-            .map_err(|err| AdmError {
-                op: Operation::Install,
-                zone: zone_name.to_string(),
-                err: Box::new(err),
-            })?;
+            ]),
+        );
+        executor.execute_async(&mut cmd).await.map_err(|err| AdmError {
+            op: Operation::Install,
+            zone: zone_name.to_string(),
+            err: Box::new(err),
+        })?;
         Ok(())
     }
 
@@ -375,9 +377,10 @@ impl Zones {
         executor: &BoxedExecutor,
         name: &str,
     ) -> Result<(), AdmError> {
-        let mut cmd = zone::Adm::new(name).boot_command();
+        let mut cmd =
+            tokio::process::Command::from(zone::Adm::new(name).boot_command());
 
-        executor.execute(&mut cmd).map_err(|err| AdmError {
+        executor.execute_async(&mut cmd).await.map_err(|err| AdmError {
             op: Operation::Boot,
             zone: name.to_string(),
             err: Box::new(err),
@@ -397,9 +400,10 @@ impl Zones {
             err,
         };
 
-        let mut cmd = zone::Adm::list_command();
+        let mut cmd = tokio::process::Command::from(zone::Adm::list_command());
         let output = executor
-            .execute(&mut cmd)
+            .execute_async(&mut cmd)
+            .await
             .map_err(|err| handle_err(Box::new(err)))?;
 
         let zones = zone::Adm::parse_list_output(&output)
