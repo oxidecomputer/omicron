@@ -657,10 +657,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_build_replicated() {
+        use std::net::{IpAddr, Ipv4Addr};
+        
         let log = slog::Logger::root(slog::Discard, o!());
 
         // Start all Keeper coordinator nodes
-        let keeper_config = String::from("./configs/keeper_config.xml");
+        let keeper_config = String::from("oximeter/db/src/configs/keeper_config.xml");
 
         // Start Keeper 1
         let k1_port = String::from("9181");
@@ -696,7 +698,9 @@ mod tests {
                 .expect("Failed to start ClickHouse keeper 3");
 
         // Start all replica nodes
-        let replica_config = String::from("./configs/replica_config.xml");
+        let cur_dir = std::env::current_dir().unwrap();
+        let replica_config = cur_dir.as_path().join("src/configs/replica_config.xml");
+//        let replica_config = String::from("oximeter/db/src/configs/replica_config.xml");
 
         // Start Replica 1
         let r1_port = String::from("8123");
@@ -713,6 +717,10 @@ mod tests {
         .await
         .expect("Failed to start ClickHouse node 1");
         let r1_address = SocketAddr::new("::1".parse().unwrap(), db_1.port());
+
+
+              
+
 
         // Start Replica 2
         let r2_port = String::from("8124");

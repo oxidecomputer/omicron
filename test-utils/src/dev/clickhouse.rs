@@ -111,10 +111,35 @@ impl ClickHouseInstance {
         tcp_port: String,
         name: String,
         r_number: String,
-        config_path: String,
+        //config_path: String,
+        config_path: PathBuf,
     ) -> Result<Self, anyhow::Error> {
         let data_dir = TempDir::new()
             .context("failed to create tempdir for ClickHouse data")?;
+
+        // Copy config template to new temporary directory
+     //   let cur_dir = std::env::current_dir()?;
+       // let config_path = cur_dir.as_path().join("clickhouse_configs/replica_config.xml");
+        let con = data_dir.path().join("replica_config.xml");
+
+        // debug
+        println!("config source: {}", config_path.display());
+        println!("config destination: {}", con.display());
+
+        std::fs::copy(&config_path, &con)?;
+
+        assert!(con.exists());
+
+        use tokio::io::AsyncReadExt;
+        
+ //debug
+ let mut file = File::open(&con).await
+ .expect("err File not found");
+ let mut data = String::new();
+file.read_to_string(&mut data).await
+ .expect("Error while reading file");
+println!("{}", data); 
+
         let log_path = data_dir.path().join("clickhouse-server.log");
         let err_log_path = data_dir.path().join("clickhouse-server.errlog");
         let tmp_path = data_dir.path().join("/tmp/");
@@ -124,20 +149,21 @@ impl ClickHouseInstance {
         let args = vec![
             "server".to_string(),
             "--config-file".to_string(),
-            format!("{}", config_path),
+            //format!("{}", config_path),
+            format!("{}", con.display()),
         ];
 
         let child = tokio::process::Command::new("clickhouse")
             .args(&args)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
+        //    .stdin(Stdio::null())
+          //  .stdout(Stdio::null())
+        //    .stderr(Stdio::null())
             .env("CLICKHOUSE_WATCHDOG_ENABLE", "0")
             .env("CH_LOG", &log_path)
             .env("CH_ERROR_LOG", err_log_path)
             .env("CH_REPLICA_DISPLAY_NAME", name)
             .env("CH_LISTEN_ADDR", "::1")
-            .env("CH_LISTEN_PORT", port)
+            .env("CH_LISTEN_PORT", port.clone())
             .env("CH_TCP_PORT", tcp_port)
             .env("CH_DATASTORE", data_dir.path())
             .env("CH_TMP_PATH", tmp_path)
@@ -155,8 +181,19 @@ impl ClickHouseInstance {
                 format!("failed to spawn `clickhouse` (with args: {:?})", &args)
             })?;
 
+         println!("{}", log_path.display());
+        // println!("config path: {}", config_path);
+
+        //debugging
+    //    let srcdir = PathBuf::from(config_path);
+      //  println!("{:?}", std::fs::canonicalize(&srcdir));
+
+
+
+
         let data_path = data_dir.path().to_path_buf();
-        let port = wait_for_port(log_path).await?;
+      //  let port = wait_for_port(log_path).await?;
+      let port: u16 = port.parse()?;
 
         Ok(Self {
             data_dir: Some(data_dir),
@@ -176,7 +213,7 @@ impl ClickHouseInstance {
         // We assume that only 3 keepers will be run, and the ID of the keeper can only
         // be one of "1", "2" or "3". This is to avoid having to pass the IDs of the
         // other keepers as part of the function's parameters.
-        if k_id != "1" || k_id != "2" || k_id != "3" {
+        if !["1", "2", "3"].contains(&k_id.as_str()) {
             return Err(ClickHouseError::InvalidKeeperId.into());
         }
         let data_dir = TempDir::new()
