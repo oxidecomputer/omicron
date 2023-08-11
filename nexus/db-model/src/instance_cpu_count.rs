@@ -47,6 +47,6 @@ where
 
 impl From<InstanceCpuCount> for sled_agent_client::types::InstanceCpuCount {
     fn from(i: InstanceCpuCount) -> Self {
-        Self(i.0 .0)
+        Self((&i.0).try_into().unwrap())
     }
 }

@@ -64,7 +64,7 @@ impl From<omicron_common::api::external::InstanceCpuCount>
     for types::InstanceCpuCount
 {
     fn from(s: omicron_common::api::external::InstanceCpuCount) -> Self {
-        Self(s.0)
+        Self(s.0.try_into().unwrap())
     }
 }
 
@@ -125,7 +125,7 @@ impl From<types::InstanceCpuCount>
     for omicron_common::api::external::InstanceCpuCount
 {
     fn from(s: types::InstanceCpuCount) -> Self {
-        Self(s.0)
+        Self(s.0.try_into().unwrap())
     }
 }
 
