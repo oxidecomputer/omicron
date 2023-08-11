@@ -451,7 +451,12 @@ impl ServiceInner {
         );
 
         let ts = client.timesync_get().await?.into_inner();
-        Ok(TimeSync { sync: ts.sync, skew: ts.skew, correction: ts.correction })
+        Ok(TimeSync {
+            sync: ts.sync,
+            ref_id: ts.ref_id,
+            ip_addr: ts.ip_addr,
+            correction: ts.correction,
+        })
     }
 
     async fn wait_for_timesync(
