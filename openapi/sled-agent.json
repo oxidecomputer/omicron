@@ -1344,7 +1344,8 @@
         "description": "The number of CPUs in an Instance",
         "type": "integer",
         "format": "uint16",
-        "minimum": 0
+        "minimum": 1,
+        "maximum": 64
       },
       "InstanceEnsureBody": {
         "description": "The body of a request to ensure that an instance is known to a sled agent.",
