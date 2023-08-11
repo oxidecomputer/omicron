@@ -9631,7 +9631,11 @@
             "type": "string"
           },
           "memory": {
-            "$ref": "#/components/schemas/ByteCount"
+            "description": "The amount of memory to allocate to the instance, in bytes.\n\nMust be between 1 and 256 GiB.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 1073741824,
+            "maximum": 274877906944
           },
           "name": {
             "$ref": "#/components/schemas/Name"

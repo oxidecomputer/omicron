@@ -8,20 +8,23 @@
 use crate::external_api::shared;
 use base64::Engine;
 use chrono::{DateTime, Utc};
-use omicron_common::api::external::{
-    AddressLotKind, ByteCount, IdentityMetadataCreateParams,
-    IdentityMetadataUpdateParams, InstanceCpuCount, IpNet, Ipv4Net, Ipv6Net,
-    Name, NameOrId, PaginationOrder, RouteDestination, RouteTarget,
-    SemverVersion,
+use omicron_common::{
+    api::external::{
+        AddressLotKind, ByteCount, IdentityMetadataCreateParams,
+        IdentityMetadataUpdateParams, InstanceCpuCount, IpNet, Ipv4Net,
+        Ipv6Net, Name, NameOrId, PaginationOrder, RouteDestination,
+        RouteTarget, SemverVersion,
+    },
+    limits::{MAX_MEMORY_BYTES_PER_INSTANCE, MIN_MEMORY_BYTES_PER_INSTANCE},
 };
 use schemars::JsonSchema;
 use serde::{
     de::{self, Visitor},
     Deserialize, Deserializer, Serialize, Serializer,
 };
-use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::collections::HashMap;
+use std::{char::MAX, collections::BTreeMap};
 use std::{net::IpAddr, str::FromStr};
 use uuid::Uuid;
 
@@ -816,6 +819,7 @@ pub struct InstanceCreate {
     #[serde(flatten)]
     pub identity: IdentityMetadataCreateParams,
     pub ncpus: InstanceCpuCount,
+    #[schemars(schema_with = "memory_limits")]
     pub memory: ByteCount,
     pub hostname: String, // TODO-cleanup different type?
 
@@ -857,6 +861,22 @@ pub struct InstanceCreate {
 #[inline]
 fn bool_true() -> bool {
     true
+}
+
+fn memory_limits(
+    gen: &mut schemars::gen::SchemaGenerator,
+) -> schemars::schema::Schema {
+    let mut schema: schemars::schema::SchemaObject =
+        <ByteCount>::json_schema(gen).into();
+    let min_mem = MIN_MEMORY_BYTES_PER_INSTANCE / (1 << 30);
+    let max_mem = MAX_MEMORY_BYTES_PER_INSTANCE / (1 << 30);
+    schema.metadata().description = Some(
+        format!("The amount of memory to allocate to the instance, in bytes.\n\nMust be between {min_mem} and {max_mem} GiB.")
+            .to_string(),
+    );
+    schema.number().minimum = Some(MIN_MEMORY_BYTES_PER_INSTANCE as f64);
+    schema.number().maximum = Some(MAX_MEMORY_BYTES_PER_INSTANCE as f64);
+    schema.into()
 }
 
 // If you change this, also update the error message in
