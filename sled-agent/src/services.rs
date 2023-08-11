@@ -2971,19 +2971,19 @@ mod test {
             Output::success(),
         );
         handler.expect(
-            Input::shell(format!("echo /usr/sbin/svccfg -s svc:/oxide/oximeter setprop config/address=[::1]:12223")),
+            Input::shell("echo /usr/sbin/svccfg -s svc:/oxide/oximeter setprop config/address=[::1]:12223"),
             Output::success(),
         );
         handler.expect(
-            Input::shell(format!(
-                "echo /usr/sbin/svccfg -s svc:/oxide/oximeter:default refresh"
-            )),
+            Input::shell(
+                "echo /usr/sbin/svccfg -s svc:/oxide/oximeter:default refresh",
+            ),
             Output::success(),
         );
         handler.expect(
-            Input::shell(format!(
-                "echo /usr/sbin/svcadm enable -t svc:/oxide/oximeter:default"
-            )),
+            Input::shell(
+                "echo /usr/sbin/svcadm enable -t svc:/oxide/oximeter:default",
+            ),
             Output::success(),
         );
     }
