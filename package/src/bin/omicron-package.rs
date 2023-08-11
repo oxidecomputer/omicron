@@ -587,12 +587,12 @@ async fn do_install(
     do_activate(config, install_dir)
 }
 
-async fn uninstall_all_omicron_zones() -> Result<()> {
+async fn uninstall_all_omicron_zones(executor: &BoxedExecutor) -> Result<()> {
     const CONCURRENCY_CAP: usize = 32;
-    futures::stream::iter(zone::Zones::get().await?)
+    futures::stream::iter(zone::Zones::get(executor).await?)
         .map(Ok::<_, anyhow::Error>)
         .try_for_each_concurrent(CONCURRENCY_CAP, |zone| async move {
-            zone::Zones::halt_and_remove(zone.name()).await?;
+            zone::Zones::halt_and_remove(executor, zone.name()).await?;
             Ok(())
         })
         .await?;
@@ -692,7 +692,7 @@ fn remove_all_except<P: AsRef<Path>>(
 async fn do_deactivate(config: &Config) -> Result<()> {
     let executor = HostExecutor::new(config.log.clone()).as_executor();
     info!(&config.log, "Removing all Omicron zones");
-    uninstall_all_omicron_zones().await?;
+    uninstall_all_omicron_zones(&executor).await?;
     info!(config.log, "Uninstalling all packages");
     uninstall_all_packages(config);
     info!(config.log, "Removing networking resources");

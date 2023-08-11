@@ -603,7 +603,7 @@ impl DumpSetupWorker {
         // its 'sync' and 'async' features simultaneously :(
         let rt =
             tokio::runtime::Runtime::new().map_err(ArchiveLogsError::Tokio)?;
-        let oxz_zones = rt.block_on(Zones::get())?;
+        let oxz_zones = rt.block_on(Zones::get(&self.executor))?;
         self.archive_logs_inner(
             debug_dir,
             PathBuf::from("/var/svc/log"),

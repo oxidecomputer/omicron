@@ -2167,7 +2167,7 @@ impl ServiceManager {
             let name = zone.zone_name();
             if existing_zones.contains_key(&name) {
                 // Make sure the zone actually exists in the right state too
-                match Zones::find(&name).await {
+                match Zones::find(&self.inner.executor, &name).await {
                     Ok(Some(zone)) if zone.state() == zone::State::Running => {
                         info!(log, "skipping running zone"; "zone" => &name);
                         continue;
@@ -2859,9 +2859,8 @@ mod test {
             Etherstub, BOOTSTRAP_ETHERSTUB_NAME, UNDERLAY_ETHERSTUB_NAME,
             UNDERLAY_ETHERSTUB_VNIC_NAME,
         },
-        process::FakeExecutor,
-        svc,
-        zone::MockZones,
+        process::{FakeExecutor, Input, Output, OutputExt, StaticHandler},
+        zone::{ZONEADM, ZONECFG},
     };
     use key_manager::{
         SecretRetriever, SecretRetrieverError, SecretState, VersionedIkm,
@@ -2876,55 +2875,120 @@ mod test {
 
     const EXPECTED_ZONE_NAME_PREFIX: &str = "oxz_oximeter";
 
-    // Returns the expectations for a new service to be created.
-    fn expect_new_service() -> Vec<Box<dyn std::any::Any>> {
-        // Install the Omicron Zone
-        let install_ctx = MockZones::install_omicron_zone_context();
-        install_ctx.expect().return_once(|_, _, name, _, _, _, _, _, _| {
-            assert!(name.starts_with(EXPECTED_ZONE_NAME_PREFIX));
-            Ok(())
-        });
+    // Generate a static executor handler with the expected invocations (and
+    // responses) when generating a new service.
+    fn expect_new_service(
+        handler: &mut StaticHandler,
+        config: &TestConfig,
+        zone_id: Uuid,
+        u2_mountpoint: &Utf8Path,
+    ) {
+        handler.expect(
+            Input::shell(format!("{PFEXEC} /usr/sbin/dladm create-vnic -t -l underlay_stub0 -p mtu=9000 oxControlService0")),
+            Output::success()
+        );
+        handler.expect(
+            Input::shell(format!("{PFEXEC} /usr/sbin/dladm set-linkprop -t -p mtu=9000 oxControlService0")),
+            Output::success()
+        );
 
-        // Boot the zone.
-        let boot_ctx = MockZones::boot_context();
-        boot_ctx.expect().return_once(|name| {
-            assert!(name.starts_with(EXPECTED_ZONE_NAME_PREFIX));
-            Ok(())
-        });
+        handler.expect(
+            Input::shell(format!("{PFEXEC} {ZONEADM} list -cip")),
+            Output::success().set_stdout("0:global:running:/::ipkg:shared"),
+        );
 
-        // After calling `MockZones::boot`, `RunningZone::boot` will then look
-        // up the zone ID for the booted zone. This goes through
-        // `MockZone::id` to find the zone and get its ID.
-        let id_ctx = MockZones::id_context();
-        id_ctx.expect().return_once(|name| {
-            assert!(name.starts_with(EXPECTED_ZONE_NAME_PREFIX));
-            Ok(Some(1))
-        });
+        let zone_name = format!("{EXPECTED_ZONE_NAME_PREFIX}_{zone_id}");
 
-        // Ensure the address exists
-        let ensure_address_ctx = MockZones::ensure_address_context();
-        ensure_address_ctx.expect().return_once(|_, _, _, _| {
-            Ok(ipnetwork::IpNetwork::new(IpAddr::V6(Ipv6Addr::LOCALHOST), 64)
-                .unwrap())
-        });
+        let zonepath = format!("{u2_mountpoint}/{zone_name}");
+        handler.expect(
+            Input::shell(format!(
+                "{PFEXEC} {ZONECFG} -z {zone_name} \
+                    create -F -b ; \
+                    set brand=omicron1 ; \
+                    set zonepath={zonepath} ; \
+                    set autoboot=false ; \
+                    set ip-type=exclusive ; \
+                    add net ; \
+                    set physical=oxControlService0 ; \
+                    end"
+            )),
+            Output::success(),
+        );
 
-        // Wait for the networking service.
-        let wait_ctx = svc::wait_for_service_context();
-        wait_ctx.expect().return_once(|_, _| Ok(()));
+        let zone_image =
+            format!("{}/oximeter.tar.gz", config.config_dir.path());
+        handler.expect(
+            Input::shell(format!(
+                "{PFEXEC} {ZONEADM} -z {zone_name} \
+                    install {zone_image} /opt/oxide/overlay.tar.gz"
+            )),
+            Output::success(),
+        );
 
-        vec![
-            Box::new(install_ctx),
-            Box::new(boot_ctx),
-            Box::new(id_ctx),
-            Box::new(ensure_address_ctx),
-            Box::new(wait_ctx),
-        ]
+        handler.expect(
+            Input::shell(format!("{PFEXEC} {ZONEADM} -z {zone_name} boot")),
+            Output::success(),
+        );
+
+        handler.expect(
+            Input::shell(
+                format!("{PFEXEC} /usr/bin/svcprop -t -z {zone_name} -p restarter/state svc:/milestone/single-user:default")
+            ),
+            Output::success().set_stdout("restarter/state astring online"),
+        );
+
+        handler.expect(
+            Input::shell(format!("{PFEXEC} {ZONEADM} list -cip")),
+            Output::success().set_stdout(
+                format!("0:global:running:/::ipkg:shared\n1:{zone_name}:running:{zonepath}::omicron1:excl")
+            )
+        );
+
+        // TODO: The "echo" is a linux-only hack for commands which would
+        // typically run within a zone.
+        handler.expect(
+            Input::shell("echo /usr/sbin/ipadm create-if -t oxControlService0"),
+            Output::success(),
+        );
+        handler.expect(
+            Input::shell("echo /usr/sbin/ipadm set-ifprop -t -p mtu=9000 -m ipv4 oxControlService0"),
+            Output::success(),
+        );
+        handler.expect(
+            Input::shell("echo /usr/sbin/ipadm set-ifprop -t -p mtu=9000 -m ipv6 oxControlService0"),
+            Output::success(),
+        );
+        handler.expect(
+            Input::shell("echo /usr/sbin/route add -inet6 default -inet6 ::1"),
+            Output::success(),
+        );
+        handler.expect(
+            Input::shell("echo /usr/sbin/svccfg import /var/svc/manifest/site/oximeter/manifest.xml"),
+            Output::success(),
+        );
+        handler.expect(
+            Input::shell(format!("echo /usr/sbin/svccfg -s svc:/oxide/oximeter setprop config/id={zone_id}")),
+            Output::success(),
+        );
+        handler.expect(
+            Input::shell(format!("echo /usr/sbin/svccfg -s svc:/oxide/oximeter setprop config/address=[::1]:12223")),
+            Output::success(),
+        );
+        handler.expect(
+            Input::shell(format!(
+                "echo /usr/sbin/svccfg -s svc:/oxide/oximeter:default refresh"
+            )),
+            Output::success(),
+        );
+        handler.expect(
+            Input::shell(format!(
+                "echo /usr/sbin/svcadm enable -t svc:/oxide/oximeter:default"
+            )),
+            Output::success(),
+        );
     }
 
-    // Prepare to call "ensure" for a new service, then actually call "ensure".
     async fn ensure_new_service(mgr: &ServiceManager, id: Uuid) {
-        let _expectations = expect_new_service();
-
         mgr.ensure_all_services_persistent(ServiceEnsureBody {
             services: vec![ServiceZoneRequest {
                 id,
@@ -2948,8 +3012,6 @@ mod test {
         .unwrap();
     }
 
-    // Prepare to call "ensure" for a service which already exists. We should
-    // return the service without actually installing a new zone.
     async fn ensure_existing_service(mgr: &ServiceManager, id: Uuid) {
         mgr.ensure_all_services_persistent(ServiceEnsureBody {
             services: vec![ServiceZoneRequest {
@@ -2972,20 +3034,6 @@ mod test {
         })
         .await
         .unwrap();
-    }
-
-    // Prepare to drop the service manager.
-    //
-    // This will shut down all allocated zones, and delete their
-    // associated VNICs.
-    fn drop_service_manager(mgr: ServiceManager) {
-        let halt_ctx = MockZones::halt_and_remove_logged_context();
-        halt_ctx.expect().returning(|_, name| {
-            assert!(name.starts_with(EXPECTED_ZONE_NAME_PREFIX));
-            Ok(())
-        });
-        // Explicitly drop the service manager
-        drop(mgr);
     }
 
     struct TestConfig {
@@ -3046,13 +3094,23 @@ mod test {
     }
 
     #[tokio::test]
-    #[serial_test::serial]
     async fn test_ensure_service() {
         let logctx =
             omicron_test_utils::dev::test_setup_log("test_ensure_service");
         let log = logctx.log.clone();
         let test_config = TestConfig::new().await;
-        let executor = FakeExecutor::new(log.clone()).as_executor();
+
+        let storage = StorageResources::new_for_test();
+        let u2_mountpoints = storage.all_u2_mountpoints(ZONE_DATASET).await;
+        assert_eq!(u2_mountpoints.len(), 1);
+        let u2_mountpoint = &u2_mountpoints[0];
+
+        let executor = FakeExecutor::new(log.clone());
+        let id = Uuid::new_v4();
+        let mut handler = StaticHandler::new();
+        expect_new_service(&mut handler, &test_config, id, &u2_mountpoint);
+        executor.set_static_handler(handler);
+        let executor = executor.as_executor();
 
         let mgr = ServiceManager::new(
             log.clone(),
@@ -3066,7 +3124,7 @@ mod test {
             SidecarRevision::Physical("rev-test".to_string()),
             SWITCH_ZONE_BOOTSTRAP_IP,
             vec![],
-            StorageResources::new_for_test(),
+            storage,
         )
         .await
         .unwrap();
@@ -3086,22 +3144,31 @@ mod test {
         )
         .unwrap();
 
-        let id = Uuid::new_v4();
         ensure_new_service(&mgr, id).await;
-        drop_service_manager(mgr);
+        drop(mgr);
 
         logctx.cleanup_successful();
     }
 
     #[tokio::test]
-    #[serial_test::serial]
     async fn test_ensure_service_which_already_exists() {
         let logctx = omicron_test_utils::dev::test_setup_log(
             "test_ensure_service_which_already_exists",
         );
         let log = logctx.log.clone();
         let test_config = TestConfig::new().await;
-        let executor = FakeExecutor::new(log.clone()).as_executor();
+
+        let storage = StorageResources::new_for_test();
+        let u2_mountpoints = storage.all_u2_mountpoints(ZONE_DATASET).await;
+        assert_eq!(u2_mountpoints.len(), 1);
+        let u2_mountpoint = &u2_mountpoints[0];
+
+        let executor = FakeExecutor::new(log.clone());
+        let id = Uuid::new_v4();
+        let mut handler = StaticHandler::new();
+        expect_new_service(&mut handler, &test_config, id, &u2_mountpoint);
+        executor.set_static_handler(handler);
+        let executor = executor.as_executor();
 
         let mgr = ServiceManager::new(
             log.clone(),
@@ -3115,7 +3182,7 @@ mod test {
             SidecarRevision::Physical("rev-test".to_string()),
             SWITCH_ZONE_BOOTSTRAP_IP,
             vec![],
-            StorageResources::new_for_test(),
+            storage,
         )
         .await
         .unwrap();
@@ -3135,23 +3202,32 @@ mod test {
         )
         .unwrap();
 
-        let id = Uuid::new_v4();
         ensure_new_service(&mgr, id).await;
         ensure_existing_service(&mgr, id).await;
-        drop_service_manager(mgr);
+        drop(mgr);
 
         logctx.cleanup_successful();
     }
 
     #[tokio::test]
-    #[serial_test::serial]
     async fn test_services_are_recreated_on_reboot() {
         let logctx = omicron_test_utils::dev::test_setup_log(
             "test_services_are_recreated_on_reboot",
         );
         let log = logctx.log.clone();
         let test_config = TestConfig::new().await;
-        let executor = FakeExecutor::new(log.clone()).as_executor();
+
+        let storage = StorageResources::new_for_test();
+        let u2_mountpoints = storage.all_u2_mountpoints(ZONE_DATASET).await;
+        assert_eq!(u2_mountpoints.len(), 1);
+        let u2_mountpoint = &u2_mountpoints[0];
+
+        let executor = FakeExecutor::new(log.clone());
+        let id = Uuid::new_v4();
+        let mut handler = StaticHandler::new();
+        expect_new_service(&mut handler, &test_config, id, &u2_mountpoint);
+        executor.set_static_handler(handler);
+        let executor = executor.as_executor();
 
         // First, spin up a ServiceManager, create a new service, and tear it
         // down.
@@ -3167,7 +3243,7 @@ mod test {
             SidecarRevision::Physical("rev-test".to_string()),
             SWITCH_ZONE_BOOTSTRAP_IP,
             vec![],
-            StorageResources::new_for_test(),
+            storage.clone(),
         )
         .await
         .unwrap();
@@ -3187,13 +3263,32 @@ mod test {
         )
         .unwrap();
 
-        let id = Uuid::new_v4();
         ensure_new_service(&mgr, id).await;
-        drop_service_manager(mgr);
+        drop(mgr);
 
         // Before we re-create the service manager - notably, using the same
         // config file! - expect that a service gets initialized.
-        let _expectations = expect_new_service();
+        let executor = FakeExecutor::new(log.clone());
+        let mut handler = StaticHandler::new();
+
+        handler.expect_dynamic(Box::new(|input| -> Output {
+            assert_eq!(input.program, PFEXEC);
+            assert_eq!(input.args[0], "/usr/platform/oxide/bin/tmpx");
+            // input.args[1] is the current time.
+            assert_eq!(input.args[2], "/var/adm/utmpx");
+            Output::success()
+        }));
+        handler.expect_dynamic(Box::new(|input| -> Output {
+            assert_eq!(input.program, PFEXEC);
+            assert_eq!(input.args[0], "/usr/platform/oxide/bin/tmpx");
+            // input.args[1] is the current time.
+            assert_eq!(input.args[2], "/var/adm/wtmpx");
+            Output::success()
+        }));
+        expect_new_service(&mut handler, &test_config, id, &u2_mountpoint);
+        executor.set_static_handler(handler);
+        let executor = executor.as_executor();
+
         let mgr = ServiceManager::new(
             log.clone(),
             &executor,
@@ -3206,7 +3301,7 @@ mod test {
             SidecarRevision::Physical("rev-test".to_string()),
             SWITCH_ZONE_BOOTSTRAP_IP,
             vec![],
-            StorageResources::new_for_test(),
+            storage,
         )
         .await
         .unwrap();
@@ -3226,20 +3321,31 @@ mod test {
         )
         .unwrap();
 
-        drop_service_manager(mgr);
+        mgr.load_services().await.expect("Failed to load services");
 
+        drop(mgr);
         logctx.cleanup_successful();
     }
 
     #[tokio::test]
-    #[serial_test::serial]
     async fn test_services_do_not_persist_without_config() {
         let logctx = omicron_test_utils::dev::test_setup_log(
             "test_services_do_not_persist_without_config",
         );
         let log = logctx.log.clone();
         let test_config = TestConfig::new().await;
-        let executor = FakeExecutor::new(log.clone()).as_executor();
+
+        let storage = StorageResources::new_for_test();
+        let u2_mountpoints = storage.all_u2_mountpoints(ZONE_DATASET).await;
+        assert_eq!(u2_mountpoints.len(), 1);
+        let u2_mountpoint = &u2_mountpoints[0];
+
+        let executor = FakeExecutor::new(log.clone());
+        let id = Uuid::new_v4();
+        let mut handler = StaticHandler::new();
+        expect_new_service(&mut handler, &test_config, id, &u2_mountpoint);
+        executor.set_static_handler(handler);
+        let executor = executor.as_executor();
 
         // First, spin up a ServiceManager, create a new service, and tear it
         // down.
@@ -3255,7 +3361,7 @@ mod test {
             SidecarRevision::Physical("rev-test".to_string()),
             SWITCH_ZONE_BOOTSTRAP_IP,
             vec![],
-            StorageResources::new_for_test(),
+            storage.clone(),
         )
         .await
         .unwrap();
@@ -3275,9 +3381,8 @@ mod test {
         )
         .unwrap();
 
-        let id = Uuid::new_v4();
         ensure_new_service(&mgr, id).await;
-        drop_service_manager(mgr);
+        drop(mgr);
 
         // Next, delete the ledger. This means the service we just created will
         // not be remembered on the next initialization.
@@ -3299,7 +3404,7 @@ mod test {
             SidecarRevision::Physical("rev-test".to_string()),
             SWITCH_ZONE_BOOTSTRAP_IP,
             vec![],
-            StorageResources::new_for_test(),
+            storage,
         )
         .await
         .unwrap();
@@ -3319,7 +3424,7 @@ mod test {
         )
         .unwrap();
 
-        drop_service_manager(mgr);
+        drop(mgr);
 
         logctx.cleanup_successful();
     }

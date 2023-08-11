@@ -30,6 +30,4 @@ illumos-devinfo = { git = "https://github.com/oxidecomputer/illumos-devinfo", br
 libefi-illumos = { git = "https://github.com/oxidecomputer/libefi-illumos", branch = "master" }
 
 [dev-dependencies]
-illumos-utils = { workspace = true, features = ["testing"] }
 omicron-test-utils.workspace = true
-serial_test.workspace = true

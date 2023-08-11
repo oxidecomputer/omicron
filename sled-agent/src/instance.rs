@@ -577,7 +577,9 @@ impl InstanceInner {
         // `RunningZone::stop` in case we're called between creating the
         // zone and assigning `running_state`.
         warn!(self.log, "Halting and removing zone: {}", zname);
-        Zones::halt_and_remove_logged(&self.log, &zname).await.unwrap();
+        Zones::halt_and_remove_logged(&self.executor, &self.log, &zname)
+            .await
+            .unwrap();
 
         // Remove ourselves from the instance manager's map of instances.
         self.instance_ticket.terminate();
@@ -983,7 +985,7 @@ impl Instance {
         // but it helps distinguish "online in SMF" from "responding to HTTP
         // requests".
         let fmri = fmri_name();
-        wait_for_service(Some(&zname), &fmri)
+        wait_for_service(&inner.executor, Some(&zname), &fmri)
             .await
             .map_err(|_| Error::Timeout(fmri.to_string()))?;
         info!(inner.log, "Propolis SMF service is online");

@@ -9,7 +9,7 @@ use slog::{debug, error, info, Logger};
 use std::collections::VecDeque;
 use std::io::{Read, Write};
 use std::os::unix::process::ExitStatusExt;
-use std::process::{Command, ExitStatus, Output, Stdio};
+use std::process::{Command, ExitStatus, Stdio};
 use std::str::from_utf8;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -23,6 +23,13 @@ pub type BoxedExecutor = Arc<dyn Executor>;
 /// - In production, this is usually simply a [HostExecutor].
 /// - Under test, this can be customized, and a [FakeExecutor] may be used.
 pub trait Executor: Send + Sync {
+    // TODO: Would be nice to have an async variant of this?
+    // - Is that possible?
+    // - Could it be additive?
+    //
+    // XXX: If we don't have that, I think we're regressing for the
+    // zone commands, which were previously async.
+
     /// Executes a task, waiting for it to complete, and returning output.
     fn execute(&self, command: &mut Command) -> Result<Output, ExecutionError>;
 
@@ -322,6 +329,8 @@ impl From<&Command> for Input {
     }
 }
 
+pub type Output = std::process::Output;
+
 /// Convenience functions for usage in tests, to perform common operations
 /// with minimal boilerplate.
 pub trait OutputExt: Sized {
@@ -359,12 +368,19 @@ impl OutputExt for Output {
     }
 }
 
+type DynamicHandler = Box<dyn FnMut(Input) -> Output + Send + Sync>;
+
+enum HandledCommand {
+    Static { input: Input, output: Output },
+    Dynamic { handler: DynamicHandler },
+}
+
 /// A handler that may be used for setting inputs/outputs to the executor
 /// when these commands are known ahead-of-time.
 ///
 /// See: [FakeExecutor::set_static_handler] for usage.
 pub struct StaticHandler {
-    expected: Vec<(Input, Output)>,
+    expected: Vec<HandledCommand>,
     index: usize,
 }
 
@@ -373,27 +389,44 @@ impl StaticHandler {
         Self { expected: Vec::new(), index: 0 }
     }
 
+    /// Expects a static "input" to exactly produce some "output".
     pub fn expect(&mut self, input: Input, output: Output) {
-        self.expected.push((input, output));
+        self.expected.push(HandledCommand::Static { input, output });
     }
 
+    /// A helper for [Self::expect] which quietly succeeds.
     pub fn expect_ok<S: AsRef<str>>(&mut self, input: S) {
         self.expect(Input::shell(input), Output::success())
     }
 
+    /// A helper for [Self::expect] which quietly fails.
     pub fn expect_fail<S: AsRef<str>>(&mut self, input: S) {
         self.expect(Input::shell(input), Output::failure())
     }
 
+    /// Expects a dynamic handler to be invoked to dynamically
+    /// determine the output of this call.
+    pub fn expect_dynamic(&mut self, handler: DynamicHandler) {
+        self.expected.push(HandledCommand::Dynamic { handler });
+    }
+
     fn execute(&mut self, command: &Command) -> Output {
-        let input = Input::from(command);
-        let expected = &self
+        let observed_input = Input::from(command);
+        let expected = &mut self
             .expected
-            .get(self.index)
-            .unwrap_or_else(|| panic!("Unexpected command: {input}"));
+            .get_mut(self.index)
+            .unwrap_or_else(|| panic!("Unexpected command: {observed_input}"));
         self.index += 1;
-        assert_eq!(input, expected.0, "Unexpected input command");
-        expected.1.clone()
+
+        match expected {
+            HandledCommand::Static { input, output } => {
+                assert_eq!(&observed_input, input, "Unexpected input command");
+                output.clone()
+            }
+            HandledCommand::Dynamic { ref mut handler } => {
+                handler(observed_input)
+            }
+        }
     }
 }
 
@@ -402,8 +435,14 @@ impl Drop for StaticHandler {
         let expected = self.expected.len();
         let actual = self.index;
         if actual < expected {
-            let next = &self.expected[actual].0;
-            assert!(false, "Only saw {actual} calls, expected {expected}\nNext would have been: {next}");
+            let next = &self.expected[actual];
+            let tip = match next {
+                HandledCommand::Static { input, .. } => input.to_string(),
+                HandledCommand::Dynamic { .. } => {
+                    "<dynamic handler>".to_string()
+                }
+            };
+            assert!(false, "Only saw {actual} calls, expected {expected}\nNext would have been: {tip}");
         }
     }
 }

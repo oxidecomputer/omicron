@@ -29,6 +29,7 @@ use illumos_utils::dladm::Dladm;
 use illumos_utils::opte::params::SetVirtualNetworkInterfaceHost;
 use illumos_utils::opte::PortManager;
 use illumos_utils::process::BoxedExecutor;
+use illumos_utils::zone::Zones;
 use illumos_utils::zone::PROPOLIS_ZONE_PREFIX;
 use illumos_utils::zone::ZONE_PREFIX;
 use omicron_common::address::{
@@ -51,11 +52,6 @@ use std::collections::BTreeSet;
 use std::net::{Ipv6Addr, SocketAddrV6};
 use std::sync::Arc;
 use uuid::Uuid;
-
-#[cfg(test)]
-use illumos_utils::zone::MockZones as Zones;
-#[cfg(not(test))]
-use illumos_utils::zone::Zones;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -192,6 +188,9 @@ struct SledAgentInner {
 
     // Logger used for generic sled agent operations, e.g., zone bundles.
     log: Logger,
+
+    // Sled Agent's interaction with the host system
+    executor: BoxedExecutor,
 
     // Subnet of the Sled's underlay.
     //
@@ -414,6 +413,7 @@ impl SledAgent {
             inner: Arc::new(SledAgentInner {
                 id: request.id,
                 log: log.clone(),
+                executor: executor.clone(),
                 subnet: request.subnet,
                 storage,
                 instances,
@@ -820,7 +820,7 @@ impl SledAgent {
 
     /// List the zones that the sled agent is currently managing.
     pub async fn zones_list(&self) -> Result<Vec<String>, Error> {
-        Zones::get()
+        Zones::get(&self.inner.executor)
             .await
             .map(|zones| {
                 zones

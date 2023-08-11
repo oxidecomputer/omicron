@@ -22,6 +22,8 @@ pub const IPADM: &str = "/usr/sbin/ipadm";
 pub const SVCADM: &str = "/usr/sbin/svcadm";
 pub const SVCCFG: &str = "/usr/sbin/svccfg";
 pub const ZLOGIN: &str = "/usr/sbin/zlogin";
+pub const ZONEADM: &str = "/usr/sbin/zoneadm";
+pub const ZONECFG: &str = "/usr/sbin/zonecfg";
 
 // TODO: These could become enums
 pub const ZONE_PREFIX: &str = "oxz_";
@@ -58,7 +60,7 @@ pub struct AdmError {
     op: Operation,
     zone: String,
     #[source]
-    err: zone::ZoneError,
+    err: Box<dyn std::error::Error + Send + Sync>,
 }
 
 /// Errors which may be encountered when deleting addresses.
@@ -203,16 +205,16 @@ fn parse_ip_network(s: &str) -> Result<IpNetwork, IpNetworkError> {
     }
 }
 
-#[cfg_attr(any(test, feature = "testing"), mockall::automock, allow(dead_code))]
 impl Zones {
     /// Ensures a zone is halted before both uninstalling and deleting it.
     ///
     /// Returns the state the zone was in before it was removed, or None if the
     /// zone did not exist.
     pub async fn halt_and_remove(
+        executor: &BoxedExecutor,
         name: &str,
     ) -> Result<Option<zone::State>, AdmError> {
-        match Self::find(name).await? {
+        match Self::find(executor, name).await? {
             None => Ok(None),
             Some(zone) => {
                 let state = zone.state();
@@ -231,7 +233,7 @@ impl Zones {
                         AdmError {
                             op: Operation::Halt,
                             zone: name.to_string(),
-                            err,
+                            err: Box::new(err),
                         }
                     })?;
                 }
@@ -242,7 +244,7 @@ impl Zones {
                         .map_err(|err| AdmError {
                             op: Operation::Uninstall,
                             zone: name.to_string(),
-                            err,
+                            err: Box::new(err),
                         })?;
                 }
                 zone::Config::new(name)
@@ -252,7 +254,7 @@ impl Zones {
                     .map_err(|err| AdmError {
                     op: Operation::Delete,
                     zone: name.to_string(),
-                    err,
+                    err: Box::new(err),
                 })?;
                 Ok(Some(state))
             }
@@ -261,10 +263,11 @@ impl Zones {
 
     /// Halt and remove the zone, logging the state in which the zone was found.
     pub async fn halt_and_remove_logged(
+        executor: &BoxedExecutor,
         log: &Logger,
         name: &str,
     ) -> Result<(), AdmError> {
-        if let Some(state) = Self::halt_and_remove(name).await? {
+        if let Some(state) = Self::halt_and_remove(executor, name).await? {
             info!(
                 log,
                 "halt_and_remove_logged: Previous zone state: {:?}", state
@@ -280,6 +283,7 @@ impl Zones {
     /// - Otherwise, the zone is deleted.
     #[allow(clippy::too_many_arguments)]
     pub async fn install_omicron_zone(
+        executor: &BoxedExecutor,
         log: &Logger,
         zone_root_path: &Utf8Path,
         zone_name: &str,
@@ -290,7 +294,7 @@ impl Zones {
         links: Vec<String>,
         limit_priv: Vec<String>,
     ) -> Result<(), AdmError> {
-        if let Some(zone) = Self::find(zone_name).await? {
+        if let Some(zone) = Self::find(executor, zone_name).await? {
             info!(
                 log,
                 "install_omicron_zone: Found zone: {} in state {:?}",
@@ -307,7 +311,8 @@ impl Zones {
                     "Invalid state; uninstalling and deleting zone {}",
                     zone_name
                 );
-                Zones::halt_and_remove_logged(log, zone.name()).await?;
+                Zones::halt_and_remove_logged(executor, log, zone.name())
+                    .await?;
             }
         }
 
@@ -344,34 +349,38 @@ impl Zones {
                 ..Default::default()
             });
         }
-        cfg.run().await.map_err(|err| AdmError {
+        executor.execute(&mut cfg.as_command()).map_err(|err| AdmError {
             op: Operation::Configure,
             zone: zone_name.to_string(),
-            err,
+            err: Box::new(err),
         })?;
 
         info!(log, "Installing Omicron zone: {}", zone_name);
 
-        zone::Adm::new(zone_name)
-            .install(&[
+        executor
+            .execute(&mut zone::Adm::new(zone_name).install_command(&[
                 zone_image.as_ref(),
                 "/opt/oxide/overlay.tar.gz".as_ref(),
-            ])
-            .await
+            ]))
             .map_err(|err| AdmError {
                 op: Operation::Install,
                 zone: zone_name.to_string(),
-                err,
+                err: Box::new(err),
             })?;
         Ok(())
     }
 
     /// Boots a zone (named `name`).
-    pub async fn boot(name: &str) -> Result<(), AdmError> {
-        zone::Adm::new(name).boot().await.map_err(|err| AdmError {
+    pub async fn boot(
+        executor: &BoxedExecutor,
+        name: &str,
+    ) -> Result<(), AdmError> {
+        let mut cmd = zone::Adm::new(name).boot_command();
+
+        executor.execute(&mut cmd).map_err(|err| AdmError {
             op: Operation::Boot,
             zone: name.to_string(),
-            err,
+            err: Box::new(err),
         })?;
         Ok(())
     }
@@ -379,14 +388,24 @@ impl Zones {
     /// Returns all zones that may be managed by the Sled Agent.
     ///
     /// These zones must have names starting with [`ZONE_PREFIX`].
-    pub async fn get() -> Result<Vec<zone::Zone>, AdmError> {
-        Ok(zone::Adm::list()
-            .await
-            .map_err(|err| AdmError {
-                op: Operation::List,
-                zone: "<all>".to_string(),
-                err,
-            })?
+    pub async fn get(
+        executor: &BoxedExecutor,
+    ) -> Result<Vec<zone::Zone>, AdmError> {
+        let handle_err = |err| AdmError {
+            op: Operation::List,
+            zone: "<all>".to_string(),
+            err,
+        };
+
+        let mut cmd = zone::Adm::list_command();
+        let output = executor
+            .execute(&mut cmd)
+            .map_err(|err| handle_err(Box::new(err)))?;
+
+        let zones = zone::Adm::parse_list_output(&output)
+            .map_err(|err| handle_err(Box::new(err)))?;
+
+        Ok(zones
             .into_iter()
             .filter(|z| z.name().starts_with(ZONE_PREFIX))
             .collect())
@@ -396,8 +415,14 @@ impl Zones {
     ///
     /// Can only return zones that start with [`ZONE_PREFIX`], as they
     /// are managed by the Sled Agent.
-    pub async fn find(name: &str) -> Result<Option<zone::Zone>, AdmError> {
-        Ok(Self::get().await?.into_iter().find(|zone| zone.name() == name))
+    pub async fn find(
+        executor: &BoxedExecutor,
+        name: &str,
+    ) -> Result<Option<zone::Zone>, AdmError> {
+        Ok(Self::get(executor)
+            .await?
+            .into_iter()
+            .find(|zone| zone.name() == name))
     }
 
     /// Return the ID for a _running_ zone with the specified name.
@@ -407,10 +432,13 @@ impl Zones {
     // object. But that can't easily be done, because we need to supply
     // `mockall` with a value to return, and `zone::Zone` objects can't be
     // constructed since they have private fields.
-    pub async fn id(name: &str) -> Result<Option<i32>, AdmError> {
+    pub async fn id(
+        executor: &BoxedExecutor,
+        name: &str,
+    ) -> Result<Option<i32>, AdmError> {
         // Safety: illumos defines `zoneid_t` as a typedef for an integer, i.e.,
         // an `i32`, so this unwrap should always be safe.
-        match Self::find(name).await?.map(|zn| zn.id()) {
+        match Self::find(executor, name).await?.map(|zn| zn.id()) {
             Some(Some(id)) => Ok(Some(id.try_into().unwrap())),
             Some(None) | None => Ok(None),
         }
@@ -863,6 +891,119 @@ impl Zones {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::process::{FakeExecutor, Input, OutputExt, StaticHandler};
+    use omicron_test_utils::dev;
+    use std::process::Output;
+
+    #[tokio::test]
+    async fn install_new_zone_calls_config_then_install() {
+        let logctx =
+            dev::test_setup_log("install_new_zone_calls_config_then_install");
+
+        let zone_root_path = Utf8Path::new("/root");
+        let zone_name = "oxz_myzone";
+        let zone_image = Utf8Path::new("/image.tar.gz");
+
+        // When installing a new zone, we expect to see:
+        // - A request for the list of existing zones
+        // - A command to configure the zone
+        // - A command to install the zone
+        let mut handler = StaticHandler::new();
+        handler.expect(
+            Input::shell(format!("{PFEXEC} {ZONEADM} list -cip")),
+            Output::success().set_stdout("0:global:running:/::ipkg:shared"),
+        );
+
+        handler.expect(
+            Input::shell(format!(
+                "{PFEXEC} {ZONECFG} -z {zone_name} \
+                    create -F -b ; \
+                    set brand=omicron1 ; \
+                    set zonepath={zone_root_path}/{zone_name} ; \
+                    set autoboot=false ; \
+                    set ip-type=exclusive"
+            )),
+            Output::success(),
+        );
+
+        handler.expect(
+            Input::shell(format!(
+                "{PFEXEC} {ZONEADM} -z {zone_name} \
+                    install {zone_image} /opt/oxide/overlay.tar.gz"
+            )),
+            Output::success(),
+        );
+
+        let executor = FakeExecutor::new(logctx.log.clone());
+        executor.set_static_handler(handler);
+
+        let datasets = [];
+        let filesystems = [];
+        let devices = [];
+        let links = vec![];
+        let limit_priv = vec![];
+
+        Zones::install_omicron_zone(
+            &executor.as_executor(),
+            &logctx.log,
+            &zone_root_path,
+            zone_name,
+            &zone_image,
+            &datasets,
+            &filesystems,
+            &devices,
+            links,
+            limit_priv,
+        )
+        .await
+        .expect("Failed to install zone");
+
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn install_existing_zone_queries_for_it() {
+        let logctx =
+            dev::test_setup_log("install_existing_zone_queries_for_it");
+
+        let zone_root_path = Utf8Path::new("/root");
+        let zone_name = "oxz_myzone";
+        let zone_image = Utf8Path::new("/image.tar.gz");
+
+        let mut handler = StaticHandler::new();
+        handler.expect(
+            Input::shell(format!("{PFEXEC} {ZONEADM} list -cip")),
+            Output::success().set_stdout(
+                "0:global:running:/::ipkg:shared\n1:oxz_myzone:running:/root/oxz_myzone::omicron1:excl"
+            )
+        );
+
+        let executor = FakeExecutor::new(logctx.log.clone());
+        executor.set_static_handler(handler);
+
+        let datasets = [];
+        let filesystems = [];
+        let devices = [];
+        let links = vec![];
+        let limit_priv = vec![];
+
+        Zones::install_omicron_zone(
+            &executor.as_executor(),
+            &logctx.log,
+            &zone_root_path,
+            zone_name,
+            &zone_image,
+            &datasets,
+            &filesystems,
+            &devices,
+            links,
+            limit_priv,
+        )
+        .await
+        .expect("Failed to install zone");
+
+        logctx.cleanup_successful();
+    }
 
     #[test]
     fn test_parse_ip_network() {

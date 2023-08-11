@@ -242,7 +242,7 @@ async fn cleanup_all_old_global_state(
     // Currently, we're removing these zones. In the future, we should
     // re-establish contact (i.e., if the Sled Agent crashed, but we wanted
     // to leave the running Zones intact).
-    let zones = Zones::get().await?;
+    let zones = Zones::get(executor).await?;
     stream::iter(zones)
         .zip(stream::iter(std::iter::repeat(log.clone())))
         .map(Ok::<_, illumos_utils::zone::AdmError>)
@@ -251,7 +251,7 @@ async fn cleanup_all_old_global_state(
         // the caller that this failed.
         .for_each_concurrent_then_try(None, |(zone, log)| async move {
             warn!(log, "Deleting existing zone"; "zone_name" => zone.name());
-            Zones::halt_and_remove_logged(&log, zone.name()).await
+            Zones::halt_and_remove_logged(executor, &log, zone.name()).await
         })
         .await?;
 
@@ -760,14 +760,14 @@ impl Agent {
         _state: &tokio::sync::MutexGuard<'_, SledAgentState>,
     ) -> Result<(), BootstrapError> {
         const CONCURRENCY_CAP: usize = 32;
-        futures::stream::iter(Zones::get().await?)
+        futures::stream::iter(Zones::get(&self.executor).await?)
             .map(Ok::<_, anyhow::Error>)
             // Use for_each_concurrent_then_try to delete as much as possible.
             // We only return one error though -- hopefully that's enough to
             // signal to the caller that this failed.
             .for_each_concurrent_then_try(CONCURRENCY_CAP, |zone| async move {
                 if zone.name() != "oxz_switch" {
-                    Zones::halt_and_remove(zone.name()).await?;
+                    Zones::halt_and_remove(&self.executor, zone.name()).await?;
                 }
                 Ok(())
             })

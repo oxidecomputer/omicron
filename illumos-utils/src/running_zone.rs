@@ -10,7 +10,7 @@ use crate::link::{Link, VnicAllocator};
 use crate::opte::{Port, PortTicket};
 use crate::process::{BoxedExecutor, ExecutionError};
 use crate::svc::wait_for_service;
-use crate::zone::{AddressRequest, IPADM, ZONE_PREFIX};
+use crate::zone::{AddressRequest, Zones, IPADM, ZONE_PREFIX};
 use camino::{Utf8Path, Utf8PathBuf};
 use ipnetwork::IpNetwork;
 #[cfg(target_os = "illumos")]
@@ -23,11 +23,6 @@ use slog::warn;
 use slog::Logger;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use uuid::Uuid;
-
-#[cfg(any(test, feature = "testing"))]
-use crate::zone::MockZones as Zones;
-#[cfg(not(any(test, feature = "testing")))]
-use crate::zone::Zones;
 
 /// Errors returned from methods for fetching SMF services and log files
 #[derive(thiserror::Error, Debug)]
@@ -458,7 +453,7 @@ impl RunningZone {
         // Boot the zone.
         info!(zone.log, "Zone booting");
 
-        Zones::boot(&zone.name).await?;
+        Zones::boot(&zone.executor, &zone.name).await?;
 
         // Wait until the zone reaches the 'single-user' SMF milestone.
         // At this point, we know that the dependent
@@ -467,12 +462,12 @@ impl RunningZone {
         // services are up, so future requests to create network addresses
         // or manipulate services will work.
         let fmri = "svc:/milestone/single-user:default";
-        wait_for_service(Some(&zone.name), fmri).await.map_err(|_| {
-            BootError::Timeout {
+        wait_for_service(&zone.executor, Some(&zone.name), fmri)
+            .await
+            .map_err(|_| BootError::Timeout {
                 service: fmri.to_string(),
                 zone: zone.name.to_string(),
-            }
-        })?;
+            })?;
 
         // If the zone is self-assembling, then SMF service(s) inside the zone
         // will be creating the listen address for the zone's service(s),
@@ -482,7 +477,7 @@ impl RunningZone {
 
         // Use the zone ID in order to check if /var/svc/profile/site.xml
         // exists.
-        let id = Zones::id(&zone.name)
+        let id = Zones::id(&zone.executor, &zone.name)
             .await?
             .ok_or_else(|| BootError::NoZoneId { zone: zone.name.clone() })?;
         let site_profile_xml_exists =
@@ -778,7 +773,7 @@ impl RunningZone {
         zone_prefix: &str,
         addrtype: AddressRequest,
     ) -> Result<Self, GetZoneError> {
-        let zone_info = Zones::get()
+        let zone_info = Zones::get(executor)
             .await
             .map_err(|err| GetZoneError::GetZones {
                 prefix: zone_prefix.to_string(),
@@ -870,7 +865,7 @@ impl RunningZone {
         if let Some(_) = self.id.take() {
             let log = self.inner.log.clone();
             let name = self.name().to_string();
-            Zones::halt_and_remove_logged(&log, &name)
+            Zones::halt_and_remove_logged(&self.inner.executor, &log, &name)
                 .await
                 .map_err(|err| err.to_string())?;
         }
@@ -1008,8 +1003,11 @@ impl Drop for RunningZone {
         if let Some(_) = self.id.take() {
             let log = self.inner.log.clone();
             let name = self.name().to_string();
+            let executor = self.inner.executor.clone();
             tokio::task::spawn(async move {
-                match Zones::halt_and_remove_logged(&log, &name).await {
+                match Zones::halt_and_remove_logged(&executor, &log, &name)
+                    .await
+                {
                     Ok(()) => {
                         info!(log, "Stopped and uninstalled zone")
                     }
@@ -1180,6 +1178,7 @@ impl InstalledZone {
         net_device_names.dedup();
 
         Zones::install_omicron_zone(
+            executor,
             log,
             &zone_root_path,
             &full_zone_name,
