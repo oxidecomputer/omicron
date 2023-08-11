@@ -22,9 +22,9 @@ use serde::{
     de::{self, Visitor},
     Deserialize, Deserializer, Serialize, Serializer,
 };
+use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::collections::HashMap;
-use std::{char::MAX, collections::BTreeMap};
 use std::{net::IpAddr, str::FromStr};
 use uuid::Uuid;
 
@@ -872,7 +872,6 @@ fn memory_limits(
     let max_mem = MAX_MEMORY_BYTES_PER_INSTANCE / (1 << 30);
     schema.metadata().description = Some(
         format!("The amount of memory to allocate to the instance, in bytes.\n\nMust be between {min_mem} and {max_mem} GiB.")
-            .to_string(),
     );
     schema.number().minimum = Some(MIN_MEMORY_BYTES_PER_INSTANCE as f64);
     schema.number().maximum = Some(MAX_MEMORY_BYTES_PER_INSTANCE as f64);
