@@ -8544,11 +8544,10 @@
           },
           "size": {
             "description": "total size of the Disk in bytes",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/ByteCount"
-              }
-            ]
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 1073741824,
+            "maximum": 1098437885952
           }
         },
         "required": [
@@ -9631,7 +9630,7 @@
             "type": "string"
           },
           "memory": {
-            "description": "The amount of memory to allocate to the instance, in bytes.\n\nMust be between 1 and 256 GiB.",
+            "description": "the amount of memory to allocate to the instance, in bytes.\n\nMust be between 1 and 256 GiB.",
             "type": "integer",
             "format": "uint64",
             "minimum": 1073741824,
@@ -9697,11 +9696,10 @@
               },
               "size": {
                 "description": "total size of the Disk in bytes",
-                "allOf": [
-                  {
-                    "$ref": "#/components/schemas/ByteCount"
-                  }
-                ]
+                "type": "integer",
+                "format": "uint64",
+                "minimum": 1073741824,
+                "maximum": 1098437885952
               },
               "type": {
                 "type": "string",

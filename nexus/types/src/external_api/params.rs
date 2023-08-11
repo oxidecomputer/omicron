@@ -15,7 +15,10 @@ use omicron_common::{
         Ipv6Net, Name, NameOrId, PaginationOrder, RouteDestination,
         RouteTarget, SemverVersion,
     },
-    limits::{MAX_MEMORY_BYTES_PER_INSTANCE, MIN_MEMORY_BYTES_PER_INSTANCE},
+    limits::{
+        MAX_DISK_SIZE_BYTES, MAX_MEMORY_BYTES_PER_INSTANCE,
+        MIN_DISK_SIZE_BYTES, MIN_MEMORY_BYTES_PER_INSTANCE,
+    },
 };
 use schemars::JsonSchema;
 use serde::{
@@ -871,7 +874,7 @@ fn memory_limits(
     let min_mem = MIN_MEMORY_BYTES_PER_INSTANCE / (1 << 30);
     let max_mem = MAX_MEMORY_BYTES_PER_INSTANCE / (1 << 30);
     schema.metadata().description = Some(
-        format!("The amount of memory to allocate to the instance, in bytes.\n\nMust be between {min_mem} and {max_mem} GiB.")
+        format!("the amount of memory to allocate to the instance, in bytes.\n\nMust be between {min_mem} and {max_mem} GiB.")
     );
     schema.number().minimum = Some(MIN_MEMORY_BYTES_PER_INSTANCE as f64);
     schema.number().maximum = Some(MAX_MEMORY_BYTES_PER_INSTANCE as f64);
@@ -1170,7 +1173,23 @@ pub struct DiskCreate {
     /// initial source for this disk
     pub disk_source: DiskSource,
     /// total size of the Disk in bytes
+    #[schemars(schema_with = "disk_size_limits")]
     pub size: ByteCount,
+}
+
+fn disk_size_limits(
+    gen: &mut schemars::gen::SchemaGenerator,
+) -> schemars::schema::Schema {
+    let mut schema: schemars::schema::SchemaObject =
+        ByteCount::json_schema(gen).into();
+    let min_disk = MIN_DISK_SIZE_BYTES / (1 << 30);
+    let max_disk = MAX_DISK_SIZE_BYTES / (1 << 30);
+    schema.metadata().description = Some(
+        format!("total size of the disk in bytes.\n\nMust be between {min_disk} and {max_disk} GiB.")
+    );
+    schema.number().minimum = Some(MIN_DISK_SIZE_BYTES as f64);
+    schema.number().maximum = Some(MAX_DISK_SIZE_BYTES as f64);
+    schema.into()
 }
 
 // equivalent to crucible_pantry_client::types::ExpectedDigest
