@@ -220,28 +220,6 @@ pub(self) enum ZfsGetError {
     Parse(#[from] std::num::ParseIntError),
 }
 
-#[cfg(test)]
-impl Clone for ZfsGetError {
-    fn clone(&self) -> Self {
-        match self {
-            ZfsGetError::IoError(_err) => unimplemented!(),
-            ZfsGetError::Utf8(err) => ZfsGetError::Utf8(err.clone()),
-            ZfsGetError::Parse(err) => ZfsGetError::Parse(err.clone()),
-        }
-    }
-}
-
-#[cfg(test)]
-#[derive(Default)]
-struct Fake {
-    pub zpool_props: HashMap<
-        &'static str,
-        HashMap<&'static str, Result<String, ZfsGetError>>,
-    >,
-    pub zones: Vec<Zone>,
-}
-struct Real {}
-
 trait Invoker {
     fn coreadm(&self, core_dir: &Utf8PathBuf) -> Result<(), ExecutionError>;
     fn dumpadm(
@@ -286,71 +264,7 @@ trait Invoker {
     fn get_zones(&self) -> Result<Vec<Zone>, ArchiveLogsError>;
 }
 
-#[cfg(test)]
-impl Invoker for Fake {
-    fn coreadm(&self, _core_dir: &Utf8PathBuf) -> Result<(), ExecutionError> {
-        Ok(())
-    }
-
-    fn dumpadm(
-        &self,
-        _dump_slice: &Utf8PathBuf,
-        _savecore_dir: Option<&Utf8PathBuf>,
-    ) -> Result<Option<OsString>, ExecutionError> {
-        Ok(None)
-    }
-
-    fn zfs_get_prop(
-        &self,
-        mountpoint_or_name: impl AsRef<str> + Sized,
-        property: &str,
-    ) -> Result<String, ZfsGetError> {
-        self.zpool_props
-            .get(mountpoint_or_name.as_ref())
-            .unwrap_or_else(|| {
-                panic!(
-                    "Test did not provide fake zpool {}",
-                    mountpoint_or_name.as_ref()
-                )
-            })
-            .get(property)
-            .unwrap_or_else(|| {
-                panic!(
-                "Test did not provide property {property} for fake zpool {}",
-                mountpoint_or_name.as_ref()
-            )
-            })
-            .clone()
-    }
-
-    fn mountpoint(
-        &self,
-        zpool: &ZpoolName,
-        mountpoint: &'static str,
-    ) -> Utf8PathBuf {
-        Utf8PathBuf::from(
-            self.zpool_props
-                .get(zpool.to_string().as_str())
-                .unwrap_or_else(|| {
-                    panic!("Test did not provide fake zpool {}", zpool)
-                })
-                .get("mountpoint")
-                .unwrap_or_else(|| {
-                    panic!(
-                        "Test did not provide mountpoint for fake zpool {}",
-                        zpool
-                    )
-                })
-                .clone()
-                .unwrap(),
-        )
-        .join(mountpoint)
-    }
-
-    fn get_zones(&self) -> Result<Vec<Zone>, ArchiveLogsError> {
-        Ok(self.zones.clone())
-    }
-}
+struct Real {}
 
 impl Invoker for Real {
     fn coreadm(&self, core_dir: &Utf8PathBuf) -> Result<(), ExecutionError> {
@@ -454,18 +368,10 @@ impl Invoker for Real {
     }
 
     fn get_zones(&self) -> Result<Vec<Zone>, ArchiveLogsError> {
-        // zone crate's 'deprecated' functions collide if you try to enable
-        // its 'sync' and 'async' features simultaneously :(
-        let rt =
-            tokio::runtime::Runtime::new().map_err(ArchiveLogsError::Tokio)?;
-
-        rt.block_on(async {
-            Ok(zone::Adm::list()
-                .await?
-                .into_iter()
-                .filter(|z| z.global() || z.name().starts_with(ZONE_PREFIX))
-                .collect::<Vec<_>>())
-        })
+        Ok(zone::Adm::list_blocking()?
+            .into_iter()
+            .filter(|z| z.global() || z.name().starts_with(ZONE_PREFIX))
+            .collect::<Vec<_>>())
     }
 }
 
@@ -991,8 +897,6 @@ impl<I: Invoker> DumpSetupWorker<I> {
 #[cfg_attr(test, allow(dead_code))] // mock doesn't construct Tokio variant
 #[derive(thiserror::Error, Debug)]
 pub enum ArchiveLogsError {
-    #[error("Couldn't make an async runtime to get zone info: {0}")]
-    Tokio(std::io::Error),
     #[error("I/O error: {0}")]
     IoError(#[from] std::io::Error),
     #[error("Error calling zoneadm: {0}")]
@@ -1039,6 +943,93 @@ mod tests {
     use std::io::Write;
     use std::str::FromStr;
     use tempfile::TempDir;
+
+    impl Clone for ZfsGetError {
+        fn clone(&self) -> Self {
+            match self {
+                ZfsGetError::IoError(_err) => unimplemented!(),
+                ZfsGetError::Utf8(err) => ZfsGetError::Utf8(err.clone()),
+                ZfsGetError::Parse(err) => ZfsGetError::Parse(err.clone()),
+            }
+        }
+    }
+
+    #[derive(Default)]
+    struct Fake {
+        pub zpool_props: HashMap<
+            &'static str,
+            HashMap<&'static str, Result<String, ZfsGetError>>,
+        >,
+        pub zones: Vec<Zone>,
+    }
+
+    impl Invoker for Fake {
+        fn coreadm(
+            &self,
+            _core_dir: &Utf8PathBuf,
+        ) -> Result<(), ExecutionError> {
+            Ok(())
+        }
+
+        fn dumpadm(
+            &self,
+            _dump_slice: &Utf8PathBuf,
+            _savecore_dir: Option<&Utf8PathBuf>,
+        ) -> Result<Option<OsString>, ExecutionError> {
+            Ok(None)
+        }
+
+        fn zfs_get_prop(
+            &self,
+            mountpoint_or_name: impl AsRef<str> + Sized,
+            property: &str,
+        ) -> Result<String, ZfsGetError> {
+            self.zpool_props
+                .get(mountpoint_or_name.as_ref())
+                .unwrap_or_else(|| {
+                    panic!(
+                        "Test did not provide fake zpool {}",
+                        mountpoint_or_name.as_ref()
+                    )
+                })
+                .get(property)
+                .unwrap_or_else(|| {
+                    panic!(
+                        "Test did not provide property {property} for fake zpool {}",
+                        mountpoint_or_name.as_ref()
+                    )
+                })
+                .clone()
+        }
+
+        fn mountpoint(
+            &self,
+            zpool: &ZpoolName,
+            mountpoint: &'static str,
+        ) -> Utf8PathBuf {
+            Utf8PathBuf::from(
+                self.zpool_props
+                    .get(zpool.to_string().as_str())
+                    .unwrap_or_else(|| {
+                        panic!("Test did not provide fake zpool {}", zpool)
+                    })
+                    .get("mountpoint")
+                    .unwrap_or_else(|| {
+                        panic!(
+                            "Test did not provide mountpoint for fake zpool {}",
+                            zpool
+                        )
+                    })
+                    .clone()
+                    .unwrap(),
+            )
+            .join(mountpoint)
+        }
+
+        fn get_zones(&self) -> Result<Vec<Zone>, ArchiveLogsError> {
+            Ok(self.zones.clone())
+        }
+    }
 
     #[test]
     fn test_does_not_configure_coreadm_when_no_crash_dataset_mounted() {
