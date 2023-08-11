@@ -109,6 +109,8 @@ use tokio::sync::MutexGuard;
 use tokio::task::JoinHandle;
 use uuid::Uuid;
 
+const IPV6_UNSPECIFIED: IpAddr = IpAddr::V6(Ipv6Addr::UNSPECIFIED);
+
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
     #[error("Failed to initialize CockroachDb: {err}")]
@@ -2327,7 +2329,12 @@ impl ServiceManager {
         if let Some(true) = self.inner.skip_timesync {
             info!(self.inner.log, "Configured to skip timesync checks");
             self.boottime_rewrite(existing_zones.values());
-            return Ok(TimeSync { sync: true, skew: 0.00, correction: 0.00 });
+            return Ok(TimeSync {
+                sync: true,
+                ref_id: 0,
+                ip_addr: IPV6_UNSPECIFIED,
+                correction: 0.00,
+            });
         };
 
         let ntp_zone_name =
@@ -2350,19 +2357,26 @@ impl ServiceManager {
                 let v: Vec<&str> = stdout.split(',').collect();
 
                 if v.len() > 9 {
+                    let ref_id = u32::from_str_radix(v[0], 16)
+                        .map_err(|_| Error::NtpZoneNotReady)?;
+                    let ip_addr =
+                        IpAddr::from_str(v[1]).unwrap_or(IPV6_UNSPECIFIED);
                     let correction = f64::from_str(v[4])
                         .map_err(|_| Error::NtpZoneNotReady)?;
-                    let skew = f64::from_str(v[9])
-                        .map_err(|_| Error::NtpZoneNotReady)?;
 
-                    let sync = (skew != 0.0 || correction != 0.0)
-                        && correction.abs() <= 0.05;
+                    // Per `chronyc waitsync`'s implementation, if either the
+                    // reference IP address is not unspecified or the reference
+                    // ID is not 0 or 0x7f7f0101, we are synchronized to a peer.
+                    let peer_sync = !ip_addr.is_unspecified()
+                        || (ref_id != 0 && ref_id != 0x7f7f0101);
+
+                    let sync = peer_sync && correction.abs() <= 0.05;
 
                     if sync {
                         self.boottime_rewrite(existing_zones.values());
                     }
 
-                    Ok(TimeSync { sync, skew, correction })
+                    Ok(TimeSync { sync, ref_id, ip_addr, correction })
                 } else {
                     Err(Error::NtpZoneNotReady)
                 }
