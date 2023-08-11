@@ -9,7 +9,7 @@ use std::process::Stdio;
 use std::time::Duration;
 
 use anyhow::Context;
-use tempfile::TempDir;
+use tempfile::{TempDir, Builder};
 use thiserror::Error;
 use tokio::{
     fs::File,
@@ -109,6 +109,7 @@ impl ClickHouseInstance {
     pub async fn new_replicated(
         port: String,
         tcp_port: String,
+        interserver_port: String,
         name: String,
         r_number: String,
         //config_path: String,
@@ -120,44 +121,36 @@ impl ClickHouseInstance {
         // Copy config template to new temporary directory
      //   let cur_dir = std::env::current_dir()?;
        // let config_path = cur_dir.as_path().join("clickhouse_configs/replica_config.xml");
-        let con = data_dir.path().join("replica_config.xml");
+     //   let con = data_dir.path().join("replica_config.xml");
 
         // debug
         println!("config source: {}", config_path.display());
-        println!("config destination: {}", con.display());
+      //  println!("config destination: {}", con.display());
 
-        std::fs::copy(&config_path, &con)?;
+      //  std::fs::copy(&config_path, &con)?;
 
-        assert!(con.exists());
+//        assert!(con.exists());
 
-        use tokio::io::AsyncReadExt;
-        
- //debug
- let mut file = File::open(&con).await
- .expect("err File not found");
- let mut data = String::new();
-file.read_to_string(&mut data).await
- .expect("Error while reading file");
-println!("{}", data); 
+        assert!(config_path.exists());
 
         let log_path = data_dir.path().join("clickhouse-server.log");
         let err_log_path = data_dir.path().join("clickhouse-server.errlog");
-        let tmp_path = data_dir.path().join("/tmp/");
-        let user_files_path = data_dir.path().join("/user_files/");
-        let access_path = data_dir.path().join("/access/");
-        let format_schemas_path = data_dir.path().join("/format_schemas/");
+        let tmp_path = data_dir.path().join("tmp/");
+        let user_files_path = data_dir.path().join("user_files/");
+        let access_path = data_dir.path().join("access/");
+        let format_schemas_path = data_dir.path().join("format_schemas/");
         let args = vec![
             "server".to_string(),
             "--config-file".to_string(),
-            //format!("{}", config_path),
-            format!("{}", con.display()),
+            format!("{}", config_path.display()),
+           // format!("{}", con.display()),
         ];
 
         let child = tokio::process::Command::new("clickhouse")
             .args(&args)
-        //    .stdin(Stdio::null())
-          //  .stdout(Stdio::null())
-        //    .stderr(Stdio::null())
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
             .env("CLICKHOUSE_WATCHDOG_ENABLE", "0")
             .env("CH_LOG", &log_path)
             .env("CH_ERROR_LOG", err_log_path)
@@ -165,6 +158,7 @@ println!("{}", data);
             .env("CH_LISTEN_ADDR", "::1")
             .env("CH_LISTEN_PORT", port.clone())
             .env("CH_TCP_PORT", tcp_port)
+            .env("CH_INTERSERVER_PORT", interserver_port)
             .env("CH_DATASTORE", data_dir.path())
             .env("CH_TMP_PATH", tmp_path)
             .env("CH_USER_FILES_PATH", user_files_path)
@@ -189,11 +183,21 @@ println!("{}", data);
       //  println!("{:?}", std::fs::canonicalize(&srcdir));
 
 
+   //   use tokio::io::AsyncReadExt;
+
+      //debug
+  //    let mut file = File::open(&log_path).await
+  //    .expect("err File not found");
+  //    let mut data = String::new();
+  //   file.read_to_string(&mut data).await
+  //    .expect("Error while reading file");
+  //   println!("{}", data); 
+
 
 
         let data_path = data_dir.path().to_path_buf();
-      //  let port = wait_for_port(log_path).await?;
-      let port: u16 = port.parse()?;
+        let port = wait_for_port(log_path).await?;
+     //  let port: u16 = port.parse()?;
 
         Ok(Self {
             data_dir: Some(data_dir),
@@ -208,7 +212,7 @@ println!("{}", data);
     pub async fn new_keeper(
         port: String,
         k_id: String,
-        config_path: String,
+        config_path: PathBuf,
     ) -> Result<Self, anyhow::Error> {
         // We assume that only 3 keepers will be run, and the ID of the keeper can only
         // be one of "1", "2" or "3". This is to avoid having to pass the IDs of the
@@ -216,23 +220,33 @@ println!("{}", data);
         if !["1", "2", "3"].contains(&k_id.as_str()) {
             return Err(ClickHouseError::InvalidKeeperId.into());
         }
-        let data_dir = TempDir::new()
+       // let data_dir = TempDir::new()
+         //   .context("failed to create tempdir for ClickHouse Keeper data")?;
+
+            // Keepers do not allow a dot in the beginning of the directory, so we must
+            // use a prefix. They also must live in a directory owned by the same user
+
+            // TODO: I keep getting an `<Error> Application: DB::Exception: Invalid changelog` error
+            // and I don't know why :(
+            // https://github.com/ClickHouse/ClickHouse/blob/a6f89c05465753379f481cfe91130a9cd87c66b0/src/Coordination/Changelog.cpp#L78
+            let data_dir = Builder::new().prefix("k").tempdir_in("")
             .context("failed to create tempdir for ClickHouse Keeper data")?;
+        
         let log_path = data_dir.path().join("clickhouse-keeper.log");
-        let err_log_path = data_dir.path().join("clickhouse-keeper.err.log");
-        let log_storage_path = data_dir.path().join("/log");
-        let snapshot_storage_path = data_dir.path().join("/snapshots");
+        let err_log_path = data_dir.path().join("clickhouse-keeper.errlog");
+        let log_storage_path = data_dir.path();//.join("log/");
+        let snapshot_storage_path = data_dir.path();//.join("snapshots/");
         let args = vec![
             "keeper".to_string(),
             "--config-file".to_string(),
-            format!("{}", config_path),
+            format!("{}", config_path.display()),
         ];
 
         let child = tokio::process::Command::new("clickhouse")
             .args(&args)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
+         //   .stdin(Stdio::null())
+         //   .stdout(Stdio::null())
+         //   .stderr(Stdio::null())
             .env("CLICKHOUSE_WATCHDOG_ENABLE", "0")
             .env("CH_LOG", &log_path)
             .env("CH_ERROR_LOG", err_log_path)

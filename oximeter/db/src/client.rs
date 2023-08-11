@@ -656,13 +656,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_build_replicated() {
-        use std::net::{IpAddr, Ipv4Addr};
-        
+    async fn test_build_replicated() {        
         let log = slog::Logger::root(slog::Discard, o!());
 
         // Start all Keeper coordinator nodes
-        let keeper_config = String::from("oximeter/db/src/configs/keeper_config.xml");
+        let cur_dir = std::env::current_dir().unwrap();
+        let keeper_config = cur_dir.as_path().join("src/configs/keeper_config.xml");
 
         // Start Keeper 1
         let k1_port = String::from("9181");
@@ -705,11 +704,13 @@ mod tests {
         // Start Replica 1
         let r1_port = String::from("8123");
         let r1_tcp_port = String::from("9000");
+        let r1_interserver_port = String::from("9009");
         let r1_name = String::from("oximeter_cluster node 1");
         let r1_number = String::from("01");
         let mut db_1 = ClickHouseInstance::new_replicated(
             r1_port,
             r1_tcp_port,
+            r1_interserver_port,
             r1_name,
             r1_number,
             replica_config.clone(),
@@ -718,18 +719,16 @@ mod tests {
         .expect("Failed to start ClickHouse node 1");
         let r1_address = SocketAddr::new("::1".parse().unwrap(), db_1.port());
 
-
-              
-
-
         // Start Replica 2
         let r2_port = String::from("8124");
         let r2_tcp_port = String::from("9001");
+        let r2_interserver_port = String::from("9010");
         let r2_name = String::from("oximeter_cluster node 2");
         let r2_number = String::from("02");
         let mut db_2 = ClickHouseInstance::new_replicated(
             r2_port,
             r2_tcp_port,
+            r2_interserver_port,
             r2_name,
             r2_number,
             replica_config,
@@ -744,6 +743,8 @@ mod tests {
             .init_replicated_db()
             .await
             .expect("Failed to initialize timeseries database");
+
+        // Perhaps check on db 1 first?
 
         // Verify database exists in node 2
         let client_2 = Client::new(r2_address, &log);

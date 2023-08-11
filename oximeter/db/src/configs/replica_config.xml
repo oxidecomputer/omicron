@@ -41,16 +41,6 @@
     -->
     <tcp_port replace="true" from_env="CH_TCP_PORT"/>
 
-    <!-- Compatibility with MySQL protocol.
-         ClickHouse will pretend to be MySQL for applications connecting to this port.
-    -->
-    <mysql_port>9004</mysql_port>
-
-    <!-- Compatibility with PostgreSQL protocol.
-         ClickHouse will pretend to be PostgreSQL for applications connecting to this port.
-    -->
-    <postgresql_port>9005</postgresql_port>
-
     <!-- Port for communication between replicas. Used for data exchange.
          It provides low-level data access between servers.
          This port should not be accessible from untrusted networks.
@@ -58,7 +48,7 @@
          Data transferred over connections to this port should not go through untrusted networks.
          See also 'interserver_https_port'.
       -->
-    <interserver_http_port>9009</interserver_http_port>
+    <interserver_http_port replace="true" from_env="CH_INTERSERVER_PORT"/>
 
     <max_connections>4096</max_connections>
 
