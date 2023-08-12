@@ -400,6 +400,10 @@ pub enum MetricsError {
     /// An error parsing a field or measurement from a string.
     #[error("String '{src}' could not be parsed as type '{typ}'")]
     ParseError { src: String, typ: String },
+
+    /// A field name is duplicated between the target and metric.
+    #[error("Field '{name}' is duplicated between the target and metric")]
+    DuplicateFieldName { name: String },
 }
 
 /// A cumulative or counter data type.
@@ -539,24 +543,27 @@ impl Sample {
         timestamp: DateTime<Utc>,
         target: &T,
         metric: &M,
-    ) -> Self
+    ) -> Result<Self, MetricsError>
     where
         T: traits::Target,
         M: traits::Metric<Datum = D>,
     {
-        Self {
-            timeseries_name: format!("{}:{}", target.name(), metric.name()),
-            target: FieldSet::from_target(target),
-            metric: FieldSet::from_metric(metric),
+        let target_fields = FieldSet::from_target(target);
+        let metric_fields = FieldSet::from_metric(metric);
+        Self::verify_field_names(&target_fields, &metric_fields)?;
+        Ok(Self {
+            timeseries_name: crate::timeseries_name(target, metric),
+            target: target_fields,
+            metric: metric_fields,
             measurement: metric.measure(timestamp),
-        }
+        })
     }
 
     /// Construct a new sample, created at the time the function is called.
     ///
     /// This materializes the data from the target and metric, and stores that information along
     /// with the measurement data itself.
-    pub fn new<T, M, D>(target: &T, metric: &M) -> Self
+    pub fn new<T, M, D>(target: &T, metric: &M) -> Result<Self, MetricsError>
     where
         T: traits::Target,
         M: traits::Metric<Datum = D>,
@@ -590,6 +597,22 @@ impl Sample {
     /// Return the fields of this sample's metric.
     pub fn metric_fields(&self) -> &Vec<Field> {
         &self.metric.fields
+    }
+
+    // Check validity of field names for the target and metric. Currently this
+    // just verifies there are no duplicate names between them.
+    fn verify_field_names(
+        target: &FieldSet,
+        metric: &FieldSet,
+    ) -> Result<(), MetricsError> {
+        for name in target.fields.iter().map(|f| f.name.as_str()) {
+            if metric.fields.iter().any(|f| f.name == name) {
+                return Err(MetricsError::DuplicateFieldName {
+                    name: name.to_string(),
+                });
+            }
+        }
+        Ok(())
     }
 }
 
@@ -662,17 +685,20 @@ impl ProducerRegistry {
 
 #[cfg(test)]
 mod tests {
-    use bytes::Bytes;
-    use std::net::IpAddr;
-    use uuid::Uuid;
-
     use super::histogram::Histogram;
+    use super::Field;
+    use super::FieldSet;
+    use super::MetricsError;
+    use super::Sample;
     use super::{
         Cumulative, Datum, DatumType, FieldType, FieldValue, Measurement,
     };
     use crate::test_util;
     use crate::types;
     use crate::{Metric, Target};
+    use bytes::Bytes;
+    use std::net::IpAddr;
+    use uuid::Uuid;
 
     #[test]
     fn test_cumulative_i64() {
@@ -744,7 +770,7 @@ mod tests {
             good: true,
             datum: 1i64,
         };
-        let sample = types::Sample::new(&t, &m);
+        let sample = types::Sample::new(&t, &m).unwrap();
         assert_eq!(
             sample.timeseries_name,
             format!("{}:{}", t.name(), m.name())
@@ -757,7 +783,7 @@ mod tests {
             good: true,
             datum: 1i64.into(),
         };
-        let sample = types::Sample::new(&t, &m);
+        let sample = types::Sample::new(&t, &m).unwrap();
         assert!(sample.measurement.start_time().is_some());
     }
 
@@ -791,5 +817,20 @@ mod tests {
         );
 
         assert!(FieldValue::parse_as_type(&as_string, FieldType::Uuid).is_err());
+    }
+
+    #[test]
+    fn test_verify_field_names() {
+        let fields = FieldSet {
+            name: "t".to_string(),
+            fields: vec![Field {
+                name: "n".to_string(),
+                value: FieldValue::from(0i64),
+            }],
+        };
+        assert!(matches!(
+            Sample::verify_field_names(&fields, &fields),
+            Err(MetricsError::DuplicateFieldName { .. })
+        ));
     }
 }

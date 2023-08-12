@@ -244,7 +244,7 @@ async fn populate(
                         cpu_id: cpu as _,
                         busy: Cumulative::from(sample as f64),
                     };
-                    let sample = Sample::new(&vm, &cpu_busy);
+                    let sample = Sample::new(&vm, &cpu_busy)?;
                     samples.push(sample);
                     if samples.len() == chunk_size {
                         insert_samples(&client, &samples, &log, args.dry_run)

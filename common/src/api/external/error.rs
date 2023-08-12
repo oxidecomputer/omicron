@@ -423,6 +423,12 @@ impl From<serde_json::Error> for Error {
     }
 }
 
+impl From<oximeter::MetricsError> for Error {
+    fn from(e: oximeter::MetricsError) -> Self {
+        Error::internal_error(&e.to_string())
+    }
+}
+
 /// Like [`assert!`], except that instead of panicking, this function returns an
 /// `Err(Error::InternalError)` with an appropriate message if the given
 /// condition is not true.

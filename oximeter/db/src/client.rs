@@ -704,7 +704,7 @@ mod tests {
             good: true,
             datum: 1,
         };
-        let sample = Sample::new(&bad_name, &metric);
+        let sample = Sample::new(&bad_name, &metric).unwrap();
         let result = client.verify_sample_schema(&sample).await;
         assert!(matches!(result, Err(Error::SchemaMismatch { .. })));
         db.cleanup().await.expect("Failed to cleanup ClickHouse server");
@@ -1004,8 +1004,8 @@ mod tests {
         let second_metric = SecondMetric::default();
 
         let samples = &[
-            Sample::new(&target, &first_metric),
-            Sample::new(&target, &second_metric),
+            Sample::new(&target, &first_metric).unwrap(),
+            Sample::new(&target, &second_metric).unwrap(),
         ];
         client
             .insert_samples(samples)
@@ -1073,8 +1073,8 @@ mod tests {
                 status_code: *status_code,
                 latency: 0.0,
             };
-            samples.push(Sample::new(&target, &metric));
-            samples.push(Sample::new(&target, &metric));
+            samples.push(Sample::new(&target, &metric).unwrap());
+            samples.push(Sample::new(&target, &metric).unwrap());
             metrics.push(metric);
         }
         (target, metrics, samples)

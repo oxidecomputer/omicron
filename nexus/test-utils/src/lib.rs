@@ -846,12 +846,12 @@ pub async fn start_oximeter(
 
 #[derive(Debug, Clone, oximeter::Target)]
 struct IntegrationTarget {
-    pub name: String,
+    pub target_name: String,
 }
 
 #[derive(Debug, Clone, oximeter::Metric)]
 struct IntegrationMetric {
-    pub name: String,
+    pub metric_name: String,
     pub datum: i64,
 }
 
@@ -870,7 +870,7 @@ impl oximeter::Producer for IntegrationProducer {
         oximeter::MetricsError,
     > {
         use oximeter::Metric;
-        let sample = oximeter::types::Sample::new(&self.target, &self.metric);
+        let sample = oximeter::types::Sample::new(&self.target, &self.metric)?;
         *self.metric.datum_mut() += 1;
         Ok(Box::new(vec![sample].into_iter()))
     }
@@ -925,10 +925,10 @@ pub fn register_test_producer(server: &ProducerServer) -> Result<(), String> {
     // Create and register an actual metric producer.
     let test_producer = IntegrationProducer {
         target: IntegrationTarget {
-            name: "integration-test-target".to_string(),
+            target_name: "integration-test-target".to_string(),
         },
         metric: IntegrationMetric {
-            name: "integration-test-metric".to_string(),
+            metric_name: "integration-test-metric".to_string(),
             datum: 0,
         },
     };

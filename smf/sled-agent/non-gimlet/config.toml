@@ -68,7 +68,7 @@ switch_zone_maghemite_links = ["tfportrear0_0"]
 data_links = ["net0", "net1"]
 
 [log]
-level = "info"
+level = "debug"
 mode = "file"
 path = "/dev/stdout"
 if_exists = "append"

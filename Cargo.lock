@@ -4788,6 +4788,7 @@ dependencies = [
  "lazy_static",
  "libc",
  "macaddr",
+ "oximeter 0.1.0",
  "parse-display",
  "progenitor",
  "proptest",

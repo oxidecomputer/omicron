@@ -2196,6 +2196,33 @@
               "content",
               "type"
             ]
+          },
+          {
+            "description": "A field name is duplicated between the target and metric.",
+            "type": "object",
+            "properties": {
+              "content": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name"
+                ]
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "duplicate_field_name"
+                ]
+              }
+            },
+            "required": [
+              "content",
+              "type"
+            ]
           }
         ]
       },
