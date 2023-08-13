@@ -44,9 +44,8 @@ declare_saga_actions! {
         - sis_move_to_starting_undo
     }
 
-    // This saga should eventually trigger a RPW that updates all this state
-    // (see PR #3804), but for now it manually ensures that the correct
-    // networking state has been propagated.
+    // TODO(#3879) This can be replaced with an action that triggers the NAT RPW
+    // once such an RPW is available.
     DPD_ENSURE -> "dpd_ensure" {
         + sis_dpd_ensure
         - sis_dpd_ensure_undo

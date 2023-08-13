@@ -487,6 +487,17 @@ impl super::Nexus {
         // If the instance is already starting or running, succeed immediately
         // for idempotency. If the instance is stopped, try to start it. In all
         // other cases return an error describing the state conflict.
+        //
+        // The "Creating" state is not permitted here (even though a request to
+        // create can include a request to start the instance) because an
+        // instance that is still being created may not be ready to start yet
+        // (e.g. its disks may not yet be attached).
+        //
+        // If the instance is stopped, the start saga will try to change the
+        // instance's state to Starting and increment the instance's state
+        // generation number. If this increment fails (because someone else has
+        // changed the state), the saga fails. See the saga comments for more
+        // details on how this synchronization works.
         match db_instance.runtime_state.state.0 {
             InstanceState::Starting | InstanceState::Running => {
                 return Ok(db_instance)
