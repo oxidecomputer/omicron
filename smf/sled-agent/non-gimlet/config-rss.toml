@@ -97,7 +97,7 @@ infra_ip_last = "192.168.1.30"
 # You can configure multiple uplinks by repeating the following stanza
 [[rack_network_config.uplinks]]
 # The gateway IP for the rack's external network
-gateway_ip = "192.168.1.1"
+gateway_ip = "192.168.1.199"
 # Name of the uplink port.  This should always be "qsfp0" when using softnpu.
 uplink_port = "qsfp0"
 uplink_port_speed = "40G"

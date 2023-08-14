@@ -14,6 +14,7 @@ use num_traits::{One, Zero};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::boxed::Box;
+use std::collections::BTreeMap;
 use std::fmt;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::ops::{Add, AddAssign};
@@ -194,17 +195,6 @@ where
 pub struct Field {
     pub name: String,
     pub value: FieldValue,
-}
-
-impl Field {
-    /// Construct a field from its name and value.
-    pub fn new<S, T>(name: S, value: T) -> Self
-    where
-        S: AsRef<str>,
-        T: Into<FieldValue>,
-    {
-        Field { name: name.as_ref().to_string(), value: value.into() }
-    }
 }
 
 /// The type of an individual datum of a metric.
@@ -406,6 +396,12 @@ pub enum MetricsError {
     DuplicateFieldName { name: String },
 }
 
+impl From<MetricsError> for omicron_common::api::external::Error {
+    fn from(e: MetricsError) -> Self {
+        omicron_common::api::external::Error::internal_error(&e.to_string())
+    }
+}
+
 /// A cumulative or counter data type.
 #[derive(Debug, Clone, Copy, PartialEq, JsonSchema, Deserialize, Serialize)]
 #[schemars(rename = "Cumulative{T}")]
@@ -492,16 +488,28 @@ where
 #[derive(Clone, Debug, PartialEq, JsonSchema, Deserialize, Serialize)]
 pub(crate) struct FieldSet {
     pub name: String,
-    pub fields: Vec<Field>,
+    pub fields: BTreeMap<String, Field>,
 }
 
 impl FieldSet {
     fn from_target(target: &impl traits::Target) -> Self {
-        Self { name: target.name().to_string(), fields: target.fields() }
+        let fields = target
+            .fields()
+            .iter()
+            .cloned()
+            .map(|f| (f.name.clone(), f))
+            .collect();
+        Self { name: target.name().to_string(), fields }
     }
 
     fn from_metric(metric: &impl traits::Metric) -> Self {
-        Self { name: metric.name().to_string(), fields: metric.fields() }
+        let fields = metric
+            .fields()
+            .iter()
+            .cloned()
+            .map(|f| (f.name.clone(), f))
+            .collect();
+        Self { name: metric.name().to_string(), fields }
     }
 }
 
@@ -576,7 +584,14 @@ impl Sample {
     /// This returns the target fields and metric fields, chained, although there is no distinction
     /// between them in this method.
     pub fn fields(&self) -> Vec<Field> {
-        [self.target.fields.clone(), self.metric.fields.clone()].concat()
+        let mut out = Vec::with_capacity(
+            self.target.fields.len() + self.metric.fields.len(),
+        );
+        for f in self.target.fields.values().chain(self.metric.fields.values())
+        {
+            out.push(f.clone())
+        }
+        out
     }
 
     /// Return the name of this sample's target.
@@ -585,8 +600,8 @@ impl Sample {
     }
 
     /// Return the fields of this sample's target.
-    pub fn target_fields(&self) -> &Vec<Field> {
-        &self.target.fields
+    pub fn target_fields(&self) -> impl Iterator<Item = &Field> {
+        self.target.fields.values()
     }
 
     /// Return the name of this sample's metric.
@@ -595,8 +610,8 @@ impl Sample {
     }
 
     /// Return the fields of this sample's metric.
-    pub fn metric_fields(&self) -> &Vec<Field> {
-        &self.metric.fields
+    pub fn metric_fields(&self) -> impl Iterator<Item = &Field> {
+        self.metric.fields.values()
     }
 
     // Check validity of field names for the target and metric. Currently this
@@ -605,8 +620,8 @@ impl Sample {
         target: &FieldSet,
         metric: &FieldSet,
     ) -> Result<(), MetricsError> {
-        for name in target.fields.iter().map(|f| f.name.as_str()) {
-            if metric.fields.iter().any(|f| f.name == name) {
+        for name in target.fields.keys() {
+            if metric.fields.contains_key(name) {
                 return Err(MetricsError::DuplicateFieldName {
                     name: name.to_string(),
                 });
@@ -697,6 +712,7 @@ mod tests {
     use crate::types;
     use crate::{Metric, Target};
     use bytes::Bytes;
+    use std::collections::BTreeMap;
     use std::net::IpAddr;
     use uuid::Uuid;
 
@@ -821,13 +837,11 @@ mod tests {
 
     #[test]
     fn test_verify_field_names() {
-        let fields = FieldSet {
-            name: "t".to_string(),
-            fields: vec![Field {
-                name: "n".to_string(),
-                value: FieldValue::from(0i64),
-            }],
-        };
+        let mut fields = BTreeMap::new();
+        let field =
+            Field { name: "n".to_string(), value: FieldValue::from(0i64) };
+        fields.insert(field.name.clone(), field);
+        let fields = FieldSet { name: "t".to_string(), fields };
         assert!(matches!(
             Sample::verify_field_names(&fields, &fields),
             Err(MetricsError::DuplicateFieldName { .. })
