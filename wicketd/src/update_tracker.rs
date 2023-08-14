@@ -620,9 +620,13 @@ impl UpdateDriver {
             ),
         };
 
-        // To update the RoT, we have to know which slot (A or B) it is
-        // currently executing; we must update the _other_ slot.
         let rot_registrar = engine.for_component(UpdateComponent::Rot);
+        let sp_registrar = engine.for_component(UpdateComponent::Sp);
+
+        // To update the RoT, we have to know which slot (A or B) it is
+        // currently executing; we must update the _other_ slot. We also want to
+        // know its current version (so we can skip updating if we only need to
+        // update the SP and/or host).
         let rot_interrogation =
             rot_registrar
                 .new_step(
@@ -634,6 +638,64 @@ impl UpdateDriver {
                 )
                 .register();
 
+        // The SP only has one updateable firmware slot ("the inactive bank").
+        // We want to ask about slot 0 (the active slot)'s current version, and
+        // we are supposed to always pass 0 when updating.
+        let sp_firmware_slot = 0;
+
+        // To update the SP, we want to know both its version and its board (so
+        // we can map to the correct artifact from our update plan).
+        let sp_artifact_and_version = sp_registrar
+            .new_step(
+                UpdateStepId::InterrogateSp,
+                "Checking current SP version",
+                move |_cx| async move {
+                    let caboose = update_cx
+                        .mgs_client
+                        .sp_component_caboose_get(
+                            update_cx.sp.type_,
+                            update_cx.sp.slot,
+                            SpComponent::SP_ITSELF.const_as_str(),
+                            sp_firmware_slot,
+                        )
+                        .await
+                        .map_err(|error| {
+                            UpdateTerminalError::GetSpCabooseFailed { error }
+                        })?
+                        .into_inner();
+
+                    let Some(sp_artifact) = sp_artifacts.get(&caboose.board)
+                    else {
+                        return Err(UpdateTerminalError::MissingSpImageForBoard {
+                            board: caboose.board,
+                        });
+                    };
+                    let sp_artifact = sp_artifact.clone();
+
+                    let message = format!(
+                        "SP version {} (git commit {})",
+                        caboose.version.as_deref().unwrap_or("unknown"),
+                        caboose.git_commit
+                    );
+                    match caboose.version.map(|v| v.parse::<SemverVersion>()) {
+                        Some(Ok(version)) => {
+                            StepSuccess::new((sp_artifact, Some(version)))
+                                .with_message(message)
+                                .into()
+                        }
+                        Some(Err(err)) => StepWarning::new(
+                            (sp_artifact, None),
+                            format!(
+                                "{message} (failed to parse SP version: {err})"
+                            ),
+                        )
+                        .into(),
+                        None => StepWarning::new((sp_artifact, None), message)
+                            .into(),
+                    }
+                },
+            )
+            .register();
         // Send the update to the RoT.
         let inner_cx =
             SpComponentUpdateContext::new(update_cx, UpdateComponent::Rot);
@@ -695,64 +757,6 @@ impl UpdateDriver {
             )
             .register();
 
-        let sp_registrar = engine.for_component(UpdateComponent::Sp);
-
-        // The SP only has one updateable firmware slot ("the inactive bank").
-        // We want to ask about slot 0 (the active slot)'s current version, and
-        // we are supposed to always pass 0 when updating.
-        let sp_firmware_slot = 0;
-
-        let sp_artifact_and_version = sp_registrar
-            .new_step(
-                UpdateStepId::InterrogateSp,
-                "Checking current SP version",
-                move |_cx| async move {
-                    let caboose = update_cx
-                        .mgs_client
-                        .sp_component_caboose_get(
-                            update_cx.sp.type_,
-                            update_cx.sp.slot,
-                            SpComponent::SP_ITSELF.const_as_str(),
-                            sp_firmware_slot,
-                        )
-                        .await
-                        .map_err(|error| {
-                            UpdateTerminalError::GetSpCabooseFailed { error }
-                        })?
-                        .into_inner();
-
-                    let Some(sp_artifact) = sp_artifacts.get(&caboose.board)
-                    else {
-                        return Err(UpdateTerminalError::MissingSpImageForBoard {
-                            board: caboose.board,
-                        });
-                    };
-                    let sp_artifact = sp_artifact.clone();
-
-                    let message = format!(
-                        "SP version {} (git commit {})",
-                        caboose.version.as_deref().unwrap_or("unknown"),
-                        caboose.git_commit
-                    );
-                    match caboose.version.map(|v| v.parse::<SemverVersion>()) {
-                        Some(Ok(version)) => {
-                            StepSuccess::new((sp_artifact, Some(version)))
-                                .with_message(message)
-                                .into()
-                        }
-                        Some(Err(err)) => StepWarning::new(
-                            (sp_artifact, None),
-                            format!(
-                                "{message} (failed to parse SP version: {err})"
-                            ),
-                        )
-                        .into(),
-                        None => StepWarning::new((sp_artifact, None), message)
-                            .into(),
-                    }
-                },
-            )
-            .register();
         let inner_cx =
             SpComponentUpdateContext::new(update_cx, UpdateComponent::Sp);
         sp_registrar
