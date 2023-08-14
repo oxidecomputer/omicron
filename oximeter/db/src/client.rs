@@ -656,12 +656,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_build_replicated() {        
+    async fn test_build_replicated() {
         let log = slog::Logger::root(slog::Discard, o!());
 
         // Start all Keeper coordinator nodes
         let cur_dir = std::env::current_dir().unwrap();
-        let keeper_config = cur_dir.as_path().join("src/configs/keeper_config.xml");
+        let keeper_config =
+            cur_dir.as_path().join("src/configs/keeper_config.xml");
 
         // Start Keeper 1
         let k1_port = String::from("9181");
@@ -676,29 +677,30 @@ mod tests {
         .expect("Failed to start ClickHouse keeper 1");
 
         // Start Keeper 2
-       let k2_port = String::from("9182");
-       let k2_id = String::from("2");
+        let k2_port = String::from("9182");
+        let k2_id = String::from("2");
 
-       let mut k2 = ClickHouseInstance::new_keeper(
-           k2_port,
-           k2_id,
-           keeper_config.clone(),
-       )
-       .await
-       .expect("Failed to start ClickHouse keeper 2");
+        let mut k2 = ClickHouseInstance::new_keeper(
+            k2_port,
+            k2_id,
+            keeper_config.clone(),
+        )
+        .await
+        .expect("Failed to start ClickHouse keeper 2");
 
-       // Start Keeper 3
-       let k3_port = String::from("9183");
-       let k3_id = String::from("3");
+        // Start Keeper 3
+        let k3_port = String::from("9183");
+        let k3_id = String::from("3");
 
-       let mut k3 =
-           ClickHouseInstance::new_keeper(k3_port, k3_id, keeper_config)
-               .await
-               .expect("Failed to start ClickHouse keeper 3");
+        let mut k3 =
+            ClickHouseInstance::new_keeper(k3_port, k3_id, keeper_config)
+                .await
+                .expect("Failed to start ClickHouse keeper 3");
 
         // Start all replica nodes
         let cur_dir = std::env::current_dir().unwrap();
-        let replica_config = cur_dir.as_path().join("src/configs/replica_config.xml");
+        let replica_config =
+            cur_dir.as_path().join("src/configs/replica_config.xml");
 
         // Start Replica 1
         let r1_port = String::from("8123");
@@ -716,7 +718,8 @@ mod tests {
         )
         .await
         .expect("Failed to start ClickHouse node 1");
-        let r1_address = SocketAddr::new("::1".parse().unwrap(), db_1.port());
+        let r1_address =
+            SocketAddr::new("127.0.0.1".parse().unwrap(), db_1.port());
 
         // Start Replica 2
         let r2_port = String::from("8124");
@@ -734,7 +737,14 @@ mod tests {
         )
         .await
         .expect("Failed to start ClickHouse node 2");
-        let r2_address = SocketAddr::new("::1".parse().unwrap(), db_2.port());
+        let r2_address =
+            SocketAddr::new("127.0.0.1".parse().unwrap(), db_2.port());
+
+        // TODO: Wait for 1 minute to make sure all servers are up. Remove this sleep once
+        // the wait_for_port function takes into account ipv4 as well
+        use std::time::Duration;
+        use tokio::time::sleep;
+        sleep(Duration::from_secs(60)).await;
 
         // Create database in node 1
         let client_1 = Client::new(r1_address, &log);
@@ -743,7 +753,9 @@ mod tests {
             .await
             .expect("Failed to initialize timeseries database");
 
-        // Perhaps check on db 1 first?
+        // Wait to make sure data has been synchronised. TODO: Waiting for 30 secs is a bit sloppy
+        // come up with a better way to do this.
+        sleep(Duration::from_secs(30)).await;
 
         // Verify database exists in node 2
         let client_2 = Client::new(r2_address, &log);
