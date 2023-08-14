@@ -676,30 +676,29 @@ mod tests {
         .expect("Failed to start ClickHouse keeper 1");
 
         // Start Keeper 2
-        let k2_port = String::from("9182");
-        let k2_id = String::from("2");
+       let k2_port = String::from("9182");
+       let k2_id = String::from("2");
 
-        let mut k2 = ClickHouseInstance::new_keeper(
-            k2_port,
-            k2_id,
-            keeper_config.clone(),
-        )
-        .await
-        .expect("Failed to start ClickHouse keeper 2");
+       let mut k2 = ClickHouseInstance::new_keeper(
+           k2_port,
+           k2_id,
+           keeper_config.clone(),
+       )
+       .await
+       .expect("Failed to start ClickHouse keeper 2");
 
-        // Start Keeper 3
-        let k3_port = String::from("9183");
-        let k3_id = String::from("3");
+       // Start Keeper 3
+       let k3_port = String::from("9183");
+       let k3_id = String::from("3");
 
-        let mut k3 =
-            ClickHouseInstance::new_keeper(k3_port, k3_id, keeper_config)
-                .await
-                .expect("Failed to start ClickHouse keeper 3");
+       let mut k3 =
+           ClickHouseInstance::new_keeper(k3_port, k3_id, keeper_config)
+               .await
+               .expect("Failed to start ClickHouse keeper 3");
 
         // Start all replica nodes
         let cur_dir = std::env::current_dir().unwrap();
         let replica_config = cur_dir.as_path().join("src/configs/replica_config.xml");
-//        let replica_config = String::from("oximeter/db/src/configs/replica_config.xml");
 
         // Start Replica 1
         let r1_port = String::from("8123");

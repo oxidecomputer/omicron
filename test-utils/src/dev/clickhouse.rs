@@ -220,22 +220,15 @@ impl ClickHouseInstance {
         if !["1", "2", "3"].contains(&k_id.as_str()) {
             return Err(ClickHouseError::InvalidKeeperId.into());
         }
-       // let data_dir = TempDir::new()
-         //   .context("failed to create tempdir for ClickHouse Keeper data")?;
-
             // Keepers do not allow a dot in the beginning of the directory, so we must
-            // use a prefix. They also must live in a directory owned by the same user
-
-            // TODO: I keep getting an `<Error> Application: DB::Exception: Invalid changelog` error
-            // and I don't know why :(
-            // https://github.com/ClickHouse/ClickHouse/blob/a6f89c05465753379f481cfe91130a9cd87c66b0/src/Coordination/Changelog.cpp#L78
-            let data_dir = Builder::new().prefix("k").tempdir_in("")
+            // use a prefix.
+            let data_dir = Builder::new().prefix("k").tempdir()
             .context("failed to create tempdir for ClickHouse Keeper data")?;
         
         let log_path = data_dir.path().join("clickhouse-keeper.log");
-        let err_log_path = data_dir.path().join("clickhouse-keeper.errlog");
-        let log_storage_path = data_dir.path();//.join("log/");
-        let snapshot_storage_path = data_dir.path();//.join("snapshots/");
+        let err_log_path = data_dir.path().join("clickhouse-keeper.err.log");
+        let log_storage_path = data_dir.path().join("log");
+        let snapshot_storage_path = data_dir.path().join("snapshots");
         let args = vec![
             "keeper".to_string(),
             "--config-file".to_string(),
