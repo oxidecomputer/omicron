@@ -344,9 +344,6 @@ pub(crate) fn timeseries_key_for(
     hasher.finish()
 }
 
-// The name of the cluster that will hold replicated databases.
-//const CLUSTER_NAME: &str = "oximeter_cluster";
-
 // Timestamp format in the database
 const DATABASE_TIMESTAMP_FORMAT: &str = "%Y-%m-%d %H:%M:%S%.9f";
 

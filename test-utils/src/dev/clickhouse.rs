@@ -162,9 +162,9 @@ impl ClickHouseInstance {
             })?;
 
         let data_path = data_dir.path().to_path_buf();
-        // TODO: modify wait_for_port() to account for ipv4 as well
-        // TODO: perhaps check for "<Information> Application: Ready for connections." instead
-        //   let port = wait_for_port(log_path).await?;
+        // TODO: Poll for "<Information> Application: Ready for connections."
+        // using a similar mechanism to:
+        // let port = wait_for_port(log_path).await?;
         let port: u16 = port.parse()?;
 
         Ok(Self {
@@ -222,6 +222,9 @@ impl ClickHouseInstance {
             .env("CH_KEEPER_ID_01", "1")
             .env("CH_KEEPER_ID_02", "2")
             .env("CH_KEEPER_ID_03", "3")
+            // There seems to be a bug using ipv6 with a replicated set up
+            // when installing all servers and coordinator nodes on the same
+            // server. For this reason we will be using ipv4 for testing.
             .env("CH_KEEPER_HOST_01", "127.0.0.1")
             .env("CH_KEEPER_HOST_02", "127.0.0.1")
             .env("CH_KEEPER_HOST_03", "127.0.0.1")
@@ -234,6 +237,10 @@ impl ClickHouseInstance {
             })?;
 
         let data_path = data_dir.path().to_path_buf();
+        // TODO: Poll for information that the keepers have formed
+        // quorum and are listening. Perhaps the result of 
+        // `echo mntr | nc <host> <port>`, using a similar mechanism to:
+        // let port = wait_for_port(log_path).await?;
         let port: u16 = port.parse()?;
 
         Ok(Self {

@@ -662,7 +662,7 @@ mod tests {
         // Start all Keeper coordinator nodes
         let cur_dir = std::env::current_dir().unwrap();
         let keeper_config =
-            cur_dir.as_path().join("src/configs/keeper_config.xml");
+            cur_dir.as_path().join("src/test-configs/keeper_config.xml");
 
         // Start Keeper 1
         let k1_port = String::from("9181");
@@ -700,7 +700,7 @@ mod tests {
         // Start all replica nodes
         let cur_dir = std::env::current_dir().unwrap();
         let replica_config =
-            cur_dir.as_path().join("src/configs/replica_config.xml");
+            cur_dir.as_path().join("src/test-configs/replica_config.xml");
 
         // Start Replica 1
         let r1_port = String::from("8123");
@@ -740,8 +740,9 @@ mod tests {
         let r2_address =
             SocketAddr::new("127.0.0.1".parse().unwrap(), db_2.port());
 
-        // TODO: Wait for 1 minute to make sure all servers are up. Remove this sleep once
-        // the wait_for_port function takes into account ipv4 as well
+        // TODO: Wait for 1 minute to make sure all servers are up.
+        // Remove this sleep once we have a mechanism that polls for 
+        // "Ready for connections" similar to wait_for_port().
         use std::time::Duration;
         use tokio::time::sleep;
         sleep(Duration::from_secs(60)).await;
@@ -753,7 +754,8 @@ mod tests {
             .await
             .expect("Failed to initialize timeseries database");
 
-        // Wait to make sure data has been synchronised. TODO: Waiting for 30 secs is a bit sloppy
+        // Wait to make sure data has been synchronised. 
+        // TODO: Waiting for 30 secs is a bit sloppy,
         // come up with a better way to do this.
         sleep(Duration::from_secs(30)).await;
 

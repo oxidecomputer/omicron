@@ -7,7 +7,6 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_bool
     timestamp DateTime64(9, 'UTC'),
     datum UInt8
 )
-
 ENGINE = MergeTree()
 ORDER BY (timeseries_name, timeseries_key, timestamp)
 TTL toDateTime(timestamp) + INTERVAL 30 DAY;
