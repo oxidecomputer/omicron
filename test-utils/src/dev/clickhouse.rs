@@ -163,6 +163,7 @@ impl ClickHouseInstance {
 
         let data_path = data_dir.path().to_path_buf();
         // TODO: modify wait_for_port() to account for ipv4 as well
+        // TODO: perhaps check for "<Information> Application: Ready for connections." instead
         //   let port = wait_for_port(log_path).await?;
         let port: u16 = port.parse()?;
 
