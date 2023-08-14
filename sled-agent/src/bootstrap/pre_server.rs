@@ -15,6 +15,7 @@ use super::secret_retriever::LrtqOrHardcodedSecretRetriever;
 use super::server::StartError;
 use crate::config::Config;
 use crate::services::ServiceManager;
+use crate::sled_agent::SledAgent;
 use crate::storage_manager::StorageManager;
 use camino::Utf8PathBuf;
 use cancel_safe_futures::TryStreamExt;
@@ -31,7 +32,6 @@ use illumos_utils::zone::Zones;
 use key_manager::KeyManager;
 use key_manager::StorageKeyRequester;
 use omicron_common::address::Ipv6Subnet;
-use omicron_common::api::internal::shared::RackNetworkConfig;
 use omicron_common::FileKv;
 use sled_hardware::underlay;
 use sled_hardware::DendriteAsic;
@@ -55,7 +55,7 @@ impl BootstrapManagers {
     pub(super) async fn handle_hardware_update(
         &self,
         update: Result<HardwareUpdate, broadcast::error::RecvError>,
-        underlay_network: Option<(Ipv6Addr, Option<&RackNetworkConfig>)>,
+        sled_agent: Option<&SledAgent>,
         log: &Logger,
     ) {
         match update {
@@ -64,7 +64,10 @@ impl BootstrapManagers {
                     let baseboard = self.hardware.baseboard();
                     if let Err(e) = self
                         .service
-                        .activate_switch(underlay_network, baseboard)
+                        .activate_switch(
+                            sled_agent.map(|sa| sa.switch_zone_underlay_info()),
+                            baseboard,
+                        )
                         .await
                     {
                         warn!(log, "Failed to activate switch: {e}");
@@ -76,7 +79,9 @@ impl BootstrapManagers {
                     }
                 }
                 HardwareUpdate::TofinoDeviceChange => {
-                    // TODO-correctness What should we do here?
+                    if let Some(sled_agent) = sled_agent {
+                        sled_agent.notify_nexus_about_self(log);
+                    }
                 }
                 HardwareUpdate::DiskAdded(disk) => {
                     self.storage.upsert_disk(disk).await;
@@ -87,7 +92,7 @@ impl BootstrapManagers {
             },
             Err(broadcast::error::RecvError::Lagged(count)) => {
                 warn!(log, "Hardware monitor missed {count} messages");
-                self.full_hardware_scan(underlay_network, log).await;
+                self.full_hardware_scan(sled_agent, log).await;
             }
             Err(broadcast::error::RecvError::Closed) => {
                 // The `HardwareManager` monitoring task is an infinite loop -
@@ -107,10 +112,17 @@ impl BootstrapManagers {
     // named something like "check latest hardware snapshot"?
     pub(super) async fn full_hardware_scan(
         &self,
-        underlay_network: Option<(Ipv6Addr, Option<&RackNetworkConfig>)>,
+        sled_agent: Option<&SledAgent>,
         log: &Logger,
     ) {
-        info!(log, "Checking current full hardware snapshot");
+        let underlay_network = sled_agent.map(|sled_agent| {
+            sled_agent.notify_nexus_about_self(log);
+            sled_agent.switch_zone_underlay_info()
+        });
+        info!(
+            log, "Checking current full hardware snapshot";
+            "underlay_network_info" => ?underlay_network,
+        );
         if self.hardware.is_scrimlet_driver_loaded() {
             let baseboard = self.hardware.baseboard();
             if let Err(e) =

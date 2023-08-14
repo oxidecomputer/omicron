@@ -25,6 +25,7 @@ use crate::bootstrap::sprockets_server::SprocketsServer;
 use crate::config::Config as SledConfig;
 use crate::config::ConfigError;
 use crate::server::Server as SledAgentServer;
+use crate::sled_agent::SledAgent;
 use crate::storage_manager::StorageResources;
 use bootstore::schemes::v0 as bootstore;
 use camino::Utf8PathBuf;
@@ -38,7 +39,6 @@ use illumos_utils::dladm;
 use illumos_utils::zfs;
 use illumos_utils::zone;
 use illumos_utils::zone::Zones;
-use omicron_common::api::internal::shared::RackNetworkConfig;
 use omicron_common::ledger;
 use omicron_common::ledger::Ledger;
 use omicron_common::ledger::Ledgerable;
@@ -50,7 +50,6 @@ use sled_hardware::HardwareUpdate;
 use slog::Logger;
 use std::borrow::Cow;
 use std::io;
-use std::net::Ipv6Addr;
 use std::net::SocketAddr;
 use std::net::SocketAddrV6;
 use tokio::sync::broadcast;
@@ -190,8 +189,7 @@ impl Server {
 
         // Check the latest hardware snapshot; we could have missed events
         // between the creation of the hardware manager and our subscription of
-        // its monitor. We are pre-underlay network, so pass `None` for the
-        // underlay network info.
+        // its monitor.
         managers.full_hardware_scan(None, &startup_log).await;
 
         // Wait for our boot M.2 to show up.
@@ -319,9 +317,7 @@ impl Server {
                 startup_log, "Sled Agent started; rescanning hardware";
                 "underlay_network_info" => ?underlay_network_info,
             );
-            managers
-                .full_hardware_scan(Some(underlay_network_info), &startup_log)
-                .await;
+            managers.full_hardware_scan(Some(&sled_agent), &startup_log).await;
 
             // For cold boot specifically, we now need to load the services
             // we're responsible for, while continuing to handle hardware
@@ -331,7 +327,7 @@ impl Server {
                 sled_agent.cold_boot_load_services(),
                 &mut hardware_monitor,
                 &managers,
-                Some(underlay_network_info),
+                Some(&sled_agent),
                 &startup_log,
                 "restoring sled-agent services (cold boot)",
             )
@@ -390,14 +386,10 @@ enum SledAgentState {
 }
 
 impl SledAgentState {
-    fn switch_zone_underlay_info(
-        &self,
-    ) -> Option<(Ipv6Addr, Option<&RackNetworkConfig>)> {
+    fn sled_agent(&self) -> Option<&SledAgent> {
         match self {
             SledAgentState::Bootstrapping => None,
-            SledAgentState::ServerStarted(server) => {
-                Some(server.sled_agent().switch_zone_underlay_info())
-            }
+            SledAgentState::ServerStarted(server) => Some(server.sled_agent()),
         }
     }
 }
@@ -587,7 +579,7 @@ async fn wait_while_handling_hardware_updates<F: Future<Output = T>, T>(
     fut: F,
     hardware_monitor: &mut broadcast::Receiver<HardwareUpdate>,
     managers: &BootstrapManagers,
-    underlay_network: Option<(Ipv6Addr, Option<&RackNetworkConfig>)>,
+    sled_agent: Option<&SledAgent>,
     log: &Logger,
     log_phase: &str,
 ) -> T {
@@ -605,7 +597,7 @@ async fn wait_while_handling_hardware_updates<F: Future<Output = T>, T>(
 
                 managers.handle_hardware_update(
                     hardware_update,
-                    underlay_network,
+                    sled_agent,
                     log,
                 ).await;
             }
@@ -708,31 +700,13 @@ impl Inner {
             "update" => ?hardware_update,
         );
 
-        // TODO are these choices correct? This tries to match the previous
-        // behavior when SledAgent monitored hardware itself. Could/should we
-        // notify nexus after any hardware update?
-        let should_notify_nexus = match &hardware_update {
-            Ok(HardwareUpdate::TofinoDeviceChange)
-            | Err(broadcast::error::RecvError::Lagged(_)) => true,
-            _ => false,
-        };
-
         self.managers
             .handle_hardware_update(
                 hardware_update,
-                self.state.switch_zone_underlay_info(),
+                self.state.sled_agent(),
                 &log,
             )
             .await;
-
-        if should_notify_nexus {
-            match &self.state {
-                SledAgentState::Bootstrapping => (),
-                SledAgentState::ServerStarted(server) => {
-                    server.sled_agent().notify_nexus_about_self(&log);
-                }
-            }
-        }
     }
 
     async fn handle_start_sled_agent_request(
@@ -758,17 +732,8 @@ impl Inner {
                         // We've created sled-agent; we need to (possibly)
                         // reconfigure the switch zone, if we're a scrimlet, to
                         // give it our underlay network information.
-                        let underlay_network_info =
-                            server.sled_agent().switch_zone_underlay_info();
-                        info!(
-                            log, "Sled Agent started; rescanning hardware";
-                            "underlay_network_info" => ?underlay_network_info,
-                        );
                         self.managers
-                            .full_hardware_scan(
-                                Some(underlay_network_info),
-                                log,
-                            )
+                            .full_hardware_scan(Some(server.sled_agent()), log)
                             .await;
 
                         self.state = SledAgentState::ServerStarted(server);
@@ -906,6 +871,7 @@ mod tests {
     use super::*;
     use omicron_common::address::Ipv6Subnet;
     use omicron_test_utils::dev::test_setup_log;
+    use std::net::Ipv6Addr;
     use uuid::Uuid;
 
     #[tokio::test]
