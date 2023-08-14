@@ -9738,6 +9738,7 @@ dependencies = [
  "gateway-test-utils",
  "hex",
  "http",
+ "hubtools",
  "hyper",
  "installinator",
  "installinator-artifact-client",

@@ -604,21 +604,19 @@ impl UpdateDriver {
             define_test_steps(&engine, secs);
         }
 
-        let (rot_a, rot_b, sp_artifact) = match update_cx.sp.type_ {
+        let (rot_a, rot_b, sp_artifacts) = match update_cx.sp.type_ {
             SpType::Sled => (
                 plan.gimlet_rot_a.clone(),
                 plan.gimlet_rot_b.clone(),
-                plan.gimlet_sp.clone(),
+                &plan.gimlet_sp,
             ),
-            SpType::Power => (
-                plan.psc_rot_a.clone(),
-                plan.psc_rot_b.clone(),
-                plan.psc_sp.clone(),
-            ),
+            SpType::Power => {
+                (plan.psc_rot_a.clone(), plan.psc_rot_b.clone(), &plan.psc_sp)
+            }
             SpType::Switch => (
                 plan.sidecar_rot_a.clone(),
                 plan.sidecar_rot_b.clone(),
-                plan.sidecar_sp.clone(),
+                &plan.sidecar_sp,
             ),
         };
 
@@ -704,7 +702,7 @@ impl UpdateDriver {
         // we are supposed to always pass 0 when updating.
         let sp_firmware_slot = 0;
 
-        let sp_current_version = sp_registrar
+        let sp_artifact_and_version = sp_registrar
             .new_step(
                 UpdateStepId::InterrogateSp,
                 "Checking current SP version",
@@ -723,23 +721,34 @@ impl UpdateDriver {
                         })?
                         .into_inner();
 
+                    let Some(sp_artifact) = sp_artifacts.get(&caboose.board)
+                    else {
+                        return Err(UpdateTerminalError::MissingSpImageForBoard {
+                            board: caboose.board,
+                        });
+                    };
+                    let sp_artifact = sp_artifact.clone();
+
                     let message = format!(
                         "SP version {} (git commit {})",
                         caboose.version.as_deref().unwrap_or("unknown"),
                         caboose.git_commit
                     );
                     match caboose.version.map(|v| v.parse::<SemverVersion>()) {
-                        Some(Ok(version)) => StepSuccess::new(Some(version))
-                            .with_message(message)
-                            .into(),
+                        Some(Ok(version)) => {
+                            StepSuccess::new((sp_artifact, Some(version)))
+                                .with_message(message)
+                                .into()
+                        }
                         Some(Err(err)) => StepWarning::new(
-                            None,
+                            (sp_artifact, None),
                             format!(
                                 "{message} (failed to parse SP version: {err})"
                             ),
                         )
                         .into(),
-                        None => StepWarning::new(None, message).into(),
+                        None => StepWarning::new((sp_artifact, None), message)
+                            .into(),
                     }
                 },
             )
@@ -755,11 +764,11 @@ impl UpdateDriver {
                         return simulate_result(result);
                     }
 
-                    let sp_current_version =
-                        sp_current_version.into_value(cx.token()).await;
+                    let (sp_artifact, sp_version) =
+                        sp_artifact_and_version.into_value(cx.token()).await;
 
-                    let sp_has_this_version = Some(&sp_artifact.id.version)
-                        == sp_current_version.as_ref();
+                    let sp_has_this_version =
+                        Some(&sp_artifact.id.version) == sp_version.as_ref();
 
                     // If this SP already has this version, skip the rest of
                     // this step, UNLESS we've been told to skip this version
