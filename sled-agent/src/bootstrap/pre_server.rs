@@ -500,11 +500,6 @@ impl BootstrapNetworking {
                 IpAddr::V6(addr) => addr,
             };
 
-        // TODO-correctness: Creating the underlay IP and
-        // etherstub/etherstub_vnic here is _slightly_ earlier than
-        // BootstrapAgent did this setup (it waited until it was about to start
-        // the HardwareMonitor), but I don't anything in between now and then
-        // has an effect on these steps. Need to confirm.
         let switch_zone_bootstrap_ip = underlay::BootstrapInterface::SwitchZone
             .ip(&link_for_mac)
             .map_err(StartError::BootstrapLinkMac)?;
