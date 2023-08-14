@@ -704,7 +704,7 @@ mod tests {
             good: true,
             datum: 1,
         };
-        let sample = Sample::new(&bad_name, &metric);
+        let sample = Sample::new(&bad_name, &metric).unwrap();
         let result = client.verify_sample_schema(&sample).await;
         assert!(matches!(result, Err(Error::SchemaMismatch { .. })));
         db.cleanup().await.expect("Failed to cleanup ClickHouse server");
@@ -825,8 +825,8 @@ mod tests {
     async fn test_client_select_timeseries_one() {
         let (mut db, client, samples) = setup_filter_testcase().await;
         let sample = samples.first().unwrap();
-        let target_fields = sample.target_fields();
-        let metric_fields = sample.metric_fields();
+        let target_fields = sample.target_fields().collect::<Vec<_>>();
+        let metric_fields = sample.metric_fields().collect::<Vec<_>>();
         let criteria = &[
             format!(
                 "project_id=={}",
@@ -874,9 +874,12 @@ mod tests {
             .all(|(first, second)| first == second));
         assert_eq!(timeseries.target.name, "virtual_machine");
         // Compare fields, but order might be different.
-        let field_cmp = |needle: &crate::Field, haystack: &[crate::Field]| {
-            needle == haystack.iter().find(|f| f.name == needle.name).unwrap()
-        };
+        fn field_cmp<'a>(
+            needle: &'a crate::Field,
+            mut haystack: impl Iterator<Item = &'a crate::Field>,
+        ) -> bool {
+            needle == haystack.find(|f| f.name == needle.name).unwrap()
+        }
         timeseries
             .target
             .fields
@@ -1004,8 +1007,8 @@ mod tests {
         let second_metric = SecondMetric::default();
 
         let samples = &[
-            Sample::new(&target, &first_metric),
-            Sample::new(&target, &second_metric),
+            Sample::new(&target, &first_metric).unwrap(),
+            Sample::new(&target, &second_metric).unwrap(),
         ];
         client
             .insert_samples(samples)
@@ -1073,8 +1076,8 @@ mod tests {
                 status_code: *status_code,
                 latency: 0.0,
             };
-            samples.push(Sample::new(&target, &metric));
-            samples.push(Sample::new(&target, &metric));
+            samples.push(Sample::new(&target, &metric).unwrap());
+            samples.push(Sample::new(&target, &metric).unwrap());
             metrics.push(metric);
         }
         (target, metrics, samples)

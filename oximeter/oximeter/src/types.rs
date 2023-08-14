@@ -14,6 +14,7 @@ use num_traits::{One, Zero};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::boxed::Box;
+use std::collections::BTreeMap;
 use std::fmt;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::ops::{Add, AddAssign};
@@ -194,17 +195,6 @@ where
 pub struct Field {
     pub name: String,
     pub value: FieldValue,
-}
-
-impl Field {
-    /// Construct a field from its name and value.
-    pub fn new<S, T>(name: S, value: T) -> Self
-    where
-        S: AsRef<str>,
-        T: Into<FieldValue>,
-    {
-        Field { name: name.as_ref().to_string(), value: value.into() }
-    }
 }
 
 /// The type of an individual datum of a metric.
@@ -400,6 +390,16 @@ pub enum MetricsError {
     /// An error parsing a field or measurement from a string.
     #[error("String '{src}' could not be parsed as type '{typ}'")]
     ParseError { src: String, typ: String },
+
+    /// A field name is duplicated between the target and metric.
+    #[error("Field '{name}' is duplicated between the target and metric")]
+    DuplicateFieldName { name: String },
+}
+
+impl From<MetricsError> for omicron_common::api::external::Error {
+    fn from(e: MetricsError) -> Self {
+        omicron_common::api::external::Error::internal_error(&e.to_string())
+    }
 }
 
 /// A cumulative or counter data type.
@@ -488,16 +488,28 @@ where
 #[derive(Clone, Debug, PartialEq, JsonSchema, Deserialize, Serialize)]
 pub(crate) struct FieldSet {
     pub name: String,
-    pub fields: Vec<Field>,
+    pub fields: BTreeMap<String, Field>,
 }
 
 impl FieldSet {
     fn from_target(target: &impl traits::Target) -> Self {
-        Self { name: target.name().to_string(), fields: target.fields() }
+        let fields = target
+            .fields()
+            .iter()
+            .cloned()
+            .map(|f| (f.name.clone(), f))
+            .collect();
+        Self { name: target.name().to_string(), fields }
     }
 
     fn from_metric(metric: &impl traits::Metric) -> Self {
-        Self { name: metric.name().to_string(), fields: metric.fields() }
+        let fields = metric
+            .fields()
+            .iter()
+            .cloned()
+            .map(|f| (f.name.clone(), f))
+            .collect();
+        Self { name: metric.name().to_string(), fields }
     }
 }
 
@@ -539,24 +551,27 @@ impl Sample {
         timestamp: DateTime<Utc>,
         target: &T,
         metric: &M,
-    ) -> Self
+    ) -> Result<Self, MetricsError>
     where
         T: traits::Target,
         M: traits::Metric<Datum = D>,
     {
-        Self {
-            timeseries_name: format!("{}:{}", target.name(), metric.name()),
-            target: FieldSet::from_target(target),
-            metric: FieldSet::from_metric(metric),
+        let target_fields = FieldSet::from_target(target);
+        let metric_fields = FieldSet::from_metric(metric);
+        Self::verify_field_names(&target_fields, &metric_fields)?;
+        Ok(Self {
+            timeseries_name: crate::timeseries_name(target, metric),
+            target: target_fields,
+            metric: metric_fields,
             measurement: metric.measure(timestamp),
-        }
+        })
     }
 
     /// Construct a new sample, created at the time the function is called.
     ///
     /// This materializes the data from the target and metric, and stores that information along
     /// with the measurement data itself.
-    pub fn new<T, M, D>(target: &T, metric: &M) -> Self
+    pub fn new<T, M, D>(target: &T, metric: &M) -> Result<Self, MetricsError>
     where
         T: traits::Target,
         M: traits::Metric<Datum = D>,
@@ -569,7 +584,14 @@ impl Sample {
     /// This returns the target fields and metric fields, chained, although there is no distinction
     /// between them in this method.
     pub fn fields(&self) -> Vec<Field> {
-        [self.target.fields.clone(), self.metric.fields.clone()].concat()
+        let mut out = Vec::with_capacity(
+            self.target.fields.len() + self.metric.fields.len(),
+        );
+        for f in self.target.fields.values().chain(self.metric.fields.values())
+        {
+            out.push(f.clone())
+        }
+        out
     }
 
     /// Return the name of this sample's target.
@@ -578,8 +600,8 @@ impl Sample {
     }
 
     /// Return the fields of this sample's target.
-    pub fn target_fields(&self) -> &Vec<Field> {
-        &self.target.fields
+    pub fn target_fields(&self) -> impl Iterator<Item = &Field> {
+        self.target.fields.values()
     }
 
     /// Return the name of this sample's metric.
@@ -588,8 +610,24 @@ impl Sample {
     }
 
     /// Return the fields of this sample's metric.
-    pub fn metric_fields(&self) -> &Vec<Field> {
-        &self.metric.fields
+    pub fn metric_fields(&self) -> impl Iterator<Item = &Field> {
+        self.metric.fields.values()
+    }
+
+    // Check validity of field names for the target and metric. Currently this
+    // just verifies there are no duplicate names between them.
+    fn verify_field_names(
+        target: &FieldSet,
+        metric: &FieldSet,
+    ) -> Result<(), MetricsError> {
+        for name in target.fields.keys() {
+            if metric.fields.contains_key(name) {
+                return Err(MetricsError::DuplicateFieldName {
+                    name: name.to_string(),
+                });
+            }
+        }
+        Ok(())
     }
 }
 
@@ -662,17 +700,21 @@ impl ProducerRegistry {
 
 #[cfg(test)]
 mod tests {
-    use bytes::Bytes;
-    use std::net::IpAddr;
-    use uuid::Uuid;
-
     use super::histogram::Histogram;
+    use super::Field;
+    use super::FieldSet;
+    use super::MetricsError;
+    use super::Sample;
     use super::{
         Cumulative, Datum, DatumType, FieldType, FieldValue, Measurement,
     };
     use crate::test_util;
     use crate::types;
     use crate::{Metric, Target};
+    use bytes::Bytes;
+    use std::collections::BTreeMap;
+    use std::net::IpAddr;
+    use uuid::Uuid;
 
     #[test]
     fn test_cumulative_i64() {
@@ -744,7 +786,7 @@ mod tests {
             good: true,
             datum: 1i64,
         };
-        let sample = types::Sample::new(&t, &m);
+        let sample = types::Sample::new(&t, &m).unwrap();
         assert_eq!(
             sample.timeseries_name,
             format!("{}:{}", t.name(), m.name())
@@ -757,7 +799,7 @@ mod tests {
             good: true,
             datum: 1i64.into(),
         };
-        let sample = types::Sample::new(&t, &m);
+        let sample = types::Sample::new(&t, &m).unwrap();
         assert!(sample.measurement.start_time().is_some());
     }
 
@@ -791,5 +833,18 @@ mod tests {
         );
 
         assert!(FieldValue::parse_as_type(&as_string, FieldType::Uuid).is_err());
+    }
+
+    #[test]
+    fn test_verify_field_names() {
+        let mut fields = BTreeMap::new();
+        let field =
+            Field { name: "n".to_string(), value: FieldValue::from(0i64) };
+        fields.insert(field.name.clone(), field);
+        let fields = FieldSet { name: "t".to_string(), fields };
+        assert!(matches!(
+            Sample::verify_field_names(&fields, &fields),
+            Err(MetricsError::DuplicateFieldName { .. })
+        ));
     }
 }

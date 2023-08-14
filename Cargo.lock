@@ -5466,6 +5466,7 @@ dependencies = [
  "bytes",
  "chrono",
  "num-traits",
+ "omicron-common 0.1.0",
  "oximeter-macro-impl 0.1.0",
  "schemars",
  "serde",
