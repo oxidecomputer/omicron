@@ -12,7 +12,7 @@ use crate::nexus::NexusClientWithResolver;
 use crate::services::ServiceManager;
 use crate::storage_manager::StorageManager;
 use bootstore::schemes::v0 as bootstore;
-use illumos_utils::process::BoxedExecutor;
+use illumos_utils::host::BoxedExecutor;
 use internal_dns::resolver::Resolver;
 use slog::Logger;
 use std::net::SocketAddr;

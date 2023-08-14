@@ -6,7 +6,7 @@
 
 use camino::Utf8PathBuf;
 use clap::{Parser, Subcommand};
-use illumos_utils::process::HostExecutor;
+use illumos_utils::host::HostExecutor;
 use omicron_common::cmd::fatal;
 use omicron_common::cmd::CmdError;
 use omicron_sled_agent::bootstrap::RssAccessError;

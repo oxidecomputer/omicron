@@ -14,7 +14,7 @@ use std::net::{IpAddr, Ipv6Addr};
 
 use crate::addrobj::AddrObject;
 use crate::dladm::{EtherstubVnic, VNIC_PREFIX_BOOTSTRAP, VNIC_PREFIX_CONTROL};
-use crate::process::{BoxedExecutor, ExecutionError, PFEXEC};
+use crate::host::{BoxedExecutor, ExecutionError, PFEXEC};
 use omicron_common::address::SLED_PREFIX;
 
 const DLADM: &str = "/usr/sbin/dladm";
@@ -895,7 +895,7 @@ impl Zones {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::process::{FakeExecutor, Input, OutputExt, StaticHandler};
+    use crate::host::{FakeExecutor, Input, OutputExt, StaticHandler};
     use omicron_test_utils::dev;
     use std::process::Output;
 

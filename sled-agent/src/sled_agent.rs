@@ -26,9 +26,9 @@ use bootstore::schemes::v0 as bootstore;
 use camino::Utf8PathBuf;
 use dropshot::HttpError;
 use illumos_utils::dladm::Dladm;
+use illumos_utils::host::BoxedExecutor;
 use illumos_utils::opte::params::SetVirtualNetworkInterfaceHost;
 use illumos_utils::opte::PortManager;
-use illumos_utils::process::BoxedExecutor;
 use illumos_utils::zone::Zones;
 use illumos_utils::zone::PROPOLIS_ZONE_PREFIX;
 use illumos_utils::zone::ZONE_PREFIX;
@@ -62,7 +62,7 @@ pub enum Error {
     SwapDevice(#[from] crate::swap_device::SwapDeviceError),
 
     #[error("Failed to acquire etherstub: {0}")]
-    Etherstub(illumos_utils::process::ExecutionError),
+    Etherstub(illumos_utils::host::ExecutionError),
 
     #[error("Failed to acquire etherstub VNIC: {0}")]
     EtherstubVnic(illumos_utils::dladm::CreateVnicError),
@@ -71,7 +71,7 @@ pub enum Error {
     Bootstrap(#[from] crate::bootstrap::agent::BootstrapError),
 
     #[error("Failed to remove Omicron address: {0}")]
-    DeleteAddress(#[from] illumos_utils::process::ExecutionError),
+    DeleteAddress(#[from] illumos_utils::host::ExecutionError),
 
     #[error("Failed to operate on underlay device: {0}")]
     Underlay(#[from] underlay::Error),

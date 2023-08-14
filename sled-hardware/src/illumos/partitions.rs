@@ -7,7 +7,7 @@
 use crate::illumos::gpt;
 use crate::{DiskError, DiskPaths, DiskVariant, Partition};
 use camino::Utf8Path;
-use illumos_utils::process::BoxedExecutor;
+use illumos_utils::host::BoxedExecutor;
 use illumos_utils::zpool::{Zpool, ZpoolName};
 use slog::info;
 use slog::Logger;
@@ -158,7 +158,7 @@ mod test {
     use super::*;
     use crate::DiskPaths;
     use camino::Utf8PathBuf;
-    use illumos_utils::process::{FakeExecutor, Input, OutputExt, PFEXEC};
+    use illumos_utils::host::{FakeExecutor, Input, OutputExt, PFEXEC};
     use illumos_utils::zpool::{ZpoolKind, ZPOOL};
     use omicron_test_utils::dev::test_setup_log;
     use std::path::Path;

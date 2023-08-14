@@ -10,7 +10,7 @@ use crate::bootstrap::http_entrypoints::api as http_api;
 use crate::bootstrap::maghemite;
 use crate::bootstrap::sprockets_server::SprocketsServer;
 use crate::config::Config as SledConfig;
-use illumos_utils::process::BoxedExecutor;
+use illumos_utils::host::BoxedExecutor;
 use omicron_common::FileKv;
 use sled_hardware::underlay;
 use slog::Drain;

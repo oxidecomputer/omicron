@@ -27,7 +27,7 @@ use ddm_admin_client::{Client as DdmAdminClient, DdmError};
 use futures::stream::{self, StreamExt};
 use illumos_utils::addrobj::AddrObject;
 use illumos_utils::dladm::{Dladm, Etherstub, EtherstubVnic, GetMacError};
-use illumos_utils::process::{BoxedExecutor, PFEXEC};
+use illumos_utils::host::{BoxedExecutor, PFEXEC};
 use illumos_utils::zfs::{
     self, Mountpoint, Zfs, ZONE_ZFS_RAMDISK_DATASET,
     ZONE_ZFS_RAMDISK_DATASET_MOUNTPOINT,
@@ -63,7 +63,7 @@ pub enum BootstrapError {
     Cleanup(anyhow::Error),
 
     #[error("Failed to enable routing: {0}")]
-    EnablingRouting(illumos_utils::process::ExecutionError),
+    EnablingRouting(illumos_utils::host::ExecutionError),
 
     #[error("Error contacting ddmd: {0}")]
     DdmError(#[from] DdmError),

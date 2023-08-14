@@ -7,7 +7,7 @@
 use anyhow::{anyhow, bail, Context, Result};
 use clap::{Parser, Subcommand};
 use futures::stream::{self, StreamExt, TryStreamExt};
-use illumos_utils::process::{BoxedExecutor, HostExecutor};
+use illumos_utils::host::{BoxedExecutor, HostExecutor};
 use illumos_utils::{zfs, zone};
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use omicron_package::target::KnownTarget;

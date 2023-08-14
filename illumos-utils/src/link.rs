@@ -9,7 +9,7 @@ use crate::dladm::{
     CreateVnicError, DeleteVnicError, Dladm, VnicSource, VNIC_PREFIX,
     VNIC_PREFIX_BOOTSTRAP, VNIC_PREFIX_CONTROL, VNIC_PREFIX_GUEST,
 };
-use crate::process::BoxedExecutor;
+use crate::host::BoxedExecutor;
 use omicron_common::api::external::MacAddr;
 use std::sync::{
     atomic::{AtomicU64, Ordering},
@@ -259,7 +259,7 @@ impl Deletable for VnicDestruction {
 mod test {
     use super::*;
     use crate::dladm::Etherstub;
-    use crate::process::FakeExecutor;
+    use crate::host::FakeExecutor;
     use omicron_test_utils::dev;
 
     #[tokio::test]

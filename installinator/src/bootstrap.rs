@@ -13,7 +13,7 @@ use ddm_admin_client::Client as DdmAdminClient;
 use illumos_utils::addrobj::AddrObject;
 use illumos_utils::dladm;
 use illumos_utils::dladm::Dladm;
-use illumos_utils::process::BoxedExecutor;
+use illumos_utils::host::BoxedExecutor;
 use illumos_utils::zone::Zones;
 use omicron_common::address::Ipv6Subnet;
 use sled_hardware::underlay;

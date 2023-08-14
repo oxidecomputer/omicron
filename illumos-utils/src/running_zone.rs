@@ -6,9 +6,9 @@
 
 use crate::addrobj::AddrObject;
 use crate::dladm::Etherstub;
+use crate::host::{BoxedExecutor, ExecutionError};
 use crate::link::{Link, VnicAllocator};
 use crate::opte::{Port, PortTicket};
-use crate::process::{BoxedExecutor, ExecutionError};
 use crate::svc::wait_for_service;
 use crate::zone::{AddressRequest, Zones, IPADM, ZLOGIN, ZONE_PREFIX};
 use camino::{Utf8Path, Utf8PathBuf};
@@ -436,7 +436,7 @@ impl RunningZone {
                 RunCommandError { zone: self.name().to_string(), err }
             })?);
         let tmpl = std::sync::Arc::clone(&template);
-        let mut command = std::process::Command::new(crate::process::PFEXEC);
+        let mut command = std::process::Command::new(crate::host::PFEXEC);
         command.env_clear();
         unsafe {
             command.pre_exec(move || {
@@ -474,7 +474,7 @@ impl RunningZone {
     {
         // NOTE: This implementation is useless, and will never work. However,
         // it must actually call `execute()` for the testing purposes.
-        let mut command = std::process::Command::new(crate::process::PFEXEC);
+        let mut command = std::process::Command::new(crate::host::PFEXEC);
         let command = command.arg(ZLOGIN).arg(self.name()).args(args);
         self.inner
             .executor

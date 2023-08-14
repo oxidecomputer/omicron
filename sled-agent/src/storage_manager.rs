@@ -15,7 +15,7 @@ use futures::stream::FuturesOrdered;
 use futures::FutureExt;
 use futures::StreamExt;
 use illumos_utils::dumpadm::DumpHdrError;
-use illumos_utils::process::BoxedExecutor;
+use illumos_utils::host::BoxedExecutor;
 use illumos_utils::zfs::{Mountpoint, Zfs};
 use illumos_utils::zpool::{Zpool, ZpoolInfo, ZpoolKind, ZpoolName};
 use key_manager::StorageKeyRequester;

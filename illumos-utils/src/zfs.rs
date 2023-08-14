@@ -4,7 +4,7 @@
 
 //! Utilities for poking at ZFS.
 
-use crate::process::{BoxedExecutor, ExecutionError, PFEXEC};
+use crate::host::{BoxedExecutor, ExecutionError, PFEXEC};
 use camino::Utf8PathBuf;
 use omicron_common::disk::DiskIdentity;
 use std::fmt;

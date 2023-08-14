@@ -2,7 +2,7 @@ use crate::storage_manager::DiskWrapper;
 use camino::Utf8PathBuf;
 use derive_more::{AsRef, Deref, From};
 use illumos_utils::dumpadm::DumpAdmError;
-use illumos_utils::process::{BoxedExecutor, ExecutionError};
+use illumos_utils::host::{BoxedExecutor, ExecutionError};
 use illumos_utils::zone::{AdmError, Zones};
 use illumos_utils::zpool::{ZpoolHealth, ZpoolName};
 use omicron_common::disk::DiskIdentity;

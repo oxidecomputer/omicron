@@ -15,9 +15,9 @@ use crate::params::{
 use crate::storage_manager::StorageResources;
 use crate::zone_bundle::BundleError;
 use illumos_utils::dladm::Etherstub;
+use illumos_utils::host::BoxedExecutor;
 use illumos_utils::link::VnicAllocator;
 use illumos_utils::opte::PortManager;
-use illumos_utils::process::BoxedExecutor;
 use illumos_utils::vmm_reservoir;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;

@@ -4,7 +4,7 @@
 
 use crate::disk::{DiskError, DiskPaths, DiskVariant, Partition, UnparsedDisk};
 use crate::{Baseboard, SledMode};
-use illumos_utils::process::BoxedExecutor;
+use illumos_utils::host::BoxedExecutor;
 use slog::Logger;
 use std::collections::HashSet;
 use tokio::sync::broadcast;

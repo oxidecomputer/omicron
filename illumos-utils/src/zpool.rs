@@ -4,7 +4,7 @@
 
 //! Utilities for managing Zpools.
 
-use crate::process::{BoxedExecutor, ExecutionError, PFEXEC};
+use crate::host::{BoxedExecutor, ExecutionError, PFEXEC};
 use camino::{Utf8Path, Utf8PathBuf};
 use schemars::JsonSchema;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};

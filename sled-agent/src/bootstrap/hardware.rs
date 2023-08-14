@@ -8,7 +8,7 @@ use crate::config::{Config as SledConfig, SledMode as SledModeConfig};
 use crate::services::ServiceManager;
 use crate::storage_manager::{StorageManager, StorageResources};
 use illumos_utils::dladm::{Etherstub, EtherstubVnic};
-use illumos_utils::process::BoxedExecutor;
+use illumos_utils::host::BoxedExecutor;
 use key_manager::StorageKeyRequester;
 use sled_hardware::{Baseboard, DendriteAsic, HardwareManager, SledMode};
 use slog::Logger;

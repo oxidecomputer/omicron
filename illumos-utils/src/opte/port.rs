@@ -4,9 +4,9 @@
 
 //! A single port on the OPTE virtual switch.
 
+use crate::host::BoxedExecutor;
 use crate::opte::Gateway;
 use crate::opte::Vni;
-use crate::process::BoxedExecutor;
 use debug_ignore::DebugIgnore;
 use macaddr::MacAddr6;
 use std::net::IpAddr;

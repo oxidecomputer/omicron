@@ -8,7 +8,7 @@ use anyhow::{bail, Context, Result};
 use buf_list::{BufList, Cursor};
 use camino::{Utf8Path, Utf8PathBuf};
 use clap::{Args, Parser, Subcommand};
-use illumos_utils::process::BoxedExecutor;
+use illumos_utils::host::BoxedExecutor;
 use installinator_common::{
     InstallinatorCompletionMetadata, InstallinatorComponent, InstallinatorSpec,
     InstallinatorStepId, StepContext, StepHandle, StepProgress, StepSuccess,

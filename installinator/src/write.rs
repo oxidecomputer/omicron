@@ -17,7 +17,7 @@ use bytes::Buf;
 use camino::{Utf8Path, Utf8PathBuf};
 use illumos_utils::{
     dkio::{self, MediaInfoExtended},
-    process::BoxedExecutor,
+    host::BoxedExecutor,
     zpool::{Zpool, ZpoolName},
 };
 use installinator_common::{
@@ -1160,8 +1160,8 @@ mod tests {
 
         let engine = UpdateEngine::new(&logctx.log, event_sender);
         let log = logctx.log.clone();
-        let executor = illumos_utils::process::FakeExecutor::new(log.clone())
-            .as_executor();
+        let executor =
+            illumos_utils::host::FakeExecutor::new(log.clone()).as_executor();
         engine
             .new_step(
                 InstallinatorComponent::Both,

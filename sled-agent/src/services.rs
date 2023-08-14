@@ -50,9 +50,9 @@ use illumos_utils::addrobj::IPV6_LINK_LOCAL_NAME;
 use illumos_utils::dladm::{
     Dladm, Etherstub, EtherstubVnic, GetSimnetError, PhysicalLink,
 };
+use illumos_utils::host::{BoxedExecutor, PFEXEC};
 use illumos_utils::link::{Link, VnicAllocator};
 use illumos_utils::opte::{Port, PortManager, PortTicket};
-use illumos_utils::process::{BoxedExecutor, PFEXEC};
 use illumos_utils::running_zone::{
     InstalledZone, RunCommandError, RunningZone,
 };
@@ -203,7 +203,7 @@ pub enum Error {
     NtpZoneNotReady,
 
     #[error("Execution error: {0}")]
-    ExecutionError(#[from] illumos_utils::process::ExecutionError),
+    ExecutionError(#[from] illumos_utils::host::ExecutionError),
 
     #[error("Error resolving DNS name: {0}")]
     ResolveError(#[from] internal_dns::resolver::ResolveError),
@@ -2873,7 +2873,7 @@ mod test {
             Etherstub, BOOTSTRAP_ETHERSTUB_NAME, UNDERLAY_ETHERSTUB_NAME,
             UNDERLAY_ETHERSTUB_VNIC_NAME,
         },
-        process::{FakeExecutor, Input, Output, OutputExt, StaticHandler},
+        host::{FakeExecutor, Input, Output, OutputExt, StaticHandler},
         zone::{ZLOGIN, ZONEADM, ZONECFG},
     };
     use key_manager::{

@@ -4,7 +4,7 @@
 
 //! Operations for creating a system swap device.
 
-use illumos_utils::process::{
+use illumos_utils::host::{
     command_to_string, output_to_exec_error, BoxedExecutor, ExecutionError,
 };
 use std::io::Read;

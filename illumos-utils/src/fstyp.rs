@@ -4,7 +4,7 @@
 
 //! Helper for calling fstyp.
 
-use crate::process::{BoxedExecutor, ExecutionError, PFEXEC};
+use crate::host::{BoxedExecutor, ExecutionError, PFEXEC};
 use crate::zpool::ZpoolName;
 use camino::Utf8Path;
 use std::str::FromStr;
