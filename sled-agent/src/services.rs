@@ -2874,7 +2874,7 @@ mod test {
             UNDERLAY_ETHERSTUB_VNIC_NAME,
         },
         process::{FakeExecutor, Input, Output, OutputExt, StaticHandler},
-        zone::{ZONEADM, ZONECFG},
+        zone::{ZLOGIN, ZONEADM, ZONECFG},
     };
     use key_manager::{
         SecretRetriever, SecretRetrieverError, SecretState, VersionedIkm,
@@ -2958,45 +2958,48 @@ mod test {
             )
         );
 
-        // TODO: The "echo" is a linux-only hack for commands which would
-        // typically run within a zone.
+        let login = format!("{PFEXEC} {ZLOGIN} {zone_name}");
         handler.expect(
-            Input::shell("echo /usr/sbin/ipadm create-if -t oxControlService0"),
+            Input::shell(format!(
+                "{login} /usr/sbin/ipadm create-if -t oxControlService0"
+            )),
             Output::success(),
         );
         handler.expect(
-            Input::shell("echo /usr/sbin/ipadm set-ifprop -t -p mtu=9000 -m ipv4 oxControlService0"),
+            Input::shell(format!("{login} /usr/sbin/ipadm set-ifprop -t -p mtu=9000 -m ipv4 oxControlService0")),
             Output::success(),
         );
         handler.expect(
-            Input::shell("echo /usr/sbin/ipadm set-ifprop -t -p mtu=9000 -m ipv6 oxControlService0"),
+            Input::shell(format!("{login} /usr/sbin/ipadm set-ifprop -t -p mtu=9000 -m ipv6 oxControlService0")),
             Output::success(),
         );
         handler.expect(
-            Input::shell("echo /usr/sbin/route add -inet6 default -inet6 ::1"),
+            Input::shell(format!(
+                "{login} /usr/sbin/route add -inet6 default -inet6 ::1"
+            )),
             Output::success(),
         );
         handler.expect(
-            Input::shell("echo /usr/sbin/svccfg import /var/svc/manifest/site/oximeter/manifest.xml"),
+            Input::shell(format!("{login} /usr/sbin/svccfg import /var/svc/manifest/site/oximeter/manifest.xml")),
             Output::success(),
         );
         handler.expect(
-            Input::shell(format!("echo /usr/sbin/svccfg -s svc:/oxide/oximeter setprop config/id={zone_id}")),
+            Input::shell(format!("{login} /usr/sbin/svccfg -s svc:/oxide/oximeter setprop config/id={zone_id}")),
             Output::success(),
         );
         handler.expect(
-            Input::shell("echo /usr/sbin/svccfg -s svc:/oxide/oximeter setprop config/address=[::1]:12223"),
+            Input::shell(format!("{login} /usr/sbin/svccfg -s svc:/oxide/oximeter setprop config/address=[::1]:12223")),
             Output::success(),
         );
         handler.expect(
             Input::shell(
-                "echo /usr/sbin/svccfg -s svc:/oxide/oximeter:default refresh",
+                format!("{login} /usr/sbin/svccfg -s svc:/oxide/oximeter:default refresh"),
             ),
             Output::success(),
         );
         handler.expect(
             Input::shell(
-                "echo /usr/sbin/svcadm enable -t svc:/oxide/oximeter:default",
+                format!("{login} /usr/sbin/svcadm enable -t svc:/oxide/oximeter:default"),
             ),
             Output::success(),
         );
