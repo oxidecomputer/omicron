@@ -174,15 +174,15 @@ dns-server = { path = "dns-server" }
 dns-service-client = { path = "dns-service-client" }
 dpd-client = { path = "dpd-client" }
 dropshot = { git = "https://github.com/oxidecomputer/dropshot", branch = "main", features = [ "usdt-probes" ] }
-either = "1.8.1"
+either = "1.9.0"
 expectorate = "1.0.7"
 fatfs = "0.3.6"
 flate2 = "1.0.26"
 fs-err = "2.9.0"
 futures = "0.3.28"
 gateway-client = { path = "gateway-client" }
-gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", default-features = false, features = ["std"], rev = "146a687f7413bfe580869bb6017f3bfe8b4710b1" }
-gateway-sp-comms = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "146a687f7413bfe580869bb6017f3bfe8b4710b1" }
+gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "a954f3d1a42f56f985b4081ba6bedd0b6db8f330", default-features = false, features = ["std"] }
+gateway-sp-comms = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "a954f3d1a42f56f985b4081ba6bedd0b6db8f330" }
 gateway-test-utils = { path = "gateway-test-utils" }
 glob = "0.3.1"
 headers = "0.3.8"
@@ -192,14 +192,14 @@ hex-literal = "0.3.4"
 hkdf = "0.12.3"
 http = "0.2.9"
 httptest = "0.15.4"
-hubtools = { git = "https://github.com/oxidecomputer/hubtools.git" }
+hubtools = { git = "https://github.com/oxidecomputer/hubtools.git", branch = "main" }
 humantime = "2.1.0"
 hyper = "0.14"
 hyper-rustls = "0.24.1"
 hyper-staticfile = "0.9.5"
 illumos-utils = { path = "illumos-utils" }
 indexmap = "1.9.3"
-indicatif = { version = "0.17.5", features = ["rayon"] }
+indicatif = { version = "0.17.6", features = ["rayon"] }
 installinator = { path = "installinator" }
 installinator-artifactd = { path = "installinator-artifactd" }
 installinator-artifact-client = { path = "installinator-artifact-client" }
@@ -227,7 +227,7 @@ nexus-test-utils-macros = { path = "nexus/test-utils-macros" }
 nexus-test-utils = { path = "nexus/test-utils" }
 nexus-types = { path = "nexus/types" }
 num-integer = "0.1.45"
-num-traits = "0.2.15"
+num-traits = "0.2.16"
 omicron-common = { path = "common" }
 omicron-dev-tools = { path = "dev-tools" }
 omicron-gateway = { path = "gateway" }
@@ -262,7 +262,6 @@ paste = "1.0.14"
 percent-encoding = "2.2.0"
 pem = "1.1"
 petgraph = "0.6.3"
-pin-project-lite = "0.2.10"
 postgres-protocol = "0.6.5"
 predicates = "3.0.3"
 pretty_assertions = "1.4.0"
@@ -280,7 +279,7 @@ rand = "0.8.5"
 rayon = "1.7"
 rcgen = "0.10.0"
 ref-cast = "1.0"
-regex = "1.9.1"
+regex = "1.9.3"
 regress = "0.6.0"
 reqwest = { version = "0.11", default-features = false }
 ring = "0.16"
@@ -293,7 +292,7 @@ secrecy = "0.8.0"
 semver = { version = "1.0.18", features = ["std", "serde"] }
 serde = { version = "1.0", default-features = false, features = [ "derive" ] }
 serde_derive = "1.0"
-serde_human_bytes = { git = "http://github.com/oxidecomputer/serde_human_bytes" }
+serde_human_bytes = { git = "http://github.com/oxidecomputer/serde_human_bytes", branch = "main" }
 serde_json = "1.0.104"
 serde_path_to_error = "0.1.14"
 serde_tokenstream = "0.2"
@@ -356,7 +355,7 @@ tufaceous-lib = { path = "tufaceous-lib" }
 tui = "0.19.0"
 unicode-width = "0.1.10"
 update-engine = { path = "update-engine" }
-uuid = { version = "1.4.0", features = ["serde", "v4"] }
+uuid = { version = "1.4.1", features = ["serde", "v4"] }
 usdt = "0.3"
 walkdir = "2.3"
 wicket = { path = "wicket" }

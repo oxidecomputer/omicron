@@ -284,6 +284,11 @@ impl SledAgent {
             }
         }
 
+        // Ensure we have a thread that automatically reaps process contracts
+        // when they become empty. See the comments in
+        // illumos-utils/src/running_zone.rs for more detail.
+        illumos_utils::running_zone::ensure_contract_reaper(&parent_log);
+
         // TODO-correctness Bootstrap-agent already ensures the underlay
         // etherstub and etherstub VNIC exist on startup - could it pass them
         // through to us?
