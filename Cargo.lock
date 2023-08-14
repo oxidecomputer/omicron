@@ -798,7 +798,7 @@ name = "caboose-util"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "hubtools 0.4.1 (git+https://github.com/oxidecomputer/hubtools.git?branch=main)",
+ "hubtools",
 ]
 
 [[package]]
@@ -2754,7 +2754,7 @@ dependencies = [
 [[package]]
 name = "gateway-messages"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=a954f3d1a42f56f985b4081ba6bedd0b6db8f330#a954f3d1a42f56f985b4081ba6bedd0b6db8f330"
+source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=1e180ae55e56bd17af35cb868ffbd18ce487351d#1e180ae55e56bd17af35cb868ffbd18ce487351d"
 dependencies = [
  "bitflags 1.3.2",
  "hubpack 0.1.2",
@@ -2769,7 +2769,7 @@ dependencies = [
 [[package]]
 name = "gateway-sp-comms"
 version = "0.1.1"
-source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=a954f3d1a42f56f985b4081ba6bedd0b6db8f330#a954f3d1a42f56f985b4081ba6bedd0b6db8f330"
+source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=1e180ae55e56bd17af35cb868ffbd18ce487351d#1e180ae55e56bd17af35cb868ffbd18ce487351d"
 dependencies = [
  "async-trait",
  "backoff",
@@ -2778,17 +2778,17 @@ dependencies = [
  "gateway-messages",
  "hex",
  "hubpack 0.1.2",
- "hubtools 0.4.1 (git+https://github.com/oxidecomputer/hubtools.git)",
+ "hubtools",
  "lru-cache",
  "nix 0.26.2 (git+https://github.com/jgallagher/nix?branch=r0.26-illumos)",
  "once_cell",
  "serde",
  "serde-big-array 0.5.1",
  "slog",
- "socket2 0.5.1",
+ "socket2 0.5.3",
  "string_cache",
  "thiserror",
- "tlvc",
+ "tlvc 0.3.1 (git+https://github.com/oxidecomputer/tlvc.git?branch=main)",
  "tokio",
  "usdt",
  "uuid",
@@ -3226,26 +3226,7 @@ dependencies = [
  "path-slash",
  "rsa",
  "thiserror",
- "tlvc",
- "tlvc-text",
- "toml 0.7.6",
- "x509-cert",
- "zerocopy 0.6.1",
- "zip",
-]
-
-[[package]]
-name = "hubtools"
-version = "0.4.1"
-source = "git+https://github.com/oxidecomputer/hubtools.git#fbd499ceb440b838b9d8f6d9d73d046586bc24b8"
-dependencies = [
- "lpc55_areas",
- "lpc55_sign",
- "object",
- "path-slash",
- "rsa",
- "thiserror",
- "tlvc",
+ "tlvc 0.3.1 (git+https://github.com/oxidecomputer/tlvc.git)",
  "tlvc-text",
  "toml 0.7.6",
  "x509-cert",
@@ -8024,12 +8005,12 @@ dependencies = [
 
 [[package]]
 name = "socket2"
-version = "0.5.1"
+version = "0.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bc8d618c6641ae355025c449427f9e96b98abf99a772be3cef6708d15c77147a"
+checksum = "2538b18701741680e0322a2302176d3253a35388e2e62f172f64f4f16605f877"
 dependencies = [
  "libc",
- "windows-sys 0.45.0",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]
@@ -8583,8 +8564,18 @@ checksum = "1f3ccbac311fea05f86f61904b462b55fb3df8837a366dfc601a0161d0532f20"
 
 [[package]]
 name = "tlvc"
-version = "0.3.0"
-source = "git+https://github.com/oxidecomputer/tlvc.git#559c72856a215ae217e9e6f25ff317edde0b0041"
+version = "0.3.1"
+source = "git+https://github.com/oxidecomputer/tlvc.git?branch=main#e644a21a7ca973ed31499106ea926bd63ebccc6f"
+dependencies = [
+ "byteorder",
+ "crc",
+ "zerocopy 0.6.1",
+]
+
+[[package]]
+name = "tlvc"
+version = "0.3.1"
+source = "git+https://github.com/oxidecomputer/tlvc.git#e644a21a7ca973ed31499106ea926bd63ebccc6f"
 dependencies = [
  "byteorder",
  "crc",
@@ -8594,11 +8585,11 @@ dependencies = [
 [[package]]
 name = "tlvc-text"
 version = "0.3.0"
-source = "git+https://github.com/oxidecomputer/tlvc.git#559c72856a215ae217e9e6f25ff317edde0b0041"
+source = "git+https://github.com/oxidecomputer/tlvc.git#e644a21a7ca973ed31499106ea926bd63ebccc6f"
 dependencies = [
  "ron 0.8.0",
  "serde",
- "tlvc",
+ "tlvc 0.3.1 (git+https://github.com/oxidecomputer/tlvc.git)",
  "zerocopy 0.6.1",
 ]
 
@@ -8674,7 +8665,7 @@ dependencies = [
  "pin-project-lite",
  "postgres-protocol",
  "postgres-types",
- "socket2 0.5.1",
+ "socket2 0.5.3",
  "tokio",
  "tokio-util",
 ]
@@ -9107,7 +9098,7 @@ version = "1.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "97fee6b57c6a41524a810daee9286c02d7752c4253064d0b05472833a438f675"
 dependencies = [
- "cfg-if 0.1.10",
+ "cfg-if 1.0.0",
  "rand 0.8.5",
  "static_assertions",
 ]
