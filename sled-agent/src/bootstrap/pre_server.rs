@@ -237,7 +237,7 @@ impl BootstrapAgentStartup {
         let global_zone_bootstrap_ip =
             startup_networking.global_zone_bootstrap_ip;
 
-        let service_manager = ServiceManager::new_v2(
+        let service_manager = ServiceManager::new(
             &base_log,
             ddm_admin_localhost_client.clone(),
             startup_networking,
@@ -450,6 +450,7 @@ fn spawn_key_manager_task(
     (storage_key_requester, key_manager_handle)
 }
 
+#[derive(Debug, Clone)]
 pub(crate) struct BootstrapNetworking {
     pub(crate) bootstrap_etherstub: dladm::Etherstub,
     pub(crate) global_zone_bootstrap_ip: Ipv6Addr,
