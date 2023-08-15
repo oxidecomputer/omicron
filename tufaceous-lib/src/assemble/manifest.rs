@@ -69,7 +69,11 @@ impl ArtifactManifest {
                             ArtifactSource::File(base_dir.join(path))
                         }
                         DeserializedArtifactSource::Fake { size } => {
-                            let fake_data = make_filler_text(size.0 as usize);
+                            let fake_data = make_fake_data(
+                                &kind,
+                                &data.version,
+                                size.0 as usize,
+                            );
                             ArtifactSource::Memory(fake_data.into())
                         }
                         DeserializedArtifactSource::CompositeHost {
@@ -193,6 +197,40 @@ impl ArtifactManifest {
 
         Ok(())
     }
+}
+
+fn make_fake_data(
+    kind: &KnownArtifactKind,
+    version: &SemverVersion,
+    size: usize,
+) -> Vec<u8> {
+    use hubtools::{CabooseBuilder, HubrisArchiveBuilder};
+
+    let board = match kind {
+        // non-Hubris artifacts: just make fake data
+        KnownArtifactKind::Host
+        | KnownArtifactKind::Trampoline
+        | KnownArtifactKind::ControlPlane => return make_filler_text(size),
+
+        // hubris artifacts: build a fake archive
+        KnownArtifactKind::GimletSp => "fake-gimlet-sp",
+        KnownArtifactKind::GimletRot => "fake-gimlet-rot",
+        KnownArtifactKind::PscSp => "fake-psc-sp",
+        KnownArtifactKind::PscRot => "fake-psc-rot",
+        KnownArtifactKind::SwitchSp => "fake-sidecar-sp",
+        KnownArtifactKind::SwitchRot => "fake-sidecar-rot",
+    };
+
+    let caboose = CabooseBuilder::default()
+        .git_commit("this-is-fake-data")
+        .board(board)
+        .version(version.to_string())
+        .name(board)
+        .build();
+
+    let mut builder = HubrisArchiveBuilder::with_fake_image();
+    builder.write_caboose(caboose.as_slice()).unwrap();
+    builder.build_to_vec().unwrap()
 }
 
 /// Information about an individual artifact.
