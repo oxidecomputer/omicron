@@ -92,7 +92,7 @@ impl BootstrapManagers {
             },
             Err(broadcast::error::RecvError::Lagged(count)) => {
                 warn!(log, "Hardware monitor missed {count} messages");
-                self.full_hardware_scan(sled_agent, log).await;
+                self.check_latest_hardware_snapshot(sled_agent, log).await;
             }
             Err(broadcast::error::RecvError::Closed) => {
                 // The `HardwareManager` monitoring task is an infinite loop -
@@ -107,10 +107,7 @@ impl BootstrapManagers {
     //
     // We use this when we're monitoring hardware for the first
     // time, and if we miss notifications.
-    //
-    // TODO-clarity This doesn't actually _perform_ a scan; maybe it should be
-    // named something like "check latest hardware snapshot"?
-    pub(super) async fn full_hardware_scan(
+    pub(super) async fn check_latest_hardware_snapshot(
         &self,
         sled_agent: Option<&SledAgent>,
         log: &Logger,

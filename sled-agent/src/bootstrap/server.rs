@@ -190,7 +190,7 @@ impl Server {
         // Check the latest hardware snapshot; we could have missed events
         // between the creation of the hardware manager and our subscription of
         // its monitor.
-        managers.full_hardware_scan(None, &startup_log).await;
+        managers.check_latest_hardware_snapshot(None, &startup_log).await;
 
         // Wait for our boot M.2 to show up.
         wait_while_handling_hardware_updates(
@@ -317,7 +317,9 @@ impl Server {
                 startup_log, "Sled Agent started; rescanning hardware";
                 "underlay_network_info" => ?underlay_network_info,
             );
-            managers.full_hardware_scan(Some(&sled_agent), &startup_log).await;
+            managers
+                .check_latest_hardware_snapshot(Some(&sled_agent), &startup_log)
+                .await;
 
             // For cold boot specifically, we now need to load the services
             // we're responsible for, while continuing to handle hardware
@@ -733,7 +735,10 @@ impl Inner {
                         // reconfigure the switch zone, if we're a scrimlet, to
                         // give it our underlay network information.
                         self.managers
-                            .full_hardware_scan(Some(server.sled_agent()), log)
+                            .check_latest_hardware_snapshot(
+                                Some(server.sled_agent()),
+                                log,
+                            )
                             .await;
 
                         self.state = SledAgentState::ServerStarted(server);
