@@ -906,7 +906,7 @@ impl RunningZone {
         if let Some(_) = self.id.take() {
             let log = self.inner.log.clone();
             let name = self.name().to_string();
-            Zones::halt_and_remove_logged(&self.inner.executor, &log, &name)
+            Zones::halt_and_remove_logged(&log, &self.inner.executor, &name)
                 .await
                 .map_err(|err| err.to_string())?;
         }
@@ -1046,7 +1046,7 @@ impl Drop for RunningZone {
             let name = self.name().to_string();
             let executor = self.inner.executor.clone();
             tokio::task::spawn(async move {
-                match Zones::halt_and_remove_logged(&executor, &log, &name)
+                match Zones::halt_and_remove_logged(&log, &executor, &name)
                     .await
                 {
                     Ok(()) => {

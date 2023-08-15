@@ -73,6 +73,7 @@ tofino.workspace = true
 tokio = { workspace = true, features = [ "full" ] }
 tokio-tungstenite.workspace = true
 toml.workspace = true
+usdt.workspace = true
 uuid.workspace = true
 zeroize.workspace = true
 zone.workspace = true

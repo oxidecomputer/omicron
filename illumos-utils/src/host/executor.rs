@@ -450,7 +450,7 @@ enum HandledCommand {
 /// A handler that may be used for setting inputs/outputs to the executor
 /// when these commands are known ahead-of-time.
 ///
-/// See: [FakeExecutor::set_static_handler] for usage.
+/// See: [Self::register] for integration with a [FakeExecutor].
 pub struct StaticHandler {
     expected: Vec<HandledCommand>,
     index: usize,

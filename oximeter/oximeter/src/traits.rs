@@ -344,7 +344,7 @@ pub use crate::histogram::HistogramSupport;
 ///
 /// impl Producer for RequestCounter {
 ///     fn produce(&mut self) -> Result<Box<dyn Iterator<Item = Sample>>, MetricsError> {
-///         let sample = Sample::new(&self.target, &self.metric);
+///         let sample = Sample::new(&self.target, &self.metric).unwrap();
 ///         Ok(Box::new(vec![sample].into_iter()))
 ///     }
 /// }
@@ -401,8 +401,8 @@ mod tests {
 
     #[derive(Debug, Clone, Target)]
     struct Targ {
-        pub good: bool,
-        pub id: i64,
+        pub happy: bool,
+        pub tid: i64,
     }
 
     #[derive(Debug, Clone, Metric)]
@@ -424,7 +424,7 @@ mod tests {
         ) -> Result<Box<dyn Iterator<Item = types::Sample>>, MetricsError>
         {
             Ok(Box::new(
-                vec![types::Sample::new(&self.target, &self.metric)]
+                vec![types::Sample::new(&self.target, &self.metric)?]
                     .into_iter(),
             ))
         }
@@ -432,10 +432,10 @@ mod tests {
 
     #[test]
     fn test_target_trait() {
-        let t = Targ { good: false, id: 2 };
+        let t = Targ { happy: false, tid: 2 };
 
         assert_eq!(t.name(), "targ");
-        assert_eq!(t.field_names(), &["good", "id"]);
+        assert_eq!(t.field_names(), &["happy", "tid"]);
         assert_eq!(t.field_types(), &[FieldType::Bool, FieldType::I64]);
         assert_eq!(
             t.field_values(),
@@ -459,7 +459,7 @@ mod tests {
 
     #[test]
     fn test_producer_trait() {
-        let t = Targ { good: false, id: 2 };
+        let t = Targ { happy: false, tid: 2 };
         let m = Met { good: false, id: 2, datum: 0 };
         let mut p = Prod { target: t.clone(), metric: m.clone() };
         let sample = p.produce().unwrap().next().unwrap();

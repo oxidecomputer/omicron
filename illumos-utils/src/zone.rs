@@ -263,8 +263,8 @@ impl Zones {
 
     /// Halt and remove the zone, logging the state in which the zone was found.
     pub async fn halt_and_remove_logged(
-        executor: &BoxedExecutor,
         log: &Logger,
+        executor: &BoxedExecutor,
         name: &str,
     ) -> Result<(), AdmError> {
         if let Some(state) = Self::halt_and_remove(executor, name).await? {
@@ -311,7 +311,7 @@ impl Zones {
                     "Invalid state; uninstalling and deleting zone {}",
                     zone_name
                 );
-                Zones::halt_and_remove_logged(executor, log, zone.name())
+                Zones::halt_and_remove_logged(log, executor, zone.name())
                     .await?;
             }
         }

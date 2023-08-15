@@ -577,7 +577,7 @@ impl InstanceInner {
         // `RunningZone::stop` in case we're called between creating the
         // zone and assigning `running_state`.
         warn!(self.log, "Halting and removing zone: {}", zname);
-        Zones::halt_and_remove_logged(&self.executor, &self.log, &zname)
+        Zones::halt_and_remove_logged(&self.log, &self.executor, &zname)
             .await
             .unwrap();
 

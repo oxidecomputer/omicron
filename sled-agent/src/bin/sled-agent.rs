@@ -6,16 +6,12 @@
 
 use camino::Utf8PathBuf;
 use clap::{Parser, Subcommand};
-use illumos_utils::host::HostExecutor;
 use omicron_common::cmd::fatal;
 use omicron_common::cmd::CmdError;
+use omicron_sled_agent::bootstrap::server as bootstrap_server;
 use omicron_sled_agent::bootstrap::RssAccessError;
-use omicron_sled_agent::bootstrap::{
-    config::Config as BootstrapConfig, server as bootstrap_server,
-};
 use omicron_sled_agent::rack_setup::config::SetupServiceConfig as RssConfig;
 use omicron_sled_agent::{config::Config as SledConfig, server as sled_server};
-use uuid::Uuid;
 
 #[derive(Subcommand, Debug)]
 enum OpenapiFlavor {
@@ -93,42 +89,16 @@ async fn do_run() -> Result<(), CmdError> {
                 None
             };
 
-            let log = config
-                .log
-                .to_logger("sled-agent")
-                .map_err(|e| CmdError::Failure(e.to_string()))?;
-            let executor = HostExecutor::new(log).as_executor();
-
-            // Derive the bootstrap addresses from the data link's MAC address.
-            let link = config
-                .get_link(&executor)
-                .map_err(|e| CmdError::Failure(e.to_string()))?;
-
-            // Configure and run the Bootstrap server.
-            let bootstrap_config = BootstrapConfig {
-                id: Uuid::new_v4(),
-                link,
-                log: config.log.clone(),
-                updates: config.updates.clone(),
-            };
-
-            // TODO: It's a little silly to pass the config this way - namely,
-            // that we construct the bootstrap config from `config`, but then
-            // pass it separately just so the sled agent can ingest it later on.
-            let server = bootstrap_server::Server::start(
-                &executor,
-                bootstrap_config,
-                config,
-            )
-            .await
-            .map_err(CmdError::Failure)?;
+            let server = bootstrap_server::Server::start(config)
+                .await
+                .map_err(|err| CmdError::Failure(format!("{err:#}")))?;
 
             // If requested, automatically supply the RSS configuration.
             //
             // This should remain equivalent to the HTTP request which can
             // be invoked by Wicket.
             if let Some(rss_config) = rss_config {
-                match server.agent().start_rack_initialize(rss_config) {
+                match server.start_rack_initialize(rss_config) {
                     // If the rack has already been initialized, we shouldn't
                     // abandon the server.
                     Ok(_) | Err(RssAccessError::AlreadyInitialized) => {}

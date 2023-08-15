@@ -68,7 +68,7 @@ pub enum Error {
     EtherstubVnic(illumos_utils::dladm::CreateVnicError),
 
     #[error("Bootstrap error: {0}")]
-    Bootstrap(#[from] crate::bootstrap::agent::BootstrapError),
+    Bootstrap(#[from] crate::bootstrap::BootstrapError),
 
     #[error("Failed to remove Omicron address: {0}")]
     DeleteAddress(#[from] illumos_utils::host::ExecutionError),
@@ -293,6 +293,9 @@ impl SledAgent {
         // illumos-utils/src/running_zone.rs for more detail.
         illumos_utils::running_zone::ensure_contract_reaper(&parent_log);
 
+        // TODO-correctness Bootstrap-agent already ensures the underlay
+        // etherstub and etherstub VNIC exist on startup - could it pass them
+        // through to us?
         let etherstub = Dladm::ensure_etherstub(
             executor,
             illumos_utils::dladm::UNDERLAY_ETHERSTUB_NAME,
@@ -329,6 +332,11 @@ impl SledAgent {
             })
             .await?;
 
+        // TODO-correctness The bootstrap agent _also_ has a `HardwareManager`.
+        // We only use it for reading properties, but it's not `Clone`able
+        // because it's holding an inner task handle. Could we add a way to get
+        // a read-only handle to it, and have bootstrap agent give us that
+        // instead of creating a new full one ourselves?
         let hardware = HardwareManager::new(&parent_log, services.sled_mode())
             .map_err(|e| Error::Hardware(e))?;
 
@@ -446,22 +454,19 @@ impl SledAgent {
         // be received by Nexus eventually.
         sled_agent.notify_nexus_about_self(&log);
 
-        // Begin monitoring the underlying hardware, and reacting to changes.
-        let sa = sled_agent.clone();
-        let hardware_log = log.clone();
-        tokio::spawn(async move {
-            sa.hardware_monitor_task(hardware_log).await;
-        });
+        Ok(sled_agent)
+    }
 
-        // Finally, load services for which we're already responsible.
-        //
-        // Do this *after* monitoring for harware, to enable the switch zone to
-        // establish an underlay address before proceeding.
+    /// Load services for which we're responsible; only meaningful to call
+    /// during a cold boot.
+    ///
+    /// Blocks until all services have started, retrying indefinitely on
+    /// failure.
+    pub(crate) async fn cold_boot_load_services(&self) {
         retry_notify(
             retry_policy_internal_service_aggressive(),
             || async {
-                sled_agent
-                    .inner
+                self.inner
                     .services
                     .load_services()
                     .await
@@ -469,123 +474,24 @@ impl SledAgent {
             },
             |err, delay| {
                 warn!(
-                    log,
+                    self.log,
                     "Failed to load services, will retry in {:?}", delay;
                     "error" => %err,
                 );
             },
         )
-        .await?;
+        .await
+        .unwrap(); // we retry forever, so this can't fail
 
         // Now that we've initialized the sled services, notify nexus again
         // at which point it'll plumb any necessary firewall rules back to us.
-        sled_agent.notify_nexus_about_self(&log);
-
-        Ok(sled_agent)
+        self.notify_nexus_about_self(&self.log);
     }
 
-    // Observe the current hardware state manually.
-    //
-    // We use this when we're monitoring hardware for the first
-    // time, and if we miss notifications.
-    async fn full_hardware_scan(&self, log: &Logger) {
-        info!(log, "Performing full hardware scan");
-        self.notify_nexus_about_self(log);
-
-        let scrimlet = self.inner.hardware.is_scrimlet_driver_loaded();
-
-        if scrimlet {
-            let baseboard = self.inner.hardware.baseboard();
-            let switch_zone_ip = self.inner.switch_zone_ip();
-            if let Err(e) = self
-                .inner
-                .services
-                .activate_switch(
-                    Some((
-                        switch_zone_ip,
-                        self.inner.rack_network_config.as_ref(),
-                    )),
-                    baseboard,
-                )
-                .await
-            {
-                warn!(log, "Failed to activate switch: {e}");
-            }
-        } else {
-            if let Err(e) = self.inner.services.deactivate_switch().await {
-                warn!(log, "Failed to deactivate switch: {e}");
-            }
-        }
-
-        self.inner
-            .storage
-            .ensure_using_exactly_these_disks(self.inner.hardware.disks())
-            .await;
-    }
-
-    async fn hardware_monitor_task(&self, log: Logger) {
-        // Start monitoring the hardware for changes
-        let mut hardware_updates = self.inner.hardware.monitor();
-
-        // Scan the system manually for events we have have missed
-        // before we started monitoring.
-        self.full_hardware_scan(&log).await;
-
-        // Rely on monitoring for tracking all future updates.
-        loop {
-            use sled_hardware::HardwareUpdate;
-            use tokio::sync::broadcast::error::RecvError;
-            match hardware_updates.recv().await {
-                Ok(update) => match update {
-                    HardwareUpdate::TofinoDeviceChange => {
-                        // Inform Nexus that we're now a scrimlet, instead of a Gimlet.
-                        //
-                        // This won't block on Nexus responding; it may take while before
-                        // Nexus actually comes online.
-                        self.notify_nexus_about_self(&log);
-                    }
-                    HardwareUpdate::TofinoLoaded => {
-                        let baseboard = self.inner.hardware.baseboard();
-                        let switch_zone_ip = self.inner.switch_zone_ip();
-                        if let Err(e) = self
-                            .inner
-                            .services
-                            .activate_switch(
-                                Some((
-                                    switch_zone_ip,
-                                    self.inner.rack_network_config.as_ref(),
-                                )),
-                                baseboard,
-                            )
-                            .await
-                        {
-                            warn!(log, "Failed to activate switch: {e}");
-                        }
-                    }
-                    HardwareUpdate::TofinoUnloaded => {
-                        if let Err(e) =
-                            self.inner.services.deactivate_switch().await
-                        {
-                            warn!(log, "Failed to deactivate switch: {e}");
-                        }
-                    }
-                    HardwareUpdate::DiskAdded(disk) => {
-                        self.inner.storage.upsert_disk(disk).await;
-                    }
-                    HardwareUpdate::DiskRemoved(disk) => {
-                        self.inner.storage.delete_disk(disk).await;
-                    }
-                },
-                Err(RecvError::Lagged(count)) => {
-                    warn!(log, "Hardware monitor missed {count} messages");
-                    self.full_hardware_scan(&log).await;
-                }
-                Err(RecvError::Closed) => {
-                    warn!(log, "Hardware monitor receiver closed; exiting");
-                    return;
-                }
-            }
-        }
+    pub(crate) fn switch_zone_underlay_info(
+        &self,
+    ) -> (Ipv6Addr, Option<&RackNetworkConfig>) {
+        (self.inner.switch_zone_ip(), self.inner.rack_network_config.as_ref())
     }
 
     pub fn id(&self) -> Uuid {
@@ -597,7 +503,7 @@ impl SledAgent {
     }
 
     // Sends a request to Nexus informing it that the current sled exists.
-    fn notify_nexus_about_self(&self, log: &Logger) {
+    pub(crate) fn notify_nexus_about_self(&self, log: &Logger) {
         let sled_id = self.inner.id;
         let nexus_client = self.inner.nexus_client.clone();
         let sled_address = self.inner.sled_address();
