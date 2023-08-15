@@ -574,7 +574,7 @@ mod test {
             .expect_ok(format!("{PFEXEC} {DLADM} create-etherstub -t mystub1"));
 
         let executor = FakeExecutor::new(logctx.log.clone());
-        executor.set_static_handler(handler);
+        handler.register(&executor);
 
         let etherstub =
             Dladm::ensure_etherstub(&executor.as_executor(), "mystub1")
@@ -591,7 +591,7 @@ mod test {
         let mut handler = StaticHandler::new();
         handler.expect_ok(format!("{PFEXEC} {DLADM} show-etherstub mystub1"));
         let executor = FakeExecutor::new(logctx.log.clone());
-        executor.set_static_handler(handler);
+        handler.register(&executor);
 
         let etherstub =
             Dladm::ensure_etherstub(&executor.as_executor(), "mystub1")
@@ -613,7 +613,7 @@ mod test {
             "{PFEXEC} {DLADM} show-vnic {UNDERLAY_ETHERSTUB_VNIC_NAME}"
         ));
         let executor = FakeExecutor::new(logctx.log.clone());
-        executor.set_static_handler(handler);
+        handler.register(&executor);
 
         let executor = &executor.as_executor();
         let etherstub =
@@ -645,7 +645,7 @@ mod test {
             {UNDERLAY_ETHERSTUB_VNIC_NAME}"
         ));
         let executor = FakeExecutor::new(logctx.log.clone());
-        executor.set_static_handler(handler);
+        handler.register(&executor);
 
         let executor = &executor.as_executor();
         let etherstub =
@@ -669,7 +669,7 @@ mod test {
             ),
         );
         let executor = FakeExecutor::new(logctx.log.clone());
-        executor.set_static_handler(handler);
+        handler.register(&executor);
 
         let executor = &executor.as_executor();
         let vnics = Dladm::get_vnics(executor).expect("Failed to get VNICs");

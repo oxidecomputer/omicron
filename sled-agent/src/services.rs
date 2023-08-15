@@ -3142,7 +3142,7 @@ mod test {
         let id = Uuid::new_v4();
         let mut handler = StaticHandler::new();
         expect_new_service(&mut handler, &test_config, id, &u2_mountpoint);
-        executor.set_static_handler(handler);
+        handler.register(&executor);
         let executor = executor.as_executor();
 
         let mgr = ServiceManager::new(
@@ -3200,7 +3200,7 @@ mod test {
         let id = Uuid::new_v4();
         let mut handler = StaticHandler::new();
         expect_new_service(&mut handler, &test_config, id, &u2_mountpoint);
-        executor.set_static_handler(handler);
+        handler.register(&executor);
         let executor = executor.as_executor();
 
         let mgr = ServiceManager::new(
@@ -3259,7 +3259,7 @@ mod test {
         let id = Uuid::new_v4();
         let mut handler = StaticHandler::new();
         expect_new_service(&mut handler, &test_config, id, &u2_mountpoint);
-        executor.set_static_handler(handler);
+        handler.register(&executor);
         let executor = executor.as_executor();
 
         // First, spin up a ServiceManager, create a new service, and tear it
@@ -3319,7 +3319,7 @@ mod test {
             Output::success()
         }));
         expect_new_service(&mut handler, &test_config, id, &u2_mountpoint);
-        executor.set_static_handler(handler);
+        handler.register(&executor);
         let executor = executor.as_executor();
 
         let mgr = ServiceManager::new(
@@ -3377,7 +3377,7 @@ mod test {
         let id = Uuid::new_v4();
         let mut handler = StaticHandler::new();
         expect_new_service(&mut handler, &test_config, id, &u2_mountpoint);
-        executor.set_static_handler(handler);
+        handler.register(&executor);
         let executor = executor.as_executor();
 
         // First, spin up a ServiceManager, create a new service, and tear it

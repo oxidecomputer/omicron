@@ -939,7 +939,7 @@ mod tests {
         );
 
         let executor = FakeExecutor::new(logctx.log.clone());
-        executor.set_static_handler(handler);
+        handler.register(&executor);
 
         let datasets = [];
         let filesystems = [];
@@ -983,7 +983,7 @@ mod tests {
         );
 
         let executor = FakeExecutor::new(logctx.log.clone());
-        executor.set_static_handler(handler);
+        handler.register(&executor);
 
         let datasets = [];
         let filesystems = [];

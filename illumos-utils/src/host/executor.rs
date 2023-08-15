@@ -140,14 +140,6 @@ impl FakeExecutor {
         *self.inner.wait_handler.lock().unwrap() = f;
     }
 
-    /// Set the request handler to a static set of inputs and outputs.
-    // TODO: Remove me, add a method to the StatiHandler itself.
-    pub fn set_static_handler(&self, mut handler: StaticHandler) {
-        self.set_wait_handler(Box::new(move |child| -> Output {
-            handler.execute(child.command())
-        }));
-    }
-
     /// Perform some type coercion to access a commonly-used trait object.
     pub fn as_executor(self: Arc<Self>) -> BoxedExecutor {
         self
@@ -467,6 +459,13 @@ pub struct StaticHandler {
 impl StaticHandler {
     pub fn new() -> Self {
         Self { expected: Vec::new(), index: 0 }
+    }
+
+    /// Convenience function to register the handler with a [FakeExecutor].
+    pub fn register(mut self, executor: &FakeExecutor) {
+        executor.set_wait_handler(Box::new(move |child| -> Output {
+            self.execute(child.command())
+        }));
     }
 
     /// Expects a static "input" to exactly produce some "output".
