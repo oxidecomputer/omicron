@@ -673,7 +673,8 @@ impl UpdateDriver {
                     let sp_artifact = sp_artifact.clone();
 
                     let message = format!(
-                        "SP version {} (git commit {})",
+                        "SP board {}, version {} (git commit {})",
+                        caboose.board,
                         caboose.version.as_deref().unwrap_or("unknown"),
                         caboose.git_commit
                     );

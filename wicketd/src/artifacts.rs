@@ -27,7 +27,7 @@ use omicron_common::update::{
     ArtifactHash, ArtifactHashId, ArtifactId, ArtifactKind,
 };
 use sha2::{Digest, Sha256};
-use slog::Logger;
+use slog::{info, Logger};
 use thiserror::Error;
 use tough::TargetName;
 use tufaceous_lib::{
@@ -199,7 +199,7 @@ impl ArtifactsWithPlan {
         let dir = camino_tempfile::tempdir()
             .map_err(RepositoryError::TempDirCreate)?;
 
-        slog::info!(log, "extracting uploaded archive to {}", dir.path());
+        info!(log, "extracting uploaded archive to {}", dir.path());
 
         // XXX: might be worth differentiating between server-side issues (503)
         // and issues with the uploaded archive (400).
@@ -318,7 +318,7 @@ impl ArtifactsWithPlan {
                 }
             }
 
-            slog::info!(
+            info!(
                 log, "added artifact";
                 "kind" => %artifact_id.kind,
                 "id" => format!("{}:{}", artifact_id.name, artifact_id.version),
@@ -617,6 +617,11 @@ impl UpdatePlan {
 
             match out.entry(board) {
                 btree_map::Entry::Vacant(slot) => {
+                    info!(
+                        log, "found SP archive";
+                        "kind" => ?id.kind,
+                        "board" => &slot.key().0,
+                    );
                     slot.insert(ArtifactIdData {
                         id,
                         data: DebugIgnore(data.clone()),
@@ -665,7 +670,7 @@ impl UpdatePlan {
 
             match artifact_kind {
                 KnownArtifactKind::GimletSp => {
-                    sp_image_found(&mut gimlet_sp, artifact_id, hash, data)?
+                    sp_image_found(&mut gimlet_sp, artifact_id, hash, data)?;
                 }
                 KnownArtifactKind::GimletRot => {
                     slog::debug!(log, "extracting gimlet rot tarball");
@@ -684,7 +689,7 @@ impl UpdatePlan {
                     )?;
                 }
                 KnownArtifactKind::PscSp => {
-                    sp_image_found(&mut psc_sp, artifact_id, hash, data)?
+                    sp_image_found(&mut psc_sp, artifact_id, hash, data)?;
                 }
                 KnownArtifactKind::PscRot => {
                     slog::debug!(log, "extracting psc rot tarball");
@@ -703,7 +708,7 @@ impl UpdatePlan {
                     )?;
                 }
                 KnownArtifactKind::SwitchSp => {
-                    sp_image_found(&mut sidecar_sp, artifact_id, hash, data)?
+                    sp_image_found(&mut sidecar_sp, artifact_id, hash, data)?;
                 }
                 KnownArtifactKind::SwitchRot => {
                     slog::debug!(log, "extracting switch rot tarball");
@@ -795,7 +800,7 @@ impl UpdatePlan {
                 ));
             }
             Entry::Vacant(entry) => {
-                slog::info!(log, "added host phase 2 artifact";
+                info!(log, "added host phase 2 artifact";
                     "kind" => %host_phase_2_hash_id.kind,
                     "hash" => %host_phase_2_hash_id.hash,
                     "length" => host_phase_2.data.len(),
