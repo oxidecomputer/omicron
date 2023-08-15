@@ -28,6 +28,7 @@
 use crate::bootstrap::early_networking::{
     EarlyNetworkSetup, EarlyNetworkSetupError,
 };
+use crate::bootstrap::BootstrapNetworking;
 use crate::config::SidecarRevision;
 use crate::params::{
     DendriteAsic, ServiceEnsureBody, ServiceType, ServiceZoneRequest,
@@ -394,34 +395,32 @@ impl ServiceManager {
     ///
     /// Args:
     /// - `log`: The logger
-    /// - `underlay_etherstub`: Etherstub used to allocate service vNICs.
-    /// - `underlay_vnic`: The underlay's vNIC in the Global Zone.
-    /// - `bootstrap_etherstub`: Etherstub used to allocate bootstrap service vNICs.
+    /// - `ddm_client`: Client pointed to our localhost ddmd
+    /// - `bootstrap_networking`: Collection of etherstubs/VNICs set up when
+    ///    bootstrap agent begins
     /// - `sled_mode`: The sled's mode of operation (Gimlet vs Scrimlet).
     /// - `skip_timesync`: If true, the sled always reports synced time.
-    /// - `time_synced`: If true, time sync was achieved.
     /// - `sidecar_revision`: Rev of attached sidecar, if present.
-    /// - `switch_zone_bootstrap_address`: The bootstrap IP to use for the switch zone.
+    /// - `switch_zone_maghemite_links`: List of physical links on which
+    ///    maghemite should listen.
+    /// - `storage`: Shared handle to get the current state of disks/zpools.
     #[allow(clippy::too_many_arguments)]
-    pub async fn new(
-        log: Logger,
-        global_zone_bootstrap_link_local_address: Ipv6Addr,
-        underlay_etherstub: Etherstub,
-        underlay_vnic: EtherstubVnic,
-        bootstrap_etherstub: Etherstub,
+    pub(crate) fn new(
+        log: &Logger,
+        ddmd_client: DdmAdminClient,
+        bootstrap_networking: BootstrapNetworking,
         sled_mode: SledMode,
         skip_timesync: Option<bool>,
         sidecar_revision: SidecarRevision,
-        switch_zone_bootstrap_address: Ipv6Addr,
         switch_zone_maghemite_links: Vec<PhysicalLink>,
         storage: StorageResources,
-    ) -> Result<Self, Error> {
-        debug!(log, "Creating new ServiceManager");
+    ) -> Self {
         let log = log.new(o!("component" => "ServiceManager"));
-        let mgr = Self {
+        Self {
             inner: Arc::new(ServiceManagerInner {
                 log: log.clone(),
-                global_zone_bootstrap_link_local_address,
+                global_zone_bootstrap_link_local_address: bootstrap_networking
+                    .global_zone_bootstrap_link_local_ip,
                 // TODO(https://github.com/oxidecomputer/omicron/issues/725):
                 // Load the switch zone if it already exists?
                 switch_zone: Mutex::new(SledLocalZone::Disabled),
@@ -433,23 +432,23 @@ impl ServiceManager {
                 zones: Mutex::new(BTreeMap::new()),
                 underlay_vnic_allocator: VnicAllocator::new(
                     "Service",
-                    underlay_etherstub,
+                    bootstrap_networking.underlay_etherstub,
                 ),
-                underlay_vnic,
+                underlay_vnic: bootstrap_networking.underlay_etherstub_vnic,
                 bootstrap_vnic_allocator: VnicAllocator::new(
                     "Bootstrap",
-                    bootstrap_etherstub,
+                    bootstrap_networking.bootstrap_etherstub,
                 ),
-                ddmd_client: DdmAdminClient::localhost(&log)?,
+                ddmd_client,
                 advertised_prefixes: Mutex::new(HashSet::new()),
                 sled_info: OnceCell::new(),
-                switch_zone_bootstrap_address,
+                switch_zone_bootstrap_address: bootstrap_networking
+                    .switch_zone_bootstrap_ip,
                 storage,
                 ledger_directory_override: OnceCell::new(),
                 image_directory_override: OnceCell::new(),
             }),
-        };
-        Ok(mgr)
+        }
     }
 
     #[cfg(test)]
@@ -2877,6 +2876,21 @@ mod test {
 
     const EXPECTED_ZONE_NAME_PREFIX: &str = "oxz_oximeter";
 
+    fn make_bootstrap_networking_config() -> BootstrapNetworking {
+        BootstrapNetworking {
+            bootstrap_etherstub: Etherstub(
+                BOOTSTRAP_ETHERSTUB_NAME.to_string(),
+            ),
+            global_zone_bootstrap_ip: GLOBAL_ZONE_BOOTSTRAP_IP,
+            global_zone_bootstrap_link_local_ip: GLOBAL_ZONE_BOOTSTRAP_IP,
+            switch_zone_bootstrap_ip: SWITCH_ZONE_BOOTSTRAP_IP,
+            underlay_etherstub: Etherstub(UNDERLAY_ETHERSTUB_NAME.to_string()),
+            underlay_etherstub_vnic: EtherstubVnic(
+                UNDERLAY_ETHERSTUB_VNIC_NAME.to_string(),
+            ),
+        }
+    }
+
     // Returns the expectations for a new service to be created.
     fn expect_new_service() -> Vec<Box<dyn std::any::Any>> {
         // Create a VNIC
@@ -3078,20 +3092,15 @@ mod test {
         let test_config = TestConfig::new().await;
 
         let mgr = ServiceManager::new(
-            log.clone(),
-            GLOBAL_ZONE_BOOTSTRAP_IP,
-            Etherstub(UNDERLAY_ETHERSTUB_NAME.to_string()),
-            EtherstubVnic(UNDERLAY_ETHERSTUB_VNIC_NAME.to_string()),
-            Etherstub(BOOTSTRAP_ETHERSTUB_NAME.to_string()),
+            &log,
+            DdmAdminClient::localhost(&log).unwrap(),
+            make_bootstrap_networking_config(),
             SledMode::Auto,
             Some(true),
             SidecarRevision::Physical("rev-test".to_string()),
-            SWITCH_ZONE_BOOTSTRAP_IP,
             vec![],
             StorageResources::new_for_test(),
-        )
-        .await
-        .unwrap();
+        );
         test_config.override_paths(&mgr);
 
         let port_manager = PortManager::new(
@@ -3124,20 +3133,15 @@ mod test {
         let test_config = TestConfig::new().await;
 
         let mgr = ServiceManager::new(
-            log.clone(),
-            GLOBAL_ZONE_BOOTSTRAP_IP,
-            Etherstub(UNDERLAY_ETHERSTUB_NAME.to_string()),
-            EtherstubVnic(UNDERLAY_ETHERSTUB_VNIC_NAME.to_string()),
-            Etherstub(BOOTSTRAP_ETHERSTUB_NAME.to_string()),
+            &log,
+            DdmAdminClient::localhost(&log).unwrap(),
+            make_bootstrap_networking_config(),
             SledMode::Auto,
             Some(true),
             SidecarRevision::Physical("rev-test".to_string()),
-            SWITCH_ZONE_BOOTSTRAP_IP,
             vec![],
             StorageResources::new_for_test(),
-        )
-        .await
-        .unwrap();
+        );
         test_config.override_paths(&mgr);
 
         let port_manager = PortManager::new(
@@ -3169,24 +3173,21 @@ mod test {
         );
         let log = logctx.log.clone();
         let test_config = TestConfig::new().await;
+        let ddmd_client = DdmAdminClient::localhost(&log).unwrap();
+        let bootstrap_networking = make_bootstrap_networking_config();
 
         // First, spin up a ServiceManager, create a new service, and tear it
         // down.
         let mgr = ServiceManager::new(
-            log.clone(),
-            GLOBAL_ZONE_BOOTSTRAP_IP,
-            Etherstub(UNDERLAY_ETHERSTUB_NAME.to_string()),
-            EtherstubVnic(UNDERLAY_ETHERSTUB_VNIC_NAME.to_string()),
-            Etherstub(BOOTSTRAP_ETHERSTUB_NAME.to_string()),
+            &log,
+            ddmd_client.clone(),
+            bootstrap_networking.clone(),
             SledMode::Auto,
             Some(true),
             SidecarRevision::Physical("rev-test".to_string()),
-            SWITCH_ZONE_BOOTSTRAP_IP,
             vec![],
             StorageResources::new_for_test(),
-        )
-        .await
-        .unwrap();
+        );
         test_config.override_paths(&mgr);
 
         let port_manager = PortManager::new(
@@ -3210,20 +3211,15 @@ mod test {
         // config file! - expect that a service gets initialized.
         let _expectations = expect_new_service();
         let mgr = ServiceManager::new(
-            log.clone(),
-            GLOBAL_ZONE_BOOTSTRAP_IP,
-            Etherstub(UNDERLAY_ETHERSTUB_NAME.to_string()),
-            EtherstubVnic(UNDERLAY_ETHERSTUB_VNIC_NAME.to_string()),
-            Etherstub(BOOTSTRAP_ETHERSTUB_NAME.to_string()),
+            &log,
+            ddmd_client,
+            bootstrap_networking,
             SledMode::Auto,
             Some(true),
             SidecarRevision::Physical("rev-test".to_string()),
-            SWITCH_ZONE_BOOTSTRAP_IP,
             vec![],
             StorageResources::new_for_test(),
-        )
-        .await
-        .unwrap();
+        );
         test_config.override_paths(&mgr);
 
         let port_manager = PortManager::new(
@@ -3252,24 +3248,21 @@ mod test {
         );
         let log = logctx.log.clone();
         let test_config = TestConfig::new().await;
+        let ddmd_client = DdmAdminClient::localhost(&log).unwrap();
+        let bootstrap_networking = make_bootstrap_networking_config();
 
         // First, spin up a ServiceManager, create a new service, and tear it
         // down.
         let mgr = ServiceManager::new(
-            log.clone(),
-            GLOBAL_ZONE_BOOTSTRAP_IP,
-            Etherstub(UNDERLAY_ETHERSTUB_NAME.to_string()),
-            EtherstubVnic(UNDERLAY_ETHERSTUB_VNIC_NAME.to_string()),
-            Etherstub(BOOTSTRAP_ETHERSTUB_NAME.to_string()),
+            &log,
+            ddmd_client.clone(),
+            bootstrap_networking.clone(),
             SledMode::Auto,
             Some(true),
             SidecarRevision::Physical("rev-test".to_string()),
-            SWITCH_ZONE_BOOTSTRAP_IP,
             vec![],
             StorageResources::new_for_test(),
-        )
-        .await
-        .unwrap();
+        );
         test_config.override_paths(&mgr);
 
         let port_manager = PortManager::new(
@@ -3298,20 +3291,15 @@ mod test {
 
         // Observe that the old service is not re-initialized.
         let mgr = ServiceManager::new(
-            log.clone(),
-            GLOBAL_ZONE_BOOTSTRAP_IP,
-            Etherstub(UNDERLAY_ETHERSTUB_NAME.to_string()),
-            EtherstubVnic(UNDERLAY_ETHERSTUB_VNIC_NAME.to_string()),
-            Etherstub(BOOTSTRAP_ETHERSTUB_NAME.to_string()),
+            &log,
+            ddmd_client,
+            bootstrap_networking,
             SledMode::Auto,
             Some(true),
             SidecarRevision::Physical("rev-test".to_string()),
-            SWITCH_ZONE_BOOTSTRAP_IP,
             vec![],
             StorageResources::new_for_test(),
-        )
-        .await
-        .unwrap();
+        );
         test_config.override_paths(&mgr);
 
         let port_manager = PortManager::new(

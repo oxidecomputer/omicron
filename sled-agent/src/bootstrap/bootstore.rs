@@ -5,8 +5,8 @@
 //! Helpers for configuring and starting the bootstore during bootstrap agent
 //! startup.
 
-use super::agent::BootstrapError;
 use super::config::BOOTSTORE_PORT;
+use super::server::StartError;
 use crate::storage_manager::StorageResources;
 use bootstore::schemes::v0 as bootstore;
 use camino::Utf8PathBuf;
@@ -39,7 +39,7 @@ impl BootstoreHandles {
         baseboard: Baseboard,
         global_zone_bootstrap_ip: Ipv6Addr,
         base_log: &Logger,
-    ) -> Result<Self, BootstrapError> {
+    ) -> Result<Self, StartError> {
         let config = bootstore::Config {
             id: baseboard,
             addr: SocketAddrV6::new(
@@ -85,7 +85,7 @@ impl BootstoreHandles {
 
 async fn bootstore_fsm_state_paths(
     storage: &StorageResources,
-) -> Result<Vec<Utf8PathBuf>, BootstrapError> {
+) -> Result<Vec<Utf8PathBuf>, StartError> {
     let paths: Vec<_> = storage
         .all_m2_mountpoints(sled_hardware::disk::CLUSTER_DATASET)
         .await
@@ -94,7 +94,7 @@ async fn bootstore_fsm_state_paths(
         .collect();
 
     if paths.is_empty() {
-        return Err(BootstrapError::MissingM2Paths(
+        return Err(StartError::MissingM2Paths(
             sled_hardware::disk::CLUSTER_DATASET,
         ));
     }
@@ -103,7 +103,7 @@ async fn bootstore_fsm_state_paths(
 
 async fn bootstore_network_config_paths(
     storage: &StorageResources,
-) -> Result<Vec<Utf8PathBuf>, BootstrapError> {
+) -> Result<Vec<Utf8PathBuf>, StartError> {
     let paths: Vec<_> = storage
         .all_m2_mountpoints(sled_hardware::disk::CLUSTER_DATASET)
         .await
@@ -112,7 +112,7 @@ async fn bootstore_network_config_paths(
         .collect();
 
     if paths.is_empty() {
-        return Err(BootstrapError::MissingM2Paths(
+        return Err(StartError::MissingM2Paths(
             sled_hardware::disk::CLUSTER_DATASET,
         ));
     }

@@ -85,6 +85,10 @@ impl Server {
         Ok(Server { http_server })
     }
 
+    pub(crate) fn sled_agent(&self) -> &SledAgent {
+        self.http_server.app_private()
+    }
+
     /// Wait for the given server to shut down
     ///
     /// Note that this doesn't initiate a graceful shutdown, so if you call this
