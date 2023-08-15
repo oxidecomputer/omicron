@@ -10,7 +10,7 @@ use crate::host::{BoxedExecutor, ExecutionError};
 use crate::link::{Link, VnicAllocator};
 use crate::opte::{Port, PortTicket};
 use crate::svc::wait_for_service;
-use crate::zone::{AddressRequest, Zones, IPADM, ZLOGIN, ZONE_PREFIX};
+use crate::zone::{AddressRequest, Zones, IPADM, ZONE_PREFIX};
 use camino::{Utf8Path, Utf8PathBuf};
 use ipnetwork::IpNetwork;
 use omicron_common::backoff;
@@ -475,7 +475,8 @@ impl RunningZone {
         // NOTE: This implementation is useless, and will never work. However,
         // it must actually call `execute()` for the testing purposes.
         let mut command = std::process::Command::new(crate::host::PFEXEC);
-        let command = command.arg(ZLOGIN).arg(self.name()).args(args);
+        let command =
+            command.arg(crate::zone::ZLOGIN).arg(self.name()).args(args);
         self.inner
             .executor
             .execute(command)

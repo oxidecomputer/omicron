@@ -1047,12 +1047,14 @@ impl ServiceManager {
             .map(|d| zone::Device { name: d.to_string() })
             .collect();
 
-        // Look for the image in the ramdisk first
-        let mut zone_image_paths = vec![Utf8PathBuf::from("/opt/oxide")];
+        let mut zone_image_paths = vec![];
         // Inject an image path if requested by a test.
         if let Some(path) = self.inner.image_directory_override.get() {
             zone_image_paths.push(path.clone());
         };
+
+        // Look for the image in the ramdisk next.
+        zone_image_paths.push(Utf8PathBuf::from("/opt/oxide"));
 
         // If the boot disk exists, look for the image in the "install" dataset
         // there too.
@@ -2958,7 +2960,21 @@ mod test {
             )
         );
 
-        let login = format!("{PFEXEC} {ZLOGIN} {zone_name}");
+        // Refer to illumos-utils/src/running_zone.rs for the difference here.
+        //
+        // On illumos, we tend to avoid using zlogin, and instead use
+        // thread-level contracts with zenter::zone_enter to run commands within
+        // the context of zones.
+        //
+        // On non-illumos systems, we just pretend to zlogin, since the
+        // interface for doing so is simpler than the host API to access
+        // zenter.
+        let login = if cfg!(target_os = "illumos") {
+            format!("{PFEXEC} ")
+        } else {
+            format!("{PFEXEC} {ZLOGIN} {zone_name} ")
+        };
+
         handler.expect(
             Input::shell(format!(
                 "{login} /usr/sbin/ipadm create-if -t oxControlService0"

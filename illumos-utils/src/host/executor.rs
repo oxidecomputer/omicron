@@ -36,7 +36,7 @@ where
     .collect::<String>()
 }
 
-fn log_command(log: &Logger, id: u64, command: &Command) {
+fn log_input(log: &Logger, id: u64, command: &Command) {
     info!(log, "{id} - Running Command: [{}]", Input::from(command),);
     debug!(
         log,
@@ -158,7 +158,7 @@ impl FakeExecutor {
         command: &Command,
     ) -> Result<Output, ExecutionError> {
         let id = self.inner.counter.fetch_add(1, Ordering::SeqCst);
-        log_command(&self.inner.log, id, command);
+        log_input(&self.inner.log, id, command);
 
         let mut child = FakeChild::new(id, command, self.inner.clone());
 
@@ -202,7 +202,7 @@ impl Executor for FakeExecutor {
         command: &mut Command,
     ) -> Result<BoxedChild, ExecutionError> {
         let id = self.inner.counter.fetch_add(1, Ordering::SeqCst);
-        log_command(&self.inner.log, id, command);
+        log_input(&self.inner.log, id, command);
 
         Ok(FakeChild::new(id, command, self.inner.clone()))
     }
@@ -224,7 +224,7 @@ impl HostExecutor {
 
     fn prepare(&self, command: &Command) -> u64 {
         let id = self.counter.fetch_add(1, Ordering::SeqCst);
-        log_command(&self.log, id, command);
+        log_input(&self.log, id, command);
         id
     }
 
@@ -522,7 +522,12 @@ impl Drop for StaticHandler {
                     "<dynamic handler>".to_string()
                 }
             };
-            assert!(false, "Only saw {actual} calls, expected {expected}\nNext would have been: {tip}");
+            let errmsg = format!("Only saw {actual} calls, expected {expected}\nNext would have been: {tip}");
+            if !std::thread::panicking() {
+                assert!(false, "Only saw {actual} calls, expected {expected}\nNext would have been: {tip}");
+            } else {
+                eprintln!("{errmsg}");
+            }
         }
     }
 }
