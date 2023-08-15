@@ -741,7 +741,7 @@ mod tests {
             SocketAddr::new("127.0.0.1".parse().unwrap(), db_2.port());
 
         // TODO: Wait for 1 minute to make sure all servers are up.
-        // Remove this sleep once we have a mechanism that polls for 
+        // Remove this sleep once we have a mechanism that polls for
         // "Ready for connections" similar to wait_for_port().
         use std::time::Duration;
         use tokio::time::sleep;
@@ -754,7 +754,7 @@ mod tests {
             .await
             .expect("Failed to initialize timeseries database");
 
-        // Wait to make sure data has been synchronised. 
+        // Wait to make sure data has been synchronised.
         // TODO: Waiting for 30 secs is a bit sloppy,
         // come up with a better way to do this.
         sleep(Duration::from_secs(30)).await;
