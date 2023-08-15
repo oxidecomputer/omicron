@@ -523,7 +523,7 @@ impl Drop for StaticHandler {
             };
             let errmsg = format!("Only saw {actual} calls, expected {expected}\nNext would have been: {tip}");
             if !std::thread::panicking() {
-                assert!(false, "Only saw {actual} calls, expected {expected}\nNext would have been: {tip}");
+                assert!(false, "{errmsg}");
             } else {
                 eprintln!("{errmsg}");
             }
