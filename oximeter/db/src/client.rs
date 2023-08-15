@@ -662,7 +662,7 @@ mod tests {
         // Start all Keeper coordinator nodes
         let cur_dir = std::env::current_dir().unwrap();
         let keeper_config =
-            cur_dir.as_path().join("src/test-configs/keeper_config.xml");
+            cur_dir.as_path().join("src/configs/keeper_config.xml");
 
         // Start Keeper 1
         let k1_port = String::from("9181");
@@ -700,7 +700,7 @@ mod tests {
         // Start all replica nodes
         let cur_dir = std::env::current_dir().unwrap();
         let replica_config =
-            cur_dir.as_path().join("src/test-configs/replica_config.xml");
+            cur_dir.as_path().join("src/configs/replica_config.xml");
 
         // Start Replica 1
         let r1_port = String::from("8123");
