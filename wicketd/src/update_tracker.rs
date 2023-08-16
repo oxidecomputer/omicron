@@ -648,7 +648,7 @@ impl UpdateDriver {
         let sp_artifact_and_version = sp_registrar
             .new_step(
                 UpdateStepId::InterrogateSp,
-                "Checking current SP version",
+                "Checking SP board and current version",
                 move |_cx| async move {
                     let caboose = update_cx
                         .mgs_client
