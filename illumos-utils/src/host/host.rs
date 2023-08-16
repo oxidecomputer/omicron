@@ -353,7 +353,7 @@ impl TryFrom<Input> for DladmCommand {
 
                 Ok(Self::SetLinkprop { temporary, properties, name })
             }
-            _ => Err(format!("Unsupported command: {}", input.program)),
+            command => Err(format!("Unsupported command: {}", command)),
         }
     }
 }
@@ -501,8 +501,75 @@ impl TryFrom<Input> for IpadmCommand {
     }
 }
 
+#[derive(Debug, PartialEq, Eq)]
+enum RouteTarget {
+    Default,
+    DefaultV4,
+    DefaultV6,
+    ByAddress(IpNetwork),
+}
+
+impl RouteTarget {
+    fn shift_target(input: &mut Input) -> Result<Self, String> {
+        let force_v4 = shift_arg_if(input, "-inet")?;
+        let force_v6 = shift_arg_if(input, "-inet6")?;
+
+        let target = match (force_v4, force_v6, shift_arg(input)?.as_str()) {
+            (true, true, _) => {
+                return Err("Cannot force both v4 and v6".to_string())
+            }
+            (true, false, "default") => RouteTarget::DefaultV4,
+            (false, true, "default") => RouteTarget::DefaultV6,
+            (false, false, "default") => RouteTarget::Default,
+            (_, _, other) => {
+                let net =
+                    IpNetwork::from_str(other).map_err(|e| e.to_string())?;
+                if force_v4 && !net.is_ipv4() {
+                    return Err(format!("{net} is not ipv4"));
+                }
+                if force_v6 && !net.is_ipv6() {
+                    return Err(format!("{net} is not ipv6"));
+                }
+                RouteTarget::ByAddress(net)
+            }
+        };
+        Ok(target)
+    }
+}
+
 enum RouteCommand {
-    Add,
+    Add {
+        destination: RouteTarget,
+        gateway: RouteTarget,
+        interface: Option<LinkName>,
+    },
+}
+
+impl TryFrom<Input> for RouteCommand {
+    type Error = String;
+
+    fn try_from(mut input: Input) -> Result<Self, Self::Error> {
+        if input.program != ROUTE {
+            return Err(format!("Not route command: {}", input.program));
+        }
+
+        match shift_arg(&mut input)?.as_str() {
+            "add" => {
+                let destination = RouteTarget::shift_target(&mut input)?;
+                let gateway = RouteTarget::shift_target(&mut input)?;
+
+                let interface =
+                    if let Ok(true) = shift_arg_if(&mut input, "-ifp") {
+                        Some(LinkName(shift_arg(&mut input)?))
+                    } else {
+                        None
+                    };
+                no_args_remaining(&input)?;
+                Ok(RouteCommand::Add { destination, gateway, interface })
+            }
+            command => return Err(format!("Unsupported command: {}", command)),
+        }
+    }
 }
 
 // TODO: How much is it worth doing this vs just making things self-assembling?
@@ -752,7 +819,7 @@ impl TryFrom<Input> for Command {
         let cmd = match input.program.as_str() {
             DLADM => KnownCommand::Dladm(DladmCommand::try_from(input)?),
             IPADM => KnownCommand::Ipadm(IpadmCommand::try_from(input)?),
-            ROUTE => todo!(),
+            ROUTE => KnownCommand::Route(RouteCommand::try_from(input)?),
             SVCCFG => todo!(),
             ZONEADM => todo!(),
             ZONECFG => KnownCommand::Zonecfg(ZonecfgCommand::try_from(input)?),
@@ -1169,6 +1236,51 @@ mod test {
             panic!("Wrong command");
         };
         assert_eq!(name.0, "myzone");
+    }
+
+    #[test]
+    fn route_add() {
+        // Valid command
+        let RouteCommand::Add { destination, gateway, interface } =
+            RouteCommand::try_from(Input::shell(format!(
+                "{ROUTE} add -inet6 fd00::/16 default -ifp mylink"
+            )))
+            .unwrap();
+        assert_eq!(
+            destination,
+            RouteTarget::ByAddress(IpNetwork::from_str("fd00::/16").unwrap())
+        );
+        assert_eq!(gateway, RouteTarget::Default);
+        assert_eq!(interface.unwrap().0, "mylink");
+
+        // Valid command
+        let RouteCommand::Add { destination, gateway, interface } =
+            RouteCommand::try_from(Input::shell(format!(
+                "{ROUTE} add -inet default 127.0.0.1/8"
+            )))
+            .unwrap();
+        assert_eq!(destination, RouteTarget::DefaultV4);
+        assert_eq!(
+            gateway,
+            RouteTarget::ByAddress(IpNetwork::from_str("127.0.0.1/8").unwrap())
+        );
+        assert!(interface.is_none());
+
+        // Invalid address family
+        RouteCommand::try_from(Input::shell(format!(
+            "{ROUTE} add -inet -inet6 default 127.0.0.1/8"
+        )))
+        .err()
+        .unwrap()
+        .contains("Cannot force both v4 and v6");
+
+        // Invalid address family
+        RouteCommand::try_from(Input::shell(format!(
+            "{ROUTE} add -ine6 default -inet6 127.0.0.1/8"
+        )))
+        .err()
+        .unwrap()
+        .contains("127.0.0.1/8 is not ipv6");
     }
 
     #[test]
