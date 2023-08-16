@@ -86,8 +86,7 @@ use once_cell::sync::OnceCell;
 use rand::prelude::SliceRandom;
 use rand::SeedableRng;
 use sled_hardware::disk::ZONE_DATASET;
-// TODO: Revert to original settings before merging
-// use sled_hardware::is_gimlet;
+use sled_hardware::is_gimlet;
 use sled_hardware::underlay;
 use sled_hardware::underlay::BOOTSTRAP_PREFIX;
 use sled_hardware::Baseboard;
@@ -796,12 +795,9 @@ impl ServiceManager {
     ) -> Result<Vec<(Link, bool)>, Error> {
         let mut links: Vec<(Link, bool)> = Vec::new();
 
-        // TODO: Revert to original settings before merging
-        // let is_gimlet = is_gimlet().map_err(|e| {
-        //     Error::Underlay(underlay::Error::SystemDetection(e))
-        // })?;
-
-        let is_gimlet = false;
+        let is_gimlet = is_gimlet().map_err(|e| {
+            Error::Underlay(underlay::Error::SystemDetection(e))
+        })?;
 
         for svc in &req.services {
             match &svc.details {
@@ -1882,12 +1878,9 @@ impl ServiceManager {
                 ServiceType::Tfport { pkt_source } => {
                     info!(self.inner.log, "Setting up tfport service");
 
-                    // TODO: Revert to original settings before merging
-                    // let is_gimlet = is_gimlet().map_err(|e| {
-                    //     Error::Underlay(underlay::Error::SystemDetection(e))
-                    // })?;
-
-                    let is_gimlet = false;
+                    let is_gimlet = is_gimlet().map_err(|e| {
+                        Error::Underlay(underlay::Error::SystemDetection(e))
+                    })?;
 
                     if is_gimlet {
                         // Collect the prefixes for each techport.
@@ -1996,11 +1989,9 @@ impl ServiceManager {
                     smfh.setprop("config/mode", &mode)?;
                     smfh.setprop("config/admin_host", "::")?;
 
-                    // TODO: Revert to original settings before merging
-                    // let is_gimlet = is_gimlet().map_err(|e| {
-                    //     Error::Underlay(underlay::Error::SystemDetection(e))
-                    // })?;
-                    let is_gimlet = false;
+                    let is_gimlet = is_gimlet().map_err(|e| {
+                        Error::Underlay(underlay::Error::SystemDetection(e))
+                    })?;
 
                     let maghemite_interfaces: Vec<AddrObject> = if is_gimlet {
                         (0..32)

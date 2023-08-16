@@ -164,13 +164,12 @@ impl ClickHouseInstance {
         // TODO: Poll for "<Information> Application: Ready for connections."
         // using a similar mechanism to:
         // let port = wait_for_port(log_path).await?;
-        
-        
+
         let port: u16 = port.parse()?;
 
         let result = wait_for_ready(log_path).await;
         match result {
-            Ok(()) =>  Ok(Self {
+            Ok(()) => Ok(Self {
                 data_dir: Some(data_dir),
                 data_path,
                 port,
@@ -179,7 +178,6 @@ impl ClickHouseInstance {
             }),
             Err(e) => Err(e),
         }
-       
     }
 
     /// Start a new ClickHouse keeper on the given IPv6 port.
@@ -251,7 +249,7 @@ impl ClickHouseInstance {
 
         let result = wait_for_ready(log_path).await;
         match result {
-            Ok(()) =>  Ok(Self {
+            Ok(()) => Ok(Self {
                 data_dir: Some(data_dir),
                 data_path,
                 port,
@@ -424,9 +422,7 @@ async fn find_clickhouse_port_in_log(
 pub async fn wait_for_ready(log_path: PathBuf) -> Result<(), anyhow::Error> {
     let p = poll::wait_for_condition(
         || async {
-            let result =
-                discover_ready(&log_path, CLICKHOUSE_TIMEOUT)
-                    .await;
+            let result = discover_ready(&log_path, CLICKHOUSE_TIMEOUT).await;
             match result {
                 Ok(ready) => Ok(ready),
                 Err(e) => {
@@ -469,12 +465,9 @@ async fn discover_ready(
 //
 // NOTE: This function loops forever until the expected line is found. It should be run under a
 // timeout, or some other mechanism for cancelling it.
-async fn clickhouse_ready_from_log(
-    path: &Path,
-) -> Result<(), ClickHouseError> {
+async fn clickhouse_ready_from_log(path: &Path) -> Result<(), ClickHouseError> {
     let mut reader = BufReader::new(File::open(path).await?);
-    const READY: &str =
-        "<Information> Application: Ready for connections";
+    const READY: &str = "<Information> Application: Ready for connections";
     let mut lines = reader.lines();
     loop {
         let line = lines.next_line().await?;
@@ -500,7 +493,8 @@ async fn clickhouse_ready_from_log(
 #[cfg(test)]
 mod tests {
     use super::{
-        discover_local_listening_port, discover_ready, ClickHouseError, CLICKHOUSE_TIMEOUT,
+        discover_local_listening_port, discover_ready, ClickHouseError,
+        CLICKHOUSE_TIMEOUT,
     };
     use std::process::Stdio;
     use std::{io::Write, sync::Arc, time::Duration};
@@ -556,9 +550,7 @@ mod tests {
         file.flush().unwrap();
 
         assert_eq!(
-            discover_ready(file.path(), CLICKHOUSE_TIMEOUT)
-                .await
-                .unwrap(),
+            discover_ready(file.path(), CLICKHOUSE_TIMEOUT).await.unwrap(),
             ()
         );
     }
@@ -576,9 +568,8 @@ mod tests {
         writeln!(file, "Another garbage line").unwrap();
         file.flush().unwrap();
         assert!(matches!(
-            discover_ready(file.path(), Duration::from_secs(1))
-                .await,
-                Err(ClickHouseError::Timeout {})
+            discover_ready(file.path(), Duration::from_secs(1)).await,
+            Err(ClickHouseError::Timeout {})
         ));
     }
 
