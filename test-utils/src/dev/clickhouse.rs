@@ -112,7 +112,6 @@ impl ClickHouseInstance {
         interserver_port: String,
         name: String,
         r_number: String,
-        //config_path: String,
         config_path: PathBuf,
     ) -> Result<Self, anyhow::Error> {
         let data_dir = TempDir::new()
@@ -165,15 +164,22 @@ impl ClickHouseInstance {
         // TODO: Poll for "<Information> Application: Ready for connections."
         // using a similar mechanism to:
         // let port = wait_for_port(log_path).await?;
+        
+        
         let port: u16 = port.parse()?;
 
-        Ok(Self {
-            data_dir: Some(data_dir),
-            data_path,
-            port,
-            args,
-            child: Some(child),
-        })
+        let result = wait_for_ready(log_path).await;
+        match result {
+            Ok(()) =>  Ok(Self {
+                data_dir: Some(data_dir),
+                data_path,
+                port,
+                args,
+                child: Some(child),
+            }),
+            Err(e) => Err(e),
+        }
+       
     }
 
     /// Start a new ClickHouse keeper on the given IPv6 port.
@@ -243,13 +249,17 @@ impl ClickHouseInstance {
         // let port = wait_for_port(log_path).await?;
         let port: u16 = port.parse()?;
 
-        Ok(Self {
-            data_dir: Some(data_dir),
-            data_path,
-            port,
-            args,
-            child: Some(child),
-        })
+        let result = wait_for_ready(log_path).await;
+        match result {
+            Ok(()) =>  Ok(Self {
+                data_dir: Some(data_dir),
+                data_path,
+                port,
+                args,
+                child: Some(child),
+            }),
+            Err(e) => Err(e),
+        }
     }
 
     /// Wait for the ClickHouse server process to shutdown, after it's been killed.
@@ -410,10 +420,87 @@ async fn find_clickhouse_port_in_log(
     }
 }
 
+// Wait for the ClickHouse log file to report it is ready to receive connections
+pub async fn wait_for_ready(log_path: PathBuf) -> Result<(), anyhow::Error> {
+    let p = poll::wait_for_condition(
+        || async {
+            let result =
+                discover_ready(&log_path, CLICKHOUSE_TIMEOUT)
+                    .await;
+            match result {
+                Ok(ready) => Ok(ready),
+                Err(e) => {
+                    match e {
+                        ClickHouseError::Io(ref inner) => {
+                            if matches!(
+                                inner.kind(),
+                                std::io::ErrorKind::NotFound
+                            ) {
+                                return Err(poll::CondCheckError::NotYet);
+                            }
+                        }
+                        _ => {}
+                    }
+                    Err(poll::CondCheckError::from(e))
+                }
+            }
+        },
+        &Duration::from_millis(500),
+        &CLICKHOUSE_TIMEOUT,
+    )
+    .await
+    .context("waiting to discover if ClickHouse is ready for connections")?;
+    Ok(p)
+}
+
+// Parse the ClickHouse log file at the given path, looking for a line reporting that the server
+// is ready for connections.
+async fn discover_ready(
+    path: &Path,
+    timeout: Duration,
+) -> Result<(), ClickHouseError> {
+    let timeout = Instant::now() + timeout;
+    tokio::time::timeout_at(timeout, clickhouse_ready_from_log(path))
+        .await
+        .map_err(|_| ClickHouseError::Timeout)?
+}
+
+// Parse the clickhouse log to know if the server is ready for connections.
+//
+// NOTE: This function loops forever until the expected line is found. It should be run under a
+// timeout, or some other mechanism for cancelling it.
+async fn clickhouse_ready_from_log(
+    path: &Path,
+) -> Result<(), ClickHouseError> {
+    let mut reader = BufReader::new(File::open(path).await?);
+    const READY: &str =
+        "<Information> Application: Ready for connections";
+    let mut lines = reader.lines();
+    loop {
+        let line = lines.next_line().await?;
+        match line {
+            Some(line) => {
+                if let Some(_) = line.find(READY) {
+                    return Ok(());
+                }
+            }
+            None => {
+                // Reached EOF, just sleep for an interval and check again.
+                sleep(Duration::from_millis(10)).await;
+
+                // We might have gotten a partial line; close the file, reopen
+                // it, and start reading again from the beginning.
+                reader = BufReader::new(File::open(path).await?);
+                lines = reader.lines();
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        discover_local_listening_port, ClickHouseError, CLICKHOUSE_TIMEOUT,
+        discover_local_listening_port, discover_ready, ClickHouseError, CLICKHOUSE_TIMEOUT,
     };
     use std::process::Stdio;
     use std::{io::Write, sync::Arc, time::Duration};
@@ -453,6 +540,46 @@ mod tests {
                 .unwrap(),
             EXPECTED_PORT
         );
+    }
+
+    #[tokio::test]
+    async fn test_discover_clickhouse_ready() {
+        // Write some data to a fake log file
+        let mut file = NamedTempFile::new().unwrap();
+        writeln!(file, "A garbage line").unwrap();
+        writeln!(
+            file,
+            "2023.07.31 20:12:38.936192 [ 82373 ] <Information> Application: Ready for connections.",
+        )
+        .unwrap();
+        writeln!(file, "Another garbage line").unwrap();
+        file.flush().unwrap();
+
+        assert_eq!(
+            discover_ready(file.path(), CLICKHOUSE_TIMEOUT)
+                .await
+                .unwrap(),
+            ()
+        );
+    }
+
+    #[tokio::test]
+    async fn test_discover_clickhouse_not_ready() {
+        // Write some data to a fake log file
+        let mut file = NamedTempFile::new().unwrap();
+        writeln!(file, "A garbage line").unwrap();
+        writeln!(
+            file,
+            "2023.07.31 20:12:38.936192 [ 82373 ] <Information> Application: Not ready for connections.",
+        )
+        .unwrap();
+        writeln!(file, "Another garbage line").unwrap();
+        file.flush().unwrap();
+        assert!(matches!(
+            discover_ready(file.path(), Duration::from_secs(1))
+                .await,
+                Err(ClickHouseError::Timeout {})
+        ));
     }
 
     // A regression test for #131.

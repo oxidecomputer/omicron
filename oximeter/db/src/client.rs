@@ -630,6 +630,8 @@ mod tests {
     use oximeter::test_util;
     use oximeter::{Metric, Target};
     use slog::o;
+    use std::time::Duration;
+    use tokio::time::sleep;
 
     // NOTE: It's important that each test run the ClickHouse server with different ports.
     // The tests each require a clean slate. Previously, we ran the tests in a different thread,
@@ -740,13 +742,6 @@ mod tests {
         let r2_address =
             SocketAddr::new("127.0.0.1".parse().unwrap(), db_2.port());
 
-        // TODO: Wait for 1 minute to make sure all servers are up.
-        // Remove this sleep once we have a mechanism that polls for
-        // "Ready for connections" similar to wait_for_port().
-        use std::time::Duration;
-        use tokio::time::sleep;
-        sleep(Duration::from_secs(60)).await;
-
         // Create database in node 1
         let client_1 = Client::new(r1_address, &log);
         client_1
@@ -755,9 +750,9 @@ mod tests {
             .expect("Failed to initialize timeseries database");
 
         // Wait to make sure data has been synchronised.
-        // TODO: Waiting for 30 secs is a bit sloppy,
+        // TODO: Waiting for 5 secs is a bit sloppy,
         // come up with a better way to do this.
-        sleep(Duration::from_secs(30)).await;
+        sleep(Duration::from_secs(5)).await;
 
         // Verify database exists in node 2
         let client_2 = Client::new(r2_address, &log);
