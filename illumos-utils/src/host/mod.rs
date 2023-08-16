@@ -7,6 +7,7 @@
 mod byte_queue;
 mod error;
 mod executor;
+mod host;
 mod input;
 mod output;
 

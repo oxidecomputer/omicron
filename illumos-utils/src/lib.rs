@@ -21,3 +21,5 @@ pub mod vmm_reservoir;
 pub mod zfs;
 pub mod zone;
 pub mod zpool;
+
+pub const ROUTE: &'static str = "/usr/sbin/route";

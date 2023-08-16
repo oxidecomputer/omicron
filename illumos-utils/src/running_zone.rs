@@ -11,6 +11,7 @@ use crate::link::{Link, VnicAllocator};
 use crate::opte::{Port, PortTicket};
 use crate::svc::wait_for_service;
 use crate::zone::{AddressRequest, Zones, IPADM, ZONE_PREFIX};
+use crate::ROUTE;
 use camino::{Utf8Path, Utf8PathBuf};
 use ipnetwork::IpNetwork;
 use omicron_common::backoff;
@@ -680,13 +681,7 @@ impl RunningZone {
                 "-ifp",
                 port.vnic_name(),
             ])?;
-            self.run_cmd(&[
-                "/usr/sbin/route",
-                "add",
-                "-inet",
-                "default",
-                &gateway_ip,
-            ])?;
+            self.run_cmd(&[ROUTE, "add", "-inet", "default", &gateway_ip])?;
             Ok(addr)
         } else {
             // If the port is using IPv6 addressing we still want it to use
@@ -757,7 +752,7 @@ impl RunningZone {
         gateway: Ipv6Addr,
     ) -> Result<(), RunCommandError> {
         self.run_cmd([
-            "/usr/sbin/route",
+            ROUTE,
             "add",
             "-inet6",
             "default",
@@ -771,12 +766,7 @@ impl RunningZone {
         &self,
         gateway: Ipv4Addr,
     ) -> Result<(), RunCommandError> {
-        self.run_cmd([
-            "/usr/sbin/route",
-            "add",
-            "default",
-            &gateway.to_string(),
-        ])?;
+        self.run_cmd([ROUTE, "add", "default", &gateway.to_string()])?;
         Ok(())
     }
 
@@ -787,7 +777,7 @@ impl RunningZone {
         zone_vnic_name: &str,
     ) -> Result<(), RunCommandError> {
         self.run_cmd([
-            "/usr/sbin/route",
+            ROUTE,
             "add",
             "-inet6",
             &format!("{bootstrap_prefix:x}::/16"),
