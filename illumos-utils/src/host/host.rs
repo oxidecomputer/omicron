@@ -4,9 +4,10 @@
 
 //! Emulates an illumos system
 
-// TODO TODO TODO REMOVE ME
+// TODO REMOVE ME
 #![allow(dead_code)]
 
+use crate::addrobj::AddrObject;
 use crate::dladm::DLADM;
 use crate::host::input::Input;
 use crate::host::PFEXEC;
@@ -75,15 +76,16 @@ impl ZoneEnvironment {
     }
 }
 
-// TODO: How much is it worth doing this vs just making things self-assembling?
-// XXX E.g. is it actually worth emulating svccfg?
-
+#[derive(Debug)]
 struct ZoneName(String);
+
 struct ZoneConfig {
     state: zone::State,
     brand: String,
     // zonepath
     path: Utf8PathBuf,
+    datasets: Vec<zone::Dataset>,
+    devices: Vec<zone::Device>,
     nets: Vec<zone::Net>,
     fs: Vec<zone::Fs>,
     // E.g. zone image, overlays, etc.
@@ -159,8 +161,7 @@ impl TryFrom<Input> for DladmCommand {
             return Err(format!("Not dladm command: {}", input.program));
         }
 
-        match input.args.pop_front().ok_or_else(|| "Missing command")?.as_str()
-        {
+        match shift_arg(&mut input)?.as_str() {
             "create-vnic" => {
                 let mut link = None;
                 let mut temporary = false;
@@ -172,23 +173,24 @@ impl TryFrom<Input> for DladmCommand {
                 );
 
                 while !input.args.is_empty() {
-                    if shift_if_eq(&mut input, "-t")? {
+                    if shift_arg_if(&mut input, "-t")? {
                         temporary = true;
-                    } else if shift_if_eq(&mut input, "-p")? {
+                    } else if shift_arg_if(&mut input, "-p")? {
                         let props = shift_arg(&mut input)?;
                         let props = props.split(',');
                         for prop in props {
-                            let (k, v) = prop
-                                .split_once('=')
-                                .ok_or_else(|| "Bad property")?;
+                            let (k, v) =
+                                prop.split_once('=').ok_or_else(|| {
+                                    format!("Bad property: {prop}")
+                                })?;
                             properties.insert(k.to_string(), v.to_string());
                         }
-                    } else if shift_if_eq(&mut input, "-m")? {
+                    } else if shift_arg_if(&mut input, "-m")? {
                         // NOTE: Not yet supporting the keyword-based MACs.
                         mac = Some(shift_arg(&mut input)?);
-                    } else if shift_if_eq(&mut input, "-l")? {
+                    } else if shift_arg_if(&mut input, "-l")? {
                         link = Some(LinkName(shift_arg(&mut input)?));
-                    } else if shift_if_eq(&mut input, "-v")? {
+                    } else if shift_arg_if(&mut input, "-v")? {
                         vlan = Some(
                             VlanID::from_str(&shift_arg(&mut input)?)
                                 .map_err(|e| e.to_string())?,
@@ -213,7 +215,7 @@ impl TryFrom<Input> for DladmCommand {
                     input.args.pop_back().ok_or_else(|| "Missing name")?,
                 );
                 while !input.args.is_empty() {
-                    if shift_if_eq(&mut input, "-t")? {
+                    if shift_arg_if(&mut input, "-t")? {
                         temporary = true;
                     } else {
                         return Err(format!("Invalid arguments {}", input));
@@ -227,7 +229,7 @@ impl TryFrom<Input> for DladmCommand {
                     input.args.pop_back().ok_or_else(|| "Missing name")?,
                 );
                 while !input.args.is_empty() {
-                    if shift_if_eq(&mut input, "-t")? {
+                    if shift_arg_if(&mut input, "-t")? {
                         temporary = true;
                     } else {
                         return Err(format!("Invalid arguments {}", input));
@@ -241,7 +243,7 @@ impl TryFrom<Input> for DladmCommand {
                     input.args.pop_back().ok_or_else(|| "Missing name")?,
                 );
                 while !input.args.is_empty() {
-                    if shift_if_eq(&mut input, "-t")? {
+                    if shift_arg_if(&mut input, "-t")? {
                         temporary = true;
                     } else {
                         return Err(format!("Invalid arguments {}", input));
@@ -258,17 +260,16 @@ impl TryFrom<Input> for DladmCommand {
                 let name = LinkName(
                     input.args.pop_back().ok_or_else(|| "Missing name")?,
                 );
-                if !shift_if_eq(&mut input, "-p")? {
+                if !shift_arg_if(&mut input, "-p")? {
                     return Err(
                         "You should ask for parseable output ('-p')".into()
                     );
                 }
-                if !shift_if_eq(&mut input, "-o")? {
+                if !shift_arg_if(&mut input, "-o")? {
                     return Err(
                         "You should ask for specific outputs ('-o')".into()
                     );
                 }
-                // TODO: Could parse an enum of known properties...
                 let fields = shift_arg(&mut input)?
                     .split(',')
                     .map(|s| s.to_string())
@@ -279,20 +280,19 @@ impl TryFrom<Input> for DladmCommand {
             }
             "show-phys" => {
                 let mut mac = false;
-                if shift_if_eq(&mut input, "-m")? {
+                if shift_arg_if(&mut input, "-m")? {
                     mac = true;
                 }
-                if !shift_if_eq(&mut input, "-p")? {
+                if !shift_arg_if(&mut input, "-p")? {
                     return Err(
                         "You should ask for parseable output ('-p')".into()
                     );
                 }
-                if !shift_if_eq(&mut input, "-o")? {
+                if !shift_arg_if(&mut input, "-o")? {
                     return Err(
                         "You should ask for specific outputs ('-o')".into()
                     );
                 }
-                // TODO: Could parse an enum of known properties...
                 let fields = shift_arg(&mut input)?
                     .split(',')
                     .map(|s| s.to_string())
@@ -304,8 +304,8 @@ impl TryFrom<Input> for DladmCommand {
             }
             "show-vnic" => {
                 let mut fields = None;
-                if shift_if_eq(&mut input, "-p")? {
-                    if !shift_if_eq(&mut input, "-o")? {
+                if shift_arg_if(&mut input, "-p")? {
+                    if !shift_arg_if(&mut input, "-o")? {
                         return Err(
                             "You should ask for specific outputs ('-o')".into(),
                         );
@@ -330,15 +330,16 @@ impl TryFrom<Input> for DladmCommand {
                 );
 
                 while !input.args.is_empty() {
-                    if shift_if_eq(&mut input, "-t")? {
+                    if shift_arg_if(&mut input, "-t")? {
                         temporary = true;
-                    } else if shift_if_eq(&mut input, "-p")? {
+                    } else if shift_arg_if(&mut input, "-p")? {
                         let props = shift_arg(&mut input)?;
                         let props = props.split(',');
                         for prop in props {
-                            let (k, v) = prop
-                                .split_once('=')
-                                .ok_or_else(|| "Bad property")?;
+                            let (k, v) =
+                                prop.split_once('=').ok_or_else(|| {
+                                    format!("Bad property: {prop}")
+                                })?;
                             properties.insert(k.to_string(), v.to_string());
                         }
                     } else {
@@ -357,16 +358,155 @@ impl TryFrom<Input> for DladmCommand {
     }
 }
 
+#[derive(Debug, PartialEq)]
+enum AddrType {
+    Dhcp,
+    Static(IpNetwork),
+    Addrconf,
+}
+
 enum IpadmCommand {
-    CreateIf,
-    DeleteIf,
-    ShowIf,
-    SetIfprop,
+    CreateAddr {
+        temporary: bool,
+        ty: AddrType,
+        addrobj: AddrObject,
+    },
+    CreateIf {
+        temporary: bool,
+        name: IpInterfaceName,
+    },
+    DeleteAddr {
+        addrobj: AddrObject,
+    },
+    DeleteIf {
+        name: IpInterfaceName,
+    },
+    ShowIf {
+        properties: Vec<String>,
+        name: IpInterfaceName,
+    },
+    SetIfprop {
+        temporary: bool,
+        properties: HashMap<String, String>,
+        module: String,
+        name: IpInterfaceName,
+    },
+}
+
+impl TryFrom<Input> for IpadmCommand {
+    type Error = String;
+
+    fn try_from(mut input: Input) -> Result<Self, Self::Error> {
+        if input.program != IPADM {
+            return Err(format!("Not ipadm command: {}", input.program));
+        }
+
+        match shift_arg(&mut input)?.as_str() {
+            "create-addr" => {
+                let temporary = shift_arg_if(&mut input, "-t")?;
+                shift_arg_expect(&mut input, "-T")?;
+
+                let ty = match shift_arg(&mut input)?.as_str() {
+                    "static" => {
+                        shift_arg_expect(&mut input, "-a")?;
+                        let addr = shift_arg(&mut input)?;
+                        AddrType::Static(
+                            IpNetwork::from_str(&addr)
+                                .map_err(|e| e.to_string())?,
+                        )
+                    }
+                    "dhcp" => AddrType::Dhcp,
+                    "addrconf" => AddrType::Addrconf,
+                    ty => return Err(format!("Unknown address type {ty}")),
+                };
+                let addrobj = AddrObject::from_str(&shift_arg(&mut input)?)
+                    .map_err(|e| e.to_string())?;
+                no_args_remaining(&input)?;
+                Ok(IpadmCommand::CreateAddr { temporary, ty, addrobj })
+            }
+            "create-ip" | "create-if" => {
+                let temporary = shift_arg_if(&mut input, "-t")?;
+                let name = IpInterfaceName(shift_arg(&mut input)?);
+                no_args_remaining(&input)?;
+                Ok(IpadmCommand::CreateIf { temporary, name })
+            }
+            "delete-addr" => {
+                let addrobj = AddrObject::from_str(&shift_arg(&mut input)?)
+                    .map_err(|e| e.to_string())?;
+                no_args_remaining(&input)?;
+                Ok(IpadmCommand::DeleteAddr { addrobj })
+            }
+            "delete-ip" | "delete-if" => {
+                let name = IpInterfaceName(shift_arg(&mut input)?);
+                no_args_remaining(&input)?;
+                Ok(IpadmCommand::DeleteIf { name })
+            }
+            "show-if" => {
+                let name = IpInterfaceName(
+                    input.args.pop_back().ok_or_else(|| "Missing name")?,
+                );
+                let mut properties = vec![];
+                while !input.args.is_empty() {
+                    if shift_arg_if(&mut input, "-p")? {
+                        shift_arg_expect(&mut input, "-o")?;
+                        properties = shift_arg(&mut input)?
+                            .split(',')
+                            .map(|s| s.to_string())
+                            .collect();
+                    } else {
+                        return Err(format!("Unexpected input: {input}"));
+                    }
+                }
+
+                Ok(IpadmCommand::ShowIf { properties, name })
+            }
+            "set-ifprop" => {
+                let name = IpInterfaceName(
+                    input.args.pop_back().ok_or_else(|| "Missing name")?,
+                );
+
+                let mut temporary = false;
+                let mut properties = HashMap::new();
+                let mut module = "ip".to_string();
+
+                while !input.args.is_empty() {
+                    if shift_arg_if(&mut input, "-t")? {
+                        temporary = true;
+                    } else if shift_arg_if(&mut input, "-m")? {
+                        module = shift_arg(&mut input)?;
+                    } else if shift_arg_if(&mut input, "-p")? {
+                        let props = shift_arg(&mut input)?;
+                        let props = props.split(',');
+                        for prop in props {
+                            let (k, v) =
+                                prop.split_once('=').ok_or_else(|| {
+                                    format!("Bad property: {prop}")
+                                })?;
+                            properties.insert(k.to_string(), v.to_string());
+                        }
+                    } else {
+                        return Err(format!("Unexpected input: {input}"));
+                    }
+                }
+
+                Ok(IpadmCommand::SetIfprop {
+                    temporary,
+                    properties,
+                    module,
+                    name,
+                })
+            }
+            command => return Err(format!("Unexpected command: {command}")),
+        }
+    }
 }
 
 enum RouteCommand {
     Add,
 }
+
+// TODO: How much is it worth doing this vs just making things self-assembling?
+// XXX E.g. is it actually worth emulating svccfg?
 
 enum SvccfgCommand {
     Import,
@@ -381,7 +521,200 @@ enum ZoneadmCommand {
 }
 
 enum ZonecfgCommand {
-    Create,
+    Create { name: ZoneName, config: ZoneConfig },
+    Delete { name: ZoneName },
+}
+
+impl TryFrom<Input> for ZonecfgCommand {
+    type Error = String;
+
+    fn try_from(mut input: Input) -> Result<Self, Self::Error> {
+        if input.program != ZONECFG {
+            return Err(format!("Not zonecfg command: {}", input.program));
+        }
+        shift_arg_expect(&mut input, "-z")?;
+        let zone = ZoneName(shift_arg(&mut input)?);
+        match shift_arg(&mut input)?.as_str() {
+            "create" => {
+                shift_arg_expect(&mut input, "-F")?;
+                shift_arg_expect(&mut input, "-b")?;
+
+                enum Scope {
+                    Global,
+                    Dataset(zone::Dataset),
+                    Device(zone::Device),
+                    Fs(zone::Fs),
+                    Net(zone::Net),
+                }
+                let mut scope = Scope::Global;
+
+                // Globally-scoped Resources
+                let mut brand = None;
+                let mut path = None;
+
+                // Non-Global Resources
+                let mut datasets = vec![];
+                let mut devices = vec![];
+                let mut nets = vec![];
+                let mut fs = vec![];
+
+                while !input.args.is_empty() {
+                    shift_arg_expect(&mut input, ";")?;
+                    match shift_arg(&mut input)?.as_str() {
+                        "set" => {
+                            let prop = shift_arg(&mut input)?;
+                            let (k, v) =
+                                prop.split_once('=').ok_or_else(|| {
+                                    format!("Bad property: {prop}")
+                                })?;
+
+                            match &mut scope {
+                                Scope::Global => {
+                                    match k {
+                                        "brand" => {
+                                            brand = Some(v.to_string());
+                                        }
+                                        "zonepath" => {
+                                            path = Some(Utf8PathBuf::from(v));
+                                        }
+                                        "autoboot" => {
+                                            if v != "false" {
+                                                return Err(format!("Unhandled autoboot value: {v}"));
+                                            }
+                                        }
+                                        "ip-type" => {
+                                            if v != "exclusive" {
+                                                return Err(format!("Unhandled ip-type value: {v}"));
+                                            }
+                                        }
+                                        k => {
+                                            return Err(format!(
+                                                "Unknown property name: {k}"
+                                            ))
+                                        }
+                                    }
+                                }
+                                Scope::Dataset(d) => match k {
+                                    "name" => d.name = v.to_string(),
+                                    k => {
+                                        return Err(format!(
+                                            "Unknown property name: {k}"
+                                        ))
+                                    }
+                                },
+                                Scope::Device(d) => match k {
+                                    "match" => d.name = v.to_string(),
+                                    k => {
+                                        return Err(format!(
+                                            "Unknown property name: {k}"
+                                        ))
+                                    }
+                                },
+                                Scope::Fs(f) => match k {
+                                    "type" => f.ty = v.to_string(),
+                                    "dir" => f.dir = v.to_string(),
+                                    "special" => f.special = v.to_string(),
+                                    "raw" => f.raw = Some(v.to_string()),
+                                    "options" => {
+                                        f.options = v
+                                            .split(',')
+                                            .map(|s| s.to_string())
+                                            .collect()
+                                    }
+                                    k => {
+                                        return Err(format!(
+                                            "Unknown property name: {k}"
+                                        ))
+                                    }
+                                },
+                                Scope::Net(n) => match k {
+                                    "physical" => n.physical = v.to_string(),
+                                    "address" => {
+                                        n.address = Some(v.to_string())
+                                    }
+                                    "allowed-address" => {
+                                        n.allowed_address = Some(v.to_string())
+                                    }
+                                    k => {
+                                        return Err(format!(
+                                            "Unknown property name: {k}"
+                                        ))
+                                    }
+                                },
+                            }
+                        }
+                        "add" => {
+                            if !matches!(scope, Scope::Global) {
+                                return Err("Cannot add from non-global scope"
+                                    .to_string());
+                            }
+                            match shift_arg(&mut input)?.as_str() {
+                                "dataset" => {
+                                    scope =
+                                        Scope::Dataset(zone::Dataset::default())
+                                }
+                                "device" => {
+                                    scope =
+                                        Scope::Device(zone::Device::default())
+                                }
+                                "fs" => scope = Scope::Fs(zone::Fs::default()),
+                                "net" => {
+                                    scope = Scope::Net(zone::Net::default())
+                                }
+                                scope => {
+                                    return Err(format!(
+                                        "Unexpected scope: {scope}"
+                                    ))
+                                }
+                            }
+                        }
+                        "end" => {
+                            match scope {
+                                Scope::Global => {
+                                    return Err(
+                                        "Cannot end global scope".to_string()
+                                    )
+                                }
+                                Scope::Dataset(d) => datasets.push(d),
+                                Scope::Device(d) => devices.push(d),
+                                Scope::Fs(f) => fs.push(f),
+                                Scope::Net(n) => nets.push(n),
+                            }
+                            scope = Scope::Global;
+                        }
+                        sc => {
+                            return Err(format!("Unexpected subcommand: {sc}"))
+                        }
+                    }
+                }
+
+                if !matches!(scope, Scope::Global) {
+                    return Err(
+                        "Cannot end zonecfg outside global scope".to_string()
+                    );
+                }
+
+                Ok(ZonecfgCommand::Create {
+                    name: zone,
+                    config: ZoneConfig {
+                        state: zone::State::Configured,
+                        brand: brand.ok_or_else(|| "Missing brand")?,
+                        path: path.ok_or_else(|| "Missing zonepath")?,
+                        datasets,
+                        devices,
+                        nets,
+                        fs,
+                        layers: vec![],
+                    },
+                })
+            }
+            "delete" => {
+                shift_arg_expect(&mut input, "-F")?;
+                Ok(ZonecfgCommand::Delete { name: zone })
+            }
+            command => return Err(format!("Unexpected command: {command}")),
+        }
+    }
 }
 
 enum KnownCommand {
@@ -418,11 +751,11 @@ impl TryFrom<Input> for Command {
 
         let cmd = match input.program.as_str() {
             DLADM => KnownCommand::Dladm(DladmCommand::try_from(input)?),
-            IPADM => todo!(),
+            IPADM => KnownCommand::Ipadm(IpadmCommand::try_from(input)?),
             ROUTE => todo!(),
             SVCCFG => todo!(),
             ZONEADM => todo!(),
-            ZONECFG => todo!(),
+            ZONECFG => KnownCommand::Zonecfg(ZonecfgCommand::try_from(input)?),
             _ => return Err(format!("Unknown command: {}", input.program)),
         };
 
@@ -456,10 +789,19 @@ fn shift_arg(input: &mut Input) -> Result<String, String> {
     Ok(input.args.pop_front().ok_or_else(|| "Missing argument")?)
 }
 
-// Removes the next argument if it equals value.
+// Removes the next argument, which must equal the provided value.
+fn shift_arg_expect(input: &mut Input, value: &str) -> Result<(), String> {
+    let v = input.args.pop_front().ok_or_else(|| "Not enough args")?;
+    if value != v {
+        return Err(format!("Unexpected argument {v} (expected: {value}"));
+    }
+    Ok(())
+}
+
+// Removes the next argument if it equals `value`.
 //
 // Returns if it was equal.
-fn shift_if_eq(input: &mut Input, value: &str) -> Result<bool, String> {
+fn shift_arg_if(input: &mut Input, value: &str) -> Result<bool, String> {
     let eq = input.args.front().ok_or_else(|| "Not enough args")? == value;
     if eq {
         input.args.pop_front();
@@ -756,5 +1098,271 @@ mod test {
             "{DLADM} set-linkprop -p foo=bar"
         )))
         .unwrap_err();
+    }
+
+    #[test]
+    fn zonecfg_create() {
+        let ZonecfgCommand::Create { name, config } = ZonecfgCommand::try_from(
+            Input::shell(format!(
+                "{ZONECFG} -z myzone \
+                    create -F -b ; \
+                    set brand=omicron1 ; \
+                    set zonepath=/zone/myzone ; \
+                    set autoboot=false ; \
+                    set ip-type=exclusive ; \
+                    add net ; \
+                    set physical=oxControlService0 ; \
+                    end"
+            )),
+        ).unwrap() else {
+            panic!("Wrong command");
+        };
+
+        assert_eq!(name.0, "myzone");
+        assert_eq!(config.state, zone::State::Configured);
+        assert_eq!(config.brand, "omicron1");
+        assert_eq!(config.path, Utf8PathBuf::from("/zone/myzone"));
+        assert!(config.datasets.is_empty());
+        assert_eq!(config.nets[0].physical, "oxControlService0");
+        assert!(config.fs.is_empty());
+        assert!(config.layers.is_empty());
+
+        // Missing brand
+        assert!(ZonecfgCommand::try_from(Input::shell(format!(
+            "{ZONECFG} -z myzone \
+                    create -F -b ; \
+                    set zonepath=/zone/myzone"
+        )),)
+        .err()
+        .unwrap()
+        .contains("Missing brand"));
+
+        // Missing zonepath
+        assert!(ZonecfgCommand::try_from(Input::shell(format!(
+            "{ZONECFG} -z myzone \
+                    create -F -b ; \
+                    set brand=omicron1"
+        )),)
+        .err()
+        .unwrap()
+        .contains("Missing zonepath"));
+
+        // Ending mid-scope
+        assert!(ZonecfgCommand::try_from(Input::shell(format!(
+            "{ZONECFG} -z myzone \
+                    create -F -b ; \
+                    set brand=omicron1 ; \
+                    set zonepath=/zone/myzone ; \
+                    add net ; \
+                    set physical=oxControlService0"
+        )),)
+        .err()
+        .unwrap()
+        .contains("Cannot end zonecfg outside global scope"));
+    }
+
+    #[test]
+    fn zonecfg_delete() {
+        let ZonecfgCommand::Delete { name } = ZonecfgCommand::try_from(
+            Input::shell(format!("{ZONECFG} -z myzone delete -F")),
+        ).unwrap() else {
+            panic!("Wrong command");
+        };
+        assert_eq!(name.0, "myzone");
+    }
+
+    #[test]
+    fn ipadm_create_addr() {
+        // Valid command
+        let IpadmCommand::CreateAddr { temporary, ty, addrobj } = IpadmCommand::try_from(
+            Input::shell(format!("{IPADM} create-addr -t -T addrconf foo/bar"))
+        ).unwrap() else {
+            panic!("Wrong command")
+        };
+        assert!(temporary);
+        assert!(matches!(ty, AddrType::Addrconf));
+        assert_eq!("foo/bar", addrobj.to_string());
+
+        // Valid command
+        let IpadmCommand::CreateAddr { temporary, ty, addrobj } = IpadmCommand::try_from(
+            Input::shell(format!("{IPADM} create-addr -T static -a ::/32 foo/bar"))
+        ).unwrap() else {
+            panic!("Wrong command")
+        };
+        assert!(!temporary);
+        assert_eq!(ty, AddrType::Static(IpNetwork::from_str("::/32").unwrap()));
+        assert_eq!("foo/bar", addrobj.to_string());
+
+        // Bad type
+        IpadmCommand::try_from(Input::shell(format!(
+            "{IPADM} create-addr -T quadratric foo/bar"
+        )))
+        .err()
+        .unwrap()
+        .contains("Unknown address type");
+
+        // Missing name
+        IpadmCommand::try_from(Input::shell(format!(
+            "{IPADM} create-addr -T dhcp"
+        )))
+        .err()
+        .unwrap()
+        .contains("Missing argument");
+
+        // Too many arguments
+        IpadmCommand::try_from(Input::shell(format!(
+            "{IPADM} create-addr -T dhcp foo/bar baz"
+        )))
+        .err()
+        .unwrap()
+        .contains("Unexpected extra arguments");
+
+        // Not addrobject
+        IpadmCommand::try_from(Input::shell(format!(
+            "{IPADM} create-addr -T dhcp foobar"
+        )))
+        .err()
+        .unwrap()
+        .contains("Failed to parse addrobj name");
+    }
+
+    #[test]
+    fn ipadm_create_if() {
+        // Valid command
+        let IpadmCommand::CreateIf { temporary, name } = IpadmCommand::try_from(
+            Input::shell(format!("{IPADM} create-if foobar"))
+        ).unwrap() else {
+            panic!("Wrong command")
+        };
+        assert!(!temporary);
+        assert_eq!(name.0, "foobar");
+
+        // Too many arguments
+        IpadmCommand::try_from(Input::shell(format!(
+            "{IPADM} create-if foo bar"
+        )))
+        .err()
+        .unwrap()
+        .contains("Unexpected extra arguments");
+    }
+
+    #[test]
+    fn ipadm_delete_addr() {
+        // Valid command
+        let IpadmCommand::DeleteAddr { addrobj } = IpadmCommand::try_from(
+            Input::shell(format!("{IPADM} delete-addr foo/bar"))
+        ).unwrap() else {
+            panic!("Wrong command")
+        };
+        assert_eq!(addrobj.to_string(), "foo/bar");
+
+        // Not addrobject
+        IpadmCommand::try_from(Input::shell(format!(
+            "{IPADM} delete-addr foobar"
+        )))
+        .err()
+        .unwrap()
+        .contains("Failed to parse addobj name");
+
+        // Too many arguments
+        IpadmCommand::try_from(Input::shell(format!(
+            "{IPADM} delete-addr foo/bar foo/bar"
+        )))
+        .err()
+        .unwrap()
+        .contains("Unexpected extra arguments");
+    }
+
+    #[test]
+    fn ipadm_delete_if() {
+        // Valid command
+        let IpadmCommand::DeleteIf { name } = IpadmCommand::try_from(
+            Input::shell(format!("{IPADM} delete-if foobar"))
+        ).unwrap() else {
+            panic!("Wrong command")
+        };
+        assert_eq!(name.0, "foobar");
+
+        // Too many arguments
+        IpadmCommand::try_from(Input::shell(format!(
+            "{IPADM} delete-if foo bar"
+        )))
+        .err()
+        .unwrap()
+        .contains("Unexpected extra arguments");
+    }
+
+    #[test]
+    fn ipadm_show_if() {
+        // Valid command
+        let IpadmCommand::ShowIf { properties, name } = IpadmCommand::try_from(
+            Input::shell(format!("{IPADM} show-if foobar"))
+        ).unwrap() else {
+            panic!("Wrong command")
+        };
+        assert!(properties.is_empty());
+        assert_eq!(name.0, "foobar");
+
+        // Valid command
+        let IpadmCommand::ShowIf { properties, name } = IpadmCommand::try_from(
+            Input::shell(format!("{IPADM} show-if -p -o IFNAME foobar"))
+        ).unwrap() else {
+            panic!("Wrong command")
+        };
+        assert_eq!(properties[0], "IFNAME");
+        assert_eq!(name.0, "foobar");
+
+        // Non parseable output
+        IpadmCommand::try_from(Input::shell(format!(
+            "{IPADM} show-if -o IFNAME foobar"
+        )))
+        .err()
+        .unwrap();
+
+        // Not asking for specific field
+        IpadmCommand::try_from(Input::shell(format!(
+            "{IPADM} show-if -p foobar"
+        )))
+        .err()
+        .unwrap();
+
+        // Too many arguments
+        IpadmCommand::try_from(Input::shell(format!(
+            "{IPADM} show-if fizz buzz"
+        )))
+        .err()
+        .unwrap()
+        .contains("Unexpected input");
+    }
+
+    #[test]
+    fn ipadm_set_ifprop() {
+        // Valid command
+        let IpadmCommand::SetIfprop { temporary, properties, module, name } = IpadmCommand::try_from(
+            Input::shell(format!("{IPADM} set-ifprop -t -m ipv4 -p mtu=123 foo"))
+        ).unwrap() else {
+            panic!("Wrong command")
+        };
+
+        assert!(temporary);
+        assert_eq!(properties["mtu"], "123");
+        assert_eq!(module, "ipv4");
+        assert_eq!(name.0, "foo");
+
+        // Bad property
+        IpadmCommand::try_from(Input::shell(format!(
+            "{IPADM} set-ifprop -p blarg foo"
+        )))
+        .err()
+        .unwrap()
+        .contains("Bad property: blarg");
+
+        // Too many arguments
+        IpadmCommand::try_from(Input::shell(format!(
+            "{IPADM} set-ifprop -p mtu=123 foo bar"
+        )))
+        .err()
+        .unwrap()
+        .contains("Unexpected input");
     }
 }
