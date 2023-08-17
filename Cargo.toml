@@ -192,8 +192,7 @@ hex-literal = "0.3.4"
 hkdf = "0.12.3"
 http = "0.2.9"
 httptest = "0.15.4"
-# TODO point back to main after merging
-hubtools = { git = "https://github.com/oxidecomputer/hubtools.git", branch = "archive-builder" }
+hubtools = { git = "https://github.com/oxidecomputer/hubtools.git", branch = "main" }
 humantime = "2.1.0"
 hyper = "0.14"
 hyper-rustls = "0.24.1"
