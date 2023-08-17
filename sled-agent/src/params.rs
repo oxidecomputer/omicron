@@ -849,12 +849,14 @@ pub struct TimeSync {
     /// The synchronization state of the sled, true when the system clock
     /// and the NTP clock are in sync (to within a small window).
     pub sync: bool,
-    // These could both be f32, but there is a problem with progenitor/typify
+    /// The NTP reference ID.
+    pub ref_id: u32,
+    /// The NTP reference IP address.
+    pub ip_addr: IpAddr,
+    // This could be f32, but there is a problem with progenitor/typify
     // where, although the f32 correctly becomes "float" (and not "double") in
     // the API spec, that "float" gets converted back to f64 when generating
     // the client.
-    /// The estimated error bound on the frequency.
-    pub skew: f64,
     /// The current offset between the NTP clock and system clock.
     pub correction: f64,
 }
@@ -889,6 +891,36 @@ pub struct ZoneBundleId {
     pub bundle_id: Uuid,
 }
 
+/// The reason or cause for a zone bundle, i.e., why it was created.
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Default,
+    Deserialize,
+    Eq,
+    Hash,
+    JsonSchema,
+    Ord,
+    PartialEq,
+    PartialOrd,
+    Serialize,
+)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum ZoneBundleCause {
+    /// Generated in response to an explicit request to the sled agent.
+    ExplicitRequest,
+    /// A zone bundle taken when a sled agent finds a zone that it does not
+    /// expect to be running.
+    UnexpectedZone,
+    /// An instance zone was terminated.
+    TerminatedInstance,
+    /// Some other, unspecified reason.
+    #[default]
+    Other,
+}
+
 /// Metadata about a zone bundle.
 #[derive(
     Clone,
@@ -907,17 +939,25 @@ pub struct ZoneBundleMetadata {
     pub id: ZoneBundleId,
     /// The time at which this zone bundle was created.
     pub time_created: DateTime<Utc>,
+    /// A version number for this zone bundle.
+    pub version: u8,
+    /// The reason or cause a bundle was created.
+    pub cause: ZoneBundleCause,
 }
 
 impl ZoneBundleMetadata {
+    const VERSION: u8 = 0;
+
     /// Create a new set of metadata for the provided zone.
-    pub(crate) fn new(zone_name: &str) -> Self {
+    pub(crate) fn new(zone_name: &str, cause: ZoneBundleCause) -> Self {
         Self {
             id: ZoneBundleId {
                 zone_name: zone_name.to_string(),
                 bundle_id: Uuid::new_v4(),
             },
             time_created: Utc::now(),
+            version: Self::VERSION,
+            cause,
         }
     }
 }

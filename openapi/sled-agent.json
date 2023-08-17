@@ -10,6 +10,34 @@
     "version": "0.0.1"
   },
   "paths": {
+    "/all-zone-bundles": {
+      "get": {
+        "summary": "List all zone bundles that exist, even for now-deleted zones.",
+        "operationId": "zone_bundle_list_all",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Array_of_ZoneBundleMetadata",
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ZoneBundleMetadata"
+                  }
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/cockroachdb": {
       "post": {
         "summary": "Initializes a CockroachDB cluster",
@@ -528,7 +556,7 @@
     },
     "/zones/{zone_name}/bundles": {
       "get": {
-        "summary": "List the zone bundles that are current available for a zone.",
+        "summary": "List the zone bundles that are available for a running zone.",
         "operationId": "zone_bundle_list",
         "parameters": [
           {
@@ -631,6 +659,42 @@
                 "schema": {}
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "summary": "Delete a zone bundle.",
+        "operationId": "zone_bundle_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "bundle_id",
+            "description": "The ID for this bundle itself.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "zone_name",
+            "description": "The name of the zone this bundle is derived from.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "successful deletion"
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -2386,10 +2450,16 @@
             "type": "number",
             "format": "double"
           },
-          "skew": {
-            "description": "The estimated error bound on the frequency.",
-            "type": "number",
-            "format": "double"
+          "ip_addr": {
+            "description": "The NTP reference IP address.",
+            "type": "string",
+            "format": "ip"
+          },
+          "ref_id": {
+            "description": "The NTP reference ID.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
           },
           "sync": {
             "description": "The synchronization state of the sled, true when the system clock and the NTP clock are in sync (to within a small window).",
@@ -2398,7 +2468,8 @@
         },
         "required": [
           "correction",
-          "skew",
+          "ip_addr",
+          "ref_id",
           "sync"
         ]
       },
@@ -2686,6 +2757,39 @@
           "vni"
         ]
       },
+      "ZoneBundleCause": {
+        "description": "The reason or cause for a zone bundle, i.e., why it was created.",
+        "oneOf": [
+          {
+            "description": "Generated in response to an explicit request to the sled agent.",
+            "type": "string",
+            "enum": [
+              "explicit_request"
+            ]
+          },
+          {
+            "description": "A zone bundle taken when a sled agent finds a zone that it does not expect to be running.",
+            "type": "string",
+            "enum": [
+              "unexpected_zone"
+            ]
+          },
+          {
+            "description": "An instance zone was terminated.",
+            "type": "string",
+            "enum": [
+              "terminated_instance"
+            ]
+          },
+          {
+            "description": "Some other, unspecified reason.",
+            "type": "string",
+            "enum": [
+              "other"
+            ]
+          }
+        ]
+      },
       "ZoneBundleId": {
         "description": "An identifier for a zone bundle.",
         "type": "object",
@@ -2709,6 +2813,14 @@
         "description": "Metadata about a zone bundle.",
         "type": "object",
         "properties": {
+          "cause": {
+            "description": "The reason or cause a bundle was created.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ZoneBundleCause"
+              }
+            ]
+          },
           "id": {
             "description": "Identifier for this zone bundle",
             "allOf": [
@@ -2721,11 +2833,19 @@
             "description": "The time at which this zone bundle was created.",
             "type": "string",
             "format": "date-time"
+          },
+          "version": {
+            "description": "A version number for this zone bundle.",
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0
           }
         },
         "required": [
+          "cause",
           "id",
-          "time_created"
+          "time_created",
+          "version"
         ]
       },
       "ZoneType": {

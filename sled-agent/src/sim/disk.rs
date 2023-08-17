@@ -120,12 +120,12 @@ mod producers {
             oximeter::MetricsError,
         > {
             let samples = vec![
-                Sample::new(&self.target, &self.activated_count),
-                Sample::new(&self.target, &self.write_count),
-                Sample::new(&self.target, &self.write_bytes),
-                Sample::new(&self.target, &self.read_count),
-                Sample::new(&self.target, &self.read_bytes),
-                Sample::new(&self.target, &self.flush_count),
+                Sample::new(&self.target, &self.activated_count)?,
+                Sample::new(&self.target, &self.write_count)?,
+                Sample::new(&self.target, &self.write_bytes)?,
+                Sample::new(&self.target, &self.read_count)?,
+                Sample::new(&self.target, &self.read_bytes)?,
+                Sample::new(&self.target, &self.flush_count)?,
             ];
 
             *self.activated_count.datum_mut() += 1;

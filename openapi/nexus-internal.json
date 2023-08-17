@@ -1557,8 +1557,8 @@
         "type": "object",
         "properties": {
           "fields": {
-            "type": "array",
-            "items": {
+            "type": "object",
+            "additionalProperties": {
               "$ref": "#/components/schemas/Field"
             }
           },
@@ -2190,6 +2190,33 @@
                 "type": "string",
                 "enum": [
                   "parse_error"
+                ]
+              }
+            },
+            "required": [
+              "content",
+              "type"
+            ]
+          },
+          {
+            "description": "A field name is duplicated between the target and metric.",
+            "type": "object",
+            "properties": {
+              "content": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name"
+                ]
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "duplicate_field_name"
                 ]
               }
             },

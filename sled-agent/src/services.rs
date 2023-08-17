@@ -28,21 +28,24 @@
 use crate::bootstrap::early_networking::{
     EarlyNetworkSetup, EarlyNetworkSetupError,
 };
+use crate::bootstrap::BootstrapNetworking;
 use crate::config::SidecarRevision;
 use crate::params::{
     DendriteAsic, ServiceEnsureBody, ServiceType, ServiceZoneRequest,
-    ServiceZoneService, TimeSync, ZoneBundleMetadata, ZoneType,
+    ServiceZoneService, TimeSync, ZoneBundleCause, ZoneBundleMetadata,
+    ZoneType,
 };
 use crate::profile::*;
 use crate::smf_helper::Service;
 use crate::smf_helper::SmfHelper;
 use crate::storage_manager::StorageResources;
+use crate::zone_bundle;
+use crate::zone_bundle::BundleError;
 use anyhow::anyhow;
 use camino::{Utf8Path, Utf8PathBuf};
 use ddm_admin_client::{Client as DdmAdminClient, DdmError};
 use dpd_client::{types as DpdTypes, Client as DpdClient, Error as DpdError};
 use dropshot::HandlerTaskMode;
-use flate2::bufread::GzDecoder;
 use illumos_utils::addrobj::AddrObject;
 use illumos_utils::addrobj::IPV6_LINK_LOCAL_NAME;
 use illumos_utils::dladm::{
@@ -92,10 +95,8 @@ use sled_hardware::underlay::BOOTSTRAP_PREFIX;
 use sled_hardware::Baseboard;
 use sled_hardware::SledMode;
 use slog::Logger;
-use std::collections::BTreeSet;
 use std::collections::HashSet;
 use std::collections::{BTreeMap, HashMap};
-use std::io::Cursor;
 use std::iter;
 use std::iter::FromIterator;
 use std::net::{IpAddr, Ipv6Addr, SocketAddr};
@@ -103,15 +104,14 @@ use std::str::FromStr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
-use tar::Archive;
-use tar::Builder;
-use tar::Header;
 use tokio::io::AsyncWriteExt;
 use tokio::sync::oneshot;
 use tokio::sync::Mutex;
 use tokio::sync::MutexGuard;
 use tokio::task::JoinHandle;
 use uuid::Uuid;
+
+const IPV6_UNSPECIFIED: IpAddr = IpAddr::V6(Ipv6Addr::UNSPECIFIED);
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -216,9 +216,6 @@ pub enum Error {
     #[error("Sidecar revision error")]
     SidecarRevision(#[from] anyhow::Error),
 
-    #[error("Zone bundle error")]
-    Bundle(#[from] BundleError),
-
     #[error("Early networking setup error")]
     EarlyNetworkSetupError(#[from] EarlyNetworkSetupError),
 
@@ -258,30 +255,6 @@ fn display_zone_init_errors(errors: &[(String, Box<Error>)]) -> String {
     output
 }
 
-#[derive(Debug, thiserror::Error)]
-pub enum BundleError {
-    #[error("I/O error")]
-    Io(#[from] std::io::Error),
-
-    #[error("TOML serialization failure")]
-    Serialization(#[from] toml::ser::Error),
-
-    #[error("TOML deserialization failure")]
-    Deserialization(#[from] toml::de::Error),
-
-    #[error("No zone named '{name}' is available for bundling")]
-    NoSuchZone { name: String },
-
-    #[error("No storage available for bundles")]
-    NoStorage,
-
-    #[error("Failed to join zone bundling task")]
-    Task(#[from] tokio::task::JoinError),
-
-    #[error("Failed to create bundle")]
-    BundleFailed(#[from] anyhow::Error),
-}
-
 /// Configuration parameters which modify the [`ServiceManager`]'s behavior.
 pub struct Config {
     /// Identifies the sled being configured
@@ -299,15 +272,6 @@ impl Config {
 
 // The filename of the ledger, within the provided directory.
 const SERVICES_LEDGER_FILENAME: &str = "services.json";
-
-// The directory within the debug dataset in which bundles are created.
-const BUNDLE_DIRECTORY: &str = "bundle";
-
-// The directory for zone bundles.
-const ZONE_BUNDLE_DIRECTORY: &str = "zone";
-
-// The name for zone bundle metadata files.
-const ZONE_BUNDLE_METADATA_FILENAME: &str = "metadata.toml";
 
 // A wrapper around `ZoneRequest`, which allows it to be serialized
 // to a JSON file.
@@ -432,34 +396,32 @@ impl ServiceManager {
     ///
     /// Args:
     /// - `log`: The logger
-    /// - `underlay_etherstub`: Etherstub used to allocate service vNICs.
-    /// - `underlay_vnic`: The underlay's vNIC in the Global Zone.
-    /// - `bootstrap_etherstub`: Etherstub used to allocate bootstrap service vNICs.
+    /// - `ddm_client`: Client pointed to our localhost ddmd
+    /// - `bootstrap_networking`: Collection of etherstubs/VNICs set up when
+    ///    bootstrap agent begins
     /// - `sled_mode`: The sled's mode of operation (Gimlet vs Scrimlet).
     /// - `skip_timesync`: If true, the sled always reports synced time.
-    /// - `time_synced`: If true, time sync was achieved.
     /// - `sidecar_revision`: Rev of attached sidecar, if present.
-    /// - `switch_zone_bootstrap_address`: The bootstrap IP to use for the switch zone.
+    /// - `switch_zone_maghemite_links`: List of physical links on which
+    ///    maghemite should listen.
+    /// - `storage`: Shared handle to get the current state of disks/zpools.
     #[allow(clippy::too_many_arguments)]
-    pub async fn new(
-        log: Logger,
-        global_zone_bootstrap_link_local_address: Ipv6Addr,
-        underlay_etherstub: Etherstub,
-        underlay_vnic: EtherstubVnic,
-        bootstrap_etherstub: Etherstub,
+    pub(crate) fn new(
+        log: &Logger,
+        ddmd_client: DdmAdminClient,
+        bootstrap_networking: BootstrapNetworking,
         sled_mode: SledMode,
         skip_timesync: Option<bool>,
         sidecar_revision: SidecarRevision,
-        switch_zone_bootstrap_address: Ipv6Addr,
         switch_zone_maghemite_links: Vec<PhysicalLink>,
         storage: StorageResources,
-    ) -> Result<Self, Error> {
-        debug!(log, "Creating new ServiceManager");
+    ) -> Self {
         let log = log.new(o!("component" => "ServiceManager"));
-        let mgr = Self {
+        Self {
             inner: Arc::new(ServiceManagerInner {
                 log: log.clone(),
-                global_zone_bootstrap_link_local_address,
+                global_zone_bootstrap_link_local_address: bootstrap_networking
+                    .global_zone_bootstrap_link_local_ip,
                 // TODO(https://github.com/oxidecomputer/omicron/issues/725):
                 // Load the switch zone if it already exists?
                 switch_zone: Mutex::new(SledLocalZone::Disabled),
@@ -471,23 +433,23 @@ impl ServiceManager {
                 zones: Mutex::new(BTreeMap::new()),
                 underlay_vnic_allocator: VnicAllocator::new(
                     "Service",
-                    underlay_etherstub,
+                    bootstrap_networking.underlay_etherstub,
                 ),
-                underlay_vnic,
+                underlay_vnic: bootstrap_networking.underlay_etherstub_vnic,
                 bootstrap_vnic_allocator: VnicAllocator::new(
                     "Bootstrap",
-                    bootstrap_etherstub,
+                    bootstrap_networking.bootstrap_etherstub,
                 ),
-                ddmd_client: DdmAdminClient::localhost(&log)?,
+                ddmd_client,
                 advertised_prefixes: Mutex::new(HashSet::new()),
                 sled_info: OnceCell::new(),
-                switch_zone_bootstrap_address,
+                switch_zone_bootstrap_address: bootstrap_networking
+                    .switch_zone_bootstrap_ip,
                 storage,
                 ledger_directory_override: OnceCell::new(),
                 image_directory_override: OnceCell::new(),
             }),
-        };
-        Ok(mgr)
+        }
     }
 
     #[cfg(test)]
@@ -502,32 +464,6 @@ impl ServiceManager {
 
     pub fn switch_zone_bootstrap_address(&self) -> Ipv6Addr {
         self.inner.switch_zone_bootstrap_address
-    }
-
-    // Return the directories for storing debug information.
-    async fn all_debug_directories(&self) -> Vec<Utf8PathBuf> {
-        self.inner
-            .storage
-            .all_m2_mountpoints(sled_hardware::disk::DEBUG_DATASET)
-            .await
-    }
-
-    // Return the directories for storing all service bundles.
-    async fn all_service_bundle_directories(&self) -> Vec<Utf8PathBuf> {
-        self.all_debug_directories()
-            .await
-            .into_iter()
-            .map(|p| p.join(BUNDLE_DIRECTORY))
-            .collect()
-    }
-
-    // Return the directories for storing zone service bundles.
-    async fn all_zone_bundle_directories(&self) -> Vec<Utf8PathBuf> {
-        self.all_service_bundle_directories()
-            .await
-            .into_iter()
-            .map(|p| p.join(ZONE_BUNDLE_DIRECTORY))
-            .collect()
     }
 
     async fn all_service_ledgers(&self) -> Vec<Utf8PathBuf> {
@@ -2125,472 +2061,39 @@ impl ServiceManager {
         Ok(())
     }
 
-    // Create a zone bundle for the named running zone.
-    async fn create_zone_bundle_impl(
-        &self,
-        zone: &RunningZone,
-    ) -> Result<ZoneBundleMetadata, BundleError> {
-        // Fetch the directory into which we'll store data, and ensure it
-        // exists.
-        let log = &self.inner.log;
-        let directories = self.all_zone_bundle_directories().await;
-        if directories.is_empty() {
-            warn!(log, "no directories available for zone bundles");
-            return Err(BundleError::NoStorage);
-        }
-        info!(
-            log,
-            "creating zone bundle";
-            "zone" => zone.name(),
-            "directories" => ?directories,
-        );
-        let mut zone_bundle_dirs = Vec::with_capacity(directories.len());
-        for dir in directories.iter() {
-            let bundle_dir = dir.join(zone.name());
-            debug!(log, "creating bundle directory"; "dir" => %bundle_dir);
-            tokio::fs::create_dir_all(&bundle_dir).await?;
-            zone_bundle_dirs.push(bundle_dir);
-        }
-
-        // Create metadata and the tarball writer.
-        //
-        // We'll write the contents of the bundle into a gzipped tar archive,
-        // including metadata and a file for the output of each command we run
-        // in the zone.
-        let zone_metadata = ZoneBundleMetadata::new(zone.name());
-        let filename = format!("{}.tar.gz", zone_metadata.id.bundle_id);
-        let full_path = zone_bundle_dirs[0].join(&filename);
-        let file = match tokio::fs::OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create(true)
-            .open(&full_path)
-            .await
-        {
-            Ok(f) => f.into_std().await,
-            Err(e) => {
-                error!(
-                    log,
-                    "failed to create bundle file";
-                    "zone" => zone.name(),
-                    "file" => %full_path,
-                    "error" => ?e,
-                );
-                return Err(BundleError::from(e));
-            }
-        };
-        debug!(
-            log,
-            "created bundle tarball file";
-            "zone" => zone.name(),
-            "path" => %full_path
-        );
-        let gz = flate2::GzBuilder::new()
-            .filename(filename.as_str())
-            .write(file, flate2::Compression::best());
-        let mut builder = Builder::new(gz);
-
-        // Helper function to write an array of bytes into the tar archive, with
-        // the provided name.
-        fn insert_data<W: std::io::Write>(
-            builder: &mut Builder<W>,
-            name: &str,
-            contents: &[u8],
-        ) -> Result<(), BundleError> {
-            let mtime = SystemTime::now()
-                .duration_since(SystemTime::UNIX_EPOCH)
-                .map_err(|e| anyhow::anyhow!("failed to compute mtime: {e}"))?
-                .as_secs();
-
-            let mut hdr = Header::new_ustar();
-            hdr.set_size(contents.len().try_into().unwrap());
-            hdr.set_mode(0o444);
-            hdr.set_mtime(mtime);
-            hdr.set_entry_type(tar::EntryType::Regular);
-            // NOTE: This internally sets the path and checksum.
-            builder
-                .append_data(&mut hdr, name, Cursor::new(contents))
-                .map_err(BundleError::from)
-        }
-
-        // Write the metadata file itself, in TOML format.
-        let contents = toml::to_string(&zone_metadata)?;
-        insert_data(
-            &mut builder,
-            ZONE_BUNDLE_METADATA_FILENAME,
-            contents.as_bytes(),
-        )?;
-        debug!(
-            log,
-            "wrote zone bundle metadata";
-            "zone" => zone.name(),
-        );
-
-        // The set of zone-wide commands, which don't require any details about
-        // the processes we've launched in the zone.
-        const ZONE_WIDE_COMMANDS: [&[&str]; 6] = [
-            &["ptree"],
-            &["uptime"],
-            &["last"],
-            &["who"],
-            &["svcs", "-p"],
-            &["netstat", "-an"],
-        ];
-        for cmd in ZONE_WIDE_COMMANDS {
-            debug!(
-                log,
-                "running zone bundle command";
-                "zone" => zone.name(),
-                "command" => ?cmd,
-            );
-            let output = match zone.run_cmd(cmd) {
-                Ok(s) => s,
-                Err(e) => format!("{}", e),
-            };
-            let contents =
-                format!("Command: {:?}\n{}", cmd, output).into_bytes();
-            if let Err(e) = insert_data(&mut builder, cmd[0], &contents) {
-                error!(
-                    log,
-                    "failed to save zone bundle command output";
-                    "zone" => zone.name(),
-                    "command" => ?cmd,
-                    "error" => ?e,
-                );
-            }
-        }
-
-        // Debugging commands run on the specific processes this zone defines.
-        const ZONE_PROCESS_COMMANDS: [&str; 3] = [
-            "pfiles", "pstack",
-            "pargs",
-            // TODO-completeness: We may want `gcore`, since that encompasses
-            // the above commands and much more. It seems like overkill now,
-            // however.
-        ];
-        let procs = match zone.service_processes() {
-            Ok(p) => {
-                debug!(
-                    log,
-                    "enumerated service processes";
-                    "zone" => zone.name(),
-                    "procs" => ?p,
-                );
-                p
-            }
-            Err(e) => {
-                error!(
-                    log,
-                    "failed to enumerate zone service processes";
-                    "zone" => zone.name(),
-                    "error" => ?e,
-                );
-                let err = anyhow::anyhow!(
-                    "failed to enumerate zone service processes: {e}"
-                );
-                return Err(BundleError::from(err));
-            }
-        };
-        for svc in procs.into_iter() {
-            let pid_s = svc.pid.to_string();
-            for cmd in ZONE_PROCESS_COMMANDS {
-                let args = &[cmd, &pid_s];
-                debug!(
-                    log,
-                    "running zone bundle command";
-                    "zone" => zone.name(),
-                    "command" => ?args,
-                );
-                let output = match zone.run_cmd(args) {
-                    Ok(s) => s,
-                    Err(e) => format!("{}", e),
-                };
-                let contents =
-                    format!("Command: {:?}\n{}", args, output).into_bytes();
-
-                // There may be multiple Oxide service processes for which we
-                // want to capture the command output. Name each output after
-                // the command and PID to disambiguate.
-                let filename = format!("{}.{}", cmd, svc.pid);
-                if let Err(e) = insert_data(&mut builder, &filename, &contents)
-                {
-                    error!(
-                        log,
-                        "failed to save zone bundle command output";
-                        "zone" => zone.name(),
-                        "command" => ?args,
-                        "error" => ?e,
-                    );
-                }
-            }
-
-            // Copy any log files, current and rotated, into the tarball as
-            // well.
-            //
-            // Safety: This pathbuf was retrieved by locating an existing file
-            // on the filesystem, so we're sure it has a name and the unwrap is
-            // safe.
-            debug!(
-                log,
-                "appending current log file to zone bundle";
-                "zone" => zone.name(),
-                "log_file" => %svc.log_file,
-            );
-            if let Err(e) = builder.append_path_with_name(
-                &svc.log_file,
-                svc.log_file.file_name().unwrap(),
-            ) {
-                error!(
-                    log,
-                    "failed to append current log file to zone bundle";
-                    "zone" => zone.name(),
-                    "log_file" => %svc.log_file,
-                    "error" => ?e,
-                );
-                return Err(e.into());
-            }
-            for f in svc.rotated_log_files.iter() {
-                debug!(
-                    log,
-                    "appending rotated log file to zone bundle";
-                    "zone" => zone.name(),
-                    "log_file" => %svc.log_file,
-                );
-                if let Err(e) =
-                    builder.append_path_with_name(f, f.file_name().unwrap())
-                {
-                    error!(
-                        log,
-                        "failed to append current log file to zone bundle";
-                        "zone" => zone.name(),
-                        "log_file" => %svc.log_file,
-                        "error" => ?e,
-                    );
-                    return Err(e.into());
-                }
-            }
-        }
-
-        // Finish writing out the tarball itself.
-        builder
-            .into_inner()
-            .map_err(|e| anyhow::anyhow!("Failed to build bundle: {e}"))?;
-
-        // Copy the bundle to the other locations. We really want the bundles to
-        // be duplicates, not an additional, new bundle.
-        for other_dir in zone_bundle_dirs[1..].iter() {
-            let to = other_dir.join(&filename);
-            debug!(log, "copying bundle"; "from" => %full_path, "to" => %to);
-            tokio::fs::copy(&full_path, to).await?;
-        }
-
-        info!(log, "finished zone bundle"; "metadata" => ?zone_metadata);
-        Ok(zone_metadata)
-    }
-
     /// Create a zone bundle for the provided zone.
     pub async fn create_zone_bundle(
         &self,
         name: &str,
-    ) -> Result<ZoneBundleMetadata, Error> {
+    ) -> Result<ZoneBundleMetadata, BundleError> {
         // Search for the named zone.
         if let SledLocalZone::Running { zone, .. } =
             &*self.inner.switch_zone.lock().await
         {
             if zone.name() == name {
-                return self
-                    .create_zone_bundle_impl(zone)
-                    .await
-                    .map_err(Error::from);
+                let context = self
+                    .inner
+                    .storage
+                    .zone_bundle_context(name, ZoneBundleCause::ExplicitRequest)
+                    .await;
+                return crate::zone_bundle::create(
+                    &self.inner.log,
+                    zone,
+                    &context,
+                )
+                .await;
             }
         }
         if let Some(zone) = self.inner.zones.lock().await.get(name) {
-            return self
-                .create_zone_bundle_impl(zone)
-                .await
-                .map_err(Error::from);
+            let context = self
+                .inner
+                .storage
+                .zone_bundle_context(name, ZoneBundleCause::ExplicitRequest)
+                .await;
+            return crate::zone_bundle::create(&self.inner.log, zone, &context)
+                .await;
         }
-        Err(Error::from(BundleError::NoSuchZone { name: name.to_string() }))
-    }
-
-    fn extract_zone_bundle_metadata(
-        path: &std::path::PathBuf,
-    ) -> Result<ZoneBundleMetadata, BundleError> {
-        // Build a reader for the whole archive.
-        let reader = std::fs::File::open(path).map_err(BundleError::from)?;
-        let buf_reader = std::io::BufReader::new(reader);
-        let gz = GzDecoder::new(buf_reader);
-        let mut archive = Archive::new(gz);
-
-        // Find the metadata entry, if it exists.
-        let entries = archive.entries()?;
-        let Some(md_entry) = entries
-            // The `Archive::entries` iterator
-            // returns a result, so filter to those
-            // that are OK first.
-            .filter_map(Result::ok)
-            .find(|entry| {
-                entry
-                    .path()
-                    .map(|p| p.to_str() == Some(ZONE_BUNDLE_METADATA_FILENAME))
-                    .unwrap_or(false)
-            })
-        else {
-            return Err(BundleError::from(
-                anyhow::anyhow!("Zone bundle is missing metadata file")
-            ));
-        };
-
-        // Extract its contents and parse as metadata.
-        let contents = std::io::read_to_string(md_entry)?;
-        toml::from_str(&contents).map_err(BundleError::from)
-    }
-
-    /// List the bundles available for the zone of the provided name.
-    pub async fn list_zone_bundles(
-        &self,
-        name: &str,
-    ) -> Result<Vec<ZoneBundleMetadata>, Error> {
-        let log = &self.inner.log;
-
-        // The zone bundles are replicated in several places, so we'll use a set
-        // to collect them all, to avoid duplicating.
-        let mut bundles = BTreeSet::new();
-
-        for path in self.all_zone_bundle_directories().await {
-            info!(log, "searching zone bundle directory"; "directory" => ?path);
-            let zone_bundle_dir = path.join(name);
-            if zone_bundle_dir.is_dir() {
-                let mut dir = tokio::fs::read_dir(zone_bundle_dir)
-                    .await
-                    .map_err(BundleError::from)?;
-                while let Some(zone_bundle) =
-                    dir.next_entry().await.map_err(BundleError::from)?
-                {
-                    let bundle_path = zone_bundle.path();
-                    info!(
-                        log,
-                        "checking possible zone bundle";
-                        "bundle_path" => %bundle_path.display(),
-                    );
-
-                    // Zone bundles _should_ be named like:
-                    //
-                    // .../bundle/zone/<zone_name>/<bundle_id>.tar.gz.
-                    //
-                    // However, really a zone bundle is any tarball with the
-                    // right metadata file, which contains a TOML-serialized
-                    // `ZoneBundleMetadata` file. Try to create an archive out
-                    // of each file we find in this directory, and parse out a
-                    // metadata file.
-                    let tarball = bundle_path.to_owned();
-                    let task = tokio::task::spawn_blocking(move || {
-                        Self::extract_zone_bundle_metadata(&tarball)
-                    });
-                    let metadata = match task.await {
-                        Ok(Ok(md)) => md,
-                        Ok(Err(e)) => {
-                            error!(
-                                log,
-                                "failed to read zone bundle metadata";
-                                "error" => ?e,
-                            );
-                            return Err(Error::from(e));
-                        }
-                        Err(e) => {
-                            error!(
-                                log,
-                                "failed to join zone bundle metadata read task";
-                                "error" => ?e,
-                            );
-                            return Err(Error::from(BundleError::from(e)));
-                        }
-                    };
-                    info!(log, "found zone bundle"; "metadata" => ?metadata);
-                    bundles.insert(metadata);
-                }
-            }
-        }
-        Ok(bundles.into_iter().collect())
-    }
-
-    /// Get the path to a zone bundle, if it exists.
-    pub async fn get_zone_bundle_path(
-        &self,
-        zone_name: &str,
-        id: &Uuid,
-    ) -> Result<Option<Utf8PathBuf>, Error> {
-        let log = &self.inner.log;
-        for path in self.all_zone_bundle_directories().await {
-            info!(log, "searching zone bundle directory"; "directory" => ?path);
-            let zone_bundle_dir = path.join(zone_name);
-            if zone_bundle_dir.is_dir() {
-                let mut dir = tokio::fs::read_dir(zone_bundle_dir)
-                    .await
-                    .map_err(BundleError::from)?;
-                while let Some(zone_bundle) =
-                    dir.next_entry().await.map_err(BundleError::from)?
-                {
-                    let path = zone_bundle.path();
-                    let task = tokio::task::spawn_blocking(move || {
-                        Self::extract_zone_bundle_metadata(&path)
-                    });
-                    let metadata = match task.await {
-                        Ok(Ok(md)) => md,
-                        Ok(Err(e)) => {
-                            error!(
-                                log,
-                                "failed to read zone bundle metadata";
-                                "error" => ?e,
-                            );
-                            return Err(Error::from(e));
-                        }
-                        Err(e) => {
-                            error!(
-                                log,
-                                "failed to join zone bundle metadata read task";
-                                "error" => ?e,
-                            );
-                            return Err(Error::from(BundleError::from(e)));
-                        }
-                    };
-                    let bundle_id = &metadata.id;
-                    if bundle_id.zone_name == zone_name
-                        && bundle_id.bundle_id == *id
-                    {
-                        let path = Utf8PathBuf::try_from(zone_bundle.path())
-                            .map_err(|_| {
-                                BundleError::from(anyhow::anyhow!(
-                                    "Non-UTF-8 path name: {}",
-                                    zone_bundle.path().display()
-                                ))
-                            })?;
-                        return Ok(Some(path));
-                    }
-                }
-            }
-        }
-        Ok(None)
-    }
-
-    /// List all zones that are currently managed.
-    pub async fn list_all_zones(&self) -> Result<Vec<String>, Error> {
-        let mut zone_names = vec![];
-        if let SledLocalZone::Running { zone, .. } =
-            &*self.inner.switch_zone.lock().await
-        {
-            zone_names.push(String::from(zone.name()))
-        }
-        zone_names.extend(
-            self.inner
-                .zones
-                .lock()
-                .await
-                .values()
-                .map(|zone| zone.name().to_string()),
-        );
-        zone_names.sort();
-        Ok(zone_names)
+        Err(BundleError::NoSuchZone { name: name.to_string() })
     }
 
     /// Ensures that particular services should be initialized.
@@ -2666,6 +2169,28 @@ impl ServiceManager {
         for zone in zones_to_be_removed {
             let expected_zone_name = zone.zone_name();
             if let Some(mut zone) = existing_zones.remove(&expected_zone_name) {
+                debug!(
+                    log,
+                    "removing an existing zone";
+                    "zone_name" => &expected_zone_name,
+                );
+                let context = self
+                    .inner
+                    .storage
+                    .zone_bundle_context(
+                        &expected_zone_name,
+                        ZoneBundleCause::UnexpectedZone,
+                    )
+                    .await;
+                if let Err(e) = zone_bundle::create(log, &zone, &context).await
+                {
+                    error!(
+                        log,
+                        "Failed to take bundle of unexpected zone";
+                        "zone_name" => &expected_zone_name,
+                        "reason" => ?e,
+                    );
+                }
                 if let Err(e) = zone.stop().await {
                     error!(log, "Failed to stop zone {}: {e}", zone.name());
                 }
@@ -2854,7 +2379,12 @@ impl ServiceManager {
         if let Some(true) = self.inner.skip_timesync {
             info!(self.inner.log, "Configured to skip timesync checks");
             self.boottime_rewrite(existing_zones.values());
-            return Ok(TimeSync { sync: true, skew: 0.00, correction: 0.00 });
+            return Ok(TimeSync {
+                sync: true,
+                ref_id: 0,
+                ip_addr: IPV6_UNSPECIFIED,
+                correction: 0.00,
+            });
         };
 
         let ntp_zone_name =
@@ -2877,19 +2407,26 @@ impl ServiceManager {
                 let v: Vec<&str> = stdout.split(',').collect();
 
                 if v.len() > 9 {
+                    let ref_id = u32::from_str_radix(v[0], 16)
+                        .map_err(|_| Error::NtpZoneNotReady)?;
+                    let ip_addr =
+                        IpAddr::from_str(v[1]).unwrap_or(IPV6_UNSPECIFIED);
                     let correction = f64::from_str(v[4])
                         .map_err(|_| Error::NtpZoneNotReady)?;
-                    let skew = f64::from_str(v[9])
-                        .map_err(|_| Error::NtpZoneNotReady)?;
 
-                    let sync = (skew != 0.0 || correction != 0.0)
-                        && correction.abs() <= 0.05;
+                    // Per `chronyc waitsync`'s implementation, if either the
+                    // reference IP address is not unspecified or the reference
+                    // ID is not 0 or 0x7f7f0101, we are synchronized to a peer.
+                    let peer_sync = !ip_addr.is_unspecified()
+                        || (ref_id != 0 && ref_id != 0x7f7f0101);
+
+                    let sync = peer_sync && correction.abs() <= 0.05;
 
                     if sync {
                         self.boottime_rewrite(existing_zones.values());
                     }
 
-                    Ok(TimeSync { sync, skew, correction })
+                    Ok(TimeSync { sync, ref_id, ip_addr, correction })
                 } else {
                     Err(Error::NtpZoneNotReady)
                 }
@@ -3390,6 +2927,21 @@ mod test {
 
     const EXPECTED_ZONE_NAME_PREFIX: &str = "oxz_oximeter";
 
+    fn make_bootstrap_networking_config() -> BootstrapNetworking {
+        BootstrapNetworking {
+            bootstrap_etherstub: Etherstub(
+                BOOTSTRAP_ETHERSTUB_NAME.to_string(),
+            ),
+            global_zone_bootstrap_ip: GLOBAL_ZONE_BOOTSTRAP_IP,
+            global_zone_bootstrap_link_local_ip: GLOBAL_ZONE_BOOTSTRAP_IP,
+            switch_zone_bootstrap_ip: SWITCH_ZONE_BOOTSTRAP_IP,
+            underlay_etherstub: Etherstub(UNDERLAY_ETHERSTUB_NAME.to_string()),
+            underlay_etherstub_vnic: EtherstubVnic(
+                UNDERLAY_ETHERSTUB_VNIC_NAME.to_string(),
+            ),
+        }
+    }
+
     // Returns the expectations for a new service to be created.
     fn expect_new_service() -> Vec<Box<dyn std::any::Any>> {
         // Create a VNIC
@@ -3435,20 +2987,8 @@ mod test {
         wait_ctx.expect().return_once(|_, _| Ok(()));
 
         // Import the manifest, enable the service
-        let spawn_ctx =
-            illumos_utils::spawn_with_piped_stdout_and_stderr_context();
-        spawn_ctx.expect().times(..).returning(|_| {
-            std::process::Command::new("/bin/false").spawn().map_err(|err| {
-                illumos_utils::ExecutionError::ExecutionStart {
-                    command: "mock".to_string(),
-                    err,
-                }
-            })
-        });
-        let run_child_ctx = illumos_utils::run_child_context();
-        run_child_ctx.expect().times(..).returning(|_, mut child| {
-            let _ = child.kill();
-
+        let execute_ctx = illumos_utils::execute_context();
+        execute_ctx.expect().times(..).returning(|_| {
             Ok(std::process::Output {
                 status: std::process::ExitStatus::from_raw(0),
                 stdout: vec![],
@@ -3463,8 +3003,7 @@ mod test {
             Box::new(id_ctx),
             Box::new(ensure_address_ctx),
             Box::new(wait_ctx),
-            Box::new(spawn_ctx),
-            Box::new(run_child_ctx),
+            Box::new(execute_ctx),
         ]
     }
 
@@ -3604,20 +3143,15 @@ mod test {
         let test_config = TestConfig::new().await;
 
         let mgr = ServiceManager::new(
-            log.clone(),
-            GLOBAL_ZONE_BOOTSTRAP_IP,
-            Etherstub(UNDERLAY_ETHERSTUB_NAME.to_string()),
-            EtherstubVnic(UNDERLAY_ETHERSTUB_VNIC_NAME.to_string()),
-            Etherstub(BOOTSTRAP_ETHERSTUB_NAME.to_string()),
+            &log,
+            DdmAdminClient::localhost(&log).unwrap(),
+            make_bootstrap_networking_config(),
             SledMode::Auto,
             Some(true),
             SidecarRevision::Physical("rev-test".to_string()),
-            SWITCH_ZONE_BOOTSTRAP_IP,
             vec![],
             StorageResources::new_for_test(),
-        )
-        .await
-        .unwrap();
+        );
         test_config.override_paths(&mgr);
 
         let port_manager = PortManager::new(
@@ -3650,20 +3184,15 @@ mod test {
         let test_config = TestConfig::new().await;
 
         let mgr = ServiceManager::new(
-            log.clone(),
-            GLOBAL_ZONE_BOOTSTRAP_IP,
-            Etherstub(UNDERLAY_ETHERSTUB_NAME.to_string()),
-            EtherstubVnic(UNDERLAY_ETHERSTUB_VNIC_NAME.to_string()),
-            Etherstub(BOOTSTRAP_ETHERSTUB_NAME.to_string()),
+            &log,
+            DdmAdminClient::localhost(&log).unwrap(),
+            make_bootstrap_networking_config(),
             SledMode::Auto,
             Some(true),
             SidecarRevision::Physical("rev-test".to_string()),
-            SWITCH_ZONE_BOOTSTRAP_IP,
             vec![],
             StorageResources::new_for_test(),
-        )
-        .await
-        .unwrap();
+        );
         test_config.override_paths(&mgr);
 
         let port_manager = PortManager::new(
@@ -3695,24 +3224,21 @@ mod test {
         );
         let log = logctx.log.clone();
         let test_config = TestConfig::new().await;
+        let ddmd_client = DdmAdminClient::localhost(&log).unwrap();
+        let bootstrap_networking = make_bootstrap_networking_config();
 
         // First, spin up a ServiceManager, create a new service, and tear it
         // down.
         let mgr = ServiceManager::new(
-            log.clone(),
-            GLOBAL_ZONE_BOOTSTRAP_IP,
-            Etherstub(UNDERLAY_ETHERSTUB_NAME.to_string()),
-            EtherstubVnic(UNDERLAY_ETHERSTUB_VNIC_NAME.to_string()),
-            Etherstub(BOOTSTRAP_ETHERSTUB_NAME.to_string()),
+            &log,
+            ddmd_client.clone(),
+            bootstrap_networking.clone(),
             SledMode::Auto,
             Some(true),
             SidecarRevision::Physical("rev-test".to_string()),
-            SWITCH_ZONE_BOOTSTRAP_IP,
             vec![],
             StorageResources::new_for_test(),
-        )
-        .await
-        .unwrap();
+        );
         test_config.override_paths(&mgr);
 
         let port_manager = PortManager::new(
@@ -3736,20 +3262,15 @@ mod test {
         // config file! - expect that a service gets initialized.
         let _expectations = expect_new_service();
         let mgr = ServiceManager::new(
-            log.clone(),
-            GLOBAL_ZONE_BOOTSTRAP_IP,
-            Etherstub(UNDERLAY_ETHERSTUB_NAME.to_string()),
-            EtherstubVnic(UNDERLAY_ETHERSTUB_VNIC_NAME.to_string()),
-            Etherstub(BOOTSTRAP_ETHERSTUB_NAME.to_string()),
+            &log,
+            ddmd_client,
+            bootstrap_networking,
             SledMode::Auto,
             Some(true),
             SidecarRevision::Physical("rev-test".to_string()),
-            SWITCH_ZONE_BOOTSTRAP_IP,
             vec![],
             StorageResources::new_for_test(),
-        )
-        .await
-        .unwrap();
+        );
         test_config.override_paths(&mgr);
 
         let port_manager = PortManager::new(
@@ -3778,24 +3299,21 @@ mod test {
         );
         let log = logctx.log.clone();
         let test_config = TestConfig::new().await;
+        let ddmd_client = DdmAdminClient::localhost(&log).unwrap();
+        let bootstrap_networking = make_bootstrap_networking_config();
 
         // First, spin up a ServiceManager, create a new service, and tear it
         // down.
         let mgr = ServiceManager::new(
-            log.clone(),
-            GLOBAL_ZONE_BOOTSTRAP_IP,
-            Etherstub(UNDERLAY_ETHERSTUB_NAME.to_string()),
-            EtherstubVnic(UNDERLAY_ETHERSTUB_VNIC_NAME.to_string()),
-            Etherstub(BOOTSTRAP_ETHERSTUB_NAME.to_string()),
+            &log,
+            ddmd_client.clone(),
+            bootstrap_networking.clone(),
             SledMode::Auto,
             Some(true),
             SidecarRevision::Physical("rev-test".to_string()),
-            SWITCH_ZONE_BOOTSTRAP_IP,
             vec![],
             StorageResources::new_for_test(),
-        )
-        .await
-        .unwrap();
+        );
         test_config.override_paths(&mgr);
 
         let port_manager = PortManager::new(
@@ -3824,20 +3342,15 @@ mod test {
 
         // Observe that the old service is not re-initialized.
         let mgr = ServiceManager::new(
-            log.clone(),
-            GLOBAL_ZONE_BOOTSTRAP_IP,
-            Etherstub(UNDERLAY_ETHERSTUB_NAME.to_string()),
-            EtherstubVnic(UNDERLAY_ETHERSTUB_VNIC_NAME.to_string()),
-            Etherstub(BOOTSTRAP_ETHERSTUB_NAME.to_string()),
+            &log,
+            ddmd_client,
+            bootstrap_networking,
             SledMode::Auto,
             Some(true),
             SidecarRevision::Physical("rev-test".to_string()),
-            SWITCH_ZONE_BOOTSTRAP_IP,
             vec![],
             StorageResources::new_for_test(),
-        )
-        .await
-        .unwrap();
+        );
         test_config.override_paths(&mgr);
 
         let port_manager = PortManager::new(
