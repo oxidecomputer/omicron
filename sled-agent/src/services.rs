@@ -39,8 +39,8 @@ use crate::profile::*;
 use crate::smf_helper::Service;
 use crate::smf_helper::SmfHelper;
 use crate::storage_manager::StorageResources;
-use crate::zone_bundle;
 use crate::zone_bundle::BundleError;
+use crate::zone_bundle::ZoneBundler;
 use anyhow::anyhow;
 use camino::{Utf8Path, Utf8PathBuf};
 use ddm_admin_client::{Client as DdmAdminClient, DdmError};
@@ -370,6 +370,7 @@ pub struct ServiceManagerInner {
     sled_info: OnceCell<SledAgentInfo>,
     switch_zone_bootstrap_address: Ipv6Addr,
     storage: StorageResources,
+    zone_bundler: ZoneBundler,
     ledger_directory_override: OnceCell<Utf8PathBuf>,
     image_directory_override: OnceCell<Utf8PathBuf>,
 }
@@ -414,6 +415,7 @@ impl ServiceManager {
         sidecar_revision: SidecarRevision,
         switch_zone_maghemite_links: Vec<PhysicalLink>,
         storage: StorageResources,
+        zone_bundler: ZoneBundler,
     ) -> Self {
         let log = log.new(o!("component" => "ServiceManager"));
         Self {
@@ -445,6 +447,7 @@ impl ServiceManager {
                 switch_zone_bootstrap_address: bootstrap_networking
                     .switch_zone_bootstrap_ip,
                 storage,
+                zone_bundler,
                 ledger_directory_override: OnceCell::new(),
                 image_directory_override: OnceCell::new(),
             }),
@@ -2020,26 +2023,18 @@ impl ServiceManager {
             &*self.inner.switch_zone.lock().await
         {
             if zone.name() == name {
-                let context = self
+                return self
                     .inner
-                    .storage
-                    .zone_bundle_context(name, ZoneBundleCause::ExplicitRequest)
+                    .zone_bundler
+                    .create(zone, ZoneBundleCause::ExplicitRequest)
                     .await;
-                return crate::zone_bundle::create(
-                    &self.inner.log,
-                    zone,
-                    &context,
-                )
-                .await;
             }
         }
         if let Some(zone) = self.inner.zones.lock().await.get(name) {
-            let context = self
+            return self
                 .inner
-                .storage
-                .zone_bundle_context(name, ZoneBundleCause::ExplicitRequest)
-                .await;
-            return crate::zone_bundle::create(&self.inner.log, zone, &context)
+                .zone_bundler
+                .create(zone, ZoneBundleCause::ExplicitRequest)
                 .await;
         }
         Err(BundleError::NoSuchZone { name: name.to_string() })
@@ -2123,15 +2118,11 @@ impl ServiceManager {
                     "removing an existing zone";
                     "zone_name" => &expected_zone_name,
                 );
-                let context = self
+                if let Err(e) = self
                     .inner
-                    .storage
-                    .zone_bundle_context(
-                        &expected_zone_name,
-                        ZoneBundleCause::UnexpectedZone,
-                    )
-                    .await;
-                if let Err(e) = zone_bundle::create(log, &zone, &context).await
+                    .zone_bundler
+                    .create(&zone, ZoneBundleCause::UnexpectedZone)
+                    .await
                 {
                     error!(
                         log,
@@ -3091,6 +3082,12 @@ mod test {
         let log = logctx.log.clone();
         let test_config = TestConfig::new().await;
 
+        let resources = StorageResources::new_for_test();
+        let zone_bundler = ZoneBundler::new(
+            log.clone(),
+            resources.clone(),
+            Default::default(),
+        );
         let mgr = ServiceManager::new(
             &log,
             DdmAdminClient::localhost(&log).unwrap(),
@@ -3099,7 +3096,8 @@ mod test {
             Some(true),
             SidecarRevision::Physical("rev-test".to_string()),
             vec![],
-            StorageResources::new_for_test(),
+            resources,
+            zone_bundler,
         );
         test_config.override_paths(&mgr);
 
@@ -3132,6 +3130,12 @@ mod test {
         let log = logctx.log.clone();
         let test_config = TestConfig::new().await;
 
+        let resources = StorageResources::new_for_test();
+        let zone_bundler = ZoneBundler::new(
+            log.clone(),
+            resources.clone(),
+            Default::default(),
+        );
         let mgr = ServiceManager::new(
             &log,
             DdmAdminClient::localhost(&log).unwrap(),
@@ -3140,7 +3144,8 @@ mod test {
             Some(true),
             SidecarRevision::Physical("rev-test".to_string()),
             vec![],
-            StorageResources::new_for_test(),
+            resources,
+            zone_bundler,
         );
         test_config.override_paths(&mgr);
 
@@ -3178,6 +3183,12 @@ mod test {
 
         // First, spin up a ServiceManager, create a new service, and tear it
         // down.
+        let resources = StorageResources::new_for_test();
+        let zone_bundler = ZoneBundler::new(
+            log.clone(),
+            resources.clone(),
+            Default::default(),
+        );
         let mgr = ServiceManager::new(
             &log,
             ddmd_client.clone(),
@@ -3186,7 +3197,8 @@ mod test {
             Some(true),
             SidecarRevision::Physical("rev-test".to_string()),
             vec![],
-            StorageResources::new_for_test(),
+            resources.clone(),
+            zone_bundler.clone(),
         );
         test_config.override_paths(&mgr);
 
@@ -3218,7 +3230,8 @@ mod test {
             Some(true),
             SidecarRevision::Physical("rev-test".to_string()),
             vec![],
-            StorageResources::new_for_test(),
+            resources.clone(),
+            zone_bundler.clone(),
         );
         test_config.override_paths(&mgr);
 
@@ -3253,6 +3266,12 @@ mod test {
 
         // First, spin up a ServiceManager, create a new service, and tear it
         // down.
+        let resources = StorageResources::new_for_test();
+        let zone_bundler = ZoneBundler::new(
+            log.clone(),
+            resources.clone(),
+            Default::default(),
+        );
         let mgr = ServiceManager::new(
             &log,
             ddmd_client.clone(),
@@ -3261,7 +3280,8 @@ mod test {
             Some(true),
             SidecarRevision::Physical("rev-test".to_string()),
             vec![],
-            StorageResources::new_for_test(),
+            resources.clone(),
+            zone_bundler.clone(),
         );
         test_config.override_paths(&mgr);
 
@@ -3298,7 +3318,8 @@ mod test {
             Some(true),
             SidecarRevision::Physical("rev-test".to_string()),
             vec![],
-            StorageResources::new_for_test(),
+            resources.clone(),
+            zone_bundler.clone(),
         );
         test_config.override_paths(&mgr);
 
