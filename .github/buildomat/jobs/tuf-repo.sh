@@ -94,7 +94,7 @@ export TUFACEOUS_KEY
 cat >/work/manifest.toml <<EOF
 system_version = "$VERSION"
 
-[artifact.control_plane]
+[[artifact.control_plane]]
 name = "control-plane"
 version = "$VERSION"
 [artifact.control_plane.source]
@@ -116,7 +116,7 @@ done
 
 for kind in host trampoline; do
     cat >>/work/manifest.toml <<EOF
-[artifact.$kind]
+[[artifact.$kind]]
 name = "$kind"
 version = "$VERSION"
 [artifact.$kind.source]
@@ -162,7 +162,7 @@ add_hubris_artifacts() {
         sp_version=$(/work/caboose-util read-version "$sp_image")
 
         cat >>"$manifest" <<EOF
-[artifact.${tufaceous_board}_rot]
+[[artifact.${tufaceous_board}_rot]]
 name = "${tufaceous_board}_rot"
 version = "$rot_version_a"
 [artifact.${tufaceous_board}_rot.source]
@@ -173,7 +173,7 @@ path = "$rot_image_a"
 [artifact.${tufaceous_board}_rot.source.archive_b]
 kind = "file"
 path = "$rot_image_b"
-[artifact.${tufaceous_board}_sp]
+[[artifact.${tufaceous_board}_sp]]
 name = "${tufaceous_board}_sp"
 version = "$sp_version"
 [artifact.${tufaceous_board}_sp.source]
