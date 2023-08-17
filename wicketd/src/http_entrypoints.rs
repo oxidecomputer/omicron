@@ -8,6 +8,7 @@ use crate::mgs::GetInventoryError;
 use crate::mgs::GetInventoryResponse;
 use crate::mgs::MgsHandle;
 use crate::mgs::ShutdownInProgress;
+use crate::preflight_check::UplinkEventReport;
 use crate::RackV1Inventory;
 use bootstrap_agent_client::types::RackInitId;
 use bootstrap_agent_client::types::RackOperationStatus;
@@ -29,6 +30,7 @@ use http::StatusCode;
 use omicron_common::address;
 use omicron_common::api::external::SemverVersion;
 use omicron_common::api::internal::shared::RackNetworkConfig;
+use omicron_common::api::internal::shared::SwitchLocation;
 use omicron_common::update::ArtifactId;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -72,6 +74,8 @@ pub fn api() -> WicketdApiDescription {
         api.register(post_clear_update_state)?;
         api.register(get_update_sp)?;
         api.register(post_ignition_command)?;
+        api.register(post_start_preflight_uplink_check)?;
+        api.register(get_preflight_uplink_report)?;
         Ok(())
     }
 
@@ -984,6 +988,95 @@ async fn post_ignition_command(
         .map_err(http_error_from_client_error)?;
 
     Ok(HttpResponseUpdatedNoContent())
+}
+
+/// An endpoint to start a preflight check for uplink configuration.
+#[endpoint {
+    method = POST,
+    path = "/preflight/uplink",
+}]
+async fn post_start_preflight_uplink_check(
+    rqctx: RequestContext<ServerContext>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let rqctx = rqctx.context();
+
+    let our_switch_location = match rqctx.local_switch_id().await {
+        Some(SpIdentifier { slot, type_: SpType::Switch }) => match slot {
+            0 => SwitchLocation::Switch0,
+            1 => SwitchLocation::Switch1,
+            _ => {
+                return Err(HttpError::for_internal_error(format!(
+                    "unexpected switch slot {slot}"
+                )));
+            }
+        },
+        Some(other) => {
+            return Err(HttpError::for_internal_error(format!(
+                "unexpected switch SP identifier {other:?}"
+            )));
+        }
+        None => {
+            return Err(HttpError::for_unavail(
+                Some("UnknownSwitchLocation".to_string()),
+                "local switch location not yet determined".to_string(),
+            ));
+        }
+    };
+
+    let (network_config, dns_servers, ntp_servers) = {
+        let rss_config = rqctx.rss_config.lock().unwrap();
+
+        let network_config =
+            rss_config.rack_network_config().cloned().ok_or_else(|| {
+                HttpError::for_bad_request(
+                    None,
+                    "uplink preflight check requires setting \
+                 the uplink config for RSS"
+                        .to_string(),
+                )
+            })?;
+
+        (
+            network_config,
+            rss_config.dns_servers().to_vec(),
+            rss_config.ntp_servers().to_vec(),
+        )
+    };
+
+    match rqctx.preflight_checker.uplink_start(
+        network_config,
+        dns_servers,
+        ntp_servers,
+        our_switch_location,
+    ) {
+        Ok(()) => Ok(HttpResponseUpdatedNoContent {}),
+        Err(err) => Err(HttpError::for_client_error(
+            None,
+            StatusCode::TOO_MANY_REQUESTS,
+            err.to_string(),
+        )),
+    }
+}
+
+/// An endpoint to get the report for the most recent (or still running)
+/// preflight uplink check.
+#[endpoint {
+    method = GET,
+    path = "/preflight/uplink",
+}]
+async fn get_preflight_uplink_report(
+    rqctx: RequestContext<ServerContext>,
+) -> Result<HttpResponseOk<UplinkEventReport>, HttpError> {
+    let rqctx = rqctx.context();
+
+    match rqctx.preflight_checker.uplink_event_report() {
+        Some(report) => Ok(HttpResponseOk(report)),
+        None => Err(HttpError::for_bad_request(
+            None,
+            "no preflight uplink report available - have you started a check?"
+                .to_string(),
+        )),
+    }
 }
 
 fn http_error_from_client_error(

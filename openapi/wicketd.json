@@ -285,6 +285,46 @@
         }
       }
     },
+    "/preflight/uplink": {
+      "get": {
+        "summary": "An endpoint to get the report for the most recent (or still running)",
+        "description": "preflight uplink check.",
+        "operationId": "get_preflight_uplink_report",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventReportForGenericSpec"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "post": {
+        "summary": "An endpoint to start a preflight check for uplink configuration.",
+        "operationId": "post_start_preflight_uplink_check",
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/rack-setup": {
       "get": {
         "summary": "Query current state of rack setup.",
@@ -1023,6 +1063,43 @@
         "required": [
           "message",
           "request_id"
+        ]
+      },
+      "EventReportForGenericSpec": {
+        "description": "A report produced from an [`EventBuffer`](crate::EventBuffer).\n\nRemote reports can be passed into a [`StepContext`](crate::StepContext), in which case they show up as nested events.",
+        "type": "object",
+        "properties": {
+          "last_seen": {
+            "nullable": true,
+            "description": "The last event seen.\n\n`last_seen` can be used to retrieve deltas of events.",
+            "type": "integer",
+            "format": "uint",
+            "minimum": 0
+          },
+          "progress_events": {
+            "description": "A list of progress events, or whether we're currently waiting for a progress event.\n\nCurrently, this produces one progress event for each top-level and nested event in progress.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProgressEventForGenericSpec"
+            }
+          },
+          "root_execution_id": {
+            "nullable": true,
+            "description": "The root execution ID for this report.\n\nEach report has a root execution ID, which ties together all step and progress events. This is always filled out if the list of step events is non-empty.",
+            "type": "string",
+            "format": "uuid"
+          },
+          "step_events": {
+            "description": "A list of step events.\n\nStep events include success and failure events.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/StepEventForGenericSpec"
+            }
+          }
+        },
+        "required": [
+          "progress_events",
+          "step_events"
         ]
       },
       "EventReportForWicketdEngineSpec": {

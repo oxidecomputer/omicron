@@ -5,6 +5,7 @@
 //! User provided dropshot server context
 
 use crate::bootstrap_addrs::BootstrapPeers;
+use crate::preflight_check::PreflightCheckerHandler;
 use crate::rss_config::CurrentRssConfig;
 use crate::update_tracker::UpdateTracker;
 use crate::MgsHandle;
@@ -34,6 +35,7 @@ pub struct ServerContext {
     pub(crate) update_tracker: Arc<UpdateTracker>,
     pub(crate) baseboard: Option<Baseboard>,
     pub(crate) rss_config: Mutex<CurrentRssConfig>,
+    pub(crate) preflight_checker: PreflightCheckerHandler,
 }
 
 impl ServerContext {
