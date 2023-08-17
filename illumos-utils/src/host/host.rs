@@ -11,16 +11,20 @@ use crate::addrobj::AddrObject;
 use crate::dladm::DLADM;
 use crate::host::input::Input;
 use crate::host::PFEXEC;
+use crate::zfs::ZFS;
 use crate::zone::IPADM;
+use crate::zone::SVCADM;
 use crate::zone::SVCCFG;
 use crate::zone::ZLOGIN;
 use crate::zone::ZONEADM;
 use crate::zone::ZONECFG;
+use crate::zpool::ZPOOL;
+use crate::zpool::ZpoolName;
 use crate::ROUTE;
 use camino::Utf8PathBuf;
 use ipnetwork::IpNetwork;
 use omicron_common::vlan::VlanID;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::str::FromStr;
 
 enum LinkType {
@@ -100,11 +104,21 @@ struct Zone {
 struct Host {
     global: ZoneEnvironment,
     zones: HashMap<ZoneName, Zone>,
+
+    // TODO: Is this the right abstraction layer?
+    // How do you want to represent zpools & filesystems?
+    //
+    // TODO: Should filesystems be part of the "ZoneEnvironment" abstraction?
+    zpools: HashSet<ZpoolName>,
 }
 
 impl Host {
     pub fn new() -> Self {
-        Self { global: ZoneEnvironment::new(0), zones: HashMap::new() }
+        Self {
+            global: ZoneEnvironment::new(0),
+            zones: HashMap::new(),
+            zpools: HashSet::new(),
+        }
     }
 }
 
@@ -572,19 +586,131 @@ impl TryFrom<Input> for RouteCommand {
     }
 }
 
-// TODO: How much is it worth doing this vs just making things self-assembling?
-// XXX E.g. is it actually worth emulating svccfg?
-
 enum SvccfgCommand {
-    Import,
-    Refresh,
-    Setprop,
+    Addpropvalue {
+        zone: Option<ZoneName>,
+        service: ServiceName,
+        key: smf::PropertyName,
+        value: smf::PropertyValue,
+    },
+    Addpg {
+        zone: Option<ZoneName>,
+        service: ServiceName,
+        group: smf::PropertyGroupName,
+        group_type: String,
+    },
+    Delpg {
+        zone: Option<ZoneName>,
+        service: ServiceName,
+        group: smf::PropertyName,
+        value: String,
+    },
+    Delpropvalue {
+        zone: Option<ZoneName>,
+        service: ServiceName,
+        group: smf::PropertyName,
+        value: String,
+    },
+    Import {
+        zone: Option<ZoneName>,
+        file: Utf8PathBuf,
+    },
+    Refresh {
+        zone: Option<ZoneName>,
+        service: ServiceName,
+    },
+    Setprop {
+        zone: Option<ZoneName>,
+        service: ServiceName,
+        key: smf::PropertyName,
+        value: smf::PropertyValue,
+    },
+}
+
+impl TryFrom<Input> for SvccfgCommand {
+    type Error = String;
+
+    fn try_from(mut input: Input) -> Result<Self, Self::Error> {
+        if input.program != SVCCFG {
+            return Err(format!("Not svccfg command: {}", input.program));
+        }
+
+        let zone = if shift_arg_if(&mut input, "-z")? {
+            Some(ZoneName(shift_arg(&mut input)?))
+        } else {
+            None
+        };
+
+        let fmri = if shift_arg_if(&mut input, "-s")? {
+            Some(ServiceName(shift_arg(&mut input)?))
+        } else {
+            None
+        };
+
+        match shift_arg(&mut input)?.as_str() {
+            "addpropvalue" => todo!(),
+            "addpg" => todo!(),
+            "delpg" => todo!(),
+            "delpropvalue" => todo!(),
+            "import" => todo!(),
+            "refresh" => todo!(),
+            "setprop" => todo!(),
+            command => return Err(format!("Unexpected command: {command}")),
+        }
+    }
+}
+
+enum SvcadmCommand {
+    Enable { zone: Option<ZoneName>, service: ServiceName },
+    Disable { zone: Option<ZoneName>, service: ServiceName },
+}
+
+impl TryFrom<Input> for SvcadmCommand {
+    type Error = String;
+
+    fn try_from(mut input: Input) -> Result<Self, Self::Error> {
+        if input.program != SVCADM {
+            return Err(format!("Not svcadm command: {}", input.program));
+        }
+        todo!();
+    }
+}
+
+enum ZfsCommand {
+    Create,
+    Destroy,
+    Get,
+    List,
+    Mount,
+    Set,
+}
+
+impl TryFrom<Input> for ZfsCommand {
+    type Error = String;
+
+    fn try_from(mut input: Input) -> Result<Self, Self::Error> {
+        if input.program != ZFS {
+            return Err(format!("Not zfs command: {}", input.program));
+        }
+        todo!();
+    }
 }
 
 enum ZoneadmCommand {
     List,
     Install,
     Boot,
+}
+
+impl TryFrom<Input> for ZoneadmCommand {
+    type Error = String;
+
+    fn try_from(mut input: Input) -> Result<Self, Self::Error> {
+        if input.program != ZONEADM {
+            return Err(format!("Not zoneadm command: {}", input.program));
+        }
+        todo!();
+    }
 }
 
 enum ZonecfgCommand {
@@ -784,14 +910,37 @@ impl TryFrom<Input> for ZonecfgCommand {
     }
 }
 
+enum ZpoolCommand {
+    Create,
+    Export,
+    Import,
+    List,
+    Set,
+}
+
+impl TryFrom<Input> for ZpoolCommand {
+    type Error = String;
+
+    fn try_from(mut input: Input) -> Result<Self, Self::Error> {
+        if input.program != ZPOOL {
+            return Err(format!("Not zpool command: {}", input.program));
+        }
+
+        todo!();
+    }
+}
+
 enum KnownCommand {
     Dladm(DladmCommand),
     Ipadm(IpadmCommand),
     RouteAdm,
     Route(RouteCommand),
     Svccfg(SvccfgCommand),
+    Svcadm(SvcadmCommand),
+    Zfs(ZfsCommand),
     Zoneadm(ZoneadmCommand),
     Zonecfg(ZonecfgCommand),
+    Zpool(ZpoolCommand),
 }
 
 struct Command {
@@ -820,9 +969,12 @@ impl TryFrom<Input> for Command {
             DLADM => KnownCommand::Dladm(DladmCommand::try_from(input)?),
             IPADM => KnownCommand::Ipadm(IpadmCommand::try_from(input)?),
             ROUTE => KnownCommand::Route(RouteCommand::try_from(input)?),
-            SVCCFG => todo!(),
-            ZONEADM => todo!(),
+            SVCCFG => KnownCommand::Svccfg(SvccfgCommand::try_from(input)?),
+            SVCADM => KnownCommand::Svcadm(SvcadmCommand::try_from(input)?),
+            ZFS => KnownCommand::Zfs(ZfsCommand::try_from(input)?),
+            ZONEADM => KnownCommand::Zoneadm(ZoneadmCommand::try_from(input)?),
             ZONECFG => KnownCommand::Zonecfg(ZonecfgCommand::try_from(input)?),
+            ZPOOL => KnownCommand::Zpool(ZpoolCommand::try_from(input)?),
             _ => return Err(format!("Unknown command: {}", input.program)),
         };
 
