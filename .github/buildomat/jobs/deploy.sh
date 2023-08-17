@@ -4,10 +4,14 @@
 #: variety = "basic"
 #: target = "lab-2.0-opte-0.23"
 #: output_rules = [
-#:  "%/var/svc/log/oxide-sled-agent:default.log",
-#:  "%/pool/ext/*/crypt/zone/oxz_*/root/var/svc/log/oxide-*.log",
-#:  "%/pool/ext/*/crypt/zone/oxz_*/root/var/svc/log/system-illumos-*.log",
-#:  "!/pool/ext/*/crypt/zone/oxz_propolis-server_*/root/var/svc/log/*.log"
+#:  "%/var/svc/log/oxide-sled-agent:default.log*",
+#:  "%/pool/ext/*/crypt/zone/oxz_*/root/var/svc/log/oxide-*.log*",
+#:  "%/pool/ext/*/crypt/zone/oxz_*/root/var/svc/log/system-illumos-*.log*",
+#:  "!/pool/ext/*/crypt/zone/oxz_propolis-server_*/root/var/svc/log/*.log*",
+#:  "%/pool/ext/*/crypt/debug/global/oxide-sled-agent:default.log.*",
+#:  "%/pool/ext/*/crypt/debug/oxz_*/oxide-*.log.*",
+#:  "%/pool/ext/*/crypt/debug/oxz_*/system-illumos-*.log.*",
+#:  "!/pool/ext/*/crypt/debug/oxz_propolis-server_*/*.log.*"
 #: ]
 #: skip_clone = true
 #:
