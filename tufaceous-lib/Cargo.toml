@@ -16,6 +16,7 @@ debug-ignore.workspace = true
 flate2.workspace = true
 fs-err.workspace = true
 hex.workspace = true
+hubtools.workspace = true
 itertools.workspace = true
 omicron-common.workspace = true
 rand.workspace = true

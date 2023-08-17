@@ -81,7 +81,7 @@ impl DataStore {
                     )
                 })?;
         self.virtual_provisioning_collection_producer
-            .append_all_metrics(&provisions);
+            .append_all_metrics(&provisions)?;
         Ok(provisions)
     }
 
@@ -215,7 +215,7 @@ impl DataStore {
                 public_error_from_diesel_pool(e, ErrorHandler::Server)
             })?;
         self.virtual_provisioning_collection_producer
-            .append_disk_metrics(&provisions);
+            .append_disk_metrics(&provisions)?;
         Ok(provisions)
     }
 
@@ -271,7 +271,7 @@ impl DataStore {
                 public_error_from_diesel_pool(e, ErrorHandler::Server)
             })?;
         self.virtual_provisioning_collection_producer
-            .append_disk_metrics(&provisions);
+            .append_disk_metrics(&provisions)?;
         Ok(provisions)
     }
 
@@ -294,7 +294,7 @@ impl DataStore {
                 public_error_from_diesel_pool(e, ErrorHandler::Server)
             })?;
         self.virtual_provisioning_collection_producer
-            .append_cpu_metrics(&provisions);
+            .append_cpu_metrics(&provisions)?;
         Ok(provisions)
     }
 
@@ -317,7 +317,7 @@ impl DataStore {
                 public_error_from_diesel_pool(e, ErrorHandler::Server)
             })?;
         self.virtual_provisioning_collection_producer
-            .append_cpu_metrics(&provisions);
+            .append_cpu_metrics(&provisions)?;
         Ok(provisions)
     }
 

@@ -204,11 +204,11 @@ impl Producer for LatencyTracker {
         let latencies: Vec<_> =
             self.latencies.lock().unwrap().values().cloned().collect();
         let service = self.service.clone();
-        Ok(Box::new(
-            latencies
-                .into_iter()
-                .map(move |latency| Sample::new(&service, &latency)),
-        ))
+        let samples = latencies
+            .into_iter()
+            .map(|latency| Sample::new(&service, &latency))
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(Box::new(samples.into_iter()))
     }
 }
 

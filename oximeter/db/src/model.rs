@@ -565,13 +565,12 @@ pub(crate) fn schema_for(sample: &Sample) -> TimeseriesSchema {
     let created = Utc::now();
     let field_schema = sample
         .target_fields()
-        .iter()
         .map(|field| FieldSchema {
             name: field.name.clone(),
             ty: field.value.field_type(),
             source: FieldSource::Target,
         })
-        .chain(sample.metric_fields().iter().map(|field| FieldSchema {
+        .chain(sample.metric_fields().map(|field| FieldSchema {
             name: field.name.clone(),
             ty: field.value.field_type(),
             source: FieldSource::Metric,
@@ -974,7 +973,7 @@ mod tests {
         let unpacked: StringFieldRow =
             serde_json::from_str(&out["oximeter.fields_string"][0]).unwrap();
         assert_eq!(unpacked.timeseries_name, sample.timeseries_name);
-        let field = &sample.target_fields()[0];
+        let field = sample.target_fields().next().unwrap();
         assert_eq!(unpacked.field_name, field.name);
         if let FieldValue::String(v) = &field.value {
             assert_eq!(v, &unpacked.field_value);

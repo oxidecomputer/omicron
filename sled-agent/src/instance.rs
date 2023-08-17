@@ -34,6 +34,10 @@ use omicron_common::api::internal::shared::{
 };
 use omicron_common::backoff;
 //use propolis_client::generated::DiskRequest;
+use crate::params::ZoneBundleCause;
+use crate::params::ZoneBundleMetadata;
+use crate::zone_bundle;
+use crate::zone_bundle::BundleError;
 use propolis_client::Client as PropolisClient;
 use rand::prelude::SliceRandom;
 use rand::SeedableRng;
@@ -151,7 +155,9 @@ fn fmri_name() -> String {
     format!("{}:default", service_name())
 }
 
-fn propolis_zone_name(id: &Uuid) -> String {
+/// Return the expected name of a Propolis zone managing an instance with the
+/// provided ID.
+pub fn propolis_zone_name(id: &Uuid) -> String {
     format!("{}{}", PROPOLIS_ZONE_PREFIX, id)
 }
 
@@ -526,12 +532,47 @@ impl InstanceInner {
     /// This routine is safe to call even if the instance's zone was never
     /// started. It is also safe to call multiple times on a single instance.
     async fn terminate(&mut self) -> Result<(), Error> {
+        let zname = propolis_zone_name(self.propolis_id());
+
+        // First fetch the running state.
+        //
+        // If there is nothing here, then there is no `RunningZone`, and so
+        // there's no zone or resources to clean up at all.
+        let mut running_state = if let Some(state) = self.running_state.take() {
+            state
+        } else {
+            debug!(
+                self.log,
+                "Instance::terminate() called with no running state"
+            );
+            return Ok(());
+        };
+
+        // Take a zone bundle whenever this instance stops.
+        let context = self
+            .storage
+            .zone_bundle_context(&zname, ZoneBundleCause::TerminatedInstance)
+            .await;
+        if let Err(e) = zone_bundle::create(
+            &self.log,
+            &running_state.running_zone,
+            &context,
+        )
+        .await
+        {
+            error!(
+                self.log,
+                "Failed to take zone bundle for terminated instance";
+                "zone_name" => &zname,
+                "reason" => ?e,
+            );
+        }
+
         // Ensure that no zone exists. This succeeds even if no zone was ever
         // created.
         // NOTE: we call`Zones::halt_and_remove_logged` directly instead of
         // `RunningZone::stop` in case we're called between creating the
         // zone and assigning `running_state`.
-        let zname = propolis_zone_name(self.propolis_id());
         warn!(self.log, "Halting and removing zone: {}", zname);
         Zones::halt_and_remove_logged(&self.log, &zname).await.unwrap();
 
@@ -539,12 +580,7 @@ impl InstanceInner {
         self.instance_ticket.terminate();
 
         // See if there are any runtime objects to clean up.
-        let mut running_state = if let Some(state) = self.running_state.take() {
-            state
-        } else {
-            return Ok(());
-        };
-
+        //
         // We already removed the zone above but mark it as stopped
         running_state.running_zone.stop().await.unwrap();
 
@@ -625,6 +661,33 @@ impl Instance {
         let inner = Arc::new(Mutex::new(instance));
 
         Ok(Instance { inner })
+    }
+
+    /// Create bundle from an instance zone.
+    pub async fn request_zone_bundle(
+        &self,
+    ) -> Result<ZoneBundleMetadata, BundleError> {
+        let inner = self.inner.lock().await;
+        let name = propolis_zone_name(inner.propolis_id());
+        match &*inner {
+            InstanceInner { running_state: None, .. } => {
+                Err(BundleError::Unavailable { name })
+            }
+            InstanceInner {
+                ref log,
+                running_state: Some(RunningState { ref running_zone, .. }),
+                ..
+            } => {
+                let context = inner
+                    .storage
+                    .zone_bundle_context(
+                        &name,
+                        ZoneBundleCause::ExplicitRequest,
+                    )
+                    .await;
+                zone_bundle::create(log, running_zone, &context).await
+            }
+        }
     }
 
     pub async fn current_state(&self) -> InstanceRuntimeState {
