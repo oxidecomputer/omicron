@@ -2865,7 +2865,7 @@ mod test {
             Etherstub, BOOTSTRAP_ETHERSTUB_NAME, UNDERLAY_ETHERSTUB_NAME,
             UNDERLAY_ETHERSTUB_VNIC_NAME,
         },
-        host::fake::{CommandSequence, FakeExecutor},
+        host::fake::{CommandSequence, FakeExecutorBuilder},
         host::{Input, Output, OutputExt},
         zone::{ZLOGIN, ZONEADM, ZONECFG},
     };
@@ -3144,12 +3144,13 @@ mod test {
         assert_eq!(u2_mountpoints.len(), 1);
         let u2_mountpoint = &u2_mountpoints[0];
 
-        let executor = FakeExecutor::new(log.clone());
         let id = Uuid::new_v4();
         let mut handler = CommandSequence::new();
         expect_new_service(&mut handler, &test_config, id, &u2_mountpoint);
-        handler.register(&executor);
-        let executor = executor.as_executor();
+        let executor = FakeExecutorBuilder::new(log.clone())
+            .with_sequence(handler)
+            .build()
+            .as_executor();
 
         let zone_bundler =
             ZoneBundler::new(log.clone(), storage.clone(), Default::default());
@@ -3200,12 +3201,13 @@ mod test {
         assert_eq!(u2_mountpoints.len(), 1);
         let u2_mountpoint = &u2_mountpoints[0];
 
-        let executor = FakeExecutor::new(log.clone());
         let id = Uuid::new_v4();
         let mut handler = CommandSequence::new();
         expect_new_service(&mut handler, &test_config, id, &u2_mountpoint);
-        handler.register(&executor);
-        let executor = executor.as_executor();
+        let executor = FakeExecutorBuilder::new(log.clone())
+            .with_sequence(handler)
+            .build()
+            .as_executor();
 
         let zone_bundler =
             ZoneBundler::new(log.clone(), storage.clone(), Default::default());
@@ -3259,12 +3261,13 @@ mod test {
         assert_eq!(u2_mountpoints.len(), 1);
         let u2_mountpoint = &u2_mountpoints[0];
 
-        let executor = FakeExecutor::new(log.clone());
         let id = Uuid::new_v4();
         let mut handler = CommandSequence::new();
         expect_new_service(&mut handler, &test_config, id, &u2_mountpoint);
-        handler.register(&executor);
-        let executor = executor.as_executor();
+        let executor = FakeExecutorBuilder::new(log.clone())
+            .with_sequence(handler)
+            .build()
+            .as_executor();
 
         // First, spin up a ServiceManager, create a new service, and tear it
         // down.
@@ -3303,7 +3306,6 @@ mod test {
 
         // Before we re-create the service manager - notably, using the same
         // config file! - expect that a service gets initialized.
-        let executor = FakeExecutor::new(log.clone());
         let mut handler = CommandSequence::new();
 
         handler.expect_dynamic(Box::new(|input| -> Output {
@@ -3321,8 +3323,10 @@ mod test {
             Output::success()
         }));
         expect_new_service(&mut handler, &test_config, id, &u2_mountpoint);
-        handler.register(&executor);
-        let executor = executor.as_executor();
+        let executor = FakeExecutorBuilder::new(log.clone())
+            .with_sequence(handler)
+            .build()
+            .as_executor();
 
         let mgr = ServiceManager::new(
             &log,
@@ -3373,12 +3377,13 @@ mod test {
         assert_eq!(u2_mountpoints.len(), 1);
         let u2_mountpoint = &u2_mountpoints[0];
 
-        let executor = FakeExecutor::new(log.clone());
         let id = Uuid::new_v4();
         let mut handler = CommandSequence::new();
         expect_new_service(&mut handler, &test_config, id, &u2_mountpoint);
-        handler.register(&executor);
-        let executor = executor.as_executor();
+        let executor = FakeExecutorBuilder::new(log.clone())
+            .with_sequence(handler)
+            .build()
+            .as_executor();
 
         // First, spin up a ServiceManager, create a new service, and tear it
         // down.

@@ -902,7 +902,7 @@ impl Zones {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::host::fake::{CommandSequence, FakeExecutor};
+    use crate::host::fake::{CommandSequence, FakeExecutorBuilder};
     use crate::host::{Input, OutputExt};
     use omicron_test_utils::dev;
     use std::process::Output;
@@ -946,8 +946,9 @@ mod tests {
             Output::success(),
         );
 
-        let executor = FakeExecutor::new(logctx.log.clone());
-        handler.register(&executor);
+        let executor = FakeExecutorBuilder::new(logctx.log.clone())
+            .with_sequence(handler)
+            .build();
 
         let datasets = [];
         let filesystems = [];
@@ -990,8 +991,9 @@ mod tests {
             )
         );
 
-        let executor = FakeExecutor::new(logctx.log.clone());
-        handler.register(&executor);
+        let executor = FakeExecutorBuilder::new(logctx.log.clone())
+            .with_sequence(handler)
+            .build();
 
         let datasets = [];
         let filesystems = [];

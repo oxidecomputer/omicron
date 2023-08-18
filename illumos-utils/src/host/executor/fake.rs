@@ -28,6 +28,46 @@ type BoxedSpawnFn = Box<SpawnFn>;
 type WaitFn = dyn FnMut(&mut FakeChild) -> Output + Send + Sync;
 type BoxedWaitFn = Box<WaitFn>;
 
+pub struct FakeExecutorBuilder {
+    log: Logger,
+    spawn_handler: Option<BoxedSpawnFn>,
+    wait_handler: Option<BoxedWaitFn>,
+}
+
+impl FakeExecutorBuilder {
+    pub fn new(log: Logger) -> Self {
+        Self { log, spawn_handler: None, wait_handler: None }
+    }
+
+    pub fn spawn_handler(mut self, f: BoxedSpawnFn) -> Self {
+        self.spawn_handler = Some(f);
+        self
+    }
+
+    pub fn wait_handler(mut self, f: BoxedWaitFn) -> Self {
+        self.wait_handler = Some(f);
+        self
+    }
+
+    /// Convenience function to register the sequence with a [FakeExecutor].
+    pub fn with_sequence(mut self, mut sequence: CommandSequence) -> Self {
+        self.wait_handler =
+            Some(Box::new(move |child: &mut FakeChild| -> Output {
+                sequence.execute(child.command())
+            }));
+        self
+    }
+
+    pub fn build(self) -> Arc<FakeExecutor> {
+        FakeExecutor::new(
+            self.log,
+            self.spawn_handler.unwrap_or_else(|| Box::new(|_cmd| ())),
+            self.wait_handler
+                .unwrap_or_else(|| Box::new(|_cmd| Output::success())),
+        )
+    }
+}
+
 pub(crate) struct FakeExecutorInner {
     log: Logger,
     counter: AtomicU64,
@@ -41,13 +81,17 @@ pub struct FakeExecutor {
 }
 
 impl FakeExecutor {
-    pub fn new(log: Logger) -> Arc<FakeExecutor> {
+    pub fn new(
+        log: Logger,
+        s: BoxedSpawnFn,
+        w: BoxedWaitFn,
+    ) -> Arc<FakeExecutor> {
         Arc::new(Self {
             inner: Arc::new(FakeExecutorInner {
                 log,
                 counter: AtomicU64::new(0),
-                spawn_handler: Mutex::new(Box::new(|_cmd| ())),
-                wait_handler: Mutex::new(Box::new(|_cmd| Output::success())),
+                spawn_handler: Mutex::new(s),
+                wait_handler: Mutex::new(w),
             }),
         })
     }
@@ -212,13 +256,6 @@ pub struct CommandSequence {
 impl CommandSequence {
     pub fn new() -> Self {
         Self { expected: Vec::new(), index: 0 }
-    }
-
-    /// Convenience function to register the handler with a [FakeExecutor].
-    pub fn register(mut self, executor: &FakeExecutor) {
-        executor.set_wait_handler(Box::new(move |child| -> Output {
-            self.execute(child.command())
-        }));
     }
 
     /// Expects a static "input" to exactly produce some "output".

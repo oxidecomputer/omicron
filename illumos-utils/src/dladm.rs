@@ -560,7 +560,7 @@ impl Dladm {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::host::fake::{CommandSequence, FakeExecutor};
+    use crate::host::fake::{CommandSequence, FakeExecutorBuilder};
     use crate::host::{Input, OutputExt};
     use omicron_test_utils::dev;
     use std::process::Output;
@@ -574,8 +574,9 @@ mod test {
         handler
             .expect_ok(format!("{PFEXEC} {DLADM} create-etherstub -t mystub1"));
 
-        let executor = FakeExecutor::new(logctx.log.clone());
-        handler.register(&executor);
+        let executor = FakeExecutorBuilder::new(logctx.log.clone())
+            .with_sequence(handler)
+            .build();
 
         let etherstub =
             Dladm::ensure_etherstub(&executor.as_executor(), "mystub1")
@@ -591,8 +592,9 @@ mod test {
 
         let mut handler = CommandSequence::new();
         handler.expect_ok(format!("{PFEXEC} {DLADM} show-etherstub mystub1"));
-        let executor = FakeExecutor::new(logctx.log.clone());
-        handler.register(&executor);
+        let executor = FakeExecutorBuilder::new(logctx.log.clone())
+            .with_sequence(handler)
+            .build();
 
         let etherstub =
             Dladm::ensure_etherstub(&executor.as_executor(), "mystub1")
@@ -613,8 +615,9 @@ mod test {
         handler.expect_ok(format!(
             "{PFEXEC} {DLADM} show-vnic {UNDERLAY_ETHERSTUB_VNIC_NAME}"
         ));
-        let executor = FakeExecutor::new(logctx.log.clone());
-        handler.register(&executor);
+        let executor = FakeExecutorBuilder::new(logctx.log.clone())
+            .with_sequence(handler)
+            .build();
 
         let executor = &executor.as_executor();
         let etherstub =
@@ -645,8 +648,9 @@ mod test {
             "{PFEXEC} {DLADM} set-linkprop -t -p mtu=9000 \
             {UNDERLAY_ETHERSTUB_VNIC_NAME}"
         ));
-        let executor = FakeExecutor::new(logctx.log.clone());
-        handler.register(&executor);
+        let executor = FakeExecutorBuilder::new(logctx.log.clone())
+            .with_sequence(handler)
+            .build();
 
         let executor = &executor.as_executor();
         let etherstub =
@@ -669,8 +673,9 @@ mod test {
                 "oxVnic\nvopteVnic\nInvalid\noxBootstrapVnic\nInvalid",
             ),
         );
-        let executor = FakeExecutor::new(logctx.log.clone());
-        handler.register(&executor);
+        let executor = FakeExecutorBuilder::new(logctx.log.clone())
+            .with_sequence(handler)
+            .build();
 
         let executor = &executor.as_executor();
         let vnics = Dladm::get_vnics(executor).expect("Failed to get VNICs");

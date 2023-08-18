@@ -259,13 +259,13 @@ impl Deletable for VnicDestruction {
 mod test {
     use super::*;
     use crate::dladm::Etherstub;
-    use crate::host::fake::FakeExecutor;
+    use crate::host::fake::FakeExecutorBuilder;
     use omicron_test_utils::dev;
 
     #[tokio::test]
     async fn test_allocate() {
         let logctx = dev::test_setup_log("test_allocate");
-        let executor = FakeExecutor::new(logctx.log.clone());
+        let executor = FakeExecutorBuilder::new(logctx.log.clone()).build();
         let allocator = VnicAllocator::new(
             &executor.as_executor(),
             "Foo",
@@ -280,7 +280,7 @@ mod test {
     #[tokio::test]
     async fn test_allocate_within_scopes() {
         let logctx = dev::test_setup_log("test_allocate_within_scopes");
-        let executor = FakeExecutor::new(logctx.log.clone());
+        let executor = FakeExecutorBuilder::new(logctx.log.clone()).build();
         let allocator = VnicAllocator::new(
             &executor.as_executor(),
             "Foo",
