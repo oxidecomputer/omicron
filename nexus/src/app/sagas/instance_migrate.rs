@@ -469,19 +469,15 @@ async fn sim_instance_migrate(
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
 
-    use crate::{
-        app::{saga::create_saga_dag, sagas::instance_create},
-        Nexus, TestInterfaces as _,
+    use crate::app::{
+        saga::create_saga_dag,
+        sagas::{instance_create, test_helpers},
     };
     use camino::Utf8Path;
-
     use dropshot::test_util::ClientTestContext;
-    use http::{method::Method, StatusCode};
     use nexus_test_interface::NexusServer;
     use nexus_test_utils::{
-        http_testing::{AuthnMode, NexusRequest, RequestBuilder},
         resource_helpers::{create_project, object_create, populate_ip_pool},
         start_sled_agent,
     };
@@ -490,7 +486,6 @@ mod tests {
         ByteCount, IdentityMetadataCreateParams, InstanceCpuCount,
     };
     use omicron_sled_agent::sim::Server;
-    use sled_agent_client::TestInterfaces as _;
 
     use super::*;
 
@@ -561,17 +556,6 @@ mod tests {
         .await
     }
 
-    async fn instance_simulate(
-        cptestctx: &ControlPlaneTestContext,
-        nexus: &Arc<Nexus>,
-        instance_id: &Uuid,
-    ) {
-        info!(&cptestctx.logctx.log, "Poking simulated instance";
-              "instance_id" => %instance_id);
-        let sa = nexus.instance_sled_by_id(instance_id).await.unwrap();
-        sa.instance_finish_transition(*instance_id).await;
-    }
-
     async fn fetch_db_instance(
         cptestctx: &ControlPlaneTestContext,
         opctx: &nexus_db_queries::context::OpContext,
@@ -588,34 +572,6 @@ mod tests {
               "instance" => ?db_instance);
 
         db_instance
-    }
-
-    async fn instance_start(cptestctx: &ControlPlaneTestContext, id: &Uuid) {
-        let client = &cptestctx.external_client;
-        let instance_stop_url = format!("/v1/instances/{}/start", id);
-        NexusRequest::new(
-            RequestBuilder::new(client, Method::POST, &instance_stop_url)
-                .body(None as Option<&serde_json::Value>)
-                .expect_status(Some(StatusCode::ACCEPTED)),
-        )
-        .authn_as(AuthnMode::PrivilegedUser)
-        .execute()
-        .await
-        .expect("Failed to start instance");
-    }
-
-    async fn instance_stop(cptestctx: &ControlPlaneTestContext, id: &Uuid) {
-        let client = &cptestctx.external_client;
-        let instance_stop_url = format!("/v1/instances/{}/stop", id);
-        NexusRequest::new(
-            RequestBuilder::new(client, Method::POST, &instance_stop_url)
-                .body(None as Option<&serde_json::Value>)
-                .expect_status(Some(StatusCode::ACCEPTED)),
-        )
-        .authn_as(AuthnMode::PrivilegedUser)
-        .execute()
-        .await
-        .expect("Failed to stop instance");
     }
 
     fn select_first_alternate_sled(
@@ -652,7 +608,7 @@ mod tests {
         let instance = create_instance(client).await;
 
         // Poke the instance to get it into the Running state.
-        instance_simulate(cptestctx, nexus, &instance.identity.id).await;
+        test_helpers::instance_simulate(cptestctx, &instance.identity.id).await;
 
         let db_instance =
             fetch_db_instance(cptestctx, &opctx, instance.identity.id).await;
@@ -695,7 +651,7 @@ mod tests {
         let instance = create_instance(client).await;
 
         // Poke the instance to get it into the Running state.
-        instance_simulate(cptestctx, nexus, &instance.identity.id).await;
+        test_helpers::instance_simulate(cptestctx, &instance.identity.id).await;
 
         let db_instance =
             fetch_db_instance(cptestctx, &opctx, instance.identity.id).await;
@@ -759,9 +715,16 @@ mod tests {
                     // destroying the migration destination (if one was ensured)
                     // doesn't advance the Propolis ID generation in a way that
                     // prevents the source from issuing further state updates.
-                    instance_stop(cptestctx, &instance.identity.id).await;
-                    instance_simulate(cptestctx, nexus, &instance.identity.id)
-                        .await;
+                    test_helpers::instance_stop(
+                        cptestctx,
+                        &instance.identity.id,
+                    )
+                    .await;
+                    test_helpers::instance_simulate(
+                        cptestctx,
+                        &instance.identity.id,
+                    )
+                    .await;
                     let new_db_instance = fetch_db_instance(
                         cptestctx,
                         &opctx,
@@ -774,9 +737,16 @@ mod tests {
                     );
 
                     // Restart the instance for the next iteration.
-                    instance_start(cptestctx, &instance.identity.id).await;
-                    instance_simulate(cptestctx, nexus, &instance.identity.id)
-                        .await;
+                    test_helpers::instance_start(
+                        cptestctx,
+                        &instance.identity.id,
+                    )
+                    .await;
+                    test_helpers::instance_simulate(
+                        cptestctx,
+                        &instance.identity.id,
+                    )
+                    .await;
                 }
             })
         };

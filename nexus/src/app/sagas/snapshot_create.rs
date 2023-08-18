@@ -1550,6 +1550,7 @@ mod test {
     use super::*;
 
     use crate::app::saga::create_saga_dag;
+    use crate::app::sagas::test_helpers;
     use crate::app::test_interfaces::TestInterfaces;
     use crate::db::DataStore;
     use crate::external_api::shared::IpRange;
@@ -1565,6 +1566,7 @@ mod test {
     use nexus_test_utils::resource_helpers::populate_ip_pool;
     use nexus_test_utils::resource_helpers::DiskTest;
     use nexus_test_utils_macros::nexus_test;
+    use nexus_types::external_api::params::InstanceDiskAttachment;
     use omicron_common::api::external::ByteCount;
     use omicron_common::api::external::IdentityMetadataCreateParams;
     use omicron_common::api::external::Instance;
@@ -1776,6 +1778,7 @@ mod test {
 
     const PROJECT_NAME: &str = "springfield-squidport";
     const DISK_NAME: &str = "disky-mcdiskface";
+    const INSTANCE_NAME: &str = "base-instance";
 
     async fn create_org_project_and_disk(client: &ClientTestContext) -> Uuid {
         create_ip_pool(&client, "p0", None).await;
@@ -1913,6 +1916,46 @@ mod test {
         assert!(no_region_snapshot_records_exist(datastore).await);
     }
 
+    /// Creates an instance in the test project with the supplied disks attached
+    /// and ensures the instance is started.
+    async fn setup_test_instance(
+        cptestctx: &ControlPlaneTestContext,
+        client: &ClientTestContext,
+        disks_to_attach: Vec<InstanceDiskAttachment>,
+    ) -> Instance {
+        let instances_url = format!("/v1/instances?project={}", PROJECT_NAME,);
+        let instance: Instance = object_create(
+            client,
+            &instances_url,
+            &params::InstanceCreate {
+                identity: IdentityMetadataCreateParams {
+                    name: INSTANCE_NAME.parse().unwrap(),
+                    description: format!("instance {:?}", INSTANCE_NAME),
+                },
+                ncpus: InstanceCpuCount(2),
+                memory: ByteCount::from_gibibytes_u32(1),
+                hostname: String::from("base_instance"),
+                user_data:
+                    b"#cloud-config\nsystem_info:\n  default_user:\n    name: oxide"
+                        .to_vec(),
+                network_interfaces:
+                    params::InstanceNetworkInterfaceAttachment::None,
+                disks: disks_to_attach,
+                external_ips: vec![],
+                start: true,
+            },
+        )
+        .await;
+
+        // cannot snapshot attached disk for instance in state starting
+        let nexus = &cptestctx.server.apictx().nexus;
+        let sa =
+            nexus.instance_sled_by_id(&instance.identity.id).await.unwrap();
+        sa.instance_finish_transition(instance.identity.id).await;
+
+        instance
+    }
+
     #[nexus_test(server = crate::Server)]
     async fn test_action_failure_can_unwind_no_pantry(
         cptestctx: &ControlPlaneTestContext,
@@ -1962,6 +2005,25 @@ mod test {
         // As a concession to the test helper, make sure the disk is gone
         // before the first attempt to run the saga recreates it.
         delete_disk(client, PROJECT_NAME, DISK_NAME).await;
+
+        // The no-pantry variant of the test needs to see the disk attached to
+        // an instance. Set up an IP pool so that instances can be created
+        // against it.
+        if !use_the_pantry {
+            populate_ip_pool(
+                &client,
+                "default",
+                Some(
+                    IpRange::try_from((
+                        Ipv4Addr::new(10, 1, 0, 0),
+                        Ipv4Addr::new(10, 1, 255, 255),
+                    ))
+                    .unwrap(),
+                ),
+            )
+            .await;
+        }
+
         crate::app::sagas::test_helpers::action_failure_can_unwind::<
             SagaSnapshotCreate,
             _,
@@ -1978,6 +2040,26 @@ mod test {
                                 .identity
                                 .id;
 
+                        // If the pantry isn't being used, make sure the disk is
+                        // attached. Note that under normal circumstances, a
+                        // disk can only be attached to a stopped instance, but
+                        // since this is just a test, bypass the normal
+                        // attachment machinery and just update the disk's
+                        // database record directly.
+                        if !use_the_pantry {
+                            let _ = setup_test_instance(
+                                cptestctx,
+                                client,
+                                vec![params::InstanceDiskAttachment::Attach(
+                                    params::InstanceDiskAttach {
+                                        name: Name::from_str(DISK_NAME)
+                                            .unwrap(),
+                                    },
+                                )],
+                            )
+                            .await;
+                        }
+
                         new_test_params(
                             &opctx,
                             silo_id,
@@ -1991,6 +2073,53 @@ mod test {
             },
             || {
                 Box::pin(async {
+                    // If the pantry wasn't used, detach the disk before
+                    // deleting it. Note that because each iteration creates a
+                    // new disk ID, and that ID doesn't escape the closure that
+                    // created it, the lookup needs to be done by name instead.
+                    if !use_the_pantry {
+                        let (.., authz_disk, db_disk) =
+                            LookupPath::new(&opctx, nexus.datastore())
+                                .project_id(project_id)
+                                .disk_name(&db::model::Name(
+                                    DISK_NAME.to_owned().try_into().unwrap(),
+                                ))
+                                .fetch_for(authz::Action::Read)
+                                .await
+                                .expect("Failed to look up created disk");
+
+                        assert!(nexus
+                            .datastore()
+                            .disk_update_runtime(
+                                &opctx,
+                                &authz_disk,
+                                &db_disk.runtime().detach(),
+                            )
+                            .await
+                            .expect("failed to detach disk"));
+
+                        // Stop and destroy the test instance to satisfy the
+                        // clean-slate check.
+                        test_helpers::instance_stop_by_name(
+                            cptestctx,
+                            INSTANCE_NAME,
+                            PROJECT_NAME,
+                        )
+                        .await;
+                        test_helpers::instance_simulate_by_name(
+                            cptestctx,
+                            INSTANCE_NAME,
+                            PROJECT_NAME,
+                        )
+                        .await;
+                        test_helpers::instance_delete_by_name(
+                            cptestctx,
+                            INSTANCE_NAME,
+                            PROJECT_NAME,
+                        )
+                        .await;
+                    }
+
                     delete_disk(client, PROJECT_NAME, DISK_NAME).await;
                     verify_clean_slate(cptestctx, &test).await;
                 })
@@ -2181,7 +2310,7 @@ mod test {
             }
         }
 
-        // Attach the to an instance, then rerun the saga
+        // Attach the disk to an instance, then rerun the saga
         populate_ip_pool(
             &client,
             "default",
@@ -2195,39 +2324,16 @@ mod test {
         )
         .await;
 
-        let instances_url = format!("/v1/instances?project={}", PROJECT_NAME,);
-        let instance_name = "base-instance";
-
-        let instance: Instance = object_create(
+        let _ = setup_test_instance(
+            cptestctx,
             client,
-            &instances_url,
-            &params::InstanceCreate {
-                identity: IdentityMetadataCreateParams {
-                    name: instance_name.parse().unwrap(),
-                    description: format!("instance {:?}", instance_name),
+            vec![params::InstanceDiskAttachment::Attach(
+                params::InstanceDiskAttach {
+                    name: Name::from_str(DISK_NAME).unwrap(),
                 },
-                ncpus: InstanceCpuCount(2),
-                memory: ByteCount::from_gibibytes_u32(1),
-                hostname: String::from("base_instance"),
-                user_data:
-                    b"#cloud-config\nsystem_info:\n  default_user:\n    name: oxide"
-                        .to_vec(),
-                network_interfaces:
-                    params::InstanceNetworkInterfaceAttachment::None,
-                disks: vec![params::InstanceDiskAttachment::Attach(
-                    params::InstanceDiskAttach { name: Name::from_str(DISK_NAME).unwrap() },
-                )],
-                external_ips: vec![],
-                start: true,
-            },
+            )],
         )
         .await;
-
-        // cannot snapshot attached disk for instance in state starting
-        let nexus = &cptestctx.server.apictx().nexus;
-        let sa =
-            nexus.instance_sled_by_id(&instance.identity.id).await.unwrap();
-        sa.instance_finish_transition(instance.identity.id).await;
 
         // Rerun the saga
         let params = new_test_params(
