@@ -53,6 +53,13 @@ pub enum Operation {
     Uninstall,
 }
 
+#[derive(thiserror::Error, Debug)]
+#[error("{0}")]
+enum AdmErrorVariant {
+    Execution(#[from] ExecutionError),
+    Adm(#[from] zone::ZoneError),
+}
+
 /// Errors from issuing [`zone::Adm`] commands.
 #[derive(thiserror::Error, Debug)]
 #[error("Failed to execute zoneadm command '{op:?}' for zone '{zone}': {err}")]
@@ -60,7 +67,7 @@ pub struct AdmError {
     op: Operation,
     zone: String,
     #[source]
-    err: Box<dyn std::error::Error + Send + Sync>,
+    err: AdmErrorVariant,
 }
 
 /// Errors which may be encountered when deleting addresses.
@@ -233,7 +240,7 @@ impl Zones {
                         AdmError {
                             op: Operation::Halt,
                             zone: name.to_string(),
-                            err: Box::new(err),
+                            err: err.into(),
                         }
                     })?;
                 }
@@ -244,7 +251,7 @@ impl Zones {
                         .map_err(|err| AdmError {
                             op: Operation::Uninstall,
                             zone: name.to_string(),
-                            err: Box::new(err),
+                            err: err.into(),
                         })?;
                 }
                 zone::Config::new(name)
@@ -254,7 +261,7 @@ impl Zones {
                     .map_err(|err| AdmError {
                     op: Operation::Delete,
                     zone: name.to_string(),
-                    err: Box::new(err),
+                    err: err.into(),
                 })?;
                 Ok(Some(state))
             }
@@ -353,7 +360,7 @@ impl Zones {
         executor.execute_async(&mut cmd).await.map_err(|err| AdmError {
             op: Operation::Configure,
             zone: zone_name.to_string(),
-            err: Box::new(err),
+            err: err.into(),
         })?;
 
         info!(log, "Installing Omicron zone: {}", zone_name);
@@ -367,7 +374,7 @@ impl Zones {
         executor.execute_async(&mut cmd).await.map_err(|err| AdmError {
             op: Operation::Install,
             zone: zone_name.to_string(),
-            err: Box::new(err),
+            err: err.into(),
         })?;
         Ok(())
     }
@@ -383,7 +390,7 @@ impl Zones {
         executor.execute_async(&mut cmd).await.map_err(|err| AdmError {
             op: Operation::Boot,
             zone: name.to_string(),
-            err: Box::new(err),
+            err: err.into(),
         })?;
         Ok(())
     }
@@ -404,10 +411,10 @@ impl Zones {
         let output = executor
             .execute_async(&mut cmd)
             .await
-            .map_err(|err| handle_err(Box::new(err)))?;
+            .map_err(|err| handle_err(err.into()))?;
 
         let zones = zone::Adm::parse_list_output(&output)
-            .map_err(|err| handle_err(Box::new(err)))?;
+            .map_err(|err| handle_err(err.into()))?;
 
         Ok(zones
             .into_iter()
