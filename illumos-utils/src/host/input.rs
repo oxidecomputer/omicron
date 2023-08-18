@@ -13,10 +13,10 @@ pub struct Input {
 }
 
 impl Input {
-    pub fn new<S: AsRef<str>>(program: S, args: Vec<S>) -> Self {
+    pub fn new<S: Into<String>>(program: S, args: Vec<S>) -> Self {
         Self {
-            program: program.as_ref().to_string(),
-            args: args.into_iter().map(|s| s.as_ref().to_string()).collect(),
+            program: program.into(),
+            args: args.into_iter().map(|s| s.into()).collect(),
             envs: vec![],
         }
     }
