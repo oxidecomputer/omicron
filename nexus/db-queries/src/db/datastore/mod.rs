@@ -765,7 +765,7 @@ mod test {
     /// deterministic by generating deterministic *dataset* Uuids. The sled and
     /// pool IDs should not matter.
     async fn test_region_allocation_strat_random() {
-        let logctx = dev::test_setup_log("test_region_allocation");
+        let logctx = dev::test_setup_log("test_region_allocation_strat_random");
         let mut db = test_setup_database(&logctx.log).await;
         let (opctx, datastore) = datastore_test(&logctx, &db).await;
         create_test_datasets_for_region_allocation(
@@ -829,7 +829,9 @@ mod test {
     /// It should always pick datasets where no two datasets are on the same
     /// zpool and no two zpools are on the same sled.
     async fn test_region_allocation_strat_random_with_distinct_sleds() {
-        let logctx = dev::test_setup_log("test_region_allocation");
+        let logctx = dev::test_setup_log(
+            "test_region_allocation_strat_random_with_distinct_sleds",
+        );
         let mut db = test_setup_database(&logctx.log).await;
         let (opctx, datastore) = datastore_test(&logctx, &db).await;
 
@@ -905,7 +907,9 @@ mod test {
     /// Ensure the [`RegionAllocationStrategy::RandomWithDistinctSleds`]
     /// strategy fails when there aren't enough distinct sleds.
     async fn test_region_allocation_strat_random_with_distinct_sleds_fails() {
-        let logctx = dev::test_setup_log("test_region_allocation");
+        let logctx = dev::test_setup_log(
+            "test_region_allocation_strat_random_with_distinct_sleds_fails",
+        );
         let mut db = test_setup_database(&logctx.log).await;
         let (opctx, datastore) = datastore_test(&logctx, &db).await;
 
