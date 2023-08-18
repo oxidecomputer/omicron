@@ -4338,7 +4338,7 @@ dependencies = [
  "serde_json",
  "sled-agent-client",
  "steno",
- "strum 0.24.1",
+ "strum 0.25.0",
  "thiserror",
  "uuid",
 ]
@@ -4410,7 +4410,7 @@ dependencies = [
  "sled-agent-client",
  "slog",
  "steno",
- "strum 0.24.1",
+ "strum 0.25.0",
  "subprocess",
  "tempfile",
  "term",
@@ -4516,7 +4516,7 @@ dependencies = [
  "serde",
  "serde_json",
  "steno",
- "strum 0.24.1",
+ "strum 0.25.0",
  "uuid",
 ]
 
@@ -4811,7 +4811,7 @@ dependencies = [
  "serde_with",
  "slog",
  "steno",
- "strum 0.24.1",
+ "strum 0.25.0",
  "test-strategy",
  "thiserror",
  "tokio",
@@ -5049,7 +5049,7 @@ dependencies = [
  "slog-dtrace",
  "slog-term",
  "steno",
- "strum 0.24.1",
+ "strum 0.25.0",
  "subprocess",
  "tempfile",
  "term",
@@ -5089,7 +5089,7 @@ dependencies = [
  "slog-async",
  "slog-term",
  "smf",
- "strum 0.24.1",
+ "strum 0.25.0",
  "tar",
  "tempfile",
  "thiserror",
@@ -8272,6 +8272,9 @@ name = "strum"
 version = "0.25.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "290d54ea6f91c969195bdbcd7442c8c2a2ba87da8bf60a7ee86a235d4bc1e125"
+dependencies = [
+ "strum_macros 0.25.2",
+]
 
 [[package]]
 name = "strum_macros"
