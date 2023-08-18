@@ -61,10 +61,8 @@ pub fn session_cookie_header_value(
     token: &str,
     max_age: Duration,
 ) -> Result<HeaderValue, HttpError> {
-    // TODO-security:(https://github.com/oxidecomputer/omicron/issues/249): We
-    // should insert "Secure;" back into this string.
     let value = format!(
-        "{}={}; Path=/; HttpOnly; SameSite=Lax; Max-Age={}",
+        "{}={}; Path=/; HttpOnly; SameSite=Lax; Secure; Max-Age={}",
         SESSION_COOKIE_COOKIE_NAME,
         token,
         max_age.num_seconds()
@@ -424,17 +422,17 @@ mod test {
     fn test_session_cookie_value() {
         assert_eq!(
             session_cookie_header_value("abc", Duration::seconds(5)).unwrap(),
-            "session=abc; Path=/; HttpOnly; SameSite=Lax; Max-Age=5"
+            "session=abc; Path=/; HttpOnly; SameSite=Lax; Secure; Max-Age=5"
         );
 
         assert_eq!(
             session_cookie_header_value("abc", Duration::seconds(-5)).unwrap(),
-            "session=abc; Path=/; HttpOnly; SameSite=Lax; Max-Age=-5"
+            "session=abc; Path=/; HttpOnly; SameSite=Lax; Secure; Max-Age=-5"
         );
 
         assert_eq!(
             session_cookie_header_value("", Duration::zero()).unwrap(),
-            "session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0"
+            "session=; Path=/; HttpOnly; SameSite=Lax; Secure; Max-Age=0"
         );
     }
     #[test]
@@ -443,7 +441,7 @@ mod test {
             session_cookie_header_value("abc\ndef", Duration::seconds(5))
                 .unwrap_err()
                 .internal_message,
-            "unsupported cookie value: session=abc\ndef; Path=/; HttpOnly; SameSite=Lax; Max-Age=5".to_string(),
+            "unsupported cookie value: session=abc\ndef; Path=/; HttpOnly; SameSite=Lax; Secure; Max-Age=5".to_string(),
         );
     }
 }
