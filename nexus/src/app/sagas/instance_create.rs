@@ -1367,8 +1367,8 @@ pub mod test {
     use crate::{
         app::saga::create_saga_dag, app::sagas::instance_create::Params,
         app::sagas::instance_create::SagaInstanceCreate,
-        authn::saga::Serialized, db::datastore::DataStore,
-        external_api::params,
+        app::sagas::test_helpers::*, authn::saga::Serialized,
+        db::datastore::DataStore, external_api::params,
     };
     use async_bb8_diesel::{
         AsyncConnection, AsyncRunQueryDsl, AsyncSimpleConnection,
@@ -1435,13 +1435,6 @@ pub mod test {
             },
             boundary_switches: HashSet::from([SwitchLocation::Switch0]),
         }
-    }
-
-    pub fn test_opctx(cptestctx: &ControlPlaneTestContext) -> OpContext {
-        OpContext::for_tests(
-            cptestctx.logctx.log.new(o!()),
-            cptestctx.server.apictx().nexus.datastore().clone(),
-        )
     }
 
     #[nexus_test(server = crate::Server)]
@@ -1679,11 +1672,7 @@ pub mod test {
 
         let params = new_test_params(&opctx, project_id);
 
-        crate::app::sagas::test_helpers::action_failure_can_unwind::<
-            SagaInstanceCreate,
-            _,
-            _,
-        >(
+        action_failure_can_unwind::<SagaInstanceCreate, _, _>(
             nexus,
             params,
             || Box::pin(async { new_test_params(&opctx, project_id) }),

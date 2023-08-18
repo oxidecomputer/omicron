@@ -499,7 +499,7 @@ async fn sis_ensure_running(
 mod test {
     use crate::external_api::params;
     use crate::{
-        app::{saga::create_saga_dag, sagas::instance_create},
+        app::{saga::create_saga_dag, sagas::test_helpers},
         authn, Nexus, TestInterfaces as _,
     };
     use dropshot::test_util::ClientTestContext;
@@ -591,7 +591,7 @@ mod test {
         let client = &cptestctx.external_client;
         let nexus = &cptestctx.server.apictx().nexus;
         let _project_id = setup_test_project(&client).await;
-        let opctx = instance_create::test::test_opctx(cptestctx);
+        let opctx = test_helpers::test_opctx(cptestctx);
         let instance = create_instance(client).await;
         let db_instance =
             fetch_db_instance(cptestctx, &opctx, instance.identity.id).await;
@@ -620,7 +620,7 @@ mod test {
         let client = &cptestctx.external_client;
         let nexus = &cptestctx.server.apictx().nexus;
         let _project_id = setup_test_project(&client).await;
-        let opctx = instance_create::test::test_opctx(cptestctx);
+        let opctx = test_helpers::test_opctx(cptestctx);
         let instance = create_instance(client).await;
 
         // Fetch enough state to be able to reason about how many nodes are in
@@ -633,7 +633,7 @@ mod test {
             ensure_network: true,
         };
 
-        crate::app::sagas::test_helpers::action_failure_can_unwind::<
+        test_helpers::action_failure_can_unwind::<
             SagaInstanceStart,
             _,
             _,
@@ -692,7 +692,7 @@ mod test {
         let client = &cptestctx.external_client;
         let nexus = &cptestctx.server.apictx().nexus;
         let _project_id = setup_test_project(&client).await;
-        let opctx = instance_create::test::test_opctx(cptestctx);
+        let opctx = test_helpers::test_opctx(cptestctx);
         let instance = create_instance(client).await;
         let db_instance =
             fetch_db_instance(cptestctx, &opctx, instance.identity.id).await;

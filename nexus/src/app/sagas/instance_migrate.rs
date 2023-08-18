@@ -469,11 +469,7 @@ async fn sim_instance_migrate(
 
 #[cfg(test)]
 mod tests {
-
-    use crate::app::{
-        saga::create_saga_dag,
-        sagas::{instance_create, test_helpers},
-    };
+    use crate::app::{saga::create_saga_dag, sagas::test_helpers};
     use camino::Utf8Path;
     use dropshot::test_util::ClientTestContext;
     use nexus_test_interface::NexusServer;
@@ -604,7 +600,7 @@ mod tests {
         let nexus = &cptestctx.server.apictx().nexus;
         let _project_id = setup_test_project(&client).await;
 
-        let opctx = instance_create::test::test_opctx(cptestctx);
+        let opctx = test_helpers::test_opctx(cptestctx);
         let instance = create_instance(client).await;
 
         // Poke the instance to get it into the Running state.
@@ -647,7 +643,7 @@ mod tests {
         let nexus = &cptestctx.server.apictx().nexus;
         let _project_id = setup_test_project(&client).await;
 
-        let opctx = instance_create::test::test_opctx(cptestctx);
+        let opctx = test_helpers::test_opctx(cptestctx);
         let instance = create_instance(client).await;
 
         // Poke the instance to get it into the Running state.

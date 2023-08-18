@@ -22,9 +22,9 @@ use crate::{
     Nexus,
 };
 use futures::future::BoxFuture;
-use http::{Method, StatusCode};
-use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
-use omicron_common::api::external::Instance;
+use nexus_db_queries::context::OpContext;
+use nexus_types::identity::Resource;
+use omicron_common::api::external::NameOrId;
 use sled_agent_client::TestInterfaces as _;
 use slog::{info, Logger};
 use std::sync::Arc;
@@ -33,32 +33,45 @@ use uuid::Uuid;
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<crate::Server>;
 
-pub async fn instance_start(cptestctx: &ControlPlaneTestContext, id: &Uuid) {
-    let client = &cptestctx.external_client;
-    let instance_stop_url = format!("/v1/instances/{}/start", id);
-    NexusRequest::new(
-        RequestBuilder::new(client, Method::POST, &instance_stop_url)
-            .body(None as Option<&serde_json::Value>)
-            .expect_status(Some(StatusCode::ACCEPTED)),
+pub fn test_opctx(cptestctx: &ControlPlaneTestContext) -> OpContext {
+    OpContext::for_tests(
+        cptestctx.logctx.log.new(o!()),
+        cptestctx.server.apictx().nexus.datastore().clone(),
     )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .expect("Failed to start instance");
+}
+
+pub async fn instance_start(cptestctx: &ControlPlaneTestContext, id: &Uuid) {
+    let nexus = &cptestctx.server.apictx().nexus;
+    let opctx = test_opctx(&cptestctx);
+    let instance_selector =
+        nexus_types::external_api::params::InstanceSelector {
+            project: None,
+            instance: NameOrId::from(*id),
+        };
+
+    let instance_lookup =
+        nexus.instance_lookup(&opctx, instance_selector).unwrap();
+    nexus
+        .instance_start(&opctx, &instance_lookup)
+        .await
+        .expect("Failed to start instance");
 }
 
 pub async fn instance_stop(cptestctx: &ControlPlaneTestContext, id: &Uuid) {
-    let client = &cptestctx.external_client;
-    let url = format!("/v1/instances/{}/stop", id);
-    NexusRequest::new(
-        RequestBuilder::new(client, Method::POST, &url)
-            .body(None as Option<&serde_json::Value>)
-            .expect_status(Some(StatusCode::ACCEPTED)),
-    )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .expect("Failed to stop instance");
+    let nexus = &cptestctx.server.apictx().nexus;
+    let opctx = test_opctx(&cptestctx);
+    let instance_selector =
+        nexus_types::external_api::params::InstanceSelector {
+            project: None,
+            instance: NameOrId::from(*id),
+        };
+
+    let instance_lookup =
+        nexus.instance_lookup(&opctx, instance_selector).unwrap();
+    nexus
+        .instance_stop(&opctx, &instance_lookup)
+        .await
+        .expect("Failed to stop instance");
 }
 
 pub async fn instance_stop_by_name(
@@ -66,17 +79,20 @@ pub async fn instance_stop_by_name(
     name: &str,
     project_name: &str,
 ) {
-    let client = &cptestctx.external_client;
-    let url = format!("/v1/instances/{}/stop?project={}", name, project_name);
-    NexusRequest::new(
-        RequestBuilder::new(client, Method::POST, &url)
-            .body(None as Option<&serde_json::Value>)
-            .expect_status(Some(StatusCode::ACCEPTED)),
-    )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .expect("Failed to stop instance");
+    let nexus = &cptestctx.server.apictx().nexus;
+    let opctx = test_opctx(&cptestctx);
+    let instance_selector =
+        nexus_types::external_api::params::InstanceSelector {
+            project: Some(project_name.to_string().try_into().unwrap()),
+            instance: name.to_string().try_into().unwrap(),
+        };
+
+    let instance_lookup =
+        nexus.instance_lookup(&opctx, instance_selector).unwrap();
+    nexus
+        .instance_stop(&opctx, &instance_lookup)
+        .await
+        .expect("Failed to stop instance");
 }
 
 pub async fn instance_delete_by_name(
@@ -84,17 +100,20 @@ pub async fn instance_delete_by_name(
     name: &str,
     project_name: &str,
 ) {
-    let client = &cptestctx.external_client;
-    let url = format!("/v1/instances/{}?project={}", name, project_name);
-    NexusRequest::new(
-        RequestBuilder::new(client, Method::DELETE, &url)
-            .body(None as Option<&serde_json::Value>)
-            .expect_status(Some(StatusCode::NO_CONTENT)),
-    )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .expect("Failed to delete instance");
+    let nexus = &cptestctx.server.apictx().nexus;
+    let opctx = test_opctx(&cptestctx);
+    let instance_selector =
+        nexus_types::external_api::params::InstanceSelector {
+            project: Some(project_name.to_string().try_into().unwrap()),
+            instance: name.to_string().try_into().unwrap(),
+        };
+
+    let instance_lookup =
+        nexus.instance_lookup(&opctx, instance_selector).unwrap();
+    nexus
+        .project_destroy_instance(&opctx, &instance_lookup)
+        .await
+        .expect("Failed to destroy instance");
 }
 
 pub async fn instance_simulate(
@@ -117,23 +136,19 @@ pub async fn instance_simulate_by_name(
           "instance_name" => %name,
           "project_name" => %project_name);
 
-    let client = &cptestctx.external_client;
-    let url = format!("/v1/instances/{}?project={}", name, project_name);
-    let instance = NexusRequest::new(
-        RequestBuilder::new(client, Method::GET, &url)
-            .body(None as Option<&serde_json::Value>)
-            .expect_status(Some(StatusCode::OK)),
-    )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .expect("Failed to look up instance for its ID")
-    .parsed_body::<Instance>()
-    .expect("Failed to parse instance GET response as Instance");
-
     let nexus = &cptestctx.server.apictx().nexus;
-    let sa = nexus.instance_sled_by_id(&instance.identity.id).await.unwrap();
-    sa.instance_finish_transition(instance.identity.id).await;
+    let opctx = test_opctx(&cptestctx);
+    let instance_selector =
+        nexus_types::external_api::params::InstanceSelector {
+            project: Some(project_name.to_string().try_into().unwrap()),
+            instance: name.to_string().try_into().unwrap(),
+        };
+
+    let instance_lookup =
+        nexus.instance_lookup(&opctx, instance_selector).unwrap();
+    let (.., instance) = instance_lookup.fetch().await.unwrap();
+    let sa = nexus.instance_sled_by_id(&instance.id()).await.unwrap();
+    sa.instance_finish_transition(instance.id()).await;
 }
 
 /// Tests that a saga `S` functions properly when any of its nodes fails and
