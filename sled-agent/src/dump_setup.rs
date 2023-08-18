@@ -54,9 +54,9 @@ trait GetMountpoint: AsRef<ZpoolName> {
     const MOUNTPOINT: &'static str;
     fn mountpoint(
         &self,
-        invoker: &impl ZfsInvoker,
+        invoker: &dyn ZfsInvoker,
     ) -> Result<Option<Self::NewType>, ZfsGetError> {
-        if invoker.zfs_get_prop(self.as_ref().to_string(), "mounted")? == "yes"
+        if invoker.zfs_get_prop(&self.as_ref().to_string(), "mounted")? == "yes"
         {
             Ok(Some(Self::NewType::from(
                 invoker.mountpoint(self.as_ref(), Self::MOUNTPOINT),
@@ -66,8 +66,7 @@ trait GetMountpoint: AsRef<ZpoolName> {
         }
     }
 }
-struct DumpSetupWorker<CDA: CoreDumpAdmInvoker, ZFS: ZfsInvoker, Z: ZoneInvoker>
-{
+struct DumpSetupWorker {
     core_dataset_names: Vec<CoreZpool>,
     debug_dataset_names: Vec<DebugZpool>,
 
@@ -82,15 +81,13 @@ struct DumpSetupWorker<CDA: CoreDumpAdmInvoker, ZFS: ZfsInvoker, Z: ZoneInvoker>
     savecored_slices: HashSet<DumpSlicePath>,
 
     log: Logger,
-    coredumpadm_invoker: CDA,
-    zfs_invoker: ZFS,
-    zone_invoker: Z,
+    coredumpadm_invoker: Box<dyn CoreDumpAdmInvoker + Send + Sync>,
+    zfs_invoker: Box<dyn ZfsInvoker + Send + Sync>,
+    zone_invoker: Box<dyn ZoneInvoker + Send + Sync>,
 }
 
 pub struct DumpSetup {
-    worker: Arc<
-        std::sync::Mutex<DumpSetupWorker<RealCoreDumpAdm, RealZfs, RealZone>>,
-    >,
+    worker: Arc<std::sync::Mutex<DumpSetupWorker>>,
     _poller: std::thread::JoinHandle<()>,
     log: Logger,
 }
@@ -98,9 +95,9 @@ pub struct DumpSetup {
 impl DumpSetup {
     pub fn new(log: &Logger) -> Self {
         let worker = Arc::new(std::sync::Mutex::new(DumpSetupWorker::new(
-            RealCoreDumpAdm {},
-            RealZfs {},
-            RealZone {},
+            Box::new(RealCoreDumpAdm {}),
+            Box::new(RealZfs {}),
+            Box::new(RealZone {}),
             log.new(o!("component" => "DumpSetup-worker")),
         )));
         let worker_weak = Arc::downgrade(&worker);
@@ -180,12 +177,8 @@ impl DumpSetup {
         });
     }
 
-    fn poll_file_archival<
-        CDA: CoreDumpAdmInvoker,
-        ZFS: ZfsInvoker,
-        Z: ZoneInvoker,
-    >(
-        worker: Weak<std::sync::Mutex<DumpSetupWorker<CDA, ZFS, Z>>>,
+    fn poll_file_archival(
+        worker: Weak<std::sync::Mutex<DumpSetupWorker>>,
         log: Logger,
     ) {
         info!(log, "DumpSetup poll loop started.");
@@ -243,13 +236,13 @@ trait CoreDumpAdmInvoker {
 trait ZfsInvoker {
     fn zfs_get_prop(
         &self,
-        mountpoint_or_name: impl AsRef<str> + Sized,
+        mountpoint_or_name: &str,
         property: &str,
     ) -> Result<String, ZfsGetError>;
 
     fn zfs_get_integer(
         &self,
-        mountpoint_or_name: impl AsRef<str>,
+        mountpoint_or_name: &str,
         property: &str,
     ) -> Result<u64, ZfsGetError> {
         self.zfs_get_prop(mountpoint_or_name, property)?
@@ -262,8 +255,9 @@ trait ZfsInvoker {
         mountpoint: &Utf8PathBuf,
         percent: u64,
     ) -> Result<(bool, u64), ZfsGetError> {
-        let used = self.zfs_get_integer(mountpoint, ZFS_PROP_USED)?;
-        let available = self.zfs_get_integer(mountpoint, ZFS_PROP_AVAILABLE)?;
+        let used = self.zfs_get_integer(mountpoint.as_str(), ZFS_PROP_USED)?;
+        let available =
+            self.zfs_get_integer(mountpoint.as_str(), ZFS_PROP_AVAILABLE)?;
         let capacity = used + available;
         let below = (used * 100) / capacity < percent;
         Ok((below, used))
@@ -367,14 +361,13 @@ impl CoreDumpAdmInvoker for RealCoreDumpAdm {
 impl ZfsInvoker for RealZfs {
     fn zfs_get_prop(
         &self,
-        mountpoint_or_name: impl AsRef<str> + Sized,
+        mountpoint_or_name: &str,
         property: &str,
     ) -> Result<String, ZfsGetError> {
-        let mountpoint = mountpoint_or_name.as_ref();
         let mut cmd = std::process::Command::new(illumos_utils::zfs::ZFS);
         cmd.arg("get").arg("-Hpo").arg("value");
         cmd.arg(property);
-        cmd.arg(mountpoint);
+        cmd.arg(mountpoint_or_name);
         let output = cmd.output()?;
         Ok(String::from_utf8(output.stdout)?.trim().to_string())
     }
@@ -397,13 +390,11 @@ impl ZoneInvoker for RealZone {
     }
 }
 
-impl<CDA: CoreDumpAdmInvoker, ZFS: ZfsInvoker, Z: ZoneInvoker>
-    DumpSetupWorker<CDA, ZFS, Z>
-{
+impl DumpSetupWorker {
     fn new(
-        coredumpadm_invoker: CDA,
-        zfs_invoker: ZFS,
-        zone_invoker: Z,
+        coredumpadm_invoker: Box<dyn CoreDumpAdmInvoker + Send + Sync>,
+        zfs_invoker: Box<dyn ZfsInvoker + Send + Sync>,
+        zone_invoker: Box<dyn ZoneInvoker + Send + Sync>,
         log: Logger,
     ) -> Self {
         Self {
@@ -443,13 +434,13 @@ impl<CDA: CoreDumpAdmInvoker, ZFS: ZfsInvoker, Z: ZoneInvoker>
         self.known_debug_dirs = self
             .debug_dataset_names
             .iter()
-            .flat_map(|ds| ds.mountpoint(&self.zfs_invoker))
+            .flat_map(|ds| ds.mountpoint(self.zfs_invoker.as_ref()))
             .flatten()
             .collect();
         self.known_core_dirs = self
             .core_dataset_names
             .iter()
-            .flat_map(|ds| ds.mountpoint(&self.zfs_invoker))
+            .flat_map(|ds| ds.mountpoint(self.zfs_invoker.as_ref()))
             .flatten()
             .collect();
     }
@@ -480,7 +471,7 @@ impl<CDA: CoreDumpAdmInvoker, ZFS: ZfsInvoker, Z: ZoneInvoker>
             // these get archived periodically anyway, pick one with room
             let available = self
                 .zfs_invoker
-                .zfs_get_integer(mnt.as_ref(), "available")
+                .zfs_get_integer(mnt.as_ref().as_str(), "available")
                 .unwrap_or(0);
             (u64::MAX - available, mnt.clone())
         });
@@ -886,10 +877,10 @@ impl<CDA: CoreDumpAdmInvoker, ZFS: ZfsInvoker, Z: ZoneInvoker>
     ) -> Result<CleanupDirInfo, CleanupError> {
         let used = self
             .zfs_invoker
-            .zfs_get_integer(debug_dir.as_ref(), ZFS_PROP_USED)?;
+            .zfs_get_integer(debug_dir.as_ref().as_str(), ZFS_PROP_USED)?;
         let available = self
             .zfs_invoker
-            .zfs_get_integer(debug_dir.as_ref(), ZFS_PROP_AVAILABLE)?;
+            .zfs_get_integer(debug_dir.as_ref().as_str(), ZFS_PROP_AVAILABLE)?;
         let capacity = used + available;
 
         let target_used = capacity * DATASET_USAGE_PERCENT_CHOICE / 100;
@@ -1023,22 +1014,22 @@ mod tests {
     impl ZfsInvoker for FakeZfs {
         fn zfs_get_prop(
             &self,
-            mountpoint_or_name: impl AsRef<str> + Sized,
+            mountpoint_or_name: &str,
             property: &str,
         ) -> Result<String, ZfsGetError> {
             self.zpool_props
-                .get(mountpoint_or_name.as_ref())
+                .get(mountpoint_or_name)
                 .unwrap_or_else(|| {
                     panic!(
                         "Test did not provide fake zpool {}",
-                        mountpoint_or_name.as_ref()
+                        mountpoint_or_name
                     )
                 })
                 .get(property)
                 .unwrap_or_else(|| {
                     panic!(
                         "Test did not provide property {property} for fake zpool {}",
-                        mountpoint_or_name.as_ref()
+                        mountpoint_or_name
                     )
                 })
                 .clone()
@@ -1082,16 +1073,16 @@ mod tests {
         const NOT_MOUNTED_INTERNAL: &str =
             "oxi_acab2069-6e63-6c75-de73-20c06c756db0";
         let mut worker = DumpSetupWorker::new(
-            FakeCoreDumpAdm::default(),
-            FakeZfs {
+            Box::<FakeCoreDumpAdm>::default(),
+            Box::new(FakeZfs {
                 zpool_props: [(
                     NOT_MOUNTED_INTERNAL,
                     [("mounted", Ok("no".to_string()))].into_iter().collect(),
                 )]
                 .into_iter()
                 .collect(),
-            },
-            FakeZone::default(),
+            }),
+            Box::<FakeZone>::default(),
             logctx.log.clone(),
         );
 
@@ -1124,8 +1115,8 @@ mod tests {
         let err_zpool = CoreZpool(ZpoolName::from_str(ERROR_INTERNAL).unwrap());
         const ZPOOL_MNT: &str = "/path/to/internal/zpool";
         let mut worker = DumpSetupWorker::new(
-            FakeCoreDumpAdm::default(),
-            FakeZfs {
+            Box::<FakeCoreDumpAdm>::default(),
+            Box::new(FakeZfs {
                 zpool_props: [
                     (
                         NOT_MOUNTED_INTERNAL,
@@ -1154,8 +1145,8 @@ mod tests {
                 ]
                 .into_iter()
                 .collect(),
-            },
-            FakeZone::default(),
+            }),
+            Box::<FakeZone>::default(),
             logctx.log.clone(),
         );
 
@@ -1217,9 +1208,9 @@ mod tests {
             "test_savecore_and_dumpadm_not_called_when_occupied_and_no_dir",
         );
         let mut worker = DumpSetupWorker::new(
-            FakeCoreDumpAdm::default(),
-            FakeZfs::default(),
-            FakeZone::default(),
+            Box::<FakeCoreDumpAdm>::default(),
+            Box::<FakeZfs>::default(),
+            Box::<FakeZone>::default(),
             logctx.log.clone(),
         );
         let tempdir = TempDir::new().unwrap();
@@ -1243,9 +1234,9 @@ mod tests {
             "test_dumpadm_called_when_vacant_slice_but_no_dir",
         );
         let mut worker = DumpSetupWorker::new(
-            FakeCoreDumpAdm::default(),
-            FakeZfs::default(),
-            FakeZone::default(),
+            Box::<FakeCoreDumpAdm>::default(),
+            Box::<FakeZfs>::default(),
+            Box::<FakeZone>::default(),
             logctx.log.clone(),
         );
         let tempdir = TempDir::new().unwrap();
@@ -1270,8 +1261,8 @@ mod tests {
             "oxp_446f6e74-4469-6557-6f6e-646572696e67";
         const ZPOOL_MNT: &str = "/path/to/external/zpool";
         let mut worker = DumpSetupWorker::new(
-            FakeCoreDumpAdm::default(),
-            FakeZfs {
+            Box::<FakeCoreDumpAdm>::default(),
+            Box::new(FakeZfs {
                 zpool_props: [(
                     MOUNTED_EXTERNAL,
                     [
@@ -1283,8 +1274,8 @@ mod tests {
                 )]
                 .into_iter()
                 .collect(),
-            },
-            FakeZone::default(),
+            }),
+            Box::<FakeZone>::default(),
             logctx.log.clone(),
         );
         let tempdir = TempDir::new().unwrap();
@@ -1327,8 +1318,8 @@ mod tests {
         const MOUNTED_EXTERNAL: &str =
             "oxp_446f6e74-4469-6557-6f6e-646572696e67";
         let mut worker = DumpSetupWorker::new(
-            FakeCoreDumpAdm::default(),
-            FakeZfs {
+            Box::<FakeCoreDumpAdm>::default(),
+            Box::new(FakeZfs {
                 zpool_props: [
                     (
                         MOUNTED_INTERNAL,
@@ -1351,8 +1342,8 @@ mod tests {
                 ]
                 .into_iter()
                 .collect(),
-            },
-            FakeZone { zones: vec![zone.clone()] },
+            }),
+            Box::new(FakeZone { zones: vec![zone.clone()] }),
             logctx.log.clone(),
         );
 
