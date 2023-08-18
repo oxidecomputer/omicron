@@ -77,7 +77,7 @@ done
 mkdir /work/package
 pushd /work/package
 tar xf /input/package/work/package.tar.gz out package-manifest.toml target/release/omicron-package
-target/release/omicron-package -t default target create -i standard -m gimlet -s asic
+target/release/omicron-package -t default target create -i standard -m gimlet -s asic -r multi-sled
 ln -s /input/package/work/zones/* out/
 rm out/switch-softnpu.tar.gz  # not used when target switch=asic
 rm out/omicron-gateway-softnpu.tar.gz  # not used when target switch=asic

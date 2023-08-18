@@ -46,6 +46,13 @@ pub enum TargetCommand {
 
         #[clap(short, long, default_value_if("image", "standard", "stub"))]
         switch: Option<crate::target::Switch>,
+
+        #[clap(
+            short,
+            long,
+            default_value_if("image", "standard", "single-sled")
+        )]
+        rack_topology: Option<crate::target::RackTopology>,
     },
     /// List all existing targets
     List,

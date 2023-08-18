@@ -189,11 +189,12 @@ async fn do_target(
         format!("failed to create directory {}", target_dir.display())
     })?;
     match subcommand {
-        TargetCommand::Create { image, machine, switch } => {
+        TargetCommand::Create { image, machine, switch, rack_topology } => {
             let target = KnownTarget::new(
                 image.clone(),
                 machine.clone(),
                 switch.clone(),
+                rack_topology.clone(),
             )?;
 
             let path = get_single_target(&target_dir, name).await?;

@@ -321,10 +321,32 @@ Error: Creates a new build target, and sets it as "active"
 Usage: omicron-package target create [OPTIONS]
 
 Options:
-  -i, --image <IMAGE>      [default: standard] [possible values: standard, trampoline]
-  -m, --machine <MACHINE>  [possible values: gimlet, gimlet-standalone, non-gimlet]
-  -s, --switch <SWITCH>    [possible values: asic, stub, softnpu]
-  -h, --help               Print help (see more with '--help')
+  -i, --image <IMAGE>
+          [default: standard]
+
+          Possible values:
+          - standard:   A typical host OS image
+          - trampoline: A recovery host OS image, intended to bootstrap a Standard image
+
+  -m, --machine <MACHINE>
+          Possible values:
+          - gimlet:            Use sled agent configuration for a Gimlet
+          - gimlet-standalone: Use sled agent configuration for a Gimlet running in isolation
+          - non-gimlet:        Use sled agent configuration for a device emulating a Gimlet
+
+  -s, --switch <SWITCH>
+          Possible values:
+          - asic:    Use the "real" Dendrite, that attempts to interact with the Tofino
+          - stub:    Use a "stub" Dendrite that does not require any real hardware
+          - softnpu: Use a "softnpu" Dendrite that uses the SoftNPU asic emulator
+
+  -r, --rack-topology <RACK_TOPOLOGY>
+          Possible values:
+          - multi-sled:  Use configurations suitable for a multi-sled deployment, such as dogfood and production racks
+          - single-sled: Use configurations suitable for a single-sled deployment, such as CI and dev machines
+
+  -h, --help
+          Print help (see a summary with '-h')
 
 ----
 
@@ -332,9 +354,9 @@ To set up a build target for a non-Gimlet machine with simulated (but fully func
 
 [source,console]
 ----
-$ cargo run --release --bin omicron-package -- -t default target create -i standard -m non-gimlet -s softnpu
+$ cargo run --release --bin omicron-package -- -t default target create -i standard -m non-gimlet -s softnpu -r single-sled
     Finished release [optimized] target(s) in 0.66s
-     Running `target/release/omicron-package -t default target create -i standard -m non-gimlet -s softnpu`
+     Running `target/release/omicron-package -t default target create -i standard -m non-gimlet -s softnpu -r single-sled`
 Created new build target 'default' and set it as active
 ----
 

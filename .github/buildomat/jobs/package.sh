@@ -45,7 +45,7 @@ ptime -m ./tools/ci_download_softnpu_machinery
 
 # Build the test target
 ptime -m cargo run --locked --release --bin omicron-package -- \
-  -t test target create -i standard -m non-gimlet -s softnpu
+  -t test target create -i standard -m non-gimlet -s softnpu -r single-sled
 ptime -m cargo run --locked --release --bin omicron-package -- \
   -t test package
 
@@ -83,7 +83,7 @@ stamp_packages() {
 
 # Build necessary for the global zone
 ptime -m cargo run --locked --release --bin omicron-package -- \
-  -t host target create -i standard -m gimlet -s asic
+  -t host target create -i standard -m gimlet -s asic -r multi-sled
 ptime -m cargo run --locked --release --bin omicron-package -- \
   -t host package
 stamp_packages omicron-sled-agent maghemite propolis-server overlay
