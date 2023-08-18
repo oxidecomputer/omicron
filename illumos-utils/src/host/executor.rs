@@ -310,7 +310,7 @@ pub trait Child: Send {
     fn id(&self) -> u32;
 
     /// Waits for the child to complete, and returns the output.
-    fn wait(&mut self) -> Result<Output, ExecutionError>;
+    fn wait(self: Box<Self>) -> Result<Output, ExecutionError>;
 }
 
 /// A real, host-controlled child process
@@ -348,7 +348,7 @@ impl Child for SpawnedChild {
         self.child.as_ref().expect("No child").id()
     }
 
-    fn wait(&mut self) -> Result<Output, ExecutionError> {
+    fn wait(mut self: Box<Self>) -> Result<Output, ExecutionError> {
         let output =
             self.child.take().unwrap().wait_with_output().map_err(|err| {
                 ExecutionError::ExecutionStart {
@@ -431,9 +431,9 @@ impl Child for FakeChild {
         self.id.try_into().expect("u32 overflow")
     }
 
-    fn wait(&mut self) -> Result<Output, ExecutionError> {
+    fn wait(mut self: Box<Self>) -> Result<Output, ExecutionError> {
         let executor = self.executor.clone();
-        let output = executor.wait_handler.lock().unwrap()(self);
+        let output = executor.wait_handler.lock().unwrap()(&mut self);
         log_output(&self.executor.log, self.id, &output);
         if !output.status.success() {
             return Err(output_to_exec_error(
