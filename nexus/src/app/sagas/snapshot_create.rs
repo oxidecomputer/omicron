@@ -1922,7 +1922,7 @@ mod test {
         cptestctx: &ControlPlaneTestContext,
         client: &ClientTestContext,
         disks_to_attach: Vec<InstanceDiskAttachment>,
-    ) -> Instance {
+    ) {
         let instances_url = format!("/v1/instances?project={}", PROJECT_NAME,);
         let instance: Instance = object_create(
             client,
@@ -1952,8 +1952,6 @@ mod test {
         let sa =
             nexus.instance_sled_by_id(&instance.identity.id).await.unwrap();
         sa.instance_finish_transition(instance.identity.id).await;
-
-        instance
     }
 
     #[nexus_test(server = crate::Server)]
@@ -2047,7 +2045,7 @@ mod test {
                         // attachment machinery and just update the disk's
                         // database record directly.
                         if !use_the_pantry {
-                            let _ = setup_test_instance(
+                            setup_test_instance(
                                 cptestctx,
                                 client,
                                 vec![params::InstanceDiskAttachment::Attach(
@@ -2324,7 +2322,7 @@ mod test {
         )
         .await;
 
-        let _ = setup_test_instance(
+        setup_test_instance(
             cptestctx,
             client,
             vec![params::InstanceDiskAttachment::Attach(

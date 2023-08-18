@@ -2,19 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Helper functions that provide common scaffolding for testing sagas.
-//!
-//! These functions aim to help verify two important properties that all sagas
-//! should have:
-//!
-//! - All actions and undo actions must be idempotent.
-//! - Sagas must unwind properly from a failure in any node in the saga DAG.
-//!
-//! It is easy to accidentally write a test that tries to verify one of these
-//! properties but produces false negative results. See omicron#3265 and
-//! omicron#3894 for examples. The helpers in this module provide common
-//! scaffolding that can help prevent these mistakes. They also avoid
-//! duplicating boilerplate between saga tests.
+//! Helper functions for writing saga undo tests and working with instances in
+//! saga tests.
 
 use super::NexusSaga;
 use crate::{
