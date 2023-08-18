@@ -1080,61 +1080,19 @@ pub(crate) mod test {
         let client = &cptestctx.external_client;
         let nexus = &cptestctx.server.apictx.nexus;
         let project_id = create_org_and_project(&client).await;
-
-        // Build the saga DAG with the provided test parameters
         let opctx = test_opctx(&cptestctx);
 
-        let params = new_test_params(&opctx, project_id);
-        let dag = create_saga_dag::<SagaDiskCreate>(params).unwrap();
-
-        // The "undo_node" should always be immediately preceding the
-        // "error_node".
-        for (undo_node, error_node) in
-            dag.get_nodes().zip(dag.get_nodes().skip(1))
-        {
-            // Create a new saga for this node.
-            info!(
-                log,
-                "Creating new saga which will fail at index {:?}", error_node.index();
-                "node_name" => error_node.name().as_ref(),
-                "label" => error_node.label(),
-            );
-
-            let runnable_saga =
-                nexus.create_runnable_saga(dag.clone()).await.unwrap();
-
-            // Inject an error instead of running the node.
-            //
-            // This should cause the saga to unwind.
-            nexus
-                .sec()
-                .saga_inject_error(runnable_saga.id(), error_node.index())
-                .await
-                .unwrap();
-
-            // Inject a repetition for the node being undone.
-            //
-            // This means it is executing twice while unwinding.
-            nexus
-                .sec()
-                .saga_inject_repeat(
-                    runnable_saga.id(),
-                    undo_node.index(),
-                    steno::RepeatInjected {
-                        action: NonZeroU32::new(1).unwrap(),
-                        undo: NonZeroU32::new(2).unwrap(),
-                    },
-                )
-                .await
-                .unwrap();
-
-            nexus
-                .run_saga(runnable_saga)
-                .await
-                .expect_err("Saga should have failed");
-
-            verify_clean_slate(&cptestctx, &test).await;
-        }
+        crate::app::sagas::test_helpers::action_failure_can_unwind_idempotently::<
+            SagaDiskCreate,
+            _,
+            _
+        >(
+            nexus,
+            new_test_params(&opctx, project_id),
+            || Box::pin(async { new_test_params(&opctx, project_id) }),
+            || Box::pin(async { verify_clean_slate(&cptestctx, &test).await; }),
+            log
+        ).await;
     }
 
     async fn destroy_disk(cptestctx: &ControlPlaneTestContext) {

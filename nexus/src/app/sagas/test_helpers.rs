@@ -27,7 +27,7 @@ use nexus_types::identity::Resource;
 use omicron_common::api::external::NameOrId;
 use sled_agent_client::TestInterfaces as _;
 use slog::{info, Logger};
-use std::sync::Arc;
+use std::{num::NonZeroU32, sync::Arc};
 use uuid::Uuid;
 
 type ControlPlaneTestContext =
@@ -218,6 +218,93 @@ pub async fn action_failure_can_unwind<'a, S, G, P>(
             .expect_err("saga execution should have failed");
 
         assert_eq!(saga_error.error_node_name, *node.name());
+
+        after_saga().await;
+    }
+}
+
+/// Tests that saga `S` functions properly when any of its nodes fails and the
+/// prior node's undo step is repeated during unwind. Like
+/// `action_failure_can_unwind`, this routine creates a new DAG with new
+/// parameters for each node and verifies that the saga failed at the expected
+/// point.
+///
+/// # Arguments
+///
+/// - `nexus`: A reference to the Nexus that should execute the saga.
+/// - `initial_params`: The parameters to use to construct an initial instance
+///   of saga `S` so that the scaffold can figure out how many nodes are in the
+///   DAG.
+/// - `generate_params`: A callback called at the beginning of each loop
+///   iteration that returns a future that yields the saga parameters to use for
+///   that loop iteration.
+/// - `after_saga`: A callback called after saga execution in each loop
+///   iteration. The caller may use this to check additional post-execution
+///   invariants and to prepare the test for the next loop iteration.
+/// - `log`: A logger to which the scaffold should log messages.
+///
+/// # Panics
+///
+/// This function asserts that each saga it executes (a) starts successfully,
+/// (b) fails, and (c) fails at the specific node at which the function injected
+/// a failure.
+pub async fn action_failure_can_unwind_idempotently<'a, S, G, P>(
+    nexus: &Arc<Nexus>,
+    initial_params: S::Params,
+    generate_params: G,
+    after_saga: P,
+    log: &Logger,
+) where
+    S: NexusSaga,
+    G: Fn() -> BoxFuture<'a, S::Params>,
+    P: Fn() -> BoxFuture<'a, ()>,
+{
+    let dag = create_saga_dag::<S>(initial_params).unwrap();
+    let num_nodes = dag.get_nodes().count();
+
+    let node_indices = Vec::from_iter(0..num_nodes);
+    for indices in node_indices.windows(2) {
+        let params = generate_params().await;
+        let dag = create_saga_dag::<S>(params).unwrap();
+        let undo_node = dag.get_nodes().nth(indices[0]).unwrap();
+        let error_node = dag.get_nodes().nth(indices[1]).unwrap();
+        info!(
+            log,
+            "Creating new saga that will fail at index {:?}", error_node.index();
+            "node_name" => error_node.name().as_ref(),
+            "label" => error_node.label(),
+        );
+
+        let runnable_saga =
+            nexus.create_runnable_saga(dag.clone()).await.unwrap();
+
+        nexus
+            .sec()
+            .saga_inject_error(runnable_saga.id(), error_node.index())
+            .await
+            .unwrap();
+
+        nexus
+            .sec()
+            .saga_inject_repeat(
+                runnable_saga.id(),
+                undo_node.index(),
+                steno::RepeatInjected {
+                    action: NonZeroU32::new(1).unwrap(),
+                    undo: NonZeroU32::new(2).unwrap(),
+                },
+            )
+            .await
+            .unwrap();
+
+        let saga_error = nexus
+            .run_saga_raw_result(runnable_saga)
+            .await
+            .expect("saga should have started successfully")
+            .kind
+            .expect_err("saga execution should have failed");
+
+        assert_eq!(saga_error.error_node_name, *error_node.name());
 
         after_saga().await;
     }
