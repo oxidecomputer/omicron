@@ -274,7 +274,7 @@ impl<'a> ArtifactWriter<'a> {
                 // want each drive to track success and failure independently.
                 let write_cx = SlotWriteContext {
                     log: log.clone(),
-                    executor: executor.clone(),
+                    executor,
                     artifacts: self.artifacts,
                     slot: *drive,
                     destinations,
@@ -357,7 +357,7 @@ impl<'a> ArtifactWriter<'a> {
 
 struct SlotWriteContext<'a> {
     log: Logger,
-    executor: BoxedExecutor,
+    executor: &'a BoxedExecutor,
     artifacts: ArtifactsToWrite<'a>,
     slot: M2Slot,
     destinations: &'a ArtifactDestination,
@@ -570,7 +570,7 @@ impl ArtifactsToWrite<'_> {
         // own step.
         let inner_cx = &ControlPlaneZoneWriteContext {
             slot,
-            executor: executor.clone(),
+            executor,
             clean_output_directory: destinations.clean_control_plane_dir,
             output_directory: &destinations.control_plane_dir,
             zones: self.control_plane_zones,
@@ -604,7 +604,7 @@ impl ArtifactsToWrite<'_> {
 
 struct ControlPlaneZoneWriteContext<'a> {
     slot: M2Slot,
-    executor: BoxedExecutor,
+    executor: &'a BoxedExecutor,
     clean_output_directory: bool,
     output_directory: &'a Utf8Path,
     zones: &'a ControlPlaneZoneImages,
