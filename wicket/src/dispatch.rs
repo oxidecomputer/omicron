@@ -52,6 +52,7 @@ pub fn exec() -> Result<()> {
 #[derive(Debug, Parser)]
 enum ShellCommand {
     /// Upload a TUF repository to wicketd.
+    #[command(visible_alias = "upload")]
     UploadRepo(UploadArgs),
     /// Interact with rack setup configuration.
     #[command(subcommand)]
