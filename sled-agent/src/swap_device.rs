@@ -234,7 +234,7 @@ fn create_encrypted_swap_zvol(
             error: e.to_string(),
         })?;
 
-    let mut stdin = spawn.stdin().take().unwrap();
+    let mut stdin = spawn.take_stdin().take().unwrap();
     let child_log = log.clone();
     let hdl = std::thread::spawn(move || {
         use std::io::Write;

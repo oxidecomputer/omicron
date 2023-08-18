@@ -298,13 +298,13 @@ pub type BoxedChild = Box<dyn Child>;
 /// A child process spawned by the executor.
 pub trait Child: Send {
     /// Accesses the stdin of the spawned child, as a Writer.
-    fn stdin(&mut self) -> Option<Box<dyn Write + Send>>;
+    fn take_stdin(&mut self) -> Option<Box<dyn Write + Send>>;
 
     /// Accesses the stdout of the spawned child, as a Reader.
-    fn stdout(&mut self) -> Option<Box<dyn Read + Send>>;
+    fn take_stdout(&mut self) -> Option<Box<dyn Read + Send>>;
 
     /// Accesses the stderr of the spawned child, as a Reader.
-    fn stderr(&mut self) -> Option<Box<dyn Read + Send>>;
+    fn take_stderr(&mut self) -> Option<Box<dyn Read + Send>>;
 
     /// OS-assigned PID identifier for the child
     fn id(&self) -> u32;
@@ -320,7 +320,7 @@ pub struct SpawnedChild {
 }
 
 impl Child for SpawnedChild {
-    fn stdin(&mut self) -> Option<Box<dyn Write + Send>> {
+    fn take_stdin(&mut self) -> Option<Box<dyn Write + Send>> {
         self.child
             .as_mut()?
             .stdin
@@ -328,7 +328,7 @@ impl Child for SpawnedChild {
             .map(|s| Box::new(s) as Box<dyn Write + Send>)
     }
 
-    fn stdout(&mut self) -> Option<Box<dyn Read + Send>> {
+    fn take_stdout(&mut self) -> Option<Box<dyn Read + Send>> {
         self.child
             .as_mut()?
             .stdout
@@ -336,7 +336,7 @@ impl Child for SpawnedChild {
             .map(|s| Box::new(s) as Box<dyn Read + Send>)
     }
 
-    fn stderr(&mut self) -> Option<Box<dyn Read + Send>> {
+    fn take_stderr(&mut self) -> Option<Box<dyn Read + Send>> {
         self.child
             .as_mut()?
             .stderr
@@ -415,15 +415,15 @@ impl FakeChild {
 }
 
 impl Child for FakeChild {
-    fn stdin(&mut self) -> Option<Box<dyn Write + Send>> {
+    fn take_stdin(&mut self) -> Option<Box<dyn Write + Send>> {
         Some(Box::new(self.stdin.clone()))
     }
 
-    fn stdout(&mut self) -> Option<Box<dyn Read + Send>> {
+    fn take_stdout(&mut self) -> Option<Box<dyn Read + Send>> {
         Some(Box::new(self.stdout.clone()))
     }
 
-    fn stderr(&mut self) -> Option<Box<dyn Read + Send>> {
+    fn take_stderr(&mut self) -> Option<Box<dyn Read + Send>> {
         Some(Box::new(self.stderr.clone()))
     }
 
