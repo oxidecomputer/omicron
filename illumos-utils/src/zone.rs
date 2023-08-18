@@ -902,7 +902,7 @@ impl Zones {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::host::{FakeExecutor, Input, OutputExt, StaticHandler};
+    use crate::host::{CommandSequence, FakeExecutor, Input, OutputExt};
     use omicron_test_utils::dev;
     use std::process::Output;
 
@@ -919,7 +919,7 @@ mod tests {
         // - A request for the list of existing zones
         // - A command to configure the zone
         // - A command to install the zone
-        let mut handler = StaticHandler::new();
+        let mut handler = CommandSequence::new();
         handler.expect(
             Input::shell(format!("{PFEXEC} {ZONEADM} list -cip")),
             Output::success().set_stdout("0:global:running:/::ipkg:shared"),
@@ -981,7 +981,7 @@ mod tests {
         let zone_name = "oxz_myzone";
         let zone_image = Utf8Path::new("/image.tar.gz");
 
-        let mut handler = StaticHandler::new();
+        let mut handler = CommandSequence::new();
         handler.expect(
             Input::shell(format!("{PFEXEC} {ZONEADM} list -cip")),
             Output::success().set_stdout(

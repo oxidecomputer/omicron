@@ -456,12 +456,12 @@ enum HandledCommand {
 /// when these commands are known ahead-of-time.
 ///
 /// See: [Self::register] for integration with a [FakeExecutor].
-pub struct StaticHandler {
+pub struct CommandSequence {
     expected: Vec<HandledCommand>,
     index: usize,
 }
 
-impl StaticHandler {
+impl CommandSequence {
     pub fn new() -> Self {
         Self { expected: Vec::new(), index: 0 }
     }
@@ -514,7 +514,7 @@ impl StaticHandler {
     }
 }
 
-impl Drop for StaticHandler {
+impl Drop for CommandSequence {
     fn drop(&mut self) {
         let expected = self.expected.len();
         let actual = self.index;

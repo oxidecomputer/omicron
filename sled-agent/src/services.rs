@@ -2865,7 +2865,7 @@ mod test {
             Etherstub, BOOTSTRAP_ETHERSTUB_NAME, UNDERLAY_ETHERSTUB_NAME,
             UNDERLAY_ETHERSTUB_VNIC_NAME,
         },
-        host::{FakeExecutor, Input, Output, OutputExt, StaticHandler},
+        host::{CommandSequence, FakeExecutor, Input, Output, OutputExt},
         zone::{ZLOGIN, ZONEADM, ZONECFG},
     };
     use key_manager::{
@@ -2899,7 +2899,7 @@ mod test {
     // Generate a static executor handler with the expected invocations (and
     // responses) when generating a new service.
     fn expect_new_service(
-        handler: &mut StaticHandler,
+        handler: &mut CommandSequence,
         config: &TestConfig,
         zone_id: Uuid,
         u2_mountpoint: &Utf8Path,
@@ -3145,7 +3145,7 @@ mod test {
 
         let executor = FakeExecutor::new(log.clone());
         let id = Uuid::new_v4();
-        let mut handler = StaticHandler::new();
+        let mut handler = CommandSequence::new();
         expect_new_service(&mut handler, &test_config, id, &u2_mountpoint);
         handler.register(&executor);
         let executor = executor.as_executor();
@@ -3201,7 +3201,7 @@ mod test {
 
         let executor = FakeExecutor::new(log.clone());
         let id = Uuid::new_v4();
-        let mut handler = StaticHandler::new();
+        let mut handler = CommandSequence::new();
         expect_new_service(&mut handler, &test_config, id, &u2_mountpoint);
         handler.register(&executor);
         let executor = executor.as_executor();
@@ -3260,7 +3260,7 @@ mod test {
 
         let executor = FakeExecutor::new(log.clone());
         let id = Uuid::new_v4();
-        let mut handler = StaticHandler::new();
+        let mut handler = CommandSequence::new();
         expect_new_service(&mut handler, &test_config, id, &u2_mountpoint);
         handler.register(&executor);
         let executor = executor.as_executor();
@@ -3303,7 +3303,7 @@ mod test {
         // Before we re-create the service manager - notably, using the same
         // config file! - expect that a service gets initialized.
         let executor = FakeExecutor::new(log.clone());
-        let mut handler = StaticHandler::new();
+        let mut handler = CommandSequence::new();
 
         handler.expect_dynamic(Box::new(|input| -> Output {
             assert_eq!(input.program, PFEXEC);
@@ -3374,7 +3374,7 @@ mod test {
 
         let executor = FakeExecutor::new(log.clone());
         let id = Uuid::new_v4();
-        let mut handler = StaticHandler::new();
+        let mut handler = CommandSequence::new();
         expect_new_service(&mut handler, &test_config, id, &u2_mountpoint);
         handler.register(&executor);
         let executor = executor.as_executor();

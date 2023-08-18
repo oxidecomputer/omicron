@@ -560,7 +560,7 @@ impl Dladm {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::host::{FakeExecutor, Input, OutputExt, StaticHandler};
+    use crate::host::{CommandSequence, FakeExecutor, Input, OutputExt};
     use omicron_test_utils::dev;
     use std::process::Output;
 
@@ -568,7 +568,7 @@ mod test {
     fn ensure_new_etherstub() {
         let logctx = dev::test_setup_log("ensure_new_etherstub");
 
-        let mut handler = StaticHandler::new();
+        let mut handler = CommandSequence::new();
         handler.expect_fail(format!("{PFEXEC} {DLADM} show-etherstub mystub1"));
         handler
             .expect_ok(format!("{PFEXEC} {DLADM} create-etherstub -t mystub1"));
@@ -588,7 +588,7 @@ mod test {
     fn ensure_existing_etherstub() {
         let logctx = dev::test_setup_log("ensure_existing_etherstub");
 
-        let mut handler = StaticHandler::new();
+        let mut handler = CommandSequence::new();
         handler.expect_ok(format!("{PFEXEC} {DLADM} show-etherstub mystub1"));
         let executor = FakeExecutor::new(logctx.log.clone());
         handler.register(&executor);
@@ -605,7 +605,7 @@ mod test {
     fn ensure_existing_etherstub_vnic() {
         let logctx = dev::test_setup_log("ensure_existing_etherstub_vnic");
 
-        let mut handler = StaticHandler::new();
+        let mut handler = CommandSequence::new();
         handler.expect_ok(format!(
             "{PFEXEC} {DLADM} show-etherstub {UNDERLAY_ETHERSTUB_NAME}"
         ));
@@ -629,7 +629,7 @@ mod test {
     fn ensure_new_etherstub_vnic() {
         let logctx = dev::test_setup_log("ensure_new_etherstub_vnic");
 
-        let mut handler = StaticHandler::new();
+        let mut handler = CommandSequence::new();
         handler.expect_ok(format!(
             "{PFEXEC} {DLADM} show-etherstub {UNDERLAY_ETHERSTUB_NAME}"
         ));
@@ -661,7 +661,7 @@ mod test {
     fn only_parse_oxide_vnics() {
         let logctx = dev::test_setup_log("only_parse_oxide_vnics");
 
-        let mut handler = StaticHandler::new();
+        let mut handler = CommandSequence::new();
         handler.expect(
             Input::shell(format!("{PFEXEC} {DLADM} show-vnic -p -o LINK")),
             Output::success().set_stdout(
