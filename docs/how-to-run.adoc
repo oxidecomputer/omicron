@@ -104,9 +104,10 @@ As an example, in this doc:
 +
 * The network is 192.168.1.0/24.
 * The network's gateway is 192.168.1.199.
-* You can carve off 192.168.1.20 - 192.168.1.29 for externally-facing services provided by the system.
-* You can carve off 192.168.1.30 as the address used by SoftNPU on the external network.
-* You can carve off 192.168.1.31 - 192.168.1.40 as the addresses used for Instances that need some public IPs (even if just for NAT to the internet).
+* You can carve off a range from 192.168.1.20 to 192.168.1.40 for use by the rack:
+** 192.168.1.20 - 192.168.1.29 for externally-facing services provided by the system,
+** 192.168.1.30 as the address used by SoftNPU on the external network, and
+** 192.168.1.31 - 192.168.1.40 as the addresses used for Instances that need some public IPs (even if just for NAT to the internet).
 2. Alternatively, you'll set up an "external" network that only exists on your test machine.  If you go this route, we'll choose 192.168.1.0/24 and all the same other details as in the case above, just for convenience.  In this mode, you'll need create your made-up network and give the global zone an IP address on it.  We'll use 192.168.1.199:
 +
 [source,text]
@@ -172,29 +173,39 @@ The rest of these instructions assume that you're building and running Omicron o
 The Sled Agent supports operation on both:
 
 * a Gimlet (i.e., real Oxide hardware), and
-* an ordinary PC that's been set up to look like a Gimlet using the `./tools/create_virtual_hardware.sh` script.
+* an ordinary PC that's been set up to look like a Gimlet using the `./tools/create_virtual_hardware.sh` script (described next).
 
 This script also sets up a "softnpu" zone to implement Boundary Services.  SoftNPU simulates the Tofino device that's used in real systems.  Just like Tofino, it can implement sled-to-sled networking, but that's beyond the scope of this doc.
 
-If you're running on a PC and using an existing network as your external network, you can usually just run this script with a few environment vaiables set. These environment varaibles tell SoftNPU about your local network. You'll need to carve out part of your network for the Oxide platform, making sure that the range you specify below is not occupied by other hosts on your network.
+If you're running on a PC and using either of the networking configurations mentioned above, you can usually just run this script with a few environment vaiables set. These environment variables tell SoftNPU about your local network.  You will need the gateway for your network as well as the whole range of IPs that you've carved out for the Oxide system (see <<_external_networking>> above):
 
 [source,bash]
 ----
-export PHYSICAL_LINK=igb0           # The physical link for your local network.
-export GATEWAY_IP=192.168.1.199     # The gateway IP address for your local network.
-export PXA_START=192.168.1.2        # The first IP address your Oxide cluster can use.
-export PXA_END=192.168.1.100        # The last IP address your Oxide cluster can use.
+export GATEWAY_IP=192.168.1.199     # The gateway IP address for your local network (see above)
+export PXA_START=192.168.1.20       # The first IP address your Oxide cluster can use (see above)
+export PXA_END=192.168.1.40         # The last IP address your Oxide cluster can use (see above)
+----
 
+If you're using the fake sled-local external network mentioned above, then you'll need to set PHYSICAL_LINK:
+
+[source,bash]
+----
+export PHYSICAL_LINK=fake_external_stub0 	# The etherstub for the fake external network
+----
+
+If you're using an existing external network, you likely don't need to specify anything here because the script will choose one.  You can specify a particular one if you want, though:
+
+[source,bash]
+----
+export PHYSICAL_LINK=igb0           # The physical link for your external network.
+----
+
+Having set those variables, you're ready to run:
+
+[source,bash]
+----
 $ pfexec ./tools/create_virtual_hardware.sh
 ----
-
-If above you made up a new "external" network only accessible within the Sled, then you'll want to override PHYSICAL_LINK as follows:
-
-----
-$ PHYSICAL_LINK=fake_external_stub0 pfexec ./tools/create_virtual_hardware.sh
-----
-
-You can also use this override if you find that the script chose the wrong datalink to use for external connectivity for whatever reason.
 
 If you're running on a Gimlet, you don't need (or want) most of what `create_virtual_hardware.sh` does, but you do still need SoftNPU.  You'll have to look at the script and run that part by hand.
 
