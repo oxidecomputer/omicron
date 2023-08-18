@@ -37,20 +37,23 @@ where
 }
 
 fn log_input(log: &Logger, id: u64, command: &Command) {
-    info!(log, "{id} - Running Command: [{}]", Input::from(command),);
+    info!(
+        log,
+        "running command via executor"; "id" => id, "command" => %Input::from(command)
+    );
     debug!(
         log,
-        "{id} - Environment: [{}]",
-        to_space_separated_string(command.get_envs()),
-    )
+        "running command via executor"; "id" => id, "envs" => %to_space_separated_string(command.get_envs())
+    );
 }
 
 fn log_output(log: &Logger, id: u64, output: &Output) {
     info!(
         log,
-        "{id} - {} (status code: {})",
-        if output.status.success() { "OK" } else { "ERROR" },
-        output
+        "finished running command via executor";
+        "id" => id,
+        "result" => if output.status.success() { "OK" } else { "ERROR" },
+        "status" => output
             .status
             .code()
             .map(|c| c.to_string())
@@ -59,15 +62,17 @@ fn log_output(log: &Logger, id: u64, output: &Output) {
     if !output.stdout.is_empty() {
         debug!(
             log,
-            "{id} - stdout: {}",
-            from_utf8(&output.stdout).unwrap_or("<Not valid UTF-8>"),
+            "finished command stdout";
+            "id" => id,
+            "stdout" => from_utf8(&output.stdout).unwrap_or("<Not valid UTF-8>"),
         );
     }
     if !output.stderr.is_empty() {
         debug!(
             log,
-            "{id} - stderr: {}",
-            from_utf8(&output.stderr).unwrap_or("<Not valid UTF-8>"),
+            "finished command stderr";
+            "id" => id,
+            "stderr" => from_utf8(&output.stderr).unwrap_or("<Not valid UTF-8>"),
         );
     }
 }
@@ -245,7 +250,7 @@ impl Executor for HostExecutor {
     ) -> Result<Output, ExecutionError> {
         let id = self.prepare(command.as_std());
         let output = command.output().await.map_err(|err| {
-            error!(self.log, "{id} - Could not start program!");
+            error!(self.log, "Could not start program asynchronously!"; "id" => id);
             ExecutionError::ExecutionStart {
                 command: Input::from(command.as_std()).to_string(),
                 err,
@@ -257,7 +262,7 @@ impl Executor for HostExecutor {
     fn execute(&self, command: &mut Command) -> Result<Output, ExecutionError> {
         let id = self.prepare(command);
         let output = command.output().map_err(|err| {
-            error!(self.log, "{id} - Could not start program!");
+            error!(self.log, "Could not start program!"; "id" => id);
             ExecutionError::ExecutionStart {
                 command: Input::from(&*command).to_string(),
                 err,
