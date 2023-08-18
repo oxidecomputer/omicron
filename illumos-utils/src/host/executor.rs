@@ -4,7 +4,7 @@
 
 use crate::host::{
     byte_queue::ByteQueue,
-    error::ExecutionError,
+    error::{AsCommandStr, ExecutionError},
     input::Input,
     output::Output,
     output::OutputExt,
@@ -18,14 +18,6 @@ use std::process::{Command, Stdio};
 use std::str::from_utf8;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
-
-pub fn command_to_string(command: &std::process::Command) -> String {
-    command
-        .get_args()
-        .map(|s| s.to_string_lossy().into())
-        .collect::<Vec<String>>()
-        .join(" ")
-}
 
 fn to_space_separated_string<T, I>(iter: T) -> String
 where
@@ -170,7 +162,7 @@ impl FakeExecutor {
         log_output(&self.inner.log, id, &output);
 
         if !output.status.success() {
-            return Err(ExecutionError::from_output(command_to_string(command), &output));
+            return Err(ExecutionError::from_output(command, &output));
         }
         Ok(output)
     }
@@ -233,7 +225,7 @@ impl HostExecutor {
     ) -> Result<Output, ExecutionError> {
         log_output(&self.log, id, &output);
         if !output.status.success() {
-            return Err(ExecutionError::from_output(command_to_string(command), &output));
+            return Err(ExecutionError::from_output(command, &output));
         }
         Ok(output)
     }
@@ -272,7 +264,7 @@ impl Executor for HostExecutor {
         &self,
         command: &mut Command,
     ) -> Result<BoxedChild, ExecutionError> {
-        let command_str = command_to_string(&command);
+        let command_str = (&*command).into_str();
         Ok(Box::new(SpawnedChild {
             child: Some(
                 command
@@ -430,7 +422,7 @@ impl Child for FakeChild {
         let output = executor.wait_handler.lock().unwrap()(&mut self);
         log_output(&self.executor.log, self.id, &output);
         if !output.status.success() {
-            return Err(ExecutionError::from_output(command_to_string(&self.command), &output));
+            return Err(ExecutionError::from_output(&self.command, &output));
         }
         Ok(output)
     }

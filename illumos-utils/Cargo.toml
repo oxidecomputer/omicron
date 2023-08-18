@@ -22,6 +22,7 @@ omicron-common.workspace = true
 oxide-vpc.workspace = true
 schemars.workspace = true
 serde.workspace = true
+shlex.workspace = true
 slog.workspace = true
 smf.workspace = true
 thiserror.workspace = true

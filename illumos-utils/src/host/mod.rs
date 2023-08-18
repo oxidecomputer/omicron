@@ -14,8 +14,7 @@ pub const PFEXEC: &str = "/usr/bin/pfexec";
 
 pub use error::ExecutionError;
 pub use executor::{
-    command_to_string, BoxedExecutor, CommandSequence, FakeExecutor,
-    HostExecutor,
+    BoxedExecutor, CommandSequence, FakeExecutor, HostExecutor,
 };
 pub use input::Input;
 pub use output::{Output, OutputExt};

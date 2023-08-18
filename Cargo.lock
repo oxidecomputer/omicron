@@ -3387,6 +3387,7 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
+ "shlex",
  "slog",
  "smf",
  "thiserror",
