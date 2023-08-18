@@ -2,8 +2,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::host::error::{ExecutionError, FailureInfo};
-
 use std::os::unix::process::ExitStatusExt;
 use std::process::ExitStatus;
 
@@ -44,16 +42,4 @@ impl OutputExt for Output {
         self.stderr = stderr.as_ref().as_bytes().to_vec();
         self
     }
-}
-
-pub fn output_to_exec_error(
-    command_str: String,
-    output: &std::process::Output,
-) -> ExecutionError {
-    ExecutionError::CommandFailure(Box::new(FailureInfo {
-        command: command_str,
-        status: output.status,
-        stdout: String::from_utf8_lossy(&output.stdout).to_string(),
-        stderr: String::from_utf8_lossy(&output.stderr).to_string(),
-    }))
 }

@@ -5,7 +5,7 @@
 //! Operations for creating a system swap device.
 
 use illumos_utils::host::{
-    command_to_string, output_to_exec_error, BoxedExecutor, ExecutionError,
+    command_to_string, BoxedExecutor, ExecutionError,
 };
 use std::io::Read;
 use zeroize::Zeroize;
@@ -255,7 +255,7 @@ fn create_encrypted_swap_zvol(
     hdl.join().unwrap();
 
     if !output.status.success() {
-        return Err(SwapDeviceError::Zfs(output_to_exec_error(
+        return Err(SwapDeviceError::Zfs(ExecutionError::from_output(
             command_to_string(&command),
             &output,
         )));

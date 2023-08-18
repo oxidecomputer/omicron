@@ -12,7 +12,7 @@ mod output;
 
 pub const PFEXEC: &str = "/usr/bin/pfexec";
 
-pub use error::{output_to_exec_error, ExecutionError};
+pub use error::ExecutionError;
 pub use executor::{
     command_to_string, BoxedExecutor, CommandSequence, FakeExecutor,
     HostExecutor,

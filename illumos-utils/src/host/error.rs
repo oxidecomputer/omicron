@@ -39,14 +39,16 @@ pub enum ExecutionError {
     NotRunning,
 }
 
-pub fn output_to_exec_error(
-    command_str: String,
-    output: &std::process::Output,
-) -> ExecutionError {
-    ExecutionError::CommandFailure(Box::new(FailureInfo {
-        command: command_str,
-        status: output.status,
-        stdout: String::from_utf8_lossy(&output.stdout).to_string(),
-        stderr: String::from_utf8_lossy(&output.stderr).to_string(),
-    }))
+impl ExecutionError {
+    pub fn from_output<S: Into<String>>(
+        command_str: S,
+        output: &std::process::Output,
+    ) -> Self {
+        Self::CommandFailure(Box::new(FailureInfo {
+            command: command_str.into(),
+            status: output.status,
+            stdout: String::from_utf8_lossy(&output.stdout).to_string(),
+            stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+        }))
+    }
 }

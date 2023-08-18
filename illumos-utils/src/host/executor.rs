@@ -3,8 +3,11 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::host::{
-    byte_queue::ByteQueue, error::ExecutionError, input::Input,
-    output::output_to_exec_error, output::Output, output::OutputExt,
+    byte_queue::ByteQueue,
+    error::ExecutionError,
+    input::Input,
+    output::Output,
+    output::OutputExt,
 };
 
 use async_trait::async_trait;
@@ -167,10 +170,7 @@ impl FakeExecutor {
         log_output(&self.inner.log, id, &output);
 
         if !output.status.success() {
-            return Err(output_to_exec_error(
-                command_to_string(command),
-                &output,
-            ));
+            return Err(ExecutionError::from_output(command_to_string(command), &output));
         }
         Ok(output)
     }
@@ -233,10 +233,7 @@ impl HostExecutor {
     ) -> Result<Output, ExecutionError> {
         log_output(&self.log, id, &output);
         if !output.status.success() {
-            return Err(output_to_exec_error(
-                command_to_string(command),
-                &output,
-            ));
+            return Err(ExecutionError::from_output(command_to_string(command), &output));
         }
         Ok(output)
     }
@@ -358,10 +355,7 @@ impl Child for SpawnedChild {
             })?;
 
         if !output.status.success() {
-            return Err(output_to_exec_error(
-                self.command_str.clone(),
-                &output,
-            ));
+            return Err(ExecutionError::from_output(self.command_str, &output));
         }
 
         Ok(output)
@@ -436,10 +430,7 @@ impl Child for FakeChild {
         let output = executor.wait_handler.lock().unwrap()(&mut self);
         log_output(&self.executor.log, self.id, &output);
         if !output.status.success() {
-            return Err(output_to_exec_error(
-                command_to_string(&self.command),
-                &output,
-            ));
+            return Err(ExecutionError::from_output(command_to_string(&self.command), &output));
         }
         Ok(output)
     }
