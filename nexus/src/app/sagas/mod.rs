@@ -42,6 +42,9 @@ pub mod vpc_create;
 
 pub mod common_storage;
 
+#[cfg(test)]
+mod test_helpers;
+
 #[derive(Debug)]
 pub struct NexusSagaType;
 impl steno::SagaType for NexusSagaType {

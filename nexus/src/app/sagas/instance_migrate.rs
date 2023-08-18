@@ -708,59 +708,84 @@ mod tests {
             migrate_params: params::InstanceMigrate { dst_sled_id },
         };
 
-        let dag = create_saga_dag::<SagaInstanceMigrate>(params).unwrap();
-        for node in dag.get_nodes() {
-            info!(
-                log,
-                "Creating new saga which will fail at index {:?}", node.index();
-                "node_name" => node.name().as_ref(),
-                "label" => node.label(),
-            );
+        let make_params = || -> futures::future::BoxFuture<'_, Params> {
+            Box::pin({
+                async {
+                    let db_instance = fetch_db_instance(
+                        cptestctx,
+                        &opctx,
+                        instance.identity.id,
+                    )
+                    .await;
+                    Params {
+                        serialized_authn: authn::saga::Serialized::for_opctx(
+                            &opctx,
+                        ),
+                        instance: db_instance,
+                        migrate_params: params::InstanceMigrate { dst_sled_id },
+                    }
+                }
+            })
+        };
 
-            let runnable_saga =
-                nexus.create_runnable_saga(dag.clone()).await.unwrap();
-            nexus
-                .sec()
-                .saga_inject_error(runnable_saga.id(), node.index())
-                .await
-                .unwrap();
-            nexus
-                .run_saga(runnable_saga)
-                .await
-                .expect_err("Saga should have failed");
-
-            // Unwinding at any step should clear the migration IDs from the
-            // instance record and leave the instance's location otherwise
-            // untouched.
-            let new_db_instance =
-                fetch_db_instance(cptestctx, &opctx, instance.identity.id)
+        let after_saga = || -> futures::future::BoxFuture<'_, ()> {
+            Box::pin({
+                async {
+                    // Unwinding at any step should clear the migration IDs from
+                    // the instance record and leave the instance's location
+                    // otherwise untouched.
+                    let new_db_instance = fetch_db_instance(
+                        cptestctx,
+                        &opctx,
+                        instance.identity.id,
+                    )
                     .await;
 
-            assert!(new_db_instance.runtime().migration_id.is_none());
-            assert!(new_db_instance.runtime().dst_propolis_id.is_none());
-            assert_eq!(new_db_instance.runtime().sled_id, old_runtime.sled_id);
-            assert_eq!(
-                new_db_instance.runtime().propolis_id,
-                old_runtime.propolis_id
-            );
+                    assert!(new_db_instance.runtime().migration_id.is_none());
+                    assert!(new_db_instance
+                        .runtime()
+                        .dst_propolis_id
+                        .is_none());
+                    assert_eq!(
+                        new_db_instance.runtime().sled_id,
+                        old_runtime.sled_id
+                    );
+                    assert_eq!(
+                        new_db_instance.runtime().propolis_id,
+                        old_runtime.propolis_id
+                    );
 
-            // Ensure the instance can stop. This helps to check that destroying
-            // the migration destination (if one was ensured) doesn't advance
-            // the Propolis ID generation in a way that prevents the source from
-            // issuing further state updates.
-            instance_stop(cptestctx, &instance.identity.id).await;
-            instance_simulate(cptestctx, nexus, &instance.identity.id).await;
-            let new_db_instance =
-                fetch_db_instance(cptestctx, &opctx, instance.identity.id)
+                    // Ensure the instance can stop. This helps to check that
+                    // destroying the migration destination (if one was ensured)
+                    // doesn't advance the Propolis ID generation in a way that
+                    // prevents the source from issuing further state updates.
+                    instance_stop(cptestctx, &instance.identity.id).await;
+                    instance_simulate(cptestctx, nexus, &instance.identity.id)
+                        .await;
+                    let new_db_instance = fetch_db_instance(
+                        cptestctx,
+                        &opctx,
+                        instance.identity.id,
+                    )
                     .await;
-            assert_eq!(
-                new_db_instance.runtime().state.0,
-                InstanceState::Stopped
-            );
+                    assert_eq!(
+                        new_db_instance.runtime().state.0,
+                        InstanceState::Stopped
+                    );
 
-            // Restart the instance for the next iteration.
-            instance_start(cptestctx, &instance.identity.id).await;
-            instance_simulate(cptestctx, nexus, &instance.identity.id).await;
-        }
+                    // Restart the instance for the next iteration.
+                    instance_start(cptestctx, &instance.identity.id).await;
+                    instance_simulate(cptestctx, nexus, &instance.identity.id)
+                        .await;
+                }
+            })
+        };
+
+        crate::app::sagas::test_helpers::action_failure_can_unwind::<
+            SagaInstanceMigrate,
+            _,
+            _,
+        >(nexus, params, make_params, after_saga, log)
+        .await;
     }
 }

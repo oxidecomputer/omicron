@@ -632,65 +632,57 @@ mod test {
             instance: db_instance,
             ensure_network: true,
         };
-        let dag = create_saga_dag::<SagaInstanceStart>(params).unwrap();
-        let num_nodes = dag.get_nodes().count();
 
-        // Because the instance's state prior to the saga is a parameter, and
-        // even a failed saga execution attempt can change what's in CRDB, the
-        // saga must be recreated with new parameters after each iteration.
-        // Otherwise, later iterations will just try to use superseded
-        // generation numbers from prior generations.
-        for failure_index in 0..num_nodes {
-            let db_instance =
-                fetch_db_instance(cptestctx, &opctx, instance.identity.id)
-                    .await;
+        crate::app::sagas::test_helpers::action_failure_can_unwind::<
+            SagaInstanceStart,
+            _,
+            _,
+        >(
+            nexus,
+            params,
+            || {
+                Box::pin({
+                    async {
+                        let db_instance = fetch_db_instance(
+                            cptestctx,
+                            &opctx,
+                            instance.identity.id,
+                        )
+                        .await;
 
-            let params = Params {
-                serialized_authn: authn::saga::Serialized::for_opctx(&opctx),
-                instance: db_instance,
-                ensure_network: true,
-            };
+                        Params {
+                            serialized_authn:
+                                authn::saga::Serialized::for_opctx(&opctx),
+                            instance: db_instance,
+                            ensure_network: true,
+                        }
+                    }
+                })
+            },
+            || {
+                Box::pin({
+                    async {
+                        let new_db_instance = fetch_db_instance(
+                            cptestctx,
+                            &opctx,
+                            instance.identity.id,
+                        )
+                        .await;
 
-            let dag = create_saga_dag::<SagaInstanceStart>(params).unwrap();
-            let node = dag.get_nodes().nth(failure_index).unwrap();
-            info!(
-                log,
-                "Creating new saga that will fail at index {:?}", node.index();
-                "node_name" => node.name().as_ref(),
-                "label" => node.label()
-            );
+                        info!(log,
+                              "fetched instance runtime state after saga execution";
+                              "instance_id" => %instance.identity.id,
+                              "instance_runtime" => ?new_db_instance.runtime());
 
-            let runnable_saga =
-                nexus.create_runnable_saga(dag.clone()).await.unwrap();
-
-            nexus
-                .sec()
-                .saga_inject_error(runnable_saga.id(), node.index())
-                .await
-                .unwrap();
-
-            let saga_error = nexus
-                .run_saga_raw_result(runnable_saga)
-                .await
-                .expect("saga should have started successfully")
-                .kind
-                .expect_err("saga execution should have failed");
-
-            assert_eq!(saga_error.error_node_name, *node.name());
-
-            let new_db_instance =
-                fetch_db_instance(cptestctx, &opctx, instance.identity.id)
-                    .await;
-
-            info!(log, "fetched instance runtime state after saga execution";
-                  "instance_id" => %instance.identity.id,
-                  "instance_runtime" => ?new_db_instance.runtime());
-
-            assert_eq!(
-                new_db_instance.runtime().state.0,
-                InstanceState::Stopped
-            );
-        }
+                        assert_eq!(
+                            new_db_instance.runtime().state.0,
+                            InstanceState::Stopped
+                        );
+                    }
+                })
+            },
+            log,
+        ).await;
     }
 
     #[nexus_test(server = crate::Server)]

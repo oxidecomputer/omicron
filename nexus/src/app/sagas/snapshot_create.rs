@@ -546,7 +546,7 @@ async fn ssc_create_snapshot_record(
         project_id: params.project_id,
         disk_id: disk.id(),
         volume_id,
-        destination_volume_id: destination_volume_id,
+        destination_volume_id,
 
         gen: db::model::Generation::new(),
         state: db::model::SnapshotState::Creating,
@@ -1936,7 +1936,7 @@ mod test {
 
         let client = &cptestctx.external_client;
         let nexus = &cptestctx.server.apictx().nexus;
-        let mut disk_id = create_org_project_and_disk(&client).await;
+        let disk_id = create_org_project_and_disk(&client).await;
 
         // Build the saga DAG with the provided test parameters
         let opctx = test_opctx(&cptestctx);
@@ -1958,66 +1958,46 @@ mod test {
             Name::from_str(DISK_NAME).unwrap().into(),
             use_the_pantry,
         );
-        let mut dag = create_saga_dag::<SagaSnapshotCreate>(params).unwrap();
 
-        // The saga's input parameters include a disk UUID, which makes sense,
-        // since the snapshot is created from a disk.
-        //
-        // Unfortunately, for our idempotency checks, checking for a "clean
-        // slate" gets more expensive when we need to compare region allocations
-        // between the disk and the snapshot. If we can undo the snapshot
-        // provisioning AND delete the disk together, these checks are much
-        // simpler to write.
-        //
-        // So, in summary: We do some odd indexing here...
-        // ... because we re-create the whole DAG on each iteration...
-        // ... because we also delete the disk on each iteration, making the
-        // parameters invalid...
-        // ... because doing so provides a really easy-to-verify "clean slate"
-        // for us to test against.
-        let mut n: usize = 0;
-        while let Some(node) = dag.get_nodes().nth(n) {
-            n = n + 1;
+        // As a concession to the test helper, make sure the disk is gone
+        // before the first attempt to run the saga recreates it.
+        delete_disk(client, PROJECT_NAME, DISK_NAME).await;
+        crate::app::sagas::test_helpers::action_failure_can_unwind::<
+            SagaSnapshotCreate,
+            _,
+            _,
+        >(
+            nexus,
+            params,
+            || {
+                Box::pin({
+                    async {
+                        let disk_id =
+                            create_disk(client, PROJECT_NAME, DISK_NAME)
+                                .await
+                                .identity
+                                .id;
 
-            // Create a new saga for this node.
-            info!(
-                log,
-                "Creating new saga which will fail at index {:?}", node.index();
-                "node_name" => node.name().as_ref(),
-                "label" => node.label(),
-            );
-
-            let runnable_saga =
-                nexus.create_runnable_saga(dag.clone()).await.unwrap();
-
-            // Inject an error instead of running the node.
-            //
-            // This should cause the saga to unwind.
-            nexus
-                .sec()
-                .saga_inject_error(runnable_saga.id(), node.index())
-                .await
-                .unwrap();
-            nexus
-                .run_saga(runnable_saga)
-                .await
-                .expect_err("Saga should have failed");
-
-            delete_disk(client, PROJECT_NAME, DISK_NAME).await;
-            verify_clean_slate(cptestctx, &test).await;
-            disk_id =
-                create_disk(client, PROJECT_NAME, DISK_NAME).await.identity.id;
-
-            let params = new_test_params(
-                &opctx,
-                silo_id,
-                project_id,
-                disk_id,
-                Name::from_str(DISK_NAME).unwrap().into(),
-                use_the_pantry,
-            );
-            dag = create_saga_dag::<SagaSnapshotCreate>(params).unwrap();
-        }
+                        new_test_params(
+                            &opctx,
+                            silo_id,
+                            project_id,
+                            disk_id,
+                            Name::from_str(DISK_NAME).unwrap().into(),
+                            use_the_pantry,
+                        )
+                    }
+                })
+            },
+            || {
+                Box::pin(async {
+                    delete_disk(client, PROJECT_NAME, DISK_NAME).await;
+                    verify_clean_slate(cptestctx, &test).await;
+                })
+            },
+            log,
+        )
+        .await;
     }
 
     #[nexus_test(server = crate::Server)]

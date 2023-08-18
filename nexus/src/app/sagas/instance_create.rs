@@ -1679,50 +1679,24 @@ pub mod test {
 
         let params = new_test_params(&opctx, project_id);
 
-        // Each run of the test needs to use a distinct DAG so that it has a
-        // distinct instance ID. Instead of creating a DAG and iterating over
-        // each node to turn it into a failure point, create an initial DAG to
-        // find out how many nodes there are, then iterate over possible failure
-        // points, creating a new DAG each time.
-        let dag =
-            create_saga_dag::<SagaInstanceCreate>(params.clone()).unwrap();
-        let num_nodes = dag.get_nodes().count();
-
-        for failure_index in 0..num_nodes {
-            let dag =
-                create_saga_dag::<SagaInstanceCreate>(params.clone()).unwrap();
-
-            let node = dag.get_nodes().nth(failure_index).unwrap();
-            info!(
-                log,
-                "Creating new saga which will fail at index {:?}", node.index();
-                "node_name" => node.name().as_ref(),
-                "label" => node.label(),
-            );
-
-            let runnable_saga =
-                nexus.create_runnable_saga(dag.clone()).await.unwrap();
-
-            // Inject an error instead of running the node.
-            //
-            // This should cause the saga to unwind.
-            nexus
-                .sec()
-                .saga_inject_error(runnable_saga.id(), node.index())
-                .await
-                .unwrap();
-
-            let saga_error = nexus
-                .run_saga_raw_result(runnable_saga)
-                .await
-                .expect("saga should have started successfully")
-                .kind
-                .expect_err("saga execution should have failed");
-
-            assert_eq!(saga_error.error_node_name, *node.name());
-
-            verify_clean_slate(&cptestctx).await;
-        }
+        crate::app::sagas::test_helpers::action_failure_can_unwind::<
+            SagaInstanceCreate,
+            _,
+            _,
+        >(
+            nexus,
+            params,
+            || Box::pin(async { new_test_params(&opctx, project_id) }),
+            || {
+                Box::pin({
+                    async {
+                        verify_clean_slate(&cptestctx).await;
+                    }
+                })
+            },
+            log,
+        )
+        .await;
     }
 
     #[nexus_test(server = crate::Server)]
