@@ -54,7 +54,7 @@ trait GetMountpoint: AsRef<ZpoolName> {
     const MOUNTPOINT: &'static str;
     fn mountpoint(
         &self,
-        invoker: &impl Invoker,
+        invoker: &impl ZfsInvoker,
     ) -> Result<Option<Self::NewType>, ZfsGetError> {
         if invoker.zfs_get_prop(self.as_ref().to_string(), "mounted")? == "yes"
         {
@@ -66,7 +66,8 @@ trait GetMountpoint: AsRef<ZpoolName> {
         }
     }
 }
-struct DumpSetupWorker<I: Invoker> {
+struct DumpSetupWorker<CDA: CoreDumpAdmInvoker, ZFS: ZfsInvoker, Z: ZoneInvoker>
+{
     core_dataset_names: Vec<CoreZpool>,
     debug_dataset_names: Vec<DebugZpool>,
 
@@ -81,11 +82,15 @@ struct DumpSetupWorker<I: Invoker> {
     savecored_slices: HashSet<DumpSlicePath>,
 
     log: Logger,
-    invoker: I,
+    coredumpadm_invoker: CDA,
+    zfs_invoker: ZFS,
+    zone_invoker: Z,
 }
 
 pub struct DumpSetup {
-    worker: Arc<std::sync::Mutex<DumpSetupWorker<Real>>>,
+    worker: Arc<
+        std::sync::Mutex<DumpSetupWorker<RealCoreDumpAdm, RealZfs, RealZone>>,
+    >,
     _poller: std::thread::JoinHandle<()>,
     log: Logger,
 }
@@ -93,7 +98,9 @@ pub struct DumpSetup {
 impl DumpSetup {
     pub fn new(log: &Logger) -> Self {
         let worker = Arc::new(std::sync::Mutex::new(DumpSetupWorker::new(
-            Real {},
+            RealCoreDumpAdm {},
+            RealZfs {},
+            RealZone {},
             log.new(o!("component" => "DumpSetup-worker")),
         )));
         let worker_weak = Arc::downgrade(&worker);
@@ -173,8 +180,12 @@ impl DumpSetup {
         });
     }
 
-    fn poll_file_archival<I: Invoker>(
-        worker: Weak<std::sync::Mutex<DumpSetupWorker<I>>>,
+    fn poll_file_archival<
+        CDA: CoreDumpAdmInvoker,
+        ZFS: ZfsInvoker,
+        Z: ZoneInvoker,
+    >(
+        worker: Weak<std::sync::Mutex<DumpSetupWorker<CDA, ZFS, Z>>>,
         log: Logger,
     ) {
         info!(log, "DumpSetup poll loop started.");
@@ -220,13 +231,16 @@ pub(self) enum ZfsGetError {
     Parse(#[from] std::num::ParseIntError),
 }
 
-trait Invoker {
+trait CoreDumpAdmInvoker {
     fn coreadm(&self, core_dir: &Utf8PathBuf) -> Result<(), ExecutionError>;
     fn dumpadm(
         &self,
         dump_slice: &Utf8PathBuf,
         savecore_dir: Option<&Utf8PathBuf>,
     ) -> Result<Option<OsString>, ExecutionError>;
+}
+
+trait ZfsInvoker {
     fn zfs_get_prop(
         &self,
         mountpoint_or_name: impl AsRef<str> + Sized,
@@ -260,13 +274,17 @@ trait Invoker {
         zpool: &ZpoolName,
         mountpoint: &'static str,
     ) -> Utf8PathBuf;
+}
 
+trait ZoneInvoker {
     fn get_zones(&self) -> Result<Vec<Zone>, ArchiveLogsError>;
 }
 
-struct Real {}
+struct RealCoreDumpAdm {}
+struct RealZfs {}
+struct RealZone {}
 
-impl Invoker for Real {
+impl CoreDumpAdmInvoker for RealCoreDumpAdm {
     fn coreadm(&self, core_dir: &Utf8PathBuf) -> Result<(), ExecutionError> {
         let mut cmd = CoreAdm::new();
 
@@ -344,7 +362,9 @@ impl Invoker for Real {
         }
         Ok(None)
     }
+}
 
+impl ZfsInvoker for RealZfs {
     fn zfs_get_prop(
         &self,
         mountpoint_or_name: impl AsRef<str> + Sized,
@@ -366,7 +386,9 @@ impl Invoker for Real {
     ) -> Utf8PathBuf {
         zpool.dataset_mountpoint(mountpoint)
     }
+}
 
+impl ZoneInvoker for RealZone {
     fn get_zones(&self) -> Result<Vec<Zone>, ArchiveLogsError> {
         Ok(zone::Adm::list_blocking()?
             .into_iter()
@@ -375,8 +397,15 @@ impl Invoker for Real {
     }
 }
 
-impl<I: Invoker> DumpSetupWorker<I> {
-    fn new(invoker: I, log: Logger) -> Self {
+impl<CDA: CoreDumpAdmInvoker, ZFS: ZfsInvoker, Z: ZoneInvoker>
+    DumpSetupWorker<CDA, ZFS, Z>
+{
+    fn new(
+        coredumpadm_invoker: CDA,
+        zfs_invoker: ZFS,
+        zone_invoker: Z,
+        log: Logger,
+    ) -> Self {
         Self {
             core_dataset_names: vec![],
             debug_dataset_names: vec![],
@@ -388,7 +417,9 @@ impl<I: Invoker> DumpSetupWorker<I> {
             known_core_dirs: vec![],
             savecored_slices: Default::default(),
             log,
-            invoker,
+            coredumpadm_invoker,
+            zfs_invoker,
+            zone_invoker,
         }
     }
 
@@ -412,13 +443,13 @@ impl<I: Invoker> DumpSetupWorker<I> {
         self.known_debug_dirs = self
             .debug_dataset_names
             .iter()
-            .flat_map(|ds| ds.mountpoint(&self.invoker))
+            .flat_map(|ds| ds.mountpoint(&self.zfs_invoker))
             .flatten()
             .collect();
         self.known_core_dirs = self
             .core_dataset_names
             .iter()
-            .flat_map(|ds| ds.mountpoint(&self.invoker))
+            .flat_map(|ds| ds.mountpoint(&self.zfs_invoker))
             .flatten()
             .collect();
     }
@@ -432,7 +463,7 @@ impl<I: Invoker> DumpSetupWorker<I> {
         // below a certain usage threshold.
         self.known_debug_dirs.sort_by_cached_key(
             |mountpoint: &DebugDataset| {
-                match self.invoker.below_thresh(mountpoint.as_ref(), DATASET_USAGE_PERCENT_CHOICE) {
+                match self.zfs_invoker.below_thresh(mountpoint.as_ref(), DATASET_USAGE_PERCENT_CHOICE) {
                     Ok((below, used)) => {
                         let priority = if below { 0 } else { 1 };
                         (priority, used, mountpoint.clone())
@@ -448,7 +479,7 @@ impl<I: Invoker> DumpSetupWorker<I> {
         self.known_core_dirs.sort_by_cached_key(|mnt| {
             // these get archived periodically anyway, pick one with room
             let available = self
-                .invoker
+                .zfs_invoker
                 .zfs_get_integer(mnt.as_ref(), "available")
                 .unwrap_or(0);
             (u64::MAX - available, mnt.clone())
@@ -460,13 +491,13 @@ impl<I: Invoker> DumpSetupWorker<I> {
                 self.chosen_debug_dir = None;
             } else {
                 match self
-                    .invoker
+                    .zfs_invoker
                     .below_thresh(x.as_ref(), DATASET_USAGE_PERCENT_CLEANUP)
                 {
                     Ok((true, _)) => {}
                     Ok((false, _)) => {
                         if self.known_debug_dirs.iter().any(|x| {
-                            self.invoker
+                            self.zfs_invoker
                                 .below_thresh(
                                     x.as_ref(),
                                     DATASET_USAGE_PERCENT_CHOICE,
@@ -512,7 +543,7 @@ impl<I: Invoker> DumpSetupWorker<I> {
         if self.chosen_core_dir.is_none() {
             for core_dir in &self.known_core_dirs {
                 // tell the system to write *userspace process* cores here.
-                match self.invoker.coreadm(core_dir.as_ref()) {
+                match self.coredumpadm_invoker.coreadm(core_dir.as_ref()) {
                     Ok(()) => {
                         self.chosen_core_dir = Some(core_dir.clone());
                         info!(
@@ -565,7 +596,7 @@ impl<I: Invoker> DumpSetupWorker<I> {
                             // Have dumpadm write the config for crash dumps to be
                             // on this slice, at least, until a U.2 comes along.
                             match self
-                                .invoker
+                                .coredumpadm_invoker
                                 .dumpadm(dump_slice.as_ref(), None)
                             {
                                 Ok(_) => {
@@ -625,8 +656,9 @@ impl<I: Invoker> DumpSetupWorker<I> {
             // in the event of a kernel crash
             if changed_slice {
                 if let Some(dump_slice) = &self.chosen_dump_slice {
-                    if let Err(err) =
-                        self.invoker.dumpadm(dump_slice.as_ref(), None)
+                    if let Err(err) = self
+                        .coredumpadm_invoker
+                        .dumpadm(dump_slice.as_ref(), None)
                     {
                         error!(self.log, "Could not restore dump slice to {dump_slice:?}: {err:?}");
                     }
@@ -709,7 +741,7 @@ impl<I: Invoker> DumpSetupWorker<I> {
             .chosen_debug_dir
             .as_ref()
             .ok_or(ArchiveLogsError::NoDebugDirYet)?;
-        let oxz_zones = self.invoker.get_zones()?;
+        let oxz_zones = self.zone_invoker.get_zones()?;
         for zone in oxz_zones {
             let logdir = if zone.global() {
                 PathBuf::from("/var/svc/log")
@@ -796,7 +828,10 @@ impl<I: Invoker> DumpSetupWorker<I> {
 
         let savecore_dir = self.chosen_debug_dir.clone().unwrap().0;
 
-        match self.invoker.dumpadm(dump_slice.as_ref(), Some(&savecore_dir)) {
+        match self
+            .coredumpadm_invoker
+            .dumpadm(dump_slice.as_ref(), Some(&savecore_dir))
+        {
             Ok(saved) => {
                 self.savecored_slices.insert(dump_slice.clone());
                 Ok(saved)
@@ -849,10 +884,11 @@ impl<I: Invoker> DumpSetupWorker<I> {
         &self,
         debug_dir: &DebugDataset,
     ) -> Result<CleanupDirInfo, CleanupError> {
-        let used =
-            self.invoker.zfs_get_integer(debug_dir.as_ref(), ZFS_PROP_USED)?;
+        let used = self
+            .zfs_invoker
+            .zfs_get_integer(debug_dir.as_ref(), ZFS_PROP_USED)?;
         let available = self
-            .invoker
+            .zfs_invoker
             .zfs_get_integer(debug_dir.as_ref(), ZFS_PROP_AVAILABLE)?;
         let capacity = used + available;
 
@@ -955,15 +991,20 @@ mod tests {
     }
 
     #[derive(Default)]
-    struct Fake {
+    struct FakeCoreDumpAdm {}
+    #[derive(Default)]
+    struct FakeZfs {
         pub zpool_props: HashMap<
             &'static str,
             HashMap<&'static str, Result<String, ZfsGetError>>,
         >,
+    }
+    #[derive(Default)]
+    struct FakeZone {
         pub zones: Vec<Zone>,
     }
 
-    impl Invoker for Fake {
+    impl CoreDumpAdmInvoker for FakeCoreDumpAdm {
         fn coreadm(
             &self,
             _core_dir: &Utf8PathBuf,
@@ -978,7 +1019,8 @@ mod tests {
         ) -> Result<Option<OsString>, ExecutionError> {
             Ok(None)
         }
-
+    }
+    impl ZfsInvoker for FakeZfs {
         fn zfs_get_prop(
             &self,
             mountpoint_or_name: impl AsRef<str> + Sized,
@@ -1025,7 +1067,8 @@ mod tests {
             )
             .join(mountpoint)
         }
-
+    }
+    impl ZoneInvoker for FakeZone {
         fn get_zones(&self) -> Result<Vec<Zone>, ArchiveLogsError> {
             Ok(self.zones.clone())
         }
@@ -1039,15 +1082,16 @@ mod tests {
         const NOT_MOUNTED_INTERNAL: &str =
             "oxi_acab2069-6e63-6c75-de73-20c06c756db0";
         let mut worker = DumpSetupWorker::new(
-            Fake {
+            FakeCoreDumpAdm::default(),
+            FakeZfs {
                 zpool_props: [(
                     NOT_MOUNTED_INTERNAL,
                     [("mounted", Ok("no".to_string()))].into_iter().collect(),
                 )]
                 .into_iter()
                 .collect(),
-                ..Default::default()
             },
+            FakeZone::default(),
             logctx.log.clone(),
         );
 
@@ -1080,7 +1124,8 @@ mod tests {
         let err_zpool = CoreZpool(ZpoolName::from_str(ERROR_INTERNAL).unwrap());
         const ZPOOL_MNT: &str = "/path/to/internal/zpool";
         let mut worker = DumpSetupWorker::new(
-            Fake {
+            FakeCoreDumpAdm::default(),
+            FakeZfs {
                 zpool_props: [
                     (
                         NOT_MOUNTED_INTERNAL,
@@ -1109,8 +1154,8 @@ mod tests {
                 ]
                 .into_iter()
                 .collect(),
-                ..Default::default()
             },
+            FakeZone::default(),
             logctx.log.clone(),
         );
 
@@ -1171,8 +1216,12 @@ mod tests {
         let logctx = omicron_test_utils::dev::test_setup_log(
             "test_savecore_and_dumpadm_not_called_when_occupied_and_no_dir",
         );
-        let mut worker =
-            DumpSetupWorker::new(Fake::default(), logctx.log.clone());
+        let mut worker = DumpSetupWorker::new(
+            FakeCoreDumpAdm::default(),
+            FakeZfs::default(),
+            FakeZone::default(),
+            logctx.log.clone(),
+        );
         let tempdir = TempDir::new().unwrap();
         let (occupied, _) = populate_tempdir_with_fake_dumps(&tempdir);
 
@@ -1194,7 +1243,9 @@ mod tests {
             "test_dumpadm_called_when_vacant_slice_but_no_dir",
         );
         let mut worker = DumpSetupWorker::new(
-            Fake { zpool_props: Default::default(), ..Default::default() },
+            FakeCoreDumpAdm::default(),
+            FakeZfs::default(),
+            FakeZone::default(),
             logctx.log.clone(),
         );
         let tempdir = TempDir::new().unwrap();
@@ -1219,7 +1270,8 @@ mod tests {
             "oxp_446f6e74-4469-6557-6f6e-646572696e67";
         const ZPOOL_MNT: &str = "/path/to/external/zpool";
         let mut worker = DumpSetupWorker::new(
-            Fake {
+            FakeCoreDumpAdm::default(),
+            FakeZfs {
                 zpool_props: [(
                     MOUNTED_EXTERNAL,
                     [
@@ -1231,8 +1283,8 @@ mod tests {
                 )]
                 .into_iter()
                 .collect(),
-                ..Default::default()
             },
+            FakeZone::default(),
             logctx.log.clone(),
         );
         let tempdir = TempDir::new().unwrap();
@@ -1275,7 +1327,8 @@ mod tests {
         const MOUNTED_EXTERNAL: &str =
             "oxp_446f6e74-4469-6557-6f6e-646572696e67";
         let mut worker = DumpSetupWorker::new(
-            Fake {
+            FakeCoreDumpAdm::default(),
+            FakeZfs {
                 zpool_props: [
                     (
                         MOUNTED_INTERNAL,
@@ -1298,8 +1351,8 @@ mod tests {
                 ]
                 .into_iter()
                 .collect(),
-                zones: vec![zone.clone()],
             },
+            FakeZone { zones: vec![zone.clone()] },
             logctx.log.clone(),
         );
 
