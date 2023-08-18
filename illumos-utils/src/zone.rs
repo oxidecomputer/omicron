@@ -54,7 +54,7 @@ pub enum Operation {
 }
 
 #[derive(thiserror::Error, Debug)]
-#[error("{0}")]
+#[error(transparent)]
 enum AdmErrorVariant {
     Execution(#[from] ExecutionError),
     Adm(#[from] zone::ZoneError),
@@ -902,7 +902,8 @@ impl Zones {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::host::{CommandSequence, FakeExecutor, Input, OutputExt};
+    use crate::host::fake::{CommandSequence, FakeExecutor};
+    use crate::host::{Input, OutputExt};
     use omicron_test_utils::dev;
     use std::process::Output;
 

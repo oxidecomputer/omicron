@@ -2,105 +2,31 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+//! A "fake" [Executor] implementation, which can respond to host requests.
+
+use super::executor::{
+    log_input, log_output, BoxedChild, BoxedExecutor, Child, Executor,
+};
+
 use crate::host::{
-    byte_queue::ByteQueue,
-    error::{AsCommandStr, ExecutionError},
-    input::Input,
-    output::Output,
+    byte_queue::ByteQueue, error::ExecutionError, input::Input, output::Output,
     output::OutputExt,
 };
 
 use async_trait::async_trait;
-use itertools::Itertools;
-use slog::{debug, error, info, Logger};
+use slog::Logger;
 use std::io::{Read, Write};
-use std::process::{Command, Stdio};
-use std::str::from_utf8;
+use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
-fn to_space_separated_string<T, I>(iter: T) -> String
-where
-    T: IntoIterator<Item = I>,
-    I: std::fmt::Debug,
-{
-    Itertools::intersperse(
-        iter.into_iter().map(|arg| format!("{arg:?}")),
-        " ".into(),
-    )
-    .collect::<String>()
-}
-
-fn log_input(log: &Logger, id: u64, command: &Command) {
-    info!(
-        log,
-        "running command via executor"; "id" => id, "command" => %Input::from(command)
-    );
-    debug!(
-        log,
-        "running command via executor"; "id" => id, "envs" => %to_space_separated_string(command.get_envs())
-    );
-}
-
-fn log_output(log: &Logger, id: u64, output: &Output) {
-    info!(
-        log,
-        "finished running command via executor";
-        "id" => id,
-        "succeeded" => output.status.success(),
-        "status" => output.status.code()
-    );
-    if !output.stdout.is_empty() {
-        debug!(
-            log,
-            "finished command stdout";
-            "id" => id,
-            "stdout" => from_utf8(&output.stdout).unwrap_or("<Not valid UTF-8>"),
-        );
-    }
-    if !output.stderr.is_empty() {
-        debug!(
-            log,
-            "finished command stderr";
-            "id" => id,
-            "stderr" => from_utf8(&output.stderr).unwrap_or("<Not valid UTF-8>"),
-        );
-    }
-}
-
-/// Describes the commonly-used "safe-to-reference" type describing the
-/// Executor as a trait object.
-pub type BoxedExecutor = Arc<dyn Executor>;
-
-/// Describes an "executor", which can run [Command]s and return a response.
-///
-/// - In production, this is usually simply a [HostExecutor].
-/// - Under test, this can be customized, and a [FakeExecutor] may be used.
-#[async_trait]
-pub trait Executor: Send + Sync {
-    /// Executes a task, waiting for it to complete, and returning output.
-    async fn execute_async(
-        &self,
-        command: &mut tokio::process::Command,
-    ) -> Result<Output, ExecutionError>;
-
-    /// Executes a task, waiting for it to complete, and returning output.
-    fn execute(&self, command: &mut Command) -> Result<Output, ExecutionError>;
-
-    /// Spawns a task, without waiting for it to complete.
-    fn spawn(
-        &self,
-        command: &mut Command,
-    ) -> Result<BoxedChild, ExecutionError>;
-}
-
 /// Handler called when spawning a fake child process
-pub type SpawnFn = dyn FnMut(&mut FakeChild) + Send + Sync;
-pub type BoxedSpawnFn = Box<SpawnFn>;
+type SpawnFn = dyn FnMut(&mut FakeChild) + Send + Sync;
+type BoxedSpawnFn = Box<SpawnFn>;
 
 /// Handler called when awaiting a fake child process
-pub type WaitFn = dyn FnMut(&mut FakeChild) -> Output + Send + Sync;
-pub type BoxedWaitFn = Box<WaitFn>;
+type WaitFn = dyn FnMut(&mut FakeChild) -> Output + Send + Sync;
+type BoxedWaitFn = Box<WaitFn>;
 
 pub(crate) struct FakeExecutorInner {
     log: Logger,
@@ -190,163 +116,6 @@ impl Executor for FakeExecutor {
         log_input(&self.inner.log, id, command);
 
         Ok(FakeChild::new(id, command, self.inner.clone()))
-    }
-}
-
-pub struct HostExecutor {
-    log: slog::Logger,
-    counter: std::sync::atomic::AtomicU64,
-}
-
-impl HostExecutor {
-    pub fn new(log: Logger) -> Arc<Self> {
-        Arc::new(Self { log, counter: AtomicU64::new(0) })
-    }
-
-    pub fn as_executor(self: Arc<Self>) -> BoxedExecutor {
-        self
-    }
-
-    fn prepare(&self, command: &Command) -> u64 {
-        let id = self.counter.fetch_add(1, Ordering::SeqCst);
-        log_input(&self.log, id, command);
-        id
-    }
-
-    fn finalize(
-        &self,
-        command: &Command,
-        id: u64,
-        output: Output,
-    ) -> Result<Output, ExecutionError> {
-        log_output(&self.log, id, &output);
-        if !output.status.success() {
-            return Err(ExecutionError::from_output(command, &output));
-        }
-        Ok(output)
-    }
-}
-
-#[async_trait]
-impl Executor for HostExecutor {
-    async fn execute_async(
-        &self,
-        command: &mut tokio::process::Command,
-    ) -> Result<Output, ExecutionError> {
-        let id = self.prepare(command.as_std());
-        let output = command.output().await.map_err(|err| {
-            error!(self.log, "Could not start program asynchronously!"; "id" => id);
-            ExecutionError::ExecutionStart {
-                command: Input::from(command.as_std()).to_string(),
-                err,
-            }
-        })?;
-        self.finalize(command.as_std(), id, output)
-    }
-
-    fn execute(&self, command: &mut Command) -> Result<Output, ExecutionError> {
-        let id = self.prepare(command);
-        let output = command.output().map_err(|err| {
-            error!(self.log, "Could not start program!"; "id" => id);
-            ExecutionError::ExecutionStart {
-                command: Input::from(&*command).to_string(),
-                err,
-            }
-        })?;
-        self.finalize(command, id, output)
-    }
-
-    fn spawn(
-        &self,
-        command: &mut Command,
-    ) -> Result<BoxedChild, ExecutionError> {
-        let command_str = (&*command).into_str();
-        Ok(Box::new(SpawnedChild {
-            child: Some(
-                command
-                    .stdout(Stdio::piped())
-                    .stderr(Stdio::piped())
-                    .spawn()
-                    .map_err(|err| ExecutionError::ExecutionStart {
-                    command: command_str.clone(),
-                    err,
-                })?,
-            ),
-            command_str,
-        }))
-    }
-}
-
-/// A wrapper around a spawned [Child] process.
-pub type BoxedChild = Box<dyn Child>;
-
-/// A child process spawned by the executor.
-pub trait Child: Send {
-    /// Accesses the stdin of the spawned child, as a Writer.
-    fn take_stdin(&mut self) -> Option<Box<dyn Write + Send>>;
-
-    /// Accesses the stdout of the spawned child, as a Reader.
-    fn take_stdout(&mut self) -> Option<Box<dyn Read + Send>>;
-
-    /// Accesses the stderr of the spawned child, as a Reader.
-    fn take_stderr(&mut self) -> Option<Box<dyn Read + Send>>;
-
-    /// OS-assigned PID identifier for the child
-    fn id(&self) -> u32;
-
-    /// Waits for the child to complete, and returns the output.
-    fn wait(self: Box<Self>) -> Result<Output, ExecutionError>;
-}
-
-/// A real, host-controlled child process
-pub struct SpawnedChild {
-    command_str: String,
-    child: Option<std::process::Child>,
-}
-
-impl Child for SpawnedChild {
-    fn take_stdin(&mut self) -> Option<Box<dyn Write + Send>> {
-        self.child
-            .as_mut()?
-            .stdin
-            .take()
-            .map(|s| Box::new(s) as Box<dyn Write + Send>)
-    }
-
-    fn take_stdout(&mut self) -> Option<Box<dyn Read + Send>> {
-        self.child
-            .as_mut()?
-            .stdout
-            .take()
-            .map(|s| Box::new(s) as Box<dyn Read + Send>)
-    }
-
-    fn take_stderr(&mut self) -> Option<Box<dyn Read + Send>> {
-        self.child
-            .as_mut()?
-            .stderr
-            .take()
-            .map(|s| Box::new(s) as Box<dyn Read + Send>)
-    }
-
-    fn id(&self) -> u32 {
-        self.child.as_ref().expect("No child").id()
-    }
-
-    fn wait(mut self: Box<Self>) -> Result<Output, ExecutionError> {
-        let output =
-            self.child.take().unwrap().wait_with_output().map_err(|err| {
-                ExecutionError::ExecutionStart {
-                    command: self.command_str.clone(),
-                    err,
-                }
-            })?;
-
-        if !output.status.success() {
-            return Err(ExecutionError::from_output(self.command_str, &output));
-        }
-
-        Ok(output)
     }
 }
 

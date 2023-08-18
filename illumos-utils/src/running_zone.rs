@@ -1086,16 +1086,20 @@ pub enum InstallZoneError {
         err: crate::dladm::CreateVnicError,
     },
 
-    #[error("Failed to install zone '{zone}' from '{image_path}': {err}")]
-    InstallZone {
-        zone: String,
-        image_path: Utf8PathBuf,
-        #[source]
-        err: crate::zone::AdmError,
-    },
+    #[error(transparent)]
+    InstallZone(Box<InstallFailure>),
 
     #[error("Failed to find zone image '{image}' from {paths:?}")]
     ImageNotFound { image: String, paths: Vec<Utf8PathBuf> },
+}
+
+#[derive(thiserror::Error, Debug)]
+#[error("Failed to install zone '{zone}' from '{image_path}': {err}")]
+pub struct InstallFailure {
+    zone: String,
+    image_path: Utf8PathBuf,
+    #[source]
+    err: crate::zone::AdmError,
 }
 
 pub struct InstalledZone {
@@ -1231,10 +1235,12 @@ impl InstalledZone {
             limit_priv,
         )
         .await
-        .map_err(|err| InstallZoneError::InstallZone {
-            zone: full_zone_name.to_string(),
-            image_path: zone_image_path.clone(),
-            err,
+        .map_err(|err| {
+            InstallZoneError::InstallZone(Box::new(InstallFailure {
+                zone: full_zone_name.to_string(),
+                image_path: zone_image_path.clone(),
+                err,
+            }))
         })?;
 
         Ok(InstalledZone {

@@ -2865,7 +2865,8 @@ mod test {
             Etherstub, BOOTSTRAP_ETHERSTUB_NAME, UNDERLAY_ETHERSTUB_NAME,
             UNDERLAY_ETHERSTUB_VNIC_NAME,
         },
-        host::{CommandSequence, FakeExecutor, Input, Output, OutputExt},
+        host::fake::{CommandSequence, FakeExecutor},
+        host::{Input, Output, OutputExt},
         zone::{ZLOGIN, ZONEADM, ZONECFG},
     };
     use key_manager::{

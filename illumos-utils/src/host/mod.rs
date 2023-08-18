@@ -13,8 +13,6 @@ mod output;
 pub const PFEXEC: &str = "/usr/bin/pfexec";
 
 pub use error::ExecutionError;
-pub use executor::{
-    BoxedExecutor, CommandSequence, FakeExecutor, HostExecutor,
-};
+pub use executor::*;
 pub use input::Input;
 pub use output::{Output, OutputExt};

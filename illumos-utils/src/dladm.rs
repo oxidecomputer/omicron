@@ -560,7 +560,8 @@ impl Dladm {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::host::{CommandSequence, FakeExecutor, Input, OutputExt};
+    use crate::host::fake::{CommandSequence, FakeExecutor};
+    use crate::host::{Input, OutputExt};
     use omicron_test_utils::dev;
     use std::process::Output;
 

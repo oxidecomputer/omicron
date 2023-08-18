@@ -1161,7 +1161,8 @@ mod tests {
         let engine = UpdateEngine::new(&logctx.log, event_sender);
         let log = logctx.log.clone();
         let executor =
-            illumos_utils::host::FakeExecutor::new(log.clone()).as_executor();
+            illumos_utils::host::fake::FakeExecutor::new(log.clone())
+                .as_executor();
         engine
             .new_step(
                 InstallinatorComponent::Both,

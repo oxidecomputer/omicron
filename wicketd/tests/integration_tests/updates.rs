@@ -11,7 +11,7 @@ use camino_tempfile::Utf8TempDir;
 use clap::Parser;
 use gateway_messages::SpPort;
 use gateway_test_utils::setup as gateway_setup;
-use illumos_utils::host::FakeExecutor;
+use illumos_utils::host::fake::FakeExecutor;
 use installinator::HOST_PHASE_2_FILE_NAME;
 use omicron_common::{
     api::internal::nexus::KnownArtifactKind,

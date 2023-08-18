@@ -259,7 +259,7 @@ impl Deletable for VnicDestruction {
 mod test {
     use super::*;
     use crate::dladm::Etherstub;
-    use crate::host::FakeExecutor;
+    use crate::host::fake::FakeExecutor;
     use omicron_test_utils::dev;
 
     #[tokio::test]
