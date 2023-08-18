@@ -250,6 +250,7 @@ impl BootstrapAgentStartup {
             config.sidecar_revision.clone(),
             config.switch_zone_maghemite_links.clone(),
             storage_manager.resources().clone(),
+            storage_manager.zone_bundler().clone(),
         );
 
         Ok(Self {

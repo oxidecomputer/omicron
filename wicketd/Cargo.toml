@@ -18,6 +18,7 @@ dropshot.workspace = true
 futures.workspace = true
 gateway-messages.workspace = true
 hex.workspace = true
+hubtools.workspace = true
 http.workspace = true
 hyper.workspace = true
 illumos-utils.workspace = true

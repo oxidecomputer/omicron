@@ -14,6 +14,7 @@ use crate::params::{
 };
 use crate::storage_manager::StorageResources;
 use crate::zone_bundle::BundleError;
+use crate::zone_bundle::ZoneBundler;
 use illumos_utils::dladm::Etherstub;
 use illumos_utils::host::BoxedExecutor;
 use illumos_utils::link::VnicAllocator;
@@ -64,6 +65,7 @@ struct InstanceManagerInternal {
     vnic_allocator: VnicAllocator<Etherstub>,
     port_manager: PortManager,
     storage: StorageResources,
+    zone_bundler: ZoneBundler,
 }
 
 /// All instances currently running on the sled.
@@ -80,6 +82,7 @@ impl InstanceManager {
         etherstub: Etherstub,
         port_manager: PortManager,
         storage: StorageResources,
+        zone_bundler: ZoneBundler,
     ) -> Result<InstanceManager, Error> {
         Ok(InstanceManager {
             inner: Arc::new(InstanceManagerInternal {
@@ -95,6 +98,7 @@ impl InstanceManager {
                 ),
                 port_manager,
                 storage,
+                zone_bundler,
             }),
         })
     }
@@ -219,6 +223,7 @@ impl InstanceManager {
                     self.inner.port_manager.clone(),
                     self.inner.nexus_client.clone(),
                     self.inner.storage.clone(),
+                    self.inner.zone_bundler.clone(),
                 )?;
                 let instance_clone = instance.clone();
                 let _old = instances
