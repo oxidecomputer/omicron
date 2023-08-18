@@ -47,12 +47,8 @@ fn log_output(log: &Logger, id: u64, output: &Output) {
         log,
         "finished running command via executor";
         "id" => id,
-        "result" => if output.status.success() { "OK" } else { "ERROR" },
-        "status" => output
-            .status
-            .code()
-            .map(|c| c.to_string())
-            .unwrap_or_else(|| "none".to_string()),
+        "succeeded" => output.status.success(),
+        "status" => output.status.code()
     );
     if !output.stdout.is_empty() {
         debug!(
