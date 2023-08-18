@@ -18,7 +18,6 @@ use serde::{Deserialize, Serialize};
 use sled_agent_client::types::InstanceStateRequested;
 use slog::info;
 use steno::ActionError;
-use uuid::Uuid;
 
 /// Parameters to the instance start saga.
 #[derive(Debug, Deserialize, Serialize)]
@@ -193,10 +192,16 @@ async fn sis_move_to_starting_undo(
         ..runtime_state
     };
 
-    let _ = osagactx
+    if !osagactx
         .datastore()
         .instance_update_runtime(&params.instance.id(), &new_runtime)
-        .await?;
+        .await?
+    {
+        info!(osagactx.log(),
+              "did not return instance to Stopped: old generation number";
+              "instance_id" => %params.instance.id());
+    }
+
     Ok(())
 }
 
@@ -364,14 +369,14 @@ async fn sis_v2p_ensure_undo(
         return Ok(());
     }
 
+    let instance_id = params.instance.id();
     info!(osagactx.log(), "start saga: undoing v2p configuration";
-          "instance_id" => %params.instance.id());
+          "instance_id" => %instance_id);
 
     let opctx = crate::context::op_context_for_saga_action(
         &sagactx,
         &params.serialized_authn,
     );
-    let instance_id = sagactx.lookup::<Uuid>("instance_id")?;
 
     osagactx
         .nexus()
@@ -426,7 +431,7 @@ async fn sis_ensure_registered_undo(
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
     let datastore = osagactx.datastore();
-    let instance_id = sagactx.lookup::<Uuid>("instance_id")?;
+    let instance_id = params.instance.id();
     let opctx = crate::context::op_context_for_saga_action(
         &sagactx,
         &params.serialized_authn,
@@ -508,6 +513,7 @@ mod test {
     use sled_agent_client::TestInterfaces as _;
     use std::num::NonZeroU32;
     use std::sync::Arc;
+    use uuid::Uuid;
 
     use super::*;
 
@@ -616,17 +622,37 @@ mod test {
         let _project_id = setup_test_project(&client).await;
         let opctx = instance_create::test::test_opctx(cptestctx);
         let instance = create_instance(client).await;
+
+        // Fetch enough state to be able to reason about how many nodes are in
+        // the saga.
         let db_instance =
             fetch_db_instance(cptestctx, &opctx, instance.identity.id).await;
-
         let params = Params {
             serialized_authn: authn::saga::Serialized::for_opctx(&opctx),
             instance: db_instance,
             ensure_network: true,
         };
-
         let dag = create_saga_dag::<SagaInstanceStart>(params).unwrap();
-        for node in dag.get_nodes() {
+        let num_nodes = dag.get_nodes().count();
+
+        // Because the instance's state prior to the saga is a parameter, and
+        // even a failed saga execution attempt can change what's in CRDB, the
+        // saga must be recreated with new parameters after each iteration.
+        // Otherwise, later iterations will just try to use superseded
+        // generation numbers from prior generations.
+        for failure_index in 0..num_nodes {
+            let db_instance =
+                fetch_db_instance(cptestctx, &opctx, instance.identity.id)
+                    .await;
+
+            let params = Params {
+                serialized_authn: authn::saga::Serialized::for_opctx(&opctx),
+                instance: db_instance,
+                ensure_network: true,
+            };
+
+            let dag = create_saga_dag::<SagaInstanceStart>(params).unwrap();
+            let node = dag.get_nodes().nth(failure_index).unwrap();
             info!(
                 log,
                 "Creating new saga that will fail at index {:?}", node.index();
@@ -642,14 +668,23 @@ mod test {
                 .saga_inject_error(runnable_saga.id(), node.index())
                 .await
                 .unwrap();
-            nexus
-                .run_saga(runnable_saga)
+
+            let saga_error = nexus
+                .run_saga_raw_result(runnable_saga)
                 .await
-                .expect_err("Saga should have failed");
+                .expect("saga should have started successfully")
+                .kind
+                .expect_err("saga execution should have failed");
+
+            assert_eq!(saga_error.error_node_name, *node.name());
 
             let new_db_instance =
                 fetch_db_instance(cptestctx, &opctx, instance.identity.id)
                     .await;
+
+            info!(log, "fetched instance runtime state after saga execution";
+                  "instance_id" => %instance.identity.id,
+                  "instance_runtime" => ?new_db_instance.runtime());
 
             assert_eq!(
                 new_db_instance.runtime().state.0,
