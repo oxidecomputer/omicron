@@ -158,7 +158,8 @@ mod test {
     use super::*;
     use crate::DiskPaths;
     use camino::Utf8PathBuf;
-    use illumos_utils::host::{FakeExecutor, Input, OutputExt, PFEXEC};
+    use illumos_utils::host::fake::{FakeChild, FakeExecutorBuilder};
+    use illumos_utils::host::{Input, OutputExt, PFEXEC};
     use illumos_utils::zpool::{ZpoolKind, ZPOOL};
     use omicron_test_utils::dev::test_setup_log;
     use std::path::Path;
@@ -192,7 +193,7 @@ mod test {
             "ensure_partition_layout_u2_no_format_without_dev_path",
         );
         let log = &logctx.log;
-        let executor = FakeExecutor::new(log.clone());
+        let executor = FakeExecutorBuilder::new(log.clone()).build();
 
         let devfs_path = Utf8PathBuf::from("/devfs/path");
         let result = internal_ensure_partition_layout::<LabelNotFoundGPT>(
@@ -217,10 +218,9 @@ mod test {
         let devfs_path = Utf8PathBuf::from("/devfs/path");
         const DEV_PATH: &'static str = "/dev/path";
 
-        let executor = FakeExecutor::new(log.clone());
         let mut calls = 0;
         let mut zpool_name = None;
-        executor.set_wait_handler(Box::new(move |child| -> Output {
+        let wait_handler = Box::new(move |child: &mut FakeChild| -> Output {
             let input = Input::from(child.command());
             assert_eq!(input.program, PFEXEC);
 
@@ -252,7 +252,10 @@ mod test {
             };
             calls += 1;
             Output::success()
-        }));
+        });
+        let executor = FakeExecutorBuilder::new(log.clone())
+            .wait_handler(wait_handler)
+            .build();
 
         let partitions = internal_ensure_partition_layout::<LabelNotFoundGPT>(
             &log,
@@ -275,7 +278,7 @@ mod test {
     fn ensure_partition_layout_m2_cannot_format() {
         let logctx = test_setup_log("ensure_partition_layout_m2_cannot_format");
         let log = &logctx.log.clone();
-        let executor = FakeExecutor::new(log.clone());
+        let executor = FakeExecutorBuilder::new(log.clone()).build();
 
         let devfs_path = Utf8PathBuf::from("/devfs/path");
         const DEV_PATH: &'static str = "/dev/path";
@@ -314,7 +317,7 @@ mod test {
         let logctx =
             test_setup_log("ensure_partition_layout_u2_with_expected_format");
         let log = &logctx.log;
-        let executor = FakeExecutor::new(log.clone());
+        let executor = FakeExecutorBuilder::new(log.clone()).build();
 
         let devfs_path = Utf8PathBuf::from("/devfs/path");
         const DEV_PATH: &'static str = "/dev/path";
@@ -358,7 +361,7 @@ mod test {
         let logctx =
             test_setup_log("ensure_partition_layout_m2_with_expected_format");
         let log = &logctx.log;
-        let executor = FakeExecutor::new(log.clone());
+        let executor = FakeExecutorBuilder::new(log.clone()).build();
 
         let devfs_path = Utf8PathBuf::from("/devfs/path");
         const DEV_PATH: &'static str = "/dev/path";
@@ -398,7 +401,7 @@ mod test {
         let logctx =
             test_setup_log("ensure_partition_layout_m2_fails_with_empty_gpt");
         let log = &logctx.log;
-        let executor = FakeExecutor::new(log.clone());
+        let executor = FakeExecutorBuilder::new(log.clone()).build();
 
         let devfs_path = Utf8PathBuf::from("/devfs/path");
         const DEV_PATH: &'static str = "/dev/path";
@@ -425,7 +428,7 @@ mod test {
         let logctx =
             test_setup_log("ensure_partition_layout_u2_fails_with_empty_gpt");
         let log = &logctx.log;
-        let executor = FakeExecutor::new(log.clone());
+        let executor = FakeExecutorBuilder::new(log.clone()).build();
 
         let devfs_path = Utf8PathBuf::from("/devfs/path");
         const DEV_PATH: &'static str = "/dev/path";

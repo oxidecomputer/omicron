@@ -96,16 +96,6 @@ impl FakeExecutor {
         })
     }
 
-    /// Set the spawn handler to an arbitrary function.
-    pub fn set_spawn_handler(&self, f: BoxedSpawnFn) {
-        *self.inner.spawn_handler.lock().unwrap() = f;
-    }
-
-    /// Set the request handler to an arbitrary function.
-    pub fn set_wait_handler(&self, f: BoxedWaitFn) {
-        *self.inner.wait_handler.lock().unwrap() = f;
-    }
-
     /// Perform some type coercion to access a commonly-used trait object.
     pub fn as_executor(self: Arc<Self>) -> BoxedExecutor {
         self
