@@ -237,7 +237,7 @@ enum HandledCommand {
 /// A handler that may be used for setting inputs/outputs to the executor
 /// when these commands are known ahead-of-time.
 ///
-/// See: [Self::register] for integration with a [FakeExecutor].
+/// See: [FakeExecutorBuilder::with_sequence] for integration with a [FakeExecutor].
 pub struct CommandSequence {
     expected: Vec<HandledCommand>,
     index: usize,
