@@ -103,16 +103,18 @@ impl OmicronRepoAssembler {
         .into_editor()?;
 
         // Add all the artifacts.
-        for (kind, data) in &self.manifest.artifacts {
-            let new_artifact = AddArtifact::new(
-                (*kind).into(),
-                data.name.clone(),
-                data.version.clone(),
-                data.source.clone(),
-            );
-            repository.add_artifact(&new_artifact).with_context(|| {
-                format!("error adding artifact with kind `{kind}`")
-            })?;
+        for (kind, entries) in &self.manifest.artifacts {
+            for data in entries {
+                let new_artifact = AddArtifact::new(
+                    (*kind).into(),
+                    data.name.clone(),
+                    data.version.clone(),
+                    data.source.clone(),
+                );
+                repository.add_artifact(&new_artifact).with_context(|| {
+                    format!("error adding artifact with kind `{kind}`")
+                })?;
+            }
         }
 
         // Write out the repository.

@@ -3,7 +3,8 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use std::{
-    collections::{hash_map::Entry, HashMap},
+    borrow::Borrow,
+    collections::{btree_map, hash_map::Entry, BTreeMap, HashMap},
     convert::Infallible,
     io::{self, Read},
     sync::{Arc, Mutex},
@@ -16,6 +17,7 @@ use debug_ignore::DebugIgnore;
 use display_error_chain::DisplayErrorChain;
 use dropshot::HttpError;
 use futures::stream;
+use hubtools::RawHubrisArchive;
 use hyper::Body;
 use installinator_artifactd::{ArtifactGetter, EventReportStatus};
 use omicron_common::api::{
@@ -25,7 +27,7 @@ use omicron_common::update::{
     ArtifactHash, ArtifactHashId, ArtifactId, ArtifactKind,
 };
 use sha2::{Digest, Sha256};
-use slog::Logger;
+use slog::{info, Logger};
 use thiserror::Error;
 use tough::TargetName;
 use tufaceous_lib::{
@@ -197,7 +199,7 @@ impl ArtifactsWithPlan {
         let dir = camino_tempfile::tempdir()
             .map_err(RepositoryError::TempDirCreate)?;
 
-        slog::info!(log, "extracting uploaded archive to {}", dir.path());
+        info!(log, "extracting uploaded archive to {}", dir.path());
 
         // XXX: might be worth differentiating between server-side issues (503)
         // and issues with the uploaded archive (400).
@@ -316,7 +318,7 @@ impl ArtifactsWithPlan {
                 }
             }
 
-            slog::info!(
+            info!(
                 log, "added artifact";
                 "kind" => %artifact_id.kind,
                 "id" => format!("{}:{}", artifact_id.name, artifact_id.version),
@@ -332,6 +334,7 @@ impl ArtifactsWithPlan {
             &by_id,
             &mut by_hash,
             log,
+            read_hubris_board_from_archive,
         )?;
 
         Ok(Self {
@@ -414,6 +417,35 @@ enum RepositoryError {
     #[error("multiple artifacts found for kind `{0:?}`")]
     DuplicateArtifactKind(KnownArtifactKind),
 
+    #[error("duplicate board found for kind `{kind:?}`: `{board}`")]
+    DuplicateBoardEntry { board: String, kind: KnownArtifactKind },
+
+    #[error("error parsing artifact {id:?} as hubris archive")]
+    ParsingHubrisArchive {
+        id: ArtifactId,
+        #[source]
+        error: Box<hubtools::Error>,
+    },
+
+    #[error("error reading hubris caboose from {id:?}")]
+    ReadHubrisCaboose {
+        id: ArtifactId,
+        #[source]
+        error: Box<hubtools::Error>,
+    },
+
+    #[error("error reading board from hubris caboose of {id:?}")]
+    ReadHubrisCabooseBoard {
+        id: ArtifactId,
+        #[source]
+        error: hubtools::CabooseError,
+    },
+
+    #[error(
+        "error reading board from hubris caboose of {0:?}: non-utf8 value"
+    )]
+    ReadHubrisCabooseBoardUtf8(ArtifactId),
+
     #[error("missing artifact of kind `{0:?}`")]
     MissingArtifactKind(KnownArtifactKind),
 
@@ -441,7 +473,12 @@ impl RepositoryError {
             | RepositoryError::TargetHashLength(_)
             | RepositoryError::MissingArtifactKind(_)
             | RepositoryError::MissingTarget(_)
-            | RepositoryError::DuplicateHashEntry(_) => {
+            | RepositoryError::DuplicateHashEntry(_)
+            | RepositoryError::DuplicateBoardEntry { .. }
+            | RepositoryError::ParsingHubrisArchive { .. }
+            | RepositoryError::ReadHubrisCaboose { .. }
+            | RepositoryError::ReadHubrisCabooseBoard { .. }
+            | RepositoryError::ReadHubrisCabooseBoardUtf8(_) => {
                 HttpError::for_bad_request(None, message)
             }
 
@@ -470,19 +507,28 @@ pub(crate) struct ArtifactIdData {
     pub(crate) hash: ArtifactHash,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) struct Board(pub(crate) String);
+
+impl Borrow<String> for Board {
+    fn borrow(&self) -> &String {
+        &self.0
+    }
+}
+
 /// The update plan currently in effect.
 ///
 /// Exposed for testing.
 #[derive(Debug, Clone)]
 pub struct UpdatePlan {
     pub(crate) system_version: SemverVersion,
-    pub(crate) gimlet_sp: ArtifactIdData,
+    pub(crate) gimlet_sp: BTreeMap<Board, ArtifactIdData>,
     pub(crate) gimlet_rot_a: ArtifactIdData,
     pub(crate) gimlet_rot_b: ArtifactIdData,
-    pub(crate) psc_sp: ArtifactIdData,
+    pub(crate) psc_sp: BTreeMap<Board, ArtifactIdData>,
     pub(crate) psc_rot_a: ArtifactIdData,
     pub(crate) psc_rot_b: ArtifactIdData,
-    pub(crate) sidecar_sp: ArtifactIdData,
+    pub(crate) sidecar_sp: BTreeMap<Board, ArtifactIdData>,
     pub(crate) sidecar_rot_a: ArtifactIdData,
     pub(crate) sidecar_rot_b: ArtifactIdData,
 
@@ -513,22 +559,39 @@ pub struct UpdatePlan {
 }
 
 impl UpdatePlan {
-    fn new(
+    // `read_hubris_board` should always be `read_hubris_board_from_archive`; we
+    // take it as an argument to allow unit tests to give us invalid/fake
+    // "hubris archives" `read_hubris_board_from_archive` wouldn't be able to
+    // handle.
+    fn new<F>(
         system_version: SemverVersion,
         by_id: &HashMap<ArtifactId, (ArtifactHash, Bytes)>,
         by_hash: &mut HashMap<ArtifactHashId, Bytes>,
         log: &Logger,
-    ) -> Result<Self, RepositoryError> {
+        read_hubris_board: F,
+    ) -> Result<Self, RepositoryError>
+    where
+        F: Fn(
+            ArtifactId,
+            Vec<u8>,
+        ) -> Result<(ArtifactId, Board), RepositoryError>,
+    {
+        // We expect at least one of each of these kinds to be present, but we
+        // allow multiple (keyed by the Hubris archive caboose `board` value,
+        // which identifies hardware revision). We could do the same for the RoT
+        // images, but to date the RoT images are applicable to all revs; only
+        // the SP images change from rev to rev.
+        let mut gimlet_sp = BTreeMap::new();
+        let mut psc_sp = BTreeMap::new();
+        let mut sidecar_sp = BTreeMap::new();
+
         // We expect exactly one of each of these kinds to be present in the
         // snapshot. Scan the snapshot and record the first of each we find,
         // failing if we find a second.
-        let mut gimlet_sp = None;
         let mut gimlet_rot_a = None;
         let mut gimlet_rot_b = None;
-        let mut psc_sp = None;
         let mut psc_rot_a = None;
         let mut psc_rot_b = None;
-        let mut sidecar_sp = None;
         let mut sidecar_rot_a = None;
         let mut sidecar_rot_b = None;
         let mut host_phase_1 = None;
@@ -545,6 +608,38 @@ impl UpdatePlan {
             ArtifactHash(hasher.finalize().into())
         };
 
+        // Helper called for each SP image found in the loop below.
+        let sp_image_found = |out: &mut BTreeMap<Board, ArtifactIdData>,
+                              id,
+                              hash: &ArtifactHash,
+                              data: &Bytes| {
+            let (id, board) = read_hubris_board(id, data.clone().into())?;
+
+            match out.entry(board) {
+                btree_map::Entry::Vacant(slot) => {
+                    info!(
+                        log, "found SP archive";
+                        "kind" => ?id.kind,
+                        "board" => &slot.key().0,
+                    );
+                    slot.insert(ArtifactIdData {
+                        id,
+                        data: DebugIgnore(data.clone()),
+                        hash: *hash,
+                    });
+                    Ok(())
+                }
+                btree_map::Entry::Occupied(slot) => {
+                    Err(RepositoryError::DuplicateBoardEntry {
+                        board: slot.key().0.clone(),
+                        // This closure is only called with well-known kinds.
+                        kind: slot.get().id.kind.to_known().unwrap(),
+                    })
+                }
+            }
+        };
+
+        // Helper called for each non-SP artifact found in the loop below.
         let artifact_found = |out: &mut Option<ArtifactIdData>,
                               id,
                               hash: Option<&ArtifactHash>,
@@ -568,16 +663,15 @@ impl UpdatePlan {
             // In generating an update plan, skip any artifact kinds that are
             // unknown to us (we wouldn't know how to incorporate them into our
             // plan).
-            let Some(artifact_kind) = artifact_id.kind.to_known() else { continue };
+            let Some(artifact_kind) = artifact_id.kind.to_known() else {
+                continue;
+            };
             let artifact_id = artifact_id.clone();
 
             match artifact_kind {
-                KnownArtifactKind::GimletSp => artifact_found(
-                    &mut gimlet_sp,
-                    artifact_id,
-                    Some(hash),
-                    data,
-                )?,
+                KnownArtifactKind::GimletSp => {
+                    sp_image_found(&mut gimlet_sp, artifact_id, hash, data)?;
+                }
                 KnownArtifactKind::GimletRot => {
                     slog::debug!(log, "extracting gimlet rot tarball");
                     let archives = unpack_rot_artifact(artifact_kind, data)?;
@@ -595,7 +689,7 @@ impl UpdatePlan {
                     )?;
                 }
                 KnownArtifactKind::PscSp => {
-                    artifact_found(&mut psc_sp, artifact_id, Some(hash), data)?
+                    sp_image_found(&mut psc_sp, artifact_id, hash, data)?;
                 }
                 KnownArtifactKind::PscRot => {
                     slog::debug!(log, "extracting psc rot tarball");
@@ -613,12 +707,9 @@ impl UpdatePlan {
                         &archives.archive_b,
                     )?;
                 }
-                KnownArtifactKind::SwitchSp => artifact_found(
-                    &mut sidecar_sp,
-                    artifact_id,
-                    Some(hash),
-                    data,
-                )?,
+                KnownArtifactKind::SwitchSp => {
+                    sp_image_found(&mut sidecar_sp, artifact_id, hash, data)?;
+                }
                 KnownArtifactKind::SwitchRot => {
                     slog::debug!(log, "extracting switch rot tarball");
                     let archives = unpack_rot_artifact(artifact_kind, data)?;
@@ -709,7 +800,7 @@ impl UpdatePlan {
                 ));
             }
             Entry::Vacant(entry) => {
-                slog::info!(log, "added host phase 2 artifact";
+                info!(log, "added host phase 2 artifact";
                     "kind" => %host_phase_2_hash_id.kind,
                     "hash" => %host_phase_2_hash_id.hash,
                     "length" => host_phase_2.data.len(),
@@ -718,13 +809,27 @@ impl UpdatePlan {
             }
         }
 
+        // Ensure our multi-board-supporting kinds have at least one board
+        // present.
+        if gimlet_sp.is_empty() {
+            return Err(RepositoryError::MissingArtifactKind(
+                KnownArtifactKind::GimletSp,
+            ));
+        }
+        if psc_sp.is_empty() {
+            return Err(RepositoryError::MissingArtifactKind(
+                KnownArtifactKind::PscSp,
+            ));
+        }
+        if sidecar_sp.is_empty() {
+            return Err(RepositoryError::MissingArtifactKind(
+                KnownArtifactKind::SwitchSp,
+            ));
+        }
+
         Ok(Self {
             system_version,
-            gimlet_sp: gimlet_sp.ok_or(
-                RepositoryError::MissingArtifactKind(
-                    KnownArtifactKind::GimletSp,
-                ),
-            )?,
+            gimlet_sp,
             gimlet_rot_a: gimlet_rot_a.ok_or(
                 RepositoryError::MissingArtifactKind(
                     KnownArtifactKind::GimletRot,
@@ -735,20 +840,14 @@ impl UpdatePlan {
                     KnownArtifactKind::GimletRot,
                 ),
             )?,
-            psc_sp: psc_sp.ok_or(RepositoryError::MissingArtifactKind(
-                KnownArtifactKind::PscSp,
-            ))?,
+            psc_sp,
             psc_rot_a: psc_rot_a.ok_or(
                 RepositoryError::MissingArtifactKind(KnownArtifactKind::PscRot),
             )?,
             psc_rot_b: psc_rot_b.ok_or(
                 RepositoryError::MissingArtifactKind(KnownArtifactKind::PscRot),
             )?,
-            sidecar_sp: sidecar_sp.ok_or(
-                RepositoryError::MissingArtifactKind(
-                    KnownArtifactKind::SwitchSp,
-                ),
-            )?,
+            sidecar_sp,
             sidecar_rot_a: sidecar_rot_a.ok_or(
                 RepositoryError::MissingArtifactKind(
                     KnownArtifactKind::SwitchRot,
@@ -794,6 +893,39 @@ fn unpack_rot_artifact(
         .map_err(|error| RepositoryError::TarballExtract { kind, error })
 }
 
+// This function takes and returns `id` to avoid an unnecessary clone; `id` will
+// be present in either the Ok tuple or the error.
+fn read_hubris_board_from_archive(
+    id: ArtifactId,
+    data: Vec<u8>,
+) -> Result<(ArtifactId, Board), RepositoryError> {
+    let archive = match RawHubrisArchive::from_vec(data).map_err(Box::new) {
+        Ok(archive) => archive,
+        Err(error) => {
+            return Err(RepositoryError::ParsingHubrisArchive { id, error });
+        }
+    };
+    let caboose = match archive.read_caboose().map_err(Box::new) {
+        Ok(caboose) => caboose,
+        Err(error) => {
+            return Err(RepositoryError::ReadHubrisCaboose { id, error });
+        }
+    };
+    let board = match caboose.board() {
+        Ok(board) => board,
+        Err(error) => {
+            return Err(RepositoryError::ReadHubrisCabooseBoard { id, error });
+        }
+    };
+    let board = match std::str::from_utf8(board) {
+        Ok(s) => s,
+        Err(_) => {
+            return Err(RepositoryError::ReadHubrisCabooseBoardUtf8(id));
+        }
+    };
+    Ok((id, Board(board.to_string())))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -806,8 +938,8 @@ mod tests {
     use omicron_test_utils::dev::test_setup_log;
     use rand::{distributions::Standard, thread_rng, Rng};
 
-    /// Test that `ArtifactsWithPlan` can extract the fake repository generated by
-    /// tufaceous.
+    /// Test that `ArtifactsWithPlan` can extract the fake repository generated
+    /// by tufaceous.
     #[test]
     fn test_extract_fake() -> Result<()> {
         let logctx = test_setup_log("test_extract_fake");
@@ -920,13 +1052,10 @@ mod tests {
         let mut by_id = HashMap::new();
         let mut by_hash = HashMap::new();
 
-        // Some artifacts can just be arbitrary data; fill those in.
-        for kind in [
-            KnownArtifactKind::GimletSp,
-            KnownArtifactKind::ControlPlane,
-            KnownArtifactKind::PscSp,
-            KnownArtifactKind::SwitchSp,
-        ] {
+        // The control plane artifact can be arbitrary bytes; just populate it
+        // with random data.
+        {
+            let kind = KnownArtifactKind::ControlPlane;
             let data = Bytes::from(make_random_bytes());
             let hash = ArtifactHash(Sha256::digest(&data).into());
             let id = ArtifactId {
@@ -937,6 +1066,30 @@ mod tests {
             let hash_id = ArtifactHashId { kind: kind.into(), hash };
             by_id.insert(id, (hash, data.clone()));
             by_hash.insert(hash_id, data);
+        }
+
+        // For each SP image, we'll insert two artifacts: these should end up in
+        // the update plan's SP image maps keyed by their "board". Normally the
+        // board is read from the archive itself via hubtools; we'll inject a
+        // test function that returns the artifact ID name as the board instead.
+        for (kind, boards) in [
+            (KnownArtifactKind::GimletSp, ["test-gimlet-a", "test-gimlet-b"]),
+            (KnownArtifactKind::PscSp, ["test-psc-a", "test-psc-b"]),
+            (KnownArtifactKind::SwitchSp, ["test-switch-a", "test-switch-b"]),
+        ] {
+            for board in boards {
+                let data = Bytes::from(make_random_bytes());
+                let hash = ArtifactHash(Sha256::digest(&data).into());
+                let id = ArtifactId {
+                    name: board.to_string(),
+                    version: VERSION_0,
+                    kind: kind.into(),
+                };
+                println!("{kind:?}={board:?} => {id:?}");
+                let hash_id = ArtifactHashId { kind: kind.into(), hash };
+                by_id.insert(id, (hash, data.clone()));
+                by_hash.insert(hash_id, data);
+            }
         }
 
         // The Host, Trampoline, and RoT artifacts must be structed the way we
@@ -981,23 +1134,56 @@ mod tests {
 
         let logctx = test_setup_log("test_update_plan_from_artifacts");
 
-        let plan =
-            UpdatePlan::new(VERSION_0, &by_id, &mut by_hash, &logctx.log)
-                .unwrap();
+        let plan = UpdatePlan::new(
+            VERSION_0,
+            &by_id,
+            &mut by_hash,
+            &logctx.log,
+            |id, _data| {
+                let board = id.name.clone();
+                Ok((id, Board(board)))
+            },
+        )
+        .unwrap();
+
+        assert_eq!(plan.gimlet_sp.len(), 2);
+        assert_eq!(plan.psc_sp.len(), 2);
+        assert_eq!(plan.sidecar_sp.len(), 2);
 
         for (id, (hash, data)) in &by_id {
             match id.kind.to_known().unwrap() {
                 KnownArtifactKind::GimletSp => {
-                    assert_eq!(*plan.gimlet_sp.data, data);
+                    assert!(
+                        id.name.starts_with("test-gimlet-"),
+                        "unexpected id.name {:?}",
+                        id.name
+                    );
+                    assert_eq!(
+                        *plan.gimlet_sp.get(&id.name).unwrap().data,
+                        data
+                    );
                 }
                 KnownArtifactKind::ControlPlane => {
                     assert_eq!(plan.control_plane_hash, *hash);
                 }
                 KnownArtifactKind::PscSp => {
-                    assert_eq!(*plan.psc_sp.data, data);
+                    assert!(
+                        id.name.starts_with("test-psc-"),
+                        "unexpected id.name {:?}",
+                        id.name
+                    );
+                    assert_eq!(*plan.psc_sp.get(&id.name).unwrap().data, data);
                 }
                 KnownArtifactKind::SwitchSp => {
-                    assert_eq!(*plan.sidecar_sp.data, data);
+                    assert!(
+                        id.name.starts_with("test-switch-"),
+                        "unexpected id.name {:?}",
+                        id.name
+                    );
+                    assert_eq!(
+                        *plan.sidecar_sp.get(&id.name).unwrap().data,
+                        data
+                    );
                 }
                 KnownArtifactKind::Host
                 | KnownArtifactKind::Trampoline

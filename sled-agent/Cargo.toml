@@ -67,12 +67,12 @@ slog-term.workspace = true
 smf.workspace = true
 sp-sim.workspace = true
 tar.workspace = true
-tempfile.workspace = true
 thiserror.workspace = true
 tofino.workspace = true
 tokio = { workspace = true, features = [ "full" ] }
 tokio-tungstenite.workspace = true
 toml.workspace = true
+usdt.workspace = true
 uuid.workspace = true
 zeroize.workspace = true
 zone.workspace = true

@@ -131,7 +131,7 @@ api_identity = { path = "api_identity" }
 assert_matches = "1.5.0"
 assert_cmd = "2.0.12"
 async-bb8-diesel = { git = "https://github.com/oxidecomputer/async-bb8-diesel", rev = "be3d9bce50051d8c0e0c06078e8066cc27db3001" }
-async-trait = "0.1.71"
+async-trait = "0.1.73"
 authz-macros = { path = "nexus/authz-macros" }
 backoff = { version = "0.4.0", features = [ "tokio" ] }
 base64 = "0.21.2"
@@ -181,8 +181,8 @@ flate2 = "1.0.26"
 fs-err = "2.9.0"
 futures = "0.3.28"
 gateway-client = { path = "gateway-client" }
-gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", default-features = false, features = ["std"], rev = "146a687f7413bfe580869bb6017f3bfe8b4710b1" }
-gateway-sp-comms = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "146a687f7413bfe580869bb6017f3bfe8b4710b1" }
+gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "1e180ae55e56bd17af35cb868ffbd18ce487351d", default-features = false, features = ["std"] }
+gateway-sp-comms = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "1e180ae55e56bd17af35cb868ffbd18ce487351d" }
 gateway-test-utils = { path = "gateway-test-utils" }
 glob = "0.3.1"
 headers = "0.3.8"
@@ -192,7 +192,7 @@ hex-literal = "0.3.4"
 hkdf = "0.12.3"
 http = "0.2.9"
 httptest = "0.15.4"
-hubtools = { git = "https://github.com/oxidecomputer/hubtools.git" }
+hubtools = { git = "https://github.com/oxidecomputer/hubtools.git", branch = "main" }
 humantime = "2.1.0"
 hyper = "0.14"
 hyper-rustls = "0.24.1"
@@ -262,7 +262,6 @@ paste = "1.0.14"
 percent-encoding = "2.2.0"
 pem = "1.1"
 petgraph = "0.6.3"
-pin-project-lite = "0.2.10"
 postgres-protocol = "0.6.5"
 predicates = "3.0.3"
 pretty_assertions = "1.4.0"
@@ -293,7 +292,7 @@ secrecy = "0.8.0"
 semver = { version = "1.0.18", features = ["std", "serde"] }
 serde = { version = "1.0", default-features = false, features = [ "derive" ] }
 serde_derive = "1.0"
-serde_human_bytes = { git = "http://github.com/oxidecomputer/serde_human_bytes" }
+serde_human_bytes = { git = "http://github.com/oxidecomputer/serde_human_bytes", branch = "main" }
 serde_json = "1.0.104"
 serde_path_to_error = "0.1.14"
 serde_tokenstream = "0.2"
@@ -324,7 +323,7 @@ static_assertions = "1.1.0"
 # harder than expected to make breaking changes (even if you specify a specific
 # SHA).  Cut a new Steno release instead.  See omicron#2117.
 steno = "0.4.0"
-strum = { version = "0.24", features = [ "derive" ] }
+strum = { version = "0.25", features = [ "derive" ] }
 subprocess = "0.2.9"
 libsw = { version = "3.3.0", features = ["tokio"] }
 syn = { version = "2.0" }

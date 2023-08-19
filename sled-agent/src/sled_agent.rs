@@ -45,7 +45,7 @@ use omicron_common::backoff::{
 use sled_hardware::underlay;
 use sled_hardware::HardwareManager;
 use slog::Logger;
-use std::collections::BTreeSet;
+use std::collections::BTreeMap;
 use std::net::{Ipv6Addr, SocketAddrV6};
 use std::sync::Arc;
 use uuid::Uuid;
@@ -70,7 +70,7 @@ pub enum Error {
     EtherstubVnic(illumos_utils::dladm::CreateVnicError),
 
     #[error("Bootstrap error: {0}")]
-    Bootstrap(#[from] crate::bootstrap::agent::BootstrapError),
+    Bootstrap(#[from] crate::bootstrap::BootstrapError),
 
     #[error("Failed to remove Omicron address: {0}")]
     DeleteAddress(#[from] illumos_utils::ExecutionError),
@@ -174,6 +174,10 @@ impl From<Error> for dropshot::HttpError {
                 BundleError::NoSuchZone { .. } => {
                     HttpError::for_not_found(None, inner.to_string())
                 }
+                BundleError::InvalidStorageLimit
+                | BundleError::InvalidCleanupPeriod => {
+                    HttpError::for_bad_request(None, inner.to_string())
+                }
                 _ => HttpError::for_internal_error(err.to_string()),
             },
             e => HttpError::for_internal_error(e.to_string()),
@@ -187,9 +191,6 @@ impl From<Error> for dropshot::HttpError {
 struct SledAgentInner {
     // ID of the Sled
     id: Uuid,
-
-    // Logger used for generic sled agent operations, e.g., zone bundles.
-    log: Logger,
 
     // Subnet of the Sled's underlay.
     //
@@ -222,6 +223,9 @@ struct SledAgentInner {
 
     // The rack network config provided at RSS time.
     rack_network_config: Option<RackNetworkConfig>,
+
+    // Object managing zone bundles.
+    zone_bundler: zone_bundle::ZoneBundler,
 }
 
 impl SledAgentInner {
@@ -284,6 +288,14 @@ impl SledAgent {
             }
         }
 
+        // Ensure we have a thread that automatically reaps process contracts
+        // when they become empty. See the comments in
+        // illumos-utils/src/running_zone.rs for more detail.
+        illumos_utils::running_zone::ensure_contract_reaper(&parent_log);
+
+        // TODO-correctness Bootstrap-agent already ensures the underlay
+        // etherstub and etherstub VNIC exist on startup - could it pass them
+        // through to us?
         let etherstub = Dladm::ensure_etherstub(
             illumos_utils::dladm::UNDERLAY_ETHERSTUB_NAME,
         )
@@ -317,6 +329,11 @@ impl SledAgent {
             })
             .await?;
 
+        // TODO-correctness The bootstrap agent _also_ has a `HardwareManager`.
+        // We only use it for reading properties, but it's not `Clone`able
+        // because it's holding an inner task handle. Could we add a way to get
+        // a read-only handle to it, and have bootstrap agent give us that
+        // instead of creating a new full one ourselves?
         let hardware = HardwareManager::new(&parent_log, services.sled_mode())
             .map_err(|e| Error::Hardware(e))?;
 
@@ -326,6 +343,7 @@ impl SledAgent {
             etherstub.clone(),
             port_manager.clone(),
             storage.resources().clone(),
+            storage.zone_bundler().clone(),
         )?;
 
         match config.vmm_reservoir_percentage {
@@ -401,10 +419,10 @@ impl SledAgent {
             rack_network_config.clone(),
         )?;
 
+        let zone_bundler = storage.zone_bundler().clone();
         let sled_agent = SledAgent {
             inner: Arc::new(SledAgentInner {
                 id: request.id,
-                log: log.clone(),
                 subnet: request.subnet,
                 storage,
                 instances,
@@ -422,6 +440,7 @@ impl SledAgent {
                 // request queue?
                 nexus_request_queue: NexusRequestQueue::new(),
                 rack_network_config,
+                zone_bundler,
             }),
             log: log.clone(),
         };
@@ -432,22 +451,19 @@ impl SledAgent {
         // be received by Nexus eventually.
         sled_agent.notify_nexus_about_self(&log);
 
-        // Begin monitoring the underlying hardware, and reacting to changes.
-        let sa = sled_agent.clone();
-        let hardware_log = log.clone();
-        tokio::spawn(async move {
-            sa.hardware_monitor_task(hardware_log).await;
-        });
+        Ok(sled_agent)
+    }
 
-        // Finally, load services for which we're already responsible.
-        //
-        // Do this *after* monitoring for harware, to enable the switch zone to
-        // establish an underlay address before proceeding.
+    /// Load services for which we're responsible; only meaningful to call
+    /// during a cold boot.
+    ///
+    /// Blocks until all services have started, retrying indefinitely on
+    /// failure.
+    pub(crate) async fn cold_boot_load_services(&self) {
         retry_notify(
             retry_policy_internal_service_aggressive(),
             || async {
-                sled_agent
-                    .inner
+                self.inner
                     .services
                     .load_services()
                     .await
@@ -455,123 +471,24 @@ impl SledAgent {
             },
             |err, delay| {
                 warn!(
-                    log,
+                    self.log,
                     "Failed to load services, will retry in {:?}", delay;
                     "error" => %err,
                 );
             },
         )
-        .await?;
+        .await
+        .unwrap(); // we retry forever, so this can't fail
 
         // Now that we've initialized the sled services, notify nexus again
         // at which point it'll plumb any necessary firewall rules back to us.
-        sled_agent.notify_nexus_about_self(&log);
-
-        Ok(sled_agent)
+        self.notify_nexus_about_self(&self.log);
     }
 
-    // Observe the current hardware state manually.
-    //
-    // We use this when we're monitoring hardware for the first
-    // time, and if we miss notifications.
-    async fn full_hardware_scan(&self, log: &Logger) {
-        info!(log, "Performing full hardware scan");
-        self.notify_nexus_about_self(log);
-
-        let scrimlet = self.inner.hardware.is_scrimlet_driver_loaded();
-
-        if scrimlet {
-            let baseboard = self.inner.hardware.baseboard();
-            let switch_zone_ip = self.inner.switch_zone_ip();
-            if let Err(e) = self
-                .inner
-                .services
-                .activate_switch(
-                    Some((
-                        switch_zone_ip,
-                        self.inner.rack_network_config.as_ref(),
-                    )),
-                    baseboard,
-                )
-                .await
-            {
-                warn!(log, "Failed to activate switch: {e}");
-            }
-        } else {
-            if let Err(e) = self.inner.services.deactivate_switch().await {
-                warn!(log, "Failed to deactivate switch: {e}");
-            }
-        }
-
-        self.inner
-            .storage
-            .ensure_using_exactly_these_disks(self.inner.hardware.disks())
-            .await;
-    }
-
-    async fn hardware_monitor_task(&self, log: Logger) {
-        // Start monitoring the hardware for changes
-        let mut hardware_updates = self.inner.hardware.monitor();
-
-        // Scan the system manually for events we have have missed
-        // before we started monitoring.
-        self.full_hardware_scan(&log).await;
-
-        // Rely on monitoring for tracking all future updates.
-        loop {
-            use sled_hardware::HardwareUpdate;
-            use tokio::sync::broadcast::error::RecvError;
-            match hardware_updates.recv().await {
-                Ok(update) => match update {
-                    HardwareUpdate::TofinoDeviceChange => {
-                        // Inform Nexus that we're now a scrimlet, instead of a Gimlet.
-                        //
-                        // This won't block on Nexus responding; it may take while before
-                        // Nexus actually comes online.
-                        self.notify_nexus_about_self(&log);
-                    }
-                    HardwareUpdate::TofinoLoaded => {
-                        let baseboard = self.inner.hardware.baseboard();
-                        let switch_zone_ip = self.inner.switch_zone_ip();
-                        if let Err(e) = self
-                            .inner
-                            .services
-                            .activate_switch(
-                                Some((
-                                    switch_zone_ip,
-                                    self.inner.rack_network_config.as_ref(),
-                                )),
-                                baseboard,
-                            )
-                            .await
-                        {
-                            warn!(log, "Failed to activate switch: {e}");
-                        }
-                    }
-                    HardwareUpdate::TofinoUnloaded => {
-                        if let Err(e) =
-                            self.inner.services.deactivate_switch().await
-                        {
-                            warn!(log, "Failed to deactivate switch: {e}");
-                        }
-                    }
-                    HardwareUpdate::DiskAdded(disk) => {
-                        self.inner.storage.upsert_disk(disk).await;
-                    }
-                    HardwareUpdate::DiskRemoved(disk) => {
-                        self.inner.storage.delete_disk(disk).await;
-                    }
-                },
-                Err(RecvError::Lagged(count)) => {
-                    warn!(log, "Hardware monitor missed {count} messages");
-                    self.full_hardware_scan(&log).await;
-                }
-                Err(RecvError::Closed) => {
-                    warn!(log, "Hardware monitor receiver closed; exiting");
-                    return;
-                }
-            }
-        }
+    pub(crate) fn switch_zone_underlay_info(
+        &self,
+    ) -> (Ipv6Addr, Option<&RackNetworkConfig>) {
+        (self.inner.switch_zone_ip(), self.inner.rack_network_config.as_ref())
     }
 
     pub fn id(&self) -> Uuid {
@@ -583,7 +500,7 @@ impl SledAgent {
     }
 
     // Sends a request to Nexus informing it that the current sled exists.
-    fn notify_nexus_about_self(&self, log: &Logger) {
+    pub(crate) fn notify_nexus_about_self(&self, log: &Logger) {
         let sled_id = self.inner.id;
         let nexus_client = self.inner.nexus_client.clone();
         let sled_address = self.inner.sled_address();
@@ -674,78 +591,9 @@ impl SledAgent {
     /// List all zone bundles on the system, for any zones live or dead.
     pub async fn list_all_zone_bundles(
         &self,
+        filter: Option<&str>,
     ) -> Result<Vec<ZoneBundleMetadata>, Error> {
-        let mut bundles = BTreeSet::new();
-        let log = &self.inner.log;
-        for path in
-            self.inner.storage.resources().all_zone_bundle_directories().await
-        {
-            debug!(log, "searching zone bundle directory"; "directory" => ?path);
-            // It's possible that the debug directories themselves do not exist,
-            // since we create them when we create the first bundles. Return an
-            // empty set in this case.
-            let mut entries = match tokio::fs::read_dir(path).await {
-                Ok(ent) => ent,
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
-                Err(e) => {
-                    return Err(Error::from(BundleError::from(
-                        anyhow::anyhow!("failed to read bundle directory: {e}"),
-                    )));
-                }
-            };
-
-            // First iterate over all the possible zone-names here.
-            loop {
-                let Some(zone_name) = entries
-                    .next_entry()
-                    .await
-                    .map_err(|e| BundleError::from(anyhow::anyhow!("failed to read zone bundle dir entry: {e}")))? else {
-                    break;
-                };
-
-                // Enumerate and iterate over all the contained entries, which
-                // _should_ all be zone bundles.
-                let mut bundle_entries = tokio::fs::read_dir(zone_name.path())
-                    .await
-                    .map_err(|e| {
-                        BundleError::from(anyhow::anyhow!(
-                            "failed to read zone directory: {e}"
-                        ))
-                    })?;
-                loop {
-                    let Some(bundle) = bundle_entries
-                        .next_entry()
-                        .await
-                        .map_err(|e| BundleError::from(anyhow::anyhow!("failed to read zone bundle dir entry: {e}")))? else {
-                        break;
-                    };
-                    match zone_bundle::extract_zone_bundle_metadata(
-                        bundle.path(),
-                    )
-                    .await
-                    {
-                        Ok(metadata) => {
-                            debug!(
-                                log,
-                                "found zone bundle";
-                                "zone_name" => &metadata.id.zone_name,
-                                "id" => %&metadata.id.bundle_id,
-                                "path" => ?bundle.path(),
-                            );
-                            bundles.insert(metadata);
-                        }
-                        Err(e) => warn!(
-                            log,
-                            "found file in zone bundle directory which doesn't \
-                            appear to be a valid zone bundle";
-                            "path" => ?bundle.path(),
-                            "err" => ?e,
-                        ),
-                    }
-                }
-            }
-        }
-        Ok(bundles.into_iter().collect())
+        self.inner.zone_bundler.list(filter).await.map_err(Error::from)
     }
 
     /// List zone bundles for the provided zone.
@@ -753,22 +601,7 @@ impl SledAgent {
         &self,
         name: &str,
     ) -> Result<Vec<ZoneBundleMetadata>, Error> {
-        // The zone bundles are replicated in several places, so we'll use a set
-        // to collect them all, to avoid duplicating.
-        let mut bundles = BTreeSet::new();
-        let log = &self.inner.log;
-        for path in
-            self.inner.storage.resources().all_zone_bundle_directories().await
-        {
-            debug!(log, "searching zone bundle directory"; "directory" => ?path);
-            bundles.extend(
-                zone_bundle::list_bundles_for_zone(log, &path, name)
-                    .await?
-                    .into_iter()
-                    .map(|(_path, bdl)| bdl),
-            );
-        }
-        Ok(bundles.into_iter().collect())
+        self.inner.zone_bundler.list_for_zone(name).await.map_err(Error::from)
     }
 
     /// Create a zone bundle for the provided zone.
@@ -793,20 +626,17 @@ impl SledAgent {
         }
     }
 
-    /// Fetch the path to a zone bundle.
-    pub async fn get_zone_bundle_path(
+    /// Fetch the paths to all zone bundles with the provided name and ID.
+    pub async fn get_zone_bundle_paths(
         &self,
         name: &str,
         id: &Uuid,
-    ) -> Result<Option<Utf8PathBuf>, Error> {
-        zone_bundle::get_zone_bundle_path(
-            &self.inner.log,
-            &self.inner.storage.resources().all_zone_bundle_directories().await,
-            name,
-            id,
-        )
-        .await
-        .map_err(Error::from)
+    ) -> Result<Vec<Utf8PathBuf>, Error> {
+        self.inner
+            .zone_bundler
+            .bundle_paths(name, id)
+            .await
+            .map_err(Error::from)
     }
 
     /// List the zones that the sled agent is currently managing.
@@ -826,6 +656,42 @@ impl SledAgent {
                     .collect()
             })
             .map_err(|e| Error::from(BundleError::from(e)))
+    }
+
+    /// Fetch the zone bundle cleanup context.
+    pub async fn zone_bundle_cleanup_context(
+        &self,
+    ) -> zone_bundle::CleanupContext {
+        self.inner.zone_bundler.cleanup_context().await
+    }
+
+    /// Update the zone bundle cleanup context.
+    pub async fn update_zone_bundle_cleanup_context(
+        &self,
+        period: Option<zone_bundle::CleanupPeriod>,
+        storage_limit: Option<zone_bundle::StorageLimit>,
+        priority: Option<zone_bundle::PriorityOrder>,
+    ) -> Result<(), Error> {
+        self.inner
+            .zone_bundler
+            .update_cleanup_context(period, storage_limit, priority)
+            .await
+            .map_err(Error::from)
+    }
+
+    /// Fetch the current utilization of the relevant datasets for zone bundles.
+    pub async fn zone_bundle_utilization(
+        &self,
+    ) -> Result<BTreeMap<Utf8PathBuf, zone_bundle::BundleUtilization>, Error>
+    {
+        self.inner.zone_bundler.utilization().await.map_err(Error::from)
+    }
+
+    /// Trigger an explicit request to cleanup old zone bundles.
+    pub async fn zone_bundle_cleanup(
+        &self,
+    ) -> Result<BTreeMap<Utf8PathBuf, zone_bundle::CleanupCount>, Error> {
+        self.inner.zone_bundler.cleanup().await.map_err(Error::from)
     }
 
     /// Ensures that particular services should be initialized.
