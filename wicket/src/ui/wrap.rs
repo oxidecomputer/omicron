@@ -141,13 +141,13 @@ fn wrap_single_line_slow_path<'a>(
             output_line.push(options.subsequent_indent.clone());
         }
 
-        for word in words.into_iter().with_position() {
-            match word {
-                Position::First(word) | Position::Middle(word) => {
+        for (position, word) in words.into_iter().with_position() {
+            match position {
+                Position::First | Position::Middle => {
                     output_line.extend(word.word_span());
                     output_line.extend(word.whitespace_span());
                 }
-                Position::Last(word) | Position::Only(word) => {
+                Position::Last | Position::Only => {
                     // Don't add trailing whitespace, just the content.
                     output_line.extend(word.word_span());
                     // We don't support hyphenation at the moment, but if we
