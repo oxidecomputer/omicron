@@ -125,9 +125,23 @@ impl super::Nexus {
             )));
         }
         for disk in &params.disks {
-            if let params::InstanceDiskAttachment::Create(create) = disk {
-                self.validate_disk_create_params(opctx, &authz_project, create)
+            match disk {
+                params::InstanceDiskAttachment::Create(params) => {
+                    self.validate_disk_create_params(
+                        opctx,
+                        &authz_project,
+                        params,
+                    )
                     .await?;
+                }
+                params::InstanceDiskAttachment::Attach(params) => {
+                    self.validate_disk_attach_params(
+                        opctx,
+                        &authz_project,
+                        params,
+                    )
+                    .await?;
+                }
             }
         }
         if params.ncpus.0 > MAX_VCPU_PER_INSTANCE {

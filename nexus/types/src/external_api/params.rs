@@ -795,8 +795,8 @@ pub enum InstanceDiskAttachment {
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct InstanceDiskAttach {
-    /// A disk name to attach
-    pub name: Name,
+    /// A disk to attach
+    pub disk: NameOrId,
 }
 
 /// Parameters for creating an external IP address for instances.

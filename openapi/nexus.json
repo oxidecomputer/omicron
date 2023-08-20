@@ -9717,11 +9717,11 @@
             "description": "During instance creation, attach this disk",
             "type": "object",
             "properties": {
-              "name": {
-                "description": "A disk name to attach",
+              "disk": {
+                "description": "A disk to attach",
                 "allOf": [
                   {
-                    "$ref": "#/components/schemas/Name"
+                    "$ref": "#/components/schemas/NameOrId"
                   }
                 ]
               },
@@ -9733,7 +9733,7 @@
               }
             },
             "required": [
-              "name",
+              "disk",
               "type"
             ]
           }

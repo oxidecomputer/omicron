@@ -2281,7 +2281,7 @@ async fn test_attach_one_disk_to_instance(cptestctx: &ControlPlaneTestContext) {
         external_ips: vec![],
         disks: vec![params::InstanceDiskAttachment::Attach(
             params::InstanceDiskAttach {
-                name: Name::try_from(String::from("probablydata")).unwrap(),
+                disk: "probablydata".parse::<Name>().unwrap().into(),
             },
         )],
         start: true,
@@ -2353,7 +2353,7 @@ async fn test_instance_create_attach_disks(
             }),
             params::InstanceDiskAttachment::Attach(
                 params::InstanceDiskAttach {
-                    name: attachable_disk.identity.name,
+                    disk: attachable_disk.identity.name.into(),
                 },
             ),
         ],
@@ -2446,10 +2446,14 @@ async fn test_instance_create_attach_disks_undo(
                 },
             }),
             params::InstanceDiskAttachment::Attach(
-                params::InstanceDiskAttach { name: regular_disk.identity.name },
+                params::InstanceDiskAttach {
+                    disk: regular_disk.identity.name.into(),
+                },
             ),
             params::InstanceDiskAttachment::Attach(
-                params::InstanceDiskAttach { name: faulted_disk.identity.name },
+                params::InstanceDiskAttach {
+                    disk: faulted_disk.identity.name.into(),
+                },
             ),
         ],
         start: true,
@@ -2522,8 +2526,10 @@ async fn test_attach_eight_disks_to_instance(
             .map(|i| {
                 params::InstanceDiskAttachment::Attach(
                     params::InstanceDiskAttach {
-                        name: Name::try_from(format!("probablydata{}", i))
-                            .unwrap(),
+                        disk: format!("probablydata{}", i)
+                            .parse::<Name>()
+                            .unwrap()
+                            .into(),
                     },
                 )
             })
@@ -2602,8 +2608,10 @@ async fn test_cannot_attach_nine_disks_to_instance(
             .map(|i| {
                 params::InstanceDiskAttachment::Attach(
                     params::InstanceDiskAttach {
-                        name: Name::try_from(format!("probablydata{}", i))
-                            .unwrap(),
+                        disk: format!("probablydata{}", i)
+                            .parse::<Name>()
+                            .unwrap()
+                            .into(),
                     },
                 )
             })
@@ -2696,8 +2704,10 @@ async fn test_cannot_attach_faulted_disks(cptestctx: &ControlPlaneTestContext) {
             .map(|i| {
                 params::InstanceDiskAttachment::Attach(
                     params::InstanceDiskAttach {
-                        name: Name::try_from(format!("probablydata{}", i))
-                            .unwrap(),
+                        disk: format!("probablydata{}", i)
+                            .parse::<Name>()
+                            .unwrap()
+                            .into(),
                     },
                 )
             })
@@ -2779,8 +2789,10 @@ async fn test_disks_detached_when_instance_destroyed(
             .map(|i| {
                 params::InstanceDiskAttachment::Attach(
                     params::InstanceDiskAttach {
-                        name: Name::try_from(format!("probablydata{}", i))
-                            .unwrap(),
+                        disk: format!("probablydata{}", i)
+                            .parse::<Name>()
+                            .unwrap()
+                            .into(),
                     },
                 )
             })
@@ -2863,8 +2875,10 @@ async fn test_disks_detached_when_instance_destroyed(
             .map(|i| {
                 params::InstanceDiskAttachment::Attach(
                     params::InstanceDiskAttach {
-                        name: Name::try_from(format!("probablydata{}", i))
-                            .unwrap(),
+                        disk: format!("probablydata{}", i)
+                            .parse::<Name>()
+                            .unwrap()
+                            .into(),
                     },
                 )
             })

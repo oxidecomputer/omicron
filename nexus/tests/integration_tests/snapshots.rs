@@ -143,7 +143,9 @@ async fn test_snapshot_basic(cptestctx: &ControlPlaneTestContext) {
             network_interfaces:
                 params::InstanceNetworkInterfaceAttachment::None,
             disks: vec![params::InstanceDiskAttachment::Attach(
-                params::InstanceDiskAttach { name: base_disk_name.clone() },
+                params::InstanceDiskAttach {
+                    disk: base_disk_name.clone().into(),
+                },
             )],
             external_ips: vec![],
             start: true,

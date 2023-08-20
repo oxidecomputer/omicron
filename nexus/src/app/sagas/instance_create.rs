@@ -27,6 +27,7 @@ use omicron_common::api::external::Generation;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::InstanceState;
 use omicron_common::api::external::Name;
+use omicron_common::api::external::NameOrId;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
 use omicron_common::api::internal::shared::SwitchLocation;
 use serde::Deserialize;
@@ -939,30 +940,45 @@ async fn ensure_instance_disk_attach_state(
     let instance_id = params.instance_id;
     let project_id = params.project_id;
 
-    let disk_name = match params.attach_params {
+    let disk: NameOrId = match params.attach_params {
         InstanceDiskAttachment::Create(create_params) => {
-            db::model::Name(create_params.identity.name)
+            create_params.identity.name.into()
         }
-        InstanceDiskAttachment::Attach(attach_params) => {
-            db::model::Name(attach_params.name)
-        }
+        InstanceDiskAttachment::Attach(attach_params) => attach_params.disk,
     };
 
-    let (.., authz_instance, _db_instance) =
-        LookupPath::new(&opctx, &datastore)
-            .instance_id(instance_id)
-            .fetch()
-            .await
-            .map_err(ActionError::action_failed)?;
+    let (.., authz_instance) = LookupPath::new(&opctx, &datastore)
+        .instance_id(instance_id)
+        .lookup_for(authz::Action::Read)
+        .await
+        .map_err(ActionError::action_failed)?;
 
     // TODO-correctness TODO-security It's not correct to re-resolve the
     // disk name now.  See oxidecomputer/omicron#1536.
-    let (.., authz_disk, _db_disk) = LookupPath::new(&opctx, &datastore)
-        .project_id(project_id)
-        .disk_name(&disk_name)
-        .fetch()
-        .await
-        .map_err(ActionError::action_failed)?;
+    let (.., attach_authz_project, authz_disk) = match disk {
+        NameOrId::Id(disk_id) => LookupPath::new(&opctx, &datastore)
+            .disk_id(disk_id)
+            .lookup_for(authz::Action::Read)
+            .await
+            .map_err(ActionError::action_failed)?,
+        NameOrId::Name(disk_name) => LookupPath::new(&opctx, &datastore)
+            .project_id(project_id)
+            .disk_name_owned(disk_name.into())
+            .lookup_for(authz::Action::Read)
+            .await
+            .map_err(ActionError::action_failed)?,
+    };
+
+    // Verify that the given disk ID is in the same project as the instance
+    if attach_authz_project.id() != project_id {
+        return Err(ActionError::action_failed(Error::invalid_request(
+            &format!(
+                "disk {} does not belong to project {}",
+                authz_disk.id(),
+                project_id
+            ),
+        )));
+    }
 
     if attached {
         datastore
@@ -1384,6 +1400,7 @@ pub mod test {
     use nexus_test_utils::resource_helpers::populate_ip_pool;
     use nexus_test_utils::resource_helpers::DiskTest;
     use nexus_test_utils_macros::nexus_test;
+    use omicron_common::api::external::Name;
     use omicron_common::api::external::{
         ByteCount, IdentityMetadataCreateParams, InstanceCpuCount,
     };
@@ -1428,7 +1445,7 @@ pub mod test {
                 }],
                 disks: vec![params::InstanceDiskAttachment::Attach(
                     params::InstanceDiskAttach {
-                        name: DISK_NAME.parse().unwrap(),
+                        disk: DISK_NAME.parse::<Name>().unwrap().into(),
                     },
                 )],
                 start: false,
