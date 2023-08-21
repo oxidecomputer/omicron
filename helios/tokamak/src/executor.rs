@@ -4,7 +4,7 @@
 
 //! A "fake" [Executor] implementation, which can respond to host requests.
 
-use crate::byte_queue::ByteQueue;
+use crate::shared_byte_queue::SharedByteQueue;
 
 use async_trait::async_trait;
 use helios_fusion::{
@@ -155,9 +155,9 @@ pub struct FakeChild {
     id: u64,
     command: Command,
     executor: Arc<FakeExecutorInner>,
-    stdin: ByteQueue,
-    stdout: ByteQueue,
-    stderr: ByteQueue,
+    stdin: SharedByteQueue,
+    stdout: SharedByteQueue,
+    stderr: SharedByteQueue,
 }
 
 impl FakeChild {
@@ -185,9 +185,9 @@ impl FakeChild {
             id,
             command: copy_command,
             executor,
-            stdin: ByteQueue::new(),
-            stdout: ByteQueue::new(),
-            stderr: ByteQueue::new(),
+            stdin: SharedByteQueue::new(),
+            stdout: SharedByteQueue::new(),
+            stderr: SharedByteQueue::new(),
         })
     }
 
