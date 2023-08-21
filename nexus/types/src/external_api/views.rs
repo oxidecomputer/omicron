@@ -522,3 +522,18 @@ pub struct UpdateDeployment {
     pub version: SemverVersion,
     pub status: UpdateStatus,
 }
+
+// SYSTEM HEALTH
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum SystemHealthStatus {
+    Ok,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct SystemHealth {
+    /// Whether the external API is reachable. Will always be Ok if the endpoint
+    /// returns anything at all.
+    pub api: SystemHealthStatus,
+}

@@ -4036,6 +4036,34 @@
         }
       }
     },
+    "/v1/system/health": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Fetch system status",
+        "description": "Always responds with Ok if it responds at all.",
+        "operationId": "system_health",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SystemHealth"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/v1/system/identity-providers": {
       "get": {
         "tags": [
@@ -14031,6 +14059,28 @@
           "vlan_id"
         ]
       },
+      "SystemHealth": {
+        "type": "object",
+        "properties": {
+          "api": {
+            "description": "Whether the external API is reachable. Will always be Ok if the endpoint returns anything at all.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SystemHealthStatus"
+              }
+            ]
+          }
+        },
+        "required": [
+          "api"
+        ]
+      },
+      "SystemHealthStatus": {
+        "type": "string",
+        "enum": [
+          "ok"
+        ]
+      },
       "User": {
         "description": "View of a User",
         "type": "object",
@@ -15245,6 +15295,13 @@
       "description": "Snapshots of virtual disks at a particular point in time.",
       "externalDocs": {
         "url": "http://docs.oxide.computer/api/snapshots"
+      }
+    },
+    {
+      "name": "system",
+      "description": "General system endpoints",
+      "externalDocs": {
+        "url": "http://docs.oxide.computer/api/system"
       }
     },
     {
