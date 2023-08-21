@@ -1046,11 +1046,7 @@ pub(crate) mod test {
         let client = &cptestctx.external_client;
         let nexus = &cptestctx.server.apictx().nexus;
         let project_id = create_org_and_project(&client).await;
-
-        // Build the saga DAG with the provided test parameters
         let opctx = test_opctx(cptestctx);
-
-        let params = new_test_params(&opctx, project_id);
 
         crate::app::sagas::test_helpers::action_failure_can_unwind::<
             SagaDiskCreate,
@@ -1058,7 +1054,6 @@ pub(crate) mod test {
             _,
         >(
             nexus,
-            params,
             || Box::pin(async { new_test_params(&opctx, project_id) }),
             || {
                 Box::pin(async {
@@ -1088,7 +1083,6 @@ pub(crate) mod test {
             _
         >(
             nexus,
-            new_test_params(&opctx, project_id),
             || Box::pin(async { new_test_params(&opctx, project_id) }),
             || Box::pin(async { verify_clean_slate(&cptestctx, &test).await; }),
             log

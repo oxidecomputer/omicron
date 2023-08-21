@@ -654,11 +654,6 @@ mod tests {
         let old_runtime = db_instance.runtime().clone();
         let dst_sled_id =
             select_first_alternate_sled(&db_instance, &other_sleds);
-        let params = Params {
-            serialized_authn: authn::saga::Serialized::for_opctx(&opctx),
-            instance: db_instance,
-            migrate_params: params::InstanceMigrate { dst_sled_id },
-        };
 
         let make_params = || -> futures::future::BoxFuture<'_, Params> {
             Box::pin({
@@ -751,7 +746,7 @@ mod tests {
             SagaInstanceMigrate,
             _,
             _,
-        >(nexus, params, make_params, after_saga, log)
+        >(nexus, make_params, after_saga, log)
         .await;
     }
 }

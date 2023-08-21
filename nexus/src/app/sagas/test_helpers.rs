@@ -15,7 +15,7 @@ use nexus_db_queries::context::OpContext;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::NameOrId;
 use sled_agent_client::TestInterfaces as _;
-use slog::{info, Logger};
+use slog::{info, warn, Logger};
 use std::{num::NonZeroU32, sync::Arc};
 use uuid::Uuid;
 
@@ -150,15 +150,14 @@ pub async fn instance_simulate_by_name(
 /// # Arguments
 ///
 /// - `nexus`: A reference to the Nexus that should execute the saga.
-/// - `initial_params`: The parameters to use to construct an initial instance
-///   of saga `S` so that the scaffold can figure out how many nodes are in the
-///   DAG.
-/// - `generate_params`: A callback called at the beginning of each loop
-///   iteration that returns a future that yields the saga parameters to use for
-///   that loop iteration.
-/// - `after_saga`: A callback called after saga execution in each loop
-///   iteration. The caller may use this to check additional post-execution
-///   invariants and to prepare the test for the next loop iteration.
+/// - `before_saga`: A function that runs before each execution of the saga
+///   under test. This function returns the set of parameters to use for the
+///   next saga execution. It may also set up other aspects of the test
+///   environment needed to test the target saga (e.g. creating a test
+///   instance).
+/// - `after_saga`: A function that runs after each execution of the saga under
+///   test. This function checks any post-saga invariants and cleans up any
+///   objects that should be destroyed before the next test iteration.
 /// - `log`: A logger to which the scaffold should log messages.
 ///
 /// # Panics
@@ -166,22 +165,38 @@ pub async fn instance_simulate_by_name(
 /// This function asserts that each saga it executes (a) starts successfully,
 /// (b) fails, and (c) fails at the specific node at which the function injected
 /// a failure.
-pub async fn action_failure_can_unwind<'a, S, G, P>(
+pub async fn action_failure_can_unwind<'a, S, B, A>(
     nexus: &Arc<Nexus>,
-    initial_params: S::Params,
-    generate_params: G,
-    after_saga: P,
+    before_saga: B,
+    after_saga: A,
     log: &Logger,
 ) where
     S: NexusSaga,
-    G: Fn() -> BoxFuture<'a, S::Params>,
-    P: Fn() -> BoxFuture<'a, ()>,
+    B: Fn() -> BoxFuture<'a, S::Params>,
+    A: Fn() -> BoxFuture<'a, ()>,
 {
-    let dag = create_saga_dag::<S>(initial_params).unwrap();
-    let num_nodes = dag.get_nodes().count();
-    for failure_index in 0..num_nodes {
-        let params = generate_params().await;
+    // Construct the failure index by hand (instead of iterating over a range)
+    // to avoid having to pre-construct a DAG for a saga of type S, which
+    // requires a separate `S::Params`. (Obtaining parameters from `before_saga`
+    // for this purpose may not be correct because that function may have side
+    // effects.)
+    let mut failure_index = 0;
+    let mut previous_node_count = None;
+    loop {
+        let params = before_saga().await;
         let dag = create_saga_dag::<S>(params).unwrap();
+        let node_count = dag.get_nodes().count();
+
+        // Verify that the DAG is not empty and that, if this is not the first
+        // iteration, the node count has not changed between iterations (it
+        // might be a function of the generated parameters).
+        assert_ne!(node_count, 0);
+        if let Some(prev_count) = previous_node_count {
+            assert_eq!(prev_count, node_count);
+        } else {
+            previous_node_count = Some(node_count);
+        }
+
         let node = dag.get_nodes().nth(failure_index).unwrap();
         info!(
             log,
@@ -209,6 +224,11 @@ pub async fn action_failure_can_unwind<'a, S, G, P>(
         assert_eq!(saga_error.error_node_name, *node.name());
 
         after_saga().await;
+
+        failure_index += 1;
+        if failure_index >= node_count {
+            break;
+        }
     }
 }
 
@@ -221,42 +241,63 @@ pub async fn action_failure_can_unwind<'a, S, G, P>(
 /// # Arguments
 ///
 /// - `nexus`: A reference to the Nexus that should execute the saga.
-/// - `initial_params`: The parameters to use to construct an initial instance
-///   of saga `S` so that the scaffold can figure out how many nodes are in the
-///   DAG.
-/// - `generate_params`: A callback called at the beginning of each loop
-///   iteration that returns a future that yields the saga parameters to use for
-///   that loop iteration.
-/// - `after_saga`: A callback called after saga execution in each loop
-///   iteration. The caller may use this to check additional post-execution
-///   invariants and to prepare the test for the next loop iteration.
+/// - `before_saga`: A function that runs before each execution of the saga
+///   under test. This function returns the set of parameters to use for the
+///   next saga execution. It may also set up other aspects of the test
+///   environment needed to test the target saga (e.g. creating a test
+///   instance).
+/// - `after_saga`: A function that runs after each execution of the saga under
+///   test. This function checks any post-saga invariants and cleans up any
+///   objects that should be destroyed before the next test iteration.
 /// - `log`: A logger to which the scaffold should log messages.
+/// - `nexus`: A reference to the Nexus that should execute the saga.
 ///
 /// # Panics
 ///
 /// This function asserts that each saga it executes (a) starts successfully,
 /// (b) fails, and (c) fails at the specific node at which the function injected
 /// a failure.
-pub async fn action_failure_can_unwind_idempotently<'a, S, G, P>(
+pub async fn action_failure_can_unwind_idempotently<'a, S, B, A>(
     nexus: &Arc<Nexus>,
-    initial_params: S::Params,
-    generate_params: G,
-    after_saga: P,
+    before_saga: B,
+    after_saga: A,
     log: &Logger,
 ) where
     S: NexusSaga,
-    G: Fn() -> BoxFuture<'a, S::Params>,
-    P: Fn() -> BoxFuture<'a, ()>,
+    B: Fn() -> BoxFuture<'a, S::Params>,
+    A: Fn() -> BoxFuture<'a, ()>,
 {
-    let dag = create_saga_dag::<S>(initial_params).unwrap();
-    let num_nodes = dag.get_nodes().count();
-
-    let node_indices = Vec::from_iter(0..num_nodes);
-    for indices in node_indices.windows(2) {
-        let params = generate_params().await;
+    // Construct the error index by hand (instead of iterating over a range) to
+    // avoid having to pre-construct a DAG for a saga of type S, which requires
+    // a separate `S::Params`. (Obtaining parameters from `before_saga` for this
+    // purpose may not be correct because that function may have side effects.)
+    //
+    // To test the effects of repeating an undo node, start injecting failures
+    // at the second node in the DAG so that there's always at least one
+    // preceding node whose undo step will run.
+    let mut error_index = 1;
+    let mut previous_node_count = None;
+    loop {
+        let params = before_saga().await;
         let dag = create_saga_dag::<S>(params).unwrap();
-        let undo_node = dag.get_nodes().nth(indices[0]).unwrap();
-        let error_node = dag.get_nodes().nth(indices[1]).unwrap();
+        let node_count = dag.get_nodes().count();
+
+        // Verify that the DAG's node count doesn't change between iterations.
+        // The DAG must have at least two nodes so that there's always a step
+        // preceding the error step.
+        if let Some(prev_count) = previous_node_count {
+            assert_eq!(prev_count, node_count);
+        } else {
+            if node_count < 2 {
+                warn!(log, "Saga has fewer than 2 nodes; nothing to undo");
+                return;
+            }
+
+            previous_node_count = Some(node_count);
+        }
+
+        let undo_node = dag.get_nodes().nth(error_index - 1).unwrap();
+        let error_node = dag.get_nodes().nth(error_index).unwrap();
         info!(
             log,
             "Creating new saga that will fail at index {:?}", error_node.index();
@@ -296,5 +337,10 @@ pub async fn action_failure_can_unwind_idempotently<'a, S, G, P>(
         assert_eq!(saga_error.error_node_name, *error_node.name());
 
         after_saga().await;
+
+        error_index += 1;
+        if error_index >= node_count {
+            break;
+        }
     }
 }

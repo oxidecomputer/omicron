@@ -623,23 +623,12 @@ mod test {
         let opctx = test_helpers::test_opctx(cptestctx);
         let instance = create_instance(client).await;
 
-        // Fetch enough state to be able to reason about how many nodes are in
-        // the saga.
-        let db_instance =
-            fetch_db_instance(cptestctx, &opctx, instance.identity.id).await;
-        let params = Params {
-            serialized_authn: authn::saga::Serialized::for_opctx(&opctx),
-            instance: db_instance,
-            ensure_network: true,
-        };
-
         test_helpers::action_failure_can_unwind::<
             SagaInstanceStart,
             _,
             _,
         >(
             nexus,
-            params,
             || {
                 Box::pin({
                     async {

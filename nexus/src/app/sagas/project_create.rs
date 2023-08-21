@@ -276,21 +276,14 @@ mod test {
         cptestctx: &ControlPlaneTestContext,
     ) {
         let log = &cptestctx.logctx.log;
-
         let nexus = &cptestctx.server.apictx().nexus;
-
-        // Build the saga DAG with the provided test parameters
         let opctx = test_opctx(&cptestctx);
-        let authz_silo = opctx.authn.silo_required().unwrap();
-        let params = new_test_params(&opctx, authz_silo);
-
         crate::app::sagas::test_helpers::action_failure_can_unwind::<
             SagaProjectCreate,
             _,
             _,
         >(
             nexus,
-            params,
             || {
                 Box::pin({
                     async {

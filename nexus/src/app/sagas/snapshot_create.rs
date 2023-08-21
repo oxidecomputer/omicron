@@ -1991,15 +1991,6 @@ mod test {
         let silo_id = authz_silo.id();
         let project_id = authz_project.id();
 
-        let params = new_test_params(
-            &opctx,
-            silo_id,
-            project_id,
-            disk_id,
-            Name::from_str(DISK_NAME).unwrap().into(),
-            use_the_pantry,
-        );
-
         // As a concession to the test helper, make sure the disk is gone
         // before the first attempt to run the saga recreates it.
         delete_disk(client, PROJECT_NAME, DISK_NAME).await;
@@ -2028,7 +2019,6 @@ mod test {
             _,
         >(
             nexus,
-            params,
             || {
                 Box::pin({
                     async {

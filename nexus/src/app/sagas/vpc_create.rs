@@ -734,23 +734,13 @@ pub(crate) mod test {
         let project_id = create_org_and_project(&client).await;
         delete_project_vpc_defaults(&cptestctx, project_id).await;
 
-        // Build the saga DAG with the provided test parameters
         let opctx = test_opctx(&cptestctx);
-        let authz_project = get_authz_project(
-            &cptestctx,
-            project_id,
-            authz::Action::CreateChild,
-        )
-        .await;
-        let params = new_test_params(&opctx, authz_project);
-
         crate::app::sagas::test_helpers::action_failure_can_unwind::<
             SagaVpcCreate,
             _,
             _,
         >(
             nexus,
-            params,
             || {
                 Box::pin(async {
                     new_test_params(

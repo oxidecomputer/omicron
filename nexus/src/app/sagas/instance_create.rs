@@ -1671,11 +1671,8 @@ pub mod test {
         // Build the saga DAG with the provided test parameters
         let opctx = test_helpers::test_opctx(&cptestctx);
 
-        let params = new_test_params(&opctx, project_id);
-
         test_helpers::action_failure_can_unwind::<SagaInstanceCreate, _, _>(
             nexus,
-            params,
             || Box::pin(async { new_test_params(&opctx, project_id) }),
             || {
                 Box::pin({
@@ -1707,7 +1704,6 @@ pub mod test {
             _,
         >(
             nexus,
-            new_test_params(&opctx, project_id),
             || Box::pin(async { new_test_params(&opctx, project_id) }),
             || Box::pin(async { verify_clean_slate(&cptestctx).await }),
             log,
