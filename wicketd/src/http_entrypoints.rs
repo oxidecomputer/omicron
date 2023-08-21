@@ -1043,12 +1043,16 @@ async fn post_start_preflight_uplink_check(
         )
     };
 
-    match rqctx.preflight_checker.uplink_start(
-        network_config,
-        dns_servers,
-        ntp_servers,
-        our_switch_location,
-    ) {
+    match rqctx
+        .preflight_checker
+        .uplink_start(
+            network_config,
+            dns_servers,
+            ntp_servers,
+            our_switch_location,
+        )
+        .await
+    {
         Ok(()) => Ok(HttpResponseUpdatedNoContent {}),
         Err(err) => Err(HttpError::for_client_error(
             None,

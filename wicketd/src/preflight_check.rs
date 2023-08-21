@@ -6,6 +6,7 @@ use omicron_common::api::internal::shared::RackNetworkConfig;
 use omicron_common::api::internal::shared::SwitchLocation;
 use slog::o;
 use slog::Logger;
+use tokio::sync::oneshot;
 use std::net::IpAddr;
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -41,21 +42,38 @@ impl PreflightCheckerHandler {
         Self { request_tx, uplink_event_buffer }
     }
 
-    pub(crate) fn uplink_start(
+    pub(crate) async fn uplink_start(
         &self,
         network_config: RackNetworkConfig,
         dns_servers: Vec<IpAddr>,
         ntp_servers: Vec<String>,
         our_switch_location: SwitchLocation,
     ) -> Result<(), PreflightCheckerBusy> {
+        let (check_started_tx, check_started_rx) = oneshot::channel();
+
+        // Attempt to message the task running `preflight_task_main`.
+        // `self.request_tx` is a 0-size bounded channel, so this will fail if
+        // the task isn't currently waiting for a message (i.e., it either
+        // _just_ started, which is exceedingly unlikely, or it's busy handling
+        // a previous request, which is the expected error here).
         self.request_tx
             .try_send(PreflightCheck::Uplink {
                 network_config,
                 dns_servers,
                 ntp_servers,
                 our_switch_location,
+                check_started_tx,
             })
-            .map_err(|_err| PreflightCheckerBusy)
+            .map_err(|_err| PreflightCheckerBusy)?;
+
+        // Don't return until the task tells us to: this allows it to create a
+        // new, clear event report buffer, so if our client calls
+        // `uplink_event_report` immediately after this function returns,
+        // they won't see a stale report from a previous check (or no report at
+        // all, if this is the first check being run).
+        check_started_rx.await.unwrap();
+
+        Ok(())
     }
 
     pub(crate) fn uplink_event_report(&self) -> Option<UplinkEventReport> {
@@ -78,6 +96,7 @@ enum PreflightCheck {
         dns_servers: Vec<IpAddr>,
         ntp_servers: Vec<String>,
         our_switch_location: SwitchLocation,
+        check_started_tx: oneshot::Sender<()>,
     },
 }
 
@@ -93,10 +112,16 @@ async fn preflight_task_main(
                 dns_servers,
                 ntp_servers,
                 our_switch_location,
+                check_started_tx,
             } => {
                 // New preflight check: create a new event buffer.
                 *uplink_event_buffer.lock().unwrap() =
                     Some(uplink::EventBuffer::new(16));
+
+                // We've cleared the shared event buffer; release our caller
+                // (they can now lock and check the event buffer while we run
+                // the preflight check below).
+                _ = check_started_tx.send(());
 
                 // Run the uplink check.
                 uplink::run_local_uplink_preflight_check(

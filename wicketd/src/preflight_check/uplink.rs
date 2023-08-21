@@ -28,6 +28,7 @@ use serde::Serialize;
 use slog::error;
 use slog::o;
 use slog::Logger;
+use std::collections::BTreeSet;
 use std::collections::HashMap;
 use std::net::IpAddr;
 use std::net::Ipv4Addr;
@@ -185,7 +186,16 @@ fn add_steps_for_single_local_uplink_preflight_check<'a>(
                     .await
                 {
                     Ok(_response) => {
-                        StepSuccess::new((port_id, link_id)).into()
+                        let metadata = vec![format!(
+                            "configured {}/{}: ip {}, gateway {}",
+                            *port_id,
+                            link_id.0,
+                            uplink.uplink_cidr,
+                            uplink.gateway_ip
+                        )];
+                        StepSuccess::new((port_id, link_id))
+                            .with_metadata(metadata)
+                            .into()
                     }
                     Err(err) => {
                         Err(UplinkPreflightTerminalError::ConfigurePort {
@@ -211,7 +221,7 @@ fn add_steps_for_single_local_uplink_preflight_check<'a>(
     let prev_step = registrar
         .new_step(
             UplinkPreflightStepId::WaitForL1Link,
-            "Configuring switch",
+            "Waiting for L1 link up",
             move |cx| async move {
                 let (port_id, link_id) = prev_step.into_value(cx.token()).await;
 
@@ -267,7 +277,7 @@ fn add_steps_for_single_local_uplink_preflight_check<'a>(
     let prev_step = registrar
         .new_step(
             UplinkPreflightStepId::ConfigureAddress,
-            "Configuring IP address",
+            "Configuring IP address in host OS",
             move |cx| async move {
                 let level1 = match prev_step.into_value(cx.token()).await {
                     Ok(level1) => level1,
@@ -370,7 +380,10 @@ fn add_steps_for_single_local_uplink_preflight_check<'a>(
                     }
                 }
 
+                let metadata =
+                    vec![format!("configured {}", uplink_property.0)];
                 StepSuccess::new(Ok(L2Success { level1, uplink_property }))
+                    .with_metadata(metadata)
                     .into()
             },
         )
@@ -379,7 +392,7 @@ fn add_steps_for_single_local_uplink_preflight_check<'a>(
     let prev_step = registrar
         .new_step(
             UplinkPreflightStepId::ConfigureRouting,
-            "Configuring routing",
+            "Configuring routing in host OS",
             move |cx| async move {
                 let level2 = match prev_step.into_value(cx.token()).await {
                     Ok(level2) => level2,
@@ -409,7 +422,12 @@ fn add_steps_for_single_local_uplink_preflight_check<'a>(
                     .into();
                 };
 
-                StepSuccess::new(Ok(RoutingSuccess { level2 })).into()
+                StepSuccess::new(Ok(RoutingSuccess { level2 }))
+                    .with_metadata(vec![format!(
+                        "added default route to {}",
+                        uplink.gateway_ip
+                    )])
+                    .into()
             },
         )
         .register();
@@ -505,13 +523,13 @@ fn add_steps_for_single_local_uplink_preflight_check<'a>(
                         if line.contains("Timeout reached") {
                             parsed_result = true;
                             warnings.push(format!(
-                                "Failed to contact NTP server {ntp_ip}"
+                                "failed to contact NTP server {ntp_ip}"
                             ));
                             break;
                         } else if line.contains("System clock wrong by") {
                             parsed_result = true;
                             messages.push(format!(
-                                "Successfully contacted NTP server {ntp_ip}"
+                                "successfully contacted NTP server {ntp_ip}"
                             ));
                             break;
                         }
@@ -519,19 +537,19 @@ fn add_steps_for_single_local_uplink_preflight_check<'a>(
 
                     if !parsed_result {
                         warnings.push(format!(
-                            "Failed to determine success or failure from \
-                             chronyd output: stdout={} stderr={}",
+                            "failed to determine success or failure for \
+                             {ntp_ip} from chronyd output: stdout={} stderr={}",
                             output.stdout, output.stderr
                         ));
                     }
                 }
 
                 if warnings.is_empty() {
-                    StepSuccess::new(Ok(level2))
-                        .with_message(messages.join("\n"))
-                        .into()
+                    StepSuccess::new(Ok(level2)).with_metadata(messages).into()
                 } else {
-                    StepWarning::new(Ok(level2), warnings.join("\n")).into()
+                    StepWarning::new(Ok(level2), warnings.join("\n"))
+                        .with_metadata(messages)
+                        .into()
                 }
             },
         )
@@ -548,7 +566,7 @@ fn add_steps_for_single_local_uplink_preflight_check<'a>(
     let prev_step = registrar
         .new_step(
             UplinkPreflightStepId::CleanupRouting,
-            "Cleaning up routing configuration",
+            "Cleaning up host OS routing configuration",
             move |cx| async move {
                 let remove_host_route: bool;
                 let level2 = match prev_step.into_value(cx.token()).await {
@@ -588,16 +606,6 @@ fn add_steps_for_single_local_uplink_preflight_check<'a>(
                     })?;
                 }
 
-                dpd_client
-                    .route_ipv4_delete(&DPD_DEFAULT_IPV4_CIDR.parse().unwrap())
-                    .await
-                    .map_err(|err| {
-                        UplinkPreflightTerminalError::RemoveDpdRoute {
-                            err,
-                            gateway_ip: uplink.gateway_ip,
-                        }
-                    })?;
-
                 StepSuccess::new(Ok(level2)).into()
             },
         )
@@ -607,7 +615,7 @@ fn add_steps_for_single_local_uplink_preflight_check<'a>(
         registrar
             .new_step(
                 UplinkPreflightStepId::CleanupAddress,
-                "Cleaning up IP address configuration",
+                "Cleaning up host OS IP address configuration",
                 move |cx| async move {
                     let mut uplink_property_to_remove = None;
                     let level1 = match prev_step.into_value(cx.token()).await {
@@ -673,20 +681,6 @@ fn add_steps_for_single_local_uplink_preflight_check<'a>(
                         )?;
                     }
 
-                    dpd_client
-                        .link_ipv4_delete(
-                            &level1.port_id,
-                            &level1.link_id,
-                            &uplink.uplink_cidr.ip(),
-                        )
-                        .await
-                        .map_err(|err| {
-                            UplinkPreflightTerminalError::RemoveDpdAddr {
-                                err,
-                                ip: uplink.uplink_cidr.ip(),
-                            }
-                        })?;
-
                     StepSuccess::new(Ok(level1)).into()
                 },
             )
@@ -695,9 +689,9 @@ fn add_steps_for_single_local_uplink_preflight_check<'a>(
     registrar
         .new_step(
             UplinkPreflightStepId::CleanupL1,
-            "Cleaning up L1 link",
+            "Cleaning up switch configuration",
             move |cx| async move {
-                let (port_id, link_id) =
+                let (port_id, _link_id) =
                     match prev_step.into_value(cx.token()).await {
                         Ok(L1Success { port_id, link_id })
                         | Err(L1Failure::WaitForLinkUp(port_id, link_id)) => {
@@ -705,13 +699,23 @@ fn add_steps_for_single_local_uplink_preflight_check<'a>(
                         }
                     };
 
-                dpd_client.link_delete(&port_id, &link_id).await.map_err(
-                    |err| UplinkPreflightTerminalError::RemoveDpdLink {
-                        err,
-                        port_id,
-                        link_id,
-                    },
-                )?;
+                dpd_client
+                    .port_settings_apply(
+                        &port_id,
+                        &PortSettings {
+                            tag: WICKETD_TAG.to_string(),
+                            links: HashMap::new(),
+                            v4_routes: HashMap::new(),
+                            v6_routes: HashMap::new(),
+                        },
+                    )
+                    .await
+                    .map_err(|err| {
+                        UplinkPreflightTerminalError::UnconfigurePort {
+                            port_id,
+                            err,
+                        }
+                    })?;
 
                 StepSuccess::new(()).into()
             },
@@ -764,7 +768,7 @@ fn build_port_settings(
     );
 
     port_settings.v4_routes.insert(
-        "0.0.0.0/0".parse().unwrap(),
+        DPD_DEFAULT_IPV4_CIDR.parse().unwrap(),
         RouteSettingsV4 {
             link_id: link_id.0,
             nexthop: Some(uplink.gateway_ip),
@@ -882,28 +886,15 @@ pub(crate) enum UplinkPreflightTerminalError {
     },
     #[error("failed to remove host OS route to gateway {gateway_ip}: {err}")]
     RemoveHostRoute { err: String, gateway_ip: Ipv4Addr },
-    #[error("failed to remove dpd route to gateway {gateway_ip}")]
-    RemoveDpdRoute {
-        #[source]
-        err: DpdError,
-        gateway_ip: Ipv4Addr,
-    },
     #[error("failed to remove uplink SMF property {property:?}: {err}")]
     RemoveSmfProperty { property: String, err: String },
     #[error("failed to refresh uplink service config: {0}")]
     RefreshUplinkSmf(String),
-    #[error("failed to remove DPD address {ip}")]
-    RemoveDpdAddr {
-        #[source]
-        err: DpdError,
-        ip: Ipv4Addr,
-    },
-    #[error("failed to remove DPD link {port_id:?}/{link_id:?}")]
-    RemoveDpdLink {
+    #[error("failed to clear settings for port {port_id:?}")]
+    UnconfigurePort {
         #[source]
         err: DpdError,
         port_id: PortId,
-        link_id: LinkId,
     },
 }
 
@@ -921,7 +912,7 @@ impl StepSpec for UplinkPreflightCheckSpec {
     type StepId = UplinkPreflightStepId;
     type StepMetadata = ();
     type ProgressMetadata = String;
-    type CompletionMetadata = ();
+    type CompletionMetadata = Vec<String>;
     type SkippedMetadata = ();
     type Error = UplinkPreflightTerminalError;
 }
@@ -937,16 +928,18 @@ struct DnsLookupStep<'a> {
     ntp_names_to_resolve: Vec<&'a str>,
 
     // Usable output of this step: IP addrs of the NTP servers to use.
-    ntp_ips: Vec<IpAddr>,
+    ntp_ips: BTreeSet<IpAddr>,
 }
 
 impl<'a> DnsLookupStep<'a> {
     fn new(dns_servers: &'a [IpAddr], ntp_servers: &'a [String]) -> Self {
-        let mut ntp_ips = Vec::with_capacity(ntp_servers.len());
+        let mut ntp_ips = BTreeSet::new();
         let mut ntp_names_to_resolve = Vec::new();
         for ntp_server in ntp_servers {
             match ntp_server.parse::<IpAddr>() {
-                Ok(ip) => ntp_ips.push(ip),
+                Ok(ip) => {
+                    ntp_ips.insert(ip);
+                }
                 Err(_) => {
                     ntp_names_to_resolve.push(ntp_server.as_str());
                 }
@@ -982,12 +975,8 @@ impl<'a> DnsLookupStep<'a> {
                 }
             };
 
-            // Attempt to resolve any remaining NTP servers.
-            // ntp_names_to_resolve might have started out empty if we were
-            // given IPs instead of names, or even if we were given names we
-            // might've already resolved them all using an earlier DNS server in
-            // this function.
-            while let Some(&ntp_name) = self.ntp_names_to_resolve.last() {
+            // Attempt to resolve any NTP servers that aren't IP addresses.
+            for &ntp_name in &self.ntp_names_to_resolve {
                 match resolver.lookup_ip(ntp_name).await {
                     Ok(ips) => {
                         for ip in ips {
@@ -1002,9 +991,8 @@ impl<'a> DnsLookupStep<'a> {
                                 metadata: message,
                             })
                             .await;
-                            self.ntp_ips.push(ip);
+                            self.ntp_ips.insert(ip);
                         }
-                        self.ntp_names_to_resolve.pop();
                     }
                     Err(err) => {
                         warnings.push(format!(
@@ -1012,60 +1000,64 @@ impl<'a> DnsLookupStep<'a> {
                              {dns_ip}: {}",
                             DisplayErrorChain::new(&err)
                         ));
-                        break;
                     }
                 }
             }
 
-            // Also attempt to look up `DNS_NAME_TO_QUERY`. This may fail at the
-            // DNS level if the server we're talking to does not handle general
-            // public DNS names; we treat such failures at the DNS level as
-            // successes, because we're trying to check uplink connectivity.
-            match resolver.lookup_ip(DNS_NAME_TO_QUERY).await {
-                Ok(ips) => {
-                    for ip in ips {
-                        let message = format!(
-                            "resolved {DNS_NAME_TO_QUERY} to {ip} \
-                             via DNS server {dns_ip}"
-                        );
-                        messages.push(message.clone());
-                        cx.send_progress(StepProgress::Progress {
-                            progress: None,
-                            metadata: message,
-                        })
-                        .await;
+            // If all the NTP servers are IP addresses, we'll attempt a DNS
+            // query of an arbitrarily-chosen DNS name (`oxide.computer`). This
+            // may fail at the DNS level if the server we're talking to does not
+            // handle general public DNS names; we treat such a failure at the
+            // DNS level as successes, because we're trying to check uplink
+            // connectivity.
+            if self.ntp_names_to_resolve.is_empty() {
+                match resolver.lookup_ip(DNS_NAME_TO_QUERY).await {
+                    Ok(ips) => {
+                        for ip in ips {
+                            let message = format!(
+                                "resolved {DNS_NAME_TO_QUERY} to {ip} \
+                                 via DNS server {dns_ip}"
+                            );
+                            messages.push(message.clone());
+                            cx.send_progress(StepProgress::Progress {
+                                progress: None,
+                                metadata: message,
+                            })
+                            .await;
+                        }
                     }
+                    Err(err) => match err.kind() {
+                        ResolveErrorKind::NoRecordsFound { .. } => {
+                            let message = format!(
+                                "no records found for  {DNS_NAME_TO_QUERY}; \
+                                 connectivity to DNS server appears good"
+                            );
+                            messages.push(message.clone());
+                            cx.send_progress(StepProgress::Progress {
+                                progress: None,
+                                metadata: message,
+                            })
+                            .await;
+                        }
+                        _ => {
+                            warnings.push(format!(
+                                "failed to look up {DNS_NAME_TO_QUERY} via \
+                                 DNS server {dns_ip}: {}",
+                                DisplayErrorChain::new(&err)
+                            ));
+                        }
+                    },
                 }
-                Err(err) => match err.kind() {
-                    ResolveErrorKind::NoRecordsFound { .. } => {
-                        let message = format!(
-                            "no records found for  {DNS_NAME_TO_QUERY}; \
-                             connectivity to DNS server appears good"
-                        );
-                        messages.push(message.clone());
-                        cx.send_progress(StepProgress::Progress {
-                            progress: None,
-                            metadata: message,
-                        })
-                        .await;
-                    }
-                    _ => {
-                        warnings.push(format!(
-                            "failed to look up {DNS_NAME_TO_QUERY} via \
-                             DNS server {dns_ip}: {}",
-                            DisplayErrorChain::new(&err)
-                        ));
-                    }
-                },
             }
         }
 
+        let ntp_ips = self.ntp_ips.into_iter().collect();
         if warnings.is_empty() {
-            StepSuccess::new(self.ntp_ips)
-                .with_message(messages.join("\n"))
-                .build()
+            StepSuccess::new(ntp_ips).with_metadata(messages).build()
         } else {
-            StepWarning::new(self.ntp_ips, warnings.join("\n")).build()
+            StepWarning::new(ntp_ips, warnings.join("\n"))
+                .with_metadata(messages)
+                .build()
         }
     }
 }
