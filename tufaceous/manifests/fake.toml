@@ -4,12 +4,12 @@
 
 system_version = "1.0.0"
 
-[artifact.gimlet_sp]
+[[artifact.gimlet_sp]]
 name = "fake-gimlet-sp"
 version = "1.0.0"
 source = { kind = "fake", size = "1MiB" }
 
-[artifact.gimlet_rot]
+[[artifact.gimlet_rot]]
 name = "fake-gimlet-rot"
 version = "1.0.0"
 [artifact.gimlet_rot.source]
@@ -17,7 +17,7 @@ kind = "composite-rot"
 archive_a = { kind = "fake", size = "512KiB" }
 archive_b = { kind = "fake", size = "512KiB" }
 
-[artifact.host]
+[[artifact.host]]
 name = "fake-host"
 version = "1.0.0"
 [artifact.host.source]
@@ -25,7 +25,7 @@ kind = "composite-host"
 phase_1 = { kind = "fake", size = "512KiB" }
 phase_2 = { kind = "fake", size = "3MiB" }
 
-[artifact.trampoline]
+[[artifact.trampoline]]
 name = "fake-trampoline"
 version = "1.0.0"
 [artifact.trampoline.source]
@@ -33,7 +33,7 @@ kind = "composite-host"
 phase_1 = { kind = "fake", size = "512KiB" }
 phase_2 = { kind = "fake", size = "3MiB" }
 
-[artifact.control_plane]
+[[artifact.control_plane]]
 name = "fake-control-plane"
 version = "1.0.0"
 [artifact.control_plane.source]
@@ -43,12 +43,12 @@ zones = [
     { kind = "fake", name = "zone2.tar.gz", size = "1MiB" },
 ]
 
-[artifact.psc_sp]
+[[artifact.psc_sp]]
 name = "fake-psc-sp"
 version = "1.0.0"
 source = { kind = "fake", size = "1MiB" }
 
-[artifact.psc_rot]
+[[artifact.psc_rot]]
 name = "fake-psc-rot"
 version = "1.0.0"
 [artifact.psc_rot.source]
@@ -56,12 +56,12 @@ kind = "composite-rot"
 archive_a = { kind = "fake", size = "512KiB" }
 archive_b = { kind = "fake", size = "512KiB" }
 
-[artifact.switch_sp]
+[[artifact.switch_sp]]
 name = "fake-switch-sp"
 version = "1.0.0"
 source = { kind = "fake", size = "1MiB" }
 
-[artifact.switch_rot]
+[[artifact.switch_rot]]
 name = "fake-switch-rot"
 version = "1.0.0"
 [artifact.switch_rot.source]

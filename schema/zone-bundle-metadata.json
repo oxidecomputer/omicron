@@ -43,10 +43,10 @@
       "description": "The reason or cause for a zone bundle, i.e., why it was created.",
       "oneOf": [
         {
-          "description": "Generated in response to an explicit request to the sled agent.",
+          "description": "Some other, unspecified reason.",
           "type": "string",
           "enum": [
-            "explicit_request"
+            "other"
           ]
         },
         {
@@ -64,10 +64,10 @@
           ]
         },
         {
-          "description": "Some other, unspecified reason.",
+          "description": "Generated in response to an explicit request to the sled agent.",
           "type": "string",
           "enum": [
-            "other"
+            "explicit_request"
           ]
         }
       ]
