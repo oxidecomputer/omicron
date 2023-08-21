@@ -14,10 +14,10 @@ pub fn generate_name(prefix: &str) -> Result<Name> {
 }
 
 pub async fn get_system_ip_pool() -> Result<(Ipv4Addr, Ipv4Addr)> {
-    if let (Ok(s), Ok(e)) = (env::var("PXA_START"), env::var("PXA_END")) {
+    if let (Ok(s), Ok(e)) = (env::var("IPPOOL_START"), env::var("IPPOOL_END")) {
         return Ok((
-            s.parse::<Ipv4Addr>().expect("PXA_START is not an IP address"),
-            e.parse::<Ipv4Addr>().expect("PXA_END is not an IP address"),
+            s.parse::<Ipv4Addr>().expect("IPPOOL_START is not an IP address"),
+            e.parse::<Ipv4Addr>().expect("IPPOOL_END is not an IP address"),
         ));
     }
 

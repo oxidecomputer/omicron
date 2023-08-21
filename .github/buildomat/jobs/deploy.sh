@@ -180,8 +180,8 @@ SERVICE_IP_POOL_END="$EXTRA_IP_BASE.$((EXTRA_IP_FOCTET + 9))"
 DNS_IP1="$EXTRA_IP_BASE.$((EXTRA_IP_FOCTET + 0))"
 DNS_IP2="$EXTRA_IP_BASE.$((EXTRA_IP_FOCTET + 1))"
 UPLINK_IP="$EXTRA_IP_BASE.$((EXTRA_IP_FOCTET + 10))"
-PXA_START="$EXTRA_IP_BASE.$((EXTRA_IP_FOCTET + 11))"
-PXA_END="$EXTRA_IP_BASE.$((EXTRA_IP_LOCTET + 0))"
+IPPOOL_START="$EXTRA_IP_BASE.$((EXTRA_IP_FOCTET + 11))"
+IPPOOL_END="$EXTRA_IP_BASE.$((EXTRA_IP_LOCTET + 0))"
 
 # Set the gateway IP address to be the GZ IP...
 GATEWAY_IP=$(ipadm show-addr -po type,addr | \
@@ -193,6 +193,10 @@ GATEWAY_MAC=$(arp -an | awk -vgw=$GATEWAY_IP '$2 == gw {print $NF}')
 # through the GZ. This allows the NTP zone to talk to DNS and NTP servers on
 # the Internet.
 routeadm -e ipv4-forwarding -u
+
+# Configure softnpu to proxy ARP for the entire extra IP range.
+PXA_START="$EXTRA_IP_START"
+PXA_END="$EXTRA_IP_END"
 
 # These variables are used by softnpu_init, so export them.
 export GATEWAY_IP GATEWAY_MAC PXA_START PXA_END
@@ -298,7 +302,7 @@ pfexec svccfg import /var/svc/manifest/site/tcpproxy.xml
 OMICRON_NO_UNINSTALL=1 \
     ptime -m pfexec ./target/release/omicron-package -t test install
 
-# Wait for switch zone to come up so that we can configure it
+# Wait for switch zone to come up
 retry=0
 until curl --head --silent -o /dev/null "http://[fd00:1122:3344:101::2]:12224/"
 do
@@ -309,17 +313,6 @@ do
 	sleep 1
 	retry=$((retry + 1))
 done
-
-# We also need to configure proxy arp for any services which use OPTE for
-# external connectivity (e.g. Nexus)
-SOFTNPU_MAC=$(dladm show-vnic sc0_1 -p -o macaddress \
-    | sed -E 's/[ :]/&0/g; s/0([^:]{2}(:|$))/\1/g')
-
-pfexec zlogin sidecar_softnpu /softnpu/scadm \
-	--server /softnpu/server \
-	--client /softnpu/client \
-	standalone \
-	add-proxy-arp $SERVICE_IP_POOL_START $SERVICE_IP_POOL_END $SOFTNPU_MAC
 
 pfexec zlogin sidecar_softnpu /softnpu/scadm \
 	--server /softnpu/server \
@@ -341,7 +334,7 @@ done
 echo "Waited for chrony: ${retry}s"
 
 export RUST_BACKTRACE=1
-export E2E_TLS_CERT
+export E2E_TLS_CERT IPPOOL_START IPPOOL_END
 ./tests/bootstrap
 
 rm ./tests/bootstrap
