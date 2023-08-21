@@ -105,8 +105,6 @@ uplink_port_fec="none"
 # For softnpu, an address within the "infra" block above that will be used for
 # the softnpu uplink port.  You can just pick the first address in that pool.
 uplink_cidr = "192.168.1.30/32"
-# TODO: Revert to original settings before merging
-uplink_ip = "192.168.1.30"
 # Switch to use for the uplink. For single-rack deployments this can be
 # "switch0" (upper slot) or "switch1" (lower slot). For single-node softnpu
 # and dendrite stub environments, use "switch0"

@@ -240,7 +240,7 @@ pub async fn build_client() -> Result<oxide_client::Client> {
             })
         },
         &Duration::from_secs(1),
-        &Duration::from_secs(600),
+        &Duration::from_secs(1200),
     )
     .await
     .context("logging in")?;

@@ -38,6 +38,9 @@ fi
 
 declare -a nodes=($CH_ADDRS)
 
+# TODO: If it is a single zone start in single node mode (check ch and keepers?), 
+# else do all this dance
+
 for i in "${nodes[@]}"
 do
   if ! grep -q "host.control-plane.oxide.internal" <<< "${i}"; then
