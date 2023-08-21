@@ -35,6 +35,17 @@ impl ArtifactsDocument {
 /// internally in Nexus and Sled Agent.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 pub struct Artifact {
+    /// Used to differentiate between different series of artifacts of the same
+    /// kind. This is used by the control plane to select the correct artifact.
+    ///
+    /// For SP and ROT images ([`KnownArtifactKind::GimletSp`],
+    /// [`KnownArtifactKind::GimletRot`], [`KnownArtifactKind::PscSp`],
+    /// [`KnownArtifactKind::PscRot`], [`KnownArtifactKind::SwitchSp`],
+    /// [`KnownArtifactKind::SwitchRot`]), `name` is the value of the board
+    /// (`BORD`) tag in the image caboose.
+    ///
+    /// In the future when [`KnownArtifactKind::ControlPlane`] is split up into
+    /// separate zones, `name` will be the zone name.
     pub name: String,
     pub version: SemverVersion,
     pub kind: ArtifactKind,

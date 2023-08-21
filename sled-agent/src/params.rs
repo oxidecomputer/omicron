@@ -2,8 +2,12 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use chrono::DateTime;
-use chrono::Utc;
+use crate::zone_bundle::PriorityOrder;
+pub use crate::zone_bundle::ZoneBundleCause;
+pub use crate::zone_bundle::ZoneBundleId;
+pub use crate::zone_bundle::ZoneBundleMetadata;
+pub use illumos_utils::opte::params::VpcFirewallRule;
+pub use illumos_utils::opte::params::VpcFirewallRulesEnsureBody;
 use omicron_common::api::internal::nexus::{
     DiskRuntimeState, InstanceRuntimeState,
 };
@@ -13,14 +17,12 @@ use omicron_common::api::internal::shared::{
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sled_hardware::Baseboard;
+pub use sled_hardware::DendriteAsic;
 use std::fmt::{Debug, Display, Formatter, Result as FormatResult};
 use std::net::{IpAddr, Ipv6Addr, SocketAddr, SocketAddrV6};
+use std::time::Duration;
 use thiserror::Error;
 use uuid::Uuid;
-
-pub use illumos_utils::opte::params::VpcFirewallRule;
-pub use illumos_utils::opte::params::VpcFirewallRulesEnsureBody;
-pub use sled_hardware::DendriteAsic;
 
 /// Used to request a Disk state change
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
@@ -845,93 +847,13 @@ pub enum SledRole {
     Scrimlet,
 }
 
-/// An identifier for a zone bundle.
-#[derive(
-    Clone,
-    Debug,
-    Deserialize,
-    Eq,
-    Hash,
-    JsonSchema,
-    Ord,
-    PartialEq,
-    PartialOrd,
-    Serialize,
-)]
-pub struct ZoneBundleId {
-    /// The name of the zone this bundle is derived from.
-    pub zone_name: String,
-    /// The ID for this bundle itself.
-    pub bundle_id: Uuid,
-}
-
-/// The reason or cause for a zone bundle, i.e., why it was created.
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    Default,
-    Deserialize,
-    Eq,
-    Hash,
-    JsonSchema,
-    Ord,
-    PartialEq,
-    PartialOrd,
-    Serialize,
-)]
-#[serde(rename_all = "snake_case")]
-#[non_exhaustive]
-pub enum ZoneBundleCause {
-    /// Generated in response to an explicit request to the sled agent.
-    ExplicitRequest,
-    /// A zone bundle taken when a sled agent finds a zone that it does not
-    /// expect to be running.
-    UnexpectedZone,
-    /// An instance zone was terminated.
-    TerminatedInstance,
-    /// Some other, unspecified reason.
-    #[default]
-    Other,
-}
-
-/// Metadata about a zone bundle.
-#[derive(
-    Clone,
-    Debug,
-    Deserialize,
-    Eq,
-    Hash,
-    JsonSchema,
-    Ord,
-    PartialEq,
-    PartialOrd,
-    Serialize,
-)]
-pub struct ZoneBundleMetadata {
-    /// Identifier for this zone bundle
-    pub id: ZoneBundleId,
-    /// The time at which this zone bundle was created.
-    pub time_created: DateTime<Utc>,
-    /// A version number for this zone bundle.
-    pub version: u8,
-    /// The reason or cause a bundle was created.
-    pub cause: ZoneBundleCause,
-}
-
-impl ZoneBundleMetadata {
-    const VERSION: u8 = 0;
-
-    /// Create a new set of metadata for the provided zone.
-    pub(crate) fn new(zone_name: &str, cause: ZoneBundleCause) -> Self {
-        Self {
-            id: ZoneBundleId {
-                zone_name: zone_name.to_string(),
-                bundle_id: Uuid::new_v4(),
-            },
-            time_created: Utc::now(),
-            version: Self::VERSION,
-            cause,
-        }
-    }
+/// Parameters used to update the zone bundle cleanup context.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
+pub struct CleanupContextUpdate {
+    /// The new period on which automatic cleanups are run.
+    pub period: Option<Duration>,
+    /// The priority ordering for preserving old zone bundles.
+    pub priority: Option<PriorityOrder>,
+    /// The new limit on the underlying dataset quota allowed for bundles.
+    pub storage_limit: Option<u8>,
 }
