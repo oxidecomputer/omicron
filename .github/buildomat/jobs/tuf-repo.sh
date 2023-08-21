@@ -134,6 +134,19 @@ git init /work/dvt-dock
     git checkout FETCH_HEAD
 )
 
+caboose_util_rot() {
+    # usage: caboose_util_rot ACTION IMAGE_A IMAGE_B
+    output_a=$(/work/caboose-util "$1" "$2")
+    output_b=$(/work/caboose-util "$1" "$3")
+    if [[ "$output_a" != "$output_b" ]]; then
+        >&2 echo "\`caboose-util $1\` mismatch:"
+        >&2 echo "  $2: $output_a"
+        >&2 echo "  $3: $output_b"
+        exit 1
+    fi
+    echo "$output_a"
+}
+
 add_hubris_artifacts() {
     series="$1"
     rot_dir="$2"
@@ -151,20 +164,15 @@ add_hubris_artifacts() {
         rot_image_b="/work/dvt-dock/${rot_dir}/${board}/build-${board}-rot-image-b-${rot_version}.zip"
         sp_image="/work/dvt-dock/sp/${board}/build-${board_rev}-image-default.zip"
 
-        rot_version_a=$(/work/caboose-util read-version "$rot_image_a")
-        rot_version_b=$(/work/caboose-util read-version "$rot_image_b")
-        if [[ "$rot_version_a" != "$rot_version_b" ]]; then
-            echo "version mismatch:"
-            echo "  $rot_image_a: $rot_version_a"
-            echo "  $rot_image_b: $rot_version_b"
-            exit 1
-        fi
-        sp_version=$(/work/caboose-util read-version "$sp_image")
+        rot_caboose_version=$(caboose_util_rot read-version "$rot_image_a" "$rot_image_b")
+        sp_caboose_version=$(/work/caboose-util read-version "$sp_image")
+        rot_caboose_board=$(caboose_util_rot read-board "$rot_image_a" "$rot_image_b")
+        sp_caboose_board=$(/work/caboose-util read-board "$sp_image")
 
         cat >>"$manifest" <<EOF
 [[artifact.${tufaceous_board}_rot]]
-name = "${tufaceous_board}_rot"
-version = "$rot_version_a"
+name = "$rot_caboose_board"
+version = "$rot_caboose_version"
 [artifact.${tufaceous_board}_rot.source]
 kind = "composite-rot"
 [artifact.${tufaceous_board}_rot.source.archive_a]
@@ -174,8 +182,8 @@ path = "$rot_image_a"
 kind = "file"
 path = "$rot_image_b"
 [[artifact.${tufaceous_board}_sp]]
-name = "${tufaceous_board}_sp"
-version = "$sp_version"
+name = "$sp_caboose_board"
+version = "$sp_caboose_version"
 [artifact.${tufaceous_board}_sp.source]
 kind = "file"
 path = "$sp_image"
