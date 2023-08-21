@@ -4,7 +4,7 @@
 
 //! Interfaces used to interact with the underlying host system.
 
-use crate::host::{error::ExecutionError, input::Input, output::Output};
+use crate::{error::ExecutionError, input::Input, output::Output};
 
 use async_trait::async_trait;
 use itertools::Itertools;
@@ -26,7 +26,7 @@ where
     .collect::<String>()
 }
 
-pub(super) fn log_input(log: &Logger, id: u64, command: &Command) {
+pub fn log_input(log: &Logger, id: u64, command: &Command) {
     info!(
         log,
         "running command via executor"; "id" => id, "command" => %Input::from(command)
@@ -37,7 +37,7 @@ pub(super) fn log_input(log: &Logger, id: u64, command: &Command) {
     );
 }
 
-pub(super) fn log_output(log: &Logger, id: u64, output: &Output) {
+pub fn log_output(log: &Logger, id: u64, output: &Output) {
     info!(
         log,
         "finished running command via executor";

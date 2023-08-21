@@ -59,6 +59,7 @@ expectorate.workspace = true
 flate2.workspace = true
 fs-err.workspace = true
 gateway-test-utils.workspace = true
+helios-tokamak.workspace = true
 http.workspace = true
 installinator.workspace = true
 installinator-artifact-client.workspace = true

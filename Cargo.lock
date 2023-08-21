@@ -3022,6 +3022,68 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "95505c38b4572b2d910cecb0281560f54b440a19336cbbcb27bf6ce6adc6f5a8"
 
 [[package]]
+name = "helios-fusion"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "itertools 0.10.5",
+ "shlex",
+ "slog",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
+name = "helios-protostar"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "camino",
+ "cfg-if 1.0.0",
+ "futures",
+ "helios-fusion",
+ "itertools 0.10.5",
+ "libc",
+ "omicron-common 0.1.0",
+ "omicron-test-utils",
+ "schemars",
+ "serde",
+ "shlex",
+ "slog",
+ "smf",
+ "thiserror",
+ "tokio",
+ "uuid",
+ "zone",
+]
+
+[[package]]
+name = "helios-tokamak"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "camino",
+ "cfg-if 1.0.0",
+ "futures",
+ "helios-fusion",
+ "itertools 0.10.5",
+ "libc",
+ "omicron-common 0.1.0",
+ "omicron-test-utils",
+ "schemars",
+ "serde",
+ "shlex",
+ "slog",
+ "smf",
+ "thiserror",
+ "tokio",
+ "uuid",
+ "zone",
+]
+
+[[package]]
 name = "hermit-abi"
 version = "0.1.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3375,6 +3437,8 @@ dependencies = [
  "cfg-if 1.0.0",
  "debug-ignore",
  "futures",
+ "helios-fusion",
+ "helios-tokamak",
  "ipnetwork",
  "itertools 0.10.5",
  "libc",
@@ -3473,6 +3537,9 @@ dependencies = [
  "ddm-admin-client",
  "display-error-chain",
  "futures",
+ "helios-fusion",
+ "helios-protostar",
+ "helios-tokamak",
  "hex",
  "hex-literal",
  "http",
@@ -5023,6 +5090,8 @@ dependencies = [
  "clap 4.3.21",
  "expectorate",
  "futures",
+ "helios-fusion",
+ "helios-protostar",
  "hex",
  "illumos-utils",
  "indicatif",
@@ -5112,6 +5181,9 @@ dependencies = [
  "futures",
  "gateway-client",
  "glob",
+ "helios-fusion",
+ "helios-protostar",
+ "helios-tokamak",
  "http",
  "hyper",
  "hyper-staticfile",
@@ -7747,6 +7819,8 @@ dependencies = [
  "camino",
  "cfg-if 1.0.0",
  "futures",
+ "helios-fusion",
+ "helios-tokamak",
  "illumos-devinfo",
  "illumos-utils",
  "key-manager",
@@ -9702,6 +9776,7 @@ dependencies = [
  "gateway-client",
  "gateway-messages",
  "gateway-test-utils",
+ "helios-tokamak",
  "hex",
  "http",
  "hubtools",

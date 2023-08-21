@@ -46,12 +46,12 @@ use camino::{Utf8Path, Utf8PathBuf};
 use ddm_admin_client::{Client as DdmAdminClient, DdmError};
 use dpd_client::{types as DpdTypes, Client as DpdClient, Error as DpdError};
 use dropshot::HandlerTaskMode;
+use helios_fusion::{BoxedExecutor, PFEXEC};
 use illumos_utils::addrobj::AddrObject;
 use illumos_utils::addrobj::IPV6_LINK_LOCAL_NAME;
 use illumos_utils::dladm::{
     Dladm, Etherstub, EtherstubVnic, GetSimnetError, PhysicalLink,
 };
-use illumos_utils::host::{BoxedExecutor, PFEXEC};
 use illumos_utils::link::{Link, VnicAllocator};
 use illumos_utils::opte::{Port, PortManager, PortTicket};
 use illumos_utils::running_zone::{
@@ -204,7 +204,7 @@ pub enum Error {
     NtpZoneNotReady,
 
     #[error("Execution error: {0}")]
-    ExecutionError(#[from] illumos_utils::host::ExecutionError),
+    ExecutionError(#[from] helios_fusion::ExecutionError),
 
     #[error("Error resolving DNS name: {0}")]
     ResolveError(#[from] internal_dns::resolver::ResolveError),
@@ -2860,13 +2860,13 @@ mod test {
     use super::*;
     use crate::params::{ServiceZoneService, ZoneType};
     use async_trait::async_trait;
+    use helios_fusion::{Input, Output, OutputExt};
+    use helios_tokamak::{CommandSequence, FakeExecutorBuilder};
     use illumos_utils::{
         dladm::{
             Etherstub, BOOTSTRAP_ETHERSTUB_NAME, UNDERLAY_ETHERSTUB_NAME,
             UNDERLAY_ETHERSTUB_VNIC_NAME,
         },
-        host::fake::{CommandSequence, FakeExecutorBuilder},
-        host::{Input, Output, OutputExt},
         zone::{ZLOGIN, ZONEADM, ZONECFG},
     };
     use key_manager::{

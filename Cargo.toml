@@ -53,6 +53,9 @@ members = [
     "sled-hardware",
     "sp-sim",
     "test-utils",
+    "helios/fusion",
+    "helios/protostar",
+    "helios/tokamak",
     "tufaceous-lib",
     "tufaceous",
     "update-engine",
@@ -113,6 +116,9 @@ default-members = [
     "sled-hardware",
     "sp-sim",
     "test-utils",
+    "helios/fusion",
+    "helios/protostar",
+    "helios/tokamak",
     "tufaceous",
     "tufaceous-lib",
     "update-engine",
@@ -187,6 +193,9 @@ gateway-test-utils = { path = "gateway-test-utils" }
 glob = "0.3.1"
 headers = "0.3.8"
 heck = "0.4"
+helios-fusion = { path = "helios/fusion" }
+helios-protostar = { path = "helios/protostar" }
+helios-tokamak = { path = "helios/tokamak" }
 hex = "0.4.3"
 hex-literal = "0.3.4"
 hkdf = "0.12.3"

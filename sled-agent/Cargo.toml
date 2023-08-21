@@ -31,6 +31,8 @@ dropshot.workspace = true
 flate2.workspace = true
 futures.workspace = true
 glob.workspace = true
+helios-fusion.workspace = true
+helios-protostar.workspace = true
 http.workspace = true
 hyper-staticfile.workspace = true
 gateway-client.workspace = true
@@ -84,6 +86,7 @@ opte-ioctl.workspace = true
 [dev-dependencies]
 assert_matches.workspace = true
 expectorate.workspace = true
+helios-tokamak.workspace = true
 http.workspace = true
 hyper.workspace = true
 omicron-test-utils.workspace = true

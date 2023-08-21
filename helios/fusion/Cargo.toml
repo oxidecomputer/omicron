@@ -1,0 +1,14 @@
+[package]
+name = "helios-fusion"
+description = "Interface to access an underlying Helios system"
+version = "0.1.0"
+edition = "2021"
+license = "MPL-2.0"
+
+[dependencies]
+async-trait.workspace = true
+itertools.workspace = true
+shlex.workspace = true
+slog.workspace = true
+thiserror.workspace = true
+tokio.workspace = true

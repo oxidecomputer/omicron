@@ -4,9 +4,9 @@
 
 //! Helper for calling fstyp.
 
-use crate::host::{BoxedExecutor, ExecutionError, PFEXEC};
 use crate::zpool::ZpoolName;
 use camino::Utf8Path;
+use helios_fusion::{BoxedExecutor, ExecutionError, PFEXEC};
 use std::str::FromStr;
 
 const FSTYP: &str = "/usr/sbin/fstyp";

@@ -14,7 +14,7 @@ use std::net::{IpAddr, Ipv6Addr};
 
 use crate::addrobj::AddrObject;
 use crate::dladm::{EtherstubVnic, VNIC_PREFIX_BOOTSTRAP, VNIC_PREFIX_CONTROL};
-use crate::host::{BoxedExecutor, ExecutionError, PFEXEC};
+use helios_fusion::{BoxedExecutor, ExecutionError, PFEXEC};
 use omicron_common::address::SLED_PREFIX;
 
 const DLADM: &str = "/usr/sbin/dladm";
@@ -902,8 +902,8 @@ impl Zones {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::host::fake::{CommandSequence, FakeExecutorBuilder};
-    use crate::host::{Input, OutputExt};
+    use helios_fusion::{Input, OutputExt};
+    use helios_tokamak::{CommandSequence, FakeExecutorBuilder};
     use omicron_test_utils::dev;
     use std::process::Output;
 

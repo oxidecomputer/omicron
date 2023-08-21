@@ -22,11 +22,11 @@ use cancel_safe_futures::TryStreamExt;
 use ddm_admin_client::Client as DdmAdminClient;
 use futures::stream;
 use futures::StreamExt;
+use helios_fusion::BoxedExecutor;
+use helios_protostar::HostExecutor;
 use illumos_utils::addrobj::AddrObject;
 use illumos_utils::dladm;
 use illumos_utils::dladm::Dladm;
-use illumos_utils::host::real::HostExecutor;
-use illumos_utils::host::BoxedExecutor;
 use illumos_utils::zfs;
 use illumos_utils::zfs::Zfs;
 use illumos_utils::zone;
@@ -548,8 +548,7 @@ impl BootstrapNetworking {
     async fn enable_ipv6_forwarding(
         executor: &BoxedExecutor,
     ) -> Result<(), StartError> {
-        let mut command =
-            std::process::Command::new(illumos_utils::host::PFEXEC);
+        let mut command = std::process::Command::new(helios_fusion::PFEXEC);
         command.args(&[
             "/usr/sbin/routeadm",
             // Needed to access all zones, which are on the underlay.

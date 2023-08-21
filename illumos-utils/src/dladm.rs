@@ -4,9 +4,9 @@
 
 //! Utilities for poking at data links.
 
-use crate::host::{BoxedExecutor, ExecutionError, PFEXEC};
 use crate::link::{Link, LinkKind};
 use crate::zone::IPADM;
+use helios_fusion::{BoxedExecutor, ExecutionError, PFEXEC};
 use omicron_common::api::external::MacAddr;
 use omicron_common::vlan::VlanID;
 use serde::{Deserialize, Serialize};
@@ -560,8 +560,8 @@ impl Dladm {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::host::fake::{CommandSequence, FakeExecutorBuilder};
-    use crate::host::{Input, OutputExt};
+    use helios_fusion::{Input, OutputExt};
+    use helios_tokamak::{CommandSequence, FakeExecutorBuilder};
     use omicron_test_utils::dev;
     use std::process::Output;
 

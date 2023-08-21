@@ -6,12 +6,12 @@
 
 use crate::addrobj::AddrObject;
 use crate::dladm::Etherstub;
-use crate::host::{BoxedExecutor, ExecutionError};
 use crate::link::{Link, VnicAllocator};
 use crate::opte::{Port, PortTicket};
 use crate::svc::wait_for_service;
 use crate::zone::{AddressRequest, Zones, IPADM, ZONE_PREFIX};
 use camino::{Utf8Path, Utf8PathBuf};
+use helios_fusion::{BoxedExecutor, ExecutionError};
 use ipnetwork::IpNetwork;
 use omicron_common::backoff;
 use slog::{error, info, o, warn, Logger};
@@ -436,7 +436,7 @@ impl RunningZone {
                 RunCommandError { zone: self.name().to_string(), err }
             })?);
         let tmpl = std::sync::Arc::clone(&template);
-        let mut command = std::process::Command::new(crate::host::PFEXEC);
+        let mut command = std::process::Command::new(helios_fusion::PFEXEC);
         command.env_clear();
         unsafe {
             command.pre_exec(move || {
@@ -474,7 +474,7 @@ impl RunningZone {
     {
         // NOTE: This implementation is useless, and will never work. However,
         // it must actually call `execute()` for the testing purposes.
-        let mut command = std::process::Command::new(crate::host::PFEXEC);
+        let mut command = std::process::Command::new(helios_fusion::PFEXEC);
         let command =
             command.arg(crate::zone::ZLOGIN).arg(self.name()).args(args);
         self.inner

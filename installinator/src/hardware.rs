@@ -6,7 +6,7 @@ use anyhow::anyhow;
 use anyhow::ensure;
 use anyhow::Context;
 use anyhow::Result;
-use illumos_utils::host::BoxedExecutor;
+use helios_fusion::BoxedExecutor;
 use sled_hardware::Disk;
 use sled_hardware::DiskVariant;
 use sled_hardware::HardwareManager;

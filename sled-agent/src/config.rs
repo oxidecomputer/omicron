@@ -7,11 +7,11 @@
 use crate::updates::ConfigUpdates;
 use camino::{Utf8Path, Utf8PathBuf};
 use dropshot::ConfigLogging;
+use helios_fusion::BoxedExecutor;
 use illumos_utils::dladm::Dladm;
 use illumos_utils::dladm::FindPhysicalLinkError;
 use illumos_utils::dladm::PhysicalLink;
 use illumos_utils::dladm::CHELSIO_LINK_PREFIX;
-use illumos_utils::host::BoxedExecutor;
 use illumos_utils::zpool::ZpoolName;
 use omicron_common::vlan::VlanID;
 use serde::Deserialize;

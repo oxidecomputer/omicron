@@ -4,10 +4,10 @@
 
 //! A single port on the OPTE virtual switch.
 
-use crate::host::BoxedExecutor;
 use crate::opte::Gateway;
 use crate::opte::Vni;
 use debug_ignore::DebugIgnore;
+use helios_fusion::BoxedExecutor;
 use macaddr::MacAddr6;
 use std::net::IpAddr;
 use std::sync::Arc;

@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex};
 ///
 /// This is primarily used to emulate stdin / stdout / stderr.
 #[derive(Clone)]
-pub(crate) struct ByteQueue {
+pub struct ByteQueue {
     buf: Arc<Mutex<VecDeque<u8>>>,
 }
 

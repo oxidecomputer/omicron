@@ -4,16 +4,13 @@
 
 //! A "fake" [Executor] implementation, which can respond to host requests.
 
-use super::executor::{
-    log_input, log_output, BoxedChild, BoxedExecutor, Child, Executor,
-};
-
-use crate::host::{
-    byte_queue::ByteQueue, error::ExecutionError, input::Input, output::Output,
-    output::OutputExt,
-};
+use crate::byte_queue::ByteQueue;
 
 use async_trait::async_trait;
+use helios_fusion::{
+    log_input, log_output, BoxedChild, BoxedExecutor, Child, ExecutionError,
+    Executor, Input, Output, OutputExt,
+};
 use slog::Logger;
 use std::io::{Read, Write};
 use std::process::Command;

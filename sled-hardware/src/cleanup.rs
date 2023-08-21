@@ -6,12 +6,12 @@
 
 use anyhow::Error;
 use futures::stream::{self, StreamExt, TryStreamExt};
+use helios_fusion::{BoxedExecutor, ExecutionError, PFEXEC};
 use illumos_utils::dladm::Dladm;
 use illumos_utils::dladm::BOOTSTRAP_ETHERSTUB_NAME;
 use illumos_utils::dladm::BOOTSTRAP_ETHERSTUB_VNIC_NAME;
 use illumos_utils::dladm::UNDERLAY_ETHERSTUB_NAME;
 use illumos_utils::dladm::UNDERLAY_ETHERSTUB_VNIC_NAME;
-use illumos_utils::host::{BoxedExecutor, ExecutionError, PFEXEC};
 use illumos_utils::link::LinkKind;
 use illumos_utils::opte;
 use illumos_utils::zone::IPADM;

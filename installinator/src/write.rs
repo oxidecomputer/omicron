@@ -15,9 +15,9 @@ use async_trait::async_trait;
 use buf_list::BufList;
 use bytes::Buf;
 use camino::{Utf8Path, Utf8PathBuf};
+use helios_fusion::BoxedExecutor;
 use illumos_utils::{
     dkio::{self, MediaInfoExtended},
-    host::BoxedExecutor,
     zpool::{Zpool, ZpoolName},
 };
 use installinator_common::{
@@ -1160,10 +1160,9 @@ mod tests {
 
         let engine = UpdateEngine::new(&logctx.log, event_sender);
         let log = logctx.log.clone();
-        let executor =
-            illumos_utils::host::fake::FakeExecutorBuilder::new(log.clone())
-                .build()
-                .as_executor();
+        let executor = helios_tokamak::FakeExecutorBuilder::new(log.clone())
+            .build()
+            .as_executor();
         engine
             .new_step(
                 InstallinatorComponent::Both,

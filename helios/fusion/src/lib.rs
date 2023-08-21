@@ -2,17 +2,16 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Utilities to either access or emulate a host system
+//! Interfaces used to interact with the underlying host system.
 
-mod byte_queue;
 mod error;
 mod executor;
 mod input;
 mod output;
 
-pub const PFEXEC: &str = "/usr/bin/pfexec";
-
-pub use error::ExecutionError;
+pub use error::*;
 pub use executor::*;
-pub use input::Input;
-pub use output::{Output, OutputExt};
+pub use input::*;
+pub use output::*;
+
+pub const PFEXEC: &str = "/usr/bin/pfexec";

@@ -4,7 +4,6 @@
 
 //! Manager for all OPTE ports on a Helios system
 
-use crate::host::BoxedExecutor;
 use crate::opte::default_boundary_services;
 use crate::opte::opte_firewall_rules;
 use crate::opte::params::SetVirtualNetworkInterfaceHost;
@@ -14,6 +13,7 @@ use crate::opte::Gateway;
 use crate::opte::Port;
 use crate::opte::Vni;
 use debug_ignore::DebugIgnore;
+use helios_fusion::BoxedExecutor;
 use ipnetwork::IpNetwork;
 use omicron_common::api::external;
 use omicron_common::api::internal::shared::NetworkInterface;

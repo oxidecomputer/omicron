@@ -4,8 +4,8 @@
 
 //! Utilities for managing Zpools.
 
-use crate::host::{BoxedExecutor, ExecutionError, PFEXEC};
 use camino::{Utf8Path, Utf8PathBuf};
+use helios_fusion::{BoxedExecutor, ExecutionError, PFEXEC};
 use schemars::JsonSchema;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::fmt;

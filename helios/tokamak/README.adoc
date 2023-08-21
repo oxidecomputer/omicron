@@ -1,0 +1,16 @@
+:showtitle:
+:toc: left
+:icons: font
+
+= tokamak
+
+[TIP]
+A tokamak is a magnetic confinement fusion device which can be used to
+produce nuclear fusion reactions. In other words, they're one of our tools for
+creating a "artificial sun".
+
+`tokamak` is a toolkit implementing the `fusion` interface which allows callers
+to run an emulated Helios system. It does not intend to operate as a virtual
+machine, nor run any real workloads: the purpose of this crate is to give
+callers an opportunity to test very specific interfaces against the underlying
+host, without actually requiring a host that has undergone that behavior.

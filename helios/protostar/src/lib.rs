@@ -4,14 +4,9 @@
 
 //! A "real" [Executor] implementation, which sends commands to the host.
 
-use super::executor::{
-    log_input, log_output, BoxedChild, BoxedExecutor, Child, Executor,
-};
-
-use crate::host::{
-    error::{AsCommandStr, ExecutionError},
-    input::Input,
-    output::Output,
+use helios_fusion::{
+    log_input, log_output, AsCommandStr, BoxedChild, BoxedExecutor, Child,
+    ExecutionError, Executor, Input, Output,
 };
 
 use async_trait::async_trait;

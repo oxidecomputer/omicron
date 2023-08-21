@@ -1,0 +1,13 @@
+:showtitle:
+:toc: left
+:icons: font
+
+= helios
+
+This directory describes various interfaces for acting upon a Helios system.
+
+* `fusion` describes an interface for interacting with the underlying OS.
+* `tokamak` provides a fake implementation of `fusion` - not enough
+to be virtualized, but enough to test code depending on `fusion` under test.
+* `protostar` provides a real implementation of `fusion`, which should actually
+make calls to the underlying OS.

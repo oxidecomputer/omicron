@@ -4,7 +4,7 @@
 
 //! Operations for creating a system swap device.
 
-use illumos_utils::host::{BoxedExecutor, ExecutionError};
+use helios_fusion::{BoxedExecutor, ExecutionError};
 use std::io::Read;
 use zeroize::Zeroize;
 

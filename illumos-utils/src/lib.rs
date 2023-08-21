@@ -11,7 +11,6 @@ pub mod dkio;
 pub mod dladm;
 pub mod dumpadm;
 pub mod fstyp;
-pub mod host;
 pub mod libc;
 pub mod link;
 pub mod opte;
