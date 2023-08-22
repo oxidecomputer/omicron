@@ -1,4 +1,5 @@
 use camino::Utf8PathBuf;
+use helios_fusion::COREADM;
 use std::ffi::OsString;
 use std::os::unix::ffi::OsStringExt;
 use std::process::Command;
@@ -20,8 +21,6 @@ pub enum CoreAdmError {
     #[error("Failed to execute dumpadm process: {0}")]
     Exec(std::io::Error),
 }
-
-const COREADM: &str = "/usr/bin/coreadm";
 
 pub fn coreadm(core_dir: &Utf8PathBuf) -> Result<(), CoreAdmError> {
     let mut cmd = Command::new(COREADM);

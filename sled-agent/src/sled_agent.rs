@@ -25,8 +25,8 @@ use crate::zone_bundle::BundleError;
 use bootstore::schemes::v0 as bootstore;
 use camino::Utf8PathBuf;
 use dropshot::HttpError;
+use helios_fusion::BoxedExecutor;
 use illumos_utils::dladm::Dladm;
-use illumos_utils::host::BoxedExecutor;
 use illumos_utils::opte::params::SetVirtualNetworkInterfaceHost;
 use illumos_utils::opte::PortManager;
 use illumos_utils::zone::Zones;
@@ -48,7 +48,7 @@ use omicron_common::backoff::{
 use sled_hardware::underlay;
 use sled_hardware::HardwareManager;
 use slog::Logger;
-use std::collections::BTreeSet;
+use std::collections::BTreeMap;
 use std::net::{Ipv6Addr, SocketAddrV6};
 use std::sync::Arc;
 use uuid::Uuid;
@@ -62,7 +62,7 @@ pub enum Error {
     SwapDevice(#[from] crate::swap_device::SwapDeviceError),
 
     #[error("Failed to acquire etherstub: {0}")]
-    Etherstub(illumos_utils::host::ExecutionError),
+    Etherstub(helios_fusion::ExecutionError),
 
     #[error("Failed to acquire etherstub VNIC: {0}")]
     EtherstubVnic(illumos_utils::dladm::CreateVnicError),
@@ -71,7 +71,7 @@ pub enum Error {
     Bootstrap(#[from] crate::bootstrap::BootstrapError),
 
     #[error("Failed to remove Omicron address: {0}")]
-    DeleteAddress(#[from] illumos_utils::host::ExecutionError),
+    DeleteAddress(#[from] helios_fusion::ExecutionError),
 
     #[error("Failed to operate on underlay device: {0}")]
     Underlay(#[from] underlay::Error),
@@ -172,6 +172,10 @@ impl From<Error> for dropshot::HttpError {
                 BundleError::NoSuchZone { .. } => {
                     HttpError::for_not_found(None, inner.to_string())
                 }
+                BundleError::InvalidStorageLimit
+                | BundleError::InvalidCleanupPeriod => {
+                    HttpError::for_bad_request(None, inner.to_string())
+                }
                 _ => HttpError::for_internal_error(err.to_string()),
             },
             e => HttpError::for_internal_error(e.to_string()),
@@ -185,9 +189,6 @@ impl From<Error> for dropshot::HttpError {
 struct SledAgentInner {
     // ID of the Sled
     id: Uuid,
-
-    // Logger used for generic sled agent operations, e.g., zone bundles.
-    log: Logger,
 
     // Sled Agent's interaction with the host system
     executor: BoxedExecutor,
@@ -223,6 +224,9 @@ struct SledAgentInner {
 
     // The rack network config provided at RSS time.
     rack_network_config: Option<RackNetworkConfig>,
+
+    // Object managing zone bundles.
+    zone_bundler: zone_bundle::ZoneBundler,
 }
 
 impl SledAgentInner {
@@ -347,6 +351,7 @@ impl SledAgent {
             etherstub.clone(),
             port_manager.clone(),
             storage.resources().clone(),
+            storage.zone_bundler().clone(),
         )?;
 
         match config.vmm_reservoir_percentage {
@@ -422,10 +427,10 @@ impl SledAgent {
             rack_network_config.clone(),
         )?;
 
+        let zone_bundler = storage.zone_bundler().clone();
         let sled_agent = SledAgent {
             inner: Arc::new(SledAgentInner {
                 id: request.id,
-                log: log.clone(),
                 executor: executor.clone(),
                 subnet: request.subnet,
                 storage,
@@ -444,6 +449,7 @@ impl SledAgent {
                 // request queue?
                 nexus_request_queue: NexusRequestQueue::new(),
                 rack_network_config,
+                zone_bundler,
             }),
             log: log.clone(),
         };
@@ -594,78 +600,9 @@ impl SledAgent {
     /// List all zone bundles on the system, for any zones live or dead.
     pub async fn list_all_zone_bundles(
         &self,
+        filter: Option<&str>,
     ) -> Result<Vec<ZoneBundleMetadata>, Error> {
-        let mut bundles = BTreeSet::new();
-        let log = &self.inner.log;
-        for path in
-            self.inner.storage.resources().all_zone_bundle_directories().await
-        {
-            debug!(log, "searching zone bundle directory"; "directory" => ?path);
-            // It's possible that the debug directories themselves do not exist,
-            // since we create them when we create the first bundles. Return an
-            // empty set in this case.
-            let mut entries = match tokio::fs::read_dir(path).await {
-                Ok(ent) => ent,
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
-                Err(e) => {
-                    return Err(Error::from(BundleError::from(
-                        anyhow::anyhow!("failed to read bundle directory: {e}"),
-                    )));
-                }
-            };
-
-            // First iterate over all the possible zone-names here.
-            loop {
-                let Some(zone_name) = entries
-                    .next_entry()
-                    .await
-                    .map_err(|e| BundleError::from(anyhow::anyhow!("failed to read zone bundle dir entry: {e}")))? else {
-                    break;
-                };
-
-                // Enumerate and iterate over all the contained entries, which
-                // _should_ all be zone bundles.
-                let mut bundle_entries = tokio::fs::read_dir(zone_name.path())
-                    .await
-                    .map_err(|e| {
-                        BundleError::from(anyhow::anyhow!(
-                            "failed to read zone directory: {e}"
-                        ))
-                    })?;
-                loop {
-                    let Some(bundle) = bundle_entries
-                        .next_entry()
-                        .await
-                        .map_err(|e| BundleError::from(anyhow::anyhow!("failed to read zone bundle dir entry: {e}")))? else {
-                        break;
-                    };
-                    match zone_bundle::extract_zone_bundle_metadata(
-                        bundle.path(),
-                    )
-                    .await
-                    {
-                        Ok(metadata) => {
-                            debug!(
-                                log,
-                                "found zone bundle";
-                                "zone_name" => &metadata.id.zone_name,
-                                "id" => %&metadata.id.bundle_id,
-                                "path" => ?bundle.path(),
-                            );
-                            bundles.insert(metadata);
-                        }
-                        Err(e) => warn!(
-                            log,
-                            "found file in zone bundle directory which doesn't \
-                            appear to be a valid zone bundle";
-                            "path" => ?bundle.path(),
-                            "err" => ?e,
-                        ),
-                    }
-                }
-            }
-        }
-        Ok(bundles.into_iter().collect())
+        self.inner.zone_bundler.list(filter).await.map_err(Error::from)
     }
 
     /// List zone bundles for the provided zone.
@@ -673,22 +610,7 @@ impl SledAgent {
         &self,
         name: &str,
     ) -> Result<Vec<ZoneBundleMetadata>, Error> {
-        // The zone bundles are replicated in several places, so we'll use a set
-        // to collect them all, to avoid duplicating.
-        let mut bundles = BTreeSet::new();
-        let log = &self.inner.log;
-        for path in
-            self.inner.storage.resources().all_zone_bundle_directories().await
-        {
-            debug!(log, "searching zone bundle directory"; "directory" => ?path);
-            bundles.extend(
-                zone_bundle::list_bundles_for_zone(log, &path, name)
-                    .await?
-                    .into_iter()
-                    .map(|(_path, bdl)| bdl),
-            );
-        }
-        Ok(bundles.into_iter().collect())
+        self.inner.zone_bundler.list_for_zone(name).await.map_err(Error::from)
     }
 
     /// Create a zone bundle for the provided zone.
@@ -713,20 +635,17 @@ impl SledAgent {
         }
     }
 
-    /// Fetch the path to a zone bundle.
-    pub async fn get_zone_bundle_path(
+    /// Fetch the paths to all zone bundles with the provided name and ID.
+    pub async fn get_zone_bundle_paths(
         &self,
         name: &str,
         id: &Uuid,
-    ) -> Result<Option<Utf8PathBuf>, Error> {
-        zone_bundle::get_zone_bundle_path(
-            &self.inner.log,
-            &self.inner.storage.resources().all_zone_bundle_directories().await,
-            name,
-            id,
-        )
-        .await
-        .map_err(Error::from)
+    ) -> Result<Vec<Utf8PathBuf>, Error> {
+        self.inner
+            .zone_bundler
+            .bundle_paths(name, id)
+            .await
+            .map_err(Error::from)
     }
 
     /// List the zones that the sled agent is currently managing.
@@ -746,6 +665,42 @@ impl SledAgent {
                     .collect()
             })
             .map_err(|e| Error::from(BundleError::from(e)))
+    }
+
+    /// Fetch the zone bundle cleanup context.
+    pub async fn zone_bundle_cleanup_context(
+        &self,
+    ) -> zone_bundle::CleanupContext {
+        self.inner.zone_bundler.cleanup_context().await
+    }
+
+    /// Update the zone bundle cleanup context.
+    pub async fn update_zone_bundle_cleanup_context(
+        &self,
+        period: Option<zone_bundle::CleanupPeriod>,
+        storage_limit: Option<zone_bundle::StorageLimit>,
+        priority: Option<zone_bundle::PriorityOrder>,
+    ) -> Result<(), Error> {
+        self.inner
+            .zone_bundler
+            .update_cleanup_context(period, storage_limit, priority)
+            .await
+            .map_err(Error::from)
+    }
+
+    /// Fetch the current utilization of the relevant datasets for zone bundles.
+    pub async fn zone_bundle_utilization(
+        &self,
+    ) -> Result<BTreeMap<Utf8PathBuf, zone_bundle::BundleUtilization>, Error>
+    {
+        self.inner.zone_bundler.utilization().await.map_err(Error::from)
+    }
+
+    /// Trigger an explicit request to cleanup old zone bundles.
+    pub async fn zone_bundle_cleanup(
+        &self,
+    ) -> Result<BTreeMap<Utf8PathBuf, zone_bundle::CleanupCount>, Error> {
+        self.inner.zone_bundler.cleanup().await.map_err(Error::from)
     }
 
     /// Ensures that particular services should be initialized.

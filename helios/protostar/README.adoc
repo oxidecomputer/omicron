@@ -1,0 +1,22 @@
+:showtitle:
+:toc: left
+:icons: font
+
+= protostar
+
+[TIP]
+A protostar is one of the earliest stages in a star's lifecycle, which gathers
+mass before eventually igniting and becoming a main-sequence star. When this
+happens, a star generates energy via fusion.
+
+`protostar` is an implementation of the `fusion` interface which is designed to
+execute on a real Helios system. This interface, while necessary, is notoriously
+difficult to test. Although we encourage the addition of arbitrary host-interfacing
+calls here, we recommend the following:
+
+1. Keeping them as simple as possible, with the understanding that code within
+this crate can only sufficiently be tested via end-to-end tests.
+2. When adding new interfaces to the host, access them via the `fusion` interface,
+and provide a "fake" implementation in the `tokamak` crate. This will allow callers
+integrating with host interfaces to write tests, and simulate the underlying system
+behaviors.

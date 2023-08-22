@@ -9,7 +9,7 @@ use crate::dladm::{
     CreateVnicError, DeleteVnicError, Dladm, VnicSource, VNIC_PREFIX,
     VNIC_PREFIX_BOOTSTRAP, VNIC_PREFIX_CONTROL, VNIC_PREFIX_GUEST,
 };
-use crate::host::BoxedExecutor;
+use helios_fusion::BoxedExecutor;
 use omicron_common::api::external::MacAddr;
 use std::sync::{
     atomic::{AtomicU64, Ordering},
@@ -259,13 +259,14 @@ impl Deletable for VnicDestruction {
 mod test {
     use super::*;
     use crate::dladm::Etherstub;
-    use crate::host::FakeExecutor;
+    use helios_tokamak::FakeExecutorBuilder;
+
     use omicron_test_utils::dev;
 
     #[tokio::test]
     async fn test_allocate() {
         let logctx = dev::test_setup_log("test_allocate");
-        let executor = FakeExecutor::new(logctx.log.clone());
+        let executor = FakeExecutorBuilder::new(logctx.log.clone()).build();
         let allocator = VnicAllocator::new(
             &executor.as_executor(),
             "Foo",
@@ -280,7 +281,7 @@ mod test {
     #[tokio::test]
     async fn test_allocate_within_scopes() {
         let logctx = dev::test_setup_log("test_allocate_within_scopes");
-        let executor = FakeExecutor::new(logctx.log.clone());
+        let executor = FakeExecutorBuilder::new(logctx.log.clone()).build();
         let allocator = VnicAllocator::new(
             &executor.as_executor(),
             "Foo",

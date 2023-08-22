@@ -39,14 +39,37 @@ pub enum ExecutionError {
     NotRunning,
 }
 
-pub fn output_to_exec_error(
-    command_str: String,
-    output: &std::process::Output,
-) -> ExecutionError {
-    ExecutionError::CommandFailure(Box::new(FailureInfo {
-        command: command_str,
-        status: output.status,
-        stdout: String::from_utf8_lossy(&output.stdout).to_string(),
-        stderr: String::from_utf8_lossy(&output.stderr).to_string(),
-    }))
+/// Convenience trait for turning [std::process::Command] into a String.
+pub trait AsCommandStr {
+    fn into_str(&self) -> String;
+}
+
+impl AsCommandStr for String {
+    fn into_str(&self) -> String {
+        self.into()
+    }
+}
+
+impl AsCommandStr for &std::process::Command {
+    fn into_str(&self) -> String {
+        shlex::join(
+            std::iter::once(self.get_program())
+                .chain(self.get_args())
+                .map(|s| s.to_str().expect("Invalid UTF-8")),
+        )
+    }
+}
+
+impl ExecutionError {
+    pub fn from_output<S: AsCommandStr>(
+        command: S,
+        output: &std::process::Output,
+    ) -> Self {
+        Self::CommandFailure(Box::new(FailureInfo {
+            command: command.into_str(),
+            status: output.status,
+            stdout: String::from_utf8_lossy(&output.stdout).to_string(),
+            stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+        }))
+    }
 }

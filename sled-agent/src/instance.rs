@@ -10,17 +10,21 @@ use crate::common::instance::{
 };
 use crate::instance_manager::InstanceTicket;
 use crate::nexus::NexusClientWithResolver;
+use crate::params::ZoneBundleCause;
+use crate::params::ZoneBundleMetadata;
 use crate::params::{
     InstanceHardware, InstanceMigrationSourceParams,
     InstanceMigrationTargetParams, InstanceStateRequested, VpcFirewallRule,
 };
 use crate::profile::*;
 use crate::storage_manager::StorageResources;
+use crate::zone_bundle::BundleError;
+use crate::zone_bundle::ZoneBundler;
 use anyhow::anyhow;
 use backoff::BackoffError;
 use futures::lock::{Mutex, MutexGuard};
+use helios_fusion::BoxedExecutor;
 use illumos_utils::dladm::Etherstub;
-use illumos_utils::host::BoxedExecutor;
 use illumos_utils::link::VnicAllocator;
 use illumos_utils::opte::PortManager;
 use illumos_utils::running_zone::{InstalledZone, RunningZone};
@@ -34,11 +38,6 @@ use omicron_common::api::internal::shared::{
     NetworkInterface, SourceNatConfig,
 };
 use omicron_common::backoff;
-//use propolis_client::generated::DiskRequest;
-use crate::params::ZoneBundleCause;
-use crate::params::ZoneBundleMetadata;
-use crate::zone_bundle;
-use crate::zone_bundle::BundleError;
 use propolis_client::Client as PropolisClient;
 use rand::prelude::SliceRandom;
 use rand::SeedableRng;
@@ -248,6 +247,9 @@ struct InstanceInner {
 
     // Storage resources
     storage: StorageResources,
+
+    // Object used to collect zone bundles from this instance when terminated.
+    zone_bundler: ZoneBundler,
 
     // Object representing membership in the "instance manager".
     instance_ticket: InstanceTicket,
@@ -552,16 +554,13 @@ impl InstanceInner {
         };
 
         // Take a zone bundle whenever this instance stops.
-        let context = self
-            .storage
-            .zone_bundle_context(&zname, ZoneBundleCause::TerminatedInstance)
-            .await;
-        if let Err(e) = zone_bundle::create(
-            &self.log,
-            &running_state.running_zone,
-            &context,
-        )
-        .await
+        if let Err(e) = self
+            .zone_bundler
+            .create(
+                &running_state.running_zone,
+                ZoneBundleCause::TerminatedInstance,
+            )
+            .await
         {
             error!(
                 self.log,
@@ -630,6 +629,7 @@ impl Instance {
         port_manager: PortManager,
         nexus_client: NexusClientWithResolver,
         storage: StorageResources,
+        zone_bundler: ZoneBundler,
     ) -> Result<Self, Error> {
         info!(log, "Instance::new w/initial HW: {:?}", initial);
         let instance = InstanceInner {
@@ -662,6 +662,7 @@ impl Instance {
             running_state: None,
             nexus_client,
             storage,
+            zone_bundler,
             instance_ticket: ticket,
         };
 
@@ -681,18 +682,13 @@ impl Instance {
                 Err(BundleError::Unavailable { name })
             }
             InstanceInner {
-                ref log,
                 running_state: Some(RunningState { ref running_zone, .. }),
                 ..
             } => {
-                let context = inner
-                    .storage
-                    .zone_bundle_context(
-                        &name,
-                        ZoneBundleCause::ExplicitRequest,
-                    )
-                    .await;
-                zone_bundle::create(log, running_zone, &context).await
+                inner
+                    .zone_bundler
+                    .create(running_zone, ZoneBundleCause::ExplicitRequest)
+                    .await
             }
         }
     }

@@ -3,8 +3,8 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use camino::{Utf8Path, Utf8PathBuf};
+use helios_fusion::BoxedExecutor;
 use illumos_utils::fstyp::Fstyp;
-use illumos_utils::host::BoxedExecutor;
 use illumos_utils::zfs;
 use illumos_utils::zfs::DestroyDatasetErrorVariant;
 use illumos_utils::zfs::EncryptionDetails;

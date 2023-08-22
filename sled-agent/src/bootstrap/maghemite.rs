@@ -4,7 +4,7 @@
 
 //! Starting the mg-ddm service.
 
-use illumos_utils::addrobj::AddrObject;
+use helios_fusion::addrobj::AddrObject;
 use slog::Logger;
 use thiserror::Error;
 

@@ -11,7 +11,7 @@ use camino_tempfile::Utf8TempDir;
 use clap::Parser;
 use gateway_messages::SpPort;
 use gateway_test_utils::setup as gateway_setup;
-use illumos_utils::host::FakeExecutor;
+use helios_tokamak::FakeExecutorBuilder;
 use installinator::HOST_PHASE_2_FILE_NAME;
 use omicron_common::{
     api::internal::nexus::KnownArtifactKind,
@@ -137,8 +137,9 @@ async fn test_updates() {
     match terminal_event.kind {
         StepEventKind::ExecutionFailed { failed_step, .. } => {
             // TODO: obviously we shouldn't stop here, get past more of the
-            // update process in this test.
-            assert_eq!(failed_step.info.component, UpdateComponent::Rot);
+            // update process in this test. We currently fail when attempting to
+            // look up the SP's board in our tuf repo.
+            assert_eq!(failed_step.info.component, UpdateComponent::Sp);
         }
         other => {
             panic!("unexpected terminal event kind: {other:?}");
@@ -244,7 +245,7 @@ async fn test_installinator_fetch() {
     ])
     .expect("installinator args parsed successfully");
 
-    let executor = FakeExecutor::new(log.clone()).as_executor();
+    let executor = FakeExecutorBuilder::new(log.clone()).build().as_executor();
     args.exec(&log.new(slog::o!("crate" => "installinator")), &executor)
         .await
         .expect("installinator succeeded");

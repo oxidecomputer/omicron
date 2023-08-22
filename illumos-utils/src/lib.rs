@@ -4,14 +4,12 @@
 
 //! Wrappers around illumos-specific commands.
 
-pub mod addrobj;
 pub mod coreadm;
 pub mod destructor;
 pub mod dkio;
 pub mod dladm;
 pub mod dumpadm;
 pub mod fstyp;
-pub mod host;
 pub mod libc;
 pub mod link;
 pub mod opte;
@@ -21,5 +19,3 @@ pub mod vmm_reservoir;
 pub mod zfs;
 pub mod zone;
 pub mod zpool;
-
-pub const ROUTE: &'static str = "/usr/sbin/route";

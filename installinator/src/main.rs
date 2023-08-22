@@ -5,7 +5,7 @@
 use std::error::Error;
 
 use clap::Parser;
-use illumos_utils::host::HostExecutor;
+use helios_protostar::HostExecutor;
 use installinator::InstallinatorApp;
 
 #[tokio::main]

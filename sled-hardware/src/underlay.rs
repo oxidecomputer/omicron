@@ -5,8 +5,9 @@
 //! Finding the underlay network physical links and address objects.
 
 use crate::is_gimlet;
-use illumos_utils::addrobj;
-use illumos_utils::addrobj::AddrObject;
+use helios_fusion::addrobj;
+use helios_fusion::addrobj::AddrObject;
+use helios_fusion::BoxedExecutor;
 use illumos_utils::dladm;
 use illumos_utils::dladm::Dladm;
 use illumos_utils::dladm::FindPhysicalLinkError;
@@ -14,7 +15,6 @@ use illumos_utils::dladm::GetLinkpropError;
 use illumos_utils::dladm::PhysicalLink;
 use illumos_utils::dladm::SetLinkpropError;
 use illumos_utils::dladm::CHELSIO_LINK_PREFIX;
-use illumos_utils::host::BoxedExecutor;
 use illumos_utils::zone::Zones;
 use omicron_common::api::external::MacAddr;
 use std::net::Ipv6Addr;
@@ -30,7 +30,7 @@ pub enum Error {
     #[error(
         "Failed to create an IPv6 link-local address for underlay devices: {0}"
     )]
-    UnderlayDeviceAddress(#[from] illumos_utils::host::ExecutionError),
+    UnderlayDeviceAddress(#[from] helios_fusion::ExecutionError),
 
     #[error(transparent)]
     BadAddrObj(#[from] addrobj::ParseError),

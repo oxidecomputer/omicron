@@ -4,9 +4,7 @@
 
 //! Operations for creating a system swap device.
 
-use illumos_utils::host::{
-    command_to_string, output_to_exec_error, BoxedExecutor, ExecutionError,
-};
+use helios_fusion::{BoxedExecutor, ExecutionError};
 use std::io::Read;
 use zeroize::Zeroize;
 
@@ -234,7 +232,7 @@ fn create_encrypted_swap_zvol(
             error: e.to_string(),
         })?;
 
-    let mut stdin = spawn.stdin().take().unwrap();
+    let mut stdin = spawn.take_stdin().take().unwrap();
     let child_log = log.clone();
     let hdl = std::thread::spawn(move || {
         use std::io::Write;
@@ -255,9 +253,8 @@ fn create_encrypted_swap_zvol(
     hdl.join().unwrap();
 
     if !output.status.success() {
-        return Err(SwapDeviceError::Zfs(output_to_exec_error(
-            command_to_string(&command),
-            &output,
+        return Err(SwapDeviceError::Zfs(ExecutionError::from_output(
+            &command, &output,
         )));
     }
 

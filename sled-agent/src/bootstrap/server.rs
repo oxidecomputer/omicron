@@ -35,8 +35,8 @@ use ddm_admin_client::DdmError;
 use dropshot::HttpServer;
 use futures::Future;
 use futures::StreamExt;
+use helios_fusion::BoxedExecutor;
 use illumos_utils::dladm;
-use illumos_utils::host::BoxedExecutor;
 use illumos_utils::zfs;
 use illumos_utils::zone;
 use illumos_utils::zone::Zones;
@@ -101,7 +101,7 @@ pub enum StartError {
     EnsureEtherstubError {
         name: &'static str,
         #[source]
-        err: illumos_utils::host::ExecutionError,
+        err: helios_fusion::ExecutionError,
     },
 
     #[error(transparent)]
@@ -132,7 +132,7 @@ pub enum StartError {
     DeleteXdeDevices(#[source] illumos_utils::opte::Error),
 
     #[error("Failed to enable ipv6-forwarding")]
-    EnableIpv6Forwarding(#[from] illumos_utils::host::ExecutionError),
+    EnableIpv6Forwarding(#[from] helios_fusion::ExecutionError),
 
     #[error("Incorrect binary packaging: {0}")]
     IncorrectBuildPackaging(&'static str),

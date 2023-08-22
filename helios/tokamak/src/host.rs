@@ -6,22 +6,17 @@
 
 // TODO REMOVE ME
 #![allow(dead_code)]
+#![allow(unused_mut)]
+#![allow(unused_variables)]
 
-use crate::addrobj::AddrObject;
-use crate::dladm::DLADM;
-use crate::host::input::Input;
-use crate::host::PFEXEC;
-use crate::zfs::ZFS;
-use crate::zone::IPADM;
-use crate::zone::SVCADM;
-use crate::zone::SVCCFG;
-use crate::zone::ZLOGIN;
-use crate::zone::ZONEADM;
-use crate::zone::ZONECFG;
-use crate::zpool::ZPOOL;
-use crate::zpool::ZpoolName;
-use crate::ROUTE;
 use camino::Utf8PathBuf;
+use helios_fusion::addrobj::AddrObject;
+use helios_fusion::zpool::ZpoolName;
+use helios_fusion::Input;
+use helios_fusion::{
+    DLADM, IPADM, PFEXEC, ROUTE, SVCADM, SVCCFG, ZFS, ZLOGIN, ZONEADM, ZONECFG,
+    ZPOOL,
+};
 use ipnetwork::IpNetwork;
 use omicron_common::vlan::VlanID;
 use std::collections::{HashMap, HashSet};

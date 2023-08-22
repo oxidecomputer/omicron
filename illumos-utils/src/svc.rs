@@ -4,7 +4,7 @@
 
 //! Utilities for accessing services.
 
-use crate::host::BoxedExecutor;
+use helios_fusion::BoxedExecutor;
 use omicron_common::api::external::Error;
 use omicron_common::backoff;
 

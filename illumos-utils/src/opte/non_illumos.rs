@@ -6,7 +6,7 @@
 
 use slog::Logger;
 
-use crate::addrobj::AddrObject;
+use helios_fusion::addrobj::AddrObject;
 use omicron_common::api::internal::shared::NetworkInterfaceKind;
 
 #[derive(thiserror::Error, Debug)]

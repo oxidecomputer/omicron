@@ -163,6 +163,8 @@ pub enum UpdateTerminalError {
         #[source]
         error: gateway_client::Error<gateway_client::types::Error>,
     },
+    #[error("TUF repository missing SP image for board {board}")]
+    MissingSpImageForBoard { board: String },
     #[error("setting installinator image ID failed")]
     SetInstallinatorImageIdFailed {
         #[source]

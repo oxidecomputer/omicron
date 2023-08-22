@@ -39,19 +39,19 @@ use crate::profile::*;
 use crate::smf_helper::Service;
 use crate::smf_helper::SmfHelper;
 use crate::storage_manager::StorageResources;
-use crate::zone_bundle;
 use crate::zone_bundle::BundleError;
+use crate::zone_bundle::ZoneBundler;
 use anyhow::anyhow;
 use camino::{Utf8Path, Utf8PathBuf};
 use ddm_admin_client::{Client as DdmAdminClient, DdmError};
 use dpd_client::{types as DpdTypes, Client as DpdClient, Error as DpdError};
 use dropshot::HandlerTaskMode;
-use illumos_utils::addrobj::AddrObject;
-use illumos_utils::addrobj::IPV6_LINK_LOCAL_NAME;
+use helios_fusion::addrobj::AddrObject;
+use helios_fusion::addrobj::IPV6_LINK_LOCAL_NAME;
+use helios_fusion::{BoxedExecutor, PFEXEC};
 use illumos_utils::dladm::{
     Dladm, Etherstub, EtherstubVnic, GetSimnetError, PhysicalLink,
 };
-use illumos_utils::host::{BoxedExecutor, PFEXEC};
 use illumos_utils::link::{Link, VnicAllocator};
 use illumos_utils::opte::{Port, PortManager, PortTicket};
 use illumos_utils::running_zone::{
@@ -204,7 +204,7 @@ pub enum Error {
     NtpZoneNotReady,
 
     #[error("Execution error: {0}")]
-    ExecutionError(#[from] illumos_utils::host::ExecutionError),
+    ExecutionError(#[from] helios_fusion::ExecutionError),
 
     #[error("Error resolving DNS name: {0}")]
     ResolveError(#[from] internal_dns::resolver::ResolveError),
@@ -371,6 +371,7 @@ pub struct ServiceManagerInner {
     sled_info: OnceCell<SledAgentInfo>,
     switch_zone_bootstrap_address: Ipv6Addr,
     storage: StorageResources,
+    zone_bundler: ZoneBundler,
     ledger_directory_override: OnceCell<Utf8PathBuf>,
     image_directory_override: OnceCell<Utf8PathBuf>,
 }
@@ -416,6 +417,7 @@ impl ServiceManager {
         sidecar_revision: SidecarRevision,
         switch_zone_maghemite_links: Vec<PhysicalLink>,
         storage: StorageResources,
+        zone_bundler: ZoneBundler,
     ) -> Self {
         let log = log.new(o!("component" => "ServiceManager"));
         Self {
@@ -450,6 +452,7 @@ impl ServiceManager {
                 switch_zone_bootstrap_address: bootstrap_networking
                     .switch_zone_bootstrap_ip,
                 storage,
+                zone_bundler,
                 ledger_directory_override: OnceCell::new(),
                 image_directory_override: OnceCell::new(),
             }),
@@ -2033,26 +2036,18 @@ impl ServiceManager {
             &*self.inner.switch_zone.lock().await
         {
             if zone.name() == name {
-                let context = self
+                return self
                     .inner
-                    .storage
-                    .zone_bundle_context(name, ZoneBundleCause::ExplicitRequest)
+                    .zone_bundler
+                    .create(zone, ZoneBundleCause::ExplicitRequest)
                     .await;
-                return crate::zone_bundle::create(
-                    &self.inner.log,
-                    zone,
-                    &context,
-                )
-                .await;
             }
         }
         if let Some(zone) = self.inner.zones.lock().await.get(name) {
-            let context = self
+            return self
                 .inner
-                .storage
-                .zone_bundle_context(name, ZoneBundleCause::ExplicitRequest)
-                .await;
-            return crate::zone_bundle::create(&self.inner.log, zone, &context)
+                .zone_bundler
+                .create(zone, ZoneBundleCause::ExplicitRequest)
                 .await;
         }
         Err(BundleError::NoSuchZone { name: name.to_string() })
@@ -2136,15 +2131,11 @@ impl ServiceManager {
                     "removing an existing zone";
                     "zone_name" => &expected_zone_name,
                 );
-                let context = self
+                if let Err(e) = self
                     .inner
-                    .storage
-                    .zone_bundle_context(
-                        &expected_zone_name,
-                        ZoneBundleCause::UnexpectedZone,
-                    )
-                    .await;
-                if let Err(e) = zone_bundle::create(log, &zone, &context).await
+                    .zone_bundler
+                    .create(&zone, ZoneBundleCause::UnexpectedZone)
+                    .await
                 {
                     error!(
                         log,
@@ -2869,12 +2860,13 @@ mod test {
     use super::*;
     use crate::params::{ServiceZoneService, ZoneType};
     use async_trait::async_trait;
+    use helios_fusion::{Input, Output, OutputExt};
+    use helios_tokamak::{CommandSequence, FakeExecutorBuilder};
     use illumos_utils::{
         dladm::{
             Etherstub, BOOTSTRAP_ETHERSTUB_NAME, UNDERLAY_ETHERSTUB_NAME,
             UNDERLAY_ETHERSTUB_VNIC_NAME,
         },
-        host::{FakeExecutor, Input, Output, OutputExt, StaticHandler},
         zone::{ZLOGIN, ZONEADM, ZONECFG},
     };
     use key_manager::{
@@ -2908,7 +2900,7 @@ mod test {
     // Generate a static executor handler with the expected invocations (and
     // responses) when generating a new service.
     fn expect_new_service(
-        handler: &mut StaticHandler,
+        handler: &mut CommandSequence,
         config: &TestConfig,
         zone_id: Uuid,
         u2_mountpoint: &Utf8Path,
@@ -3152,13 +3144,16 @@ mod test {
         assert_eq!(u2_mountpoints.len(), 1);
         let u2_mountpoint = &u2_mountpoints[0];
 
-        let executor = FakeExecutor::new(log.clone());
         let id = Uuid::new_v4();
-        let mut handler = StaticHandler::new();
+        let mut handler = CommandSequence::new();
         expect_new_service(&mut handler, &test_config, id, &u2_mountpoint);
-        handler.register(&executor);
-        let executor = executor.as_executor();
+        let executor = FakeExecutorBuilder::new(log.clone())
+            .with_sequence(handler)
+            .build()
+            .as_executor();
 
+        let zone_bundler =
+            ZoneBundler::new(log.clone(), storage.clone(), Default::default());
         let mgr = ServiceManager::new(
             &log,
             &executor,
@@ -3169,6 +3164,7 @@ mod test {
             SidecarRevision::Physical("rev-test".to_string()),
             vec![],
             storage,
+            zone_bundler,
         );
         test_config.override_paths(&mgr);
 
@@ -3205,13 +3201,16 @@ mod test {
         assert_eq!(u2_mountpoints.len(), 1);
         let u2_mountpoint = &u2_mountpoints[0];
 
-        let executor = FakeExecutor::new(log.clone());
         let id = Uuid::new_v4();
-        let mut handler = StaticHandler::new();
+        let mut handler = CommandSequence::new();
         expect_new_service(&mut handler, &test_config, id, &u2_mountpoint);
-        handler.register(&executor);
-        let executor = executor.as_executor();
+        let executor = FakeExecutorBuilder::new(log.clone())
+            .with_sequence(handler)
+            .build()
+            .as_executor();
 
+        let zone_bundler =
+            ZoneBundler::new(log.clone(), storage.clone(), Default::default());
         let mgr = ServiceManager::new(
             &log,
             &executor,
@@ -3222,6 +3221,7 @@ mod test {
             SidecarRevision::Physical("rev-test".to_string()),
             vec![],
             storage,
+            zone_bundler,
         );
         test_config.override_paths(&mgr);
 
@@ -3261,15 +3261,18 @@ mod test {
         assert_eq!(u2_mountpoints.len(), 1);
         let u2_mountpoint = &u2_mountpoints[0];
 
-        let executor = FakeExecutor::new(log.clone());
         let id = Uuid::new_v4();
-        let mut handler = StaticHandler::new();
+        let mut handler = CommandSequence::new();
         expect_new_service(&mut handler, &test_config, id, &u2_mountpoint);
-        handler.register(&executor);
-        let executor = executor.as_executor();
+        let executor = FakeExecutorBuilder::new(log.clone())
+            .with_sequence(handler)
+            .build()
+            .as_executor();
 
         // First, spin up a ServiceManager, create a new service, and tear it
         // down.
+        let zone_bundler =
+            ZoneBundler::new(log.clone(), storage.clone(), Default::default());
         let mgr = ServiceManager::new(
             &log,
             &executor,
@@ -3280,6 +3283,7 @@ mod test {
             SidecarRevision::Physical("rev-test".to_string()),
             vec![],
             storage.clone(),
+            zone_bundler.clone(),
         );
         test_config.override_paths(&mgr);
 
@@ -3302,8 +3306,7 @@ mod test {
 
         // Before we re-create the service manager - notably, using the same
         // config file! - expect that a service gets initialized.
-        let executor = FakeExecutor::new(log.clone());
-        let mut handler = StaticHandler::new();
+        let mut handler = CommandSequence::new();
 
         handler.expect_dynamic(Box::new(|input| -> Output {
             assert_eq!(input.program, PFEXEC);
@@ -3320,8 +3323,10 @@ mod test {
             Output::success()
         }));
         expect_new_service(&mut handler, &test_config, id, &u2_mountpoint);
-        handler.register(&executor);
-        let executor = executor.as_executor();
+        let executor = FakeExecutorBuilder::new(log.clone())
+            .with_sequence(handler)
+            .build()
+            .as_executor();
 
         let mgr = ServiceManager::new(
             &log,
@@ -3332,7 +3337,8 @@ mod test {
             Some(true),
             SidecarRevision::Physical("rev-test".to_string()),
             vec![],
-            storage,
+            storage.clone(),
+            zone_bundler.clone(),
         );
         test_config.override_paths(&mgr);
 
@@ -3371,15 +3377,18 @@ mod test {
         assert_eq!(u2_mountpoints.len(), 1);
         let u2_mountpoint = &u2_mountpoints[0];
 
-        let executor = FakeExecutor::new(log.clone());
         let id = Uuid::new_v4();
-        let mut handler = StaticHandler::new();
+        let mut handler = CommandSequence::new();
         expect_new_service(&mut handler, &test_config, id, &u2_mountpoint);
-        handler.register(&executor);
-        let executor = executor.as_executor();
+        let executor = FakeExecutorBuilder::new(log.clone())
+            .with_sequence(handler)
+            .build()
+            .as_executor();
 
         // First, spin up a ServiceManager, create a new service, and tear it
         // down.
+        let zone_bundler =
+            ZoneBundler::new(log.clone(), storage.clone(), Default::default());
         let mgr = ServiceManager::new(
             &log,
             &executor,
@@ -3390,6 +3399,7 @@ mod test {
             SidecarRevision::Physical("rev-test".to_string()),
             vec![],
             storage.clone(),
+            zone_bundler.clone(),
         );
         test_config.override_paths(&mgr);
 
@@ -3428,6 +3438,7 @@ mod test {
             SidecarRevision::Physical("rev-test".to_string()),
             vec![],
             storage,
+            zone_bundler.clone(),
         );
         test_config.override_paths(&mgr);
 

@@ -4,10 +4,12 @@
 
 //! Utilities for poking at ZFS.
 
-use crate::host::{BoxedExecutor, ExecutionError, PFEXEC};
 use camino::Utf8PathBuf;
+use helios_fusion::{BoxedExecutor, ExecutionError, PFEXEC};
 use omicron_common::disk::DiskIdentity;
 use std::fmt;
+
+pub use helios_fusion::ZFS;
 
 // These locations in the ramdisk must only be used by the switch zone.
 //
@@ -19,7 +21,6 @@ use std::fmt;
 pub const ZONE_ZFS_RAMDISK_DATASET_MOUNTPOINT: &str = "/zone";
 pub const ZONE_ZFS_RAMDISK_DATASET: &str = "rpool/zone";
 
-pub const ZFS: &str = "/usr/sbin/zfs";
 pub const KEYPATH_ROOT: &str = "/var/run/oxide/";
 
 /// Error returned by [`Zfs::list_datasets`].
@@ -458,7 +459,7 @@ pub fn get_all_omicron_datasets_for_delete(
     // This includes cockroachdb, clickhouse, and crucible datasets.
     let zpools = crate::zpool::Zpool::list(executor)?;
     for pool in &zpools {
-        let internal = pool.kind() == crate::zpool::ZpoolKind::Internal;
+        let internal = pool.kind() == helios_fusion::zpool::ZpoolKind::Internal;
         let pool = pool.to_string();
         for dataset in &Zfs::list_datasets(executor, &pool)? {
             // Avoid erasing crashdump datasets on internal pools

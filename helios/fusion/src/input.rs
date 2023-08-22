@@ -14,10 +14,10 @@ pub struct Input {
 }
 
 impl Input {
-    pub fn new<S: AsRef<str>>(program: S, args: Vec<S>) -> Self {
+    pub fn new<S: Into<String>>(program: S, args: Vec<S>) -> Self {
         Self {
-            program: program.as_ref().to_string(),
-            args: args.into_iter().map(|s| s.as_ref().to_string()).collect(),
+            program: program.into(),
+            args: args.into_iter().map(|s| s.into()).collect(),
             envs: vec![],
         }
     }
@@ -25,20 +25,21 @@ impl Input {
     /// Short-hand for a whitespace-separated string, which can be provided
     /// "like a shell command".
     pub fn shell<S: AsRef<str>>(input: S) -> Self {
-        let mut args = input.as_ref().split_whitespace();
+        let mut args = shlex::split(input.as_ref()).expect("Invalid input");
 
-        Self::new(
-            args.next().expect("Needs at least a program"),
-            args.collect(),
-        )
+        if args.is_empty() {
+            panic!("Empty input is invalid");
+        }
+
+        Self::new(args.remove(0), args)
     }
 }
 
 impl std::fmt::Display for Input {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.program)?;
+        write!(f, "{}", shlex::quote(&self.program))?;
         for arg in &self.args {
-            write!(f, " {}", arg)?;
+            write!(f, " {}", shlex::quote(arg))?;
         }
         Ok(())
     }

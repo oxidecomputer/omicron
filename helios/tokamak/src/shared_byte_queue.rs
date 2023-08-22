@@ -10,17 +10,17 @@ use std::sync::{Arc, Mutex};
 ///
 /// This is primarily used to emulate stdin / stdout / stderr.
 #[derive(Clone)]
-pub(crate) struct ByteQueue {
+pub struct SharedByteQueue {
     buf: Arc<Mutex<VecDeque<u8>>>,
 }
 
-impl ByteQueue {
+impl SharedByteQueue {
     pub fn new() -> Self {
         Self { buf: Arc::new(Mutex::new(VecDeque::new())) }
     }
 }
 
-impl std::io::Write for ByteQueue {
+impl std::io::Write for SharedByteQueue {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
         self.buf.lock().unwrap().write(buf)
     }
@@ -30,7 +30,7 @@ impl std::io::Write for ByteQueue {
     }
 }
 
-impl std::io::Read for ByteQueue {
+impl std::io::Read for SharedByteQueue {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
         self.buf.lock().unwrap().read(buf)
     }

@@ -4,26 +4,22 @@
 
 //! API for interacting with Zones running Propolis.
 
+use crate::dladm::{EtherstubVnic, VNIC_PREFIX_BOOTSTRAP, VNIC_PREFIX_CONTROL};
+
 use anyhow::anyhow;
 use camino::Utf8Path;
+use helios_fusion::addrobj::AddrObject;
+use helios_fusion::{BoxedExecutor, ExecutionError, PFEXEC};
 use ipnetwork::IpNetwork;
 use ipnetwork::IpNetworkError;
+use omicron_common::address::SLED_PREFIX;
 use slog::info;
 use slog::Logger;
 use std::net::{IpAddr, Ipv6Addr};
 
-use crate::addrobj::AddrObject;
-use crate::dladm::{EtherstubVnic, VNIC_PREFIX_BOOTSTRAP, VNIC_PREFIX_CONTROL};
-use crate::host::{BoxedExecutor, ExecutionError, PFEXEC};
-use omicron_common::address::SLED_PREFIX;
-
-const DLADM: &str = "/usr/sbin/dladm";
-pub const IPADM: &str = "/usr/sbin/ipadm";
-pub const SVCADM: &str = "/usr/sbin/svcadm";
-pub const SVCCFG: &str = "/usr/sbin/svccfg";
-pub const ZLOGIN: &str = "/usr/sbin/zlogin";
-pub const ZONEADM: &str = "/usr/sbin/zoneadm";
-pub const ZONECFG: &str = "/usr/sbin/zonecfg";
+pub use helios_fusion::{
+    DLADM, IPADM, SVCADM, SVCCFG, ZLOGIN, ZONEADM, ZONECFG,
+};
 
 // TODO: These could become enums
 pub const ZONE_PREFIX: &str = "oxz_";
@@ -35,7 +31,7 @@ enum Error {
     Execution(#[from] ExecutionError),
 
     #[error(transparent)]
-    AddrObject(#[from] crate::addrobj::ParseError),
+    AddrObject(#[from] helios_fusion::addrobj::ParseError),
 
     #[error("Address not found: {addrobj}")]
     AddressNotFound { addrobj: AddrObject },
@@ -53,6 +49,13 @@ pub enum Operation {
     Uninstall,
 }
 
+#[derive(thiserror::Error, Debug)]
+#[error(transparent)]
+enum AdmErrorVariant {
+    Execution(#[from] ExecutionError),
+    Adm(#[from] zone::ZoneError),
+}
+
 /// Errors from issuing [`zone::Adm`] commands.
 #[derive(thiserror::Error, Debug)]
 #[error("Failed to execute zoneadm command '{op:?}' for zone '{zone}': {err}")]
@@ -60,7 +63,7 @@ pub struct AdmError {
     op: Operation,
     zone: String,
     #[source]
-    err: Box<dyn std::error::Error + Send + Sync>,
+    err: AdmErrorVariant,
 }
 
 /// Errors which may be encountered when deleting addresses.
@@ -233,7 +236,7 @@ impl Zones {
                         AdmError {
                             op: Operation::Halt,
                             zone: name.to_string(),
-                            err: Box::new(err),
+                            err: err.into(),
                         }
                     })?;
                 }
@@ -244,7 +247,7 @@ impl Zones {
                         .map_err(|err| AdmError {
                             op: Operation::Uninstall,
                             zone: name.to_string(),
-                            err: Box::new(err),
+                            err: err.into(),
                         })?;
                 }
                 zone::Config::new(name)
@@ -254,7 +257,7 @@ impl Zones {
                     .map_err(|err| AdmError {
                     op: Operation::Delete,
                     zone: name.to_string(),
-                    err: Box::new(err),
+                    err: err.into(),
                 })?;
                 Ok(Some(state))
             }
@@ -353,7 +356,7 @@ impl Zones {
         executor.execute_async(&mut cmd).await.map_err(|err| AdmError {
             op: Operation::Configure,
             zone: zone_name.to_string(),
-            err: Box::new(err),
+            err: err.into(),
         })?;
 
         info!(log, "Installing Omicron zone: {}", zone_name);
@@ -367,7 +370,7 @@ impl Zones {
         executor.execute_async(&mut cmd).await.map_err(|err| AdmError {
             op: Operation::Install,
             zone: zone_name.to_string(),
-            err: Box::new(err),
+            err: err.into(),
         })?;
         Ok(())
     }
@@ -383,7 +386,7 @@ impl Zones {
         executor.execute_async(&mut cmd).await.map_err(|err| AdmError {
             op: Operation::Boot,
             zone: name.to_string(),
-            err: Box::new(err),
+            err: err.into(),
         })?;
         Ok(())
     }
@@ -404,10 +407,10 @@ impl Zones {
         let output = executor
             .execute_async(&mut cmd)
             .await
-            .map_err(|err| handle_err(Box::new(err)))?;
+            .map_err(|err| handle_err(err.into()))?;
 
         let zones = zone::Adm::parse_list_output(&output)
-            .map_err(|err| handle_err(Box::new(err)))?;
+            .map_err(|err| handle_err(err.into()))?;
 
         Ok(zones
             .into_iter()
@@ -895,7 +898,8 @@ impl Zones {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::host::{FakeExecutor, Input, OutputExt, StaticHandler};
+    use helios_fusion::{Input, OutputExt};
+    use helios_tokamak::{CommandSequence, FakeExecutorBuilder};
     use omicron_test_utils::dev;
     use std::process::Output;
 
@@ -912,7 +916,7 @@ mod tests {
         // - A request for the list of existing zones
         // - A command to configure the zone
         // - A command to install the zone
-        let mut handler = StaticHandler::new();
+        let mut handler = CommandSequence::new();
         handler.expect(
             Input::shell(format!("{PFEXEC} {ZONEADM} list -cip")),
             Output::success().set_stdout("0:global:running:/::ipkg:shared"),
@@ -938,8 +942,9 @@ mod tests {
             Output::success(),
         );
 
-        let executor = FakeExecutor::new(logctx.log.clone());
-        handler.register(&executor);
+        let executor = FakeExecutorBuilder::new(logctx.log.clone())
+            .with_sequence(handler)
+            .build();
 
         let datasets = [];
         let filesystems = [];
@@ -974,7 +979,7 @@ mod tests {
         let zone_name = "oxz_myzone";
         let zone_image = Utf8Path::new("/image.tar.gz");
 
-        let mut handler = StaticHandler::new();
+        let mut handler = CommandSequence::new();
         handler.expect(
             Input::shell(format!("{PFEXEC} {ZONEADM} list -cip")),
             Output::success().set_stdout(
@@ -982,8 +987,9 @@ mod tests {
             )
         );
 
-        let executor = FakeExecutor::new(logctx.log.clone());
-        handler.register(&executor);
+        let executor = FakeExecutorBuilder::new(logctx.log.clone())
+            .with_sequence(handler)
+            .build();
 
         let datasets = [];
         let filesystems = [];

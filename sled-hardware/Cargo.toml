@@ -10,6 +10,7 @@ anyhow.workspace = true
 camino.workspace = true
 cfg-if.workspace = true
 futures.workspace = true
+helios-fusion.workspace = true
 illumos-utils.workspace = true
 key-manager.workspace = true
 libc.workspace = true
@@ -30,4 +31,5 @@ illumos-devinfo = { git = "https://github.com/oxidecomputer/illumos-devinfo", br
 libefi-illumos = { git = "https://github.com/oxidecomputer/libefi-illumos", branch = "master" }
 
 [dev-dependencies]
+helios-tokamak.workspace = true
 omicron-test-utils.workspace = true

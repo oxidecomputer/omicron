@@ -15,9 +15,9 @@ use async_trait::async_trait;
 use buf_list::BufList;
 use bytes::Buf;
 use camino::{Utf8Path, Utf8PathBuf};
+use helios_fusion::BoxedExecutor;
 use illumos_utils::{
     dkio::{self, MediaInfoExtended},
-    host::BoxedExecutor,
     zpool::{Zpool, ZpoolName},
 };
 use installinator_common::{
@@ -274,7 +274,7 @@ impl<'a> ArtifactWriter<'a> {
                 // want each drive to track success and failure independently.
                 let write_cx = SlotWriteContext {
                     log: log.clone(),
-                    executor: executor.clone(),
+                    executor,
                     artifacts: self.artifacts,
                     slot: *drive,
                     destinations,
@@ -357,7 +357,7 @@ impl<'a> ArtifactWriter<'a> {
 
 struct SlotWriteContext<'a> {
     log: Logger,
-    executor: BoxedExecutor,
+    executor: &'a BoxedExecutor,
     artifacts: ArtifactsToWrite<'a>,
     slot: M2Slot,
     destinations: &'a ArtifactDestination,
@@ -570,7 +570,7 @@ impl ArtifactsToWrite<'_> {
         // own step.
         let inner_cx = &ControlPlaneZoneWriteContext {
             slot,
-            executor: executor.clone(),
+            executor,
             clean_output_directory: destinations.clean_control_plane_dir,
             output_directory: &destinations.control_plane_dir,
             zones: self.control_plane_zones,
@@ -604,7 +604,7 @@ impl ArtifactsToWrite<'_> {
 
 struct ControlPlaneZoneWriteContext<'a> {
     slot: M2Slot,
-    executor: BoxedExecutor,
+    executor: &'a BoxedExecutor,
     clean_output_directory: bool,
     output_directory: &'a Utf8Path,
     zones: &'a ControlPlaneZoneImages,
@@ -1160,8 +1160,9 @@ mod tests {
 
         let engine = UpdateEngine::new(&logctx.log, event_sender);
         let log = logctx.log.clone();
-        let executor =
-            illumos_utils::host::FakeExecutor::new(log.clone()).as_executor();
+        let executor = helios_tokamak::FakeExecutorBuilder::new(log.clone())
+            .build()
+            .as_executor();
         engine
             .new_step(
                 InstallinatorComponent::Both,

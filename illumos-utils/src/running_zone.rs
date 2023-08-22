@@ -4,15 +4,14 @@
 
 //! Utilities to manage running zones.
 
-use crate::addrobj::AddrObject;
 use crate::dladm::Etherstub;
-use crate::host::{BoxedExecutor, ExecutionError};
 use crate::link::{Link, VnicAllocator};
 use crate::opte::{Port, PortTicket};
 use crate::svc::wait_for_service;
 use crate::zone::{AddressRequest, Zones, IPADM, ZONE_PREFIX};
-use crate::ROUTE;
 use camino::{Utf8Path, Utf8PathBuf};
+use helios_fusion::addrobj::AddrObject;
+use helios_fusion::{BoxedExecutor, ExecutionError, ROUTE};
 use ipnetwork::IpNetwork;
 use omicron_common::backoff;
 use slog::{error, info, o, warn, Logger};
@@ -65,7 +64,7 @@ pub enum EnsureAddressError {
     AddrObject {
         request: AddressRequest,
         zone: String,
-        err: crate::addrobj::ParseError,
+        err: helios_fusion::addrobj::ParseError,
     },
 
     #[error(transparent)]
@@ -127,7 +126,7 @@ pub enum GetZoneError {
     AddrObject {
         name: String,
         #[source]
-        err: crate::addrobj::ParseError,
+        err: helios_fusion::addrobj::ParseError,
     },
 
     #[error(
@@ -437,7 +436,7 @@ impl RunningZone {
                 RunCommandError { zone: self.name().to_string(), err }
             })?);
         let tmpl = std::sync::Arc::clone(&template);
-        let mut command = std::process::Command::new(crate::host::PFEXEC);
+        let mut command = std::process::Command::new(helios_fusion::PFEXEC);
         command.env_clear();
         unsafe {
             command.pre_exec(move || {
@@ -475,7 +474,7 @@ impl RunningZone {
     {
         // NOTE: This implementation is useless, and will never work. However,
         // it must actually call `execute()` for the testing purposes.
-        let mut command = std::process::Command::new(crate::host::PFEXEC);
+        let mut command = std::process::Command::new(helios_fusion::PFEXEC);
         let command =
             command.arg(crate::zone::ZLOGIN).arg(self.name()).args(args);
         self.inner
@@ -1076,16 +1075,20 @@ pub enum InstallZoneError {
         err: crate::dladm::CreateVnicError,
     },
 
-    #[error("Failed to install zone '{zone}' from '{image_path}': {err}")]
-    InstallZone {
-        zone: String,
-        image_path: Utf8PathBuf,
-        #[source]
-        err: crate::zone::AdmError,
-    },
+    #[error(transparent)]
+    InstallZone(Box<InstallFailure>),
 
     #[error("Failed to find zone image '{image}' from {paths:?}")]
     ImageNotFound { image: String, paths: Vec<Utf8PathBuf> },
+}
+
+#[derive(thiserror::Error, Debug)]
+#[error("Failed to install zone '{zone}' from '{image_path}': {err}")]
+pub struct InstallFailure {
+    zone: String,
+    image_path: Utf8PathBuf,
+    #[source]
+    err: crate::zone::AdmError,
 }
 
 pub struct InstalledZone {
@@ -1221,10 +1224,12 @@ impl InstalledZone {
             limit_priv,
         )
         .await
-        .map_err(|err| InstallZoneError::InstallZone {
-            zone: full_zone_name.to_string(),
-            image_path: zone_image_path.clone(),
-            err,
+        .map_err(|err| {
+            InstallZoneError::InstallZone(Box::new(InstallFailure {
+                zone: full_zone_name.to_string(),
+                image_path: zone_image_path.clone(),
+                err,
+            }))
         })?;
 
         Ok(InstalledZone {

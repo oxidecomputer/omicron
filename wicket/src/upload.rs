@@ -19,7 +19,9 @@ use tokio_util::io::ReaderStream;
 
 use crate::wicketd::create_wicketd_client;
 
-const WICKETD_UPLOAD_TIMEOUT: Duration = Duration::from_millis(30_000);
+// We have observed wicketd running in a switch zone under load take ~60 seconds
+// to accept a repository; set the timeout to double that to give some headroom.
+const WICKETD_UPLOAD_TIMEOUT: Duration = Duration::from_secs(120);
 
 #[derive(Debug, Args)]
 pub(crate) struct UploadArgs {

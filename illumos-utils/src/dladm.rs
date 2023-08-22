@@ -4,14 +4,16 @@
 
 //! Utilities for poking at data links.
 
-use crate::host::{BoxedExecutor, ExecutionError, PFEXEC};
 use crate::link::{Link, LinkKind};
 use crate::zone::IPADM;
+use helios_fusion::{BoxedExecutor, ExecutionError, PFEXEC};
 use omicron_common::api::external::MacAddr;
 use omicron_common::vlan::VlanID;
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 use std::str::Utf8Error;
+
+pub use helios_fusion::DLADM;
 
 pub const VNIC_PREFIX: &str = "ox";
 pub const VNIC_PREFIX_CONTROL: &str = "oxControl";
@@ -21,9 +23,6 @@ pub const VNIC_PREFIX_BOOTSTRAP: &str = "oxBootstrap";
 // TODO-correctness: Remove this when `xde` devices can be directly used beneath
 // Viona, and thus plumbed directly to guests.
 pub const VNIC_PREFIX_GUEST: &str = "vopte";
-
-/// Path to the DLADM command.
-pub const DLADM: &str = "/usr/sbin/dladm";
 
 /// The name of the etherstub to be created for the underlay network.
 pub const UNDERLAY_ETHERSTUB_NAME: &str = "underlay_stub0";
@@ -560,7 +559,8 @@ impl Dladm {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::host::{FakeExecutor, Input, OutputExt, StaticHandler};
+    use helios_fusion::{Input, OutputExt};
+    use helios_tokamak::{CommandSequence, FakeExecutorBuilder};
     use omicron_test_utils::dev;
     use std::process::Output;
 
@@ -568,13 +568,14 @@ mod test {
     fn ensure_new_etherstub() {
         let logctx = dev::test_setup_log("ensure_new_etherstub");
 
-        let mut handler = StaticHandler::new();
+        let mut handler = CommandSequence::new();
         handler.expect_fail(format!("{PFEXEC} {DLADM} show-etherstub mystub1"));
         handler
             .expect_ok(format!("{PFEXEC} {DLADM} create-etherstub -t mystub1"));
 
-        let executor = FakeExecutor::new(logctx.log.clone());
-        handler.register(&executor);
+        let executor = FakeExecutorBuilder::new(logctx.log.clone())
+            .with_sequence(handler)
+            .build();
 
         let etherstub =
             Dladm::ensure_etherstub(&executor.as_executor(), "mystub1")
@@ -588,10 +589,11 @@ mod test {
     fn ensure_existing_etherstub() {
         let logctx = dev::test_setup_log("ensure_existing_etherstub");
 
-        let mut handler = StaticHandler::new();
+        let mut handler = CommandSequence::new();
         handler.expect_ok(format!("{PFEXEC} {DLADM} show-etherstub mystub1"));
-        let executor = FakeExecutor::new(logctx.log.clone());
-        handler.register(&executor);
+        let executor = FakeExecutorBuilder::new(logctx.log.clone())
+            .with_sequence(handler)
+            .build();
 
         let etherstub =
             Dladm::ensure_etherstub(&executor.as_executor(), "mystub1")
@@ -605,15 +607,16 @@ mod test {
     fn ensure_existing_etherstub_vnic() {
         let logctx = dev::test_setup_log("ensure_existing_etherstub_vnic");
 
-        let mut handler = StaticHandler::new();
+        let mut handler = CommandSequence::new();
         handler.expect_ok(format!(
             "{PFEXEC} {DLADM} show-etherstub {UNDERLAY_ETHERSTUB_NAME}"
         ));
         handler.expect_ok(format!(
             "{PFEXEC} {DLADM} show-vnic {UNDERLAY_ETHERSTUB_VNIC_NAME}"
         ));
-        let executor = FakeExecutor::new(logctx.log.clone());
-        handler.register(&executor);
+        let executor = FakeExecutorBuilder::new(logctx.log.clone())
+            .with_sequence(handler)
+            .build();
 
         let executor = &executor.as_executor();
         let etherstub =
@@ -629,7 +632,7 @@ mod test {
     fn ensure_new_etherstub_vnic() {
         let logctx = dev::test_setup_log("ensure_new_etherstub_vnic");
 
-        let mut handler = StaticHandler::new();
+        let mut handler = CommandSequence::new();
         handler.expect_ok(format!(
             "{PFEXEC} {DLADM} show-etherstub {UNDERLAY_ETHERSTUB_NAME}"
         ));
@@ -644,8 +647,9 @@ mod test {
             "{PFEXEC} {DLADM} set-linkprop -t -p mtu=9000 \
             {UNDERLAY_ETHERSTUB_VNIC_NAME}"
         ));
-        let executor = FakeExecutor::new(logctx.log.clone());
-        handler.register(&executor);
+        let executor = FakeExecutorBuilder::new(logctx.log.clone())
+            .with_sequence(handler)
+            .build();
 
         let executor = &executor.as_executor();
         let etherstub =
@@ -661,15 +665,16 @@ mod test {
     fn only_parse_oxide_vnics() {
         let logctx = dev::test_setup_log("only_parse_oxide_vnics");
 
-        let mut handler = StaticHandler::new();
+        let mut handler = CommandSequence::new();
         handler.expect(
             Input::shell(format!("{PFEXEC} {DLADM} show-vnic -p -o LINK")),
             Output::success().set_stdout(
                 "oxVnic\nvopteVnic\nInvalid\noxBootstrapVnic\nInvalid",
             ),
         );
-        let executor = FakeExecutor::new(logctx.log.clone());
-        handler.register(&executor);
+        let executor = FakeExecutorBuilder::new(logctx.log.clone())
+            .with_sequence(handler)
+            .build();
 
         let executor = &executor.as_executor();
         let vnics = Dladm::get_vnics(executor).expect("Failed to get VNICs");
