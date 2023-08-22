@@ -250,7 +250,6 @@ pub async fn action_failure_can_unwind<'a, S, B, A>(
 ///   test. This function checks any post-saga invariants and cleans up any
 ///   objects that should be destroyed before the next test iteration.
 /// - `log`: A logger to which the scaffold should log messages.
-/// - `nexus`: A reference to the Nexus that should execute the saga.
 ///
 /// # Panics
 ///
