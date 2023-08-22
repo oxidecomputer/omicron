@@ -65,7 +65,6 @@ pub enum ExecutionError {
 #[cfg_attr(any(test, feature = "testing"), mockall::automock, allow(dead_code))]
 mod inner {
     use super::*;
-    use std::process::Stdio;
 
     fn to_string(command: &mut std::process::Command) -> String {
         command
@@ -91,35 +90,8 @@ mod inner {
         }))
     }
 
-    // Helper functions for starting the process and checking the
+    // Helper function for starting the process and checking the
     // exit code result.
-
-    pub fn spawn_with_piped_stdout_and_stderr(
-        command: &mut std::process::Command,
-    ) -> Result<std::process::Child, ExecutionError> {
-        command.stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().map_err(
-            |err| ExecutionError::ExecutionStart {
-                command: to_string(command),
-                err,
-            },
-        )
-    }
-
-    pub fn run_child(
-        command: &mut std::process::Command,
-        child: std::process::Child,
-    ) -> Result<std::process::Output, ExecutionError> {
-        let output = child.wait_with_output().map_err(|err| {
-            ExecutionError::ExecutionStart { command: to_string(command), err }
-        })?;
-
-        if !output.status.success() {
-            return Err(output_to_exec_error(command, &output));
-        }
-
-        Ok(output)
-    }
-
     pub fn execute(
         command: &mut std::process::Command,
     ) -> Result<std::process::Output, ExecutionError> {

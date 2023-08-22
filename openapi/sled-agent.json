@@ -10,34 +10,6 @@
     "version": "0.0.1"
   },
   "paths": {
-    "/all-zone-bundles": {
-      "get": {
-        "summary": "List all zone bundles that exist, even for now-deleted zones.",
-        "operationId": "zone_bundle_list_all",
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "title": "Array_of_ZoneBundleMetadata",
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/ZoneBundleMetadata"
-                  }
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
     "/cockroachdb": {
       "post": {
         "summary": "Initializes a CockroachDB cluster",
@@ -554,7 +526,151 @@
         }
       }
     },
-    "/zones/{zone_name}/bundles": {
+    "/zones/bundle-cleanup": {
+      "post": {
+        "summary": "Trigger a zone bundle cleanup.",
+        "operationId": "zone_bundle_cleanup",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Map_of_CleanupCount",
+                  "type": "object",
+                  "additionalProperties": {
+                    "$ref": "#/components/schemas/CleanupCount"
+                  }
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/zones/bundle-cleanup/context": {
+      "get": {
+        "summary": "Return context used by the zone-bundle cleanup task.",
+        "operationId": "zone_bundle_cleanup_context",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CleanupContext"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "put": {
+        "summary": "Update context used by the zone-bundle cleanup task.",
+        "operationId": "zone_bundle_cleanup_context_update",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CleanupContextUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/zones/bundle-cleanup/utilization": {
+      "get": {
+        "summary": "Return utilization information about all zone bundles.",
+        "operationId": "zone_bundle_utilization",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Map_of_BundleUtilization",
+                  "type": "object",
+                  "additionalProperties": {
+                    "$ref": "#/components/schemas/BundleUtilization"
+                  }
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/zones/bundles": {
+      "get": {
+        "summary": "List all zone bundles that exist, even for now-deleted zones.",
+        "operationId": "zone_bundle_list_all",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "filter",
+            "description": "An optional substring used to filter zone bundles.",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Array_of_ZoneBundleMetadata",
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ZoneBundleMetadata"
+                  }
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/zones/bundles/{zone_name}": {
       "get": {
         "summary": "List the zone bundles that are available for a running zone.",
         "operationId": "zone_bundle_list",
@@ -626,7 +742,7 @@
         }
       }
     },
-    "/zones/{zone_name}/bundles/{bundle_id}": {
+    "/zones/bundles/{zone_name}/{bundle_id}": {
       "get": {
         "summary": "Fetch the binary content of a single zone bundle.",
         "operationId": "zone_bundle_get",
@@ -747,11 +863,136 @@
       }
     },
     "schemas": {
+      "BundleUtilization": {
+        "description": "The portion of a debug dataset used for zone bundles.",
+        "type": "object",
+        "properties": {
+          "bytes_available": {
+            "description": "The total number of bytes available for zone bundles.\n\nThis is `dataset_quota` multiplied by the context's storage limit.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "bytes_used": {
+            "description": "Total bundle usage, in bytes.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "dataset_quota": {
+            "description": "The total dataset quota, in bytes.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "bytes_available",
+          "bytes_used",
+          "dataset_quota"
+        ]
+      },
       "ByteCount": {
         "description": "Byte count to express memory or storage capacity.",
         "type": "integer",
         "format": "uint64",
         "minimum": 0
+      },
+      "CleanupContext": {
+        "description": "Context provided for the zone bundle cleanup task.",
+        "type": "object",
+        "properties": {
+          "period": {
+            "description": "The period on which automatic checks and cleanup is performed.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/CleanupPeriod"
+              }
+            ]
+          },
+          "priority": {
+            "description": "The priority ordering for keeping old bundles.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PriorityOrder"
+              }
+            ]
+          },
+          "storage_limit": {
+            "description": "The limit on the dataset quota available for zone bundles.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/StorageLimit"
+              }
+            ]
+          }
+        },
+        "required": [
+          "period",
+          "priority",
+          "storage_limit"
+        ]
+      },
+      "CleanupContextUpdate": {
+        "description": "Parameters used to update the zone bundle cleanup context.",
+        "type": "object",
+        "properties": {
+          "period": {
+            "nullable": true,
+            "description": "The new period on which automatic cleanups are run.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Duration"
+              }
+            ]
+          },
+          "priority": {
+            "nullable": true,
+            "description": "The priority ordering for preserving old zone bundles.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PriorityOrder"
+              }
+            ]
+          },
+          "storage_limit": {
+            "nullable": true,
+            "description": "The new limit on the underlying dataset quota allowed for bundles.",
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0
+          }
+        }
+      },
+      "CleanupCount": {
+        "description": "The count of bundles / bytes removed during a cleanup operation.",
+        "type": "object",
+        "properties": {
+          "bundles": {
+            "description": "The number of bundles removed.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "bytes": {
+            "description": "The number of bytes removed.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "bundles",
+          "bytes"
+        ]
+      },
+      "CleanupPeriod": {
+        "description": "A period on which bundles are automatically cleaned up.",
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/Duration"
+          }
+        ]
       },
       "CrucibleOpts": {
         "type": "object",
@@ -1272,6 +1513,25 @@
         "enum": [
           "U2",
           "M2"
+        ]
+      },
+      "Duration": {
+        "type": "object",
+        "properties": {
+          "nanos": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "secs": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "nanos",
+          "secs"
         ]
       },
       "Error": {
@@ -1953,6 +2213,34 @@
           }
         ]
       },
+      "PriorityDimension": {
+        "description": "A dimension along with bundles can be sorted, to determine priority.",
+        "oneOf": [
+          {
+            "description": "Sorting by time, with older bundles with lower priority.",
+            "type": "string",
+            "enum": [
+              "time"
+            ]
+          },
+          {
+            "description": "Sorting by the cause for creating the bundle.",
+            "type": "string",
+            "enum": [
+              "cause"
+            ]
+          }
+        ]
+      },
+      "PriorityOrder": {
+        "description": "The priority order for bundles during cleanup.\n\nBundles are sorted along the dimensions in [`PriorityDimension`], with each dimension appearing exactly once. During cleanup, lesser-priority bundles are pruned first, to maintain the dataset quota. Note that bundles are sorted by each dimension in the order in which they appear, with each dimension having higher priority than the next.",
+        "type": "array",
+        "items": {
+          "$ref": "#/components/schemas/PriorityDimension"
+        },
+        "minItems": 2,
+        "maxItems": 2
+      },
       "SemverVersion": {
         "type": "string",
         "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$"
@@ -2411,6 +2699,12 @@
           "last_port"
         ]
       },
+      "StorageLimit": {
+        "description": "The limit on space allowed for zone bundles, as a percentage of the overall dataset's quota.",
+        "type": "integer",
+        "format": "uint8",
+        "minimum": 0
+      },
       "TimeSync": {
         "type": "object",
         "properties": {
@@ -2730,10 +3024,10 @@
         "description": "The reason or cause for a zone bundle, i.e., why it was created.",
         "oneOf": [
           {
-            "description": "Generated in response to an explicit request to the sled agent.",
+            "description": "Some other, unspecified reason.",
             "type": "string",
             "enum": [
-              "explicit_request"
+              "other"
             ]
           },
           {
@@ -2751,10 +3045,10 @@
             ]
           },
           {
-            "description": "Some other, unspecified reason.",
+            "description": "Generated in response to an explicit request to the sled agent.",
             "type": "string",
             "enum": [
-              "other"
+              "explicit_request"
             ]
           }
         ]

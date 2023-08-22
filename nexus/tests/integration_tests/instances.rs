@@ -496,6 +496,108 @@ async fn test_instances_create_reboot_halt(
 }
 
 #[nexus_test]
+async fn test_instance_start_creates_networking_state(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let apictx = &cptestctx.server.apictx();
+    let nexus = &apictx.nexus;
+    let instance_name = "series-of-tubes";
+
+    // Add some additional sleds that can receive V2P mappings.
+    let nsleds = 3;
+    let mut additional_sleds = Vec::with_capacity(nsleds);
+    for _ in 0..nsleds {
+        let sa_id = Uuid::new_v4();
+        let log =
+            cptestctx.logctx.log.new(o!( "sled_id" => sa_id.to_string() ));
+        let addr = cptestctx.server.get_http_server_internal_address().await;
+        let update_directory = Utf8Path::new("/should/not/be/used");
+        additional_sleds.push(
+            start_sled_agent(
+                log,
+                addr,
+                sa_id,
+                &update_directory,
+                sim::SimMode::Explicit,
+            )
+            .await
+            .unwrap(),
+        );
+    }
+
+    create_org_and_project(&client).await;
+    let instance_url = get_instance_url(instance_name);
+    let instance = create_instance(client, PROJECT_NAME, instance_name).await;
+
+    // Drive the instance to Running, then stop it.
+    instance_simulate(nexus, &instance.identity.id).await;
+    let instance =
+        instance_post(&client, instance_name, InstanceOp::Stop).await;
+    instance_simulate(nexus, &instance.identity.id).await;
+    let instance = instance_get(&client, &instance_url).await;
+    assert_eq!(instance.runtime.run_state, InstanceState::Stopped);
+
+    // Forcibly clear the instance's V2P mappings to simulate what happens when
+    // the control plane comes up when an instance is stopped.
+    let mut sled_agents: Vec<&Arc<SledAgent>> =
+        additional_sleds.iter().map(|x| &x.sled_agent).collect();
+
+    sled_agents.push(&cptestctx.sled_agent.sled_agent);
+    for agent in &sled_agents {
+        agent.v2p_mappings.lock().await.clear();
+    }
+
+    // Start the instance and make sure that it gets to Running.
+    let instance =
+        instance_post(&client, instance_name, InstanceOp::Start).await;
+    instance_simulate(nexus, &instance.identity.id).await;
+    let instance = instance_get(&client, &instance_url).await;
+    assert_eq!(instance.runtime.run_state, InstanceState::Running);
+
+    // Now ensure the V2P mappings have been reestablished everywhere.
+    let nics_url =
+        format!("/v1/network-interfaces?instance={}", instance.identity.id,);
+
+    let nics =
+        objects_list_page_authz::<InstanceNetworkInterface>(client, &nics_url)
+            .await
+            .items;
+
+    assert_eq!(nics.len(), 1);
+    let datastore = nexus.datastore();
+    let opctx =
+        OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
+
+    let (.., authz_instance, db_instance) = LookupPath::new(&opctx, &datastore)
+        .instance_id(instance.identity.id)
+        .fetch()
+        .await
+        .unwrap();
+
+    let guest_nics = datastore
+        .derive_guest_network_interface_info(&opctx, &authz_instance)
+        .await
+        .unwrap();
+
+    assert_eq!(guest_nics.len(), 1);
+    for agent in &sled_agents {
+        // TODO(#3107) Remove this bifurcation when Nexus programs all mappings
+        // itself.
+        if agent.id != db_instance.runtime().sled_id {
+            assert_sled_v2p_mappings(
+                agent,
+                &nics[0],
+                guest_nics[0].vni.clone().into(),
+            )
+            .await;
+        } else {
+            assert!(agent.v2p_mappings.lock().await.is_empty());
+        }
+    }
+}
+
+#[nexus_test]
 async fn test_instance_migrate(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
     let apictx = &cptestctx.server.apictx();
