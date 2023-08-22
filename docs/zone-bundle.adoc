@@ -4,11 +4,11 @@
 
 = Zone bundle
 
-`zone-bundle` tool can be used to manage a tarball of debugging data collected
-from Oxide zones. The tool collects all log files on the system, including
-current, rotated and archived files. It also runs a series of debugging
-commands in the target zone, such as `netstat -an`. All of these items are
-packaged into a tarball that can be fetched from the system.
+The `zone-bundle` tool can be used to manage a tarball of debugging data
+collected from Oxide zones. The tool collects all log files on the system,
+including current, rotated and archived files. It also runs a series of
+debugging commands in the target zone, such as `netstat -an`. All of these items
+are packaged into a tarball that can be fetched from the system.
 
 = Running
 
