@@ -18,7 +18,6 @@ use helios_fusion::{
 };
 use ipnetwork::IpNetwork;
 use std::collections::{HashMap, HashSet};
-use std::str::FromStr;
 
 // Parsing command-line utilities
 mod dladm;
@@ -136,42 +135,6 @@ pub enum AddrType {
     Dhcp,
     Static(IpNetwork),
     Addrconf,
-}
-
-#[derive(Debug, PartialEq, Eq)]
-pub enum RouteTarget {
-    Default,
-    DefaultV4,
-    DefaultV6,
-    ByAddress(IpNetwork),
-}
-
-impl RouteTarget {
-    fn shift_target(input: &mut parse::InputParser) -> Result<Self, String> {
-        let force_v4 = input.shift_arg_if("-inet")?;
-        let force_v6 = input.shift_arg_if("-inet6")?;
-
-        let target = match (force_v4, force_v6, input.shift_arg()?.as_str()) {
-            (true, true, _) => {
-                return Err("Cannot force both v4 and v6".to_string())
-            }
-            (true, false, "default") => RouteTarget::DefaultV4,
-            (false, true, "default") => RouteTarget::DefaultV6,
-            (false, false, "default") => RouteTarget::Default,
-            (_, _, other) => {
-                let net =
-                    IpNetwork::from_str(other).map_err(|e| e.to_string())?;
-                if force_v4 && !net.is_ipv4() {
-                    return Err(format!("{net} is not ipv4"));
-                }
-                if force_v6 && !net.is_ipv6() {
-                    return Err(format!("{net} is not ipv6"));
-                }
-                RouteTarget::ByAddress(net)
-            }
-        };
-        Ok(target)
-    }
 }
 
 pub struct FilesystemName(String);
