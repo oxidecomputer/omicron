@@ -4,9 +4,9 @@
 
 //! Interactions with the Oxide Packet Transformation Engine (OPTE)
 
-use crate::addrobj::AddrObject;
 use crate::dladm;
 use camino::Utf8Path;
+use helios_fusion::addrobj::AddrObject;
 use omicron_common::api::internal::shared::NetworkInterfaceKind;
 use opte_ioctl::OpteHdl;
 use slog::info;
@@ -33,7 +33,7 @@ pub enum Error {
     IncompatibleKernel,
 
     #[error(transparent)]
-    BadAddrObj(#[from] crate::addrobj::ParseError),
+    BadAddrObj(#[from] helios_fusion::addrobj::ParseError),
 
     #[error(transparent)]
     SetLinkpropError(#[from] crate::dladm::SetLinkpropError),

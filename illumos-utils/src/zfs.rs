@@ -428,8 +428,14 @@ impl Zfs {
         name: &str,
     ) -> Result<String, GetValueError> {
         let mut command = std::process::Command::new(PFEXEC);
-        let cmd =
-            command.args(&[ZFS, "get", "-Ho", "value", &name, filesystem_name]);
+        let cmd = command.args(&[
+            ZFS,
+            "get",
+            "-Hpo",
+            "value",
+            &name,
+            filesystem_name,
+        ]);
         let output = executor.execute(cmd).map_err(|err| GetValueError {
             filesystem: filesystem_name.to_string(),
             name: name.to_string(),

@@ -48,6 +48,7 @@ struct Route {
     gateway: IpNetwork,
 }
 
+#[derive(Debug)]
 struct ServiceName(String);
 
 struct Service {
@@ -271,7 +272,7 @@ impl TryFrom<Input> for DladmCommand {
                 );
                 if !shift_arg_if(&mut input, "-p")? {
                     return Err(
-                        "You should ask for parseable output ('-p')".into()
+                        "You should ask for parsable output ('-p')".into()
                     );
                 }
                 if !shift_arg_if(&mut input, "-o")? {
@@ -294,7 +295,7 @@ impl TryFrom<Input> for DladmCommand {
                 }
                 if !shift_arg_if(&mut input, "-p")? {
                     return Err(
-                        "You should ask for parseable output ('-p')".into()
+                        "You should ask for parsable output ('-p')".into()
                     );
                 }
                 if !shift_arg_if(&mut input, "-o")? {
@@ -584,27 +585,27 @@ impl TryFrom<Input> for RouteCommand {
 enum SvccfgCommand {
     Addpropvalue {
         zone: Option<ZoneName>,
-        service: ServiceName,
+        fmri: ServiceName,
         key: smf::PropertyName,
-        value: smf::PropertyValue,
+        ty: Option<String>,
+        value: String,
     },
     Addpg {
         zone: Option<ZoneName>,
-        service: ServiceName,
+        fmri: ServiceName,
         group: smf::PropertyGroupName,
         group_type: String,
     },
     Delpg {
         zone: Option<ZoneName>,
-        service: ServiceName,
-        group: smf::PropertyName,
-        value: String,
+        fmri: ServiceName,
+        group: smf::PropertyGroupName,
     },
     Delpropvalue {
         zone: Option<ZoneName>,
-        service: ServiceName,
-        group: smf::PropertyName,
-        value: String,
+        fmri: ServiceName,
+        name: smf::PropertyName,
+        glob: String,
     },
     Import {
         zone: Option<ZoneName>,
@@ -612,13 +613,13 @@ enum SvccfgCommand {
     },
     Refresh {
         zone: Option<ZoneName>,
-        service: ServiceName,
+        fmri: ServiceName,
     },
     Setprop {
         zone: Option<ZoneName>,
-        service: ServiceName,
-        key: smf::PropertyName,
-        value: smf::PropertyValue,
+        fmri: ServiceName,
+        name: smf::PropertyName,
+        value: String,
     },
 }
 
@@ -643,13 +644,118 @@ impl TryFrom<Input> for SvccfgCommand {
         };
 
         match shift_arg(&mut input)?.as_str() {
-            "addpropvalue" => todo!(),
-            "addpg" => todo!(),
-            "delpg" => todo!(),
-            "delpropvalue" => todo!(),
-            "import" => todo!(),
-            "refresh" => todo!(),
-            "setprop" => todo!(),
+            "addpropvalue" => {
+                let name = shift_arg(&mut input)?;
+                let name = smf::PropertyName::from_str(&name)
+                    .map_err(|e| e.to_string())?;
+
+                let type_or_value = shift_arg(&mut input)?;
+                let (ty, value) = match input.args.pop_front() {
+                    Some(value) => {
+                        let ty = type_or_value
+                            .strip_suffix(':')
+                            .ok_or_else(|| {
+                                format!("Bad property type: {type_or_value}")
+                            })?
+                            .to_string();
+                        (Some(ty), value)
+                    }
+                    None => (None, type_or_value),
+                };
+
+                let fmri = fmri.ok_or_else(|| {
+                    format!("-s option required for addpropvalue")
+                })?;
+
+                no_args_remaining(&input)?;
+                Ok(SvccfgCommand::Addpropvalue {
+                    zone,
+                    fmri,
+                    key: name,
+                    ty,
+                    value,
+                })
+            }
+            "addpg" => {
+                let name = shift_arg(&mut input)?;
+                let group = smf::PropertyGroupName::new(&name)
+                    .map_err(|e| e.to_string())?;
+
+                let group_type = shift_arg(&mut input)?;
+                if let Some(flags) = input.args.pop_front() {
+                    return Err(
+                        "Parsing of optional flags not implemented".to_string()
+                    );
+                }
+                let fmri = fmri
+                    .ok_or_else(|| format!("-s option required for addpg"))?;
+
+                no_args_remaining(&input)?;
+                Ok(SvccfgCommand::Addpg { zone, fmri, group, group_type })
+            }
+            "delpg" => {
+                let name = shift_arg(&mut input)?;
+                let group = smf::PropertyGroupName::new(&name)
+                    .map_err(|e| e.to_string())?;
+                let fmri = fmri
+                    .ok_or_else(|| format!("-s option required for delpg"))?;
+
+                no_args_remaining(&input)?;
+                Ok(SvccfgCommand::Delpg { zone, fmri, group })
+            }
+            "delpropvalue" => {
+                let name = shift_arg(&mut input)?;
+                let name = smf::PropertyName::from_str(&name)
+                    .map_err(|e| e.to_string())?;
+                let fmri = fmri.ok_or_else(|| {
+                    format!("-s option required for delpropvalue")
+                })?;
+                let glob = shift_arg(&mut input)?;
+
+                no_args_remaining(&input)?;
+                Ok(SvccfgCommand::Delpropvalue { zone, fmri, name, glob })
+            }
+            "import" => {
+                let file = shift_arg(&mut input)?;
+                if let Some(_) = fmri {
+                    return Err(
+                        "Cannot use '-s' option with import".to_string()
+                    );
+                }
+                no_args_remaining(&input)?;
+                Ok(SvccfgCommand::Import { zone, file: file.into() })
+            }
+            "refresh" => {
+                let fmri = fmri
+                    .ok_or_else(|| format!("-s option required for refresh"))?;
+                no_args_remaining(&input)?;
+                Ok(SvccfgCommand::Refresh { zone, fmri })
+            }
+            "setprop" => {
+                let fmri = fmri
+                    .ok_or_else(|| format!("-s option required for setprop"))?;
+
+                // Setprop seems fine accepting args of the form:
+                // - name=value
+                // - name = value
+                // - name = type: value     (NOTE: not yet supported)
+                let first_arg = shift_arg(&mut input)?;
+                let (name, value) =
+                    if let Some((name, value)) = first_arg.split_once('=') {
+                        (name.to_string(), value.to_string())
+                    } else {
+                        let name = first_arg;
+                        shift_arg_expect(&mut input, "=")?;
+                        let value = shift_arg(&mut input)?;
+                        (name, value.to_string())
+                    };
+
+                let name = smf::PropertyName::from_str(&name)
+                    .map_err(|e| e.to_string())?;
+
+                no_args_remaining(&input)?;
+                Ok(SvccfgCommand::Setprop { zone, fmri, name, value })
+            }
             command => return Err(format!("Unexpected command: {command}")),
         }
     }
@@ -667,17 +773,75 @@ impl TryFrom<Input> for SvcadmCommand {
         if input.program != SVCADM {
             return Err(format!("Not svcadm command: {}", input.program));
         }
-        todo!();
+
+        let zone = if shift_arg_if(&mut input, "-z")? {
+            Some(ZoneName(shift_arg(&mut input)?))
+        } else {
+            None
+        };
+
+        match shift_arg(&mut input)?.as_str() {
+            "enable" => {
+                // Intentionally ignored
+                shift_arg_if(&mut input, "-t")?;
+                let service = ServiceName(shift_arg(&mut input)?);
+                no_args_remaining(&input)?;
+                Ok(SvcadmCommand::Enable { zone, service })
+            }
+            "disable" => {
+                // Intentionally ignored
+                shift_arg_if(&mut input, "-t")?;
+                let service = ServiceName(shift_arg(&mut input)?);
+                no_args_remaining(&input)?;
+                Ok(SvcadmCommand::Disable { zone, service })
+            }
+            command => return Err(format!("Unexpected command: {command}")),
+        }
     }
 }
 
+struct FilesystemName(String);
+
 enum ZfsCommand {
-    Create,
-    Destroy,
-    Get,
-    List,
-    Mount,
-    Set,
+    CreateFilesystem {
+        properties: Vec<(String, String)>,
+        name: FilesystemName,
+    },
+    CreateVolume {
+        properties: Vec<(String, String)>,
+        sparse: bool,
+        blocksize: Option<u64>,
+        size: u64,
+        name: FilesystemName,
+    },
+    Destroy {
+        recursive_dependents: bool,
+        recursive_children: bool,
+        force_unmount: bool,
+        name: FilesystemName,
+    },
+    Get {
+        recursive: bool,
+        depth: Option<usize>,
+        // name, property, value, source
+        fields: Vec<String>,
+        properties: Vec<String>,
+        datasets: Option<Vec<String>>,
+    },
+    List {
+        recursive: bool,
+        depth: Option<usize>,
+        properties: Vec<String>,
+        datasets: Option<Vec<String>>,
+    },
+    Mount {
+        load_keys: bool,
+        filesystem: FilesystemName,
+    },
+    Set {
+        properties: Vec<(String, String)>,
+        name: FilesystemName,
+    },
 }
 
 impl TryFrom<Input> for ZfsCommand {
@@ -687,7 +851,271 @@ impl TryFrom<Input> for ZfsCommand {
         if input.program != ZFS {
             return Err(format!("Not zfs command: {}", input.program));
         }
-        todo!();
+
+        match shift_arg(&mut input)?.as_str() {
+            "create" => {
+                let mut size = None;
+                let mut blocksize = None;
+                let mut sparse = None;
+                let mut properties = vec![];
+
+                while input.args.len() > 1 {
+                    // Volume Size (volumes only, required)
+                    if shift_arg_if(&mut input, "-V")? {
+                        size = Some(
+                            shift_arg(&mut input)?
+                                .parse::<u64>()
+                                .map_err(|e| e.to_string())?,
+                        );
+                    // Sparse (volumes only, optional)
+                    } else if shift_arg_if(&mut input, "-s")? {
+                        sparse = Some(true);
+                    // Block size (volumes only, optional)
+                    } else if shift_arg_if(&mut input, "-b")? {
+                        blocksize = Some(
+                            shift_arg(&mut input)?
+                                .parse::<u64>()
+                                .map_err(|e| e.to_string())?,
+                        );
+                    // Properties
+                    } else if shift_arg_if(&mut input, "-o")? {
+                        let prop = shift_arg(&mut input)?;
+                        let (k, v) = prop
+                            .split_once('=')
+                            .ok_or_else(|| format!("Bad property: {prop}"))?;
+                        properties.push((k.to_string(), v.to_string()));
+                    }
+                }
+                let name = FilesystemName(shift_arg(&mut input)?);
+                no_args_remaining(&input)?;
+
+                if let Some(size) = size {
+                    // Volume
+                    let sparse = sparse.unwrap_or(false);
+                    Ok(ZfsCommand::CreateVolume {
+                        properties,
+                        sparse,
+                        blocksize,
+                        size,
+                        name,
+                    })
+                } else {
+                    // Filesystem
+                    if sparse.is_some() || blocksize.is_some() {
+                        return Err("Using volume arguments, but forgot to specify '-V size'?".to_string());
+                    }
+                    Ok(ZfsCommand::CreateFilesystem { properties, name })
+                }
+            }
+            "destroy" => {
+                let mut recursive_dependents = false;
+                let mut recursive_children = false;
+                let mut force_unmount = false;
+                let mut name = None;
+
+                while !input.args.is_empty() {
+                    let arg = shift_arg(&mut input)?;
+                    let mut chars = arg.chars();
+                    if let Some('-') = chars.next() {
+                        while let Some(c) = chars.next() {
+                            match c {
+                                'R' => recursive_dependents = true,
+                                'r' => recursive_children = true,
+                                'f' => force_unmount = true,
+                                c => {
+                                    return Err(format!(
+                                        "Unrecognized option '-{c}'"
+                                    ))
+                                }
+                            }
+                        }
+                    } else {
+                        name = Some(FilesystemName(arg));
+                        no_args_remaining(&input)?;
+                    }
+                }
+                let name = name.ok_or_else(|| "Missing name".to_string())?;
+                Ok(ZfsCommand::Destroy {
+                    recursive_dependents,
+                    recursive_children,
+                    force_unmount,
+                    name,
+                })
+            }
+            "get" => {
+                let mut scripting = false;
+                let mut parsable = false;
+                let mut recursive = false;
+                let mut depth = None;
+                let mut fields = ["name", "property", "value", "source"]
+                    .map(String::from)
+                    .to_vec();
+                let mut properties = vec![];
+
+                while !input.args.is_empty() {
+                    let arg = shift_arg(&mut input)?;
+                    let mut chars = arg.chars();
+                    // ZFS list lets callers pass in flags in groups, or
+                    // separately.
+                    if let Some('-') = chars.next() {
+                        while let Some(c) = chars.next() {
+                            match c {
+                                'r' => recursive = true,
+                                'H' => scripting = true,
+                                'p' => parsable = true,
+                                'd' => {
+                                    let depth_raw =
+                                        if chars.clone().next().is_some() {
+                                            chars.collect::<String>()
+                                        } else {
+                                            shift_arg(&mut input)?
+                                        };
+                                    depth = Some(
+                                        depth_raw
+                                            .parse::<usize>()
+                                            .map_err(|e| e.to_string())?,
+                                    );
+                                    // Convince the compiler we won't use any
+                                    // more 'chars', because used them all
+                                    // parsing 'depth'.
+                                    break;
+                                }
+                                'o' => {
+                                    if chars.next().is_some() {
+                                        return Err("-o should be immediately followed by fields".to_string());
+                                    }
+                                    fields = shift_arg(&mut input)?
+                                        .split(',')
+                                        .map(|s| s.to_string())
+                                        .collect();
+                                }
+                                c => {
+                                    return Err(format!(
+                                        "Unrecognized option '-{c}'"
+                                    ))
+                                }
+                            }
+                        }
+                    } else {
+                        properties =
+                            arg.split(',').map(|s| s.to_string()).collect();
+                        break;
+                    }
+                }
+
+                let datasets = Some(
+                    std::mem::take(&mut input.args)
+                        .into_iter()
+                        .collect::<Vec<String>>(),
+                );
+                if !scripting || !parsable {
+                    return Err("You should run 'zfs get' commands with the '-Hp' flags enabled".to_string());
+                }
+
+                Ok(ZfsCommand::Get {
+                    recursive,
+                    depth,
+                    fields,
+                    properties,
+                    datasets,
+                })
+            }
+            "list" => {
+                let mut scripting = false;
+                let mut parsable = false;
+                let mut recursive = false;
+                let mut depth = None;
+                let mut properties = vec![];
+                let mut datasets = None;
+
+                while !input.args.is_empty() {
+                    let arg = shift_arg(&mut input)?;
+                    let mut chars = arg.chars();
+                    // ZFS list lets callers pass in flags in groups, or
+                    // separately.
+                    if let Some('-') = chars.next() {
+                        while let Some(c) = chars.next() {
+                            match c {
+                                'r' => recursive = true,
+                                'H' => scripting = true,
+                                'p' => parsable = true,
+                                'd' => {
+                                    let depth_raw =
+                                        if chars.clone().next().is_some() {
+                                            chars.collect::<String>()
+                                        } else {
+                                            shift_arg(&mut input)?
+                                        };
+                                    depth = Some(
+                                        depth_raw
+                                            .parse::<usize>()
+                                            .map_err(|e| e.to_string())?,
+                                    );
+                                    // Convince the compiler we won't use any
+                                    // more 'chars', because used them all
+                                    // parsing 'depth'.
+                                    break;
+                                }
+                                'o' => {
+                                    if chars.next().is_some() {
+                                        return Err("-o should be immediately followed by properties".to_string());
+                                    }
+                                    properties = shift_arg(&mut input)?
+                                        .split(',')
+                                        .map(|s| s.to_string())
+                                        .collect();
+                                }
+                                c => {
+                                    return Err(format!(
+                                        "Unrecognized option '-{c}'"
+                                    ))
+                                }
+                            }
+                        }
+                    } else {
+                        // As soon as non-flag arguments are passed, the rest of
+                        // the arguments are treated as datasets.
+                        datasets = Some(vec![arg]);
+                        break;
+                    }
+                }
+
+                let remaining_datasets = std::mem::take(&mut input.args);
+                if !remaining_datasets.is_empty() {
+                    datasets
+                        .get_or_insert(vec![])
+                        .extend(remaining_datasets.into_iter());
+                };
+
+                if !scripting || !parsable {
+                    return Err("You should run 'zfs list' commands with the '-Hp' flags enabled".to_string());
+                }
+
+                Ok(ZfsCommand::List { recursive, depth, properties, datasets })
+            }
+            "mount" => {
+                let load_keys = shift_arg_if(&mut input, "-l")?;
+                let filesystem = FilesystemName(shift_arg(&mut input)?);
+                no_args_remaining(&input)?;
+                Ok(ZfsCommand::Mount { load_keys, filesystem })
+            }
+            "set" => {
+                let mut properties = vec![];
+
+                while input.args.len() > 1 {
+                    let prop = shift_arg(&mut input)?;
+                    let (k, v) = prop
+                        .split_once('=')
+                        .ok_or_else(|| format!("Bad property: {prop}"))?;
+                    properties.push((k.to_string(), v.to_string()));
+                }
+                let name = FilesystemName(shift_arg(&mut input)?);
+                no_args_remaining(&input)?;
+
+                Ok(ZfsCommand::Set { properties, name })
+            }
+            command => return Err(format!("Unexpected command: {command}")),
+        }
     }
 }
 
@@ -906,11 +1334,11 @@ impl TryFrom<Input> for ZonecfgCommand {
 }
 
 enum ZpoolCommand {
-    Create,
-    Export,
-    Import,
-    List,
-    Set,
+    Create { pool: String, vdev: String },
+    Export { pool: String },
+    Import { force: bool, pool: String },
+    List { properties: Vec<String>, pools: Option<Vec<String>> },
+    Set { property: String, value: String, pool: String },
 }
 
 impl TryFrom<Input> for ZpoolCommand {
@@ -921,13 +1349,93 @@ impl TryFrom<Input> for ZpoolCommand {
             return Err(format!("Not zpool command: {}", input.program));
         }
 
-        todo!();
+        match shift_arg(&mut input)?.as_str() {
+            "create" => {
+                let pool = shift_arg(&mut input)?;
+                let vdev = shift_arg(&mut input)?;
+                no_args_remaining(&input)?;
+                Ok(ZpoolCommand::Create { pool, vdev })
+            }
+            "export" => {
+                let pool = shift_arg(&mut input)?;
+                no_args_remaining(&input)?;
+                Ok(ZpoolCommand::Export { pool })
+            }
+            "import" => {
+                let force = shift_arg_if(&mut input, "-f")?;
+                let pool = shift_arg(&mut input)?;
+                Ok(ZpoolCommand::Import { force, pool })
+            }
+            "list" => {
+                let mut scripting = false;
+                let mut parsable = false;
+                let mut properties = vec![];
+                let mut pools = None;
+
+                while !input.args.is_empty() {
+                    let arg = shift_arg(&mut input)?;
+                    let mut chars = arg.chars();
+                    // ZFS list lets callers pass in flags in groups, or
+                    // separately.
+                    if let Some('-') = chars.next() {
+                        while let Some(c) = chars.next() {
+                            match c {
+                                'H' => scripting = true,
+                                'p' => parsable = true,
+                                'o' => {
+                                    if chars.next().is_some() {
+                                        return Err("-o should be immediately followed by properties".to_string());
+                                    }
+                                    properties = shift_arg(&mut input)?
+                                        .split(',')
+                                        .map(|s| s.to_string())
+                                        .collect();
+                                }
+                                c => {
+                                    return Err(format!(
+                                        "Unrecognized option '-{c}'"
+                                    ))
+                                }
+                            }
+                        }
+                    } else {
+                        pools = Some(vec![arg]);
+                        break;
+                    }
+                }
+
+                let remaining_pools = std::mem::take(&mut input.args);
+                if !remaining_pools.is_empty() {
+                    pools
+                        .get_or_insert(vec![])
+                        .extend(remaining_pools.into_iter());
+                };
+                if !scripting || !parsable {
+                    return Err("You should run 'zpool list' commands with the '-Hp' flags enabled".to_string());
+                }
+                Ok(ZpoolCommand::List { properties, pools })
+            }
+            "set" => {
+                let prop = shift_arg(&mut input)?;
+                let (k, v) = prop
+                    .split_once('=')
+                    .ok_or_else(|| format!("Bad property: {prop}"))?;
+                let property = k.to_string();
+                let value = v.to_string();
+
+                let pool = shift_arg(&mut input)?;
+                no_args_remaining(&input)?;
+                Ok(ZpoolCommand::Set { property, value, pool })
+            }
+            command => return Err(format!("Unexpected command: {command}")),
+        }
     }
 }
 
 enum KnownCommand {
     Dladm(DladmCommand),
     Ipadm(IpadmCommand),
+    Fstyp,
     RouteAdm,
     Route(RouteCommand),
     Svccfg(SvccfgCommand),
@@ -1005,7 +1513,7 @@ fn shift_arg(input: &mut Input) -> Result<String, String> {
 
 // Removes the next argument, which must equal the provided value.
 fn shift_arg_expect(input: &mut Input, value: &str) -> Result<(), String> {
-    let v = input.args.pop_front().ok_or_else(|| "Not enough args")?;
+    let v = input.args.pop_front().ok_or_else(|| "Missing argument")?;
     if value != v {
         return Err(format!("Unexpected argument {v} (expected: {value}"));
     }
@@ -1016,7 +1524,7 @@ fn shift_arg_expect(input: &mut Input, value: &str) -> Result<(), String> {
 //
 // Returns if it was equal.
 fn shift_arg_if(input: &mut Input, value: &str) -> Result<bool, String> {
-    let eq = input.args.front().ok_or_else(|| "Not enough args")? == value;
+    let eq = input.args.front().ok_or_else(|| "Missing argument")? == value;
     if eq {
         input.args.pop_front();
     }
@@ -1221,7 +1729,7 @@ mod test {
         )))
         .unwrap_err();
 
-        // Not asking for parseable output
+        // Not asking for parsable output
         DladmCommand::try_from(Input::shell(format!(
             "{DLADM} show-link -o LINK mylink"
         )))
@@ -1246,7 +1754,7 @@ mod test {
         )))
         .unwrap_err();
 
-        // Not asking for parseable output
+        // Not asking for parsable output
         DladmCommand::try_from(Input::shell(format!(
             "{DLADM} show-phys -o LINK mylink"
         )))
@@ -1273,7 +1781,7 @@ mod test {
         assert!(fields.is_none());
         assert_eq!(name.unwrap().0, "mylink");
 
-        // Not asking for parseable output
+        // Not asking for parsable output
         DladmCommand::try_from(Input::shell(format!(
             "{DLADM} show-vnic -o LINK mylink"
         )))
@@ -1312,6 +1820,228 @@ mod test {
             "{DLADM} set-linkprop -p foo=bar"
         )))
         .unwrap_err();
+    }
+
+    #[test]
+    fn svccfg_addpropvalue() {
+        let SvccfgCommand::Addpropvalue { zone, fmri, key, ty, value } = SvccfgCommand::try_from(
+            Input::shell(format!(
+                "{SVCCFG} -z myzone -s svc:/myservice:default addpropvalue foo/bar astring: baz"
+            ))
+        ).unwrap() else {
+            panic!("Wrong command");
+        };
+
+        assert_eq!(zone.unwrap().0, "myzone");
+        assert_eq!(fmri.0, "svc:/myservice:default");
+        assert_eq!(key.to_string(), "foo/bar");
+        assert_eq!(ty, Some("astring".to_string()));
+        assert_eq!(value, "baz");
+
+        assert!(SvccfgCommand::try_from(Input::shell(format!(
+            "{SVCCFG} addpropvalue foo/bar baz"
+        )))
+        .err()
+        .unwrap()
+        .contains("-s option required"));
+
+        assert!(SvccfgCommand::try_from(Input::shell(format!(
+            "{SVCCFG} -s svc:/mysvc addpropvalue foo/bar astring baz"
+        )))
+        .err()
+        .unwrap()
+        .contains("Bad property type"));
+    }
+
+    #[test]
+    fn svccfg_addpg() {
+        let SvccfgCommand::Addpg { zone, fmri, group, group_type } = SvccfgCommand::try_from(
+            Input::shell(format!(
+                "{SVCCFG} -z myzone -s svc:/myservice:default addpg foo baz"
+            ))
+        ).unwrap() else {
+            panic!("Wrong command");
+        };
+
+        assert_eq!(zone.unwrap().0, "myzone");
+        assert_eq!(fmri.0, "svc:/myservice:default");
+        assert_eq!(group.to_string(), "foo");
+        assert_eq!(group_type, "baz");
+
+        assert!(SvccfgCommand::try_from(Input::shell(format!(
+            "{SVCCFG} addpg foo baz"
+        )))
+        .err()
+        .unwrap()
+        .contains("-s option required"));
+
+        assert!(SvccfgCommand::try_from(Input::shell(format!(
+            "{SVCCFG} addpg foo baz P"
+        )))
+        .err()
+        .unwrap()
+        .contains("Parsing of optional flags not implemented"));
+    }
+
+    #[test]
+    fn svccfg_delpg() {
+        let SvccfgCommand::Delpg { zone, fmri, group } = SvccfgCommand::try_from(
+            Input::shell(format!(
+                "{SVCCFG} -z myzone -s svc:/myservice:default delpg foo"
+            ))
+        ).unwrap() else {
+            panic!("Wrong command");
+        };
+
+        assert_eq!(zone.unwrap().0, "myzone");
+        assert_eq!(fmri.0, "svc:/myservice:default");
+        assert_eq!(group.to_string(), "foo");
+
+        assert!(SvccfgCommand::try_from(Input::shell(format!(
+            "{SVCCFG} delpg foo"
+        )))
+        .err()
+        .unwrap()
+        .contains("-s option required"));
+
+        assert!(SvccfgCommand::try_from(Input::shell(format!(
+            "{SVCCFG} -s mysvc delpg foo baz"
+        )))
+        .err()
+        .unwrap()
+        .contains("Unexpected extra arguments"));
+    }
+
+    #[test]
+    fn svccfg_import() {
+        let SvccfgCommand::Import { zone, file } = SvccfgCommand::try_from(
+            Input::shell(format!(
+                "{SVCCFG} -z myzone import myfile"
+            ))
+        ).unwrap() else {
+            panic!("Wrong command");
+        };
+
+        assert_eq!(zone.unwrap().0, "myzone");
+        assert_eq!(file, "myfile");
+
+        assert!(SvccfgCommand::try_from(Input::shell(format!(
+            "{SVCCFG} import myfile myotherfile"
+        )))
+        .err()
+        .unwrap()
+        .contains("Unexpected extra arguments"));
+
+        assert!(SvccfgCommand::try_from(Input::shell(format!(
+            "{SVCCFG} -s myservice import myfile"
+        )))
+        .err()
+        .unwrap()
+        .contains("Cannot use '-s' option with import"));
+    }
+
+    #[test]
+    fn svccfg_refresh() {
+        let SvccfgCommand::Refresh { zone, fmri } = SvccfgCommand::try_from(
+            Input::shell(format!(
+                "{SVCCFG} -z myzone -s myservice refresh"
+            ))
+        ).unwrap() else {
+            panic!("Wrong command");
+        };
+
+        assert_eq!(zone.unwrap().0, "myzone");
+        assert_eq!(fmri.0, "myservice");
+    }
+
+    #[test]
+    fn svccfg_setprop() {
+        let SvccfgCommand::Setprop { zone, fmri, name, value } = SvccfgCommand::try_from(
+            Input::shell(format!(
+                "{SVCCFG} -z myzone -s myservice setprop foo/bar=baz"
+            ))
+        ).unwrap() else {
+            panic!("Wrong command");
+        };
+
+        assert_eq!(zone.unwrap().0, "myzone");
+        assert_eq!(fmri.0, "myservice");
+        assert_eq!(name.to_string(), "foo/bar");
+        assert_eq!(value, "baz");
+
+        // Try that command again, but with spaces
+        let SvccfgCommand::Setprop { zone, fmri, name, value } = SvccfgCommand::try_from(
+            Input::shell(format!(
+                "{SVCCFG} -z myzone -s myservice setprop foo/bar = baz"
+            ))
+        ).unwrap() else {
+            panic!("Wrong command");
+        };
+        assert_eq!(zone.unwrap().0, "myzone");
+        assert_eq!(fmri.0, "myservice");
+        assert_eq!(name.to_string(), "foo/bar");
+        assert_eq!(value, "baz");
+
+        // Try that command again, but with quotes
+        let SvccfgCommand::Setprop { zone, fmri, name, value } = SvccfgCommand::try_from(
+            Input::shell(format!(
+                "{SVCCFG} -z myzone -s myservice setprop foo/bar = \"fizz buzz\""
+            ))
+        ).unwrap() else {
+            panic!("Wrong command");
+        };
+        assert_eq!(zone.unwrap().0, "myzone");
+        assert_eq!(fmri.0, "myservice");
+        assert_eq!(name.to_string(), "foo/bar");
+        assert_eq!(value, "fizz buzz");
+
+        assert!(SvccfgCommand::try_from(
+            Input::shell(format!(
+                "{SVCCFG} -z myzone -s myservice setprop foo/bar = \"fizz buzz\" blat"
+            ))
+        ).err().unwrap().contains("Unexpected extra arguments"));
+    }
+
+    #[test]
+    fn svcadm_enable() {
+        let SvcadmCommand::Enable { zone, service } = SvcadmCommand::try_from(
+            Input::shell(format!(
+                "{SVCADM} -z myzone enable -t foobar"
+            )),
+        ).unwrap() else {
+            panic!("wrong command");
+        };
+
+        assert_eq!(zone.unwrap().0, "myzone");
+        assert_eq!(service.0, "foobar");
+
+        assert!(SvcadmCommand::try_from(Input::shell(format!(
+            "{SVCADM} enable"
+        )))
+        .err()
+        .unwrap()
+        .contains("Missing argument"));
+    }
+
+    #[test]
+    fn svcadm_disable() {
+        let SvcadmCommand::Disable { zone, service } = SvcadmCommand::try_from(
+            Input::shell(format!(
+                "{SVCADM} -z myzone disable -t foobar"
+            )),
+        ).unwrap() else {
+            panic!("wrong command");
+        };
+
+        assert_eq!(zone.unwrap().0, "myzone");
+        assert_eq!(service.0, "foobar");
+
+        assert!(SvcadmCommand::try_from(Input::shell(format!(
+            "{SVCADM} disable"
+        )))
+        .err()
+        .unwrap()
+        .contains("Missing argument"));
     }
 
     #[test]
@@ -1414,20 +2144,20 @@ mod test {
         assert!(interface.is_none());
 
         // Invalid address family
-        RouteCommand::try_from(Input::shell(format!(
+        assert!(RouteCommand::try_from(Input::shell(format!(
             "{ROUTE} add -inet -inet6 default 127.0.0.1/8"
         )))
         .err()
         .unwrap()
-        .contains("Cannot force both v4 and v6");
+        .contains("Cannot force both v4 and v6"));
 
         // Invalid address family
-        RouteCommand::try_from(Input::shell(format!(
-            "{ROUTE} add -ine6 default -inet6 127.0.0.1/8"
+        assert!(RouteCommand::try_from(Input::shell(format!(
+            "{ROUTE} add -inet6 default -inet6 127.0.0.1/8"
         )))
         .err()
         .unwrap()
-        .contains("127.0.0.1/8 is not ipv6");
+        .contains("127.0.0.1/8 is not ipv6"));
     }
 
     #[test]
@@ -1453,36 +2183,36 @@ mod test {
         assert_eq!("foo/bar", addrobj.to_string());
 
         // Bad type
-        IpadmCommand::try_from(Input::shell(format!(
+        assert!(IpadmCommand::try_from(Input::shell(format!(
             "{IPADM} create-addr -T quadratric foo/bar"
         )))
         .err()
         .unwrap()
-        .contains("Unknown address type");
+        .contains("Unknown address type"));
 
         // Missing name
-        IpadmCommand::try_from(Input::shell(format!(
+        assert!(IpadmCommand::try_from(Input::shell(format!(
             "{IPADM} create-addr -T dhcp"
         )))
         .err()
         .unwrap()
-        .contains("Missing argument");
+        .contains("Missing argument"));
 
         // Too many arguments
-        IpadmCommand::try_from(Input::shell(format!(
+        assert!(IpadmCommand::try_from(Input::shell(format!(
             "{IPADM} create-addr -T dhcp foo/bar baz"
         )))
         .err()
         .unwrap()
-        .contains("Unexpected extra arguments");
+        .contains("Unexpected extra arguments"));
 
         // Not addrobject
-        IpadmCommand::try_from(Input::shell(format!(
+        assert!(IpadmCommand::try_from(Input::shell(format!(
             "{IPADM} create-addr -T dhcp foobar"
         )))
         .err()
         .unwrap()
-        .contains("Failed to parse addrobj name");
+        .contains("Failed to parse addrobj name"));
     }
 
     #[test]
@@ -1497,12 +2227,12 @@ mod test {
         assert_eq!(name.0, "foobar");
 
         // Too many arguments
-        IpadmCommand::try_from(Input::shell(format!(
+        assert!(IpadmCommand::try_from(Input::shell(format!(
             "{IPADM} create-if foo bar"
         )))
         .err()
         .unwrap()
-        .contains("Unexpected extra arguments");
+        .contains("Unexpected extra arguments"));
     }
 
     #[test]
@@ -1516,20 +2246,20 @@ mod test {
         assert_eq!(addrobj.to_string(), "foo/bar");
 
         // Not addrobject
-        IpadmCommand::try_from(Input::shell(format!(
+        assert!(IpadmCommand::try_from(Input::shell(format!(
             "{IPADM} delete-addr foobar"
         )))
         .err()
         .unwrap()
-        .contains("Failed to parse addobj name");
+        .contains("Failed to parse addrobj name"));
 
         // Too many arguments
-        IpadmCommand::try_from(Input::shell(format!(
+        assert!(IpadmCommand::try_from(Input::shell(format!(
             "{IPADM} delete-addr foo/bar foo/bar"
         )))
         .err()
         .unwrap()
-        .contains("Unexpected extra arguments");
+        .contains("Unexpected extra arguments"));
     }
 
     #[test]
@@ -1543,12 +2273,12 @@ mod test {
         assert_eq!(name.0, "foobar");
 
         // Too many arguments
-        IpadmCommand::try_from(Input::shell(format!(
+        assert!(IpadmCommand::try_from(Input::shell(format!(
             "{IPADM} delete-if foo bar"
         )))
         .err()
         .unwrap()
-        .contains("Unexpected extra arguments");
+        .contains("Unexpected extra arguments"));
     }
 
     #[test]
@@ -1571,7 +2301,7 @@ mod test {
         assert_eq!(properties[0], "IFNAME");
         assert_eq!(name.0, "foobar");
 
-        // Non parseable output
+        // Non parsable output
         IpadmCommand::try_from(Input::shell(format!(
             "{IPADM} show-if -o IFNAME foobar"
         )))
@@ -1586,12 +2316,12 @@ mod test {
         .unwrap();
 
         // Too many arguments
-        IpadmCommand::try_from(Input::shell(format!(
+        assert!(IpadmCommand::try_from(Input::shell(format!(
             "{IPADM} show-if fizz buzz"
         )))
         .err()
         .unwrap()
-        .contains("Unexpected input");
+        .contains("Unexpected input"));
     }
 
     #[test]
@@ -1609,19 +2339,135 @@ mod test {
         assert_eq!(name.0, "foo");
 
         // Bad property
-        IpadmCommand::try_from(Input::shell(format!(
+        assert!(IpadmCommand::try_from(Input::shell(format!(
             "{IPADM} set-ifprop -p blarg foo"
         )))
         .err()
         .unwrap()
-        .contains("Bad property: blarg");
+        .contains("Bad property: blarg"));
 
         // Too many arguments
-        IpadmCommand::try_from(Input::shell(format!(
+        assert!(IpadmCommand::try_from(Input::shell(format!(
             "{IPADM} set-ifprop -p mtu=123 foo bar"
         )))
         .err()
         .unwrap()
-        .contains("Unexpected input");
+        .contains("Unexpected input"));
+    }
+
+    #[test]
+    fn zfs_create() {
+        let ZfsCommand::CreateFilesystem { properties, name } = ZfsCommand::try_from(
+            Input::shell(format!("{ZFS} create myfilesystem"))
+        ).unwrap() else { panic!("wrong command") };
+
+        assert_eq!(properties, vec![]);
+        assert_eq!(name.0, "myfilesystem");
+
+        let ZfsCommand::CreateVolume { properties, sparse, blocksize, size, name } = ZfsCommand::try_from(
+            Input::shell(format!("{ZFS} create -s -V 1024 -b 512 -o foo=bar myvolume"))
+        ).unwrap() else { panic!("wrong command") };
+
+        assert_eq!(properties, vec![("foo".to_string(), "bar".to_string())]);
+        assert_eq!(name.0, "myvolume");
+        assert!(sparse);
+        assert_eq!(size, 1024);
+        assert_eq!(blocksize, Some(512));
+
+        assert!(ZfsCommand::try_from(Input::shell(format!(
+            "{ZFS} create -s -b 512 -o foo=bar myvolume"
+        )))
+        .err()
+        .unwrap()
+        .contains("Using volume arguments, but forgot to specify '-V size'"));
+    }
+
+    #[test]
+    fn zfs_destroy() {
+        let ZfsCommand::Destroy { recursive_dependents, recursive_children, force_unmount, name } =
+            ZfsCommand::try_from(
+                Input::shell(format!("{ZFS} destroy -rf foobar"))
+            ).unwrap() else { panic!("wrong command") };
+
+        assert!(!recursive_dependents);
+        assert!(recursive_children);
+        assert!(force_unmount);
+        assert_eq!(name.0, "foobar");
+
+        assert!(ZfsCommand::try_from(Input::shell(format!(
+            "{ZFS} destroy -x doit"
+        )))
+        .err()
+        .unwrap()
+        .contains("Unrecognized option '-x'"));
+    }
+
+    #[test]
+    fn zfs_get() {
+        let ZfsCommand::Get { recursive, depth, fields, properties, datasets } = ZfsCommand::try_from(
+            Input::shell(format!("{ZFS} get -Hrpd10 -o name,value mounted,available myvolume"))
+        ).unwrap() else { panic!("wrong command") };
+
+        assert!(recursive);
+        assert_eq!(depth, Some(10));
+        assert_eq!(fields, vec!["name", "value"]);
+        assert_eq!(properties, vec!["mounted", "available"]);
+        assert_eq!(datasets.unwrap(), vec!["myvolume"]);
+
+        assert!(ZfsCommand::try_from(Input::shell(format!(
+            "{ZFS} get -o name,value mounted,available myvolume"
+        )))
+        .err()
+        .unwrap()
+        .contains(
+            "You should run 'zfs get' commands with the '-Hp' flags enabled"
+        ));
+    }
+
+    #[test]
+    fn zfs_list() {
+        let ZfsCommand::List { recursive, depth, properties, datasets } = ZfsCommand::try_from(
+            Input::shell(format!("{ZFS} list -d 1 -rHpo name myfilesystem"))
+        ).unwrap() else { panic!("wrong command") };
+
+        assert!(recursive);
+        assert_eq!(depth.unwrap(), 1);
+        assert_eq!(properties, vec!["name"]);
+        assert_eq!(datasets.unwrap(), vec!["myfilesystem"]);
+
+        assert!(ZfsCommand::try_from(Input::shell(format!(
+            "{ZFS} list name myfilesystem"
+        )))
+        .err()
+        .unwrap()
+        .contains(
+            "You should run 'zfs list' commands with the '-Hp' flags enabled"
+        ));
+    }
+
+    #[test]
+    fn zfs_mount() {
+        let ZfsCommand::Mount { load_keys, filesystem } = ZfsCommand::try_from(
+            Input::shell(format!("{ZFS} mount -l foobar"))
+        ).unwrap() else { panic!("wrong command") };
+
+        assert!(load_keys);
+        assert_eq!(filesystem.0, "foobar");
+    }
+
+    #[test]
+    fn zfs_set() {
+        let ZfsCommand::Set { properties, name } = ZfsCommand::try_from(
+            Input::shell(format!("{ZFS} set foo=bar baz=blat myfs"))
+        ).unwrap() else { panic!("wrong command") };
+
+        assert_eq!(
+            properties,
+            vec![
+                ("foo".to_string(), "bar".to_string()),
+                ("baz".to_string(), "blat".to_string())
+            ]
+        );
+        assert_eq!(name.0, "myfs");
     }
 }
