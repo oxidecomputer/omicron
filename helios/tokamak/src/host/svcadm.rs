@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::host::{no_args_remaining, shift_arg, shift_arg_if};
+use crate::host::parse::InputParser;
 use crate::host::{ServiceName, ZoneName};
 
 use helios_fusion::Input;
@@ -21,25 +21,27 @@ impl TryFrom<Input> for Command {
             return Err(format!("Not svcadm command: {}", input.program));
         }
 
-        let zone = if shift_arg_if(&mut input, "-z")? {
-            Some(ZoneName(shift_arg(&mut input)?))
+        let mut input = InputParser::new(input);
+
+        let zone = if input.shift_arg_if("-z")? {
+            Some(ZoneName(input.shift_arg()?))
         } else {
             None
         };
 
-        match shift_arg(&mut input)?.as_str() {
+        match input.shift_arg()?.as_str() {
             "enable" => {
                 // Intentionally ignored
-                shift_arg_if(&mut input, "-t")?;
-                let service = ServiceName(shift_arg(&mut input)?);
-                no_args_remaining(&input)?;
+                input.shift_arg_if("-t")?;
+                let service = ServiceName(input.shift_arg()?);
+                input.no_args_remaining()?;
                 Ok(Command::Enable { zone, service })
             }
             "disable" => {
                 // Intentionally ignored
-                shift_arg_if(&mut input, "-t")?;
-                let service = ServiceName(shift_arg(&mut input)?);
-                no_args_remaining(&input)?;
+                input.shift_arg_if("-t")?;
+                let service = ServiceName(input.shift_arg()?);
+                input.no_args_remaining()?;
                 Ok(Command::Disable { zone, service })
             }
             command => return Err(format!("Unexpected command: {command}")),

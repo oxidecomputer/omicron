@@ -2,9 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::host::{
-    no_args_remaining, shift_arg, shift_arg_expect, shift_arg_if,
-};
+use crate::host::parse::InputParser;
 use crate::host::{ServiceName, ZoneName};
 
 use camino::Utf8PathBuf;
@@ -61,26 +59,28 @@ impl TryFrom<Input> for Command {
             return Err(format!("Not svccfg command: {}", input.program));
         }
 
-        let zone = if shift_arg_if(&mut input, "-z")? {
-            Some(ZoneName(shift_arg(&mut input)?))
+        let mut input = InputParser::new(input);
+
+        let zone = if input.shift_arg_if("-z")? {
+            Some(ZoneName(input.shift_arg()?))
         } else {
             None
         };
 
-        let fmri = if shift_arg_if(&mut input, "-s")? {
-            Some(ServiceName(shift_arg(&mut input)?))
+        let fmri = if input.shift_arg_if("-s")? {
+            Some(ServiceName(input.shift_arg()?))
         } else {
             None
         };
 
-        match shift_arg(&mut input)?.as_str() {
+        match input.shift_arg()?.as_str() {
             "addpropvalue" => {
-                let name = shift_arg(&mut input)?;
+                let name = input.shift_arg()?;
                 let name = smf::PropertyName::from_str(&name)
                     .map_err(|e| e.to_string())?;
 
-                let type_or_value = shift_arg(&mut input)?;
-                let (ty, value) = match input.args.pop_front() {
+                let type_or_value = input.shift_arg()?;
+                let (ty, value) = match input.shift_arg().ok() {
                     Some(value) => {
                         let ty = type_or_value
                             .strip_suffix(':')
@@ -93,91 +93,89 @@ impl TryFrom<Input> for Command {
                     None => (None, type_or_value),
                 };
 
-                let fmri = fmri.ok_or_else(|| {
-                    format!("-s option required for addpropvalue")
-                })?;
+                let fmri =
+                    fmri.ok_or_else(|| "-s option required for addpropvalue")?;
 
-                no_args_remaining(&input)?;
+                input.no_args_remaining()?;
                 Ok(Command::Addpropvalue { zone, fmri, key: name, ty, value })
             }
             "addpg" => {
-                let name = shift_arg(&mut input)?;
+                let name = input.shift_arg()?;
                 let group = smf::PropertyGroupName::new(&name)
                     .map_err(|e| e.to_string())?;
 
-                let group_type = shift_arg(&mut input)?;
-                if let Some(flags) = input.args.pop_front() {
+                let group_type = input.shift_arg()?;
+                if let Some(flags) = input.shift_arg().ok() {
                     return Err(
                         "Parsing of optional flags not implemented".to_string()
                     );
                 }
-                let fmri = fmri
-                    .ok_or_else(|| format!("-s option required for addpg"))?;
+                let fmri =
+                    fmri.ok_or_else(|| "-s option required for addpg")?;
 
-                no_args_remaining(&input)?;
+                input.no_args_remaining()?;
                 Ok(Command::Addpg { zone, fmri, group, group_type })
             }
             "delpg" => {
-                let name = shift_arg(&mut input)?;
+                let name = input.shift_arg()?;
                 let group = smf::PropertyGroupName::new(&name)
                     .map_err(|e| e.to_string())?;
-                let fmri = fmri
-                    .ok_or_else(|| format!("-s option required for delpg"))?;
+                let fmri =
+                    fmri.ok_or_else(|| "-s option required for delpg")?;
 
-                no_args_remaining(&input)?;
+                input.no_args_remaining()?;
                 Ok(Command::Delpg { zone, fmri, group })
             }
             "delpropvalue" => {
-                let name = shift_arg(&mut input)?;
+                let name = input.shift_arg()?;
                 let name = smf::PropertyName::from_str(&name)
                     .map_err(|e| e.to_string())?;
-                let fmri = fmri.ok_or_else(|| {
-                    format!("-s option required for delpropvalue")
-                })?;
-                let glob = shift_arg(&mut input)?;
+                let fmri =
+                    fmri.ok_or_else(|| "-s option required for delpropvalue")?;
+                let glob = input.shift_arg()?;
 
-                no_args_remaining(&input)?;
+                input.no_args_remaining()?;
                 Ok(Command::Delpropvalue { zone, fmri, name, glob })
             }
             "import" => {
-                let file = shift_arg(&mut input)?;
+                let file = input.shift_arg()?;
                 if let Some(_) = fmri {
                     return Err(
                         "Cannot use '-s' option with import".to_string()
                     );
                 }
-                no_args_remaining(&input)?;
+                input.no_args_remaining()?;
                 Ok(Command::Import { zone, file: file.into() })
             }
             "refresh" => {
-                let fmri = fmri
-                    .ok_or_else(|| format!("-s option required for refresh"))?;
-                no_args_remaining(&input)?;
+                let fmri =
+                    fmri.ok_or_else(|| "-s option required for refresh")?;
+                input.no_args_remaining()?;
                 Ok(Command::Refresh { zone, fmri })
             }
             "setprop" => {
-                let fmri = fmri
-                    .ok_or_else(|| format!("-s option required for setprop"))?;
+                let fmri =
+                    fmri.ok_or_else(|| "-s option required for setprop")?;
 
                 // Setprop seems fine accepting args of the form:
                 // - name=value
                 // - name = value
                 // - name = type: value     (NOTE: not yet supported)
-                let first_arg = shift_arg(&mut input)?;
+                let first_arg = input.shift_arg()?;
                 let (name, value) =
                     if let Some((name, value)) = first_arg.split_once('=') {
                         (name.to_string(), value.to_string())
                     } else {
                         let name = first_arg;
-                        shift_arg_expect(&mut input, "=")?;
-                        let value = shift_arg(&mut input)?;
-                        (name, value.to_string())
+                        input.shift_arg_expect("=")?;
+                        let value = input.shift_arg()?;
+                        (name, value)
                     };
 
                 let name = smf::PropertyName::from_str(&name)
                     .map_err(|e| e.to_string())?;
 
-                no_args_remaining(&input)?;
+                input.no_args_remaining()?;
                 Ok(Command::Setprop { zone, fmri, name, value })
             }
             command => return Err(format!("Unexpected command: {command}")),

@@ -2,8 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use crate::host::parse::InputParser;
 use crate::host::ZoneName;
-use crate::host::{no_args_remaining, shift_arg, shift_arg_if};
 
 use helios_fusion::Input;
 use helios_fusion::ZONEADM;
@@ -38,22 +38,24 @@ impl TryFrom<Input> for Command {
             return Err(format!("Not zoneadm command: {}", input.program));
         }
 
-        let name = if shift_arg_if(&mut input, "-z")? {
-            Some(ZoneName(shift_arg(&mut input)?))
+        let mut input = InputParser::new(input);
+
+        let name = if input.shift_arg_if("-z")? {
+            Some(ZoneName(input.shift_arg()?))
         } else {
             None
         };
 
-        match shift_arg(&mut input)?.as_str() {
+        match input.shift_arg()?.as_str() {
             "boot" => {
-                no_args_remaining(&input)?;
+                input.no_args_remaining()?;
                 let name = name.ok_or_else(|| {
                     "No zone specified, try: zoneadm -z ZONE boot"
                 })?;
                 Ok(Command::Boot { name })
             }
             "halt" => {
-                no_args_remaining(&input)?;
+                input.no_args_remaining()?;
                 let name = name.ok_or_else(|| {
                     "No zone specified, try: zoneadm -z ZONE halt"
                 })?;
@@ -61,7 +63,7 @@ impl TryFrom<Input> for Command {
             }
             "install" => {
                 let brand_specific_args =
-                    std::mem::take(&mut input.args).into_iter().collect();
+                    input.args().into_iter().cloned().collect();
                 let name = name.ok_or_else(|| {
                     "No zone specified, try: zoneadm -z ZONE install"
                 })?;
@@ -72,8 +74,8 @@ impl TryFrom<Input> for Command {
                 let mut list_installed = false;
                 let mut parsable = false;
 
-                while !input.args.is_empty() {
-                    let arg = shift_arg(&mut input)?;
+                while !input.args().is_empty() {
+                    let arg = input.shift_arg()?;
                     let mut chars = arg.chars();
 
                     if let Some('-') = chars.next() {
@@ -104,12 +106,12 @@ impl TryFrom<Input> for Command {
                 let name = name.ok_or_else(|| {
                     "No zone specified, try: zoneadm -z ZONE uninstall"
                 })?;
-                let force = if !input.args.is_empty() {
-                    shift_arg_if(&mut input, "-F")?
+                let force = if !input.args().is_empty() {
+                    input.shift_arg_if("-F")?
                 } else {
                     false
                 };
-                no_args_remaining(&input)?;
+                input.no_args_remaining()?;
                 Ok(Command::Uninstall { name, force })
             }
             command => return Err(format!("Unexpected command: {command}")),

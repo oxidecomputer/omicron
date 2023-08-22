@@ -2,8 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use crate::host::parse::InputParser;
 use crate::host::LinkName;
-use crate::host::{no_args_remaining, shift_arg, shift_arg_if};
 
 use helios_fusion::Input;
 use helios_fusion::DLADM;
@@ -64,22 +64,22 @@ impl TryFrom<Input> for Command {
             return Err(format!("Not dladm command: {}", input.program));
         }
 
-        match shift_arg(&mut input)?.as_str() {
+        let mut input = InputParser::new(input);
+
+        match input.shift_arg()?.as_str() {
             "create-vnic" => {
                 let mut link = None;
                 let mut temporary = false;
                 let mut mac = None;
                 let mut vlan = None;
                 let mut properties = HashMap::new();
-                let name = LinkName(
-                    input.args.pop_back().ok_or_else(|| "Missing name")?,
-                );
+                let name = LinkName(input.shift_last_arg()?);
 
-                while !input.args.is_empty() {
-                    if shift_arg_if(&mut input, "-t")? {
+                while !input.args().is_empty() {
+                    if input.shift_arg_if("-t")? {
                         temporary = true;
-                    } else if shift_arg_if(&mut input, "-p")? {
-                        let props = shift_arg(&mut input)?;
+                    } else if input.shift_arg_if("-p")? {
+                        let props = input.shift_arg()?;
                         let props = props.split(',');
                         for prop in props {
                             let (k, v) =
@@ -88,18 +88,21 @@ impl TryFrom<Input> for Command {
                                 })?;
                             properties.insert(k.to_string(), v.to_string());
                         }
-                    } else if shift_arg_if(&mut input, "-m")? {
+                    } else if input.shift_arg_if("-m")? {
                         // NOTE: Not yet supporting the keyword-based MACs.
-                        mac = Some(shift_arg(&mut input)?);
-                    } else if shift_arg_if(&mut input, "-l")? {
-                        link = Some(LinkName(shift_arg(&mut input)?));
-                    } else if shift_arg_if(&mut input, "-v")? {
+                        mac = Some(input.shift_arg()?);
+                    } else if input.shift_arg_if("-l")? {
+                        link = Some(LinkName(input.shift_arg()?));
+                    } else if input.shift_arg_if("-v")? {
                         vlan = Some(
-                            VlanID::from_str(&shift_arg(&mut input)?)
+                            VlanID::from_str(&input.shift_arg()?)
                                 .map_err(|e| e.to_string())?,
                         );
                     } else {
-                        return Err(format!("Invalid arguments {}", input));
+                        return Err(format!(
+                            "Invalid arguments {}",
+                            input.input()
+                        ));
                     }
                 }
 
@@ -114,129 +117,131 @@ impl TryFrom<Input> for Command {
             }
             "create-etherstub" => {
                 let mut temporary = false;
-                let name = LinkName(
-                    input.args.pop_back().ok_or_else(|| "Missing name")?,
-                );
-                while !input.args.is_empty() {
-                    if shift_arg_if(&mut input, "-t")? {
+                let name = LinkName(input.shift_last_arg()?);
+                while !input.args().is_empty() {
+                    if input.shift_arg_if("-t")? {
                         temporary = true;
                     } else {
-                        return Err(format!("Invalid arguments {}", input));
+                        return Err(format!(
+                            "Invalid arguments {}",
+                            input.input()
+                        ));
                     }
                 }
                 Ok(Self::CreateEtherstub { temporary, name })
             }
             "delete-etherstub" => {
                 let mut temporary = false;
-                let name = LinkName(
-                    input.args.pop_back().ok_or_else(|| "Missing name")?,
-                );
-                while !input.args.is_empty() {
-                    if shift_arg_if(&mut input, "-t")? {
+                let name = LinkName(input.shift_last_arg()?);
+                while !input.args().is_empty() {
+                    if input.shift_arg_if("-t")? {
                         temporary = true;
                     } else {
-                        return Err(format!("Invalid arguments {}", input));
+                        return Err(format!(
+                            "Invalid arguments {}",
+                            input.input()
+                        ));
                     }
                 }
                 Ok(Self::DeleteEtherstub { temporary, name })
             }
             "delete-vnic" => {
                 let mut temporary = false;
-                let name = LinkName(
-                    input.args.pop_back().ok_or_else(|| "Missing name")?,
-                );
-                while !input.args.is_empty() {
-                    if shift_arg_if(&mut input, "-t")? {
+                let name = LinkName(input.shift_last_arg()?);
+                while !input.args().is_empty() {
+                    if input.shift_arg_if("-t")? {
                         temporary = true;
                     } else {
-                        return Err(format!("Invalid arguments {}", input));
+                        return Err(format!(
+                            "Invalid arguments {}",
+                            input.input()
+                        ));
                     }
                 }
                 Ok(Self::DeleteVnic { temporary, name })
             }
             "show-etherstub" => {
-                let name = input.args.pop_back().map(|s| LinkName(s));
-                no_args_remaining(&input)?;
+                let name = input.shift_last_arg().map(|s| LinkName(s)).ok();
+                input.no_args_remaining()?;
                 Ok(Self::ShowEtherstub { name })
             }
             "show-link" => {
-                let name = LinkName(
-                    input.args.pop_back().ok_or_else(|| "Missing name")?,
-                );
-                if !shift_arg_if(&mut input, "-p")? {
+                let name = LinkName(input.shift_last_arg()?);
+                if !input.shift_arg_if("-p")? {
                     return Err(
                         "You should ask for parsable output ('-p')".into()
                     );
                 }
-                if !shift_arg_if(&mut input, "-o")? {
+                if !input.shift_arg_if("-o")? {
                     return Err(
                         "You should ask for specific outputs ('-o')".into()
                     );
                 }
-                let fields = shift_arg(&mut input)?
+                let fields = input
+                    .shift_arg()?
                     .split(',')
                     .map(|s| s.to_string())
                     .collect();
-                no_args_remaining(&input)?;
+                input.no_args_remaining()?;
 
                 Ok(Self::ShowLink { name, fields })
             }
             "show-phys" => {
                 let mut mac = false;
-                if shift_arg_if(&mut input, "-m")? {
+                if input.shift_arg_if("-m")? {
                     mac = true;
                 }
-                if !shift_arg_if(&mut input, "-p")? {
+                if !input.shift_arg_if("-p")? {
                     return Err(
                         "You should ask for parsable output ('-p')".into()
                     );
                 }
-                if !shift_arg_if(&mut input, "-o")? {
+                if !input.shift_arg_if("-o")? {
                     return Err(
                         "You should ask for specific outputs ('-o')".into()
                     );
                 }
-                let fields = shift_arg(&mut input)?
+                let fields = input
+                    .shift_arg()?
                     .split(',')
                     .map(|s| s.to_string())
                     .collect();
-                let name = input.args.pop_front().map(|s| LinkName(s));
-                no_args_remaining(&input)?;
+                let name = input.shift_arg().map(|s| LinkName(s)).ok();
+                input.no_args_remaining()?;
 
                 Ok(Self::ShowPhys { mac, fields, name })
             }
             "show-vnic" => {
                 let mut fields = None;
-                if shift_arg_if(&mut input, "-p")? {
-                    if !shift_arg_if(&mut input, "-o")? {
+                if input.shift_arg_if("-p")? {
+                    if !input.shift_arg_if("-o")? {
                         return Err(
                             "You should ask for specific outputs ('-o')".into(),
                         );
                     }
                     fields = Some(
-                        shift_arg(&mut input)?
+                        input
+                            .shift_arg()?
                             .split(',')
                             .map(|s| s.to_string())
                             .collect(),
                     );
                 }
 
-                let name = input.args.pop_front().map(|s| LinkName(s));
-                no_args_remaining(&input)?;
+                let name = input.shift_arg().map(|s| LinkName(s)).ok();
+                input.no_args_remaining()?;
                 Ok(Self::ShowVnic { fields, name })
             }
             "set-linkprop" => {
                 let mut temporary = false;
                 let mut properties = HashMap::new();
-                let name = LinkName(
-                    input.args.pop_back().ok_or_else(|| "Missing name")?,
-                );
+                let name = LinkName(input.shift_last_arg()?);
 
-                while !input.args.is_empty() {
-                    if shift_arg_if(&mut input, "-t")? {
+                while !input.args().is_empty() {
+                    if input.shift_arg_if("-t")? {
                         temporary = true;
-                    } else if shift_arg_if(&mut input, "-p")? {
-                        let props = shift_arg(&mut input)?;
+                    } else if input.shift_arg_if("-p")? {
+                        let props = input.shift_arg()?;
                         let props = props.split(',');
                         for prop in props {
                             let (k, v) =
@@ -246,7 +251,10 @@ impl TryFrom<Input> for Command {
                             properties.insert(k.to_string(), v.to_string());
                         }
                     } else {
-                        return Err(format!("Invalid arguments {}", input));
+                        return Err(format!(
+                            "Invalid arguments {}",
+                            input.input()
+                        ));
                     }
                 }
 

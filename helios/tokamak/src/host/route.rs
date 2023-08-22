@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::host::{no_args_remaining, shift_arg, shift_arg_if};
+use crate::host::parse::InputParser;
 use crate::host::{LinkName, RouteTarget};
 
 use helios_fusion::Input;
@@ -24,18 +24,19 @@ impl TryFrom<Input> for Command {
             return Err(format!("Not route command: {}", input.program));
         }
 
-        match shift_arg(&mut input)?.as_str() {
+        let mut input = InputParser::new(input);
+
+        match input.shift_arg()?.as_str() {
             "add" => {
                 let destination = RouteTarget::shift_target(&mut input)?;
                 let gateway = RouteTarget::shift_target(&mut input)?;
 
-                let interface =
-                    if let Ok(true) = shift_arg_if(&mut input, "-ifp") {
-                        Some(LinkName(shift_arg(&mut input)?))
-                    } else {
-                        None
-                    };
-                no_args_remaining(&input)?;
+                let interface = if let Ok(true) = input.shift_arg_if("-ifp") {
+                    Some(LinkName(input.shift_arg()?))
+                } else {
+                    None
+                };
+                input.no_args_remaining()?;
                 Ok(Command::Add { destination, gateway, interface })
             }
             command => return Err(format!("Unsupported command: {}", command)),

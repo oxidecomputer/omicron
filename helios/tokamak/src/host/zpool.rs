@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::host::{no_args_remaining, shift_arg, shift_arg_if};
+use crate::host::parse::InputParser;
 
 use helios_fusion::Input;
 use helios_fusion::ZPOOL;
@@ -25,21 +25,23 @@ impl TryFrom<Input> for Command {
             return Err(format!("Not zpool command: {}", input.program));
         }
 
-        match shift_arg(&mut input)?.as_str() {
+        let mut input = InputParser::new(input);
+
+        match input.shift_arg()?.as_str() {
             "create" => {
-                let pool = shift_arg(&mut input)?;
-                let vdev = shift_arg(&mut input)?;
-                no_args_remaining(&input)?;
+                let pool = input.shift_arg()?;
+                let vdev = input.shift_arg()?;
+                input.no_args_remaining()?;
                 Ok(Command::Create { pool, vdev })
             }
             "export" => {
-                let pool = shift_arg(&mut input)?;
-                no_args_remaining(&input)?;
+                let pool = input.shift_arg()?;
+                input.no_args_remaining()?;
                 Ok(Command::Export { pool })
             }
             "import" => {
-                let force = shift_arg_if(&mut input, "-f")?;
-                let pool = shift_arg(&mut input)?;
+                let force = input.shift_arg_if("-f")?;
+                let pool = input.shift_arg()?;
                 Ok(Command::Import { force, pool })
             }
             "list" => {
@@ -48,8 +50,8 @@ impl TryFrom<Input> for Command {
                 let mut properties = vec![];
                 let mut pools = None;
 
-                while !input.args.is_empty() {
-                    let arg = shift_arg(&mut input)?;
+                while !input.args().is_empty() {
+                    let arg = input.shift_arg()?;
                     let mut chars = arg.chars();
                     // ZFS list lets callers pass in flags in groups, or
                     // separately.
@@ -62,7 +64,8 @@ impl TryFrom<Input> for Command {
                                     if chars.next().is_some() {
                                         return Err("-o should be immediately followed by properties".to_string());
                                     }
-                                    properties = shift_arg(&mut input)?
+                                    properties = input
+                                        .shift_arg()?
                                         .split(',')
                                         .map(|s| s.to_string())
                                         .collect();
@@ -80,11 +83,11 @@ impl TryFrom<Input> for Command {
                     }
                 }
 
-                let remaining_pools = std::mem::take(&mut input.args);
+                let remaining_pools = input.args();
                 if !remaining_pools.is_empty() {
                     pools
                         .get_or_insert(vec![])
-                        .extend(remaining_pools.into_iter());
+                        .extend(remaining_pools.into_iter().cloned());
                 };
                 if !scripting || !parsable {
                     return Err("You should run 'zpool list' commands with the '-Hp' flags enabled".to_string());
@@ -92,15 +95,15 @@ impl TryFrom<Input> for Command {
                 Ok(Command::List { properties, pools })
             }
             "set" => {
-                let prop = shift_arg(&mut input)?;
+                let prop = input.shift_arg()?;
                 let (k, v) = prop
                     .split_once('=')
                     .ok_or_else(|| format!("Bad property: {prop}"))?;
                 let property = k.to_string();
                 let value = v.to_string();
 
-                let pool = shift_arg(&mut input)?;
-                no_args_remaining(&input)?;
+                let pool = input.shift_arg()?;
+                input.no_args_remaining()?;
                 Ok(Command::Set { property, value, pool })
             }
             command => return Err(format!("Unexpected command: {command}")),

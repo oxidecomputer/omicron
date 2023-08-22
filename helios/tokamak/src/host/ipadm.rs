@@ -2,9 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::host::{
-    no_args_remaining, shift_arg, shift_arg_expect, shift_arg_if,
-};
+use crate::host::parse::InputParser;
 use crate::host::{AddrType, IpInterfaceName};
 
 use helios_fusion::addrobj::AddrObject;
@@ -50,15 +48,17 @@ impl TryFrom<Input> for Command {
             return Err(format!("Not ipadm command: {}", input.program));
         }
 
-        match shift_arg(&mut input)?.as_str() {
-            "create-addr" => {
-                let temporary = shift_arg_if(&mut input, "-t")?;
-                shift_arg_expect(&mut input, "-T")?;
+        let mut input = InputParser::new(input);
 
-                let ty = match shift_arg(&mut input)?.as_str() {
+        match input.shift_arg()?.as_str() {
+            "create-addr" => {
+                let temporary = input.shift_arg_if("-t")?;
+                input.shift_arg_expect("-T")?;
+
+                let ty = match input.shift_arg()?.as_str() {
                     "static" => {
-                        shift_arg_expect(&mut input, "-a")?;
-                        let addr = shift_arg(&mut input)?;
+                        input.shift_arg_expect("-a")?;
+                        let addr = input.shift_arg()?;
                         AddrType::Static(
                             IpNetwork::from_str(&addr)
                                 .map_err(|e| e.to_string())?,
@@ -68,63 +68,63 @@ impl TryFrom<Input> for Command {
                     "addrconf" => AddrType::Addrconf,
                     ty => return Err(format!("Unknown address type {ty}")),
                 };
-                let addrobj = AddrObject::from_str(&shift_arg(&mut input)?)
+                let addrobj = AddrObject::from_str(&input.shift_arg()?)
                     .map_err(|e| e.to_string())?;
-                no_args_remaining(&input)?;
+                input.no_args_remaining()?;
                 Ok(Command::CreateAddr { temporary, ty, addrobj })
             }
             "create-ip" | "create-if" => {
-                let temporary = shift_arg_if(&mut input, "-t")?;
-                let name = IpInterfaceName(shift_arg(&mut input)?);
-                no_args_remaining(&input)?;
+                let temporary = input.shift_arg_if("-t")?;
+                let name = IpInterfaceName(input.shift_arg()?);
+                input.no_args_remaining()?;
                 Ok(Command::CreateIf { temporary, name })
             }
             "delete-addr" => {
-                let addrobj = AddrObject::from_str(&shift_arg(&mut input)?)
+                let addrobj = AddrObject::from_str(&input.shift_arg()?)
                     .map_err(|e| e.to_string())?;
-                no_args_remaining(&input)?;
+                input.no_args_remaining()?;
                 Ok(Command::DeleteAddr { addrobj })
             }
             "delete-ip" | "delete-if" => {
-                let name = IpInterfaceName(shift_arg(&mut input)?);
-                no_args_remaining(&input)?;
+                let name = IpInterfaceName(input.shift_arg()?);
+                input.no_args_remaining()?;
                 Ok(Command::DeleteIf { name })
             }
             "show-if" => {
-                let name = IpInterfaceName(
-                    input.args.pop_back().ok_or_else(|| "Missing name")?,
-                );
+                let name = IpInterfaceName(input.shift_last_arg()?);
                 let mut properties = vec![];
-                while !input.args.is_empty() {
-                    if shift_arg_if(&mut input, "-p")? {
-                        shift_arg_expect(&mut input, "-o")?;
-                        properties = shift_arg(&mut input)?
+                while !input.args().is_empty() {
+                    if input.shift_arg_if("-p")? {
+                        input.shift_arg_expect("-o")?;
+                        properties = input
+                            .shift_arg()?
                             .split(',')
                             .map(|s| s.to_string())
                             .collect();
                     } else {
-                        return Err(format!("Unexpected input: {input}"));
+                        return Err(format!(
+                            "Unexpected input: {}",
+                            input.input()
+                        ));
                     }
                 }
 
                 Ok(Command::ShowIf { properties, name })
             }
             "set-ifprop" => {
-                let name = IpInterfaceName(
-                    input.args.pop_back().ok_or_else(|| "Missing name")?,
-                );
+                let name = IpInterfaceName(input.shift_last_arg()?);
 
                 let mut temporary = false;
                 let mut properties = HashMap::new();
                 let mut module = "ip".to_string();
 
-                while !input.args.is_empty() {
-                    if shift_arg_if(&mut input, "-t")? {
+                while !input.args().is_empty() {
+                    if input.shift_arg_if("-t")? {
                         temporary = true;
-                    } else if shift_arg_if(&mut input, "-m")? {
-                        module = shift_arg(&mut input)?;
-                    } else if shift_arg_if(&mut input, "-p")? {
-                        let props = shift_arg(&mut input)?;
+                    } else if input.shift_arg_if("-m")? {
+                        module = input.shift_arg()?;
+                    } else if input.shift_arg_if("-p")? {
+                        let props = input.shift_arg()?;
                         let props = props.split(',');
                         for prop in props {
                             let (k, v) =
@@ -134,7 +134,10 @@ impl TryFrom<Input> for Command {
                             properties.insert(k.to_string(), v.to_string());
                         }
                     } else {
-                        return Err(format!("Unexpected input: {input}"));
+                        return Err(format!(
+                            "Unexpected input: {}",
+                            input.input()
+                        ));
                     }
                 }
 

@@ -20,6 +20,7 @@ use ipnetwork::IpNetwork;
 use std::collections::{HashMap, HashSet};
 use std::str::FromStr;
 
+// Parsing command-line utilities
 mod dladm;
 mod ipadm;
 mod route;
@@ -29,6 +30,10 @@ mod zfs;
 mod zoneadm;
 mod zonecfg;
 mod zpool;
+
+mod parse;
+
+use crate::host::parse::InputExt;
 
 enum LinkType {
     Etherstub,
@@ -142,11 +147,11 @@ pub enum RouteTarget {
 }
 
 impl RouteTarget {
-    fn shift_target(input: &mut Input) -> Result<Self, String> {
-        let force_v4 = shift_arg_if(input, "-inet")?;
-        let force_v6 = shift_arg_if(input, "-inet6")?;
+    fn shift_target(input: &mut parse::InputParser) -> Result<Self, String> {
+        let force_v4 = input.shift_arg_if("-inet")?;
+        let force_v6 = input.shift_arg_if("-inet6")?;
 
-        let target = match (force_v4, force_v6, shift_arg(input)?.as_str()) {
+        let target = match (force_v4, force_v6, input.shift_arg()?.as_str()) {
             (true, true, _) => {
                 return Err("Cannot force both v4 and v6".to_string())
             }
@@ -172,11 +177,14 @@ impl RouteTarget {
 pub struct FilesystemName(String);
 
 enum KnownCommand {
+    Coreadm, // TODO
     Dladm(dladm::Command),
+    Dumpadm, // TODO
     Ipadm(ipadm::Command),
-    Fstyp,
-    RouteAdm,
+    Fstyp,    // TODO
+    RouteAdm, // TODO
     Route(route::Command),
+    Savecore, // TODO
     Svccfg(svccfg::Command),
     Svcadm(svcadm::Command),
     Zfs(zfs::Command),
@@ -200,84 +208,29 @@ impl TryFrom<Input> for Command {
 
         while input.program == PFEXEC {
             with_pfexec = true;
-            shift_program(&mut input)?;
+            input.shift_program()?;
         }
         if input.program == ZLOGIN {
-            shift_program(&mut input)?;
-            in_zone = Some(ZoneName(shift_program(&mut input)?));
+            input.shift_program()?;
+            in_zone = Some(ZoneName(input.shift_program()?));
         }
 
+        use KnownCommand::*;
         let cmd = match input.program.as_str() {
-            DLADM => KnownCommand::Dladm(dladm::Command::try_from(input)?),
-            IPADM => KnownCommand::Ipadm(ipadm::Command::try_from(input)?),
-            ROUTE => KnownCommand::Route(route::Command::try_from(input)?),
-            SVCCFG => KnownCommand::Svccfg(svccfg::Command::try_from(input)?),
-            SVCADM => KnownCommand::Svcadm(svcadm::Command::try_from(input)?),
-            ZFS => KnownCommand::Zfs(zfs::Command::try_from(input)?),
-            ZONEADM => {
-                KnownCommand::Zoneadm(zoneadm::Command::try_from(input)?)
-            }
-            ZONECFG => {
-                KnownCommand::Zonecfg(zonecfg::Command::try_from(input)?)
-            }
-            ZPOOL => KnownCommand::Zpool(zpool::Command::try_from(input)?),
+            DLADM => Dladm(dladm::Command::try_from(input)?),
+            IPADM => Ipadm(ipadm::Command::try_from(input)?),
+            ROUTE => Route(route::Command::try_from(input)?),
+            SVCCFG => Svccfg(svccfg::Command::try_from(input)?),
+            SVCADM => Svcadm(svcadm::Command::try_from(input)?),
+            ZFS => Zfs(zfs::Command::try_from(input)?),
+            ZONEADM => Zoneadm(zoneadm::Command::try_from(input)?),
+            ZONECFG => Zonecfg(zonecfg::Command::try_from(input)?),
+            ZPOOL => Zpool(zpool::Command::try_from(input)?),
             _ => return Err(format!("Unknown command: {}", input.program)),
         };
 
         Ok(Command { with_pfexec, in_zone, cmd })
     }
-}
-
-// Shifts out the program, putting the subsequent argument in its place.
-//
-// Returns the prior program value.
-pub(crate) fn shift_program(input: &mut Input) -> Result<String, String> {
-    let new = input
-        .args
-        .pop_front()
-        .ok_or_else(|| format!("Failed to parse {input}"))?;
-
-    let old = std::mem::replace(&mut input.program, new);
-
-    Ok(old)
-}
-
-pub(crate) fn no_args_remaining(input: &Input) -> Result<(), String> {
-    if !input.args.is_empty() {
-        return Err(format!("Unexpected extra arguments: {input}"));
-    }
-    Ok(())
-}
-
-// Removes the next argument unconditionally.
-pub(crate) fn shift_arg(input: &mut Input) -> Result<String, String> {
-    Ok(input.args.pop_front().ok_or_else(|| "Missing argument")?)
-}
-
-// Removes the next argument, which must equal the provided value.
-pub(crate) fn shift_arg_expect(
-    input: &mut Input,
-    value: &str,
-) -> Result<(), String> {
-    let v = input.args.pop_front().ok_or_else(|| "Missing argument")?;
-    if value != v {
-        return Err(format!("Unexpected argument {v} (expected: {value}"));
-    }
-    Ok(())
-}
-
-// Removes the next argument if it equals `value`.
-//
-// Returns if it was equal.
-pub(crate) fn shift_arg_if(
-    input: &mut Input,
-    value: &str,
-) -> Result<bool, String> {
-    let eq = input.args.front().ok_or_else(|| "Missing argument")? == value;
-    if eq {
-        input.args.pop_front();
-    }
-    Ok(eq)
 }
 
 #[cfg(test)]

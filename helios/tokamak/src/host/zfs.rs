@@ -2,8 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use crate::host::parse::InputParser;
 use crate::host::FilesystemName;
-use crate::host::{no_args_remaining, shift_arg, shift_arg_if};
 
 use helios_fusion::Input;
 use helios_fusion::ZFS;
@@ -58,42 +58,45 @@ impl TryFrom<Input> for Command {
             return Err(format!("Not zfs command: {}", input.program));
         }
 
-        match shift_arg(&mut input)?.as_str() {
+        let mut input = InputParser::new(input);
+        match input.shift_arg()?.as_str() {
             "create" => {
                 let mut size = None;
                 let mut blocksize = None;
                 let mut sparse = None;
                 let mut properties = vec![];
 
-                while input.args.len() > 1 {
+                while input.args().len() > 1 {
                     // Volume Size (volumes only, required)
-                    if shift_arg_if(&mut input, "-V")? {
+                    if input.shift_arg_if("-V")? {
                         size = Some(
-                            shift_arg(&mut input)?
+                            input
+                                .shift_arg()?
                                 .parse::<u64>()
                                 .map_err(|e| e.to_string())?,
                         );
                     // Sparse (volumes only, optional)
-                    } else if shift_arg_if(&mut input, "-s")? {
+                    } else if input.shift_arg_if("-s")? {
                         sparse = Some(true);
                     // Block size (volumes only, optional)
-                    } else if shift_arg_if(&mut input, "-b")? {
+                    } else if input.shift_arg_if("-b")? {
                         blocksize = Some(
-                            shift_arg(&mut input)?
+                            input
+                                .shift_arg()?
                                 .parse::<u64>()
                                 .map_err(|e| e.to_string())?,
                         );
                     // Properties
-                    } else if shift_arg_if(&mut input, "-o")? {
-                        let prop = shift_arg(&mut input)?;
+                    } else if input.shift_arg_if("-o")? {
+                        let prop = input.shift_arg()?;
                         let (k, v) = prop
                             .split_once('=')
                             .ok_or_else(|| format!("Bad property: {prop}"))?;
                         properties.push((k.to_string(), v.to_string()));
                     }
                 }
-                let name = FilesystemName(shift_arg(&mut input)?);
-                no_args_remaining(&input)?;
+                let name = FilesystemName(input.shift_arg()?);
+                input.no_args_remaining()?;
 
                 if let Some(size) = size {
                     // Volume
@@ -119,8 +122,8 @@ impl TryFrom<Input> for Command {
                 let mut force_unmount = false;
                 let mut name = None;
 
-                while !input.args.is_empty() {
-                    let arg = shift_arg(&mut input)?;
+                while !input.args().is_empty() {
+                    let arg = input.shift_arg()?;
                     let mut chars = arg.chars();
                     if let Some('-') = chars.next() {
                         while let Some(c) = chars.next() {
@@ -137,7 +140,7 @@ impl TryFrom<Input> for Command {
                         }
                     } else {
                         name = Some(FilesystemName(arg));
-                        no_args_remaining(&input)?;
+                        input.no_args_remaining()?;
                     }
                 }
                 let name = name.ok_or_else(|| "Missing name".to_string())?;
@@ -158,8 +161,8 @@ impl TryFrom<Input> for Command {
                     .to_vec();
                 let mut properties = vec![];
 
-                while !input.args.is_empty() {
-                    let arg = shift_arg(&mut input)?;
+                while !input.args().is_empty() {
+                    let arg = input.shift_arg()?;
                     let mut chars = arg.chars();
                     // ZFS list lets callers pass in flags in groups, or
                     // separately.
@@ -174,7 +177,7 @@ impl TryFrom<Input> for Command {
                                         if chars.clone().next().is_some() {
                                             chars.collect::<String>()
                                         } else {
-                                            shift_arg(&mut input)?
+                                            input.shift_arg()?
                                         };
                                     depth = Some(
                                         depth_raw
@@ -190,7 +193,8 @@ impl TryFrom<Input> for Command {
                                     if chars.next().is_some() {
                                         return Err("-o should be immediately followed by fields".to_string());
                                     }
-                                    fields = shift_arg(&mut input)?
+                                    fields = input
+                                        .shift_arg()?
                                         .split(',')
                                         .map(|s| s.to_string())
                                         .collect();
@@ -210,8 +214,10 @@ impl TryFrom<Input> for Command {
                 }
 
                 let datasets = Some(
-                    std::mem::take(&mut input.args)
+                    input
+                        .args()
                         .into_iter()
+                        .map(|s| s.into())
                         .collect::<Vec<String>>(),
                 );
                 if !scripting || !parsable {
@@ -234,8 +240,8 @@ impl TryFrom<Input> for Command {
                 let mut properties = vec![];
                 let mut datasets = None;
 
-                while !input.args.is_empty() {
-                    let arg = shift_arg(&mut input)?;
+                while !input.args().is_empty() {
+                    let arg = input.shift_arg()?;
                     let mut chars = arg.chars();
                     // ZFS list lets callers pass in flags in groups, or
                     // separately.
@@ -250,7 +256,7 @@ impl TryFrom<Input> for Command {
                                         if chars.clone().next().is_some() {
                                             chars.collect::<String>()
                                         } else {
-                                            shift_arg(&mut input)?
+                                            input.shift_arg()?
                                         };
                                     depth = Some(
                                         depth_raw
@@ -266,7 +272,8 @@ impl TryFrom<Input> for Command {
                                     if chars.next().is_some() {
                                         return Err("-o should be immediately followed by properties".to_string());
                                     }
-                                    properties = shift_arg(&mut input)?
+                                    properties = input
+                                        .shift_arg()?
                                         .split(',')
                                         .map(|s| s.to_string())
                                         .collect();
@@ -286,11 +293,11 @@ impl TryFrom<Input> for Command {
                     }
                 }
 
-                let remaining_datasets = std::mem::take(&mut input.args);
+                let remaining_datasets = input.args();
                 if !remaining_datasets.is_empty() {
                     datasets
                         .get_or_insert(vec![])
-                        .extend(remaining_datasets.into_iter());
+                        .extend(remaining_datasets.into_iter().cloned());
                 };
 
                 if !scripting || !parsable {
@@ -300,23 +307,23 @@ impl TryFrom<Input> for Command {
                 Ok(Command::List { recursive, depth, properties, datasets })
             }
             "mount" => {
-                let load_keys = shift_arg_if(&mut input, "-l")?;
-                let filesystem = FilesystemName(shift_arg(&mut input)?);
-                no_args_remaining(&input)?;
+                let load_keys = input.shift_arg_if("-l")?;
+                let filesystem = FilesystemName(input.shift_arg()?);
+                input.no_args_remaining()?;
                 Ok(Command::Mount { load_keys, filesystem })
             }
             "set" => {
                 let mut properties = vec![];
 
-                while input.args.len() > 1 {
-                    let prop = shift_arg(&mut input)?;
+                while input.args().len() > 1 {
+                    let prop = input.shift_arg()?;
                     let (k, v) = prop
                         .split_once('=')
                         .ok_or_else(|| format!("Bad property: {prop}"))?;
                     properties.push((k.to_string(), v.to_string()));
                 }
-                let name = FilesystemName(shift_arg(&mut input)?);
-                no_args_remaining(&input)?;
+                let name = FilesystemName(input.shift_arg()?);
+                input.no_args_remaining()?;
 
                 Ok(Command::Set { properties, name })
             }

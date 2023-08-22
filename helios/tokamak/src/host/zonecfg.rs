@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::host::{shift_arg, shift_arg_expect};
+use crate::host::parse::InputParser;
 use crate::host::{ZoneConfig, ZoneName};
 
 use camino::Utf8PathBuf;
@@ -21,12 +21,15 @@ impl TryFrom<Input> for Command {
         if input.program != ZONECFG {
             return Err(format!("Not zonecfg command: {}", input.program));
         }
-        shift_arg_expect(&mut input, "-z")?;
-        let zone = ZoneName(shift_arg(&mut input)?);
-        match shift_arg(&mut input)?.as_str() {
+
+        let mut input = InputParser::new(input);
+
+        input.shift_arg_expect("-z")?;
+        let zone = ZoneName(input.shift_arg()?);
+        match input.shift_arg()?.as_str() {
             "create" => {
-                shift_arg_expect(&mut input, "-F")?;
-                shift_arg_expect(&mut input, "-b")?;
+                input.shift_arg_expect("-F")?;
+                input.shift_arg_expect("-b")?;
 
                 enum Scope {
                     Global,
@@ -47,11 +50,11 @@ impl TryFrom<Input> for Command {
                 let mut nets = vec![];
                 let mut fs = vec![];
 
-                while !input.args.is_empty() {
-                    shift_arg_expect(&mut input, ";")?;
-                    match shift_arg(&mut input)?.as_str() {
+                while !input.args().is_empty() {
+                    input.shift_arg_expect(";")?;
+                    match input.shift_arg()?.as_str() {
                         "set" => {
-                            let prop = shift_arg(&mut input)?;
+                            let prop = input.shift_arg()?;
                             let (k, v) =
                                 prop.split_once('=').ok_or_else(|| {
                                     format!("Bad property: {prop}")
@@ -137,7 +140,7 @@ impl TryFrom<Input> for Command {
                                 return Err("Cannot add from non-global scope"
                                     .to_string());
                             }
-                            match shift_arg(&mut input)?.as_str() {
+                            match input.shift_arg()?.as_str() {
                                 "dataset" => {
                                     scope =
                                         Scope::Dataset(zone::Dataset::default())
@@ -198,7 +201,7 @@ impl TryFrom<Input> for Command {
                 })
             }
             "delete" => {
-                shift_arg_expect(&mut input, "-F")?;
+                input.shift_arg_expect("-F")?;
                 Ok(Command::Delete { name: zone })
             }
             command => return Err(format!("Unexpected command: {command}")),
