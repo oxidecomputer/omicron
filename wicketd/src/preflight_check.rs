@@ -6,10 +6,10 @@ use omicron_common::api::internal::shared::RackNetworkConfig;
 use omicron_common::api::internal::shared::SwitchLocation;
 use slog::o;
 use slog::Logger;
-use tokio::sync::oneshot;
 use std::net::IpAddr;
 use std::sync::Arc;
 use std::sync::Mutex;
+use tokio::sync::oneshot;
 use update_engine::events::EventReport;
 use update_engine::GenericSpec;
 
@@ -48,6 +48,7 @@ impl PreflightCheckerHandler {
         dns_servers: Vec<IpAddr>,
         ntp_servers: Vec<String>,
         our_switch_location: SwitchLocation,
+        dns_name_to_query: Option<String>,
     ) -> Result<(), PreflightCheckerBusy> {
         let (check_started_tx, check_started_rx) = oneshot::channel();
 
@@ -62,6 +63,7 @@ impl PreflightCheckerHandler {
                 dns_servers,
                 ntp_servers,
                 our_switch_location,
+                dns_name_to_query,
                 check_started_tx,
             })
             .map_err(|_err| PreflightCheckerBusy)?;
@@ -96,6 +98,7 @@ enum PreflightCheck {
         dns_servers: Vec<IpAddr>,
         ntp_servers: Vec<String>,
         our_switch_location: SwitchLocation,
+        dns_name_to_query: Option<String>,
         check_started_tx: oneshot::Sender<()>,
     },
 }
@@ -112,6 +115,7 @@ async fn preflight_task_main(
                 dns_servers,
                 ntp_servers,
                 our_switch_location,
+                dns_name_to_query,
                 check_started_tx,
             } => {
                 // New preflight check: create a new event buffer.
@@ -129,6 +133,7 @@ async fn preflight_task_main(
                     dns_servers,
                     ntp_servers,
                     our_switch_location,
+                    dns_name_to_query,
                     Arc::clone(&uplink_event_buffer),
                     &log,
                 )

@@ -990,6 +990,14 @@ async fn post_ignition_command(
     Ok(HttpResponseUpdatedNoContent())
 }
 
+/// Options provided to the preflight uplink check.
+#[derive(Clone, Debug, JsonSchema, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct PreflightUplinkCheckOptions {
+    /// DNS name to query.
+    pub dns_name_to_query: Option<String>,
+}
+
 /// An endpoint to start a preflight check for uplink configuration.
 #[endpoint {
     method = POST,
@@ -997,8 +1005,10 @@ async fn post_ignition_command(
 }]
 async fn post_start_preflight_uplink_check(
     rqctx: RequestContext<ServerContext>,
+    body: TypedBody<PreflightUplinkCheckOptions>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let rqctx = rqctx.context();
+    let options = body.into_inner();
 
     let our_switch_location = match rqctx.local_switch_id().await {
         Some(SpIdentifier { slot, type_: SpType::Switch }) => match slot {
@@ -1050,6 +1060,7 @@ async fn post_start_preflight_uplink_check(
             dns_servers,
             ntp_servers,
             our_switch_location,
+            options.dns_name_to_query,
         )
         .await
     {

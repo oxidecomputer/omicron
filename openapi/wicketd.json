@@ -312,6 +312,16 @@
       "post": {
         "summary": "An endpoint to start a preflight check for uplink configuration.",
         "operationId": "post_start_preflight_uplink_check",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PreflightUplinkCheckOptions"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "204": {
             "description": "resource updated"
@@ -1388,6 +1398,17 @@
           "A1",
           "A2"
         ]
+      },
+      "PreflightUplinkCheckOptions": {
+        "description": "Options provided to the preflight uplink check.",
+        "type": "object",
+        "properties": {
+          "dns_name_to_query": {
+            "nullable": true,
+            "description": "DNS name to query.",
+            "type": "string"
+          }
+        }
       },
       "ProgressCounter": {
         "description": "Current progress.\n\nBoth `current` and `total` are abstract counters. These counters are often a number of bytes. There is no guarantee that the counter won't go back in subsequent events; that can happen e.g. if a fetch happens from multiple peers within a single attempt.",

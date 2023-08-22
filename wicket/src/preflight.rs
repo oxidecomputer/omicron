@@ -23,6 +23,7 @@ use update_engine::events::StepInfo;
 use update_engine::events::StepInfoWithMetadata;
 use update_engine::events::StepOutcome;
 use update_engine::StepSpec;
+use wicketd_client::types::PreflightUplinkCheckOptions;
 use wicketd_client::Client;
 
 const WICKETD_TIMEOUT: Duration = Duration::from_secs(5);
@@ -31,7 +32,16 @@ const WICKETD_TIMEOUT: Duration = Duration::from_secs(5);
 pub(crate) enum PreflightArgs {
     /// Run a preflight check on the uplink configuration to ensure connectivity
     /// to external DNS and NTP servers.
-    Uplink,
+    Uplink {
+        /// Optional DNS name to query.
+        ///
+        /// The preflight check will query for the IPs of any NTP servers that
+        /// are provided by name. If all NTP servers are listed by IP, we will
+        /// either query for this name (if provided) or `oxide.computer` to
+        /// check for DNS connectivity.
+        #[clap(long)]
+        query_dns: Option<String>,
+    },
     /// Display progress of a previously-started uplink config check.
     UplinkStatus,
 }
@@ -56,9 +66,12 @@ impl PreflightArgs {
         let client = create_wicketd_client(&log, wicketd_addr, WICKETD_TIMEOUT);
 
         match self {
-            Self::Uplink => {
+            Self::Uplink { query_dns } => {
+                let options = PreflightUplinkCheckOptions {
+                    dns_name_to_query: query_dns,
+                };
                 client
-                    .post_start_preflight_uplink_check()
+                    .post_start_preflight_uplink_check(&options)
                     .await
                     .context("failed to start uplink preflight check")?;
 
@@ -129,7 +142,9 @@ async fn poll_uplink_status_until_complete(client: Client) -> Result<()> {
     }
 }
 
-fn print_completed_steps<S: StepSpec<CompletionMetadata = serde_json::Value>>(
+fn print_completed_steps<
+    S: StepSpec<CompletionMetadata = serde_json::Value>,
+>(
     step_events: Vec<StepEvent<S>>,
     last_seen: &mut Option<usize>,
     all_steps: &mut Option<Vec<StepInfo<S>>>,

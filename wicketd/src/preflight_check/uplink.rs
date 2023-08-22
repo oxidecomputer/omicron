@@ -71,6 +71,7 @@ pub(super) async fn run_local_uplink_preflight_check(
     dns_servers: Vec<IpAddr>,
     ntp_servers: Vec<String>,
     our_switch_location: SwitchLocation,
+    dns_name_to_query: Option<String>,
     event_buffer: Arc<Mutex<Option<EventBuffer>>>,
     log: &Logger,
 ) {
@@ -97,6 +98,7 @@ pub(super) async fn run_local_uplink_preflight_check(
             uplink,
             &dns_servers,
             &ntp_servers,
+            dns_name_to_query.as_deref(),
         );
     }
 
@@ -130,6 +132,7 @@ fn add_steps_for_single_local_uplink_preflight_check<'a>(
     uplink: &'a UplinkConfig,
     dns_servers: &'a [IpAddr],
     ntp_servers: &'a [String],
+    dns_name_to_query: Option<&'a str>,
 ) {
     // Total time we're willing to wait for an L1 link up.
     const L1_WAIT_TIMEOUT: Duration = Duration::from_secs(30);
@@ -454,7 +457,11 @@ fn add_steps_for_single_local_uplink_preflight_check<'a>(
                     }
                 };
 
-                let step_impl = DnsLookupStep::new(dns_servers, ntp_servers);
+                let step_impl = DnsLookupStep::new(
+                    dns_servers,
+                    ntp_servers,
+                    dns_name_to_query,
+                );
                 let ntp_ips_result = step_impl.run(&cx).await;
 
                 Ok(ntp_ips_result.map(|ntp_ips| Ok((level2, ntp_ips))))
@@ -926,13 +933,18 @@ update_engine::define_update_engine!(pub(super) UplinkPreflightCheckSpec);
 struct DnsLookupStep<'a> {
     dns_servers: &'a [IpAddr],
     ntp_names_to_resolve: Vec<&'a str>,
+    dns_name_to_query: Option<&'a str>,
 
     // Usable output of this step: IP addrs of the NTP servers to use.
     ntp_ips: BTreeSet<IpAddr>,
 }
 
 impl<'a> DnsLookupStep<'a> {
-    fn new(dns_servers: &'a [IpAddr], ntp_servers: &'a [String]) -> Self {
+    fn new(
+        dns_servers: &'a [IpAddr],
+        ntp_servers: &'a [String],
+        dns_name_to_query: Option<&'a str>,
+    ) -> Self {
         let mut ntp_ips = BTreeSet::new();
         let mut ntp_names_to_resolve = Vec::new();
         for ntp_server in ntp_servers {
@@ -945,7 +957,7 @@ impl<'a> DnsLookupStep<'a> {
                 }
             }
         }
-        Self { dns_servers, ntp_names_to_resolve, ntp_ips }
+        Self { dns_servers, ntp_names_to_resolve, dns_name_to_query, ntp_ips }
     }
 
     async fn run(mut self, cx: &StepContext) -> StepResult<Vec<IpAddr>> {
@@ -1004,13 +1016,43 @@ impl<'a> DnsLookupStep<'a> {
                 }
             }
 
-            // If all the NTP servers are IP addresses, we'll attempt a DNS
-            // query of an arbitrarily-chosen DNS name (`oxide.computer`). This
-            // may fail at the DNS level if the server we're talking to does not
-            // handle general public DNS names; we treat such a failure at the
-            // DNS level as successes, because we're trying to check uplink
+            // If we were given a DNS name to query, we'll query that too.
+            if let Some(dns_name) = self.dns_name_to_query {
+                match resolver.lookup_ip(dns_name).await {
+                    Ok(ips) => {
+                        for ip in ips {
+                            let message = format!(
+                                "resolved {dns_name} to {ip} \
+                                 via DNS server {dns_ip}"
+                            );
+                            messages.push(message.clone());
+                            cx.send_progress(StepProgress::Progress {
+                                progress: None,
+                                metadata: message,
+                            })
+                            .await;
+                        }
+                    }
+                    Err(err) => {
+                        warnings.push(format!(
+                            "failed to look up {dns_name} via DNS server \
+                             {dns_ip}: {}",
+                            DisplayErrorChain::new(&err)
+                        ));
+                    }
+                }
+            }
+
+            // If all the NTP servers are IP addresses and we weren't given an
+            // explicit DNS name to query, we'll attempt a DNS query of an
+            // arbitrarily-chosen DNS name (`oxide.computer`). This may fail at
+            // the DNS level if the server we're talking to does not handle
+            // general public DNS names; we treat such a failure at the DNS
+            // level as successes, because we're trying to check uplink
             // connectivity.
-            if self.ntp_names_to_resolve.is_empty() {
+            if self.ntp_names_to_resolve.is_empty()
+                && self.dns_name_to_query.is_none()
+            {
                 match resolver.lookup_ip(DNS_NAME_TO_QUERY).await {
                     Ok(ips) => {
                         for ip in ips {
@@ -1029,7 +1071,7 @@ impl<'a> DnsLookupStep<'a> {
                     Err(err) => match err.kind() {
                         ResolveErrorKind::NoRecordsFound { .. } => {
                             let message = format!(
-                                "no records found for  {DNS_NAME_TO_QUERY}; \
+                                "no DNS records found for {DNS_NAME_TO_QUERY}; \
                                  connectivity to DNS server appears good"
                             );
                             messages.push(message.clone());

@@ -12,7 +12,9 @@ use clap::Parser;
 use omicron_common::{address::WICKETD_PORT, FileKv};
 use slog::Drain;
 
-use crate::{rack_setup::SetupArgs, upload::UploadArgs, Runner, preflight::PreflightArgs};
+use crate::{
+    preflight::PreflightArgs, rack_setup::SetupArgs, upload::UploadArgs, Runner,
+};
 
 pub fn exec() -> Result<()> {
     let wicketd_addr =
@@ -60,7 +62,7 @@ enum ShellCommand {
     Setup(SetupArgs),
     /// Run checks prior to setting up the rack.
     #[command(subcommand)]
-    Preflight(PreflightArgs)
+    Preflight(PreflightArgs),
 }
 
 fn setup_log(
