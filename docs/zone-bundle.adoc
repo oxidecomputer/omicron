@@ -4,11 +4,11 @@
 
 = Zone bundle
 
-The `zone-bundle` tool is a binary that can be used to manage a tarball of
-debugging data collected from Oxide zones. The tool collects all log files on
-the system, including current, rotated and archived files. It also runs a series
-of debugging commands in the target zone, such as `netstat -an`. All of these
-items are packaged into a tarball that can be fetched from the system.
+`zone-bundle` tool can be used to manage a tarball of debugging data collected
+from Oxide zones. The tool collects all log files on the system, including
+current, rotated and archived files. It also runs a series of debugging
+commands in the target zone, such as `netstat -an`. All of these items are
+packaged into a tarball that can be fetched from the system.
 
 = Running
 
@@ -20,12 +20,15 @@ commands are:
 - `list-zones`: List the _current_ zones on the system.
 - `ls [filter]`: List all zone bundles that exist, possibly with a substring
   filter. This includes bundles from zones that no longer exist.
-- `create`: Create a zone bundle immediately. They are also created
-  automatically when zones are destroyed.
+- `create`: Create a zone bundle immediately. (Bundles are also created
+  automatically when zones are destroyed.)
 - `get`: Copy a zone-bundle from internal storage. By default, the file is
   copied to the local directory with the same name as in internal storage, which
   is like `<UUID>.tar.gz`.
 - `rm`: Remove a zone bundle from internal storage.
+
+NOTE: Internal storage for Gimlets refers to debug datasets on the internal M.2
+drives.
 
 = Basic usage
 
