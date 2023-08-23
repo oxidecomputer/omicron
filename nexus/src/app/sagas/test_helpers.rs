@@ -10,8 +10,12 @@ use crate::{
     app::{saga::create_saga_dag, test_interfaces::TestInterfaces as _},
     Nexus,
 };
+use async_bb8_diesel::{
+    AsyncConnection, AsyncRunQueryDsl, AsyncSimpleConnection,
+};
+use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
 use futures::future::BoxFuture;
-use nexus_db_queries::context::OpContext;
+use nexus_db_queries::{context::OpContext, db::DataStore};
 use nexus_types::identity::Resource;
 use omicron_common::api::external::NameOrId;
 use sled_agent_client::TestInterfaces as _;
@@ -258,6 +262,8 @@ pub async fn action_failure_can_unwind<'a, S, B, A>(
             break;
         }
     }
+
+    assert_no_failed_undo_steps(log, nexus.datastore()).await;
 }
 
 /// Tests that saga `S` functions properly when any of its nodes fails and the
@@ -370,4 +376,43 @@ pub async fn action_failure_can_unwind_idempotently<'a, S, B, A>(
             break;
         }
     }
+
+    assert_no_failed_undo_steps(log, nexus.datastore()).await;
+}
+
+/// Asserts that there are no sagas in the supplied `datastore` for which an
+/// undo step failed.
+async fn assert_no_failed_undo_steps(log: &Logger, datastore: &DataStore) {
+    use crate::db::model::saga_types::SagaNodeEvent;
+
+    let saga_node_events: Vec<SagaNodeEvent> = datastore
+        .pool_for_tests()
+        .await
+        .unwrap()
+        .transaction_async(|conn| async move {
+            use crate::db::schema::saga_node_event::dsl;
+
+            conn.batch_execute_async(
+                nexus_test_utils::db::ALLOW_FULL_TABLE_SCAN_SQL,
+            )
+            .await
+            .unwrap();
+
+            Ok::<_, crate::db::TransactionError<()>>(
+                dsl::saga_node_event
+                    .filter(dsl::event_type.eq(String::from("undo_failed")))
+                    .select(SagaNodeEvent::as_select())
+                    .load_async::<SagaNodeEvent>(&conn)
+                    .await
+                    .unwrap(),
+            )
+        })
+        .await
+        .unwrap();
+
+    for saga_node_event in &saga_node_events {
+        error!(log, "saga {:?} is stuck!", saga_node_event.saga_id);
+    }
+
+    assert!(saga_node_events.is_empty());
 }
