@@ -2,8 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::host::parse::InputParser;
-use crate::host::FilesystemName;
+use crate::cli::parse::InputParser;
+use crate::host::{DatasetName, FilesystemName, VolumeName};
 
 use helios_fusion::Input;
 use helios_fusion::ZFS;
@@ -18,13 +18,13 @@ pub(crate) enum Command {
         sparse: bool,
         blocksize: Option<u64>,
         size: u64,
-        name: FilesystemName,
+        name: VolumeName,
     },
     Destroy {
         recursive_dependents: bool,
         recursive_children: bool,
         force_unmount: bool,
-        name: FilesystemName,
+        name: DatasetName,
     },
     Get {
         recursive: bool,
@@ -32,13 +32,13 @@ pub(crate) enum Command {
         // name, property, value, source
         fields: Vec<String>,
         properties: Vec<String>,
-        datasets: Option<Vec<String>>,
+        datasets: Option<Vec<DatasetName>>,
     },
     List {
         recursive: bool,
         depth: Option<usize>,
         properties: Vec<String>,
-        datasets: Option<Vec<String>>,
+        datasets: Option<Vec<DatasetName>>,
     },
     Mount {
         load_keys: bool,
@@ -46,14 +46,14 @@ pub(crate) enum Command {
     },
     Set {
         properties: Vec<(String, String)>,
-        name: FilesystemName,
+        name: DatasetName,
     },
 }
 
 impl TryFrom<Input> for Command {
     type Error = String;
 
-    fn try_from(mut input: Input) -> Result<Self, Self::Error> {
+    fn try_from(input: Input) -> Result<Self, Self::Error> {
         if input.program != ZFS {
             return Err(format!("Not zfs command: {}", input.program));
         }
@@ -69,11 +69,29 @@ impl TryFrom<Input> for Command {
                 while input.args().len() > 1 {
                     // Volume Size (volumes only, required)
                     if input.shift_arg_if("-V")? {
+                        let size_str = input.shift_arg()?;
+
+                        let (size_str, multiplier) = if let Some(size_str) =
+                            size_str.strip_suffix('G')
+                        {
+                            (size_str, (1 << 30))
+                        } else if let Some(size_str) =
+                            size_str.strip_suffix('M')
+                        {
+                            (size_str, (1 << 20))
+                        } else if let Some(size_str) =
+                            size_str.strip_suffix('K')
+                        {
+                            (size_str, (1 << 10))
+                        } else {
+                            (size_str.as_str(), 1)
+                        };
+
                         size = Some(
-                            input
-                                .shift_arg()?
+                            size_str
                                 .parse::<u64>()
-                                .map_err(|e| e.to_string())?,
+                                .map_err(|e| e.to_string())?
+                                * multiplier,
                         );
                     // Sparse (volumes only, optional)
                     } else if input.shift_arg_if("-s")? {
@@ -95,12 +113,13 @@ impl TryFrom<Input> for Command {
                         properties.push((k.to_string(), v.to_string()));
                     }
                 }
-                let name = FilesystemName(input.shift_arg()?);
+                let name = input.shift_arg()?;
                 input.no_args_remaining()?;
 
                 if let Some(size) = size {
                     // Volume
                     let sparse = sparse.unwrap_or(false);
+                    let name = VolumeName(name);
                     Ok(Command::CreateVolume {
                         properties,
                         sparse,
@@ -113,6 +132,7 @@ impl TryFrom<Input> for Command {
                     if sparse.is_some() || blocksize.is_some() {
                         return Err("Using volume arguments, but forgot to specify '-V size'?".to_string());
                     }
+                    let name = FilesystemName(name);
                     Ok(Command::CreateFilesystem { properties, name })
                 }
             }
@@ -139,7 +159,7 @@ impl TryFrom<Input> for Command {
                             }
                         }
                     } else {
-                        name = Some(FilesystemName(arg));
+                        name = Some(DatasetName(arg));
                         input.no_args_remaining()?;
                     }
                 }
@@ -217,8 +237,8 @@ impl TryFrom<Input> for Command {
                     input
                         .args()
                         .into_iter()
-                        .map(|s| s.into())
-                        .collect::<Vec<String>>(),
+                        .map(|s| DatasetName(s.to_string()))
+                        .collect::<Vec<DatasetName>>(),
                 );
                 if !scripting || !parsable {
                     return Err("You should run 'zfs get' commands with the '-Hp' flags enabled".to_string());
@@ -288,16 +308,18 @@ impl TryFrom<Input> for Command {
                     } else {
                         // As soon as non-flag arguments are passed, the rest of
                         // the arguments are treated as datasets.
-                        datasets = Some(vec![arg]);
+                        datasets = Some(vec![DatasetName(arg.to_string())]);
                         break;
                     }
                 }
 
                 let remaining_datasets = input.args();
                 if !remaining_datasets.is_empty() {
-                    datasets
-                        .get_or_insert(vec![])
-                        .extend(remaining_datasets.into_iter().cloned());
+                    datasets.get_or_insert(vec![]).extend(
+                        remaining_datasets
+                            .into_iter()
+                            .map(|d| DatasetName(d.to_string())),
+                    );
                 };
 
                 if !scripting || !parsable {
@@ -322,7 +344,7 @@ impl TryFrom<Input> for Command {
                         .ok_or_else(|| format!("Bad property: {prop}"))?;
                     properties.push((k.to_string(), v.to_string()));
                 }
-                let name = FilesystemName(input.shift_arg()?);
+                let name = DatasetName(input.shift_arg()?);
                 input.no_args_remaining()?;
 
                 Ok(Command::Set { properties, name })
@@ -338,23 +360,34 @@ mod test {
 
     #[test]
     fn create() {
+        // Create a filesystem
         let Command::CreateFilesystem { properties, name } = Command::try_from(
             Input::shell(format!("{ZFS} create myfilesystem"))
         ).unwrap() else { panic!("wrong command") };
-
         assert_eq!(properties, vec![]);
         assert_eq!(name.0, "myfilesystem");
 
+        // Create a volume
         let Command::CreateVolume { properties, sparse, blocksize, size, name } = Command::try_from(
             Input::shell(format!("{ZFS} create -s -V 1024 -b 512 -o foo=bar myvolume"))
         ).unwrap() else { panic!("wrong command") };
-
         assert_eq!(properties, vec![("foo".to_string(), "bar".to_string())]);
         assert_eq!(name.0, "myvolume");
         assert!(sparse);
         assert_eq!(size, 1024);
         assert_eq!(blocksize, Some(512));
 
+        // Create a volume (using letter suffix)
+        let Command::CreateVolume { properties, sparse, blocksize, size, name } = Command::try_from(
+            Input::shell(format!("{ZFS} create -s -V 2G -b 512 -o foo=bar myvolume"))
+        ).unwrap() else { panic!("wrong command") };
+        assert_eq!(properties, vec![("foo".to_string(), "bar".to_string())]);
+        assert_eq!(name.0, "myvolume");
+        assert!(sparse);
+        assert_eq!(size, 2 << 30);
+        assert_eq!(blocksize, Some(512));
+
+        // Create volume (invalid)
         assert!(Command::try_from(Input::shell(format!(
             "{ZFS} create -s -b 512 -o foo=bar myvolume"
         )))
@@ -393,7 +426,10 @@ mod test {
         assert_eq!(depth, Some(10));
         assert_eq!(fields, vec!["name", "value"]);
         assert_eq!(properties, vec!["mounted", "available"]);
-        assert_eq!(datasets.unwrap(), vec!["myvolume"]);
+        assert_eq!(
+            datasets.unwrap(),
+            vec![DatasetName("myvolume".to_string())]
+        );
 
         assert!(Command::try_from(Input::shell(format!(
             "{ZFS} get -o name,value mounted,available myvolume"
@@ -414,7 +450,10 @@ mod test {
         assert!(recursive);
         assert_eq!(depth.unwrap(), 1);
         assert_eq!(properties, vec!["name"]);
-        assert_eq!(datasets.unwrap(), vec!["myfilesystem"]);
+        assert_eq!(
+            datasets.unwrap(),
+            vec![DatasetName("myfilesystem".to_string())]
+        );
 
         assert!(Command::try_from(Input::shell(format!(
             "{ZFS} list name myfilesystem"

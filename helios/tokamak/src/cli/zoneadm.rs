@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::host::parse::InputParser;
+use crate::cli::parse::InputParser;
 use crate::host::ZoneName;
 
 use helios_fusion::Input;
@@ -33,7 +33,7 @@ pub(crate) enum Command {
 impl TryFrom<Input> for Command {
     type Error = String;
 
-    fn try_from(mut input: Input) -> Result<Self, Self::Error> {
+    fn try_from(input: Input) -> Result<Self, Self::Error> {
         if input.program != ZONEADM {
             return Err(format!("Not zoneadm command: {}", input.program));
         }

@@ -7,12 +7,15 @@
 pub mod addrobj;
 mod error;
 mod executor;
+mod host;
 mod input;
+pub mod interfaces;
 mod output;
 pub mod zpool;
 
 pub use error::*;
 pub use executor::*;
+pub use host::*;
 pub use input::*;
 pub use output::*;
 

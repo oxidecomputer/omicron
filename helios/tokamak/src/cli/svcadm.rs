@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::host::parse::InputParser;
+use crate::cli::parse::InputParser;
 use crate::host::{ServiceName, ZoneName};
 
 use helios_fusion::Input;
@@ -16,7 +16,7 @@ pub enum Command {
 impl TryFrom<Input> for Command {
     type Error = String;
 
-    fn try_from(mut input: Input) -> Result<Self, Self::Error> {
+    fn try_from(input: Input) -> Result<Self, Self::Error> {
         if input.program != SVCADM {
             return Err(format!("Not svcadm command: {}", input.program));
         }

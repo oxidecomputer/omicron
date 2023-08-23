@@ -2,9 +2,9 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-mod executor;
-mod host;
-mod libc;
-mod swapctl;
+//! Interface to the libc API
 
-pub use executor::*;
+pub trait Libc {
+    /// sysconf(3c)
+    fn sysconf(&self, arg: i32) -> std::io::Result<i64>;
+}

@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::host::parse::InputParser;
+use crate::cli::parse::InputParser;
 use crate::host::{ServiceName, ZoneName};
 
 use camino::Utf8PathBuf;
@@ -54,7 +54,7 @@ pub(crate) enum Command {
 impl TryFrom<Input> for Command {
     type Error = String;
 
-    fn try_from(mut input: Input) -> Result<Self, Self::Error> {
+    fn try_from(input: Input) -> Result<Self, Self::Error> {
         if input.program != SVCCFG {
             return Err(format!("Not svccfg command: {}", input.program));
         }
@@ -105,7 +105,7 @@ impl TryFrom<Input> for Command {
                     .map_err(|e| e.to_string())?;
 
                 let group_type = input.shift_arg()?;
-                if let Some(flags) = input.shift_arg().ok() {
+                if let Some(_flags) = input.shift_arg().ok() {
                     return Err(
                         "Parsing of optional flags not implemented".to_string()
                     );
