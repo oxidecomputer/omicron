@@ -1622,7 +1622,6 @@ impl ServiceManager {
                 }
                 ServiceType::Oximeter { address } => {
                     info!(self.inner.log, "Setting up oximeter service");
-
                     smfh.setprop("config/id", request.zone.id)?;
                     smfh.setprop("config/address", address.to_string())?;
                     smfh.refresh()?;

@@ -161,10 +161,6 @@ impl ClickHouseInstance {
             })?;
 
         let data_path = data_dir.path().to_path_buf();
-        // TODO: Poll for "<Information> Application: Ready for connections."
-        // using a similar mechanism to:
-        // let port = wait_for_port(log_path).await?;
-
         let port: u16 = port.parse()?;
 
         let result = wait_for_ready(log_path).await;
@@ -241,10 +237,6 @@ impl ClickHouseInstance {
             })?;
 
         let data_path = data_dir.path().to_path_buf();
-        // TODO: Poll for information that the keepers have formed
-        // quorum and are listening. Perhaps the result of
-        // `echo mntr | nc <host> <port>`, using a similar mechanism to:
-        // let port = wait_for_port(log_path).await?;
         let port: u16 = port.parse()?;
 
         let result = wait_for_ready(log_path).await;

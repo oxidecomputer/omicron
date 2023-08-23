@@ -16,9 +16,8 @@
       <envvar name="LD_LIBRARY_PATH" value="/opt/ooce/pgsql-13/lib/amd64" />
     </method_environment>
   </method_context>
-  <!-- TODO: If it is a single zone start in single node mode (check ch and keepers?), else do replicated -->
   <exec_method type='method' name='start'
-    exec='ctrun -l child -o noorphan,regent /opt/oxide/oximeter/bin/oximeter run /var/svc/manifest/site/oximeter/config.toml --replicated --address %{config/address} --id %{config/id} &amp;'
+    exec='ctrun -l child -o noorphan,regent /opt/oxide/oximeter/bin/oximeter run /var/svc/manifest/site/oximeter/config.toml --address %{config/address} --id %{config/id} &amp;'
     timeout_seconds='0' />
   <exec_method type='method' name='stop' exec=':kill' timeout_seconds='0' />
 

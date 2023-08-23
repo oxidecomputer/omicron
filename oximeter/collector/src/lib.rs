@@ -305,7 +305,6 @@ impl OximeterAgent {
         db_config: DbConfig,
         resolver: &Resolver,
         log: &Logger,
-        replicated: bool,
     ) -> Result<Self, Error> {
         let (result_sender, result_receiver) = mpsc::channel(8);
         let log = log.new(o!("component" => "oximeter-agent", "collector_id" => id.to_string()));
@@ -322,6 +321,7 @@ impl OximeterAgent {
             )
         };
         let client = Client::new(db_address, &log);
+        let replicated = client.is_oximeter_cluster().await?;
         if !replicated {
             client.init_single_node_db().await?;
         } else {
@@ -459,13 +459,12 @@ impl Oximeter {
     pub async fn new(
         config: &Config,
         args: &OximeterArguments,
-        replicated: bool,
     ) -> Result<Self, Error> {
         let log = config
             .log
             .to_logger("oximeter")
             .map_err(|msg| Error::Server(msg.to_string()))?;
-        Self::with_logger(config, args, log, replicated).await
+        Self::with_logger(config, args, log).await
     }
 
     /// Create a new `Oximeter`, specifying an alternative logger to use.
@@ -476,7 +475,6 @@ impl Oximeter {
         config: &Config,
         args: &OximeterArguments,
         log: Logger,
-        replicated: bool,
     ) -> Result<Self, Error> {
         let (drain, registration) = slog_dtrace::with_drain(log);
         let log = slog::Logger::root(drain.fuse(), o!(FileKv));
@@ -497,10 +495,8 @@ impl Oximeter {
         let make_agent = || async {
             debug!(log, "creating ClickHouse client");
             Ok(Arc::new(
-                OximeterAgent::with_id(
-                    args.id, config.db, &resolver, &log, replicated,
-                )
-                .await?,
+                OximeterAgent::with_id(args.id, config.db, &resolver, &log)
+                    .await?,
             ))
         };
         let log_client_failure = |error, delay| {

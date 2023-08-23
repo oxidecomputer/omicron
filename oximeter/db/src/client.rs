@@ -248,6 +248,13 @@ impl Client {
         .map_err(|e| Error::Database(e.to_string()))
     }
 
+    // Verifies if instance is part of oximeter_cluster
+    pub async fn is_oximeter_cluster(&self) -> Result<bool, Error> {
+        let sql = String::from("SHOW CLUSTERS FORMAT JSONEachRow;");
+        let res = self.execute_with_body(sql).await?;
+        Ok(res.contains("oximeter_cluster"))
+    }
+
     // Verifies that the schema for a sample matches the schema in the database.
     //
     // If the schema exists in the database, and the sample matches that schema, `None` is
@@ -653,7 +660,10 @@ mod tests {
             .expect("Failed to start ClickHouse");
         let address = SocketAddr::new("::1".parse().unwrap(), db.port());
 
-        Client::new(address, &log).wipe_single_node_db().await.unwrap();
+        let client = Client::new(address, &log);
+        assert!(!client.is_oximeter_cluster().await.unwrap());
+
+        client.wipe_single_node_db().await.unwrap();
         db.cleanup().await.expect("Failed to cleanup ClickHouse server");
     }
 
@@ -744,6 +754,7 @@ mod tests {
 
         // Create database in node 1
         let client_1 = Client::new(r1_address, &log);
+        assert!(client_1.is_oximeter_cluster().await.unwrap());
         client_1
             .init_replicated_db()
             .await
@@ -756,6 +767,7 @@ mod tests {
 
         // Verify database exists in node 2
         let client_2 = Client::new(r2_address, &log);
+        assert!(client_2.is_oximeter_cluster().await.unwrap());
         let sql = String::from("SHOW DATABASES FORMAT JSONEachRow;");
 
         let result = client_2.execute_with_body(sql).await.unwrap();
