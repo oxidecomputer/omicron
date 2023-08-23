@@ -797,7 +797,6 @@ pub(crate) mod test {
     use omicron_sled_agent::sim::SledAgent;
     use slog::error;
     use slog::Logger;
-    use std::num::NonZeroU32;
     use uuid::Uuid;
 
     type ControlPlaneTestContext =
@@ -1121,31 +1120,10 @@ pub(crate) mod test {
 
         let params = new_test_params(&opctx, project_id);
         let dag = create_saga_dag::<SagaDiskCreate>(params).unwrap();
-
-        let runnable_saga =
-            nexus.create_runnable_saga(dag.clone()).await.unwrap();
-
-        // Cause all actions to run twice. The saga should succeed regardless!
-        for node in dag.get_nodes() {
-            nexus
-                .sec()
-                .saga_inject_repeat(
-                    runnable_saga.id(),
-                    node.index(),
-                    steno::RepeatInjected {
-                        action: NonZeroU32::new(2).unwrap(),
-                        undo: NonZeroU32::new(1).unwrap(),
-                    },
-                )
-                .await
-                .unwrap();
-        }
-
-        // Verify that the saga's execution succeeded.
-        nexus
-            .run_saga(runnable_saga)
-            .await
-            .expect("Saga should have succeeded");
+        crate::app::sagas::test_helpers::actions_succeed_idempotently(
+            nexus, dag,
+        )
+        .await;
 
         destroy_disk(&cptestctx).await;
         verify_clean_slate(&cptestctx, &test).await;

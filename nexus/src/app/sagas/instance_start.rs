@@ -511,7 +511,6 @@ mod test {
         ByteCount, IdentityMetadataCreateParams, InstanceCpuCount,
     };
     use sled_agent_client::TestInterfaces as _;
-    use std::num::NonZeroU32;
     use std::sync::Arc;
     use uuid::Uuid;
 
@@ -693,29 +692,7 @@ mod test {
         };
 
         let dag = create_saga_dag::<SagaInstanceStart>(params).unwrap();
-        let runnable_saga =
-            nexus.create_runnable_saga(dag.clone()).await.unwrap();
-
-        for node in dag.get_nodes() {
-            nexus
-                .sec()
-                .saga_inject_repeat(
-                    runnable_saga.id(),
-                    node.index(),
-                    steno::RepeatInjected {
-                        action: NonZeroU32::new(2).unwrap(),
-                        undo: NonZeroU32::new(1).unwrap(),
-                    },
-                )
-                .await
-                .unwrap();
-        }
-
-        nexus
-            .run_saga(runnable_saga)
-            .await
-            .expect("Saga should have succeeded");
-
+        test_helpers::actions_succeed_idempotently(nexus, dag).await;
         instance_simulate(cptestctx, nexus, &instance.identity.id).await;
         let new_db_instance =
             fetch_db_instance(cptestctx, &opctx, instance.identity.id).await;

@@ -17,6 +17,7 @@ use omicron_common::api::external::NameOrId;
 use sled_agent_client::TestInterfaces as _;
 use slog::{info, warn, Logger};
 use std::{num::NonZeroU32, sync::Arc};
+use steno::SagaDag;
 use uuid::Uuid;
 
 type ControlPlaneTestContext =
@@ -138,6 +139,33 @@ pub async fn instance_simulate_by_name(
     let (.., instance) = instance_lookup.fetch().await.unwrap();
     let sa = nexus.instance_sled_by_id(&instance.id()).await.unwrap();
     sa.instance_finish_transition(instance.id()).await;
+}
+
+/// Tests that the saga described by `dag` succeeds if each of its nodes is
+/// repeated.
+///
+/// # Panics
+///
+/// Asserts that a saga can be created from the supplied DAG and that it
+/// succeeds when it is executed.
+pub async fn actions_succeed_idempotently(nexus: &Arc<Nexus>, dag: SagaDag) {
+    let runnable_saga = nexus.create_runnable_saga(dag.clone()).await.unwrap();
+    for node in dag.get_nodes() {
+        nexus
+            .sec()
+            .saga_inject_repeat(
+                runnable_saga.id(),
+                node.index(),
+                steno::RepeatInjected {
+                    action: NonZeroU32::new(2).unwrap(),
+                    undo: NonZeroU32::new(1).unwrap(),
+                },
+            )
+            .await
+            .unwrap();
+    }
+
+    nexus.run_saga(runnable_saga).await.expect("Saga should have succeeded");
 }
 
 /// Tests that a saga `S` functions properly when any of its nodes fails and
