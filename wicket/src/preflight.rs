@@ -86,6 +86,10 @@ impl PreflightArgs {
 }
 
 async fn poll_uplink_status_until_complete(client: Client) -> Result<()> {
+    // We have to pick a max width for our progress "bar" (actually a spinner
+    // with a message). Let's pick something slightly smaller than 80 columns.
+    const PROGRESS_BAR_WIDTH: u64 = 72;
+
     let mut last_seen = None;
     let mut all_steps = None;
     let mut progress_bar = None;
@@ -127,7 +131,7 @@ async fn poll_uplink_status_until_complete(client: Client) -> Result<()> {
         // Is this a new active step that needs a new progress bar?
         if progress_bar.is_none() {
             progress_bar = Some(
-                ProgressBar::new(72)
+                ProgressBar::new(PROGRESS_BAR_WIDTH)
                     .with_style(
                         ProgressStyle::with_template("{spinner:.green} {msg}")
                             .unwrap(),
