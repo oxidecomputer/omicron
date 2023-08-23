@@ -178,6 +178,7 @@ either = "1.9.0"
 expectorate = "1.0.7"
 fatfs = "0.3.6"
 flate2 = "1.0.27"
+flume = "0.11.0"
 fs-err = "2.9.0"
 futures = "0.3.28"
 gateway-client = { path = "gateway-client" }

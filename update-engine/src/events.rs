@@ -972,6 +972,15 @@ impl<S: StepSpec> StepOutcome<S> {
             Self::Success { .. } | Self::Warning { .. } => false,
         }
     }
+
+    /// Returns the message associated with this outcome, if one exists.
+    pub fn message(&self) -> Option<&Cow<'static, str>> {
+        match self {
+            StepOutcome::Success { message, .. } => message.as_ref(),
+            StepOutcome::Warning { message, .. }
+            | StepOutcome::Skipped { message, .. } => Some(message),
+        }
+    }
 }
 
 #[derive(Deserialize, Serialize, JsonSchema)]
