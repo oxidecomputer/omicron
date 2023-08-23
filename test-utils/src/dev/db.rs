@@ -34,11 +34,11 @@ const COCKROACHDB_START_TIMEOUT_DEFAULT: Duration = Duration::from_secs(30);
 const COCKROACHDB_DEFAULT_LISTEN_PORT: u16 = 0;
 
 /// CockroachDB database name
-// This MUST be kept in sync with src/sql/dbinit.sql and src/sql/dbwipe.sql.
+// This MUST be kept in sync with dbinit.sql and dbwipe.sql.
 const COCKROACHDB_DATABASE: &'static str = "omicron";
 /// CockroachDB user name
 // TODO-security This should really use "omicron", which is created in
-// src/sql/dbinit.sql.  Doing that requires either hardcoding a password or
+// dbinit.sql.  Doing that requires either hardcoding a password or
 // (better) using `cockroach cert` to set up a CA and certificates for this
 // user.  We should modify the infrastructure here to do that rather than use
 // "root" here.
@@ -138,8 +138,8 @@ impl CockroachStarterBuilder {
 
     /// Redirect stdout and stderr for the "cockroach" process to files within
     /// the temporary directory.  This is used by the test suite so that people
-    /// don't get reams of irrelevant output when running `cargo test`.  This
-    /// will be cleaned up as usual on success.
+    /// don't get reams of irrelevant output when running `cargo nextest run`.
+    /// This will be cleaned up as usual on success.
     pub fn redirect_stdio_to_files(&mut self) -> &mut Self {
         self.redirect_stdio = true;
         self
@@ -747,7 +747,7 @@ fn interpret_exit(
 pub async fn populate(
     client: &tokio_postgres::Client,
 ) -> Result<(), anyhow::Error> {
-    let sql = include_str!("../../../common/src/sql/dbinit.sql");
+    let sql = include_str!("../../../schema/crdb/dbinit.sql");
     client.batch_execute(sql).await.context("populating Omicron database")
 
     // It's tempting to put hardcoded data in here (like builtin users).  That
@@ -762,7 +762,7 @@ pub async fn populate(
 pub async fn wipe(
     client: &tokio_postgres::Client,
 ) -> Result<(), anyhow::Error> {
-    let sql = include_str!("../../../common/src/sql/dbwipe.sql");
+    let sql = include_str!("../../../schema/crdb/dbwipe.sql");
     client.batch_execute(sql).await.context("wiping Omicron database")
 }
 
@@ -1353,14 +1353,13 @@ mod test {
             eprintln!("populating database (1)");
             database.populate().await.expect("populating database (1)");
             assert!(has_omicron_schema(&client).await);
-            // populate() fails if the database is already populated.  We don't
-            // want to accidentally destroy data by wiping it first
-            // automatically.
-            database.populate().await.expect_err("populated database twice");
+            // The populate step is idempotent, and should not cause
+            // changes if executed twice.
+            database.populate().await.expect("populated database twice");
             eprintln!("wiping database (1)");
             database.wipe().await.expect("wiping database (1)");
             assert!(!has_omicron_schema(&client).await);
-            // On the other hand, wipe() is idempotent.
+            // wipe() is idempotent.
             database.wipe().await.expect("wiping database (2)");
             assert!(!has_omicron_schema(&client).await);
             // populate() should work again after a wipe().

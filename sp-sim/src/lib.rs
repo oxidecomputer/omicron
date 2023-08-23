@@ -4,6 +4,7 @@
 
 pub mod config;
 mod gimlet;
+mod helpers;
 mod rot;
 mod server;
 mod sidecar;

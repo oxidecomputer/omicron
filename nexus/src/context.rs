@@ -168,16 +168,21 @@ impl ServerContext {
             nexus_config::Database::FromUrl { url } => url.clone(),
             nexus_config::Database::FromDns => {
                 info!(log, "Accessing DB url from DNS");
-                let address = loop {
+                // It's been requested but unfortunately not supported to directly
+                // connect using SRV based lookup.
+                // TODO-robustness: the set of cockroachdb hosts we'll use will be
+                // fixed to whatever we got back from DNS at Nexus start. This means
+                // a new cockroachdb instance won't picked up until Nexus restarts.
+                let addrs = loop {
                     match resolver
-                        .lookup_socket_v6(ServiceName::Cockroach)
+                        .lookup_all_socket_v6(ServiceName::Cockroach)
                         .await
                     {
-                        Ok(address) => break address,
+                        Ok(addrs) => break addrs,
                         Err(e) => {
                             warn!(
                                 log,
-                                "Failed to lookup cockroach address: {e}"
+                                "Failed to lookup cockroach addresses: {e}"
                             );
                             tokio::time::sleep(std::time::Duration::from_secs(
                                 1,
@@ -186,9 +191,14 @@ impl ServerContext {
                         }
                     }
                 };
-                info!(log, "DB address: {}", address);
+                let addrs_str = addrs
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .join(",");
+                info!(log, "DB addresses: {}", addrs_str);
                 PostgresConfigWithUrl::from_str(&format!(
-                    "postgresql://root@{address}/omicron?sslmode=disable",
+                    "postgresql://root@{addrs_str}/omicron?sslmode=disable",
                 ))
                 .map_err(|e| format!("Cannot parse Postgres URL: {}", e))?
             }

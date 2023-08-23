@@ -4,16 +4,21 @@
 
 //! HTTP entrypoint functions for the sled agent's exposed API
 
+use super::sled_agent::SledAgent;
 use crate::params::{
-    DiskEnsureBody, InstanceEnsureBody, InstancePutMigrationIdsBody,
-    InstancePutStateBody, InstancePutStateResponse, InstanceUnregisterResponse,
-    ServiceEnsureBody, SledRole, TimeSync, VpcFirewallRulesEnsureBody,
-    ZoneBundleId, ZoneBundleMetadata, Zpool,
+    CleanupContextUpdate, DiskEnsureBody, InstanceEnsureBody,
+    InstancePutMigrationIdsBody, InstancePutStateBody,
+    InstancePutStateResponse, InstanceUnregisterResponse, ServiceEnsureBody,
+    SledRole, TimeSync, VpcFirewallRulesEnsureBody, ZoneBundleId,
+    ZoneBundleMetadata, Zpool,
 };
+use crate::sled_agent::Error as SledAgentError;
+use crate::zone_bundle;
+use camino::Utf8PathBuf;
 use dropshot::{
     endpoint, ApiDescription, FreeformBody, HttpError, HttpResponseCreated,
-    HttpResponseHeaders, HttpResponseOk, HttpResponseUpdatedNoContent, Path,
-    RequestContext, TypedBody,
+    HttpResponseDeleted, HttpResponseHeaders, HttpResponseOk,
+    HttpResponseUpdatedNoContent, Path, Query, RequestContext, TypedBody,
 };
 use illumos_utils::opte::params::SetVirtualNetworkInterfaceHost;
 use omicron_common::api::external::Error;
@@ -22,9 +27,8 @@ use omicron_common::api::internal::nexus::InstanceRuntimeState;
 use omicron_common::api::internal::nexus::UpdateArtifactId;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use uuid::Uuid;
-
-use super::sled_agent::SledAgent;
 
 type SledApiDescription = ApiDescription<SledAgent>;
 
@@ -41,8 +45,14 @@ pub fn api() -> SledApiDescription {
         api.register(services_put)?;
         api.register(zones_list)?;
         api.register(zone_bundle_list)?;
+        api.register(zone_bundle_list_all)?;
         api.register(zone_bundle_create)?;
         api.register(zone_bundle_get)?;
+        api.register(zone_bundle_delete)?;
+        api.register(zone_bundle_utilization)?;
+        api.register(zone_bundle_cleanup_context)?;
+        api.register(zone_bundle_cleanup_context_update)?;
+        api.register(zone_bundle_cleanup)?;
         api.register(sled_role_get)?;
         api.register(set_v2p)?;
         api.register(del_v2p)?;
@@ -67,10 +77,33 @@ struct ZonePathParam {
     zone_name: String,
 }
 
-/// List the zone bundles that are current available for a zone.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
+struct ZoneBundleFilter {
+    /// An optional substring used to filter zone bundles.
+    filter: Option<String>,
+}
+
+/// List all zone bundles that exist, even for now-deleted zones.
 #[endpoint {
     method = GET,
-    path = "/zones/{zone_name}/bundles",
+    path = "/zones/bundles",
+}]
+async fn zone_bundle_list_all(
+    rqctx: RequestContext<SledAgent>,
+    query: Query<ZoneBundleFilter>,
+) -> Result<HttpResponseOk<Vec<ZoneBundleMetadata>>, HttpError> {
+    let sa = rqctx.context();
+    let filter = query.into_inner().filter;
+    sa.list_all_zone_bundles(filter.as_deref())
+        .await
+        .map(HttpResponseOk)
+        .map_err(HttpError::from)
+}
+
+/// List the zone bundles that are available for a running zone.
+#[endpoint {
+    method = GET,
+    path = "/zones/bundles/{zone_name}",
 }]
 async fn zone_bundle_list(
     rqctx: RequestContext<SledAgent>,
@@ -88,7 +121,7 @@ async fn zone_bundle_list(
 /// Ask the sled agent to create a zone bundle.
 #[endpoint {
     method = POST,
-    path = "/zones/{zone_name}/bundles",
+    path = "/zones/bundles/{zone_name}",
 }]
 async fn zone_bundle_create(
     rqctx: RequestContext<SledAgent>,
@@ -106,7 +139,7 @@ async fn zone_bundle_create(
 /// Fetch the binary content of a single zone bundle.
 #[endpoint {
     method = GET,
-    path = "/zones/{zone_name}/bundles/{bundle_id}",
+    path = "/zones/bundles/{zone_name}/{bundle_id}",
 }]
 async fn zone_bundle_get(
     rqctx: RequestContext<SledAgent>,
@@ -116,12 +149,15 @@ async fn zone_bundle_get(
     let zone_name = params.zone_name;
     let bundle_id = params.bundle_id;
     let sa = rqctx.context();
-    let Some(path) = sa.get_zone_bundle_path(&zone_name, &bundle_id)
+    let Some(path) = sa.get_zone_bundle_paths(&zone_name, &bundle_id)
         .await
-        .map_err(HttpError::from)? else {
-            return Err(HttpError::for_not_found(
-                None,
-                format!("No zone bundle for zone '{}' with ID '{}'", zone_name, bundle_id)));
+        .map_err(HttpError::from)?
+        .into_iter()
+        .next()
+    else {
+        return Err(HttpError::for_not_found(
+            None,
+            format!("No zone bundle for zone '{}' with ID '{}'", zone_name, bundle_id)));
     };
     let f = tokio::fs::File::open(&path).await.map_err(|e| {
         HttpError::for_internal_error(format!(
@@ -137,6 +173,115 @@ async fn zone_bundle_get(
         "application/gzip".try_into().unwrap(),
     );
     Ok(response)
+}
+
+/// Delete a zone bundle.
+#[endpoint {
+    method = DELETE,
+    path = "/zones/bundles/{zone_name}/{bundle_id}",
+}]
+async fn zone_bundle_delete(
+    rqctx: RequestContext<SledAgent>,
+    params: Path<ZoneBundleId>,
+) -> Result<HttpResponseDeleted, HttpError> {
+    let params = params.into_inner();
+    let zone_name = params.zone_name;
+    let bundle_id = params.bundle_id;
+    let sa = rqctx.context();
+    let paths = sa
+        .get_zone_bundle_paths(&zone_name, &bundle_id)
+        .await
+        .map_err(HttpError::from)?;
+    if paths.is_empty() {
+        return Err(HttpError::for_not_found(
+            None,
+            format!(
+                "No zone bundle for zone '{}' with ID '{}'",
+                zone_name, bundle_id
+            ),
+        ));
+    };
+    for path in paths.into_iter() {
+        tokio::fs::remove_file(&path).await.map_err(|e| {
+            HttpError::for_internal_error(format!(
+                "Failed to delete zone bundle: {e}"
+            ))
+        })?;
+    }
+    Ok(HttpResponseDeleted())
+}
+
+/// Return utilization information about all zone bundles.
+#[endpoint {
+    method = GET,
+    path = "/zones/bundle-cleanup/utilization",
+}]
+async fn zone_bundle_utilization(
+    rqctx: RequestContext<SledAgent>,
+) -> Result<
+    HttpResponseOk<BTreeMap<Utf8PathBuf, zone_bundle::BundleUtilization>>,
+    HttpError,
+> {
+    let sa = rqctx.context();
+    sa.zone_bundle_utilization()
+        .await
+        .map(HttpResponseOk)
+        .map_err(HttpError::from)
+}
+
+/// Return context used by the zone-bundle cleanup task.
+#[endpoint {
+    method = GET,
+    path = "/zones/bundle-cleanup/context",
+}]
+async fn zone_bundle_cleanup_context(
+    rqctx: RequestContext<SledAgent>,
+) -> Result<HttpResponseOk<zone_bundle::CleanupContext>, HttpError> {
+    let sa = rqctx.context();
+    Ok(HttpResponseOk(sa.zone_bundle_cleanup_context().await))
+}
+
+/// Update context used by the zone-bundle cleanup task.
+#[endpoint {
+    method = PUT,
+    path = "/zones/bundle-cleanup/context",
+}]
+async fn zone_bundle_cleanup_context_update(
+    rqctx: RequestContext<SledAgent>,
+    body: TypedBody<CleanupContextUpdate>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let sa = rqctx.context();
+    let params = body.into_inner();
+    let new_period = params
+        .period
+        .map(zone_bundle::CleanupPeriod::new)
+        .transpose()
+        .map_err(|e| HttpError::from(SledAgentError::from(e)))?;
+    let new_priority = params.priority;
+    let new_limit = params
+        .storage_limit
+        .map(zone_bundle::StorageLimit::new)
+        .transpose()
+        .map_err(|e| HttpError::from(SledAgentError::from(e)))?;
+    sa.update_zone_bundle_cleanup_context(new_period, new_limit, new_priority)
+        .await
+        .map(|_| HttpResponseUpdatedNoContent())
+        .map_err(HttpError::from)
+}
+
+/// Trigger a zone bundle cleanup.
+#[endpoint {
+    method = POST,
+    path = "/zones/bundle-cleanup",
+}]
+async fn zone_bundle_cleanup(
+    rqctx: RequestContext<SledAgent>,
+) -> Result<
+    HttpResponseOk<BTreeMap<Utf8PathBuf, zone_bundle::CleanupCount>>,
+    HttpError,
+> {
+    let sa = rqctx.context();
+    sa.zone_bundle_cleanup().await.map(HttpResponseOk).map_err(HttpError::from)
 }
 
 /// List the zones that are currently managed by the sled agent.
@@ -167,8 +312,18 @@ async fn services_put(
     // times out) could result in leaving zones partially configured and the
     // in-memory state of the service manager invalid. See:
     // oxidecomputer/omicron#3098.
-    match tokio::spawn(async move { sa.services_ensure(body_args).await }).await
-    {
+    let handler = async move {
+        match sa.services_ensure(body_args).await {
+            Ok(()) => Ok(()),
+            Err(e) => {
+                // Log the error here to make things clear even if the client
+                // has already disconnected.
+                error!(sa.logger(), "failed to initialize services: {e}");
+                Err(e)
+            }
+        }
+    };
+    match tokio::spawn(handler).await {
         Ok(result) => result.map_err(|e| Error::from(e))?,
 
         Err(e) => {

@@ -18,14 +18,15 @@ use artifacts::{WicketdArtifactServer, WicketdArtifactStore};
 use bootstrap_addrs::BootstrapPeers;
 pub use config::Config;
 pub(crate) use context::ServerContext;
+use dropshot::{ConfigDropshot, HandlerTaskMode, HttpServer};
 pub use installinator_progress::{IprUpdateTracker, RunningUpdateState};
 pub use inventory::{RackV1Inventory, SpInventory};
 use mgs::make_mgs_client;
 pub(crate) use mgs::{MgsHandle, MgsManager};
+use omicron_common::FileKv;
 use sled_hardware::Baseboard;
-
-use dropshot::{ConfigDropshot, HandlerTaskMode, HttpServer};
 use slog::{debug, error, o, Drain};
+use std::sync::OnceLock;
 use std::{
     net::{SocketAddr, SocketAddrV6},
     sync::Arc,
@@ -65,7 +66,7 @@ impl Server {
     pub async fn start(log: slog::Logger, args: Args) -> Result<Self, String> {
         let (drain, registration) = slog_dtrace::with_drain(log);
 
-        let log = slog::Logger::root(drain.fuse(), slog::o!());
+        let log = slog::Logger::root(drain.fuse(), slog::o!(FileKv));
         if let slog_dtrace::ProbeRegistration::Failed(e) = registration {
             let msg = format!("failed to register DTrace probes: {}", e);
             error!(log, "{}", msg);
@@ -111,6 +112,7 @@ impl Server {
                     mgs_handle,
                     mgs_client,
                     log: log.clone(),
+                    local_switch_id: OnceLock::new(),
                     bootstrap_peers,
                     update_tracker: update_tracker.clone(),
                     baseboard: args.baseboard,

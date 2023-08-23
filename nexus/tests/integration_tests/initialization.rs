@@ -60,7 +60,8 @@ async fn test_nexus_boots_before_cockroach() {
     //
     // This is necessary for the prior call to "start Nexus" to succeed.
     info!(log, "Starting CRDB");
-    builder.start_crdb().await;
+    let populate = true;
+    builder.start_crdb(populate).await;
     info!(log, "Started CRDB");
 
     info!(log, "Populating internal DNS records");
@@ -98,7 +99,8 @@ async fn test_nexus_boots_before_dendrite() {
 
     let log = builder.logctx.log.new(o!("component" => "test"));
 
-    builder.start_crdb().await;
+    let populate = true;
+    builder.start_crdb(populate).await;
     builder.start_internal_dns().await;
     builder.start_external_dns().await;
 
@@ -158,7 +160,8 @@ async fn test_nexus_boots_before_dendrite() {
 async fn nexus_schema_test_setup(
     builder: &mut ControlPlaneTestContextBuilder<'_, omicron_nexus::Server>,
 ) {
-    builder.start_crdb().await;
+    let populate = true;
+    builder.start_crdb(populate).await;
     builder.start_internal_dns().await;
     builder.start_external_dns().await;
     builder.start_dendrite(SwitchLocation::Switch0).await;
@@ -217,11 +220,11 @@ async fn test_nexus_does_not_boot_without_valid_schema() {
             .expect("Failed to connect to CRDB")
             .batch_execute(
                 &format!(
-                    "UPDATE omicron.public.db_metadata SET value = '{schema}' WHERE name = 'schema_version'"
+                    "UPDATE omicron.public.db_metadata SET version = '{schema}' WHERE singleton = true"
                 )
             )
             .await
-            .expect("Failled to update schema");
+            .expect("Failed to update schema");
 
         assert!(
             timeout(
@@ -268,7 +271,7 @@ async fn test_nexus_does_not_boot_until_schema_updated() {
     // "test_nexus_does_not_boot_without_valid_schema" test.
     crdb.batch_execute(
         &format!(
-            "UPDATE omicron.public.db_metadata SET value = '{bad_schema}' WHERE name = 'schema_version'"
+            "UPDATE omicron.public.db_metadata SET version = '{bad_schema}' WHERE singleton = true"
         )
     )
     .await
@@ -282,7 +285,7 @@ async fn test_nexus_does_not_boot_until_schema_updated() {
         sleep(Duration::from_secs(1)).await;
         crdb.batch_execute(
             &format!(
-                "UPDATE omicron.public.db_metadata SET value = '{good_schema}' WHERE name = 'schema_version'"
+                "UPDATE omicron.public.db_metadata SET version = '{good_schema}' WHERE singleton = true"
             )
         )
         .await

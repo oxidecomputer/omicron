@@ -84,7 +84,7 @@ pub enum DumpAdmError {
     Execution { dump_slice: Utf8PathBuf, savecore_dir: Option<Utf8PathBuf> },
 
     #[error("Invalid invocation of dumpadm: {0:?} {1:?}")]
-    InvalidCommand(Vec<String>, std::ffi::OsString),
+    InvalidCommand(Vec<String>, OsString),
 
     #[error("dumpadm process was terminated by a signal.")]
     TerminatedBySignal,
@@ -98,7 +98,7 @@ pub enum DumpAdmError {
     Mkdir(std::io::Error),
 
     #[error("savecore failed: {0:?}")]
-    SavecoreFailure(std::ffi::OsString),
+    SavecoreFailure(OsString),
 
     #[error("Failed to execute dumpadm process: {0}")]
     ExecDumpadm(std::io::Error),
@@ -197,7 +197,7 @@ fn savecore() -> Result<Option<OsString>, DumpAdmError> {
     cmd.arg("-v");
     let out = cmd.output().map_err(DumpAdmError::ExecSavecore)?;
     if out.status.success() {
-        if out.stdout.is_empty() {
+        if out.stdout.is_empty() || out.stdout == vec![b'\n'] {
             Ok(None)
         } else {
             Ok(Some(OsString::from_vec(out.stdout)))

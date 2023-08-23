@@ -118,7 +118,7 @@ pub struct UpdateArtifactId {
 //    must be left as a `todo!()` for now; `types::UpdateArtifactKind` will not
 //    be updated with the new variant until step 5 below.
 //
-// 3. Add it to <repo root>/common/src/sql/dbinit.sql under (CREATE TYPE
+// 3. Add it to the sql database schema under (CREATE TYPE
 //    omicron.public.update_artifact_kind).
 //
 //    TODO: After omicron ships this would likely involve a DB migration.
@@ -129,7 +129,7 @@ pub struct UpdateArtifactId {
 // 5. Regenerate the OpenAPI specs for nexus and sled-agent:
 //
 //    ```
-//    EXPECTORATE=overwrite cargo test -p omicron-nexus -p omicron-sled-agent openapi
+//    EXPECTORATE=overwrite cargo nextest run -p omicron-nexus -p omicron-sled-agent openapi
 //    ```
 //
 // 6. Return to <repo root>/{nexus-client,sled-agent-client}/lib.rs from step 2

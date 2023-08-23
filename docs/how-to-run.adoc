@@ -104,9 +104,10 @@ As an example, in this doc:
 +
 * The network is 192.168.1.0/24.
 * The network's gateway is 192.168.1.199.
-* You can carve off 192.168.1.20 - 192.168.1.29 for externally-facing services provided by the system.
-* You can carve off 192.168.1.30 as the address used by SoftNPU on the external network.
-* You can carve off 192.168.1.31 - 192.168.1.40 as the addresses used for Instances that need some public IPs (even if just for NAT to the internet).
+* You can carve off a range from 192.168.1.20 to 192.168.1.40 for use by the rack:
+** 192.168.1.20 - 192.168.1.29 for externally-facing services provided by the system,
+** 192.168.1.30 as the address used by SoftNPU on the external network, and
+** 192.168.1.31 - 192.168.1.40 as the addresses used for Instances that need some public IPs (even if just for NAT to the internet).
 2. Alternatively, you'll set up an "external" network that only exists on your test machine.  If you go this route, we'll choose 192.168.1.0/24 and all the same other details as in the case above, just for convenience.  In this mode, you'll need create your made-up network and give the global zone an IP address on it.  We'll use 192.168.1.199:
 +
 [source,text]
@@ -172,23 +173,39 @@ The rest of these instructions assume that you're building and running Omicron o
 The Sled Agent supports operation on both:
 
 * a Gimlet (i.e., real Oxide hardware), and
-* an ordinary PC that's been set up to look like a Gimlet using the `./tools_create_virtual_hardware.sh` script.
+* an ordinary PC that's been set up to look like a Gimlet using the `./tools/create_virtual_hardware.sh` script (described next).
 
 This script also sets up a "softnpu" zone to implement Boundary Services.  SoftNPU simulates the Tofino device that's used in real systems.  Just like Tofino, it can implement sled-to-sled networking, but that's beyond the scope of this doc.
 
-If you're running on a PC and using an existing network as your external network, you can usually just run:
+If you're running on a PC and using either of the networking configurations mentioned above, you can usually just run this script with a few environment vaiables set. These environment variables tell SoftNPU about your local network.  You will need the gateway for your network as well as the whole range of IPs that you've carved out for the Oxide system (see <<_external_networking>> above):
 
+[source,bash]
+----
+export GATEWAY_IP=192.168.1.199     # The gateway IP address for your local network (see above)
+export PXA_START=192.168.1.20       # The first IP address your Oxide cluster can use (see above)
+export PXA_END=192.168.1.40         # The last IP address your Oxide cluster can use (see above)
+----
+
+If you're using the fake sled-local external network mentioned above, then you'll need to set PHYSICAL_LINK:
+
+[source,bash]
+----
+export PHYSICAL_LINK=fake_external_stub0 	# The etherstub for the fake external network
+----
+
+If you're using an existing external network, you likely don't need to specify anything here because the script will choose one.  You can specify a particular one if you want, though:
+
+[source,bash]
+----
+export PHYSICAL_LINK=igb0           # The physical link for your external network.
+----
+
+Having set those variables, you're ready to run:
+
+[source,bash]
 ----
 $ pfexec ./tools/create_virtual_hardware.sh
 ----
-
-If above you made up a new "external" network only accessible within the Sled, then you'll want to override PHYSICAL_LINK:
-
-----
-$ PHYSICAL_LINK=fake_external_stub0 pfexec ./tools/create_virtual_hardware.sh
-----
-
-You can also use this override if you find that the script chose the wrong datalink to use for external connectivity for whatever reason.
 
 If you're running on a Gimlet, you don't need (or want) most of what `create_virtual_hardware.sh` does, but you do still need SoftNPU.  You'll have to look at the script and run that part by hand.
 
@@ -350,46 +367,6 @@ $ zoneadm list -cnv
 $ pfexec tail -f $(pfexec svcs -z oxz_nexus_<UUID> -L nexus)
 ----
 
-=== SoftNPU Configuration
-
-After installing omicron with `omicron-package install`, you can run the `softnpu-init.sh` script to configure SoftNPU.  If your external network is the one that your global zone is already on (i.e., an existing network), then you can likely just run:
-
-[source,console]
-----
-$ ./tools/scrimlet/softnpu-init.sh
-----
-
-In this case, `softnpu-init.sh` determines a network gateway by looking at your system's default gateway.  Again, the assumption for this use case is that your rack gets external connectivity the same way your system does because it's part of the same network.
-
-If your external network is one you made up above that's local to your own system, this won't be right.  In that case, you'll want to override the gateway IP to be the address of the global zone on your made-up network.  In our example:
-
-[source,console]
-----
-$ GATEWAY_IP=192.168.1.199 ./tools/scrimlet/softnpu-init.sh
-----
-
-In other configurations, you might use a different GATEWAY_IP.  You can also override GATEWAY_MAC if needed, but that shouldn't be necessary for the configurations described here.
-
-=== SoftNPU Proxy ARP Setup
-
-Services that require external connectivity (e.g. Nexus, Boundary NTP, External DNS) do so via OPTE using addresses from the services IP pool.  When using SoftNPU, we'll need to configure Proxy ARP for those addresses.
-
-In this snippet, `$SERVICE_IP_POOL_START` and `$SERVICE_IP_POOL_END` are the addresses you put into `config-rss.toml` above for `internal_services_ip_pool_ranges`:
-
-[source,console]
-----
-# dladm won't return leading zeroes but `scadm` expects them
-$ SOFTNPU_MAC=$(dladm show-vnic sc0_1 -p -o macaddress | gsed 's/\b\(\w\)\b/0\1/g')
-$ pfexec /opt/oxide/softnpu/stuff/scadm \
-  --server /opt/oxide/softnpu/stuff/server \
-  --client /opt/oxide/softnpu/stuff/client \
-  standalone \
-  add-proxy-arp \
-  $SERVICE_IP_POOL_START \
-  $SERVICE_IP_POOL_END \
-  $SOFTNPU_MAC
-----
-
 == Using Omicron
 
 At this point, the system should be up and running!  You should be able to reach the external API and web console from your external network.  But how?  The URL for the API and console will be:
@@ -407,7 +384,9 @@ $ dig recovery.sys.oxide.test @192.168.1.20 +short
 192.168.1.21
 ----
 
-Where did 192.168.1.20 come from?  That's the external address of the external DNS server.  We knew that only because it's the first address in the "internal services" IP pool in config-rss.toml.
+Where did 192.168.1.20 come from?  That's the external address of the external
+DNS server.  We knew that because it's listed in the `external_dns_ips` entry of
+the `config-rss.toml` file we're using.
 
 Having looked this up, the easiest thing will be to use `http://192.168.1.21` for your URL (replacing with `https` if you used a certificate, and replacing that IP if needed).  If you've set up networking right, you should be able to reach this from your web browser.  You may have to instruct the browser to accept a self-signed TLS certificate.  See also <<_connecting_securely_with_tls_using_the_cli>>.
 
@@ -426,12 +405,19 @@ An IP pool is needed to provide external connectivity to Instances.  The address
 
 [source,console]
 ----
-$ oxide api /v1/system/ip-pools/default/ranges/add --method POST --input - <<EOF
-{
-  "first": "192.168.1.31",
-  "last": "192.168.1.40"
+$ oxide ip-pool range add --pool default --first 192.168.1.31 --last 192.168.1.40
+success
+IpPoolRange {
+    id: 4a61e65a-d96d-4c56-9cfd-dc1e44d9e99b,
+    ip_pool_id: 1b1289a7-cefe-4a7e-a8c9-d93330846301,
+    range: V4(
+        Ipv4Range {
+            first: 192.168.1.31,
+            last: 192.168.1.40,
+        },
+    ),
+    time_created: 2023-08-02T16:31:43.679785Z,
 }
-EOF
 ----
 
 With SoftNPU you will generally also need to configure Proxy ARP.  Below, `IP_POOL_START` and `IP_POOL_END` are the first and last addresses you used in the previous command:
@@ -440,9 +426,9 @@ With SoftNPU you will generally also need to configure Proxy ARP.  Below, `IP_PO
 ----
 # dladm won't return leading zeroes but `scadm` expects them
 $ SOFTNPU_MAC=$(dladm show-vnic sc0_1 -p -o macaddress | gsed 's/\b\(\w\)\b/0\1/g')
-$ pfexec /opt/oxide/softnpu/stuff/scadm \
-  --server /opt/oxide/softnpu/stuff/server \
-  --client /opt/oxide/softnpu/stuff/client \
+$ pfexec zlogin sidecar_softnpu /softnpu/scadm \
+  --server /softnpu/server \
+  --client /softnpu/client \
   standalone \
   add-proxy-arp \
   $IP_POOL_START \
@@ -469,11 +455,6 @@ $ oxide api /v1/images?project=myproj --method POST --input - <<EOF
 {
   "name": "alpine",
   "description": "boot from propolis zone blob!",
-  "block_size": 512,
-  "distribution": {
-    "name": "alpine",
-    "version": "propolis-blob"
-  },
   "os": "linux",
   "version": "1",
   "source": {
@@ -491,14 +472,12 @@ $ oxide api /v1/images --method POST --input - <<EOF
 {
   "name": "crucible-tester-sparse",
   "description": "boot from a url!",
-  "block_size": 512,
-  "distribution": {
-    "name": "debian",
-    "version": "9"
-  },
+  "os": "debian",
+  "version": "9",
   "source": {
     "type": "url",
-    "url": "http://[fd00:1122:3344:101::15]/crucible-tester-sparse.img"
+    "url": "http://[fd00:1122:3344:101::15]/crucible-tester-sparse.img",
+    "block_size": 512
   }
 }
 EOF
@@ -506,7 +485,8 @@ EOF
 
 === Provision an instance using the CLI
 
-You'll need the id `$IMAGE_ID` of the image you just created.
+You'll need the id `$IMAGE_ID` of the image you just created. You can fetch that
+with `oxide image view --image $IMAGE_NAME`.
 
 Now, create a Disk from that Image.  The disk size must be a multiple of 1 GiB and at least as large as the image size.  The example below creates a disk using the image made from the alpine ISO that ships with propolis, and sets the size to the next 1GiB multiple of the original alpine source:
 

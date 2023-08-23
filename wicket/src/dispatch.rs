@@ -9,7 +9,7 @@ use std::net::{Ipv6Addr, SocketAddrV6};
 use anyhow::{bail, Context, Result};
 use camino::{Utf8Path, Utf8PathBuf};
 use clap::Parser;
-use omicron_common::address::WICKETD_PORT;
+use omicron_common::{address::WICKETD_PORT, FileKv};
 use slog::Drain;
 
 use crate::{rack_setup::SetupArgs, upload::UploadArgs, Runner};
@@ -52,6 +52,7 @@ pub fn exec() -> Result<()> {
 #[derive(Debug, Parser)]
 enum ShellCommand {
     /// Upload a TUF repository to wicketd.
+    #[command(visible_alias = "upload")]
     UploadRepo(UploadArgs),
     /// Interact with rack setup configuration.
     #[command(subcommand)]
@@ -81,7 +82,7 @@ fn setup_log(
         WithStderr::No => slog_async::Async::new(drain).build().fuse(),
     };
 
-    Ok(slog::Logger::root(drain, slog::o!()))
+    Ok(slog::Logger::root(drain, slog::o!(FileKv)))
 }
 
 #[derive(Copy, Clone, Debug)]

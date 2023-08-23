@@ -260,6 +260,31 @@
         }
       }
     },
+    "/location": {
+      "get": {
+        "summary": "Report the identity of the sled and switch we're currently running on /",
+        "description": "connected to.",
+        "operationId": "get_location",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetLocationResponse"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/rack-setup": {
       "get": {
         "summary": "Query current state of rack setup.",
@@ -901,7 +926,8 @@
           "dns_servers": {
             "type": "array",
             "items": {
-              "type": "string"
+              "type": "string",
+              "format": "ip"
             }
           },
           "external_dns_ips": {
@@ -1146,6 +1172,48 @@
           }
         ]
       },
+      "GetLocationResponse": {
+        "description": "All the fields of this response are optional, because it's possible we don't know any of them (yet) if MGS has not yet finished discovering its location or (ever) if we're running in a dev environment that doesn't support MGS-location / baseboard mapping.",
+        "type": "object",
+        "properties": {
+          "sled_baseboard": {
+            "nullable": true,
+            "description": "The baseboard of our sled (where wicketd is running).",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Baseboard"
+              }
+            ]
+          },
+          "sled_id": {
+            "nullable": true,
+            "description": "The identity of our sled (where wicketd is running).",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SpIdentifier"
+              }
+            ]
+          },
+          "switch_baseboard": {
+            "nullable": true,
+            "description": "The baseboard of the switch our sled is physically connected to.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Baseboard"
+              }
+            ]
+          },
+          "switch_id": {
+            "nullable": true,
+            "description": "The identity of the switch our sled is physically connected to.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SpIdentifier"
+              }
+            ]
+          }
+        }
+      },
       "IpRange": {
         "oneOf": [
           {
@@ -1165,6 +1233,10 @@
             ]
           }
         ]
+      },
+      "Ipv4Network": {
+        "type": "string",
+        "pattern": "^((25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.){3}(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\/(3[0-2]|[0-2]?[0-9])$"
       },
       "Ipv4Range": {
         "description": "A non-decreasing IPv4 address range, inclusive of both ends.\n\nThe first address must be less than or equal to the last address.",
@@ -1738,7 +1810,8 @@
           "dns_servers": {
             "type": "array",
             "items": {
-              "type": "string"
+              "type": "string",
+              "format": "ip"
             }
           },
           "external_dns_ips": {
@@ -2518,6 +2591,24 @@
             "allOf": [
               {
                 "$ref": "#/components/schemas/UpdateTestError"
+              }
+            ]
+          },
+          "test_simulate_rot_result": {
+            "nullable": true,
+            "description": "If passed in, simulates a result for the RoT update.\n\nThis is used for testing.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/UpdateSimulatedResult"
+              }
+            ]
+          },
+          "test_simulate_sp_result": {
+            "nullable": true,
+            "description": "If passed in, simulates a result for the SP update.\n\nThis is used for testing.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/UpdateSimulatedResult"
               }
             ]
           },
@@ -3984,6 +4075,16 @@
           }
         ]
       },
+      "UpdateSimulatedResult": {
+        "description": "A simulated result for a component update.\n\nUsed by [`StartUpdateOptions`].",
+        "type": "string",
+        "enum": [
+          "success",
+          "warning",
+          "skipped",
+          "failure"
+        ]
+      },
       "UpdateStepId": {
         "oneOf": [
           {
@@ -4211,10 +4312,13 @@
               }
             ]
           },
-          "uplink_ip": {
-            "description": "IP Address to apply to switchport (must be in infra_ip pool)",
-            "type": "string",
-            "format": "ipv4"
+          "uplink_cidr": {
+            "description": "IP Address and prefix (e.g., `192.168.0.1/16`) to apply to switchport (must be in infra_ip pool)",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Ipv4Network"
+              }
+            ]
           },
           "uplink_port": {
             "description": "Switchport to use for external connectivity",
@@ -4247,7 +4351,7 @@
         "required": [
           "gateway_ip",
           "switch",
-          "uplink_ip",
+          "uplink_cidr",
           "uplink_port",
           "uplink_port_fec",
           "uplink_port_speed"

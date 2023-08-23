@@ -7,19 +7,9 @@ use crate::collection::DatastoreCollectionConfig;
 use crate::schema::{region, volume};
 use chrono::{DateTime, Utc};
 use db_macros::Asset;
-use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-#[derive(
-    Asset,
-    Queryable,
-    Insertable,
-    Debug,
-    Selectable,
-    Serialize,
-    Deserialize,
-    Clone,
-)]
+#[derive(Asset, Queryable, Insertable, Debug, Selectable, Clone)]
 #[diesel(table_name = volume)]
 pub struct Volume {
     #[diesel(embed)]

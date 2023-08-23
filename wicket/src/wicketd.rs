@@ -11,8 +11,8 @@ use tokio::sync::mpsc::{self, Sender, UnboundedSender};
 use tokio::time::{interval, Duration, MissedTickBehavior};
 use wicketd_client::types::{
     AbortUpdateOptions, ClearUpdateStateOptions, GetInventoryParams,
-    GetInventoryResponse, IgnitionCommand, SpIdentifier, SpType,
-    StartUpdateOptions,
+    GetInventoryResponse, GetLocationResponse, IgnitionCommand, SpIdentifier,
+    SpType, StartUpdateOptions,
 };
 
 use crate::events::EventReportMap;
@@ -114,6 +114,7 @@ impl WicketdManager {
         self.poll_artifacts_and_event_reports();
         self.poll_rack_setup_config();
         self.poll_rack_setup_status();
+        self.poll_location();
 
         loop {
             tokio::select! {
@@ -338,6 +339,61 @@ impl WicketdManager {
                 }
                 prev = Some(result.clone());
                 let _ = tx.send(Event::RackSetupStatus(result));
+            }
+        });
+    }
+
+    fn poll_location(&self) {
+        let log = self.log.clone();
+        let tx = self.events_tx.clone();
+        let addr = self.wicketd_addr;
+        tokio::spawn(async move {
+            let client = create_wicketd_client(&log, addr, WICKETD_TIMEOUT);
+            let mut ticker = interval(WICKETD_POLL_INTERVAL * 2);
+            let mut prev = None;
+            ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
+            loop {
+                ticker.tick().await;
+                // TODO: We should really be using ETAGs here
+                let location = match client.get_location().await {
+                    Ok(val) => val.into_inner(),
+                    Err(err) => {
+                        warn!(
+                            log,
+                            "Failed to fetch location of wicketd";
+                            "err" => #%err,
+                        );
+                        continue;
+                    }
+                };
+
+                // Only send a new event if the config has changed
+                if Some(&location) == prev.as_ref() {
+                    continue;
+                }
+                prev = Some(location.clone());
+
+                // If every field of `location` is filled in, we don't need to
+                // poll any more - wicketd can't move around while it's running.
+                // Check this prior to sending the event to avoid an extra
+                // clone.
+                let GetLocationResponse {
+                    sled_baseboard,
+                    sled_id,
+                    switch_baseboard,
+                    switch_id,
+                } = &location;
+
+                let location_fully_provided = sled_baseboard.is_some()
+                    && sled_id.is_some()
+                    && switch_baseboard.is_some()
+                    && switch_id.is_some();
+
+                let _ = tx.send(Event::WicketdLocation(location));
+
+                if location_fully_provided {
+                    break;
+                }
             }
         });
     }

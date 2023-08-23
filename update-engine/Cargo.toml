@@ -6,6 +6,7 @@ license = "MPL-2.0"
 
 [dependencies]
 anyhow.workspace = true
+cancel-safe-futures.workspace = true
 debug-ignore.workspace = true
 derive-where.workspace = true
 either.workspace = true

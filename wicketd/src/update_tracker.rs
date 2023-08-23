@@ -9,6 +9,7 @@ use crate::artifacts::UpdatePlan;
 use crate::artifacts::WicketdArtifactStore;
 use crate::http_entrypoints::GetArtifactsAndEventReportsResponse;
 use crate::http_entrypoints::StartUpdateOptions;
+use crate::http_entrypoints::UpdateSimulatedResult;
 use crate::installinator_progress::IprStartReceiver;
 use crate::installinator_progress::IprUpdateTracker;
 use crate::mgs::make_mgs_client;
@@ -461,9 +462,17 @@ impl UpdateTrackerData {
             return Err(AbortUpdateError::UpdateFinished);
         }
 
-        let waiter = update_data.abort_handle.abort(message);
-        waiter.await;
-        Ok(())
+        match update_data.abort_handle.abort(message) {
+            Ok(waiter) => {
+                waiter.await;
+                Ok(())
+            }
+            Err(_) => {
+                // This occurs if the engine has finished execution and has been
+                // dropped.
+                Err(AbortUpdateError::UpdateFinished)
+            }
+        }
     }
 
     fn put_repository(&mut self, bytes: BufList) -> Result<(), HttpError> {
@@ -595,27 +604,29 @@ impl UpdateDriver {
             define_test_steps(&engine, secs);
         }
 
-        let (rot_a, rot_b, sp_artifact) = match update_cx.sp.type_ {
+        let (rot_a, rot_b, sp_artifacts) = match update_cx.sp.type_ {
             SpType::Sled => (
                 plan.gimlet_rot_a.clone(),
                 plan.gimlet_rot_b.clone(),
-                plan.gimlet_sp.clone(),
+                &plan.gimlet_sp,
             ),
-            SpType::Power => (
-                plan.psc_rot_a.clone(),
-                plan.psc_rot_b.clone(),
-                plan.psc_sp.clone(),
-            ),
+            SpType::Power => {
+                (plan.psc_rot_a.clone(), plan.psc_rot_b.clone(), &plan.psc_sp)
+            }
             SpType::Switch => (
                 plan.sidecar_rot_a.clone(),
                 plan.sidecar_rot_b.clone(),
-                plan.sidecar_sp.clone(),
+                &plan.sidecar_sp,
             ),
         };
 
-        // To update the RoT, we have to know which slot (A or B) it is
-        // currently executing; we must update the _other_ slot.
         let rot_registrar = engine.for_component(UpdateComponent::Rot);
+        let sp_registrar = engine.for_component(UpdateComponent::Sp);
+
+        // To update the RoT, we have to know which slot (A or B) it is
+        // currently executing; we must update the _other_ slot. We also want to
+        // know its current version (so we can skip updating if we only need to
+        // update the SP and/or host).
         let rot_interrogation =
             rot_registrar
                 .new_step(
@@ -627,6 +638,65 @@ impl UpdateDriver {
                 )
                 .register();
 
+        // The SP only has one updateable firmware slot ("the inactive bank").
+        // We want to ask about slot 0 (the active slot)'s current version, and
+        // we are supposed to always pass 0 when updating.
+        let sp_firmware_slot = 0;
+
+        // To update the SP, we want to know both its version and its board (so
+        // we can map to the correct artifact from our update plan).
+        let sp_artifact_and_version = sp_registrar
+            .new_step(
+                UpdateStepId::InterrogateSp,
+                "Checking SP board and current version",
+                move |_cx| async move {
+                    let caboose = update_cx
+                        .mgs_client
+                        .sp_component_caboose_get(
+                            update_cx.sp.type_,
+                            update_cx.sp.slot,
+                            SpComponent::SP_ITSELF.const_as_str(),
+                            sp_firmware_slot,
+                        )
+                        .await
+                        .map_err(|error| {
+                            UpdateTerminalError::GetSpCabooseFailed { error }
+                        })?
+                        .into_inner();
+
+                    let Some(sp_artifact) = sp_artifacts.get(&caboose.board)
+                    else {
+                        return Err(UpdateTerminalError::MissingSpImageForBoard {
+                            board: caboose.board,
+                        });
+                    };
+                    let sp_artifact = sp_artifact.clone();
+
+                    let message = format!(
+                        "SP board {}, version {} (git commit {})",
+                        caboose.board,
+                        caboose.version.as_deref().unwrap_or("unknown"),
+                        caboose.git_commit
+                    );
+                    match caboose.version.map(|v| v.parse::<SemverVersion>()) {
+                        Some(Ok(version)) => {
+                            StepSuccess::new((sp_artifact, Some(version)))
+                                .with_message(message)
+                                .into()
+                        }
+                        Some(Err(err)) => StepWarning::new(
+                            (sp_artifact, None),
+                            format!(
+                                "{message} (failed to parse SP version: {err})"
+                            ),
+                        )
+                        .into(),
+                        None => StepWarning::new((sp_artifact, None), message)
+                            .into(),
+                    }
+                },
+            )
+            .register();
         // Send the update to the RoT.
         let inner_cx =
             SpComponentUpdateContext::new(update_cx, UpdateComponent::Rot);
@@ -635,6 +705,10 @@ impl UpdateDriver {
                 UpdateStepId::SpComponentUpdate,
                 "Updating RoT",
                 move |cx| async move {
+                    if let Some(result) = opts.test_simulate_rot_result {
+                        return simulate_result(result);
+                    }
+
                     let rot_interrogation =
                         rot_interrogation.into_value(cx.token()).await;
 
@@ -684,53 +758,6 @@ impl UpdateDriver {
             )
             .register();
 
-        let sp_registrar = engine.for_component(UpdateComponent::Sp);
-
-        // The SP only has one updateable firmware slot ("the inactive bank").
-        // We want to ask about slot 0 (the active slot)'s current version, and
-        // we are supposed to always pass 0 when updating.
-        let sp_firmware_slot = 0;
-
-        let sp_current_version = sp_registrar
-            .new_step(
-                UpdateStepId::InterrogateSp,
-                "Checking current SP version",
-                move |_cx| async move {
-                    let caboose = update_cx
-                        .mgs_client
-                        .sp_component_caboose_get(
-                            update_cx.sp.type_,
-                            update_cx.sp.slot,
-                            SpComponent::SP_ITSELF.const_as_str(),
-                            sp_firmware_slot,
-                        )
-                        .await
-                        .map_err(|error| {
-                            UpdateTerminalError::GetSpCabooseFailed { error }
-                        })?
-                        .into_inner();
-
-                    let message = format!(
-                        "SP version {} (git commit {})",
-                        caboose.version.as_deref().unwrap_or("unknown"),
-                        caboose.git_commit
-                    );
-                    match caboose.version.map(|v| v.parse::<SemverVersion>()) {
-                        Some(Ok(version)) => StepSuccess::new(Some(version))
-                            .with_message(message)
-                            .into(),
-                        Some(Err(err)) => StepWarning::new(
-                            None,
-                            format!(
-                                "{message} (failed to parse SP version: {err})"
-                            ),
-                        )
-                        .into(),
-                        None => StepWarning::new(None, message).into(),
-                    }
-                },
-            )
-            .register();
         let inner_cx =
             SpComponentUpdateContext::new(update_cx, UpdateComponent::Sp);
         sp_registrar
@@ -738,11 +765,15 @@ impl UpdateDriver {
                 UpdateStepId::SpComponentUpdate,
                 "Updating SP",
                 move |cx| async move {
-                    let sp_current_version =
-                        sp_current_version.into_value(cx.token()).await;
+                    if let Some(result) = opts.test_simulate_sp_result {
+                        return simulate_result(result);
+                    }
 
-                    let sp_has_this_version = Some(&sp_artifact.id.version)
-                        == sp_current_version.as_ref();
+                    let (sp_artifact, sp_version) =
+                        sp_artifact_and_version.into_value(cx.token()).await;
+
+                    let sp_has_this_version =
+                        Some(&sp_artifact.id.version) == sp_version.as_ref();
 
                     // If this SP already has this version, skip the rest of
                     // this step, UNLESS we've been told to skip this version
@@ -1271,6 +1302,25 @@ struct RotInterrogation {
 impl RotInterrogation {
     fn active_version_matches_artifact_to_apply(&self) -> bool {
         Some(&self.artifact_to_apply.id.version) == self.active_version.as_ref()
+    }
+}
+
+fn simulate_result(
+    result: UpdateSimulatedResult,
+) -> Result<StepResult<()>, UpdateTerminalError> {
+    match result {
+        UpdateSimulatedResult::Success => {
+            StepSuccess::new(()).with_message("Simulated success result").into()
+        }
+        UpdateSimulatedResult::Warning => {
+            StepWarning::new((), "Simulated warning result").into()
+        }
+        UpdateSimulatedResult::Skipped => {
+            StepSkipped::new((), "Simulated skipped result").into()
+        }
+        UpdateSimulatedResult::Failure => {
+            Err(UpdateTerminalError::SimulatedFailure)
+        }
     }
 }
 

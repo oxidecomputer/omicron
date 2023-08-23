@@ -85,7 +85,7 @@ impl Producer for CpuBusyProducer {
                 .as_secs_f64();
             let datum = cpu.datum_mut();
             *datum += elapsed - datum.value();
-            data.push(Sample::new(&self.vm, cpu));
+            data.push(Sample::new(&self.vm, cpu)?);
         }
         // Yield the available samples.
         Ok(Box::new(data.into_iter()))

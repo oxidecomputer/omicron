@@ -174,6 +174,8 @@ pub struct InstanceRuntimeState {
     // TODO-cleanup: Different type?
     #[diesel(column_name = hostname)]
     pub hostname: String,
+    #[diesel(column_name = boot_on_fault)]
+    pub boot_on_fault: bool,
 }
 
 impl From<InstanceRuntimeState>
@@ -225,6 +227,7 @@ impl From<internal::nexus::InstanceRuntimeState> for InstanceRuntimeState {
             hostname: state.hostname,
             gen: state.gen.into(),
             time_updated: state.time_updated,
+            boot_on_fault: false,
         }
     }
 }

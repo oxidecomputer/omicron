@@ -558,10 +558,7 @@ impl SledAgent {
                 storage.get_dataset_for_region(*region_id).await;
 
             if let Some(crucible_data) = crucible_data {
-                crucible_data
-                    .create_snapshot(*region_id, snapshot_id)
-                    .await
-                    .map_err(|e| Error::internal_error(&e.to_string()))?;
+                crucible_data.create_snapshot(*region_id, snapshot_id).await;
             } else {
                 return Err(Error::not_found_by_id(
                     ResourceType::Disk,

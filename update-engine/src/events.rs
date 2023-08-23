@@ -955,6 +955,23 @@ impl<S: StepSpec> StepOutcome<S> {
             }
         }
     }
+
+    /// Returns true if the step was successful, including success with
+    /// warning.
+    pub fn is_success_or_warning(&self) -> bool {
+        match self {
+            Self::Success { .. } | Self::Warning { .. } => true,
+            Self::Skipped { .. } => false,
+        }
+    }
+
+    /// Returns true if the step was skipped.
+    pub fn is_skipped(&self) -> bool {
+        match self {
+            Self::Skipped { .. } => true,
+            Self::Success { .. } | Self::Warning { .. } => false,
+        }
+    }
 }
 
 #[derive(Deserialize, Serialize, JsonSchema)]

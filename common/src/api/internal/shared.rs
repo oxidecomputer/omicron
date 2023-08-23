@@ -5,6 +5,7 @@
 //! Types shared between Nexus and Sled Agent.
 
 use crate::api::external::{self, Name};
+use ipnetwork::Ipv4Network;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -91,15 +92,16 @@ pub struct UplinkConfig {
     pub uplink_port_speed: PortSpeed,
     /// Forward Error Correction setting for the uplink port
     pub uplink_port_fec: PortFec,
-    /// IP Address to apply to switchport (must be in infra_ip pool)
-    pub uplink_ip: Ipv4Addr,
+    /// IP Address and prefix (e.g., `192.168.0.1/16`) to apply to switchport
+    /// (must be in infra_ip pool)
+    pub uplink_cidr: Ipv4Network,
     /// VLAN id to use for uplink
     pub uplink_vid: Option<u16>,
 }
 
 /// Identifies switch physical location
 #[derive(
-    Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema, Hash, Eq,
+    Clone, Copy, Debug, Deserialize, Serialize, PartialEq, JsonSchema, Hash, Eq,
 )]
 #[serde(rename_all = "snake_case")]
 pub enum SwitchLocation {

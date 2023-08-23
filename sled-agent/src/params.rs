@@ -2,8 +2,12 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use chrono::DateTime;
-use chrono::Utc;
+use crate::zone_bundle::PriorityOrder;
+pub use crate::zone_bundle::ZoneBundleCause;
+pub use crate::zone_bundle::ZoneBundleId;
+pub use crate::zone_bundle::ZoneBundleMetadata;
+pub use illumos_utils::opte::params::VpcFirewallRule;
+pub use illumos_utils::opte::params::VpcFirewallRulesEnsureBody;
 use omicron_common::api::internal::nexus::{
     DiskRuntimeState, InstanceRuntimeState,
 };
@@ -13,14 +17,12 @@ use omicron_common::api::internal::shared::{
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sled_hardware::Baseboard;
+pub use sled_hardware::DendriteAsic;
 use std::fmt::{Debug, Display, Formatter, Result as FormatResult};
 use std::net::{IpAddr, Ipv6Addr, SocketAddr, SocketAddrV6};
+use std::time::Duration;
 use thiserror::Error;
 use uuid::Uuid;
-
-pub use illumos_utils::opte::params::VpcFirewallRule;
-pub use illumos_utils::opte::params::VpcFirewallRulesEnsureBody;
-pub use sled_hardware::DendriteAsic;
 
 /// Used to request a Disk state change
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
@@ -277,6 +279,8 @@ pub enum ServiceType {
         nic: NetworkInterface,
         /// Whether Nexus's external endpoint should use TLS
         external_tls: bool,
+        /// External DNS servers Nexus can use to resolve external hosts.
+        external_dns_servers: Vec<IpAddr>,
     },
     ExternalDns {
         /// The address at which the external DNS server API is reachable.
@@ -323,6 +327,8 @@ pub enum ServiceType {
         pkt_source: String,
     },
     #[serde(skip)]
+    Uplink,
+    #[serde(skip)]
     Maghemite {
         mode: String,
     },
@@ -334,7 +340,7 @@ pub enum ServiceType {
     BoundaryNtp {
         address: SocketAddrV6,
         ntp_servers: Vec<String>,
-        dns_servers: Vec<String>,
+        dns_servers: Vec<IpAddr>,
         domain: Option<String>,
         /// The service vNIC providing outbound connectivity using OPTE.
         nic: NetworkInterface,
@@ -344,7 +350,7 @@ pub enum ServiceType {
     InternalNtp {
         address: SocketAddrV6,
         ntp_servers: Vec<String>,
-        dns_servers: Vec<String>,
+        dns_servers: Vec<IpAddr>,
         domain: Option<String>,
     },
     Clickhouse {
@@ -369,6 +375,7 @@ impl std::fmt::Display for ServiceType {
             ServiceType::Wicketd { .. } => write!(f, "wicketd"),
             ServiceType::Dendrite { .. } => write!(f, "dendrite"),
             ServiceType::Tfport { .. } => write!(f, "tfport"),
+            ServiceType::Uplink { .. } => write!(f, "uplink"),
             ServiceType::CruciblePantry { .. } => write!(f, "crucible/pantry"),
             ServiceType::BoundaryNtp { .. }
             | ServiceType::InternalNtp { .. } => write!(f, "ntp"),
@@ -414,14 +421,19 @@ impl TryFrom<ServiceType> for sled_agent_client::types::ServiceType {
         use ServiceType as St;
 
         match s {
-            St::Nexus { internal_address, external_ip, nic, external_tls } => {
-                Ok(AutoSt::Nexus {
-                    internal_address: internal_address.to_string(),
-                    external_ip,
-                    nic: nic.into(),
-                    external_tls,
-                })
-            }
+            St::Nexus {
+                internal_address,
+                external_ip,
+                nic,
+                external_tls,
+                external_dns_servers,
+            } => Ok(AutoSt::Nexus {
+                internal_address: internal_address.to_string(),
+                external_ip,
+                nic: nic.into(),
+                external_tls,
+                external_dns_servers,
+            }),
             St::ExternalDns { http_address, dns_address, nic } => {
                 Ok(AutoSt::ExternalDns {
                     http_address: http_address.to_string(),
@@ -483,6 +495,7 @@ impl TryFrom<ServiceType> for sled_agent_client::types::ServiceType {
             | St::Wicketd { .. }
             | St::Dendrite { .. }
             | St::Tfport { .. }
+            | St::Uplink
             | St::Maghemite { .. } => Err(AutonomousServiceOnlyError),
         }
     }
@@ -580,8 +593,6 @@ pub struct ServiceZoneRequest {
     pub dataset: Option<DatasetRequest>,
     // Services that should be run in the zone
     pub services: Vec<ServiceZoneService>,
-    // Switch addresses for SNAT configuration, if required
-    pub boundary_switches: Vec<Ipv6Addr>,
 }
 
 impl ServiceZoneRequest {
@@ -629,7 +640,6 @@ impl TryFrom<ServiceZoneRequest>
             addresses: s.addresses,
             dataset: s.dataset.map(|d| d.into()),
             services,
-            boundary_switches: s.boundary_switches,
         })
     }
 }
@@ -773,7 +783,8 @@ impl ServiceZoneRequest {
                 | ServiceType::Wicketd { .. }
                 | ServiceType::Dendrite { .. }
                 | ServiceType::Maghemite { .. }
-                | ServiceType::Tfport { .. } => {
+                | ServiceType::Tfport { .. }
+                | ServiceType::Uplink => {
                     return Err(AutonomousServiceOnlyError);
                 }
             }
@@ -814,12 +825,14 @@ pub struct TimeSync {
     /// The synchronization state of the sled, true when the system clock
     /// and the NTP clock are in sync (to within a small window).
     pub sync: bool,
-    // These could both be f32, but there is a problem with progenitor/typify
+    /// The NTP reference ID.
+    pub ref_id: u32,
+    /// The NTP reference IP address.
+    pub ip_addr: IpAddr,
+    // This could be f32, but there is a problem with progenitor/typify
     // where, although the f32 correctly becomes "float" (and not "double") in
     // the API spec, that "float" gets converted back to f64 when generating
     // the client.
-    /// The estimated error bound on the frequency.
-    pub skew: f64,
     /// The current offset between the NTP clock and system clock.
     pub correction: f64,
 }
@@ -834,55 +847,13 @@ pub enum SledRole {
     Scrimlet,
 }
 
-/// An identifier for a zone bundle.
-#[derive(
-    Clone,
-    Debug,
-    Deserialize,
-    Eq,
-    Hash,
-    JsonSchema,
-    Ord,
-    PartialEq,
-    PartialOrd,
-    Serialize,
-)]
-pub struct ZoneBundleId {
-    /// The name of the zone this bundle is derived from.
-    pub zone_name: String,
-    /// The ID for this bundle itself.
-    pub bundle_id: Uuid,
-}
-
-/// Metadata about a zone bundle.
-#[derive(
-    Clone,
-    Debug,
-    Deserialize,
-    Eq,
-    Hash,
-    JsonSchema,
-    Ord,
-    PartialEq,
-    PartialOrd,
-    Serialize,
-)]
-pub struct ZoneBundleMetadata {
-    /// Identifier for this zone bundle
-    pub id: ZoneBundleId,
-    /// The time at which this zone bundle was created.
-    pub time_created: DateTime<Utc>,
-}
-
-impl ZoneBundleMetadata {
-    /// Create a new set of metadata for the provided zone.
-    pub(crate) fn new(zone_name: &str) -> Self {
-        Self {
-            id: ZoneBundleId {
-                zone_name: zone_name.to_string(),
-                bundle_id: Uuid::new_v4(),
-            },
-            time_created: Utc::now(),
-        }
-    }
+/// Parameters used to update the zone bundle cleanup context.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
+pub struct CleanupContextUpdate {
+    /// The new period on which automatic cleanups are run.
+    pub period: Option<Duration>,
+    /// The priority ordering for preserving old zone bundles.
+    pub priority: Option<PriorityOrder>,
+    /// The new limit on the underlying dataset quota allowed for bundles.
+    pub storage_limit: Option<u8>,
 }

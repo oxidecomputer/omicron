@@ -63,16 +63,38 @@ source.rust.release = true
 source.paths = [ { from = "smf/installinator", to = "pkg" } ]
 output.type = "tarball"
 
+# overlay is a set of packages that are overlaid onto all non-global zones.
+[package.overlay]
+service_name = "overlay"
+source.type = "composite"
+source.packages = [
+  "logadm.tar.gz",
+]
+output.type = "zone"
+
+# The logadm package is an overlay for all non-global zones to reconfigure log
+# rotation and the frequency with which it runs.
+[package.logadm]
+service_name = "logadm"
+source.type = "local"
+source.paths = [
+  { from = "smf/logadm/crontab.root", to = "/var/spool/cron/crontabs/root" },
+  { from = "smf/logadm/logadm.conf", to = "/etc/logadm.conf" },
+]
+output.type = "zone"
+output.intermediate_only = true
+
 [package.omicron-nexus]
 service_name = "nexus"
 only_for_targets.image = "standard"
 source.type = "local"
-source.rust.binary_names = ["nexus"]
+source.rust.binary_names = ["nexus", "schema-updater"]
 source.rust.release = true
 source.paths = [
   { from = "/opt/ooce/pgsql-13/lib/amd64", to = "/opt/ooce/pgsql-13/lib/amd64" },
   { from = "smf/nexus", to = "/var/svc/manifest/site/nexus" },
   { from = "out/console-assets", to = "/var/nexus/static" },
+  { from = "schema/crdb", to = "/var/nexus/schema/crdb" },
 ]
 output.type = "zone"
 setup_hint = """
@@ -114,7 +136,7 @@ only_for_targets.image = "standard"
 source.type = "local"
 source.paths = [
   { from = "out/cockroachdb", to = "/opt/oxide/cockroachdb" },
-  { from = "common/src/sql", to = "/opt/oxide/cockroachdb/sql" },
+  { from = "schema/crdb", to = "/opt/oxide/cockroachdb/sql" },
   { from = "smf/cockroachdb/manifest.xml", to = "/var/svc/manifest/site/cockroachdb/manifest.xml" },
   { from = "smf/cockroachdb/method_script.sh", to = "/opt/oxide/lib/svc/manifest/cockroachdb.sh" },
 ]
@@ -273,6 +295,7 @@ source.paths = [
   { from = "smf/switch_zone_setup/manifest.xml", to = "/var/svc/manifest/site/switch_zone_setup/manifest.xml" },
   { from = "smf/switch_zone_setup/switch_zone_setup", to = "/opt/oxide/bin/switch_zone_setup" },
   { from = "smf/switch_zone_setup/support_authorized_keys", to = "/opt/oxide/support/authorized_keys" },
+  { from = "smf/switch_zone_setup/root.profile", to = "/root/.profile" },
 ]
 output.type = "zone"
 output.intermediate_only = true
@@ -321,10 +344,10 @@ only_for_targets.image = "standard"
 # 3. Use source.type = "manual" instead of "prebuilt"
 source.type = "prebuilt"
 source.repo = "crucible"
-source.commit = "179e68b8718d24673893dac46a8ab4a9249ec318"
+source.commit = "84507ed89aced20920de73342666a8abcb8237c1"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/crucible/image/<commit>/crucible.sha256.txt
-source.sha256 = "92d83450a48c3bca7775a8b00b453dfb48d1c6a3519bc1a4a75c9f9c46543e8f"
+source.sha256 = "3e55c672a2ba17a58b17f89128257cfd9fdb57c6e7f66d03535dd8f3c60036c3"
 output.type = "zone"
 
 [package.crucible-pantry]
@@ -332,10 +355,10 @@ service_name = "crucible_pantry"
 only_for_targets.image = "standard"
 source.type = "prebuilt"
 source.repo = "crucible"
-source.commit = "179e68b8718d24673893dac46a8ab4a9249ec318"
+source.commit = "84507ed89aced20920de73342666a8abcb8237c1"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/crucible/image/<commit>/crucible-pantry.sha256.txt
-source.sha256 = "88d86e90f1c0e45eb371b57ecf05f15ac869d642adf343b76217bb2cdb7a928d"
+source.sha256 = "6b53e106d1449ea6465e0d352080b63da191b890aabe8d751b0b75e5ddc18621"
 output.type = "zone"
 
 # Refer to
@@ -346,10 +369,10 @@ service_name = "propolis-server"
 only_for_targets.image = "standard"
 source.type = "prebuilt"
 source.repo = "propolis"
-source.commit = "fbd701c0a54f25208712b0b3b2dc7931c875d347"
+source.commit = "f2f0ad2dc7ea9a6d02f6b41d4b15ca40b8e2dcc4"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/propolis/image/<commit>/propolis-server.sha256.txt
-source.sha256 = "1bc7c6fc6a029d34493adef16457029bc2cd3b3624beab376136f0e08e4550e7"
+source.sha256 = "b0e6951b347bd4755ee2fc41eb51482f5de7169032c064ea54820c5dbdb63bfd"
 output.type = "zone"
 
 [package.maghemite]
@@ -398,8 +421,8 @@ only_for_targets.image = "standard"
 # 2. Copy dendrite.tar.gz from dendrite/out to omicron/out
 source.type = "prebuilt"
 source.repo = "dendrite"
-source.commit = "b4bc47394a663670084199df48c4d0ea48e67aff"
-source.sha256 = "17c953bb2ba1aece6be0f69c4715430cbc73affac5fc65e1abbc23ed24849800"
+source.commit = "ef8a97532214c795abb6c7de05289c161e9a80ca"
+source.sha256 = "a63c05e81cf58efd28f89f4f860f4e5e68865c234eb071bec03184437521245b"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -423,8 +446,8 @@ only_for_targets.image = "standard"
 # 2. Copy the output zone image from dendrite/out to omicron/out
 source.type = "prebuilt"
 source.repo = "dendrite"
-source.commit = "b4bc47394a663670084199df48c4d0ea48e67aff"
-source.sha256 = "f012d0560feb3f8f683600a17035b9f3c0354188962bfde651a61aac494b8eb8"
+source.commit = "ef8a97532214c795abb6c7de05289c161e9a80ca"
+source.sha256 = "7a828286c4e3c97cff56b347fa5922acb6ba93fd8fdfb3e9ea61f1d5fb9b53a5"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -441,8 +464,8 @@ only_for_targets.image = "standard"
 # 2. Copy dendrite.tar.gz from dendrite/out to omicron/out/dendrite-softnpu.tar.gz
 source.type = "prebuilt"
 source.repo = "dendrite"
-source.commit = "b4bc47394a663670084199df48c4d0ea48e67aff"
-source.sha256 = "af3c8a9eae07b0a55821292f2b1ac1e21fd8d8c39c3bac2be985fd201be223bc"
+source.commit = "ef8a97532214c795abb6c7de05289c161e9a80ca"
+source.sha256 = "aef8ecec0ebdbf8ea790cb65702be636b7e1fae007dcd1434fdba2bc4ccbc06f"
 output.type = "zone"
 output.intermediate_only = true
 
