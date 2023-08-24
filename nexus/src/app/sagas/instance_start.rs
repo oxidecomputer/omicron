@@ -499,7 +499,7 @@ async fn sis_ensure_running(
 mod test {
     use crate::external_api::params;
     use crate::{
-        app::{saga::create_saga_dag, sagas::instance_create},
+        app::{saga::create_saga_dag, sagas::test_helpers},
         authn, Nexus, TestInterfaces as _,
     };
     use dropshot::test_util::ClientTestContext;
@@ -511,7 +511,6 @@ mod test {
         ByteCount, IdentityMetadataCreateParams, InstanceCpuCount,
     };
     use sled_agent_client::TestInterfaces as _;
-    use std::num::NonZeroU32;
     use std::sync::Arc;
     use uuid::Uuid;
 
@@ -591,7 +590,7 @@ mod test {
         let client = &cptestctx.external_client;
         let nexus = &cptestctx.server.apictx().nexus;
         let _project_id = setup_test_project(&client).await;
-        let opctx = instance_create::test::test_opctx(cptestctx);
+        let opctx = test_helpers::test_opctx(cptestctx);
         let instance = create_instance(client).await;
         let db_instance =
             fetch_db_instance(cptestctx, &opctx, instance.identity.id).await;
@@ -620,77 +619,58 @@ mod test {
         let client = &cptestctx.external_client;
         let nexus = &cptestctx.server.apictx().nexus;
         let _project_id = setup_test_project(&client).await;
-        let opctx = instance_create::test::test_opctx(cptestctx);
+        let opctx = test_helpers::test_opctx(cptestctx);
         let instance = create_instance(client).await;
 
-        // Fetch enough state to be able to reason about how many nodes are in
-        // the saga.
-        let db_instance =
-            fetch_db_instance(cptestctx, &opctx, instance.identity.id).await;
-        let params = Params {
-            serialized_authn: authn::saga::Serialized::for_opctx(&opctx),
-            instance: db_instance,
-            ensure_network: true,
-        };
-        let dag = create_saga_dag::<SagaInstanceStart>(params).unwrap();
-        let num_nodes = dag.get_nodes().count();
+        test_helpers::action_failure_can_unwind::<
+            SagaInstanceStart,
+            _,
+            _,
+        >(
+            nexus,
+            || {
+                Box::pin({
+                    async {
+                        let db_instance = fetch_db_instance(
+                            cptestctx,
+                            &opctx,
+                            instance.identity.id,
+                        )
+                        .await;
 
-        // Because the instance's state prior to the saga is a parameter, and
-        // even a failed saga execution attempt can change what's in CRDB, the
-        // saga must be recreated with new parameters after each iteration.
-        // Otherwise, later iterations will just try to use superseded
-        // generation numbers from prior generations.
-        for failure_index in 0..num_nodes {
-            let db_instance =
-                fetch_db_instance(cptestctx, &opctx, instance.identity.id)
-                    .await;
+                        Params {
+                            serialized_authn:
+                                authn::saga::Serialized::for_opctx(&opctx),
+                            instance: db_instance,
+                            ensure_network: true,
+                        }
+                    }
+                })
+            },
+            || {
+                Box::pin({
+                    async {
+                        let new_db_instance = fetch_db_instance(
+                            cptestctx,
+                            &opctx,
+                            instance.identity.id,
+                        )
+                        .await;
 
-            let params = Params {
-                serialized_authn: authn::saga::Serialized::for_opctx(&opctx),
-                instance: db_instance,
-                ensure_network: true,
-            };
+                        info!(log,
+                              "fetched instance runtime state after saga execution";
+                              "instance_id" => %instance.identity.id,
+                              "instance_runtime" => ?new_db_instance.runtime());
 
-            let dag = create_saga_dag::<SagaInstanceStart>(params).unwrap();
-            let node = dag.get_nodes().nth(failure_index).unwrap();
-            info!(
-                log,
-                "Creating new saga that will fail at index {:?}", node.index();
-                "node_name" => node.name().as_ref(),
-                "label" => node.label()
-            );
-
-            let runnable_saga =
-                nexus.create_runnable_saga(dag.clone()).await.unwrap();
-
-            nexus
-                .sec()
-                .saga_inject_error(runnable_saga.id(), node.index())
-                .await
-                .unwrap();
-
-            let saga_error = nexus
-                .run_saga_raw_result(runnable_saga)
-                .await
-                .expect("saga should have started successfully")
-                .kind
-                .expect_err("saga execution should have failed");
-
-            assert_eq!(saga_error.error_node_name, *node.name());
-
-            let new_db_instance =
-                fetch_db_instance(cptestctx, &opctx, instance.identity.id)
-                    .await;
-
-            info!(log, "fetched instance runtime state after saga execution";
-                  "instance_id" => %instance.identity.id,
-                  "instance_runtime" => ?new_db_instance.runtime());
-
-            assert_eq!(
-                new_db_instance.runtime().state.0,
-                InstanceState::Stopped
-            );
-        }
+                        assert_eq!(
+                            new_db_instance.runtime().state.0,
+                            InstanceState::Stopped
+                        );
+                    }
+                })
+            },
+            log,
+        ).await;
     }
 
     #[nexus_test(server = crate::Server)]
@@ -700,7 +680,7 @@ mod test {
         let client = &cptestctx.external_client;
         let nexus = &cptestctx.server.apictx().nexus;
         let _project_id = setup_test_project(&client).await;
-        let opctx = instance_create::test::test_opctx(cptestctx);
+        let opctx = test_helpers::test_opctx(cptestctx);
         let instance = create_instance(client).await;
         let db_instance =
             fetch_db_instance(cptestctx, &opctx, instance.identity.id).await;
@@ -712,29 +692,7 @@ mod test {
         };
 
         let dag = create_saga_dag::<SagaInstanceStart>(params).unwrap();
-        let runnable_saga =
-            nexus.create_runnable_saga(dag.clone()).await.unwrap();
-
-        for node in dag.get_nodes() {
-            nexus
-                .sec()
-                .saga_inject_repeat(
-                    runnable_saga.id(),
-                    node.index(),
-                    steno::RepeatInjected {
-                        action: NonZeroU32::new(2).unwrap(),
-                        undo: NonZeroU32::new(1).unwrap(),
-                    },
-                )
-                .await
-                .unwrap();
-        }
-
-        nexus
-            .run_saga(runnable_saga)
-            .await
-            .expect("Saga should have succeeded");
-
+        test_helpers::actions_succeed_idempotently(nexus, dag).await;
         instance_simulate(cptestctx, nexus, &instance.identity.id).await;
         let new_db_instance =
             fetch_db_instance(cptestctx, &opctx, instance.identity.id).await;

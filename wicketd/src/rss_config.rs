@@ -72,6 +72,18 @@ pub(crate) struct CurrentRssConfig {
 }
 
 impl CurrentRssConfig {
+    pub(crate) fn dns_servers(&self) -> &[IpAddr] {
+        &self.dns_servers
+    }
+
+    pub(crate) fn ntp_servers(&self) -> &[String] {
+        &self.ntp_servers
+    }
+
+    pub(crate) fn rack_network_config(&self) -> Option<&RackNetworkConfig> {
+        self.rack_network_config.as_ref()
+    }
+
     pub(crate) fn update_with_inventory_and_bootstrap_peers(
         &mut self,
         inventory: &RackV1Inventory,

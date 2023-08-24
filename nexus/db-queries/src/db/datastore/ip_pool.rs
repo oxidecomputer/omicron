@@ -114,18 +114,9 @@ impl DataStore {
     ) -> LookupResult<(authz::IpPool, IpPool)> {
         use db::schema::ip_pool::dsl;
 
-        // Ensure the caller has the ability to look up these IP pools.
-        // If they don't, return "not found" instead of "forbidden".
         opctx
             .authorize(authz::Action::ListChildren, &authz::IP_POOL_LIST)
-            .await
-            .map_err(|e| match e {
-                Error::Forbidden => {
-                    LookupType::ByCompositeId("Service IP Pool".to_string())
-                        .into_not_found(ResourceType::IpPool)
-                }
-                _ => e,
-            })?;
+            .await?;
 
         // Look up this IP pool by rack ID.
         let (authz_pool, pool) = dsl::ip_pool

@@ -551,6 +551,17 @@ pub struct StepResult<T, S: StepSpec> {
     pub outcome: StepOutcome<S>,
 }
 
+impl<T, S: StepSpec> StepResult<T, S> {
+    /// Maps a `StepResult<T, S>` to `StepResult<U, S>` by applying a function
+    /// to the contained `output` value, leaving the `outcome` untouched.
+    pub fn map<U, F>(self, op: F) -> StepResult<U, S>
+    where
+        F: FnOnce(T) -> U,
+    {
+        StepResult { output: op(self.output), outcome: self.outcome }
+    }
+}
+
 /// A success result produced by a step.
 #[derive_where(Debug; T: std::fmt::Debug)]
 #[must_use = "StepSuccess must be used"]

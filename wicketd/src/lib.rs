@@ -10,6 +10,7 @@ mod http_entrypoints;
 mod installinator_progress;
 mod inventory;
 pub mod mgs;
+mod preflight_check;
 mod rss_config;
 mod update_tracker;
 
@@ -24,6 +25,7 @@ pub use inventory::{RackV1Inventory, SpInventory};
 use mgs::make_mgs_client;
 pub(crate) use mgs::{MgsHandle, MgsManager};
 use omicron_common::FileKv;
+use preflight_check::PreflightCheckerHandler;
 use sled_hardware::Baseboard;
 use slog::{debug, error, o, Drain};
 use std::sync::OnceLock;
@@ -117,6 +119,7 @@ impl Server {
                     update_tracker: update_tracker.clone(),
                     baseboard: args.baseboard,
                     rss_config: Default::default(),
+                    preflight_checker: PreflightCheckerHandler::new(&log),
                 },
                 &ds_log,
             )

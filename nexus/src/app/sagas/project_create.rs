@@ -276,41 +276,33 @@ mod test {
         cptestctx: &ControlPlaneTestContext,
     ) {
         let log = &cptestctx.logctx.log;
-
         let nexus = &cptestctx.server.apictx().nexus;
-
-        // Build the saga DAG with the provided test parameters
         let opctx = test_opctx(&cptestctx);
-        let authz_silo = opctx.authn.silo_required().unwrap();
-        let params = new_test_params(&opctx, authz_silo);
-        let dag = create_saga_dag::<SagaProjectCreate>(params).unwrap();
-
-        for node in dag.get_nodes() {
-            // Create a new saga for this node.
-            info!(
-                log,
-                "Creating new saga which will fail at index {:?}", node.index();
-                "node_name" => node.name().as_ref(),
-                "label" => node.label(),
-            );
-
-            let runnable_saga =
-                nexus.create_runnable_saga(dag.clone()).await.unwrap();
-
-            // Inject an error instead of running the node.
-            //
-            // This should cause the saga to unwind.
-            nexus
-                .sec()
-                .saga_inject_error(runnable_saga.id(), node.index())
-                .await
-                .unwrap();
-            nexus
-                .run_saga(runnable_saga)
-                .await
-                .expect_err("Saga should have failed");
-
-            verify_clean_slate(nexus.datastore()).await;
-        }
+        crate::app::sagas::test_helpers::action_failure_can_unwind::<
+            SagaProjectCreate,
+            _,
+            _,
+        >(
+            nexus,
+            || {
+                Box::pin({
+                    async {
+                        new_test_params(
+                            &opctx,
+                            opctx.authn.silo_required().unwrap(),
+                        )
+                    }
+                })
+            },
+            || {
+                Box::pin({
+                    async {
+                        verify_clean_slate(nexus.datastore()).await;
+                    }
+                })
+            },
+            log,
+        )
+        .await;
     }
 }

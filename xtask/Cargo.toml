@@ -5,4 +5,7 @@ edition = "2021"
 
 [dependencies]
 anyhow.workspace = true
+camino.workspace = true
+cargo_toml = "0.15"
+cargo_metadata = "0.15"
 clap.workspace = true

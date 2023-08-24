@@ -69,8 +69,8 @@ pub type BoxedExecutor = Arc<dyn Executor>;
 
 /// Describes an "executor", which can run [Command]s and return a response.
 ///
-/// - In production, this is usually simply a [super::real::HostExecutor].
-/// - Under test, this can be customized, and a [super::fake::FakeExecutor] may be used.
+/// - In production, this is usually `helios_protostar`'s executor.
+/// - Under test, this can be customized, and `helios_tokamak`'s executor may be used.
 #[async_trait]
 pub trait Executor: Send + Sync {
     /// Executes a task, waiting for it to complete, and returning output.
