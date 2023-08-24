@@ -795,9 +795,6 @@ pub(crate) mod test {
     use omicron_common::api::external::IdentityMetadataCreateParams;
     use omicron_common::api::external::Name;
     use omicron_sled_agent::sim::SledAgent;
-    use slog::error;
-    use slog::Logger;
-    use std::num::NonZeroU32;
     use uuid::Uuid;
 
     type ControlPlaneTestContext =
@@ -864,41 +861,6 @@ pub(crate) mod test {
             .lookup_node_output::<crate::db::model::Disk>("created_disk")
             .unwrap();
         assert_eq!(disk.project_id, project_id);
-    }
-
-    async fn no_stuck_sagas(log: &Logger, datastore: &DataStore) -> bool {
-        use crate::db::model::saga_types::SagaNodeEvent;
-
-        let saga_node_events: Vec<SagaNodeEvent> = datastore
-            .pool_for_tests()
-            .await
-            .unwrap()
-            .transaction_async(|conn| async move {
-                use crate::db::schema::saga_node_event::dsl;
-
-                conn.batch_execute_async(
-                    nexus_test_utils::db::ALLOW_FULL_TABLE_SCAN_SQL,
-                )
-                .await
-                .unwrap();
-
-                Ok::<_, crate::db::TransactionError<()>>(
-                    dsl::saga_node_event
-                        .filter(dsl::event_type.eq(String::from("undo_failed")))
-                        .select(SagaNodeEvent::as_select())
-                        .load_async::<SagaNodeEvent>(&conn)
-                        .await
-                        .unwrap(),
-                )
-            })
-            .await
-            .unwrap();
-
-        for saga_node_event in &saga_node_events {
-            error!(log, "saga {:?} is stuck!", saga_node_event.saga_id);
-        }
-
-        saga_node_events.is_empty()
     }
 
     async fn no_disk_records_exist(datastore: &DataStore) -> bool {
@@ -1020,7 +982,6 @@ pub(crate) mod test {
         let sled_agent = &cptestctx.sled_agent.sled_agent;
         let datastore = cptestctx.server.apictx().nexus.datastore();
 
-        assert!(no_stuck_sagas(&cptestctx.logctx.log, datastore).await);
         assert!(no_disk_records_exist(datastore).await);
         assert!(no_volume_records_exist(datastore).await);
         assert!(
@@ -1046,40 +1007,23 @@ pub(crate) mod test {
         let client = &cptestctx.external_client;
         let nexus = &cptestctx.server.apictx().nexus;
         let project_id = create_org_and_project(&client).await;
-
-        // Build the saga DAG with the provided test parameters
         let opctx = test_opctx(cptestctx);
 
-        let params = new_test_params(&opctx, project_id);
-        let dag = create_saga_dag::<SagaDiskCreate>(params).unwrap();
-
-        for node in dag.get_nodes() {
-            // Create a new saga for this node.
-            info!(
-                log,
-                "Creating new saga which will fail at index {:?}", node.index();
-                "node_name" => node.name().as_ref(),
-                "label" => node.label(),
-            );
-            let runnable_saga =
-                nexus.create_runnable_saga(dag.clone()).await.unwrap();
-
-            // Inject an error instead of running the node.
-            //
-            // This should cause the saga to unwind.
-            nexus
-                .sec()
-                .saga_inject_error(runnable_saga.id(), node.index())
-                .await
-                .unwrap();
-            nexus
-                .run_saga(runnable_saga)
-                .await
-                .expect_err("Saga should have failed");
-
-            // Check that no partial artifacts of disk creation exist:
-            verify_clean_slate(&cptestctx, &test).await;
-        }
+        crate::app::sagas::test_helpers::action_failure_can_unwind::<
+            SagaDiskCreate,
+            _,
+            _,
+        >(
+            nexus,
+            || Box::pin(async { new_test_params(&opctx, project_id) }),
+            || {
+                Box::pin(async {
+                    verify_clean_slate(&cptestctx, &test).await;
+                })
+            },
+            log,
+        )
+        .await;
     }
 
     #[nexus_test(server = crate::Server)]
@@ -1092,61 +1036,18 @@ pub(crate) mod test {
         let client = &cptestctx.external_client;
         let nexus = &cptestctx.server.apictx.nexus;
         let project_id = create_org_and_project(&client).await;
-
-        // Build the saga DAG with the provided test parameters
         let opctx = test_opctx(&cptestctx);
 
-        let params = new_test_params(&opctx, project_id);
-        let dag = create_saga_dag::<SagaDiskCreate>(params).unwrap();
-
-        // The "undo_node" should always be immediately preceding the
-        // "error_node".
-        for (undo_node, error_node) in
-            dag.get_nodes().zip(dag.get_nodes().skip(1))
-        {
-            // Create a new saga for this node.
-            info!(
-                log,
-                "Creating new saga which will fail at index {:?}", error_node.index();
-                "node_name" => error_node.name().as_ref(),
-                "label" => error_node.label(),
-            );
-
-            let runnable_saga =
-                nexus.create_runnable_saga(dag.clone()).await.unwrap();
-
-            // Inject an error instead of running the node.
-            //
-            // This should cause the saga to unwind.
-            nexus
-                .sec()
-                .saga_inject_error(runnable_saga.id(), error_node.index())
-                .await
-                .unwrap();
-
-            // Inject a repetition for the node being undone.
-            //
-            // This means it is executing twice while unwinding.
-            nexus
-                .sec()
-                .saga_inject_repeat(
-                    runnable_saga.id(),
-                    undo_node.index(),
-                    steno::RepeatInjected {
-                        action: NonZeroU32::new(1).unwrap(),
-                        undo: NonZeroU32::new(2).unwrap(),
-                    },
-                )
-                .await
-                .unwrap();
-
-            nexus
-                .run_saga(runnable_saga)
-                .await
-                .expect_err("Saga should have failed");
-
-            verify_clean_slate(&cptestctx, &test).await;
-        }
+        crate::app::sagas::test_helpers::action_failure_can_unwind_idempotently::<
+            SagaDiskCreate,
+            _,
+            _
+        >(
+            nexus,
+            || Box::pin(async { new_test_params(&opctx, project_id) }),
+            || Box::pin(async { verify_clean_slate(&cptestctx, &test).await; }),
+            log
+        ).await;
     }
 
     async fn destroy_disk(cptestctx: &ControlPlaneTestContext) {
@@ -1181,31 +1082,10 @@ pub(crate) mod test {
 
         let params = new_test_params(&opctx, project_id);
         let dag = create_saga_dag::<SagaDiskCreate>(params).unwrap();
-
-        let runnable_saga =
-            nexus.create_runnable_saga(dag.clone()).await.unwrap();
-
-        // Cause all actions to run twice. The saga should succeed regardless!
-        for node in dag.get_nodes() {
-            nexus
-                .sec()
-                .saga_inject_repeat(
-                    runnable_saga.id(),
-                    node.index(),
-                    steno::RepeatInjected {
-                        action: NonZeroU32::new(2).unwrap(),
-                        undo: NonZeroU32::new(1).unwrap(),
-                    },
-                )
-                .await
-                .unwrap();
-        }
-
-        // Verify that the saga's execution succeeded.
-        nexus
-            .run_saga(runnable_saga)
-            .await
-            .expect("Saga should have succeeded");
+        crate::app::sagas::test_helpers::actions_succeed_idempotently(
+            nexus, dag,
+        )
+        .await;
 
         destroy_disk(&cptestctx).await;
         verify_clean_slate(&cptestctx, &test).await;
