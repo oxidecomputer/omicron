@@ -1059,7 +1059,8 @@ async fn test_create_snapshot_record_idempotent(
                 db::model::SnapshotState::Ready,
                 db::model::SnapshotState::Faulted,
                 db::model::SnapshotState::Destroyed,
-            ])
+            ],
+        )
         .await
         .unwrap();
 
@@ -1072,7 +1073,8 @@ async fn test_create_snapshot_record_idempotent(
                 db::model::SnapshotState::Ready,
                 db::model::SnapshotState::Faulted,
                 db::model::SnapshotState::Destroyed,
-            ])
+            ],
+        )
         .await
         .unwrap();
 }
