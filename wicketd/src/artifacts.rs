@@ -13,6 +13,7 @@ use std::{
 use async_trait::async_trait;
 use buf_list::BufList;
 use bytes::{BufMut, Bytes, BytesMut};
+use camino_tempfile::Utf8TempDir;
 use debug_ignore::DebugIgnore;
 use display_error_chain::DisplayErrorChain;
 use dropshot::HttpError;
@@ -128,15 +129,24 @@ impl WicketdArtifactStore {
         Self { log, artifacts_with_plan: Default::default() }
     }
 
-    pub(crate) fn put_repository(
+    pub(crate) async fn put_repository<T>(
         &self,
-        bytes: BufList,
-    ) -> Result<(), HttpError> {
-        slog::debug!(self.log, "adding repository"; "size" => bytes.num_bytes());
+        data: T,
+    ) -> Result<(), HttpError>
+    where
+        T: io::Read + io::Seek + Send + 'static,
+    {
+        slog::debug!(self.log, "adding repository");
 
-        let new_artifacts = ArtifactsWithPlan::from_zip(bytes, &self.log)
-            .map_err(|error| error.to_http_error())?;
+        let log = self.log.clone();
+        let new_artifacts = tokio::task::spawn_blocking(move || {
+            ArtifactsWithPlan::from_zip(data, &log)
+                .map_err(|error| error.to_http_error())
+        })
+        .await
+        .unwrap()?;
         self.replace(new_artifacts);
+
         Ok(())
     }
 
@@ -187,23 +197,13 @@ impl WicketdArtifactStore {
 }
 
 impl ArtifactsWithPlan {
-    fn from_zip(
-        zip_bytes: BufList,
-        log: &Logger,
-    ) -> Result<Self, RepositoryError> {
-        let mut extractor = ArchiveExtractor::from_owned_buf_list(zip_bytes)
-            .map_err(RepositoryError::OpenArchive)?;
-
+    fn from_zip<T>(zip_data: T, log: &Logger) -> Result<Self, RepositoryError>
+    where
+        T: io::Read + io::Seek,
+    {
         // Create a temporary directory to hold artifacts in (we'll read them
         // into memory as we extract them).
-        let dir = camino_tempfile::tempdir()
-            .map_err(RepositoryError::TempDirCreate)?;
-
-        info!(log, "extracting uploaded archive to {}", dir.path());
-
-        // XXX: might be worth differentiating between server-side issues (503)
-        // and issues with the uploaded archive (400).
-        extractor.extract(dir.path()).map_err(RepositoryError::Extract)?;
+        let dir = unzip_into_tempdir(zip_data, log)?;
 
         // Time is unavailable during initial setup, so ignore expiration. Even
         // if time were available, we might want to be able to load older
@@ -354,6 +354,28 @@ impl ArtifactsWithPlan {
     fn get_by_hash(&self, id: &ArtifactHashId) -> Option<BufList> {
         self.by_hash.get(id).cloned().map(|bytes| BufList::from_iter([bytes]))
     }
+}
+
+fn unzip_into_tempdir<T>(
+    zip_data: T,
+    log: &Logger,
+) -> Result<Utf8TempDir, RepositoryError>
+where
+    T: io::Read + io::Seek,
+{
+    let mut extractor = ArchiveExtractor::new(zip_data)
+        .map_err(RepositoryError::OpenArchive)?;
+
+    let dir =
+        camino_tempfile::tempdir().map_err(RepositoryError::TempDirCreate)?;
+
+    info!(log, "extracting uploaded archive to {}", dir.path());
+
+    // XXX: might be worth differentiating between server-side issues (503)
+    // and issues with the uploaded archive (400).
+    extractor.extract(dir.path()).map_err(RepositoryError::Extract)?;
+
+    Ok(dir)
 }
 
 #[derive(Debug, Error)]
@@ -958,7 +980,8 @@ mod tests {
         args.exec(&logctx.log).context("error executing assemble command")?;
 
         // Now check that it can be read by the archive extractor.
-        let zip_bytes = fs_err::read(&archive_path)?.into();
+        let zip_bytes = std::fs::File::open(&archive_path)
+            .context("error opening archive.zip")?;
         let plan = ArtifactsWithPlan::from_zip(zip_bytes, &logctx.log)
             .context("error reading archive.zip")?;
         // Check that all known artifact kinds are present in the map.

@@ -38,9 +38,11 @@ use serde::Serialize;
 use sled_hardware::Baseboard;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
+use std::io;
 use std::net::IpAddr;
 use std::net::Ipv6Addr;
 use std::time::Duration;
+use tokio::io::AsyncWriteExt;
 use uuid::Uuid;
 use wicket_common::rack_setup::PutRssUserConfigInsensitive;
 use wicket_common::update_events::EventReport;
@@ -561,10 +563,45 @@ async fn put_repository(
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let rqctx = rqctx.context();
 
-    // TODO: do we need to return more information with the response?
+    // Create a temporary file to store the incoming archive.
+    let tempfile = tokio::task::spawn_blocking(|| {
+        camino_tempfile::tempfile().map_err(|err| {
+            HttpError::for_unavail(
+                None,
+                format!("failed to create temp file: {err}"),
+            )
+        })
+    })
+    .await
+    .unwrap()?;
+    let mut tempfile =
+        tokio::io::BufWriter::new(tokio::fs::File::from_std(tempfile));
 
-    let bytes = body.into_stream().try_collect().await?;
-    rqctx.update_tracker.put_repository(bytes).await?;
+    let body = body.into_stream();
+    tokio::pin!(body);
+
+    // Stream the uploaded body into our tempfile.
+    while let Some(bytes) = body.try_next().await? {
+        tempfile.write_all(&bytes).await.map_err(|err| {
+            HttpError::for_unavail(
+                None,
+                format!("failed to write to temp file: {err}"),
+            )
+        })?;
+    }
+
+    // Flush writes. We don't need to seek back to the beginning of the file
+    // because extracting the repository will do its own seeking as a part of
+    // unzipping this repo.
+    tempfile.flush().await.map_err(|err| {
+        HttpError::for_unavail(
+            None,
+            format!("failed to flush temp file: {err}"),
+        )
+    })?;
+
+    let tempfile = tempfile.into_inner().into_std().await;
+    rqctx.update_tracker.put_repository(io::BufReader::new(tempfile)).await?;
 
     Ok(HttpResponseUpdatedNoContent())
 }
