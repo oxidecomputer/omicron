@@ -4,17 +4,18 @@
 
 use crate::cli::parse::InputParser;
 
+use camino::Utf8PathBuf;
+use helios_fusion::zpool::ZpoolName;
 use helios_fusion::Input;
 use helios_fusion::ZPOOL;
-
-// TODO: Consider using helios_fusion::zpool::ZpoolName here?
+use std::str::FromStr;
 
 pub(crate) enum Command {
-    Create { pool: String, vdev: String },
-    Export { pool: String },
-    Import { force: bool, pool: String },
-    List { properties: Vec<String>, pools: Option<Vec<String>> },
-    Set { property: String, value: String, pool: String },
+    Create { pool: ZpoolName, vdev: Utf8PathBuf },
+    Export { pool: ZpoolName },
+    Import { force: bool, pool: ZpoolName },
+    List { properties: Vec<String>, pools: Option<Vec<ZpoolName>> },
+    Set { property: String, value: String, pool: ZpoolName },
 }
 
 impl TryFrom<Input> for Command {
@@ -29,19 +30,19 @@ impl TryFrom<Input> for Command {
 
         match input.shift_arg()?.as_str() {
             "create" => {
-                let pool = input.shift_arg()?;
-                let vdev = input.shift_arg()?;
+                let pool = ZpoolName::from_str(&input.shift_arg()?)?;
+                let vdev = Utf8PathBuf::from(input.shift_arg()?);
                 input.no_args_remaining()?;
                 Ok(Command::Create { pool, vdev })
             }
             "export" => {
-                let pool = input.shift_arg()?;
+                let pool = ZpoolName::from_str(&input.shift_arg()?)?;
                 input.no_args_remaining()?;
                 Ok(Command::Export { pool })
             }
             "import" => {
                 let force = input.shift_arg_if("-f")?;
-                let pool = input.shift_arg()?;
+                let pool = ZpoolName::from_str(&input.shift_arg()?)?;
                 Ok(Command::Import { force, pool })
             }
             "list" => {
@@ -78,16 +79,19 @@ impl TryFrom<Input> for Command {
                             }
                         }
                     } else {
-                        pools = Some(vec![arg]);
+                        pools = Some(vec![ZpoolName::from_str(&arg)?]);
                         break;
                     }
                 }
 
                 let remaining_pools = input.args();
                 if !remaining_pools.is_empty() {
-                    pools
-                        .get_or_insert(vec![])
-                        .extend(remaining_pools.into_iter().cloned());
+                    pools.get_or_insert(vec![]).extend(
+                        remaining_pools
+                            .into_iter()
+                            .map(|s| ZpoolName::from_str(s))
+                            .collect::<Result<Vec<_>, String>>()?,
+                    )
                 };
                 if !scripting || !parsable {
                     return Err("You should run 'zpool list' commands with the '-Hp' flags enabled".to_string());
@@ -102,7 +106,7 @@ impl TryFrom<Input> for Command {
                 let property = k.to_string();
                 let value = v.to_string();
 
-                let pool = input.shift_arg()?;
+                let pool = ZpoolName::from_str(&input.shift_arg()?)?;
                 input.no_args_remaining()?;
                 Ok(Command::Set { property, value, pool })
             }

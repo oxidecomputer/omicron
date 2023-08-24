@@ -119,7 +119,7 @@ impl TryFrom<Input> for Command {
                 if let Some(size) = size {
                     // Volume
                     let sparse = sparse.unwrap_or(false);
-                    let name = VolumeName(name);
+                    let name = FilesystemName::new(name)?;
                     Ok(Command::CreateVolume {
                         properties,
                         sparse,
@@ -132,7 +132,7 @@ impl TryFrom<Input> for Command {
                     if sparse.is_some() || blocksize.is_some() {
                         return Err("Using volume arguments, but forgot to specify '-V size'?".to_string());
                     }
-                    let name = FilesystemName(name);
+                    let name = FilesystemName::new(name)?;
                     Ok(Command::CreateFilesystem { properties, name })
                 }
             }
@@ -330,7 +330,7 @@ impl TryFrom<Input> for Command {
             }
             "mount" => {
                 let load_keys = input.shift_arg_if("-l")?;
-                let filesystem = FilesystemName(input.shift_arg()?);
+                let filesystem = FilesystemName::new(input.shift_arg()?)?;
                 input.no_args_remaining()?;
                 Ok(Command::Mount { load_keys, filesystem })
             }
@@ -365,14 +365,14 @@ mod test {
             Input::shell(format!("{ZFS} create myfilesystem"))
         ).unwrap() else { panic!("wrong command") };
         assert_eq!(properties, vec![]);
-        assert_eq!(name.0, "myfilesystem");
+        assert_eq!(name.as_str(), "myfilesystem");
 
         // Create a volume
         let Command::CreateVolume { properties, sparse, blocksize, size, name } = Command::try_from(
             Input::shell(format!("{ZFS} create -s -V 1024 -b 512 -o foo=bar myvolume"))
         ).unwrap() else { panic!("wrong command") };
         assert_eq!(properties, vec![("foo".to_string(), "bar".to_string())]);
-        assert_eq!(name.0, "myvolume");
+        assert_eq!(name.as_str(), "myvolume");
         assert!(sparse);
         assert_eq!(size, 1024);
         assert_eq!(blocksize, Some(512));
@@ -382,7 +382,7 @@ mod test {
             Input::shell(format!("{ZFS} create -s -V 2G -b 512 -o foo=bar myvolume"))
         ).unwrap() else { panic!("wrong command") };
         assert_eq!(properties, vec![("foo".to_string(), "bar".to_string())]);
-        assert_eq!(name.0, "myvolume");
+        assert_eq!(name.as_str(), "myvolume");
         assert!(sparse);
         assert_eq!(size, 2 << 30);
         assert_eq!(blocksize, Some(512));
@@ -472,7 +472,7 @@ mod test {
         ).unwrap() else { panic!("wrong command") };
 
         assert!(load_keys);
-        assert_eq!(filesystem.0, "foobar");
+        assert_eq!(filesystem.as_str(), "foobar");
     }
 
     #[test]

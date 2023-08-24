@@ -145,8 +145,9 @@ impl Executor for FakeExecutor {
     ) -> Result<BoxedChild, ExecutionError> {
         let id = self.inner.counter.fetch_add(1, Ordering::SeqCst);
         log_input(&self.inner.log, id, command);
-
-        Ok(FakeChild::new(id, command, self.inner.clone()))
+        let mut child = FakeChild::new(id, command, self.inner.clone());
+        self.inner.spawn_handler.lock().unwrap()(&mut child);
+        Ok(child)
     }
 }
 
@@ -193,6 +194,16 @@ impl FakeChild {
 
     pub fn command(&self) -> &Command {
         &self.command
+    }
+
+    pub fn stdin(&self) -> &SharedByteQueue {
+        &self.stdin
+    }
+    pub fn stdout(&self) -> &SharedByteQueue {
+        &self.stdout
+    }
+    pub fn stderr(&self) -> &SharedByteQueue {
+        &self.stderr
     }
 }
 

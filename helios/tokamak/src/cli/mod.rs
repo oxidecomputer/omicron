@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Emulates an illumos system
+//! Parsing of CLI-based arguments to a Helios system
 
 // TODO: REMOVE
 #![allow(dead_code)]
@@ -16,22 +16,22 @@ use helios_fusion::{
 };
 
 // Command-line utilities
-mod dladm;
-mod ipadm;
-mod route;
-mod svcadm;
-mod svccfg;
-mod zfs;
-mod zoneadm;
-mod zonecfg;
-mod zpool;
+pub(crate) mod dladm;
+pub(crate) mod ipadm;
+pub(crate) mod route;
+pub(crate) mod svcadm;
+pub(crate) mod svccfg;
+pub(crate) mod zfs;
+pub(crate) mod zoneadm;
+pub(crate) mod zonecfg;
+pub(crate) mod zpool;
 
 // Utilities for parsing
 mod parse;
 
 use crate::cli::parse::InputExt;
 
-enum KnownCommand {
+pub(crate) enum KnownCommand {
     Coreadm, // TODO
     Dladm(dladm::Command),
     Dumpadm, // TODO
@@ -48,10 +48,25 @@ enum KnownCommand {
     Zpool(zpool::Command),
 }
 
-struct Command {
+pub(crate) struct Command {
     with_pfexec: bool,
     in_zone: Option<ZoneName>,
     cmd: KnownCommand,
+}
+
+impl Command {
+    pub fn with_pfexec(&self) -> bool {
+        self.with_pfexec
+    }
+    pub fn in_zone(&self) -> &Option<ZoneName> {
+        &self.in_zone
+    }
+    pub fn cmd(&self) -> &KnownCommand {
+        &self.cmd
+    }
+    pub fn as_cmd(self) -> KnownCommand {
+        self.cmd
+    }
 }
 
 impl TryFrom<Input> for Command {

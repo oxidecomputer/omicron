@@ -3080,6 +3080,7 @@ dependencies = [
  "libc",
  "omicron-common 0.1.0",
  "omicron-test-utils",
+ "petgraph",
  "schemars",
  "serde",
  "shlex",

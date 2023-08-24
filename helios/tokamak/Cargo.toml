@@ -16,6 +16,7 @@ itertools.workspace = true
 ipnetwork.workspace = true
 libc.workspace = true
 omicron-common.workspace = true
+petgraph.workspace = true
 schemars.workspace = true
 serde.workspace = true
 shlex.workspace = true
