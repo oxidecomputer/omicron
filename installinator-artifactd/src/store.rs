@@ -41,10 +41,7 @@ pub enum EventReportStatus {
     /// The update ID was not recognized by the server.
     UnrecognizedUpdateId,
 
-    /// The progress receiver is full: retry later.
-    ReceiverFull,
-
-    /// The progress receiver is closed: abort.
+    /// The progress receiver is closed.
     ReceiverClosed,
 }
 

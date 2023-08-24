@@ -1338,11 +1338,15 @@ impl UpdateContext {
     async fn process_installinator_reports<'engine>(
         &self,
         cx: &StepContext,
-        mut ipr_receiver: mpsc::Receiver<EventReport<InstallinatorSpec>>,
+        mut ipr_receiver: watch::Receiver<EventReport<InstallinatorSpec>>,
     ) -> anyhow::Result<WriteOutput> {
         let mut write_output = None;
 
-        while let Some(report) = ipr_receiver.recv().await {
+        // Note: watch receivers must be used via this pattern, *not* via
+        // `while ipr_receiver.changed().await.is_ok()`.
+        loop {
+            let report = ipr_receiver.borrow_and_update().clone();
+
             // Prior to processing the report, check for the completion metadata
             // that indicates which disks installinator attempt to /
             // successfully wrote. We only need to do this if we haven't already
@@ -1373,7 +1377,11 @@ impl UpdateContext {
                     }
                 }
             }
+
             cx.send_nested_report(report).await?;
+            if ipr_receiver.changed().await.is_err() {
+                break;
+            }
         }
 
         // The receiver being closed means that the installinator has completed.
@@ -1488,7 +1496,7 @@ impl UpdateContext {
         cx: &StepContext,
         mut ipr_start_receiver: IprStartReceiver,
         image_id: HostPhase2RecoveryImageId,
-    ) -> anyhow::Result<mpsc::Receiver<EventReport<InstallinatorSpec>>> {
+    ) -> anyhow::Result<watch::Receiver<EventReport<InstallinatorSpec>>> {
         const MGS_PROGRESS_POLL_INTERVAL: Duration = Duration::from_secs(3);
 
         // Waiting for the installinator to start is a little strange. It can't

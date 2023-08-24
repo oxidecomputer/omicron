@@ -117,11 +117,6 @@ async fn report_progress(
                 format!("update ID {update_id} unrecognized by this server"),
             ))
         }
-        EventReportStatus::ReceiverFull => Err(HttpError::for_client_error(
-            None,
-            StatusCode::TOO_MANY_REQUESTS,
-            format!("update ID {update_id}: receiver full, retry later"),
-        )),
         EventReportStatus::ReceiverClosed => Err(HttpError::for_client_error(
             None,
             StatusCode::GONE,

@@ -13,7 +13,7 @@ use std::{
 };
 
 use installinator_artifactd::EventReportStatus;
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::{oneshot, watch};
 use update_engine::events::StepEventIsTerminal;
 use uuid::Uuid;
 
@@ -49,8 +49,6 @@ pub(crate) struct IprArtifactServer {
 }
 
 impl IprArtifactServer {
-    const CHANNEL_SIZE: usize = 16;
-
     pub(crate) fn report_progress(
         &self,
         update_id: Uuid,
@@ -74,13 +72,20 @@ impl IprArtifactServer {
                         "first report seen for this update ID";
                         "update_id" => %update_id
                     );
-                    let (sender, receiver) = mpsc::channel(Self::CHANNEL_SIZE);
+                    let is_terminal = RunningUpdate::is_terminal(&report);
+
+                    let (sender, receiver) = watch::channel(report);
                     _ = start_sender.send(receiver);
-                    let (new_state, ret) = RunningUpdate::send_and_next_state(
-                        &self.log, sender, report,
-                    );
-                    *update = new_state;
-                    ret
+                    // The first value was already sent above, so no need to
+                    // call RunningUpdate::send_and_next_state. Just check
+                    // is_terminal.
+                    if is_terminal {
+                        *update = RunningUpdate::Closed;
+                    } else {
+                        *update = RunningUpdate::ReportsReceived(sender);
+                    }
+
+                    EventReportStatus::Processed
                 }
                 RunningUpdate::ReportsReceived(sender) => {
                     slog::debug!(
@@ -146,20 +151,22 @@ impl IprUpdateTracker {
 /// Type alias for the receiver that resolves when the first message from the
 /// installinator has been received.
 pub(crate) type IprStartReceiver =
-    oneshot::Receiver<mpsc::Receiver<installinator_common::EventReport>>;
+    oneshot::Receiver<watch::Receiver<installinator_common::EventReport>>;
 
 #[derive(Debug)]
 #[must_use]
 enum RunningUpdate {
     /// This is the initial state: the first message from the installinator
     /// hasn't been received yet.
-    Initial(oneshot::Sender<mpsc::Receiver<installinator_common::EventReport>>),
+    Initial(
+        oneshot::Sender<watch::Receiver<installinator_common::EventReport>>,
+    ),
 
     /// Reports from the installinator have been received.
     ///
     /// This is an `UnboundedSender` to avoid cancel-safety issues (see
     /// https://github.com/oxidecomputer/omicron/pull/3579).
-    ReportsReceived(mpsc::Sender<installinator_common::EventReport>),
+    ReportsReceived(watch::Sender<installinator_common::EventReport>),
 
     /// All messages have been received.
     ///
@@ -198,11 +205,11 @@ impl RunningUpdate {
 
     fn send_and_next_state(
         log: &slog::Logger,
-        sender: mpsc::Sender<installinator_common::EventReport>,
+        sender: watch::Sender<installinator_common::EventReport>,
         report: installinator_common::EventReport,
     ) -> (Self, EventReportStatus) {
         let is_terminal = Self::is_terminal(&report);
-        match sender.try_send(report) {
+        match sender.send(report) {
             Ok(()) => {
                 if is_terminal {
                     (Self::Closed, EventReportStatus::Processed)
@@ -213,23 +220,7 @@ impl RunningUpdate {
                     )
                 }
             }
-            Err(mpsc::error::TrySendError::Full(report)) => {
-                // The receiver is too slow -- apply backpressure by rejecting
-                // the update.
-                slog::warn!(
-                    log,
-                    "progress receiver is full, rejecting event report for now";
-                    "last_seen" => ?report.last_seen,
-                );
-                (
-                    // Don't set the state to Closed here even if this is a
-                    // terminal update, because we want installinator to retry
-                    // sending this report.
-                    Self::ReportsReceived(sender),
-                    EventReportStatus::ReceiverFull,
-                )
-            }
-            Err(mpsc::error::TrySendError::Closed(report)) => {
+            Err(watch::error::SendError(report)) => {
                 // This typically means that the receiver is closed (typically
                 // due to the update process being aborted). If we enforced a
                 // 1:1 relationship between installinator and wicketd, this
@@ -341,8 +332,8 @@ mod tests {
         // There should now be progress.
         let mut receiver = start_receiver.await.expect("first progress seen");
         assert_eq!(
-            receiver.recv().await,
-            Some(first_report),
+            *receiver.borrow_and_update(),
+            first_report,
             "first report matches"
         );
 
@@ -397,15 +388,14 @@ mod tests {
         );
 
         assert_eq!(
-            receiver.recv().await,
-            Some(completion_report.clone()),
+            *receiver.borrow_and_update(),
+            completion_report,
             "completion report matches"
         );
 
-        assert_eq!(
-            receiver.recv().await,
-            None,
-            "receiver closed after completion report"
+        assert!(
+            receiver.changed().await.is_err(),
+            "sender closed after completion report"
         );
 
         // Try sending the completion report again (simulating a situation where

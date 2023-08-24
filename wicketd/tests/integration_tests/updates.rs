@@ -229,7 +229,7 @@ async fn test_installinator_fetch() {
     let recv_handle = tokio::task::spawn(async move {
         let mut receiver =
             start_receiver.await.expect("start_receiver succeeded");
-        while let Some(_) = receiver.recv().await {
+        while receiver.changed().await.is_ok() {
             // TODO: do something with the reports?
         }
     });
