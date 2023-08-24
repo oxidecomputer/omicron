@@ -417,12 +417,6 @@ impl Peers {
                         "received HTTP 422 Unprocessable Entity \
                          for update ID {update_id} (update ID unrecognized)",
                     );
-                } else if err.status() == Some(StatusCode::TOO_MANY_REQUESTS) {
-                    slog::warn!(
-                        log,
-                        "received HTTP 429 Too Many Requests \
-                         for update ID {update_id} (receiver full, retry later)",
-                    );
                 } else if err.status() == Some(StatusCode::GONE) {
                     // XXX If we establish a 1:1 relationship
                     // between a particular instance of wicketd and
