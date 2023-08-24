@@ -15,7 +15,7 @@ rack_subnet = "fd00:1122:3344:0100::"
 # Only include "our own sled" in the bootstrap network
 bootstrap_discovery.type = "only_ours"
 
-ntp_servers = [ "ntp.eng.oxide.computer" ]
+ntp_servers = [ "0.pool.ntp.org" ]
 dns_servers = [ "1.1.1.1", "9.9.9.9" ]
 
 # Delegated external DNS zone name
