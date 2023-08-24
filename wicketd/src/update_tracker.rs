@@ -48,6 +48,7 @@ use slog::Logger;
 use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
+use std::io;
 use std::net::SocketAddrV6;
 use std::sync::Arc;
 use std::sync::Mutex as StdMutex;
@@ -373,12 +374,15 @@ impl UpdateTracker {
     }
 
     /// Updates the repository stored inside the update tracker.
-    pub(crate) async fn put_repository(
+    pub(crate) async fn put_repository<T>(
         &self,
-        bytes: BufList,
-    ) -> Result<(), HttpError> {
+        data: T,
+    ) -> Result<(), HttpError>
+    where
+        T: io::Read + io::Seek + Send + 'static,
+    {
         let mut update_data = self.sp_update_data.lock().await;
-        update_data.put_repository(bytes)
+        update_data.put_repository(data).await
     }
 
     /// Gets a list of artifacts stored in the update repository.
@@ -476,7 +480,10 @@ impl UpdateTrackerData {
         }
     }
 
-    fn put_repository(&mut self, bytes: BufList) -> Result<(), HttpError> {
+    async fn put_repository<T>(&mut self, data: T) -> Result<(), HttpError>
+    where
+        T: io::Read + io::Seek + Send + 'static,
+    {
         // Are there any updates currently running? If so, then reject the new
         // repository.
         let running_sps = self
@@ -494,7 +501,7 @@ impl UpdateTrackerData {
         }
 
         // Put the repository into the artifact store.
-        self.artifact_store.put_repository(bytes)?;
+        self.artifact_store.put_repository(data).await?;
 
         // Reset all running data: a new repository means starting afresh.
         self.sp_update_data.clear();
