@@ -969,7 +969,7 @@ async fn test_create_snapshot_record_idempotent(
         },
 
         project_id,
-        disk_id: disk_id.clone(),
+        disk_id,
         volume_id: Uuid::new_v4(),
         destination_volume_id: Uuid::new_v4(),
 
