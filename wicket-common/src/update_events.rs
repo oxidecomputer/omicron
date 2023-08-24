@@ -110,6 +110,7 @@ pub enum SpComponentUpdateStepId {
     Writing,
     SettingActiveBootSlot,
     Resetting,
+    CheckingActiveBootSlot,
 }
 
 impl StepSpec for SpComponentUpdateSpec {
@@ -222,6 +223,11 @@ pub enum SpComponentUpdateTerminalError {
         #[source]
         error: anyhow::Error,
     },
+    #[error("getting currently-active RoT slot failed")]
+    GetRotActiveSlotFailed {
+        #[source]
+        error: anyhow::Error,
+    },
     #[error("resetting RoT failed")]
     RotResetFailed {
         #[source]
@@ -232,6 +238,8 @@ pub enum SpComponentUpdateTerminalError {
         #[source]
         error: anyhow::Error,
     },
+    #[error("RoT booted into unexpected slot {active_slot}")]
+    RotUnexpectedActiveSlot { active_slot: u16 },
 }
 
 impl update_engine::AsError for SpComponentUpdateTerminalError {
