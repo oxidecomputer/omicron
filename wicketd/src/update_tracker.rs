@@ -391,8 +391,15 @@ impl UpdateTracker {
     ) -> GetArtifactsAndEventReportsResponse {
         let update_data = self.sp_update_data.lock().await;
 
-        let (system_version, artifacts) =
-            update_data.artifact_store.system_version_and_artifact_ids();
+        let (system_version, artifacts) = match update_data
+            .artifact_store
+            .system_version_and_artifact_ids()
+        {
+            Some((system_version, artifacts)) => {
+                (Some(system_version), artifacts)
+            }
+            None => (None, Vec::new()),
+        };
 
         let mut event_reports = BTreeMap::new();
         for (sp, update_data) in &update_data.sp_update_data {
