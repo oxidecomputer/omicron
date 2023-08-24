@@ -221,7 +221,18 @@ async fn test_installinator_fetch() {
     // Create a new update ID and register it. This is required to ensure the
     // installinator reaches completion.
     let update_id = Uuid::new_v4();
-    wicketd_testctx.server.ipr_update_tracker.register(update_id);
+    let start_receiver =
+        wicketd_testctx.server.ipr_update_tracker.register(update_id);
+
+    // Process the receiver rather than dropping it, since dropping it causes
+    // 410 Gone errors.
+    let recv_handle = tokio::task::spawn(async move {
+        let mut receiver =
+            start_receiver.await.expect("start_receiver succeeded");
+        while let Some(_) = receiver.recv().await {
+            // TODO: do something with the reports?
+        }
+    });
 
     let update_id_str = update_id.to_string();
     let dest_path = temp_dir.path().join("installinator-out");
@@ -266,6 +277,8 @@ async fn test_installinator_fetch() {
         let path = dest_path.join(file_name);
         assert!(path.is_file(), "{path} was written out");
     }
+
+    recv_handle.await.expect("recv_handle succeeded");
 
     wicketd_testctx.teardown().await;
 }

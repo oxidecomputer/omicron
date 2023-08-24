@@ -49,6 +49,8 @@ pub(crate) struct IprArtifactServer {
 }
 
 impl IprArtifactServer {
+    const CHANNEL_SIZE: usize = 16;
+
     pub(crate) fn report_progress(
         &self,
         update_id: Uuid,
@@ -72,10 +74,13 @@ impl IprArtifactServer {
                         "first report seen for this update ID";
                         "update_id" => %update_id
                     );
-                    let (sender, receiver) = mpsc::unbounded_channel();
+                    let (sender, receiver) = mpsc::channel(Self::CHANNEL_SIZE);
                     _ = start_sender.send(receiver);
-                    *update =
-                        RunningUpdate::send_and_next_state(sender, report);
+                    let (new_state, ret) = RunningUpdate::send_and_next_state(
+                        &self.log, sender, report,
+                    );
+                    *update = new_state;
+                    ret
                 }
                 RunningUpdate::ReportsReceived(sender) => {
                     slog::debug!(
@@ -83,19 +88,21 @@ impl IprArtifactServer {
                         "further report seen for this update ID";
                         "update_id" => %update_id
                     );
-                    *update =
-                        RunningUpdate::send_and_next_state(sender, report);
+                    let (new_state, ret) = RunningUpdate::send_and_next_state(
+                        &self.log, sender, report,
+                    );
+                    *update = new_state;
+                    ret
                 }
                 RunningUpdate::Closed => {
                     // The sender has been closed; ignore the report.
                     *update = RunningUpdate::Closed;
+                    EventReportStatus::Processed
                 }
                 RunningUpdate::Invalid => {
                     unreachable!("invalid state")
                 }
             }
-
-            EventReportStatus::Processed
         } else {
             slog::debug!(self.log, "update ID unrecognized"; "update_id" => %update_id);
             EventReportStatus::UnrecognizedUpdateId
@@ -138,26 +145,21 @@ impl IprUpdateTracker {
 
 /// Type alias for the receiver that resolves when the first message from the
 /// installinator has been received.
-pub(crate) type IprStartReceiver = oneshot::Receiver<
-    mpsc::UnboundedReceiver<installinator_common::EventReport>,
->;
+pub(crate) type IprStartReceiver =
+    oneshot::Receiver<mpsc::Receiver<installinator_common::EventReport>>;
 
 #[derive(Debug)]
 #[must_use]
 enum RunningUpdate {
     /// This is the initial state: the first message from the installinator
     /// hasn't been received yet.
-    Initial(
-        oneshot::Sender<
-            mpsc::UnboundedReceiver<installinator_common::EventReport>,
-        >,
-    ),
+    Initial(oneshot::Sender<mpsc::Receiver<installinator_common::EventReport>>),
 
     /// Reports from the installinator have been received.
     ///
     /// This is an `UnboundedSender` to avoid cancel-safety issues (see
     /// https://github.com/oxidecomputer/omicron/pull/3579).
-    ReportsReceived(mpsc::UnboundedSender<installinator_common::EventReport>),
+    ReportsReceived(mpsc::Sender<installinator_common::EventReport>),
 
     /// All messages have been received.
     ///
@@ -195,15 +197,60 @@ impl RunningUpdate {
     }
 
     fn send_and_next_state(
-        sender: mpsc::UnboundedSender<installinator_common::EventReport>,
+        log: &slog::Logger,
+        sender: mpsc::Sender<installinator_common::EventReport>,
         report: installinator_common::EventReport,
-    ) -> Self {
+    ) -> (Self, EventReportStatus) {
         let is_terminal = Self::is_terminal(&report);
-        _ = sender.send(report);
-        if is_terminal {
-            Self::Closed
-        } else {
-            Self::ReportsReceived(sender)
+        match sender.try_send(report) {
+            Ok(()) => {
+                if is_terminal {
+                    (Self::Closed, EventReportStatus::Processed)
+                } else {
+                    (
+                        Self::ReportsReceived(sender),
+                        EventReportStatus::Processed,
+                    )
+                }
+            }
+            Err(mpsc::error::TrySendError::Full(report)) => {
+                // The receiver is too slow -- apply backpressure by rejecting
+                // the update.
+                slog::warn!(
+                    log,
+                    "progress receiver is full, rejecting event report for now";
+                    "last_seen" => ?report.last_seen,
+                );
+                (
+                    // Don't set the state to Closed here even if this is a
+                    // terminal update, because we want installinator to retry
+                    // sending this report.
+                    Self::ReportsReceived(sender),
+                    EventReportStatus::ReceiverFull,
+                )
+            }
+            Err(mpsc::error::TrySendError::Closed(report)) => {
+                // This typically means that the receiver is closed (typically
+                // due to the update process being aborted). If we enforced a
+                // 1:1 relationship between installinator and wicketd, this
+                // would indicate that the installinator should be aborted.
+                //
+                // Note that this "closed" is different from the Self::Closed
+                // state -- the latter indicates that the installinator has sent
+                // all of its messages.
+                slog::warn!(
+                    log,
+                    "progress receiver is closed -- marking aborted";
+                    "last_seen" => ?report.last_seen,
+                );
+                (
+                    // Don't set the state to Closed here even if this is a
+                    // terminal update, because we want to keep returning
+                    // ReceiverClosed.
+                    Self::ReportsReceived(sender),
+                    EventReportStatus::ReceiverClosed,
+                )
+            }
         }
     }
 
