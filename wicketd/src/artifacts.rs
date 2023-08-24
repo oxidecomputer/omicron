@@ -7,7 +7,7 @@ use std::{
     collections::{btree_map, hash_map::Entry, BTreeMap, HashMap},
     convert::Infallible,
     io::{self, Read},
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex}, mem,
 };
 
 use async_trait::async_trait;
@@ -39,13 +39,13 @@ use uuid::Uuid;
 use crate::installinator_progress::IprArtifactServer;
 
 // A collection of artifacts along with an update plan using those artifacts.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 struct ArtifactsWithPlan {
     // TODO: replace with BufList once it supports Read via a cursor (required
     // for host tarball extraction)
     by_id: DebugIgnore<HashMap<ArtifactId, (ArtifactHash, Bytes)>>,
     by_hash: DebugIgnore<HashMap<ArtifactHashId, Bytes>>,
-    plan: Option<UpdatePlan>,
+    plan: UpdatePlan,
 }
 
 /// The artifact server interface for wicketd.
@@ -118,9 +118,9 @@ impl ArtifactGetter for WicketdArtifactServer {
 #[derive(Clone, Debug)]
 pub struct WicketdArtifactStore {
     log: Logger,
-    // NOTE: this is a `std::sync::Mutex` rather than a `tokio::sync::Mutex` because the critical
-    // sections are extremely small.
-    artifacts_with_plan: Arc<Mutex<ArtifactsWithPlan>>,
+    // NOTE: this is a `std::sync::Mutex` rather than a `tokio::sync::Mutex`
+    // because the critical sections are extremely small.
+    artifacts_with_plan: Arc<Mutex<Option<ArtifactsWithPlan>>>,
 }
 
 impl WicketdArtifactStore {
@@ -152,12 +152,12 @@ impl WicketdArtifactStore {
 
     pub(crate) fn system_version_and_artifact_ids(
         &self,
-    ) -> (Option<SemverVersion>, Vec<ArtifactId>) {
+    ) -> Option<(SemverVersion, Vec<ArtifactId>)> {
         let artifacts = self.artifacts_with_plan.lock().unwrap();
-        let system_version =
-            artifacts.plan.as_ref().map(|p| p.system_version.clone());
+        let artifacts = artifacts.as_ref()?;
+        let system_version = artifacts.plan.system_version.clone();
         let artifact_ids = artifacts.by_id.keys().cloned().collect();
-        (system_version, artifact_ids)
+        Some((system_version, artifact_ids))
     }
 
     /// Obtain the current plan.
@@ -166,7 +166,11 @@ impl WicketdArtifactStore {
     pub fn current_plan(&self) -> Option<UpdatePlan> {
         // We expect this hashmap to be relatively small (order ~10), and
         // cloning both ArtifactIds and BufLists are cheap.
-        self.artifacts_with_plan.lock().unwrap().plan.clone()
+        self.artifacts_with_plan
+            .lock()
+            .unwrap()
+            .as_ref()
+            .map(|artifacts| artifacts.plan.clone())
     }
 
     // ---
@@ -176,7 +180,12 @@ impl WicketdArtifactStore {
     fn get(&self, id: &ArtifactId) -> Option<BufList> {
         // NOTE: cloning a `BufList` is cheap since it's just a bunch of reference count bumps.
         // Cloning it here also means we can release the lock quickly.
-        self.artifacts_with_plan.lock().unwrap().get(id).map(BufList::from)
+        self.artifacts_with_plan
+            .lock()
+            .unwrap()
+            .as_ref()?
+            .get(id)
+            .map(BufList::from)
     }
 
     pub fn get_by_hash(&self, id: &ArtifactHashId) -> Option<BufList> {
@@ -185,14 +194,18 @@ impl WicketdArtifactStore {
         self.artifacts_with_plan
             .lock()
             .unwrap()
+            .as_ref()?
             .get_by_hash(id)
             .map(BufList::from)
     }
 
     /// Replaces the artifact hash map, returning the previous map.
-    fn replace(&self, new_artifacts: ArtifactsWithPlan) -> ArtifactsWithPlan {
+    fn replace(
+        &self,
+        new_artifacts: ArtifactsWithPlan,
+    ) -> Option<ArtifactsWithPlan> {
         let mut artifacts = self.artifacts_with_plan.lock().unwrap();
-        std::mem::replace(&mut *artifacts, new_artifacts)
+        mem::replace(&mut *artifacts, Some(new_artifacts))
     }
 }
 
@@ -337,11 +350,7 @@ impl ArtifactsWithPlan {
             read_hubris_board_from_archive,
         )?;
 
-        Ok(Self {
-            by_id: by_id.into(),
-            by_hash: by_hash.into(),
-            plan: Some(plan),
-        })
+        Ok(Self { by_id: by_id.into(), by_hash: by_hash.into(), plan })
     }
 
     fn get(&self, id: &ArtifactId) -> Option<BufList> {
