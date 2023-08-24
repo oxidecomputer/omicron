@@ -1,6 +1,13 @@
 :showtitle:
 :toc: left
 :icons: font
+ifdef::env-github[]
+:tip-caption: :bulb:
+:note-caption: :information_source:
+:important-caption: :heavy_exclamation_mark:
+:caution-caption: :fire:
+:warning-caption: :warning:
+endif::[]
 
 = Running Omicron
 
@@ -108,14 +115,30 @@ As an example, in this doc:
 ** 192.168.1.20 - 192.168.1.29 for externally-facing services provided by the system,
 ** 192.168.1.30 as the address used by SoftNPU on the external network, and
 ** 192.168.1.31 - 192.168.1.40 as the addresses used for Instances that need some public IPs (even if just for NAT to the internet).
-2. Alternatively, you'll set up an "external" network that only exists on your test machine.  If you go this route, we'll choose 192.168.1.0/24 and all the same other details as in the case above, just for convenience.  In this mode, you'll need create your made-up network and give the global zone an IP address on it.  We'll use 192.168.1.199:
-+
+
+2. Alternatively, you'll set up an "external" network that only exists on your
+   test machine.  If you go this route, we'll choose 192.168.1.0/24 and all the
+   same other details as in the case above, just for convenience, and it happens
+   to match what is in the non-gimlet.toml file.  In this mode, you'll need to
+   create your made-up network, give the global zone an IP address on it,
+   and set up IPv4 forwarding and address translation (NAT) so that the NTP
+   zone and any instances can get out to the outside world.
+   We'll use 192.168.1.199 for the GZ interface.
+
+NOTE: In the two `map` lines, replace `igb0` with the name of your machine's
+      physical interface that connects to the outside world.
+
 [source,text]
 ----
-# pfexec dladm create-etherstub -t fake_external_stub0
+$ pfexec dladm create-etherstub -t fake_external_stub0
 $ pfexec dladm create-vnic -t -l fake_external_stub0 fake_external0
 $ pfexec ipadm create-if -t fake_external0
 $ pfexec ipadm create-addr -t -T static --address 192.168.1.199 fake_external0/external
+$ echo "map igb0 192.168.1.0/24 -> 0/32 portmap tcp/udp auto" > /tmp/ipnat.conf
+$ echo "map igb0 192.168.1.0/24 -> 0/32" >> /tmp/ipnat.conf
+$ pfexec cp /tmp/ipnat.conf /etc/ipf/ipnat.conf
+$ pfexec routeadm -e ipv4-forwarding -u
+$ svcadm enable ipfilter
 ----
 
 Other network configurations are possible but beyond the scope of this doc.
@@ -305,7 +328,7 @@ Options:
 
 ----
 
-To setup a build target for a non-Gimlet machine with simulated (but fully functional) external networking, you would run:
+To set up a build target for a non-Gimlet machine with simulated (but fully functional) external networking, you would run:
 
 [source,console]
 ----
