@@ -5,8 +5,8 @@
 #: target = "helios-2.0"
 #: output_rules = [
 #:	"=/work/manifest*.toml",
-#:	"=/work/repo-dogfood.zip*",
-#:	"=/work/repo-pvt1.zip*",
+#:	"=/work/repo-*.zip",
+#:	"=/work/repo-*.zip.sha256.txt",
 #: ]
 #: access_repos = [
 #:	"oxidecomputer/dvt-dock",
@@ -25,29 +25,29 @@
 #: job = "helios / build trampoline OS image"
 #:
 #: [[publish]]
-#: series = "dogfood"
-#: name = "repo.zip.parta"
-#: from_output = "/work/repo-dogfood.zip.parta"
+#: series = "rot-prod-rel"
+#: name = "repo.zip"
+#: from_output = "/work/repo-rot-prod-rel.zip"
 #:
 #: [[publish]]
-#: series = "dogfood"
-#: name = "repo.zip.partb"
-#: from_output = "/work/repo-dogfood.zip.partb"
-#:
-#: [[publish]]
-#: series = "dogfood"
+#: series = "rot-prod-rel"
 #: name = "repo.zip.sha256.txt"
-#: from_output = "/work/repo-dogfood.zip.sha256.txt"
+#: from_output = "/work/repo-rot-prod-rel.zip.sha256.txt"
+#:
+#: [[publish]]
+#: series = "rot-staging-dev"
+#: name = "repo.zip"
+#: from_output = "/work/repo-rot-staging-dev.zip"
+#:
+#: [[publish]]
+#: series = "rot-staging-dev"
+#: name = "repo.zip.sha256.txt"
+#: from_output = "/work/repo-rot-staging-dev.zip.sha256.txt"
 #:
 #: [[publish]]
 #: series = "pvt1"
-#: name = "repo.zip.parta"
-#: from_output = "/work/repo-pvt1.zip.parta"
-#:
-#: [[publish]]
-#: series = "pvt1"
-#: name = "repo.zip.partb"
-#: from_output = "/work/repo-pvt1.zip.partb"
+#: name = "repo.zip"
+#: from_output = "/work/repo-pvt1.zip"
 #:
 #: [[publish]]
 #: series = "pvt1"
@@ -58,6 +58,8 @@
 set -o errexit
 set -o pipefail
 set -o xtrace
+
+ALL_BOARDS=(gimlet-{c..e} psc-{b..c} sidecar-{b..c})
 
 TOP=$PWD
 VERSION=$(< /input/package/work/version.txt)
@@ -125,6 +127,23 @@ path = "/input/$kind/work/helios/image/output/os.tar.gz"
 EOF
 done
 
+# Fetch SP images from a Hubris release.
+mkdir /work/hubris
+pushd /work/hubris
+source "$TOP/tools/hubris_version"
+for tag in "${TAGS[@]}"; do
+    for board in "${ALL_BOARDS[@]}"; do
+        if [[ "${tag%-*}" = "${board%-*}" ]]; then
+            file=build-${board}-image-default-${tag#*-}.zip
+            curl -fLOsS "https://github.com/oxidecomputer/hubris/releases/download/$tag/$file"
+            grep -F "$file" "$TOP/tools/hubris_checksums" | shasum -a 256 -c -
+            mv "$file" "$board.zip"
+        fi
+    done
+done
+popd
+
+# Fetch ROT images from dvt-dock.
 source "$TOP/tools/dvt_dock_version"
 git init /work/dvt-dock
 (
@@ -147,27 +166,24 @@ caboose_util_rot() {
     echo "$output_a"
 }
 
+SERIES_LIST=()
 add_hubris_artifacts() {
     series="$1"
     rot_dir="$2"
     rot_version="$3"
     shift 3
 
+    SERIES_LIST+=("$series")
+
     manifest=/work/manifest-$series.toml
     cp /work/manifest.toml "$manifest"
 
-    for board_rev in "$@"; do
-        board=${board_rev%-?}
+    for board in gimlet psc sidecar; do
         tufaceous_board=${board//sidecar/switch}
-
         rot_image_a="/work/dvt-dock/${rot_dir}/${board}/build-${board}-rot-image-a-${rot_version}.zip"
         rot_image_b="/work/dvt-dock/${rot_dir}/${board}/build-${board}-rot-image-b-${rot_version}.zip"
-        sp_image="/work/dvt-dock/sp/${board}/build-${board_rev}-image-default.zip"
-
         rot_caboose_version=$(caboose_util_rot read-version "$rot_image_a" "$rot_image_b")
-        sp_caboose_version=$(/work/caboose-util read-version "$sp_image")
         rot_caboose_board=$(caboose_util_rot read-board "$rot_image_a" "$rot_image_b")
-        sp_caboose_board=$(/work/caboose-util read-board "$sp_image")
 
         cat >>"$manifest" <<EOF
 [[artifact.${tufaceous_board}_rot]]
@@ -181,6 +197,17 @@ path = "$rot_image_a"
 [artifact.${tufaceous_board}_rot.source.archive_b]
 kind = "file"
 path = "$rot_image_b"
+EOF
+    done
+
+    for board_rev in "$@"; do
+        board=${board_rev%-?}
+        tufaceous_board=${board//sidecar/switch}
+        sp_image="/work/hubris/${board_rev}.zip"
+        sp_caboose_version=$(/work/caboose-util read-version "$sp_image")
+        sp_caboose_board=$(/work/caboose-util read-board "$sp_image")
+
+        cat >>"$manifest" <<EOF
 [[artifact.${tufaceous_board}_sp]]
 name = "$sp_caboose_board"
 version = "$sp_caboose_version"
@@ -190,20 +217,13 @@ path = "$sp_image"
 EOF
     done
 }
-# usage:              SERIES   ROT_DIR      ROT_VERSION              BOARDS...
-add_hubris_artifacts  dogfood  staging/dev  cert-staging-dev-v1.0.0  gimlet-c psc-b sidecar-b
-add_hubris_artifacts  pvt1     prod/rel     cert-prod-rel-v1.0.0     gimlet-d psc-c sidecar-c
+# usage:              SERIES           ROT_DIR      ROT_VERSION              BOARDS...
+add_hubris_artifacts  rot-staging-dev  staging/dev  cert-staging-dev-v1.0.0  "${ALL_BOARDS[@]}"
+add_hubris_artifacts  rot-prod-rel     prod/rel     cert-prod-rel-v1.0.0     "${ALL_BOARDS[@]}"
+# XXX temporary until PVT1 rack is updated past #3887 (0c5ca49)
+add_hubris_artifacts  pvt1             prod/rel     cert-prod-rel-v1.0.0     gimlet-d psc-c sidecar-c
 
-for series in dogfood pvt1; do
-    /work/tufaceous assemble --no-generate-key /work/manifest-$series.toml /work/repo-$series.zip
-    digest -a sha256 /work/repo-$series.zip > /work/repo-$series.zip.sha256.txt
-
-    #
-    # XXX: Buildomat currently does not support uploads greater than 1 GiB. This is
-    # an awful temporary hack which we need to strip out the moment it does.
-    #
-    split -a 1 -b 1024m /work/repo-$series.zip /work/repo-$series.zip.part
-    rm /work/repo-$series.zip
-    # Ensure the build doesn't fail if the repo gets smaller than 1 GiB.
-    touch /work/repo-$series.zip.partb
+for series in "${SERIES_LIST[@]}"; do
+    /work/tufaceous assemble --no-generate-key /work/manifest-"$series".toml /work/repo-"$series".zip
+    digest -a sha256 /work/repo-"$series".zip > /work/repo-"$series".zip.sha256.txt
 done
