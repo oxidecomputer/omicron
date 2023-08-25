@@ -1096,10 +1096,7 @@ mod tests {
         {
             let kind = KnownArtifactKind::ControlPlane;
             let data = extracted_artifacts
-                .store_and_hash(
-                    kind.clone().into(),
-                    &Bytes::from(make_random_bytes()),
-                )
+                .store_and_hash(kind.into(), &Bytes::from(make_random_bytes()))
                 .unwrap();
             let id = ArtifactId {
                 name: format!("{kind:?}"),
@@ -1124,7 +1121,7 @@ mod tests {
             for board in boards {
                 let data = extracted_artifacts
                     .store_and_hash(
-                        kind.clone().into(),
+                        kind.into(),
                         &Bytes::from(make_random_bytes()),
                     )
                     .unwrap();
@@ -1151,7 +1148,7 @@ mod tests {
             (KnownArtifactKind::Trampoline, &trampoline),
         ] {
             let data = extracted_artifacts
-                .store_and_hash(kind.clone().into(), &image.tarball)
+                .store_and_hash(kind.into(), &image.tarball)
                 .unwrap();
             let id = ArtifactId {
                 name: format!("{kind:?}"),
@@ -1174,7 +1171,7 @@ mod tests {
             (KnownArtifactKind::SwitchRot, &sidecar_rot),
         ] {
             let data = extracted_artifacts
-                .store_and_hash(kind.clone().into(), &artifact.tarball)
+                .store_and_hash(kind.into(), &artifact.tarball)
                 .unwrap();
             let id = ArtifactId {
                 name: format!("{kind:?}"),
