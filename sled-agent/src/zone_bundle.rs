@@ -1053,14 +1053,22 @@ async fn get_zone_bundle_paths(
     id: &Uuid,
 ) -> Result<Vec<Utf8PathBuf>, BundleError> {
     let mut out = Vec::with_capacity(directories.len());
-    for path in directories {
-        out.extend(
-            filter_zone_bundles(log, path, |md| {
-                md.id.zone_name == zone_name && md.id.bundle_id == *id
-            })
-            .await?
-            .into_keys(),
-        );
+    for dir in directories {
+        let mut rd = tokio::fs::read_dir(dir).await.map_err(|err| {
+            BundleError::ReadDirectory { directory: dir.to_owned(), err }
+        })?;
+        while let Some(entry) = rd.next_entry().await.map_err(|err| {
+            BundleError::ReadDirectory { directory: dir.to_owned(), err }
+        })? {
+            let search_dir = Utf8PathBuf::try_from(entry.path())?;
+            out.extend(
+                filter_zone_bundles(log, &search_dir, |md| {
+                    md.id.zone_name == zone_name && md.id.bundle_id == *id
+                })
+                .await?
+                .into_keys(),
+            );
+        }
     }
     Ok(out)
 }

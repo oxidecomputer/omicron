@@ -14,10 +14,6 @@ use std::sync::Arc;
 use std::time::Duration;
 use trust_dns_resolver::error::ResolveErrorKind;
 
-const RSS_CONFIG_PATH: &str = concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/../smf/sled-agent/non-gimlet/config-rss.toml"
-);
 const RSS_CONFIG_STR: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../smf/sled-agent/non-gimlet/config-rss.toml"
@@ -72,8 +68,11 @@ impl Context {
 }
 
 fn rss_config() -> Result<SetupServiceConfig> {
-    toml::from_str(RSS_CONFIG_STR)
-        .with_context(|| format!("parsing {:?} as TOML", RSS_CONFIG_PATH))
+    let path = "/opt/oxide/sled-agent/pkg/config-rss.toml";
+    let content =
+        std::fs::read_to_string(&path).unwrap_or(RSS_CONFIG_STR.to_string());
+    toml::from_str(&content)
+        .with_context(|| format!("parsing config-rss as TOML"))
 }
 
 fn nexus_external_dns_name(config: &SetupServiceConfig) -> String {
@@ -147,6 +146,7 @@ impl ClientParams {
         // server.
         let rss_config = rss_config()?;
         let dns_addr = external_dns_addr(&rss_config)?;
+        eprintln!("Using external DNS server at {:?}", dns_addr);
         let nexus_dns_name = nexus_external_dns_name(&rss_config);
         let resolver = Arc::new(CustomDnsResolver::new(dns_addr)?);
 

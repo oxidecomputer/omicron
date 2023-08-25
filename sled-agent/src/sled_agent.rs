@@ -644,7 +644,7 @@ impl SledAgent {
         Zones::get()
             .await
             .map(|zones| {
-                zones
+                let mut zn: Vec<_> = zones
                     .into_iter()
                     .filter_map(|zone| {
                         if matches!(zone.state(), zone::State::Running) {
@@ -653,7 +653,9 @@ impl SledAgent {
                             None
                         }
                     })
-                    .collect()
+                    .collect();
+                zn.sort();
+                zn
             })
             .map_err(|e| Error::from(BundleError::from(e)))
     }
