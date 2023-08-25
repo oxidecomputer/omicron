@@ -110,6 +110,7 @@ pub enum SpComponentUpdateStepId {
     Writing,
     SettingActiveBootSlot,
     Resetting,
+    CheckingActiveBootSlot,
 }
 
 impl StepSpec for SpComponentUpdateSpec {
@@ -146,6 +147,8 @@ pub enum UpdateTerminalError {
         #[from]
         error: NestedEngineError<TestStepSpec>,
     },
+    #[error("simulated failure result")]
+    SimulatedFailure,
     #[error("error updating component")]
     ComponentNestedError {
         #[from]
@@ -161,6 +164,8 @@ pub enum UpdateTerminalError {
         #[source]
         error: gateway_client::Error<gateway_client::types::Error>,
     },
+    #[error("TUF repository missing SP image for board {board}")]
+    MissingSpImageForBoard { board: String },
     #[error("setting installinator image ID failed")]
     SetInstallinatorImageIdFailed {
         #[source]
@@ -218,6 +223,11 @@ pub enum SpComponentUpdateTerminalError {
         #[source]
         error: anyhow::Error,
     },
+    #[error("getting currently-active RoT slot failed")]
+    GetRotActiveSlotFailed {
+        #[source]
+        error: anyhow::Error,
+    },
     #[error("resetting RoT failed")]
     RotResetFailed {
         #[source]
@@ -228,6 +238,8 @@ pub enum SpComponentUpdateTerminalError {
         #[source]
         error: anyhow::Error,
     },
+    #[error("RoT booted into unexpected slot {active_slot}")]
+    RotUnexpectedActiveSlot { active_slot: u16 },
 }
 
 impl update_engine::AsError for SpComponentUpdateTerminalError {

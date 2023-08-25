@@ -136,8 +136,9 @@ async fn test_updates() {
     match terminal_event.kind {
         StepEventKind::ExecutionFailed { failed_step, .. } => {
             // TODO: obviously we shouldn't stop here, get past more of the
-            // update process in this test.
-            assert_eq!(failed_step.info.component, UpdateComponent::Rot);
+            // update process in this test. We currently fail when attempting to
+            // look up the SP's board in our tuf repo.
+            assert_eq!(failed_step.info.component, UpdateComponent::Sp);
         }
         other => {
             panic!("unexpected terminal event kind: {other:?}");
@@ -236,6 +237,10 @@ async fn test_installinator_fetch() {
         "--control-plane",
         control_plane_hash.as_str(),
         dest_path.as_str(),
+        "--data-link0",
+        "cxgbe0",
+        "--data-link1",
+        "cxgbe1",
     ])
     .expect("installinator args parsed successfully");
 

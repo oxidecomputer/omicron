@@ -13,12 +13,12 @@ use crate::zone::{AddressRequest, IPADM, ZONE_PREFIX};
 use camino::{Utf8Path, Utf8PathBuf};
 use ipnetwork::IpNetwork;
 use omicron_common::backoff;
-use slog::error;
-use slog::info;
-use slog::o;
-use slog::warn;
-use slog::Logger;
+use slog::{error, info, o, warn, Logger};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+#[cfg(target_os = "illumos")]
+use std::sync::OnceLock;
+#[cfg(target_os = "illumos")]
+use std::thread;
 use uuid::Uuid;
 
 #[cfg(any(test, feature = "testing"))]
@@ -152,14 +152,40 @@ pub enum GetZoneError {
     },
 }
 
+#[cfg(target_os = "illumos")]
+static REAPER_THREAD: OnceLock<thread::JoinHandle<()>> = OnceLock::new();
+
+#[cfg(target_os = "illumos")]
+pub fn ensure_contract_reaper(log: &Logger) {
+    info!(log, "Ensuring contract reaper thread");
+    REAPER_THREAD.get_or_init(|| {
+        let log = log.new(o!("component" => "ContractReaper"));
+        std::thread::spawn(move || zenter::contract_reaper(log))
+    });
+}
+
+#[cfg(not(target_os = "illumos"))]
+pub fn ensure_contract_reaper(log: &Logger) {
+    info!(log, "Not illumos, skipping contract reaper thread");
+}
+
 // Helper module for setting up and running `zone_enter()` for subprocesses run
 // inside a non-global zone.
 #[cfg(target_os = "illumos")]
 mod zenter {
+    use libc::ctid_t;
     use libc::zoneid_t;
+    use slog::{debug, error, Logger};
     use std::ffi::c_int;
     use std::ffi::c_uint;
-    use std::ffi::CStr;
+    use std::ffi::c_void;
+    use std::ffi::{CStr, CString};
+    use std::process;
+    use std::thread;
+    use std::time::Duration;
+
+    #[allow(non_camel_case_types)]
+    type ct_evthdl_t = *mut c_void;
 
     #[link(name = "contract")]
     extern "C" {
@@ -169,11 +195,120 @@ mod zenter {
         fn ct_pr_tmpl_set_param(fd: c_int, params: c_uint) -> c_int;
         fn ct_tmpl_activate(fd: c_int) -> c_int;
         fn ct_tmpl_clear(fd: c_int) -> c_int;
+        fn ct_ctl_abandon(fd: c_int) -> c_int;
+        fn ct_event_read_critical(fd: c_int, ev: *mut ct_evthdl_t) -> c_int;
+        fn ct_event_get_type(ev: ct_evthdl_t) -> u64;
+        fn ct_event_get_ctid(ev: ct_evthdl_t) -> ctid_t;
+        fn ct_event_free(ev: ct_evthdl_t);
     }
 
     #[link(name = "c")]
     extern "C" {
         pub fn zone_enter(zid: zoneid_t) -> c_int;
+    }
+
+    // This thread watches for critical events coming from all process
+    // contracts held by sled-agent, and reaps (abandons) contracts which
+    // become empty. Process contracts are used in conjunction with
+    // zone_enter() in order to run commands within non-global zones, and
+    // the contracts used for this come from templates that define becoming
+    // empty as a critical event.
+    pub fn contract_reaper(log: Logger) {
+        const EVENT_PATH: &[u8] = b"/system/contract/process/pbundle";
+        const CT_PR_EV_EMPTY: u64 = 1;
+
+        let cpath = CString::new(EVENT_PATH).unwrap();
+        let fd = unsafe { libc::open(cpath.as_ptr(), libc::O_RDONLY) };
+
+        if fd < 0 {
+            panic!(
+                "Could not open {:?}: {}",
+                cpath,
+                std::io::Error::last_os_error()
+            );
+        }
+
+        loop {
+            let mut ev: ct_evthdl_t = std::ptr::null_mut();
+            let evp: *mut ct_evthdl_t = &mut ev;
+            // The event endpoint was not opened as non-blocking, so
+            // ct_event_read_critical(3CONTRACT) will block until a new
+            // critical event is available on the channel.
+            match unsafe { ct_event_read_critical(fd, evp) } {
+                0 => {
+                    let typ = unsafe { ct_event_get_type(ev) };
+                    if typ == CT_PR_EV_EMPTY {
+                        let ctid = unsafe { ct_event_get_ctid(ev) };
+                        match abandon_contract(ctid) {
+                            Err(e) => error!(
+                                &log,
+                                "Failed to abandon contract {}: {}", ctid, e
+                            ),
+                            Ok(_) => {
+                                debug!(&log, "Abandoned contract {}", ctid)
+                            }
+                        }
+                    }
+                    unsafe { ct_event_free(ev) };
+                }
+                err => {
+                    // ct_event_read_critical(3CONTRACT) does not state any
+                    // error values for this function if the file descriptor
+                    // was not opened non-blocking, but inspection of the
+                    // library code shows that various errnos could be returned
+                    // in situations such as failure to allocate memory. In
+                    // those cases, log a message and pause to avoid entering a
+                    // tight loop if the problem persists.
+                    error!(
+                        &log,
+                        "Unexpected response from contract event channel: {}",
+                        std::io::Error::from_raw_os_error(err)
+                    );
+                    thread::sleep(Duration::from_secs(1));
+                }
+            }
+        }
+    }
+
+    #[derive(thiserror::Error, Debug)]
+    pub enum AbandonContractError {
+        #[error("Error opening file {file}: {error}")]
+        Open { file: String, error: std::io::Error },
+
+        #[error("Error abandoning contract {ctid}: {error}")]
+        Abandon { ctid: ctid_t, error: std::io::Error },
+
+        #[error("Error closing file {file}: {error}")]
+        Close { file: String, error: std::io::Error },
+    }
+
+    pub fn abandon_contract(ctid: ctid_t) -> Result<(), AbandonContractError> {
+        let path = format!("/proc/{}/contracts/{}/ctl", process::id(), ctid);
+
+        let cpath = CString::new(path.clone()).unwrap();
+        let fd = unsafe { libc::open(cpath.as_ptr(), libc::O_WRONLY) };
+        if fd < 0 {
+            return Err(AbandonContractError::Open {
+                file: path,
+                error: std::io::Error::last_os_error(),
+            });
+        }
+        let ret = unsafe { ct_ctl_abandon(fd) };
+        if ret != 0 {
+            unsafe { libc::close(fd) };
+            return Err(AbandonContractError::Abandon {
+                ctid,
+                error: std::io::Error::from_raw_os_error(ret),
+            });
+        }
+        if unsafe { libc::close(fd) } != 0 {
+            return Err(AbandonContractError::Close {
+                file: path,
+                error: std::io::Error::last_os_error(),
+            });
+        }
+
+        Ok(())
     }
 
     // A Rust wrapper around the process contract template.
@@ -198,6 +333,8 @@ mod zenter {
         // `usr/src/uts/common/sys/contract/process.h` in the illumos sources
         // for details.
 
+        // Contract has become empty.
+        const CT_PR_EV_EMPTY: c_uint = 0x1;
         // Process experienced an uncorrectable error.
         const CT_PR_EV_HWERR: c_uint = 0x20;
         // Only kill process group on fatal errors.
@@ -215,12 +352,14 @@ mod zenter {
 
             // Initialize the contract template.
             //
-            // No events are delivered, nothing is inherited, and we do not
-            // allow the contract to be orphaned.
+            // Nothing is inherited, we do not allow the contract to be
+            // orphaned, and the only event which is delivered is EV_EMPTY,
+            // indicating that the contract has become empty. These events are
+            // consumed by contract_reaper() above.
             //
             // See illumos sources in `usr/src/cmd/zlogin/zlogin.c` in the
             // implementation of `init_template()` for details.
-            if unsafe { ct_tmpl_set_critical(fd, 0) } != 0
+            if unsafe { ct_tmpl_set_critical(fd, Self::CT_PR_EV_EMPTY) } != 0
                 || unsafe { ct_tmpl_set_informative(fd, 0) } != 0
                 || unsafe { ct_pr_tmpl_set_fatal(fd, Self::CT_PR_EV_HWERR) }
                     != 0
@@ -277,11 +416,11 @@ impl RunningZone {
     // another, if the task is swapped out at an await point. That would leave
     // the first thread's template in a modified state.
     //
-    // If we do need to make this method asynchronous, we will need to change the
-    // internals to avoid changing the thread's contract. One possible approach
-    // here would be to use `libscf` directly, rather than `exec`-ing `svccfg`
-    // directly in a forked child. That would obviate the need to work on the
-    // contract at all.
+    // If we do need to make this method asynchronous, we will need to change
+    // the internals to avoid changing the thread's contract. One possible
+    // approach here would be to use `libscf` directly, rather than `exec`-ing
+    // `svccfg` directly in a forked child. That would obviate the need to work
+    // on the contract at all.
     #[cfg(target_os = "illumos")]
     pub fn run_cmd<I, S>(&self, args: I) -> Result<String, RunCommandError>
     where
@@ -326,6 +465,7 @@ impl RunningZone {
             err,
         });
         template.clear();
+
         res.map(|output| String::from_utf8_lossy(&output.stdout).to_string())
     }
 
@@ -834,11 +974,10 @@ impl RunningZone {
 
     /// Return the names of the Oxide SMF services this zone is intended to run.
     pub fn service_names(&self) -> Result<Vec<String>, ServiceError> {
-        const NEEDLES: [&str; 2] = ["/oxide", "/system/illumos"];
         let output = self.run_cmd(&["svcs", "-H", "-o", "fmri"])?;
         Ok(output
             .lines()
-            .filter(|line| NEEDLES.iter().any(|needle| line.contains(needle)))
+            .filter(|line| is_oxide_smf_log_file(line))
             .map(|line| line.trim().to_string())
             .collect())
     }
@@ -1005,6 +1144,7 @@ impl InstalledZone {
         unique_name: Option<Uuid>,
         datasets: &[zone::Dataset],
         filesystems: &[zone::Fs],
+        data_links: &[String],
         devices: &[zone::Device],
         opte_ports: Vec<(Port, PortTicket)>,
         bootstrap_vnic: Option<Link>,
@@ -1041,13 +1181,20 @@ impl InstalledZone {
                     .collect(),
             })?;
 
-        let net_device_names: Vec<String> = opte_ports
+        let mut net_device_names: Vec<String> = opte_ports
             .iter()
             .map(|(port, _)| port.vnic_name().to_string())
             .chain(std::iter::once(control_vnic.name().to_string()))
             .chain(bootstrap_vnic.as_ref().map(|vnic| vnic.name().to_string()))
             .chain(links.iter().map(|nic| nic.name().to_string()))
+            .chain(data_links.iter().map(|x| x.to_string()))
             .collect();
+
+        // There are many sources for device names. In some cases they can
+        // overlap, depending on the contents of user defined config files. This
+        // can cause zones to fail to start if duplicate data links are given.
+        net_device_names.sort();
+        net_device_names.dedup();
 
         Zones::install_omicron_zone(
             log,
@@ -1083,4 +1230,12 @@ impl InstalledZone {
         path.push("root/var/svc/profile/site.xml");
         path
     }
+}
+
+/// Return true if the named file appears to be a log file for an Oxide SMF
+/// service.
+pub fn is_oxide_smf_log_file(name: impl AsRef<str>) -> bool {
+    const SMF_SERVICE_PREFIXES: [&str; 2] = ["/oxide", "/system/illumos"];
+    let name = name.as_ref();
+    SMF_SERVICE_PREFIXES.iter().any(|needle| name.contains(needle))
 }

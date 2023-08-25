@@ -26,6 +26,7 @@ pub mod import_blocks_from_url;
 pub mod instance_create;
 pub mod instance_delete;
 pub mod instance_migrate;
+pub mod instance_start;
 pub mod loopback_address_create;
 pub mod loopback_address_delete;
 pub mod project_create;
@@ -40,6 +41,9 @@ pub mod volume_remove_rop;
 pub mod vpc_create;
 
 pub mod common_storage;
+
+#[cfg(test)]
+mod test_helpers;
 
 #[derive(Debug)]
 pub struct NexusSagaType;
@@ -127,6 +131,9 @@ fn make_action_registry() -> ActionRegistry {
         &mut registry,
     );
     <instance_migrate::SagaInstanceMigrate as NexusSaga>::register_actions(
+        &mut registry,
+    );
+    <instance_start::SagaInstanceStart as NexusSaga>::register_actions(
         &mut registry,
     );
     <loopback_address_create::SagaLoopbackAddressCreate

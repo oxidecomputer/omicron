@@ -18,10 +18,45 @@ progenitor::generate_api!(
         slog::debug!(log, "client response"; "result" => ?result);
     }),
     derives = [schemars::JsonSchema],
+    replace = {
+        Ipv4Network = ipnetwork::Ipv4Network,
+    }
 );
 
 impl omicron_common::api::external::ClientError for types::Error {
     fn message(&self) -> String {
         self.message.clone()
+    }
+}
+
+impl From<types::Baseboard> for sled_hardware::Baseboard {
+    fn from(value: types::Baseboard) -> Self {
+        match value {
+            types::Baseboard::Gimlet { identifier, model, revision } => {
+                sled_hardware::Baseboard::new_gimlet(
+                    identifier, model, revision,
+                )
+            }
+            types::Baseboard::Unknown => sled_hardware::Baseboard::unknown(),
+            types::Baseboard::Pc { identifier, model } => {
+                sled_hardware::Baseboard::new_pc(identifier, model)
+            }
+        }
+    }
+}
+
+impl From<sled_hardware::Baseboard> for types::Baseboard {
+    fn from(value: sled_hardware::Baseboard) -> Self {
+        match value {
+            sled_hardware::Baseboard::Gimlet {
+                identifier,
+                model,
+                revision,
+            } => types::Baseboard::Gimlet { identifier, model, revision },
+            sled_hardware::Baseboard::Unknown => types::Baseboard::Unknown,
+            sled_hardware::Baseboard::Pc { identifier, model } => {
+                types::Baseboard::Pc { identifier, model }
+            }
+        }
     }
 }

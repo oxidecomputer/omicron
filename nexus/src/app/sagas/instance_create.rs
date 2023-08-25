@@ -330,7 +330,7 @@ impl NexusSaga for SagaInstanceCreate {
         // If a primary NIC exists, create a NAT entry for the default external IP,
         // as well as additional NAT entries for each requested ephemeral IP
         for i in 0..(params.create_params.external_ips.len() + 1) {
-            for switch_location in &params.boundary_switches {
+            for &switch_location in &params.boundary_switches {
                 let subsaga_name = SagaName::new(&format!(
                     "instance-configure-nat-{i}-{switch_location}"
                 ));
@@ -346,7 +346,7 @@ impl NexusSaga for SagaInstanceCreate {
                     saga_params: params.clone(),
                     instance_id,
                     which: i,
-                    switch_location: switch_location.clone(),
+                    switch_location,
                 };
                 subsaga_append(
                     basename,
@@ -1141,6 +1141,7 @@ async fn sic_delete_instance_record(
         .instance_name(&instance_name)
         .fetch()
         .await;
+
     // Although, as mentioned in the comment above, we should not be doing the
     // lookup by name here, we do want this operation to be idempotent.
     //
@@ -1367,8 +1368,8 @@ pub mod test {
     use crate::{
         app::saga::create_saga_dag, app::sagas::instance_create::Params,
         app::sagas::instance_create::SagaInstanceCreate,
-        authn::saga::Serialized, db::datastore::DataStore,
-        external_api::params,
+        app::sagas::test_helpers, authn::saga::Serialized,
+        db::datastore::DataStore, external_api::params,
     };
     use async_bb8_diesel::{
         AsyncConnection, AsyncRunQueryDsl, AsyncSimpleConnection,
@@ -1390,7 +1391,6 @@ pub mod test {
     use omicron_common::api::internal::shared::SwitchLocation;
     use omicron_sled_agent::sim::SledAgent;
     use std::collections::HashSet;
-    use std::num::NonZeroU32;
     use uuid::Uuid;
 
     type ControlPlaneTestContext =
@@ -1437,13 +1437,6 @@ pub mod test {
         }
     }
 
-    pub fn test_opctx(cptestctx: &ControlPlaneTestContext) -> OpContext {
-        OpContext::for_tests(
-            cptestctx.logctx.log.new(o!()),
-            cptestctx.server.apictx().nexus.datastore().clone(),
-        )
-    }
-
     #[nexus_test(server = crate::Server)]
     async fn test_saga_basic_usage_succeeds(
         cptestctx: &ControlPlaneTestContext,
@@ -1454,7 +1447,7 @@ pub mod test {
         let project_id = create_org_project_and_disk(&client).await;
 
         // Build the saga DAG with the provided test parameters
-        let opctx = test_opctx(&cptestctx);
+        let opctx = test_helpers::test_opctx(&cptestctx);
         let params = new_test_params(&opctx, project_id);
         let dag = create_saga_dag::<SagaInstanceCreate>(params).unwrap();
         let runnable_saga = nexus.create_runnable_saga(dag).await.unwrap();
@@ -1675,54 +1668,21 @@ pub mod test {
         let project_id = create_org_project_and_disk(&client).await;
 
         // Build the saga DAG with the provided test parameters
-        let opctx = test_opctx(&cptestctx);
+        let opctx = test_helpers::test_opctx(&cptestctx);
 
-        let params = new_test_params(&opctx, project_id);
-
-        // Each run of the test needs to use a distinct DAG so that it has a
-        // distinct instance ID. Instead of creating a DAG and iterating over
-        // each node to turn it into a failure point, create an initial DAG to
-        // find out how many nodes there are, then iterate over possible failure
-        // points, creating a new DAG each time.
-        let dag =
-            create_saga_dag::<SagaInstanceCreate>(params.clone()).unwrap();
-        let num_nodes = dag.get_nodes().count();
-
-        for failure_index in 0..num_nodes {
-            let dag =
-                create_saga_dag::<SagaInstanceCreate>(params.clone()).unwrap();
-
-            let node = dag.get_nodes().nth(failure_index).unwrap();
-            info!(
-                log,
-                "Creating new saga which will fail at index {:?}", node.index();
-                "node_name" => node.name().as_ref(),
-                "label" => node.label(),
-            );
-
-            let runnable_saga =
-                nexus.create_runnable_saga(dag.clone()).await.unwrap();
-
-            // Inject an error instead of running the node.
-            //
-            // This should cause the saga to unwind.
-            nexus
-                .sec()
-                .saga_inject_error(runnable_saga.id(), node.index())
-                .await
-                .unwrap();
-
-            let saga_error = nexus
-                .run_saga_raw_result(runnable_saga)
-                .await
-                .expect("saga should have started successfully")
-                .kind
-                .expect_err("saga execution should have failed");
-
-            assert_eq!(saga_error.error_node_name, *node.name());
-
-            verify_clean_slate(&cptestctx).await;
-        }
+        test_helpers::action_failure_can_unwind::<SagaInstanceCreate, _, _>(
+            nexus,
+            || Box::pin(async { new_test_params(&opctx, project_id) }),
+            || {
+                Box::pin({
+                    async {
+                        verify_clean_slate(&cptestctx).await;
+                    }
+                })
+            },
+            log,
+        )
+        .await;
     }
 
     #[nexus_test(server = crate::Server)]
@@ -1735,88 +1695,19 @@ pub mod test {
         let client = &cptestctx.external_client;
         let nexus = &cptestctx.server.apictx().nexus;
         let project_id = create_org_project_and_disk(&client).await;
+        let opctx = test_helpers::test_opctx(&cptestctx);
 
-        // Build the saga DAG with the provided test parameters
-        let opctx = test_opctx(&cptestctx);
-
-        // Create the DAG once to determine how many nodes it has (for iteration
-        // purposes), then recreate it in each iteration of the test. This is
-        // needed to ensure each iteration gets a distinct instance ID.
-        let params = new_test_params(&opctx, project_id);
-        let dag =
-            create_saga_dag::<SagaInstanceCreate>(params.clone()).unwrap();
-        let num_nodes = dag.get_nodes().count();
-
-        // Iterate over pairs of adjacent nodes. Inject an error into the second
-        // node, then configure the undo action for the first node to be
-        // repeated.
-        let node_indices = Vec::from_iter(0..num_nodes);
-        for indices in node_indices.windows(2) {
-            let dag =
-                create_saga_dag::<SagaInstanceCreate>(params.clone()).unwrap();
-            let undo_node = dag.get_nodes().nth(indices[0]).unwrap();
-            let error_node = dag.get_nodes().nth(indices[1]).unwrap();
-
-            // Create a new saga for this node.
-            info!(
-                log,
-                "Creating new saga which will fail at index {:?}", error_node.index();
-                "node_name" => error_node.name().as_ref(),
-                "label" => error_node.label(),
-            );
-
-            let runnable_saga =
-                nexus.create_runnable_saga(dag.clone()).await.unwrap();
-
-            // Inject an error instead of running the node.
-            //
-            // This should cause the saga to unwind.
-            nexus
-                .sec()
-                .saga_inject_error(runnable_saga.id(), error_node.index())
-                .await
-                .unwrap();
-
-            // Inject a repetition for the node being undone.
-            //
-            // This means it is executing twice while unwinding.
-            nexus
-                .sec()
-                .saga_inject_repeat(
-                    runnable_saga.id(),
-                    undo_node.index(),
-                    steno::RepeatInjected {
-                        action: NonZeroU32::new(1).unwrap(),
-                        undo: NonZeroU32::new(2).unwrap(),
-                    },
-                )
-                .await
-                .unwrap();
-
-            let saga_error = nexus
-                .run_saga_raw_result(runnable_saga)
-                .await
-                .expect("saga should have started successfully")
-                .kind
-                .expect_err("saga execution should have failed");
-
-            assert_eq!(saga_error.error_node_name, *error_node.name());
-
-            verify_clean_slate(&cptestctx).await;
-        }
-    }
-
-    async fn destroy_instance(cptestctx: &ControlPlaneTestContext) {
-        let nexus = &cptestctx.server.apictx().nexus;
-        let opctx = test_opctx(&cptestctx);
-
-        let instance_selector = params::InstanceSelector {
-            project: Some(PROJECT_NAME.to_string().try_into().unwrap()),
-            instance: INSTANCE_NAME.to_string().try_into().unwrap(),
-        };
-        let instance_lookup =
-            nexus.instance_lookup(&opctx, instance_selector).unwrap();
-        nexus.project_destroy_instance(&opctx, &instance_lookup).await.unwrap();
+        test_helpers::action_failure_can_unwind_idempotently::<
+            SagaInstanceCreate,
+            _,
+            _,
+        >(
+            nexus,
+            || Box::pin(async { new_test_params(&opctx, project_id) }),
+            || Box::pin(async { verify_clean_slate(&cptestctx).await }),
+            log,
+        )
+        .await;
     }
 
     #[nexus_test(server = crate::Server)]
@@ -1830,40 +1721,21 @@ pub mod test {
         let project_id = create_org_project_and_disk(&client).await;
 
         // Build the saga DAG with the provided test parameters
-        let opctx = test_opctx(&cptestctx);
+        let opctx = test_helpers::test_opctx(&cptestctx);
 
         let params = new_test_params(&opctx, project_id);
         let dag = create_saga_dag::<SagaInstanceCreate>(params).unwrap();
-
-        let runnable_saga =
-            nexus.create_runnable_saga(dag.clone()).await.unwrap();
-
-        // Cause all actions to run twice. The saga should succeed regardless!
-        for node in dag.get_nodes() {
-            nexus
-                .sec()
-                .saga_inject_repeat(
-                    runnable_saga.id(),
-                    node.index(),
-                    steno::RepeatInjected {
-                        action: NonZeroU32::new(2).unwrap(),
-                        undo: NonZeroU32::new(1).unwrap(),
-                    },
-                )
-                .await
-                .unwrap();
-        }
-
-        // Verify that the saga's execution succeeded.
-        nexus
-            .run_saga(runnable_saga)
-            .await
-            .expect("Saga should have succeeded");
+        test_helpers::actions_succeed_idempotently(nexus, dag).await;
 
         // Verify that if the instance is destroyed, no detritus remains.
         // This is important to ensure that our original saga didn't
         // double-allocate during repeated actions.
-        destroy_instance(&cptestctx).await;
+        test_helpers::instance_delete_by_name(
+            &cptestctx,
+            INSTANCE_NAME,
+            PROJECT_NAME,
+        )
+        .await;
         verify_clean_slate(&cptestctx).await;
     }
 }

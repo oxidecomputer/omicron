@@ -1,21 +1,17 @@
 #!/bin/bash
-#:
-#: name = "build-and-test (helios)"
-#: variety = "basic"
-#: target = "helios-2.0"
-#: rust_toolchain = "1.70.0"
-#: output_rules = [
-#:	"/var/tmp/omicron_tmp/*",
-#:	"!/var/tmp/omicron_tmp/crdb-base*",
-#:	"!/var/tmp/omicron_tmp/rustc*",
-#: ]
 
 set -o errexit
 set -o pipefail
 set -o xtrace
 
+# NOTE: This version should be in sync with the recommended version in
+# .config/nextest.toml. (Maybe build an automated way to pull the recommended
+# version in the future.)
+NEXTEST_VERSION='0.9.57'
+
 cargo --version
 rustc --version
+curl -sSfL --retry 10 https://get.nexte.st/"$NEXTEST_VERSION"/"$1" | gunzip | tar -xvf - -C ~/.cargo/bin
 
 #
 # Set up a custom temporary directory within whatever one we were given so that
@@ -50,14 +46,25 @@ ptime -m bash ./tools/install_builder_prerequisites.sh -y
 # We don't use `--workspace` here because we're not prepared to run tests
 # from end-to-end-tests.
 #
-# We apply our own timeout to ensure that we get a normal failure on timeout
-# rather than a buildomat timeout.  See oxidecomputer/buildomat#8.
-banner test
+banner build
 export RUSTFLAGS="-D warnings"
 export RUSTDOCFLAGS="-D warnings"
 export TMPDIR=$TEST_TMPDIR
 export RUST_BACKTRACE=1
-ptime -m timeout 2h cargo test --locked --verbose --no-fail-fast
+ptime -m cargo test --locked --verbose --no-run
+
+#
+# We apply our own timeout to ensure that we get a normal failure on timeout
+# rather than a buildomat timeout.  See oxidecomputer/buildomat#8.
+#
+banner test
+ptime -m timeout 2h cargo nextest run --profile ci --locked --verbose
+
+#
+# https://github.com/nextest-rs/nextest/issues/16
+#
+banner doctest
+ptime -m timeout 1h cargo test --doc --locked --verbose --no-fail-fast
 
 #
 # Make sure that we have left nothing around in $TEST_TMPDIR.  The easiest way

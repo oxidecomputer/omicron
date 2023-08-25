@@ -91,7 +91,8 @@
 use super::{
     common_storage::{
         call_pantry_attach_for_disk, call_pantry_detach_for_disk,
-        delete_crucible_regions, ensure_all_datasets_and_regions,
+        delete_crucible_regions, delete_crucible_running_snapshot,
+        delete_crucible_snapshot, ensure_all_datasets_and_regions,
         get_pantry_address,
     },
     ActionRegistry, NexusActionContext, NexusSaga, SagaInitError,
@@ -351,6 +352,7 @@ async fn ssc_alloc_regions_undo(
     sagactx: NexusActionContext,
 ) -> Result<(), anyhow::Error> {
     let osagactx = sagactx.user_data();
+    let log = osagactx.log();
 
     let region_ids = sagactx
         .lookup::<Vec<(db::model::Dataset, db::model::Region)>>(
@@ -360,7 +362,7 @@ async fn ssc_alloc_regions_undo(
         .map(|(_, region)| region.id())
         .collect::<Vec<Uuid>>();
 
-    osagactx.datastore().regions_hard_delete(region_ids).await?;
+    osagactx.datastore().regions_hard_delete(log, region_ids).await?;
     Ok(())
 }
 
@@ -453,6 +455,7 @@ async fn ssc_regions_ensure_undo(
     let log = sagactx.user_data().log();
     warn!(log, "ssc_regions_ensure_undo: Deleting crucible regions");
     delete_crucible_regions(
+        log,
         sagactx.lookup::<Vec<(db::model::Dataset, db::model::Region)>>(
             "datasets_and_regions",
         )?,
@@ -464,7 +467,7 @@ async fn ssc_regions_ensure_undo(
 
 async fn ssc_create_destination_volume_record(
     sagactx: NexusActionContext,
-) -> Result<db::model::Volume, ActionError> {
+) -> Result<(), ActionError> {
     let osagactx = sagactx.user_data();
 
     let destination_volume_id =
@@ -475,28 +478,31 @@ async fn ssc_create_destination_volume_record(
     let volume =
         db::model::Volume::new(destination_volume_id, destination_volume_data);
 
-    let volume_created = osagactx
+    osagactx
         .datastore()
         .volume_create(volume)
         .await
         .map_err(ActionError::action_failed)?;
 
-    Ok(volume_created)
+    Ok(())
 }
 
 async fn ssc_create_destination_volume_record_undo(
     sagactx: NexusActionContext,
 ) -> Result<(), anyhow::Error> {
     let osagactx = sagactx.user_data();
-    let params = sagactx.saga_params::<Params>()?;
-    let opctx = crate::context::op_context_for_saga_action(
-        &sagactx,
-        &params.serialized_authn,
-    );
 
     let destination_volume_id =
         sagactx.lookup::<Uuid>("destination_volume_id")?;
-    osagactx.nexus().volume_delete(&opctx, destination_volume_id).await?;
+
+    osagactx
+        .datastore()
+        .decrease_crucible_resource_count_and_soft_delete_volume(
+            destination_volume_id,
+        )
+        .await?;
+
+    osagactx.datastore().volume_hard_delete(destination_volume_id).await?;
 
     Ok(())
 }
@@ -540,7 +546,7 @@ async fn ssc_create_snapshot_record(
         project_id: params.project_id,
         disk_id: disk.id(),
         volume_id,
-        destination_volume_id: destination_volume_id,
+        destination_volume_id,
 
         gen: db::model::Generation::new(),
         state: db::model::SnapshotState::Creating,
@@ -739,16 +745,10 @@ async fn ssc_send_snapshot_request_to_sled_agent_undo(
         let url = format!("http://{}", dataset.address());
         let client = CrucibleAgentClient::new(&url);
 
-        retry_until_known_result(log, || async {
-            client
-                .region_delete_snapshot(
-                    &RegionId(region.id().to_string()),
-                    &snapshot_id.to_string(),
-                )
-                .await
-        })
-        .await?;
+        delete_crucible_snapshot(log, &client, region.id(), snapshot_id)
+            .await?;
     }
+
     Ok(())
 }
 
@@ -1061,15 +1061,8 @@ async fn ssc_call_pantry_snapshot_for_disk_undo(
         let url = format!("http://{}", dataset.address());
         let client = CrucibleAgentClient::new(&url);
 
-        retry_until_known_result(log, || async {
-            client
-                .region_delete_snapshot(
-                    &RegionId(region.id().to_string()),
-                    &snapshot_id.to_string(),
-                )
-                .await
-        })
-        .await?;
+        delete_crucible_snapshot(log, &client, region.id(), snapshot_id)
+            .await?;
     }
     Ok(())
 }
@@ -1300,6 +1293,7 @@ async fn ssc_start_running_snapshot_undo(
         .disk_id(params.disk_id)
         .fetch()
         .await?;
+
     let datasets_and_regions =
         osagactx.datastore().get_allocated_regions(disk.volume_id).await?;
 
@@ -1308,29 +1302,14 @@ async fn ssc_start_running_snapshot_undo(
         let url = format!("http://{}", dataset.address());
         let client = CrucibleAgentClient::new(&url);
 
-        use crucible_agent_client::Error::ErrorResponse;
-        use http::status::StatusCode;
+        delete_crucible_running_snapshot(
+            &log,
+            &client,
+            region.id(),
+            snapshot_id,
+        )
+        .await?;
 
-        retry_until_known_result(log, || async {
-            client
-                .region_delete_running_snapshot(
-                    &RegionId(region.id().to_string()),
-                    &snapshot_id.to_string(),
-                )
-                .await
-        })
-        .await
-        .map(|_| ())
-        // NOTE: If we later create a volume record and delete it, the
-        // running snapshot may be deleted (see:
-        // ssc_create_volume_record_undo).
-        //
-        // To cope, we treat "running snapshot not found" as "Ok", since it
-        // may just be the result of the volume deletion steps completing.
-        .or_else(|err| match err {
-            ErrorResponse(r) if r.status() == StatusCode::NOT_FOUND => Ok(()),
-            _ => Err(err),
-        })?;
         osagactx
             .datastore()
             .region_snapshot_remove(dataset.id(), region.id(), snapshot_id)
@@ -1341,7 +1320,7 @@ async fn ssc_start_running_snapshot_undo(
 
 async fn ssc_create_volume_record(
     sagactx: NexusActionContext,
-) -> Result<db::model::Volume, ActionError> {
+) -> Result<(), ActionError> {
     let log = sagactx.user_data().log();
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
@@ -1403,7 +1382,7 @@ async fn ssc_create_volume_record(
     let volume = db::model::Volume::new(volume_id, volume_data);
 
     // Insert volume record into the DB
-    let volume_created = osagactx
+    osagactx
         .datastore()
         .volume_create(volume)
         .await
@@ -1411,7 +1390,7 @@ async fn ssc_create_volume_record(
 
     info!(log, "volume {} created ok", volume_id);
 
-    Ok(volume_created)
+    Ok(())
 }
 
 async fn ssc_create_volume_record_undo(
@@ -1419,15 +1398,18 @@ async fn ssc_create_volume_record_undo(
 ) -> Result<(), anyhow::Error> {
     let log = sagactx.user_data().log();
     let osagactx = sagactx.user_data();
-    let params = sagactx.saga_params::<Params>()?;
-    let opctx = crate::context::op_context_for_saga_action(
-        &sagactx,
-        &params.serialized_authn,
-    );
     let volume_id = sagactx.lookup::<Uuid>("volume_id")?;
 
-    info!(log, "deleting volume {}", volume_id);
-    osagactx.nexus().volume_delete(&opctx, volume_id).await?;
+    info!(
+        log,
+        "calling decrease crucible resource count for volume {}", volume_id
+    );
+    osagactx
+        .datastore()
+        .decrease_crucible_resource_count_and_soft_delete_volume(volume_id)
+        .await?;
+
+    osagactx.datastore().volume_hard_delete(volume_id).await?;
 
     Ok(())
 }
@@ -1568,6 +1550,7 @@ mod test {
     use super::*;
 
     use crate::app::saga::create_saga_dag;
+    use crate::app::sagas::test_helpers;
     use crate::app::test_interfaces::TestInterfaces;
     use crate::db::DataStore;
     use crate::external_api::shared::IpRange;
@@ -1583,6 +1566,7 @@ mod test {
     use nexus_test_utils::resource_helpers::populate_ip_pool;
     use nexus_test_utils::resource_helpers::DiskTest;
     use nexus_test_utils_macros::nexus_test;
+    use nexus_types::external_api::params::InstanceDiskAttachment;
     use omicron_common::api::external::ByteCount;
     use omicron_common::api::external::IdentityMetadataCreateParams;
     use omicron_common::api::external::Instance;
@@ -1794,6 +1778,7 @@ mod test {
 
     const PROJECT_NAME: &str = "springfield-squidport";
     const DISK_NAME: &str = "disky-mcdiskface";
+    const INSTANCE_NAME: &str = "base-instance";
 
     async fn create_org_project_and_disk(client: &ClientTestContext) -> Uuid {
         create_ip_pool(&client, "p0", None).await;
@@ -1931,6 +1916,44 @@ mod test {
         assert!(no_region_snapshot_records_exist(datastore).await);
     }
 
+    /// Creates an instance in the test project with the supplied disks attached
+    /// and ensures the instance is started.
+    async fn setup_test_instance(
+        cptestctx: &ControlPlaneTestContext,
+        client: &ClientTestContext,
+        disks_to_attach: Vec<InstanceDiskAttachment>,
+    ) {
+        let instances_url = format!("/v1/instances?project={}", PROJECT_NAME,);
+        let instance: Instance = object_create(
+            client,
+            &instances_url,
+            &params::InstanceCreate {
+                identity: IdentityMetadataCreateParams {
+                    name: INSTANCE_NAME.parse().unwrap(),
+                    description: format!("instance {:?}", INSTANCE_NAME),
+                },
+                ncpus: InstanceCpuCount(2),
+                memory: ByteCount::from_gibibytes_u32(1),
+                hostname: String::from("base_instance"),
+                user_data:
+                    b"#cloud-config\nsystem_info:\n  default_user:\n    name: oxide"
+                        .to_vec(),
+                network_interfaces:
+                    params::InstanceNetworkInterfaceAttachment::None,
+                disks: disks_to_attach,
+                external_ips: vec![],
+                start: true,
+            },
+        )
+        .await;
+
+        // cannot snapshot attached disk for instance in state starting
+        let nexus = &cptestctx.server.apictx().nexus;
+        let sa =
+            nexus.instance_sled_by_id(&instance.identity.id).await.unwrap();
+        sa.instance_finish_transition(instance.identity.id).await;
+    }
+
     #[nexus_test(server = crate::Server)]
     async fn test_action_failure_can_unwind_no_pantry(
         cptestctx: &ControlPlaneTestContext,
@@ -1954,7 +1977,7 @@ mod test {
 
         let client = &cptestctx.external_client;
         let nexus = &cptestctx.server.apictx().nexus;
-        let mut disk_id = create_org_project_and_disk(&client).await;
+        let disk_id = create_org_project_and_disk(&client).await;
 
         // Build the saga DAG with the provided test parameters
         let opctx = test_opctx(&cptestctx);
@@ -1968,74 +1991,130 @@ mod test {
         let silo_id = authz_silo.id();
         let project_id = authz_project.id();
 
-        let params = new_test_params(
-            &opctx,
-            silo_id,
-            project_id,
-            disk_id,
-            Name::from_str(DISK_NAME).unwrap().into(),
-            use_the_pantry,
-        );
-        let mut dag = create_saga_dag::<SagaSnapshotCreate>(params).unwrap();
+        // As a concession to the test helper, make sure the disk is gone
+        // before the first attempt to run the saga recreates it.
+        delete_disk(client, PROJECT_NAME, DISK_NAME).await;
 
-        // The saga's input parameters include a disk UUID, which makes sense,
-        // since the snapshot is created from a disk.
-        //
-        // Unfortunately, for our idempotency checks, checking for a "clean
-        // slate" gets more expensive when we need to compare region allocations
-        // between the disk and the snapshot. If we can undo the snapshot
-        // provisioning AND delete the disk together, these checks are much
-        // simpler to write.
-        //
-        // So, in summary: We do some odd indexing here...
-        // ... because we re-create the whole DAG on each iteration...
-        // ... because we also delete the disk on each iteration, making the
-        // parameters invalid...
-        // ... because doing so provides a really easy-to-verify "clean slate"
-        // for us to test against.
-        let mut n: usize = 0;
-        while let Some(node) = dag.get_nodes().nth(n) {
-            n = n + 1;
-
-            // Create a new saga for this node.
-            info!(
-                log,
-                "Creating new saga which will fail at index {:?}", node.index();
-                "node_name" => node.name().as_ref(),
-                "label" => node.label(),
-            );
-
-            let runnable_saga =
-                nexus.create_runnable_saga(dag.clone()).await.unwrap();
-
-            // Inject an error instead of running the node.
-            //
-            // This should cause the saga to unwind.
-            nexus
-                .sec()
-                .saga_inject_error(runnable_saga.id(), node.index())
-                .await
-                .unwrap();
-            nexus
-                .run_saga(runnable_saga)
-                .await
-                .expect_err("Saga should have failed");
-
-            delete_disk(client, PROJECT_NAME, DISK_NAME).await;
-            verify_clean_slate(cptestctx, &test).await;
-            disk_id =
-                create_disk(client, PROJECT_NAME, DISK_NAME).await.identity.id;
-
-            let params = new_test_params(
-                &opctx,
-                silo_id,
-                project_id,
-                disk_id,
-                Name::from_str(DISK_NAME).unwrap().into(),
-                use_the_pantry,
-            );
-            dag = create_saga_dag::<SagaSnapshotCreate>(params).unwrap();
+        // The no-pantry variant of the test needs to see the disk attached to
+        // an instance. Set up an IP pool so that instances can be created
+        // against it.
+        if !use_the_pantry {
+            populate_ip_pool(
+                &client,
+                "default",
+                Some(
+                    IpRange::try_from((
+                        Ipv4Addr::new(10, 1, 0, 0),
+                        Ipv4Addr::new(10, 1, 255, 255),
+                    ))
+                    .unwrap(),
+                ),
+            )
+            .await;
         }
+
+        crate::app::sagas::test_helpers::action_failure_can_unwind::<
+            SagaSnapshotCreate,
+            _,
+            _,
+        >(
+            nexus,
+            || {
+                Box::pin({
+                    async {
+                        let disk_id =
+                            create_disk(client, PROJECT_NAME, DISK_NAME)
+                                .await
+                                .identity
+                                .id;
+
+                        // If the pantry isn't being used, make sure the disk is
+                        // attached. Note that under normal circumstances, a
+                        // disk can only be attached to a stopped instance, but
+                        // since this is just a test, bypass the normal
+                        // attachment machinery and just update the disk's
+                        // database record directly.
+                        if !use_the_pantry {
+                            setup_test_instance(
+                                cptestctx,
+                                client,
+                                vec![params::InstanceDiskAttachment::Attach(
+                                    params::InstanceDiskAttach {
+                                        name: Name::from_str(DISK_NAME)
+                                            .unwrap(),
+                                    },
+                                )],
+                            )
+                            .await;
+                        }
+
+                        new_test_params(
+                            &opctx,
+                            silo_id,
+                            project_id,
+                            disk_id,
+                            Name::from_str(DISK_NAME).unwrap().into(),
+                            use_the_pantry,
+                        )
+                    }
+                })
+            },
+            || {
+                Box::pin(async {
+                    // If the pantry wasn't used, detach the disk before
+                    // deleting it. Note that because each iteration creates a
+                    // new disk ID, and that ID doesn't escape the closure that
+                    // created it, the lookup needs to be done by name instead.
+                    if !use_the_pantry {
+                        let (.., authz_disk, db_disk) =
+                            LookupPath::new(&opctx, nexus.datastore())
+                                .project_id(project_id)
+                                .disk_name(&db::model::Name(
+                                    DISK_NAME.to_owned().try_into().unwrap(),
+                                ))
+                                .fetch_for(authz::Action::Read)
+                                .await
+                                .expect("Failed to look up created disk");
+
+                        assert!(nexus
+                            .datastore()
+                            .disk_update_runtime(
+                                &opctx,
+                                &authz_disk,
+                                &db_disk.runtime().detach(),
+                            )
+                            .await
+                            .expect("failed to detach disk"));
+
+                        // Stop and destroy the test instance to satisfy the
+                        // clean-slate check.
+                        test_helpers::instance_stop_by_name(
+                            cptestctx,
+                            INSTANCE_NAME,
+                            PROJECT_NAME,
+                        )
+                        .await;
+                        test_helpers::instance_simulate_by_name(
+                            cptestctx,
+                            INSTANCE_NAME,
+                            PROJECT_NAME,
+                        )
+                        .await;
+                        test_helpers::instance_delete_by_name(
+                            cptestctx,
+                            INSTANCE_NAME,
+                            PROJECT_NAME,
+                        )
+                        .await;
+                    }
+
+                    delete_disk(client, PROJECT_NAME, DISK_NAME).await;
+                    verify_clean_slate(cptestctx, &test).await;
+                })
+            },
+            log,
+        )
+        .await;
     }
 
     #[nexus_test(server = crate::Server)]
@@ -2219,7 +2298,7 @@ mod test {
             }
         }
 
-        // Attach the to an instance, then rerun the saga
+        // Attach the disk to an instance, then rerun the saga
         populate_ip_pool(
             &client,
             "default",
@@ -2233,39 +2312,16 @@ mod test {
         )
         .await;
 
-        let instances_url = format!("/v1/instances?project={}", PROJECT_NAME,);
-        let instance_name = "base-instance";
-
-        let instance: Instance = object_create(
+        setup_test_instance(
+            cptestctx,
             client,
-            &instances_url,
-            &params::InstanceCreate {
-                identity: IdentityMetadataCreateParams {
-                    name: instance_name.parse().unwrap(),
-                    description: format!("instance {:?}", instance_name),
+            vec![params::InstanceDiskAttachment::Attach(
+                params::InstanceDiskAttach {
+                    name: Name::from_str(DISK_NAME).unwrap(),
                 },
-                ncpus: InstanceCpuCount(2),
-                memory: ByteCount::from_gibibytes_u32(1),
-                hostname: String::from("base_instance"),
-                user_data:
-                    b"#cloud-config\nsystem_info:\n  default_user:\n    name: oxide"
-                        .to_vec(),
-                network_interfaces:
-                    params::InstanceNetworkInterfaceAttachment::None,
-                disks: vec![params::InstanceDiskAttachment::Attach(
-                    params::InstanceDiskAttach { name: Name::from_str(DISK_NAME).unwrap() },
-                )],
-                external_ips: vec![],
-                start: true,
-            },
+            )],
         )
         .await;
-
-        // cannot snapshot attached disk for instance in state starting
-        let nexus = &cptestctx.server.apictx().nexus;
-        let sa =
-            nexus.instance_sled_by_id(&instance.identity.id).await.unwrap();
-        sa.instance_finish_transition(instance.identity.id).await;
 
         // Rerun the saga
         let params = new_test_params(

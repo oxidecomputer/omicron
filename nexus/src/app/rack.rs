@@ -34,6 +34,7 @@ use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::IpNet;
+use omicron_common::api::external::Ipv4Net;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::Name;
@@ -458,11 +459,8 @@ impl super::Nexus {
                     addresses: HashMap::new(),
                 };
 
-                let uplink_address = IpNet::from_str(&format!("{}/32", uplink_config.uplink_ip))
-                    .map_err(|e| Error::internal_error(&format!(
-                    "failed to parse value provided for `rack_network_config.uplink_ip` as `IpNet`: {e}"
-                )))?;
-
+                let uplink_address =
+                    IpNet::V4(Ipv4Net(uplink_config.uplink_cidr));
                 let address = Address {
                     address_lot: NameOrId::Name(address_lot_name.clone()),
                     address: uplink_address,

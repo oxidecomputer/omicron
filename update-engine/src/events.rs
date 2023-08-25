@@ -955,6 +955,32 @@ impl<S: StepSpec> StepOutcome<S> {
             }
         }
     }
+
+    /// Returns true if the step was successful, including success with
+    /// warning.
+    pub fn is_success_or_warning(&self) -> bool {
+        match self {
+            Self::Success { .. } | Self::Warning { .. } => true,
+            Self::Skipped { .. } => false,
+        }
+    }
+
+    /// Returns true if the step was skipped.
+    pub fn is_skipped(&self) -> bool {
+        match self {
+            Self::Skipped { .. } => true,
+            Self::Success { .. } | Self::Warning { .. } => false,
+        }
+    }
+
+    /// Returns the message associated with this outcome, if one exists.
+    pub fn message(&self) -> Option<&Cow<'static, str>> {
+        match self {
+            StepOutcome::Success { message, .. } => message.as_ref(),
+            StepOutcome::Warning { message, .. }
+            | StepOutcome::Skipped { message, .. } => Some(message),
+        }
+    }
 }
 
 #[derive(Deserialize, Serialize, JsonSchema)]

@@ -7,6 +7,8 @@
 use crate::mgs::GetInventoryError;
 use crate::mgs::GetInventoryResponse;
 use crate::mgs::MgsHandle;
+use crate::mgs::ShutdownInProgress;
+use crate::preflight_check::UplinkEventReport;
 use crate::RackV1Inventory;
 use bootstrap_agent_client::types::RackInitId;
 use bootstrap_agent_client::types::RackOperationStatus;
@@ -28,6 +30,7 @@ use http::StatusCode;
 use omicron_common::address;
 use omicron_common::api::external::SemverVersion;
 use omicron_common::api::internal::shared::RackNetworkConfig;
+use omicron_common::api::internal::shared::SwitchLocation;
 use omicron_common::update::ArtifactId;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -62,6 +65,7 @@ pub fn api() -> WicketdApiDescription {
         api.register(post_run_rack_setup)?;
         api.register(post_run_rack_reset)?;
         api.register(get_inventory)?;
+        api.register(get_location)?;
         api.register(put_repository)?;
         api.register(get_artifacts_and_event_reports)?;
         api.register(get_baseboard)?;
@@ -70,6 +74,8 @@ pub fn api() -> WicketdApiDescription {
         api.register(post_clear_update_state)?;
         api.register(get_update_sp)?;
         api.register(post_ignition_command)?;
+        api.register(post_start_preflight_uplink_check)?;
+        api.register(get_preflight_uplink_report)?;
         Ok(())
     }
 
@@ -156,7 +162,7 @@ pub struct BootstrapSledDescription {
 pub struct CurrentRssUserConfigInsensitive {
     pub bootstrap_sleds: BTreeSet<BootstrapSledDescription>,
     pub ntp_servers: Vec<String>,
-    pub dns_servers: Vec<String>,
+    pub dns_servers: Vec<IpAddr>,
     pub internal_services_ip_pool_ranges: Vec<address::IpRange>,
     pub external_dns_ips: Vec<IpAddr>,
     pub external_dns_zone_name: String,
@@ -181,19 +187,14 @@ pub struct CurrentRssUserConfig {
 async fn inventory_or_unavail(
     mgs_handle: &MgsHandle,
 ) -> Result<RackV1Inventory, HttpError> {
-    match mgs_handle.get_inventory(Vec::new()).await {
+    match mgs_handle.get_cached_inventory().await {
         Ok(GetInventoryResponse::Response { inventory, .. }) => Ok(inventory),
         Ok(GetInventoryResponse::Unavailable) => Err(HttpError::for_unavail(
             None,
             "Rack inventory not yet available".into(),
         )),
-        Err(GetInventoryError::ShutdownInProgress) => {
+        Err(ShutdownInProgress) => {
             Err(HttpError::for_unavail(None, "Server is shutting down".into()))
-        }
-        Err(GetInventoryError::InvalidSpIdentifier) => {
-            // We didn't provide any SP identifiers to refresh, so they can't be
-            // invalid.
-            unreachable!()
         }
     }
 }
@@ -407,6 +408,7 @@ async fn post_run_rack_setup(
     rqctx: RequestContext<ServerContext>,
 ) -> Result<HttpResponseOk<RackInitId>, HttpError> {
     let ctx = rqctx.context();
+    let log = &rqctx.log;
 
     let sled_agent_addr = ctx
         .bootstrap_agent_addr()
@@ -414,7 +416,7 @@ async fn post_run_rack_setup(
 
     let request = {
         let config = ctx.rss_config.lock().unwrap();
-        config.start_rss_request(&ctx.bootstrap_peers).map_err(|err| {
+        config.start_rss_request(&ctx.bootstrap_peers, log).map_err(|err| {
             HttpError::for_bad_request(None, format!("{err:#}"))
         })?
     };
@@ -526,7 +528,12 @@ async fn get_inventory(
     body_params: TypedBody<GetInventoryParams>,
 ) -> Result<HttpResponseOk<GetInventoryResponse>, HttpError> {
     let GetInventoryParams { force_refresh } = body_params.into_inner();
-    match rqctx.context().mgs_handle.get_inventory(force_refresh).await {
+    match rqctx
+        .context()
+        .mgs_handle
+        .get_inventory_refreshing_sps(force_refresh)
+        .await
+    {
         Ok(response) => Ok(HttpResponseOk(response)),
         Err(GetInventoryError::InvalidSpIdentifier) => {
             Err(HttpError::for_unavail(
@@ -598,6 +605,16 @@ pub(crate) struct StartUpdateOptions {
     /// This is used for testing.
     pub(crate) test_step_seconds: Option<u64>,
 
+    /// If passed in, simulates a result for the RoT update.
+    ///
+    /// This is used for testing.
+    pub(crate) test_simulate_rot_result: Option<UpdateSimulatedResult>,
+
+    /// If passed in, simulates a result for the SP update.
+    ///
+    /// This is used for testing.
+    pub(crate) test_simulate_sp_result: Option<UpdateSimulatedResult>,
+
     /// If true, skip the check on the current RoT version and always update it
     /// regardless of whether the update appears to be neeeded.
     #[allow(dead_code)] // TODO actually use this
@@ -606,6 +623,18 @@ pub(crate) struct StartUpdateOptions {
     /// If true, skip the check on the current SP version and always update it
     /// regardless of whether the update appears to be neeeded.
     pub(crate) skip_sp_version_check: bool,
+}
+
+/// A simulated result for a component update.
+///
+/// Used by [`StartUpdateOptions`].
+#[derive(Clone, Debug, JsonSchema, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum UpdateSimulatedResult {
+    Success,
+    Warning,
+    Skipped,
+    Failure,
 }
 
 #[derive(Clone, Debug, JsonSchema, Deserialize)]
@@ -682,6 +711,72 @@ async fn get_baseboard(
     }))
 }
 
+/// All the fields of this response are optional, because it's possible we don't
+/// know any of them (yet) if MGS has not yet finished discovering its location
+/// or (ever) if we're running in a dev environment that doesn't support
+/// MGS-location / baseboard mapping.
+#[derive(Clone, Debug, JsonSchema, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub struct GetLocationResponse {
+    /// The identity of our sled (where wicketd is running).
+    pub sled_id: Option<SpIdentifier>,
+    /// The baseboard of our sled (where wicketd is running).
+    pub sled_baseboard: Option<Baseboard>,
+    /// The baseboard of the switch our sled is physically connected to.
+    pub switch_baseboard: Option<Baseboard>,
+    /// The identity of the switch our sled is physically connected to.
+    pub switch_id: Option<SpIdentifier>,
+}
+
+/// Report the identity of the sled and switch we're currently running on /
+/// connected to.
+#[endpoint {
+    method = GET,
+    path = "/location",
+}]
+async fn get_location(
+    rqctx: RequestContext<ServerContext>,
+) -> Result<HttpResponseOk<GetLocationResponse>, HttpError> {
+    let rqctx = rqctx.context();
+    let inventory = inventory_or_unavail(&rqctx.mgs_handle).await?;
+
+    let switch_id = rqctx.local_switch_id().await;
+    let sled_baseboard = rqctx.baseboard.clone();
+
+    let mut switch_baseboard = None;
+    let mut sled_id = None;
+
+    for sp in &inventory.sps {
+        if Some(sp.id) == switch_id {
+            switch_baseboard = sp.state.as_ref().map(|state| {
+                // TODO-correctness `new_gimlet` isn't the right name: this is a
+                // sidecar baseboard.
+                Baseboard::new_gimlet(
+                    state.serial_number.clone(),
+                    state.model.clone(),
+                    i64::from(state.revision),
+                )
+            });
+        } else if let (Some(sled_baseboard), Some(state)) =
+            (sled_baseboard.as_ref(), sp.state.as_ref())
+        {
+            if sled_baseboard.identifier() == state.serial_number
+                && sled_baseboard.model() == state.model
+                && sled_baseboard.revision() == i64::from(state.revision)
+            {
+                sled_id = Some(sp.id);
+            }
+        }
+    }
+
+    Ok(HttpResponseOk(GetLocationResponse {
+        sled_id,
+        sled_baseboard,
+        switch_baseboard,
+        switch_id,
+    }))
+}
+
 /// An endpoint to start updating a sled.
 #[endpoint {
     method = POST,
@@ -708,16 +803,14 @@ async fn post_start_update(
     //    an abundance of caution).
     //
     // First, get our most-recently-cached inventory view.
-    let inventory = match rqctx.mgs_handle.get_inventory(Vec::new()).await {
+    let inventory = match rqctx.mgs_handle.get_cached_inventory().await {
         Ok(inventory) => inventory,
-        Err(GetInventoryError::ShutdownInProgress) => {
+        Err(ShutdownInProgress) => {
             return Err(HttpError::for_unavail(
                 None,
                 "Server is shutting down".into(),
             ));
         }
-        // We didn't specify any SP ids to refresh, so this error is impossible.
-        Err(GetInventoryError::InvalidSpIdentifier) => unreachable!(),
     };
 
     // Next, do we have the state of the target SP?
@@ -895,6 +988,110 @@ async fn post_ignition_command(
         .map_err(http_error_from_client_error)?;
 
     Ok(HttpResponseUpdatedNoContent())
+}
+
+/// Options provided to the preflight uplink check.
+#[derive(Clone, Debug, JsonSchema, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct PreflightUplinkCheckOptions {
+    /// DNS name to query.
+    pub dns_name_to_query: Option<String>,
+}
+
+/// An endpoint to start a preflight check for uplink configuration.
+#[endpoint {
+    method = POST,
+    path = "/preflight/uplink",
+}]
+async fn post_start_preflight_uplink_check(
+    rqctx: RequestContext<ServerContext>,
+    body: TypedBody<PreflightUplinkCheckOptions>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let rqctx = rqctx.context();
+    let options = body.into_inner();
+
+    let our_switch_location = match rqctx.local_switch_id().await {
+        Some(SpIdentifier { slot, type_: SpType::Switch }) => match slot {
+            0 => SwitchLocation::Switch0,
+            1 => SwitchLocation::Switch1,
+            _ => {
+                return Err(HttpError::for_internal_error(format!(
+                    "unexpected switch slot {slot}"
+                )));
+            }
+        },
+        Some(other) => {
+            return Err(HttpError::for_internal_error(format!(
+                "unexpected switch SP identifier {other:?}"
+            )));
+        }
+        None => {
+            return Err(HttpError::for_unavail(
+                Some("UnknownSwitchLocation".to_string()),
+                "local switch location not yet determined".to_string(),
+            ));
+        }
+    };
+
+    let (network_config, dns_servers, ntp_servers) = {
+        let rss_config = rqctx.rss_config.lock().unwrap();
+
+        let network_config =
+            rss_config.rack_network_config().cloned().ok_or_else(|| {
+                HttpError::for_bad_request(
+                    None,
+                    "uplink preflight check requires setting \
+                 the uplink config for RSS"
+                        .to_string(),
+                )
+            })?;
+
+        (
+            network_config,
+            rss_config.dns_servers().to_vec(),
+            rss_config.ntp_servers().to_vec(),
+        )
+    };
+
+    match rqctx
+        .preflight_checker
+        .uplink_start(
+            network_config,
+            dns_servers,
+            ntp_servers,
+            our_switch_location,
+            options.dns_name_to_query,
+        )
+        .await
+    {
+        Ok(()) => Ok(HttpResponseUpdatedNoContent {}),
+        Err(err) => Err(HttpError::for_client_error(
+            None,
+            StatusCode::TOO_MANY_REQUESTS,
+            err.to_string(),
+        )),
+    }
+}
+
+/// An endpoint to get the report for the most recent (or still running)
+/// preflight uplink check.
+#[endpoint {
+    method = GET,
+    path = "/preflight/uplink",
+}]
+async fn get_preflight_uplink_report(
+    rqctx: RequestContext<ServerContext>,
+) -> Result<HttpResponseOk<UplinkEventReport>, HttpError> {
+    let rqctx = rqctx.context();
+
+    match rqctx.preflight_checker.uplink_event_report() {
+        Some(report) => Ok(HttpResponseOk(report)),
+        None => Err(HttpError::for_bad_request(
+            None,
+            "no preflight uplink report available - have you started a check?"
+                .to_string(),
+        )),
+    }
 }
 
 fn http_error_from_client_error(

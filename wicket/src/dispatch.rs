@@ -9,10 +9,12 @@ use std::net::{Ipv6Addr, SocketAddrV6};
 use anyhow::{bail, Context, Result};
 use camino::{Utf8Path, Utf8PathBuf};
 use clap::Parser;
-use omicron_common::address::WICKETD_PORT;
+use omicron_common::{address::WICKETD_PORT, FileKv};
 use slog::Drain;
 
-use crate::{rack_setup::SetupArgs, upload::UploadArgs, Runner};
+use crate::{
+    preflight::PreflightArgs, rack_setup::SetupArgs, upload::UploadArgs, Runner,
+};
 
 pub fn exec() -> Result<()> {
     let wicketd_addr =
@@ -34,6 +36,7 @@ pub fn exec() -> Result<()> {
         match args {
             ShellCommand::UploadRepo(args) => args.exec(log, wicketd_addr),
             ShellCommand::Setup(args) => args.exec(log, wicketd_addr),
+            ShellCommand::Preflight(args) => args.exec(log, wicketd_addr),
         }
     } else {
         // Do not expose log messages via standard error since they'll show up
@@ -52,10 +55,14 @@ pub fn exec() -> Result<()> {
 #[derive(Debug, Parser)]
 enum ShellCommand {
     /// Upload a TUF repository to wicketd.
+    #[command(visible_alias = "upload")]
     UploadRepo(UploadArgs),
     /// Interact with rack setup configuration.
     #[command(subcommand)]
     Setup(SetupArgs),
+    /// Run checks prior to setting up the rack.
+    #[command(subcommand)]
+    Preflight(PreflightArgs),
 }
 
 fn setup_log(
@@ -81,7 +88,7 @@ fn setup_log(
         WithStderr::No => slog_async::Async::new(drain).build().fuse(),
     };
 
-    Ok(slog::Logger::root(drain, slog::o!()))
+    Ok(slog::Logger::root(drain, slog::o!(FileKv)))
 }
 
 #[derive(Copy, Clone, Debug)]

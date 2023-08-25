@@ -238,7 +238,7 @@ impl SledAgent {
             // Ensure that any disks that are in this request are attached to
             // this instance.
             let id = match disk.volume_construction_request {
-                propolis_client::instance_spec::VolumeConstructionRequest::Volume { id, .. } => id,
+                VolumeConstructionRequest::Volume { id, .. } => id,
                 _ => panic!("Unexpected construction type"),
             };
             self.disks
@@ -300,17 +300,7 @@ impl SledAgent {
             .await?;
 
         for disk_request in &initial_hardware.disks {
-            // disk_request.volume_construction_request is of type
-            // propolis_client::instance_spec::VolumeConstructionRequest, where
-            // map_disk_ids_to_region_ids expects
-            // crucible_client_types::VolumeConstructionRequest, so take a round
-            // trip through JSON serialization -> deserialization to make this
-            // work.
-            let vcr: crucible_client_types::VolumeConstructionRequest =
-                serde_json::from_str(&serde_json::to_string(
-                    &disk_request.volume_construction_request,
-                )?)?;
-
+            let vcr = &disk_request.volume_construction_request;
             self.map_disk_ids_to_region_ids(&vcr).await?;
         }
 
@@ -558,10 +548,7 @@ impl SledAgent {
                 storage.get_dataset_for_region(*region_id).await;
 
             if let Some(crucible_data) = crucible_data {
-                crucible_data
-                    .create_snapshot(*region_id, snapshot_id)
-                    .await
-                    .map_err(|e| Error::internal_error(&e.to_string()))?;
+                crucible_data.create_snapshot(*region_id, snapshot_id).await;
             } else {
                 return Err(Error::not_found_by_id(
                     ResourceType::Disk,

@@ -17,7 +17,9 @@ use std::time::Instant;
 
 pub use ::backoff::future::{retry, retry_notify};
 pub use ::backoff::Error as BackoffError;
-pub use ::backoff::{backoff::Backoff, ExponentialBackoff, Notify};
+pub use ::backoff::{
+    backoff::Backoff, ExponentialBackoff, ExponentialBackoffBuilder, Notify,
+};
 
 /// A helper function which modifies what information is tracked within the
 /// callback of the notify function.

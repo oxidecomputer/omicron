@@ -9,6 +9,16 @@ use camino::Utf8PathBuf;
 use omicron_common::disk::DiskIdentity;
 use std::fmt;
 
+// These locations in the ramdisk must only be used by the switch zone.
+//
+// We need the switch zone online before we can create the U.2 drives and
+// encrypt the zpools during rack initialization. Without the switch zone we
+// cannot get the rack initialization request from wicketd in RSS which allows
+// us to  initialize the trust quorum and derive the encryption keys needed for
+// the U.2 disks.
+pub const ZONE_ZFS_RAMDISK_DATASET_MOUNTPOINT: &str = "/zone";
+pub const ZONE_ZFS_RAMDISK_DATASET: &str = "rpool/zone";
+
 pub const ZFS: &str = "/usr/sbin/zfs";
 pub const KEYPATH_ROOT: &str = "/var/run/oxide/";
 
@@ -144,6 +154,12 @@ pub struct EncryptionDetails {
     pub epoch: u64,
 }
 
+#[derive(Debug, Default)]
+pub struct SizeDetails {
+    pub quota: Option<usize>,
+    pub compression: Option<&'static str>,
+}
+
 #[cfg_attr(any(test, feature = "testing"), mockall::automock, allow(dead_code))]
 impl Zfs {
     /// Lists all datasets within a pool or existing dataset.
@@ -192,10 +208,16 @@ impl Zfs {
         zoned: bool,
         do_format: bool,
         encryption_details: Option<EncryptionDetails>,
-        quota: Option<usize>,
+        size_details: Option<SizeDetails>,
     ) -> Result<(), EnsureFilesystemError> {
         let (exists, mounted) = Self::dataset_exists(name, &mountpoint)?;
         if exists {
+            if let Some(SizeDetails { quota, compression }) = size_details {
+                // apply quota and compression mode (in case they've changed across
+                // sled-agent versions since creation)
+                Self::apply_properties(name, &mountpoint, quota, compression)?;
+            }
+
             if encryption_details.is_none() {
                 // If the dataset exists, we're done. Unencrypted datasets are
                 // automatically mounted.
@@ -238,6 +260,7 @@ impl Zfs {
                 &epoch,
             ]);
         }
+
         cmd.args(&["-o", &format!("mountpoint={}", mountpoint), name]);
         execute(cmd).map_err(|err| EnsureFilesystemError {
             name: name.to_string(),
@@ -245,14 +268,38 @@ impl Zfs {
             err: err.into(),
         })?;
 
-        // Apply any quota.
+        if let Some(SizeDetails { quota, compression }) = size_details {
+            // Apply any quota and compression mode.
+            Self::apply_properties(name, &mountpoint, quota, compression)?;
+        }
+
+        Ok(())
+    }
+
+    fn apply_properties(
+        name: &str,
+        mountpoint: &Mountpoint,
+        quota: Option<usize>,
+        compression: Option<&'static str>,
+    ) -> Result<(), EnsureFilesystemError> {
         if let Some(quota) = quota {
             if let Err(err) =
                 Self::set_value(name, "quota", &format!("{quota}"))
             {
                 return Err(EnsureFilesystemError {
                     name: name.to_string(),
-                    mountpoint,
+                    mountpoint: mountpoint.clone(),
+                    // Take the execution error from the SetValueError
+                    err: err.err.into(),
+                });
+            }
+        }
+        if let Some(compression) = compression {
+            if let Err(err) = Self::set_value(name, "compression", compression)
+            {
+                return Err(EnsureFilesystemError {
+                    name: name.to_string(),
+                    mountpoint: mountpoint.clone(),
                     // Take the execution error from the SetValueError
                     err: err.err.into(),
                 });
@@ -380,8 +427,22 @@ pub fn get_all_omicron_datasets_for_delete() -> anyhow::Result<Vec<String>> {
                 continue;
             }
 
+            // The swap device might be in use, so don't assert that it can be deleted.
+            if dataset == "swap" && internal {
+                continue;
+            }
+
             datasets.push(format!("{pool}/{dataset}"));
         }
     }
+
+    // Collect all datasets for ramdisk-based Oxide zones, if any exist.
+    if let Ok(ramdisk_datasets) = Zfs::list_datasets(&ZONE_ZFS_RAMDISK_DATASET)
+    {
+        for dataset in &ramdisk_datasets {
+            datasets.push(format!("{}/{dataset}", ZONE_ZFS_RAMDISK_DATASET));
+        }
+    };
+
     Ok(datasets)
 }

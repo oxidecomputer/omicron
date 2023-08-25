@@ -51,7 +51,7 @@ impl TomlTemplate {
         *doc.get_mut("dns_servers").unwrap().as_array_mut().unwrap() = config
             .dns_servers
             .iter()
-            .map(|s| Value::String(Formatted::new(s.into())))
+            .map(|s| Value::String(Formatted::new(s.to_string())))
             .collect();
 
         *doc.get_mut("internal_services_ip_pool_ranges")
@@ -224,7 +224,7 @@ fn populate_network_table(
                             "uplink_port_fec",
                             enum_to_toml_string(&cfg.uplink_port_fec),
                         ),
-                        ("uplink_ip", cfg.uplink_ip.to_string()),
+                        ("uplink_cidr", cfg.uplink_cidr.to_string()),
                     ] {
                         uplink.insert(
                             property,
@@ -265,7 +265,6 @@ fn populate_network_table(
 mod tests {
     use super::*;
     use omicron_common::api::internal::shared::RackNetworkConfig as InternalRackNetworkConfig;
-    use std::net::Ipv4Addr;
     use std::net::Ipv6Addr;
     use wicket_common::rack_setup::PutRssUserConfigInsensitive;
     use wicketd_client::types::Baseboard;
@@ -341,7 +340,7 @@ mod tests {
                             PortFec::None => InternalPortFec::None,
                             PortFec::Rs => InternalPortFec::Rs,
                         },
-                        uplink_ip: config.uplink_ip,
+                        uplink_cidr: config.uplink_cidr,
                         uplink_vid: config.uplink_vid,
                         switch: match config.switch {
                             SwitchLocation::Switch0 => {
@@ -380,7 +379,10 @@ mod tests {
                     bootstrap_ip: Some(Ipv6Addr::LOCALHOST),
                 },
             ],
-            dns_servers: vec!["1.1.1.1".into(), "2.2.2.2".into()],
+            dns_servers: vec![
+                "1.1.1.1".parse().unwrap(),
+                "2.2.2.2".parse().unwrap(),
+            ],
             external_dns_zone_name: "oxide.computer".into(),
             internal_services_ip_pool_ranges: vec![IpRange::V4(
                 wicketd_client::types::Ipv4Range {
@@ -391,11 +393,11 @@ mod tests {
             external_dns_ips: vec!["10.0.0.1".parse().unwrap()],
             ntp_servers: vec!["ntp1.com".into(), "ntp2.com".into()],
             rack_network_config: Some(RackNetworkConfig {
-                infra_ip_first: Ipv4Addr::new(2, 3, 4, 5),
-                infra_ip_last: Ipv4Addr::new(3, 4, 5, 6),
+                infra_ip_first: "172.30.0.1".parse().unwrap(),
+                infra_ip_last: "172.30.0.10".parse().unwrap(),
                 uplinks: vec![UplinkConfig {
-                    gateway_ip: Ipv4Addr::new(1, 2, 3, 4),
-                    uplink_ip: Ipv4Addr::new(4, 5, 6, 7),
+                    gateway_ip: "172.30.0.10".parse().unwrap(),
+                    uplink_cidr: "172.30.0.1/24".parse().unwrap(),
                     uplink_port_speed: PortSpeed::Speed400G,
                     uplink_port_fec: PortFec::Firecode,
                     uplink_port: "port0".into(),

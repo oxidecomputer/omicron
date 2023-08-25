@@ -15,7 +15,7 @@ rack_subnet = "fd00:1122:3344:0100::"
 # Only include "our own sled" in the bootstrap network
 bootstrap_discovery.type = "only_ours"
 
-ntp_servers = [ "ntp.eng.oxide.computer" ]
+ntp_servers = [ "0.pool.ntp.org" ]
 dns_servers = [ "1.1.1.1", "9.9.9.9" ]
 
 # Delegated external DNS zone name
@@ -104,7 +104,7 @@ uplink_port_speed = "40G"
 uplink_port_fec="none"
 # For softnpu, an address within the "infra" block above that will be used for
 # the softnpu uplink port.  You can just pick the first address in that pool.
-uplink_ip = "192.168.1.30"
+uplink_cidr = "192.168.1.30/32"
 # Switch to use for the uplink. For single-rack deployments this can be
 # "switch0" (upper slot) or "switch1" (lower slot). For single-node softnpu
 # and dendrite stub environments, use "switch0"

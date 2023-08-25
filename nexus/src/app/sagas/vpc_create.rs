@@ -734,43 +734,33 @@ pub(crate) mod test {
         let project_id = create_org_and_project(&client).await;
         delete_project_vpc_defaults(&cptestctx, project_id).await;
 
-        // Build the saga DAG with the provided test parameters
         let opctx = test_opctx(&cptestctx);
-        let authz_project = get_authz_project(
-            &cptestctx,
-            project_id,
-            authz::Action::CreateChild,
+        crate::app::sagas::test_helpers::action_failure_can_unwind::<
+            SagaVpcCreate,
+            _,
+            _,
+        >(
+            nexus,
+            || {
+                Box::pin(async {
+                    new_test_params(
+                        &opctx,
+                        get_authz_project(
+                            &cptestctx,
+                            project_id,
+                            authz::Action::CreateChild,
+                        )
+                        .await,
+                    )
+                })
+            },
+            || {
+                Box::pin(async {
+                    verify_clean_slate(nexus.datastore()).await;
+                })
+            },
+            log,
         )
         .await;
-        let params = new_test_params(&opctx, authz_project);
-        let dag = create_saga_dag::<SagaVpcCreate>(params).unwrap();
-
-        for node in dag.get_nodes() {
-            // Create a new saga for this node.
-            info!(
-                log,
-                "Creating new saga which will fail at index {:?}", node.index();
-                "node_name" => node.name().as_ref(),
-                "label" => node.label(),
-            );
-
-            let runnable_saga =
-                nexus.create_runnable_saga(dag.clone()).await.unwrap();
-
-            // Inject an error instead of running the node.
-            //
-            // This should cause the saga to unwind.
-            nexus
-                .sec()
-                .saga_inject_error(runnable_saga.id(), node.index())
-                .await
-                .unwrap();
-            nexus
-                .run_saga(runnable_saga)
-                .await
-                .expect_err("Saga should have failed");
-
-            verify_clean_slate(nexus.datastore()).await;
-        }
     }
 }

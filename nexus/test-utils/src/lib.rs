@@ -279,12 +279,16 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
         }
     }
 
-    pub async fn start_crdb(&mut self) {
+    pub async fn start_crdb(&mut self, populate: bool) {
         let log = &self.logctx.log;
         debug!(log, "Starting CRDB");
 
         // Start up CockroachDB.
-        let database = db::test_setup_database(log).await;
+        let database = if populate {
+            db::test_setup_database(log).await
+        } else {
+            db::test_setup_database_empty(log).await
+        };
 
         eprintln!("DB URL: {}", database.pg_config());
         let address = database
@@ -350,7 +354,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
         // Set up a stub instance of dendrite
         let dendrite = dev::dendrite::DendriteInstance::start(0).await.unwrap();
         let port = dendrite.port;
-        self.dendrite.insert(switch_location.clone(), dendrite);
+        self.dendrite.insert(switch_location, dendrite);
 
         let address = SocketAddrV6::new(Ipv6Addr::LOCALHOST, port, 0, 0);
 
@@ -757,7 +761,8 @@ pub async fn test_setup_with_config<N: NexusServer>(
     let mut builder =
         ControlPlaneTestContextBuilder::<N>::new(test_name, config);
 
-    builder.start_crdb().await;
+    let populate = true;
+    builder.start_crdb(populate).await;
     builder.start_clickhouse().await;
     builder.start_dendrite(SwitchLocation::Switch0).await;
     builder.start_dendrite(SwitchLocation::Switch1).await;
@@ -841,12 +846,12 @@ pub async fn start_oximeter(
 
 #[derive(Debug, Clone, oximeter::Target)]
 struct IntegrationTarget {
-    pub name: String,
+    pub target_name: String,
 }
 
 #[derive(Debug, Clone, oximeter::Metric)]
 struct IntegrationMetric {
-    pub name: String,
+    pub metric_name: String,
     pub datum: i64,
 }
 
@@ -865,7 +870,7 @@ impl oximeter::Producer for IntegrationProducer {
         oximeter::MetricsError,
     > {
         use oximeter::Metric;
-        let sample = oximeter::types::Sample::new(&self.target, &self.metric);
+        let sample = oximeter::types::Sample::new(&self.target, &self.metric)?;
         *self.metric.datum_mut() += 1;
         Ok(Box::new(vec![sample].into_iter()))
     }
@@ -920,10 +925,10 @@ pub fn register_test_producer(server: &ProducerServer) -> Result<(), String> {
     // Create and register an actual metric producer.
     let test_producer = IntegrationProducer {
         target: IntegrationTarget {
-            name: "integration-test-target".to_string(),
+            target_name: "integration-test-target".to_string(),
         },
         metric: IntegrationMetric {
-            name: "integration-test-metric".to_string(),
+            metric_name: "integration-test-metric".to_string(),
             datum: 0,
         },
     };

@@ -328,17 +328,17 @@ pub struct TimeseriesPageSelector {
 pub(crate) type TimeseriesKey = u64;
 
 pub(crate) fn timeseries_key(sample: &Sample) -> TimeseriesKey {
-    timeseries_key_for(&sample.target_fields(), &sample.metric_fields())
+    timeseries_key_for(sample.target_fields(), sample.metric_fields())
 }
 
-pub(crate) fn timeseries_key_for(
-    target_fields: &[Field],
-    metric_fields: &[Field],
+pub(crate) fn timeseries_key_for<'a>(
+    target_fields: impl Iterator<Item = &'a Field>,
+    metric_fields: impl Iterator<Item = &'a Field>,
 ) -> TimeseriesKey {
     use std::collections::hash_map::DefaultHasher;
     use std::hash::{Hash, Hasher};
     let mut hasher = DefaultHasher::new();
-    for field in target_fields.iter().chain(metric_fields.iter()) {
+    for field in target_fields.chain(metric_fields) {
         field.hash(&mut hasher);
     }
     hasher.finish()

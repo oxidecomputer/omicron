@@ -26,6 +26,7 @@ use omicron_common::address;
 use omicron_common::address::Ipv4Range;
 use omicron_common::api::internal::shared::RackNetworkConfig;
 use sled_hardware::Baseboard;
+use slog::warn;
 use std::collections::BTreeSet;
 use std::mem;
 use std::net::IpAddr;
@@ -55,7 +56,7 @@ pub(crate) struct CurrentRssConfig {
 
     bootstrap_sleds: BTreeSet<BootstrapSledDescription>,
     ntp_servers: Vec<String>,
-    dns_servers: Vec<String>,
+    dns_servers: Vec<IpAddr>,
     internal_services_ip_pool_ranges: Vec<address::IpRange>,
     external_dns_ips: Vec<IpAddr>,
     external_dns_zone_name: String,
@@ -71,6 +72,18 @@ pub(crate) struct CurrentRssConfig {
 }
 
 impl CurrentRssConfig {
+    pub(crate) fn dns_servers(&self) -> &[IpAddr] {
+        &self.dns_servers
+    }
+
+    pub(crate) fn ntp_servers(&self) -> &[String] {
+        &self.ntp_servers
+    }
+
+    pub(crate) fn rack_network_config(&self) -> Option<&RackNetworkConfig> {
+        self.rack_network_config.as_ref()
+    }
+
     pub(crate) fn update_with_inventory_and_bootstrap_peers(
         &mut self,
         inventory: &RackV1Inventory,
@@ -116,6 +129,7 @@ impl CurrentRssConfig {
     pub(crate) fn start_rss_request(
         &self,
         bootstrap_peers: &BootstrapPeers,
+        log: &slog::Logger,
     ) -> Result<RackInitializeRequest> {
         // Basic "client-side" checks.
         if self.bootstrap_sleds.is_empty() {
@@ -164,6 +178,30 @@ impl CurrentRssConfig {
             bootstrap_ips.push(ip);
         }
 
+        // LRTQ requires at least 3 sleds
+        //
+        // TODO: Warn users in the wicket UI if they are configuring
+        // a small rack cluster that does not support trust quorum.
+        // https://github.com/oxidecomputer/omicron/issues/3690
+        const TRUST_QUORUM_MIN_SIZE: usize = 3;
+        let trust_quorum_peers: Option<
+            Vec<bootstrap_agent_client::types::Baseboard>,
+        > = if self.bootstrap_sleds.len() >= TRUST_QUORUM_MIN_SIZE {
+            Some(
+                self.bootstrap_sleds
+                    .iter()
+                    .map(|sled| sled.baseboard.clone().into())
+                    .collect(),
+            )
+        } else {
+            warn!(
+                log,
+                "Trust quorum disabled: requires at least {} sleds",
+                TRUST_QUORUM_MIN_SIZE
+            );
+            None
+        };
+
         // Convert between internal and progenitor types.
         let user_password_hash = bootstrap_agent_client::types::NewPasswordHash(
             recovery_silo_password_hash.to_string(),
@@ -190,6 +228,7 @@ impl CurrentRssConfig {
 
         let request = RackInitializeRequest {
             rack_subnet: RACK_SUBNET,
+            trust_quorum_peers,
             bootstrap_discovery: BootstrapAddressDiscovery::OnlyThese(
                 bootstrap_ips,
             ),
@@ -404,12 +443,12 @@ fn validate_rack_network_config(
     // iterate through each UplinkConfig
     for uplink_config in &config.uplinks {
         // ... and check that it contains `uplink_ip`.
-        if uplink_config.uplink_ip < infra_ip_range.first
-            || uplink_config.uplink_ip > infra_ip_range.last
+        if uplink_config.uplink_cidr.ip() < infra_ip_range.first
+            || uplink_config.uplink_cidr.ip() > infra_ip_range.last
         {
             bail!(
-                "`uplink_ip` must be in the range defined by `infra_ip_first` \
-                and `infra_ip_last`"
+                "`uplink_cidr`'s IP address must be in the range defined by \
+                `infra_ip_first` and `infra_ip_last`"
             );
         }
     }
@@ -427,7 +466,7 @@ fn validate_rack_network_config(
                     SwitchLocation::Switch0 => BaSwitchLocation::Switch0,
                     SwitchLocation::Switch1 => BaSwitchLocation::Switch1,
                 },
-                uplink_ip: config.uplink_ip,
+                uplink_cidr: config.uplink_cidr,
                 uplink_port: config.uplink_port.clone(),
                 uplink_port_speed: match config.uplink_port_speed {
                     PortSpeed::Speed0G => BaPortSpeed::Speed0G,

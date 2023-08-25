@@ -16,7 +16,7 @@ sidecar_revision.soft = { front_port_count = 1, rear_port_count = 1 }
 
 # Setting this to true causes sled-agent to always report that its time is
 # in-sync, rather than querying its NTP zone.
-skip_timesync = true
+skip_timesync = false
 
 # For testing purposes, A file-backed zpool can be manually created with the
 # following:
@@ -39,7 +39,14 @@ zpools = [
 
 # Percentage of usable physical DRAM to use for the VMM reservoir, which
 # guest memory is pulled from.
-vmm_reservoir_percentage = 0
+vmm_reservoir_percentage = 50
+
+# Swap device size for the system. The device is a sparsely allocated zvol on
+# the internal zpool of the M.2 that we booted from.
+#
+# If use of the VMM reservoir is configured, it is likely the system will not
+# work without a swap device configured.
+swap_device_size_gb = 64
 
 # An optional data link from which we extract a MAC address.
 # This is used as a unique identifier for the bootstrap address.
@@ -54,8 +61,11 @@ vmm_reservoir_percentage = 0
 # tfportd will create the necessary links and Maghemite will be configured to
 # use those.  But on non-Gimlet systems, you need to specify physical links to
 # be passed into the `oxz_switch` zone for this purpose.  You can skip this if
-# you're deploying a single-sled system.
-#switch_zone_maghemite_links = ["ixgbe0", "ixgbe1"]
+# you're deploying a single-sled system and just leave the single tfportrear
+# as-is.
+switch_zone_maghemite_links = ["tfportrear0_0"]
+
+data_links = ["net0", "net1"]
 
 [log]
 level = "info"

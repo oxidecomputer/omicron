@@ -7,6 +7,7 @@
 use cfg_if::cfg_if;
 
 pub mod addrobj;
+pub mod coreadm;
 pub mod destructor;
 pub mod dkio;
 pub mod dladm;

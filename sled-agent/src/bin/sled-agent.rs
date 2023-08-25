@@ -8,13 +8,10 @@ use camino::Utf8PathBuf;
 use clap::{Parser, Subcommand};
 use omicron_common::cmd::fatal;
 use omicron_common::cmd::CmdError;
-use omicron_sled_agent::bootstrap::{
-    agent as bootstrap_agent, config::Config as BootstrapConfig,
-    server as bootstrap_server,
-};
+use omicron_sled_agent::bootstrap::server as bootstrap_server;
+use omicron_sled_agent::bootstrap::RssAccessError;
 use omicron_sled_agent::rack_setup::config::SetupServiceConfig as RssConfig;
 use omicron_sled_agent::{config::Config as SledConfig, server as sled_server};
-use uuid::Uuid;
 
 #[derive(Subcommand, Debug)]
 enum OpenapiFlavor {
@@ -92,39 +89,19 @@ async fn do_run() -> Result<(), CmdError> {
                 None
             };
 
-            // Derive the bootstrap addresses from the data link's MAC address.
-            let link = config
-                .get_link()
-                .map_err(|e| CmdError::Failure(e.to_string()))?;
-
-            // Configure and run the Bootstrap server.
-            let bootstrap_config = BootstrapConfig {
-                id: Uuid::new_v4(),
-                link,
-                log: config.log.clone(),
-                updates: config.updates.clone(),
-            };
-
-            // TODO: It's a little silly to pass the config this way - namely,
-            // that we construct the bootstrap config from `config`, but then
-            // pass it separately just so the sled agent can ingest it later on.
-            let server =
-                bootstrap_server::Server::start(bootstrap_config, config)
-                    .await
-                    .map_err(CmdError::Failure)?;
+            let server = bootstrap_server::Server::start(config)
+                .await
+                .map_err(|err| CmdError::Failure(format!("{err:#}")))?;
 
             // If requested, automatically supply the RSS configuration.
             //
             // This should remain equivalent to the HTTP request which can
             // be invoked by Wicket.
             if let Some(rss_config) = rss_config {
-                match server.agent().start_rack_initialize(rss_config) {
+                match server.start_rack_initialize(rss_config) {
                     // If the rack has already been initialized, we shouldn't
                     // abandon the server.
-                    Ok(_)
-                    | Err(
-                        bootstrap_agent::RssAccessError::AlreadyInitialized,
-                    ) => {}
+                    Ok(_) | Err(RssAccessError::AlreadyInitialized) => {}
                     Err(e) => {
                         return Err(CmdError::Failure(e.to_string()));
                     }
