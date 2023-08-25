@@ -52,6 +52,21 @@ impl FromStr for ZpoolHealth {
     }
 }
 
+impl ToString for ZpoolHealth {
+    fn to_string(&self) -> String {
+        use ZpoolHealth::*;
+        match self {
+            Online => "ONLINE",
+            Degraded => "DEGRADED",
+            Faulted => "FAULTED",
+            Offline => "OFFLINE",
+            Removed => "REMOVED",
+            Unavailable => "UNAVAIL",
+        }
+        .to_string()
+    }
+}
+
 /// Describes a Zpool.
 #[derive(Clone, Debug)]
 pub struct ZpoolInfo {

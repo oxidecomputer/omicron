@@ -81,8 +81,13 @@ impl TryFrom<Input> for Command {
             input.shift_program()?;
         }
         if input.program == ZLOGIN {
-            input.shift_program()?;
-            in_zone = Some(ZoneName(input.shift_program()?));
+            input
+                .shift_program()
+                .map_err(|_| "Missing zone name".to_string())?;
+            in_zone =
+                Some(ZoneName(input.shift_program().map_err(|_| {
+                    "Missing command to run in zone".to_string()
+                })?));
         }
 
         use KnownCommand::*;

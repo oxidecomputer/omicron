@@ -14,9 +14,12 @@ pub(crate) trait InputExt {
 impl InputExt for Input {
     fn shift_program(&mut self) -> Result<String, String> {
         if self.args.is_empty() {
-            return Err(format!("Failed to parse {self}"));
+            return Err(format!(
+                "Failed to parse {self}, expected more arguments"
+            ));
         }
         let new = self.args.remove(0);
+        let new = helios_fusion::which_binary(&new).to_string();
         let old = std::mem::replace(&mut self.program, new);
         Ok(old)
     }

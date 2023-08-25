@@ -7,14 +7,15 @@ use crate::host::{DatasetName, FilesystemName, VolumeName};
 
 use helios_fusion::Input;
 use helios_fusion::ZFS;
+use std::collections::HashMap;
 
 pub(crate) enum Command {
     CreateFilesystem {
-        properties: Vec<(String, String)>,
+        properties: HashMap<String, String>,
         name: FilesystemName,
     },
     CreateVolume {
-        properties: Vec<(String, String)>,
+        properties: HashMap<String, String>,
         sparse: bool,
         blocksize: Option<u64>,
         size: u64,
@@ -45,7 +46,7 @@ pub(crate) enum Command {
         filesystem: FilesystemName,
     },
     Set {
-        properties: Vec<(String, String)>,
+        properties: HashMap<String, String>,
         name: DatasetName,
     },
 }
@@ -64,7 +65,7 @@ impl TryFrom<Input> for Command {
                 let mut size = None;
                 let mut blocksize = None;
                 let mut sparse = None;
-                let mut properties = vec![];
+                let mut properties = HashMap::new();
 
                 while input.args().len() > 1 {
                     // Volume Size (volumes only, required)
@@ -110,7 +111,10 @@ impl TryFrom<Input> for Command {
                         let (k, v) = prop
                             .split_once('=')
                             .ok_or_else(|| format!("Bad property: {prop}"))?;
-                        properties.push((k.to_string(), v.to_string()));
+                        properties.insert(k.to_string(), v.to_string());
+                    } else {
+                        let arg = input.shift_arg()?;
+                        return Err(format!("Unexpected argument: {arg}"));
                     }
                 }
                 let name = input.shift_arg()?;
@@ -335,14 +339,14 @@ impl TryFrom<Input> for Command {
                 Ok(Command::Mount { load_keys, filesystem })
             }
             "set" => {
-                let mut properties = vec![];
+                let mut properties = HashMap::new();
 
                 while input.args().len() > 1 {
                     let prop = input.shift_arg()?;
                     let (k, v) = prop
                         .split_once('=')
                         .ok_or_else(|| format!("Bad property: {prop}"))?;
-                    properties.push((k.to_string(), v.to_string()));
+                    properties.insert(k.to_string(), v.to_string());
                 }
                 let name = DatasetName(input.shift_arg()?);
                 input.no_args_remaining()?;
@@ -364,14 +368,17 @@ mod test {
         let Command::CreateFilesystem { properties, name } = Command::try_from(
             Input::shell(format!("{ZFS} create myfilesystem"))
         ).unwrap() else { panic!("wrong command") };
-        assert_eq!(properties, vec![]);
+        assert_eq!(properties, HashMap::new());
         assert_eq!(name.as_str(), "myfilesystem");
 
         // Create a volume
         let Command::CreateVolume { properties, sparse, blocksize, size, name } = Command::try_from(
             Input::shell(format!("{ZFS} create -s -V 1024 -b 512 -o foo=bar myvolume"))
         ).unwrap() else { panic!("wrong command") };
-        assert_eq!(properties, vec![("foo".to_string(), "bar".to_string())]);
+        assert_eq!(
+            properties,
+            HashMap::from([("foo".to_string(), "bar".to_string())])
+        );
         assert_eq!(name.as_str(), "myvolume");
         assert!(sparse);
         assert_eq!(size, 1024);
@@ -381,7 +388,10 @@ mod test {
         let Command::CreateVolume { properties, sparse, blocksize, size, name } = Command::try_from(
             Input::shell(format!("{ZFS} create -s -V 2G -b 512 -o foo=bar myvolume"))
         ).unwrap() else { panic!("wrong command") };
-        assert_eq!(properties, vec![("foo".to_string(), "bar".to_string())]);
+        assert_eq!(
+            properties,
+            HashMap::from([("foo".to_string(), "bar".to_string())])
+        );
         assert_eq!(name.as_str(), "myvolume");
         assert!(sparse);
         assert_eq!(size, 2 << 30);
@@ -483,10 +493,10 @@ mod test {
 
         assert_eq!(
             properties,
-            vec![
+            HashMap::from([
                 ("foo".to_string(), "bar".to_string()),
                 ("baz".to_string(), "blat".to_string())
-            ]
+            ])
         );
         assert_eq!(name.0, "myfs");
     }

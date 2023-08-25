@@ -96,6 +96,10 @@ impl TryFrom<Input> for Command {
                 if !scripting || !parsable {
                     return Err("You should run 'zpool list' commands with the '-Hp' flags enabled".to_string());
                 }
+
+                if properties.is_empty() {
+                    properties = vec!["name".to_string(), "health".to_string()];
+                }
                 Ok(Command::List { properties, pools })
             }
             "set" => {

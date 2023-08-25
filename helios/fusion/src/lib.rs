@@ -34,3 +34,24 @@ pub const ZLOGIN: &str = "/usr/sbin/zlogin";
 pub const ZONEADM: &str = "/usr/sbin/zoneadm";
 pub const ZONECFG: &str = "/usr/sbin/zonecfg";
 pub const ZPOOL: &str = "/usr/sbin/zpool";
+
+pub fn which_binary(short: &str) -> &str {
+    match short {
+        "coreadm" => COREADM,
+        "dladm" => DLADM,
+        "dumpadm" => DUMPADM,
+        "fstyp" => FSTYP,
+        "ipadm" => IPADM,
+        "pfexec" => PFEXEC,
+        "route" => ROUTE,
+        "savecore" => SAVECORE,
+        "svcadm" => SVCADM,
+        "svccfg" => SVCCFG,
+        "zfs" => ZFS,
+        "zlogin" => ZLOGIN,
+        "zoneadm" => ZONEADM,
+        "zonecfg" => ZONECFG,
+        "zpool" => ZPOOL,
+        short => short,
+    }
+}

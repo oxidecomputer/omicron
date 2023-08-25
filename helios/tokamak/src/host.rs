@@ -12,7 +12,7 @@ use crate::{FakeChild, FakeExecutor, FakeExecutorBuilder};
 use camino::Utf8PathBuf;
 use helios_fusion::interfaces::libc;
 use helios_fusion::interfaces::swapctl;
-use helios_fusion::zpool::ZpoolName;
+use helios_fusion::zpool::{ZpoolHealth, ZpoolName};
 use helios_fusion::{Child, Input, Output, OutputExt};
 use ipnetwork::IpNetwork;
 use petgraph::stable_graph::StableGraph;
@@ -125,11 +125,22 @@ struct FakeZpool {
     zix: ZnodeIdx,
     name: ZpoolName,
     vdev: Utf8PathBuf,
+
+    imported: bool,
+    health: ZpoolHealth,
+    properties: HashMap<String, String>,
 }
 
 impl FakeZpool {
     fn new(zix: ZnodeIdx, name: ZpoolName, vdev: Utf8PathBuf) -> Self {
-        Self { zix, name, vdev }
+        Self {
+            zix,
+            name,
+            vdev,
+            imported: false,
+            health: ZpoolHealth::Online,
+            properties: HashMap::new(),
+        }
     }
 }
 
@@ -145,14 +156,14 @@ enum DatasetFlavor {
 
 struct FakeDataset {
     zix: ZnodeIdx,
-    properties: Vec<(String, String)>,
+    properties: HashMap<String, String>,
     flavor: DatasetFlavor,
 }
 
 impl FakeDataset {
     fn new(
         zix: ZnodeIdx,
-        properties: Vec<(String, String)>,
+        properties: HashMap<String, String>,
         flavor: DatasetFlavor,
     ) -> Self {
         Self { zix, properties, flavor }
@@ -244,6 +255,7 @@ impl Znodes {
         &mut self,
         name: ZpoolName,
         vdev: Utf8PathBuf,
+        import: bool,
     ) -> Result<(), String> {
         if self.zpools.contains_key(&name) {
             return Err(format!(
@@ -253,7 +265,10 @@ impl Znodes {
 
         let zix = self.all_znodes.add_node(Znode::Zpool(name.clone()));
         self.all_znodes.add_edge(self.zix_root, zix, ());
-        self.zpools.insert(name.clone(), FakeZpool { zix, name, vdev });
+
+        let mut pool = FakeZpool::new(zix, name.clone(), vdev);
+        pool.imported = import;
+        self.zpools.insert(name, pool);
 
         Ok(())
     }
@@ -261,7 +276,7 @@ impl Znodes {
     fn add_dataset(
         &mut self,
         name: FilesystemName,
-        properties: Vec<(String, String)>,
+        properties: HashMap<String, String>,
         flavor: DatasetFlavor,
     ) -> Result<(), String> {
         if self.datasets.contains_key(&name) {
@@ -374,7 +389,7 @@ impl FakeHostInner {
 
                         Ok(ProcessState::Completed(
                             Output::success().set_stdout(format!(
-                                "Created {} successfully",
+                                "Created {} successfully\n",
                                 name.as_str()
                             )),
                         ))
@@ -465,6 +480,81 @@ impl FakeHostInner {
                                 .set_stdout(format!("{} destroyed", name.0)),
                         ))
                     }
+                    Get { recursive, depth, fields, properties, datasets } => {
+                        let mut targets = if let Some(datasets) = datasets {
+                            let mut targets = VecDeque::new();
+
+                            let depths =
+                                if recursive { depth } else { Some(0) };
+                            for dataset in datasets {
+                                let zix = self
+                                    .znodes
+                                    .name_to_zix(&dataset)
+                                    .map_err(to_stderr)?;
+                                targets.push_back((zix, depth));
+                            }
+                            targets
+                        } else {
+                            VecDeque::from([(
+                                self.znodes.zix_root,
+                                depth.map(|d| d + 1),
+                            )])
+                        };
+
+                        let mut output = String::new();
+
+                        while let Some((target, depth)) = targets.pop_front() {
+                            let node = self.znodes.all_znodes.node_weight(target)
+                                .expect("We should have looked up the znode earlier...");
+
+                            let (add_children, child_depth) =
+                                if let Some(depth) = depth {
+                                    if depth > 0 {
+                                        (true, Some(depth - 1))
+                                    } else {
+                                        (false, None)
+                                    }
+                                } else {
+                                    (true, None)
+                                };
+
+                            if add_children {
+                                for child in self.znodes.children(target) {
+                                    targets.push_front((child, child_depth));
+                                }
+                            }
+
+                            if target == self.znodes.zix_root {
+                                // Skip the root node, as there is nothing to
+                                // display for it.
+                                continue;
+                            }
+
+                            for property in &properties {
+                                for field in &fields {
+                                    match field.as_str() {
+                                        "name" => {
+                                            output.push_str(&node.to_string())
+                                        }
+                                        "property" => {
+                                            output.push_str(&property)
+                                        }
+                                        "value" => {
+                                            // TODO: Look up, across whatever
+                                            // the node type is.
+                                            todo!();
+                                        }
+                                        f => {
+                                            return Err(to_stderr(format!(
+                                                "Unknown field: {f}"
+                                            )))
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        todo!();
+                    }
                     List { recursive, depth, properties, datasets } => {
                         let mut targets = if let Some(datasets) = datasets {
                             let mut targets = VecDeque::new();
@@ -547,8 +637,12 @@ impl FakeHostInner {
                             Output::success().set_stdout(output),
                         ))
                     }
-                    // TODO: Finish these
-                    _ => return Err(to_stderr("Not implemented (yet")),
+                    Mount { load_keys, filesystem } => {
+                        todo!();
+                    }
+                    Set { properties, name } => {
+                        todo!();
+                    }
                 }
             }
             Zpool(zpool_cmd) => {
@@ -562,18 +656,109 @@ impl FakeHostInner {
                     Create { pool, vdev } => {
                         if !self.vdevs.contains(&vdev) {
                             return Err(to_stderr(format!(
-                                "Cannot create zpool: {vdev} does not exist"
+                                "Cannot create zpool: device '{vdev}' does not exist"
                             )));
                         }
 
+                        let import = true;
                         self.znodes
-                            .add_zpool(pool.clone(), vdev.clone())
+                            .add_zpool(pool.clone(), vdev.clone(), import)
                             .map_err(to_stderr)?;
+
+                        Ok(ProcessState::Completed(Output::success()))
                     }
-                    // TODO: Finish these
-                    _ => return Err(to_stderr("Not implemented (yet")),
+                    Export { pool: name } => {
+                        let Some(mut pool) = self.znodes.zpools.get_mut(&name) else {
+                            return Err(to_stderr(format!("pool does not exist")));
+                        };
+
+                        if !pool.imported {
+                            return Err(to_stderr(format!(
+                                "cannot export pool which is already exported"
+                            )));
+                        }
+                        pool.imported = false;
+                        Ok(ProcessState::Completed(Output::success()))
+                    }
+                    Import { force: _, pool: name } => {
+                        let Some(mut pool) = self.znodes.zpools.get_mut(&name) else {
+                            return Err(to_stderr(format!("pool does not exist")));
+                        };
+
+                        if pool.imported {
+                            return Err(to_stderr(format!(
+                                "a pool with that name is already created"
+                            )));
+                        }
+                        pool.imported = true;
+                        Ok(ProcessState::Completed(Output::success()))
+                    }
+                    List { properties, pools } => {
+                        let mut output = String::new();
+                        let mut display =
+                            |name: &ZpoolName,
+                             pool: &FakeZpool,
+                             properties: &Vec<String>|
+                             -> Result<(), _> {
+                                for property in properties {
+                                    match property.as_str() {
+                                        "name" => output
+                                            .push_str(&format!("{}", name)),
+                                        "health" => output
+                                            .push_str(&pool.health.to_string()),
+                                        _ => {
+                                            return Err(to_stderr(format!(
+                                                "Unknown property: {property}"
+                                            )))
+                                        }
+                                    }
+                                    output.push_str("\t");
+                                }
+                                output.push_str("\n");
+                                Ok(())
+                            };
+
+                        if let Some(pools) = pools {
+                            for name in &pools {
+                                let pool =
+                                    self.znodes.zpools.get(name).ok_or_else(
+                                        || {
+                                            to_stderr(format!(
+                                                "{} does not exist",
+                                                name
+                                            ))
+                                        },
+                                    )?;
+
+                                if !pool.imported {
+                                    return Err(to_stderr(format!(
+                                        "{} not imported",
+                                        name
+                                    )));
+                                }
+
+                                display(&name, &pool, &properties)?;
+                            }
+                        } else {
+                            for (name, pool) in &self.znodes.zpools {
+                                if pool.imported {
+                                    display(&name, &pool, &properties)?;
+                                }
+                            }
+                        }
+
+                        Ok(ProcessState::Completed(
+                            Output::success().set_stdout(output),
+                        ))
+                    }
+                    Set { property, value, pool: name } => {
+                        let Some(pool) = self.znodes.zpools.get_mut(&name) else {
+                            return Err(to_stderr(format!("{} does not exist", name)));
+                        };
+                        pool.properties.insert(property, value);
+                        Ok(ProcessState::Completed(Output::success()))
+                    }
                 }
-                todo!();
             }
             _ => todo!(),
         }
@@ -615,7 +800,7 @@ impl FakeHostInner {
     }
 }
 
-struct FakeHost {
+pub struct FakeHost {
     executor: Arc<FakeExecutor>,
     inner: Arc<Mutex<FakeHostInner>>,
 }
@@ -642,6 +827,14 @@ impl FakeHost {
 
     fn page_size(&self) -> i64 {
         4096
+    }
+
+    pub fn add_devices(&self, vdevs: &Vec<Utf8PathBuf>) {
+        let mut inner = self.inner.lock().unwrap();
+
+        for vdev in vdevs {
+            inner.vdevs.insert(vdev.clone());
+        }
     }
 }
 

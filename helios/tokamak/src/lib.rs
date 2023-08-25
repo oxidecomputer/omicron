@@ -8,3 +8,4 @@ mod host;
 mod shared_byte_queue;
 
 pub use executor::*;
+pub use host::FakeHost;
