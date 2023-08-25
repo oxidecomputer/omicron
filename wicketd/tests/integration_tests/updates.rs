@@ -193,8 +193,7 @@ async fn test_installinator_fetch() {
         wicketd_testctx
             .server
             .artifact_store
-            .get_by_hash(&host_phase_2_id)
-            .is_some(),
+            .contains_by_hash(&host_phase_2_id),
         "host phase 2 ID found by hash"
     );
 
@@ -206,8 +205,7 @@ async fn test_installinator_fetch() {
         wicketd_testctx
             .server
             .artifact_store
-            .get_by_hash(&control_plane_id)
-            .is_some(),
+            .contains_by_hash(&control_plane_id),
         "control plane ID found by hash"
     );
 
