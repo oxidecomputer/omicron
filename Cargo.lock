@@ -145,16 +145,15 @@ dependencies = [
 
 [[package]]
 name = "anstream"
-version = "0.3.0"
+version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9e579a7752471abc2a8268df8b20005e3eadd975f585398f17efcfd8d4927371"
+checksum = "b1f58811cfac344940f1a400b6e6231ce35171f614f26439e80f8c1465c5cc0c"
 dependencies = [
  "anstyle",
  "anstyle-parse",
  "anstyle-query",
  "anstyle-wincon",
  "colorchoice",
- "is-terminal",
  "utf8parse",
 ]
 
@@ -184,9 +183,9 @@ dependencies = [
 
 [[package]]
 name = "anstyle-wincon"
-version = "1.0.0"
+version = "2.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4bcd8291a340dd8ac70e18878bc4501dd7b4ff970cfa21c207d36ece51ea88fd"
+checksum = "58f54d10c6dfa51283a066ceab3ec1ab78d13fae00aa49243a45e4571fb79dfd"
 dependencies = [
  "anstyle",
  "windows-sys 0.48.0",
@@ -1043,20 +1042,20 @@ dependencies = [
 
 [[package]]
 name = "clap"
-version = "4.3.21"
+version = "4.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c27cdf28c0f604ba3f512b0c9a409f8de8513e4816705deb0498b627e7c3a3fd"
+checksum = "1d5f1946157a96594eb2d2c10eb7ad9a2b27518cb3000209dec700c35df9197d"
 dependencies = [
  "clap_builder",
- "clap_derive 4.3.12",
+ "clap_derive 4.4.0",
  "once_cell",
 ]
 
 [[package]]
 name = "clap_builder"
-version = "4.3.21"
+version = "4.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "08a9f1ab5e9f01a9b81f202e8562eb9a10de70abf9eaeac1be465c28b75aa4aa"
+checksum = "78116e32a042dd73c2901f0dc30790d20ff3447f3e3472fad359e8c3d282bcd6"
 dependencies = [
  "anstream",
  "anstyle",
@@ -1080,9 +1079,9 @@ dependencies = [
 
 [[package]]
 name = "clap_derive"
-version = "4.3.12"
+version = "4.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "54a9bb5758fc5dfe728d1019941681eccaf0cf8a4189b692a0ee2f2ecf90a050"
+checksum = "c9fd1a5729c4548118d7d70ff234a44868d00489a4b6597b0b020918a0e91a1a"
 dependencies = [
  "heck 0.4.1",
  "proc-macro2",
@@ -1269,7 +1268,7 @@ dependencies = [
  "anes",
  "cast",
  "ciborium",
- "clap 4.3.21",
+ "clap 4.4.0",
  "criterion-plot",
  "futures",
  "is-terminal",
@@ -2057,7 +2056,7 @@ dependencies = [
  "anyhow",
  "camino",
  "chrono",
- "clap 4.3.21",
+ "clap 4.4.0",
  "dns-service-client 0.1.0",
  "dropshot",
  "expectorate",
@@ -2766,7 +2765,7 @@ name = "gateway-cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "clap 4.3.21",
+ "clap 4.4.0",
  "futures",
  "gateway-client",
  "gateway-messages",
@@ -3533,7 +3532,7 @@ dependencies = [
  "bytes",
  "camino",
  "cancel-safe-futures",
- "clap 4.3.21",
+ "clap 4.4.0",
  "ddm-admin-client",
  "display-error-chain",
  "futures",
@@ -3595,7 +3594,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "camino",
- "clap 4.3.21",
+ "clap 4.4.0",
  "dropshot",
  "expectorate",
  "hyper",
@@ -3690,7 +3689,7 @@ name = "internal-dns-cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "clap 4.3.21",
+ "clap 4.4.0",
  "dropshot",
  "internal-dns 0.1.0",
  "omicron-common 0.1.0",
@@ -4074,7 +4073,7 @@ version = "0.2.4"
 source = "git+https://github.com/oxidecomputer/lpc55_support#4051a3b9421573dc36ed6098b292a7609a3cf98b"
 dependencies = [
  "bitfield",
- "clap 4.3.21",
+ "clap 4.4.0",
  "packed_struct",
  "serde",
 ]
@@ -4915,7 +4914,7 @@ name = "omicron-deploy"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "clap 4.3.21",
+ "clap 4.4.0",
  "crossbeam",
  "omicron-package",
  "omicron-sled-agent",
@@ -4934,7 +4933,7 @@ dependencies = [
  "anyhow",
  "camino",
  "camino-tempfile",
- "clap 4.3.21",
+ "clap 4.4.0",
  "dropshot",
  "expectorate",
  "futures",
@@ -4965,7 +4964,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "ciborium",
- "clap 4.3.21",
+ "clap 4.4.0",
  "crucible-smf",
  "dropshot",
  "expectorate",
@@ -5015,7 +5014,7 @@ dependencies = [
  "camino",
  "cancel-safe-futures",
  "chrono",
- "clap 4.3.21",
+ "clap 4.4.0",
  "cookie",
  "criterion",
  "crucible-agent-client",
@@ -5120,7 +5119,7 @@ name = "omicron-package"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "clap 4.3.21",
+ "clap 4.4.0",
  "expectorate",
  "futures",
  "hex",
@@ -5198,7 +5197,7 @@ dependencies = [
  "cancel-safe-futures",
  "cfg-if 1.0.0",
  "chrono",
- "clap 4.3.21",
+ "clap 4.4.0",
  "crucible-agent-client",
  "crucible-client-types",
  "ddm-admin-client",
@@ -5564,7 +5563,7 @@ dependencies = [
 name = "oximeter-collector"
 version = "0.1.0"
 dependencies = [
- "clap 4.3.21",
+ "clap 4.4.0",
  "dropshot",
  "expectorate",
  "futures",
@@ -5596,7 +5595,7 @@ dependencies = [
  "async-trait",
  "bytes",
  "chrono",
- "clap 4.3.21",
+ "clap 4.4.0",
  "dropshot",
  "itertools 0.11.0",
  "omicron-test-utils",
@@ -6443,7 +6442,7 @@ dependencies = [
  "bytes",
  "cfg-if 1.0.0",
  "chrono",
- "clap 4.3.21",
+ "clap 4.4.0",
  "const_format",
  "crucible-client-types",
  "dropshot",
@@ -8115,7 +8114,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
- "clap 4.3.21",
+ "clap 4.4.0",
  "dropshot",
  "futures",
  "gateway-messages",
@@ -9094,7 +9093,7 @@ dependencies = [
  "assert_cmd",
  "camino",
  "chrono",
- "clap 4.3.21",
+ "clap 4.4.0",
  "console",
  "datatest-stable",
  "fs-err",
@@ -9209,8 +9208,8 @@ version = "1.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "97fee6b57c6a41524a810daee9286c02d7752c4253064d0b05472833a438f675"
 dependencies = [
- "cfg-if 0.1.10",
- "rand 0.4.6",
+ "cfg-if 1.0.0",
+ "rand 0.8.5",
  "static_assertions",
 ]
 
@@ -9758,7 +9757,7 @@ dependencies = [
  "buf-list",
  "camino",
  "ciborium",
- "clap 4.3.21",
+ "clap 4.4.0",
  "crossterm 0.26.1",
  "futures",
  "hex",
@@ -9822,7 +9821,7 @@ dependencies = [
  "bytes",
  "camino",
  "ciborium",
- "clap 4.3.21",
+ "clap 4.4.0",
  "crossterm 0.26.1",
  "reedline",
  "serde",
@@ -9846,7 +9845,7 @@ dependencies = [
  "bytes",
  "camino",
  "camino-tempfile",
- "clap 4.3.21",
+ "clap 4.4.0",
  "ddm-admin-client",
  "debug-ignore",
  "display-error-chain",
@@ -10159,7 +10158,7 @@ dependencies = [
  "camino",
  "cargo_metadata",
  "cargo_toml",
- "clap 4.3.21",
+ "clap 4.4.0",
 ]
 
 [[package]]
