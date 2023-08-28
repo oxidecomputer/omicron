@@ -73,7 +73,7 @@ impl IpPool {
 
 impl From<IpPool> for views::IpPool {
     fn from(pool: IpPool) -> Self {
-        Self { identity: pool.identity() }
+        Self { identity: pool.identity(), silo_id: pool.silo_id }
     }
 }
 

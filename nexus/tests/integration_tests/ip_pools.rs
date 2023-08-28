@@ -113,6 +113,7 @@ async fn test_ip_pool_basic_crud(cptestctx: &ControlPlaneTestContext) {
             .unwrap();
     assert_eq!(created_pool.identity.name, pool_name);
     assert_eq!(created_pool.identity.description, description);
+    assert_eq!(created_pool.silo_id, None);
 
     let list = NexusRequest::iter_collection_authn::<IpPool>(
         client,

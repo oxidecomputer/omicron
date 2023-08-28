@@ -10141,6 +10141,11 @@
               }
             ]
           },
+          "silo_id": {
+            "nullable": true,
+            "type": "string",
+            "format": "uuid"
+          },
           "time_created": {
             "description": "timestamp when this resource was created",
             "type": "string",
