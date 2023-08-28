@@ -10174,6 +10174,15 @@
           },
           "name": {
             "$ref": "#/components/schemas/Name"
+          },
+          "silo": {
+            "nullable": true,
+            "description": "If an IP pool is associated with a silo, instance IP allocations in that silo can draw from that pool.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/NameOrId"
+              }
+            ]
           }
         },
         "required": [

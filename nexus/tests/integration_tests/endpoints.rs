@@ -454,6 +454,7 @@ lazy_static! {
                 name: DEMO_IP_POOL_NAME.clone(),
                 description: String::from("an IP pool"),
             },
+            silo: None,
         };
     pub static ref DEMO_IP_POOL_PROJ_URL: String =
         format!("/v1/ip-pools/{}?project={}", *DEMO_IP_POOL_NAME, *DEMO_PROJECT_NAME);

@@ -140,6 +140,7 @@ pub async fn create_ip_pool(
                 name: pool_name.parse().unwrap(),
                 description: String::from("an ip pool"),
             },
+            silo: None,
         },
     )
     .await;

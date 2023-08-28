@@ -561,6 +561,7 @@ impl DataStore {
                 name: SERVICE_IP_POOL_NAME.parse::<Name>().unwrap(),
                 description: String::from("IP Pool for Oxide Services"),
             },
+            silo: None,
         };
         self.ip_pool_create(opctx, &params, /*internal=*/ true)
             .await
@@ -575,6 +576,7 @@ impl DataStore {
                 name: "default".parse::<Name>().unwrap(),
                 description: String::from("default IP pool"),
             },
+            silo: None,
         };
         self.ip_pool_create(opctx, &params, /*internal=*/ false)
             .await

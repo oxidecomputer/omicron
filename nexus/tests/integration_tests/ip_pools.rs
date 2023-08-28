@@ -102,6 +102,7 @@ async fn test_ip_pool_basic_crud(cptestctx: &ControlPlaneTestContext) {
             name: String::from(pool_name).parse().unwrap(),
             description: String::from(description),
         },
+        silo: None,
     };
     let created_pool: IpPool =
         NexusRequest::objects_post(client, ip_pools_url, &params)
@@ -298,6 +299,7 @@ async fn test_ip_pool_range_overlapping_ranges_fails(
             name: String::from(pool_name).parse().unwrap(),
             description: String::from(description),
         },
+        silo: None,
     };
     let created_pool: IpPool =
         NexusRequest::objects_post(client, ip_pools_url, &params)
@@ -479,6 +481,7 @@ async fn test_ip_pool_range_pagination(cptestctx: &ControlPlaneTestContext) {
             name: String::from(pool_name).parse().unwrap(),
             description: String::from(description),
         },
+        silo: None,
     };
     let created_pool: IpPool =
         NexusRequest::objects_post(client, ip_pools_url, &params)
@@ -615,6 +618,7 @@ async fn test_ip_pool_list_usable_by_project(
             name: String::from(mypool_name).parse().unwrap(),
             description: String::from("right on cue"),
         },
+        silo: None,
     };
     NexusRequest::objects_post(client, ip_pools_url, &params)
         .authn_as(AuthnMode::PrivilegedUser)

@@ -731,6 +731,10 @@ impl std::fmt::Debug for CertificateCreate {
 pub struct IpPoolCreate {
     #[serde(flatten)]
     pub identity: IdentityMetadataCreateParams,
+
+    /// If an IP pool is associated with a silo, instance IP allocations in that
+    /// silo can draw from that pool.
+    pub silo: Option<NameOrId>,
 }
 
 /// Parameters for updating an IP Pool
