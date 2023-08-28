@@ -143,7 +143,7 @@ bootstrap-agent-client = { path = "bootstrap-agent-client" }
 buf-list = { version = "1.0.3", features = ["tokio1"] }
 byteorder = "1.4.3"
 bytes = "1.4.0"
-bytesize = "1.2.0"
+bytesize = "1.3.0"
 camino = "1.1"
 camino-tempfile = "1.0.2"
 cancel-safe-futures = "0.1.2"
