@@ -37,6 +37,9 @@ pub struct IpPool {
     /// Child resource generation number, for optimistic concurrency control of
     /// the contained ranges.
     pub rcgen: i64,
+
+    pub silo_id: Option<Uuid>,
+    pub project_id: Option<Uuid>,
 }
 
 impl IpPool {
@@ -51,6 +54,8 @@ impl IpPool {
             ),
             internal,
             rcgen: 0,
+            silo_id: None,
+            project_id: None,
         }
     }
 }
