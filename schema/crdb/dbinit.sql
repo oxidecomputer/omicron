@@ -1480,12 +1480,20 @@ CREATE TABLE IF NOT EXISTS omicron.public.ip_pool (
     time_modified TIMESTAMPTZ NOT NULL,
     time_deleted TIMESTAMPTZ,
 
-
     /* Identifies if the IP Pool is dedicated to Control Plane services */
     internal BOOL NOT NULL,
 
     /* The collection's child-resource generation number */
-    rcgen INT8 NOT NULL
+    rcgen INT8 NOT NULL,
+
+    /*
+     * Fields representating association with a silo or project. silo_id must be
+     * non-null if project_id is non-null. When project_id is non-null, silo_id
+     * will (naturally) be the ID of the project's silo. Both must be null if
+     * internal is true, i.e., internal IP pools must be fleet-level pools.
+     */
+    silo_id UUID,
+    project_id UUID
 );
 
 /*
@@ -2544,7 +2552,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    ( TRUE, NOW(), NOW(), '2.0.0', NULL)
+    ( TRUE, NOW(), NOW(), '3.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;
