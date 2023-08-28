@@ -3,19 +3,29 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 //! Functions for querying the timeseries database.
-// Copyright 2021 Oxide Computer Company
 
-use crate::{
-    Error, FieldSchema, FieldSource, TimeseriesKey, TimeseriesSchema,
-    DATABASE_NAME, DATABASE_SELECT_FORMAT,
-};
-use chrono::{DateTime, Utc};
+// Copyright 2023 Oxide Computer Company
+
+use crate::unversioned_timeseries_name;
+use crate::Error;
+use crate::FieldSchema;
+use crate::FieldSource;
+use crate::TimeseriesKey;
+use crate::TimeseriesSchema;
+use crate::DATABASE_NAME;
+use crate::DATABASE_SELECT_FORMAT;
+use chrono::DateTime;
+use chrono::Utc;
 use dropshot::PaginationOrder;
-use oximeter::types::{DatumType, FieldType, FieldValue};
-use oximeter::{Metric, Target};
+use oximeter::types::DatumType;
+use oximeter::types::FieldType;
+use oximeter::types::FieldValue;
+use oximeter::Metric;
+use oximeter::Target;
 use regex::Regex;
 use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
+use serde::Serialize;
 use std::collections::BTreeMap;
 use std::fmt;
 use std::net::IpAddr;
@@ -313,7 +323,7 @@ fn field_table_name(ty: FieldType) -> String {
 impl FieldSelector {
     // Return a query selecting records of the field table where the field name and value match the
     // current criteria. The timeseries name is always included in the query.
-    fn as_query(&self, timeseries_name: &str) -> String {
+    fn as_query(&self, timeseries_name: impl AsRef<str>) -> String {
         let base_query = self.base_query(timeseries_name);
         if let Some(comparison) = &self.comparison {
             format!(
@@ -329,12 +339,12 @@ impl FieldSelector {
 
     // Helper to generate the base query that selects from the right table and matches the
     // timeseries name and field name.
-    fn base_query(&self, timeseries_name: &str) -> String {
+    fn base_query(&self, timeseries_name: impl AsRef<str>) -> String {
         format!(
             "SELECT * FROM {db_name}.{table_name} WHERE timeseries_name = '{timeseries_name}' AND field_name = '{field_name}'",
             db_name = DATABASE_NAME,
             table_name = field_table_name(self.ty),
-            timeseries_name = timeseries_name,
+            timeseries_name = timeseries_name.as_ref(),
             field_name = self.name,
         )
     }
@@ -561,7 +571,9 @@ impl SelectQuery {
                     .field_selectors
                     .values()
                     .map(|sel| {
-                        sel.as_query(&self.timeseries_schema.timeseries_name)
+                        sel.as_query(unversioned_timeseries_name(
+                            &self.timeseries_schema.timeseries_name,
+                        ))
                     })
                     .enumerate()
                 {
@@ -650,7 +662,7 @@ impl SelectQuery {
             db_name = DATABASE_NAME,
             table_name =
                 measurement_table_name(self.timeseries_schema.datum_type),
-            timeseries_name = self.timeseries_schema.timeseries_name,
+            timeseries_name = unversioned_timeseries_name(&self.timeseries_schema.timeseries_name),
             key_clause = key_clause,
             timestamp_clause = self.time_range.as_query(),
             pagination_clause = pagination_clause,

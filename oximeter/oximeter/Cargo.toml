@@ -6,13 +6,19 @@ edition = "2021"
 license = "MPL-2.0"
 
 [dependencies]
+anyhow.workspace = true
 bytes = { workspace = true, features = [ "serde" ] }
 chrono.workspace = true
+console.workspace = true
+const_format = "0.2.31"
 num-traits.workspace = true
 omicron-common.workspace = true
 oximeter-macro-impl.workspace = true
+regex.workspace = true
 schemars = { workspace = true, features = [ "uuid1", "bytes", "chrono" ] }
 serde.workspace = true
+serde_json.workspace = true
+similar.workspace = true
 thiserror.workspace = true
 uuid.workspace = true
 

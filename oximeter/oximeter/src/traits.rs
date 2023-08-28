@@ -3,7 +3,8 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 //! Traits used to describe metric data and its sources.
-// Copyright 2021 Oxide Computer Company
+
+// Copyright 2023 Oxide Computer Company
 
 use crate::histogram::Histogram;
 use crate::types;
@@ -60,9 +61,31 @@ use std::ops::{Add, AddAssign};
 ///     bad: f64,
 /// }
 /// ```
+///
+/// Attributes
+/// ----------
+///
+/// The output of the `Target` trait methods can be tweaked in various ways, by
+/// using the `oximeter` attribute. The following attributes are supported:
+///
+/// - `oximeter(name = "...")`: Use the provided name for the target, rather
+/// than the type's name.
+/// - `oximeter(version = N)`: Specify the version number. If not provided the
+/// version defaults to 1.
+/// - `oximeter(description = "...")`: Provide a description for the target. If
+/// not provided, the docstring for the type is used.
 pub trait Target {
-    /// Return the name of the target, which is the snake_case form of the struct's name.
+    /// Return the name of the target, which is usually the snake_case form of
+    /// the struct's name.
     fn name(&self) -> &'static str;
+
+    /// Return the description of the target, if any.
+    fn description(&self) -> &'static str {
+        ""
+    }
+
+    /// Return the version of this metric.
+    fn version(&self) -> ::std::num::NonZeroU8;
 
     /// Return the names of the target's fields, in the order in which they're defined.
     fn field_names(&self) -> &'static [&'static str];
@@ -133,12 +156,37 @@ pub trait Target {
 ///     field: f32,
 /// }
 /// ```
+///
+/// Attributes
+/// ----------
+///
+/// The output of the `Metric` trait methods can be tweaked in various ways, by
+/// using the `oximeter` attribute. The following attributes are supported:
+///
+/// - `oximeter(name = "...")`: Use the provided name for the metric, rather
+/// than the type's name.
+/// - `oximeter(version = N)`: Specify the version number. If not provided the
+/// version defaults to 1.
+/// - `oximeter(description = "...")`: Provide a description for the metric. If
+/// not provided, the docstring for the type is used.
+/// - `oximeter(datum)`: Mark a particular field the datum. Normally the field
+/// named `datum` is used. The attribute `#[datum]` is also supported, though
+/// deprecated.
 pub trait Metric {
     /// The type of datum produced by this metric.
     type Datum: Datum;
 
-    /// Return the name of the metric, which is the snake_case form of the struct's name.
+    /// Return the name of the metric, which is usually the snake_case form of
+    /// the struct's name.
     fn name(&self) -> &'static str;
+
+    /// Return the text description of the metric.
+    fn description(&self) -> &'static str {
+        ""
+    }
+
+    /// Return the version of this metric.
+    fn version(&self) -> ::std::num::NonZeroU8;
 
     /// Return the names of the metric's fields, in the order in which they're defined.
     fn field_names(&self) -> &'static [&'static str];

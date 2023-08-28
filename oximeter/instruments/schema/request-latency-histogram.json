@@ -1,0 +1,1 @@
+{"datum_type":"histogram_f64","field_names":["route","method","status_code"],"field_types":["String","String","I64"],"name":"request_latency_histogram","version":1}

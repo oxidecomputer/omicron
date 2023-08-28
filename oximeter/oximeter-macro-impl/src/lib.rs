@@ -9,16 +9,27 @@
 //! retrieve the names, types, and values of their struct fields, and to associate a supported
 //! datum type with their metric struct.
 
-// Copyright 2021 Oxide Computer Company
+// Copyright 2023 Oxide Computer Company
 
 extern crate proc_macro;
 
+use heck::AsSnakeCase;
 use proc_macro2::TokenStream;
 use quote::quote;
+use std::num::NonZeroU8;
 use syn::spanned::Spanned;
-use syn::{
-    Data, DeriveInput, Error, Field, Fields, FieldsNamed, Ident, ItemStruct,
-};
+use syn::Error;
+use syn::Expr;
+use syn::ExprLit;
+use syn::Field;
+use syn::Fields;
+use syn::FieldsNamed;
+use syn::Ident;
+use syn::ItemStruct;
+use syn::Lit;
+use syn::LitInt;
+use syn::LitStr;
+use syn::Meta;
 
 /// Derive the `Target` trait for a type.
 ///
@@ -26,7 +37,7 @@ use syn::{
 /// (and their types) for a target.
 ///
 /// See the [`oximeter::Target`](../oximeter/traits/trait.Target.html) trait for details.
-#[proc_macro_derive(Target)]
+#[proc_macro_derive(Target, attributes(oximeter))]
 pub fn target(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     target_impl(input.into()).unwrap_or_else(|e| e.to_compile_error()).into()
 }
@@ -39,122 +50,322 @@ pub fn target(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
 /// describes the datum of the metric, the type of underlying data that the metric tracks.
 ///
 /// See the [`oximeter::Metric`](../oximeter/traits/trait.Metric.html) trait for details.
-#[proc_macro_derive(Metric, attributes(datum))]
+#[proc_macro_derive(Metric, attributes(oximeter, datum))]
 pub fn metric(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     metric_impl(input.into()).unwrap_or_else(|e| e.to_compile_error()).into()
 }
 
-// Implementation of `#[derive(Target)]`
-fn target_impl(tokens: TokenStream) -> syn::Result<TokenStream> {
-    let item = syn::parse2::<DeriveInput>(tokens)?;
-    if let Data::Struct(ref data) = item.data {
-        let name = &item.ident;
-        let fields = if let Fields::Named(ref data_fields) = data.fields {
-            extract_struct_fields(&data_fields, None)
-        } else if matches!(data.fields, Fields::Unit) {
-            vec![]
-        } else {
+#[derive(Clone, Debug)]
+struct OximeterArgs<'a> {
+    name: String,
+    description: String,
+    version: NonZeroU8,
+    datum_field: Option<&'a Field>,
+}
+
+// Extract the oximeter attribute helper arguments.
+//
+// This supports the following:
+//
+// - name = "foo": A renaming of the target or metric object.
+// - version = x: An explicit version. This defaults to 1.
+// - description: The `doc` attribute is exctracted if one exists, or may be
+// overridden with an explicit attribute.
+fn oximeter_attribute_args(
+    item: &ItemStruct,
+    is_metric: bool,
+) -> syn::Result<OximeterArgs> {
+    let item_name = format!("{}", item.ident);
+    let mut args = OximeterArgs {
+        name: AsSnakeCase(item_name).to_string(),
+        description: String::new(),
+        version: NonZeroU8::new(1).unwrap(),
+        datum_field: None,
+    };
+    // Parse the outer attributes on the struct itself.
+    for attr in item.attrs.iter() {
+        match &attr.meta {
+            Meta::NameValue(nv) => {
+                if attr.path().is_ident("doc") {
+                    let Expr::Lit(ExprLit { lit: Lit::Str(desc), .. }) = &nv.value else {
+                        return Err(Error::new(nv.span(), "expected a literal string"));
+                    };
+                    args.description = desc.value().clone();
+                }
+            }
+            Meta::List(list) => {
+                if attr.path().is_ident("oximeter") {
+                    if list.tokens.is_empty() {
+                        return Err(Error::new(
+                            attr.span(),
+                            "`oximeter` attribute may not be empty",
+                        ));
+                    }
+                    attr.parse_nested_meta(|meta| {
+                        if meta.path.is_ident("name") {
+                            let _: syn::token::Eq = meta.input.parse()?;
+                            let lit: LitStr = meta.input.parse()?;
+                            let value = lit.value();
+                            // If the user is overriding the name, we require
+                            // that it be snake_case to avoid confusion and
+                            // ambiguity.
+                            let new_name = AsSnakeCase(&value).to_string();
+                            if value != new_name {
+                                return Err(Error::new(
+                                    lit.span(),
+                                    "Explicitly overridden names must be in snake_case",
+                                ));
+                            }
+                            args.name = new_name;
+                            return Ok(());
+                        }
+                        if meta.path.is_ident("description") {
+                            let _: syn::token::Eq = meta.input.parse()?;
+                            let lit: LitStr = meta.input.parse()?;
+                            args.description = lit.value();
+                            return Ok(());
+                        }
+                        if meta.path.is_ident("version") {
+                            let _: syn::token::Eq = meta.input.parse()?;
+                            let lit: LitInt = meta.input.parse()?;
+                            args.version = NonZeroU8::new(
+                                lit.base10_parse()?
+                            ).ok_or_else(|| Error::new(lit.span(), "version must be > 0"))?;
+                            return Ok(());
+                        }
+                        Err(meta.error(format!(
+                            "unrecognized oximeter attribute: '{}'",
+                            meta.path
+                                .get_ident()
+                                .map(ToString::to_string)
+                                .unwrap_or_default()
+                        )))
+                    })?;
+                }
+            }
+            Meta::Path(p) if p.is_ident("oximeter") => {
+                return Err(Error::new(
+                    p.span(),
+                    "`oximeter` attribute requires arguments",
+                ));
+            }
+            _ => {}
+        }
+    }
+
+    // Parse the outer attributes on the struct fields, if any.
+    //
+    // We're looking for a field named `datum` or a field marked with `datum`
+    if is_metric {
+        let Some(f) = find_datum_field(&item)? else {
             return Err(Error::new(
                     item.span(),
-                    "Can only be derived for structs with named fields or unit structs",
+                    "datum field must be specified for metrics",
                 ));
         };
-        return Ok(build_target_trait_impl(&name, &fields[..]));
+        args.datum_field.replace(f);
     }
-    Err(Error::new(
-        item.span(),
-        "Can only be derived for structs with named fields or unit structs",
-    ))
+    Ok(args)
+}
+
+// Implementation of `#[derive(Target)]`
+fn target_impl(tokens: TokenStream) -> syn::Result<TokenStream> {
+    let item = syn::parse2::<ItemStruct>(tokens)?;
+    let args = oximeter_attribute_args(&item, false)?;
+    let item_name = &item.ident;
+    let fields = if let Fields::Named(ref data_fields) = item.fields {
+        extract_struct_fields(&data_fields, None::<String>)
+    } else if matches!(item.fields, Fields::Unit) {
+        vec![]
+    } else {
+        return Err(Error::new(
+            item.span(),
+            "Can only be derived for structs with named fields or unit structs",
+        ));
+    };
+    return Ok(build_target_trait_impl(&item_name, &fields[..], &args));
 }
 
 // Implementation of the `#[derive(Metric)]` derive macro.
 fn metric_impl(item: TokenStream) -> syn::Result<TokenStream> {
     let item = syn::parse2::<ItemStruct>(item)?;
-    let datum_field = extract_datum_type(&item)?;
-    let name = &item.ident;
-    if let Fields::Named(ref data_fields) = item.fields {
-        let ignore = datum_field.ident.as_ref().unwrap().to_string();
-        let fields = extract_struct_fields(&data_fields, Some(&ignore));
-        let metric_impl =
-            build_metric_trait_impl(name, &fields[..], &datum_field);
-        Ok(quote! {
-            #metric_impl
-        })
-    } else {
-        Err(Error::new(
-            item.span(),
-            "Attribute may only be applied to structs with named fields",
-        ))
-    }
+    let args = oximeter_attribute_args(&item, true)?;
+    let item_name = &item.ident;
+    let fields = match &item.fields {
+        Fields::Named(ref data_fields) => {
+            let ignore =
+                args.datum_field.unwrap().ident.as_ref().unwrap().to_string();
+            extract_struct_fields(&data_fields, Some(&ignore))
+        }
+        Fields::Unnamed(_) => {
+            vec![]
+        }
+        _ => {
+            return Err(Error::new(
+                item.span(),
+                "Attribute may only be applied to structs with named fields",
+            ));
+        }
+    };
+    let metric_impl = build_metric_trait_impl(
+        item_name,
+        &fields,
+        &args.datum_field.unwrap(),
+        &args,
+    );
+    Ok(quote! {
+        #metric_impl
+    })
 }
 
 // Find a field named `datum` or annotated with the `#[datum]` attribute helper. Return its name,
 // the type of the field, and the tokens representing the `oximeter::DatumType` enum variant
 // corresponding to the field's type.
+/*
 fn extract_datum_type(item: &ItemStruct) -> syn::Result<&syn::Field> {
-    if let Fields::Named(ref fields) = item.fields {
-        find_datum_field(fields)
-            .ok_or_else(|| Error::new(item.span(), "Metric structs must have exactly one field named `datum` or a field annotated with the `#[datum]` attribute helper"))
-    } else {
-        Err(Error::new(item.span(), "Struct must contain named fields"))
-    }
-}
-
-fn find_datum_field(fields: &FieldsNamed) -> Option<&syn::Field> {
-    // Find fields annotated with the `#[datum]` helper.
-    let annotated_fields = fields
-        .named
-        .iter()
-        .filter(|field| {
-            field.attrs.iter().any(|attr| {
-                attr.path()
-                    .get_ident()
-                    .map(|ident| *ident == "datum")
-                    .unwrap_or(false)
-            })
-        })
-        .collect::<Vec<_>>();
-
-    // Find fields named `datum`
-    let named_fields = fields
-        .named
-        .iter()
-        .filter(|field| *field.ident.as_ref().unwrap() == "datum")
-        .collect::<Vec<_>>();
-
-    match (annotated_fields.len(), named_fields.len()) {
-        (1, 0) => annotated_fields.first(),
-        (0, 1) => named_fields.first(),
-        (1, 1) => {
-            if named_fields.first() == annotated_fields.first() {
-                named_fields.first()
-            } else {
-                None
+    const ERR: &str = "Metric structs must have exactly one field named \
+        `datum`; a field annotated with the `#[datum]` \
+        attribute helper; or be a tuple struct with \
+        one field.";
+    match &item.fields {
+        Fields::Unnamed(FieldsUnnamed { unnamed, .. }) => {
+            if unnamed.len() != 1 {
+                return Err(Error::new(item.span(), ERR));
             }
+            Ok(&unnamed[0])
         }
-        _ => None,
+        Fields::Named(fields) => {
+            find_datum_field(fields).ok_or_else(|| Error::new(item.span(),
+            ERR))?;
+            todo!();
+            Ok(None);
+        }
+        _ => Err(Error::new(item.span(), "Struct must contain named fields")),
     }
-    .map(|field| &**field)
+}
+*/
+
+// Find the datum field from the fields of a struct.
+//
+// For a tuple struct, this returns the first field, of which there must be
+// exactly 1.
+//
+// For a struct with named fields, a field named `datum` or decorated with the
+// attribute `#[datum]` or `#[oximeter(datum)]` is allowed, of which there must
+// be at most one.
+//
+// Unit structs are not allowed.
+fn find_datum_field(item: &ItemStruct) -> syn::Result<Option<&syn::Field>> {
+    match &item.fields {
+        Fields::Unit => Err(Error::new(
+            item.span(),
+            "Struct must be a single-element tuple struct \
+            or contain named fields",
+        )),
+        Fields::Named(named) => {
+            let mut datum_field = None;
+            for field in named.named.iter() {
+                if field.ident.as_ref().unwrap() == "datum" {
+                    if datum_field.is_some() {
+                        return Err(Error::new(
+                            field.span(),
+                            "there must be a single datum field",
+                        ));
+                    }
+                    datum_field.replace(field);
+                    continue;
+                }
+                for attr in field.attrs.iter() {
+                    match &attr.meta {
+                        Meta::Path(p) => {
+                            if p.is_ident("datum") {
+                                if datum_field.is_some() {
+                                    return Err(Error::new(
+                                        field.span(),
+                                        "there must be a single datum field",
+                                    ));
+                                }
+                                datum_field.replace(field);
+                            }
+                        }
+                        Meta::List(list) => {
+                            if attr.path().is_ident("oximeter") {
+                                if list.tokens.is_empty() {
+                                    return Err(Error::new(
+                                        attr.span(),
+                                        "`oximeter` attribute may not be empty",
+                                    ));
+                                }
+                                attr.parse_nested_meta(|meta| {
+                                    if meta.path.is_ident("datum") {
+                                        if !meta.input.is_empty() {
+                                            return Err(Error::new(
+                                                meta.path.span(),
+                                                "datum may not have arguments"
+                                            ));
+                                        }
+                                        if datum_field.is_some() {
+                                            if datum_field.is_some() {
+                                                return Err(Error::new(
+                                                    field.span(),
+                                                    "there must be a single datum field"
+                                                ));
+                                            }
+                                        }
+                                        datum_field.replace(field);
+                                        return Ok(());
+                                    }
+                                    Err(Error::new(meta.path.span(), "Unrecognized oximeter attribute"))
+                                })?;
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            Ok(datum_field)
+        }
+        Fields::Unnamed(fields) => {
+            if fields.unnamed.len() != 1 {
+                return Err(Error::new(
+                    fields.span(),
+                    "Only a single field is supported",
+                ));
+            }
+            Ok(Some(&fields.unnamed[0]))
+        }
+    }
 }
 
-fn build_shared_methods(item_name: &Ident, fields: &[&Field]) -> TokenStream {
+fn build_shared_methods(fields: &[&Field], args: &OximeterArgs) -> TokenStream {
     let field_idents = fields
         .iter()
         .map(|field| field.ident.as_ref().unwrap())
         .collect::<Vec<_>>();
-    let names = fields
+    let field_names = fields
         .iter()
         .map(|field| field.ident.as_ref().unwrap().to_string())
         .collect::<Vec<_>>();
-    let name = to_snake_case(&format!("{}", item_name));
+    let name = &args.name;
+    let description = &args.description;
+    let version = args.version.get();
 
     quote! {
         fn name(&self) -> &'static str {
             #name
         }
 
+        fn description(&self) -> &'static str {
+            #description
+        }
+
+        fn version(&self) -> ::std::num::NonZeroU8 {
+            // Safety: This is checked at the time the macro is run.
+            unsafe { ::std::num::NonZeroU8::new_unchecked(#version) }
+        }
+
         fn field_names(&self) -> &'static [&'static str] {
-            &[#(#names),*]
+            &[#(#field_names),*]
         }
 
         fn field_types(&self) -> Vec<::oximeter::FieldType> {
@@ -171,8 +382,9 @@ fn build_shared_methods(item_name: &Ident, fields: &[&Field]) -> TokenStream {
 fn build_target_trait_impl(
     item_name: &Ident,
     fields: &[&Field],
+    args: &OximeterArgs,
 ) -> TokenStream {
-    let shared_methods = build_shared_methods(item_name, fields);
+    let shared_methods = build_shared_methods(fields, args);
     quote! {
         impl ::oximeter::Target for #item_name {
             #shared_methods
@@ -185,9 +397,13 @@ fn build_metric_trait_impl(
     item_name: &Ident,
     fields: &[&Field],
     datum_field: &syn::Field,
+    args: &OximeterArgs,
 ) -> TokenStream {
-    let shared_methods = build_shared_methods(item_name, fields);
-    let datum_field_ident = datum_field.ident.as_ref().unwrap();
+    let shared_methods = build_shared_methods(fields, args);
+    let datum_field_ident = match datum_field.ident.as_ref() {
+        Some(id) => quote! { #id },
+        None => quote! { .0 },
+    };
     let dat_type = &datum_field.ty;
     quote! {
         impl ::oximeter::Metric for #item_name {
@@ -221,33 +437,19 @@ fn build_metric_trait_impl(
     }
 }
 
-fn extract_struct_fields<'a>(
-    fields: &'a FieldsNamed,
-    ignore: Option<&'a str>,
-) -> Vec<&'a Field> {
+fn extract_struct_fields(
+    fields: &FieldsNamed,
+    ignore: Option<impl AsRef<str>>,
+) -> Vec<&Field> {
     if let Some(ignore) = ignore {
         fields
             .named
             .iter()
-            .filter(|field| *field.ident.as_ref().unwrap() != ignore)
+            .filter(|field| *field.ident.as_ref().unwrap() != ignore.as_ref())
             .collect()
     } else {
         fields.named.iter().collect()
     }
-}
-
-// Convert the CapitalCase struct name in to snake_case.
-fn to_snake_case(name: &str) -> String {
-    let mut out = String::with_capacity(name.len());
-    for ch in name.chars() {
-        if ch.is_uppercase() {
-            if !out.is_empty() {
-                out.push('_');
-            }
-        }
-        out.push(ch.to_lowercase().next().unwrap());
-    }
-    out
 }
 
 #[cfg(test)]
@@ -274,7 +476,8 @@ mod tests {
             #[derive(Target)]
             struct MyTarget;
         });
-        assert!(out.is_ok());
+        out.unwrap();
+        //assert!(out.is_ok());
     }
 
     #[test]
@@ -360,6 +563,12 @@ mod tests {
     }
 
     #[test]
+    fn test_metric_single_tuple_field() {
+        let out = metric_impl(quote! { struct MyMetric(pub i64); });
+        out.unwrap();
+    }
+
+    #[test]
     fn test_metric_without_datum_field() {
         let out = metric_impl(quote! {
             struct MyMetric {
@@ -380,51 +589,71 @@ mod tests {
     }
 
     #[test]
-    fn test_extract_datum_type_by_field_name() {
-        let item = syn::parse2::<syn::ItemStruct>(quote! {
+    fn test_oximeter_args_metric_datum_by_field_name() {
+        let q = quote! {
+            #[derive(Metric)]
             struct MyMetric {
                 not_datum: String,
                 datum: i64,
             }
-        })
-        .unwrap();
-        let field = extract_datum_type(&item).unwrap();
-        assert_eq!(field.ident.as_ref().unwrap(), "datum");
-        if let syn::Type::Path(ref p) = field.ty {
-            assert_eq!(
-                p.path.segments.last().unwrap().ident.to_string(),
-                "i64"
-            );
-        } else {
-            panic!("Expected the extracted datum type");
-        }
+        };
+        let item: ItemStruct = syn::parse2(q).unwrap();
+        let args = oximeter_attribute_args(&item, true).unwrap();
+        assert!(
+            args.datum_field
+                .expect("Should have extracted datum field")
+                .ident
+                .as_ref()
+                .expect("Ident must be named")
+                == "datum"
+        );
     }
 
     #[test]
-    fn test_extract_datum_type_by_annotatd_field() {
-        let item = syn::parse2::<syn::ItemStruct>(quote! {
+    fn test_oximeter_args_metric_datum_by_annotated_field() {
+        let q = quote! {
+            #[derive(Metric)]
             struct MyMetric {
                 not_datum: String,
                 #[datum]
                 also_not_datum: i64,
             }
-        })
-        .unwrap();
-        let field = extract_datum_type(&item).unwrap();
-        assert_eq!(field.ident.as_ref().unwrap(), "also_not_datum");
-        if let syn::Type::Path(ref p) = field.ty {
-            assert_eq!(
-                p.path.segments.last().unwrap().ident.to_string(),
-                "i64"
-            );
-        } else {
-            panic!("Expected the extracted datum type");
-        }
+        };
+        let item: ItemStruct = syn::parse2(q).unwrap();
+        let args = oximeter_attribute_args(&item, true).unwrap();
+        assert!(
+            args.datum_field
+                .expect("Should have extracted datum field")
+                .ident
+                .as_ref()
+                .expect("Ident must be named")
+                == "also_not_datum"
+        );
+
+        let q = quote! {
+            #[derive(Metric)]
+            struct MyMetric {
+                not_datum: String,
+                #[oximeter(datum)]
+                also_not_datum: i64,
+            }
+        };
+        let item: ItemStruct = syn::parse2(q).unwrap();
+        let args = oximeter_attribute_args(&item, true).unwrap();
+        assert!(
+            args.datum_field
+                .expect("Should have extracted datum field")
+                .ident
+                .as_ref()
+                .expect("Ident must be named")
+                == "also_not_datum"
+        );
     }
 
     #[test]
-    fn test_extract_datum_type_named_and_annotated() {
-        let item = syn::parse2::<syn::ItemStruct>(quote! {
+    fn test_oximeter_args_metric_datum_named_and_annotated_fails() {
+        let item = syn::parse2::<ItemStruct>(quote! {
+            #[derive(Metric)]
             struct MyMetric {
                 not_datum: String,
                 #[datum]
@@ -433,27 +662,29 @@ mod tests {
             }
         })
         .unwrap();
-        assert!(extract_datum_type(&item).is_err());
+        assert!(oximeter_attribute_args(&item, true).is_err());
     }
 
     #[test]
-    fn test_extract_datum_type_multiple_annotated_fields() {
+    fn test_oximeter_args_metric_multiple_annotated_fields() {
         let item = syn::parse2::<syn::ItemStruct>(quote! {
+            #[derive(Metric)]
             struct MyMetric {
                 not_datum: String,
                 #[datum]
                 also_not_datum: i64,
-                #[datum]
+                #[oximeter(datum)]
                 also_also: i64,
             }
         })
         .unwrap();
-        assert!(extract_datum_type(&item).is_err());
+        assert!(oximeter_attribute_args(&item, true).is_err());
     }
 
     #[test]
-    fn test_extract_datum_type_named_and_annotated_same_field() {
+    fn test_oximeter_args_metric_named_and_annotated_same_field() {
         let item = syn::parse2::<syn::ItemStruct>(quote! {
+            #[derive(Metric)]
             struct MyMetric {
                 not_datum: String,
                 #[datum]
@@ -461,7 +692,11 @@ mod tests {
             }
         })
         .unwrap();
-        let field = extract_datum_type(&item).unwrap();
+        let args = oximeter_attribute_args(&item, true).unwrap();
+        let field = args
+            .datum_field
+            .as_ref()
+            .expect("Should have extracted a datum field");
         assert_eq!(field.ident.as_ref().unwrap(), "datum");
         if let syn::Type::Path(ref p) = field.ty {
             assert_eq!(
@@ -471,5 +706,148 @@ mod tests {
         } else {
             panic!("Expected the extracted datum type");
         }
+    }
+
+    #[test]
+    fn test_oximeter_args_metric_tuple_struct_one_field() {
+        let item = syn::parse2::<syn::ItemStruct>(quote! {
+            #[derive(Debug)]
+            struct Metric(pub f64);
+        })
+        .unwrap();
+        let args = oximeter_attribute_args(&item, true).unwrap();
+        let field = args
+            .datum_field
+            .as_ref()
+            .expect("Should have extracted datum field");
+        assert!(field.ident.is_none());
+        let syn::Type::Path(ref p) = field.ty else {
+            panic!("Expected the extracted datum type");
+        };
+        assert_eq!(p.path.segments.last().unwrap().ident.to_string(), "f64",);
+    }
+
+    #[test]
+    fn test_oximeter_args_extract_description() {
+        let desc = "Some description";
+        let item = syn::parse2::<ItemStruct>(quote! {
+            #[doc = #desc]
+            #[derive(Metric)]
+            struct Met(pub f64);
+        })
+        .unwrap();
+        let args = oximeter_attribute_args(&item, true).unwrap();
+        assert_eq!(args.description, desc, "Failed to extract description");
+    }
+
+    #[test]
+    fn test_oximeter_args_extract_overridden_description() {
+        let desc = "Some description";
+        let new_desc = "New description";
+        let item = syn::parse2::<ItemStruct>(quote! {
+            #[doc = #desc]
+            #[derive(Metric)]
+            #[oximeter(description = #new_desc)]
+            struct Met(pub f64);
+        })
+        .unwrap();
+        let args = oximeter_attribute_args(&item, true).unwrap();
+        assert_eq!(
+            args.description, new_desc,
+            "Failed to extract overridden description"
+        );
+    }
+
+    #[test]
+    fn test_oximeter_args_extract_name() {
+        let item = syn::parse2::<ItemStruct>(quote! {
+            #[derive(Target)]
+            struct MyTarget;
+        })
+        .unwrap();
+        let args = oximeter_attribute_args(&item, false).unwrap();
+        assert_eq!(args.name, "my_target", "Failed to extract target name");
+    }
+
+    #[test]
+    fn test_oximeter_args_extract_overridden_name() {
+        let new_name = "new_name";
+        let item = syn::parse2::<ItemStruct>(quote! {
+            #[derive(Target)]
+            #[oximeter(name = #new_name)]
+            struct MyTarget;
+        })
+        .unwrap();
+        let args = oximeter_attribute_args(&item, false).unwrap();
+        assert_eq!(args.name, new_name, "Failed to extract target name");
+    }
+
+    #[test]
+    fn test_oximeter_args_extract_overridden_name_non_snake_case() {
+        let new_name = "CamelCase";
+        let item = syn::parse2::<ItemStruct>(quote! {
+            #[derive(Target)]
+            #[oximeter(name = #new_name)]
+            struct MyTarget;
+        })
+        .unwrap();
+        oximeter_attribute_args(&item, false).expect_err(
+            "Should fail when an overridden name is not snake_case",
+        );
+    }
+
+    #[test]
+    fn test_oximeter_args_extract_version() {
+        let item = syn::parse2::<ItemStruct>(quote! {
+            #[derive(Target)]
+            struct MyTarget;
+        })
+        .unwrap();
+        let args = oximeter_attribute_args(&item, false).unwrap();
+        assert_eq!(args.version.get(), 1, "Failed to extract target version");
+    }
+
+    #[test]
+    fn test_oximeter_args_extract_overridden_version() {
+        let version = 2;
+        let item = syn::parse2::<ItemStruct>(quote! {
+            #[derive(Target)]
+            #[oximeter(version = #version)]
+            struct MyTarget;
+        })
+        .unwrap();
+        let args = oximeter_attribute_args(&item, false).unwrap();
+        assert_eq!(
+            args.version.get(),
+            version,
+            "Failed to extract overridden target version"
+        );
+    }
+
+    #[test]
+    fn test_oximeter_args_fail_on_non_integer_version() {
+        let version = "1";
+        let item = syn::parse2::<ItemStruct>(quote! {
+            #[derive(Target)]
+            #[oximeter(version = #version)]
+            struct MyTarget;
+        })
+        .unwrap();
+        oximeter_attribute_args(&item, false).expect_err(
+            "Should fail to extract a version which is not an integer",
+        );
+    }
+
+    #[test]
+    fn test_oximeter_args_fail_out_of_range_version() {
+        let version = 10000;
+        let item = syn::parse2::<ItemStruct>(quote! {
+            #[derive(Target)]
+            #[oximeter(version = #version)]
+            struct MyTarget;
+        })
+        .unwrap();
+        oximeter_attribute_args(&item, false)
+            .expect_err("Should fail to extract a version which is not a u8");
     }
 }

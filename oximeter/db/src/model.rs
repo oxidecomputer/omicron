@@ -3,24 +3,36 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 //! Models for timeseries data in ClickHouse
-// Copyright 2022 Oxide Computer Company
 
-use crate::{
-    DbFieldSource, FieldSchema, FieldSource, Metric, Target, TimeseriesKey,
-    TimeseriesName, TimeseriesSchema,
-};
+// Copyright 2023 Oxide Computer Company
+
+use crate::unversioned_timeseries_name;
+use crate::DbFieldSource;
+use crate::FieldSchema;
+use crate::FieldSource;
+use crate::Metric;
+use crate::Target;
+use crate::TimeseriesKey;
+use crate::TimeseriesSchema;
 use bytes::Bytes;
-use chrono::{DateTime, Utc};
+use chrono::DateTime;
+use chrono::Utc;
 use oximeter::histogram::Histogram;
 use oximeter::traits;
-use oximeter::types::{
-    Cumulative, Datum, DatumType, Field, FieldType, FieldValue, Measurement,
-    Sample,
-};
-use serde::{Deserialize, Serialize};
+use oximeter::types::Cumulative;
+use oximeter::types::Datum;
+use oximeter::types::DatumType;
+use oximeter::types::Field;
+use oximeter::types::FieldType;
+use oximeter::types::FieldValue;
+use oximeter::types::Measurement;
+use oximeter::types::Sample;
+use oximeter::TimeseriesName;
+use serde::Deserialize;
+use serde::Serialize;
 use std::collections::BTreeMap;
-use std::convert::TryFrom;
-use std::net::{IpAddr, Ipv6Addr};
+use std::net::IpAddr;
+use std::net::Ipv6Addr;
 use uuid::Uuid;
 
 // Wrapper type to represent a boolean in the database.
@@ -116,10 +128,33 @@ impl From<Vec<FieldSchema>> for DbFieldList {
     }
 }
 
+const fn default_version() -> u8 {
+    1
+}
+
+// TODO-remove: Remove when DB supports versioned names.
+fn serialize_unversioned_timeseries_name<S>(
+    name: &TimeseriesName,
+    serializer: S,
+) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    serializer.serialize_str(&unversioned_timeseries_name(name))
+}
+
 // The `DbTimeseriesSchema` type models the `oximeter.timeseries_schema` table.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub(crate) struct DbTimeseriesSchema {
     pub timeseries_name: String,
+    // TODO-remove: Remove the default values and skipped serialization when the
+    // DB supports versioned names.
+    #[serde(default = "default_version", skip_serializing)]
+    pub target_version: u8,
+    // TODO-remove: Remove the default values and skipped serialization when the
+    // DB supports versioned names.
+    #[serde(default = "default_version", skip_serializing)]
+    pub metric_version: u8,
     #[serde(flatten)]
     pub field_schema: DbFieldList,
     pub datum_type: DbDatumType,
@@ -130,7 +165,11 @@ pub(crate) struct DbTimeseriesSchema {
 impl From<TimeseriesSchema> for DbTimeseriesSchema {
     fn from(schema: TimeseriesSchema) -> DbTimeseriesSchema {
         DbTimeseriesSchema {
-            timeseries_name: schema.timeseries_name.to_string(),
+            timeseries_name: unversioned_timeseries_name(
+                &schema.timeseries_name,
+            ),
+            target_version: schema.timeseries_name.target_version().get(),
+            metric_version: schema.timeseries_name.target_version().get(),
             field_schema: schema.field_schema.into(),
             datum_type: schema.datum_type.into(),
             created: schema.created,
@@ -274,7 +313,8 @@ macro_rules! declare_field_row {
     {$name:ident, $value_type:ty, $data_type:literal} => {
         #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
         struct $name {
-            timeseries_name: String,
+            #[serde(serialize_with = "serialize_unversioned_timeseries_name")]
+            timeseries_name: TimeseriesName,
             timeseries_key: TimeseriesKey,
             field_name: String,
             field_value: $value_type,
@@ -293,7 +333,8 @@ macro_rules! declare_measurement_row {
     {$name:ident, $datum_type:ty, $data_type:literal} => {
         #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
         struct $name {
-            timeseries_name: String,
+            #[serde(serialize_with = "serialize_unversioned_timeseries_name")]
+            timeseries_name: TimeseriesName,
             timeseries_key: TimeseriesKey,
             #[serde(with = "serde_timestamp")]
             timestamp: DateTime<Utc>,
@@ -314,7 +355,8 @@ macro_rules! declare_cumulative_measurement_row {
     {$name:ident, $datum_type:ty, $data_type:literal} => {
         #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
         struct $name {
-            timeseries_name: String,
+            #[serde(serialize_with = "serialize_unversioned_timeseries_name")]
+            timeseries_name: TimeseriesName,
             timeseries_key: TimeseriesKey,
             #[serde(with = "serde_timestamp")]
             start_time: DateTime<Utc>,
@@ -355,7 +397,8 @@ macro_rules! declare_histogram_measurement_row {
     {$name:ident, $datum_type:ty, $data_type:literal} => {
         #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
         struct $name {
-            timeseries_name: String,
+            #[serde(serialize_with = "serialize_unversioned_timeseries_name")]
+            timeseries_name: TimeseriesName,
             timeseries_key: TimeseriesKey,
             #[serde(with = "serde_timestamp")]
             start_time: DateTime<Utc>,
@@ -577,10 +620,7 @@ pub(crate) fn schema_for(sample: &Sample) -> TimeseriesSchema {
         }))
         .collect();
     TimeseriesSchema {
-        timeseries_name: TimeseriesName::try_from(
-            sample.timeseries_name.as_str(),
-        )
-        .expect("Failed to parse timeseries name"),
+        timeseries_name: sample.timeseries_name.clone(),
         field_schema,
         datum_type: sample.measurement.datum_type(),
         created,
@@ -611,10 +651,7 @@ where
         }))
         .collect();
     TimeseriesSchema {
-        timeseries_name: TimeseriesName::try_from(oximeter::timeseries_name(
-            target, metric,
-        ))
-        .expect("Failed to parse timeseries name"),
+        timeseries_name: TimeseriesName::new(target, metric),
         field_schema,
         datum_type: metric.datum_type(),
         created: Utc::now(),

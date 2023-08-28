@@ -3,18 +3,34 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 //! Rust client to ClickHouse database
-// Copyright 2021 Oxide Computer Company
 
-use crate::{
-    model, query, Error, Metric, Target, Timeseries, TimeseriesPageSelector,
-    TimeseriesScanParams, TimeseriesSchema,
-};
-use crate::{TimeseriesKey, TimeseriesName};
+// Copyright 2023 Oxide Computer Company
+
+use crate::model;
+use crate::query;
+use crate::unversioned_timeseries_name;
+use crate::Error;
+use crate::Metric;
+use crate::Target;
+use crate::Timeseries;
+use crate::TimeseriesKey;
+use crate::TimeseriesPageSelector;
+use crate::TimeseriesScanParams;
+use crate::TimeseriesSchema;
 use async_trait::async_trait;
-use dropshot::{EmptyScanParams, PaginationOrder, ResultsPage, WhichPage};
+use dropshot::EmptyScanParams;
+use dropshot::PaginationOrder;
+use dropshot::ResultsPage;
+use dropshot::WhichPage;
 use oximeter::types::Sample;
-use slog::{debug, error, trace, Logger};
-use std::collections::{btree_map::Entry, BTreeMap, BTreeSet};
+use oximeter::TimeseriesName;
+use slog::debug;
+use slog::error;
+use slog::trace;
+use slog::Logger;
+use std::collections::btree_map::Entry;
+use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::convert::TryFrom;
 use std::net::SocketAddr;
 use std::num::NonZeroU32;
@@ -60,15 +76,19 @@ impl Client {
     }
 
     /// Select timeseries from criteria on the fields and start/end timestamps.
-    pub async fn select_timeseries_with(
+    pub async fn select_timeseries_with<N>(
         &self,
-        timeseries_name: &str,
+        timeseries_name: N,
         criteria: &[&str],
         start_time: Option<query::Timestamp>,
         end_time: Option<query::Timestamp>,
         limit: Option<NonZeroU32>,
         order: Option<PaginationOrder>,
-    ) -> Result<Vec<Timeseries>, Error> {
+    ) -> Result<Vec<Timeseries>, Error>
+    where
+        TimeseriesName: TryFrom<N>,
+        Error: From<<TimeseriesName as TryFrom<N>>::Error>,
+    {
         // Querying uses up to three queries to the database:
         //  1. Retrieve the schema
         //  2. Retrieve the keys and field names/values for matching timeseries
@@ -111,6 +131,8 @@ impl Client {
             }
             None => BTreeMap::new(),
         };
+
+        println!("{}", query.field_query().unwrap());
 
         if info.is_empty() {
             // allow queries that resolve to zero timeseries even with limit
@@ -324,7 +346,7 @@ impl Client {
                         .expect("Timeseries key in measurement query but not field query")
                         .clone();
                     Timeseries {
-                        timeseries_name: schema.timeseries_name.to_string(),
+                        timeseries_name: schema.timeseries_name.clone(),
                         target,
                         metric,
                         measurements: Vec::new(),
@@ -465,7 +487,7 @@ impl DbWrite for Client {
 
             // Key on both the timeseries name and key, as timeseries may actually share keys.
             let key = (
-                sample.timeseries_name.as_str(),
+                unversioned_timeseries_name(&sample.timeseries_name),
                 crate::timeseries_key(&sample),
             );
             if !seen_timeseries.contains(&key) {
@@ -743,8 +765,7 @@ mod tests {
 
         // The internal map should now contain both the new timeseries schema
         let actual_schema = model::schema_for(&sample);
-        let timeseries_name =
-            TimeseriesName::try_from(sample.timeseries_name.as_str()).unwrap();
+        let timeseries_name = &sample.timeseries_name;
         let expected_schema = client
             .schema
             .lock()
@@ -848,7 +869,7 @@ mod tests {
         ];
         let results = client
             .select_timeseries_with(
-                &sample.timeseries_name,
+                &unversioned_timeseries_name(&sample.timeseries_name),
                 &criteria.iter().map(|x| x.as_str()).collect::<Vec<_>>(),
                 None,
                 None,

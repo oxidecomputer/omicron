@@ -4,7 +4,7 @@
 
 //! Instrumentation tools for HTTP services.
 
-// Copyright 2021 Oxide Computer Company
+// Copyright 2023 Oxide Computer Company
 
 use dropshot::{
     HttpError, HttpResponse, RequestContext, RequestInfo, ServerContext,
@@ -215,6 +215,8 @@ impl Producer for LatencyTracker {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use oximeter::test_util::check_metric_schema;
+    use oximeter::test_util::check_target_schema;
 
     const ID: &str = "cc7a22ab-bc69-42c4-a75e-f1d9156eb351";
 
@@ -263,5 +265,36 @@ mod tests {
             println!("{test}");
             assert_eq!(normalized_uri_path(&test.parse().unwrap()), EXPECTED);
         }
+    }
+
+    const EXPECTED_SCHEMA_DIR: &str =
+        concat!(env!("CARGO_MANIFEST_DIR"), "/schema");
+
+    #[test]
+    fn test_http_service_schema_match() {
+        let service = HttpService {
+            name: String::from("my-service"),
+            id: ID.parse().unwrap(),
+        };
+        check_target_schema(
+            format!("{}/http-service.json", EXPECTED_SCHEMA_DIR),
+            service,
+        )
+        .expect("schema mismatch");
+    }
+
+    #[test]
+    fn test_request_latency_histogram_schema_match() {
+        let hist = RequestLatencyHistogram {
+            route: String::new(),
+            method: String::new(),
+            status_code: 0,
+            latency: Histogram::new(&[0.0, 1.0]).unwrap(),
+        };
+        check_metric_schema(
+            format!("{}/request-latency-histogram.json", EXPECTED_SCHEMA_DIR),
+            hist,
+        )
+        .expect("schema mismatch");
     }
 }

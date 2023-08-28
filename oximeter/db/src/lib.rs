@@ -4,23 +4,31 @@
 
 //! Tools for interacting with the control plane telemetry database.
 
-// Copyright 2021 Oxide Computer Company
+// Copyright 2023 Oxide Computer Company
 
 use crate::query::StringFieldSelector;
-use chrono::{DateTime, Utc};
-use dropshot::{EmptyScanParams, PaginationParams};
-pub use oximeter::{DatumType, Field, FieldType, Measurement, Sample};
+use chrono::DateTime;
+use chrono::Utc;
+use dropshot::EmptyScanParams;
+use dropshot::PaginationParams;
+pub use oximeter::DatumType;
+pub use oximeter::Field;
+pub use oximeter::FieldType;
+pub use oximeter::Measurement;
+pub use oximeter::Sample;
+pub use oximeter::TimeseriesName;
 use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
+use serde::Serialize;
 use std::collections::BTreeMap;
-use std::convert::TryFrom;
 use std::num::NonZeroU32;
 use thiserror::Error;
 
 mod client;
 pub mod model;
 pub mod query;
-pub use client::{Client, DbWrite};
+pub use client::Client;
+pub use client::DbWrite;
 
 #[derive(Clone, Debug, Error)]
 pub enum Error {
@@ -77,97 +85,8 @@ pub enum Error {
     #[error("The field comparison {op} is not valid for the type {ty}")]
     InvalidFieldCmp { op: String, ty: FieldType },
 
-    #[error("Invalid timeseries name")]
-    InvalidTimeseriesName,
-
     #[error("Query must resolve to a single timeseries if limit is specified")]
     InvalidLimitQuery,
-}
-
-/// A timeseries name.
-///
-/// Timeseries are named by concatenating the names of their target and metric, joined with a
-/// colon.
-#[derive(
-    Debug, Clone, PartialEq, PartialOrd, Ord, Eq, Hash, Serialize, Deserialize,
-)]
-#[serde(try_from = "&str")]
-pub struct TimeseriesName(String);
-
-impl JsonSchema for TimeseriesName {
-    fn schema_name() -> String {
-        "TimeseriesName".to_string()
-    }
-
-    fn json_schema(
-        _: &mut schemars::gen::SchemaGenerator,
-    ) -> schemars::schema::Schema {
-        schemars::schema::SchemaObject {
-            metadata: Some(Box::new(schemars::schema::Metadata {
-                title: Some("The name of a timeseries".to_string()),
-                description: Some(
-                    "Names are constructed by concatenating the target \
-                     and metric names with ':'. Target and metric \
-                     names must be lowercase alphanumeric characters \
-                     with '_' separating words."
-                        .to_string(),
-                ),
-                ..Default::default()
-            })),
-            instance_type: Some(schemars::schema::InstanceType::String.into()),
-            string: Some(Box::new(schemars::schema::StringValidation {
-                pattern: Some(TIMESERIES_NAME_REGEX.to_string()),
-                ..Default::default()
-            })),
-            ..Default::default()
-        }
-        .into()
-    }
-}
-
-impl std::ops::Deref for TimeseriesName {
-    type Target = String;
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl std::fmt::Display for TimeseriesName {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-impl std::convert::TryFrom<&str> for TimeseriesName {
-    type Error = Error;
-    fn try_from(s: &str) -> Result<Self, Self::Error> {
-        validate_timeseries_name(s).map(|s| TimeseriesName(s.to_string()))
-    }
-}
-
-impl std::convert::TryFrom<String> for TimeseriesName {
-    type Error = Error;
-    fn try_from(s: String) -> Result<Self, Self::Error> {
-        validate_timeseries_name(&s)?;
-        Ok(TimeseriesName(s))
-    }
-}
-
-impl<T> PartialEq<T> for TimeseriesName
-where
-    T: AsRef<str>,
-{
-    fn eq(&self, other: &T) -> bool {
-        self.0.eq(other.as_ref())
-    }
-}
-
-fn validate_timeseries_name(s: &str) -> Result<&str, Error> {
-    if regex::Regex::new(TIMESERIES_NAME_REGEX).unwrap().is_match(s) {
-        Ok(s)
-    } else {
-        Err(Error::InvalidTimeseriesName)
-    }
 }
 
 /// The schema for a timeseries.
@@ -193,9 +112,7 @@ impl TimeseriesSchema {
 
     /// Return the target and metric component names for this timeseries
     pub fn component_names(&self) -> (&str, &str) {
-        self.timeseries_name
-            .split_once(':')
-            .expect("Incorrectly formatted timseries name")
+        self.timeseries_name.component_names()
     }
 }
 
@@ -210,10 +127,12 @@ impl PartialEq for TimeseriesSchema {
 impl From<model::DbTimeseriesSchema> for TimeseriesSchema {
     fn from(schema: model::DbTimeseriesSchema) -> TimeseriesSchema {
         TimeseriesSchema {
-            timeseries_name: TimeseriesName::try_from(
-                schema.timeseries_name.as_str(),
+            timeseries_name: TimeseriesName::from_name_and_versions(
+                &schema.timeseries_name,
+                schema.target_version.try_into().expect("Expected non-zero u8"),
+                schema.metric_version.try_into().expect("Expected non-zero u8"),
             )
-            .expect("Invalid timeseries name in database"),
+            .expect("Invalid timeseries name"),
             field_schema: schema.field_schema.into(),
             datum_type: schema.datum_type.into(),
             created: schema.created,
@@ -239,7 +158,7 @@ pub struct Metric {
 /// A list of timestamped measurements from a single timeseries.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Timeseries {
-    pub timeseries_name: String,
+    pub timeseries_name: TimeseriesName,
     pub target: Target,
     pub metric: Metric,
     pub measurements: Vec<Measurement>,
@@ -355,42 +274,8 @@ const DATABASE_NAME: &str = "oximeter";
 // See https://clickhouse.com/docs/en/interfaces/formats/#jsoneachrow for details.
 const DATABASE_SELECT_FORMAT: &str = "JSONEachRow";
 
-// Regular expression describing valid timeseries names.
-//
-// Names are derived from the names of the Rust structs for the target and metric, converted to
-// snake case. So the names must be valid identifiers, and generally:
-//
-//  - Start with lowercase a-z
-//  - Any number of alphanumerics
-//  - Zero or more of the above, delimited by '-'.
-//
-// That describes the target/metric name, and the timeseries is two of those, joined with ':'.
-const TIMESERIES_NAME_REGEX: &str =
-    "(([a-z]+[a-z0-9]*)(_([a-z0-9]+))*):(([a-z]+[a-z0-9]*)(_([a-z0-9]+))*)";
-
-#[cfg(test)]
-mod tests {
-    use super::TimeseriesName;
-    use std::convert::TryFrom;
-
-    #[test]
-    fn test_timeseries_name() {
-        let name = TimeseriesName::try_from("foo:bar").unwrap();
-        assert_eq!(format!("{}", name), "foo:bar");
-    }
-
-    #[test]
-    fn test_timeseries_name_from_str() {
-        assert!(TimeseriesName::try_from("a:b").is_ok());
-        assert!(TimeseriesName::try_from("a_a:b_b").is_ok());
-        assert!(TimeseriesName::try_from("a0:b0").is_ok());
-        assert!(TimeseriesName::try_from("a_0:b_0").is_ok());
-
-        assert!(TimeseriesName::try_from("_:b").is_err());
-        assert!(TimeseriesName::try_from("a_:b").is_err());
-        assert!(TimeseriesName::try_from("0:b").is_err());
-        assert!(TimeseriesName::try_from(":b").is_err());
-        assert!(TimeseriesName::try_from("a:").is_err());
-        assert!(TimeseriesName::try_from("123").is_err());
-    }
+// TODO-remove: This should be removed when the database schema accepts versions
+// as well as the timeseries name.
+pub(crate) fn unversioned_timeseries_name(name: &TimeseriesName) -> String {
+    format!("{}:{}", name.target_name(), name.metric_name())
 }

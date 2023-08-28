@@ -3,22 +3,32 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 //! Types used to describe targets, metrics, and measurements.
-// Copyright 2021 Oxide Computer Company
+
+// Copyright 2023 Oxide Computer Company
 
 use crate::histogram;
 use crate::traits;
 use crate::Producer;
+use crate::TimeseriesName;
 use bytes::Bytes;
-use chrono::{DateTime, Utc};
-use num_traits::{One, Zero};
+use chrono::DateTime;
+use chrono::Utc;
+use num_traits::One;
+use num_traits::Zero;
 use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
+use serde::Serialize;
 use std::boxed::Box;
 use std::collections::BTreeMap;
 use std::fmt;
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
-use std::ops::{Add, AddAssign};
-use std::sync::{Arc, Mutex};
+use std::net::IpAddr;
+use std::net::Ipv4Addr;
+use std::net::Ipv6Addr;
+use std::num::NonZeroU8;
+use std::ops::Add;
+use std::ops::AddAssign;
+use std::sync::Arc;
+use std::sync::Mutex;
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -394,6 +404,10 @@ pub enum MetricsError {
     /// A field name is duplicated between the target and metric.
     #[error("Field '{name}' is duplicated between the target and metric")]
     DuplicateFieldName { name: String },
+
+    /// A timeseries name is not valid.
+    #[error("Invalid timeseries name")]
+    InvalidTimeseriesName,
 }
 
 impl From<MetricsError> for omicron_common::api::external::Error {
@@ -484,10 +498,18 @@ where
     }
 }
 
+const fn default_version() -> NonZeroU8 {
+    NonZeroU8::MIN
+}
+
 // A helper type for representing the name and fields derived from targets and metrics
 #[derive(Clone, Debug, PartialEq, JsonSchema, Deserialize, Serialize)]
 pub(crate) struct FieldSet {
     pub name: String,
+    // Use a default of 1, to support older producers which don't yet contain
+    // the target / metric version.
+    #[serde(default = "default_version")]
+    pub version: NonZeroU8,
     pub fields: BTreeMap<String, Field>,
 }
 
@@ -499,7 +521,11 @@ impl FieldSet {
             .cloned()
             .map(|f| (f.name.clone(), f))
             .collect();
-        Self { name: target.name().to_string(), fields }
+        Self {
+            name: target.name().to_string(),
+            version: target.version(),
+            fields,
+        }
     }
 
     fn from_metric(metric: &impl traits::Metric) -> Self {
@@ -509,7 +535,11 @@ impl FieldSet {
             .cloned()
             .map(|f| (f.name.clone(), f))
             .collect();
-        Self { name: metric.name().to_string(), fields }
+        Self {
+            name: metric.name().to_string(),
+            version: metric.version(),
+            fields,
+        }
     }
 }
 
@@ -520,7 +550,7 @@ pub struct Sample {
     pub measurement: Measurement,
 
     /// The name of the timeseries this sample belongs to
-    pub timeseries_name: String,
+    pub timeseries_name: TimeseriesName,
 
     // Target name and fields
     target: FieldSet,
@@ -560,7 +590,7 @@ impl Sample {
         let metric_fields = FieldSet::from_metric(metric);
         Self::verify_field_names(&target_fields, &metric_fields)?;
         Ok(Self {
-            timeseries_name: crate::timeseries_name(target, metric),
+            timeseries_name: TimeseriesName::new(target, metric),
             target: target_fields,
             metric: metric_fields,
             measurement: metric.measure(timestamp),
@@ -841,7 +871,11 @@ mod tests {
         let field =
             Field { name: "n".to_string(), value: FieldValue::from(0i64) };
         fields.insert(field.name.clone(), field);
-        let fields = FieldSet { name: "t".to_string(), fields };
+        let fields = FieldSet {
+            name: "t".to_string(),
+            version: 1.try_into().unwrap(),
+            fields,
+        };
         assert!(matches!(
             Sample::verify_field_names(&fields, &fields),
             Err(MetricsError::DuplicateFieldName { .. })

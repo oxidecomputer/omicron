@@ -1,0 +1,12 @@
+{
+  "field_names": [
+    "name",
+    "id"
+  ],
+  "field_types": [
+    "String",
+    "Uuid"
+  ],
+  "name": "http_service",
+  "version": 1
+}

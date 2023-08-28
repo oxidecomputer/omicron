@@ -94,8 +94,29 @@
 //! but only submit that once per minute to the rest of the control plane. Similarly, different
 //! `Producer`s may be registered with the same `ProducerServer`, each with potentially different
 //! sampling intervals.
+//!
+//! Versions
+//! --------
+//!
+//! Both targets and metrics have versions associated with them. These are
+//! non-zero `u8`s, and can be specified with the attribute `#[oximeter(version
+//! = N)]` on the type deriving either `Target` or `Metric`. If not provided,
+//! the version defaults to 1.
+//!
+//! As schema change, developers should update the version number. This cannot
+//! be enforced at compile time automatically, but helper functions for ensuring
+//! this exist.
+//! [`check_target_schema()`](oximeter::test_util::check_target_schema) and
+//! [`check_metric_schema()`](oximeter::test_util::check_metric_schema) can be
+//! used to compare the schema of a type against one stored in a file. That file
+//! should be checked into the repository, and a test added to it which calls
+//! one of the above. If the contents of the schema in the file don't match the
+//! one from the type itself, the version of the schema is checked. If the
+//! version has _increased_, then the file is overwritten with the new contents.
+//! Otherwise, an error is returned. Developers can explicitly request that the
+//! file be overwritten with the `EXPECTORATE=overwrite` environment variable.
 
-// Copyright 2021 Oxide Computer Company
+// Copyright 2023 Oxide Computer Company
 
 pub use oximeter_macro_impl::*;
 
@@ -108,20 +129,18 @@ pub use oximeter_macro_impl::*;
 extern crate self as oximeter;
 
 pub mod histogram;
+mod name;
 pub mod test_util;
 pub mod traits;
 pub mod types;
-pub use traits::{Metric, Producer, Target};
-pub use types::{
-    Datum, DatumType, Field, FieldType, FieldValue, Measurement, MetricsError,
-    Sample,
-};
 
-/// Construct the timeseries name for a Target and Metric.
-pub fn timeseries_name<T, M>(target: &T, metric: &M) -> String
-where
-    T: Target,
-    M: Metric,
-{
-    format!("{}:{}", target.name(), metric.name())
-}
+pub use name::TimeseriesName;
+pub use traits::{Metric, Producer, Target};
+pub use types::Datum;
+pub use types::DatumType;
+pub use types::Field;
+pub use types::FieldType;
+pub use types::FieldValue;
+pub use types::Measurement;
+pub use types::MetricsError;
+pub use types::Sample;
