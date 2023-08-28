@@ -236,8 +236,17 @@ impl RunningUpdate {
                 );
                 (
                     // Don't set the state to Closed here even if this is a
-                    // terminal update, because we want to keep returning
-                    // ReceiverClosed.
+                    // terminal update.
+                    //
+                    // Why? Consider a situation where the receiver was closed
+                    // right before the terminal update was received. Since the
+                    // update was not delivered to the receiver, we need to keep
+                    // communicating errors to the installinator. That is not
+                    // what would happen with the Closed state.
+                    //
+                    // (This could also be done by storing a flag within the
+                    // Closed state, but there's no real benefit to that
+                    // approach.)
                     Self::ReportsReceived(sender),
                     EventReportStatus::ReceiverClosed,
                 )
