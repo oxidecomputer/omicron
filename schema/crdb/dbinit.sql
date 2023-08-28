@@ -1493,7 +1493,17 @@ CREATE TABLE IF NOT EXISTS omicron.public.ip_pool (
      * internal is true, i.e., internal IP pools must be fleet-level pools.
      */
     silo_id UUID,
-    project_id UUID
+    project_id UUID,
+
+    -- if silo_id is null, then project_id must be null
+    CONSTRAINT project_implies_silo CHECK (
+      NOT ((silo_id IS NULL) AND (project_id IS NOT NULL))
+    ),
+
+    -- if internal = true, non-null silo_id and project_id are not allowed 
+    CONSTRAINT internal_pools_have_null_silo_and_project CHECK (
+       NOT (INTERNAL AND ((silo_id IS NOT NULL) OR (project_id IS NOT NULL)))
+    )
 );
 
 /*
