@@ -22,6 +22,10 @@ use std::net::IpAddr;
 use uuid::Uuid;
 
 /// An IP Pool is a collection of IP addresses external to the rack.
+///
+/// IP pools can be external or internal. External IP pools can be associated
+/// with a silo or project so that instance IP allocation draws from that pool
+/// instead of a system pool.
 #[derive(Queryable, Insertable, Selectable, Clone, Debug, Resource)]
 #[diesel(table_name = ip_pool)]
 pub struct IpPool {
@@ -38,7 +42,14 @@ pub struct IpPool {
     /// the contained ranges.
     pub rcgen: i64,
 
+    /// Silo, if IP pool is associated with a particular silo. Must be null
+    /// if internal is true. Must be non-null if project_id is non-null. When
+    /// project_id is non-null, silo_id will (naturally) be the ID of the
+    /// project's silo.
     pub silo_id: Option<Uuid>,
+
+    /// Project, if IP pool is associated with a particular project. Must be
+    /// null if internal is true.
     pub project_id: Option<Uuid>,
 }
 
