@@ -7,20 +7,24 @@
 // TODO: REMOVE
 #![allow(dead_code)]
 
+use crate::host::znode::{FakeZpool, Znodes};
+use crate::types::{
+    DatasetName, DatasetProperty, DatasetPropertyAccess, DatasetType,
+};
 use crate::{FakeChild, FakeExecutor, FakeExecutorBuilder};
 
 use camino::Utf8PathBuf;
 use helios_fusion::interfaces::libc;
 use helios_fusion::interfaces::swapctl;
-use helios_fusion::zpool::{ZpoolHealth, ZpoolName};
+use helios_fusion::zpool::ZpoolName;
 use helios_fusion::{Child, Input, Output, OutputExt};
 use ipnetwork::IpNetwork;
-use petgraph::stable_graph::StableGraph;
 use slog::Logger;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::io::Read;
-use std::str::FromStr;
 use std::sync::{Arc, Mutex};
+
+mod znode;
 
 pub enum LinkType {
     Etherstub,
@@ -121,214 +125,6 @@ fn to_stderr<S: AsRef<str>>(s: S) -> Output {
     Output::failure().set_stderr(s)
 }
 
-struct FakeZpool {
-    zix: ZnodeIdx,
-    name: ZpoolName,
-    vdev: Utf8PathBuf,
-
-    imported: bool,
-    health: ZpoolHealth,
-    properties: HashMap<String, String>,
-}
-
-impl FakeZpool {
-    fn new(zix: ZnodeIdx, name: ZpoolName, vdev: Utf8PathBuf) -> Self {
-        Self {
-            zix,
-            name,
-            vdev,
-            imported: false,
-            health: ZpoolHealth::Online,
-            properties: HashMap::new(),
-        }
-    }
-}
-
-enum DatasetFlavor {
-    Filesystem,
-    Volume {
-        sparse: bool,
-        // Defaults to 8KiB
-        blocksize: u64,
-        size: u64,
-    },
-}
-
-struct FakeDataset {
-    zix: ZnodeIdx,
-    properties: HashMap<String, String>,
-    flavor: DatasetFlavor,
-}
-
-impl FakeDataset {
-    fn new(
-        zix: ZnodeIdx,
-        properties: HashMap<String, String>,
-        flavor: DatasetFlavor,
-    ) -> Self {
-        Self { zix, properties, flavor }
-    }
-}
-
-enum Znode {
-    Root,
-    Zpool(ZpoolName),
-    Dataset(FilesystemName),
-}
-
-impl Znode {
-    fn to_string(&self) -> String {
-        match self {
-            Znode::Root => "/".to_string(),
-            Znode::Zpool(name) => name.to_string(),
-            Znode::Dataset(name) => name.as_str().to_string(),
-        }
-    }
-}
-
-type ZnodeIdx = petgraph::graph::NodeIndex<petgraph::graph::DefaultIx>;
-
-struct Znodes {
-    // Describes the connectivity between nodes
-    all_znodes: StableGraph<Znode, ()>,
-    zix_root: ZnodeIdx,
-
-    // Individual nodes themselves
-    zpools: HashMap<ZpoolName, FakeZpool>,
-    datasets: HashMap<FilesystemName, FakeDataset>,
-}
-
-impl Znodes {
-    fn new() -> Self {
-        let mut all_znodes = StableGraph::new();
-        let zix_root = all_znodes.add_node(Znode::Root);
-        Self {
-            all_znodes,
-            zix_root,
-            zpools: HashMap::new(),
-            datasets: HashMap::new(),
-        }
-    }
-
-    fn name_to_zix(&self, name: &DatasetName) -> Result<ZnodeIdx, String> {
-        if !name.0.contains('/') {
-            if let Some(pool) = self.zpools.get(&ZpoolName::from_str(&name.0)?)
-            {
-                return Ok(pool.zix);
-            }
-        }
-        if let Some(dataset) = self.datasets.get(&FilesystemName::new(&name.0)?)
-        {
-            return Ok(dataset.zix);
-        }
-        Err(format!("{} not found", name.0))
-    }
-
-    fn type_str(&self, zix: ZnodeIdx) -> Result<&'static str, String> {
-        match self
-            .all_znodes
-            .node_weight(zix)
-            .ok_or_else(|| "Unknown node".to_string())?
-        {
-            Znode::Root => {
-                Err("Invalid (root) node for type string".to_string())
-            }
-            Znode::Zpool(_) => Ok("fileystem"),
-            Znode::Dataset(name) => {
-                let dataset = self
-                    .datasets
-                    .get(&name)
-                    .ok_or_else(|| "Missing dataset".to_string())?;
-                match dataset.flavor {
-                    DatasetFlavor::Filesystem => Ok("filesystem"),
-                    DatasetFlavor::Volume { .. } => Ok("volume"),
-                }
-            }
-        }
-    }
-
-    fn children(&self, zix: ZnodeIdx) -> impl Iterator<Item = ZnodeIdx> + '_ {
-        self.all_znodes.neighbors_directed(zix, petgraph::Direction::Outgoing)
-    }
-
-    fn add_zpool(
-        &mut self,
-        name: ZpoolName,
-        vdev: Utf8PathBuf,
-        import: bool,
-    ) -> Result<(), String> {
-        if self.zpools.contains_key(&name) {
-            return Err(format!(
-                "Cannot create pool name '{name}': already exists"
-            ));
-        }
-
-        let zix = self.all_znodes.add_node(Znode::Zpool(name.clone()));
-        self.all_znodes.add_edge(self.zix_root, zix, ());
-
-        let mut pool = FakeZpool::new(zix, name.clone(), vdev);
-        pool.imported = import;
-        self.zpools.insert(name, pool);
-
-        Ok(())
-    }
-
-    fn add_dataset(
-        &mut self,
-        name: FilesystemName,
-        properties: HashMap<String, String>,
-        flavor: DatasetFlavor,
-    ) -> Result<(), String> {
-        if self.datasets.contains_key(&name) {
-            return Err(format!("Cannot create '{}': already exists", name.0));
-        }
-
-        let parent = if let Some((parent, _)) = name.0.rsplit_once('/') {
-            parent
-        } else {
-            return Err(format!("Cannot create '{}': No parent dataset. Try creating one under an existing filesystem or zpool?", name.as_str()));
-        };
-
-        let parent_zix = self.name_to_zix(&DatasetName(parent.to_string()))?;
-        if !self.all_znodes.contains_node(parent_zix) {
-            return Err(format!(
-                "Cannot create fs '{}': Missing parent node: {}",
-                name.as_str(),
-                parent
-            ));
-        }
-
-        let zix = self.all_znodes.add_node(Znode::Dataset(name.clone()));
-        self.all_znodes.add_edge(parent_zix, zix, ());
-        self.datasets.insert(name, FakeDataset::new(zix, properties, flavor));
-
-        Ok(())
-    }
-
-    fn destroy_dataset(&mut self, name: &DatasetName) -> Result<(), String> {
-        let name = FilesystemName::new(&name.0)?;
-        let dataset = self.datasets.get(&name).ok_or_else(|| {
-            format!(
-                "Cannot destroy datasets '{}': Does not exist",
-                name.as_str()
-            )
-        })?;
-
-        let zix = dataset.zix;
-
-        // TODO: Add additional validation that this dataset is removable.
-        //
-        // - TODO: Confirm, no children? (see: recursive flag)
-        // - TODO: Not being used by any zones right now?
-        // - TODO: Not mounted?
-
-        self.all_znodes.remove_node(zix);
-        self.datasets.remove(&name);
-
-        Ok(())
-    }
-}
-
 struct FakeHostInner {
     log: Logger,
     global: ZoneEnvironment,
@@ -382,9 +178,22 @@ impl FakeHostInner {
                 }
                 match zfs_cmd {
                     CreateFilesystem { properties, name } => {
-                        let flavor = DatasetFlavor::Filesystem;
+                        for property in properties.keys() {
+                            if property.access()
+                                == DatasetPropertyAccess::ReadOnly
+                            {
+                                return Err(to_stderr(
+                                    "Not supported: {property} is a read-only property",
+                                ));
+                            }
+                        }
+
                         self.znodes
-                            .add_dataset(name.clone(), properties, flavor)
+                            .add_dataset(
+                                name.clone(),
+                                properties,
+                                DatasetType::Filesystem,
+                            )
                             .map_err(to_stderr)?;
 
                         Ok(ProcessState::Completed(
@@ -395,25 +204,61 @@ impl FakeHostInner {
                         ))
                     }
                     CreateVolume {
-                        properties,
+                        mut properties,
                         sparse,
                         blocksize,
                         size,
                         name,
                     } => {
-                        let flavor = DatasetFlavor::Volume {
-                            sparse,
-                            blocksize: blocksize.unwrap_or(8192),
-                            size,
-                        };
+                        for property in properties.keys() {
+                            if property.access()
+                                == DatasetPropertyAccess::ReadOnly
+                            {
+                                return Err(to_stderr(
+                                    "Not supported: {property} is a read-only property",
+                                ));
+                            }
+                        }
+
+                        let blocksize = blocksize.unwrap_or(8192);
+                        if sparse {
+                            properties.insert(
+                                DatasetProperty::Reservation,
+                                "0".to_string(),
+                            );
+                        } else {
+                            // NOTE: This isn't how much metadata is used, but it's
+                            // a number we can use that represents "this is larger than
+                            // the usable size of the volume".
+                            //
+                            // See:
+                            //
+                            // $ zfs get -Hp used,volsize,refreservation <ZPOOL>
+                            //
+                            // For any non-sparse zpool.
+                            let reserved_size = size + (8 << 20);
+                            properties.insert(
+                                DatasetProperty::Reservation,
+                                reserved_size.to_string(),
+                            );
+                        }
+                        properties.insert(
+                            DatasetProperty::Volblocksize,
+                            blocksize.to_string(),
+                        );
+                        properties
+                            .insert(DatasetProperty::Volsize, size.to_string());
 
                         let mut keylocation = None;
                         let mut keysize = 0;
 
                         for (k, v) in &properties {
-                            match k.as_str() {
-                                "keylocation" => keylocation = Some(v.as_str()),
-                                "encryption" => match v.as_str() {
+                            match k {
+                                DatasetProperty::Keylocation => {
+                                    keylocation = Some(v.as_str())
+                                }
+                                DatasetProperty::Encryption => match v.as_str()
+                                {
                                     "aes-256-gcm" => keysize = 32,
                                     _ => {
                                         return Err(Output::failure()
@@ -446,10 +291,11 @@ impl FakeHostInner {
                                     }
 
                                     let mut inner = inner.lock().unwrap();
-                                    match inner
-                                        .znodes
-                                        .add_dataset(name, properties, flavor)
-                                    {
+                                    match inner.znodes.add_dataset(
+                                        name,
+                                        properties,
+                                        DatasetType::Volume,
+                                    ) {
                                         Ok(()) => Output::success(),
                                         Err(err) => {
                                             Output::failure().set_stderr(err)
@@ -460,7 +306,11 @@ impl FakeHostInner {
                         }
 
                         self.znodes
-                            .add_dataset(name.clone(), properties, flavor)
+                            .add_dataset(
+                                name.clone(),
+                                properties,
+                                DatasetType::Volume,
+                            )
                             .map_err(to_stderr)?;
 
                         Ok(ProcessState::Completed(Output::success()))
@@ -472,31 +322,35 @@ impl FakeHostInner {
                         name,
                     } => {
                         self.znodes
-                            .destroy_dataset(&name)
+                            .destroy_dataset(
+                                &name,
+                                recursive_dependents,
+                                recursive_children,
+                                force_unmount,
+                            )
                             .map_err(to_stderr)?;
 
                         Ok(ProcessState::Completed(
                             Output::success()
-                                .set_stdout(format!("{} destroyed", name.0)),
+                                .set_stdout(format!("{} destroyed", name)),
                         ))
                     }
                     Get { recursive, depth, fields, properties, datasets } => {
                         let mut targets = if let Some(datasets) = datasets {
                             let mut targets = VecDeque::new();
 
-                            let depths =
-                                if recursive { depth } else { Some(0) };
+                            let depth = if recursive { depth } else { Some(0) };
                             for dataset in datasets {
                                 let zix = self
                                     .znodes
-                                    .name_to_zix(&dataset)
+                                    .index_of(dataset.as_str())
                                     .map_err(to_stderr)?;
                                 targets.push_back((zix, depth));
                             }
                             targets
                         } else {
                             VecDeque::from([(
-                                self.znodes.zix_root,
+                                self.znodes.root_index(),
                                 depth.map(|d| d + 1),
                             )])
                         };
@@ -504,8 +358,12 @@ impl FakeHostInner {
                         let mut output = String::new();
 
                         while let Some((target, depth)) = targets.pop_front() {
-                            let node = self.znodes.all_znodes.node_weight(target)
-                                .expect("We should have looked up the znode earlier...");
+                            let node = self
+                                .znodes
+                                .lookup_by_index(target)
+                                .expect(
+                                "We should have looked up the znode earlier...",
+                            );
 
                             let (add_children, child_depth) =
                                 if let Some(depth) = depth {
@@ -524,7 +382,7 @@ impl FakeHostInner {
                                 }
                             }
 
-                            if target == self.znodes.zix_root {
+                            if target == self.znodes.root_index() {
                                 // Skip the root node, as there is nothing to
                                 // display for it.
                                 continue;
@@ -536,9 +394,8 @@ impl FakeHostInner {
                                         "name" => {
                                             output.push_str(&node.to_string())
                                         }
-                                        "property" => {
-                                            output.push_str(&property)
-                                        }
+                                        "property" => output
+                                            .push_str(&property.to_string()),
                                         "value" => {
                                             // TODO: Look up, across whatever
                                             // the node type is.
@@ -567,7 +424,7 @@ impl FakeHostInner {
                             for dataset in datasets {
                                 let zix = self
                                     .znodes
-                                    .name_to_zix(&dataset)
+                                    .index_of(dataset.as_str())
                                     .map_err(to_stderr)?;
                                 targets.push_back((zix, depth));
                             }
@@ -577,7 +434,7 @@ impl FakeHostInner {
                             // Bump whatever the depth was up by one, since we
                             // don't display anything for the root node.
                             VecDeque::from([(
-                                self.znodes.zix_root,
+                                self.znodes.root_index(),
                                 depth.map(|d| d + 1),
                             )])
                         };
@@ -585,8 +442,12 @@ impl FakeHostInner {
                         let mut output = String::new();
 
                         while let Some((target, depth)) = targets.pop_front() {
-                            let node = self.znodes.all_znodes.node_weight(target)
-                                .expect("We should have looked up the znode earlier...");
+                            let node = self
+                                .znodes
+                                .lookup_by_index(target)
+                                .expect(
+                                "We should have looked up the znode earlier...",
+                            );
 
                             let (add_children, child_depth) =
                                 if let Some(depth) = depth {
@@ -605,23 +466,32 @@ impl FakeHostInner {
                                 }
                             }
 
-                            if target == self.znodes.zix_root {
+                            if target == self.znodes.root_index() {
                                 // Skip the root node, as there is nothing to
                                 // display for it.
                                 continue;
                             }
 
                             for property in &properties {
-                                match property.as_str() {
-                                    "name" => {
+                                match property {
+                                    DatasetProperty::Name => {
                                         output.push_str(&node.to_string())
                                     }
-                                    "type" => output.push_str(
-                                        &self
+                                    DatasetProperty::Type => {
+                                        let node = self
                                             .znodes
-                                            .type_str(target)
-                                            .map_err(to_stderr)?,
-                                    ),
+                                            .lookup_by_index(target)
+                                            .ok_or_else(|| {
+                                                to_stderr("Node not found")
+                                            })?;
+
+                                        output.push_str(
+                                            self.znodes
+                                                .type_str(node)
+                                                .map_err(to_stderr)?,
+                                        )
+                                    }
+                                    // TODO: Fix this
                                     _ => {
                                         return Err(to_stderr(format!(
                                             "Unknown property: {property}"
@@ -638,10 +508,17 @@ impl FakeHostInner {
                         ))
                     }
                     Mount { load_keys, filesystem } => {
-                        todo!();
+                        self.znodes
+                            .mount(load_keys, &filesystem)
+                            .map_err(to_stderr)?;
+                        Ok(ProcessState::Completed(
+                            Output::success()
+                                .set_stdout(format!("{} mounted", filesystem)),
+                        ))
                     }
                     Set { properties, name } => {
-                        todo!();
+                        // TODO
+                        todo!("Calling zfs set with properties: {properties:?} on '{name}', not implemented");
                     }
                 }
             }
@@ -668,7 +545,7 @@ impl FakeHostInner {
                         Ok(ProcessState::Completed(Output::success()))
                     }
                     Export { pool: name } => {
-                        let Some(mut pool) = self.znodes.zpools.get_mut(&name) else {
+                        let Some(mut pool) = self.znodes.get_zpool_mut(&name) else {
                             return Err(to_stderr(format!("pool does not exist")));
                         };
 
@@ -681,7 +558,7 @@ impl FakeHostInner {
                         Ok(ProcessState::Completed(Output::success()))
                     }
                     Import { force: _, pool: name } => {
-                        let Some(mut pool) = self.znodes.zpools.get_mut(&name) else {
+                        let Some(mut pool) = self.znodes.get_zpool_mut(&name) else {
                             return Err(to_stderr(format!("pool does not exist")));
                         };
 
@@ -720,15 +597,15 @@ impl FakeHostInner {
 
                         if let Some(pools) = pools {
                             for name in &pools {
-                                let pool =
-                                    self.znodes.zpools.get(name).ok_or_else(
-                                        || {
-                                            to_stderr(format!(
-                                                "{} does not exist",
-                                                name
-                                            ))
-                                        },
-                                    )?;
+                                let pool = self
+                                    .znodes
+                                    .get_zpool(name)
+                                    .ok_or_else(|| {
+                                        to_stderr(format!(
+                                            "{} does not exist",
+                                            name
+                                        ))
+                                    })?;
 
                                 if !pool.imported {
                                     return Err(to_stderr(format!(
@@ -740,7 +617,7 @@ impl FakeHostInner {
                                 display(&name, &pool, &properties)?;
                             }
                         } else {
-                            for (name, pool) in &self.znodes.zpools {
+                            for (name, pool) in self.znodes.all_zpools() {
                                 if pool.imported {
                                     display(&name, &pool, &properties)?;
                                 }
@@ -752,7 +629,7 @@ impl FakeHostInner {
                         ))
                     }
                     Set { property, value, pool: name } => {
-                        let Some(pool) = self.znodes.zpools.get_mut(&name) else {
+                        let Some(pool) = self.znodes.get_zpool_mut(&name) else {
                             return Err(to_stderr(format!("{} does not exist", name)));
                         };
                         pool.properties.insert(property, value);
@@ -869,7 +746,7 @@ impl swapctl::Swapctl for FakeHost {
 
         const PATH_PREFIX: &str = "/dev/zvol/dsk/";
         let volume = if let Some(volume) = path.strip_prefix(PATH_PREFIX) {
-            match FilesystemName::new(volume.to_string()) {
+            match DatasetName::new(volume.to_string()) {
                 Ok(name) => name,
                 Err(err) => {
                     let msg = err.to_string();
@@ -886,13 +763,13 @@ impl swapctl::Swapctl for FakeHost {
             return Err(swapctl::Error::AddDevice { msg, path, start, length });
         };
 
-        if let Some(dataset) = inner.znodes.datasets.get(&volume) {
-            match dataset.flavor {
-                DatasetFlavor::Volume { .. } => (),
+        if let Some(dataset) = inner.znodes.get_dataset(&volume) {
+            match dataset.ty() {
+                DatasetType::Volume => (),
                 _ => {
                     let msg = format!(
                         "Dataset '{}' exists, but is not a volume",
-                        volume.0
+                        volume.as_str()
                     );
                     return Err(swapctl::Error::AddDevice {
                         msg,
@@ -903,7 +780,7 @@ impl swapctl::Swapctl for FakeHost {
                 }
             }
         } else {
-            let msg = format!("Volume '{}' does not exist", volume.0);
+            let msg = format!("Volume '{}' does not exist", volume.as_str());
             return Err(swapctl::Error::AddDevice { msg, path, start, length });
         }
 
@@ -959,36 +836,3 @@ pub enum AddrType {
     Static(IpNetwork),
     Addrconf,
 }
-
-/// The name of a ZFS filesystem, volume, or snapshot
-#[derive(Debug, Clone, Eq, PartialEq, Hash)]
-pub struct DatasetName(pub String);
-
-#[derive(Debug, Clone, Eq, PartialEq, Hash)]
-pub struct FilesystemName(String);
-
-impl FilesystemName {
-    pub fn new<S: Into<String>>(s: S) -> Result<Self, String> {
-        let s: String = s.into();
-        if s.is_empty() {
-            return Err("Invalid name: Empty string".to_string());
-        }
-        if s.ends_with('/') {
-            return Err(format!("Invalid name {s}: trailing slash in name"));
-        }
-
-        Ok(Self(s))
-    }
-
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-impl From<FilesystemName> for DatasetName {
-    fn from(name: FilesystemName) -> Self {
-        Self(name.0)
-    }
-}
-
-pub type VolumeName = FilesystemName;

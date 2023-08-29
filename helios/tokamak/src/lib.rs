@@ -6,6 +6,7 @@ mod cli;
 mod executor;
 mod host;
 mod shared_byte_queue;
+mod types;
 
 pub use executor::*;
 pub use host::FakeHost;

@@ -3,7 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::cli::parse::InputParser;
-use crate::host::{DatasetName, FilesystemName, VolumeName};
+use crate::types::{DatasetName, DatasetProperty};
 
 use helios_fusion::Input;
 use helios_fusion::ZFS;
@@ -11,15 +11,15 @@ use std::collections::HashMap;
 
 pub(crate) enum Command {
     CreateFilesystem {
-        properties: HashMap<String, String>,
-        name: FilesystemName,
+        properties: HashMap<DatasetProperty, String>,
+        name: DatasetName,
     },
     CreateVolume {
-        properties: HashMap<String, String>,
+        properties: HashMap<DatasetProperty, String>,
         sparse: bool,
         blocksize: Option<u64>,
         size: u64,
-        name: VolumeName,
+        name: DatasetName,
     },
     Destroy {
         recursive_dependents: bool,
@@ -32,21 +32,21 @@ pub(crate) enum Command {
         depth: Option<usize>,
         // name, property, value, source
         fields: Vec<String>,
-        properties: Vec<String>,
+        properties: Vec<DatasetProperty>,
         datasets: Option<Vec<DatasetName>>,
     },
     List {
         recursive: bool,
         depth: Option<usize>,
-        properties: Vec<String>,
+        properties: Vec<DatasetProperty>,
         datasets: Option<Vec<DatasetName>>,
     },
     Mount {
         load_keys: bool,
-        filesystem: FilesystemName,
+        filesystem: DatasetName,
     },
     Set {
-        properties: HashMap<String, String>,
+        properties: HashMap<DatasetProperty, String>,
         name: DatasetName,
     },
 }
@@ -111,7 +111,10 @@ impl TryFrom<Input> for Command {
                         let (k, v) = prop
                             .split_once('=')
                             .ok_or_else(|| format!("Bad property: {prop}"))?;
-                        properties.insert(k.to_string(), v.to_string());
+                        let prop = DatasetProperty::try_from(k)
+                            .map_err(|e| format!("Unknown property: {e}"))?;
+
+                        properties.insert(prop, v.to_string());
                     } else {
                         let arg = input.shift_arg()?;
                         return Err(format!("Unexpected argument: {arg}"));
@@ -123,7 +126,7 @@ impl TryFrom<Input> for Command {
                 if let Some(size) = size {
                     // Volume
                     let sparse = sparse.unwrap_or(false);
-                    let name = FilesystemName::new(name)?;
+                    let name = DatasetName::new(name)?;
                     Ok(Command::CreateVolume {
                         properties,
                         sparse,
@@ -136,7 +139,7 @@ impl TryFrom<Input> for Command {
                     if sparse.is_some() || blocksize.is_some() {
                         return Err("Using volume arguments, but forgot to specify '-V size'?".to_string());
                     }
-                    let name = FilesystemName::new(name)?;
+                    let name = DatasetName::new(name)?;
                     Ok(Command::CreateFilesystem { properties, name })
                 }
             }
@@ -163,7 +166,7 @@ impl TryFrom<Input> for Command {
                             }
                         }
                     } else {
-                        name = Some(DatasetName(arg));
+                        name = Some(DatasetName::new(arg)?);
                         input.no_args_remaining()?;
                     }
                 }
@@ -231,8 +234,15 @@ impl TryFrom<Input> for Command {
                             }
                         }
                     } else {
-                        properties =
-                            arg.split(',').map(|s| s.to_string()).collect();
+                        properties = arg
+                            .split(',')
+                            .map(|s| {
+                                DatasetProperty::try_from(s).map_err(|err| {
+                                    format!("unknown property: {err}")
+                                })
+                            })
+                            .collect::<Result<Vec<DatasetProperty>, String>>(
+                            )?;
                         break;
                     }
                 }
@@ -241,8 +251,8 @@ impl TryFrom<Input> for Command {
                     input
                         .args()
                         .into_iter()
-                        .map(|s| DatasetName(s.to_string()))
-                        .collect::<Vec<DatasetName>>(),
+                        .map(|s| DatasetName::new(s.to_string()))
+                        .collect::<Result<Vec<DatasetName>, _>>()?,
                 );
                 if !scripting || !parsable {
                     return Err("You should run 'zfs get' commands with the '-Hp' flags enabled".to_string());
@@ -299,8 +309,11 @@ impl TryFrom<Input> for Command {
                                     properties = input
                                         .shift_arg()?
                                         .split(',')
-                                        .map(|s| s.to_string())
-                                        .collect();
+                                        .map(|s| {
+                                            DatasetProperty::try_from(s)
+                                                .map_err(|err| format!("unknown property: {err}"))
+                                        })
+                                        .collect::<Result<Vec<DatasetProperty>, String>>()?;
                                 }
                                 c => {
                                     return Err(format!(
@@ -312,7 +325,8 @@ impl TryFrom<Input> for Command {
                     } else {
                         // As soon as non-flag arguments are passed, the rest of
                         // the arguments are treated as datasets.
-                        datasets = Some(vec![DatasetName(arg.to_string())]);
+                        datasets =
+                            Some(vec![DatasetName::new(arg.to_string())?]);
                         break;
                     }
                 }
@@ -322,7 +336,8 @@ impl TryFrom<Input> for Command {
                     datasets.get_or_insert(vec![]).extend(
                         remaining_datasets
                             .into_iter()
-                            .map(|d| DatasetName(d.to_string())),
+                            .map(|d| DatasetName::new(d.to_string()))
+                            .collect::<Result<Vec<_>, _>>()?,
                     );
                 };
 
@@ -334,7 +349,7 @@ impl TryFrom<Input> for Command {
             }
             "mount" => {
                 let load_keys = input.shift_arg_if("-l")?;
-                let filesystem = FilesystemName::new(input.shift_arg()?)?;
+                let filesystem = DatasetName::new(input.shift_arg()?)?;
                 input.no_args_remaining()?;
                 Ok(Command::Mount { load_keys, filesystem })
             }
@@ -346,9 +361,11 @@ impl TryFrom<Input> for Command {
                     let (k, v) = prop
                         .split_once('=')
                         .ok_or_else(|| format!("Bad property: {prop}"))?;
-                    properties.insert(k.to_string(), v.to_string());
+                    let prop = DatasetProperty::try_from(k)
+                        .map_err(|e| format!("Unknown property: {e}"))?;
+                    properties.insert(prop, v.to_string());
                 }
-                let name = DatasetName(input.shift_arg()?);
+                let name = DatasetName::new(input.shift_arg()?)?;
                 input.no_args_remaining()?;
 
                 Ok(Command::Set { properties, name })
@@ -373,11 +390,11 @@ mod test {
 
         // Create a volume
         let Command::CreateVolume { properties, sparse, blocksize, size, name } = Command::try_from(
-            Input::shell(format!("{ZFS} create -s -V 1024 -b 512 -o foo=bar myvolume"))
+            Input::shell(format!("{ZFS} create -s -V 1024 -b 512 -o logbias=bar myvolume"))
         ).unwrap() else { panic!("wrong command") };
         assert_eq!(
             properties,
-            HashMap::from([("foo".to_string(), "bar".to_string())])
+            HashMap::from([(DatasetProperty::Logbias, "bar".to_string())])
         );
         assert_eq!(name.as_str(), "myvolume");
         assert!(sparse);
@@ -386,11 +403,11 @@ mod test {
 
         // Create a volume (using letter suffix)
         let Command::CreateVolume { properties, sparse, blocksize, size, name } = Command::try_from(
-            Input::shell(format!("{ZFS} create -s -V 2G -b 512 -o foo=bar myvolume"))
+            Input::shell(format!("{ZFS} create -s -V 2G -b 512 -o logbias=bar myvolume"))
         ).unwrap() else { panic!("wrong command") };
         assert_eq!(
             properties,
-            HashMap::from([("foo".to_string(), "bar".to_string())])
+            HashMap::from([(DatasetProperty::Logbias, "bar".to_string())])
         );
         assert_eq!(name.as_str(), "myvolume");
         assert!(sparse);
@@ -399,7 +416,7 @@ mod test {
 
         // Create volume (invalid)
         assert!(Command::try_from(Input::shell(format!(
-            "{ZFS} create -s -b 512 -o foo=bar myvolume"
+            "{ZFS} create -s -b 512 -o logbias=bar myvolume"
         )))
         .err()
         .unwrap()
@@ -416,7 +433,7 @@ mod test {
         assert!(!recursive_dependents);
         assert!(recursive_children);
         assert!(force_unmount);
-        assert_eq!(name.0, "foobar");
+        assert_eq!(name.as_str(), "foobar");
 
         assert!(Command::try_from(Input::shell(format!(
             "{ZFS} destroy -x doit"
@@ -435,10 +452,13 @@ mod test {
         assert!(recursive);
         assert_eq!(depth, Some(10));
         assert_eq!(fields, vec!["name", "value"]);
-        assert_eq!(properties, vec!["mounted", "available"]);
+        assert_eq!(
+            properties,
+            vec![DatasetProperty::Mounted, DatasetProperty::Available]
+        );
         assert_eq!(
             datasets.unwrap(),
-            vec![DatasetName("myvolume".to_string())]
+            vec![DatasetName::new("myvolume".to_string()).unwrap()]
         );
 
         assert!(Command::try_from(Input::shell(format!(
@@ -459,10 +479,10 @@ mod test {
 
         assert!(recursive);
         assert_eq!(depth.unwrap(), 1);
-        assert_eq!(properties, vec!["name"]);
+        assert_eq!(properties, vec![DatasetProperty::Name]);
         assert_eq!(
             datasets.unwrap(),
-            vec![DatasetName("myfilesystem".to_string())]
+            vec![DatasetName::new("myfilesystem".to_string()).unwrap()]
         );
 
         assert!(Command::try_from(Input::shell(format!(
@@ -488,16 +508,16 @@ mod test {
     #[test]
     fn set() {
         let Command::Set { properties, name } = Command::try_from(
-            Input::shell(format!("{ZFS} set foo=bar baz=blat myfs"))
+            Input::shell(format!("{ZFS} set mountpoint=bar logbias=blat myfs"))
         ).unwrap() else { panic!("wrong command") };
 
         assert_eq!(
             properties,
             HashMap::from([
-                ("foo".to_string(), "bar".to_string()),
-                ("baz".to_string(), "blat".to_string())
+                (DatasetProperty::Mountpoint, "bar".to_string()),
+                (DatasetProperty::Logbias, "blat".to_string())
             ])
         );
-        assert_eq!(name.0, "myfs");
+        assert_eq!(name.as_str(), "myfs");
     }
 }
