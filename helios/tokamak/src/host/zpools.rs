@@ -4,13 +4,11 @@
 
 //! Emulates zpools
 
-use crate::host::datasets::Datasets;
-use crate::types::dataset;
-
 use camino::Utf8PathBuf;
 use helios_fusion::zpool::{ZpoolHealth, ZpoolName};
 use std::collections::HashMap;
 
+#[derive(Debug, PartialEq, Eq)]
 pub(crate) struct FakeZpool {
     name: ZpoolName,
     vdev: Utf8PathBuf,
@@ -62,7 +60,6 @@ impl Zpools {
 
     pub fn insert(
         &mut self,
-        datasets: &mut Datasets,
         name: ZpoolName,
         vdev: Utf8PathBuf,
         import: bool,
@@ -75,19 +72,6 @@ impl Zpools {
 
         let pool = FakeZpool::new(name.clone(), vdev, import);
         self.zpools.insert(name.clone(), pool);
-
-        let mut dataset_properties = HashMap::new();
-        dataset_properties
-            .insert(dataset::Property::Mountpoint, format!("/{name}"));
-        datasets
-            .add_dataset(
-                dataset::Name::new(name.to_string())
-                    .expect("Zpool names should be valid dataset names"),
-                dataset_properties,
-                dataset::Type::Filesystem,
-            )
-            .expect("Failed to add dataset after creating zpool");
-
         Ok(())
     }
 }

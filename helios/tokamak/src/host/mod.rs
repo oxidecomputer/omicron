@@ -24,7 +24,7 @@ use std::sync::{Arc, Mutex};
 mod datasets;
 mod zpools;
 
-use datasets::Datasets;
+use datasets::{DatasetInsert, Datasets};
 use zpools::{FakeZpool, Zpools};
 
 pub enum LinkType {
@@ -193,7 +193,7 @@ impl FakeHostInner {
 
                         self.datasets
                             .add_dataset(
-                                name.clone(),
+                                DatasetInsert::WithParent(name.clone()),
                                 properties,
                                 dataset::Type::Filesystem,
                             )
@@ -298,7 +298,7 @@ impl FakeHostInner {
 
                                     let mut inner = inner.lock().unwrap();
                                     match inner.datasets.add_dataset(
-                                        name,
+                                        DatasetInsert::WithParent(name),
                                         properties,
                                         dataset::Type::Volume,
                                     ) {
@@ -313,7 +313,7 @@ impl FakeHostInner {
 
                         self.datasets
                             .add_dataset(
-                                name.clone(),
+                                DatasetInsert::WithParent(name),
                                 properties,
                                 dataset::Type::Volume,
                             )
@@ -328,7 +328,7 @@ impl FakeHostInner {
                         name,
                     } => {
                         self.datasets
-                            .destroy_dataset(
+                            .destroy(
                                 &name,
                                 recursive_dependents,
                                 recursive_children,
@@ -368,7 +368,7 @@ impl FakeHostInner {
                                 .datasets
                                 .lookup_by_index(target)
                                 .expect(
-                                "We should have looked up the znode earlier...",
+                                "We should have looked up the dataset earlier...",
                             );
 
                             let (add_children, child_depth) =
@@ -448,13 +448,6 @@ impl FakeHostInner {
                         let mut output = String::new();
 
                         while let Some((target, depth)) = targets.pop_front() {
-                            let node = self
-                                .datasets
-                                .lookup_by_index(target)
-                                .expect(
-                                "We should have looked up the znode earlier...",
-                            );
-
                             let (add_children, child_depth) =
                                 if let Some(depth) = depth {
                                     if depth > 0 {
@@ -477,33 +470,25 @@ impl FakeHostInner {
                                 // display for it.
                                 continue;
                             }
+                            let dataset_name = self
+                                .datasets
+                                .lookup_by_index(target)
+                                .expect("We should have looked up this node earlier...")
+                                .dataset_name()
+                                .expect("Cannot access name");
+
+                            let dataset = self
+                                .datasets
+                                .get_dataset(&dataset_name)
+                                .expect("Cannot access dataset");
 
                             for property in &properties {
-                                match property {
-                                    dataset::Property::Name => {
-                                        output.push_str(&node.to_string())
-                                    }
-                                    dataset::Property::Type => {
-                                        let node = self
-                                            .datasets
-                                            .lookup_by_index(target)
-                                            .ok_or_else(|| {
-                                                to_stderr("Node not found")
-                                            })?;
+                                let value = dataset
+                                    .properties()
+                                    .get(*property)
+                                    .map_err(|err| to_stderr(err))?;
 
-                                        output.push_str(
-                                            self.datasets
-                                                .type_str(node)
-                                                .map_err(to_stderr)?,
-                                        )
-                                    }
-                                    // TODO: Fix this
-                                    _ => {
-                                        return Err(to_stderr(format!(
-                                            "Unknown property: {property}"
-                                        )))
-                                    }
-                                }
+                                output.push_str(&value);
                                 output.push_str("\t");
                             }
                             output.push_str("\n");
@@ -545,14 +530,23 @@ impl FakeHostInner {
 
                         let import = true;
                         self.zpools
-                            .insert(
-                                &mut self.datasets,
-                                pool.clone(),
-                                vdev.clone(),
-                                import,
-                            )
+                            .insert(pool.clone(), vdev.clone(), import)
                             .map_err(to_stderr)?;
 
+                        let mut dataset_properties = HashMap::new();
+                        dataset_properties.insert(
+                            dataset::Property::Mountpoint,
+                            format!("/{pool}"),
+                        );
+                        self.datasets
+                            .add_dataset(
+                                DatasetInsert::WithoutParent(pool),
+                                dataset_properties,
+                                dataset::Type::Filesystem,
+                            )
+                            .expect(
+                                "Failed to add dataset after creating zpool",
+                            );
                         Ok(ProcessState::Completed(Output::success()))
                     }
                     Export { pool: name } => {
@@ -844,4 +838,40 @@ pub enum AddrType {
     Dhcp,
     Static(IpNetwork),
     Addrconf,
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use helios_fusion::Host;
+    use omicron_test_utils::dev::test_setup_log;
+    use std::process::Command;
+    use uuid::Uuid;
+
+    #[test]
+    fn create_zpool_creates_dataset_too() {
+        let logctx = test_setup_log("create_zpool_creates_dataset_too");
+        let log = &logctx.log;
+
+        let id = Uuid::new_v4();
+        let zpool_name = format!("oxp_{id}");
+        let vdev = "/mydevice";
+
+        let host = FakeHost::new(log.clone());
+        host.add_devices(&vec![Utf8PathBuf::from(vdev)]);
+
+        let output = host
+            .executor()
+            .execute(Command::new(helios_fusion::ZPOOL).args([
+                "create",
+                &zpool_name,
+                vdev,
+            ]))
+            .expect("Failed to run zpool create command");
+        assert!(output.status.success());
+
+        // TODO: Confirm dataset exists?
+
+        logctx.cleanup_successful();
+    }
 }
