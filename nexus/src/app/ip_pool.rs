@@ -24,6 +24,7 @@ use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
 use ref_cast::RefCast;
+use uuid::Uuid;
 
 impl super::Nexus {
     pub fn ip_pool_lookup<'a>(
@@ -49,9 +50,18 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         new_pool: &params::IpPoolCreate,
+        // TODO: should this be passed here as a lookup::Silo? adding this flag
+        // all the way down the chain is clearly a smell. The `internal` arg
+        // is too, really, though it is kind of nice to see at each call what's
+        // internal. But I'm thinking maybe there should be an IpPoolCreate'
+        // that is produced from IpPoolCreate and includes internal and the silo
+        // id (or lookup) resolved from the NameOrId.
+        silo_id: Option<Uuid>,
     ) -> CreateResult<db::model::IpPool> {
         self.db_datastore
-            .ip_pool_create(opctx, new_pool, /* internal= */ false)
+            .ip_pool_create(
+                opctx, new_pool, /* internal= */ false, silo_id,
+            )
             .await
     }
 
@@ -61,7 +71,10 @@ impl super::Nexus {
         new_pool: &params::IpPoolCreate,
     ) -> CreateResult<db::model::IpPool> {
         self.db_datastore
-            .ip_pool_create(opctx, new_pool, /* internal= */ true)
+            .ip_pool_create(
+                opctx, new_pool, /* internal= */ true,
+                /* silo_id= */ None,
+            )
             .await
     }
 

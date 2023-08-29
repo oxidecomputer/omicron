@@ -1210,7 +1210,17 @@ async fn ip_pool_create(
     let pool_params = pool_params.into_inner();
     let handler = async {
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let pool = nexus.ip_pool_create(&opctx, &pool_params).await?;
+        let silo_id = match pool_params.clone().silo {
+            Some(silo) => {
+                let (.., authz_silo) = nexus
+                    .silo_lookup(&opctx, silo)?
+                    .lookup_for(authz::Action::Read)
+                    .await?;
+                Some(authz_silo.id())
+            }
+            _ => None,
+        };
+        let pool = nexus.ip_pool_create(&opctx, &pool_params, silo_id).await?;
         Ok(HttpResponseCreated(IpPool::from(pool)))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await

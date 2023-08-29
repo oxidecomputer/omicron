@@ -57,6 +57,7 @@ impl IpPool {
     pub fn new(
         pool_identity: &external::IdentityMetadataCreateParams,
         internal: bool,
+        silo_id: Option<Uuid>,
     ) -> Self {
         Self {
             identity: IpPoolIdentity::new(
@@ -65,7 +66,7 @@ impl IpPool {
             ),
             internal,
             rcgen: 0,
-            silo_id: None,
+            silo_id,
             project_id: None,
         }
     }

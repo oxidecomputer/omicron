@@ -563,13 +563,15 @@ impl DataStore {
             },
             silo: None,
         };
-        self.ip_pool_create(opctx, &params, /*internal=*/ true)
-            .await
-            .map(|_| ())
-            .or_else(|e| match e {
-                Error::ObjectAlreadyExists { .. } => Ok(()),
-                _ => Err(e),
-            })?;
+        self.ip_pool_create(
+            opctx, &params, /*internal=*/ true, /*silo_id*/ None,
+        )
+        .await
+        .map(|_| ())
+        .or_else(|e| match e {
+            Error::ObjectAlreadyExists { .. } => Ok(()),
+            _ => Err(e),
+        })?;
 
         let params = external_params::IpPoolCreate {
             identity: IdentityMetadataCreateParams {
@@ -578,13 +580,15 @@ impl DataStore {
             },
             silo: None,
         };
-        self.ip_pool_create(opctx, &params, /*internal=*/ false)
-            .await
-            .map(|_| ())
-            .or_else(|e| match e {
-                Error::ObjectAlreadyExists { .. } => Ok(()),
-                _ => Err(e),
-            })?;
+        self.ip_pool_create(
+            opctx, &params, /*internal=*/ false, /*silo_id*/ None,
+        )
+        .await
+        .map(|_| ())
+        .or_else(|e| match e {
+            Error::ObjectAlreadyExists { .. } => Ok(()),
+            _ => Err(e),
+        })?;
 
         Ok(())
     }

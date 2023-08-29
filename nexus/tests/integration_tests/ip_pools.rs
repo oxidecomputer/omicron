@@ -18,6 +18,7 @@ use nexus_test_utils::resource_helpers::{
 };
 use nexus_test_utils_macros::nexus_test;
 use omicron_common::api::external::IdentityMetadataUpdateParams;
+use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::{IdentityMetadataCreateParams, Name};
 use omicron_nexus::external_api::params::ExternalIpCreate;
 use omicron_nexus::external_api::params::InstanceDiskAttachment;
@@ -269,6 +270,74 @@ async fn test_ip_pool_basic_crud(cptestctx: &ControlPlaneTestContext) {
         .execute()
         .await
         .expect("Expected to be able to delete an empty IP Pool");
+}
+
+#[nexus_test]
+async fn test_ip_pool_with_silo(cptestctx: &ControlPlaneTestContext) {
+    let client = &cptestctx.external_client;
+
+    // can create a pool with an existing silo by name
+    let params = IpPoolCreate {
+        identity: IdentityMetadataCreateParams {
+            name: String::from("p0").parse().unwrap(),
+            description: String::from(""),
+        },
+        silo: Some(NameOrId::Name(cptestctx.silo_name.clone())),
+    };
+    let created_pool = create_pool(client, &params).await;
+    assert_eq!(created_pool.identity.name, "p0");
+    assert!(created_pool.silo_id.is_some());
+
+    let silo_id = created_pool.silo_id.unwrap();
+
+    // now we'll create another IP pool using that silo ID
+    let params = IpPoolCreate {
+        identity: IdentityMetadataCreateParams {
+            name: String::from("p1").parse().unwrap(),
+            description: String::from(""),
+        },
+        silo: Some(NameOrId::Id(silo_id)),
+    };
+    let created_pool = create_pool(client, &params).await;
+    assert_eq!(created_pool.identity.name, "p1");
+    assert_eq!(created_pool.silo_id.unwrap(), silo_id);
+
+    // expect 404 if the specified silo doesn't exist
+    let bad_silo_params = IpPoolCreate {
+        identity: IdentityMetadataCreateParams {
+            name: String::from("p2").parse().unwrap(),
+            description: String::from(""),
+        },
+        silo: Some(NameOrId::Name(
+            String::from("not-a-thing").parse().unwrap(),
+        )),
+    };
+    let error: HttpErrorResponseBody = NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, "/v1/system/ip-pools")
+            .body(Some(&bad_silo_params))
+            .expect_status(Some(StatusCode::NOT_FOUND)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body()
+    .unwrap();
+
+    assert_eq!(error.message, "not found: silo with name \"not-a-thing\"");
+}
+
+async fn create_pool(
+    client: &ClientTestContext,
+    params: &IpPoolCreate,
+) -> IpPool {
+    NexusRequest::objects_post(client, "/v1/system/ip-pools", params)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap()
+        .parsed_body()
+        .unwrap()
 }
 
 // Data for testing overlapping IP ranges

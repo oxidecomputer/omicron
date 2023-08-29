@@ -869,6 +869,7 @@ mod tests {
                     description: format!("ip pool {}", name),
                 },
                 internal,
+                None, // silo id
             );
 
             use crate::db::schema::ip_pool::dsl as ip_pool_dsl;

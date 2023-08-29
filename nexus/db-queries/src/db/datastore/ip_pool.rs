@@ -149,12 +149,13 @@ impl DataStore {
         opctx: &OpContext,
         new_pool: &params::IpPoolCreate,
         internal: bool,
+        silo_id: Option<Uuid>,
     ) -> CreateResult<IpPool> {
         use db::schema::ip_pool::dsl;
         opctx
             .authorize(authz::Action::CreateChild, &authz::IP_POOL_LIST)
             .await?;
-        let pool = IpPool::new(&new_pool.identity, internal);
+        let pool = IpPool::new(&new_pool.identity, internal, silo_id);
         let pool_name = pool.name().as_str().to_string();
 
         diesel::insert_into(dsl::ip_pool)
