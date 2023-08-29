@@ -64,13 +64,7 @@ impl DataStore {
                 let blocks: Vec<AddressLotBlock> = params
                     .blocks
                     .iter()
-                    .map(|b| {
-                        AddressLotBlock::new(
-                            db_lot.id(),
-                            b.first_address.into(),
-                            b.last_address.into(),
-                        )
-                    })
+                    .map(|b| AddressLotBlock::new(db_lot.id(), *b))
                     .collect();
 
                 let db_blocks =

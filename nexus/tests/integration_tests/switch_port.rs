@@ -8,14 +8,15 @@ use http::method::Method;
 use http::StatusCode;
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use nexus_test_utils_macros::nexus_test;
+use omicron_common::address::{IpRange, Ipv4Range};
 use omicron_common::api::external::{
     self, AddressLotKind, IdentityMetadataCreateParams, NameOrId, SwitchPort,
     SwitchPortSettingsView,
 };
 use omicron_nexus::external_api::params::{
-    Address, AddressConfig, AddressLotBlockCreate, AddressLotCreate,
-    LinkConfig, LldpServiceConfig, Route, RouteConfig, SwitchInterfaceConfig,
-    SwitchInterfaceKind, SwitchPortApplySettings, SwitchPortSettingsCreate,
+    Address, AddressConfig, AddressLotCreate, LinkConfig, LldpServiceConfig,
+    Route, RouteConfig, SwitchInterfaceConfig, SwitchInterfaceKind,
+    SwitchPortApplySettings, SwitchPortSettingsCreate,
 };
 use omicron_nexus::external_api::views::Rack;
 
@@ -33,10 +34,10 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
             description: "an address parking lot".into(),
         },
         kind: AddressLotKind::Infra,
-        blocks: vec![AddressLotBlockCreate {
-            first_address: "203.0.113.10".parse().unwrap(),
-            last_address: "203.0.113.20".parse().unwrap(),
-        }],
+        blocks: vec![IpRange::V4(Ipv4Range {
+            first: "203.0.113.10".parse().unwrap(),
+            last: "203.0.113.20".parse().unwrap(),
+        })],
     };
 
     NexusRequest::objects_post(
