@@ -4,19 +4,17 @@
 
 use std::{
     borrow::Borrow,
-    collections::{btree_map, hash_map::Entry, BTreeMap, HashMap},
+    collections::{BTreeMap, HashMap},
     io, mem,
     sync::{Arc, Mutex},
 };
 
 use async_trait::async_trait;
-use bytes::Bytes;
 use camino::Utf8PathBuf;
 use camino_tempfile::Utf8TempDir;
 use debug_ignore::DebugIgnore;
 use display_error_chain::DisplayErrorChain;
 use dropshot::HttpError;
-use hubtools::RawHubrisArchive;
 use hyper::Body;
 use installinator_artifactd::{ArtifactGetter, EventReportStatus};
 use omicron_common::api::{
@@ -28,22 +26,30 @@ use omicron_common::update::{
 use slog::{error, info, Logger};
 use thiserror::Error;
 use tough::TargetName;
-use tufaceous_lib::{
-    ArchiveExtractor, HostPhaseImages, OmicronRepo, RotArchives,
-};
+use tufaceous_lib::{ArchiveExtractor, OmicronRepo};
 use uuid::Uuid;
 
-use crate::installinator_progress::IprArtifactServer;
+use crate::{
+    http_entrypoints::InstallableArtifacts,
+    installinator_progress::IprArtifactServer,
+};
 
 mod extracted_artifacts;
+mod update_plan;
 
 pub(crate) use self::extracted_artifacts::ExtractedArtifactDataHandle;
-use self::extracted_artifacts::ExtractedArtifacts;
+use self::update_plan::UpdatePlanBuilder;
 
 // A collection of artifacts along with an update plan using those artifacts.
 #[derive(Debug)]
 struct ArtifactsWithPlan {
-    by_id: DebugIgnore<HashMap<ArtifactId, ExtractedArtifactDataHandle>>,
+    // Map of top-level artifact IDs (present in the TUF repo) to the actual
+    // artifacts we're serving (e.g., a top-level RoT artifact will map to two
+    // artifact hashes: one for each of the A and B images).
+    //
+    // The sum of the lengths of the values of this map will match the number of
+    // entries in `by_hash`.
+    by_id: BTreeMap<ArtifactId, Vec<ArtifactHashId>>,
     by_hash: DebugIgnore<HashMap<ArtifactHashId, ExtractedArtifactDataHandle>>,
     plan: UpdatePlan,
 }
@@ -137,11 +143,18 @@ impl WicketdArtifactStore {
 
     pub(crate) fn system_version_and_artifact_ids(
         &self,
-    ) -> Option<(SemverVersion, Vec<ArtifactId>)> {
+    ) -> Option<(SemverVersion, Vec<InstallableArtifacts>)> {
         let artifacts = self.artifacts_with_plan.lock().unwrap();
         let artifacts = artifacts.as_ref()?;
         let system_version = artifacts.plan.system_version.clone();
-        let artifact_ids = artifacts.by_id.keys().cloned().collect();
+        let artifact_ids = artifacts
+            .by_id
+            .iter()
+            .map(|(k, v)| InstallableArtifacts {
+                artifact_id: k.clone(),
+                installable: v.clone(),
+            })
+            .collect();
         Some((system_version, artifact_ids))
     }
 
@@ -192,13 +205,6 @@ impl ArtifactsWithPlan {
         // Create a temporary directory to hold the extracted TUF repository.
         let dir = unzip_into_tempdir(zip_data, log)?;
 
-        // Create another temporary directory where we'll "permanently" (as long
-        // as this plan is in use) hold extracted artifacts we need; most of
-        // these are just direct copies of artifacts we just unpacked into
-        // `dir`, but we'll also unpack nested artifacts like the RoT dual A/B
-        // archives.
-        let mut extracted_artifacts = ExtractedArtifacts::new(log)?;
-
         // Time is unavailable during initial setup, so ignore expiration. Even
         // if time were available, we might want to be able to load older
         // versions of artifacts over the technician port in an emergency.
@@ -213,31 +219,37 @@ impl ArtifactsWithPlan {
             .read_artifacts()
             .map_err(RepositoryError::ReadArtifactsDocument)?;
 
-        // Read the artifact into memory.
+        // Create another temporary directory where we'll "permanently" (as long
+        // as this plan is in use) hold extracted artifacts we need; most of
+        // these are just direct copies of artifacts we just unpacked into
+        // `dir`, but we'll also unpack nested artifacts like the RoT dual A/B
+        // archives.
+        let mut plan_builder =
+            UpdatePlanBuilder::new(artifacts.system_version, log)?;
+
+        // Make a pass through each artifact in the repo. For each artifact, we
+        // do one of the following:
         //
-        // XXX Could also read the artifact from disk directly, keeping the
-        // files around. That introduces some new failure domains (e.g. what if
-        // the directory gets removed from underneath us?) but is worth
-        // revisiting.
+        // 1. Ignore it (if it's of an artifact kind we don't understand)
+        // 2. Add it directly to tempdir managed by `extracted_artifacts`; we'll
+        //    keep a handle to any such file and use it later. (SP images fall
+        //    into this category.)
+        // 3. Unpack its contents and copy inner artifacts into the tempdir
+        //    managed by `extracted_artifacts`. (RoT artifacts and OS images
+        //    fall into this category: RoT artifacts themselves contain A and B
+        //    hubris archives, and OS images artifacts contain separate phase1
+        //    and phase2 blobs.)
         //
-        // Notes:
-        //
-        // 1. With files on disk it is possible to keep the file descriptor
-        //    open, preventing deletes from affecting us. However, tough doesn't
-        //    quite provide an interface to do that.
-        // 2. Ideally we'd write the zip to disk, implement a zip transport, and
-        //    just keep the zip's file descriptor open. Unfortunately, a zip
-        //    transport can't currently be written in safe Rust due to
-        //    https://github.com/awslabs/tough/pull/563. If that lands and/or we
-        //    write our own TUF implementation, we should switch to that approach.
-        let mut by_id = HashMap::new();
+        // For artifacts in case 2, we should be able to move the file instead
+        // of copying it, but the source paths aren't exposed by `repository`.
+        // The only artifacts that fall into this category are SP images, which
+        // are not very large, so fixing this is not a particularly high
+        // priority - copying small SP artifacts is neglible compared to the
+        // work we do to unpack host OS images.
+
+        let mut by_id = BTreeMap::new();
         let mut by_hash = HashMap::new();
         for artifact in artifacts.artifacts {
-            // The artifact kind might be unknown here: possibly attempting to do an
-            // update where the current version of wicketd isn't aware of a new
-            // artifact kind.
-            let artifact_id = artifact.id();
-
             let target_name = TargetName::try_from(artifact.target.as_str())
                 .map_err(|error| RepositoryError::LocateTarget {
                     target: artifact.target.clone(),
@@ -264,10 +276,6 @@ impl ArtifactsWithPlan {
                     .try_into()
                     .map_err(RepositoryError::TargetHashLength)?,
             );
-            let artifact_hash_id = ArtifactHashId {
-                kind: artifact_id.kind.clone(),
-                hash: artifact_hash,
-            };
 
             let reader = repository
                 .repo()
@@ -280,59 +288,20 @@ impl ArtifactsWithPlan {
                     RepositoryError::MissingTarget(artifact.target.clone())
                 })?;
 
-            // TODO-performance This makes a filesystem-level copy of the file.
-            // We already have the file on disk; could we move it instead?
-            // `repository` supports a variety of backing stores and doesn't
-            // give us the path to the underlying artifact AFAICT, so for now
-            // we'll just do the copy.
-            let data = extracted_artifacts
-                .store(artifact_hash_id.clone(), io::BufReader::new(reader))?;
-
-            let num_bytes = data.file_size();
-
-            match by_id.entry(artifact_id.clone()) {
-                Entry::Occupied(_) => {
-                    // We got two entries for an artifact?
-                    return Err(RepositoryError::DuplicateEntry(artifact_id));
-                }
-                Entry::Vacant(entry) => {
-                    entry.insert(data.clone());
-                }
-            }
-
-            match by_hash.entry(artifact_hash_id) {
-                Entry::Occupied(entry) => {
-                    // We got two entries for an artifact?
-                    return Err(RepositoryError::DuplicateHashEntry(
-                        entry.key().clone(),
-                    ));
-                }
-                Entry::Vacant(entry) => {
-                    entry.insert(data);
-                }
-            }
-
-            info!(
-                log, "added artifact";
-                "kind" => %artifact_id.kind,
-                "id" => format!("{}:{}", artifact_id.name, artifact_id.version),
-                "hash" => %artifact_hash,
-                "length" => num_bytes,
-            );
+            plan_builder.add_artifact(
+                artifact.into_id(),
+                artifact_hash,
+                io::BufReader::new(reader),
+                &mut by_id,
+                &mut by_hash,
+            )?;
         }
 
         // Ensure we know how to apply updates from this set of artifacts; we'll
         // remember the plan we create.
-        let plan = UpdatePlan::new(
-            artifacts.system_version,
-            &by_id,
-            &mut by_hash,
-            &mut extracted_artifacts,
-            log,
-            read_hubris_board_from_archive,
-        )?;
+        let plan = plan_builder.build()?;
 
-        Ok(Self { by_id: by_id.into(), by_hash: by_hash.into(), plan })
+        Ok(Self { by_id, by_hash: by_hash.into(), plan })
     }
 
     fn get_by_hash(
@@ -372,6 +341,13 @@ enum RepositoryError {
 
     #[error("error creating temporary directory")]
     TempDirCreate(#[source] std::io::Error),
+
+    #[error("error creating temporary file in {path}")]
+    TempFileCreate {
+        path: Utf8PathBuf,
+        #[source]
+        error: std::io::Error,
+    },
 
     #[error("error extracting repository")]
     Extract(#[source] anyhow::Error),
@@ -417,18 +393,6 @@ enum RepositoryError {
         #[source]
         error: anyhow::Error,
     },
-
-    #[error("error reading already-extracted artifact `{path}`")]
-    ReadExtractedArtifact {
-        path: Utf8PathBuf,
-        #[source]
-        error: io::Error,
-    },
-
-    #[error(
-        "duplicate entries found in artifacts.json for kind `{}`, `{}:{}`", .0.kind, .0.name, .0.version
-    )]
-    DuplicateEntry(ArtifactId),
 
     #[error("multiple artifacts found for kind `{0:?}`")]
     DuplicateArtifactKind(KnownArtifactKind),
@@ -479,13 +443,12 @@ impl RepositoryError {
             // Errors we had that are unrelated to the contents of a repository
             // uploaded by a client.
             RepositoryError::TempDirCreate(_)
-            | RepositoryError::ReadExtractedArtifact { .. } => {
+            | RepositoryError::TempFileCreate { .. } => {
                 HttpError::for_unavail(None, message)
             }
 
             // Errors that are definitely caused by bad repository contents.
-            RepositoryError::DuplicateEntry(_)
-            | RepositoryError::DuplicateArtifactKind(_)
+            RepositoryError::DuplicateArtifactKind(_)
             | RepositoryError::LocateTarget { .. }
             | RepositoryError::TargetHashLength(_)
             | RepositoryError::MissingArtifactKind(_)
@@ -574,357 +537,6 @@ pub struct UpdatePlan {
     pub control_plane_hash: ArtifactHash,
 }
 
-impl UpdatePlan {
-    // `read_hubris_board` should always be `read_hubris_board_from_archive`; we
-    // take it as an argument to allow unit tests to give us invalid/fake
-    // "hubris archives" `read_hubris_board_from_archive` wouldn't be able to
-    // handle.
-    fn new<F>(
-        system_version: SemverVersion,
-        by_id: &HashMap<ArtifactId, ExtractedArtifactDataHandle>,
-        by_hash: &mut HashMap<ArtifactHashId, ExtractedArtifactDataHandle>,
-        extracted_artifacts: &mut ExtractedArtifacts,
-        log: &Logger,
-        read_hubris_board: F,
-    ) -> Result<Self, RepositoryError>
-    where
-        F: Fn(
-            ArtifactId,
-            Vec<u8>,
-        ) -> Result<(ArtifactId, Board), RepositoryError>,
-    {
-        // We expect at least one of each of these kinds to be present, but we
-        // allow multiple (keyed by the Hubris archive caboose `board` value,
-        // which identifies hardware revision). We could do the same for the RoT
-        // images, but to date the RoT images are applicable to all revs; only
-        // the SP images change from rev to rev.
-        let mut gimlet_sp = BTreeMap::new();
-        let mut psc_sp = BTreeMap::new();
-        let mut sidecar_sp = BTreeMap::new();
-
-        // We expect exactly one of each of these kinds to be present in the
-        // snapshot. Scan the snapshot and record the first of each we find,
-        // failing if we find a second.
-        let mut gimlet_rot_a = None;
-        let mut gimlet_rot_b = None;
-        let mut psc_rot_a = None;
-        let mut psc_rot_b = None;
-        let mut sidecar_rot_a = None;
-        let mut sidecar_rot_b = None;
-        let mut host_phase_1 = None;
-        let mut host_phase_2 = None;
-        let mut trampoline_phase_1 = None;
-        let mut trampoline_phase_2 = None;
-
-        // Helper called for each SP image found in the loop below.
-        let sp_image_found =
-            |out: &mut BTreeMap<Board, ArtifactIdData>,
-             id,
-             data_handle: &ExtractedArtifactDataHandle| {
-                let data = data_handle.read_to_vec()?;
-                let (id, board) = read_hubris_board(id, data)?;
-
-                match out.entry(board) {
-                    btree_map::Entry::Vacant(slot) => {
-                        info!(
-                            log, "found SP archive";
-                            "kind" => ?id.kind,
-                            "board" => &slot.key().0,
-                        );
-                        slot.insert(ArtifactIdData {
-                            id,
-                            data: data_handle.clone(),
-                        });
-                        Ok(())
-                    }
-                    btree_map::Entry::Occupied(slot) => {
-                        Err(RepositoryError::DuplicateBoardEntry {
-                            board: slot.key().0.clone(),
-                            // This closure is only called with well-known kinds.
-                            kind: slot.get().id.kind.to_known().unwrap(),
-                        })
-                    }
-                }
-            };
-
-        // Helper called for each artifact-within-an-artifact found in the loop
-        // below.
-        let mut artifact_found =
-            |out: &mut Option<ArtifactIdData>, id: ArtifactId, data: &Bytes| {
-                let data = extracted_artifacts
-                    .store_and_hash(id.kind.clone(), data)?;
-                match out.replace(ArtifactIdData { id, data }) {
-                    None => Ok(()),
-                    Some(prev) => {
-                        // This closure is only called with well-known kinds.
-                        let kind = prev.id.kind.to_known().unwrap();
-                        Err(RepositoryError::DuplicateArtifactKind(kind))
-                    }
-                }
-            };
-
-        for (artifact_id, data_handle) in by_id.iter() {
-            // In generating an update plan, skip any artifact kinds that are
-            // unknown to us (we wouldn't know how to incorporate them into our
-            // plan).
-            let Some(artifact_kind) = artifact_id.kind.to_known() else {
-                continue;
-            };
-            let artifact_id = artifact_id.clone();
-
-            match artifact_kind {
-                KnownArtifactKind::GimletSp => {
-                    sp_image_found(&mut gimlet_sp, artifact_id, data_handle)?;
-                }
-                KnownArtifactKind::GimletRot => {
-                    slog::debug!(log, "extracting gimlet rot tarball");
-                    let data = data_handle.read_to_vec()?;
-                    let archives = unpack_rot_artifact(artifact_kind, data)?;
-                    artifact_found(
-                        &mut gimlet_rot_a,
-                        artifact_id.clone(),
-                        &archives.archive_a,
-                    )?;
-                    artifact_found(
-                        &mut gimlet_rot_b,
-                        artifact_id.clone(),
-                        &archives.archive_b,
-                    )?;
-                }
-                KnownArtifactKind::PscSp => {
-                    sp_image_found(&mut psc_sp, artifact_id, data_handle)?;
-                }
-                KnownArtifactKind::PscRot => {
-                    slog::debug!(log, "extracting psc rot tarball");
-                    let data = data_handle.read_to_vec()?;
-                    let archives = unpack_rot_artifact(artifact_kind, data)?;
-                    artifact_found(
-                        &mut psc_rot_a,
-                        artifact_id.clone(),
-                        &archives.archive_a,
-                    )?;
-                    artifact_found(
-                        &mut psc_rot_b,
-                        artifact_id.clone(),
-                        &archives.archive_b,
-                    )?;
-                }
-                KnownArtifactKind::SwitchSp => {
-                    sp_image_found(&mut sidecar_sp, artifact_id, data_handle)?;
-                }
-                KnownArtifactKind::SwitchRot => {
-                    slog::debug!(log, "extracting switch rot tarball");
-                    let data = data_handle.read_to_vec()?;
-                    let archives = unpack_rot_artifact(artifact_kind, data)?;
-                    artifact_found(
-                        &mut sidecar_rot_a,
-                        artifact_id.clone(),
-                        &archives.archive_a,
-                    )?;
-                    artifact_found(
-                        &mut sidecar_rot_b,
-                        artifact_id.clone(),
-                        &archives.archive_b,
-                    )?;
-                }
-                KnownArtifactKind::Host => {
-                    slog::debug!(log, "extracting host tarball");
-                    let data = data_handle.read_to_vec()?;
-                    let images = unpack_host_artifact(artifact_kind, data)?;
-                    artifact_found(
-                        &mut host_phase_1,
-                        artifact_id.clone(),
-                        &images.phase_1,
-                    )?;
-                    artifact_found(
-                        &mut host_phase_2,
-                        artifact_id,
-                        &images.phase_2,
-                    )?;
-                }
-                KnownArtifactKind::Trampoline => {
-                    slog::debug!(log, "extracting trampoline tarball");
-                    let data = data_handle.read_to_vec()?;
-                    let images = unpack_host_artifact(artifact_kind, data)?;
-                    artifact_found(
-                        &mut trampoline_phase_1,
-                        artifact_id.clone(),
-                        &images.phase_1,
-                    )?;
-                    artifact_found(
-                        &mut trampoline_phase_2,
-                        artifact_id,
-                        &images.phase_2,
-                    )?;
-                }
-                KnownArtifactKind::ControlPlane => {
-                    // Only the installinator needs this artifact.
-                }
-            }
-        }
-
-        // Find the TUF hash of the control plane artifact. This is a little
-        // hokey: scan through `by_hash` looking for the right artifact kind.
-        let control_plane_hash = by_hash
-            .keys()
-            .find_map(|hash_id| {
-                if hash_id.kind.to_known()
-                    == Some(KnownArtifactKind::ControlPlane)
-                {
-                    Some(hash_id.hash)
-                } else {
-                    None
-                }
-            })
-            .ok_or(RepositoryError::MissingArtifactKind(
-                KnownArtifactKind::ControlPlane,
-            ))?;
-
-        // Ensure we found a Host artifact.
-        let host_phase_2 = host_phase_2.ok_or(
-            RepositoryError::MissingArtifactKind(KnownArtifactKind::Host),
-        )?;
-
-        // Add the host phase 2 image to the set of artifacts we're willing to
-        // serve by hash; that's how installinator will be requesting it.
-        let host_phase_2_hash_id = ArtifactHashId {
-            kind: ArtifactKind::HOST_PHASE_2,
-            hash: host_phase_2.data.hash(),
-        };
-        match by_hash.entry(host_phase_2_hash_id.clone()) {
-            Entry::Occupied(_) => {
-                // We got two entries for an artifact?
-                return Err(RepositoryError::DuplicateHashEntry(
-                    host_phase_2_hash_id,
-                ));
-            }
-            Entry::Vacant(entry) => {
-                info!(log, "added host phase 2 artifact";
-                    "kind" => %host_phase_2_hash_id.kind,
-                    "hash" => %host_phase_2_hash_id.hash,
-                    "length" => host_phase_2.data.file_size(),
-                );
-                entry.insert(host_phase_2.data.clone());
-            }
-        }
-
-        // Ensure our multi-board-supporting kinds have at least one board
-        // present.
-        if gimlet_sp.is_empty() {
-            return Err(RepositoryError::MissingArtifactKind(
-                KnownArtifactKind::GimletSp,
-            ));
-        }
-        if psc_sp.is_empty() {
-            return Err(RepositoryError::MissingArtifactKind(
-                KnownArtifactKind::PscSp,
-            ));
-        }
-        if sidecar_sp.is_empty() {
-            return Err(RepositoryError::MissingArtifactKind(
-                KnownArtifactKind::SwitchSp,
-            ));
-        }
-
-        Ok(Self {
-            system_version,
-            gimlet_sp,
-            gimlet_rot_a: gimlet_rot_a.ok_or(
-                RepositoryError::MissingArtifactKind(
-                    KnownArtifactKind::GimletRot,
-                ),
-            )?,
-            gimlet_rot_b: gimlet_rot_b.ok_or(
-                RepositoryError::MissingArtifactKind(
-                    KnownArtifactKind::GimletRot,
-                ),
-            )?,
-            psc_sp,
-            psc_rot_a: psc_rot_a.ok_or(
-                RepositoryError::MissingArtifactKind(KnownArtifactKind::PscRot),
-            )?,
-            psc_rot_b: psc_rot_b.ok_or(
-                RepositoryError::MissingArtifactKind(KnownArtifactKind::PscRot),
-            )?,
-            sidecar_sp,
-            sidecar_rot_a: sidecar_rot_a.ok_or(
-                RepositoryError::MissingArtifactKind(
-                    KnownArtifactKind::SwitchRot,
-                ),
-            )?,
-            sidecar_rot_b: sidecar_rot_b.ok_or(
-                RepositoryError::MissingArtifactKind(
-                    KnownArtifactKind::SwitchRot,
-                ),
-            )?,
-            host_phase_1: host_phase_1.ok_or(
-                RepositoryError::MissingArtifactKind(KnownArtifactKind::Host),
-            )?,
-            trampoline_phase_1: trampoline_phase_1.ok_or(
-                RepositoryError::MissingArtifactKind(
-                    KnownArtifactKind::Trampoline,
-                ),
-            )?,
-            trampoline_phase_2: trampoline_phase_2.ok_or(
-                RepositoryError::MissingArtifactKind(
-                    KnownArtifactKind::Trampoline,
-                ),
-            )?,
-            host_phase_2_hash: host_phase_2.data.hash(),
-            control_plane_hash,
-        })
-    }
-}
-
-fn unpack_host_artifact(
-    kind: KnownArtifactKind,
-    data: Vec<u8>,
-) -> Result<HostPhaseImages, RepositoryError> {
-    HostPhaseImages::extract(io::Cursor::new(data))
-        .map_err(|error| RepositoryError::TarballExtract { kind, error })
-}
-
-fn unpack_rot_artifact(
-    kind: KnownArtifactKind,
-    data: Vec<u8>,
-) -> Result<RotArchives, RepositoryError> {
-    RotArchives::extract(io::Cursor::new(data))
-        .map_err(|error| RepositoryError::TarballExtract { kind, error })
-}
-
-// This function takes and returns `id` to avoid an unnecessary clone; `id` will
-// be present in either the Ok tuple or the error.
-fn read_hubris_board_from_archive(
-    id: ArtifactId,
-    data: Vec<u8>,
-) -> Result<(ArtifactId, Board), RepositoryError> {
-    let archive = match RawHubrisArchive::from_vec(data).map_err(Box::new) {
-        Ok(archive) => archive,
-        Err(error) => {
-            return Err(RepositoryError::ParsingHubrisArchive { id, error });
-        }
-    };
-    let caboose = match archive.read_caboose().map_err(Box::new) {
-        Ok(caboose) => caboose,
-        Err(error) => {
-            return Err(RepositoryError::ReadHubrisCaboose { id, error });
-        }
-    };
-    let board = match caboose.board() {
-        Ok(board) => board,
-        Err(error) => {
-            return Err(RepositoryError::ReadHubrisCabooseBoard { id, error });
-        }
-    };
-    let board = match std::str::from_utf8(board) {
-        Ok(s) => s,
-        Err(_) => {
-            return Err(RepositoryError::ReadHubrisCabooseBoardUtf8(id));
-        }
-    };
-    Ok((id, Board(board.to_string())))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -935,8 +547,6 @@ mod tests {
     use camino_tempfile::Utf8TempDir;
     use clap::Parser;
     use omicron_test_utils::dev::test_setup_log;
-    use rand::{distributions::Standard, thread_rng, Rng};
-    use sha2::{Digest, Sha256};
 
     /// Test that `ArtifactsWithPlan` can extract the fake repository generated
     /// by tufaceous.
@@ -968,6 +578,7 @@ mod tests {
         let by_hash_kinds: BTreeSet<_> =
             plan.by_hash.keys().map(|id| id.kind.clone()).collect();
 
+        // `by_id` should contain one entry for every `KnownArtifactKind`...
         let mut expected_kinds: BTreeSet<_> =
             KnownArtifactKind::iter().map(ArtifactKind::from).collect();
         assert_eq!(
@@ -975,283 +586,50 @@ mod tests {
             "expected kinds match by_id kinds"
         );
 
-        // The by_hash map has the host phase 2 kind.
-        // XXX should by_id also contain this kind?
-        expected_kinds.insert(ArtifactKind::HOST_PHASE_2);
+        // ... but `by_hash` should replace the artifacts that contain nested
+        // artifacts to be expanded into their inner parts (phase1/phase2 for OS
+        // images and A/B images for the RoT) during import.
+        for remove in [
+            KnownArtifactKind::Host,
+            KnownArtifactKind::Trampoline,
+            KnownArtifactKind::GimletRot,
+            KnownArtifactKind::PscRot,
+            KnownArtifactKind::SwitchRot,
+        ] {
+            assert!(expected_kinds.remove(&remove.into()));
+        }
+        for add in [
+            ArtifactKind::HOST_PHASE_1,
+            ArtifactKind::HOST_PHASE_2,
+            ArtifactKind::TRAMPOLINE_PHASE_1,
+            ArtifactKind::TRAMPOLINE_PHASE_2,
+            ArtifactKind::GIMLET_ROT_IMAGE_A,
+            ArtifactKind::GIMLET_ROT_IMAGE_B,
+            ArtifactKind::PSC_ROT_IMAGE_A,
+            ArtifactKind::PSC_ROT_IMAGE_B,
+            ArtifactKind::SWITCH_ROT_IMAGE_A,
+            ArtifactKind::SWITCH_ROT_IMAGE_B,
+        ] {
+            assert!(expected_kinds.insert(add));
+        }
         assert_eq!(
             expected_kinds, by_hash_kinds,
             "expected kinds match by_hash kinds"
         );
 
+        // Every value present in `by_id` should also be a key in `by_hash`.
+        for (id, hash_ids) in &plan.by_id {
+            for hash_id in hash_ids {
+                assert!(
+                    plan.by_hash.contains_key(hash_id),
+                    "plan.by_hash is missing an entry for \
+                     {hash_id:?} (derived from {id:?})"
+                );
+            }
+        }
+
         logctx.cleanup_successful();
 
         Ok(())
-    }
-
-    fn make_random_bytes() -> Vec<u8> {
-        thread_rng().sample_iter(Standard).take(128).collect()
-    }
-
-    struct RandomHostOsImage {
-        phase1: Bytes,
-        phase2: Bytes,
-        tarball: Bytes,
-    }
-
-    fn make_random_host_os_image() -> RandomHostOsImage {
-        use tufaceous_lib::CompositeHostArchiveBuilder;
-
-        let phase1 = make_random_bytes();
-        let phase2 = make_random_bytes();
-
-        let mut builder = CompositeHostArchiveBuilder::new(Vec::new()).unwrap();
-        builder.append_phase_1(phase1.len(), phase1.as_slice()).unwrap();
-        builder.append_phase_2(phase2.len(), phase2.as_slice()).unwrap();
-
-        let tarball = builder.finish().unwrap();
-
-        RandomHostOsImage {
-            phase1: Bytes::from(phase1),
-            phase2: Bytes::from(phase2),
-            tarball: Bytes::from(tarball),
-        }
-    }
-
-    struct RandomRotImage {
-        archive_a: Bytes,
-        archive_b: Bytes,
-        tarball: Bytes,
-    }
-
-    fn make_random_rot_image() -> RandomRotImage {
-        use tufaceous_lib::CompositeRotArchiveBuilder;
-
-        let archive_a = make_random_bytes();
-        let archive_b = make_random_bytes();
-
-        let mut builder = CompositeRotArchiveBuilder::new(Vec::new()).unwrap();
-        builder
-            .append_archive_a(archive_a.len(), archive_a.as_slice())
-            .unwrap();
-        builder
-            .append_archive_b(archive_b.len(), archive_b.as_slice())
-            .unwrap();
-
-        let tarball = builder.finish().unwrap();
-
-        RandomRotImage {
-            archive_a: Bytes::from(archive_a),
-            archive_b: Bytes::from(archive_b),
-            tarball: Bytes::from(tarball),
-        }
-    }
-
-    #[test]
-    fn test_update_plan_from_artifacts() {
-        const VERSION_0: SemverVersion = SemverVersion::new(0, 0, 0);
-
-        let logctx = test_setup_log("test_update_plan_from_artifacts");
-
-        let mut by_id = HashMap::new();
-        let mut by_hash = HashMap::new();
-        let mut extracted_artifacts =
-            ExtractedArtifacts::new(&logctx.log).unwrap();
-
-        // The control plane artifact can be arbitrary bytes; just populate it
-        // with random data.
-        {
-            let kind = KnownArtifactKind::ControlPlane;
-            let data = extracted_artifacts
-                .store_and_hash(kind.into(), &Bytes::from(make_random_bytes()))
-                .unwrap();
-            let id = ArtifactId {
-                name: format!("{kind:?}"),
-                version: VERSION_0,
-                kind: kind.into(),
-            };
-            let hash_id =
-                ArtifactHashId { kind: kind.into(), hash: data.hash() };
-            by_id.insert(id, data.clone());
-            by_hash.insert(hash_id, data);
-        }
-
-        // For each SP image, we'll insert two artifacts: these should end up in
-        // the update plan's SP image maps keyed by their "board". Normally the
-        // board is read from the archive itself via hubtools; we'll inject a
-        // test function that returns the artifact ID name as the board instead.
-        for (kind, boards) in [
-            (KnownArtifactKind::GimletSp, ["test-gimlet-a", "test-gimlet-b"]),
-            (KnownArtifactKind::PscSp, ["test-psc-a", "test-psc-b"]),
-            (KnownArtifactKind::SwitchSp, ["test-switch-a", "test-switch-b"]),
-        ] {
-            for board in boards {
-                let data = extracted_artifacts
-                    .store_and_hash(
-                        kind.into(),
-                        &Bytes::from(make_random_bytes()),
-                    )
-                    .unwrap();
-                let id = ArtifactId {
-                    name: board.to_string(),
-                    version: VERSION_0,
-                    kind: kind.into(),
-                };
-                println!("{kind:?}={board:?} => {id:?}");
-                let hash_id =
-                    ArtifactHashId { kind: kind.into(), hash: data.hash() };
-                by_id.insert(id, data.clone());
-                by_hash.insert(hash_id, data);
-            }
-        }
-
-        // The Host, Trampoline, and RoT artifacts must be structed the way we
-        // expect (i.e., .tar.gz's containing multiple inner artifacts).
-        let host = make_random_host_os_image();
-        let trampoline = make_random_host_os_image();
-
-        for (kind, image) in [
-            (KnownArtifactKind::Host, &host),
-            (KnownArtifactKind::Trampoline, &trampoline),
-        ] {
-            let data = extracted_artifacts
-                .store_and_hash(kind.into(), &image.tarball)
-                .unwrap();
-            let id = ArtifactId {
-                name: format!("{kind:?}"),
-                version: VERSION_0,
-                kind: kind.into(),
-            };
-            let hash_id =
-                ArtifactHashId { kind: kind.into(), hash: data.hash() };
-            by_id.insert(id, data.clone());
-            by_hash.insert(hash_id, data);
-        }
-
-        let gimlet_rot = make_random_rot_image();
-        let psc_rot = make_random_rot_image();
-        let sidecar_rot = make_random_rot_image();
-
-        for (kind, artifact) in [
-            (KnownArtifactKind::GimletRot, &gimlet_rot),
-            (KnownArtifactKind::PscRot, &psc_rot),
-            (KnownArtifactKind::SwitchRot, &sidecar_rot),
-        ] {
-            let data = extracted_artifacts
-                .store_and_hash(kind.into(), &artifact.tarball)
-                .unwrap();
-            let id = ArtifactId {
-                name: format!("{kind:?}"),
-                version: VERSION_0,
-                kind: kind.into(),
-            };
-            let hash_id =
-                ArtifactHashId { kind: kind.into(), hash: data.hash() };
-            by_id.insert(id, data.clone());
-            by_hash.insert(hash_id, data);
-        }
-
-        let plan = UpdatePlan::new(
-            VERSION_0,
-            &by_id,
-            &mut by_hash,
-            &mut extracted_artifacts,
-            &logctx.log,
-            |id, _data| {
-                let board = id.name.clone();
-                Ok((id, Board(board)))
-            },
-        )
-        .unwrap();
-
-        assert_eq!(plan.gimlet_sp.len(), 2);
-        assert_eq!(plan.psc_sp.len(), 2);
-        assert_eq!(plan.sidecar_sp.len(), 2);
-
-        for (id, data) in &by_id {
-            match id.kind.to_known().unwrap() {
-                KnownArtifactKind::GimletSp => {
-                    assert!(
-                        id.name.starts_with("test-gimlet-"),
-                        "unexpected id.name {:?}",
-                        id.name
-                    );
-                    assert_eq!(
-                        &plan.gimlet_sp.get(&id.name).unwrap().data,
-                        data
-                    );
-                }
-                KnownArtifactKind::ControlPlane => {
-                    assert_eq!(plan.control_plane_hash, data.hash());
-                }
-                KnownArtifactKind::PscSp => {
-                    assert!(
-                        id.name.starts_with("test-psc-"),
-                        "unexpected id.name {:?}",
-                        id.name
-                    );
-                    assert_eq!(&plan.psc_sp.get(&id.name).unwrap().data, data);
-                }
-                KnownArtifactKind::SwitchSp => {
-                    assert!(
-                        id.name.starts_with("test-switch-"),
-                        "unexpected id.name {:?}",
-                        id.name
-                    );
-                    assert_eq!(
-                        &plan.sidecar_sp.get(&id.name).unwrap().data,
-                        data
-                    );
-                }
-                KnownArtifactKind::Host
-                | KnownArtifactKind::Trampoline
-                | KnownArtifactKind::GimletRot
-                | KnownArtifactKind::PscRot
-                | KnownArtifactKind::SwitchRot => {
-                    // special; we check these below
-                }
-            }
-        }
-
-        // Check extracted host and trampoline data
-        assert_eq!(plan.host_phase_1.data.read_to_vec().unwrap(), host.phase1);
-        assert_eq!(
-            plan.trampoline_phase_1.data.read_to_vec().unwrap(),
-            trampoline.phase1
-        );
-        assert_eq!(
-            plan.trampoline_phase_2.data.read_to_vec().unwrap(),
-            trampoline.phase2
-        );
-
-        let hash = Sha256::digest(&host.phase2);
-        assert_eq!(plan.host_phase_2_hash.0, *hash);
-
-        // Check extracted RoT data
-        assert_eq!(
-            plan.gimlet_rot_a.data.read_to_vec().unwrap(),
-            gimlet_rot.archive_a
-        );
-        assert_eq!(
-            plan.gimlet_rot_b.data.read_to_vec().unwrap(),
-            gimlet_rot.archive_b
-        );
-        assert_eq!(
-            plan.psc_rot_a.data.read_to_vec().unwrap(),
-            psc_rot.archive_a
-        );
-        assert_eq!(
-            plan.psc_rot_b.data.read_to_vec().unwrap(),
-            psc_rot.archive_b
-        );
-        assert_eq!(
-            plan.sidecar_rot_a.data.read_to_vec().unwrap(),
-            sidecar_rot.archive_a
-        );
-        assert_eq!(
-            plan.sidecar_rot_b.data.read_to_vec().unwrap(),
-            sidecar_rot.archive_b
-        );
-
-        logctx.cleanup_successful();
     }
 }

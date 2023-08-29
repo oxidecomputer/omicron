@@ -146,8 +146,8 @@ impl ArtifactManifest {
                              artifact kind {kind:?}"
                         );
 
-                        let buf = Vec::new();
-                        let mut builder = CompositeRotArchiveBuilder::new(buf)?;
+                        let mut builder =
+                            CompositeRotArchiveBuilder::new(Vec::new())?;
                         archive_a.with_data(
                             FakeDataAttributes::new(
                                 "fake-rot-archive-a",
