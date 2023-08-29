@@ -19,9 +19,13 @@ use crate::db::model::Snapshot;
 use crate::db::model::SnapshotState;
 use crate::db::pagination::paginated;
 use crate::db::update_and_check::UpdateAndCheck;
+use crate::db::TransactionError;
+use async_bb8_diesel::AsyncConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
+use async_bb8_diesel::ConnectionError;
 use chrono::Utc;
 use diesel::prelude::*;
+use diesel::result::Error as DieselError;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
@@ -44,49 +48,127 @@ impl DataStore {
         let gen = snapshot.gen;
         opctx.authorize(authz::Action::CreateChild, authz_project).await?;
 
-        use db::schema::snapshot::dsl;
-        use diesel::query_dsl::methods::FilterDsl;
+        #[derive(Debug, thiserror::Error)]
+        pub enum CustomError {
+            #[error("Resource already exists")]
+            ResourceAlreadyExists,
 
-        let project_id = snapshot.project_id;
+            #[error("saw AsyncInsertError")]
+            InsertError(AsyncInsertError),
+        }
+
+        type TxnError = TransactionError<CustomError>;
+
         let snapshot_name = snapshot.name().to_string();
-        let snapshot_id = snapshot.id();
+        let project_id = snapshot.project_id;
 
-        let mut snapshots: Vec<Snapshot> = Project::insert_resource(
-            project_id,
-            diesel::insert_into(dsl::snapshot)
-                .values(snapshot)
-                .on_conflict((dsl::project_id, dsl::name))
-                .filter_target(dsl::time_deleted.is_null())
-                .do_update()
-                .set(dsl::time_modified.eq(dsl::time_modified))
-                .filter(dsl::id.eq(snapshot_id)),
-        )
-        .insert_and_get_results_async(self.pool_authorized(opctx).await?)
-        .await
-        .map_err(|e| match e {
-            AsyncInsertError::CollectionNotFound => Error::ObjectNotFound {
-                type_name: ResourceType::Project,
-                lookup_type: LookupType::ById(project_id),
-            },
-            AsyncInsertError::DatabaseError(e) => {
-                public_error_from_diesel_pool(e, ErrorHandler::Server)
-            }
-        })?;
+        let snapshot: Snapshot = self
+            .pool_authorized(opctx)
+            .await?
+            .transaction_async(|conn| async move {
+                use db::schema::snapshot::dsl;
 
-        let Some(snapshot) = snapshots.pop() else {
-            // If the `insert_into` failed, then another snapshot record already
-            // exists with the same project and name.
-            return Err(Error::ObjectAlreadyExists {
-                type_name: ResourceType::Snapshot,
-                object_name: snapshot_name,
-            });
-        };
+                // If an undeleted snapshot exists in the database with the
+                // same name and project but a different id to the snapshot
+                // this function was passed as an argument, then return an
+                // error here.
+                //
+                // As written below,
+                //
+                //    .on_conflict((dsl::project_id, dsl::name))
+                //    .filter_target(dsl::time_deleted.is_null())
+                //    .do_update()
+                //    .set(dsl::time_modified.eq(dsl::time_modified))
+                //
+                // will set any existing record's `time_modified` if the
+                // project id and name match, even if the snapshot ID does
+                // not match. diesel supports adding a filter below like so
+                // (marked with >>):
+                //
+                //    .on_conflict((dsl::project_id, dsl::name))
+                //    .filter_target(dsl::time_deleted.is_null())
+                //    .do_update()
+                //    .set(dsl::time_modified.eq(dsl::time_modified))
+                // >> .filter(dsl::id.eq(snapshot.id()))
+                //
+                // which will restrict the `insert_into`'s set so that it
+                // only applies if the snapshot ID matches. But,
+                // AsyncInsertError does not have a ObjectAlreadyExists
+                // variant, so this will be returned as CollectionNotFound
+                // due to the `insert_into` failing.
+                //
+                // If this function is passed a snapshot with an ID that
+                // does not match, but a project and name that does, return
+                // ObjectAlreadyExists here.
 
-        bail_unless!(
-            snapshot.id() == snapshot_id,
-            "newly-created Snapshot has unexpected id: {:?}",
-            snapshot.id(),
-        );
+                let existing_snapshot_id: Option<Uuid> = match dsl::snapshot
+                    .filter(dsl::time_deleted.is_null())
+                    .filter(dsl::name.eq(snapshot.name().to_string()))
+                    .filter(dsl::project_id.eq(snapshot.project_id))
+                    .select(dsl::id)
+                    .limit(1)
+                    .first_async(&conn)
+                    .await
+                {
+                    Ok(v) => Ok(Some(v)),
+                    Err(ConnectionError::Query(DieselError::NotFound)) => {
+                        Ok(None)
+                    }
+                    Err(e) => Err(e),
+                }?;
+
+                if let Some(existing_snapshot_id) = existing_snapshot_id {
+                    if existing_snapshot_id != snapshot.id() {
+                        return Err(TransactionError::CustomError(
+                            CustomError::ResourceAlreadyExists,
+                        ));
+                    }
+                }
+
+                Project::insert_resource(
+                    project_id,
+                    diesel::insert_into(dsl::snapshot)
+                        .values(snapshot)
+                        .on_conflict((dsl::project_id, dsl::name))
+                        .filter_target(dsl::time_deleted.is_null())
+                        .do_update()
+                        .set(dsl::time_modified.eq(dsl::time_modified)),
+                )
+                .insert_and_get_result_async(&conn)
+                .await
+                .map_err(|e| {
+                    TransactionError::CustomError(CustomError::InsertError(e))
+                })
+            })
+            .await
+            .map_err(|e: TxnError| match e {
+                TxnError::CustomError(e) => match e {
+                    CustomError::ResourceAlreadyExists => {
+                        Error::ObjectAlreadyExists {
+                            type_name: ResourceType::Snapshot,
+                            object_name: snapshot_name,
+                        }
+                    }
+                    CustomError::InsertError(e) => match e {
+                        AsyncInsertError::CollectionNotFound => {
+                            Error::ObjectNotFound {
+                                type_name: ResourceType::Project,
+                                lookup_type: LookupType::ById(project_id),
+                            }
+                        }
+                        AsyncInsertError::DatabaseError(e) => {
+                            public_error_from_diesel_pool(
+                                e,
+                                ErrorHandler::Server,
+                            )
+                        }
+                    },
+                },
+
+                TxnError::Pool(e) => {
+                    public_error_from_diesel_pool(e, ErrorHandler::Server)
+                }
+            })?;
 
         bail_unless!(
             snapshot.state == SnapshotState::Creating,
