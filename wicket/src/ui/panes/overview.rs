@@ -269,7 +269,6 @@ impl InventoryView {
 
         let popup_builder =
             self.ignition.to_popup_builder(state.rack_state.selected);
-        // Scrolling in the ignition popup is always disabled.
         let popup = popup_builder.build(full_screen);
         frame.render_widget(popup, full_screen);
     }
