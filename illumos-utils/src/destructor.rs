@@ -21,7 +21,7 @@ use tokio::sync::mpsc;
 
 type SharedBoxFuture<T> = Shared<Pin<Box<dyn Future<Output = T> + Send>>>;
 
-/// Future stored within [Destructor<T>].
+/// Future stored within [`Destructor<T>`].
 struct ShutdownWaitFuture(SharedBoxFuture<Result<(), String>>);
 
 impl Future for ShutdownWaitFuture {

@@ -4,6 +4,7 @@
 
 //! HTTP entrypoint functions for the sled agent's exposed API
 
+use crate::bootstrap::early_networking::EarlyNetworkConfig;
 use crate::params::{
     DiskEnsureBody, InstanceEnsureBody, InstancePutMigrationIdsBody,
     InstancePutStateBody, InstancePutStateResponse, InstanceUnregisterResponse,
@@ -22,8 +23,11 @@ use illumos_utils::opte::params::SetVirtualNetworkInterfaceHost;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::nexus::SledInstanceState;
 use omicron_common::api::internal::nexus::UpdateArtifactId;
+use omicron_common::api::internal::shared::RackNetworkConfig;
+use omicron_common::api::internal::shared::SwitchPorts;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use std::net::{Ipv4Addr, Ipv6Addr};
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -46,6 +50,9 @@ pub fn api() -> SledApiDescription {
         api.register(vpc_firewall_rules_put)?;
         api.register(set_v2p)?;
         api.register(del_v2p)?;
+        api.register(uplink_ensure)?;
+        api.register(read_network_bootstore_config)?;
+        api.register(write_network_bootstore_config)?;
 
         Ok(())
     }
@@ -325,5 +332,48 @@ async fn del_v2p(
         .await
         .map_err(|e| HttpError::for_internal_error(e.to_string()))?;
 
+    Ok(HttpResponseUpdatedNoContent())
+}
+
+#[endpoint {
+    method = POST,
+    path = "/switch-ports",
+}]
+async fn uplink_ensure(
+    _rqctx: RequestContext<Arc<SledAgent>>,
+    _body: TypedBody<SwitchPorts>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    Ok(HttpResponseUpdatedNoContent())
+}
+
+#[endpoint {
+    method = GET,
+    path = "/network-bootstore-config",
+}]
+async fn read_network_bootstore_config(
+    _rqctx: RequestContext<Arc<SledAgent>>,
+) -> Result<HttpResponseOk<EarlyNetworkConfig>, HttpError> {
+    let config = EarlyNetworkConfig {
+        generation: 0,
+        rack_subnet: Ipv6Addr::UNSPECIFIED,
+        ntp_servers: Vec::new(),
+        rack_network_config: Some(RackNetworkConfig {
+            infra_ip_first: Ipv4Addr::UNSPECIFIED,
+            infra_ip_last: Ipv4Addr::UNSPECIFIED,
+            ports: Vec::new(),
+            bgp: Vec::new(),
+        }),
+    };
+    Ok(HttpResponseOk(config))
+}
+
+#[endpoint {
+    method = PUT,
+    path = "/network-bootstore-config",
+}]
+async fn write_network_bootstore_config(
+    _rqctx: RequestContext<Arc<SledAgent>>,
+    _body: TypedBody<EarlyNetworkConfig>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     Ok(HttpResponseUpdatedNoContent())
 }

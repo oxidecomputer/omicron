@@ -349,9 +349,11 @@ pub enum ServiceType {
     #[serde(skip)]
     Uplink,
     #[serde(skip)]
-    Maghemite {
+    MgDdm {
         mode: String,
     },
+    #[serde(skip)]
+    Mgd,
     #[serde(skip)]
     SpSim,
     CruciblePantry {
@@ -402,7 +404,8 @@ impl std::fmt::Display for ServiceType {
             ServiceType::CruciblePantry { .. } => write!(f, "crucible/pantry"),
             ServiceType::BoundaryNtp { .. }
             | ServiceType::InternalNtp { .. } => write!(f, "ntp"),
-            ServiceType::Maghemite { .. } => write!(f, "mg-ddm"),
+            ServiceType::MgDdm { .. } => write!(f, "mg-ddm"),
+            ServiceType::Mgd => write!(f, "mgd"),
             ServiceType::SpSim => write!(f, "sp-sim"),
             ServiceType::Clickhouse { .. } => write!(f, "clickhouse"),
             ServiceType::ClickhouseKeeper { .. } => {
@@ -419,13 +422,7 @@ impl crate::smf_helper::Service for ServiceType {
         self.to_string()
     }
     fn smf_name(&self) -> String {
-        match self {
-            // NOTE: This style of service-naming is deprecated
-            ServiceType::Maghemite { .. } => {
-                format!("svc:/system/illumos/{}", self.service_name())
-            }
-            _ => format!("svc:/oxide/{}", self.service_name()),
-        }
+        format!("svc:/oxide/{}", self.service_name())
     }
     fn should_import(&self) -> bool {
         true
@@ -525,7 +522,8 @@ impl TryFrom<ServiceType> for sled_agent_client::types::ServiceType {
             | St::Dendrite { .. }
             | St::Tfport { .. }
             | St::Uplink
-            | St::Maghemite { .. } => Err(AutonomousServiceOnlyError),
+            | St::Mgd
+            | St::MgDdm { .. } => Err(AutonomousServiceOnlyError),
         }
     }
 }
@@ -824,7 +822,8 @@ impl ServiceZoneRequest {
                 | ServiceType::SpSim
                 | ServiceType::Wicketd { .. }
                 | ServiceType::Dendrite { .. }
-                | ServiceType::Maghemite { .. }
+                | ServiceType::MgDdm { .. }
+                | ServiceType::Mgd
                 | ServiceType::Tfport { .. }
                 | ServiceType::Uplink => {
                     return Err(AutonomousServiceOnlyError);

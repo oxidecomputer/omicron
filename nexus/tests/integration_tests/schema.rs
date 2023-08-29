@@ -58,6 +58,8 @@ async fn test_setup<'a>(
     builder.start_external_dns().await;
     builder.start_dendrite(SwitchLocation::Switch0).await;
     builder.start_dendrite(SwitchLocation::Switch1).await;
+    builder.start_mgd(SwitchLocation::Switch0).await;
+    builder.start_mgd(SwitchLocation::Switch1).await;
     builder.populate_internal_dns().await;
     builder
 }

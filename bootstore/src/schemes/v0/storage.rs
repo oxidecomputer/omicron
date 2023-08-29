@@ -5,9 +5,9 @@
 //! Storage for the v0 bootstore scheme
 //!
 //! We write two pieces of data to M.2 devices in production via
-//! [`omicron_common::Ledger`]:
+//! [`omicron_common::ledger::Ledger`]:
 //!
-//!    1. [`super::Fsm::State`] for bootstore state itself
+//!    1. [`super::State`] for bootstore state itself
 //!    2. A network config blob required for pre-rack-unlock configuration
 //!
 

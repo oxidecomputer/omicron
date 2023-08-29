@@ -6,8 +6,10 @@ use crate::schema::{bgp_announce_set, bgp_announcement, bgp_config};
 use crate::SqlU32;
 use db_macros::Resource;
 use ipnetwork::IpNetwork;
+use nexus_types::external_api::params;
 use nexus_types::identity::Resource;
 use omicron_common::api::external;
+use omicron_common::api::external::IdentityMetadataCreateParams;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -39,6 +41,22 @@ impl Into<external::BgpConfig> for BgpConfig {
     }
 }
 
+impl From<params::BgpConfigCreate> for BgpConfig {
+    fn from(c: params::BgpConfigCreate) -> BgpConfig {
+        BgpConfig {
+            identity: BgpConfigIdentity::new(
+                Uuid::new_v4(),
+                IdentityMetadataCreateParams {
+                    name: c.identity.name.clone(),
+                    description: c.identity.description.clone(),
+                },
+            ),
+            asn: c.asn.into(),
+            vrf: c.vrf.map(|x| x.to_string()),
+        }
+    }
+}
+
 #[derive(
     Queryable,
     Insertable,
@@ -53,6 +71,20 @@ impl Into<external::BgpConfig> for BgpConfig {
 pub struct BgpAnnounceSet {
     #[diesel(embed)]
     pub identity: BgpAnnounceSetIdentity,
+}
+
+impl From<params::BgpAnnounceSetCreate> for BgpAnnounceSet {
+    fn from(x: params::BgpAnnounceSetCreate) -> BgpAnnounceSet {
+        BgpAnnounceSet {
+            identity: BgpAnnounceSetIdentity::new(
+                Uuid::new_v4(),
+                IdentityMetadataCreateParams {
+                    name: x.identity.name.clone(),
+                    description: x.identity.description.clone(),
+                },
+            ),
+        }
+    }
 }
 
 impl Into<external::BgpAnnounceSet> for BgpAnnounceSet {

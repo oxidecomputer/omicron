@@ -20,6 +20,7 @@ use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
 use omicron_common::address::DENDRITE_PORT;
+use omicron_common::address::MGD_PORT;
 use omicron_common::address::MGS_PORT;
 use omicron_common::api::external::Error;
 use omicron_common::api::internal::shared::SwitchLocation;
@@ -34,6 +35,7 @@ use uuid::Uuid;
 // by resource.
 mod address_lot;
 pub(crate) mod background;
+mod bgp;
 mod certificate;
 mod device_auth;
 mod disk;
@@ -152,6 +154,9 @@ pub struct Nexus {
     /// Mapping of SwitchLocations to their respective Dendrite Clients
     dpd_clients: HashMap<SwitchLocation, Arc<dpd_client::Client>>,
 
+    /// Map switch location to maghemite admin clients.
+    mg_clients: HashMap<SwitchLocation, Arc<mg_admin_client::Client>>,
+
     /// Background tasks
     background_tasks: background::BackgroundTasks,
 
@@ -206,7 +211,13 @@ impl Nexus {
         let mut dpd_clients: HashMap<SwitchLocation, Arc<dpd_client::Client>> =
             HashMap::new();
 
-        // Currently static dpd configuration mappings are still required for testing
+        let mut mg_clients: HashMap<
+            SwitchLocation,
+            Arc<mg_admin_client::Client>,
+        > = HashMap::new();
+
+        // Currently static dpd configuration mappings are still required for
+        // testing
         for (location, config) in &config.pkg.dendrite {
             let address = config.address.ip().to_string();
             let port = config.address.port();
@@ -215,6 +226,11 @@ impl Nexus {
                 client_state.clone(),
             );
             dpd_clients.insert(*location, Arc::new(dpd_client));
+        }
+        for (location, config) in &config.pkg.mgd {
+            let mg_client = mg_admin_client::Client::new(&log, config.address)
+                .map_err(|e| format!("mg admin client: {e}"))?;
+            mg_clients.insert(*location, Arc::new(mg_client));
         }
         if config.pkg.dendrite.is_empty() {
             loop {
@@ -243,6 +259,38 @@ impl Nexus {
                     }
                     Err(e) => {
                         warn!(log, "Failed to lookup Dendrite address: {e}");
+                        tokio::time::sleep(std::time::Duration::from_secs(1))
+                            .await;
+                    }
+                }
+            }
+        }
+        if config.pkg.mgd.is_empty() {
+            loop {
+                let result = resolver
+                    .lookup_all_ipv6(ServiceName::Mgd)
+                    .await
+                    .map_err(|e| format!("Cannot lookup mgd addresses: {e}"));
+                match result {
+                    Ok(addrs) => {
+                        let mappings = map_switch_zone_addrs(
+                            &log.new(o!("component" => "Nexus")),
+                            addrs,
+                        )
+                        .await;
+                        for (location, addr) in &mappings {
+                            let port = MGD_PORT;
+                            let mgd_client = mg_admin_client::Client::new(
+                                &log,
+                                std::net::SocketAddr::new((*addr).into(), port),
+                            )
+                            .map_err(|e| format!("mg admin client: {e}"))?;
+                            mg_clients.insert(*location, Arc::new(mgd_client));
+                        }
+                        break;
+                    }
+                    Err(e) => {
+                        warn!(log, "Failed to lookup mgd address: {e}");
                         tokio::time::sleep(std::time::Duration::from_secs(1))
                             .await;
                     }
@@ -328,6 +376,7 @@ impl Nexus {
             internal_resolver: resolver,
             external_resolver,
             dpd_clients,
+            mg_clients,
             background_tasks,
             default_region_allocation_strategy: config
                 .pkg

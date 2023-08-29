@@ -44,6 +44,9 @@ function ensure_simulated_links {
 
     if [[ -z "$(get_vnic_name_if_exists "sc0_1")" ]]; then
         dladm create-vnic -t "sc0_1" -l "$PHYSICAL_LINK" -m a8:e1:de:01:70:1d
+        if [[ -v PROMISC_FILT_OFF ]]; then
+            dladm set-linkprop -p promisc-filtered=off sc0_1
+        fi
     fi
     success "Vnic sc0_1 exists"
 }

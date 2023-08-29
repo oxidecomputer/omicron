@@ -64,7 +64,14 @@ impl Into<external::SwitchInterfaceKind> for DbSwitchInterfaceKind {
 }
 
 #[derive(
-    Queryable, Insertable, Selectable, Clone, Debug, Serialize, Deserialize,
+    Queryable,
+    Insertable,
+    Selectable,
+    Clone,
+    Debug,
+    Serialize,
+    Deserialize,
+    AsChangeset,
 )]
 #[diesel(table_name = switch_vlan_interface_config)]
 pub struct SwitchVlanInterfaceConfig {

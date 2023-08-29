@@ -4,6 +4,7 @@
 
 //! Well-known DNS names and related types for internal DNS (see RFD 248)
 
+use omicron_common::api::internal::shared::SwitchLocation;
 use uuid::Uuid;
 
 /// Name for the control plane DNS zone
@@ -32,7 +33,9 @@ pub enum ServiceName {
     Crucible(Uuid),
     BoundaryNtp,
     InternalNtp,
-    Maghemite,
+    Maghemite, //TODO change to Dpd - maghemite has several services.
+    Mgd,
+    Scrimlet(SwitchLocation),
 }
 
 impl ServiceName {
@@ -55,6 +58,8 @@ impl ServiceName {
             ServiceName::BoundaryNtp => "boundary-ntp",
             ServiceName::InternalNtp => "internal-ntp",
             ServiceName::Maghemite => "maghemite",
+            ServiceName::Mgd => "mgd",
+            ServiceName::Scrimlet(_) => "scrimlet",
         }
     }
 
@@ -76,7 +81,8 @@ impl ServiceName {
             | ServiceName::CruciblePantry
             | ServiceName::BoundaryNtp
             | ServiceName::InternalNtp
-            | ServiceName::Maghemite => {
+            | ServiceName::Maghemite
+            | ServiceName::Mgd => {
                 format!("_{}._tcp", self.service_kind())
             }
             ServiceName::SledAgent(id) => {
@@ -84,6 +90,9 @@ impl ServiceName {
             }
             ServiceName::Crucible(id) => {
                 format!("_{}._tcp.{}", self.service_kind(), id)
+            }
+            ServiceName::Scrimlet(location) => {
+                format!("_{location}._scrimlet._tcp")
             }
         }
     }

@@ -578,14 +578,21 @@ impl ServiceInner {
                 let value = NexusTypes::RackNetworkConfig {
                     infra_ip_first: config.infra_ip_first,
                     infra_ip_last: config.infra_ip_last,
-                    uplinks: config
-                        .uplinks
+                    ports: config
+                        .ports
                         .iter()
-                        .map(|config| NexusTypes::UplinkConfig {
-                            gateway_ip: config.gateway_ip,
+                        .map(|config| NexusTypes::PortConfigV1 {
+                            port: config.port.clone(),
+                            routes: config
+                                .routes
+                                .iter()
+                                .map(|r| NexusTypes::RouteConfig {
+                                    destination: r.destination,
+                                    nexthop: r.nexthop,
+                                })
+                                .collect(),
+                            addresses: config.addresses.clone(),
                             switch: config.switch.into(),
-                            uplink_cidr: config.uplink_cidr,
-                            uplink_port: config.uplink_port.clone(),
                             uplink_port_speed: config
                                 .uplink_port_speed
                                 .clone()
@@ -594,7 +601,23 @@ impl ServiceInner {
                                 .uplink_port_fec
                                 .clone()
                                 .into(),
-                            uplink_vid: config.uplink_vid,
+                            bgp_peers: config
+                                .bgp_peers
+                                .iter()
+                                .map(|b| NexusTypes::BgpPeerConfig {
+                                    addr: b.addr,
+                                    asn: b.asn,
+                                    port: b.port.clone(),
+                                })
+                                .collect(),
+                        })
+                        .collect(),
+                    bgp: config
+                        .bgp
+                        .iter()
+                        .map(|config| NexusTypes::BgpConfig {
+                            asn: config.asn,
+                            originate: config.originate.clone(),
                         })
                         .collect(),
                 };
@@ -877,6 +900,8 @@ impl ServiceInner {
             rack_network_config: config.rack_network_config.clone(),
         };
         info!(self.log, "Writing Rack Network Configuration to bootstore");
+        //NOTE(ry) this is where the early network config gets saved.
+        //NOTE(ry) generation number must be bumped. Nexus owns generation number.
         bootstore.update_network_config(early_network_config.into()).await?;
 
         // Forward the sled initialization requests to our sled-agent.

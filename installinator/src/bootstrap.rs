@@ -20,7 +20,7 @@ use sled_hardware::underlay::BootstrapInterface;
 use slog::info;
 use slog::Logger;
 
-const MG_DDM_SERVICE_FMRI: &str = "svc:/system/illumos/mg-ddm";
+const MG_DDM_SERVICE_FMRI: &str = "svc:/oxide/mg-ddm";
 const MG_DDM_MANIFEST_PATH: &str = "/opt/oxide/mg-ddm/pkg/ddm/manifest.xml";
 
 // TODO-cleanup The implementation of this function is heavily derived from

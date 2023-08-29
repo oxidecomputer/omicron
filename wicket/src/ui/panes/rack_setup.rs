@@ -695,12 +695,13 @@ fn rss_config_text<'a>(
     };
 
     if let Some(cfg) = insensitive.rack_network_config.as_ref() {
-        for (i, uplink) in cfg.uplinks.iter().enumerate() {
-            let mut items = vec![
+        for (i, uplink) in cfg.ports.iter().enumerate() {
+            let /*mut*/ items = vec![
                 vec![
                     Span::styled("  • Switch           : ", label_style),
                     Span::styled(uplink.switch.to_string(), ok_style),
                 ],
+                /* TODO(ry)
                 vec![
                     Span::styled("  • Gateway IP       : ", label_style),
                     Span::styled(uplink.gateway_ip.to_string(), ok_style),
@@ -713,6 +714,7 @@ fn rss_config_text<'a>(
                     Span::styled("  • Uplink port      : ", label_style),
                     Span::styled(uplink.uplink_port.clone(), ok_style),
                 ],
+                */
                 vec![
                     Span::styled("  • Uplink port speed: ", label_style),
                     Span::styled(
@@ -725,6 +727,7 @@ fn rss_config_text<'a>(
                     Span::styled(uplink.uplink_port_fec.to_string(), ok_style),
                 ],
             ];
+            /* TODO(ry)
             if let Some(uplink_vid) = uplink.uplink_vid {
                 items.push(vec![
                     Span::styled("  • Uplink VLAN id   : ", label_style),
@@ -736,6 +739,7 @@ fn rss_config_text<'a>(
                     Span::styled("none", ok_style),
                 ]);
             }
+            */
 
             append_list(
                 &mut spans,

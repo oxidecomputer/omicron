@@ -145,6 +145,14 @@ networking_address_lot_block_list        GET      /v1/system/networking/address-
 networking_address_lot_create            POST     /v1/system/networking/address-lot
 networking_address_lot_delete            DELETE   /v1/system/networking/address-lot/{address_lot}
 networking_address_lot_list              GET      /v1/system/networking/address-lot
+networking_bgp_announce_set_create       POST     /v1/system/networking/bgp-announce
+networking_bgp_announce_set_delete       DELETE   /v1/system/networking/bgp-announce
+networking_bgp_announce_set_list         GET      /v1/system/networking/bgp-announce
+networking_bgp_config_create             POST     /v1/system/networking/bgp
+networking_bgp_config_delete             DELETE   /v1/system/networking/bgp
+networking_bgp_config_list               GET      /v1/system/networking/bgp
+networking_bgp_imported_routes_ipv4      GET      /v1/system/networking/bgp-routes-ipv4
+networking_bgp_status                    GET      /v1/system/networking/bgp-status
 networking_loopback_address_create       POST     /v1/system/networking/loopback-address
 networking_loopback_address_delete       DELETE   /v1/system/networking/loopback-address/{rack_id}/{switch_location}/{address}/{subnet_mask}
 networking_loopback_address_list         GET      /v1/system/networking/loopback-address

@@ -29,6 +29,8 @@ async fn test_nexus_boots_before_cockroach() {
 
     builder.start_dendrite(SwitchLocation::Switch0).await;
     builder.start_dendrite(SwitchLocation::Switch1).await;
+    builder.start_mgd(SwitchLocation::Switch0).await;
+    builder.start_mgd(SwitchLocation::Switch1).await;
     builder.start_internal_dns().await;
     builder.start_external_dns().await;
 
@@ -144,6 +146,11 @@ async fn test_nexus_boots_before_dendrite() {
     builder.start_dendrite(SwitchLocation::Switch1).await;
     info!(log, "Started Dendrite");
 
+    info!(log, "Starting mgd");
+    builder.start_mgd(SwitchLocation::Switch0).await;
+    builder.start_mgd(SwitchLocation::Switch1).await;
+    info!(log, "Started mgd");
+
     info!(log, "Populating internal DNS records");
     builder.populate_internal_dns().await;
     info!(log, "Populated internal DNS records");
@@ -166,6 +173,8 @@ async fn nexus_schema_test_setup(
     builder.start_external_dns().await;
     builder.start_dendrite(SwitchLocation::Switch0).await;
     builder.start_dendrite(SwitchLocation::Switch1).await;
+    builder.start_mgd(SwitchLocation::Switch0).await;
+    builder.start_mgd(SwitchLocation::Switch1).await;
     builder.populate_internal_dns().await;
 }
 

@@ -15,10 +15,7 @@ TARGET_DIR="out"
 # Location where intermediate artifacts are downloaded / unpacked.
 DOWNLOAD_DIR="$TARGET_DIR/downloads"
 
-source "$SOURCE_DIR/maghemite_openapi_version"
 
-URL="https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/openapi/$COMMIT/ddm-admin.json"
-LOCAL_FILE="$DOWNLOAD_DIR/ddm-admin-$COMMIT.json"
 
 function main
 {
@@ -82,5 +79,15 @@ function do_sha256sum
 
 	$SHA < "$1" | awk '{print $1}'
 }
+
+source "$SOURCE_DIR/maghemite_ddm_openapi_version"
+URL="https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/openapi/$COMMIT/ddm-admin.json"
+LOCAL_FILE="$DOWNLOAD_DIR/ddm-admin-$COMMIT.json"
+
+main "$@"
+
+source "$SOURCE_DIR/maghemite_mg_openapi_version"
+URL="https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/openapi/$COMMIT/mg-admin.json"
+LOCAL_FILE="$DOWNLOAD_DIR/mg-admin-$COMMIT.json"
 
 main "$@"

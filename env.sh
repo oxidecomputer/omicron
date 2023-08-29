@@ -9,5 +9,6 @@ OMICRON_WS="$(cd $(dirname "${BASH_SOURCE[0]}") && echo $PWD)"
 export PATH="$OMICRON_WS/out/cockroachdb/bin:$PATH"
 export PATH="$OMICRON_WS/out/clickhouse:$PATH"
 export PATH="$OMICRON_WS/out/dendrite-stub/bin:$PATH"
+export PATH="$OMICRON_WS/out/mgd/root/opt/oxide/mgd/bin:$PATH"
 unset OMICRON_WS
 set +o xtrace

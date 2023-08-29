@@ -7,25 +7,26 @@
 use anyhow::{anyhow, Context};
 use bootstore::schemes::v0 as bootstore;
 use ddm_admin_client::{Client as DdmAdminClient, DdmError};
-use dpd_client::types::Ipv6Entry;
+use dpd_client::types::{Ipv6Entry, RouteSettingsV6};
 use dpd_client::types::{
     LinkCreate, LinkId, LinkSettings, PortId, PortSettings, RouteSettingsV4,
 };
 use dpd_client::Client as DpdClient;
-use dpd_client::Ipv4Cidr;
 use futures::future;
 use gateway_client::Client as MgsClient;
 use internal_dns::resolver::{ResolveError, Resolver as DnsResolver};
 use internal_dns::ServiceName;
+use ipnetwork::IpNetwork;
 use omicron_common::address::{Ipv6Subnet, AZ_PREFIX, MGS_PORT};
 use omicron_common::address::{DDMD_PORT, DENDRITE_PORT};
 use omicron_common::api::internal::shared::{
-    PortFec, PortSpeed, RackNetworkConfig, SwitchLocation, UplinkConfig,
+    PortConfigV1, PortFec, PortSpeed, RackNetworkConfig, SwitchLocation,
 };
 use omicron_common::backoff::{
     retry_notify, retry_policy_local, BackoffError, ExponentialBackoff,
     ExponentialBackoffBuilder,
 };
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use slog::Logger;
 use std::collections::{HashMap, HashSet};
@@ -107,11 +108,11 @@ impl<'a> EarlyNetworkSetup<'a> {
         resolver: &DnsResolver,
         config: &RackNetworkConfig,
     ) -> HashSet<Ipv6Addr> {
-        // Which switches have uplinks?
+        // Which switches have configured ports?
         let uplinked_switches = config
-            .uplinks
+            .ports
             .iter()
-            .map(|uplink_config| uplink_config.switch)
+            .map(|port_config| port_config.switch)
             .collect::<HashSet<SwitchLocation>>();
 
         // If we have no uplinks, we have nothing to look up.
@@ -342,7 +343,7 @@ impl<'a> EarlyNetworkSetup<'a> {
         &mut self,
         rack_network_config: &RackNetworkConfig,
         switch_zone_underlay_ip: Ipv6Addr,
-    ) -> Result<Vec<UplinkConfig>, EarlyNetworkSetupError> {
+    ) -> Result<Vec<PortConfigV1>, EarlyNetworkSetupError> {
         // First, we have to know which switch we are: ask MGS.
         info!(
             self.log,
@@ -385,10 +386,10 @@ impl<'a> EarlyNetworkSetup<'a> {
         };
 
         // We now know which switch we are: filter the uplinks to just ours.
-        let our_uplinks = rack_network_config
-            .uplinks
+        let our_ports = rack_network_config
+            .ports
             .iter()
-            .filter(|uplink| uplink.switch == switch_location)
+            .filter(|port| port.switch == switch_location)
             .cloned()
             .collect::<Vec<_>>();
 
@@ -396,7 +397,7 @@ impl<'a> EarlyNetworkSetup<'a> {
             self.log,
             "Initializing {} Uplinks on {switch_location:?} at \
              {switch_zone_underlay_ip}",
-            our_uplinks.len(),
+            our_ports.len(),
         );
         let dpd = DpdClient::new(
             &format!("http://[{}]:{}", switch_zone_underlay_ip, DENDRITE_PORT),
@@ -408,9 +409,9 @@ impl<'a> EarlyNetworkSetup<'a> {
 
         // configure uplink for each requested uplink in configuration that
         // matches our switch_location
-        for uplink_config in &our_uplinks {
+        for port_config in &our_ports {
             let (ipv6_entry, dpd_port_settings, port_id) =
-                self.build_uplink_config(uplink_config)?;
+                self.build_port_config(port_config)?;
 
             self.wait_for_dendrite(&dpd).await;
 
@@ -446,14 +447,14 @@ impl<'a> EarlyNetworkSetup<'a> {
             ddmd_client.advertise_prefix(Ipv6Subnet::new(ipv6_entry.addr));
         }
 
-        Ok(our_uplinks)
+        Ok(our_ports)
     }
 
-    fn build_uplink_config(
+    fn build_port_config(
         &self,
-        uplink_config: &UplinkConfig,
+        port_config: &PortConfigV1,
     ) -> Result<(Ipv6Entry, PortSettings, PortId), EarlyNetworkSetupError> {
-        info!(self.log, "Building Uplink Configuration");
+        info!(self.log, "Building Port Configuration");
         let ipv6_entry = Ipv6Entry {
             addr: BOUNDARY_SERVICES_ADDR.parse().map_err(|e| {
                 EarlyNetworkSetupError::BadConfig(format!(
@@ -469,41 +470,57 @@ impl<'a> EarlyNetworkSetup<'a> {
             v6_routes: HashMap::new(),
         };
         let link_id = LinkId(0);
+
+        let mut addrs = Vec::new();
+        for a in &port_config.addresses {
+            addrs.push(a.ip());
+        }
+
         // TODO We're discarding the `uplink_cidr.prefix()` here and only using
         // the IP address; at some point we probably need to give the full CIDR
         // to dendrite?
-        let addr = IpAddr::V4(uplink_config.uplink_cidr.ip());
         let link_settings = LinkSettings {
             // TODO Allow user to configure link properties
             // https://github.com/oxidecomputer/omicron/issues/3061
             params: LinkCreate {
                 autoneg: false,
                 kr: false,
-                fec: convert_fec(&uplink_config.uplink_port_fec),
-                speed: convert_speed(&uplink_config.uplink_port_speed),
+                fec: convert_fec(&port_config.uplink_port_fec),
+                speed: convert_speed(&port_config.uplink_port_speed),
             },
-            addrs: vec![addr],
+            //addrs: vec![addr],
+            addrs,
         };
         dpd_port_settings.links.insert(link_id.to_string(), link_settings);
-        let port_id: PortId =
-            uplink_config.uplink_port.parse().map_err(|e| {
-                EarlyNetworkSetupError::BadConfig(format!(
-                    concat!(
-                        "could not use value provided to",
-                        "rack_network_config.uplink_port as PortID: {}"
-                    ),
-                    e
-                ))
-            })?;
-        dpd_port_settings.v4_routes.insert(
-            Ipv4Cidr { prefix: "0.0.0.0".parse().unwrap(), prefix_len: 0 }
-                .to_string(),
-            RouteSettingsV4 {
-                link_id: link_id.0,
-                vid: uplink_config.uplink_vid,
-                nexthop: uplink_config.gateway_ip,
-            },
-        );
+        let port_id: PortId = port_config.port.parse().map_err(|e| {
+            EarlyNetworkSetupError::BadConfig(format!(
+                concat!(
+                    "could not use value provided to",
+                    "rack_network_config.uplink_port as PortID: {}"
+                ),
+                e
+            ))
+        })?;
+
+        for r in &port_config.routes {
+            if let (IpNetwork::V4(dst), IpAddr::V4(nexthop)) =
+                (r.destination, r.nexthop)
+            {
+                dpd_port_settings.v4_routes.insert(
+                    dst.to_string(),
+                    RouteSettingsV4 { link_id: link_id.0, nexthop, vid: None },
+                );
+            }
+            if let (IpNetwork::V6(dst), IpAddr::V6(nexthop)) =
+                (r.destination, r.nexthop)
+            {
+                dpd_port_settings.v6_routes.insert(
+                    dst.to_string(),
+                    RouteSettingsV6 { link_id: link_id.0, nexthop, vid: None },
+                );
+            }
+        }
+
         Ok((ipv6_entry, dpd_port_settings, port_id))
     }
 
@@ -552,9 +569,9 @@ fn retry_policy_switch_mapping() -> ExponentialBackoff {
 /// [`super::params::RackInitializeRequest`] necessary for use beyond RSS. This
 /// is just for the initial rack configuration and cold boot purposes. Updates
 /// will come from Nexus in the future.
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct EarlyNetworkConfig {
-    // The version of data. Always `1` when created from RSS.
+    // The version of data.
     pub generation: u64,
 
     pub rack_subnet: Ipv6Addr,

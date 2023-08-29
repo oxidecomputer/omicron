@@ -12,6 +12,7 @@ use crate::schema::{
 };
 use crate::SqlU16;
 use db_macros::Resource;
+use diesel::AsChangeset;
 use ipnetwork::IpNetwork;
 use nexus_types::external_api::params;
 use nexus_types::identity::Resource;
@@ -225,7 +226,14 @@ impl Into<external::SwitchPortConfig> for SwitchPortConfig {
 }
 
 #[derive(
-    Queryable, Insertable, Selectable, Clone, Debug, Serialize, Deserialize,
+    Queryable,
+    Insertable,
+    Selectable,
+    Clone,
+    Debug,
+    Serialize,
+    Deserialize,
+    AsChangeset,
 )]
 #[diesel(table_name = switch_port_settings_link_config)]
 pub struct SwitchPortLinkConfig {
@@ -263,7 +271,14 @@ impl Into<external::SwitchPortLinkConfig> for SwitchPortLinkConfig {
 }
 
 #[derive(
-    Queryable, Insertable, Selectable, Clone, Debug, Serialize, Deserialize,
+    Queryable,
+    Insertable,
+    Selectable,
+    Clone,
+    Debug,
+    Serialize,
+    Deserialize,
+    AsChangeset,
 )]
 #[diesel(table_name = lldp_service_config)]
 pub struct LldpServiceConfig {
@@ -321,7 +336,14 @@ impl Into<external::LldpConfig> for LldpConfig {
 }
 
 #[derive(
-    Queryable, Insertable, Selectable, Clone, Debug, Serialize, Deserialize,
+    Queryable,
+    Insertable,
+    Selectable,
+    Clone,
+    Debug,
+    Serialize,
+    Deserialize,
+    AsChangeset,
 )]
 #[diesel(table_name = switch_port_settings_interface_config)]
 pub struct SwitchInterfaceConfig {
@@ -362,7 +384,14 @@ impl Into<external::SwitchInterfaceConfig> for SwitchInterfaceConfig {
 }
 
 #[derive(
-    Queryable, Insertable, Selectable, Clone, Debug, Serialize, Deserialize,
+    Queryable,
+    Insertable,
+    Selectable,
+    Clone,
+    Debug,
+    Serialize,
+    Deserialize,
+    AsChangeset,
 )]
 #[diesel(table_name = switch_port_settings_route_config)]
 pub struct SwitchPortRouteConfig {
@@ -398,12 +427,23 @@ impl Into<external::SwitchPortRouteConfig> for SwitchPortRouteConfig {
 }
 
 #[derive(
-    Queryable, Insertable, Selectable, Clone, Debug, Serialize, Deserialize,
+    Queryable,
+    Insertable,
+    Selectable,
+    Clone,
+    Debug,
+    Serialize,
+    Deserialize,
+    AsChangeset,
 )]
 #[diesel(table_name = switch_port_settings_bgp_peer_config)]
 pub struct SwitchPortBgpPeerConfig {
     pub port_settings_id: Uuid,
+
+    //TODO(ry) this should be associated with the BGP configuration
+    //     not an individual peer.
     pub bgp_announce_set_id: Uuid,
+
     pub bgp_config_id: Uuid,
     pub interface_name: String,
     pub addr: IpNetwork,
@@ -440,7 +480,14 @@ impl Into<external::SwitchPortBgpPeerConfig> for SwitchPortBgpPeerConfig {
 }
 
 #[derive(
-    Queryable, Insertable, Selectable, Clone, Debug, Serialize, Deserialize,
+    Queryable,
+    Insertable,
+    Selectable,
+    Clone,
+    Debug,
+    Serialize,
+    Deserialize,
+    AsChangeset,
 )]
 #[diesel(table_name = switch_port_settings_address_config)]
 pub struct SwitchPortAddressConfig {

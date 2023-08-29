@@ -1406,6 +1406,20 @@ pub struct Route {
     pub vid: Option<u16>,
 }
 
+/// Select a BGP config by a name or id.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+pub struct BgpConfigSelector {
+    /// A name or id to use when selecting BGP config.
+    pub name_or_id: NameOrId,
+}
+
+/// List BGP configs with an optional name or id.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+pub struct BgpConfigListSelector {
+    /// A name or id to use when selecting BGP config.
+    pub name_or_id: Option<NameOrId>,
+}
+
 /// A BGP peer configuration for an interface. Includes the set of announcements
 /// that will be advertised to the peer identified by `addr`. The `bgp_config`
 /// parameter is a reference to global BGP parameters. The `interface_name`
@@ -1431,17 +1445,38 @@ pub struct BgpPeerConfig {
 
 /// Parameters for creating a named set of BGP announcements.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct CreateBgpAnnounceSet {
+pub struct BgpAnnounceSetCreate {
     #[serde(flatten)]
     pub identity: IdentityMetadataCreateParams,
 
     /// The announcements in this set.
-    pub announcement: Vec<BgpAnnouncement>,
+    pub announcement: Vec<BgpAnnouncementCreate>,
+}
+
+/// Select a BGP announce set by a name or id.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+pub struct BgpAnnounceSetSelector {
+    /// A name or id to use when selecting BGP port settings
+    pub name_or_id: NameOrId,
+}
+
+/// List BGP announce set with an optional name or id.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+pub struct BgpAnnounceListSelector {
+    /// A name or id to use when selecting BGP config.
+    pub name_or_id: Option<NameOrId>,
+}
+
+/// Selector used for querying imported BGP routes.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+pub struct BgpRouteSelector {
+    /// The ASN to filter on. Required.
+    pub asn: u32,
 }
 
 /// A BGP announcement tied to a particular address lot block.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct BgpAnnouncement {
+pub struct BgpAnnouncementCreate {
     /// Address lot this announcement is drawn from.
     pub address_lot_block: NameOrId,
 
@@ -1452,7 +1487,7 @@ pub struct BgpAnnouncement {
 /// Parameters for creating a BGP configuration. This includes and autonomous
 /// system number (ASN) and a virtual routing and forwarding (VRF) identifier.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct CreateBgpConfig {
+pub struct BgpConfigCreate {
     #[serde(flatten)]
     pub identity: IdentityMetadataCreateParams,
 
@@ -1462,6 +1497,13 @@ pub struct CreateBgpConfig {
     /// Optional virtual routing and forwarding identifier for this BGP
     /// configuration.
     pub vrf: Option<Name>,
+}
+
+/// Select a BGP status information by BGP config id.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+pub struct BgpStatusSelector {
+    /// A name or id of the BGP configuration to get status for
+    pub name_or_id: NameOrId,
 }
 
 /// A set of addresses associated with a port configuration.

@@ -198,7 +198,8 @@ CREATE TYPE IF NOT EXISTS omicron.public.service_kind AS ENUM (
   'nexus',
   'ntp',
   'oximeter',
-  'tfport'
+  'tfport',
+  'mgd'
 );
 
 CREATE TABLE IF NOT EXISTS omicron.public.service (
@@ -2539,7 +2540,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    ( TRUE, NOW(), NOW(), '7.0.0', NULL)
+    ( TRUE, NOW(), NOW(), '8.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 

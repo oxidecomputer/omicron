@@ -63,6 +63,11 @@ use omicron_common::api::external::http_pagination::ScanParams;
 use omicron_common::api::external::AddressLot;
 use omicron_common::api::external::AddressLotBlock;
 use omicron_common::api::external::AddressLotCreateResponse;
+use omicron_common::api::external::BgpAnnounceSet;
+use omicron_common::api::external::BgpAnnouncement;
+use omicron_common::api::external::BgpConfig;
+use omicron_common::api::external::BgpImportedRouteIpv4;
+use omicron_common::api::external::BgpPeerStatus;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Disk;
 use omicron_common::api::external::Error;
@@ -249,6 +254,15 @@ pub(crate) fn external_api() -> NexusApiDescription {
         api.register(networking_switch_port_list)?;
         api.register(networking_switch_port_apply_settings)?;
         api.register(networking_switch_port_clear_settings)?;
+
+        api.register(networking_bgp_config_create)?;
+        api.register(networking_bgp_config_list)?;
+        api.register(networking_bgp_status)?;
+        api.register(networking_bgp_imported_routes_ipv4)?;
+        api.register(networking_bgp_config_delete)?;
+        api.register(networking_bgp_announce_set_create)?;
+        api.register(networking_bgp_announce_set_list)?;
+        api.register(networking_bgp_announce_set_delete)?;
 
         // Fleet-wide API operations
         api.register(silo_list)?;
@@ -2642,7 +2656,7 @@ async fn networking_switch_port_settings_create(
         let nexus = &apictx.nexus;
         let params = new_settings.into_inner();
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let result = nexus.switch_port_settings_create(&opctx, params).await?;
+        let result = nexus.switch_port_settings_post(&opctx, params).await?;
 
         let settings: SwitchPortSettingsView = result.into();
         Ok(HttpResponseCreated(settings))
@@ -2805,6 +2819,193 @@ async fn networking_switch_port_clear_settings(
         let query = query_params.into_inner();
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
         nexus.switch_port_clear_settings(&opctx, &port, &query).await?;
+        Ok(HttpResponseUpdatedNoContent {})
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Create a new BGP configuration.
+#[endpoint {
+    method = POST,
+    path = "/v1/system/networking/bgp",
+    tags = ["system/networking"],
+}]
+async fn networking_bgp_config_create(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    config: TypedBody<params::BgpConfigCreate>,
+) -> Result<HttpResponseCreated<BgpConfig>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let config = config.into_inner();
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let result = nexus.bgp_config_set(&opctx, &config).await?;
+        Ok(HttpResponseCreated::<BgpConfig>(result.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Get BGP configurations.
+#[endpoint {
+    method = GET,
+    path = "/v1/system/networking/bgp",
+    tags = ["system/networking"],
+}]
+async fn networking_bgp_config_list(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    query_params: Query<PaginatedByNameOrId<params::BgpConfigListSelector>>,
+) -> Result<HttpResponseOk<ResultsPage<BgpConfig>>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let query = query_params.into_inner();
+        let pag_params = data_page_params_for(&rqctx, &query)?;
+        let scan_params = ScanByNameOrId::from_query(&query)?;
+        let paginated_by = name_or_id_pagination(&pag_params, scan_params)?;
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let configs = nexus
+            .bgp_config_list(&opctx, &paginated_by)
+            .await?
+            .into_iter()
+            .map(|p| p.into())
+            .collect();
+
+        Ok(HttpResponseOk(ScanByNameOrId::results_page(
+            &query,
+            configs,
+            &marker_for_name_or_id,
+        )?))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+//TODO pagination? the normal by-name/by-id stuff does not work here
+/// Get BGP peer status
+#[endpoint {
+    method = GET,
+    path = "/v1/system/networking/bgp-status",
+    tags = ["system/networking"],
+}]
+async fn networking_bgp_status(
+    rqctx: RequestContext<Arc<ServerContext>>,
+) -> Result<HttpResponseOk<Vec<BgpPeerStatus>>, HttpError> {
+    let apictx = rqctx.context();
+    let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let result = nexus.bgp_peer_status(&opctx).await?;
+        Ok(HttpResponseOk(result))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+//TODO pagination? the normal by-name/by-id stuff does not work here
+/// Get imported IPv4 BGP routes.
+#[endpoint {
+    method = GET,
+    path = "/v1/system/networking/bgp-routes-ipv4",
+    tags = ["system/networking"],
+}]
+async fn networking_bgp_imported_routes_ipv4(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    query_params: Query<params::BgpRouteSelector>,
+) -> Result<HttpResponseOk<Vec<BgpImportedRouteIpv4>>, HttpError> {
+    let apictx = rqctx.context();
+    let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let sel = query_params.into_inner();
+        let result = nexus.bgp_imported_routes_ipv4(&opctx, &sel).await?;
+        Ok(HttpResponseOk(result))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Delete a BGP configuration.
+#[endpoint {
+    method = DELETE,
+    path = "/v1/system/networking/bgp",
+    tags = ["system/networking"],
+}]
+async fn networking_bgp_config_delete(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    sel: Query<params::BgpConfigSelector>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let sel = sel.into_inner();
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        nexus.bgp_config_delete(&opctx, &sel).await?;
+        Ok(HttpResponseUpdatedNoContent {})
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Create a new BGP announce set.
+#[endpoint {
+    method = POST,
+    path = "/v1/system/networking/bgp-announce",
+    tags = ["system/networking"],
+}]
+async fn networking_bgp_announce_set_create(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    config: TypedBody<params::BgpAnnounceSetCreate>,
+) -> Result<HttpResponseCreated<BgpAnnounceSet>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let config = config.into_inner();
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let result = nexus.bgp_create_announce_set(&opctx, &config).await?;
+        Ok(HttpResponseCreated::<BgpAnnounceSet>(result.0.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+//TODO pagination? the normal by-name/by-id stuff does not work here
+/// Get originated routes for a given BGP configuration.
+#[endpoint {
+    method = GET,
+    path = "/v1/system/networking/bgp-announce",
+    tags = ["system/networking"],
+}]
+async fn networking_bgp_announce_set_list(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    query_params: Query<params::BgpAnnounceSetSelector>,
+) -> Result<HttpResponseOk<Vec<BgpAnnouncement>>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let sel = query_params.into_inner();
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let result = nexus
+            .bgp_announce_list(&opctx, &sel)
+            .await?
+            .into_iter()
+            .map(|p| p.into())
+            .collect();
+        Ok(HttpResponseOk(result))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Delete a BGP announce set.
+#[endpoint {
+    method = DELETE,
+    path = "/v1/system/networking/bgp-announce",
+    tags = ["system/networking"],
+}]
+async fn networking_bgp_announce_set_delete(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    selector: Query<params::BgpAnnounceSetSelector>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let sel = selector.into_inner();
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        nexus.bgp_delete_announce_set(&opctx, &sel).await?;
         Ok(HttpResponseUpdatedNoContent {})
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await

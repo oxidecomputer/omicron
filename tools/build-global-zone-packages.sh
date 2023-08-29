@@ -12,7 +12,7 @@ out_dir="$(readlink -f "${2:-"$tarball_src_dir"}")"
 # Make sure needed packages exist
 deps=(
     "$tarball_src_dir/omicron-sled-agent.tar"
-    "$tarball_src_dir/maghemite.tar"
+    "$tarball_src_dir/mg-ddm-gz.tar"
     "$tarball_src_dir/propolis-server.tar.gz"
     "$tarball_src_dir/overlay.tar.gz"
 )
@@ -46,7 +46,7 @@ cd -
 pkg_dir="$tmp_gz/root/opt/oxide/mg-ddm"
 mkdir -p "$pkg_dir"
 cd "$pkg_dir"
-tar -xvfz "$tarball_src_dir/maghemite.tar"
+tar -xvfz "$tarball_src_dir/mg-ddm-gz.tar"
 cd -
 
 # propolis should be bundled with this OS: Put the propolis-server zone image

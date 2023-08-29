@@ -29,3 +29,4 @@ ptime -m bash ./tools/install_builder_prerequisites.sh -y
 
 banner clippy
 ptime -m cargo xtask clippy
+ptime -m cargo doc

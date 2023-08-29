@@ -188,7 +188,7 @@ table! {
 }
 
 table! {
-    switch_port_settings_route_config (port_settings_id, interface_name, dst, gw, vid) {
+    switch_port_settings_route_config (port_settings_id, interface_name, dst, gw) {
         port_settings_id -> Uuid,
         interface_name -> Text,
         dst -> Inet,
@@ -1142,7 +1142,7 @@ table! {
 ///
 /// This should be updated whenever the schema is changed. For more details,
 /// refer to: schema/crdb/README.adoc
-pub const SCHEMA_VERSION: SemverVersion = SemverVersion::new(7, 0, 0);
+pub const SCHEMA_VERSION: SemverVersion = SemverVersion::new(8, 0, 0);
 
 allow_tables_to_appear_in_same_query!(
     system_update,

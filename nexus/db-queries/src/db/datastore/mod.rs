@@ -48,6 +48,7 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 mod address_lot;
+mod bgp;
 mod certificate;
 mod console_session;
 mod dataset;

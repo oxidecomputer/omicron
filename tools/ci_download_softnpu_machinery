@@ -15,7 +15,7 @@ OUT_DIR="out/npuzone"
 
 # Pinned commit for softnpu ASIC simulator
 SOFTNPU_REPO="softnpu"
-SOFTNPU_COMMIT="eb27e6a00f1082c9faac7cf997e57d0609f7a309"
+SOFTNPU_COMMIT="c1c42398c82b0220c8b5fa3bfba9c7a3bcaa0943"
 
 # This is the softnpu ASIC simulator
 echo "fetching npuzone"

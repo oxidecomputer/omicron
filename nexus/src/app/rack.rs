@@ -33,8 +33,6 @@ use omicron_common::api::external::AddressLotKind;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::IdentityMetadataCreateParams;
-use omicron_common::api::external::IpNet;
-use omicron_common::api::external::Ipv4Net;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::Name;
@@ -380,7 +378,7 @@ impl super::Nexus {
                 })?;
 
             for (idx, uplink_config) in
-                rack_network_config.uplinks.iter().enumerate()
+                rack_network_config.ports.iter().enumerate()
             {
                 let switch = uplink_config.switch.to_string();
                 let switch_location = Name::from_str(&switch).map_err(|e| {
@@ -449,31 +447,32 @@ impl super::Nexus {
                     addresses: HashMap::new(),
                 };
 
-                let uplink_address =
-                    IpNet::V4(Ipv4Net(uplink_config.uplink_cidr));
-                let address = Address {
-                    address_lot: NameOrId::Name(address_lot_name.clone()),
-                    address: uplink_address,
-                };
-                port_settings_params.addresses.insert(
-                    "phy0".to_string(),
-                    AddressConfig { addresses: vec![address] },
-                );
+                let addresses: Vec<Address> = uplink_config
+                    .addresses
+                    .iter()
+                    .map(|a| Address {
+                        address_lot: NameOrId::Name(address_lot_name.clone()),
+                        address: (*a).into(),
+                    })
+                    .collect();
 
-                let dst = IpNet::from_str("0.0.0.0/0").map_err(|e| {
-                    Error::internal_error(&format!(
-                        "failed to parse provided default route CIDR: {e}"
-                    ))
-                })?;
+                port_settings_params
+                    .addresses
+                    .insert("phy0".to_string(), AddressConfig { addresses });
 
-                let gw = IpAddr::V4(uplink_config.gateway_ip);
-                let vid = uplink_config.uplink_vid;
-                let route = Route { dst, gw, vid };
+                let routes: Vec<Route> = uplink_config
+                    .routes
+                    .iter()
+                    .map(|r| Route {
+                        dst: r.destination.into(),
+                        gw: r.nexthop,
+                        vid: None,
+                    })
+                    .collect();
 
-                port_settings_params.routes.insert(
-                    "phy0".to_string(),
-                    RouteConfig { routes: vec![route] },
-                );
+                port_settings_params
+                    .routes
+                    .insert("phy0".to_string(), RouteConfig { routes });
 
                 match self
                     .db_datastore
@@ -498,9 +497,7 @@ impl super::Nexus {
                         opctx,
                         rack_id,
                         switch_location.into(),
-                        Name::from_str(&uplink_config.uplink_port)
-                            .unwrap()
-                            .into(),
+                        Name::from_str(&uplink_config.port).unwrap().into(),
                     )
                     .await?;
 

@@ -1,8 +1,8 @@
 #!/bin/bash
 #:
-#: name = "build-and-test (ubuntu-20.04)"
+#: name = "build-and-test (ubuntu-22.04)"
 #: variety = "basic"
-#: target = "ubuntu-20.04"
+#: target = "ubuntu-22.04"
 #: rust_toolchain = "1.72.1"
 #: output_rules = [
 #:	"/var/tmp/omicron_tmp/*",

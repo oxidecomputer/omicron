@@ -104,7 +104,7 @@ impl DebugDiscoverOpts {
 /// Options shared by both [`DebugDiscoverOpts`] and [`InstallOpts`].
 #[derive(Debug, Args)]
 struct DiscoverOpts {
-    /// The mechanism by which to discover peers: bootstrap or list:[::1]:8000
+    /// The mechanism by which to discover peers: bootstrap or `list:[::1]:8000`
     #[clap(long, default_value_t = DiscoveryMechanism::Bootstrap)]
     mechanism: DiscoveryMechanism,
 }
