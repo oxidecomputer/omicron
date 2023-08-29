@@ -52,6 +52,7 @@ use std::net::SocketAddrV6;
 use std::sync::Arc;
 use std::sync::Mutex as StdMutex;
 use std::time::Duration;
+use std::time::Instant;
 use thiserror::Error;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
@@ -1337,13 +1338,15 @@ impl UpdateContext {
     async fn process_installinator_reports<'engine>(
         &self,
         cx: &StepContext,
-        mut ipr_receiver: mpsc::UnboundedReceiver<
-            EventReport<InstallinatorSpec>,
-        >,
+        mut ipr_receiver: watch::Receiver<EventReport<InstallinatorSpec>>,
     ) -> anyhow::Result<WriteOutput> {
         let mut write_output = None;
 
-        while let Some(report) = ipr_receiver.recv().await {
+        // Note: watch receivers must be used via this pattern, *not* via
+        // `while ipr_receiver.changed().await.is_ok()`.
+        loop {
+            let report = ipr_receiver.borrow_and_update().clone();
+
             // Prior to processing the report, check for the completion metadata
             // that indicates which disks installinator attempt to /
             // successfully wrote. We only need to do this if we haven't already
@@ -1374,7 +1377,11 @@ impl UpdateContext {
                     }
                 }
             }
+
             cx.send_nested_report(report).await?;
+            if ipr_receiver.changed().await.is_err() {
+                break;
+            }
         }
 
         // The receiver being closed means that the installinator has completed.
@@ -1451,13 +1458,45 @@ impl UpdateContext {
         }
     }
 
+    /// Poll the RoT asking for its currently active slot, allowing failures up
+    /// to a fixed timeout to give time for it to boot.
+    ///
+    /// Intended to be called after the RoT has been reset.
+    async fn wait_for_rot_reboot(
+        &self,
+        timeout: Duration,
+    ) -> anyhow::Result<u16> {
+        let mut ticker = tokio::time::interval(Duration::from_secs(1));
+
+        let start = Instant::now();
+        loop {
+            ticker.tick().await;
+            match self
+                .get_component_active_slot(SpComponent::ROT.const_as_str())
+                .await
+            {
+                Ok(slot) => return Ok(slot),
+                Err(error) => {
+                    if start.elapsed() < timeout {
+                        warn!(
+                            self.log,
+                            "failed getting RoT active slot (will retry)";
+                            "error" => %error,
+                        );
+                    } else {
+                        return Err(error);
+                    }
+                }
+            }
+        }
+    }
+
     async fn wait_for_first_installinator_progress(
         &self,
         cx: &StepContext,
         mut ipr_start_receiver: IprStartReceiver,
         image_id: HostPhase2RecoveryImageId,
-    ) -> anyhow::Result<mpsc::UnboundedReceiver<EventReport<InstallinatorSpec>>>
-    {
+    ) -> anyhow::Result<watch::Receiver<EventReport<InstallinatorSpec>>> {
         const MGS_PROGRESS_POLL_INTERVAL: Duration = Duration::from_secs(3);
 
         // Waiting for the installinator to start is a little strange. It can't
@@ -1946,6 +1985,44 @@ impl<'a> SpComponentUpdateContext<'a> {
                                     }
                                 })?;
                             StepSuccess::new(()).into()
+                        },
+                    )
+                    .register();
+
+                // Ensure the RoT has actually booted into the slot we just
+                // wrote. This can fail for a variety of reasons; the two big
+                // categories are:
+                //
+                // 1. The image is corrupt or signed with incorrect keys (in
+                //    which case the RoT will boot back into the previous image)
+                // 2. The RoT gets wedged in a state that requires an
+                //    ignition-level power cycle to rectify (e.g.,
+                //    https://github.com/oxidecomputer/hubris/issues/1451).
+                //
+                // We will not attempt to work around either of these
+                // automatically: we will just poll the RoT for a fixed amount
+                // of time (30 seconds should be _more_ than enough), and fail
+                // if we either (a) get a successful response with an unexpected
+                // active slot (error category 1) or (b) fail to get a
+                // successful response at all (error category 2).
+                registrar
+                    .new_step(
+                        SpComponentUpdateStepId::Resetting,
+                        format!("Waiting for RoT to boot slot {firmware_slot}"),
+                        move |_cx| async move {
+                            const WAIT_FOR_BOOT_TIMEOUT: Duration =
+                                Duration::from_secs(30);
+                            let active_slot = update_cx
+                                .wait_for_rot_reboot(WAIT_FOR_BOOT_TIMEOUT)
+                                .await
+                                .map_err(|error| {
+                                    SpComponentUpdateTerminalError::GetRotActiveSlotFailed { error }
+                                })?;
+                            if active_slot == firmware_slot {
+                                StepSuccess::new(()).into()
+                            } else {
+                                Err(SpComponentUpdateTerminalError::RotUnexpectedActiveSlot { active_slot })
+                            }
                         },
                     )
                     .register();

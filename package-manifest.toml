@@ -38,7 +38,7 @@
 service_name = "sled-agent"
 only_for_targets.image = "standard"
 source.type = "local"
-source.rust.binary_names = ["sled-agent"]
+source.rust.binary_names = ["sled-agent", "zone-bundle"]
 source.rust.release = true
 source.paths = [
   { from = "smf/sled-agent/manifest.xml", to = "pkg/manifest.xml" },
@@ -374,10 +374,10 @@ only_for_targets.image = "standard"
 # 3. Use source.type = "manual" instead of "prebuilt"
 source.type = "prebuilt"
 source.repo = "crucible"
-source.commit = "84507ed89aced20920de73342666a8abcb8237c1"
+source.commit = "5dc77d87dec8bbf56a603821d67ad13f47f99f95"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/crucible/image/<commit>/crucible.sha256.txt
-source.sha256 = "3e55c672a2ba17a58b17f89128257cfd9fdb57c6e7f66d03535dd8f3c60036c3"
+source.sha256 = "e8809a27721b6115fca763de7cca1e1e4b4c1c20e0917a52a38c67bd7844d371"
 output.type = "zone"
 
 [package.crucible-pantry]
@@ -385,10 +385,10 @@ service_name = "crucible_pantry"
 only_for_targets.image = "standard"
 source.type = "prebuilt"
 source.repo = "crucible"
-source.commit = "84507ed89aced20920de73342666a8abcb8237c1"
+source.commit = "5dc77d87dec8bbf56a603821d67ad13f47f99f95"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/crucible/image/<commit>/crucible-pantry.sha256.txt
-source.sha256 = "6b53e106d1449ea6465e0d352080b63da191b890aabe8d751b0b75e5ddc18621"
+source.sha256 = "f84344d14351beb6153a0394c2801eb47da98beb909f4aefb5b0323fce5410b5"
 output.type = "zone"
 
 # Refer to
@@ -399,10 +399,10 @@ service_name = "propolis-server"
 only_for_targets.image = "standard"
 source.type = "prebuilt"
 source.repo = "propolis"
-source.commit = "f2f0ad2dc7ea9a6d02f6b41d4b15ca40b8e2dcc4"
+source.commit = "f78820b1e1510e02dec63c6578c91a469d9f3aa4"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/propolis/image/<commit>/propolis-server.sha256.txt
-source.sha256 = "b0e6951b347bd4755ee2fc41eb51482f5de7169032c064ea54820c5dbdb63bfd"
+source.sha256 = "38e710e47c8c277ae432d953bc6707796feaacf75224d56033e69aa82094ddba"
 output.type = "zone"
 
 [package.maghemite]
@@ -451,8 +451,8 @@ only_for_targets.image = "standard"
 # 2. Copy dendrite.tar.gz from dendrite/out to omicron/out
 source.type = "prebuilt"
 source.repo = "dendrite"
-source.commit = "ef8a97532214c795abb6c7de05289c161e9a80ca"
-source.sha256 = "a63c05e81cf58efd28f89f4f860f4e5e68865c234eb071bec03184437521245b"
+source.commit = "46e53d3914bb999b6368370987d1a4b465b19290"
+source.sha256 = "1f8b7468f894ad2fa03ca7e60fb4efa8787a313c10aa9aea334d19e248e56d32"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -476,8 +476,8 @@ only_for_targets.image = "standard"
 # 2. Copy the output zone image from dendrite/out to omicron/out
 source.type = "prebuilt"
 source.repo = "dendrite"
-source.commit = "ef8a97532214c795abb6c7de05289c161e9a80ca"
-source.sha256 = "7a828286c4e3c97cff56b347fa5922acb6ba93fd8fdfb3e9ea61f1d5fb9b53a5"
+source.commit = "46e53d3914bb999b6368370987d1a4b465b19290"
+source.sha256 = "b32717b4445931a6e5404a72f0519810a8f538102fb53119bd9cab71c16ad706"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -494,8 +494,8 @@ only_for_targets.image = "standard"
 # 2. Copy dendrite.tar.gz from dendrite/out to omicron/out/dendrite-softnpu.tar.gz
 source.type = "prebuilt"
 source.repo = "dendrite"
-source.commit = "ef8a97532214c795abb6c7de05289c161e9a80ca"
-source.sha256 = "aef8ecec0ebdbf8ea790cb65702be636b7e1fae007dcd1434fdba2bc4ccbc06f"
+source.commit = "46e53d3914bb999b6368370987d1a4b465b19290"
+source.sha256 = "1ba23ab45889793d1a8c3d0c01dc08c82d9ac7cacb38b89ac7ba0e0665358746"
 output.type = "zone"
 output.intermediate_only = true
 

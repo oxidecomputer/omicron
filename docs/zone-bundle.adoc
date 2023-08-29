@@ -1,0 +1,248 @@
+:showtitle:
+:toc: left
+:icons: font
+
+= Zone bundle
+
+The `zone-bundle` tool can be used to manage a tarball of debugging data
+collected from Oxide zones. The tool collects all log files on the system,
+including current, rotated and archived files. It also runs a series of
+debugging commands in the target zone, such as `netstat -an`. All of these items
+are packaged into a tarball that can be fetched from the system.
+
+= Running
+
+`zone-bundle` is a binary from the `omicron-sled-agent` crate. It relies on the
+sled-agent's HTTP API, making requests to it for creating or fetching zone
+bundles. Full help is available with `zone-bundle --help`, but the most useful
+commands are:
+
+- `list-zones`: List the _current_ zones on the system.
+- `ls [filter]`: List all zone bundles that exist, possibly with a substring
+  filter. This includes bundles from zones that no longer exist.
+- `create`: Create a zone bundle immediately. (Bundles are also created
+  automatically when zones are destroyed.)
+- `get`: Copy a zone-bundle from internal storage. By default, the file is
+  copied to the local directory with the same name as in internal storage, which
+  is like `<UUID>.tar.gz`.
+- `rm`: Remove a zone bundle from internal storage.
+
+NOTE: Internal storage for Gimlets refers to debug datasets on the internal M.2
+drives.
+
+= Basic usage
+
+`zone-bundle` talks to the sled-agent's HTTP API. The sled-agent manages the
+bundles internally, though most of its operations are exposed in the API. As
+such, we need the IP address of the sled-agent. On a system running omicron,
+this is the `underlay0/sled6` address:
+
+[source,text]
+----
+$ ipadm show-addr underlay0/sled6
+ADDROBJ           TYPE     STATE        ADDR
+underlay0/sled6   static   ok           fd00:1122:3344:101::1/64
+----
+
+== List zones
+
+Once we've found the sled-agent, we can identify the zones available for
+bundling:
+
+[source,text]
+----
+$ ./target/release/zone-bundle --host fd00:1122:3344:101::1 list-zones
+oxz_clickhouse_273d445b-0c96-4191-bcc6-116ea18d93f3
+oxz_cockroachdb_23986911-dcb2-44a3-a41d-c55d58d8502d
+oxz_cockroachdb_334a79ea-8619-4267-a3dc-211d9ceb288d
+oxz_cockroachdb_76e6cd05-5917-4ce1-97ff-4030ecd25f14
+oxz_cockroachdb_cae66f00-9b5a-43d2-a387-d0d46329b5b6
+oxz_cockroachdb_d0af64ea-9bf7-4ddf-a953-db53434a6694
+oxz_crucible_1076b6f2-ba2c-4726-b2de-26f59ed434ef
+oxz_crucible_13ddc1ee-601f-451a-adcb-e977a1a2696b
+oxz_crucible_7e65929e-33a8-41a0-9f89-b7406d8b3f03
+oxz_crucible_ec807461-ae2c-47ce-865b-9aead4963235
+oxz_crucible_fb240fdf-960f-42d1-b622-7076498f40b6
+oxz_crucible_pantry_b1cddcaf-0dce-4cd0-a627-f5af228d830b
+oxz_crucible_pantry_f258b64d-6236-4e5c-9c4b-0cf04263c678
+oxz_crucible_pantry_f5cc07a1-b2f3-43de-9403-01fbf0a3f703
+oxz_external_dns_bbb2e3f4-ed13-483e-ade7-f5cf798da24d
+oxz_external_dns_c5f67258-4095-4d05-9533-040a2c73a643
+oxz_internal_dns_0190f439-7c3c-4a7b-9531-54412fbb3a78
+oxz_internal_dns_1dc94c52-1c92-4913-8041-8648abda75a8
+oxz_internal_dns_eb76bd1f-7242-40c1-a7ac-8fcedf5bbd6a
+oxz_nexus_c8a32c8b-95d7-4bf6-a10d-22425b71d681
+oxz_nexus_daf5b01f-bc07-40bf-ae09-b90fc1c9bf51
+oxz_nexus_fd010683-9dae-41e7-b9e1-74601b0d0e7c
+oxz_ntp_d942e150-9069-420c-9af2-cb27896695c3
+oxz_oximeter_89965262-f2cc-4a6c-8618-b3c55766fa86
+oxz_switch
+----
+
+These are the zones managed by the sled-agent on this system. As they're
+created, Propolis zones will also show up in this list.
+
+== Creating and listing zone bundles
+
+Once a target zone has been identified, a bundle can be created with
+
+[source,text]
+----
+$ ./target/release/zone-bundle --host fd00:1122:3344:101::1 create oxz_clickhouse_273d445b-0c96-4191-bcc6-116ea18d93f3
+Created zone bundle: oxz_clickhouse_273d445b-0c96-4191-bcc6-116ea18d93f3/d3f1479e-a1a0-468e-aa43-9956471e039f
+$ ./target/release/zone-bundle --host fd00:1122:3344:101::1 ls
+Zone                                                             Bundle ID                            Created
+oxz_clickhouse_273d445b-0c96-4191-bcc6-116ea18d93f3              d3f1479e-a1a0-468e-aa43-9956471e039f 2023-08-18 20:14:03.519722554 UTC
+----
+
+We can then list the bundles as well. This takes an optional string on which to
+filter the bundles that are listed, based on a simple substring match.
+
+== Fetching bundles
+
+This bundle lives on internal storage on the host machine. We need to ask the
+sled-agent to send it to us for inspection. Note that bundles are also cleaned
+out automatically when space is limited, though the quota is quite large for
+real Gimlet systems (50GiB).
+
+[source,text]
+----
+$ ./target/release/zone-bundle --host fd00:1122:3344:101::1 get oxz_clickhouse_273d445b-0c96-4191-bcc6-116ea18d93f3 --bundle-id d3f1479e-a1a0-468e-aa43-9956471e039f
+$ ls d3f*
+d3f1479e-a1a0-468e-aa43-9956471e039f.tar.gz
+----
+
+TIP: You can create and fetch a bundle at the same time, using `zone-bundle get
+--create <ZONE_NAME>`.
+
+== Contents
+
+The zone-bundles are gzip-compressed TAR archives. They contain text files with
+debugging information from the target zone. Here are the contents of an example
+bundle:
+
+[source,text]
+----
+$ tar -tf d3f1479e-a1a0-468e-aa43-9956471e039f.tar.gz
+metadata.toml
+ptree
+uptime
+last
+who
+svcs
+netstat
+pfiles.21825
+pstack.21825
+pargs.21825
+oxide-clickhouse:default.log
+pfiles.21830
+pstack.21830
+pargs.21830
+oxide-clickhouse:default.log
+----
+
+The metadata file describes the bundle:
+
+[source,text]
+----
+$ tar xzf d3f1479e-a1a0-468e-aa43-9956471e039f.tar.gz metadata.toml && cat metadata.toml
+time_created = "2023-08-18T18:51:13.782854745Z"
+version = 0
+cause = "explicit_request"
+
+[id]
+zone_name = "oxz_clickhouse_273d445b-0c96-4191-bcc6-116ea18d93f3"
+bundle_id = "d3f1479e-a1a0-468e-aa43-9956471e039"
+----
+
+This includes a "cause", which is the reason the bundle was created. Since we
+created it ourselves, the cause is an explicit request. Other common ones will
+be `"terminated_instance"`, for Propolis zones that are destroyed when their
+guest instance is terminated.
+
+We can also see the log files here. Note that this will include the current log
+file (e.g., `svcs -L service-name`); any on-disk rotated log files (e.g,
+`/var/svc/log/oxide-clickhouse:default.log.0`); and any log files that have been
+archived by the sled-agent. These will have names ending in Unix timestamps,
+e.g., `oxide-clickhouse:default.log.1692385019`.
+
+=== Zone-wide debugging commands
+
+There are also a number of other files. These include the output of some
+debugging commands that apply to the whole zone, such as `netstat`. We can see
+the exact command and output are stored in the file:
+
+[source,text]
+----
+$ tar xzf d3f1479e-a1a0-468e-aa43-9956471e039f.tar.gz netstat && cat netstat
+Command: ["netstat", "-an"]
+
+UDP: IPv4
+   Local Address        Remote Address      State
+-------------------- -------------------- ----------
+      *.*                                 Unbound
+      *.68                                Idle
+      *.546                               Idle
+
+UDP: IPv6
+   Local Address                     Remote Address                   State      If
+--------------------------------- --------------------------------- ---------- -----
+      *.*                                                           Unbound
+      *.546                                                         Idle
+
+TCP: IPv4
+   Local Address        Remote Address    Swind  Send-Q Rwind  Recv-Q    State
+-------------------- -------------------- ------ ------ ------ ------ -----------
+      *.22                 *.*                 0      0 128000      0 LISTEN
+127.0.0.1.4999             *.*                 0      0 128000      0 LISTEN
+
+TCP: IPv6
+   Local Address                     Remote Address                 Swind  Send-Q Rwind  Recv-Q    State      If
+--------------------------------- --------------------------------- ------ ------ ------ ------ ----------- -----
+      *.22                              *.*                              0      0 128000      0 LISTEN
+fd00:1122:3344:101::e.8123              *.*                              0      0 128000      0 LISTEN
+fd00:1122:3344:101::e.9000              *.*                              0      0 128000      0 LISTEN
+fd00:1122:3344:101::e.9004              *.*                              0      0 128000      0 LISTEN
+fd00:1122:3344:101::e.8123        fd00:1122:3344:101::d.35973       142848      0 133920      0 TIME_WAIT
+fd00:1122:3344:101::e.8123        fd00:1122:3344:101::d.60249       142848      0 133920      0 ESTABLISHED
+
+Active UNIX domain sockets
+Address          Type       Vnode            Conn             Local Address                           Remote Address
+---------------- ---------- ---------------- ---------------- --------------------------------------- ---------------------------------------
+fffffe5aa808e768 stream-ord fffffe5bee15c240 0000000          /var/run/in.ndpd_ipadm
+fffffe5a90ff6750 dgram      fffffe5c0c5a1640 0000000          /var/run/in.ndpd_mib
+----
+
+
+The command is written as the first line of the file, and the exact standard
+output or error of the file is written in the remainder. One can use a normal
+workflow for processing the output by just ignoring the first line, e.g., `cat
+netstat | tail +1 | <normal netstat processing pipeline>`.
+
+=== Process-specific commands
+
+In addition to the zone-wide commands, there are a number of operations run
+against the Oxide-managed binaries running inside the zone. These end with the
+PID of the process they're run against, e.g. `pargs.21830`:
+
+[source,text]
+----
+$ tar xzf d3f1479e-a1a0-468e-aa43-9956471e039f.tar.gz pargs.21830 && cat pargs.21830
+Command: ["pargs", "21830"]
+21830:  /opt/oxide/clickhouse/clickhouse server --log-file /var/tmp/clickhouse-server.l
+argv[0]: /opt/oxide/clickhouse/clickhouse
+argv[1]: server
+argv[2]: --log-file
+argv[3]: /var/tmp/clickhouse-server.log
+argv[4]: --errorlog-file
+argv[5]: /var/tmp/clickhouse-server.errlog
+argv[6]: --
+argv[7]: --path
+argv[8]: /data
+argv[9]: --listen_host
+argv[10]: fd00:1122:3344:101::e
+argv[11]: --http_port
+argv[12]: 8123
+----
+
+The `pargs` and `pstack` outputs are also collected at this time.
