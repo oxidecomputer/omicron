@@ -8,6 +8,7 @@ mod update;
 
 pub use super::Control;
 use crate::ui::defaults::style;
+use crate::Cmd;
 pub use overview::OverviewPane;
 pub use rack_setup::RackSetupPane;
 use tui::layout::{Constraint, Direction, Layout, Rect};
@@ -75,6 +76,40 @@ pub fn align_by(
     Text::from(Spans::from(text))
 }
 
+/// A pending scroll command.
+///
+/// This is used to communicate between the `on` and `draw` functions.
+///
+/// **NOTE:** `PendingScroll` deliberately does not implement `Copy` so that
+/// users are forced to reset pending scrolls with `Option::take`, or at least
+/// that there's some friction.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PendingScroll {
+    Up,
+    Down,
+    PageUp,
+    PageDown,
+    GotoTop,
+    GotoBottom,
+}
+
+impl PendingScroll {
+    /// Maps a [`Cmd`] to a `PendingScroll`, if possible.
+    ///
+    /// Use in [`Control::on`] to handle scroll events.
+    pub fn from_cmd(cmd: &Cmd) -> Option<Self> {
+        match cmd {
+            Cmd::Up => Some(Self::Up),
+            Cmd::Down => Some(Self::Down),
+            Cmd::PageUp => Some(Self::PageUp),
+            Cmd::PageDown => Some(Self::PageDown),
+            Cmd::GotoTop => Some(Self::GotoTop),
+            Cmd::GotoBottom => Some(Self::GotoBottom),
+            _ => None,
+        }
+    }
+}
+
 /// A computed scroll offset.
 ///
 /// This scroll offset is computed by [`Self::new`], and is capped so that we
@@ -107,8 +142,25 @@ impl ComputedScrollOffset {
         current_offset: usize,
         text_height: usize,
         num_lines: usize,
+        pending_scroll: Option<PendingScroll>,
     ) -> Self {
-        let mut offset: usize = current_offset;
+        let mut offset = if let Some(pending_scroll) = pending_scroll {
+            // For page up and down, scroll by num_lines - 1 so at least one line is shared.
+            let page_lines = num_lines.saturating_sub(1);
+            match pending_scroll {
+                PendingScroll::Up => current_offset.saturating_sub(1),
+                PendingScroll::Down => current_offset + 1,
+                PendingScroll::PageUp => {
+                    current_offset.saturating_sub(page_lines)
+                }
+                PendingScroll::PageDown => current_offset + page_lines,
+                PendingScroll::GotoTop => 0,
+                // text.height() will get capped below.
+                PendingScroll::GotoBottom => text_height,
+            }
+        } else {
+            current_offset
+        };
 
         if offset > text_height {
             offset = text_height;
