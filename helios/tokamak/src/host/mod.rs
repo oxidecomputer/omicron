@@ -8,9 +8,7 @@
 #![allow(dead_code)]
 
 use crate::host::znode::{FakeZpool, Znodes};
-use crate::types::{
-    DatasetName, DatasetProperty, DatasetPropertyAccess, DatasetType,
-};
+use crate::types::dataset;
 use crate::{FakeChild, FakeExecutor, FakeExecutorBuilder};
 
 use camino::Utf8PathBuf;
@@ -180,7 +178,7 @@ impl FakeHostInner {
                     CreateFilesystem { properties, name } => {
                         for property in properties.keys() {
                             if property.access()
-                                == DatasetPropertyAccess::ReadOnly
+                                == dataset::PropertyAccess::ReadOnly
                             {
                                 return Err(to_stderr(
                                     "Not supported: {property} is a read-only property",
@@ -192,7 +190,7 @@ impl FakeHostInner {
                             .add_dataset(
                                 name.clone(),
                                 properties,
-                                DatasetType::Filesystem,
+                                dataset::Type::Filesystem,
                             )
                             .map_err(to_stderr)?;
 
@@ -212,7 +210,7 @@ impl FakeHostInner {
                     } => {
                         for property in properties.keys() {
                             if property.access()
-                                == DatasetPropertyAccess::ReadOnly
+                                == dataset::PropertyAccess::ReadOnly
                             {
                                 return Err(to_stderr(
                                     "Not supported: {property} is a read-only property",
@@ -223,7 +221,7 @@ impl FakeHostInner {
                         let blocksize = blocksize.unwrap_or(8192);
                         if sparse {
                             properties.insert(
-                                DatasetProperty::Reservation,
+                                dataset::Property::Reservation,
                                 "0".to_string(),
                             );
                         } else {
@@ -238,35 +236,38 @@ impl FakeHostInner {
                             // For any non-sparse zpool.
                             let reserved_size = size + (8 << 20);
                             properties.insert(
-                                DatasetProperty::Reservation,
+                                dataset::Property::Reservation,
                                 reserved_size.to_string(),
                             );
                         }
                         properties.insert(
-                            DatasetProperty::Volblocksize,
+                            dataset::Property::Volblocksize,
                             blocksize.to_string(),
                         );
-                        properties
-                            .insert(DatasetProperty::Volsize, size.to_string());
+                        properties.insert(
+                            dataset::Property::Volsize,
+                            size.to_string(),
+                        );
 
                         let mut keylocation = None;
                         let mut keysize = 0;
 
                         for (k, v) in &properties {
                             match k {
-                                DatasetProperty::Keylocation => {
+                                dataset::Property::Keylocation => {
                                     keylocation = Some(v.as_str())
                                 }
-                                DatasetProperty::Encryption => match v.as_str()
-                                {
-                                    "aes-256-gcm" => keysize = 32,
-                                    _ => {
-                                        return Err(Output::failure()
-                                            .set_stderr(
-                                                "Unsupported encryption",
-                                            ))
+                                dataset::Property::Encryption => {
+                                    match v.as_str() {
+                                        "aes-256-gcm" => keysize = 32,
+                                        _ => {
+                                            return Err(Output::failure()
+                                                .set_stderr(
+                                                    "Unsupported encryption",
+                                                ))
+                                        }
                                     }
-                                },
+                                }
                                 _ => (),
                             }
                         }
@@ -294,7 +295,7 @@ impl FakeHostInner {
                                     match inner.znodes.add_dataset(
                                         name,
                                         properties,
-                                        DatasetType::Volume,
+                                        dataset::Type::Volume,
                                     ) {
                                         Ok(()) => Output::success(),
                                         Err(err) => {
@@ -309,7 +310,7 @@ impl FakeHostInner {
                             .add_dataset(
                                 name.clone(),
                                 properties,
-                                DatasetType::Volume,
+                                dataset::Type::Volume,
                             )
                             .map_err(to_stderr)?;
 
@@ -474,10 +475,10 @@ impl FakeHostInner {
 
                             for property in &properties {
                                 match property {
-                                    DatasetProperty::Name => {
+                                    dataset::Property::Name => {
                                         output.push_str(&node.to_string())
                                     }
-                                    DatasetProperty::Type => {
+                                    dataset::Property::Type => {
                                         let node = self
                                             .znodes
                                             .lookup_by_index(target)
@@ -746,7 +747,7 @@ impl swapctl::Swapctl for FakeHost {
 
         const PATH_PREFIX: &str = "/dev/zvol/dsk/";
         let volume = if let Some(volume) = path.strip_prefix(PATH_PREFIX) {
-            match DatasetName::new(volume.to_string()) {
+            match dataset::Name::new(volume.to_string()) {
                 Ok(name) => name,
                 Err(err) => {
                     let msg = err.to_string();
@@ -765,7 +766,7 @@ impl swapctl::Swapctl for FakeHost {
 
         if let Some(dataset) = inner.znodes.get_dataset(&volume) {
             match dataset.ty() {
-                DatasetType::Volume => (),
+                dataset::Type::Volume => (),
                 _ => {
                     let msg = format!(
                         "Dataset '{}' exists, but is not a volume",

@@ -4,7 +4,7 @@
 
 //! Emulates zpools and datasets on an illumos system
 
-use crate::types::{DatasetName, DatasetProperty, DatasetType};
+use crate::types::dataset;
 
 use camino::Utf8PathBuf;
 use helios_fusion::zpool::{ZpoolHealth, ZpoolName};
@@ -39,17 +39,17 @@ impl FakeZpool {
     }
 }
 
-struct DatasetProperties(HashMap<DatasetProperty, String>);
+struct DatasetProperties(HashMap<dataset::Property, String>);
 
 impl DatasetProperties {
-    fn get(&self, property: DatasetProperty) -> Result<String, String> {
+    fn get(&self, property: dataset::Property) -> Result<String, String> {
         self.0
             .get(&property)
             .map(|k| k.to_string())
             .ok_or_else(|| format!("Missing '{property}' property"))
     }
 
-    fn insert<V: Into<String>>(&mut self, k: DatasetProperty, v: V) {
+    fn insert<V: Into<String>>(&mut self, k: dataset::Property, v: V) {
         self.0.insert(k, v.into());
     }
 }
@@ -57,56 +57,57 @@ impl DatasetProperties {
 pub(crate) struct FakeDataset {
     zix: NodeIndex,
     properties: DatasetProperties,
-    ty: DatasetType,
+    ty: dataset::Type,
 }
 
 impl FakeDataset {
     fn new(
         zix: NodeIndex,
-        properties: HashMap<DatasetProperty, String>,
-        ty: DatasetType,
+        properties: HashMap<dataset::Property, String>,
+        ty: dataset::Type,
     ) -> Self {
         Self { zix, properties: DatasetProperties(properties), ty }
     }
 
-    pub fn ty(&self) -> DatasetType {
+    pub fn ty(&self) -> dataset::Type {
         self.ty
     }
 
     fn mountpoint(&self) -> Option<Utf8PathBuf> {
         self.properties
-            .get(DatasetProperty::Mountpoint)
+            .get(dataset::Property::Mountpoint)
             .map(|s| Utf8PathBuf::from(s))
             .ok()
     }
 
     fn mount(&mut self, new: Utf8PathBuf) -> Result<(), String> {
         match self.ty {
-            DatasetType::Filesystem => {
-                if self.properties.get(DatasetProperty::Mountpoint)? != "none" {
+            dataset::Type::Filesystem => {
+                if self.properties.get(dataset::Property::Mountpoint)? != "none"
+                {
                     return Err("Already mounted".to_string());
                 }
             }
             _ => return Err("Not a filesystem".to_string()),
         };
-        self.properties.insert(DatasetProperty::Mountpoint, new);
-        self.properties.insert(DatasetProperty::Mounted, "yes");
+        self.properties.insert(dataset::Property::Mountpoint, new);
+        self.properties.insert(dataset::Property::Mounted, "yes");
         Ok(())
     }
 
     // TODO: Confirm that the filesystem isn't used by zones?
     fn unmount(&mut self) -> Result<(), String> {
         let mountpoint = match &mut self.ty {
-            DatasetType::Filesystem => {
-                self.properties.get(DatasetProperty::Mountpoint)?
+            dataset::Type::Filesystem => {
+                self.properties.get(dataset::Property::Mountpoint)?
             }
             _ => return Err("Not a filesystem".to_string()),
         };
         if mountpoint == "none" {
             return Err("Filesystem is not mounted".to_string());
         }
-        self.properties.insert(DatasetProperty::Mountpoint, "none");
-        self.properties.insert(DatasetProperty::Mounted, "no");
+        self.properties.insert(dataset::Property::Mountpoint, "none");
+        self.properties.insert(dataset::Property::Mounted, "no");
         Ok(())
     }
 }
@@ -114,7 +115,7 @@ impl FakeDataset {
 pub(crate) enum Znode {
     Root,
     Zpool(ZpoolName),
-    Dataset(DatasetName),
+    Dataset(dataset::Name),
 }
 
 impl Znode {
@@ -145,7 +146,7 @@ pub(crate) struct Znodes {
 
     // Individual nodes themselves
     zpools: HashMap<ZpoolName, FakeZpool>,
-    datasets: HashMap<DatasetName, FakeDataset>,
+    datasets: HashMap<dataset::Name, FakeDataset>,
 }
 
 impl Znodes {
@@ -179,7 +180,7 @@ impl Znodes {
 
     // Dataset access methods
 
-    pub fn get_dataset(&self, name: &DatasetName) -> Option<&FakeDataset> {
+    pub fn get_dataset(&self, name: &dataset::Name) -> Option<&FakeDataset> {
         self.datasets.get(name)
     }
 
@@ -200,7 +201,7 @@ impl Znodes {
                 return Ok(pool.zix);
             }
         }
-        if let Some(dataset) = self.datasets.get(&DatasetName::new(name)?) {
+        if let Some(dataset) = self.datasets.get(&dataset::Name::new(name)?) {
             return Ok(dataset.zix);
         }
         Err(format!("{} not found", name))
@@ -224,9 +225,9 @@ impl Znodes {
                     .get(&name)
                     .ok_or_else(|| "Missing dataset".to_string())?;
                 match dataset.ty {
-                    DatasetType::Filesystem => Ok("filesystem"),
-                    DatasetType::Snapshot => Ok("snapshot"),
-                    DatasetType::Volume => Ok("volume"),
+                    dataset::Type::Filesystem => Ok("filesystem"),
+                    dataset::Type::Snapshot => Ok("snapshot"),
+                    dataset::Type::Volume => Ok("volume"),
                 }
             }
         }
@@ -272,9 +273,9 @@ impl Znodes {
 
     pub fn add_dataset(
         &mut self,
-        name: DatasetName,
-        mut properties: HashMap<DatasetProperty, String>,
-        ty: DatasetType,
+        name: dataset::Name,
+        mut properties: HashMap<dataset::Property, String>,
+        ty: dataset::Type,
     ) -> Result<(), String> {
         for property in properties.keys() {
             if !property.target().contains(ty.into()) {
@@ -291,18 +292,18 @@ impl Znodes {
             ));
         }
 
-        properties.insert(DatasetProperty::Type, ty.to_string());
-        properties.insert(DatasetProperty::Name, name.to_string());
+        properties.insert(dataset::Property::Type, ty.to_string());
+        properties.insert(dataset::Property::Name, name.to_string());
 
         match &ty {
-            DatasetType::Filesystem => {
-                properties.insert(DatasetProperty::Mounted, "no".to_string());
+            dataset::Type::Filesystem => {
+                properties.insert(dataset::Property::Mounted, "no".to_string());
                 properties
-                    .entry(DatasetProperty::Mountpoint)
+                    .entry(dataset::Property::Mountpoint)
                     .or_insert("none".to_string());
             }
-            DatasetType::Volume => (),
-            DatasetType::Snapshot => (),
+            dataset::Type::Volume => (),
+            dataset::Type::Snapshot => (),
         }
 
         let parent = if let Some((parent, _)) = name.as_str().rsplit_once('/') {
@@ -330,7 +331,7 @@ impl Znodes {
     pub fn mount(
         &mut self,
         load_keys: bool,
-        name: &DatasetName,
+        name: &dataset::Name,
     ) -> Result<(), String> {
         let dataset = self
             .datasets
@@ -338,17 +339,17 @@ impl Znodes {
             .ok_or_else(|| format!("Cannot mount '{name}': Does not exist"))?;
         let properties = &mut dataset.properties;
         let mountpoint_property =
-            properties.get(DatasetProperty::Mountpoint)?;
+            properties.get(dataset::Property::Mountpoint)?;
         if !mountpoint_property.starts_with('/') {
             return Err(format!(
                 "Cannot mount '{name}' with mountpoint: {mountpoint_property}"
             ));
         }
 
-        let mounted_property = properties.get(DatasetProperty::Mounted)?;
+        let mounted_property = properties.get(dataset::Property::Mounted)?;
         assert_eq!(mounted_property, "no");
         let encryption_property =
-            properties.get(DatasetProperty::Encryption)?;
+            properties.get(dataset::Property::Encryption)?;
         let encrypted = match encryption_property.as_str() {
             "off" => false,
             "aes-256-gcm" => true,
@@ -360,7 +361,7 @@ impl Znodes {
         };
 
         let keylocation_property =
-            properties.get(DatasetProperty::Keylocation)?;
+            properties.get(dataset::Property::Keylocation)?;
         if encrypted {
             if !load_keys {
                 return Err(format!(
@@ -374,7 +375,7 @@ impl Znodes {
                 return Err(format!("Key at {keylocation} does not exist"));
             }
 
-            let keyformat = properties.get(DatasetProperty::Keyformat)?;
+            let keyformat = properties.get(dataset::Property::Keyformat)?;
             if keyformat != "raw" {
                 return Err(format!(
                     "Cannot mount '{name}': Unknown keyformat: {keyformat}"
@@ -393,7 +394,7 @@ impl Znodes {
 
     pub fn destroy_dataset(
         &mut self,
-        name: &DatasetName,
+        name: &dataset::Name,
         // TODO: Not emulating this option
         _recusive_dependents: bool,
         recursive_children: bool,
@@ -418,7 +419,7 @@ impl Znodes {
                 .lookup_by_index(child_idx)
                 .map(|znode| znode.to_string())
                 .ok_or_else(|| format!("Child node missing name"))?;
-            let child_name = DatasetName::new(child_name)?;
+            let child_name = dataset::Name::new(child_name)?;
 
             if !recursive_children {
                 return Err(format!("Cannot delete dataset {name}: has children (e.g.: {child_name})"));

@@ -2,11 +2,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-mod cli;
-mod executor;
-mod host;
-mod shared_byte_queue;
-pub mod types;
+//! Types which may be parsed from the CLI and used by a fake host
 
-pub use executor::*;
-pub use host::FakeHost;
+pub mod dataset;

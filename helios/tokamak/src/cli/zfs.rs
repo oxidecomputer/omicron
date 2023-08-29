@@ -3,7 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::cli::parse::InputParser;
-use crate::types::{DatasetName, DatasetProperty};
+use crate::types::dataset;
 
 use helios_fusion::Input;
 use helios_fusion::ZFS;
@@ -11,43 +11,43 @@ use std::collections::HashMap;
 
 pub(crate) enum Command {
     CreateFilesystem {
-        properties: HashMap<DatasetProperty, String>,
-        name: DatasetName,
+        properties: HashMap<dataset::Property, String>,
+        name: dataset::Name,
     },
     CreateVolume {
-        properties: HashMap<DatasetProperty, String>,
+        properties: HashMap<dataset::Property, String>,
         sparse: bool,
         blocksize: Option<u64>,
         size: u64,
-        name: DatasetName,
+        name: dataset::Name,
     },
     Destroy {
         recursive_dependents: bool,
         recursive_children: bool,
         force_unmount: bool,
-        name: DatasetName,
+        name: dataset::Name,
     },
     Get {
         recursive: bool,
         depth: Option<usize>,
         // name, property, value, source
         fields: Vec<String>,
-        properties: Vec<DatasetProperty>,
-        datasets: Option<Vec<DatasetName>>,
+        properties: Vec<dataset::Property>,
+        datasets: Option<Vec<dataset::Name>>,
     },
     List {
         recursive: bool,
         depth: Option<usize>,
-        properties: Vec<DatasetProperty>,
-        datasets: Option<Vec<DatasetName>>,
+        properties: Vec<dataset::Property>,
+        datasets: Option<Vec<dataset::Name>>,
     },
     Mount {
         load_keys: bool,
-        filesystem: DatasetName,
+        filesystem: dataset::Name,
     },
     Set {
-        properties: HashMap<DatasetProperty, String>,
-        name: DatasetName,
+        properties: HashMap<dataset::Property, String>,
+        name: dataset::Name,
     },
 }
 
@@ -111,7 +111,7 @@ impl TryFrom<Input> for Command {
                         let (k, v) = prop
                             .split_once('=')
                             .ok_or_else(|| format!("Bad property: {prop}"))?;
-                        let prop = DatasetProperty::try_from(k)
+                        let prop = dataset::Property::try_from(k)
                             .map_err(|e| format!("Unknown property: {e}"))?;
 
                         properties.insert(prop, v.to_string());
@@ -126,7 +126,7 @@ impl TryFrom<Input> for Command {
                 if let Some(size) = size {
                     // Volume
                     let sparse = sparse.unwrap_or(false);
-                    let name = DatasetName::new(name)?;
+                    let name = dataset::Name::new(name)?;
                     Ok(Command::CreateVolume {
                         properties,
                         sparse,
@@ -139,7 +139,7 @@ impl TryFrom<Input> for Command {
                     if sparse.is_some() || blocksize.is_some() {
                         return Err("Using volume arguments, but forgot to specify '-V size'?".to_string());
                     }
-                    let name = DatasetName::new(name)?;
+                    let name = dataset::Name::new(name)?;
                     Ok(Command::CreateFilesystem { properties, name })
                 }
             }
@@ -166,7 +166,7 @@ impl TryFrom<Input> for Command {
                             }
                         }
                     } else {
-                        name = Some(DatasetName::new(arg)?);
+                        name = Some(dataset::Name::new(arg)?);
                         input.no_args_remaining()?;
                     }
                 }
@@ -237,11 +237,11 @@ impl TryFrom<Input> for Command {
                         properties = arg
                             .split(',')
                             .map(|s| {
-                                DatasetProperty::try_from(s).map_err(|err| {
+                                dataset::Property::try_from(s).map_err(|err| {
                                     format!("unknown property: {err}")
                                 })
                             })
-                            .collect::<Result<Vec<DatasetProperty>, String>>(
+                            .collect::<Result<Vec<dataset::Property>, String>>(
                             )?;
                         break;
                     }
@@ -251,8 +251,8 @@ impl TryFrom<Input> for Command {
                     input
                         .args()
                         .into_iter()
-                        .map(|s| DatasetName::new(s.to_string()))
-                        .collect::<Result<Vec<DatasetName>, _>>()?,
+                        .map(|s| dataset::Name::new(s.to_string()))
+                        .collect::<Result<Vec<dataset::Name>, _>>()?,
                 );
                 if !scripting || !parsable {
                     return Err("You should run 'zfs get' commands with the '-Hp' flags enabled".to_string());
@@ -310,10 +310,10 @@ impl TryFrom<Input> for Command {
                                         .shift_arg()?
                                         .split(',')
                                         .map(|s| {
-                                            DatasetProperty::try_from(s)
+                                            dataset::Property::try_from(s)
                                                 .map_err(|err| format!("unknown property: {err}"))
                                         })
-                                        .collect::<Result<Vec<DatasetProperty>, String>>()?;
+                                        .collect::<Result<Vec<dataset::Property>, String>>()?;
                                 }
                                 c => {
                                     return Err(format!(
@@ -326,7 +326,7 @@ impl TryFrom<Input> for Command {
                         // As soon as non-flag arguments are passed, the rest of
                         // the arguments are treated as datasets.
                         datasets =
-                            Some(vec![DatasetName::new(arg.to_string())?]);
+                            Some(vec![dataset::Name::new(arg.to_string())?]);
                         break;
                     }
                 }
@@ -336,7 +336,7 @@ impl TryFrom<Input> for Command {
                     datasets.get_or_insert(vec![]).extend(
                         remaining_datasets
                             .into_iter()
-                            .map(|d| DatasetName::new(d.to_string()))
+                            .map(|d| dataset::Name::new(d.to_string()))
                             .collect::<Result<Vec<_>, _>>()?,
                     );
                 };
@@ -349,7 +349,7 @@ impl TryFrom<Input> for Command {
             }
             "mount" => {
                 let load_keys = input.shift_arg_if("-l")?;
-                let filesystem = DatasetName::new(input.shift_arg()?)?;
+                let filesystem = dataset::Name::new(input.shift_arg()?)?;
                 input.no_args_remaining()?;
                 Ok(Command::Mount { load_keys, filesystem })
             }
@@ -361,11 +361,11 @@ impl TryFrom<Input> for Command {
                     let (k, v) = prop
                         .split_once('=')
                         .ok_or_else(|| format!("Bad property: {prop}"))?;
-                    let prop = DatasetProperty::try_from(k)
+                    let prop = dataset::Property::try_from(k)
                         .map_err(|e| format!("Unknown property: {e}"))?;
                     properties.insert(prop, v.to_string());
                 }
-                let name = DatasetName::new(input.shift_arg()?)?;
+                let name = dataset::Name::new(input.shift_arg()?)?;
                 input.no_args_remaining()?;
 
                 Ok(Command::Set { properties, name })
@@ -394,7 +394,7 @@ mod test {
         ).unwrap() else { panic!("wrong command") };
         assert_eq!(
             properties,
-            HashMap::from([(DatasetProperty::Logbias, "bar".to_string())])
+            HashMap::from([(dataset::Property::Logbias, "bar".to_string())])
         );
         assert_eq!(name.as_str(), "myvolume");
         assert!(sparse);
@@ -407,7 +407,7 @@ mod test {
         ).unwrap() else { panic!("wrong command") };
         assert_eq!(
             properties,
-            HashMap::from([(DatasetProperty::Logbias, "bar".to_string())])
+            HashMap::from([(dataset::Property::Logbias, "bar".to_string())])
         );
         assert_eq!(name.as_str(), "myvolume");
         assert!(sparse);
@@ -454,11 +454,11 @@ mod test {
         assert_eq!(fields, vec!["name", "value"]);
         assert_eq!(
             properties,
-            vec![DatasetProperty::Mounted, DatasetProperty::Available]
+            vec![dataset::Property::Mounted, dataset::Property::Available]
         );
         assert_eq!(
             datasets.unwrap(),
-            vec![DatasetName::new("myvolume".to_string()).unwrap()]
+            vec![dataset::Name::new("myvolume".to_string()).unwrap()]
         );
 
         assert!(Command::try_from(Input::shell(format!(
@@ -479,10 +479,10 @@ mod test {
 
         assert!(recursive);
         assert_eq!(depth.unwrap(), 1);
-        assert_eq!(properties, vec![DatasetProperty::Name]);
+        assert_eq!(properties, vec![dataset::Property::Name]);
         assert_eq!(
             datasets.unwrap(),
-            vec![DatasetName::new("myfilesystem".to_string()).unwrap()]
+            vec![dataset::Name::new("myfilesystem".to_string()).unwrap()]
         );
 
         assert!(Command::try_from(Input::shell(format!(
@@ -514,8 +514,8 @@ mod test {
         assert_eq!(
             properties,
             HashMap::from([
-                (DatasetProperty::Mountpoint, "bar".to_string()),
-                (DatasetProperty::Logbias, "blat".to_string())
+                (dataset::Property::Mountpoint, "bar".to_string()),
+                (dataset::Property::Logbias, "blat".to_string())
             ])
         );
         assert_eq!(name.as_str(), "myfs");

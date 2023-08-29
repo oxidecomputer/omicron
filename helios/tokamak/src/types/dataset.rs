@@ -2,17 +2,13 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Types which may be parsed from the CLI and used by a fake host
-
 use std::fmt;
-
-// TODO: nest under "dataset" module, eliminate prefix
 
 /// The name of a ZFS filesystem, volume, or snapshot
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
-pub struct DatasetName(String);
+pub struct Name(String);
 
-impl DatasetName {
+impl Name {
     pub fn new<S: Into<String>>(s: S) -> Result<Self, String> {
         let s: String = s.into();
         if s.is_empty() {
@@ -30,7 +26,7 @@ impl DatasetName {
     }
 }
 
-impl fmt::Display for DatasetName {
+impl fmt::Display for Name {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.0)
     }
@@ -48,7 +44,7 @@ impl fmt::Display for DatasetName {
     Hash,
 )]
 #[strum(use_phf, serialize_all = "lowercase")]
-pub(crate) enum DatasetType {
+pub(crate) enum Type {
     Filesystem,
     Snapshot,
     Volume,
@@ -56,27 +52,27 @@ pub(crate) enum DatasetType {
 
 bitflags::bitflags! {
     /// The classes of datasets for which a property is valid.
-    pub(crate) struct DatasetPropertyTarget: u8 {
+    pub(crate) struct PropertyTarget: u8 {
         const FILESYSTEM = 0b0001;
         const SNAPSHOT =   0b0010;
         const VOLUME =     0b0100;
     }
 }
 
-impl From<DatasetType> for DatasetPropertyTarget {
-    fn from(ty: DatasetType) -> Self {
-        use DatasetType::*;
+impl From<Type> for PropertyTarget {
+    fn from(ty: Type) -> Self {
+        use Type::*;
         match ty {
-            Filesystem => DatasetPropertyTarget::FILESYSTEM,
-            Snapshot => DatasetPropertyTarget::SNAPSHOT,
-            Volume => DatasetPropertyTarget::VOLUME,
+            Filesystem => PropertyTarget::FILESYSTEM,
+            Snapshot => PropertyTarget::SNAPSHOT,
+            Volume => PropertyTarget::VOLUME,
         }
     }
 }
 
 /// The ability of users to modify properties
 #[derive(Eq, PartialEq)]
-pub(crate) enum DatasetPropertyAccess {
+pub(crate) enum PropertyAccess {
     ReadOnly,
     ReadWrite,
 }
@@ -94,7 +90,7 @@ pub(crate) enum DatasetPropertyAccess {
     Hash,
 )]
 #[strum(use_phf, serialize_all = "lowercase")]
-pub(crate) enum DatasetProperty {
+pub(crate) enum Property {
     Atime,
     #[strum(serialize = "available", serialize = "avail")]
     Available,
@@ -117,10 +113,10 @@ pub(crate) enum DatasetProperty {
     Zoned,
 }
 
-impl DatasetProperty {
-    pub fn access(&self) -> DatasetPropertyAccess {
-        use DatasetProperty::*;
-        use DatasetPropertyAccess::*;
+impl Property {
+    pub fn access(&self) -> PropertyAccess {
+        use Property::*;
+        use PropertyAccess::*;
 
         match self {
             Atime => ReadWrite,
@@ -143,14 +139,13 @@ impl DatasetProperty {
         }
     }
 
-    pub fn target(&self) -> DatasetPropertyTarget {
-        let fs = DatasetPropertyTarget::FILESYSTEM;
-        let all = DatasetPropertyTarget::all();
-        let fs_and_vol =
-            DatasetPropertyTarget::FILESYSTEM | DatasetPropertyTarget::VOLUME;
-        let vol = DatasetPropertyTarget::VOLUME;
+    pub fn target(&self) -> PropertyTarget {
+        let fs = PropertyTarget::FILESYSTEM;
+        let all = PropertyTarget::all();
+        let fs_and_vol = PropertyTarget::FILESYSTEM | PropertyTarget::VOLUME;
+        let vol = PropertyTarget::VOLUME;
 
-        use DatasetProperty::*;
+        use Property::*;
         match self {
             Atime => fs,
             Available => all,
