@@ -14,6 +14,7 @@ use crate::db::collection_insert::DatastoreCollection;
 use crate::db::error::diesel_pool_result_optional;
 use crate::db::error::public_error_from_diesel_pool;
 use crate::db::error::ErrorHandler;
+use crate::db::fixed_data::silo::INTERNAL_SILO_ID;
 use crate::db::identity::Resource;
 use crate::db::lookup::LookupPath;
 use crate::db::model::IpPool;
@@ -27,7 +28,6 @@ use async_bb8_diesel::{AsyncRunQueryDsl, PoolError};
 use chrono::Utc;
 use diesel::prelude::*;
 use ipnetwork::IpNetwork;
-use nexus_types::external_api::params;
 use nexus_types::external_api::shared::IpRange;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
@@ -65,7 +65,8 @@ impl DataStore {
                 &pagparams.map_name(|n| Name::ref_cast(n)),
             ),
         }
-        .filter(dsl::internal.eq(false))
+        // != excludes nulls so we explicitly include them
+        .filter(dsl::silo_id.ne(*INTERNAL_SILO_ID).or(dsl::silo_id.is_null()))
         .filter(dsl::time_deleted.is_null())
         .select(db::model::IpPool::as_select())
         .get_results_async(self.pool_authorized(opctx).await?)
@@ -98,7 +99,8 @@ impl DataStore {
             .ip_pool_name(&name)
             .fetch_for(action)
             .await?;
-        if pool.internal {
+        // Can't look up the internal pool
+        if pool.silo_id == Some(*INTERNAL_SILO_ID) {
             return Err(authz_pool.not_found());
         }
 
@@ -120,7 +122,7 @@ impl DataStore {
 
         // Look up this IP pool by rack ID.
         let (authz_pool, pool) = dsl::ip_pool
-            .filter(dsl::internal.eq(true))
+            .filter(dsl::silo_id.eq(*INTERNAL_SILO_ID))
             .filter(dsl::time_deleted.is_null())
             .select(IpPool::as_select())
             .get_result_async(self.pool_authorized(opctx).await?)
@@ -142,20 +144,15 @@ impl DataStore {
     }
 
     /// Creates a new IP pool.
-    ///
-    /// - If `internal` is set, this IP pool is used for Oxide services.
     pub async fn ip_pool_create(
         &self,
         opctx: &OpContext,
-        new_pool: &params::IpPoolCreate,
-        internal: bool,
-        silo_id: Option<Uuid>,
+        pool: IpPool,
     ) -> CreateResult<IpPool> {
         use db::schema::ip_pool::dsl;
         opctx
             .authorize(authz::Action::CreateChild, &authz::IP_POOL_LIST)
             .await?;
-        let pool = IpPool::new(&new_pool.identity, internal, silo_id);
         let pool_name = pool.name().as_str().to_string();
 
         diesel::insert_into(dsl::ip_pool)
@@ -205,7 +202,10 @@ impl DataStore {
         // in between the above check for children and this query.
         let now = Utc::now();
         let updated_rows = diesel::update(dsl::ip_pool)
-            .filter(dsl::internal.eq(false))
+            // != excludes nulls so we explicitly include them
+            .filter(
+                dsl::silo_id.ne(*INTERNAL_SILO_ID).or(dsl::silo_id.is_null()),
+            )
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::id.eq(authz_pool.id()))
             .filter(dsl::rcgen.eq(db_pool.rcgen))
@@ -237,7 +237,10 @@ impl DataStore {
         use db::schema::ip_pool::dsl;
         opctx.authorize(authz::Action::Modify, authz_pool).await?;
         diesel::update(dsl::ip_pool)
-            .filter(dsl::internal.eq(false))
+            // != excludes nulls so we explicitly include them
+            .filter(
+                dsl::silo_id.ne(*INTERNAL_SILO_ID).or(dsl::silo_id.is_null()),
+            )
             .filter(dsl::id.eq(authz_pool.id()))
             .filter(dsl::time_deleted.is_null())
             .set(updates)

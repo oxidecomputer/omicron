@@ -68,6 +68,7 @@ serde.workspace = true
 serde_json.workspace = true
 serde_urlencoded.workspace = true
 serde_with.workspace = true
+similar-asserts.workspace = true
 sled-agent-client.workspace = true
 slog.workspace = true
 slog-async.workspace = true

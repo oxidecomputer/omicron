@@ -32,31 +32,27 @@ pub struct IpPool {
     #[diesel(embed)]
     pub identity: IpPoolIdentity,
 
-    /// If true, identifies that this IP pool is dedicated to "Control-Plane
-    /// Services", such as Nexus.
-    ///
-    /// Otherwise, this IP pool is intended for usage by customer VMs.
-    pub internal: bool,
-
     /// Child resource generation number, for optimistic concurrency control of
     /// the contained ranges.
     pub rcgen: i64,
 
-    /// Silo, if IP pool is associated with a particular silo. Must be null
-    /// if internal is true. Must be non-null if project_id is non-null. When
-    /// project_id is non-null, silo_id will (naturally) be the ID of the
+    /// Silo, if IP pool is associated with a particular silo. One special use
+    /// for this is  associating a pool with the internal silo oxide-internal,
+    /// which is used for internal services. If there is no silo ID, the
+    /// pool is considered a fleet-wide silo and will be used for allocating
+    /// instance IPs in silos that don't have their own pool. Must be non-
+    /// null if project_id is non-null (this is enforced as a DB constraint).
+    /// When project_id is non-null, silo_id will (naturally) be the ID of the
     /// project's silo.
     pub silo_id: Option<Uuid>,
 
-    /// Project, if IP pool is associated with a particular project. Must be
-    /// null if internal is true.
+    /// Project, if IP pool is associated with a particular project
     pub project_id: Option<Uuid>,
 }
 
 impl IpPool {
     pub fn new(
         pool_identity: &external::IdentityMetadataCreateParams,
-        internal: bool,
         silo_id: Option<Uuid>,
     ) -> Self {
         Self {
@@ -64,7 +60,6 @@ impl IpPool {
                 Uuid::new_v4(),
                 pool_identity.clone(),
             ),
-            internal,
             rcgen: 0,
             silo_id,
             project_id: None,

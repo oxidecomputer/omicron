@@ -816,6 +816,7 @@ mod tests {
     use crate::context::OpContext;
     use crate::db::datastore::DataStore;
     use crate::db::datastore::SERVICE_IP_POOL_NAME;
+    use crate::db::fixed_data::silo::INTERNAL_SILO_ID;
     use crate::db::identity::Resource;
     use crate::db::model::IpKind;
     use crate::db::model::IpPool;
@@ -862,14 +863,12 @@ mod tests {
         }
 
         async fn create_ip_pool(&self, name: &str, range: IpRange) {
-            let internal = false;
             let pool = IpPool::new(
                 &IdentityMetadataCreateParams {
                     name: String::from(name).parse().unwrap(),
                     description: format!("ip pool {}", name),
                 },
-                internal,
-                None, // silo id
+                Some(*INTERNAL_SILO_ID),
             );
 
             use crate::db::schema::ip_pool::dsl as ip_pool_dsl;

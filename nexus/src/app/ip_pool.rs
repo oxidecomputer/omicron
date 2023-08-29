@@ -12,7 +12,9 @@ use crate::db::model::Name;
 use crate::external_api::params;
 use crate::external_api::shared::IpRange;
 use ipnetwork::IpNetwork;
+use nexus_db_model::IpPool;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db::fixed_data::silo::INTERNAL_SILO_ID;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
@@ -24,7 +26,10 @@ use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
 use ref_cast::RefCast;
-use uuid::Uuid;
+
+fn is_internal(pool: &IpPool) -> bool {
+    pool.silo_id == Some(*INTERNAL_SILO_ID)
+}
 
 impl super::Nexus {
     pub fn ip_pool_lookup<'a>(
@@ -49,33 +54,20 @@ impl super::Nexus {
     pub async fn ip_pool_create(
         &self,
         opctx: &OpContext,
-        new_pool: &params::IpPoolCreate,
-        // TODO: should this be passed here as a lookup::Silo? adding this flag
-        // all the way down the chain is clearly a smell. The `internal` arg
-        // is too, really, though it is kind of nice to see at each call what's
-        // internal. But I'm thinking maybe there should be an IpPoolCreate'
-        // that is produced from IpPoolCreate and includes internal and the silo
-        // id (or lookup) resolved from the NameOrId.
-        silo_id: Option<Uuid>,
+        pool_params: &params::IpPoolCreate,
     ) -> CreateResult<db::model::IpPool> {
-        self.db_datastore
-            .ip_pool_create(
-                opctx, new_pool, /* internal= */ false, silo_id,
-            )
-            .await
-    }
-
-    pub async fn ip_pool_services_create(
-        &self,
-        opctx: &OpContext,
-        new_pool: &params::IpPoolCreate,
-    ) -> CreateResult<db::model::IpPool> {
-        self.db_datastore
-            .ip_pool_create(
-                opctx, new_pool, /* internal= */ true,
-                /* silo_id= */ None,
-            )
-            .await
+        let silo_id = match pool_params.clone().silo {
+            Some(silo) => {
+                let (.., authz_silo) = self
+                    .silo_lookup(&opctx, silo)?
+                    .lookup_for(authz::Action::Read)
+                    .await?;
+                Some(authz_silo.id())
+            }
+            _ => None,
+        };
+        let pool = db::model::IpPool::new(&pool_params.identity, silo_id);
+        self.db_datastore.ip_pool_create(opctx, pool).await
     }
 
     pub async fn ip_pools_list(
@@ -117,7 +109,7 @@ impl super::Nexus {
     ) -> ListResultVec<db::model::IpPoolRange> {
         let (.., authz_pool, db_pool) =
             pool_lookup.fetch_for(authz::Action::ListChildren).await?;
-        if db_pool.internal {
+        if is_internal(&db_pool) {
             return Err(Error::not_found_by_name(
                 ResourceType::IpPool,
                 &db_pool.identity.name,
@@ -137,7 +129,7 @@ impl super::Nexus {
     ) -> UpdateResult<db::model::IpPoolRange> {
         let (.., authz_pool, db_pool) =
             pool_lookup.fetch_for(authz::Action::Modify).await?;
-        if db_pool.internal {
+        if is_internal(&db_pool) {
             return Err(Error::not_found_by_name(
                 ResourceType::IpPool,
                 &db_pool.identity.name,
@@ -154,7 +146,7 @@ impl super::Nexus {
     ) -> DeleteResult {
         let (.., authz_pool, db_pool) =
             pool_lookup.fetch_for(authz::Action::Modify).await?;
-        if db_pool.internal {
+        if is_internal(&db_pool) {
             return Err(Error::not_found_by_name(
                 ResourceType::IpPool,
                 &db_pool.identity.name,

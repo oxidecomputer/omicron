@@ -15,6 +15,7 @@ use crate::db::collection_insert::DatastoreCollection;
 use crate::db::error::public_error_from_diesel_pool;
 use crate::db::error::ErrorHandler;
 use crate::db::error::TransactionError;
+use crate::db::fixed_data::silo::INTERNAL_SILO_ID;
 use crate::db::fixed_data::vpc_subnet::DNS_VPC_SUBNET;
 use crate::db::fixed_data::vpc_subnet::NEXUS_VPC_SUBNET;
 use crate::db::fixed_data::vpc_subnet::NTP_VPC_SUBNET;
@@ -556,39 +557,34 @@ impl DataStore {
 
         self.rack_insert(opctx, &db::model::Rack::new(rack_id)).await?;
 
-        let params = external_params::IpPoolCreate {
-            identity: IdentityMetadataCreateParams {
+        let internal_pool = db::model::IpPool::new(
+            &IdentityMetadataCreateParams {
                 name: SERVICE_IP_POOL_NAME.parse::<Name>().unwrap(),
                 description: String::from("IP Pool for Oxide Services"),
             },
-            silo: None,
-        };
-        self.ip_pool_create(
-            opctx, &params, /*internal=*/ true, /*silo_id*/ None,
-        )
-        .await
-        .map(|_| ())
-        .or_else(|e| match e {
-            Error::ObjectAlreadyExists { .. } => Ok(()),
-            _ => Err(e),
-        })?;
+            Some(*INTERNAL_SILO_ID),
+        );
 
-        let params = external_params::IpPoolCreate {
-            identity: IdentityMetadataCreateParams {
+        self.ip_pool_create(opctx, internal_pool).await.map(|_| ()).or_else(
+            |e| match e {
+                Error::ObjectAlreadyExists { .. } => Ok(()),
+                _ => Err(e),
+            },
+        )?;
+
+        let default_pool = db::model::IpPool::new(
+            &IdentityMetadataCreateParams {
                 name: "default".parse::<Name>().unwrap(),
                 description: String::from("default IP pool"),
             },
-            silo: None,
-        };
-        self.ip_pool_create(
-            opctx, &params, /*internal=*/ false, /*silo_id*/ None,
-        )
-        .await
-        .map(|_| ())
-        .or_else(|e| match e {
-            Error::ObjectAlreadyExists { .. } => Ok(()),
-            _ => Err(e),
-        })?;
+            None, // no silo ID, fleet scoped
+        );
+        self.ip_pool_create(opctx, default_pool).await.map(|_| ()).or_else(
+            |e| match e {
+                Error::ObjectAlreadyExists { .. } => Ok(()),
+                _ => Err(e),
+            },
+        )?;
 
         Ok(())
     }
@@ -1104,7 +1100,7 @@ mod test {
         // been allocated as a part of the service IP pool.
         let (.., svc_pool) =
             datastore.ip_pools_service_lookup(&opctx).await.unwrap();
-        assert!(svc_pool.internal);
+        assert_eq!(svc_pool.silo_id, Some(*INTERNAL_SILO_ID));
 
         let observed_ip_pool_ranges = get_all_ip_pool_ranges(&datastore).await;
         assert_eq!(observed_ip_pool_ranges.len(), 1);
@@ -1306,7 +1302,7 @@ mod test {
         // allocated as a part of the service IP pool.
         let (.., svc_pool) =
             datastore.ip_pools_service_lookup(&opctx).await.unwrap();
-        assert!(svc_pool.internal);
+        assert_eq!(svc_pool.silo_id, Some(*INTERNAL_SILO_ID));
 
         let observed_ip_pool_ranges = get_all_ip_pool_ranges(&datastore).await;
         assert_eq!(observed_ip_pool_ranges.len(), 1);

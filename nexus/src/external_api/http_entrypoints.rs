@@ -39,9 +39,11 @@ use dropshot::{
     channel, endpoint, WebsocketChannelResult, WebsocketConnection,
 };
 use ipnetwork::IpNetwork;
-use nexus_db_queries::authz::ApiResource;
 use nexus_db_queries::db::lookup::ImageLookup;
 use nexus_db_queries::db::lookup::ImageParentLookup;
+use nexus_db_queries::{
+    authz::ApiResource, db::fixed_data::silo::INTERNAL_SILO_ID,
+};
 use nexus_types::external_api::params::ProjectSelector;
 use nexus_types::{
     external_api::views::{SledInstance, Switch},
@@ -1149,7 +1151,7 @@ async fn project_ip_pool_view(
             .await?;
         // TODO(2148): once we've actualy implemented filtering to pools belonging to
         // the specified project, we can remove this internal check.
-        if pool.internal {
+        if pool.silo_id == Some(*INTERNAL_SILO_ID) {
             return Err(authz_pool.not_found().into());
         }
         Ok(HttpResponseOk(IpPool::from(pool)))
@@ -1210,17 +1212,7 @@ async fn ip_pool_create(
     let pool_params = pool_params.into_inner();
     let handler = async {
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let silo_id = match pool_params.clone().silo {
-            Some(silo) => {
-                let (.., authz_silo) = nexus
-                    .silo_lookup(&opctx, silo)?
-                    .lookup_for(authz::Action::Read)
-                    .await?;
-                Some(authz_silo.id())
-            }
-            _ => None,
-        };
-        let pool = nexus.ip_pool_create(&opctx, &pool_params, silo_id).await?;
+        let pool = nexus.ip_pool_create(&opctx, &pool_params).await?;
         Ok(HttpResponseCreated(IpPool::from(pool)))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
