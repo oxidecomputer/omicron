@@ -7,7 +7,6 @@
 // TODO: REMOVE
 #![allow(dead_code)]
 
-use crate::host::znode::{FakeZpool, Znodes};
 use crate::types::dataset;
 use crate::{FakeChild, FakeExecutor, FakeExecutorBuilder};
 
@@ -22,7 +21,11 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::io::Read;
 use std::sync::{Arc, Mutex};
 
-mod znode;
+mod datasets;
+mod zpools;
+
+use datasets::Datasets;
+use zpools::{FakeZpool, Zpools};
 
 pub enum LinkType {
     Etherstub,
@@ -129,7 +132,8 @@ struct FakeHostInner {
     zones: HashMap<ZoneName, Zone>,
 
     vdevs: HashSet<Utf8PathBuf>,
-    znodes: Znodes,
+    datasets: Datasets,
+    zpools: Zpools,
     swap_devices: Vec<swapctl::SwapDevice>,
 
     processes: HashMap<u32, ProcessState>,
@@ -142,7 +146,8 @@ impl FakeHostInner {
             global: ZoneEnvironment::new(0),
             zones: HashMap::new(),
             vdevs: HashSet::new(),
-            znodes: Znodes::new(),
+            datasets: Datasets::new(),
+            zpools: Zpools::new(),
             swap_devices: vec![],
             processes: HashMap::new(),
         }
@@ -186,7 +191,7 @@ impl FakeHostInner {
                             }
                         }
 
-                        self.znodes
+                        self.datasets
                             .add_dataset(
                                 name.clone(),
                                 properties,
@@ -292,7 +297,7 @@ impl FakeHostInner {
                                     }
 
                                     let mut inner = inner.lock().unwrap();
-                                    match inner.znodes.add_dataset(
+                                    match inner.datasets.add_dataset(
                                         name,
                                         properties,
                                         dataset::Type::Volume,
@@ -306,7 +311,7 @@ impl FakeHostInner {
                             ));
                         }
 
-                        self.znodes
+                        self.datasets
                             .add_dataset(
                                 name.clone(),
                                 properties,
@@ -322,7 +327,7 @@ impl FakeHostInner {
                         force_unmount,
                         name,
                     } => {
-                        self.znodes
+                        self.datasets
                             .destroy_dataset(
                                 &name,
                                 recursive_dependents,
@@ -343,7 +348,7 @@ impl FakeHostInner {
                             let depth = if recursive { depth } else { Some(0) };
                             for dataset in datasets {
                                 let zix = self
-                                    .znodes
+                                    .datasets
                                     .index_of(dataset.as_str())
                                     .map_err(to_stderr)?;
                                 targets.push_back((zix, depth));
@@ -351,7 +356,7 @@ impl FakeHostInner {
                             targets
                         } else {
                             VecDeque::from([(
-                                self.znodes.root_index(),
+                                self.datasets.root_index(),
                                 depth.map(|d| d + 1),
                             )])
                         };
@@ -360,7 +365,7 @@ impl FakeHostInner {
 
                         while let Some((target, depth)) = targets.pop_front() {
                             let node = self
-                                .znodes
+                                .datasets
                                 .lookup_by_index(target)
                                 .expect(
                                 "We should have looked up the znode earlier...",
@@ -378,12 +383,12 @@ impl FakeHostInner {
                                 };
 
                             if add_children {
-                                for child in self.znodes.children(target) {
+                                for child in self.datasets.children(target) {
                                     targets.push_front((child, child_depth));
                                 }
                             }
 
-                            if target == self.znodes.root_index() {
+                            if target == self.datasets.root_index() {
                                 // Skip the root node, as there is nothing to
                                 // display for it.
                                 continue;
@@ -424,7 +429,7 @@ impl FakeHostInner {
 
                             for dataset in datasets {
                                 let zix = self
-                                    .znodes
+                                    .datasets
                                     .index_of(dataset.as_str())
                                     .map_err(to_stderr)?;
                                 targets.push_back((zix, depth));
@@ -435,7 +440,7 @@ impl FakeHostInner {
                             // Bump whatever the depth was up by one, since we
                             // don't display anything for the root node.
                             VecDeque::from([(
-                                self.znodes.root_index(),
+                                self.datasets.root_index(),
                                 depth.map(|d| d + 1),
                             )])
                         };
@@ -444,7 +449,7 @@ impl FakeHostInner {
 
                         while let Some((target, depth)) = targets.pop_front() {
                             let node = self
-                                .znodes
+                                .datasets
                                 .lookup_by_index(target)
                                 .expect(
                                 "We should have looked up the znode earlier...",
@@ -462,12 +467,12 @@ impl FakeHostInner {
                                 };
 
                             if add_children {
-                                for child in self.znodes.children(target) {
+                                for child in self.datasets.children(target) {
                                     targets.push_front((child, child_depth));
                                 }
                             }
 
-                            if target == self.znodes.root_index() {
+                            if target == self.datasets.root_index() {
                                 // Skip the root node, as there is nothing to
                                 // display for it.
                                 continue;
@@ -480,14 +485,14 @@ impl FakeHostInner {
                                     }
                                     dataset::Property::Type => {
                                         let node = self
-                                            .znodes
+                                            .datasets
                                             .lookup_by_index(target)
                                             .ok_or_else(|| {
                                                 to_stderr("Node not found")
                                             })?;
 
                                         output.push_str(
-                                            self.znodes
+                                            self.datasets
                                                 .type_str(node)
                                                 .map_err(to_stderr)?,
                                         )
@@ -509,7 +514,7 @@ impl FakeHostInner {
                         ))
                     }
                     Mount { load_keys, filesystem } => {
-                        self.znodes
+                        self.datasets
                             .mount(load_keys, &filesystem)
                             .map_err(to_stderr)?;
                         Ok(ProcessState::Completed(
@@ -539,14 +544,19 @@ impl FakeHostInner {
                         }
 
                         let import = true;
-                        self.znodes
-                            .add_zpool(pool.clone(), vdev.clone(), import)
+                        self.zpools
+                            .insert(
+                                &mut self.datasets,
+                                pool.clone(),
+                                vdev.clone(),
+                                import,
+                            )
                             .map_err(to_stderr)?;
 
                         Ok(ProcessState::Completed(Output::success()))
                     }
                     Export { pool: name } => {
-                        let Some(mut pool) = self.znodes.get_zpool_mut(&name) else {
+                        let Some(mut pool) = self.zpools.get_mut(&name) else {
                             return Err(to_stderr(format!("pool does not exist")));
                         };
 
@@ -559,7 +569,7 @@ impl FakeHostInner {
                         Ok(ProcessState::Completed(Output::success()))
                     }
                     Import { force: _, pool: name } => {
-                        let Some(mut pool) = self.znodes.get_zpool_mut(&name) else {
+                        let Some(mut pool) = self.zpools.get_mut(&name) else {
                             return Err(to_stderr(format!("pool does not exist")));
                         };
 
@@ -598,10 +608,8 @@ impl FakeHostInner {
 
                         if let Some(pools) = pools {
                             for name in &pools {
-                                let pool = self
-                                    .znodes
-                                    .get_zpool(name)
-                                    .ok_or_else(|| {
+                                let pool =
+                                    self.zpools.get(name).ok_or_else(|| {
                                         to_stderr(format!(
                                             "{} does not exist",
                                             name
@@ -618,7 +626,7 @@ impl FakeHostInner {
                                 display(&name, &pool, &properties)?;
                             }
                         } else {
-                            for (name, pool) in self.znodes.all_zpools() {
+                            for (name, pool) in self.zpools.all() {
                                 if pool.imported {
                                     display(&name, &pool, &properties)?;
                                 }
@@ -630,7 +638,7 @@ impl FakeHostInner {
                         ))
                     }
                     Set { property, value, pool: name } => {
-                        let Some(pool) = self.znodes.get_zpool_mut(&name) else {
+                        let Some(pool) = self.zpools.get_mut(&name) else {
                             return Err(to_stderr(format!("{} does not exist", name)));
                         };
                         pool.properties.insert(property, value);
@@ -764,7 +772,7 @@ impl swapctl::Swapctl for FakeHost {
             return Err(swapctl::Error::AddDevice { msg, path, start, length });
         };
 
-        if let Some(dataset) = inner.znodes.get_dataset(&volume) {
+        if let Some(dataset) = inner.datasets.get_dataset(&volume) {
             match dataset.ty() {
                 dataset::Type::Volume => (),
                 _ => {

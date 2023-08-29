@@ -2,42 +2,13 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Emulates zpools and datasets on an illumos system
+//! Emulates datasets
 
 use crate::types::dataset;
 
 use camino::Utf8PathBuf;
-use helios_fusion::zpool::{ZpoolHealth, ZpoolName};
 use petgraph::stable_graph::{StableGraph, WalkNeighbors};
 use std::collections::HashMap;
-use std::str::FromStr;
-
-pub(crate) struct FakeZpool {
-    zix: NodeIndex,
-    name: ZpoolName,
-    vdev: Utf8PathBuf,
-
-    pub imported: bool,
-    pub health: ZpoolHealth,
-    pub properties: HashMap<String, String>,
-}
-
-impl FakeZpool {
-    pub(crate) fn new(
-        zix: NodeIndex,
-        name: ZpoolName,
-        vdev: Utf8PathBuf,
-    ) -> Self {
-        Self {
-            zix,
-            name,
-            vdev,
-            imported: false,
-            health: ZpoolHealth::Online,
-            properties: HashMap::new(),
-        }
-    }
-}
 
 struct DatasetProperties(HashMap<dataset::Property, String>);
 
@@ -55,18 +26,18 @@ impl DatasetProperties {
 }
 
 pub(crate) struct FakeDataset {
-    zix: NodeIndex,
+    idx: NodeIndex,
     properties: DatasetProperties,
     ty: dataset::Type,
 }
 
 impl FakeDataset {
     fn new(
-        zix: NodeIndex,
+        idx: NodeIndex,
         properties: HashMap<dataset::Property, String>,
         ty: dataset::Type,
     ) -> Self {
-        Self { zix, properties: DatasetProperties(properties), ty }
+        Self { idx, properties: DatasetProperties(properties), ty }
     }
 
     pub fn ty(&self) -> dataset::Type {
@@ -114,7 +85,6 @@ impl FakeDataset {
 
 pub(crate) enum Znode {
     Root,
-    Zpool(ZpoolName),
     Dataset(dataset::Name),
 }
 
@@ -122,103 +92,68 @@ impl Znode {
     pub fn to_string(&self) -> String {
         match self {
             Znode::Root => "/".to_string(),
-            Znode::Zpool(name) => name.to_string(),
             Znode::Dataset(name) => name.as_str().to_string(),
         }
     }
 }
 
-/// The type of an index used to lookup nodes in the znode DAG.
+/// The type of an index used to lookup nodes in the DAG.
 pub(crate) type NodeIndex =
     petgraph::graph::NodeIndex<petgraph::graph::DefaultIx>;
 
 /// Describes access to zpools and datasets that exist within the system.
 ///
 /// On Helios, datasets exist as children of zpools, within a DAG structure.
-/// Understanding the relationship between these znodes (dubbed "znodes", to
-/// include both zpools and datasets) is important to accurately emulate
-/// many ZFS operations, such as deletion, which can conditionally succeed or
-/// fail depeending on the prescence of children.
-pub(crate) struct Znodes {
+/// Understanding the relationship between these datasets is important to
+/// accurately emulate many ZFS operations, such as deletion, which can
+/// conditionally succeed or fail depending on the prescence of children.
+pub(crate) struct Datasets {
     // Describes the connectivity between nodes
-    all_znodes: StableGraph<Znode, ()>,
-    zix_root: NodeIndex,
+    dataset_graph: StableGraph<Znode, ()>,
+    dataset_graph_root: NodeIndex,
 
     // Individual nodes themselves
-    zpools: HashMap<ZpoolName, FakeZpool>,
     datasets: HashMap<dataset::Name, FakeDataset>,
 }
 
-impl Znodes {
+impl Datasets {
     pub(crate) fn new() -> Self {
-        let mut all_znodes = StableGraph::new();
-        let zix_root = all_znodes.add_node(Znode::Root);
-        Self {
-            all_znodes,
-            zix_root,
-            zpools: HashMap::new(),
-            datasets: HashMap::new(),
-        }
+        let mut dataset_graph = StableGraph::new();
+        let dataset_graph_root = dataset_graph.add_node(Znode::Root);
+        Self { dataset_graph, dataset_graph_root, datasets: HashMap::new() }
     }
-
-    // Zpool access methods
-
-    pub fn get_zpool(&self, name: &ZpoolName) -> Option<&FakeZpool> {
-        self.zpools.get(name)
-    }
-
-    pub fn get_zpool_mut(
-        &mut self,
-        name: &ZpoolName,
-    ) -> Option<&mut FakeZpool> {
-        self.zpools.get_mut(name)
-    }
-
-    pub fn all_zpools(&self) -> impl Iterator<Item = (&ZpoolName, &FakeZpool)> {
-        self.zpools.iter()
-    }
-
-    // Dataset access methods
 
     pub fn get_dataset(&self, name: &dataset::Name) -> Option<&FakeDataset> {
         self.datasets.get(name)
     }
-
-    // Index-based access methods
 
     /// Returns the index of the "root" of the Znode DAG.
     ///
     /// This node does not actually exist, but the children of this node should
     /// be zpools.
     pub fn root_index(&self) -> NodeIndex {
-        self.zix_root
+        self.dataset_graph_root
     }
 
-    /// Returns the node index of a znode
+    /// Returns the node index of a dataset
     pub fn index_of(&self, name: &str) -> Result<NodeIndex, String> {
-        if !name.contains('/') {
-            if let Some(pool) = self.zpools.get(&ZpoolName::from_str(name)?) {
-                return Ok(pool.zix);
-            }
-        }
         if let Some(dataset) = self.datasets.get(&dataset::Name::new(name)?) {
-            return Ok(dataset.zix);
+            return Ok(dataset.idx);
         }
         Err(format!("{} not found", name))
     }
 
     /// Looks up a Znode by an index
     pub fn lookup_by_index(&self, index: NodeIndex) -> Option<&Znode> {
-        self.all_znodes.node_weight(index)
+        self.dataset_graph.node_weight(index)
     }
 
-    /// Describe the type of a znode by string
+    /// Describe the type of a dataset by string
     pub fn type_str(&self, node: &Znode) -> Result<&'static str, String> {
         match node {
             Znode::Root => {
                 Err("Invalid (root) node for type string".to_string())
             }
-            Znode::Zpool(_) => Ok("fileystem"),
             Znode::Dataset(name) => {
                 let dataset = self
                     .datasets
@@ -235,40 +170,19 @@ impl Znodes {
 
     pub fn children(
         &self,
-        zix: NodeIndex,
+        idx: NodeIndex,
     ) -> impl Iterator<Item = NodeIndex> + '_ {
-        self.all_znodes.neighbors_directed(zix, petgraph::Direction::Outgoing)
+        self.dataset_graph
+            .neighbors_directed(idx, petgraph::Direction::Outgoing)
     }
 
     pub fn children_mut(
         &self,
-        zix: NodeIndex,
+        idx: NodeIndex,
     ) -> WalkNeighbors<petgraph::graph::DefaultIx> {
-        self.all_znodes
-            .neighbors_directed(zix, petgraph::Direction::Outgoing)
+        self.dataset_graph
+            .neighbors_directed(idx, petgraph::Direction::Outgoing)
             .detach()
-    }
-
-    pub fn add_zpool(
-        &mut self,
-        name: ZpoolName,
-        vdev: Utf8PathBuf,
-        import: bool,
-    ) -> Result<(), String> {
-        if self.zpools.contains_key(&name) {
-            return Err(format!(
-                "Cannot create pool name '{name}': already exists"
-            ));
-        }
-
-        let zix = self.all_znodes.add_node(Znode::Zpool(name.clone()));
-        self.all_znodes.add_edge(self.zix_root, zix, ());
-
-        let mut pool = FakeZpool::new(zix, name.clone(), vdev);
-        pool.imported = import;
-        self.zpools.insert(name, pool);
-
-        Ok(())
     }
 
     pub fn add_dataset(
@@ -312,8 +226,8 @@ impl Znodes {
             return Err(format!("Cannot create '{}': No parent dataset. Try creating one under an existing filesystem or zpool?", name.as_str()));
         };
 
-        let parent_zix = self.index_of(parent)?;
-        if !self.all_znodes.contains_node(parent_zix) {
+        let parent_idx = self.index_of(parent)?;
+        if !self.dataset_graph.contains_node(parent_idx) {
             return Err(format!(
                 "Cannot create fs '{}': Missing parent node: {}",
                 name.as_str(),
@@ -321,9 +235,9 @@ impl Znodes {
             ));
         }
 
-        let zix = self.all_znodes.add_node(Znode::Dataset(name.clone()));
-        self.all_znodes.add_edge(parent_zix, zix, ());
-        self.datasets.insert(name, FakeDataset::new(zix, properties, ty));
+        let idx = self.dataset_graph.add_node(Znode::Dataset(name.clone()));
+        self.dataset_graph.add_edge(parent_idx, idx, ());
+        self.datasets.insert(name, FakeDataset::new(idx, properties, ty));
 
         Ok(())
     }
@@ -411,13 +325,13 @@ impl Znodes {
             dataset.unmount()?;
         }
 
-        let zix = dataset.zix;
+        let idx = dataset.idx;
 
-        let mut children = self.children_mut(zix);
-        while let Some(child_idx) = children.next_node(&self.all_znodes) {
+        let mut children = self.children_mut(idx);
+        while let Some(child_idx) = children.next_node(&self.dataset_graph) {
             let child_name = self
                 .lookup_by_index(child_idx)
-                .map(|znode| znode.to_string())
+                .map(|n| n.to_string())
                 .ok_or_else(|| format!("Child node missing name"))?;
             let child_name = dataset::Name::new(child_name)?;
 
@@ -431,7 +345,7 @@ impl Znodes {
                 force_unmount,
             )?;
         }
-        self.all_znodes.remove_node(zix);
+        self.dataset_graph.remove_node(idx);
         self.datasets.remove(&name);
 
         Ok(())
