@@ -72,19 +72,14 @@ impl DataStore {
         .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
-    /// Look up the default IP pool for a given scope, i.e., a given combination
-    /// of silo and project ID. If there is no default at a given scope, fall
-    /// back to the next level up. There should always be a default pool at the
-    /// fleet level, though this query can theoretically fail if someone is able
-    /// to delete that pool or make another one the default and delete that.
+    /// Look up the default IP pool for the current silo. If there is no default
+    /// at silo scope, fall back to the next level up, namely the fleet default.
+    /// There should always be a default pool at the fleet level, though this
+    /// query can theoretically fail if someone is able to delete that pool or
+    /// make another one the default and delete that.
     pub async fn ip_pools_fetch_default_for(
         &self,
         opctx: &OpContext,
-        // Optional primarily because there are test contexts where we don't
-        // care about the project. If project ID is None, we will only get back
-        // pools that themselves have no associated project, i.e., are fleet-
-        // scoped or silo-scoped.
-        project_id: Option<Uuid>,
     ) -> LookupResult<IpPool> {
         use db::schema::ip_pool::dsl;
 
@@ -101,22 +96,15 @@ impl DataStore {
 
         dsl::ip_pool
             .filter(dsl::silo_id.eq(authz_silo_id).or(dsl::silo_id.is_null()))
-            .filter(
-                dsl::project_id.eq(project_id).or(dsl::project_id.is_null()),
-            )
             .filter(dsl::is_default.eq(true))
             .filter(dsl::time_deleted.is_null())
             // this will sort by most specific first, i.e.,
             //
-            //   (silo, project)
-            //   (silo, null)
-            //   (null, null)
+            //   (silo)
+            //   (null)
             //
             // then by only taking the first result, we get the most specific one
-            .order((
-                dsl::project_id.asc().nulls_last(),
-                dsl::silo_id.asc().nulls_last(),
-            ))
+            .order(dsl::silo_id.asc().nulls_last())
             .select(IpPool::as_select())
             .first_async::<IpPool>(self.pool_authorized(opctx).await?)
             .await
@@ -128,7 +116,6 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         name: &Name,
-        project_id: Option<Uuid>,
     ) -> LookupResult<IpPool> {
         let authz_silo_id = opctx.authn.silo_required()?.id();
 
@@ -140,22 +127,11 @@ impl DataStore {
             .await?;
 
         // You can't look up a pool by name if it conflicts with your current
-        // scope, i.e., if it has a silo or project and those are different from
-        // your current silo or project
-
+        // scope, i.e., if it has a silo it is different from your current silo
         if let Some(pool_silo_id) = pool.silo_id {
             if pool_silo_id != authz_silo_id {
                 return Err(authz_pool.not_found());
             }
-        }
-
-        match (pool.project_id, project_id) {
-            (Some(pool_project_id), Some(current_project_id)) => {
-                if pool_project_id != current_project_id {
-                    return Err(authz_pool.not_found());
-                }
-            }
-            _ => {}
         }
 
         Ok(pool)
@@ -494,7 +470,6 @@ mod test {
     use nexus_types::identity::Resource;
     use omicron_common::api::external::{Error, IdentityMetadataCreateParams};
     use omicron_test_utils::dev;
-    use uuid::Uuid;
 
     #[tokio::test]
     async fn test_default_ip_pools() {
@@ -502,18 +477,14 @@ mod test {
         let mut db = test_setup_database(&logctx.log).await;
         let (opctx, datastore) = datastore_test(&logctx, &db).await;
 
-        // it doesn't matter whether the project exists
-        let project_id = Uuid::new_v4();
-
         // we start out with the default fleet-level pool already created,
         // so when we ask for a default silo, we get it back
         let fleet_default_pool =
-            datastore.ip_pools_fetch_default_for(&opctx, None).await.unwrap();
+            datastore.ip_pools_fetch_default_for(&opctx).await.unwrap();
 
         assert_eq!(fleet_default_pool.identity.name.as_str(), "default");
         assert!(fleet_default_pool.is_default);
         assert_eq!(fleet_default_pool.silo_id, None);
-        assert_eq!(fleet_default_pool.project_id, None);
 
         // unique index prevents second fleet-level default
         let identity = IdentityMetadataCreateParams {
@@ -529,17 +500,8 @@ mod test {
             .expect_err("Failed to fail to create a second default fleet pool");
         assert_matches!(err, Error::ObjectAlreadyExists { .. });
 
-        // now the interesting thing is that when we fetch the default pool for
-        // a particular silo or a particular project, if those scopes do not
+        // when we fetch the default pool for a silo, if those scopes do not
         // have a default IP pool, we will still get back the fleet default
-
-        // default for passed in project is still the fleet default one because it
-        // has no default of its own
-        let ip_pool = datastore
-            .ip_pools_fetch_default_for(&opctx, Some(project_id))
-            .await
-            .expect("Failed to get silo's default IP pool");
-        assert_eq!(ip_pool.id(), fleet_default_pool.id());
 
         let silo_id = opctx.authn.silo_required().unwrap().id();
 
@@ -555,17 +517,12 @@ mod test {
             )
             .await;
 
-        // because that one was not a default, when we ask for silo or project default
+        // because that one was not a default, when we ask for the silo default
         // pool, we still get the fleet default
         let ip_pool = datastore
-            .ip_pools_fetch_default_for(&opctx, None)
+            .ip_pools_fetch_default_for(&opctx)
             .await
             .expect("Failed to get silo default IP pool");
-        assert_eq!(ip_pool.id(), fleet_default_pool.id());
-        let ip_pool = datastore
-            .ip_pools_fetch_default_for(&opctx, Some(project_id))
-            .await
-            .expect("Failed to get project default IP pool");
         assert_eq!(ip_pool.id(), fleet_default_pool.id());
 
         // now create a default pool for the silo
@@ -579,18 +536,14 @@ mod test {
 
         // now when we ask for the default pool, we get the one we just made
         let ip_pool = datastore
-            .ip_pools_fetch_default_for(&opctx, Some(project_id))
+            .ip_pools_fetch_default_for(&opctx)
             .await
             .expect("Failed to get silo's default IP pool");
         assert_eq!(ip_pool.name().as_str(), "default-for-silo");
 
         // if we ask for the fleet default by name, we can still get that one
         let ip_pool = datastore
-            .ip_pools_fetch_for(
-                &opctx,
-                &Name("default".parse().unwrap()),
-                Some(project_id),
-            )
+            .ip_pools_fetch_for(&opctx, &Name("default".parse().unwrap()))
             .await
             .expect("Failed to get fleet default IP pool");
         assert_eq!(ip_pool.id(), fleet_default_pool.id());

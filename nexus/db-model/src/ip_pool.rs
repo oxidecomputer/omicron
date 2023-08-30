@@ -40,14 +40,8 @@ pub struct IpPool {
     /// for this is  associating a pool with the internal silo oxide-internal,
     /// which is used for internal services. If there is no silo ID, the
     /// pool is considered a fleet-wide pool and will be used for allocating
-    /// instance IPs in silos that don't have their own pool. Must be non-
-    /// null if project_id is non-null (this is enforced as a DB constraint).
-    /// When project_id is non-null, silo_id will (naturally) be the ID of the
-    /// project's silo.
+    /// instance IPs in silos that don't have their own pool.
     pub silo_id: Option<Uuid>,
-
-    /// Project, if IP pool is associated with a particular project
-    pub project_id: Option<Uuid>,
 
     pub is_default: bool,
 }
@@ -65,7 +59,6 @@ impl IpPool {
             ),
             rcgen: 0,
             silo_id,
-            project_id: None,
             is_default,
         }
     }

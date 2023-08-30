@@ -454,7 +454,6 @@ table! {
         time_deleted -> Nullable<Timestamptz>,
         rcgen -> Int8,
         silo_id -> Nullable<Uuid>,
-        project_id -> Nullable<Uuid>,
         is_default -> Bool,
     }
 }

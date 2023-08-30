@@ -12,7 +12,9 @@ SELECT CAST(
 );
 
 ALTER TABLE omicron.public.ip_pool
+    DROP COLUMN IF EXISTS project_id,
     ADD COLUMN IF NOT EXISTS is_default BOOLEAN NOT NULL DEFAULT FALSE,
+    DROP CONSTRAINT IF EXISTS project_implies_silo,
     DROP CONSTRAINT IF EXISTS internal_pools_have_null_silo_and_project;
 
 COMMIT;
@@ -33,8 +35,7 @@ SELECT CAST(
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS one_default_pool_per_scope ON omicron.public.ip_pool (
-    COALESCE(silo_id, '00000000-0000-0000-0000-000000000000'::uuid), 
-    COALESCE(project_id, '00000000-0000-0000-0000-000000000000'::uuid) 
+    COALESCE(silo_id, '00000000-0000-0000-0000-000000000000'::uuid) 
 ) WHERE
     is_default = true AND time_deleted IS NULL;
 
