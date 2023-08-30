@@ -1483,7 +1483,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.ip_pool (
     /* The collection's child-resource generation number */
     rcgen INT8 NOT NULL,
 
-    "default" BOOLEAN NOT NULL DEFAULT FALSE,
+    is_default BOOLEAN NOT NULL DEFAULT FALSE,
 
     /*
      * Fields representating association with a silo or project. silo_id must
@@ -1508,7 +1508,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS one_default_pool_per_scope ON omicron.public.i
     COALESCE(silo_id, '00000000-0000-0000-0000-000000000000'::uuid), 
     COALESCE(project_id, '00000000-0000-0000-0000-000000000000'::uuid) 
 ) WHERE
-    "default" = true AND time_deleted IS NULL;
+    is_default = true AND time_deleted IS NULL;
 
 /*
  * Index ensuring uniqueness of IP Pool names, globally.

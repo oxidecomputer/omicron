@@ -736,7 +736,8 @@ pub struct IpPoolCreate {
     /// silo can draw from that pool.
     pub silo: Option<NameOrId>,
 
-    pub default: bool,
+    #[serde(default)]
+    pub is_default: bool,
 }
 
 /// Parameters for updating an IP Pool

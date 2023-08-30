@@ -104,7 +104,7 @@ async fn test_ip_pool_basic_crud(cptestctx: &ControlPlaneTestContext) {
             description: String::from(description),
         },
         silo: None,
-        default: false,
+        is_default: false,
     };
     let created_pool: IpPool =
         NexusRequest::objects_post(client, ip_pools_url, &params)
@@ -284,7 +284,7 @@ async fn test_ip_pool_with_silo(cptestctx: &ControlPlaneTestContext) {
             description: String::from(""),
         },
         silo: Some(NameOrId::Name(cptestctx.silo_name.clone())),
-        default: false,
+        is_default: false,
     };
     let created_pool = create_pool(client, &params).await;
     assert_eq!(created_pool.identity.name, "p0");
@@ -299,7 +299,7 @@ async fn test_ip_pool_with_silo(cptestctx: &ControlPlaneTestContext) {
             description: String::from(""),
         },
         silo: Some(NameOrId::Id(silo_id)),
-        default: false,
+        is_default: false,
     };
     let created_pool = create_pool(client, &params).await;
     assert_eq!(created_pool.identity.name, "p1");
@@ -314,7 +314,7 @@ async fn test_ip_pool_with_silo(cptestctx: &ControlPlaneTestContext) {
         silo: Some(NameOrId::Name(
             String::from("not-a-thing").parse().unwrap(),
         )),
-        default: false,
+        is_default: false,
     };
     let error: HttpErrorResponseBody = NexusRequest::new(
         RequestBuilder::new(client, Method::POST, "/v1/system/ip-pools")
@@ -373,7 +373,7 @@ async fn test_ip_pool_range_overlapping_ranges_fails(
             description: String::from(description),
         },
         silo: None,
-        default: false,
+        is_default: false,
     };
     let created_pool: IpPool =
         NexusRequest::objects_post(client, ip_pools_url, &params)
@@ -556,7 +556,7 @@ async fn test_ip_pool_range_pagination(cptestctx: &ControlPlaneTestContext) {
             description: String::from(description),
         },
         silo: None,
-        default: false,
+        is_default: false,
     };
     let created_pool: IpPool =
         NexusRequest::objects_post(client, ip_pools_url, &params)
@@ -694,7 +694,7 @@ async fn test_ip_pool_list_usable_by_project(
             description: String::from("right on cue"),
         },
         silo: None,
-        default: false,
+        is_default: false,
     };
     NexusRequest::objects_post(client, ip_pools_url, &params)
         .authn_as(AuthnMode::PrivilegedUser)

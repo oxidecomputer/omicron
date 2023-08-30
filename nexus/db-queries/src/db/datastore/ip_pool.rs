@@ -91,7 +91,7 @@ impl DataStore {
             .filter(
                 dsl::project_id.eq(project_id).or(dsl::project_id.is_null()),
             )
-            .filter(dsl::default.eq(true))
+            .filter(dsl::is_default.eq(true))
             .filter(dsl::time_deleted.is_null())
             // this will sort by most specific first, i.e.,
             //
@@ -479,7 +479,7 @@ mod test {
             .unwrap();
 
         assert_eq!(fleet_default_pool.identity.name.as_str(), "default");
-        assert!(fleet_default_pool.default);
+        assert!(fleet_default_pool.is_default);
         assert_eq!(fleet_default_pool.silo_id, None);
         assert_eq!(fleet_default_pool.project_id, None);
 

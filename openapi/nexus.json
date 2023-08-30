@@ -10169,11 +10169,12 @@
         "description": "Create-time parameters for an `IpPool`",
         "type": "object",
         "properties": {
-          "default": {
-            "type": "boolean"
-          },
           "description": {
             "type": "string"
+          },
+          "is_default": {
+            "default": false,
+            "type": "boolean"
           },
           "name": {
             "$ref": "#/components/schemas/Name"
@@ -10189,7 +10190,6 @@
           }
         },
         "required": [
-          "default",
           "description",
           "name"
         ]

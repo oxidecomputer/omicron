@@ -456,7 +456,7 @@ lazy_static! {
             },
             silo: None,
             // TODO: this might error due to the unique index
-            default: true,
+            is_default: true,
         };
     pub static ref DEMO_IP_POOL_PROJ_URL: String =
         format!("/v1/ip-pools/{}?project={}", *DEMO_IP_POOL_NAME, *DEMO_PROJECT_NAME);

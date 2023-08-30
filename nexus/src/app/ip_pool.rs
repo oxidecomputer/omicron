@@ -69,7 +69,7 @@ impl super::Nexus {
         let pool = db::model::IpPool::new(
             &pool_params.identity,
             silo_id,
-            pool_params.default,
+            pool_params.is_default,
         );
         self.db_datastore.ip_pool_create(opctx, pool).await
     }

@@ -19,7 +19,7 @@ UPDATE omicron.public.ip_pool
     WHERE internal = true and time_deleted is null;
 
 UPDATE omicron.public.ip_pool
-    SET "default" = true
+    SET is_default = true
     WHERE name = 'default' and time_deleted is null;
 
 COMMIT;
