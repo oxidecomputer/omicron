@@ -102,6 +102,43 @@ struct Zone {
     environment: ZoneEnvironment,
 }
 
+// A context parameter which is passed between subcommands.
+//
+// Mostly used to simplify argument passing.
+struct ProcessContext<'a> {
+    host: &'a Arc<Mutex<FakeHostInner>>,
+    child: &'a mut FakeChild,
+}
+
+impl<'a> ProcessContext<'a> {
+    fn new(
+        host: &'a Arc<Mutex<FakeHostInner>>,
+        child: &'a mut FakeChild,
+    ) -> Self {
+        Self { host, child }
+    }
+
+    // Spawns a thread which waits for stdin to be fully written, then executes
+    // a user-supplied function.
+    fn read_all_stdin_and_then<
+        F: FnOnce(Vec<u8>) -> Output + Send + 'static,
+    >(
+        &self,
+        f: F,
+    ) -> ProcessState {
+        let mut stdin = self.child.stdin().take_reader();
+        ProcessState::Executing(std::thread::spawn(move || {
+            let mut buf = Vec::new();
+            if let Err(err) = stdin.read_to_end(&mut buf) {
+                return Output::failure()
+                    .set_stderr(format!("Cannot read from stdin: {err}"));
+            }
+
+            f(buf)
+        }))
+    }
+}
+
 // A "process", which is either currently executing or completed.
 //
 // It's up to the caller to check-in on an "executing" process
@@ -153,12 +190,11 @@ impl FakeHostInner {
         }
     }
 
-    fn run(
+    fn run_process(
         &mut self,
-        inner: &Arc<Mutex<FakeHostInner>>,
-        child: &mut FakeChild,
+        context: ProcessContext<'_>,
     ) -> Result<ProcessState, Output> {
-        let input = Input::from(child.command());
+        let input = Input::from(context.child.command());
 
         let cmd = crate::cli::Command::try_from(input).map_err(to_stderr)?;
         // TODO: Pick the right zone, act on it.
@@ -172,475 +208,435 @@ impl FakeHostInner {
 
         use crate::cli::KnownCommand::*;
         match cmd.as_cmd() {
-            Zfs(zfs_cmd) => {
-                use crate::cli::zfs::Command::*;
-                if zone.is_some() {
-                    return Err(to_stderr(
-                        "Not Supported: 'zfs' commands within zone",
-                    ));
-                }
-                match zfs_cmd {
-                    CreateFilesystem { properties, name } => {
-                        for property in properties.keys() {
-                            if property.access()
-                                == dataset::PropertyAccess::ReadOnly
-                            {
-                                return Err(to_stderr(
-                                    "Not supported: {property} is a read-only property",
-                                ));
-                            }
-                        }
+            Zfs(cmd) => self.run_zfs(context, cmd, zone),
+            Zpool(cmd) => self.run_zpool(context, cmd, zone),
+            _ => todo!(),
+        }
+    }
 
-                        self.datasets
-                            .add_dataset(
-                                DatasetInsert::WithParent(name.clone()),
-                                properties,
-                                dataset::Type::Filesystem,
-                            )
-                            .map_err(to_stderr)?;
-
-                        Ok(ProcessState::Completed(
-                            Output::success().set_stdout(format!(
-                                "Created {} successfully\n",
-                                name.as_str()
-                            )),
-                        ))
+    fn run_zfs(
+        &mut self,
+        context: ProcessContext<'_>,
+        cmd: crate::cli::zfs::Command,
+        zone: Option<ZoneName>,
+    ) -> Result<ProcessState, Output> {
+        use crate::cli::zfs::Command::*;
+        if zone.is_some() {
+            return Err(to_stderr("Not Supported: 'zfs' commands within zone"));
+        }
+        match cmd {
+            CreateFilesystem { properties, name } => {
+                for property in properties.keys() {
+                    if property.access() == dataset::PropertyAccess::ReadOnly {
+                        return Err(to_stderr(
+                            "Not supported: {property} is a read-only property",
+                        ));
                     }
-                    CreateVolume {
-                        mut properties,
-                        sparse,
-                        blocksize,
-                        size,
-                        name,
-                    } => {
-                        for property in properties.keys() {
-                            if property.access()
-                                == dataset::PropertyAccess::ReadOnly
-                            {
-                                return Err(to_stderr(
-                                    "Not supported: {property} is a read-only property",
-                                ));
+                }
+
+                self.datasets
+                    .add_dataset(
+                        DatasetInsert::WithParent(name.clone()),
+                        properties,
+                        dataset::Type::Filesystem,
+                    )
+                    .map_err(to_stderr)?;
+
+                Ok(ProcessState::Completed(Output::success().set_stdout(
+                    format!("Created {} successfully\n", name.as_str()),
+                )))
+            }
+            CreateVolume { mut properties, sparse, blocksize, size, name } => {
+                for property in properties.keys() {
+                    if property.access() == dataset::PropertyAccess::ReadOnly {
+                        return Err(to_stderr(
+                            "Not supported: {property} is a read-only property",
+                        ));
+                    }
+                }
+
+                let blocksize = blocksize.unwrap_or(8192);
+                if sparse {
+                    properties.insert(
+                        dataset::Property::Reservation,
+                        "0".to_string(),
+                    );
+                } else {
+                    // NOTE: This isn't how much metadata is used, but it's
+                    // a number we can use that represents "this is larger than
+                    // the usable size of the volume".
+                    //
+                    // See:
+                    //
+                    // $ zfs get -Hp used,volsize,refreservation <ZPOOL>
+                    //
+                    // For any non-sparse zpool.
+                    let reserved_size = size + (8 << 20);
+                    properties.insert(
+                        dataset::Property::Reservation,
+                        reserved_size.to_string(),
+                    );
+                }
+                properties.insert(
+                    dataset::Property::Volblocksize,
+                    blocksize.to_string(),
+                );
+                properties.insert(dataset::Property::Volsize, size.to_string());
+
+                let mut keylocation = None;
+                let mut keysize = 0;
+
+                for (k, v) in &properties {
+                    match k {
+                        dataset::Property::Keylocation => {
+                            keylocation = Some(v.to_string())
+                        }
+                        dataset::Property::Encryption => match v.as_str() {
+                            "aes-256-gcm" => keysize = 32,
+                            _ => {
+                                return Err(Output::failure()
+                                    .set_stderr("Unsupported encryption"))
                             }
-                        }
+                        },
+                        _ => (),
+                    }
+                }
 
-                        let blocksize = blocksize.unwrap_or(8192);
-                        if sparse {
-                            properties.insert(
-                                dataset::Property::Reservation,
-                                "0".to_string(),
-                            );
-                        } else {
-                            // NOTE: This isn't how much metadata is used, but it's
-                            // a number we can use that represents "this is larger than
-                            // the usable size of the volume".
-                            //
-                            // See:
-                            //
-                            // $ zfs get -Hp used,volsize,refreservation <ZPOOL>
-                            //
-                            // For any non-sparse zpool.
-                            let reserved_size = size + (8 << 20);
-                            properties.insert(
-                                dataset::Property::Reservation,
-                                reserved_size.to_string(),
-                            );
-                        }
-                        properties.insert(
-                            dataset::Property::Volblocksize,
-                            blocksize.to_string(),
-                        );
-                        properties.insert(
-                            dataset::Property::Volsize,
-                            size.to_string(),
-                        );
+                let inner = context.host.clone();
+                let add_dataset = move || {
+                    let mut inner = inner.lock().unwrap();
+                    match inner.datasets.add_dataset(
+                        DatasetInsert::WithParent(name),
+                        properties,
+                        dataset::Type::Volume,
+                    ) {
+                        Ok(()) => Output::success(),
+                        Err(err) => Output::failure().set_stderr(err),
+                    }
+                };
 
-                        let mut keylocation = None;
-                        let mut keysize = 0;
-
-                        for (k, v) in &properties {
-                            match k {
-                                dataset::Property::Keylocation => {
-                                    keylocation = Some(v.as_str())
-                                }
-                                dataset::Property::Encryption => {
-                                    match v.as_str() {
-                                        "aes-256-gcm" => keysize = 32,
-                                        _ => {
-                                            return Err(Output::failure()
-                                                .set_stderr(
-                                                    "Unsupported encryption",
-                                                ))
-                                        }
-                                    }
-                                }
-                                _ => (),
-                            }
-                        }
-
-                        if keylocation == Some("file:///dev/stdin")
-                            && keysize > 0
-                        {
-                            let inner = inner.clone();
-                            let mut stdin = child.stdin().clone();
-                            return Ok(ProcessState::Executing(
-                                std::thread::spawn(move || {
-                                    let mut secret =
-                                        Vec::with_capacity(keysize);
-                                    if let Err(err) =
-                                        stdin.read_exact(&mut secret)
-                                    {
-                                        return Output::failure().set_stderr(
-                                            format!(
-                                                "Cannot read from stdin: {err}"
-                                            ),
-                                        );
-                                    }
-
-                                    let mut inner = inner.lock().unwrap();
-                                    match inner.datasets.add_dataset(
-                                        DatasetInsert::WithParent(name),
-                                        properties,
-                                        dataset::Type::Volume,
-                                    ) {
-                                        Ok(()) => Output::success(),
-                                        Err(err) => {
-                                            Output::failure().set_stderr(err)
-                                        }
-                                    }
-                                }),
+                if keylocation.as_deref() == Some("file:///dev/stdin") {
+                    return Ok(context.read_all_stdin_and_then(move |input| {
+                        if input.len() != keysize {
+                            return Output::failure().set_stderr(format!(
+                                "Bad key length: {}",
+                                input.len()
                             ));
                         }
-
-                        self.datasets
-                            .add_dataset(
-                                DatasetInsert::WithParent(name),
-                                properties,
-                                dataset::Type::Volume,
-                            )
-                            .map_err(to_stderr)?;
-
-                        Ok(ProcessState::Completed(Output::success()))
-                    }
-                    Destroy {
+                        add_dataset()
+                    }));
+                }
+                Ok(ProcessState::Completed(add_dataset()))
+            }
+            Destroy {
+                recursive_dependents,
+                recursive_children,
+                force_unmount,
+                name,
+            } => {
+                self.datasets
+                    .destroy(
+                        &name,
                         recursive_dependents,
                         recursive_children,
                         force_unmount,
-                        name,
-                    } => {
-                        self.datasets
-                            .destroy(
-                                &name,
-                                recursive_dependents,
-                                recursive_children,
-                                force_unmount,
-                            )
-                            .map_err(to_stderr)?;
+                    )
+                    .map_err(to_stderr)?;
 
-                        Ok(ProcessState::Completed(
-                            Output::success()
-                                .set_stdout(format!("{} destroyed", name)),
-                        ))
-                    }
-                    Get { recursive, depth, fields, properties, datasets } => {
-                        let mut targets = if let Some(datasets) = datasets {
-                            let mut targets = VecDeque::new();
-
-                            let depth = if recursive { depth } else { Some(0) };
-                            for dataset in datasets {
-                                let zix = self
-                                    .datasets
-                                    .index_of(dataset.as_str())
-                                    .map_err(to_stderr)?;
-                                targets.push_back((zix, depth));
-                            }
-                            targets
-                        } else {
-                            VecDeque::from([(
-                                self.datasets.root_index(),
-                                depth.map(|d| d + 1),
-                            )])
-                        };
-
-                        let mut output = String::new();
-
-                        while let Some((target, depth)) = targets.pop_front() {
-                            let node = self
-                                .datasets
-                                .lookup_by_index(target)
-                                .expect(
-                                "We should have looked up the dataset earlier...",
-                            );
-
-                            let (add_children, child_depth) =
-                                if let Some(depth) = depth {
-                                    if depth > 0 {
-                                        (true, Some(depth - 1))
-                                    } else {
-                                        (false, None)
-                                    }
-                                } else {
-                                    (true, None)
-                                };
-
-                            if add_children {
-                                for child in self.datasets.children(target) {
-                                    targets.push_front((child, child_depth));
-                                }
-                            }
-
-                            if target == self.datasets.root_index() {
-                                // Skip the root node, as there is nothing to
-                                // display for it.
-                                continue;
-                            }
-
-                            for property in &properties {
-                                for field in &fields {
-                                    match field.as_str() {
-                                        "name" => {
-                                            output.push_str(&node.to_string())
-                                        }
-                                        "property" => output
-                                            .push_str(&property.to_string()),
-                                        "value" => {
-                                            // TODO: Look up, across whatever
-                                            // the node type is.
-                                            todo!();
-                                        }
-                                        f => {
-                                            return Err(to_stderr(format!(
-                                                "Unknown field: {f}"
-                                            )))
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        todo!();
-                    }
-                    List { recursive, depth, properties, datasets } => {
-                        let mut targets = if let Some(datasets) = datasets {
-                            let mut targets = VecDeque::new();
-
-                            // If we explicitly request datasets, only return
-                            // information for the exact matches, unless a
-                            // recursive walk was requested.
-                            let depth = if recursive { depth } else { Some(0) };
-
-                            for dataset in datasets {
-                                let zix = self
-                                    .datasets
-                                    .index_of(dataset.as_str())
-                                    .map_err(to_stderr)?;
-                                targets.push_back((zix, depth));
-                            }
-
-                            targets
-                        } else {
-                            // Bump whatever the depth was up by one, since we
-                            // don't display anything for the root node.
-                            VecDeque::from([(
-                                self.datasets.root_index(),
-                                depth.map(|d| d + 1),
-                            )])
-                        };
-
-                        let mut output = String::new();
-
-                        while let Some((target, depth)) = targets.pop_front() {
-                            let (add_children, child_depth) =
-                                if let Some(depth) = depth {
-                                    if depth > 0 {
-                                        (true, Some(depth - 1))
-                                    } else {
-                                        (false, None)
-                                    }
-                                } else {
-                                    (true, None)
-                                };
-
-                            if add_children {
-                                for child in self.datasets.children(target) {
-                                    targets.push_front((child, child_depth));
-                                }
-                            }
-
-                            if target == self.datasets.root_index() {
-                                // Skip the root node, as there is nothing to
-                                // display for it.
-                                continue;
-                            }
-                            let dataset_name = self
-                                .datasets
-                                .lookup_by_index(target)
-                                .expect("We should have looked up this node earlier...")
-                                .dataset_name()
-                                .expect("Cannot access name");
-
-                            let dataset = self
-                                .datasets
-                                .get_dataset(&dataset_name)
-                                .expect("Cannot access dataset");
-
-                            for property in &properties {
-                                let value = dataset
-                                    .properties()
-                                    .get(*property)
-                                    .map_err(|err| to_stderr(err))?;
-
-                                output.push_str(&value);
-                                output.push_str("\t");
-                            }
-                            output.push_str("\n");
-                        }
-
-                        Ok(ProcessState::Completed(
-                            Output::success().set_stdout(output),
-                        ))
-                    }
-                    Mount { load_keys, filesystem } => {
-                        self.datasets
-                            .mount(load_keys, &filesystem)
-                            .map_err(to_stderr)?;
-                        Ok(ProcessState::Completed(
-                            Output::success()
-                                .set_stdout(format!("{} mounted", filesystem)),
-                        ))
-                    }
-                    Set { properties, name } => {
-                        // TODO
-                        todo!("Calling zfs set with properties: {properties:?} on '{name}', not implemented");
-                    }
-                }
+                Ok(ProcessState::Completed(
+                    Output::success().set_stdout(format!("{} destroyed", name)),
+                ))
             }
-            Zpool(zpool_cmd) => {
-                use crate::cli::zpool::Command::*;
-                if zone.is_some() {
-                    return Err(to_stderr(
-                        "Not Supported: 'zpool' commands within zone",
-                    ));
-                }
-                match zpool_cmd {
-                    Create { pool, vdev } => {
-                        if !self.vdevs.contains(&vdev) {
-                            return Err(to_stderr(format!(
-                                "Cannot create zpool: device '{vdev}' does not exist"
-                            )));
-                        }
+            Get { recursive, depth, fields, properties, datasets } => {
+                let mut targets = if let Some(datasets) = datasets {
+                    let mut targets = VecDeque::new();
 
-                        let import = true;
-                        self.zpools
-                            .insert(pool.clone(), vdev.clone(), import)
+                    let depth = if recursive { depth } else { Some(0) };
+                    for dataset in datasets {
+                        let zix = self
+                            .datasets
+                            .index_of(dataset.as_str())
                             .map_err(to_stderr)?;
-
-                        let mut dataset_properties = HashMap::new();
-                        dataset_properties.insert(
-                            dataset::Property::Mountpoint,
-                            format!("/{pool}"),
-                        );
-                        self.datasets
-                            .add_dataset(
-                                DatasetInsert::WithoutParent(pool),
-                                dataset_properties,
-                                dataset::Type::Filesystem,
-                            )
-                            .expect(
-                                "Failed to add dataset after creating zpool",
-                            );
-                        Ok(ProcessState::Completed(Output::success()))
+                        targets.push_back((zix, depth));
                     }
-                    Export { pool: name } => {
-                        let Some(mut pool) = self.zpools.get_mut(&name) else {
-                            return Err(to_stderr(format!("pool does not exist")));
-                        };
+                    targets
+                } else {
+                    VecDeque::from([(
+                        self.datasets.root_index(),
+                        depth.map(|d| d + 1),
+                    )])
+                };
+
+                let mut output = String::new();
+
+                while let Some((target, depth)) = targets.pop_front() {
+                    let node = self.datasets.lookup_by_index(target).expect(
+                        "We should have looked up the dataset earlier...",
+                    );
+
+                    let (add_children, child_depth) = if let Some(depth) = depth
+                    {
+                        if depth > 0 {
+                            (true, Some(depth - 1))
+                        } else {
+                            (false, None)
+                        }
+                    } else {
+                        (true, None)
+                    };
+
+                    if add_children {
+                        for child in self.datasets.children(target) {
+                            targets.push_front((child, child_depth));
+                        }
+                    }
+
+                    if target == self.datasets.root_index() {
+                        // Skip the root node, as there is nothing to
+                        // display for it.
+                        continue;
+                    }
+
+                    for property in &properties {
+                        for field in &fields {
+                            match field.as_str() {
+                                "name" => output.push_str(&node.to_string()),
+                                "property" => {
+                                    output.push_str(&property.to_string())
+                                }
+                                "value" => {
+                                    // TODO: Look up, across whatever
+                                    // the node type is.
+                                    todo!();
+                                }
+                                f => {
+                                    return Err(to_stderr(format!(
+                                        "Unknown field: {f}"
+                                    )))
+                                }
+                            }
+                        }
+                    }
+                }
+                todo!();
+            }
+            List { recursive, depth, properties, datasets } => {
+                let mut targets = if let Some(datasets) = datasets {
+                    let mut targets = VecDeque::new();
+
+                    // If we explicitly request datasets, only return
+                    // information for the exact matches, unless a
+                    // recursive walk was requested.
+                    let depth = if recursive { depth } else { Some(0) };
+
+                    for dataset in datasets {
+                        let zix = self
+                            .datasets
+                            .index_of(dataset.as_str())
+                            .map_err(to_stderr)?;
+                        targets.push_back((zix, depth));
+                    }
+
+                    targets
+                } else {
+                    // Bump whatever the depth was up by one, since we
+                    // don't display anything for the root node.
+                    VecDeque::from([(
+                        self.datasets.root_index(),
+                        depth.map(|d| d + 1),
+                    )])
+                };
+
+                let mut output = String::new();
+
+                while let Some((target, depth)) = targets.pop_front() {
+                    let (add_children, child_depth) = if let Some(depth) = depth
+                    {
+                        if depth > 0 {
+                            (true, Some(depth - 1))
+                        } else {
+                            (false, None)
+                        }
+                    } else {
+                        (true, None)
+                    };
+
+                    if add_children {
+                        for child in self.datasets.children(target) {
+                            targets.push_front((child, child_depth));
+                        }
+                    }
+
+                    if target == self.datasets.root_index() {
+                        // Skip the root node, as there is nothing to
+                        // display for it.
+                        continue;
+                    }
+                    let dataset_name = self
+                        .datasets
+                        .lookup_by_index(target)
+                        .expect("We should have looked up this node earlier...")
+                        .dataset_name()
+                        .expect("Cannot access name");
+
+                    let dataset = self
+                        .datasets
+                        .get_dataset(&dataset_name)
+                        .expect("Cannot access dataset");
+
+                    for property in &properties {
+                        let value = dataset
+                            .properties()
+                            .get(*property)
+                            .map_err(|err| to_stderr(err))?;
+
+                        output.push_str(&value);
+                        output.push_str("\t");
+                    }
+                    output.push_str("\n");
+                }
+
+                Ok(ProcessState::Completed(
+                    Output::success().set_stdout(output),
+                ))
+            }
+            Mount { load_keys, filesystem } => {
+                self.datasets
+                    .mount(load_keys, &filesystem)
+                    .map_err(to_stderr)?;
+                Ok(ProcessState::Completed(
+                    Output::success()
+                        .set_stdout(format!("{} mounted", filesystem)),
+                ))
+            }
+            Set { properties, name } => {
+                // TODO
+                todo!("Calling zfs set with properties: {properties:?} on '{name}', not implemented");
+            }
+        }
+    }
+
+    fn run_zpool(
+        &mut self,
+        _context: ProcessContext<'_>,
+        cmd: crate::cli::zpool::Command,
+        zone: Option<ZoneName>,
+    ) -> Result<ProcessState, Output> {
+        use crate::cli::zpool::Command::*;
+        if zone.is_some() {
+            return Err(to_stderr(
+                "Not Supported: 'zpool' commands within zone",
+            ));
+        }
+        match cmd {
+            Create { pool, vdev } => {
+                if !self.vdevs.contains(&vdev) {
+                    return Err(to_stderr(format!(
+                        "Cannot create zpool: device '{vdev}' does not exist"
+                    )));
+                }
+
+                let import = true;
+                self.zpools
+                    .insert(pool.clone(), vdev.clone(), import)
+                    .map_err(to_stderr)?;
+
+                let mut dataset_properties = HashMap::new();
+                dataset_properties
+                    .insert(dataset::Property::Mountpoint, format!("/{pool}"));
+                self.datasets
+                    .add_dataset(
+                        DatasetInsert::WithoutParent(pool),
+                        dataset_properties,
+                        dataset::Type::Filesystem,
+                    )
+                    .expect("Failed to add dataset after creating zpool");
+                Ok(ProcessState::Completed(Output::success()))
+            }
+            Export { pool: name } => {
+                let Some(mut pool) = self.zpools.get_mut(&name) else {
+                    return Err(to_stderr(format!("pool does not exist")));
+                };
+
+                if !pool.imported {
+                    return Err(to_stderr(format!(
+                        "cannot export pool which is already exported"
+                    )));
+                }
+                pool.imported = false;
+                Ok(ProcessState::Completed(Output::success()))
+            }
+            Import { force: _, pool: name } => {
+                let Some(mut pool) = self.zpools.get_mut(&name) else {
+                    return Err(to_stderr(format!("pool does not exist")));
+                };
+
+                if pool.imported {
+                    return Err(to_stderr(format!(
+                        "a pool with that name is already created"
+                    )));
+                }
+                pool.imported = true;
+                Ok(ProcessState::Completed(Output::success()))
+            }
+            List { properties, pools } => {
+                let mut output = String::new();
+                let mut display = |name: &ZpoolName,
+                                   pool: &FakeZpool,
+                                   properties: &Vec<String>|
+                 -> Result<(), _> {
+                    for property in properties {
+                        match property.as_str() {
+                            "name" => output.push_str(&format!("{}", name)),
+                            "health" => {
+                                output.push_str(&pool.health.to_string())
+                            }
+                            _ => {
+                                return Err(to_stderr(format!(
+                                    "Unknown property: {property}"
+                                )))
+                            }
+                        }
+                        output.push_str("\t");
+                    }
+                    output.push_str("\n");
+                    Ok(())
+                };
+
+                if let Some(pools) = pools {
+                    for name in &pools {
+                        let pool = self.zpools.get(name).ok_or_else(|| {
+                            to_stderr(format!("{} does not exist", name))
+                        })?;
 
                         if !pool.imported {
                             return Err(to_stderr(format!(
-                                "cannot export pool which is already exported"
+                                "{} not imported",
+                                name
                             )));
                         }
-                        pool.imported = false;
-                        Ok(ProcessState::Completed(Output::success()))
-                    }
-                    Import { force: _, pool: name } => {
-                        let Some(mut pool) = self.zpools.get_mut(&name) else {
-                            return Err(to_stderr(format!("pool does not exist")));
-                        };
 
+                        display(&name, &pool, &properties)?;
+                    }
+                } else {
+                    for (name, pool) in self.zpools.all() {
                         if pool.imported {
-                            return Err(to_stderr(format!(
-                                "a pool with that name is already created"
-                            )));
+                            display(&name, &pool, &properties)?;
                         }
-                        pool.imported = true;
-                        Ok(ProcessState::Completed(Output::success()))
-                    }
-                    List { properties, pools } => {
-                        let mut output = String::new();
-                        let mut display =
-                            |name: &ZpoolName,
-                             pool: &FakeZpool,
-                             properties: &Vec<String>|
-                             -> Result<(), _> {
-                                for property in properties {
-                                    match property.as_str() {
-                                        "name" => output
-                                            .push_str(&format!("{}", name)),
-                                        "health" => output
-                                            .push_str(&pool.health.to_string()),
-                                        _ => {
-                                            return Err(to_stderr(format!(
-                                                "Unknown property: {property}"
-                                            )))
-                                        }
-                                    }
-                                    output.push_str("\t");
-                                }
-                                output.push_str("\n");
-                                Ok(())
-                            };
-
-                        if let Some(pools) = pools {
-                            for name in &pools {
-                                let pool =
-                                    self.zpools.get(name).ok_or_else(|| {
-                                        to_stderr(format!(
-                                            "{} does not exist",
-                                            name
-                                        ))
-                                    })?;
-
-                                if !pool.imported {
-                                    return Err(to_stderr(format!(
-                                        "{} not imported",
-                                        name
-                                    )));
-                                }
-
-                                display(&name, &pool, &properties)?;
-                            }
-                        } else {
-                            for (name, pool) in self.zpools.all() {
-                                if pool.imported {
-                                    display(&name, &pool, &properties)?;
-                                }
-                            }
-                        }
-
-                        Ok(ProcessState::Completed(
-                            Output::success().set_stdout(output),
-                        ))
-                    }
-                    Set { property, value, pool: name } => {
-                        let Some(pool) = self.zpools.get_mut(&name) else {
-                            return Err(to_stderr(format!("{} does not exist", name)));
-                        };
-                        pool.properties.insert(property, value);
-                        Ok(ProcessState::Completed(Output::success()))
                     }
                 }
+
+                Ok(ProcessState::Completed(
+                    Output::success().set_stdout(output),
+                ))
             }
-            _ => todo!(),
+            Set { property, value, pool: name } => {
+                let Some(pool) = self.zpools.get_mut(&name) else {
+                    return Err(to_stderr(format!("{} does not exist", name)));
+                };
+                pool.properties.insert(property, value);
+                Ok(ProcessState::Completed(Output::success()))
+            }
         }
     }
 
@@ -657,7 +653,7 @@ impl FakeHostInner {
             Input::from(child.command()),
         );
 
-        let process = match me.run(inner, child) {
+        let process = match me.run_process(ProcessContext::new(inner, child)) {
             Ok(process) => process,
             Err(err) => ProcessState::Completed(err),
         };

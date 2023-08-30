@@ -209,15 +209,15 @@ impl FakeChild {
 
 impl Child for FakeChild {
     fn take_stdin(&mut self) -> Option<Box<dyn Write + Send>> {
-        Some(Box::new(self.stdin.clone()))
+        Some(Box::new(self.stdin.take_writer()))
     }
 
     fn take_stdout(&mut self) -> Option<Box<dyn Read + Send>> {
-        Some(Box::new(self.stdout.clone()))
+        Some(Box::new(self.stdout.take_reader()))
     }
 
     fn take_stderr(&mut self) -> Option<Box<dyn Read + Send>> {
-        Some(Box::new(self.stderr.clone()))
+        Some(Box::new(self.stderr.take_reader()))
     }
 
     fn id(&self) -> u32 {

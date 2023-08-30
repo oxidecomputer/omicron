@@ -96,6 +96,8 @@ impl FakeDataset {
             }
             let keylocation_property =
                 properties.get(dataset::Property::Keylocation)?;
+
+            // NOTE: This doesn't yet support reading from stdin, but it could.
             let Some(keylocation) = keylocation_property.strip_prefix("file://").map(|k| Utf8PathBuf::from(k)) else {
                 return Err(format!("Cannot read from key location: {keylocation_property}"));
             };
