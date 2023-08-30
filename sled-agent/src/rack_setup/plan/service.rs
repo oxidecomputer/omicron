@@ -559,6 +559,8 @@ impl Plan {
 
         // Provision Clickhouse Keeper zones, continuing to stripe across sleds.
         // TODO(https://github.com/oxidecomputer/omicron/issues/732): Remove
+        // Temporary linter rule until replicated Clickhouse is enabled
+        #[allow(clippy::reversed_empty_ranges)]
         for _ in 0..CLICKHOUSE_KEEPER_COUNT {
             let sled = {
                 let which_sled =
