@@ -77,7 +77,7 @@ impl DataStore {
     /// There should always be a default pool at the fleet level, though this
     /// query can theoretically fail if someone is able to delete that pool or
     /// make another one the default and delete that.
-    pub async fn ip_pools_fetch_default_for(
+    pub async fn ip_pools_fetch_default(
         &self,
         opctx: &OpContext,
     ) -> LookupResult<IpPool> {
@@ -112,7 +112,7 @@ impl DataStore {
     }
 
     /// Looks up an IP pool by name if it does not conflict with your current scope.
-    pub(crate) async fn ip_pools_fetch_for(
+    pub(crate) async fn ip_pools_fetch(
         &self,
         opctx: &OpContext,
         name: &Name,
@@ -480,7 +480,7 @@ mod test {
         // we start out with the default fleet-level pool already created,
         // so when we ask for a default silo, we get it back
         let fleet_default_pool =
-            datastore.ip_pools_fetch_default_for(&opctx).await.unwrap();
+            datastore.ip_pools_fetch_default(&opctx).await.unwrap();
 
         assert_eq!(fleet_default_pool.identity.name.as_str(), "default");
         assert!(fleet_default_pool.is_default);
@@ -520,7 +520,7 @@ mod test {
         // because that one was not a default, when we ask for the silo default
         // pool, we still get the fleet default
         let ip_pool = datastore
-            .ip_pools_fetch_default_for(&opctx)
+            .ip_pools_fetch_default(&opctx)
             .await
             .expect("Failed to get silo default IP pool");
         assert_eq!(ip_pool.id(), fleet_default_pool.id());
@@ -536,14 +536,14 @@ mod test {
 
         // now when we ask for the default pool, we get the one we just made
         let ip_pool = datastore
-            .ip_pools_fetch_default_for(&opctx)
+            .ip_pools_fetch_default(&opctx)
             .await
             .expect("Failed to get silo's default IP pool");
         assert_eq!(ip_pool.name().as_str(), "default-for-silo");
 
         // if we ask for the fleet default by name, we can still get that one
         let ip_pool = datastore
-            .ip_pools_fetch_for(&opctx, &Name("default".parse().unwrap()))
+            .ip_pools_fetch(&opctx, &Name("default".parse().unwrap()))
             .await
             .expect("Failed to get fleet default IP pool");
         assert_eq!(ip_pool.id(), fleet_default_pool.id());

@@ -56,9 +56,9 @@ impl DataStore {
         // as long as its scopes don't conflict with the current scope.
         // Otherwise, not found.
         let pool = match pool_name {
-            Some(name) => self.ip_pools_fetch_for(&opctx, &name).await?,
+            Some(name) => self.ip_pools_fetch(&opctx, &name).await?,
             // If no name given, use the default logic
-            None => self.ip_pools_fetch_default_for(&opctx).await?,
+            None => self.ip_pools_fetch_default(&opctx).await?,
         };
 
         let pool_id = pool.identity.id;
