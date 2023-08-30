@@ -594,7 +594,16 @@ async fn ssc_create_snapshot_record_undo(
 
     osagactx
         .datastore()
-        .project_delete_snapshot(&opctx, &authz_snapshot, &db_snapshot)
+        .project_delete_snapshot(
+            &opctx,
+            &authz_snapshot,
+            &db_snapshot,
+            vec![
+                db::model::SnapshotState::Creating,
+                db::model::SnapshotState::Ready,
+                db::model::SnapshotState::Faulted,
+            ],
+        )
         .await?;
 
     Ok(())
