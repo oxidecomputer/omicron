@@ -7,6 +7,7 @@
 #:	"=/work/manifest*.toml",
 #:	"=/work/repo-dogfood.zip*",
 #:	"=/work/repo-pvt1.zip*",
+#:	"=/work/repo-pvt2.zip*",
 #: ]
 #: access_repos = [
 #:	"oxidecomputer/dvt-dock",
@@ -53,6 +54,21 @@
 #: series = "pvt1"
 #: name = "repo.zip.sha256.txt"
 #: from_output = "/work/repo-pvt1.zip.sha256.txt"
+#:
+#: [[publish]]
+#: series = "pvt2"
+#: name = "repo.zip.parta"
+#: from_output = "/work/repo-pvt2.zip.parta"
+#:
+#: [[publish]]
+#: series = "pvt2"
+#: name = "repo.zip.partb"
+#: from_output = "/work/repo-pvt2.zip.partb"
+#:
+#: [[publish]]
+#: series = "pvt2"
+#: name = "repo.zip.sha256.txt"
+#: from_output = "/work/repo-pvt2.zip.sha256.txt"
 #:
 
 set -o errexit
@@ -193,8 +209,9 @@ EOF
 # usage:              SERIES   ROT_DIR      ROT_VERSION              BOARDS...
 add_hubris_artifacts  dogfood  staging/dev  cert-staging-dev-v1.0.0  gimlet-c psc-b sidecar-b
 add_hubris_artifacts  pvt1     prod/rel     cert-prod-rel-v1.0.0     gimlet-d psc-c sidecar-c
+add_hubris_artifacts  pvt2     prod/rel     cert-prod-rel-v1.0.0     gimlet-e psc-c sidecar-c
 
-for series in dogfood pvt1; do
+for series in dogfood pvt1 pvt2; do
     /work/tufaceous assemble --no-generate-key /work/manifest-$series.toml /work/repo-$series.zip
     digest -a sha256 /work/repo-$series.zip > /work/repo-$series.zip.sha256.txt
 
