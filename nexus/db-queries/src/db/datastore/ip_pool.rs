@@ -79,12 +79,19 @@ impl DataStore {
     pub async fn ip_pools_fetch_default_for(
         &self,
         opctx: &OpContext,
-        action: authz::Action,
         silo_id: Option<Uuid>,
         project_id: Option<Uuid>,
     ) -> LookupResult<IpPool> {
         use db::schema::ip_pool::dsl;
-        opctx.authorize(action, &authz::IP_POOL_LIST).await?;
+
+        // TODO: Need auth check here. Only fleet viewers can list children on
+        // IP_POOL_LIST, so if we check that, nobody can make instances. This
+        // used to check CreateChild on an individual IP pool, but now we're not
+        // looking up by name so the check is more complicated
+        //
+        // opctx
+        //     .authorize(authz::Action::ListChildren, &authz::IP_POOL_LIST)
+        //     .await?;
 
         dsl::ip_pool
             .filter(dsl::silo_id.eq(silo_id).or(dsl::silo_id.is_null()))
@@ -114,7 +121,6 @@ impl DataStore {
     pub(crate) async fn ip_pools_fetch_for(
         &self,
         opctx: &OpContext,
-        action: authz::Action,
         name: &Name,
         silo_id: Uuid,
         // TODO: project_id should always be defined, this is temporary
@@ -122,7 +128,9 @@ impl DataStore {
     ) -> LookupResult<IpPool> {
         let (.., authz_pool, pool) = LookupPath::new(opctx, &self)
             .ip_pool_name(&name)
-            .fetch_for(action)
+            // any authenticated user can CreateChild on an IP pool. this is
+            // meant to represent allocating an IP
+            .fetch_for(authz::Action::CreateChild)
             .await?;
 
         // You can't look up a pool by name if it conflicts with your current
@@ -472,7 +480,6 @@ impl DataStore {
 
 #[cfg(test)]
 mod test {
-    use crate::authz;
     use crate::db::datastore::datastore_test;
     use crate::db::model::IpPool;
     use assert_matches::assert_matches;
@@ -487,12 +494,10 @@ mod test {
         let mut db = test_setup_database(&logctx.log).await;
         let (opctx, datastore) = datastore_test(&logctx, &db).await;
 
-        let action = authz::Action::ListChildren;
-
         // we start out with the default fleet-level pool already created,
         // so when we ask for the fleet default (no silo or project) we get it back
         let fleet_default_pool = datastore
-            .ip_pools_fetch_default_for(&opctx, action, None, None)
+            .ip_pools_fetch_default_for(&opctx, None, None)
             .await
             .unwrap();
 
@@ -523,7 +528,7 @@ mod test {
         // has no default of its own
         let silo_id = opctx.authn.silo_required().unwrap().id();
         let ip_pool = datastore
-            .ip_pools_fetch_default_for(&opctx, action, Some(silo_id), None)
+            .ip_pools_fetch_default_for(&opctx, Some(silo_id), None)
             .await
             .expect("Failed to get silo's default IP pool");
         assert_eq!(ip_pool.id(), fleet_default_pool.id());
@@ -543,7 +548,7 @@ mod test {
         // because that one was not a default, when we ask for silo default
         // pool, we still get the fleet default
         let ip_pool = datastore
-            .ip_pools_fetch_default_for(&opctx, action, Some(silo_id), None)
+            .ip_pools_fetch_default_for(&opctx, Some(silo_id), None)
             .await
             .expect("Failed to get fleet default IP pool");
         assert_eq!(ip_pool.id(), fleet_default_pool.id());
@@ -559,14 +564,14 @@ mod test {
 
         // now when we ask for the silo default pool, we get the one we just made
         let ip_pool = datastore
-            .ip_pools_fetch_default_for(&opctx, action, Some(silo_id), None)
+            .ip_pools_fetch_default_for(&opctx, Some(silo_id), None)
             .await
             .expect("Failed to get silo's default IP pool");
         assert_eq!(ip_pool.name().as_str(), "default-for-silo");
 
         // and of course, if we ask for the fleet default again we still get that one
         let ip_pool = datastore
-            .ip_pools_fetch_default_for(&opctx, action, None, None)
+            .ip_pools_fetch_default_for(&opctx, None, None)
             .await
             .expect("Failed to get fleet default IP pool");
         assert_eq!(ip_pool.id(), fleet_default_pool.id());

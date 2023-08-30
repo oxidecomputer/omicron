@@ -5,7 +5,6 @@
 //! [`DataStore`] methods on [`ExternalIp`]s.
 
 use super::DataStore;
-use crate::authz;
 use crate::context::OpContext;
 use crate::db;
 use crate::db::error::public_error_from_diesel_pool;
@@ -62,7 +61,6 @@ impl DataStore {
             Some(name) => {
                 self.ip_pools_fetch_for(
                     &opctx,
-                    authz::Action::CreateChild, // TODO: wtf
                     &name,
                     current_silo.id(),
                     None, // TODO: include current project ID
@@ -73,7 +71,6 @@ impl DataStore {
             None => {
                 self.ip_pools_fetch_default_for(
                     &opctx,
-                    authz::Action::CreateChild, // TODO: wtf
                     Some(current_silo.id()),
                     None, // TODO: include current project ID
                 )
