@@ -10,6 +10,7 @@ use camino::Utf8Path;
 use http::method::Method;
 use http::StatusCode;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
 use nexus_test_interface::NexusServer;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
@@ -24,6 +25,7 @@ use nexus_test_utils::resource_helpers::objects_list_page_authz;
 use nexus_test_utils::resource_helpers::populate_ip_pool;
 use nexus_test_utils::resource_helpers::DiskTest;
 use nexus_test_utils::start_sled_agent;
+use nexus_types::identity::Resource;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Disk;
 use omicron_common::api::external::DiskState;
@@ -35,6 +37,7 @@ use omicron_common::api::external::InstanceNetworkInterface;
 use omicron_common::api::external::InstanceState;
 use omicron_common::api::external::Ipv4Net;
 use omicron_common::api::external::Name;
+use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::Vni;
 use omicron_nexus::app::MAX_MEMORY_BYTES_PER_INSTANCE;
 use omicron_nexus::app::MAX_VCPU_PER_INSTANCE;
@@ -3357,7 +3360,6 @@ async fn test_instance_ephemeral_ip_from_correct_pool(
 ) {
     let client = &cptestctx.external_client;
 
-    // Create test organization and projects.
     let _ = create_project(&client, PROJECT_NAME).await;
 
     // Create two IP pools.
@@ -3431,6 +3433,74 @@ async fn test_instance_ephemeral_ip_from_correct_pool(
         "Expected the Ephemeral IP to come from the second address \
         range, since the first is reserved for the default pool, not \
         the requested pool."
+    );
+
+    // now create a third pool, a silo default, to confirm it gets used
+    let pool_name = "silo-pool";
+    let _silo_pool: views::IpPool = object_create(
+        client,
+        "/v1/system/ip-pools",
+        &params::IpPoolCreate {
+            identity: IdentityMetadataCreateParams {
+                name: pool_name.parse().unwrap(),
+                description: String::from("an ip pool"),
+            },
+            silo: Some(NameOrId::Id(DEFAULT_SILO.id())),
+            is_default: true,
+        },
+    )
+    .await;
+    let third_range = IpRange::V4(
+        Ipv4Range::new(
+            std::net::Ipv4Addr::new(10, 2, 0, 1),
+            std::net::Ipv4Addr::new(10, 2, 0, 5),
+        )
+        .unwrap(),
+    );
+    populate_ip_pool(client, pool_name, Some(third_range)).await;
+
+    let silo_pool_instance_name = "silo-pool-test";
+    let instance_params = params::InstanceCreate {
+        identity: IdentityMetadataCreateParams {
+            name: silo_pool_instance_name.parse().unwrap(),
+            description: String::from(""),
+        },
+        hostname: silo_pool_instance_name.to_string(),
+        external_ips: vec![params::ExternalIpCreate::Ephemeral {
+            pool_name: None,
+        }],
+        ..instance_params
+    };
+    let response = NexusRequest::objects_post(
+        client,
+        &get_instances_url(),
+        &instance_params,
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("Failed to create third instance");
+    let _ = response.parsed_body::<Instance>().unwrap();
+
+    // Fetch the external IPs for the instance.
+    let ips_url = format!(
+        "/v1/instances/{}/external-ips?project={}",
+        silo_pool_instance_name, PROJECT_NAME
+    );
+    let ips = NexusRequest::object_get(client, &ips_url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("Failed to fetch external IPs")
+        .parsed_body::<ResultsPage<views::ExternalIp>>()
+        .expect("Failed to parse external IPs");
+    assert_eq!(ips.items.len(), 1);
+    assert_eq!(ips.items[0].kind, IpKind::Ephemeral);
+    assert!(
+        ips.items[0].ip >= third_range.first_address()
+            && ips.items[0].ip <= third_range.last_address(),
+        "Expected the Ephemeral IP to come from the third address \
+        range because it is in the default pool for this silo."
     );
 }
 
