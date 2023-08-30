@@ -61,7 +61,9 @@ use dropshot::test_util::ClientTestContext;
 use dropshot::{HttpErrorResponseBody, ResultsPage};
 
 use nexus_test_utils::identity_eq;
-use nexus_test_utils::resource_helpers::{create_instance, create_project};
+use nexus_test_utils::resource_helpers::{
+    create_instance, create_instance_with, create_project,
+};
 use nexus_test_utils_macros::nexus_test;
 use omicron_nexus::external_api::shared::SiloRole;
 use omicron_sled_agent::sim;
@@ -3366,76 +3368,45 @@ async fn test_instance_ephemeral_ip_from_correct_pool(
     //
     // The first is given to the "default" pool, the provided to a distinct
     // explicit pool.
-    let first_range = IpRange::V4(
+    let default_pool_range = IpRange::V4(
         Ipv4Range::new(
             std::net::Ipv4Addr::new(10, 0, 0, 1),
             std::net::Ipv4Addr::new(10, 0, 0, 5),
         )
         .unwrap(),
     );
-    let second_range = IpRange::V4(
+    let other_pool_range = IpRange::V4(
         Ipv4Range::new(
             std::net::Ipv4Addr::new(10, 1, 0, 1),
             std::net::Ipv4Addr::new(10, 1, 0, 5),
         )
         .unwrap(),
     );
-    populate_ip_pool(&client, "default", Some(first_range)).await;
-    create_ip_pool(&client, "other-pool", Some(second_range)).await;
+    populate_ip_pool(&client, "default", Some(default_pool_range)).await;
+    create_ip_pool(&client, "other-pool", Some(other_pool_range)).await;
+
+    // Create an instance with pool name blank, expect IP from default pool
+    create_instance_with_pool(client, "default-pool-inst", None).await;
+
+    let ip = fetch_instance_ephemeral_ip(client, "default-pool-inst").await;
+    assert!(
+        ip.ip >= default_pool_range.first_address()
+            && ip.ip <= default_pool_range.last_address(),
+        "Expected ephemeral IP to come from default pool"
+    );
 
     // Create an instance explicitly using the "other-pool".
-    let instance_params = params::InstanceCreate {
-        identity: IdentityMetadataCreateParams {
-            name: Name::try_from(String::from("ip-pool-test")).unwrap(),
-            description: String::from("instance to test IP Pool restriction"),
-        },
-        ncpus: InstanceCpuCount::try_from(2).unwrap(),
-        memory: ByteCount::from_gibibytes_u32(4),
-        hostname: String::from("inst"),
-        user_data: vec![],
-        network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
-        external_ips: vec![params::ExternalIpCreate::Ephemeral {
-            pool_name: Some(
-                Name::try_from(String::from("other-pool")).unwrap(),
-            ),
-        }],
-        disks: vec![],
-        start: true,
-    };
-    let response = NexusRequest::objects_post(
-        client,
-        &get_instances_url(),
-        &instance_params,
-    )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .expect("Failed to create first instance");
-    let _ = response.parsed_body::<Instance>().unwrap();
-
-    // Fetch the external IPs for the instance.
-    let ips_url = format!(
-        "/v1/instances/{}/external-ips?project={}",
-        instance_params.identity.name, PROJECT_NAME
-    );
-    let ips = NexusRequest::object_get(client, &ips_url)
-        .authn_as(AuthnMode::PrivilegedUser)
-        .execute()
-        .await
-        .expect("Failed to fetch external IPs")
-        .parsed_body::<ResultsPage<views::ExternalIp>>()
-        .expect("Failed to parse external IPs");
-    assert_eq!(ips.items.len(), 1);
-    assert_eq!(ips.items[0].kind, IpKind::Ephemeral);
+    create_instance_with_pool(client, "other-pool-inst", Some("other-pool"))
+        .await;
+    let ip = fetch_instance_ephemeral_ip(client, "other-pool-inst").await;
     assert!(
-        ips.items[0].ip >= second_range.first_address()
-            && ips.items[0].ip <= second_range.last_address(),
-        "Expected the Ephemeral IP to come from the second address \
-        range, since the first is reserved for the default pool, not \
-        the requested pool."
+        ip.ip >= other_pool_range.first_address()
+            && ip.ip <= other_pool_range.last_address(),
+        "Expected ephemeral IP to come from other pool"
     );
 
-    // now create a third pool, a silo default, to confirm it gets used
+    // now create a third pool, a silo default, to confirm it gets used. not
+    // using create_ip_pool because we need to specify a silo and default: true
     let pool_name = "silo-pool";
     let _silo_pool: views::IpPool = object_create(
         client,
@@ -3450,42 +3421,61 @@ async fn test_instance_ephemeral_ip_from_correct_pool(
         },
     )
     .await;
-    let third_range = IpRange::V4(
+    let silo_pool_range = IpRange::V4(
         Ipv4Range::new(
             std::net::Ipv4Addr::new(10, 2, 0, 1),
             std::net::Ipv4Addr::new(10, 2, 0, 5),
         )
         .unwrap(),
     );
-    populate_ip_pool(client, pool_name, Some(third_range)).await;
+    populate_ip_pool(client, pool_name, Some(silo_pool_range)).await;
 
-    let silo_pool_instance_name = "silo-pool-test";
-    let instance_params = params::InstanceCreate {
-        identity: IdentityMetadataCreateParams {
-            name: silo_pool_instance_name.parse().unwrap(),
-            description: String::from(""),
-        },
-        hostname: silo_pool_instance_name.to_string(),
-        external_ips: vec![params::ExternalIpCreate::Ephemeral {
-            pool_name: None,
-        }],
-        ..instance_params
-    };
-    let response = NexusRequest::objects_post(
+    create_instance_with_pool(client, "silo-pool-inst", Some("silo-pool"))
+        .await;
+    let ip = fetch_instance_ephemeral_ip(client, "silo-pool-inst").await;
+    assert!(
+        ip.ip >= silo_pool_range.first_address()
+            && ip.ip <= silo_pool_range.last_address(),
+        "Expected ephemeral IP to come from the silo default pool"
+    );
+
+    // we can still specify other pool even though we now have a silo default
+    create_instance_with_pool(client, "other-pool-inst-2", Some("other-pool"))
+        .await;
+
+    let ip = fetch_instance_ephemeral_ip(client, "other-pool-inst-2").await;
+    assert!(
+        ip.ip >= other_pool_range.first_address()
+            && ip.ip <= other_pool_range.last_address(),
+        "Expected ephemeral IP to come from the other pool"
+    );
+}
+
+async fn create_instance_with_pool(
+    client: &ClientTestContext,
+    instance_name: &str,
+    pool_name: Option<&str>,
+) -> Instance {
+    create_instance_with(
         client,
-        &get_instances_url(),
-        &instance_params,
+        PROJECT_NAME,
+        instance_name,
+        &params::InstanceNetworkInterfaceAttachment::Default,
+        vec![],
+        vec![params::ExternalIpCreate::Ephemeral {
+            pool_name: pool_name.map(|name| name.parse().unwrap()),
+        }],
     )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
     .await
-    .expect("Failed to create third instance");
-    let _ = response.parsed_body::<Instance>().unwrap();
+}
 
-    // Fetch the external IPs for the instance.
+async fn fetch_instance_ephemeral_ip(
+    client: &ClientTestContext,
+    instance_name: &str,
+) -> views::ExternalIp {
     let ips_url = format!(
         "/v1/instances/{}/external-ips?project={}",
-        silo_pool_instance_name, PROJECT_NAME
+        instance_name, PROJECT_NAME
     );
     let ips = NexusRequest::object_get(client, &ips_url)
         .authn_as(AuthnMode::PrivilegedUser)
@@ -3496,12 +3486,7 @@ async fn test_instance_ephemeral_ip_from_correct_pool(
         .expect("Failed to parse external IPs");
     assert_eq!(ips.items.len(), 1);
     assert_eq!(ips.items[0].kind, IpKind::Ephemeral);
-    assert!(
-        ips.items[0].ip >= third_range.first_address()
-            && ips.items[0].ip <= third_range.last_address(),
-        "Expected the Ephemeral IP to come from the third address \
-        range because it is in the default pool for this silo."
-    );
+    ips.items[0].clone()
 }
 
 #[nexus_test]
