@@ -39,8 +39,9 @@ SELECT CAST(
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS one_default_pool_per_scope ON omicron.public.ip_pool (
-    silo_id, project_id
+    COALESCE(silo_id, '00000000-0000-0000-0000-000000000000'::uuid), 
+    COALESCE(project_id, '00000000-0000-0000-0000-000000000000'::uuid) 
 ) WHERE
-    "default" AND time_deleted IS NULL;
+    "default" = true AND time_deleted IS NULL;
 
 COMMIT;

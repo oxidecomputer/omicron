@@ -457,9 +457,10 @@ mod test {
     use crate::authz;
     use crate::db::datastore::datastore_test;
     use crate::db::model::IpPool;
+    use assert_matches::assert_matches;
     use nexus_test_utils::db::test_setup_database;
     use nexus_types::identity::Resource;
-    use omicron_common::api::external::IdentityMetadataCreateParams;
+    use omicron_common::api::external::{Error, IdentityMetadataCreateParams};
     use omicron_test_utils::dev;
 
     #[tokio::test]
@@ -481,6 +482,20 @@ mod test {
         assert!(fleet_default_pool.default);
         assert_eq!(fleet_default_pool.silo_id, None);
         assert_eq!(fleet_default_pool.project_id, None);
+
+        // unique index prevents second fleet-level default
+        let identity = IdentityMetadataCreateParams {
+            name: "another-fleet-default".parse().unwrap(),
+            description: "".to_string(),
+        };
+        let err = datastore
+            .ip_pool_create(
+                &opctx,
+                IpPool::new(&identity, None, /*default= */ true),
+            )
+            .await
+            .expect_err("Failed to fail to create a second default fleet pool");
+        assert_matches!(err, Error::ObjectAlreadyExists { .. });
 
         // now the interesting thing is that when we fetch the default pool for
         // a particular silo or a particular project, if those scopes do not
@@ -537,6 +552,17 @@ mod test {
             .await
             .expect("Failed to get fleet default IP pool");
         assert_eq!(ip_pool.id(), fleet_default_pool.id());
+
+        // and we can't create a second default pool for the silo
+        let identity = IdentityMetadataCreateParams {
+            name: "second-default-for-silo".parse().unwrap(),
+            description: "".to_string(),
+        };
+        let err = datastore
+            .ip_pool_create(&opctx, IpPool::new(&identity, Some(silo_id), true))
+            .await
+            .expect_err("Failed to fail to create second default pool");
+        assert_matches!(err, Error::ObjectAlreadyExists { .. });
 
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();

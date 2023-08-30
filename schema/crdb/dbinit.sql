@@ -1500,10 +1500,13 @@ CREATE TABLE IF NOT EXISTS omicron.public.ip_pool (
 );
 
 /*
- * Ensure there can only be one default pool for the fleet or a given silo or project
+ * Ensure there can only be one default pool for the fleet or a given silo or
+ * project. Coalesce is needed because otherwise different nulls are considered
+ * to be distinct from each other.
  */
 CREATE UNIQUE INDEX IF NOT EXISTS one_default_pool_per_scope ON omicron.public.ip_pool (
-    silo_id, project_id
+    COALESCE(silo_id, '00000000-0000-0000-0000-000000000000'::uuid), 
+    COALESCE(project_id, '00000000-0000-0000-0000-000000000000'::uuid) 
 ) WHERE
     "default" = true AND time_deleted IS NULL;
 
