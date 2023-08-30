@@ -64,7 +64,7 @@ impl DataStore {
                     &opctx,
                     authz::Action::CreateChild, // TODO: wtf
                     &name,
-                    Some(current_silo.id()),
+                    current_silo.id(),
                     None, // TODO: include current project ID
                 )
                 .await?

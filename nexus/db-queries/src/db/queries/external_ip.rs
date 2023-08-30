@@ -816,7 +816,6 @@ mod tests {
     use crate::context::OpContext;
     use crate::db::datastore::DataStore;
     use crate::db::datastore::SERVICE_IP_POOL_NAME;
-    use crate::db::fixed_data::silo::INTERNAL_SILO_ID;
     use crate::db::identity::Resource;
     use crate::db::model::IpKind;
     use crate::db::model::IpPool;
@@ -862,14 +861,20 @@ mod tests {
             Self { logctx, opctx, db, db_datastore }
         }
 
-        async fn create_ip_pool(&self, name: &str, range: IpRange) {
+        async fn create_ip_pool(
+            &self,
+            name: &str,
+            range: IpRange,
+            is_default: bool,
+        ) {
+            let silo_id = self.opctx.authn.silo_required().unwrap().id();
             let pool = IpPool::new(
                 &IdentityMetadataCreateParams {
                     name: String::from(name).parse().unwrap(),
                     description: format!("ip pool {}", name),
                 },
-                Some(*INTERNAL_SILO_ID),
-                true,
+                Some(silo_id),
+                is_default,
             );
 
             use crate::db::schema::ip_pool::dsl as ip_pool_dsl;
@@ -1709,7 +1714,7 @@ mod tests {
             Ipv4Addr::new(10, 0, 0, 6),
         ))
         .unwrap();
-        context.create_ip_pool("p1", second_range).await;
+        context.create_ip_pool("p1", second_range, /*default*/ false).await;
 
         // Allocating an address on an instance in the second pool should be
         // respected, even though there are IPs available in the first.
@@ -1752,7 +1757,7 @@ mod tests {
         let last_address = Ipv4Addr::new(10, 0, 0, 6);
         let second_range =
             IpRange::try_from((first_address, last_address)).unwrap();
-        context.create_ip_pool("p1", second_range).await;
+        context.create_ip_pool("p1", second_range, /* default */ false).await;
 
         // Allocate all available addresses in the second pool.
         let instance_id = Uuid::new_v4();
