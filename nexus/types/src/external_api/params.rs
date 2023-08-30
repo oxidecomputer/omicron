@@ -735,6 +735,8 @@ pub struct IpPoolCreate {
     /// If an IP pool is associated with a silo, instance IP allocations in that
     /// silo can draw from that pool.
     pub silo: Option<NameOrId>,
+
+    pub default: bool,
 }
 
 /// Parameters for updating an IP Pool

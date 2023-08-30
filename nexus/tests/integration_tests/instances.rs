@@ -3434,6 +3434,7 @@ async fn test_instance_ephemeral_ip_from_correct_pool(
     );
 }
 
+// TODO: this test fails
 #[nexus_test]
 async fn test_instance_create_in_silo(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
@@ -3502,6 +3503,8 @@ async fn test_instance_create_in_silo(cptestctx: &ControlPlaneTestContext) {
         .authn_as(AuthnMode::SiloUser(user_id))
         .execute()
         .await
+        // fails here with 403 that comes from the default IP pool query,
+        // which checks ListChildren on IP_POOL_LIST
         .expect("Failed to create instance")
         .parsed_body::<Instance>()
         .expect("Failed to parse instance");

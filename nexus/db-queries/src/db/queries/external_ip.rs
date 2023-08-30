@@ -869,6 +869,7 @@ mod tests {
                     description: format!("ip pool {}", name),
                 },
                 Some(*INTERNAL_SILO_ID),
+                true,
             );
 
             use crate::db::schema::ip_pool::dsl as ip_pool_dsl;
@@ -916,11 +917,13 @@ mod tests {
         }
 
         async fn default_pool_id(&self) -> Uuid {
-            let (.., pool) = self
+            let pool = self
                 .db_datastore
                 .ip_pools_fetch_default_for(
                     &self.opctx,
                     crate::authz::Action::ListChildren,
+                    None,
+                    None,
                 )
                 .await
                 .expect("Failed to lookup default ip pool");

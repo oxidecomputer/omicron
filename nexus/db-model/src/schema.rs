@@ -455,6 +455,7 @@ table! {
         rcgen -> Int8,
         silo_id -> Nullable<Uuid>,
         project_id -> Nullable<Uuid>,
+        default -> Bool,
     }
 }
 

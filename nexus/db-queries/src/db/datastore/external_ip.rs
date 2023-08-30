@@ -58,6 +58,13 @@ impl DataStore {
         let name = pool_name.unwrap_or_else(|| {
             Name(ExternalName::from_str("default").unwrap())
         });
+
+        // TODO: this is the whole thing -- update this call to EITHER look up
+        // the pool by name (only allowing access to pools matching the scope of
+        // the current project, i.e., you can pick a pool by name only if it's
+        // scoped to your project, silo, or the whole fleet) or use the default
+        // logic in ip_pool_fetch_default_for
+
         let (.., pool) = self
             .ip_pools_fetch_for(opctx, authz::Action::CreateChild, &name)
             .await?;

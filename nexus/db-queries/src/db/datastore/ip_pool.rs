@@ -37,11 +37,9 @@ use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::LookupType;
-use omicron_common::api::external::Name as ExternalName;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
 use ref_cast::RefCast;
-use std::str::FromStr;
 use uuid::Uuid;
 
 impl DataStore {
@@ -74,18 +72,42 @@ impl DataStore {
         .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
-    /// Looks up the default IP pool by name.
+    /// Looks up the default IP pool for a given scope, i.e., a given
+    /// combination of silo and project ID (or none). If there is no default at
+    /// a given scope, fall back up a level. There should always be a default at
+    /// fleet level, though this query can theoretically fail.
     pub async fn ip_pools_fetch_default_for(
         &self,
         opctx: &OpContext,
         action: authz::Action,
-    ) -> LookupResult<(authz::IpPool, IpPool)> {
-        self.ip_pools_fetch_for(
-            opctx,
-            action,
-            &Name(ExternalName::from_str("default").unwrap()),
-        )
-        .await
+        silo_id: Option<Uuid>,
+        project_id: Option<Uuid>,
+    ) -> LookupResult<IpPool> {
+        use db::schema::ip_pool::dsl;
+        opctx.authorize(action, &authz::IP_POOL_LIST).await?;
+
+        dsl::ip_pool
+            .filter(dsl::silo_id.eq(silo_id).or(dsl::silo_id.is_null()))
+            .filter(
+                dsl::project_id.eq(project_id).or(dsl::project_id.is_null()),
+            )
+            .filter(dsl::default.eq(true))
+            .filter(dsl::time_deleted.is_null())
+            // this will sort by most specific first, i.e.,
+            //
+            //   (silo, project)
+            //   (silo, null)
+            //   (null, null)
+            //
+            // then by only taking the first result, we get the most specific one
+            .order((
+                dsl::project_id.asc().nulls_last(),
+                dsl::silo_id.asc().nulls_last(),
+            ))
+            .select(IpPool::as_select())
+            .first_async::<IpPool>(self.pool_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
     /// Looks up an IP pool by name.
@@ -427,5 +449,96 @@ impl DataStore {
                 "IP range deletion failed due to concurrent modification",
             ))
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use crate::authz;
+    use crate::db::datastore::datastore_test;
+    use crate::db::model::IpPool;
+    use nexus_test_utils::db::test_setup_database;
+    use nexus_types::identity::Resource;
+    use omicron_common::api::external::IdentityMetadataCreateParams;
+    use omicron_test_utils::dev;
+
+    #[tokio::test]
+    async fn test_default_ip_pools() {
+        let logctx = dev::test_setup_log("test_default_ip_pools");
+        let mut db = test_setup_database(&logctx.log).await;
+        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+
+        let action = authz::Action::ListChildren;
+
+        // we start out with the default fleet-level pool already created,
+        // so when we ask for the fleet default (no silo or project) we get it back
+        let fleet_default_pool = datastore
+            .ip_pools_fetch_default_for(&opctx, action, None, None)
+            .await
+            .unwrap();
+
+        assert_eq!(fleet_default_pool.identity.name.as_str(), "default");
+        assert!(fleet_default_pool.default);
+        assert_eq!(fleet_default_pool.silo_id, None);
+        assert_eq!(fleet_default_pool.project_id, None);
+
+        // now the interesting thing is that when we fetch the default pool for
+        // a particular silo or a particular project, if those scopes do not
+        // have a default IP pool, we will still get back the fleet default
+
+        // default for "current" silo is still the fleet default one because it
+        // has no default of its own
+        let silo_id = opctx.authn.silo_required().unwrap().id();
+        let ip_pool = datastore
+            .ip_pools_fetch_default_for(&opctx, action, Some(silo_id), None)
+            .await
+            .expect("Failed to get silo's default IP pool");
+        assert_eq!(ip_pool.id(), fleet_default_pool.id());
+
+        // create a non-default pool for the silo
+        let identity = IdentityMetadataCreateParams {
+            name: "non-default-for-silo".parse().unwrap(),
+            description: "".to_string(),
+        };
+        let _ = datastore
+            .ip_pool_create(
+                &opctx,
+                IpPool::new(&identity, Some(silo_id), /*default= */ false),
+            )
+            .await;
+
+        // because that one was not a default, when we ask for silo default
+        // pool, we still get the fleet default
+        let ip_pool = datastore
+            .ip_pools_fetch_default_for(&opctx, action, Some(silo_id), None)
+            .await
+            .expect("Failed to get fleet default IP pool");
+        assert_eq!(ip_pool.id(), fleet_default_pool.id());
+
+        // now create a default pool for the silo
+        let identity = IdentityMetadataCreateParams {
+            name: "default-for-silo".parse().unwrap(),
+            description: "".to_string(),
+        };
+        let _ = datastore
+            .ip_pool_create(&opctx, IpPool::new(&identity, Some(silo_id), true))
+            .await;
+
+        // now when we ask for the silo default pool, we get the one we just made
+        let ip_pool = datastore
+            .ip_pools_fetch_default_for(&opctx, action, Some(silo_id), None)
+            .await
+            .expect("Failed to get silo's default IP pool");
+        assert_eq!(ip_pool.name().as_str(), "default-for-silo");
+
+        // and of course, if we ask for the fleet default again we still get that one
+        let ip_pool = datastore
+            .ip_pools_fetch_default_for(&opctx, action, None, None)
+            .await
+            .expect("Failed to get fleet default IP pool");
+        assert_eq!(ip_pool.id(), fleet_default_pool.id());
+
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
     }
 }

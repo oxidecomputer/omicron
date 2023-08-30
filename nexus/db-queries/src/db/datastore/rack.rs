@@ -563,6 +563,7 @@ impl DataStore {
                 description: String::from("IP Pool for Oxide Services"),
             },
             Some(*INTERNAL_SILO_ID),
+            true, // default for internal silo
         );
 
         self.ip_pool_create(opctx, internal_pool).await.map(|_| ()).or_else(
@@ -578,6 +579,7 @@ impl DataStore {
                 description: String::from("default IP pool"),
             },
             None, // no silo ID, fleet scoped
+            true, // default for fleet
         );
         self.ip_pool_create(opctx, default_pool).await.map(|_| ()).or_else(
             |e| match e {

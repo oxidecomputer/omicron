@@ -48,12 +48,15 @@ pub struct IpPool {
 
     /// Project, if IP pool is associated with a particular project
     pub project_id: Option<Uuid>,
+
+    pub default: bool,
 }
 
 impl IpPool {
     pub fn new(
         pool_identity: &external::IdentityMetadataCreateParams,
         silo_id: Option<Uuid>,
+        default: bool,
     ) -> Self {
         Self {
             identity: IpPoolIdentity::new(
@@ -63,6 +66,7 @@ impl IpPool {
             rcgen: 0,
             silo_id,
             project_id: None,
+            default,
         }
     }
 }
