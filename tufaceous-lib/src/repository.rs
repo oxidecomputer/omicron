@@ -390,5 +390,7 @@ mod tests {
         assert!(err.contains(name));
         assert!(err.contains(version));
         assert!(err.contains("already exists"));
+
+        logctx.cleanup_successful();
     }
 }
