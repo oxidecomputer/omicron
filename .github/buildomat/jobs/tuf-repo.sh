@@ -166,17 +166,12 @@ add_hubris_artifacts() {
 
         rot_caboose_version=$(caboose_util_rot read-version "$rot_image_a" "$rot_image_b")
         sp_caboose_version=$(/work/caboose-util read-version "$sp_image")
-
-        # NOTE: the rot caboose is _not_ unique across different RoT artifacts
-        # (e.g., both gimlet RoT and sidecar RoT archives report a board of
-        # "oxide-rot-1"), so we need to further distinguish the name we provide
-        # in the manifest below to avoid collisions.
         rot_caboose_board=$(caboose_util_rot read-board "$rot_image_a" "$rot_image_b")
         sp_caboose_board=$(/work/caboose-util read-board "$sp_image")
 
         cat >>"$manifest" <<EOF
 [[artifact.${tufaceous_board}_rot]]
-name = "${tufaceous_board}_rot_$rot_caboose_board"
+name = "$rot_caboose_board"
 version = "$rot_caboose_version"
 [artifact.${tufaceous_board}_rot.source]
 kind = "composite-rot"
