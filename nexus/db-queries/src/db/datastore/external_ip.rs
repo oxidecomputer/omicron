@@ -25,9 +25,7 @@ use nexus_types::identity::Resource;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::LookupResult;
-use omicron_common::api::external::Name as ExternalName;
 use std::net::IpAddr;
-use std::str::FromStr;
 use uuid::Uuid;
 
 impl DataStore {
@@ -55,21 +53,35 @@ impl DataStore {
         instance_id: Uuid,
         pool_name: Option<Name>,
     ) -> CreateResult<ExternalIp> {
-        let name = pool_name.unwrap_or_else(|| {
-            Name(ExternalName::from_str("default").unwrap())
-        });
+        let current_silo = opctx.authn.silo_required()?;
 
-        // TODO: this is the whole thing -- update this call to EITHER look up
-        // the pool by name (only allowing access to pools matching the scope of
-        // the current project, i.e., you can pick a pool by name only if it's
-        // scoped to your project, silo, or the whole fleet) or use the default
-        // logic in ip_pool_fetch_default_for
+        // If we have a pool name, look up the pool by name and return it
+        // as long as its scopes don't conflict with the current scope.
+        // Otherwise, not found.
+        let pool = match pool_name {
+            Some(name) => {
+                self.ip_pools_fetch_for(
+                    &opctx,
+                    authz::Action::CreateChild, // TODO: wtf
+                    &name,
+                    Some(current_silo.id()),
+                    None, // TODO: include current project ID
+                )
+                .await?
+            }
+            // If no name given, use the default logic
+            None => {
+                self.ip_pools_fetch_default_for(
+                    &opctx,
+                    authz::Action::CreateChild, // TODO: wtf
+                    Some(current_silo.id()),
+                    None, // TODO: include current project ID
+                )
+                .await?
+            }
+        };
 
-        let (.., pool) = self
-            .ip_pools_fetch_for(opctx, authz::Action::CreateChild, &name)
-            .await?;
         let pool_id = pool.identity.id;
-
         let data =
             IncompleteExternalIp::for_ephemeral(ip_id, instance_id, pool_id);
         self.allocate_external_ip(opctx, data).await

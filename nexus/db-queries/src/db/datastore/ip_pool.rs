@@ -110,23 +110,49 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
-    /// Looks up an IP pool by name.
+    /// Looks up an IP pool by name if it does not conflict with your current scope.
     pub(crate) async fn ip_pools_fetch_for(
         &self,
         opctx: &OpContext,
         action: authz::Action,
         name: &Name,
-    ) -> LookupResult<(authz::IpPool, IpPool)> {
+        silo_id: Option<Uuid>,
+        project_id: Option<Uuid>,
+    ) -> LookupResult<IpPool> {
         let (.., authz_pool, pool) = LookupPath::new(opctx, &self)
             .ip_pool_name(&name)
             .fetch_for(action)
             .await?;
-        // Can't look up the internal pool
+
         if pool.silo_id == Some(*INTERNAL_SILO_ID) {
             return Err(authz_pool.not_found());
         }
 
-        Ok((authz_pool, pool))
+        // You can't look up the internal pool by name, and you can't look up
+        // a pool by name if it conflicts with your current scope, i.e., if it
+        // has a silo or project and those are different from your current silo
+        // or project
+        if let Some(pool_silo_id) = pool.silo_id {
+            if pool_silo_id == *INTERNAL_SILO_ID {
+                return Err(authz_pool.not_found());
+            }
+
+            if let Some(current_silo_id) = silo_id {
+                if current_silo_id != pool_silo_id {
+                    return Err(authz_pool.not_found());
+                }
+            }
+        }
+
+        if let Some(pool_project_id) = pool.project_id {
+            if let Some(current_project_id) = project_id {
+                if current_project_id != pool_project_id {
+                    return Err(authz_pool.not_found());
+                }
+            }
+        }
+
+        Ok(pool)
     }
 
     /// Looks up an IP pool intended for internal services.
