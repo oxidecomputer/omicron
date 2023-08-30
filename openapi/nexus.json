@@ -10169,6 +10169,9 @@
         "description": "Create-time parameters for an `IpPool`",
         "type": "object",
         "properties": {
+          "default": {
+            "type": "boolean"
+          },
           "description": {
             "type": "string"
           },
@@ -10186,6 +10189,7 @@
           }
         },
         "required": [
+          "default",
           "description",
           "name"
         ]

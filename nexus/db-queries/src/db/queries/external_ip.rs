@@ -74,7 +74,7 @@ const MAX_PORT: u16 = u16::MAX;
 ///
 /// In general, the query:
 ///
-/// - Selects the next available IP address and port range from _any_ IP Pool
+/// - Selects the next available IP address and port range from the specified IP pool
 /// - Inserts that record into the `external_ip` table
 /// - Updates the rcgen and time modified of the parent `ip_pool_range` table
 ///
