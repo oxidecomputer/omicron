@@ -56,10 +56,12 @@ const CRDB_COUNT: usize = 5;
 const OXIMETER_COUNT: usize = 1;
 // TODO(https://github.com/oxidecomputer/omicron/issues/732): Remove
 // when Nexus provisions Clickhouse.
-const CLICKHOUSE_COUNT: usize = 2;
+// TODO: Set to 2 once we enable replicated ClickHouse
+const CLICKHOUSE_COUNT: usize = 1;
 // TODO(https://github.com/oxidecomputer/omicron/issues/732): Remove
 // when Nexus provisions Clickhouse keeper.
-const CLICKHOUSE_KEEPER_COUNT: usize = 3;
+// TODO: Set to 3 once we enable replicated ClickHouse
+const CLICKHOUSE_KEEPER_COUNT: usize = 0;
 // TODO(https://github.com/oxidecomputer/omicron/issues/732): Remove.
 // when Nexus provisions Crucible.
 const MINIMUM_U2_ZPOOL_COUNT: usize = 3;

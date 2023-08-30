@@ -28,32 +28,14 @@ ipadm show-addr "$DATALINK/ll" || ipadm create-addr -t -T addrconf "$DATALINK/ll
 ipadm show-addr "$DATALINK/omicron6"  || ipadm create-addr -t -T static -a "$LISTEN_ADDR" "$DATALINK/omicron6"
 route get -inet6 default -inet6 "$GATEWAY" || route add -inet6 default -inet6 "$GATEWAY"
 
-# Retrieve hostnames (SRV records in internal DNS) of the clickhouse nodes.
-CH_ADDRS="$(/opt/oxide/internal-dns-cli/bin/dnswait clickhouse -H)"
-
-if [[ -z "$CH_ADDRS" ]]; then
-    printf 'ERROR: found no hostnames for other ClickHouse nodes\n' >&2
-    exit "$SMF_EXIT_ERR_CONFIG"
-fi
-
-declare -a nodes=($CH_ADDRS)
-
-for i in "${nodes[@]}"
-do
-  if ! grep -q "host.control-plane.oxide.internal" <<< "${i}"; then
-    printf 'ERROR: retrieved ClickHouse hostname does not match the expected format\n' >&2
-    exit "$SMF_EXIT_ERR_CONFIG"
-  fi
-done
-
-# TEMPORARY: If a single hostname is returned, start in single node mode.
-# Otherwise, set up a replicated cluster.
-#
-# TODO: Remove single node mode once all racks are running in replicated mode
+# TEMPORARY: Racks will be set up with single node ClickHouse until
+# Nexus provisions services so there is no divergence between racks
+# https://github.com/oxidecomputer/omicron/issues/732
+single_node=true
 
 command=()
-
-if [[ "${#nodes[@]}" == 1 ]]
+# TODO: Remove single node mode once all racks are running in replicated mode
+if $single_node
 then
   command+=(
   "/opt/oxide/clickhouse/clickhouse" "server"
@@ -64,8 +46,25 @@ then
   "--listen_host" "$LISTEN_ADDR"
   "--http_port" "$LISTEN_PORT"
   )
-elif [[ "${#nodes[@]}" == 2 ]]
-then
+else
+  # Retrieve hostnames (SRV records in internal DNS) of the clickhouse nodes.
+  CH_ADDRS="$(/opt/oxide/internal-dns-cli/bin/dnswait clickhouse -H)"
+  
+  if [[ -z "$CH_ADDRS" ]]; then
+      printf 'ERROR: found no hostnames for other ClickHouse nodes\n' >&2
+      exit "$SMF_EXIT_ERR_CONFIG"
+  fi
+  
+  declare -a nodes=($CH_ADDRS)
+  
+  for i in "${nodes[@]}"
+  do
+    if ! grep -q "host.control-plane.oxide.internal" <<< "${i}"; then
+      printf 'ERROR: retrieved ClickHouse hostname does not match the expected format\n' >&2
+      exit "$SMF_EXIT_ERR_CONFIG"
+    fi
+  done
+
   # Assign hostnames to replicas
   REPLICA_HOST_01="${nodes[0]}"
   REPLICA_HOST_02="${nodes[1]}"
@@ -158,9 +157,6 @@ then
   # it append them when necessary
   cd /opt/oxide/clickhouse/
   command+=("./clickhouse" "server")
-else
-  printf "ERROR: expected 1 or 2 ClickHouse hosts, found "${#nodes[@]}" instead\n" >&2
-  exit "$SMF_EXIT_ERR_CONFIG"
 fi
 
 exec "${command[@]}" &
