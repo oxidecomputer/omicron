@@ -14,6 +14,7 @@ use crate::db::collection_insert::DatastoreCollection;
 use crate::db::error::diesel_pool_result_optional;
 use crate::db::error::public_error_from_diesel_pool;
 use crate::db::error::ErrorHandler;
+use crate::db::fixed_data::silo::INTERNAL_SILO_ID;
 use crate::db::identity::Resource;
 use crate::db::lookup::LookupPath;
 use crate::db::model::IpPool;
@@ -27,7 +28,6 @@ use async_bb8_diesel::{AsyncRunQueryDsl, PoolError};
 use chrono::Utc;
 use diesel::prelude::*;
 use ipnetwork::IpNetwork;
-use nexus_types::external_api::params;
 use nexus_types::external_api::shared::IpRange;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
@@ -37,11 +37,9 @@ use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::LookupType;
-use omicron_common::api::external::Name as ExternalName;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
 use ref_cast::RefCast;
-use std::str::FromStr;
 use uuid::Uuid;
 
 impl DataStore {
@@ -65,7 +63,8 @@ impl DataStore {
                 &pagparams.map_name(|n| Name::ref_cast(n)),
             ),
         }
-        .filter(dsl::internal.eq(false))
+        // != excludes nulls so we explicitly include them
+        .filter(dsl::silo_id.ne(*INTERNAL_SILO_ID).or(dsl::silo_id.is_null()))
         .filter(dsl::time_deleted.is_null())
         .select(db::model::IpPool::as_select())
         .get_results_async(self.pool_authorized(opctx).await?)
@@ -73,36 +72,69 @@ impl DataStore {
         .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
-    /// Looks up the default IP pool by name.
-    pub async fn ip_pools_fetch_default_for(
+    /// Look up the default IP pool for the current silo. If there is no default
+    /// at silo scope, fall back to the next level up, namely the fleet default.
+    /// There should always be a default pool at the fleet level, though this
+    /// query can theoretically fail if someone is able to delete that pool or
+    /// make another one the default and delete that.
+    pub async fn ip_pools_fetch_default(
         &self,
         opctx: &OpContext,
-        action: authz::Action,
-    ) -> LookupResult<(authz::IpPool, IpPool)> {
-        self.ip_pools_fetch_for(
-            opctx,
-            action,
-            &Name(ExternalName::from_str("default").unwrap()),
-        )
-        .await
+    ) -> LookupResult<IpPool> {
+        use db::schema::ip_pool::dsl;
+
+        let authz_silo_id = opctx.authn.silo_required()?.id();
+
+        // TODO: Need auth check here. Only fleet viewers can list children on
+        // IP_POOL_LIST, so if we check that, nobody can make instances. This
+        // used to check CreateChild on an individual IP pool, but now we're not
+        // looking up by name so the check is more complicated
+        //
+        // opctx
+        //     .authorize(authz::Action::ListChildren, &authz::IP_POOL_LIST)
+        //     .await?;
+
+        dsl::ip_pool
+            .filter(dsl::silo_id.eq(authz_silo_id).or(dsl::silo_id.is_null()))
+            .filter(dsl::is_default.eq(true))
+            .filter(dsl::time_deleted.is_null())
+            // this will sort by most specific first, i.e.,
+            //
+            //   (silo)
+            //   (null)
+            //
+            // then by only taking the first result, we get the most specific one
+            .order(dsl::silo_id.asc().nulls_last())
+            .select(IpPool::as_select())
+            .first_async::<IpPool>(self.pool_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
-    /// Looks up an IP pool by name.
-    pub(crate) async fn ip_pools_fetch_for(
+    /// Looks up an IP pool by name if it does not conflict with your current scope.
+    pub(crate) async fn ip_pools_fetch(
         &self,
         opctx: &OpContext,
-        action: authz::Action,
         name: &Name,
-    ) -> LookupResult<(authz::IpPool, IpPool)> {
+    ) -> LookupResult<IpPool> {
+        let authz_silo_id = opctx.authn.silo_required()?.id();
+
         let (.., authz_pool, pool) = LookupPath::new(opctx, &self)
             .ip_pool_name(&name)
-            .fetch_for(action)
+            // any authenticated user can CreateChild on an IP pool. this is
+            // meant to represent allocating an IP
+            .fetch_for(authz::Action::CreateChild)
             .await?;
-        if pool.internal {
-            return Err(authz_pool.not_found());
+
+        // You can't look up a pool by name if it conflicts with your current
+        // scope, i.e., if it has a silo it is different from your current silo
+        if let Some(pool_silo_id) = pool.silo_id {
+            if pool_silo_id != authz_silo_id {
+                return Err(authz_pool.not_found());
+            }
         }
 
-        Ok((authz_pool, pool))
+        Ok(pool)
     }
 
     /// Looks up an IP pool intended for internal services.
@@ -120,7 +152,7 @@ impl DataStore {
 
         // Look up this IP pool by rack ID.
         let (authz_pool, pool) = dsl::ip_pool
-            .filter(dsl::internal.eq(true))
+            .filter(dsl::silo_id.eq(*INTERNAL_SILO_ID))
             .filter(dsl::time_deleted.is_null())
             .select(IpPool::as_select())
             .get_result_async(self.pool_authorized(opctx).await?)
@@ -142,19 +174,15 @@ impl DataStore {
     }
 
     /// Creates a new IP pool.
-    ///
-    /// - If `internal` is set, this IP pool is used for Oxide services.
     pub async fn ip_pool_create(
         &self,
         opctx: &OpContext,
-        new_pool: &params::IpPoolCreate,
-        internal: bool,
+        pool: IpPool,
     ) -> CreateResult<IpPool> {
         use db::schema::ip_pool::dsl;
         opctx
             .authorize(authz::Action::CreateChild, &authz::IP_POOL_LIST)
             .await?;
-        let pool = IpPool::new(&new_pool.identity, internal);
         let pool_name = pool.name().as_str().to_string();
 
         diesel::insert_into(dsl::ip_pool)
@@ -204,7 +232,10 @@ impl DataStore {
         // in between the above check for children and this query.
         let now = Utc::now();
         let updated_rows = diesel::update(dsl::ip_pool)
-            .filter(dsl::internal.eq(false))
+            // != excludes nulls so we explicitly include them
+            .filter(
+                dsl::silo_id.ne(*INTERNAL_SILO_ID).or(dsl::silo_id.is_null()),
+            )
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::id.eq(authz_pool.id()))
             .filter(dsl::rcgen.eq(db_pool.rcgen))
@@ -236,7 +267,10 @@ impl DataStore {
         use db::schema::ip_pool::dsl;
         opctx.authorize(authz::Action::Modify, authz_pool).await?;
         diesel::update(dsl::ip_pool)
-            .filter(dsl::internal.eq(false))
+            // != excludes nulls so we explicitly include them
+            .filter(
+                dsl::silo_id.ne(*INTERNAL_SILO_ID).or(dsl::silo_id.is_null()),
+            )
             .filter(dsl::id.eq(authz_pool.id()))
             .filter(dsl::time_deleted.is_null())
             .set(updates)
@@ -423,5 +457,109 @@ impl DataStore {
                 "IP range deletion failed due to concurrent modification",
             ))
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use crate::db::datastore::datastore_test;
+    use crate::db::model::IpPool;
+    use assert_matches::assert_matches;
+    use nexus_db_model::Name;
+    use nexus_test_utils::db::test_setup_database;
+    use nexus_types::identity::Resource;
+    use omicron_common::api::external::{Error, IdentityMetadataCreateParams};
+    use omicron_test_utils::dev;
+
+    #[tokio::test]
+    async fn test_default_ip_pools() {
+        let logctx = dev::test_setup_log("test_default_ip_pools");
+        let mut db = test_setup_database(&logctx.log).await;
+        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+
+        // we start out with the default fleet-level pool already created,
+        // so when we ask for a default silo, we get it back
+        let fleet_default_pool =
+            datastore.ip_pools_fetch_default(&opctx).await.unwrap();
+
+        assert_eq!(fleet_default_pool.identity.name.as_str(), "default");
+        assert!(fleet_default_pool.is_default);
+        assert_eq!(fleet_default_pool.silo_id, None);
+
+        // unique index prevents second fleet-level default
+        let identity = IdentityMetadataCreateParams {
+            name: "another-fleet-default".parse().unwrap(),
+            description: "".to_string(),
+        };
+        let err = datastore
+            .ip_pool_create(
+                &opctx,
+                IpPool::new(&identity, None, /*default= */ true),
+            )
+            .await
+            .expect_err("Failed to fail to create a second default fleet pool");
+        assert_matches!(err, Error::ObjectAlreadyExists { .. });
+
+        // when we fetch the default pool for a silo, if those scopes do not
+        // have a default IP pool, we will still get back the fleet default
+
+        let silo_id = opctx.authn.silo_required().unwrap().id();
+
+        // create a non-default pool for the silo
+        let identity = IdentityMetadataCreateParams {
+            name: "non-default-for-silo".parse().unwrap(),
+            description: "".to_string(),
+        };
+        let _ = datastore
+            .ip_pool_create(
+                &opctx,
+                IpPool::new(&identity, Some(silo_id), /*default= */ false),
+            )
+            .await;
+
+        // because that one was not a default, when we ask for the silo default
+        // pool, we still get the fleet default
+        let ip_pool = datastore
+            .ip_pools_fetch_default(&opctx)
+            .await
+            .expect("Failed to get silo default IP pool");
+        assert_eq!(ip_pool.id(), fleet_default_pool.id());
+
+        // now create a default pool for the silo
+        let identity = IdentityMetadataCreateParams {
+            name: "default-for-silo".parse().unwrap(),
+            description: "".to_string(),
+        };
+        let _ = datastore
+            .ip_pool_create(&opctx, IpPool::new(&identity, Some(silo_id), true))
+            .await;
+
+        // now when we ask for the default pool, we get the one we just made
+        let ip_pool = datastore
+            .ip_pools_fetch_default(&opctx)
+            .await
+            .expect("Failed to get silo's default IP pool");
+        assert_eq!(ip_pool.name().as_str(), "default-for-silo");
+
+        // if we ask for the fleet default by name, we can still get that one
+        let ip_pool = datastore
+            .ip_pools_fetch(&opctx, &Name("default".parse().unwrap()))
+            .await
+            .expect("Failed to get fleet default IP pool");
+        assert_eq!(ip_pool.id(), fleet_default_pool.id());
+
+        // and we can't create a second default pool for the silo
+        let identity = IdentityMetadataCreateParams {
+            name: "second-default-for-silo".parse().unwrap(),
+            description: "".to_string(),
+        };
+        let err = datastore
+            .ip_pool_create(&opctx, IpPool::new(&identity, Some(silo_id), true))
+            .await
+            .expect_err("Failed to fail to create second default pool");
+        assert_matches!(err, Error::ObjectAlreadyExists { .. });
+
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
     }
 }

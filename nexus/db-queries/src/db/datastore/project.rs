@@ -351,7 +351,8 @@ impl DataStore {
         }
         // TODO(2148, 2056): filter only pools accessible by the given
         // project, once specific projects for pools are implemented
-        .filter(dsl::internal.eq(false))
+        // != excludes nulls so we explicitly include them
+        .filter(dsl::silo_id.ne(*INTERNAL_SILO_ID).or(dsl::silo_id.is_null()))
         .filter(dsl::time_deleted.is_null())
         .select(db::model::IpPool::as_select())
         .get_results_async(self.pool_authorized(opctx).await?)

@@ -117,6 +117,7 @@ petgraph.workspace = true
 pretty_assertions.workspace = true
 rcgen.workspace = true
 regex.workspace = true
+similar-asserts.workspace = true
 rustls = { workspace = true }
 subprocess.workspace = true
 term.workspace = true
