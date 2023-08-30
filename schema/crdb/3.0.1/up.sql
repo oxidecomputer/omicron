@@ -11,15 +11,31 @@ SELECT CAST(
     ) AS BOOL
 );
 
--- to get ready to drop the internal column, take any IP pools with internal =
--- true and set silo_id = INTERNAL_SILO_ID
+ALTER TABLE omicron.public.ip_pool
+    ADD COLUMN IF NOT EXISTS is_default BOOLEAN NOT NULL DEFAULT FALSE,
+    DROP CONSTRAINT IF EXISTS internal_pools_have_null_silo_and_project;
 
-UPDATE omicron.public.ip_pool
-    SET silo_id = '001de000-5110-4000-8000-000000000001'
-    WHERE internal = true and time_deleted is null;
+COMMIT;
 
-UPDATE omicron.public.ip_pool
-    SET is_default = true
-    WHERE name = 'default' and time_deleted is null;
+-- needs to be in its own transaction because of this thrilling bug
+-- https://github.com/cockroachdb/cockroach/issues/83593
+BEGIN;
+
+SELECT CAST(
+    IF(
+        (
+            SELECT version = '3.0.0' and target_version = '3.0.1'
+            FROM omicron.public.db_metadata WHERE singleton = true
+        ),
+        'true',
+        'Invalid starting version for schema change'
+    ) AS BOOL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS one_default_pool_per_scope ON omicron.public.ip_pool (
+    COALESCE(silo_id, '00000000-0000-0000-0000-000000000000'::uuid), 
+    COALESCE(project_id, '00000000-0000-0000-0000-000000000000'::uuid) 
+) WHERE
+    is_default = true AND time_deleted IS NULL;
 
 COMMIT;

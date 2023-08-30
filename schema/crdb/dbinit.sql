@@ -1483,8 +1483,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.ip_pool (
     /* The collection's child-resource generation number */
     rcgen INT8 NOT NULL,
 
-    is_default BOOLEAN NOT NULL DEFAULT FALSE,
-
     /*
      * Fields representating association with a silo or project. silo_id must
      * be non-null if project_id is non-null. silo_id is also used to mark an IP
@@ -1492,6 +1490,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.ip_pool (
      */
     silo_id UUID,
     project_id UUID,
+
+    /* Is this the default pool for its scope (fleet, silo, or project) */
+    is_default BOOLEAN NOT NULL DEFAULT FALSE,
 
     -- if silo_id is null, then project_id must be null
     CONSTRAINT project_implies_silo CHECK (
@@ -2566,7 +2567,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    ( TRUE, NOW(), NOW(), '3.0.2', NULL)
+    ( TRUE, NOW(), NOW(), '3.0.3', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;
