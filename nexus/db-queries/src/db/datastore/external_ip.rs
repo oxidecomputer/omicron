@@ -50,17 +50,21 @@ impl DataStore {
         opctx: &OpContext,
         ip_id: Uuid,
         instance_id: Uuid,
+        project_id: Uuid,
         pool_name: Option<Name>,
     ) -> CreateResult<ExternalIp> {
         // If we have a pool name, look up the pool by name and return it
         // as long as its scopes don't conflict with the current scope.
         // Otherwise, not found.
         let pool = match pool_name {
-            // TODO: include current project ID
-            Some(name) => self.ip_pools_fetch_for(&opctx, &name, None).await?,
+            Some(name) => {
+                self.ip_pools_fetch_for(&opctx, &name, Some(project_id)).await?
+            }
             // If no name given, use the default logic
-            // TODO: include current project ID
-            None => self.ip_pools_fetch_default_for(&opctx, None).await?,
+            None => {
+                self.ip_pools_fetch_default_for(&opctx, Some(project_id))
+                    .await?
+            }
         };
 
         let pool_id = pool.identity.id;

@@ -995,6 +995,7 @@ mod tests {
         let context =
             TestContext::new("test_ephemeral_and_snat_ips_do_not_overlap")
                 .await;
+        let project_id = Uuid::new_v4();
         let range = IpRange::try_from((
             Ipv4Addr::new(10, 0, 0, 1),
             Ipv4Addr::new(10, 0, 0, 1),
@@ -1011,6 +1012,7 @@ mod tests {
                 &context.opctx,
                 Uuid::new_v4(),
                 instance_id,
+                project_id,
                 /* pool_name = */ None,
             )
             .await
@@ -1050,6 +1052,7 @@ mod tests {
                 &context.opctx,
                 Uuid::new_v4(),
                 instance_id,
+                project_id,
                 /* pool_name = */ None,
             )
             .await;
@@ -1184,6 +1187,7 @@ mod tests {
         .unwrap();
         context.initialize_ip_pool("default", range).await;
 
+        let project_id = Uuid::new_v4();
         let instance_id = Uuid::new_v4();
         let id = Uuid::new_v4();
         let pool_name = None;
@@ -1194,6 +1198,7 @@ mod tests {
                 &context.opctx,
                 id,
                 instance_id,
+                project_id,
                 pool_name,
             )
             .await
@@ -1713,6 +1718,7 @@ mod tests {
 
         // Allocating an address on an instance in the second pool should be
         // respected, even though there are IPs available in the first.
+        let project_id = Uuid::new_v4();
         let instance_id = Uuid::new_v4();
         let id = Uuid::new_v4();
         let pool_name = Some(Name("p1".parse().unwrap()));
@@ -1723,6 +1729,7 @@ mod tests {
                 &context.opctx,
                 id,
                 instance_id,
+                project_id,
                 pool_name,
             )
             .await
@@ -1742,6 +1749,7 @@ mod tests {
         )
         .await;
 
+        let project_id = Uuid::new_v4();
         let first_range = IpRange::try_from((
             Ipv4Addr::new(10, 0, 0, 1),
             Ipv4Addr::new(10, 0, 0, 3),
@@ -1766,6 +1774,7 @@ mod tests {
                     &context.opctx,
                     Uuid::new_v4(),
                     instance_id,
+                    project_id,
                     pool_name.clone(),
                 )
                 .await
@@ -1785,6 +1794,7 @@ mod tests {
                 &context.opctx,
                 Uuid::new_v4(),
                 instance_id,
+                project_id,
                 pool_name,
             )
             .await

@@ -73,12 +73,15 @@ impl DataStore {
     }
 
     /// Looks up the default IP pool for a given scope, i.e., a given
-    /// combination of silo and project ID (or none). If there is no default at
-    /// a given scope, fall back up a level. There should always be a default at
-    /// fleet level, though this query can theoretically fail.
+    /// combination of silo and project ID. If there is no default at a given
+    /// scope, fall back up a level. There should always be a default at fleet
+    /// level, though this query can theoretically fail.
     pub async fn ip_pools_fetch_default_for(
         &self,
         opctx: &OpContext,
+        // Optional primarily because there are test contexts where we don't care
+        // about the project. If project ID is None, we will only get back pools
+        // that themselves have no project.
         project_id: Option<Uuid>,
     ) -> LookupResult<IpPool> {
         use db::schema::ip_pool::dsl;
@@ -123,7 +126,6 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         name: &Name,
-        // TODO: project_id should always be defined, this is temporary
         project_id: Option<Uuid>,
     ) -> LookupResult<IpPool> {
         let authz_silo_id = opctx.authn.silo_required()?.id();
@@ -498,8 +500,11 @@ mod test {
         let mut db = test_setup_database(&logctx.log).await;
         let (opctx, datastore) = datastore_test(&logctx, &db).await;
 
+        // it doesn't matter whether the project exists
+        let project_id = Uuid::new_v4();
+
         // we start out with the default fleet-level pool already created,
-        // so when we ask for the fleet default (no silo or project) we get it back
+        // so when we ask for a default silo, we get it back
         let fleet_default_pool =
             datastore.ip_pools_fetch_default_for(&opctx, None).await.unwrap();
 
@@ -529,7 +534,7 @@ mod test {
         // default for passed in project is still the fleet default one because it
         // has no default of its own
         let ip_pool = datastore
-            .ip_pools_fetch_default_for(&opctx, Some(Uuid::new_v4()))
+            .ip_pools_fetch_default_for(&opctx, Some(project_id))
             .await
             .expect("Failed to get silo's default IP pool");
         assert_eq!(ip_pool.id(), fleet_default_pool.id());
@@ -548,12 +553,17 @@ mod test {
             )
             .await;
 
-        // because that one was not a default, when we ask for silo default
+        // because that one was not a default, when we ask for silo or project default
         // pool, we still get the fleet default
         let ip_pool = datastore
             .ip_pools_fetch_default_for(&opctx, None)
             .await
-            .expect("Failed to get fleet default IP pool");
+            .expect("Failed to get silo default IP pool");
+        assert_eq!(ip_pool.id(), fleet_default_pool.id());
+        let ip_pool = datastore
+            .ip_pools_fetch_default_for(&opctx, Some(project_id))
+            .await
+            .expect("Failed to get project default IP pool");
         assert_eq!(ip_pool.id(), fleet_default_pool.id());
 
         // now create a default pool for the silo
@@ -565,16 +575,20 @@ mod test {
             .ip_pool_create(&opctx, IpPool::new(&identity, Some(silo_id), true))
             .await;
 
-        // now when we ask for the silo default pool, we get the one we just made
+        // now when we ask for the default pool, we get the one we just made
         let ip_pool = datastore
-            .ip_pools_fetch_default_for(&opctx, None)
+            .ip_pools_fetch_default_for(&opctx, Some(project_id))
             .await
             .expect("Failed to get silo's default IP pool");
         assert_eq!(ip_pool.name().as_str(), "default-for-silo");
 
         // if we ask for the fleet default by name, we can still get that one
         let ip_pool = datastore
-            .ip_pools_fetch_for(&opctx, &Name("default".parse().unwrap()), None)
+            .ip_pools_fetch_for(
+                &opctx,
+                &Name("default".parse().unwrap()),
+                Some(project_id),
+            )
             .await
             .expect("Failed to get fleet default IP pool");
         assert_eq!(ip_pool.id(), fleet_default_pool.id());
