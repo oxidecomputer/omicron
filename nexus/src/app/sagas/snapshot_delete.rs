@@ -2,14 +2,18 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use super::{ActionRegistry, NexusActionContext, NexusSaga};
+use super::{
+    ActionRegistry, NexusActionContext, NexusSaga, ACTION_GENERATE_ID,
+};
 use crate::app::sagas;
 use crate::app::sagas::declare_saga_actions;
 use crate::{authn, authz, db};
+use omicron_common::api::external::Error;
 use serde::Deserialize;
 use serde::Serialize;
 use steno::ActionError;
 use steno::Node;
+use uuid::Uuid;
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Params {
@@ -20,11 +24,18 @@ pub struct Params {
 
 declare_saga_actions! {
     snapshot_delete;
+    LOCK_SNAPSHOT_FOR_DELETE -> "lock_snapshot" {
+        + ssd_lock_snapshot_for_delete
+        - ssd_lock_snapshot_for_delete_undo
+    }
     DELETE_SNAPSHOT_RECORD -> "no_result1" {
         + ssd_delete_snapshot_record
     }
     SPACE_ACCOUNT -> "no_result2" {
         + ssd_account_space
+    }
+    FREE_SNAPSHOT_LOCK -> "free_snapshot_lock" {
+        + ssd_free_snapshot_lock
     }
 }
 
@@ -42,8 +53,17 @@ impl NexusSaga for SagaSnapshotDelete {
         params: &Self::Params,
         mut builder: steno::DagBuilder,
     ) -> Result<steno::Dag, super::SagaInitError> {
+        // Generate a lock ID
+        builder.append(Node::action(
+            "lock_id",
+            "GenerateLockId",
+            ACTION_GENERATE_ID.as_ref(),
+        ));
+
+        builder.append(lock_snapshot_for_delete_action());
         builder.append(delete_snapshot_record_action());
         builder.append(space_account_action());
+        builder.append(free_snapshot_lock_action());
 
         const DELETE_VOLUME_PARAMS: &'static str = "delete_volume_params";
         const DELETE_VOLUME_DESTINATION_PARAMS: &'static str =
@@ -100,6 +120,61 @@ impl NexusSaga for SagaSnapshotDelete {
 
 // snapshot delete saga: action implementations
 
+async fn ssd_lock_snapshot_for_delete(
+    sagactx: NexusActionContext,
+) -> Result<(), ActionError> {
+    let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params::<Params>()?;
+    let log = osagactx.log();
+    let lock_id = sagactx.lookup::<Uuid>("lock_id")?;
+    let snapshot_id = params.authz_snapshot.id();
+
+    info!(
+        log,
+        "attempting resource lock of snapshot {} with lock id {}",
+        snapshot_id,
+        lock_id,
+    );
+
+    osagactx
+        .datastore()
+        .attempt_resource_lock(snapshot_id, lock_id)
+        .await
+        .map_err(|_e| {
+            ActionError::action_failed(Error::conflict(&format!(
+                "snapshot {} is locked by some other saga",
+                snapshot_id,
+            )))
+        })?;
+
+    Ok(())
+}
+
+async fn ssd_lock_snapshot_for_delete_undo(
+    sagactx: NexusActionContext,
+) -> Result<(), anyhow::Error> {
+    let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params::<Params>()?;
+    let log = osagactx.log();
+    let lock_id = sagactx.lookup::<Uuid>("lock_id")?;
+    let snapshot_id = params.authz_snapshot.id();
+
+    info!(
+        log,
+        "undo: freeing resource lock of snapshot {} with lock id {}",
+        snapshot_id,
+        lock_id,
+    );
+
+    osagactx
+        .datastore()
+        .free_resource_lock(snapshot_id, lock_id)
+        .await
+        .map_err(ActionError::action_failed)?;
+
+    Ok(())
+}
+
 async fn ssd_delete_snapshot_record(
     sagactx: NexusActionContext,
 ) -> Result<(), ActionError> {
@@ -146,5 +221,30 @@ async fn ssd_account_space(
         )
         .await
         .map_err(ActionError::action_failed)?;
+    Ok(())
+}
+
+async fn ssd_free_snapshot_lock(
+    sagactx: NexusActionContext,
+) -> Result<(), ActionError> {
+    let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params::<Params>()?;
+    let log = osagactx.log();
+    let lock_id = sagactx.lookup::<Uuid>("lock_id")?;
+    let snapshot_id = params.authz_snapshot.id();
+
+    info!(
+        log,
+        "freeing resource lock of snapshot {} with lock id {}",
+        snapshot_id,
+        lock_id,
+    );
+
+    osagactx
+        .datastore()
+        .free_resource_lock(snapshot_id, lock_id)
+        .await
+        .map_err(ActionError::action_failed)?;
+
     Ok(())
 }

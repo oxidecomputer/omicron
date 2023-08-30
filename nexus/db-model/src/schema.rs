@@ -1126,12 +1126,19 @@ table! {
     }
 }
 
+table! {
+    resource_lock (resource_id) {
+        resource_id -> Uuid,
+        lock_id -> Uuid,
+    }
+}
+
 /// The version of the database schema this particular version of Nexus was
 /// built against.
 ///
 /// This should be updated whenever the schema is changed. For more details,
 /// refer to: schema/crdb/README.adoc
-pub const SCHEMA_VERSION: SemverVersion = SemverVersion::new(3, 0, 0);
+pub const SCHEMA_VERSION: SemverVersion = SemverVersion::new(4, 0, 0);
 
 allow_tables_to_appear_in_same_query!(
     system_update,

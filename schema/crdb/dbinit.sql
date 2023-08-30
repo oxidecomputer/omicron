@@ -2528,7 +2528,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.switch_port_settings_address_config (
     PRIMARY KEY (port_settings_id, address, interface_name)
 );
 
-
 /*******************************************************************/
 
 /*
@@ -2562,7 +2561,12 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    ( TRUE, NOW(), NOW(), '3.0.0', NULL)
+    ( TRUE, NOW(), NOW(), '4.0.0', NULL)
 ON CONFLICT DO NOTHING;
+
+CREATE TABLE IF NOT EXISTS omicron.public.resource_lock (
+    resource_id UUID PRIMARY KEY,
+    lock_id UUID NOT NULL
+);
 
 COMMIT;

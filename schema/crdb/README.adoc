@@ -52,6 +52,8 @@ Process:
 * Update `schema/crdb/dbinit.sql` to match what the database should look like
   after your update is applied. Don't forget to update the version field of
   `db_metadata` at the bottom of the file!
+** If you're adding a new table, it has to go at the very end. Otherwise the check constraint
+   comparison test will fail.
 ** If necessary, do the same thing for `schema/crdb/dbwipe.sql`.
 * Update Nexus's idea of the latest schema, by updating it's `SCHEMA_VERSION` to
   `NEW_VERSION` within `nexus/db-model/src/schema.rs`.

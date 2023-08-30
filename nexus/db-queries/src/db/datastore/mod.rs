@@ -67,6 +67,7 @@ mod project;
 mod rack;
 mod region;
 mod region_snapshot;
+mod resource_lock;
 mod role;
 mod saga;
 mod service;
