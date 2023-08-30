@@ -860,6 +860,7 @@ mod test {
         let host = FakeHost::new(log.clone());
         host.add_devices(&vec![Utf8PathBuf::from(vdev)]);
 
+        // Create the zpool
         let output = host
             .executor()
             .execute(Command::new(helios_fusion::ZPOOL).args([
@@ -870,7 +871,16 @@ mod test {
             .expect("Failed to run zpool create command");
         assert!(output.status.success());
 
-        // TODO: Confirm dataset exists?
+        // Observe the ZFS filesystem exists
+        let output = host
+            .executor()
+            .execute(Command::new(helios_fusion::ZFS).args([
+                "list",
+                "-Hp",
+                &zpool_name,
+            ]))
+            .expect("Failed to run zfs list command");
+        assert!(output.status.success());
 
         logctx.cleanup_successful();
     }
