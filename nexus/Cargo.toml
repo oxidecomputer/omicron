@@ -68,7 +68,6 @@ serde.workspace = true
 serde_json.workspace = true
 serde_urlencoded.workspace = true
 serde_with.workspace = true
-similar-asserts.workspace = true
 sled-agent-client.workspace = true
 slog.workspace = true
 slog-async.workspace = true
@@ -118,6 +117,7 @@ petgraph.workspace = true
 pretty_assertions.workspace = true
 rcgen.workspace = true
 regex.workspace = true
+similar-asserts.workspace = true
 rustls = { workspace = true }
 subprocess.workspace = true
 term.workspace = true

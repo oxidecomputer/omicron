@@ -72,16 +72,18 @@ impl DataStore {
         .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
-    /// Looks up the default IP pool for a given scope, i.e., a given
-    /// combination of silo and project ID. If there is no default at a given
-    /// scope, fall back up a level. There should always be a default at fleet
-    /// level, though this query can theoretically fail.
+    /// Look up the default IP pool for a given scope, i.e., a given combination
+    /// of silo and project ID. If there is no default at a given scope, fall
+    /// back to the next level up. There should always be a default pool at the
+    /// fleet level, though this query can theoretically fail if someone is able
+    /// to delete that pool or make another one the default and delete that.
     pub async fn ip_pools_fetch_default_for(
         &self,
         opctx: &OpContext,
-        // Optional primarily because there are test contexts where we don't care
-        // about the project. If project ID is None, we will only get back pools
-        // that themselves have no project.
+        // Optional primarily because there are test contexts where we don't
+        // care about the project. If project ID is None, we will only get back
+        // pools that themselves have no associated project, i.e., are fleet-
+        // scoped or silo-scoped.
         project_id: Option<Uuid>,
     ) -> LookupResult<IpPool> {
         use db::schema::ip_pool::dsl;
