@@ -11,7 +11,7 @@ BEGIN;
 SELECT CAST(
     IF(
         (
-            SELECT version = '3.0.0' and target_version = '4.0.0'
+            SELECT version = '3.0.3' and target_version = '4.0.0'
             FROM omicron.public.db_metadata WHERE singleton = true
         ),
         'true',
