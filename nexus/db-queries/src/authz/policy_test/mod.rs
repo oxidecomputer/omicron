@@ -362,6 +362,7 @@ async fn test_conferred_roles() {
     let mut builder =
         ResourceBuilder::new(&opctx, &datastore, &mut coverage, main_silo_id);
     builder.new_resource(authz::FLEET);
+    builder.new_resource(authz::IP_POOL_LIST);
     let test_resources = builder.build();
 
     // We also create a Silo because the ResourceBuilder will create for us
