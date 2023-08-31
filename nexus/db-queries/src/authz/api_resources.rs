@@ -418,16 +418,9 @@ impl AuthorizedResource for IpPoolList {
     {
         // There are no roles on the IpPoolList, only permissions. But we still
         // need to load the Fleet-related roles to verify that the actor has the
-        // "admin" role on the Fleet.
-        load_roles_for_resource(
-            opctx,
-            datastore,
-            authn,
-            ResourceType::Fleet,
-            *FLEET_ID,
-            roleset,
-        )
-        .boxed()
+        // "admin" role on the Fleet (possibly conferred from a Silo role).
+        load_roles_for_resource_tree(&FLEET, opctx, datastore, authn, roleset)
+            .boxed()
     }
 
     fn on_unauthorized(

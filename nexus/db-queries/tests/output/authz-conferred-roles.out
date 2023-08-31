@@ -24,7 +24,7 @@ resource: Fleet id "001de000-1334-4000-8000-000000000000"
 resource: authz::IpPoolList
 
   USER                             Q  R LC RP  M MP CC  D
-  silo-admin                       ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo-admin                       ✘  ✘  ✔  ✘  ✔  ✔  ✔  ✔
   silo-collaborator                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo-viewer                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
 
@@ -39,9 +39,9 @@ resource: Fleet id "001de000-1334-4000-8000-000000000000"
 resource: authz::IpPoolList
 
   USER                             Q  R LC RP  M MP CC  D
-  silo-admin                       ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo-collaborator                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo-viewer                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo-admin                       ✘  ✘  ✔  ✘  ✘  ✘  ✘  ✘
+  silo-collaborator                ✘  ✘  ✔  ✘  ✘  ✘  ✘  ✘
+  silo-viewer                      ✘  ✘  ✔  ✘  ✘  ✘  ✘  ✘
 
 policy: {Admin: {Viewer}}
 resource: Fleet id "001de000-1334-4000-8000-000000000000"
@@ -54,7 +54,7 @@ resource: Fleet id "001de000-1334-4000-8000-000000000000"
 resource: authz::IpPoolList
 
   USER                             Q  R LC RP  M MP CC  D
-  silo-admin                       ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo-admin                       ✘  ✘  ✔  ✘  ✘  ✘  ✘  ✘
   silo-collaborator                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo-viewer                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
 
@@ -69,9 +69,9 @@ resource: Fleet id "001de000-1334-4000-8000-000000000000"
 resource: authz::IpPoolList
 
   USER                             Q  R LC RP  M MP CC  D
-  silo-admin                       ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo-collaborator                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo-viewer                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo-admin                       ✘  ✘  ✔  ✘  ✔  ✔  ✔  ✔
+  silo-collaborator                ✘  ✘  ✔  ✘  ✔  ✔  ✔  ✔
+  silo-viewer                      ✘  ✘  ✔  ✘  ✔  ✔  ✔  ✔
 
 policy: {Admin: {Admin}, Viewer: {Viewer}}
 resource: Fleet id "001de000-1334-4000-8000-000000000000"
@@ -84,7 +84,7 @@ resource: Fleet id "001de000-1334-4000-8000-000000000000"
 resource: authz::IpPoolList
 
   USER                             Q  R LC RP  M MP CC  D
-  silo-admin                       ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo-collaborator                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo-viewer                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo-admin                       ✘  ✘  ✔  ✘  ✔  ✔  ✔  ✔
+  silo-collaborator                ✘  ✘  ✔  ✘  ✘  ✘  ✘  ✘
+  silo-viewer                      ✘  ✘  ✔  ✘  ✘  ✘  ✘  ✘
 
