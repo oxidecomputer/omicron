@@ -29,9 +29,7 @@
 use super::actor::AnyActor;
 use super::context::AuthorizedResource;
 use super::oso_generic::Init;
-use super::roles::{
-    load_roles_for_resource, load_roles_for_resource_tree, RoleSet,
-};
+use super::roles::{load_roles_for_resource_tree, RoleSet};
 use super::Action;
 use super::{actor::AuthenticatedActor, Authz};
 use crate::authn;
@@ -290,15 +288,8 @@ impl AuthorizedResource for ConsoleSessionList {
         'd: 'f,
         'e: 'f,
     {
-        load_roles_for_resource(
-            opctx,
-            datastore,
-            authn,
-            ResourceType::Fleet,
-            *FLEET_ID,
-            roleset,
-        )
-        .boxed()
+        load_roles_for_resource_tree(&FLEET, opctx, datastore, authn, roleset)
+            .boxed()
     }
 
     fn on_unauthorized(
@@ -353,15 +344,8 @@ impl AuthorizedResource for DnsConfig {
         'd: 'f,
         'e: 'f,
     {
-        load_roles_for_resource(
-            opctx,
-            datastore,
-            authn,
-            ResourceType::Fleet,
-            *FLEET_ID,
-            roleset,
-        )
-        .boxed()
+        load_roles_for_resource_tree(&FLEET, opctx, datastore, authn, roleset)
+            .boxed()
     }
 
     fn on_unauthorized(
@@ -470,15 +454,8 @@ impl AuthorizedResource for DeviceAuthRequestList {
         // There are no roles on the DeviceAuthRequestList, only permissions. But we
         // still need to load the Fleet-related roles to verify that the actor has the
         // "admin" role on the Fleet.
-        load_roles_for_resource(
-            opctx,
-            datastore,
-            authn,
-            ResourceType::Fleet,
-            *FLEET_ID,
-            roleset,
-        )
-        .boxed()
+        load_roles_for_resource_tree(&FLEET, opctx, datastore, authn, roleset)
+            .boxed()
     }
 
     fn on_unauthorized(
