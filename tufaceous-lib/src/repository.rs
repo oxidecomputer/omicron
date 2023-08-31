@@ -11,7 +11,7 @@ use omicron_common::{
     api::external::SemverVersion,
     update::{Artifact, ArtifactsDocument},
 };
-use std::num::NonZeroU64;
+use std::{collections::BTreeSet, num::NonZeroU64};
 use tough::{
     editor::{signed::SignedRole, RepositoryEditor},
     schema::{Root, Target},
@@ -202,20 +202,24 @@ pub struct OmicronRepoEditor {
     editor: RepositoryEditor,
     repo_path: Utf8PathBuf,
     artifacts: ArtifactsDocument,
-    existing_targets: Vec<TargetName>,
+
+    // Set of `TargetName::resolved()` names for every target that existed when
+    // the repo was opened. We use this to ensure we don't overwrite an existing
+    // target when adding new artifacts.
+    existing_target_names: BTreeSet<String>,
 }
 
 impl OmicronRepoEditor {
     fn new(repo: OmicronRepo) -> Result<Self> {
         let artifacts = repo.read_artifacts()?;
 
-        let existing_targets = repo
+        let existing_target_names = repo
             .repo
             .targets()
             .signed
             .targets_iter()
-            .map(|(name, _)| name.to_owned())
-            .collect::<Vec<_>>();
+            .map(|(name, _)| name.resolved().to_string())
+            .collect::<BTreeSet<_>>();
 
         let editor = RepositoryEditor::from_repo(
             repo.repo_path
@@ -228,7 +232,7 @@ impl OmicronRepoEditor {
             editor,
             repo_path: repo.repo_path,
             artifacts,
-            existing_targets,
+            existing_target_names,
         })
     }
 
@@ -252,53 +256,41 @@ impl OmicronRepoEditor {
             editor,
             repo_path,
             artifacts: ArtifactsDocument::empty(system_version),
-            existing_targets: vec![],
+            existing_target_names: BTreeSet::new(),
         })
     }
 
     /// Adds an artifact to the repository.
     pub fn add_artifact(&mut self, new_artifact: &AddArtifact) -> Result<()> {
-        let filename = format!(
-            "{}-{}.tar.gz",
+        let target_name = format!(
+            "{}-{}-{}.tar.gz",
+            new_artifact.kind(),
             new_artifact.name(),
             new_artifact.version(),
         );
 
-        // if we already have an artifact of this name/version/kind, replace it.
-        if let Some(artifact) =
-            self.artifacts.artifacts.iter_mut().find(|artifact| {
-                artifact.name == new_artifact.name()
-                    && &artifact.version == new_artifact.version()
-                    && artifact.kind == new_artifact.kind().clone()
-            })
-        {
-            self.editor.remove_target(&artifact.target.as_str().try_into()?)?;
-            artifact.target = filename.clone();
-        } else {
-            // if we don't, make sure we're not overriding another target.
-            if self.existing_targets.iter().any(|target_name| {
-                target_name.raw() == filename
-                    && target_name.resolved() == filename
-            }) {
-                bail!(
-                    "a target named {} already exists in the repository",
-                    filename
-                );
-            }
-            self.artifacts.artifacts.push(Artifact {
-                name: new_artifact.name().to_owned(),
-                version: new_artifact.version().to_owned(),
-                kind: new_artifact.kind().clone(),
-                target: filename.clone(),
-            })
+        // make sure we're not overwriting an existing target (either one that
+        // existed when we opened the repo, or one that's been added via this
+        // method)
+        if !self.existing_target_names.insert(target_name.clone()) {
+            bail!(
+                "a target named {target_name} already exists in the repository",
+            );
         }
+
+        self.artifacts.artifacts.push(Artifact {
+            name: new_artifact.name().to_owned(),
+            version: new_artifact.version().to_owned(),
+            kind: new_artifact.kind().clone(),
+            target: target_name.clone(),
+        });
 
         let targets_dir = self.repo_path.join("targets");
 
-        let mut file = TargetWriter::new(&targets_dir, filename.clone())?;
-        new_artifact
-            .write_to(&mut file)
-            .with_context(|| format!("error writing artifact `{filename}"))?;
+        let mut file = TargetWriter::new(&targets_dir, target_name.clone())?;
+        new_artifact.write_to(&mut file).with_context(|| {
+            format!("error writing artifact `{target_name}")
+        })?;
         file.finish(&mut self.editor)?;
 
         Ok(())
@@ -343,4 +335,62 @@ fn update_versions(
     editor.targets_expires(expiry)?;
     editor.timestamp_expires(expiry);
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ArtifactSource;
+    use buf_list::BufList;
+    use camino_tempfile::Utf8TempDir;
+    use chrono::Days;
+    use omicron_test_utils::dev::test_setup_log;
+
+    #[test]
+    fn reject_artifacts_with_the_same_filename() {
+        let logctx = test_setup_log("reject_artifacts_with_the_same_filename");
+        let tempdir = Utf8TempDir::new().unwrap();
+        let mut repo = OmicronRepo::initialize(
+            &logctx.log,
+            tempdir.path(),
+            "0.0.0".parse().unwrap(),
+            vec![Key::generate_ed25519()],
+            Utc::now() + Days::new(1),
+        )
+        .unwrap()
+        .into_editor()
+        .unwrap();
+
+        // Targets are uniquely identified by their kind/name/version triple;
+        // trying to add two artifacts with identical triples should fail.
+        let kind = "test-kind";
+        let name = "test-artifact-name";
+        let version = "1.0.0";
+
+        repo.add_artifact(&AddArtifact::new(
+            kind.parse().unwrap(),
+            name.to_string(),
+            version.parse().unwrap(),
+            ArtifactSource::Memory(BufList::new()),
+        ))
+        .unwrap();
+
+        let err = repo
+            .add_artifact(&AddArtifact::new(
+                kind.parse().unwrap(),
+                name.to_string(),
+                version.parse().unwrap(),
+                ArtifactSource::Memory(BufList::new()),
+            ))
+            .unwrap_err()
+            .to_string();
+
+        assert!(err.contains("a target named"));
+        assert!(err.contains(kind));
+        assert!(err.contains(name));
+        assert!(err.contains(version));
+        assert!(err.contains("already exists"));
+
+        logctx.cleanup_successful();
+    }
 }

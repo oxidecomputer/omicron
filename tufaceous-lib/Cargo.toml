@@ -32,3 +32,6 @@ toml.workspace = true
 tough.workspace = true
 url = "2.4.0"
 zip.workspace = true
+
+[dev-dependencies]
+omicron-test-utils.workspace = true
