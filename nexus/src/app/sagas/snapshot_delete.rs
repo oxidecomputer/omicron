@@ -116,6 +116,11 @@ async fn ssd_delete_snapshot_record(
             &opctx,
             &params.authz_snapshot,
             &params.snapshot,
+            vec![
+                db::model::SnapshotState::Ready,
+                db::model::SnapshotState::Faulted,
+                db::model::SnapshotState::Destroyed,
+            ],
         )
         .await
         .map_err(ActionError::action_failed)?;
