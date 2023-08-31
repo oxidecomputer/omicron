@@ -34,7 +34,7 @@ route get -inet6 default -inet6 "$GATEWAY" || route add -inet6 default -inet6 "$
 single_node=true
 
 command=()
-# TODO: Remove single node mode once all racks are running in replicated mode
+# TODO((https://github.com/oxidecomputer/omicron/issues/4000)): Remove single node mode once all racks are running in replicated mode
 if $single_node
 then
   command+=(
@@ -94,8 +94,9 @@ else
   fi
   
   # Identify the node type this is as this will influence how the config is constructed
-  # TODO: There are probably much better ways to do this service discovery, but this works
-  # for now. The services contain the same IDs as the hostnames.
+  # TODO(https://github.com/oxidecomputer/omicron/issues/3824): There are probably much 
+  # better ways to do this service discovery, but this works for now. 
+  # The services contain the same IDs as the hostnames.
   CLICKHOUSE_SVC="$(zonename | tr -dc [:digit:])"
   REPLICA_IDENTIFIER_01="$( echo "${REPLICA_HOST_01}" | tr -dc [:digit:])"
   REPLICA_IDENTIFIER_02="$( echo "${REPLICA_HOST_02}" | tr -dc [:digit:])"

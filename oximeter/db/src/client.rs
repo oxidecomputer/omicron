@@ -761,7 +761,7 @@ mod tests {
             .expect("Failed to initialize timeseries database");
 
         // Wait to make sure data has been synchronised.
-        // TODO: Waiting for 5 secs is a bit sloppy,
+        // TODO(https://github.com/oxidecomputer/omicron/issues/4001): Waiting for 5 secs is a bit sloppy,
         // come up with a better way to do this.
         sleep(Duration::from_secs(5)).await;
 

@@ -69,7 +69,7 @@ KEEPER_ID_02="$( echo "${KEEPER_HOST_02}" | tr -dc [:digit:] | cut -c1-7)"
 KEEPER_ID_03="$( echo "${KEEPER_HOST_03}" | tr -dc [:digit:] | cut -c1-7)"
 
 # Identify the node type this is as this will influence how the config is constructed
-# TODO: There are probably much better ways to do this service name lookup, but this works
+# TODO(https://github.com/oxidecomputer/omicron/issues/3824): There are probably much better ways to do this service name lookup, but this works
 # for now. The services contain the same IDs as the hostnames.
 KEEPER_SVC="$(zonename | tr -dc [:digit:] | cut -c1-7)"
 if [[ $KEEPER_ID_01 == $KEEPER_SVC ]]

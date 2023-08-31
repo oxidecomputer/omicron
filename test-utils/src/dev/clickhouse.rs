@@ -20,7 +20,8 @@ use tokio::{
 use crate::dev::poll;
 
 // Timeout used when starting up ClickHouse subprocess.
-const CLICKHOUSE_TIMEOUT: Duration = Duration::from_secs(60);
+// build-and-test (ubuntu-20.04) needs a little longer to get going 
+const CLICKHOUSE_TIMEOUT: Duration = Duration::from_secs(90);
 
 /// A `ClickHouseInstance` is used to start and manage a ClickHouse single node server process.
 #[derive(Debug)]

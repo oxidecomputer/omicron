@@ -315,7 +315,7 @@
 
     <remote_servers replace="true">
         <oximeter_cluster>
-            <!-- TODO: secret handling TBD -->
+            <!-- TODO(https://github.com/oxidecomputer/omicron/issues/3823): secret handling TBD -->
             <secret>mysecretphrase</secret>
             <shard>
                 <internal_replication>true</internal_replication>

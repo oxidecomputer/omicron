@@ -11,7 +11,7 @@ BEGIN;
 SELECT CAST(
     IF(
         (
-            SELECT version = '3.0.3' and target_version = '4.0.0'
+            SELECT version = '4.0.0' and target_version = '4.0.1'
             FROM omicron.public.db_metadata WHERE singleton = true
         ),
         'true',
@@ -19,6 +19,6 @@ SELECT CAST(
     ) AS BOOL
 );
 
-ALTER TYPE omicron.public.service_kind ADD VALUE IF NOT EXISTS 'clickhouse_keeper';
+ALTER TYPE omicron.public.dataset_kind ADD VALUE IF NOT EXISTS 'clickhouse_keeper';
 
 COMMIT;
