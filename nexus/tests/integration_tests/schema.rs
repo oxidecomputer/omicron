@@ -12,6 +12,7 @@ use omicron_common::nexus_config::Config;
 use omicron_common::nexus_config::SchemaConfig;
 use omicron_test_utils::dev::db::CockroachInstance;
 use pretty_assertions::assert_eq;
+use similar_asserts;
 use slog::Logger;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
@@ -470,16 +471,24 @@ struct InformationSchema {
 
 impl InformationSchema {
     fn pretty_assert_eq(&self, other: &Self) {
-        // TODO: We could manually iterate here too - the Debug outputs for
-        // each of these is pretty large, and can be kinda painful to read
-        // when comparing e.g. "All columns that exist in the database".
-        assert_eq!(self.columns, other.columns);
-        assert_eq!(self.check_constraints, other.check_constraints);
-        assert_eq!(self.key_column_usage, other.key_column_usage);
-        assert_eq!(self.referential_constraints, other.referential_constraints);
-        assert_eq!(self.views, other.views);
-        assert_eq!(self.statistics, other.statistics);
-        assert_eq!(self.tables, other.tables);
+        // similar_asserts gets us nice diff that only includes the relevant context.
+        // the columns diff especially needs this: it can be 20k lines otherwise
+        similar_asserts::assert_eq!(self.columns, other.columns);
+        similar_asserts::assert_eq!(
+            self.check_constraints,
+            other.check_constraints
+        );
+        similar_asserts::assert_eq!(
+            self.key_column_usage,
+            other.key_column_usage
+        );
+        similar_asserts::assert_eq!(
+            self.referential_constraints,
+            other.referential_constraints
+        );
+        similar_asserts::assert_eq!(self.views, other.views);
+        similar_asserts::assert_eq!(self.statistics, other.statistics);
+        similar_asserts::assert_eq!(self.tables, other.tables);
     }
 
     async fn new(crdb: &CockroachInstance) -> Self {

@@ -10141,6 +10141,11 @@
               }
             ]
           },
+          "silo_id": {
+            "nullable": true,
+            "type": "string",
+            "format": "uuid"
+          },
           "time_created": {
             "description": "timestamp when this resource was created",
             "type": "string",
@@ -10167,8 +10172,22 @@
           "description": {
             "type": "string"
           },
+          "is_default": {
+            "description": "Whether the IP pool is considered a default pool for its scope (fleet, or silo). If a pool is marked default and is associated with a silo, instances created in that silo will draw IPs from that pool unless another pool is specified at instance create time.",
+            "default": false,
+            "type": "boolean"
+          },
           "name": {
             "$ref": "#/components/schemas/Name"
+          },
+          "silo": {
+            "nullable": true,
+            "description": "If an IP pool is associated with a silo, instance IP allocations in that silo can draw from that pool.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/NameOrId"
+              }
+            ]
           }
         },
         "required": [

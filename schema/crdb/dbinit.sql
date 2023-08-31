@@ -1480,31 +1480,29 @@ CREATE TABLE IF NOT EXISTS omicron.public.ip_pool (
     time_modified TIMESTAMPTZ NOT NULL,
     time_deleted TIMESTAMPTZ,
 
-    /* Identifies if the IP Pool is dedicated to Control Plane services */
-    internal BOOL NOT NULL,
-
     /* The collection's child-resource generation number */
     rcgen INT8 NOT NULL,
 
     /*
-     * Fields representating association with a silo or project. silo_id must be
-     * non-null if project_id is non-null. When project_id is non-null, silo_id
-     * will (naturally) be the ID of the project's silo. Both must be null if
-     * internal is true, i.e., internal IP pools must be fleet-level pools.
+     * Association with a silo. silo_id is also used to mark an IP pool as
+     * "internal" by associating it with the oxide-internal silo. Null silo_id
+     * means the pool is can be used fleet-wide.
      */
     silo_id UUID,
-    project_id UUID,
 
-    -- if silo_id is null, then project_id must be null
-    CONSTRAINT project_implies_silo CHECK (
-      NOT ((silo_id IS NULL) AND (project_id IS NOT NULL))
-    ),
-
-    -- if internal = true, non-null silo_id and project_id are not allowed 
-    CONSTRAINT internal_pools_have_null_silo_and_project CHECK (
-       NOT (INTERNAL AND ((silo_id IS NOT NULL) OR (project_id IS NOT NULL)))
-    )
+    /* Is this the default pool for its scope (fleet or silo) */
+    is_default BOOLEAN NOT NULL DEFAULT FALSE
 );
+
+/*
+ * Ensure there can only be one default pool for the fleet or a given silo.
+ * Coalesce is needed because otherwise different nulls are considered to be
+ * distinct from each other.
+ */
+CREATE UNIQUE INDEX IF NOT EXISTS one_default_pool_per_scope ON omicron.public.ip_pool (
+    COALESCE(silo_id, '00000000-0000-0000-0000-000000000000'::uuid)
+) WHERE
+    is_default = true AND time_deleted IS NULL;
 
 /*
  * Index ensuring uniqueness of IP Pool names, globally.
