@@ -288,9 +288,9 @@ async fn test_ip_pool_with_silo(cptestctx: &ControlPlaneTestContext) {
     };
     let created_pool = create_pool(client, &params).await;
     assert_eq!(created_pool.identity.name, "p0");
-    assert!(created_pool.silo_id.is_some());
 
-    let silo_id = created_pool.silo_id.unwrap();
+    let silo_id =
+        created_pool.silo_id.expect("Expected pool to have a silo_id");
 
     // now we'll create another IP pool using that silo ID
     let params = IpPoolCreate {
