@@ -186,7 +186,7 @@ gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-
 gateway-sp-comms = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "1e180ae55e56bd17af35cb868ffbd18ce487351d" }
 gateway-test-utils = { path = "gateway-test-utils" }
 glob = "0.3.1"
-headers = "0.3.8"
+headers = "0.3.9"
 heck = "0.4"
 hex = "0.4.3"
 hex-literal = "0.3.4"
