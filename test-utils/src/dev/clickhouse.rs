@@ -222,7 +222,7 @@ impl ClickHouseInstance {
             .env("CH_KEEPER_ID_01", "1")
             .env("CH_KEEPER_ID_02", "2")
             .env("CH_KEEPER_ID_03", "3")
-            // There seems to be a bug using ipv6 and localhost with a replicated 
+            // There seems to be a bug using ipv6 and localhost with a replicated
             // set up when installing all servers and coordinator nodes on the same
             // server. For this reason we will be using ipv4 for testing.
             .env("CH_KEEPER_HOST_01", "127.0.0.1")
