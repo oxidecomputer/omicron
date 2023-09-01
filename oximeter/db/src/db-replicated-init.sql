@@ -1,5 +1,16 @@
 CREATE DATABASE IF NOT EXISTS oximeter ON CLUSTER oximeter_cluster;
 --
+CREATE TABLE IF NOT EXISTS oximeter.measurements_bool_local ON CLUSTER oximeter_cluster
+(
+    timeseries_name String,
+    timeseries_key UInt64,
+    timestamp DateTime64(9, 'UTC'),
+    datum UInt8
+)
+ENGINE = ReplicatedMergeTree('/clickhouse/tables/{share}/measurements_bool_local', '{replica}')
+ORDER BY (timeseries_name, timeseries_key, timestamp)
+TTL toDateTime(timestamp) + INTERVAL 30 DAY;
+--
 CREATE TABLE IF NOT EXISTS oximeter.measurements_bool ON CLUSTER oximeter_cluster
 (
     timeseries_name String,
@@ -7,8 +18,18 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_bool ON CLUSTER oximeter_cluste
     timestamp DateTime64(9, 'UTC'),
     datum UInt8
 )
-
-ENGINE = ReplicatedMergeTree()
+ENGINE = Distributed('oximeter_cluster', 'oximeter', 'measurements_bool_local', timeseries_name)
+ORDER BY (timeseries_name, timeseries_key, timestamp)
+TTL toDateTime(timestamp) + INTERVAL 30 DAY;
+--
+CREATE TABLE IF NOT EXISTS oximeter.measurements_i64_local ON CLUSTER oximeter_cluster
+(
+    timeseries_name String,
+    timeseries_key UInt64,
+    timestamp DateTime64(9, 'UTC'),
+    datum Int64
+)
+ENGINE = ReplicatedMergeTree('/clickhouse/tables/{share}/measurements_i64_local', '{replica}')
 ORDER BY (timeseries_name, timeseries_key, timestamp)
 TTL toDateTime(timestamp) + INTERVAL 30 DAY;
 --
@@ -19,7 +40,18 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_i64 ON CLUSTER oximeter_cluster
     timestamp DateTime64(9, 'UTC'),
     datum Int64
 )
-ENGINE = ReplicatedMergeTree()
+ENGINE = Distributed('oximeter_cluster', 'oximeter', 'measurements_i64_local', timeseries_name)
+ORDER BY (timeseries_name, timeseries_key, timestamp)
+TTL toDateTime(timestamp) + INTERVAL 30 DAY;
+--
+CREATE TABLE IF NOT EXISTS oximeter.measurements_f64_local ON CLUSTER oximeter_cluster
+(
+    timeseries_name String,
+    timeseries_key UInt64,
+    timestamp DateTime64(9, 'UTC'),
+    datum Float64
+)
+ENGINE = ReplicatedMergeTree('/clickhouse/tables/{share}/measurements_f64_local', '{replica}')
 ORDER BY (timeseries_name, timeseries_key, timestamp)
 TTL toDateTime(timestamp) + INTERVAL 30 DAY;
 --
@@ -30,7 +62,18 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_f64 ON CLUSTER oximeter_cluster
     timestamp DateTime64(9, 'UTC'),
     datum Float64
 )
-ENGINE = ReplicatedMergeTree()
+ENGINE = Distributed('oximeter_cluster', 'oximeter', 'measurements_f64_local', timeseries_name)
+ORDER BY (timeseries_name, timeseries_key, timestamp)
+TTL toDateTime(timestamp) + INTERVAL 30 DAY;
+--
+CREATE TABLE IF NOT EXISTS oximeter.measurements_string_local ON CLUSTER oximeter_cluster
+(
+    timeseries_name String,
+    timeseries_key UInt64,
+    timestamp DateTime64(9, 'UTC'),
+    datum String
+)
+ENGINE = ReplicatedMergeTree('/clickhouse/tables/{share}/measurements_string_local', '{replica}')
 ORDER BY (timeseries_name, timeseries_key, timestamp)
 TTL toDateTime(timestamp) + INTERVAL 30 DAY;
 --
@@ -41,7 +84,18 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_string ON CLUSTER oximeter_clus
     timestamp DateTime64(9, 'UTC'),
     datum String
 )
-ENGINE = ReplicatedMergeTree()
+ENGINE = Distributed('oximeter_cluster', 'oximeter', 'measurements_string_local', timeseries_name)
+ORDER BY (timeseries_name, timeseries_key, timestamp)
+TTL toDateTime(timestamp) + INTERVAL 30 DAY;
+--
+CREATE TABLE IF NOT EXISTS oximeter.measurements_bytes_local ON CLUSTER oximeter_cluster
+(
+    timeseries_name String,
+    timeseries_key UInt64,
+    timestamp DateTime64(9, 'UTC'),
+    datum Array(UInt8)
+)
+ENGINE = ReplicatedMergeTree('/clickhouse/tables/{share}/measurements_bytes_local', '{replica}')
 ORDER BY (timeseries_name, timeseries_key, timestamp)
 TTL toDateTime(timestamp) + INTERVAL 30 DAY;
 --
@@ -52,8 +106,20 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_bytes ON CLUSTER oximeter_clust
     timestamp DateTime64(9, 'UTC'),
     datum Array(UInt8)
 )
-ENGINE = ReplicatedMergeTree()
+ENGINE = Distributed('oximeter_cluster', 'oximeter', 'measurements_bytes_local', timeseries_name)
 ORDER BY (timeseries_name, timeseries_key, timestamp)
+TTL toDateTime(timestamp) + INTERVAL 30 DAY;
+--
+CREATE TABLE IF NOT EXISTS oximeter.measurements_cumulativei64_local ON CLUSTER oximeter_cluster
+(
+    timeseries_name String,
+    timeseries_key UInt64,
+    start_time DateTime64(9, 'UTC'),
+    timestamp DateTime64(9, 'UTC'),
+    datum Int64
+)
+ENGINE = ReplicatedMergeTree('/clickhouse/tables/{share}/measurements_cumulativei64_local', '{replica}')
+ORDER BY (timeseries_name, timeseries_key, start_time, timestamp)
 TTL toDateTime(timestamp) + INTERVAL 30 DAY;
 --
 CREATE TABLE IF NOT EXISTS oximeter.measurements_cumulativei64 ON CLUSTER oximeter_cluster
@@ -64,7 +130,19 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_cumulativei64 ON CLUSTER oximet
     timestamp DateTime64(9, 'UTC'),
     datum Int64
 )
-ENGINE = ReplicatedMergeTree()
+ENGINE = Distributed('oximeter_cluster', 'oximeter', 'measurements_cumulativei64_local', timeseries_name)
+ORDER BY (timeseries_name, timeseries_key, start_time, timestamp)
+TTL toDateTime(timestamp) + INTERVAL 30 DAY;
+--
+CREATE TABLE IF NOT EXISTS oximeter.measurements_cumulativef64_local ON CLUSTER oximeter_cluster
+(
+    timeseries_name String,
+    timeseries_key UInt64,
+    start_time DateTime64(9, 'UTC'),
+    timestamp DateTime64(9, 'UTC'),
+    datum Float64
+)
+ENGINE = ReplicatedMergeTree('/clickhouse/tables/{share}/measurements_cumulativef64_local', '{replica}')
 ORDER BY (timeseries_name, timeseries_key, start_time, timestamp)
 TTL toDateTime(timestamp) + INTERVAL 30 DAY;
 --
@@ -76,7 +154,20 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_cumulativef64 ON CLUSTER oximet
     timestamp DateTime64(9, 'UTC'),
     datum Float64
 )
-ENGINE = ReplicatedMergeTree()
+ENGINE = Distributed('oximeter_cluster', 'oximeter', 'measurements_cumulativef64_local', timeseries_name)
+ORDER BY (timeseries_name, timeseries_key, start_time, timestamp)
+TTL toDateTime(timestamp) + INTERVAL 30 DAY;
+--
+CREATE TABLE IF NOT EXISTS oximeter.measurements_histogrami64_local ON CLUSTER oximeter_cluster
+(
+    timeseries_name String,
+    timeseries_key UInt64,
+    start_time DateTime64(9, 'UTC'),
+    timestamp DateTime64(9, 'UTC'),
+    bins Array(Int64),
+    counts Array(UInt64)
+)
+ENGINE = ReplicatedMergeTree('/clickhouse/tables/{share}/measurements_histogrami64_local', '{replica}')
 ORDER BY (timeseries_name, timeseries_key, start_time, timestamp)
 TTL toDateTime(timestamp) + INTERVAL 30 DAY;
 --
@@ -89,7 +180,20 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_histogrami64 ON CLUSTER oximete
     bins Array(Int64),
     counts Array(UInt64)
 )
-ENGINE = ReplicatedMergeTree()
+ENGINE = Distributed('oximeter_cluster', 'oximeter', 'measurements_histogrami64_local', timeseries_name)
+ORDER BY (timeseries_name, timeseries_key, start_time, timestamp)
+TTL toDateTime(timestamp) + INTERVAL 30 DAY;
+--
+CREATE TABLE IF NOT EXISTS oximeter.measurements_histogramf64_local ON CLUSTER oximeter_cluster
+(
+    timeseries_name String,
+    timeseries_key UInt64,
+    start_time DateTime64(9, 'UTC'),
+    timestamp DateTime64(9, 'UTC'),
+    bins Array(Float64),
+    counts Array(UInt64)
+)
+ENGINE = ReplicatedMergeTree('/clickhouse/tables/{share}/measurements_histogramf64_local', '{replica}')
 ORDER BY (timeseries_name, timeseries_key, start_time, timestamp)
 TTL toDateTime(timestamp) + INTERVAL 30 DAY;
 --
@@ -102,7 +206,7 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_histogramf64 ON CLUSTER oximete
     bins Array(Float64),
     counts Array(UInt64)
 )
-ENGINE = ReplicatedMergeTree()
+ENGINE = Distributed('oximeter_cluster', 'oximeter', 'measurements_histogramf64_local', timeseries_name)
 ORDER BY (timeseries_name, timeseries_key, start_time, timestamp)
 TTL toDateTime(timestamp) + INTERVAL 30 DAY;
 --
