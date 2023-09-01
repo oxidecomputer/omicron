@@ -875,25 +875,31 @@ mod test {
         struct DummyConfig {
             deployment: DeploymentConfig,
         }
-        let config_path = "../smf/nexus/config-partial.toml";
-        println!(
-            "checking {:?} with example deployment section added",
-            config_path
-        );
-        let mut contents = std::fs::read_to_string(config_path)
-            .expect("failed to read Nexus SMF config file");
-        contents.push_str(
-            "\n\n\n \
-            # !! content below added by test_repo_configs_are_valid()\n\
-            \n\n\n",
-        );
         let example_deployment = toml::to_string_pretty(&DummyConfig {
             deployment: example_config.deployment,
         })
         .unwrap();
-        contents.push_str(&example_deployment);
-        let _: Config = toml::from_str(&contents)
-            .expect("Nexus SMF config file is not valid");
+
+        let nexus_config_paths = [
+            "../smf/nexus/single-sled/config-partial.toml",
+            "../smf/nexus/multi-sled/config-partial.toml",
+        ];
+        for config_path in nexus_config_paths {
+            println!(
+                "checking {:?} with example deployment section added",
+                config_path
+            );
+            let mut contents = std::fs::read_to_string(config_path)
+                .expect("failed to read Nexus SMF config file");
+            contents.push_str(
+                "\n\n\n \
+            # !! content below added by test_repo_configs_are_valid()\n\
+            \n\n\n",
+            );
+            contents.push_str(&example_deployment);
+            let _: Config = toml::from_str(&contents)
+                .expect("Nexus SMF config file is not valid");
+        }
     }
 
     #[test]
