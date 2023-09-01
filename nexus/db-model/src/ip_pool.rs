@@ -66,7 +66,11 @@ impl IpPool {
 
 impl From<IpPool> for views::IpPool {
     fn from(pool: IpPool) -> Self {
-        Self { identity: pool.identity(), silo_id: pool.silo_id }
+        Self {
+            identity: pool.identity(),
+            silo_id: pool.silo_id,
+            is_default: pool.is_default,
+        }
     }
 }
 

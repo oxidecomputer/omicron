@@ -61,6 +61,8 @@ async fn test_ip_pool_basic_crud(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(ip_pools.len(), 1, "Expected to see default IP pool");
 
     assert_eq!(ip_pools[0].identity.name, "default",);
+    assert_eq!(ip_pools[0].silo_id, None);
+    assert!(ip_pools[0].is_default);
 
     // Verify 404 if the pool doesn't exist yet, both for creating or deleting
     let error: HttpErrorResponseBody = NexusRequest::expect_failure(
