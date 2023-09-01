@@ -719,7 +719,7 @@ mod tests {
         let r1_tcp_port = 9000;
         let r1_interserver_port = 9009;
         let r1_name = String::from("oximeter_cluster node 1");
-        let r1_number = 01;
+        let r1_number = String::from("01");
         let mut db_1 = ClickHouseInstance::new_replicated(
             r1_port,
             r1_tcp_port,
@@ -738,7 +738,7 @@ mod tests {
         let r2_tcp_port = 9001;
         let r2_interserver_port = 9010;
         let r2_name = String::from("oximeter_cluster node 2");
-        let r2_number = 02;
+        let r2_number = String::from("02");
         let mut db_2 = ClickHouseInstance::new_replicated(
             r2_port,
             r2_tcp_port,

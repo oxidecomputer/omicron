@@ -112,7 +112,7 @@ impl ClickHouseInstance {
         tcp_port: u16,
         interserver_port: u16,
         name: String,
-        r_number: u16,
+        r_number: String,
         config_path: PathBuf,
     ) -> Result<Self, anyhow::Error> {
         let data_dir = TempDir::new()
@@ -139,7 +139,7 @@ impl ClickHouseInstance {
             .env("CH_ERROR_LOG", err_log_path)
             .env("CH_REPLICA_DISPLAY_NAME", name)
             .env("CH_LISTEN_ADDR", "::")
-            .env("CH_LISTEN_PORT", port.to_string().clone())
+            .env("CH_LISTEN_PORT", port.to_string())
             .env("CH_TCP_PORT", tcp_port.to_string())
             .env("CH_INTERSERVER_PORT", interserver_port.to_string())
             .env("CH_DATASTORE", data_dir.path())
@@ -147,7 +147,7 @@ impl ClickHouseInstance {
             .env("CH_USER_FILES_PATH", user_files_path)
             .env("CH_USER_LOCAL_DIR", access_path)
             .env("CH_FORMAT_SCHEMA_PATH", format_schemas_path)
-            .env("CH_REPLICA_NUMBER", r_number.to_string())
+            .env("CH_REPLICA_NUMBER", r_number)
             // There seems to be a bug using ipv6 with a replicated set up
             // when installing all servers and coordinator nodes on the same
             // server. For this reason we will be using ipv4 for testing.
