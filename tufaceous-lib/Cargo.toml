@@ -30,7 +30,7 @@ slog.workspace = true
 tar.workspace = true
 toml.workspace = true
 tough.workspace = true
-url = "2.4.0"
+url = "2.4.1"
 zip.workspace = true
 
 [dev-dependencies]
