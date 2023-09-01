@@ -145,8 +145,9 @@ impl Executor for FakeExecutor {
     ) -> Result<BoxedChild, ExecutionError> {
         let id = self.inner.counter.fetch_add(1, Ordering::SeqCst);
         log_input(&self.inner.log, id, command);
-
-        Ok(FakeChild::new(id, command, self.inner.clone()))
+        let mut child = FakeChild::new(id, command, self.inner.clone());
+        self.inner.spawn_handler.lock().unwrap()(&mut child);
+        Ok(child)
     }
 }
 
@@ -194,19 +195,29 @@ impl FakeChild {
     pub fn command(&self) -> &Command {
         &self.command
     }
+
+    pub fn stdin(&self) -> &SharedByteQueue {
+        &self.stdin
+    }
+    pub fn stdout(&self) -> &SharedByteQueue {
+        &self.stdout
+    }
+    pub fn stderr(&self) -> &SharedByteQueue {
+        &self.stderr
+    }
 }
 
 impl Child for FakeChild {
     fn take_stdin(&mut self) -> Option<Box<dyn Write + Send>> {
-        Some(Box::new(self.stdin.clone()))
+        Some(Box::new(self.stdin.take_writer()))
     }
 
     fn take_stdout(&mut self) -> Option<Box<dyn Read + Send>> {
-        Some(Box::new(self.stdout.clone()))
+        Some(Box::new(self.stdout.take_reader()))
     }
 
     fn take_stderr(&mut self) -> Option<Box<dyn Read + Send>> {
-        Some(Box::new(self.stderr.clone()))
+        Some(Box::new(self.stderr.take_reader()))
     }
 
     fn id(&self) -> u32 {

@@ -4,6 +4,8 @@
 
 //! Miscellaneous FFI wrapper functions for libc
 
+// TODO: Mark deprecated in favor of helios_fusion interface
+
 /// sysconf(3c)
 pub fn sysconf(arg: i32) -> std::io::Result<i64> {
     let res = unsafe { libc::sysconf(arg) };

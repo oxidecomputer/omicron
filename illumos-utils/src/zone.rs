@@ -4,26 +4,22 @@
 
 //! API for interacting with Zones running Propolis.
 
+use crate::dladm::{EtherstubVnic, VNIC_PREFIX_BOOTSTRAP, VNIC_PREFIX_CONTROL};
+
 use anyhow::anyhow;
 use camino::Utf8Path;
+use helios_fusion::addrobj::AddrObject;
+use helios_fusion::{BoxedExecutor, ExecutionError, PFEXEC};
 use ipnetwork::IpNetwork;
 use ipnetwork::IpNetworkError;
+use omicron_common::address::SLED_PREFIX;
 use slog::info;
 use slog::Logger;
 use std::net::{IpAddr, Ipv6Addr};
 
-use crate::addrobj::AddrObject;
-use crate::dladm::{EtherstubVnic, VNIC_PREFIX_BOOTSTRAP, VNIC_PREFIX_CONTROL};
-use helios_fusion::{BoxedExecutor, ExecutionError, PFEXEC};
-use omicron_common::address::SLED_PREFIX;
-
-const DLADM: &str = "/usr/sbin/dladm";
-pub const IPADM: &str = "/usr/sbin/ipadm";
-pub const SVCADM: &str = "/usr/sbin/svcadm";
-pub const SVCCFG: &str = "/usr/sbin/svccfg";
-pub const ZLOGIN: &str = "/usr/sbin/zlogin";
-pub const ZONEADM: &str = "/usr/sbin/zoneadm";
-pub const ZONECFG: &str = "/usr/sbin/zonecfg";
+pub use helios_fusion::{
+    DLADM, IPADM, SVCADM, SVCCFG, ZLOGIN, ZONEADM, ZONECFG,
+};
 
 // TODO: These could become enums
 pub const ZONE_PREFIX: &str = "oxz_";
@@ -35,7 +31,7 @@ enum Error {
     Execution(#[from] ExecutionError),
 
     #[error(transparent)]
-    AddrObject(#[from] crate::addrobj::ParseError),
+    AddrObject(#[from] helios_fusion::addrobj::ParseError),
 
     #[error("Address not found: {addrobj}")]
     AddressNotFound { addrobj: AddrObject },

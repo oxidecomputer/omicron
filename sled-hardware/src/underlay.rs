@@ -5,9 +5,9 @@
 //! Finding the underlay network physical links and address objects.
 
 use crate::is_gimlet;
+use helios_fusion::addrobj;
+use helios_fusion::addrobj::AddrObject;
 use helios_fusion::BoxedExecutor;
-use illumos_utils::addrobj;
-use illumos_utils::addrobj::AddrObject;
 use illumos_utils::dladm;
 use illumos_utils::dladm::Dladm;
 use illumos_utils::dladm::FindPhysicalLinkError;

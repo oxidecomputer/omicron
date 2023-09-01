@@ -46,9 +46,9 @@ use camino::{Utf8Path, Utf8PathBuf};
 use ddm_admin_client::{Client as DdmAdminClient, DdmError};
 use dpd_client::{types as DpdTypes, Client as DpdClient, Error as DpdError};
 use dropshot::HandlerTaskMode;
+use helios_fusion::addrobj::AddrObject;
+use helios_fusion::addrobj::IPV6_LINK_LOCAL_NAME;
 use helios_fusion::{BoxedExecutor, PFEXEC};
-use illumos_utils::addrobj::AddrObject;
-use illumos_utils::addrobj::IPV6_LINK_LOCAL_NAME;
 use illumos_utils::dladm::{
     Dladm, Etherstub, EtherstubVnic, GetSimnetError, PhysicalLink,
 };

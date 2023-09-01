@@ -4,6 +4,8 @@
 
 //! API for operating on addrobj objects.
 
+use std::str::FromStr;
+
 /// The name provided to all link-local IPv6 addresses.
 pub const IPV6_LINK_LOCAL_NAME: &str = "ll";
 
@@ -26,6 +28,7 @@ pub struct AddrObject {
 enum BadName {
     Interface(String),
     Object(String),
+    Other(String),
 }
 
 impl std::fmt::Display for BadName {
@@ -36,6 +39,7 @@ impl std::fmt::Display for BadName {
         match self {
             BadName::Interface(s) => write!(f, "Bad interface name: {}", s),
             BadName::Object(s) => write!(f, "Bad object name: {}", s),
+            BadName::Other(s) => write!(f, "Bad name: {}", s),
         }
     }
 }
@@ -81,6 +85,17 @@ impl AddrObject {
 
     pub fn interface(&self) -> &str {
         &self.interface
+    }
+}
+
+impl FromStr for AddrObject {
+    type Err = ParseError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let (interface, name) = s.split_once('/').ok_or_else(|| {
+            ParseError { name: BadName::Other(s.to_string()) }
+        })?;
+        Self::new(interface, name)
     }
 }
 

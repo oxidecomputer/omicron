@@ -13,6 +13,8 @@ use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 use std::str::Utf8Error;
 
+pub use helios_fusion::DLADM;
+
 pub const VNIC_PREFIX: &str = "ox";
 pub const VNIC_PREFIX_CONTROL: &str = "oxControl";
 pub const VNIC_PREFIX_BOOTSTRAP: &str = "oxBootstrap";
@@ -21,9 +23,6 @@ pub const VNIC_PREFIX_BOOTSTRAP: &str = "oxBootstrap";
 // TODO-correctness: Remove this when `xde` devices can be directly used beneath
 // Viona, and thus plumbed directly to guests.
 pub const VNIC_PREFIX_GUEST: &str = "vopte";
-
-/// Path to the DLADM command.
-pub const DLADM: &str = "/usr/sbin/dladm";
 
 /// The name of the etherstub to be created for the underlay network.
 pub const UNDERLAY_ETHERSTUB_NAME: &str = "underlay_stub0";

@@ -2,10 +2,9 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use helios_fusion::{BoxedExecutor, ExecutionError};
-
 use byteorder::{LittleEndian, ReadBytesExt};
 use camino::Utf8PathBuf;
+use helios_fusion::{BoxedExecutor, ExecutionError, DUMPADM, SAVECORE};
 use std::ffi::OsString;
 use std::fs::File;
 use std::io::{Seek, SeekFrom};
@@ -80,9 +79,6 @@ pub fn dump_flag_is_valid(
         f.read_u32::<LittleEndian>().map_err(DumpHdrError::ReadFlags)?;
     Ok((flags & DF_VALID) != 0)
 }
-
-const DUMPADM: &str = "/usr/sbin/dumpadm";
-const SAVECORE: &str = "/usr/bin/savecore";
 
 #[derive(thiserror::Error, Debug)]
 pub enum DumpAdmError {
