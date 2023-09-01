@@ -53,7 +53,7 @@ pub fn from_diesel(e: async_bb8_diesel::ConnectionError) -> external::Error {
             }
             NOT_ENOUGH_ZPOOL_SPACE_SENTINEL => {
                 return external::Error::unavail(
-                    "Not enough zpool space to allocate disks",
+                    "Not enough zpool space to allocate disks. There may not be enough disks with space for the requested region. You may also see this if your rack is in a degraded state, or you're running the default multi-rack topology configuration in a 1-sled development environment.",
                 );
             }
             NOT_ENOUGH_UNIQUE_ZPOOLS_SENTINEL => {
