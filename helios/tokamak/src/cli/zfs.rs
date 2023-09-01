@@ -345,6 +345,10 @@ impl TryFrom<Input> for Command {
                     return Err("You should run 'zfs list' commands with the '-Hp' flags enabled".to_string());
                 }
 
+                if properties.is_empty() {
+                    properties = vec![dataset::Property::Name];
+                }
+
                 Ok(Command::List { recursive, depth, properties, datasets })
             }
             "mount" => {

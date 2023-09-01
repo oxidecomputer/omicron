@@ -302,6 +302,10 @@ impl FakeHostInner {
                     }
                 }
 
+                // Create a closure to add the dataset.
+                //
+                // We either call this immediately, or in a background thread,
+                // depending on whether or not we need to read a key from stdin.
                 let inner = context.host.clone();
                 let add_dataset = move || {
                     let mut inner = inner.lock().unwrap();
@@ -400,25 +404,41 @@ impl FakeHostInner {
                     for property in &properties {
                         for field in &fields {
                             match field.as_str() {
-                                "name" => output.push_str(&node.to_string()),
+                                "name" => {
+                                    output.push_str(&node.to_string());
+                                }
                                 "property" => {
-                                    output.push_str(&property.to_string())
+                                    output.push_str(&property.to_string());
                                 }
                                 "value" => {
-                                    // TODO: Look up, across whatever
-                                    // the node type is.
-                                    todo!();
+                                    let name = node.dataset_name().expect(
+                                        "Non-root node should have name",
+                                    );
+                                    let dataset = self
+                                        .datasets
+                                        .get_dataset(&name)
+                                        .expect("Dataset should exist");
+                                    let value = dataset
+                                        .properties()
+                                        .get(*property)
+                                        .map_err(|e| to_stderr(e))?;
+                                    output.push_str(&value);
                                 }
+                                "source" => output.push_str("???"),
                                 f => {
                                     return Err(to_stderr(format!(
                                         "Unknown field: {f}"
                                     )))
                                 }
                             }
+                            output.push_str("\t");
                         }
+                        output.push_str("\n");
                     }
                 }
-                todo!();
+                Ok(ProcessState::Completed(
+                    Output::success().set_stdout(output),
+                ))
             }
             List { recursive, depth, properties, datasets } => {
                 let mut targets = if let Some(datasets) = datasets {
@@ -877,6 +897,117 @@ mod test {
             ]))
             .expect("Failed to run zfs list command");
         assert!(output.status.success());
+
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn zfs_list_and_get() {
+        let logctx = test_setup_log("zfs_list");
+        let log = &logctx.log;
+
+        let id = Uuid::new_v4();
+        let vdev = "/mydevice";
+
+        let host = FakeHost::new(log.clone());
+        host.add_devices(&vec![Utf8PathBuf::from(vdev)]);
+
+        let zpool_name = format!("oxp_{id}");
+        let dataset1_name = format!("{zpool_name}/dataset_1");
+        let dataset2_name = format!("{dataset1_name}/dataset_2");
+
+        // Create the zpool and some datasets within
+        let output = host
+            .executor()
+            .execute(Command::new(helios_fusion::ZPOOL).args([
+                "create",
+                &zpool_name,
+                vdev,
+            ]))
+            .expect("Failed to run zpool create command");
+        assert!(output.status.success());
+        let output = host
+            .executor()
+            .execute(
+                Command::new(helios_fusion::ZFS)
+                    .args(["create", &dataset1_name]),
+            )
+            .expect("Failed to run zfs create command");
+        assert!(output.status.success());
+        let output = host
+            .executor()
+            .execute(
+                Command::new(helios_fusion::ZFS)
+                    .args(["create", &dataset2_name]),
+            )
+            .expect("Failed to run zfs create command");
+        assert!(output.status.success());
+
+        // ZFS List: Lists all datasets
+
+        let output = host
+            .executor()
+            .execute(Command::new(helios_fusion::ZFS).args(["list", "-Hp"]))
+            .expect("Failed to run zfs list command");
+        assert!(output.status.success());
+        assert_eq!(
+            String::from_utf8(output.stdout).unwrap(),
+            format!("{zpool_name}\t\n{dataset1_name}\t\n{dataset2_name}\t\n")
+        );
+
+        // We can ask for properties explicitly.
+        let output = host
+            .executor()
+            .execute(Command::new(helios_fusion::ZFS).args([
+                "list",
+                "-Hpo",
+                "name,type",
+            ]))
+            .expect("Failed to run zfs list command");
+        assert!(output.status.success());
+        assert_eq!(
+            String::from_utf8(output.stdout).unwrap(),
+            format!("{zpool_name}\tfilesystem\t\n{dataset1_name}\tfilesystem\t\n{dataset2_name}\tfilesystem\t\n")
+        );
+
+        // "zfs get" also works
+        let output = host
+            .executor()
+            .execute(Command::new(helios_fusion::ZFS).args([
+                "get",
+                "-Hpo",
+                "value",
+                "mountpoint",
+                &zpool_name,
+            ]))
+            .expect("Failed to run zfs get command");
+        assert!(output.status.success());
+        assert_eq!(
+            String::from_utf8(output.stdout).unwrap(),
+            format!("/{zpool_name}\t\n")
+        );
+
+        // It also allows recursive traversal
+        //
+        // This only sees output from the zpool dataset, as well as "dataset 1", but not "dataset
+        // 2" due to the depth restriction.
+        let output = host
+            .executor()
+            .execute(Command::new(helios_fusion::ZFS).args([
+                "get",
+                "-d",
+                "1",
+                "-rHpo",
+                "value",
+                "mountpoint",
+                &zpool_name,
+            ]))
+            .expect("Failed to run zfs get command");
+        assert!(output.status.success());
+        assert_eq!(
+            String::from_utf8(output.stdout).unwrap(),
+            format!("/{zpool_name}\t\nnone\t\n")
+        );
 
         logctx.cleanup_successful();
     }
