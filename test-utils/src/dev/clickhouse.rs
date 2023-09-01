@@ -108,11 +108,11 @@ impl ClickHouseInstance {
 
     /// Start a new replicated ClickHouse server on the given IPv6 port.
     pub async fn new_replicated(
-        port: String,
-        tcp_port: String,
-        interserver_port: String,
+        port: u16,
+        tcp_port: u16,
+        interserver_port: u16,
         name: String,
-        r_number: String,
+        r_number: u16,
         config_path: PathBuf,
     ) -> Result<Self, anyhow::Error> {
         let data_dir = TempDir::new()
@@ -139,15 +139,15 @@ impl ClickHouseInstance {
             .env("CH_ERROR_LOG", err_log_path)
             .env("CH_REPLICA_DISPLAY_NAME", name)
             .env("CH_LISTEN_ADDR", "::")
-            .env("CH_LISTEN_PORT", port.clone())
-            .env("CH_TCP_PORT", tcp_port)
-            .env("CH_INTERSERVER_PORT", interserver_port)
+            .env("CH_LISTEN_PORT", port.to_string().clone())
+            .env("CH_TCP_PORT", tcp_port.to_string())
+            .env("CH_INTERSERVER_PORT", interserver_port.to_string())
             .env("CH_DATASTORE", data_dir.path())
             .env("CH_TMP_PATH", tmp_path)
             .env("CH_USER_FILES_PATH", user_files_path)
             .env("CH_USER_LOCAL_DIR", access_path)
             .env("CH_FORMAT_SCHEMA_PATH", format_schemas_path)
-            .env("CH_REPLICA_NUMBER", r_number)
+            .env("CH_REPLICA_NUMBER", r_number.to_string())
             // There seems to be a bug using ipv6 with a replicated set up
             // when installing all servers and coordinator nodes on the same
             // server. For this reason we will be using ipv4 for testing.
@@ -162,7 +162,6 @@ impl ClickHouseInstance {
             })?;
 
         let data_path = data_dir.path().to_path_buf();
-        let port: u16 = port.parse()?;
 
         let result = wait_for_ready(log_path).await;
         match result {
@@ -179,14 +178,14 @@ impl ClickHouseInstance {
 
     /// Start a new ClickHouse keeper on the given IPv6 port.
     pub async fn new_keeper(
-        port: String,
-        k_id: String,
+        port: u16,
+        k_id: u16,
         config_path: PathBuf,
     ) -> Result<Self, anyhow::Error> {
         // We assume that only 3 keepers will be run, and the ID of the keeper can only
         // be one of "1", "2" or "3". This is to avoid having to pass the IDs of the
         // other keepers as part of the function's parameters.
-        if !["1", "2", "3"].contains(&k_id.as_str()) {
+        if ![1, 2, 3].contains(&k_id) {
             return Err(ClickHouseError::InvalidKeeperId.into());
         }
         // Keepers do not allow a dot in the beginning of the directory, so we must
@@ -215,16 +214,16 @@ impl ClickHouseInstance {
             .env("CH_LOG", &log_path)
             .env("CH_ERROR_LOG", err_log_path)
             .env("CH_LISTEN_ADDR", "::")
-            .env("CH_LISTEN_PORT", &port)
-            .env("CH_KEEPER_ID_CURRENT", k_id)
+            .env("CH_LISTEN_PORT", port.to_string())
+            .env("CH_KEEPER_ID_CURRENT", k_id.to_string())
             .env("CH_DATASTORE", data_dir.path())
             .env("CH_LOG_STORAGE_PATH", log_storage_path)
             .env("CH_SNAPSHOT_STORAGE_PATH", snapshot_storage_path)
             .env("CH_KEEPER_ID_01", "1")
             .env("CH_KEEPER_ID_02", "2")
             .env("CH_KEEPER_ID_03", "3")
-            // There seems to be a bug using ipv6 with a replicated set up
-            // when installing all servers and coordinator nodes on the same
+            // There seems to be a bug using ipv6 and localhost with a replicated 
+            // set up when installing all servers and coordinator nodes on the same
             // server. For this reason we will be using ipv4 for testing.
             .env("CH_KEEPER_HOST_01", "127.0.0.1")
             .env("CH_KEEPER_HOST_02", "127.0.0.1")
@@ -238,7 +237,6 @@ impl ClickHouseInstance {
             })?;
 
         let data_path = data_dir.path().to_path_buf();
-        let port: u16 = port.parse()?;
 
         let result = wait_for_ready(log_path).await;
         match result {

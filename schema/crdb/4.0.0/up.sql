@@ -7,7 +7,6 @@
 -- 2. Apply the idempotent update
 
 BEGIN;
-
 SELECT CAST(
     IF(
         (
@@ -20,5 +19,19 @@ SELECT CAST(
 );
 
 ALTER TYPE omicron.public.service_kind ADD VALUE IF NOT EXISTS 'clickhouse_keeper';
+COMMIT;
 
+BEGIN;
+SELECT CAST(
+    IF(
+        (
+            SELECT version = '3.0.3' and target_version = '4.0.0'
+            FROM omicron.public.db_metadata WHERE singleton = true
+        ),
+        'true',
+        'Invalid starting version for schema change'
+    ) AS BOOL
+);
+
+ALTER TYPE omicron.public.dataset_kind ADD VALUE IF NOT EXISTS 'clickhouse_keeper';
 COMMIT;

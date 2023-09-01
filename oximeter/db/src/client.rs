@@ -677,8 +677,8 @@ mod tests {
             cur_dir.as_path().join("src/configs/keeper_config.xml");
 
         // Start Keeper 1
-        let k1_port = String::from("9181");
-        let k1_id = String::from("1");
+        let k1_port = 9181;
+        let k1_id = 1;
 
         let mut k1 = ClickHouseInstance::new_keeper(
             k1_port,
@@ -689,8 +689,8 @@ mod tests {
         .expect("Failed to start ClickHouse keeper 1");
 
         // Start Keeper 2
-        let k2_port = String::from("9182");
-        let k2_id = String::from("2");
+        let k2_port = 9182;
+        let k2_id = 2;
 
         let mut k2 = ClickHouseInstance::new_keeper(
             k2_port,
@@ -701,8 +701,8 @@ mod tests {
         .expect("Failed to start ClickHouse keeper 2");
 
         // Start Keeper 3
-        let k3_port = String::from("9183");
-        let k3_id = String::from("3");
+        let k3_port = 9183;
+        let k3_id = 3;
 
         let mut k3 =
             ClickHouseInstance::new_keeper(k3_port, k3_id, keeper_config)
@@ -715,11 +715,11 @@ mod tests {
             cur_dir.as_path().join("src/configs/replica_config.xml");
 
         // Start Replica 1
-        let r1_port = String::from("8123");
-        let r1_tcp_port = String::from("9000");
-        let r1_interserver_port = String::from("9009");
+        let r1_port = 8123;
+        let r1_tcp_port = 9000;
+        let r1_interserver_port = 9009;
         let r1_name = String::from("oximeter_cluster node 1");
-        let r1_number = String::from("01");
+        let r1_number =01;
         let mut db_1 = ClickHouseInstance::new_replicated(
             r1_port,
             r1_tcp_port,
@@ -734,11 +734,11 @@ mod tests {
             SocketAddr::new("127.0.0.1".parse().unwrap(), db_1.port());
 
         // Start Replica 2
-        let r2_port = String::from("8124");
-        let r2_tcp_port = String::from("9001");
-        let r2_interserver_port = String::from("9010");
+        let r2_port = 8124;
+        let r2_tcp_port = 9001;
+        let r2_interserver_port = 9010;
         let r2_name = String::from("oximeter_cluster node 2");
-        let r2_number = String::from("02");
+        let r2_number =02;
         let mut db_2 = ClickHouseInstance::new_replicated(
             r2_port,
             r2_tcp_port,
