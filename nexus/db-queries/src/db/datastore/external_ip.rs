@@ -5,10 +5,13 @@
 //! [`DataStore`] methods on [`ExternalIp`]s.
 
 use super::DataStore;
+use crate::authz;
+use crate::authz::ApiResource;
 use crate::context::OpContext;
 use crate::db;
 use crate::db::error::public_error_from_diesel_pool;
 use crate::db::error::ErrorHandler;
+use crate::db::lookup::LookupPath;
 use crate::db::model::ExternalIp;
 use crate::db::model::IncompleteExternalIp;
 use crate::db::model::IpKind;
@@ -52,11 +55,29 @@ impl DataStore {
         instance_id: Uuid,
         pool_name: Option<Name>,
     ) -> CreateResult<ExternalIp> {
-        // If we have a pool name, look up the pool by name and return it
-        // as long as its scopes don't conflict with the current scope.
-        // Otherwise, not found.
         let pool = match pool_name {
-            Some(name) => self.ip_pools_fetch(&opctx, &name).await?,
+            Some(name) => {
+                let (.., authz_pool, pool) = LookupPath::new(opctx, &self)
+                    .ip_pool_name(&name)
+                    // any authenticated user can CreateChild on an IP pool. this is
+                    // meant to represent allocating an IP
+                    .fetch_for(authz::Action::CreateChild)
+                    .await?;
+
+                // If the named pool conflicts with user's current scope, i.e.,
+                // if it has a silo and it's different from the current silo,
+                // then as far as IP allocation is concerned, that pool doesn't
+                // exist. If the pool has no silo, it's fleet-scoped and can
+                // always be used.
+                let authz_silo_id = opctx.authn.silo_required()?.id();
+                if let Some(pool_silo_id) = pool.silo_id {
+                    if pool_silo_id != authz_silo_id {
+                        return Err(authz_pool.not_found());
+                    }
+                }
+
+                pool
+            }
             // If no name given, use the default logic
             None => self.ip_pools_fetch_default(&opctx).await?,
         };

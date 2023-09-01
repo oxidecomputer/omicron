@@ -736,7 +736,7 @@ pub struct IpPoolCreate {
     /// silo can draw from that pool.
     pub silo: Option<NameOrId>,
 
-    /// Whether the IP pool is considered a default pool for its scope (fleet,
+    /// Whether the IP pool is considered a default pool for its scope (fleet
     /// or silo). If a pool is marked default and is associated with a silo,
     /// instances created in that silo will draw IPs from that pool unless
     /// another pool is specified at instance create time.

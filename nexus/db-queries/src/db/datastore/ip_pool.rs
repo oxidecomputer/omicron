@@ -6,7 +6,6 @@
 
 use super::DataStore;
 use crate::authz;
-use crate::authz::ApiResource;
 use crate::context::OpContext;
 use crate::db;
 use crate::db::collection_insert::AsyncInsertError;
@@ -16,7 +15,6 @@ use crate::db::error::public_error_from_diesel_pool;
 use crate::db::error::ErrorHandler;
 use crate::db::fixed_data::silo::INTERNAL_SILO_ID;
 use crate::db::identity::Resource;
-use crate::db::lookup::LookupPath;
 use crate::db::model::IpPool;
 use crate::db::model::IpPoolRange;
 use crate::db::model::IpPoolUpdate;
@@ -109,32 +107,6 @@ impl DataStore {
             .first_async::<IpPool>(self.pool_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
-    }
-
-    /// Looks up an IP pool by name if it does not conflict with your current scope.
-    pub(crate) async fn ip_pools_fetch(
-        &self,
-        opctx: &OpContext,
-        name: &Name,
-    ) -> LookupResult<IpPool> {
-        let authz_silo_id = opctx.authn.silo_required()?.id();
-
-        let (.., authz_pool, pool) = LookupPath::new(opctx, &self)
-            .ip_pool_name(&name)
-            // any authenticated user can CreateChild on an IP pool. this is
-            // meant to represent allocating an IP
-            .fetch_for(authz::Action::CreateChild)
-            .await?;
-
-        // You can't look up a pool by name if it conflicts with your current
-        // scope, i.e., if it has a silo it is different from your current silo
-        if let Some(pool_silo_id) = pool.silo_id {
-            if pool_silo_id != authz_silo_id {
-                return Err(authz_pool.not_found());
-            }
-        }
-
-        Ok(pool)
     }
 
     /// Looks up an IP pool intended for internal services.
@@ -465,7 +437,6 @@ mod test {
     use crate::db::datastore::datastore_test;
     use crate::db::model::IpPool;
     use assert_matches::assert_matches;
-    use nexus_db_model::Name;
     use nexus_test_utils::db::test_setup_database;
     use nexus_types::identity::Resource;
     use omicron_common::api::external::{Error, IdentityMetadataCreateParams};
@@ -510,12 +481,13 @@ mod test {
             name: "non-default-for-silo".parse().unwrap(),
             description: "".to_string(),
         };
-        let _ = datastore
+        datastore
             .ip_pool_create(
                 &opctx,
                 IpPool::new(&identity, Some(silo_id), /*default= */ false),
             )
-            .await;
+            .await
+            .expect("Failed to create silo non-default IP pool");
 
         // because that one was not a default, when we ask for the silo default
         // pool, we still get the fleet default
@@ -530,9 +502,10 @@ mod test {
             name: "default-for-silo".parse().unwrap(),
             description: "".to_string(),
         };
-        let _ = datastore
+        datastore
             .ip_pool_create(&opctx, IpPool::new(&identity, Some(silo_id), true))
-            .await;
+            .await
+            .expect("Failed to create silo default IP pool");
 
         // now when we ask for the default pool, we get the one we just made
         let ip_pool = datastore
@@ -540,13 +513,6 @@ mod test {
             .await
             .expect("Failed to get silo's default IP pool");
         assert_eq!(ip_pool.name().as_str(), "default-for-silo");
-
-        // if we ask for the fleet default by name, we can still get that one
-        let ip_pool = datastore
-            .ip_pools_fetch(&opctx, &Name("default".parse().unwrap()))
-            .await
-            .expect("Failed to get fleet default IP pool");
-        assert_eq!(ip_pool.id(), fleet_default_pool.id());
 
         // and we can't create a second default pool for the silo
         let identity = IdentityMetadataCreateParams {
