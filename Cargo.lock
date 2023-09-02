@@ -685,7 +685,7 @@ dependencies = [
  "ipnetwork",
  "omicron-common 0.1.0",
  "progenitor",
- "regress",
+ "regress 0.6.0",
  "reqwest",
  "schemars",
  "serde",
@@ -2103,7 +2103,7 @@ dependencies = [
  "progenitor-client",
  "quote",
  "rand 0.8.5",
- "regress",
+ "regress 0.6.0",
  "reqwest",
  "rustfmt-wrapper",
  "schemars",
@@ -2117,7 +2117,7 @@ dependencies = [
 [[package]]
 name = "dropshot"
 version = "0.9.1-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#35d44088fdb263030ef1295f990b87f2c0a4b93c"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#bd3bf5853a8fef5757b132cec7f61974bbd37de2"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -2132,7 +2132,7 @@ dependencies = [
  "hostname",
  "http",
  "hyper",
- "indexmap 1.9.3",
+ "indexmap 2.0.0",
  "openapiv3",
  "paste",
  "percent-encoding",
@@ -2162,7 +2162,7 @@ dependencies = [
 [[package]]
 name = "dropshot_endpoint"
 version = "0.9.1-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#35d44088fdb263030ef1295f990b87f2c0a4b93c"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#bd3bf5853a8fef5757b132cec7f61974bbd37de2"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3367,7 +3367,7 @@ dependencies = [
  "omicron-common 0.1.0",
  "opte-ioctl",
  "oxide-vpc",
- "regress",
+ "regress 0.6.0",
  "schemars",
  "serde",
  "serde_json",
@@ -3410,6 +3410,7 @@ checksum = "d5477fe2230a79769d8dc68e0eabf5437907c0457a5614a9e8dddb67f65eb65d"
 dependencies = [
  "equivalent",
  "hashbrown 0.14.0",
+ "serde",
 ]
 
 [[package]]
@@ -3497,7 +3498,7 @@ version = "0.1.0"
 dependencies = [
  "installinator-common",
  "progenitor",
- "regress",
+ "regress 0.6.0",
  "reqwest",
  "schemars",
  "serde",
@@ -4213,7 +4214,7 @@ dependencies = [
  "omicron-common 0.1.0",
  "omicron-passwords 0.1.0",
  "progenitor",
- "regress",
+ "regress 0.6.0",
  "reqwest",
  "schemars",
  "serde",
@@ -4232,7 +4233,7 @@ dependencies = [
  "omicron-common 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
  "omicron-passwords 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
  "progenitor",
- "regress",
+ "regress 0.6.0",
  "reqwest",
  "schemars",
  "serde",
@@ -4737,7 +4738,7 @@ dependencies = [
  "progenitor",
  "proptest",
  "rand 0.8.5",
- "regress",
+ "regress 0.6.0",
  "reqwest",
  "ring",
  "schemars",
@@ -5218,11 +5219,11 @@ checksum = "624a8340c38c1b80fd549087862da4ba43e08858af025b236e509b6649fc13d5"
 
 [[package]]
 name = "openapi-lint"
-version = "0.3.0"
-source = "git+https://github.com/oxidecomputer/openapi-lint?branch=main#c2ac10b65f6a39519c1e7ac808575b679b5ed93c"
+version = "0.4.0"
+source = "git+https://github.com/oxidecomputer/openapi-lint?branch=main#bb69a3a4a184d966bac2a0df2be5c9038d9867d0"
 dependencies = [
  "heck 0.4.1",
- "indexmap 1.9.3",
+ "indexmap 2.0.0",
  "lazy_static",
  "openapiv3",
  "regex",
@@ -5230,11 +5231,11 @@ dependencies = [
 
 [[package]]
 name = "openapiv3"
-version = "1.0.2"
+version = "1.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7b1a9f106eb0a780abd17ba9fca8e0843e3461630bcbe2af0ad4d5d3ba4e9aa4"
+checksum = "75e56d5c441965b6425165b7e3223cc933ca469834f4a8b4786817a1f9dc4f13"
 dependencies = [
- "indexmap 1.9.3",
+ "indexmap 2.0.0",
  "serde",
  "serde_json",
 ]
@@ -5376,7 +5377,7 @@ dependencies = [
  "hyper",
  "progenitor",
  "rand 0.8.5",
- "regress",
+ "regress 0.6.0",
  "reqwest",
  "serde",
  "serde_json",
@@ -6184,7 +6185,7 @@ dependencies = [
 [[package]]
 name = "progenitor"
 version = "0.3.0"
-source = "git+https://github.com/oxidecomputer/progenitor?branch=main#90fae279f93b948ae931477c132039bda713ffdc"
+source = "git+https://github.com/oxidecomputer/progenitor?branch=main#ca8b4ef6f84760d493001aabee3826e315a84d05"
 dependencies = [
  "progenitor-client",
  "progenitor-impl",
@@ -6195,7 +6196,7 @@ dependencies = [
 [[package]]
 name = "progenitor-client"
 version = "0.3.0"
-source = "git+https://github.com/oxidecomputer/progenitor?branch=main#90fae279f93b948ae931477c132039bda713ffdc"
+source = "git+https://github.com/oxidecomputer/progenitor?branch=main#ca8b4ef6f84760d493001aabee3826e315a84d05"
 dependencies = [
  "bytes",
  "futures-core",
@@ -6209,12 +6210,12 @@ dependencies = [
 [[package]]
 name = "progenitor-impl"
 version = "0.3.0"
-source = "git+https://github.com/oxidecomputer/progenitor?branch=main#90fae279f93b948ae931477c132039bda713ffdc"
+source = "git+https://github.com/oxidecomputer/progenitor?branch=main#ca8b4ef6f84760d493001aabee3826e315a84d05"
 dependencies = [
  "getopts",
  "heck 0.4.1",
  "http",
- "indexmap 1.9.3",
+ "indexmap 2.0.0",
  "openapiv3",
  "proc-macro2",
  "quote",
@@ -6231,7 +6232,7 @@ dependencies = [
 [[package]]
 name = "progenitor-macro"
 version = "0.3.0"
-source = "git+https://github.com/oxidecomputer/progenitor?branch=main#90fae279f93b948ae931477c132039bda713ffdc"
+source = "git+https://github.com/oxidecomputer/progenitor?branch=main#ca8b4ef6f84760d493001aabee3826e315a84d05"
 dependencies = [
  "openapiv3",
  "proc-macro2",
@@ -6713,6 +6714,16 @@ name = "regress"
 version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "82a9ecfa0cb04d0b04dddb99b8ccf4f66bc8dfd23df694b398570bd8ae3a50fb"
+dependencies = [
+ "hashbrown 0.13.2",
+ "memchr",
+]
+
+[[package]]
+name = "regress"
+version = "0.7.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4ed9969cad8051328011596bf549629f1b800cf1731e7964b1eef8dfc480d2c2"
 dependencies = [
  "hashbrown 0.13.2",
  "memchr",
@@ -7754,7 +7765,7 @@ dependencies = [
  "ipnetwork",
  "omicron-common 0.1.0",
  "progenitor",
- "regress",
+ "regress 0.6.0",
  "reqwest",
  "serde",
  "slog",
@@ -9106,7 +9117,7 @@ checksum = "497961ef93d974e23eb6f433eb5fe1b7930b659f06d12dec6fc44a8f554c0bba"
 [[package]]
 name = "typify"
 version = "0.0.13"
-source = "git+https://github.com/oxidecomputer/typify#bf8bf7a698de815ed63e5115e1e8324c83d1f042"
+source = "git+https://github.com/oxidecomputer/typify#17029cef776b604573d558a41cb19287022b3333"
 dependencies = [
  "typify-impl",
  "typify-macro",
@@ -9115,13 +9126,13 @@ dependencies = [
 [[package]]
 name = "typify-impl"
 version = "0.0.13"
-source = "git+https://github.com/oxidecomputer/typify#bf8bf7a698de815ed63e5115e1e8324c83d1f042"
+source = "git+https://github.com/oxidecomputer/typify#17029cef776b604573d558a41cb19287022b3333"
 dependencies = [
  "heck 0.4.1",
  "log",
  "proc-macro2",
  "quote",
- "regress",
+ "regress 0.7.1",
  "schemars",
  "serde_json",
  "syn 2.0.29",
@@ -9132,7 +9143,7 @@ dependencies = [
 [[package]]
 name = "typify-macro"
 version = "0.0.13"
-source = "git+https://github.com/oxidecomputer/typify#bf8bf7a698de815ed63e5115e1e8324c83d1f042"
+source = "git+https://github.com/oxidecomputer/typify#17029cef776b604573d558a41cb19287022b3333"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -9246,7 +9257,7 @@ dependencies = [
  "derive-where",
  "either",
  "futures",
- "indexmap 1.9.3",
+ "indexmap 2.0.0",
  "indicatif",
  "linear-map",
  "omicron-test-utils",
@@ -9638,7 +9649,7 @@ dependencies = [
  "futures",
  "hex",
  "humantime",
- "indexmap 1.9.3",
+ "indexmap 2.0.0",
  "indicatif",
  "itertools 0.11.0",
  "omicron-common 0.1.0",
@@ -9780,7 +9791,7 @@ dependencies = [
  "installinator-common",
  "ipnetwork",
  "progenitor",
- "regress",
+ "regress 0.6.0",
  "reqwest",
  "schemars",
  "serde",
