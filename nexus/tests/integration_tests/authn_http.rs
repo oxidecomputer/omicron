@@ -48,7 +48,7 @@ async fn test_authn_spoof_allowed() {
         HashMap::new(),
     )
     .await;
-    let tried_spoof = vec![SPOOF_SCHEME_NAME]
+    let tried_spoof = [SPOOF_SCHEME_NAME]
         .iter()
         .map(|s| s.to_string())
         .collect::<Vec<String>>();

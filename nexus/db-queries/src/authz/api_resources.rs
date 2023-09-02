@@ -229,10 +229,10 @@ impl ApiResourceWithRoles for Fleet {
         // If the actor is associated with a Silo, and if that Silo has a policy
         // that grants fleet-level roles, then we must look up the actor's
         // Silo-level roles when looking up their roles on the Fleet.
-        let Some(silo_id) = authn
-                .actor()
-                .and_then(|actor| actor.silo_id())
-                else { return Ok(None); };
+        let Some(silo_id) = authn.actor().and_then(|actor| actor.silo_id())
+        else {
+            return Ok(None);
+        };
         let silo_authn_policy = authn.silo_authn_policy().ok_or_else(|| {
             Error::internal_error(&format!(
                 "actor had a Silo ({}) but no SiloAuthnPolicy",

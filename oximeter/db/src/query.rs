@@ -223,9 +223,9 @@ impl SelectQueryBuilder {
         let schema = crate::model::schema_for_parts(target, metric);
         let mut builder = Self::new(&schema);
         let target_fields =
-            target.field_names().iter().zip(target.field_values().into_iter());
+            target.field_names().iter().zip(target.field_values());
         let metric_fields =
-            metric.field_names().iter().zip(metric.field_values().into_iter());
+            metric.field_names().iter().zip(metric.field_values());
         for (name, value) in target_fields.chain(metric_fields) {
             builder = builder.filter(name, FieldCmp::Eq, value)?;
         }

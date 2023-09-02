@@ -495,11 +495,9 @@ impl ServiceManager {
         info!(log, "Loading services from: {ledger_paths:?}");
 
         let mut existing_zones = self.inner.zones.lock().await;
-        let Some(mut ledger) = Ledger::<AllZoneRequests>::new(
-            log,
-            ledger_paths,
-        )
-        .await else {
+        let Some(mut ledger) =
+            Ledger::<AllZoneRequests>::new(log, ledger_paths).await
+        else {
             info!(log, "Loading services - No services detected");
             return Ok(());
         };
@@ -1617,8 +1615,8 @@ impl ServiceManager {
                     // address for the switch zone. If we _don't_ have a
                     // bootstrap address, someone has requested wicketd in a
                     // non-switch zone; return an error.
-                    let Some((_, bootstrap_address))
-                        = bootstrap_name_and_address
+                    let Some((_, bootstrap_address)) =
+                        bootstrap_name_and_address
                     else {
                         return Err(Error::BadServiceRequest {
                             service: "wicketd".to_string(),
@@ -1626,7 +1624,9 @@ impl ServiceManager {
                                 "missing bootstrap address: ",
                                 "wicketd can only be started in the ",
                                 "switch zone",
-                            ).to_string() });
+                            )
+                            .to_string(),
+                        });
                     };
                     smfh.setprop(
                         "config/artifact-address",
@@ -2772,8 +2772,9 @@ impl ServiceManager {
             filesystems,
             data_links,
             ..
-        } = &*sled_zone else {
-            return Ok(())
+        } = &*sled_zone
+        else {
+            return Ok(());
         };
 
         // The switch zone must use the ramdisk in order to receive requests
