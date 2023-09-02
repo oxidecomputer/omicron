@@ -288,7 +288,7 @@ rpassword = "7.2.0"
 rustfmt-wrapper = "0.2"
 rustls = "0.21.7"
 samael = { git = "https://github.com/njaremko/samael", features = ["xmlsec"], branch = "master" }
-schemars = "0.8.12"
+schemars = "0.8.13"
 secrecy = "0.8.0"
 semver = { version = "1.0.18", features = ["std", "serde"] }
 serde = { version = "1.0", default-features = false, features = [ "derive" ] }
