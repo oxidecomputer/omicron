@@ -652,7 +652,6 @@ dependencies = [
  "camino-tempfile",
  "chacha20poly1305",
  "ciborium",
- "curve25519-dalek 3.2.0",
  "derive_more",
  "hex",
  "hkdf",
@@ -2042,7 +2041,6 @@ name = "dns-service-client"
 version = "0.1.0"
 dependencies = [
  "chrono",
- "futures",
  "http",
  "progenitor",
  "reqwest",
@@ -3890,15 +3888,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "libsw"
-version = "3.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "610cd929d24f634af855498b575263c44d541a0e28c21d595968a6e25fe190f9"
-dependencies = [
- "tokio",
-]
-
-[[package]]
 name = "libtest-mimic"
 version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4264,7 +4253,6 @@ dependencies = [
  "diesel",
  "expectorate",
  "hex",
- "internal-dns 0.1.0",
  "ipnetwork",
  "macaddr",
  "newtype_derive",
@@ -4321,10 +4309,8 @@ dependencies = [
  "newtype_derive",
  "nexus-db-model",
  "nexus-defaults",
- "nexus-test-interface",
  "nexus-test-utils",
  "nexus-types",
- "num-integer",
  "omicron-common 0.1.0",
  "omicron-passwords 0.1.0",
  "omicron-rpaths",
@@ -4765,7 +4751,6 @@ dependencies = [
  "serde_urlencoded",
  "serde_with",
  "slog",
- "steno",
  "strum 0.25.0",
  "test-strategy",
  "thiserror",
@@ -4822,11 +4807,8 @@ dependencies = [
  "clap 4.4.0",
  "crossbeam",
  "omicron-package",
- "omicron-sled-agent",
  "serde",
  "serde_derive",
- "sp-sim",
- "sprockets-rot",
  "thiserror",
  "toml 0.7.6",
 ]
@@ -5012,7 +4994,6 @@ dependencies = [
  "thiserror",
  "tokio",
  "tokio-postgres",
- "tokio-tungstenite 0.18.0",
  "toml 0.7.6",
  "tough",
  "trust-dns-resolver",
@@ -5158,7 +5139,6 @@ dependencies = [
  "slog-dtrace",
  "slog-term",
  "smf",
- "sp-sim",
  "static_assertions",
  "subprocess",
  "tar",
@@ -9663,7 +9643,6 @@ dependencies = [
  "indexmap 1.9.3",
  "indicatif",
  "itertools 0.11.0",
- "libsw",
  "omicron-common 0.1.0",
  "omicron-passwords 0.1.0",
  "once_cell",
@@ -9674,14 +9653,11 @@ dependencies = [
  "semver 1.0.18",
  "serde",
  "serde_json",
- "sha3",
  "shell-words",
  "slog",
  "slog-async",
  "slog-envlogger",
  "slog-term",
- "snafu",
- "tar",
  "tempfile",
  "textwrap 0.16.0",
  "tokio",

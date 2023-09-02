@@ -11,10 +11,8 @@ omicron-rpaths.workspace = true
 [dependencies]
 bytes.workspace = true
 camino.workspace = true
-camino-tempfile.workspace = true
 chacha20poly1305.workspace = true
 ciborium.workspace = true
-curve25519-dalek.workspace = true
 derive_more.workspace = true
 hex.workspace = true
 hkdf.workspace = true
@@ -41,6 +39,7 @@ pq-sys = "*"
 
 [dev-dependencies]
 assert_matches.workspace = true
+camino-tempfile.workspace = true
 omicron-test-utils.workspace = true
 proptest.workspace = true
 slog-async.workspace = true
