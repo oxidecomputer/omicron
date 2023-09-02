@@ -73,7 +73,7 @@ fn test_init_and_add() -> Result<()> {
         "artifact kind"
     );
     assert_eq!(
-        artifact.target, "omicron-nexus-42.0.0.tar.gz",
+        artifact.target, "gimlet_sp-omicron-nexus-42.0.0.tar.gz",
         "artifact target"
     );
 
@@ -86,7 +86,7 @@ fn test_init_and_add() -> Result<()> {
         "artifact kind"
     );
     assert_eq!(
-        artifact.target, "my-unknown-kind-0.1.0.tar.gz",
+        artifact.target, "my_unknown_kind-my-unknown-kind-0.1.0.tar.gz",
         "artifact target"
     );
 

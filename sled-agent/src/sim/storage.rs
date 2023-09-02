@@ -120,7 +120,7 @@ impl CrucibleDataInner {
         }
 
         let id = Uuid::from_str(&id.0).unwrap();
-        if let Some(mut region) = self.regions.get_mut(&id) {
+        if let Some(region) = self.regions.get_mut(&id) {
             region.state = State::Destroyed;
             Ok(Some(region.clone()))
         } else {

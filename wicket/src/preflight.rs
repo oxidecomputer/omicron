@@ -114,8 +114,12 @@ async fn poll_uplink_status_until_complete(client: Client) -> Result<()> {
 
         // Display or tick the progress spinner for the in-progress step, if
         // there is one.
-        let Some(last_seen) = last_seen else { continue; };
-        let Some(all_steps) = all_steps.as_ref() else { continue; };
+        let Some(last_seen) = last_seen else {
+            continue;
+        };
+        let Some(all_steps) = all_steps.as_ref() else {
+            continue;
+        };
 
         // Are we done?
         if execution_failed
@@ -124,9 +128,11 @@ async fn poll_uplink_status_until_complete(client: Client) -> Result<()> {
             return Ok(());
         }
 
-        let Some(active_step) = all_steps.iter().find(|step| {
-            step.index == last_seen + 1
-        }) else { continue; };
+        let Some(active_step) =
+            all_steps.iter().find(|step| step.index == last_seen + 1)
+        else {
+            continue;
+        };
 
         // Is this a new active step that needs a new progress bar?
         if progress_bar.is_none() {

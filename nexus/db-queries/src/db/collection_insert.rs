@@ -394,7 +394,7 @@ mod test {
     use super::*;
     use crate::db::{self, identity::Resource as IdentityResource};
     use async_bb8_diesel::{AsyncRunQueryDsl, AsyncSimpleConnection};
-    use chrono::{DateTime, NaiveDateTime, Utc};
+    use chrono::{NaiveDateTime, TimeZone, Utc};
     use db_macros::Resource;
     use diesel::expression_methods::ExpressionMethods;
     use diesel::pg::Pg;
@@ -480,13 +480,11 @@ mod test {
         let resource_id =
             uuid::Uuid::parse_str("223cb7f7-0d3a-4a4e-a5e1-ad38ecb785d8")
                 .unwrap();
-        let create_time = DateTime::<Utc>::from_utc(
-            NaiveDateTime::from_timestamp_opt(0, 0).unwrap(),
-            Utc,
+        let create_time = Utc.from_utc_datetime(
+            &NaiveDateTime::from_timestamp_opt(0, 0).unwrap(),
         );
-        let modify_time = DateTime::<Utc>::from_utc(
-            NaiveDateTime::from_timestamp_opt(1, 0).unwrap(),
-            Utc,
+        let modify_time = Utc.from_utc_datetime(
+            &NaiveDateTime::from_timestamp_opt(1, 0).unwrap(),
         );
         let insert = Collection::insert_resource(
             collection_id,
@@ -599,13 +597,11 @@ mod test {
             .await
             .unwrap();
 
-        let create_time = DateTime::<Utc>::from_utc(
-            NaiveDateTime::from_timestamp_opt(0, 0).unwrap(),
-            Utc,
+        let create_time = Utc.from_utc_datetime(
+            &NaiveDateTime::from_timestamp_opt(0, 0).unwrap(),
         );
-        let modify_time = DateTime::<Utc>::from_utc(
-            NaiveDateTime::from_timestamp_opt(1, 0).unwrap(),
-            Utc,
+        let modify_time = Utc.from_utc_datetime(
+            &NaiveDateTime::from_timestamp_opt(1, 0).unwrap(),
         );
         let resource = Collection::insert_resource(
             collection_id,

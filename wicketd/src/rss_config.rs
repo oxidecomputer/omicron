@@ -153,12 +153,13 @@ impl CurrentRssConfig {
         if self.external_certificates.is_empty() {
             bail!("at least one certificate/key pair is required");
         }
-        let Some(recovery_silo_password_hash)
-            = self.recovery_silo_password_hash.as_ref()
+        let Some(recovery_silo_password_hash) =
+            self.recovery_silo_password_hash.as_ref()
         else {
             bail!("recovery password not yet set");
         };
-        let Some(rack_network_config) = self.rack_network_config.as_ref() else {
+        let Some(rack_network_config) = self.rack_network_config.as_ref()
+        else {
             bail!("rack network config not set (have you uploaded a config?)");
         };
         let rack_network_config =

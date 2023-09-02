@@ -85,7 +85,8 @@ impl MessageDisplayState {
             steps,
             components,
             first_step: _,
-        } = step_event.kind else {
+        } = step_event.kind
+        else {
             bail!("received invalid step event kind: {step_event:?}");
         };
 

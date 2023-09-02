@@ -91,8 +91,8 @@ impl From<DbFieldList> for Vec<FieldSchema> {
     fn from(list: DbFieldList) -> Self {
         list.names
             .into_iter()
-            .zip(list.types.into_iter())
-            .zip(list.sources.into_iter())
+            .zip(list.types)
+            .zip(list.sources)
             .map(|((name, ty), source)| FieldSchema {
                 name,
                 ty: ty.into(),
@@ -599,9 +599,9 @@ where
         FieldSchema { name: name.to_string(), ty: value.field_type(), source }
     };
     let target_field_schema =
-        target.field_names().iter().zip(target.field_values().into_iter());
+        target.field_names().iter().zip(target.field_values());
     let metric_field_schema =
-        metric.field_names().iter().zip(metric.field_values().into_iter());
+        metric.field_names().iter().zip(metric.field_values());
     let field_schema = target_field_schema
         .map(|(name, value)| {
             make_field_schema(name, value, FieldSource::Target)
