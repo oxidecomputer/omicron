@@ -667,9 +667,11 @@ impl UpdateDriver {
 
                     let Some(sp_artifact) = sp_artifacts.get(&caboose.board)
                     else {
-                        return Err(UpdateTerminalError::MissingSpImageForBoard {
-                            board: caboose.board,
-                        });
+                        return Err(
+                            UpdateTerminalError::MissingSpImageForBoard {
+                                board: caboose.board,
+                            },
+                        );
                     };
                     let sp_artifact = sp_artifact.clone();
 

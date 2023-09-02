@@ -64,7 +64,9 @@ impl DataStore {
         };
 
         let Some(config) = config else {
-            return Err("Not configured to automatically update schema".to_string());
+            return Err(
+                "Not configured to automatically update schema".to_string()
+            );
         };
 
         if current_version > desired_version {
