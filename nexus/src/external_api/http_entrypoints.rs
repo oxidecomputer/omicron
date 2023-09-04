@@ -39,9 +39,11 @@ use dropshot::{
     channel, endpoint, WebsocketChannelResult, WebsocketConnection,
 };
 use ipnetwork::IpNetwork;
-use nexus_db_queries::authz::ApiResource;
 use nexus_db_queries::db::lookup::ImageLookup;
 use nexus_db_queries::db::lookup::ImageParentLookup;
+use nexus_db_queries::{
+    authz::ApiResource, db::fixed_data::silo::INTERNAL_SILO_ID,
+};
 use nexus_types::external_api::params::ProjectSelector;
 use nexus_types::{
     external_api::views::{SledInstance, Switch},
@@ -1149,7 +1151,7 @@ async fn project_ip_pool_view(
             .await?;
         // TODO(2148): once we've actualy implemented filtering to pools belonging to
         // the specified project, we can remove this internal check.
-        if pool.internal {
+        if pool.silo_id == Some(*INTERNAL_SILO_ID) {
             return Err(authz_pool.not_found().into());
         }
         Ok(HttpResponseOk(IpPool::from(pool)))

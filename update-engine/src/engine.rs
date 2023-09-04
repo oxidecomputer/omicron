@@ -230,13 +230,15 @@ impl<'a, S: StepSpec + 'a> UpdateEngine<'a, S> {
 
         let Some((index, first_step)) = steps_iter.next() else {
             // There are no steps defined.
-            self.sender.send(Event::Step(StepEvent {
-                spec: S::schema_name(),
-                execution_id: self.execution_id,
-                event_index: (exec_cx.next_event_index)(),
-                total_elapsed: exec_cx.total_start.elapsed(),
-                kind: StepEventKind::NoStepsDefined,
-            })).await?;
+            self.sender
+                .send(Event::Step(StepEvent {
+                    spec: S::schema_name(),
+                    execution_id: self.execution_id,
+                    event_index: (exec_cx.next_event_index)(),
+                    total_elapsed: exec_cx.total_start.elapsed(),
+                    kind: StepEventKind::NoStepsDefined,
+                }))
+                .await?;
             return Ok(CompletionContext::new());
         };
 

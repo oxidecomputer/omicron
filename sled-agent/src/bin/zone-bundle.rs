@@ -484,7 +484,10 @@ async fn main() -> anyhow::Result<()> {
             let priority = match args.priority {
                 None => None,
                 Some(pri) => {
-                    let Ok(arr): Result<[PriorityDimension; EXPECTED_DIMENSIONS], _> = pri.try_into() else {
+                    let Ok(arr): Result<
+                        [PriorityDimension; EXPECTED_DIMENSIONS],
+                        _,
+                    > = pri.try_into() else {
                         bail!("must provide {EXPECTED_DIMENSIONS} priority dimensions");
                     };
                     Some(PriorityOrder::from(arr))

@@ -951,7 +951,9 @@ impl RunningZone {
                 let binary = Utf8PathBuf::from(path);
 
                 // Fetch any log files for this SMF service.
-                let Some((log_file, rotated_log_files)) = self.service_log_files(&service_name)? else {
+                let Some((log_file, rotated_log_files)) =
+                    self.service_log_files(&service_name)?
+                else {
                     error!(
                         self.inner.log,
                         "failed to find log files for existing service";

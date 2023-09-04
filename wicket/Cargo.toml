@@ -27,15 +27,11 @@ rpassword.workspace = true
 semver.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-sha3.workspace = true
 shell-words.workspace = true
 slog.workspace = true
 slog-async.workspace = true
 slog-envlogger.workspace = true
 slog-term.workspace = true
-snafu.workspace = true
-libsw.workspace = true
-tar.workspace = true
 textwrap.workspace = true
 tokio = { workspace = true, features = ["full"] }
 tokio-util.workspace = true

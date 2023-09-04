@@ -8,5 +8,5 @@ license = "MPL-2.0"
 anyhow.workspace = true
 camino.workspace = true
 cargo_toml = "0.15"
-cargo_metadata = "0.15"
+cargo_metadata = "0.17"
 clap.workspace = true
