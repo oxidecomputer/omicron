@@ -7,7 +7,7 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_bool_local ON CLUSTER oximeter_
     timestamp DateTime64(9, 'UTC'),
     datum UInt8
 )
-ENGINE = ReplicatedMergeTree('/clickhouse/tables/{share}/measurements_bool_local', '{replica}')
+ENGINE = ReplicatedMergeTree('/clickhouse/tables/{shard}/measurements_bool_local', '{replica}')
 ORDER BY (timeseries_name, timeseries_key, timestamp)
 TTL toDateTime(timestamp) + INTERVAL 30 DAY;
 --
@@ -29,7 +29,7 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_i64_local ON CLUSTER oximeter_c
     timestamp DateTime64(9, 'UTC'),
     datum Int64
 )
-ENGINE = ReplicatedMergeTree('/clickhouse/tables/{share}/measurements_i64_local', '{replica}')
+ENGINE = ReplicatedMergeTree('/clickhouse/tables/{shard}/measurements_i64_local', '{replica}')
 ORDER BY (timeseries_name, timeseries_key, timestamp)
 TTL toDateTime(timestamp) + INTERVAL 30 DAY;
 --
@@ -51,7 +51,7 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_f64_local ON CLUSTER oximeter_c
     timestamp DateTime64(9, 'UTC'),
     datum Float64
 )
-ENGINE = ReplicatedMergeTree('/clickhouse/tables/{share}/measurements_f64_local', '{replica}')
+ENGINE = ReplicatedMergeTree('/clickhouse/tables/{shard}/measurements_f64_local', '{replica}')
 ORDER BY (timeseries_name, timeseries_key, timestamp)
 TTL toDateTime(timestamp) + INTERVAL 30 DAY;
 --
@@ -73,7 +73,7 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_string_local ON CLUSTER oximete
     timestamp DateTime64(9, 'UTC'),
     datum String
 )
-ENGINE = ReplicatedMergeTree('/clickhouse/tables/{share}/measurements_string_local', '{replica}')
+ENGINE = ReplicatedMergeTree('/clickhouse/tables/{shard}/measurements_string_local', '{replica}')
 ORDER BY (timeseries_name, timeseries_key, timestamp)
 TTL toDateTime(timestamp) + INTERVAL 30 DAY;
 --
@@ -95,7 +95,7 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_bytes_local ON CLUSTER oximeter
     timestamp DateTime64(9, 'UTC'),
     datum Array(UInt8)
 )
-ENGINE = ReplicatedMergeTree('/clickhouse/tables/{share}/measurements_bytes_local', '{replica}')
+ENGINE = ReplicatedMergeTree('/clickhouse/tables/{shard}/measurements_bytes_local', '{replica}')
 ORDER BY (timeseries_name, timeseries_key, timestamp)
 TTL toDateTime(timestamp) + INTERVAL 30 DAY;
 --
@@ -118,7 +118,7 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_cumulativei64_local ON CLUSTER 
     timestamp DateTime64(9, 'UTC'),
     datum Int64
 )
-ENGINE = ReplicatedMergeTree('/clickhouse/tables/{share}/measurements_cumulativei64_local', '{replica}')
+ENGINE = ReplicatedMergeTree('/clickhouse/tables/{shard}/measurements_cumulativei64_local', '{replica}')
 ORDER BY (timeseries_name, timeseries_key, start_time, timestamp)
 TTL toDateTime(timestamp) + INTERVAL 30 DAY;
 --
@@ -142,7 +142,7 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_cumulativef64_local ON CLUSTER 
     timestamp DateTime64(9, 'UTC'),
     datum Float64
 )
-ENGINE = ReplicatedMergeTree('/clickhouse/tables/{share}/measurements_cumulativef64_local', '{replica}')
+ENGINE = ReplicatedMergeTree('/clickhouse/tables/{shard}/measurements_cumulativef64_local', '{replica}')
 ORDER BY (timeseries_name, timeseries_key, start_time, timestamp)
 TTL toDateTime(timestamp) + INTERVAL 30 DAY;
 --
@@ -167,7 +167,7 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_histogrami64_local ON CLUSTER o
     bins Array(Int64),
     counts Array(UInt64)
 )
-ENGINE = ReplicatedMergeTree('/clickhouse/tables/{share}/measurements_histogrami64_local', '{replica}')
+ENGINE = ReplicatedMergeTree('/clickhouse/tables/{shard}/measurements_histogrami64_local', '{replica}')
 ORDER BY (timeseries_name, timeseries_key, start_time, timestamp)
 TTL toDateTime(timestamp) + INTERVAL 30 DAY;
 --
@@ -193,7 +193,7 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_histogramf64_local ON CLUSTER o
     bins Array(Float64),
     counts Array(UInt64)
 )
-ENGINE = ReplicatedMergeTree('/clickhouse/tables/{share}/measurements_histogramf64_local', '{replica}')
+ENGINE = ReplicatedMergeTree('/clickhouse/tables/{shard}/measurements_histogramf64_local', '{replica}')
 ORDER BY (timeseries_name, timeseries_key, start_time, timestamp)
 TTL toDateTime(timestamp) + INTERVAL 30 DAY;
 --
