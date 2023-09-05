@@ -220,6 +220,7 @@ pub enum DatasetKind {
     CockroachDb,
     Crucible,
     Clickhouse,
+    ClickhouseKeeper,
     ExternalDns,
     InternalDns,
 }
@@ -231,6 +232,7 @@ impl From<DatasetKind> for sled_agent_client::types::DatasetKind {
             CockroachDb => Self::CockroachDb,
             Crucible => Self::Crucible,
             Clickhouse => Self::Clickhouse,
+            ClickhouseKeeper => Self::ClickhouseKeeper,
             ExternalDns => Self::ExternalDns,
             InternalDns => Self::InternalDns,
         }
@@ -244,6 +246,7 @@ impl From<DatasetKind> for nexus_client::types::DatasetKind {
             CockroachDb => Self::Cockroach,
             Crucible => Self::Crucible,
             Clickhouse => Self::Clickhouse,
+            ClickhouseKeeper => Self::ClickhouseKeeper,
             ExternalDns => Self::ExternalDns,
             InternalDns => Self::InternalDns,
         }
@@ -257,6 +260,7 @@ impl std::fmt::Display for DatasetKind {
             Crucible => "crucible",
             CockroachDb { .. } => "cockroachdb",
             Clickhouse => "clickhouse",
+            ClickhouseKeeper => "clickhouse_keeper",
             ExternalDns { .. } => "external_dns",
             InternalDns { .. } => "internal_dns",
         };
@@ -356,6 +360,9 @@ pub enum ServiceType {
     Clickhouse {
         address: SocketAddrV6,
     },
+    ClickhouseKeeper {
+        address: SocketAddrV6,
+    },
     CockroachDb {
         address: SocketAddrV6,
     },
@@ -382,6 +389,9 @@ impl std::fmt::Display for ServiceType {
             ServiceType::Maghemite { .. } => write!(f, "mg-ddm"),
             ServiceType::SpSim => write!(f, "sp-sim"),
             ServiceType::Clickhouse { .. } => write!(f, "clickhouse"),
+            ServiceType::ClickhouseKeeper { .. } => {
+                write!(f, "clickhouse_keeper")
+            }
             ServiceType::CockroachDb { .. } => write!(f, "cockroachdb"),
             ServiceType::Crucible { .. } => write!(f, "crucible"),
         }
@@ -484,6 +494,9 @@ impl TryFrom<ServiceType> for sled_agent_client::types::ServiceType {
             St::Clickhouse { address } => {
                 Ok(AutoSt::Clickhouse { address: address.to_string() })
             }
+            St::ClickhouseKeeper { address } => {
+                Ok(AutoSt::ClickhouseKeeper { address: address.to_string() })
+            }
             St::CockroachDb { address } => {
                 Ok(AutoSt::CockroachDb { address: address.to_string() })
             }
@@ -508,6 +521,7 @@ impl TryFrom<ServiceType> for sled_agent_client::types::ServiceType {
 #[serde(rename_all = "snake_case")]
 pub enum ZoneType {
     Clickhouse,
+    ClickhouseKeeper,
     CockroachDb,
     CruciblePantry,
     Crucible,
@@ -523,6 +537,7 @@ impl From<ZoneType> for sled_agent_client::types::ZoneType {
     fn from(zt: ZoneType) -> Self {
         match zt {
             ZoneType::Clickhouse => Self::Clickhouse,
+            ZoneType::ClickhouseKeeper => Self::ClickhouseKeeper,
             ZoneType::CockroachDb => Self::CockroachDb,
             ZoneType::Crucible => Self::Crucible,
             ZoneType::CruciblePantry => Self::CruciblePantry,
@@ -541,6 +556,7 @@ impl std::fmt::Display for ZoneType {
         use ZoneType::*;
         let name = match self {
             Clickhouse => "clickhouse",
+            ClickhouseKeeper => "clickhouse_keeper",
             CockroachDb => "cockroachdb",
             Crucible => "crucible",
             CruciblePantry => "crucible_pantry",
@@ -611,6 +627,7 @@ impl ServiceZoneRequest {
             ZoneType::Switch => None,
             // All other zones should be identified by their zone UUID.
             ZoneType::Clickhouse
+            | ZoneType::ClickhouseKeeper
             | ZoneType::CockroachDb
             | ZoneType::Crucible
             | ZoneType::ExternalDns
@@ -758,6 +775,15 @@ impl ServiceZoneRequest {
                         sled_id,
                         address: address.to_string(),
                         kind: NexusTypes::ServiceKind::Clickhouse,
+                    });
+                }
+                ServiceType::ClickhouseKeeper { address } => {
+                    services.push(NexusTypes::ServicePutRequest {
+                        service_id,
+                        zone_id,
+                        sled_id,
+                        address: address.to_string(),
+                        kind: NexusTypes::ServiceKind::ClickhouseKeeper,
                     });
                 }
                 ServiceType::Crucible { address } => {
