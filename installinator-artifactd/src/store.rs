@@ -40,6 +40,9 @@ pub enum EventReportStatus {
 
     /// The update ID was not recognized by the server.
     UnrecognizedUpdateId,
+
+    /// The progress receiver is closed.
+    ReceiverClosed,
 }
 
 /// The artifact store -- a simple wrapper around a dynamic [`ArtifactGetter`] that does some basic

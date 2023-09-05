@@ -77,7 +77,7 @@ pub trait Target {
     fn fields(&self) -> Vec<Field> {
         self.field_names()
             .iter()
-            .zip(self.field_values().into_iter())
+            .zip(self.field_values())
             .map(|(name, value)| Field { name: name.to_string(), value })
             .collect()
     }
@@ -153,7 +153,7 @@ pub trait Metric {
     fn fields(&self) -> Vec<Field> {
         self.field_names()
             .iter()
-            .zip(self.field_values().into_iter())
+            .zip(self.field_values())
             .map(|(name, value)| Field { name: name.to_string(), value })
             .collect()
     }

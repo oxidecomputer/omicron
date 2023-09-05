@@ -467,7 +467,9 @@ impl StorageWorker {
             async move {
                 let underlay_guard = underlay.lock().await;
                 let Some(underlay) = underlay_guard.as_ref() else {
-                    return Err(backoff::BackoffError::transient(Error::UnderlayNotInitialized.to_string()));
+                    return Err(backoff::BackoffError::transient(
+                        Error::UnderlayNotInitialized.to_string(),
+                    ));
                 };
                 let sled_id = underlay.sled_id;
                 let nexus_client = underlay.nexus_client.client().clone();
@@ -899,7 +901,9 @@ impl StorageWorker {
             async move {
                 let underlay_guard = underlay.lock().await;
                 let Some(underlay) = underlay_guard.as_ref() else {
-                    return Err(backoff::BackoffError::transient(Error::UnderlayNotInitialized.to_string()));
+                    return Err(backoff::BackoffError::transient(
+                        Error::UnderlayNotInitialized.to_string(),
+                    ));
                 };
                 let sled_id = underlay.sled_id;
                 let nexus_client = underlay.nexus_client.client().clone();

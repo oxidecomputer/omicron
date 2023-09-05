@@ -117,6 +117,11 @@ async fn report_progress(
                 format!("update ID {update_id} unrecognized by this server"),
             ))
         }
+        EventReportStatus::ReceiverClosed => Err(HttpError::for_client_error(
+            None,
+            StatusCode::GONE,
+            format!("update ID {update_id}: receiver closed"),
+        )),
     }
 }
 

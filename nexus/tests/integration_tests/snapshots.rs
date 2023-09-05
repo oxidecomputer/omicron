@@ -953,6 +953,7 @@ async fn test_create_snapshot_record_idempotent(
     let datastore = nexus.datastore();
 
     let project_id = create_org_and_project(&client).await;
+    let disk_id = Uuid::new_v4();
 
     let snapshot = db::model::Snapshot {
         identity: db::model::SnapshotIdentity {
@@ -968,7 +969,7 @@ async fn test_create_snapshot_record_idempotent(
         },
 
         project_id,
-        disk_id: Uuid::new_v4(),
+        disk_id,
         volume_id: Uuid::new_v4(),
         destination_volume_id: Uuid::new_v4(),
 
@@ -995,11 +996,50 @@ async fn test_create_snapshot_record_idempotent(
         .unwrap();
 
     let snapshot_created_2 = datastore
-        .project_ensure_snapshot(&opctx, &authz_project, snapshot)
+        .project_ensure_snapshot(&opctx, &authz_project, snapshot.clone())
         .await
         .unwrap();
 
     assert_eq!(snapshot_created_1.id(), snapshot_created_2.id());
+
+    // Test that attempting to ensure a snapshot with the same project + name
+    // but a different ID will not work: if a user tries to fire off multiple
+    // snapshot creations for the same project + name, they will get different
+    // IDs, so this should be rejected, ensuring only one snapshot create saga
+    // would apply for the user's multiple requests.
+
+    let dupe_snapshot = db::model::Snapshot {
+        identity: db::model::SnapshotIdentity {
+            id: Uuid::new_v4(),
+            name: external::Name::try_from("snapshot".to_string())
+                .unwrap()
+                .into(),
+            description: "snapshot".into(),
+
+            time_created: Utc::now(),
+            time_modified: Utc::now(),
+            time_deleted: None,
+        },
+
+        project_id,
+        disk_id,
+        volume_id: Uuid::new_v4(),
+        destination_volume_id: Uuid::new_v4(),
+
+        gen: db::model::Generation::new(),
+        state: db::model::SnapshotState::Creating,
+        block_size: db::model::BlockSize::Traditional,
+        size: external::ByteCount::try_from(1024u32).unwrap().into(),
+    };
+
+    let dupe_snapshot_created_err = datastore
+        .project_ensure_snapshot(&opctx, &authz_project, dupe_snapshot)
+        .await;
+
+    assert!(matches!(
+        dupe_snapshot_created_err.unwrap_err(),
+        external::Error::ObjectAlreadyExists { .. },
+    ));
 
     // Test project_delete_snapshot is idempotent
 
@@ -1010,12 +1050,31 @@ async fn test_create_snapshot_record_idempotent(
         .unwrap();
 
     datastore
-        .project_delete_snapshot(&opctx, &authz_snapshot, &db_snapshot)
+        .project_delete_snapshot(
+            &opctx,
+            &authz_snapshot,
+            &db_snapshot,
+            vec![
+                // This must match what is in the snapshot_delete saga!
+                db::model::SnapshotState::Ready,
+                db::model::SnapshotState::Faulted,
+                db::model::SnapshotState::Destroyed,
+            ],
+        )
         .await
         .unwrap();
 
     datastore
-        .project_delete_snapshot(&opctx, &authz_snapshot, &db_snapshot)
+        .project_delete_snapshot(
+            &opctx,
+            &authz_snapshot,
+            &db_snapshot,
+            vec![
+                db::model::SnapshotState::Ready,
+                db::model::SnapshotState::Faulted,
+                db::model::SnapshotState::Destroyed,
+            ],
+        )
         .await
         .unwrap();
 }

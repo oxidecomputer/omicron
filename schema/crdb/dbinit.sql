@@ -1480,13 +1480,29 @@ CREATE TABLE IF NOT EXISTS omicron.public.ip_pool (
     time_modified TIMESTAMPTZ NOT NULL,
     time_deleted TIMESTAMPTZ,
 
-
-    /* Identifies if the IP Pool is dedicated to Control Plane services */
-    internal BOOL NOT NULL,
-
     /* The collection's child-resource generation number */
-    rcgen INT8 NOT NULL
+    rcgen INT8 NOT NULL,
+
+    /*
+     * Association with a silo. silo_id is also used to mark an IP pool as
+     * "internal" by associating it with the oxide-internal silo. Null silo_id
+     * means the pool is can be used fleet-wide.
+     */
+    silo_id UUID,
+
+    /* Is this the default pool for its scope (fleet or silo) */
+    is_default BOOLEAN NOT NULL DEFAULT FALSE
 );
+
+/*
+ * Ensure there can only be one default pool for the fleet or a given silo.
+ * Coalesce is needed because otherwise different nulls are considered to be
+ * distinct from each other.
+ */
+CREATE UNIQUE INDEX IF NOT EXISTS one_default_pool_per_scope ON omicron.public.ip_pool (
+    COALESCE(silo_id, '00000000-0000-0000-0000-000000000000'::uuid)
+) WHERE
+    is_default = true AND time_deleted IS NULL;
 
 /*
  * Index ensuring uniqueness of IP Pool names, globally.
@@ -2544,7 +2560,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    ( TRUE, NOW(), NOW(), '2.0.0', NULL)
+    ( TRUE, NOW(), NOW(), '3.0.3', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

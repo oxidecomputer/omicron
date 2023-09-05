@@ -149,7 +149,8 @@ async fn zone_bundle_get(
     let zone_name = params.zone_name;
     let bundle_id = params.bundle_id;
     let sa = rqctx.context();
-    let Some(path) = sa.get_zone_bundle_paths(&zone_name, &bundle_id)
+    let Some(path) = sa
+        .get_zone_bundle_paths(&zone_name, &bundle_id)
         .await
         .map_err(HttpError::from)?
         .into_iter()
@@ -157,7 +158,11 @@ async fn zone_bundle_get(
     else {
         return Err(HttpError::for_not_found(
             None,
-            format!("No zone bundle for zone '{}' with ID '{}'", zone_name, bundle_id)));
+            format!(
+                "No zone bundle for zone '{}' with ID '{}'",
+                zone_name, bundle_id
+            ),
+        ));
     };
     let f = tokio::fs::File::open(&path).await.map_err(|e| {
         HttpError::for_internal_error(format!(

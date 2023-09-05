@@ -44,6 +44,7 @@ Assumptions:
 
 Process:
 
+* Choose a `NEW_VERSION` number. This should almost certainly be a major version bump over `OLD_VERSION`.
 * Add a file to `schema/crdb/NEW_VERSION/up.sql` with your changes to the schema.
 ** This file should validate the expected current version transactionally.
 ** This file should only issue a single schema-modifying statement per transaction.

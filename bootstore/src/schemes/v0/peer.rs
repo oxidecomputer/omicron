@@ -762,8 +762,8 @@ impl Node {
                 peer_id,
             } => {
                 let Some(accepted_handle) =
-                   self.accepted_connections.remove(&accepted_addr) else
-                {
+                    self.accepted_connections.remove(&accepted_addr)
+                else {
                     warn!(
                         self.log,
                         concat!(
