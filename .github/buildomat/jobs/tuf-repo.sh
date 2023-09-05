@@ -5,7 +5,7 @@
 #: target = "helios-2.0"
 #: output_rules = [
 #:	"=/work/manifest*.toml",
-#:	"=/work/repo-*.zip",
+#:	"=/work/repo-*.zip.part*",
 #:	"=/work/repo-*.zip.sha256.txt",
 #: ]
 #: access_repos = [
@@ -26,8 +26,13 @@
 #:
 #: [[publish]]
 #: series = "rot-prod-rel"
-#: name = "repo.zip"
-#: from_output = "/work/repo-rot-prod-rel.zip"
+#: name = "repo.zip.parta"
+#: from_output = "/work/repo-rot-prod-rel.zip.parta"
+#:
+#: [[publish]]
+#: series = "rot-prod-rel"
+#: name = "repo.zip.partb"
+#: from_output = "/work/repo-rot-prod-rel.zip.partb"
 #:
 #: [[publish]]
 #: series = "rot-prod-rel"
@@ -36,23 +41,18 @@
 #:
 #: [[publish]]
 #: series = "rot-staging-dev"
-#: name = "repo.zip"
-#: from_output = "/work/repo-rot-staging-dev.zip"
+#: name = "repo.zip.parta"
+#: from_output = "/work/repo-rot-staging-dev.zip.parta"
+#:
+#: [[publish]]
+#: series = "rot-staging-dev"
+#: name = "repo.zip.partb"
+#: from_output = "/work/repo-rot-staging-dev.zip.partb"
 #:
 #: [[publish]]
 #: series = "rot-staging-dev"
 #: name = "repo.zip.sha256.txt"
 #: from_output = "/work/repo-rot-staging-dev.zip.sha256.txt"
-#:
-#: [[publish]]
-#: series = "pvt1"
-#: name = "repo.zip"
-#: from_output = "/work/repo-pvt1.zip"
-#:
-#: [[publish]]
-#: series = "pvt1"
-#: name = "repo.zip.sha256.txt"
-#: from_output = "/work/repo-pvt1.zip.sha256.txt"
 #:
 
 set -o errexit
@@ -220,10 +220,17 @@ EOF
 # usage:              SERIES           ROT_DIR      ROT_VERSION              BOARDS...
 add_hubris_artifacts  rot-staging-dev  staging/dev  cert-staging-dev-v1.0.0  "${ALL_BOARDS[@]}"
 add_hubris_artifacts  rot-prod-rel     prod/rel     cert-prod-rel-v1.0.0     "${ALL_BOARDS[@]}"
-# XXX temporary until PVT1 rack is updated past #3887 (0c5ca49)
-add_hubris_artifacts  pvt1             prod/rel     cert-prod-rel-v1.0.0     gimlet-d psc-c sidecar-c
 
 for series in "${SERIES_LIST[@]}"; do
     /work/tufaceous assemble --no-generate-key /work/manifest-"$series".toml /work/repo-"$series".zip
     digest -a sha256 /work/repo-"$series".zip > /work/repo-"$series".zip.sha256.txt
+
+    #
+    # XXX: There are some issues downloading Buildomat artifacts > 1 GiB, see
+    # oxidecomputer/buildomat#36.
+    #
+    split -a 1 -b 1024m /work/repo-"$series".zip /work/repo-"$series".zip.part
+    rm /work/repo-"$series".zip
+    # Ensure the build doesn't fail if the repo gets smaller than 1 GiB.
+    touch /work/repo-"$series".zip.partb
 done
