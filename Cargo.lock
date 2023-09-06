@@ -5109,7 +5109,7 @@ dependencies = [
  "semver 1.0.18",
  "serde",
  "serde_json",
- "serial_test",
+ "serial_test 0.10.0",
  "sha3",
  "sled-agent-client",
  "sled-hardware",
@@ -5476,6 +5476,7 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
+ "serial_test 2.0.0",
  "slog",
  "slog-async",
  "slog-dtrace",
@@ -7561,7 +7562,21 @@ dependencies = [
  "lazy_static",
  "log",
  "parking_lot 0.12.1",
- "serial_test_derive",
+ "serial_test_derive 0.10.0",
+]
+
+[[package]]
+name = "serial_test"
+version = "2.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0e56dd856803e253c8f298af3f4d7eb0ae5e23a737252cd90bb4f3b435033b2d"
+dependencies = [
+ "dashmap",
+ "futures",
+ "lazy_static",
+ "log",
+ "parking_lot 0.12.1",
+ "serial_test_derive 2.0.0",
 ]
 
 [[package]]
@@ -7573,6 +7588,17 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 1.0.109",
+]
+
+[[package]]
+name = "serial_test_derive"
+version = "2.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "91d129178576168c589c9ec973feedf7d3126c01ac2bf08795109aa35b69fb8f"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.31",
 ]
 
 [[package]]
@@ -7775,7 +7801,7 @@ dependencies = [
  "rand 0.8.5",
  "schemars",
  "serde",
- "serial_test",
+ "serial_test 0.10.0",
  "slog",
  "thiserror",
  "tofino",
@@ -9086,7 +9112,7 @@ version = "1.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "97fee6b57c6a41524a810daee9286c02d7752c4253064d0b05472833a438f675"
 dependencies = [
- "cfg-if 0.1.10",
+ "cfg-if 1.0.0",
  "rand 0.8.5",
  "static_assertions",
 ]
