@@ -10,7 +10,7 @@ use std::{
 };
 
 use async_trait::async_trait;
-use bytes::{BufMut, Bytes, BytesMut};
+use bytes::Bytes;
 use camino::Utf8PathBuf;
 use camino_tempfile::Utf8TempDir;
 use debug_ignore::DebugIgnore;
@@ -70,32 +70,6 @@ impl WicketdArtifactServer {
 
 #[async_trait]
 impl ArtifactGetter for WicketdArtifactServer {
-    async fn get(&self, id: &ArtifactId) -> Option<(u64, Body)> {
-        // This is a test artifact name used by the installinator.
-        if id.name == "__installinator-test" {
-            // For testing, the major version is the size of the artifact.
-            let size: u64 = id.version.0.major;
-            let mut bytes = BytesMut::with_capacity(size as usize);
-            bytes.put_bytes(0, size as usize);
-            return Some((size, Body::from(bytes.freeze())));
-        }
-
-        let data_handle = self.store.get(id)?;
-        let size = data_handle.file_size() as u64;
-        let data_stream = match data_handle.reader_stream().await {
-            Ok(stream) => stream,
-            Err(err) => {
-                error!(
-                    self.log, "failed to open extracted archive on demand";
-                    "error" => #%err,
-                );
-                return None;
-            }
-        };
-
-        Some((size, Body::wrap_stream(data_stream)))
-    }
-
     async fn get_by_hash(&self, id: &ArtifactHashId) -> Option<(u64, Body)> {
         let data_handle = self.store.get_by_hash(id)?;
         let size = data_handle.file_size() as u64;
@@ -187,10 +161,6 @@ impl WicketdArtifactStore {
     // ---
     // Helper methods
     // ---
-
-    fn get(&self, id: &ArtifactId) -> Option<ExtractedArtifactDataHandle> {
-        self.artifacts_with_plan.lock().unwrap().as_ref()?.get(id)
-    }
 
     fn get_by_hash(
         &self,
@@ -363,10 +333,6 @@ impl ArtifactsWithPlan {
         )?;
 
         Ok(Self { by_id: by_id.into(), by_hash: by_hash.into(), plan })
-    }
-
-    fn get(&self, id: &ArtifactId) -> Option<ExtractedArtifactDataHandle> {
-        self.by_id.get(id).cloned()
     }
 
     fn get_by_hash(
