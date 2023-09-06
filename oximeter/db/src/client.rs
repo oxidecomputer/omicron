@@ -668,6 +668,9 @@ mod tests {
     }
 
     #[tokio::test]
+    // TODO(https://github.com/oxidecomputer/omicron/issues/4001): This job fails intermittently
+    // on the ubuntu CI job with "Failed to detect ClickHouse subprocess within timeout"
+    #[ignore]
     async fn test_build_replicated() {
         let log = slog::Logger::root(slog::Discard, o!());
 
