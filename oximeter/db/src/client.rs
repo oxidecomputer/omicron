@@ -787,7 +787,7 @@ mod tests {
         assert!(result.contains("hiya"));
 
         // TODO(https://github.com/oxidecomputer/omicron/issues/4001): With distributed
-        // engine, it can take a long time to sync the data. This means it's tricky to 
+        // engine, it can take a long time to sync the data. This means it's tricky to
         // test that the data exists on both nodes.
 
         k1.cleanup().await.expect("Failed to cleanup ClickHouse keeper 1");
