@@ -776,12 +776,12 @@ mod tests {
 
         // Insert row into one of the tables
         let sql = String::from(
-            "INSERT INTO oximeter.measurements_string (datum) VALUES ('hiya');"
+            "INSERT INTO oximeter.measurements_string (datum) VALUES ('hiya');",
         );
         client_2.execute_with_body(sql).await.unwrap();
 
         let sql = String::from(
-            "SELECT * FROM oximeter.measurements_string FORMAT JSONEachRow;"
+            "SELECT * FROM oximeter.measurements_string FORMAT JSONEachRow;",
         );
         let result = client_2.execute_with_body(sql.clone()).await.unwrap();
         assert!(result.contains("hiya"));
