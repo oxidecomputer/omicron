@@ -165,6 +165,40 @@ impl ArtifactKind {
 /// These artifact kinds are not stored anywhere, but are derived from stored
 /// kinds and used as internal identifiers.
 impl ArtifactKind {
+    /// Gimlet root of trust A slot image identifier.
+    ///
+    /// Derived from [`KnownArtifactKind::GimletRot`].
+    pub const GIMLET_ROT_IMAGE_A: Self =
+        Self::from_static("gimlet_rot_image_a");
+
+    /// Gimlet root of trust B slot image identifier.
+    ///
+    /// Derived from [`KnownArtifactKind::GimletRot`].
+    pub const GIMLET_ROT_IMAGE_B: Self =
+        Self::from_static("gimlet_rot_image_b");
+
+    /// PSC root of trust A slot image identifier.
+    ///
+    /// Derived from [`KnownArtifactKind::PscRot`].
+    pub const PSC_ROT_IMAGE_A: Self = Self::from_static("psc_rot_image_a");
+
+    /// PSC root of trust B slot image identifier.
+    ///
+    /// Derived from [`KnownArtifactKind::PscRot`].
+    pub const PSC_ROT_IMAGE_B: Self = Self::from_static("psc_rot_image_b");
+
+    /// Switch root of trust A slot image identifier.
+    ///
+    /// Derived from [`KnownArtifactKind::SwitchRot`].
+    pub const SWITCH_ROT_IMAGE_A: Self =
+        Self::from_static("switch_rot_image_a");
+
+    /// Switch root of trust B slot image identifier.
+    ///
+    /// Derived from [`KnownArtifactKind::SwitchRot`].
+    pub const SWITCH_ROT_IMAGE_B: Self =
+        Self::from_static("switch_rot_image_b");
+
     /// Host phase 1 identifier.
     ///
     /// Derived from [`KnownArtifactKind::Host`].
