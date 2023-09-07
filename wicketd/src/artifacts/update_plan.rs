@@ -284,14 +284,10 @@ impl<'a> UpdatePlanBuilder<'a> {
             kind: rot_b_kind.clone(),
         };
 
-        *rot_a = Some(ArtifactIdData {
-            id: rot_a_id,
-            data: rot_a_data.clone(),
-        });
-        *rot_b = Some(ArtifactIdData {
-            id: rot_b_id,
-            data: rot_b_data.clone(),
-        });
+        *rot_a =
+            Some(ArtifactIdData { id: rot_a_id, data: rot_a_data.clone() });
+        *rot_b =
+            Some(ArtifactIdData { id: rot_b_id, data: rot_b_data.clone() });
 
         record_extracted_artifact(
             artifact_id.clone(),
@@ -342,10 +338,8 @@ impl<'a> UpdatePlanBuilder<'a> {
             kind: ArtifactKind::HOST_PHASE_1,
         };
 
-        self.host_phase_1 = Some(ArtifactIdData {
-            id: phase_1_id,
-            data: phase_1_data.clone(),
-        });
+        self.host_phase_1 =
+            Some(ArtifactIdData { id: phase_1_id, data: phase_1_data.clone() });
         self.host_phase_2_hash = Some(phase_2_data.hash());
 
         record_extracted_artifact(
@@ -405,14 +399,10 @@ impl<'a> UpdatePlanBuilder<'a> {
             kind: ArtifactKind::TRAMPOLINE_PHASE_2,
         };
 
-        self.trampoline_phase_1 = Some(ArtifactIdData {
-            id: phase_1_id,
-            data: phase_1_data.clone(),
-        });
-        self.trampoline_phase_2 = Some(ArtifactIdData {
-            id: phase_2_id,
-            data: phase_2_data.clone(),
-        });
+        self.trampoline_phase_1 =
+            Some(ArtifactIdData { id: phase_1_id, data: phase_1_data.clone() });
+        self.trampoline_phase_2 =
+            Some(ArtifactIdData { id: phase_2_id, data: phase_2_data.clone() });
 
         record_extracted_artifact(
             artifact_id.clone(),
