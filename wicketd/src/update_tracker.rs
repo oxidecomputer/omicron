@@ -161,7 +161,7 @@ impl UpdateTracker {
         sps: BTreeSet<SpIdentifier>,
         opts: StartUpdateOptions,
     ) -> Result<(), Vec<StartUpdateError>> {
-        let imp = RealUpdateDriver { update_tracker: self, opts };
+        let imp = RealSpawnUpdateDriver { update_tracker: self, opts };
         self.start_impl(sps, Some(imp)).await
     }
 
@@ -384,15 +384,17 @@ trait SpawnUpdateDriver {
     ) -> SpUpdateData;
 }
 
-/// This is the real update driver that actually kicks off updates.
+/// The production implementation of [`SpawnUpdateDriver`].
+///
+/// This implementation spawns real update drivers.
 #[derive(Debug)]
-struct RealUpdateDriver<'tr> {
+struct RealSpawnUpdateDriver<'tr> {
     update_tracker: &'tr UpdateTracker,
     opts: StartUpdateOptions,
 }
 
 #[async_trait::async_trait]
-impl<'tr> SpawnUpdateDriver for RealUpdateDriver<'tr> {
+impl<'tr> SpawnUpdateDriver for RealSpawnUpdateDriver<'tr> {
     type Setup = watch::Receiver<UploadTrampolinePhase2ToMgsStatus>;
 
     async fn setup(&mut self, plan: &UpdatePlan) -> Self::Setup {
@@ -480,6 +482,10 @@ impl<'tr> SpawnUpdateDriver for RealUpdateDriver<'tr> {
     }
 }
 
+/// A fake implementation of [`SpawnUpdateDriver`].
+///
+/// This implementation is only used by tests. It contains a single step that
+/// waits for a [`watch::Receiver`] to resolve.
 #[derive(Debug)]
 struct FakeUpdateDriver {
     watch_receiver: watch::Receiver<()>,
@@ -549,9 +555,10 @@ impl SpawnUpdateDriver for FakeUpdateDriver {
     }
 }
 
-/// This update driver cannot be constructed (it is an empty enum), and is only
-/// used to provide a type parameter for the [`UpdateTracker::start_pre_checks`]
-/// method.
+/// An implementation of [`SpawnUpdateDriver`] that cannot be constructed.
+///
+/// This is an uninhabited type (an empty enum), and is only used to provide a
+/// type parameter for the [`UpdateTracker::update_pre_checks`] method.
 enum NeverUpdateDriver {}
 
 #[async_trait::async_trait]
