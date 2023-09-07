@@ -45,7 +45,7 @@ use uuid::Uuid;
 // instance create saga: input parameters
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct Params {
+pub(crate) struct Params {
     pub serialized_authn: authn::saga::Serialized,
     pub project_id: Uuid,
     pub create_params: params::InstanceCreate,
@@ -137,7 +137,7 @@ declare_saga_actions! {
 // instance create saga: definition
 
 #[derive(Debug)]
-pub struct SagaInstanceCreate;
+pub(crate) struct SagaInstanceCreate;
 impl NexusSaga for SagaInstanceCreate {
     const NAME: &'static str = "instance-create";
     type Params = Params;

@@ -482,7 +482,7 @@ impl TryFrom<Certificate> for TlsCertificate {
 // to _any_ of our external endpoints!  If data from the database is invalid or
 // inconsistent, that data is discarded and a warning is produced, but we'll
 // still return a usable object.
-pub async fn read_all_endpoints(
+pub(crate) async fn read_all_endpoints(
     datastore: &DataStore,
     opctx: &OpContext,
 ) -> Result<ExternalEndpoints, Error> {

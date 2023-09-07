@@ -22,7 +22,7 @@ use steno::ActionError;
 // instance delete saga: input parameters
 
 #[derive(Debug, Deserialize, Serialize)]
-pub struct Params {
+pub(crate) struct Params {
     pub serialized_authn: authn::saga::Serialized,
     pub authz_instance: authz::Instance,
     pub instance: db::model::Instance,
@@ -63,7 +63,7 @@ declare_saga_actions! {
 // instance delete saga: definition
 
 #[derive(Debug)]
-pub struct SagaInstanceDelete;
+pub(crate) struct SagaInstanceDelete;
 impl NexusSaga for SagaInstanceDelete {
     const NAME: &'static str = "instance-delete";
     type Params = Params;

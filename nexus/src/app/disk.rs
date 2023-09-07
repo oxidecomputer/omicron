@@ -187,7 +187,7 @@ impl super::Nexus {
         Ok(())
     }
 
-    pub async fn project_create_disk(
+    pub(crate) async fn project_create_disk(
         self: &Arc<Self>,
         opctx: &OpContext,
         project_lookup: &lookup::Project<'_>,
@@ -212,7 +212,7 @@ impl super::Nexus {
         Ok(disk_created)
     }
 
-    pub async fn disk_list(
+    pub(crate) async fn disk_list(
         &self,
         opctx: &OpContext,
         project_lookup: &lookup::Project<'_>,
@@ -266,7 +266,7 @@ impl super::Nexus {
             .map(|_| ())
     }
 
-    pub async fn notify_disk_updated(
+    pub(crate) async fn notify_disk_updated(
         &self,
         opctx: &OpContext,
         id: Uuid,
@@ -323,7 +323,7 @@ impl super::Nexus {
         }
     }
 
-    pub async fn project_delete_disk(
+    pub(crate) async fn project_delete_disk(
         self: &Arc<Self>,
         opctx: &OpContext,
         disk_lookup: &lookup::Disk<'_>,
@@ -351,7 +351,7 @@ impl super::Nexus {
     /// This is just a wrapper around the volume operation of the same
     /// name, but we provide this interface when all the caller has is
     /// the disk UUID as the internal volume_id is not exposed.
-    pub async fn disk_remove_read_only_parent(
+    pub(crate) async fn disk_remove_read_only_parent(
         self: &Arc<Self>,
         opctx: &OpContext,
         disk_id: Uuid,
@@ -370,7 +370,7 @@ impl super::Nexus {
     }
 
     /// Import blocks from a URL into a disk
-    pub async fn import_blocks_from_url_for_disk(
+    pub(crate) async fn import_blocks_from_url_for_disk(
         self: &Arc<Self>,
         opctx: &OpContext,
         disk_lookup: &lookup::Disk<'_>,
@@ -397,7 +397,7 @@ impl super::Nexus {
 
     /// Move a disk from the "ImportReady" state to the "Importing" state,
     /// blocking any import from URL jobs.
-    pub async fn disk_manual_import_start(
+    pub(crate) async fn disk_manual_import_start(
         self: &Arc<Self>,
         opctx: &OpContext,
         disk_lookup: &lookup::Disk<'_>,
@@ -434,7 +434,7 @@ impl super::Nexus {
     }
 
     /// Bulk write some bytes into a disk that's in state ImportingFromBulkWrites
-    pub async fn disk_manual_import(
+    pub(crate) async fn disk_manual_import(
         self: &Arc<Self>,
         disk_lookup: &lookup::Disk<'_>,
         param: params::ImportBlocksBulkWrite,
@@ -556,7 +556,7 @@ impl super::Nexus {
     /// Move a disk from the "ImportingFromBulkWrites" state to the
     /// "ImportReady" state, usually signalling the end of manually importing
     /// blocks.
-    pub async fn disk_manual_import_stop(
+    pub(crate) async fn disk_manual_import_stop(
         self: &Arc<Self>,
         opctx: &OpContext,
         disk_lookup: &lookup::Disk<'_>,
@@ -594,7 +594,7 @@ impl super::Nexus {
 
     /// Move a disk from the "ImportReady" state to the "Detach" state, making
     /// it ready for general use.
-    pub async fn disk_finalize_import(
+    pub(crate) async fn disk_finalize_import(
         self: &Arc<Self>,
         opctx: &OpContext,
         disk_lookup: &lookup::Disk<'_>,

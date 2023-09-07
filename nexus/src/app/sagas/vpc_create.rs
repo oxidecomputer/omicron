@@ -26,7 +26,7 @@ use uuid::Uuid;
 // vpc create saga: input parameters
 
 #[derive(Debug, Deserialize, Serialize)]
-pub struct Params {
+pub(crate) struct Params {
     pub serialized_authn: authn::saga::Serialized,
     pub vpc_create: params::VpcCreate,
     pub authz_project: authz::Project,
@@ -99,7 +99,7 @@ pub fn create_dag(
 }
 
 #[derive(Debug)]
-pub struct SagaVpcCreate;
+pub(crate) struct SagaVpcCreate;
 impl NexusSaga for SagaVpcCreate {
     const NAME: &'static str = "vpc-create";
     type Params = Params;

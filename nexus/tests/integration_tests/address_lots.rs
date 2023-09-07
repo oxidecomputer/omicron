@@ -15,7 +15,7 @@ use omicron_common::api::external::{
     AddressLot, AddressLotBlock, AddressLotCreateResponse, AddressLotKind,
     IdentityMetadataCreateParams,
 };
-use omicron_nexus::external_api::params::{
+use nexus_types::external_api::params::{
     AddressLotBlockCreate, AddressLotCreate,
 };
 use std::net::IpAddr;

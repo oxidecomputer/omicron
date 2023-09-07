@@ -27,7 +27,7 @@ use steno::Node;
 use uuid::Uuid;
 
 #[derive(Debug, Deserialize, Serialize)]
-pub struct Params {
+pub(crate) struct Params {
     pub serialized_authn: authn::saga::Serialized,
     pub silo_id: Uuid,
     pub project_id: Uuid,
@@ -56,7 +56,7 @@ declare_saga_actions! {
 }
 
 #[derive(Debug)]
-pub struct SagaFinalizeDisk;
+pub(crate) struct SagaFinalizeDisk;
 impl NexusSaga for SagaFinalizeDisk {
     const NAME: &'static str = "finalize-disk";
     type Params = Params;

@@ -36,24 +36,25 @@ pub struct ServerContext {
     /// reference to the underlying nexus
     pub nexus: Arc<Nexus>,
     /// debug log
-    pub log: Logger,
+    #[allow(dead_code)]
+    log: Logger,
     /// authenticator for external HTTP requests
-    pub external_authn: authn::external::Authenticator<ServerContext>,
+    pub(crate) external_authn: authn::external::Authenticator<ServerContext>,
     /// authentication context used for internal HTTP requests
-    pub internal_authn: Arc<authn::Context>,
+    pub(crate) internal_authn: Arc<authn::Context>,
     /// authorizer
-    pub authz: Arc<authz::Authz>,
+    pub(crate) authz: Arc<authz::Authz>,
     /// internal API request latency tracker
-    pub internal_latencies: LatencyTracker,
+    pub(crate) internal_latencies: LatencyTracker,
     /// external API request latency tracker
-    pub external_latencies: LatencyTracker,
+    pub(crate) external_latencies: LatencyTracker,
     /// registry of metric producers
-    pub producer_registry: ProducerRegistry,
+    pub(crate) producer_registry: ProducerRegistry,
     /// tunable settings needed for the console at runtime
-    pub console_config: ConsoleConfig,
+    pub(crate) console_config: ConsoleConfig,
 }
 
-pub struct ConsoleConfig {
+pub(crate) struct ConsoleConfig {
     /// how long a session can be idle before expiring
     pub session_idle_timeout: Duration,
     /// how long a session can exist before expiring
@@ -239,7 +240,7 @@ impl ServerContext {
 
 /// Authenticates an incoming request to the external API and produces a new
 /// operation context for it
-pub async fn op_context_for_external_api(
+pub(crate) async fn op_context_for_external_api(
     rqctx: &dropshot::RequestContext<Arc<ServerContext>>,
 ) -> Result<OpContext, dropshot::HttpError> {
     let apictx = rqctx.context();
@@ -262,7 +263,7 @@ pub async fn op_context_for_external_api(
     .await
 }
 
-pub async fn op_context_for_internal_api(
+pub(crate) async fn op_context_for_internal_api(
     rqctx: &dropshot::RequestContext<Arc<ServerContext>>,
 ) -> OpContext {
     let apictx = rqctx.context();
@@ -285,7 +286,7 @@ pub async fn op_context_for_internal_api(
     .expect("infallible")
 }
 
-pub fn op_context_for_saga_action<T>(
+pub(crate) fn op_context_for_saga_action<T>(
     sagactx: &steno::ActionContext<T>,
     serialized_authn: &authn::saga::Serialized,
 ) -> OpContext

@@ -65,7 +65,7 @@ pub struct DeviceAuthRequest {
     content_type = "application/x-www-form-urlencoded",
     tags = ["hidden"], // "token"
 }]
-pub async fn device_auth_request(
+pub(crate) async fn device_auth_request(
     rqctx: RequestContext<Arc<ServerContext>>,
     params: TypedBody<DeviceAuthRequest>,
 ) -> Result<Response<Body>, HttpError> {
@@ -117,7 +117,7 @@ pub struct DeviceAuthVerify {
     path = "/device/verify",
     unpublished = true,
 }]
-pub async fn device_auth_verify(
+pub(crate) async fn device_auth_verify(
     rqctx: RequestContext<Arc<ServerContext>>,
 ) -> Result<Response<Body>, HttpError> {
     console_index_or_login_redirect(rqctx).await
@@ -128,7 +128,7 @@ pub async fn device_auth_verify(
     path = "/device/success",
     unpublished = true,
 }]
-pub async fn device_auth_success(
+pub(crate) async fn device_auth_success(
     rqctx: RequestContext<Arc<ServerContext>>,
 ) -> Result<Response<Body>, HttpError> {
     console_index_or_login_redirect(rqctx).await
@@ -144,7 +144,7 @@ pub async fn device_auth_success(
     path = "/device/confirm",
     tags = ["hidden"], // "token"
 }]
-pub async fn device_auth_confirm(
+pub(crate) async fn device_auth_confirm(
     rqctx: RequestContext<Arc<ServerContext>>,
     params: TypedBody<DeviceAuthVerify>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
@@ -179,6 +179,7 @@ pub struct DeviceAccessTokenRequest {
 pub enum DeviceAccessTokenResponse {
     Granted(DeviceAccessToken),
     Pending,
+    #[allow(dead_code)]
     Denied,
 }
 
@@ -192,7 +193,7 @@ pub enum DeviceAccessTokenResponse {
     content_type = "application/x-www-form-urlencoded",
     tags = ["hidden"], // "token"
 }]
-pub async fn device_access_token(
+pub(crate) async fn device_access_token(
     rqctx: RequestContext<Arc<ServerContext>>,
     params: TypedBody<DeviceAccessTokenRequest>,
 ) -> Result<Response<Body>, HttpError> {

@@ -28,7 +28,7 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 impl super::Nexus {
-    pub async fn image_lookup<'a>(
+    pub(crate) async fn image_lookup<'a>(
         &'a self,
         opctx: &'a OpContext,
         image_selector: params::ImageSelector,
@@ -75,7 +75,7 @@ impl super::Nexus {
     }
 
     /// Creates an image
-    pub async fn image_create(
+    pub(crate) async fn image_create(
         self: &Arc<Self>,
         opctx: &OpContext,
         lookup_parent: &ImageParentLookup<'_>,
@@ -332,7 +332,7 @@ impl super::Nexus {
         }
     }
 
-    pub async fn image_list(
+    pub(crate) async fn image_list(
         &self,
         opctx: &OpContext,
         parent_lookup: &ImageParentLookup<'_>,
@@ -357,7 +357,7 @@ impl super::Nexus {
     }
 
     // TODO-MVP: Implement
-    pub async fn image_delete(
+    pub(crate) async fn image_delete(
         self: &Arc<Self>,
         opctx: &OpContext,
         image_lookup: &ImageLookup<'_>,
@@ -379,7 +379,7 @@ impl super::Nexus {
     }
 
     /// Converts a project scoped image into a silo scoped image
-    pub async fn image_promote(
+    pub(crate) async fn image_promote(
         self: &Arc<Self>,
         opctx: &OpContext,
         image_lookup: &ImageLookup<'_>,
@@ -407,7 +407,7 @@ impl super::Nexus {
     }
 
     /// Converts a silo scoped image into a project scoped image
-    pub async fn image_demote(
+    pub(crate) async fn image_demote(
         self: &Arc<Self>,
         opctx: &OpContext,
         image_lookup: &ImageLookup<'_>,

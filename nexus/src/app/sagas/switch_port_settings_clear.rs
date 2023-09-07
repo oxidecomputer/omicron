@@ -20,7 +20,7 @@ use steno::ActionError;
 use uuid::Uuid;
 
 #[derive(Debug, Deserialize, Serialize)]
-pub struct Params {
+pub(crate) struct Params {
     pub serialized_authn: authn::saga::Serialized,
     pub switch_port_id: Uuid,
     pub port_name: String,
@@ -39,7 +39,7 @@ declare_saga_actions! {
 }
 
 #[derive(Debug)]
-pub struct SagaSwitchPortSettingsClear;
+pub(crate) struct SagaSwitchPortSettingsClear;
 impl NexusSaga for SagaSwitchPortSettingsClear {
     const NAME: &'static str = "switch-port-settings-clear";
     type Params = Params;

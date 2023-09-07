@@ -17,7 +17,7 @@ use oximeter_db::Measurement;
 use std::num::NonZeroU32;
 
 impl super::Nexus {
-    pub async fn system_metric_list(
+    pub(crate) async fn system_metric_list(
         &self,
         opctx: &OpContext,
         metric_name: SystemMetricName,
@@ -56,7 +56,7 @@ impl super::Nexus {
         .await
     }
 
-    pub async fn silo_metric_list(
+    pub(crate) async fn silo_metric_list(
         &self,
         opctx: &OpContext,
         metric_name: SystemMetricName,

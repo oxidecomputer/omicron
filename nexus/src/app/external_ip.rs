@@ -12,7 +12,7 @@ use nexus_db_queries::context::OpContext;
 use omicron_common::api::external::ListResultVec;
 
 impl super::Nexus {
-    pub async fn instance_list_external_ips(
+    pub(crate) async fn instance_list_external_ips(
         &self,
         opctx: &OpContext,
         instance_lookup: &lookup::Instance<'_>,

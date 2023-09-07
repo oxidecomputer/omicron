@@ -26,7 +26,7 @@ use uuid::Uuid;
 // instance migrate saga: input parameters
 
 #[derive(Debug, Deserialize, Serialize)]
-pub struct Params {
+pub(crate) struct Params {
     pub serialized_authn: authn::saga::Serialized,
     pub instance: db::model::Instance,
     pub migrate_params: params::InstanceMigrate,
@@ -171,7 +171,7 @@ declare_saga_actions! {
 }
 
 #[derive(Debug)]
-pub struct SagaInstanceMigrate;
+pub(crate) struct SagaInstanceMigrate;
 impl NexusSaga for SagaInstanceMigrate {
     const NAME: &'static str = "instance-migrate";
     type Params = Params;

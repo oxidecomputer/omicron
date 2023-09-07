@@ -20,16 +20,16 @@ use nexus_test_utils_macros::nexus_test;
 use omicron_common::api::external::IdentityMetadataUpdateParams;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::{IdentityMetadataCreateParams, Name};
-use omicron_nexus::external_api::params::ExternalIpCreate;
-use omicron_nexus::external_api::params::InstanceDiskAttachment;
-use omicron_nexus::external_api::params::InstanceNetworkInterfaceAttachment;
-use omicron_nexus::external_api::params::IpPoolCreate;
-use omicron_nexus::external_api::params::IpPoolUpdate;
-use omicron_nexus::external_api::shared::IpRange;
-use omicron_nexus::external_api::shared::Ipv4Range;
-use omicron_nexus::external_api::shared::Ipv6Range;
-use omicron_nexus::external_api::views::IpPool;
-use omicron_nexus::external_api::views::IpPoolRange;
+use nexus_types::external_api::params::ExternalIpCreate;
+use nexus_types::external_api::params::InstanceDiskAttachment;
+use nexus_types::external_api::params::InstanceNetworkInterfaceAttachment;
+use nexus_types::external_api::params::IpPoolCreate;
+use nexus_types::external_api::params::IpPoolUpdate;
+use nexus_types::external_api::shared::IpRange;
+use nexus_types::external_api::shared::Ipv4Range;
+use nexus_types::external_api::shared::Ipv6Range;
+use nexus_types::external_api::views::IpPool;
+use nexus_types::external_api::views::IpPoolRange;
 use omicron_nexus::TestInterfaces;
 use sled_agent_client::TestInterfaces as SledTestInterfaces;
 use std::collections::HashSet;
@@ -931,7 +931,7 @@ async fn test_ip_pool_service(cptestctx: &ControlPlaneTestContext) {
         .unwrap();
     assert_eq!(
         fetched_pool.identity.name,
-        omicron_nexus::db::datastore::SERVICE_IP_POOL_NAME
+        nexus_db_queries::db::datastore::SERVICE_IP_POOL_NAME
     );
     assert_eq!(fetched_pool.identity.description, "IP Pool for Oxide Services");
 

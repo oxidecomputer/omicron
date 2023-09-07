@@ -126,7 +126,7 @@ use uuid::Uuid;
 // snapshot create saga: input parameters
 
 #[derive(Debug, Deserialize, Serialize)]
-pub struct Params {
+pub(crate) struct Params {
     pub serialized_authn: authn::saga::Serialized,
     pub silo_id: Uuid,
     pub project_id: Uuid,
@@ -203,7 +203,7 @@ declare_saga_actions! {
 // snapshot create saga: definition
 
 #[derive(Debug)]
-pub struct SagaSnapshotCreate;
+pub(crate) struct SagaSnapshotCreate;
 impl NexusSaga for SagaSnapshotCreate {
     const NAME: &'static str = "snapshot-create";
     type Params = Params;

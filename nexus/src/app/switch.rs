@@ -25,7 +25,7 @@ impl super::Nexus {
 
     /// Upserts a switch into the database, updated it if it already exists.
     /// Should only be called by the internal API
-    pub async fn switch_upsert(
+    pub(crate) async fn switch_upsert(
         &self,
         id: Uuid,
         request: SwitchPutRequest,
@@ -40,7 +40,7 @@ impl super::Nexus {
         self.db_datastore.switch_upsert(switch).await
     }
 
-    pub async fn switch_list(
+    pub(crate) async fn switch_list(
         &self,
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, Uuid>,

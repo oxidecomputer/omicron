@@ -65,7 +65,7 @@ impl super::Nexus {
         }
     }
 
-    pub async fn silo_create(
+    pub(crate) async fn silo_create(
         &self,
         opctx: &OpContext,
         new_silo_params: params::SiloCreate,
@@ -107,7 +107,7 @@ impl super::Nexus {
         Ok(silo)
     }
 
-    pub async fn silos_list(
+    pub(crate) async fn silos_list(
         &self,
         opctx: &OpContext,
         pagparams: &PaginatedBy<'_>,
@@ -117,7 +117,7 @@ impl super::Nexus {
             .await
     }
 
-    pub async fn silo_delete(
+    pub(crate) async fn silo_delete(
         &self,
         opctx: &OpContext,
         silo_lookup: &lookup::Silo<'_>,
@@ -144,7 +144,7 @@ impl super::Nexus {
 
     // Role assignments
 
-    pub async fn silo_fetch_policy(
+    pub(crate) async fn silo_fetch_policy(
         &self,
         opctx: &OpContext,
         silo_lookup: &lookup::Silo<'_>,
@@ -162,7 +162,7 @@ impl super::Nexus {
         Ok(shared::Policy { role_assignments })
     }
 
-    pub async fn silo_update_policy(
+    pub(crate) async fn silo_update_policy(
         &self,
         opctx: &OpContext,
         silo_lookup: &lookup::Silo<'_>,
@@ -212,7 +212,7 @@ impl super::Nexus {
     }
 
     /// List the users in a Silo
-    pub async fn silo_list_users(
+    pub(crate) async fn silo_list_users(
         &self,
         opctx: &OpContext,
         silo_lookup: &lookup::Silo<'_>,
@@ -226,7 +226,7 @@ impl super::Nexus {
     }
 
     /// Fetch a user in a Silo
-    pub async fn silo_user_fetch(
+    pub(crate) async fn silo_user_fetch(
         &self,
         opctx: &OpContext,
         silo_lookup: &lookup::Silo<'_>,
@@ -267,7 +267,7 @@ impl super::Nexus {
     }
 
     /// Create a user in a Silo's local identity provider
-    pub async fn local_idp_create_user(
+    pub(crate) async fn local_idp_create_user(
         &self,
         opctx: &OpContext,
         silo_lookup: &lookup::Silo<'_>,
@@ -305,7 +305,7 @@ impl super::Nexus {
     }
 
     /// Delete a user in a Silo's local identity provider
-    pub async fn local_idp_delete_user(
+    pub(crate) async fn local_idp_delete_user(
         &self,
         opctx: &OpContext,
         silo_lookup: &lookup::Silo<'_>,
@@ -432,7 +432,7 @@ impl super::Nexus {
     /// If `password` is `UserPassword::Password`, the password is set to the
     /// requested value.  Otherwise, any existing password is invalidated so
     /// that it cannot be used for authentication any more.
-    pub async fn local_idp_user_set_password(
+    pub(crate) async fn local_idp_user_set_password(
         &self,
         opctx: &OpContext,
         silo_lookup: &lookup::Silo<'_>,
@@ -506,7 +506,7 @@ impl super::Nexus {
     /// callers are expected to invoke this function during authentication even
     /// if they've found no user to match the requested credentials.  That's why
     /// this function accepts `Option<SiloUser>` rather than just a `SiloUser`.
-    pub async fn silo_user_password_verify(
+    pub(crate) async fn silo_user_password_verify(
         &self,
         opctx: &OpContext,
         maybe_authz_silo_user: Option<&authz::SiloUser>,
@@ -544,7 +544,7 @@ impl super::Nexus {
 
     /// Given a silo name and username/password credentials, verify the
     /// credentials and return the corresponding SiloUser.
-    pub async fn login_local(
+    pub(crate) async fn login_local(
         &self,
         opctx: &OpContext,
         silo_lookup: &lookup::Silo<'_>,
@@ -643,7 +643,7 @@ impl super::Nexus {
         }
     }
 
-    pub async fn ssh_key_create(
+    pub(crate) async fn ssh_key_create(
         &self,
         opctx: &OpContext,
         silo_user_id: Uuid,
@@ -658,7 +658,7 @@ impl super::Nexus {
         self.db_datastore.ssh_key_create(opctx, &authz_user, ssh_key).await
     }
 
-    pub async fn ssh_keys_list(
+    pub(crate) async fn ssh_keys_list(
         &self,
         opctx: &OpContext,
         silo_user_id: Uuid,
@@ -672,7 +672,7 @@ impl super::Nexus {
         self.db_datastore.ssh_keys_list(opctx, &authz_user, page_params).await
     }
 
-    pub async fn ssh_key_delete(
+    pub(crate) async fn ssh_key_delete(
         &self,
         opctx: &OpContext,
         silo_user_id: Uuid,
@@ -718,7 +718,7 @@ impl super::Nexus {
         }
     }
 
-    pub async fn identity_provider_list(
+    pub(crate) async fn identity_provider_list(
         &self,
         opctx: &OpContext,
         silo_lookup: &lookup::Silo<'_>,
@@ -734,7 +734,7 @@ impl super::Nexus {
 
     // Silo authn identity providers
 
-    pub async fn saml_identity_provider_create(
+    pub(crate) async fn saml_identity_provider_create(
         &self,
         opctx: &OpContext,
         silo_lookup: &lookup::Silo<'_>,

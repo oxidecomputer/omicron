@@ -7,7 +7,7 @@ use nexus_test_utils_macros::nexus_test;
 use omicron_nexus::external_api::device_auth::{
     DeviceAccessTokenRequest, DeviceAuthRequest, DeviceAuthVerify,
 };
-use omicron_nexus::external_api::views::{
+use nexus_types::external_api::views::{
     DeviceAccessTokenGrant, DeviceAccessTokenType, DeviceAuthResponse,
 };
 

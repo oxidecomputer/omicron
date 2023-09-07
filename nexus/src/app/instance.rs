@@ -108,7 +108,7 @@ impl super::Nexus {
         }
     }
 
-    pub async fn project_create_instance(
+    pub(crate) async fn project_create_instance(
         self: &Arc<Self>,
         opctx: &OpContext,
         project_lookup: &lookup::Project<'_>,
@@ -267,7 +267,7 @@ impl super::Nexus {
         Ok(db_instance)
     }
 
-    pub async fn instance_list(
+    pub(crate) async fn instance_list(
         &self,
         opctx: &OpContext,
         project_lookup: &lookup::Project<'_>,
@@ -281,7 +281,7 @@ impl super::Nexus {
     // This operation may only occur on stopped instances, which implies that
     // the attached disks do not have any running "upstairs" process running
     // within the sled.
-    pub async fn project_destroy_instance(
+    pub(crate) async fn project_destroy_instance(
         self: &Arc<Self>,
         opctx: &OpContext,
         instance_lookup: &lookup::Instance<'_>,
@@ -313,7 +313,7 @@ impl super::Nexus {
         Ok(())
     }
 
-    pub async fn project_instance_migrate(
+    pub(crate) async fn project_instance_migrate(
         self: &Arc<Self>,
         opctx: &OpContext,
         instance_lookup: &lookup::Instance<'_>,
@@ -370,7 +370,7 @@ impl super::Nexus {
     ///
     /// Asserts that `db_instance` has no migration ID or destination Propolis
     /// ID set.
-    pub async fn instance_set_migration_ids(
+    pub(crate) async fn instance_set_migration_ids(
         &self,
         opctx: &OpContext,
         instance_id: Uuid,
@@ -432,7 +432,7 @@ impl super::Nexus {
     ///
     /// Asserts that `db_instance` has a migration ID and destination Propolis
     /// ID set.
-    pub async fn instance_clear_migration_ids(
+    pub(crate) async fn instance_clear_migration_ids(
         &self,
         instance_id: Uuid,
         db_instance: &db::model::Instance,
@@ -459,7 +459,7 @@ impl super::Nexus {
     }
 
     /// Reboot the specified instance.
-    pub async fn instance_reboot(
+    pub(crate) async fn instance_reboot(
         &self,
         opctx: &OpContext,
         instance_lookup: &lookup::Instance<'_>,
@@ -476,7 +476,7 @@ impl super::Nexus {
     }
 
     /// Attempts to start an instance if it is currently stopped.
-    pub async fn instance_start(
+    pub(crate) async fn instance_start(
         self: &Arc<Self>,
         opctx: &OpContext,
         instance_lookup: &lookup::Instance<'_>,
@@ -527,7 +527,7 @@ impl super::Nexus {
     }
 
     /// Make sure the given Instance is stopped.
-    pub async fn instance_stop(
+    pub(crate) async fn instance_stop(
         &self,
         opctx: &OpContext,
         instance_lookup: &lookup::Instance<'_>,
@@ -950,7 +950,7 @@ impl super::Nexus {
     }
 
     /// Lists disks attached to the instance.
-    pub async fn instance_list_disks(
+    pub(crate) async fn instance_list_disks(
         &self,
         opctx: &OpContext,
         instance_lookup: &lookup::Instance<'_>,
@@ -964,7 +964,7 @@ impl super::Nexus {
     }
 
     /// Attach a disk to an instance.
-    pub async fn instance_attach_disk(
+    pub(crate) async fn instance_attach_disk(
         &self,
         opctx: &OpContext,
         instance_lookup: &lookup::Instance<'_>,
@@ -1024,7 +1024,7 @@ impl super::Nexus {
     }
 
     /// Detach a disk from an instance.
-    pub async fn instance_detach_disk(
+    pub(crate) async fn instance_detach_disk(
         &self,
         opctx: &OpContext,
         instance_lookup: &lookup::Instance<'_>,
@@ -1067,7 +1067,7 @@ impl super::Nexus {
 
     /// Invoked by a sled agent to publish an updated runtime state for an
     /// Instance.
-    pub async fn notify_instance_updated(
+    pub(crate) async fn notify_instance_updated(
         &self,
         opctx: &OpContext,
         id: &Uuid,
@@ -1233,7 +1233,7 @@ impl super::Nexus {
     }
 
     // Switches with uplinks configured and boundary services enabled
-    pub async fn boundary_switches(
+    pub(crate) async fn boundary_switches(
         &self,
         opctx: &OpContext,
     ) -> Result<HashSet<SwitchLocation>, Error> {

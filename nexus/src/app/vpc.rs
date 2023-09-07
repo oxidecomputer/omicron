@@ -74,7 +74,7 @@ impl super::Nexus {
         }
     }
 
-    pub async fn project_create_vpc(
+    pub(crate) async fn project_create_vpc(
         self: &Arc<Self>,
         opctx: &OpContext,
         project_lookup: &lookup::Project<'_>,
@@ -103,7 +103,7 @@ impl super::Nexus {
         Ok(db_vpc)
     }
 
-    pub async fn vpc_list(
+    pub(crate) async fn vpc_list(
         &self,
         opctx: &OpContext,
         project_lookup: &lookup::Project<'_>,
@@ -114,7 +114,7 @@ impl super::Nexus {
         self.db_datastore.vpc_list(&opctx, &authz_project, pagparams).await
     }
 
-    pub async fn project_update_vpc(
+    pub(crate) async fn project_update_vpc(
         &self,
         opctx: &OpContext,
         vpc_lookup: &lookup::Vpc<'_>,
@@ -127,7 +127,7 @@ impl super::Nexus {
             .await
     }
 
-    pub async fn project_delete_vpc(
+    pub(crate) async fn project_delete_vpc(
         &self,
         opctx: &OpContext,
         vpc_lookup: &lookup::Vpc<'_>,
@@ -166,7 +166,7 @@ impl super::Nexus {
 
     // Firewall rules
 
-    pub async fn vpc_list_firewall_rules(
+    pub(crate) async fn vpc_list_firewall_rules(
         &self,
         opctx: &OpContext,
         vpc_lookup: &lookup::Vpc<'_>,
@@ -180,7 +180,7 @@ impl super::Nexus {
         Ok(rules)
     }
 
-    pub async fn vpc_update_firewall_rules(
+    pub(crate) async fn vpc_update_firewall_rules(
         &self,
         opctx: &OpContext,
         vpc_lookup: &lookup::Vpc<'_>,

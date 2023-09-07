@@ -12,7 +12,7 @@ use steno::ActionError;
 use steno::Node;
 
 #[derive(Debug, Deserialize, Serialize)]
-pub struct Params {
+pub(crate) struct Params {
     pub serialized_authn: authn::saga::Serialized,
     pub authz_snapshot: authz::Snapshot,
     pub snapshot: db::model::Snapshot,
@@ -29,7 +29,7 @@ declare_saga_actions! {
 }
 
 #[derive(Debug)]
-pub struct SagaSnapshotDelete;
+pub(crate) struct SagaSnapshotDelete;
 impl NexusSaga for SagaSnapshotDelete {
     const NAME: &'static str = "snapshot-delete";
     type Params = Params;

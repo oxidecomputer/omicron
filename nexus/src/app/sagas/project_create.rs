@@ -19,7 +19,7 @@ use steno::ActionError;
 // project create saga: input parameters
 
 #[derive(Debug, Deserialize, Serialize)]
-pub struct Params {
+pub(crate) struct Params {
     pub serialized_authn: authn::saga::Serialized,
     pub project_create: params::ProjectCreate,
     pub authz_silo: authz::Silo,
@@ -41,7 +41,7 @@ declare_saga_actions! {
 // project create saga: definition
 
 #[derive(Debug)]
-pub struct SagaProjectCreate;
+pub(crate) struct SagaProjectCreate;
 impl NexusSaga for SagaProjectCreate {
     const NAME: &'static str = "project-create";
     type Params = Params;

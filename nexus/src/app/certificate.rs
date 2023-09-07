@@ -37,7 +37,7 @@ impl super::Nexus {
         }
     }
 
-    pub async fn certificate_create(
+    pub(crate) async fn certificate_create(
         &self,
         opctx: &OpContext,
         params: params::CertificateCreate,
@@ -71,7 +71,7 @@ impl super::Nexus {
         }
     }
 
-    pub async fn certificates_list(
+    pub(crate) async fn certificates_list(
         &self,
         opctx: &OpContext,
         pagparams: &PaginatedBy<'_>,
@@ -81,7 +81,7 @@ impl super::Nexus {
             .await
     }
 
-    pub async fn certificate_delete(
+    pub(crate) async fn certificate_delete(
         &self,
         opctx: &OpContext,
         certificate_lookup: lookup::Certificate<'_>,

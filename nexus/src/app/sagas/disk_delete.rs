@@ -20,7 +20,7 @@ use uuid::Uuid;
 // disk delete saga: input parameters
 
 #[derive(Debug, Deserialize, Serialize)]
-pub struct Params {
+pub(crate) struct Params {
     pub serialized_authn: authn::saga::Serialized,
     pub project_id: Uuid,
     pub disk_id: Uuid,
@@ -46,7 +46,7 @@ declare_saga_actions! {
 // disk delete saga: definition
 
 #[derive(Debug)]
-pub struct SagaDiskDelete;
+pub(crate) struct SagaDiskDelete;
 impl NexusSaga for SagaDiskDelete {
     const NAME: &'static str = "disk-delete";
     type Params = Params;

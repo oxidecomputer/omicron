@@ -19,9 +19,9 @@ use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::Instance;
 use omicron_common::api::external::InstanceCpuCount;
 use omicron_common::api::external::Name;
-use omicron_nexus::external_api::params;
-use omicron_nexus::external_api::views;
-use omicron_nexus::external_api::views::Project;
+use nexus_types::external_api::params;
+use nexus_types::external_api::views;
+use nexus_types::external_api::views::Project;
 use std::str::FromStr;
 
 type ControlPlaneTestContext =

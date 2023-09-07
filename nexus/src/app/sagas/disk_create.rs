@@ -32,7 +32,7 @@ use uuid::Uuid;
 // disk create saga: input parameters
 
 #[derive(Debug, Deserialize, Serialize)]
-pub struct Params {
+pub(crate) struct Params {
     pub serialized_authn: authn::saga::Serialized,
     pub project_id: Uuid,
     pub create_params: params::DiskCreate,
@@ -77,7 +77,7 @@ declare_saga_actions! {
 // disk create saga: definition
 
 #[derive(Debug)]
-pub struct SagaDiskCreate;
+pub(crate) struct SagaDiskCreate;
 impl NexusSaga for SagaDiskCreate {
     const NAME: &'static str = "disk-create";
     type Params = Params;

@@ -13,7 +13,7 @@ use omicron_common::api::external::{
     IdentityMetadataCreateParams, IdentityMetadataUpdateParams,
     RouteDestination, RouteTarget, RouterRoute, RouterRouteKind,
 };
-use omicron_nexus::external_api::params;
+use nexus_types::external_api::params;
 use std::net::IpAddr;
 use std::net::Ipv4Addr;
 

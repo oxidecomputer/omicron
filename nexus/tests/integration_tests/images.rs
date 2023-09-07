@@ -16,7 +16,7 @@ use nexus_test_utils_macros::nexus_test;
 use omicron_common::api::external::Disk;
 
 use omicron_common::api::external::{ByteCount, IdentityMetadataCreateParams};
-use omicron_nexus::external_api::{params, views};
+use nexus_types::external_api::{params, views};
 
 use httptest::{matchers::*, responders::*, Expectation, ServerBuilder};
 

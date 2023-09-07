@@ -7,7 +7,7 @@ use omicron_common::update::ArtifactsDocument;
 use std::convert::TryInto;
 
 // TODO(iliana): make async/.await. awslabs/tough#213
-pub fn read_artifacts(
+pub(crate) fn read_artifacts(
     trusted_root: &[u8],
     mut base_url: String,
 ) -> Result<

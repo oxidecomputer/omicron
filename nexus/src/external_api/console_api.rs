@@ -222,7 +222,7 @@ impl RelayState {
    tags = ["login"],
    unpublished = true,
 }]
-pub async fn login_saml_begin(
+pub(crate) async fn login_saml_begin(
     rqctx: RequestContext<Arc<ServerContext>>,
     _path_params: Path<LoginToProviderPathParam>,
     _query_params: Query<LoginUrlQuery>,
@@ -241,7 +241,7 @@ pub async fn login_saml_begin(
    tags = ["login"],
    unpublished = true,
 }]
-pub async fn login_saml_redirect(
+pub(crate) async fn login_saml_redirect(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<LoginToProviderPathParam>,
     query_params: Query<LoginUrlQuery>,
@@ -296,7 +296,7 @@ pub async fn login_saml_redirect(
    path = "/login/{silo_name}/saml/{provider_name}",
    tags = ["login"],
 }]
-pub async fn login_saml(
+pub(crate) async fn login_saml(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<LoginToProviderPathParam>,
     body_bytes: dropshot::UntypedBody,
@@ -383,7 +383,7 @@ pub struct LoginPathParam {
    tags = ["login"],
    unpublished = true,
 }]
-pub async fn login_local_begin(
+pub(crate) async fn login_local_begin(
     rqctx: RequestContext<Arc<ServerContext>>,
     _path_params: Path<LoginPathParam>,
     _query_params: Query<LoginUrlQuery>,
@@ -401,7 +401,7 @@ pub async fn login_local_begin(
    path = "/v1/login/{silo_name}/local",
    tags = ["login"],
 }]
-pub async fn login_local(
+pub(crate) async fn login_local(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<LoginPathParam>,
     credentials: dropshot::TypedBody<params::UsernamePasswordCredentials>,
@@ -464,7 +464,7 @@ async fn create_session(
    path = "/v1/logout",
    tags = ["hidden"],
 }]
-pub async fn logout(
+pub(crate) async fn logout(
     rqctx: RequestContext<Arc<ServerContext>>,
     cookies: Cookies,
 ) -> Result<HttpResponseHeaders<HttpResponseUpdatedNoContent>, HttpError> {
@@ -624,7 +624,7 @@ async fn get_login_url(
    path = "/login",
    unpublished = true,
 }]
-pub async fn login_begin(
+pub(crate) async fn login_begin(
     rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<LoginUrlQuery>,
 ) -> Result<HttpResponseFound, HttpError> {
@@ -637,7 +637,7 @@ pub async fn login_begin(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-pub async fn console_index_or_login_redirect(
+pub(crate) async fn console_index_or_login_redirect(
     rqctx: RequestContext<Arc<ServerContext>>,
 ) -> Result<Response<Body>, HttpError> {
     let opctx = crate::context::op_context_for_external_api(&rqctx).await;
@@ -673,7 +673,7 @@ pub async fn console_index_or_login_redirect(
 macro_rules! console_page {
     ($name:ident, $path:literal) => {
         #[endpoint { method = GET, path = $path, unpublished = true, }]
-        pub async fn $name(
+        pub(crate) async fn $name(
             rqctx: RequestContext<Arc<ServerContext>>,
         ) -> Result<Response<Body>, HttpError> {
             console_index_or_login_redirect(rqctx).await
@@ -685,7 +685,7 @@ macro_rules! console_page {
 macro_rules! console_page_wildcard {
     ($name:ident, $path:literal) => {
         #[endpoint { method = GET, path = $path, unpublished = true, }]
-        pub async fn $name(
+        pub(crate) async fn $name(
             rqctx: RequestContext<Arc<ServerContext>>,
             _path_params: Path<RestPathParam>,
         ) -> Result<Response<Body>, HttpError> {
@@ -724,7 +724,7 @@ fn with_gz_ext(path: &PathBuf) -> PathBuf {
    path = "/assets/{path:.*}",
    unpublished = true,
 }]
-pub async fn asset(
+pub(crate) async fn asset(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<RestPathParam>,
 ) -> Result<Response<Body>, HttpError> {
@@ -784,7 +784,7 @@ pub async fn asset(
     Ok(resp.body(file_contents.into())?)
 }
 
-pub async fn serve_console_index(
+pub(crate) async fn serve_console_index(
     apictx: &ServerContext,
 ) -> Result<Response<Body>, HttpError> {
     let static_dir = &apictx

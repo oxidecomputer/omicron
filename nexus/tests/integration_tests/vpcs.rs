@@ -18,7 +18,7 @@ use nexus_test_utils_macros::nexus_test;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::IdentityMetadataUpdateParams;
 use omicron_common::api::external::Ipv6Net;
-use omicron_nexus::external_api::{params, views::Vpc};
+use nexus_types::external_api::{params, views::Vpc};
 
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;

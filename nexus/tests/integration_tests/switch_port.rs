@@ -12,12 +12,12 @@ use omicron_common::api::external::{
     self, AddressLotKind, IdentityMetadataCreateParams, NameOrId, SwitchPort,
     SwitchPortSettingsView,
 };
-use omicron_nexus::external_api::params::{
+use nexus_types::external_api::params::{
     Address, AddressConfig, AddressLotBlockCreate, AddressLotCreate,
     LinkConfig, LldpServiceConfig, Route, RouteConfig, SwitchInterfaceConfig,
     SwitchInterfaceKind, SwitchPortApplySettings, SwitchPortSettingsCreate,
 };
-use omicron_nexus::external_api::views::Rack;
+use nexus_types::external_api::views::Rack;
 
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;

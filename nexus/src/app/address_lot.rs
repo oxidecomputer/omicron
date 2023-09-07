@@ -41,7 +41,7 @@ impl super::Nexus {
         }
     }
 
-    pub async fn address_lot_create(
+    pub(crate) async fn address_lot_create(
         self: &Arc<Self>,
         opctx: &OpContext,
         params: params::AddressLotCreate,
@@ -51,7 +51,7 @@ impl super::Nexus {
         self.db_datastore.address_lot_create(opctx, &params).await
     }
 
-    pub async fn address_lot_delete(
+    pub(crate) async fn address_lot_delete(
         self: &Arc<Self>,
         opctx: &OpContext,
         address_lot_lookup: &lookup::AddressLot<'_>,
@@ -61,7 +61,7 @@ impl super::Nexus {
         self.db_datastore.address_lot_delete(opctx, &authz_address_lot).await
     }
 
-    pub async fn address_lot_list(
+    pub(crate) async fn address_lot_list(
         self: &Arc<Self>,
         opctx: &OpContext,
         pagparams: &PaginatedBy<'_>,
@@ -70,7 +70,7 @@ impl super::Nexus {
         self.db_datastore.address_lot_list(opctx, pagparams).await
     }
 
-    pub async fn address_lot_block_list(
+    pub(crate) async fn address_lot_block_list(
         self: &Arc<Self>,
         opctx: &OpContext,
         address_lot: &lookup::AddressLot<'_>,

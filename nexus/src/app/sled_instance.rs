@@ -7,7 +7,7 @@ use omicron_common::api::external::ListResultVec;
 use uuid::Uuid;
 
 impl super::Nexus {
-    pub async fn sled_instance_list(
+    pub(crate) async fn sled_instance_list(
         &self,
         opctx: &OpContext,
         sled_lookup: &lookup::Sled<'_>,

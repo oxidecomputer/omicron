@@ -68,7 +68,7 @@ impl super::Nexus {
         Ok(true)
     }
 
-    pub async fn session_create(
+    pub(crate) async fn session_create(
         &self,
         opctx: &OpContext,
         user_id: Uuid,
@@ -85,7 +85,7 @@ impl super::Nexus {
         self.db_datastore.session_create(opctx, session).await
     }
 
-    pub async fn session_fetch(
+    pub(crate) async fn session_fetch(
         &self,
         opctx: &OpContext,
         token: String,
@@ -108,7 +108,7 @@ impl super::Nexus {
     }
 
     /// Updates last_used to now.
-    pub async fn session_update_last_used(
+    pub(crate) async fn session_update_last_used(
         &self,
         opctx: &OpContext,
         token: &str,
@@ -121,7 +121,7 @@ impl super::Nexus {
         self.db_datastore.session_update_last_used(opctx, &authz_session).await
     }
 
-    pub async fn session_hard_delete(
+    pub(crate) async fn session_hard_delete(
         &self,
         opctx: &OpContext,
         token: &str,
@@ -134,7 +134,7 @@ impl super::Nexus {
         self.db_datastore.session_hard_delete(opctx, &authz_session).await
     }
 
-    pub async fn lookup_silo_for_authn(
+    pub(crate) async fn lookup_silo_for_authn(
         &self,
         opctx: &OpContext,
         silo_user_id: Uuid,

@@ -21,7 +21,7 @@ use steno::ActionError;
 
 /// Parameters to the instance start saga.
 #[derive(Debug, Deserialize, Serialize)]
-pub struct Params {
+pub(crate) struct Params {
     pub instance: db::model::Instance,
 
     /// Authentication context to use to fetch the instance's current state from
@@ -66,7 +66,7 @@ declare_saga_actions! {
 }
 
 #[derive(Debug)]
-pub struct SagaInstanceStart;
+pub(crate) struct SagaInstanceStart;
 impl NexusSaga for SagaInstanceStart {
     const NAME: &'static str = "instance-start";
     type Params = Params;

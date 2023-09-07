@@ -24,7 +24,7 @@ use steno::ActionError;
 use uuid::Uuid;
 
 #[derive(Debug, Deserialize, Serialize)]
-pub struct Params {
+pub(crate) struct Params {
     pub serialized_authn: authn::saga::Serialized,
     pub disk_id: Uuid,
 
@@ -52,7 +52,7 @@ declare_saga_actions! {
 }
 
 #[derive(Debug)]
-pub struct SagaImportBlocksFromUrl;
+pub(crate) struct SagaImportBlocksFromUrl;
 impl NexusSaga for SagaImportBlocksFromUrl {
     const NAME: &'static str = "import-blocks-from-url";
     type Params = Params;

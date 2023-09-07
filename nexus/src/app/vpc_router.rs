@@ -63,7 +63,7 @@ impl super::Nexus {
         }
     }
 
-    pub async fn vpc_create_router(
+    pub(crate) async fn vpc_create_router(
         &self,
         opctx: &OpContext,
         vpc_lookup: &lookup::Vpc<'_>,
@@ -86,7 +86,7 @@ impl super::Nexus {
         Ok(router)
     }
 
-    pub async fn vpc_router_list(
+    pub(crate) async fn vpc_router_list(
         &self,
         opctx: &OpContext,
         vpc_lookup: &lookup::Vpc<'_>,
@@ -101,7 +101,7 @@ impl super::Nexus {
         Ok(routers)
     }
 
-    pub async fn vpc_update_router(
+    pub(crate) async fn vpc_update_router(
         &self,
         opctx: &OpContext,
         vpc_router_lookup: &lookup::VpcRouter<'_>,
@@ -117,7 +117,7 @@ impl super::Nexus {
     // TODO: When a router is deleted all its routes should be deleted
     // TODO: When a router is deleted it should be unassociated w/ any subnets it may be associated with
     //       or trigger an error
-    pub async fn vpc_delete_router(
+    pub(crate) async fn vpc_delete_router(
         &self,
         opctx: &OpContext,
         vpc_router_lookup: &lookup::VpcRouter<'_>,
@@ -180,7 +180,7 @@ impl super::Nexus {
         }
     }
 
-    pub async fn router_create_route(
+    pub(crate) async fn router_create_route(
         &self,
         opctx: &OpContext,
         router_lookup: &lookup::VpcRouter<'_>,
@@ -203,7 +203,7 @@ impl super::Nexus {
         Ok(route)
     }
 
-    pub async fn vpc_router_route_list(
+    pub(crate) async fn vpc_router_route_list(
         &self,
         opctx: &OpContext,
         vpc_router_lookup: &lookup::VpcRouter<'_>,
@@ -216,7 +216,7 @@ impl super::Nexus {
             .await
     }
 
-    pub async fn router_update_route(
+    pub(crate) async fn router_update_route(
         &self,
         opctx: &OpContext,
         route_lookup: &lookup::RouterRoute<'_>,
@@ -244,7 +244,7 @@ impl super::Nexus {
             .await
     }
 
-    pub async fn router_delete_route(
+    pub(crate) async fn router_delete_route(
         &self,
         opctx: &OpContext,
         route_lookup: &lookup::RouterRoute<'_>,

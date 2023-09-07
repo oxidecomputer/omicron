@@ -528,6 +528,10 @@ opt-level = 3
 #crucible-client-types = { path = "../crucible/crucible-client-types" }
 #crucible-pantry-client = { path = "../crucible/pantry-client" }
 #crucible-smf = { path = "../crucible/smf" }
+#[patch.crates-io]
+#diesel = { path = "../../diesel/diesel" }
+#[patch."https://github.com/oxidecomputer/diesel-dtrace"]
+#diesel-dtrace = { path = "../diesel-dtrace" }
 
 #
 # Local client generation during development.

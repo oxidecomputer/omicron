@@ -30,7 +30,7 @@ use uuid::Uuid;
 // switch port settings apply saga: input parameters
 
 #[derive(Debug, Deserialize, Serialize)]
-pub struct Params {
+pub(crate) struct Params {
     pub serialized_authn: authn::saga::Serialized,
     pub switch_port_id: Uuid,
     pub switch_port_settings_id: Uuid,
@@ -57,7 +57,7 @@ declare_saga_actions! {
 // switch port settings apply saga: definition
 
 #[derive(Debug)]
-pub struct SagaSwitchPortSettingsApply;
+pub(crate) struct SagaSwitchPortSettingsApply;
 
 impl NexusSaga for SagaSwitchPortSettingsApply {
     const NAME: &'static str = "switch-port-settings-apply";
@@ -321,7 +321,7 @@ async fn spa_disassociate_switch_port(
     Ok(())
 }
 
-pub async fn select_dendrite_client(
+pub(crate) async fn select_dendrite_client(
     sagactx: &NexusActionContext,
 ) -> Result<Arc<dpd_client::Client>, ActionError> {
     let osagactx = sagactx.user_data();

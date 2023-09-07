@@ -34,7 +34,7 @@ pub fn test_opctx(cptestctx: &ControlPlaneTestContext) -> OpContext {
     )
 }
 
-pub async fn instance_start(cptestctx: &ControlPlaneTestContext, id: &Uuid) {
+pub(crate) async fn instance_start(cptestctx: &ControlPlaneTestContext, id: &Uuid) {
     let nexus = &cptestctx.server.apictx().nexus;
     let opctx = test_opctx(&cptestctx);
     let instance_selector =
@@ -51,7 +51,7 @@ pub async fn instance_start(cptestctx: &ControlPlaneTestContext, id: &Uuid) {
         .expect("Failed to start instance");
 }
 
-pub async fn instance_stop(cptestctx: &ControlPlaneTestContext, id: &Uuid) {
+pub(crate) async fn instance_stop(cptestctx: &ControlPlaneTestContext, id: &Uuid) {
     let nexus = &cptestctx.server.apictx().nexus;
     let opctx = test_opctx(&cptestctx);
     let instance_selector =
@@ -68,7 +68,7 @@ pub async fn instance_stop(cptestctx: &ControlPlaneTestContext, id: &Uuid) {
         .expect("Failed to stop instance");
 }
 
-pub async fn instance_stop_by_name(
+pub(crate) async fn instance_stop_by_name(
     cptestctx: &ControlPlaneTestContext,
     name: &str,
     project_name: &str,
@@ -89,7 +89,7 @@ pub async fn instance_stop_by_name(
         .expect("Failed to stop instance");
 }
 
-pub async fn instance_delete_by_name(
+pub(crate) async fn instance_delete_by_name(
     cptestctx: &ControlPlaneTestContext,
     name: &str,
     project_name: &str,
@@ -110,7 +110,7 @@ pub async fn instance_delete_by_name(
         .expect("Failed to destroy instance");
 }
 
-pub async fn instance_simulate(
+pub(crate) async fn instance_simulate(
     cptestctx: &ControlPlaneTestContext,
     instance_id: &Uuid,
 ) {
@@ -121,7 +121,7 @@ pub async fn instance_simulate(
     sa.instance_finish_transition(*instance_id).await;
 }
 
-pub async fn instance_simulate_by_name(
+pub(crate) async fn instance_simulate_by_name(
     cptestctx: &ControlPlaneTestContext,
     name: &str,
     project_name: &str,
@@ -152,7 +152,7 @@ pub async fn instance_simulate_by_name(
 ///
 /// Asserts that a saga can be created from the supplied DAG and that it
 /// succeeds when it is executed.
-pub async fn actions_succeed_idempotently(nexus: &Arc<Nexus>, dag: SagaDag) {
+pub(crate) async fn actions_succeed_idempotently(nexus: &Arc<Nexus>, dag: SagaDag) {
     let runnable_saga = nexus.create_runnable_saga(dag.clone()).await.unwrap();
     for node in dag.get_nodes() {
         nexus
@@ -197,7 +197,7 @@ pub async fn actions_succeed_idempotently(nexus: &Arc<Nexus>, dag: SagaDag) {
 /// This function asserts that each saga it executes (a) starts successfully,
 /// (b) fails, and (c) fails at the specific node at which the function injected
 /// a failure.
-pub async fn action_failure_can_unwind<'a, S, B, A>(
+pub(crate) async fn action_failure_can_unwind<'a, S, B, A>(
     nexus: &Arc<Nexus>,
     before_saga: B,
     after_saga: A,
@@ -290,7 +290,7 @@ pub async fn action_failure_can_unwind<'a, S, B, A>(
 /// This function asserts that each saga it executes (a) starts successfully,
 /// (b) fails, and (c) fails at the specific node at which the function injected
 /// a failure.
-pub async fn action_failure_can_unwind_idempotently<'a, S, B, A>(
+pub(crate) async fn action_failure_can_unwind_idempotently<'a, S, B, A>(
     nexus: &Arc<Nexus>,
     before_saga: B,
     after_saga: A,

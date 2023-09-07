@@ -34,7 +34,7 @@ impl super::Nexus {
         ))
     }
 
-    pub async fn loopback_address_create(
+    pub(crate) async fn loopback_address_create(
         self: &Arc<Self>,
         opctx: &OpContext,
         params: params::LoopbackAddressCreate,
@@ -62,7 +62,7 @@ impl super::Nexus {
         Ok(value)
     }
 
-    pub async fn loopback_address_delete(
+    pub(crate) async fn loopback_address_delete(
         self: &Arc<Self>,
         opctx: &OpContext,
         rack_id: Uuid,
@@ -83,7 +83,7 @@ impl super::Nexus {
         Ok(())
     }
 
-    pub async fn loopback_address_list(
+    pub(crate) async fn loopback_address_list(
         self: &Arc<Self>,
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, Uuid>,

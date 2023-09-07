@@ -17,7 +17,7 @@ use uuid::Uuid;
 // Volume remove read only parent saga: input parameters
 
 #[derive(Debug, Deserialize, Serialize)]
-pub struct Params {
+pub(crate) struct Params {
     pub serialized_authn: authn::saga::Serialized,
     pub volume_id: Uuid,
 }
@@ -57,7 +57,7 @@ declare_saga_actions! {
 // volume remove read only parent saga: definition
 
 #[derive(Debug)]
-pub struct SagaVolumeRemoveROP;
+pub(crate) struct SagaVolumeRemoveROP;
 impl NexusSaga for SagaVolumeRemoveROP {
     const NAME: &'static str = "volume-remove-read-only-parent";
     type Params = Params;

@@ -20,7 +20,7 @@ use steno::ActionError;
 use uuid::Uuid;
 
 #[derive(Debug, Deserialize, Serialize)]
-pub struct Params {
+pub(crate) struct Params {
     pub serialized_authn: authn::saga::Serialized,
     pub rack_id: Uuid,
     pub switch_location: Name,
@@ -39,7 +39,7 @@ declare_saga_actions! {
 }
 
 #[derive(Debug)]
-pub struct SagaLoopbackAddressDelete;
+pub(crate) struct SagaLoopbackAddressDelete;
 impl NexusSaga for SagaLoopbackAddressDelete {
     const NAME: &'static str = "loopback-address-delete";
     type Params = Params;

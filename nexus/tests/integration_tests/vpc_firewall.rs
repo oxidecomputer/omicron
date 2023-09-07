@@ -14,7 +14,7 @@ use omicron_common::api::external::{
     VpcFirewallRuleProtocol, VpcFirewallRuleStatus, VpcFirewallRuleTarget,
     VpcFirewallRuleUpdate, VpcFirewallRuleUpdateParams, VpcFirewallRules,
 };
-use omicron_nexus::external_api::views::Vpc;
+use nexus_types::external_api::views::Vpc;
 use std::convert::TryFrom;
 use uuid::Uuid;
 

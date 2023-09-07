@@ -8,7 +8,7 @@ use nexus_db_queries::context::OpContext;
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest};
 use nexus_test_utils_macros::nexus_test;
 use omicron_common::api::external::SemverVersion;
-use omicron_nexus::external_api::{
+use nexus_types::external_api::{
     params, shared::UpdateableComponentType, views,
 };
 

@@ -23,7 +23,7 @@ use omicron_common::api::external::{
     InstanceNetworkInterface, Ipv4Net,
 };
 use omicron_common::nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
-use omicron_nexus::external_api::params;
+use nexus_types::external_api::params;
 use std::net::Ipv4Addr;
 
 type ControlPlaneTestContext =

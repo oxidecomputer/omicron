@@ -346,7 +346,7 @@ pub mod test {
         .expect("DNS config not propagated in expected time");
     }
 
-    pub async fn write_test_dns_generation(
+    pub(crate) async fn write_test_dns_generation(
         datastore: &DataStore,
         internal_dns_zone_id: Uuid,
     ) {
@@ -400,7 +400,7 @@ pub mod test {
         }
     }
 
-    pub async fn read_internal_dns_zone_id(
+    pub(crate) async fn read_internal_dns_zone_id(
         opctx: &OpContext,
         datastore: &DataStore,
     ) -> Uuid {

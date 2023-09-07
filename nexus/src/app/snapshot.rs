@@ -57,7 +57,7 @@ impl super::Nexus {
         }
     }
 
-    pub async fn snapshot_create(
+    pub(crate) async fn snapshot_create(
         self: &Arc<Self>,
         opctx: &OpContext,
         // Is passed by value due to `disk_name` taking ownership of `self` below
@@ -154,7 +154,7 @@ impl super::Nexus {
         Ok(snapshot_created)
     }
 
-    pub async fn snapshot_list(
+    pub(crate) async fn snapshot_list(
         &self,
         opctx: &OpContext,
         project_lookup: &lookup::Project<'_>,
@@ -166,7 +166,7 @@ impl super::Nexus {
         self.db_datastore.snapshot_list(opctx, &authz_project, pagparams).await
     }
 
-    pub async fn snapshot_delete(
+    pub(crate) async fn snapshot_delete(
         self: &Arc<Self>,
         opctx: &OpContext,
         snapshot_lookup: &lookup::Snapshot<'_>,
