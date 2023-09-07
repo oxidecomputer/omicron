@@ -148,6 +148,35 @@ pub(super) async fn delete_crucible_region(
     client: &CrucibleAgentClient,
     region_id: Uuid,
 ) -> Result<(), Error> {
+    // If the region never existed, then a `GET` will return 404, and so will a
+    // `DELETE`. Catch this case, and return Ok if the region never existed.
+    // This can occur if an `ensure_all_datasets_and_regions` partially fails.
+    let result = retry_until_known_result(log, || async {
+        client.region_get(&RegionId(region_id.to_string())).await
+    })
+    .await;
+
+    if let Err(e) = result {
+        match e {
+            crucible_agent_client::Error::ErrorResponse(rv) => {
+                if rv.status() == http::StatusCode::NOT_FOUND {
+                    // Bail out here!
+                    return Ok(());
+                } else {
+                    return Err(Error::internal_error(&rv.message));
+                }
+            }
+
+            _ => {
+                return Err(Error::internal_error(
+                    "unexpected failure during `region_get`",
+                ));
+            }
+        }
+    }
+
+    // Past here, the region exists: ensure it is deleted.
+
     retry_until_known_result(log, || async {
         client.region_delete(&RegionId(region_id.to_string())).await
     })

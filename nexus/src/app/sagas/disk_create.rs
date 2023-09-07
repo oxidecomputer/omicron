@@ -54,9 +54,12 @@ declare_saga_actions! {
         + sdc_account_space
         - sdc_account_space_undo
     }
+    REGIONS_ENSURE_UNDO -> "regions_ensure_undo" {
+        + sdc_noop
+        - sdc_regions_ensure_undo
+    }
     REGIONS_ENSURE -> "regions_ensure" {
         + sdc_regions_ensure
-        - sdc_regions_ensure_undo
     }
     CREATE_VOLUME_RECORD -> "created_volume" {
         + sdc_create_volume_record
@@ -105,6 +108,7 @@ impl NexusSaga for SagaDiskCreate {
         builder.append(create_disk_record_action());
         builder.append(regions_alloc_action());
         builder.append(space_account_action());
+        builder.append(regions_ensure_undo_action());
         builder.append(regions_ensure_action());
         builder.append(create_volume_record_action());
         builder.append(finalize_disk_record_action());
@@ -331,6 +335,10 @@ async fn sdc_account_space_undo(
     Ok(())
 }
 
+async fn sdc_noop(_sagactx: NexusActionContext) -> Result<(), ActionError> {
+    Ok(())
+}
+
 /// Call out to Crucible agent and perform region creation.
 async fn sdc_regions_ensure(
     sagactx: NexusActionContext,
@@ -524,15 +532,56 @@ async fn sdc_regions_ensure_undo(
     sagactx: NexusActionContext,
 ) -> Result<(), anyhow::Error> {
     let log = sagactx.user_data().log();
+    let params = sagactx.saga_params::<Params>()?;
+    let osagactx = sagactx.user_data();
+    let datastore = osagactx.datastore();
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
+
     warn!(log, "sdc_regions_ensure_undo: Deleting crucible regions");
-    delete_crucible_regions(
+
+    let result = delete_crucible_regions(
         log,
         sagactx.lookup::<Vec<(db::model::Dataset, db::model::Region)>>(
             "datasets_and_regions",
         )?,
     )
-    .await?;
-    info!(log, "sdc_regions_ensure_undo: Deleted crucible regions");
+    .await;
+
+    match result {
+        Err(e) => {
+            // If we cannot delete the regions, then returning an error will
+            // cause the saga to stop unwinding and be stuck. This will leave
+            // the disk that the saga created: change that disk's state to
+            // Faulted here.
+
+            error!(log, "sdc_regions_ensure_undo: Deleting crucible regions failed with {}", e);
+
+            let disk_id = sagactx.lookup::<Uuid>("disk_id")?;
+            let (.., authz_disk, db_disk) = LookupPath::new(&opctx, &datastore)
+                .disk_id(disk_id)
+                .fetch_for(authz::Action::Modify)
+                .await
+                .map_err(ActionError::action_failed)?;
+
+            datastore
+                .disk_update_runtime(
+                    &opctx,
+                    &authz_disk,
+                    &db_disk.runtime().faulted(),
+                )
+                .await?;
+
+            return Err(e.into());
+        }
+
+        Ok(()) => {
+            info!(log, "sdc_regions_ensure_undo: Deleted crucible regions");
+        }
+    }
+
     Ok(())
 }
 
@@ -795,6 +844,8 @@ pub(crate) mod test {
     use omicron_common::api::external::IdentityMetadataCreateParams;
     use omicron_common::api::external::Name;
     use omicron_sled_agent::sim::SledAgent;
+    use slog::error;
+    use slog::Logger;
     use uuid::Uuid;
 
     type ControlPlaneTestContext =
@@ -861,6 +912,41 @@ pub(crate) mod test {
             .lookup_node_output::<crate::db::model::Disk>("created_disk")
             .unwrap();
         assert_eq!(disk.project_id, project_id);
+    }
+
+    async fn no_stuck_sagas(log: &Logger, datastore: &DataStore) -> bool {
+        use crate::db::model::saga_types::SagaNodeEvent;
+
+        let saga_node_events: Vec<SagaNodeEvent> = datastore
+            .pool_for_tests()
+            .await
+            .unwrap()
+            .transaction_async(|conn| async move {
+                use crate::db::schema::saga_node_event::dsl;
+
+                conn.batch_execute_async(
+                    nexus_test_utils::db::ALLOW_FULL_TABLE_SCAN_SQL,
+                )
+                .await
+                .unwrap();
+
+                Ok::<_, crate::db::TransactionError<()>>(
+                    dsl::saga_node_event
+                        .filter(dsl::event_type.eq(String::from("undo_failed")))
+                        .select(SagaNodeEvent::as_select())
+                        .load_async::<SagaNodeEvent>(&conn)
+                        .await
+                        .unwrap(),
+                )
+            })
+            .await
+            .unwrap();
+
+        for saga_node_event in &saga_node_events {
+            error!(log, "saga {:?} is stuck!", saga_node_event.saga_id);
+        }
+
+        saga_node_events.is_empty()
     }
 
     async fn no_disk_records_exist(datastore: &DataStore) -> bool {
@@ -982,6 +1068,7 @@ pub(crate) mod test {
         let sled_agent = &cptestctx.sled_agent.sled_agent;
         let datastore = cptestctx.server.apictx().nexus.datastore();
 
+        assert!(no_stuck_sagas(&cptestctx.logctx.log, datastore).await);
         assert!(no_disk_records_exist(datastore).await);
         assert!(no_volume_records_exist(datastore).await);
         assert!(

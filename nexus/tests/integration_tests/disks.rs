@@ -6,7 +6,6 @@
 
 use super::metrics::{get_latest_silo_metric, query_for_metrics};
 use chrono::Utc;
-use crucible_agent_client::types::State as RegionState;
 use dropshot::test_util::ClientTestContext;
 use dropshot::HttpErrorResponseBody;
 use http::method::Method;
@@ -728,38 +727,10 @@ async fn test_disk_region_creation_failure(
     .await
     .unwrap();
 
-    // After the failed allocation, the disk should not exist.
+    // After the failed allocation, the disk should be Faulted
     let disks = disks_list(&client, &disks_url).await;
-    assert_eq!(disks.len(), 0);
-
-    // After the failed allocation, regions will exist, but be "Failed".
-    for zpool in &test.zpools {
-        for dataset in &zpool.datasets {
-            let crucible = test
-                .sled_agent
-                .get_crucible_dataset(zpool.id, dataset.id)
-                .await;
-            let regions = crucible.list().await;
-            assert_eq!(regions.len(), 1);
-            assert_eq!(regions[0].state, RegionState::Failed);
-        }
-    }
-
-    // Validate that the underlying regions were released as a part of
-    // unwinding the failed disk allocation, by performing another disk
-    // allocation that should succeed.
-    for zpool in &test.zpools {
-        for dataset in &zpool.datasets {
-            let crucible = test
-                .sled_agent
-                .get_crucible_dataset(zpool.id, dataset.id)
-                .await;
-            crucible
-                .set_create_callback(Box::new(|_| RegionState::Created))
-                .await;
-        }
-    }
-    let _ = create_disk(client, PROJECT_NAME, DISK_NAME).await;
+    assert_eq!(disks.len(), 1);
+    assert_eq!(disks[0].state, DiskState::Faulted);
 }
 
 // Tests that invalid block sizes are rejected

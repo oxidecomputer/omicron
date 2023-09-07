@@ -142,9 +142,12 @@ declare_saga_actions! {
         + ssc_alloc_regions
         - ssc_alloc_regions_undo
     }
+    REGIONS_ENSURE_UNDO -> "regions_ensure_undo" {
+        + ssc_noop
+        - ssc_regions_ensure_undo
+    }
     REGIONS_ENSURE -> "regions_ensure" {
         + ssc_regions_ensure
-        - ssc_regions_ensure_undo
     }
     CREATE_DESTINATION_VOLUME_RECORD -> "created_destination_volume" {
         + ssc_create_destination_volume_record
@@ -239,6 +242,7 @@ impl NexusSaga for SagaSnapshotCreate {
         builder.append(regions_alloc_action());
         // (Sleds) Reaches out to each dataset, and ensures the regions exist
         // for the destination volume
+        builder.append(regions_ensure_undo_action());
         builder.append(regions_ensure_action());
         // (DB) Creates a record of the destination volume in the DB
         builder.append(create_destination_volume_record_action());
