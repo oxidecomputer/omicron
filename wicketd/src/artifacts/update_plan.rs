@@ -285,11 +285,11 @@ impl<'a> UpdatePlanBuilder<'a> {
         };
 
         *rot_a = Some(ArtifactIdData {
-            id: rot_a_id.clone(),
+            id: rot_a_id,
             data: rot_a_data.clone(),
         });
         *rot_b = Some(ArtifactIdData {
-            id: rot_b_id.clone(),
+            id: rot_b_id,
             data: rot_b_data.clone(),
         });
 
@@ -343,7 +343,7 @@ impl<'a> UpdatePlanBuilder<'a> {
         };
 
         self.host_phase_1 = Some(ArtifactIdData {
-            id: phase_1_id.clone(),
+            id: phase_1_id,
             data: phase_1_data.clone(),
         });
         self.host_phase_2_hash = Some(phase_2_data.hash());
@@ -406,11 +406,11 @@ impl<'a> UpdatePlanBuilder<'a> {
         };
 
         self.trampoline_phase_1 = Some(ArtifactIdData {
-            id: phase_1_id.clone(),
+            id: phase_1_id,
             data: phase_1_data.clone(),
         });
         self.trampoline_phase_2 = Some(ArtifactIdData {
-            id: phase_2_id.clone(),
+            id: phase_2_id,
             data: phase_2_data.clone(),
         });
 
