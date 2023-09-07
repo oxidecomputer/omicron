@@ -48,6 +48,8 @@ pub struct ServerContext {
     pub(crate) external_latencies: LatencyTracker,
     /// registry of metric producers
     pub(crate) producer_registry: ProducerRegistry,
+    /// TLS enabled on the external Dropshot server
+    pub(crate) external_tls_enabled: bool,
     /// tunable settings needed for the console at runtime
     pub(crate) console_config: ConsoleConfig,
 }
@@ -223,6 +225,7 @@ impl ServerContext {
             internal_latencies,
             external_latencies,
             producer_registry,
+            external_tls_enabled: config.deployment.dropshot_external.tls,
             console_config: ConsoleConfig {
                 session_idle_timeout: Duration::minutes(
                     config.pkg.console.session_idle_timeout_minutes.into(),

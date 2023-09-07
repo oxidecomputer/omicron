@@ -364,6 +364,7 @@ pub(crate) async fn login_saml(
                 // browser expiration is mostly for convenience, as the API will
                 // reject requests with an expired session regardless
                 apictx.session_absolute_timeout(),
+                apictx.external_tls_enabled,
             )?;
             headers.append(header::SET_COOKIE, cookie);
         }
@@ -432,6 +433,7 @@ pub(crate) async fn login_local(
                 // browser expiration is mostly for convenience, as the API will
                 // reject requests with an expired session regardless
                 apictx.session_absolute_timeout(),
+                apictx.external_tls_enabled,
             )?;
             headers.append(header::SET_COOKIE, cookie);
         }
@@ -495,7 +497,7 @@ pub(crate) async fn logout(
             let headers = response.headers_mut();
             headers.append(
                 header::SET_COOKIE,
-                clear_session_cookie_header_value()?,
+                clear_session_cookie_header_value(apictx.external_tls_enabled)?,
             );
         };
 

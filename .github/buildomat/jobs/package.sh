@@ -104,6 +104,7 @@ ptime -m ./tools/build-global-zone-packages.sh "$tarball_src_dir" /work
 mkdir -p /work/zones
 zones=(
   out/clickhouse.tar.gz
+  out/clickhouse_keeper.tar.gz
   out/cockroachdb.tar.gz
   out/crucible-pantry.tar.gz
   out/crucible.tar.gz

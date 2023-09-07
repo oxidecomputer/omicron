@@ -167,7 +167,7 @@ ddm-admin-client = { path = "ddm-admin-client" }
 db-macros = { path = "nexus/db-macros" }
 debug-ignore = "1.0.5"
 derive_more = "0.99.17"
-derive-where = "1.2.4"
+derive-where = "1.2.5"
 diesel = { version = "2.1.1" }
 diesel-dtrace = { git = "https://github.com/oxidecomputer/diesel-dtrace", branch = "main" }
 dns-server = { path = "dns-server" }
@@ -189,7 +189,7 @@ glob = "0.3.1"
 headers = "0.3.9"
 heck = "0.4"
 hex = "0.4.3"
-hex-literal = "0.3.4"
+hex-literal = "0.4.1"
 hkdf = "0.12.3"
 http = "0.2.9"
 httptest = "0.15.4"
@@ -281,7 +281,7 @@ rayon = "1.7"
 rcgen = "0.10.0"
 ref-cast = "1.0"
 regex = "1.9.5"
-regress = "0.6.0"
+regress = "0.7.1"
 reqwest = { version = "0.11", default-features = false }
 ring = "0.16"
 rpassword = "7.2.0"

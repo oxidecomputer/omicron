@@ -1,0 +1,82 @@
+<clickhouse>
+    <logger replace="true">
+        <level>trace</level>
+        <console>true</console>
+        <log from_env="CH_LOG"/>
+        <errorlog from_env="CH_ERROR_LOG"/>
+        <size>1000M</size>
+        <count>3</count>
+    </logger>
+    <display_name from_env="CH_REPLICA_DISPLAY_NAME"/>
+    <!-- To allow all use :: -->
+    <listen_host from_env="CH_LISTEN_ADDR"/> 
+    <!-- Default is 8123 -->
+    <http_port replace="true" from_env="CH_LISTEN_PORT"/>
+
+    <interserver_http_host from_env="CH_LISTEN_ADDR"/>
+
+    <path replace="true" from_env="CH_DATASTORE"/>
+    <tmp_path replace="true" from_env="CH_TMP_PATH"/>
+    <user_files_path replace="true" from_env="CH_USER_FILES_PATH"/>
+
+    <user_directories>
+        <local_directory>
+            <!-- Path to folder where users created by SQL commands are stored. -->
+            <path replace="true" from_env="CH_USER_LOCAL_DIR"/>
+        </local_directory>
+    </user_directories>
+
+    <format_schema_path replace="true" from_env="CH_FORMAT_SCHEMA_PATH"/>
+
+    <!-- replication settings -->
+    <macros>
+        <shard>01</shard>
+        <replica from_env="CH_REPLICA_NUMBER"/>
+        <cluster>oximeter_cluster</cluster>
+    </macros>
+
+    <remote_servers replace="true">
+        <oximeter_cluster>
+            <!-- TODO(https://github.com/oxidecomputer/omicron/issues/3823): secret handling TBD -->
+            <secret>mysecretphrase</secret>
+            <shard>
+                <internal_replication>true</internal_replication>
+                <replica>
+                    <host from_env="CH_REPLICA_HOST_01"/>             
+                    <port>9000</port>
+                </replica>
+                <replica>
+                    <host from_env="CH_REPLICA_HOST_02"/>
+                    <port>9000</port>
+                </replica>
+            </shard>
+        </oximeter_cluster>
+    </remote_servers>
+    <zookeeper>
+        <node>
+            <host from_env="CH_KEEPER_HOST_01"/>
+            <port>9181</port>
+        </node>
+        <node>
+            <host from_env="CH_KEEPER_HOST_02"/>
+            <port>9181</port>
+        </node>
+        <node>
+            <host from_env="CH_KEEPER_HOST_03"/>
+            <port>9181</port>
+        </node>
+    </zookeeper>
+
+    <distributed_ddl>
+        <!-- Cleanup settings (active tasks will not be removed) -->
+
+        <!-- Controls task TTL (default 1 week) -->
+        <task_max_lifetime>604800</task_max_lifetime>
+
+        <!-- Controls how often cleanup should be performed (in seconds) -->
+        <cleanup_delay_period>60</cleanup_delay_period>
+
+        <!-- Controls how many tasks could be in the queue -->
+        <max_tasks_in_queue>1000</max_tasks_in_queue>
+    </distributed_ddl>
+</clickhouse>
