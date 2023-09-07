@@ -12,9 +12,9 @@ use nexus_test_utils::assert_same_items;
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest};
 use nexus_test_utils::resource_helpers::objects_list_page_authz;
 use nexus_test_utils_macros::nexus_test;
+use nexus_types::external_api::views;
 use nexus_types::identity::Asset;
 use omicron_common::api::external::LookupType;
-use nexus_types::external_api::views;
 use uuid::Uuid;
 
 type ControlPlaneTestContext =

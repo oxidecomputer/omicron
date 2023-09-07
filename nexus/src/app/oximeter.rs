@@ -4,13 +4,13 @@
 
 //! Oximeter-related functionality
 
-use crate::db;
-use crate::db::identity::Asset;
 use crate::external_api::params::ResourceMetrics;
 use crate::internal_api::params::OximeterInfo;
 use dropshot::PaginationParams;
 use internal_dns::resolver::{ResolveError, Resolver};
 use internal_dns::ServiceName;
+use nexus_db_queries::db;
+use nexus_db_queries::db::identity::Asset;
 use omicron_common::address::CLICKHOUSE_PORT;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
@@ -54,7 +54,9 @@ impl LazyTimeseriesClient {
         Self { log, source: ClientSource::FromIp { address } }
     }
 
-    pub(crate) async fn get(&self) -> Result<oximeter_db::Client, ResolveError> {
+    pub(crate) async fn get(
+        &self,
+    ) -> Result<oximeter_db::Client, ResolveError> {
         let address = match &self.source {
             ClientSource::FromIp { address } => *address,
             ClientSource::FromDns { resolver } => SocketAddr::new(

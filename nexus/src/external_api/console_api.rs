@@ -8,18 +8,7 @@
 //! external API, but in order to avoid CORS issues for now, we are serving
 //! these routes directly from the external API.
 
-use crate::authn::silos::IdentityProviderType;
 use crate::ServerContext;
-use crate::{
-    authn::external::{
-        cookies::Cookies,
-        session_cookie::{
-            clear_session_cookie_header_value, session_cookie_header_value,
-            SessionStore, SESSION_COOKIE_COOKIE_NAME,
-        },
-    },
-    db::identity::Asset,
-};
 use anyhow::Context;
 use dropshot::{
     endpoint, http_response_found, http_response_see_other, HttpError,
@@ -31,7 +20,18 @@ use hyper::Body;
 use lazy_static::lazy_static;
 use mime_guess;
 use nexus_db_model::AuthenticationMode;
+use nexus_db_queries::authn::silos::IdentityProviderType;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::{
+    authn::external::{
+        cookies::Cookies,
+        session_cookie::{
+            clear_session_cookie_header_value, session_cookie_header_value,
+            SessionStore, SESSION_COOKIE_COOKIE_NAME,
+        },
+    },
+    db::identity::Asset,
+};
 use nexus_types::external_api::params;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::http_pagination::PaginatedBy;
@@ -183,8 +183,8 @@ use std::{collections::HashSet, ffi::OsString, path::PathBuf, sync::Arc};
 
 #[derive(Deserialize, JsonSchema)]
 pub struct LoginToProviderPathParam {
-    pub silo_name: crate::db::model::Name,
-    pub provider_name: crate::db::model::Name,
+    pub silo_name: nexus_db_queries::db::model::Name,
+    pub provider_name: nexus_db_queries::db::model::Name,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
@@ -374,7 +374,7 @@ pub(crate) async fn login_saml(
 
 #[derive(Deserialize, JsonSchema)]
 pub struct LoginPathParam {
-    pub silo_name: crate::db::model::Name,
+    pub silo_name: nexus_db_queries::db::model::Name,
 }
 
 #[endpoint {
@@ -443,8 +443,8 @@ pub(crate) async fn login_local(
 async fn create_session(
     opctx: &OpContext,
     apictx: &ServerContext,
-    user: Option<crate::db::model::SiloUser>,
-) -> Result<crate::db::model::ConsoleSession, HttpError> {
+    user: Option<nexus_db_queries::db::model::SiloUser>,
+) -> Result<nexus_db_queries::db::model::ConsoleSession, HttpError> {
     let nexus = &apictx.nexus;
     let session = match user {
         Some(user) => nexus.session_create(&opctx, user.id()).await?,

@@ -9,10 +9,10 @@ use crate::app::sagas::switch_port_settings_apply::api_to_dpd_port_settings;
 use crate::app::sagas::{
     declare_saga_actions, ActionRegistry, NexusSaga, SagaInitError,
 };
-use crate::authn;
-use crate::db::datastore::UpdatePrecondition;
 use anyhow::Error;
 use dpd_client::types::PortId;
+use nexus_db_queries::authn;
+use nexus_db_queries::db::datastore::UpdatePrecondition;
 use omicron_common::api::external::{self, NameOrId};
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;

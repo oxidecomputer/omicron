@@ -5,7 +5,7 @@
 //! Volumes
 
 use crate::app::sagas;
-use crate::authn;
+use nexus_db_queries::authn;
 use nexus_db_queries::context::OpContext;
 use omicron_common::api::external::DeleteResult;
 use std::sync::Arc;

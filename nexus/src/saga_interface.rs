@@ -5,7 +5,7 @@
 //! Interfaces available to saga actions and undo actions
 
 use crate::Nexus;
-use crate::{authz, db};
+use nexus_db_queries::{authz, db};
 use omicron_common::api::external::Error;
 use sled_agent_client::Client as SledAgentClient;
 use slog::Logger;

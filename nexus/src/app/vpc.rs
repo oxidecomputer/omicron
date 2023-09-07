@@ -5,16 +5,16 @@
 //! VPCs and firewall rules
 
 use crate::app::sagas;
-use crate::authn;
-use crate::authz;
-use crate::db;
-use crate::db::identity::Asset;
-use crate::db::identity::Resource;
-use crate::db::lookup;
-use crate::db::lookup::LookupPath;
-use crate::db::model::Name;
 use crate::external_api::params;
+use nexus_db_queries::authn;
+use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db;
+use nexus_db_queries::db::identity::Asset;
+use nexus_db_queries::db::identity::Resource;
+use nexus_db_queries::db::lookup;
+use nexus_db_queries::db::lookup::LookupPath;
+use nexus_db_queries::db::model::Name;
 use nexus_defaults as defaults;
 use omicron_common::api::external;
 use omicron_common::api::external::http_pagination::PaginatedBy;

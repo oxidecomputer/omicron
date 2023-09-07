@@ -12,10 +12,6 @@ use super::{
         UserBuiltin, Vpc, VpcRouter, VpcSubnet,
     },
 };
-use crate::authz;
-use crate::db;
-use crate::db::identity::Resource;
-use crate::db::model::Name;
 use crate::external_api::shared;
 use crate::ServerContext;
 use chrono::Utc;
@@ -39,8 +35,12 @@ use dropshot::{
     channel, endpoint, WebsocketChannelResult, WebsocketConnection,
 };
 use ipnetwork::IpNetwork;
+use nexus_db_queries::authz;
+use nexus_db_queries::db;
+use nexus_db_queries::db::identity::Resource;
 use nexus_db_queries::db::lookup::ImageLookup;
 use nexus_db_queries::db::lookup::ImageParentLookup;
+use nexus_db_queries::db::model::Name;
 use nexus_db_queries::{
     authz::ApiResource, db::fixed_data::silo::INTERNAL_SILO_ID,
 };

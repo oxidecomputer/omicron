@@ -2,13 +2,8 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 //! Shared state used by API request handlers
-use super::authn;
-use super::authz;
 use super::config;
-use super::db;
 use super::Nexus;
-use crate::authn::external::session_cookie::SessionStore;
-use crate::authn::ConsoleSessionWithSiloId;
 use crate::saga_interface::SagaContext;
 use async_trait::async_trait;
 use authn::external::session_cookie::HttpAuthnSessionCookie;
@@ -17,8 +12,11 @@ use authn::external::token::HttpAuthnToken;
 use authn::external::HttpAuthnScheme;
 use chrono::Duration;
 use internal_dns::ServiceName;
+use nexus_db_queries::authn::external::session_cookie::SessionStore;
+use nexus_db_queries::authn::ConsoleSessionWithSiloId;
 use nexus_db_queries::context::{OpContext, OpKind};
 use nexus_db_queries::db::lookup::LookupPath;
+use nexus_db_queries::{authn, authz, db};
 use omicron_common::address::{Ipv6Subnet, AZ_PREFIX};
 use omicron_common::nexus_config;
 use omicron_common::postgres_config::PostgresConfigWithUrl;

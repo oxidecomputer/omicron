@@ -5,14 +5,12 @@
 //! Implements a saga that starts an instance.
 
 use super::{NexusActionContext, NexusSaga, SagaInitError};
-use crate::{
-    app::{
-        instance::WriteBackUpdatedInstance,
-        sagas::{declare_saga_actions, retry_until_known_result},
-    },
-    authn, authz,
-    db::{self, identity::Resource, lookup::LookupPath},
+use crate::app::{
+    instance::WriteBackUpdatedInstance,
+    sagas::{declare_saga_actions, retry_until_known_result},
 };
+use nexus_db_queries::db::{identity::Resource, lookup::LookupPath};
+use nexus_db_queries::{authn, authz, db};
 use omicron_common::api::external::{Error, InstanceState};
 use serde::{Deserialize, Serialize};
 use sled_agent_client::types::InstanceStateRequested;
@@ -500,9 +498,10 @@ mod test {
     use crate::external_api::params;
     use crate::{
         app::{saga::create_saga_dag, sagas::test_helpers},
-        authn, Nexus, TestInterfaces as _,
+        Nexus, TestInterfaces as _,
     };
     use dropshot::test_util::ClientTestContext;
+    use nexus_db_queries::authn;
     use nexus_test_utils::resource_helpers::{
         create_project, object_create, populate_ip_pool,
     };

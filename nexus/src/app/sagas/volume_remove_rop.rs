@@ -5,8 +5,8 @@
 use super::{ActionRegistry, NexusActionContext, NexusSaga, SagaInitError};
 use crate::app::sagas;
 use crate::app::sagas::declare_saga_actions;
-use crate::authn;
-use crate::db;
+use nexus_db_queries::authn;
+use nexus_db_queries::db;
 use omicron_common::api::external::Error;
 use serde::Deserialize;
 use serde::Serialize;

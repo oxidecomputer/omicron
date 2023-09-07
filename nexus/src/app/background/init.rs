@@ -151,7 +151,6 @@ fn init_dns(
 
 #[cfg(test)]
 pub mod test {
-    use crate::db::TransactionError;
     use async_bb8_diesel::AsyncConnection;
     use async_bb8_diesel::AsyncRunQueryDsl;
     use dropshot::HandlerTaskMode;
@@ -159,6 +158,7 @@ pub mod test {
     use nexus_db_model::Generation;
     use nexus_db_queries::context::OpContext;
     use nexus_db_queries::db::DataStore;
+    use nexus_db_queries::db::TransactionError;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::internal_api::params as nexus_params;
     use nexus_types::internal_api::params::ServiceKind;
@@ -356,8 +356,8 @@ pub mod test {
             let _: Result<(), TxnError> = conn
                 .transaction_async(|conn| async move {
                     {
-                        use crate::db::model::DnsVersion;
-                        use crate::db::schema::dns_version::dsl;
+                        use nexus_db_queries::db::model::DnsVersion;
+                        use nexus_db_queries::db::schema::dns_version::dsl;
 
                         diesel::insert_into(dsl::dns_version)
                             .values(DnsVersion {
@@ -373,8 +373,8 @@ pub mod test {
                     }
 
                     {
-                        use crate::db::model::DnsName;
-                        use crate::db::schema::dns_name::dsl;
+                        use nexus_db_queries::db::model::DnsName;
+                        use nexus_db_queries::db::schema::dns_name::dsl;
 
                         diesel::insert_into(dsl::dns_name)
                             .values(

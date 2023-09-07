@@ -4,10 +4,10 @@
 
 //! Metrics
 
-use crate::authz;
 use crate::external_api::http_entrypoints::SystemMetricName;
 use crate::external_api::params::ResourceMetrics;
 use dropshot::PaginationParams;
+use nexus_db_queries::authz;
 use nexus_db_queries::{
     context::OpContext,
     db::{fixed_data::FLEET_ID, lookup},

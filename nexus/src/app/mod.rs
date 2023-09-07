@@ -6,10 +6,7 @@
 
 use self::external_endpoints::NexusCertResolver;
 use crate::app::oximeter::LazyTimeseriesClient;
-use crate::authn;
-use crate::authz;
 use crate::config;
-use crate::db;
 use crate::populate::populate_start;
 use crate::populate::PopulateArgs;
 use crate::populate::PopulateStatus;
@@ -18,7 +15,10 @@ use crate::DropshotServer;
 use ::oximeter::types::ProducerRegistry;
 use anyhow::anyhow;
 use internal_dns::ServiceName;
+use nexus_db_queries::authn;
+use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db;
 use omicron_common::address::DENDRITE_PORT;
 use omicron_common::address::MGS_PORT;
 use omicron_common::api::external::Error;

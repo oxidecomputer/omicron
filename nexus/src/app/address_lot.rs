@@ -2,12 +2,12 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::authz;
-use crate::db;
-use crate::db::datastore::AddressLotCreateResult;
 use crate::external_api::params;
 use db::model::{AddressLot, AddressLotBlock};
+use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db;
+use nexus_db_queries::db::datastore::AddressLotCreateResult;
 use nexus_db_queries::db::lookup;
 use nexus_db_queries::db::lookup::LookupPath;
 use omicron_common::api::external::http_pagination::PaginatedBy;

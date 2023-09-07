@@ -4,15 +4,15 @@
 
 //! x.509 Certificates
 
-use crate::db;
-use crate::db::lookup;
-use crate::db::lookup::LookupPath;
-use crate::db::model::Name;
-use crate::db::model::ServiceKind;
 use crate::external_api::params;
 use crate::external_api::shared;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db;
+use nexus_db_queries::db::lookup;
+use nexus_db_queries::db::lookup::LookupPath;
+use nexus_db_queries::db::model::Name;
+use nexus_db_queries::db::model::ServiceKind;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DeleteResult;

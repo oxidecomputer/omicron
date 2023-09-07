@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::db;
+use nexus_db_queries::db;
 use omicron_common::update::ArtifactsDocument;
 use std::convert::TryInto;
 

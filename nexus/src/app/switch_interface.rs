@@ -3,12 +3,12 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::app::sagas;
-use crate::authn;
-use crate::authz;
-use crate::db;
 use crate::external_api::params;
 use db::model::{LoopbackAddress, Name};
+use nexus_db_queries::authn;
+use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db;
 use nexus_db_queries::db::lookup;
 use nexus_db_queries::db::lookup::LookupPath;
 use omicron_common::api::external::LookupResult;

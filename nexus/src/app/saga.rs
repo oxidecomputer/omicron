@@ -7,11 +7,11 @@
 use super::sagas::NexusSaga;
 use super::sagas::SagaInitError;
 use super::sagas::ACTION_REGISTRY;
-use crate::authz;
 use crate::saga_interface::SagaContext;
 use anyhow::Context;
 use futures::future::BoxFuture;
 use futures::StreamExt;
+use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;

@@ -1,5 +1,5 @@
-use crate::db::{identity::Resource, model::Instance};
 use fatfs::{FatType, FileSystem, FormatVolumeOptions, FsOptions};
+use nexus_db_queries::db::{identity::Resource, model::Instance};
 use num_integer::Integer;
 use omicron_common::api::external::Error;
 use serde::Serialize;

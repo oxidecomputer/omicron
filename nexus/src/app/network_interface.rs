@@ -1,6 +1,6 @@
-use crate::authz::ApiResource;
-use crate::db::queries::network_interface;
+use nexus_db_queries::authz::ApiResource;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db::queries::network_interface;
 use nexus_types::external_api::params;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DeleteResult;
@@ -13,9 +13,9 @@ use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::UpdateResult;
 use uuid::Uuid;
 
-use crate::authz;
-use crate::db;
-use crate::db::lookup::{self, LookupPath};
+use nexus_db_queries::authz;
+use nexus_db_queries::db;
+use nexus_db_queries::db::lookup::{self, LookupPath};
 
 impl super::Nexus {
     pub fn instance_network_interface_lookup<'a>(

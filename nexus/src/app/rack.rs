@@ -5,17 +5,17 @@
 //! Rack management
 
 use super::silo::silo_dns_name;
-use crate::authz;
-use crate::db;
-use crate::db::lookup::LookupPath;
 use crate::external_api::params::CertificateCreate;
 use crate::external_api::shared::ServiceUsingCertificate;
 use crate::internal_api::params::RackInitializationRequest;
 use nexus_db_model::DnsGroup;
 use nexus_db_model::InitialDnsGroup;
+use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db;
 use nexus_db_queries::db::datastore::DnsVersionUpdateBuilder;
 use nexus_db_queries::db::datastore::RackInit;
+use nexus_db_queries::db::lookup::LookupPath;
 use nexus_types::external_api::params::Address;
 use nexus_types::external_api::params::AddressConfig;
 use nexus_types::external_api::params::AddressLotBlockCreate;

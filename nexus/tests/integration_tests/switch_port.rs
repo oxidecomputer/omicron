@@ -8,16 +8,16 @@ use http::method::Method;
 use http::StatusCode;
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use nexus_test_utils_macros::nexus_test;
-use omicron_common::api::external::{
-    self, AddressLotKind, IdentityMetadataCreateParams, NameOrId, SwitchPort,
-    SwitchPortSettingsView,
-};
 use nexus_types::external_api::params::{
     Address, AddressConfig, AddressLotBlockCreate, AddressLotCreate,
     LinkConfig, LldpServiceConfig, Route, RouteConfig, SwitchInterfaceConfig,
     SwitchInterfaceKind, SwitchPortApplySettings, SwitchPortSettingsCreate,
 };
 use nexus_types::external_api::views::Rack;
+use omicron_common::api::external::{
+    self, AddressLotKind, IdentityMetadataCreateParams, NameOrId, SwitchPort,
+    SwitchPortSettingsView,
+};
 
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;

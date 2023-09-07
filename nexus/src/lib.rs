@@ -40,12 +40,6 @@ use std::net::{SocketAddr, SocketAddrV6};
 use std::sync::Arc;
 use uuid::Uuid;
 
-// These modules used to be within nexus, but have been moved to
-// nexus-db-queries. Keeping these around temporarily for migration reasons.
-use nexus_db_queries::authn;
-use nexus_db_queries::authz;
-use nexus_db_queries::db;
-
 #[macro_use]
 extern crate slog;
 
@@ -288,7 +282,7 @@ impl nexus_test_interface::NexusServer for Server {
                 id,
                 zpool_id,
                 address,
-                crate::db::model::DatasetKind::Crucible,
+                nexus_db_queries::db::model::DatasetKind::Crucible,
             )
             .await
             .unwrap();

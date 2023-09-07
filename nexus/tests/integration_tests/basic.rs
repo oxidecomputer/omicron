@@ -10,10 +10,10 @@
 use dropshot::HttpErrorResponseBody;
 use http::method::Method;
 use http::StatusCode;
+use nexus_types::external_api::{params, views::Project};
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::IdentityMetadataUpdateParams;
 use omicron_common::api::external::Name;
-use nexus_types::external_api::{params, views::Project};
 use serde::Serialize;
 use uuid::Uuid;
 

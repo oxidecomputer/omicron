@@ -7,8 +7,6 @@ use crate::app::sagas::retry_until_known_result;
 use crate::app::sagas::{
     declare_saga_actions, ActionRegistry, NexusSaga, SagaInitError,
 };
-use crate::db::datastore::UpdatePrecondition;
-use crate::{authn, db};
 use anyhow::Error;
 use db::datastore::SwitchPortSettingsCombinedResult;
 use dpd_client::types::{
@@ -17,6 +15,8 @@ use dpd_client::types::{
 };
 use dpd_client::{Ipv4Cidr, Ipv6Cidr};
 use ipnetwork::IpNetwork;
+use nexus_db_queries::db::datastore::UpdatePrecondition;
+use nexus_db_queries::{authn, db};
 use omicron_common::api::external::{self, NameOrId};
 use omicron_common::api::internal::shared::SwitchLocation;
 use serde::{Deserialize, Serialize};

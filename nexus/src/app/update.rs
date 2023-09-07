@@ -4,14 +4,14 @@
 
 //! Software Updates
 
-use crate::authz;
-use crate::db;
-use crate::db::identity::Asset;
-use crate::db::lookup::LookupPath;
-use crate::db::model::KnownArtifactKind;
 use chrono::Utc;
 use hex;
+use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db;
+use nexus_db_queries::db::identity::Asset;
+use nexus_db_queries::db::lookup::LookupPath;
+use nexus_db_queries::db::model::KnownArtifactKind;
 use nexus_types::external_api::{params, shared};
 use omicron_common::api::external::{
     self, CreateResult, DataPageParams, Error, ListResultVec, LookupResult,
@@ -579,9 +579,9 @@ mod tests {
     use assert_matches::assert_matches;
     use std::num::NonZeroU32;
 
-    use crate::db::model::UpdateStatus;
     use dropshot::PaginationOrder;
     use nexus_db_queries::context::OpContext;
+    use nexus_db_queries::db::model::UpdateStatus;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::external_api::{
         params::{

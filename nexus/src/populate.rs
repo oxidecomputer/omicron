@@ -42,10 +42,10 @@
 //! you define a single data-insertion step.  We have tests that ensure that
 //! each populator behaves as expected in the above ways.
 
-use crate::db::DataStore;
 use futures::future::BoxFuture;
 use futures::FutureExt;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db::DataStore;
 use omicron_common::api::external::Error;
 use omicron_common::backoff;
 use std::sync::Arc;
@@ -335,16 +335,16 @@ impl Populator for PopulateRack {
 }
 
 const ALL_POPULATORS: [&dyn Populator; 10] = [
-    &PopulateBuiltinUsers{},
-    &PopulateBuiltinRoles{},
-    &PopulateBuiltinRoleAssignments{},
-    &PopulateBuiltinSilos{},
-    &PopulateBuiltinProjects{},
-    &PopulateBuiltinVpcs{},
-    &PopulateSiloUsers{},
-    &PopulateSiloUserRoleAssignments{},
-    &PopulateFleet{},
-    &PopulateRack{},
+    &PopulateBuiltinUsers {},
+    &PopulateBuiltinRoles {},
+    &PopulateBuiltinRoleAssignments {},
+    &PopulateBuiltinSilos {},
+    &PopulateBuiltinProjects {},
+    &PopulateBuiltinVpcs {},
+    &PopulateSiloUsers {},
+    &PopulateSiloUserRoleAssignments {},
+    &PopulateFleet {},
+    &PopulateRack {},
 ];
 
 #[cfg(test)]
@@ -352,11 +352,11 @@ mod test {
     use super::PopulateArgs;
     use super::Populator;
     use super::ALL_POPULATORS;
-    use crate::authn;
-    use crate::authz;
-    use crate::db;
     use anyhow::Context;
+    use nexus_db_queries::authn;
+    use nexus_db_queries::authz;
     use nexus_db_queries::context::OpContext;
+    use nexus_db_queries::db;
     use nexus_test_utils::db::test_setup_database;
     use omicron_common::api::external::Error;
     use omicron_test_utils::dev;

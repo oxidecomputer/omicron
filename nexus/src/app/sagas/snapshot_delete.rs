@@ -5,7 +5,7 @@
 use super::{ActionRegistry, NexusActionContext, NexusSaga};
 use crate::app::sagas;
 use crate::app::sagas::declare_saga_actions;
-use crate::{authn, authz, db};
+use nexus_db_queries::{authn, authz, db};
 use serde::Deserialize;
 use serde::Serialize;
 use steno::ActionError;

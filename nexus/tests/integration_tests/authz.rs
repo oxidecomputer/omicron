@@ -7,10 +7,10 @@
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use nexus_test_utils_macros::nexus_test;
 
-use omicron_common::api::external::IdentityMetadataCreateParams;
 use nexus_types::external_api::params;
 use nexus_types::external_api::shared;
 use nexus_types::external_api::views;
+use omicron_common::api::external::IdentityMetadataCreateParams;
 
 use dropshot::ResultsPage;
 use nexus_test_utils::resource_helpers::{create_local_user, create_silo};

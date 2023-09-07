@@ -3,14 +3,14 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::app::sagas;
-use crate::authn;
-use crate::authz;
-use crate::db;
-use crate::db::datastore::UpdatePrecondition;
-use crate::db::model::{SwitchPort, SwitchPortSettings};
 use crate::external_api::params;
 use db::datastore::SwitchPortSettingsCombinedResult;
+use nexus_db_queries::authn;
+use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db;
+use nexus_db_queries::db::datastore::UpdatePrecondition;
+use nexus_db_queries::db::model::{SwitchPort, SwitchPortSettings};
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::{
     self, CreateResult, DataPageParams, DeleteResult, ListResultVec,

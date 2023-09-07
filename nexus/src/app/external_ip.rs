@@ -4,11 +4,11 @@
 
 //! External IP addresses for instances
 
-use crate::authz;
-use crate::db::lookup;
-use crate::db::model::IpKind;
 use crate::external_api::views::ExternalIp;
+use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db::lookup;
+use nexus_db_queries::db::model::IpKind;
 use omicron_common::api::external::ListResultVec;
 
 impl super::Nexus {

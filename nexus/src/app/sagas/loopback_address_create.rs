@@ -7,11 +7,11 @@ use crate::app::sagas::retry_until_known_result;
 use crate::app::sagas::{
     declare_saga_actions, ActionRegistry, NexusSaga, SagaInitError,
 };
-use crate::authn;
-use crate::authz;
-use crate::db::model::LoopbackAddress;
 use crate::external_api::params;
 use anyhow::Error;
+use nexus_db_queries::authn;
+use nexus_db_queries::authz;
+use nexus_db_queries::db::model::LoopbackAddress;
 use omicron_common::api::internal::shared::SwitchLocation;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;

@@ -4,20 +4,20 @@
 
 //! Silos, Users, and SSH Keys.
 
-use crate::authz::ApiResource;
-use crate::db::identity::{Asset, Resource};
-use crate::db::lookup::LookupPath;
-use crate::db::model::Name;
-use crate::db::model::SshKey;
-use crate::db::{self, lookup};
 use crate::external_api::params;
 use crate::external_api::shared;
-use crate::{authn, authz};
 use anyhow::Context;
 use nexus_db_model::{DnsGroup, UserProvisionType};
+use nexus_db_queries::authz::ApiResource;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::datastore::Discoverability;
 use nexus_db_queries::db::datastore::DnsVersionUpdateBuilder;
+use nexus_db_queries::db::identity::{Asset, Resource};
+use nexus_db_queries::db::lookup::LookupPath;
+use nexus_db_queries::db::model::Name;
+use nexus_db_queries::db::model::SshKey;
+use nexus_db_queries::db::{self, lookup};
+use nexus_db_queries::{authn, authz};
 use nexus_types::internal_api::params::DnsRecord;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::ListResultVec;

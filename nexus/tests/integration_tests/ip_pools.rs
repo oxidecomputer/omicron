@@ -17,9 +17,6 @@ use nexus_test_utils::resource_helpers::{
     create_instance, create_instance_with,
 };
 use nexus_test_utils_macros::nexus_test;
-use omicron_common::api::external::IdentityMetadataUpdateParams;
-use omicron_common::api::external::NameOrId;
-use omicron_common::api::external::{IdentityMetadataCreateParams, Name};
 use nexus_types::external_api::params::ExternalIpCreate;
 use nexus_types::external_api::params::InstanceDiskAttachment;
 use nexus_types::external_api::params::InstanceNetworkInterfaceAttachment;
@@ -30,6 +27,9 @@ use nexus_types::external_api::shared::Ipv4Range;
 use nexus_types::external_api::shared::Ipv6Range;
 use nexus_types::external_api::views::IpPool;
 use nexus_types::external_api::views::IpPoolRange;
+use omicron_common::api::external::IdentityMetadataUpdateParams;
+use omicron_common::api::external::NameOrId;
+use omicron_common::api::external::{IdentityMetadataCreateParams, Name};
 use omicron_nexus::TestInterfaces;
 use sled_agent_client::TestInterfaces as SledTestInterfaces;
 use std::collections::HashSet;

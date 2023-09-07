@@ -3,7 +3,9 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::integration_tests::saml::SAML_IDP_DESCRIPTOR;
-use nexus_db_queries::authn::silos::{AuthenticatedSubject, IdentityProviderType};
+use nexus_db_queries::authn::silos::{
+    AuthenticatedSubject, IdentityProviderType,
+};
 use nexus_db_queries::authn::{USER_TEST_PRIVILEGED, USER_TEST_UNPRIVILEGED};
 use nexus_db_queries::authz::{self};
 use nexus_db_queries::context::OpContext;
@@ -17,14 +19,14 @@ use nexus_test_utils::resource_helpers::{
     objects_list_page_authz, projects_list,
 };
 use nexus_test_utils_macros::nexus_test;
-use omicron_common::api::external::ObjectIdentity;
-use omicron_common::api::external::{
-    IdentityMetadataCreateParams, LookupType, Name,
-};
 use nexus_types::external_api::views::{
     self, IdentityProvider, Project, SamlIdentityProvider, Silo,
 };
 use nexus_types::external_api::{params, shared};
+use omicron_common::api::external::ObjectIdentity;
+use omicron_common::api::external::{
+    IdentityMetadataCreateParams, LookupType, Name,
+};
 use omicron_test_utils::dev::poll::{wait_for_condition, CondCheckError};
 
 use std::collections::{BTreeMap, BTreeSet, HashSet};

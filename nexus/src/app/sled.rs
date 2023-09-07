@@ -5,17 +5,17 @@
 //! Sleds, and the hardware and services within them.
 
 use crate::app::sagas::retry_until_known_result;
-use crate::authz;
-use crate::db;
-use crate::db::identity::Asset;
-use crate::db::lookup::LookupPath;
-use crate::db::model::DatasetKind;
 use crate::internal_api::params::{
     PhysicalDiskDeleteRequest, PhysicalDiskPutRequest, SledAgentStartupInfo,
     SledRole, ZpoolPutRequest,
 };
+use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db;
+use nexus_db_queries::db::identity::Asset;
 use nexus_db_queries::db::lookup;
+use nexus_db_queries::db::lookup::LookupPath;
+use nexus_db_queries::db::model::DatasetKind;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
@@ -27,7 +27,7 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 #[cfg(test)]
-use crate::db::model::ServiceKind;
+use nexus_db_queries::db::model::ServiceKind;
 
 impl super::Nexus {
     // Sleds

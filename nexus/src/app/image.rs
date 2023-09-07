@@ -5,15 +5,15 @@
 //! Images (both project and silo scoped)
 
 use super::Unimpl;
-use crate::authz;
-use crate::db;
-use crate::db::identity::Asset;
-use crate::db::lookup;
-use crate::db::lookup::LookupPath;
 use crate::external_api::params;
+use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db;
+use nexus_db_queries::db::identity::Asset;
+use nexus_db_queries::db::lookup;
 use nexus_db_queries::db::lookup::ImageLookup;
 use nexus_db_queries::db::lookup::ImageParentLookup;
+use nexus_db_queries::db::lookup::LookupPath;
 use omicron_common::api::external;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;

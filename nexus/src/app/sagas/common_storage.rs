@@ -7,10 +7,6 @@
 use super::*;
 
 use crate::app::sagas::retry_until_known_result;
-use crate::authz;
-use crate::db;
-use crate::db::identity::Asset;
-use crate::db::lookup::LookupPath;
 use crate::Nexus;
 use anyhow::anyhow;
 use crucible_agent_client::{
@@ -19,7 +15,11 @@ use crucible_agent_client::{
 };
 use futures::StreamExt;
 use internal_dns::ServiceName;
+use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db;
+use nexus_db_queries::db::identity::Asset;
+use nexus_db_queries::db::lookup::LookupPath;
 use omicron_common::api::external::Error;
 use omicron_common::backoff::{self, BackoffError};
 use slog::Logger;

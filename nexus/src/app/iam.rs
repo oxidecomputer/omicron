@@ -4,13 +4,13 @@
 
 //! Built-ins and roles
 
-use crate::authz;
-use crate::db;
-use crate::db::lookup::{self, LookupPath};
-use crate::db::model::Name;
 use crate::external_api::shared;
 use anyhow::Context;
+use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db;
+use nexus_db_queries::db::lookup::{self, LookupPath};
+use nexus_db_queries::db::model::Name;
 use nexus_types::external_api::params;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;

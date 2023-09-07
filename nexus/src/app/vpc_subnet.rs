@@ -4,15 +4,15 @@
 
 //! VPC Subnets and their network interfaces
 
-use crate::authz;
-use crate::db;
-use crate::db::identity::Resource;
-use crate::db::lookup;
-use crate::db::lookup::LookupPath;
-use crate::db::model::VpcSubnet;
-use crate::db::queries::vpc_subnet::SubnetError;
 use crate::external_api::params;
+use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db;
+use nexus_db_queries::db::identity::Resource;
+use nexus_db_queries::db::lookup;
+use nexus_db_queries::db::lookup::LookupPath;
+use nexus_db_queries::db::model::VpcSubnet;
+use nexus_db_queries::db::queries::vpc_subnet::SubnetError;
 use omicron_common::api::external;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;

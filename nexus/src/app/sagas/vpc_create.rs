@@ -7,9 +7,9 @@ use super::NexusActionContext;
 use super::NexusSaga;
 use super::ACTION_GENERATE_ID;
 use crate::app::sagas::declare_saga_actions;
-use crate::db::queries::vpc_subnet::SubnetError;
 use crate::external_api::params;
-use crate::{authn, authz, db};
+use nexus_db_queries::db::queries::vpc_subnet::SubnetError;
+use nexus_db_queries::{authn, authz, db};
 use nexus_defaults as defaults;
 use omicron_common::api::external;
 use omicron_common::api::external::IdentityMetadataCreateParams;
@@ -443,14 +443,16 @@ async fn svc_notify_sleds(
 pub(crate) mod test {
     use crate::{
         app::saga::create_saga_dag, app::sagas::vpc_create::Params,
-        app::sagas::vpc_create::SagaVpcCreate, authn::saga::Serialized, authz,
-        db::datastore::DataStore, db::fixed_data::vpc::SERVICES_VPC_ID,
-        db::lookup::LookupPath, external_api::params,
+        app::sagas::vpc_create::SagaVpcCreate, external_api::params,
     };
     use async_bb8_diesel::{AsyncRunQueryDsl, OptionalExtension};
     use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
     use dropshot::test_util::ClientTestContext;
-    use nexus_db_queries::context::OpContext;
+    use nexus_db_queries::{
+        authn::saga::Serialized, authz, context::OpContext,
+        db::datastore::DataStore, db::fixed_data::vpc::SERVICES_VPC_ID,
+        db::lookup::LookupPath,
+    };
     use nexus_test_utils::resource_helpers::create_project;
     use nexus_test_utils::resource_helpers::populate_ip_pool;
     use nexus_test_utils_macros::nexus_test;
@@ -589,8 +591,8 @@ pub(crate) mod test {
     }
 
     async fn no_vpcs_exist(datastore: &DataStore) -> bool {
-        use crate::db::model::Vpc;
-        use crate::db::schema::vpc::dsl;
+        use nexus_db_queries::db::model::Vpc;
+        use nexus_db_queries::db::schema::vpc::dsl;
 
         dsl::vpc
             .filter(dsl::time_deleted.is_null())
@@ -608,8 +610,8 @@ pub(crate) mod test {
     }
 
     async fn no_routers_exist(datastore: &DataStore) -> bool {
-        use crate::db::model::VpcRouter;
-        use crate::db::schema::vpc_router::dsl;
+        use nexus_db_queries::db::model::VpcRouter;
+        use nexus_db_queries::db::schema::vpc_router::dsl;
 
         dsl::vpc_router
             .filter(dsl::time_deleted.is_null())
@@ -627,9 +629,9 @@ pub(crate) mod test {
     }
 
     async fn no_routes_exist(datastore: &DataStore) -> bool {
-        use crate::db::model::RouterRoute;
-        use crate::db::schema::router_route::dsl;
-        use crate::db::schema::vpc_router::dsl as vpc_router_dsl;
+        use nexus_db_queries::db::model::RouterRoute;
+        use nexus_db_queries::db::schema::router_route::dsl;
+        use nexus_db_queries::db::schema::vpc_router::dsl as vpc_router_dsl;
 
         dsl::router_route
             .filter(dsl::time_deleted.is_null())
@@ -656,8 +658,8 @@ pub(crate) mod test {
     }
 
     async fn no_subnets_exist(datastore: &DataStore) -> bool {
-        use crate::db::model::VpcSubnet;
-        use crate::db::schema::vpc_subnet::dsl;
+        use nexus_db_queries::db::model::VpcSubnet;
+        use nexus_db_queries::db::schema::vpc_subnet::dsl;
 
         dsl::vpc_subnet
             .filter(dsl::time_deleted.is_null())
@@ -675,8 +677,8 @@ pub(crate) mod test {
     }
 
     async fn no_firewall_rules_exist(datastore: &DataStore) -> bool {
-        use crate::db::model::VpcFirewallRule;
-        use crate::db::schema::vpc_firewall_rule::dsl;
+        use nexus_db_queries::db::model::VpcFirewallRule;
+        use nexus_db_queries::db::schema::vpc_firewall_rule::dsl;
 
         dsl::vpc_firewall_rule
             .filter(dsl::time_deleted.is_null())

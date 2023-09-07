@@ -19,9 +19,9 @@ use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::resource_helpers::create_project;
 use nexus_test_utils_macros::nexus_test;
-use omicron_common::api::external::ObjectIdentity;
 use nexus_types::external_api::shared;
 use nexus_types::external_api::views;
+use omicron_common::api::external::ObjectIdentity;
 
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;

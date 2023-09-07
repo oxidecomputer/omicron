@@ -44,12 +44,12 @@
 //! In the current implementation, we use long-lived random tokens,
 //! but that may change in the future.
 
-use crate::authn::{Actor, Reason};
-use crate::authz;
-use crate::db::lookup::LookupPath;
-use crate::db::model::{DeviceAccessToken, DeviceAuthRequest};
 use crate::external_api::device_auth::DeviceAccessTokenResponse;
+use nexus_db_queries::authn::{Actor, Reason};
+use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db::lookup::LookupPath;
+use nexus_db_queries::db::model::{DeviceAccessToken, DeviceAuthRequest};
 
 use omicron_common::api::external::{CreateResult, Error};
 
