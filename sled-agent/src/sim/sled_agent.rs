@@ -61,6 +61,7 @@ pub struct SledAgent {
     pub v2p_mappings: Mutex<HashMap<Uuid, Vec<SetVirtualNetworkInterfaceHost>>>,
     mock_propolis:
         Mutex<Option<(HttpServer<Arc<PropolisContext>>, PropolisClient)>>,
+    log: Logger,
 }
 
 fn extract_targets_from_volume_construction_request(
@@ -150,6 +151,7 @@ impl SledAgent {
             disk_id_to_region_ids: Mutex::new(HashMap::new()),
             v2p_mappings: Mutex::new(HashMap::new()),
             mock_propolis: Mutex::new(None),
+            log,
         })
     }
 
@@ -157,9 +159,9 @@ impl SledAgent {
     ///
     /// Crucible regions are returned with a port number, and volume
     /// construction requests contain a single Nexus region (which points to
-    /// three crucible regions). Extract the region addresses, lookup the
-    /// region from the port (which should be unique), and pair disk id with
-    /// region ids. This map is referred to later when making snapshots.
+    /// three crucible regions). Extract the region addresses, lookup the region
+    /// from the port and pair disk id with region ids. This map is referred to
+    /// later when making snapshots.
     pub async fn map_disk_ids_to_region_ids(
         &self,
         volume_construction_request: &VolumeConstructionRequest,
@@ -187,22 +189,18 @@ impl SledAgent {
 
         let storage = self.storage.lock().await;
         for target in targets {
-            let crucible_data = storage
-                .get_dataset_for_port(target.port())
+            let region = storage
+                .get_region_for_port(target.port())
                 .await
                 .ok_or_else(|| {
                     Error::internal_error(&format!(
-                        "no dataset for port {}",
+                        "no region for port {}",
                         target.port()
                     ))
                 })?;
 
-            for region in crucible_data.list().await {
-                if region.port_number == target.port() {
-                    let region_id = Uuid::from_str(&region.id.0).unwrap();
-                    region_ids.push(region_id);
-                }
-            }
+            let region_id = Uuid::from_str(&region.id.0).unwrap();
+            region_ids.push(region_id);
         }
 
         let mut disk_id_to_region_ids = self.disk_id_to_region_ids.lock().await;
@@ -541,6 +539,8 @@ impl SledAgent {
             Error::not_found_by_id(ResourceType::Disk, &disk_id)
         })?;
 
+        info!(self.log, "disk id {} region ids are {:?}", disk_id, region_ids);
+
         let storage = self.storage.lock().await;
 
         for region_id in region_ids {
@@ -548,7 +548,10 @@ impl SledAgent {
                 storage.get_dataset_for_region(*region_id).await;
 
             if let Some(crucible_data) = crucible_data {
-                crucible_data.create_snapshot(*region_id, snapshot_id).await;
+                crucible_data
+                    .create_snapshot(*region_id, snapshot_id)
+                    .await
+                    .map_err(|e| Error::internal_error(&e.to_string()))?;
             } else {
                 return Err(Error::not_found_by_id(
                     ResourceType::Disk,

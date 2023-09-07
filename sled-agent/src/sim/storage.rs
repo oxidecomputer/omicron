@@ -23,6 +23,7 @@ use futures::lock::Mutex;
 use nexus_client::types::{
     ByteCount, PhysicalDiskKind, PhysicalDiskPutRequest, ZpoolPutRequest,
 };
+use serde::Serialize;
 use slog::Logger;
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -33,18 +34,23 @@ use uuid::Uuid;
 
 type CreateCallback = Box<dyn Fn(&CreateRegion) -> State + Send + 'static>;
 
+#[derive(Serialize)]
 struct CrucibleDataInner {
+    #[serde(skip)]
     log: Logger,
     regions: HashMap<Uuid, Region>,
     snapshots: HashMap<Uuid, HashMap<String, Snapshot>>,
     running_snapshots: HashMap<Uuid, HashMap<String, RunningSnapshot>>,
+    #[serde(skip)]
     on_create: Option<CreateCallback>,
     creating_a_running_snapshot_should_fail: bool,
-    next_port: u16,
+    start_port: u16,
+    end_port: u16,
+    used_ports: HashSet<u16>,
 }
 
 impl CrucibleDataInner {
-    fn new(log: Logger, crucible_port: u16) -> Self {
+    fn new(log: Logger, start_port: u16, end_port: u16) -> Self {
         Self {
             log,
             regions: HashMap::new(),
@@ -52,7 +58,9 @@ impl CrucibleDataInner {
             running_snapshots: HashMap::new(),
             on_create: None,
             creating_a_running_snapshot_should_fail: false,
-            next_port: crucible_port,
+            start_port,
+            end_port,
+            used_ports: HashSet::new(),
         }
     }
 
@@ -62,6 +70,18 @@ impl CrucibleDataInner {
 
     fn list(&self) -> Vec<Region> {
         self.regions.values().cloned().collect()
+    }
+
+    fn get_free_port(&mut self) -> u16 {
+        for port in self.start_port..self.end_port {
+            if self.used_ports.contains(&port) {
+                continue;
+            }
+            self.used_ports.insert(port);
+            return port;
+        }
+
+        panic!("no free ports for simulated crucible agent!");
     }
 
     fn create(&mut self, params: CreateRegion) -> Region {
@@ -79,7 +99,7 @@ impl CrucibleDataInner {
             extent_size: params.extent_size,
             extent_count: params.extent_count,
             // NOTE: This is a lie - no server is running.
-            port_number: self.next_port,
+            port_number: self.get_free_port(),
             state,
             encrypted: false,
             cert_pem: None,
@@ -93,18 +113,12 @@ impl CrucibleDataInner {
                 "Region already exists, but with a different ID"
             );
         }
-        self.next_port += 1;
         region
     }
 
     fn get(&self, id: RegionId) -> Option<Region> {
         let id = Uuid::from_str(&id.0).unwrap();
         self.regions.get(&id).cloned()
-    }
-
-    fn get_mut(&mut self, id: &RegionId) -> Option<&mut Region> {
-        let id = Uuid::from_str(&id.0).unwrap();
-        self.regions.get_mut(&id)
     }
 
     fn delete(&mut self, id: RegionId) -> Result<Option<Region>> {
@@ -122,15 +136,39 @@ impl CrucibleDataInner {
         let id = Uuid::from_str(&id.0).unwrap();
         if let Some(region) = self.regions.get_mut(&id) {
             region.state = State::Destroyed;
+            self.used_ports.remove(&region.port_number);
             Ok(Some(region.clone()))
         } else {
             Ok(None)
         }
     }
 
-    fn create_snapshot(&mut self, id: Uuid, snapshot_id: Uuid) -> Snapshot {
+    fn create_snapshot(
+        &mut self,
+        id: Uuid,
+        snapshot_id: Uuid,
+    ) -> Result<Snapshot> {
         info!(self.log, "Creating region {} snapshot {}", id, snapshot_id);
-        self.snapshots
+
+        if let Some(region) = self.get(RegionId(id.to_string())) {
+            match region.state {
+                State::Failed | State::Destroyed | State::Tombstoned => {
+                    bail!(
+                        "cannot create snapshot of region in state {:?}",
+                        region.state
+                    );
+                }
+
+                State::Requested | State::Created => {
+                    // ok
+                }
+            }
+        } else {
+            bail!("cannot create snapshot of non-existent region!");
+        }
+
+        Ok(self
+            .snapshots
             .entry(id)
             .or_insert_with(|| HashMap::new())
             .entry(snapshot_id.to_string())
@@ -138,7 +176,7 @@ impl CrucibleDataInner {
                 name: snapshot_id.to_string(),
                 created: Utc::now(),
             })
-            .clone()
+            .clone())
     }
 
     fn snapshots_for_region(&self, id: &RegionId) -> Vec<Snapshot> {
@@ -198,10 +236,14 @@ impl CrucibleDataInner {
         }
 
         info!(self.log, "Deleting region {} snapshot {}", id.0, name);
+
         let region_id = Uuid::from_str(&id.0).unwrap();
         if let Some(map) = self.snapshots.get_mut(&region_id) {
             map.remove(name);
+        } else {
+            bail!("trying to delete snapshot for non-existent region!");
         }
+
         Ok(())
     }
 
@@ -218,7 +260,12 @@ impl CrucibleDataInner {
             bail!("failure creating running snapshot");
         }
 
+        if self.get_snapshot_for_region(id, name).is_none() {
+            bail!("cannot create running snapshot, snapshot does not exist!");
+        }
+
         let id = Uuid::from_str(&id.0).unwrap();
+        let port_number = self.get_free_port();
 
         let map =
             self.running_snapshots.entry(id).or_insert_with(|| HashMap::new());
@@ -226,19 +273,20 @@ impl CrucibleDataInner {
         // If a running snapshot exists already, return it - this endpoint must
         // be idempotent.
         if let Some(running_snapshot) = map.get(&name.to_string()) {
+            self.used_ports.remove(&port_number);
             return Ok(running_snapshot.clone());
         }
 
         let running_snapshot = RunningSnapshot {
             id: RegionId(Uuid::new_v4().to_string()),
             name: name.to_string(),
-            port_number: self.next_port,
+            port_number,
             state: State::Created,
         };
 
+        let map =
+            self.running_snapshots.entry(id).or_insert_with(|| HashMap::new());
         map.insert(name.to_string(), running_snapshot.clone());
-
-        self.next_port += 1;
 
         Ok(running_snapshot)
     }
@@ -255,6 +303,7 @@ impl CrucibleDataInner {
 
         if let Some(running_snapshot) = map.get_mut(&name.to_string()) {
             running_snapshot.state = State::Destroyed;
+            self.used_ports.remove(&running_snapshot.port_number);
         }
 
         Ok(())
@@ -277,15 +326,264 @@ impl CrucibleDataInner {
             .filter(|rs| rs.state != State::Destroyed)
             .count();
 
-        info!(
-            self.log,
-            "is_empty non_destroyed_regions {} snapshots {} running_snapshots {}",
-            non_destroyed_regions,
-            snapshots,
-            running_snapshots,
-        );
+        let empty = non_destroyed_regions == 0
+            && snapshots == 0
+            && running_snapshots == 0;
 
-        non_destroyed_regions == 0 && snapshots == 0 && running_snapshots == 0
+        if !empty {
+            info!(
+                self.log,
+                "is_empty state: {:?}",
+                serde_json::to_string(&self).unwrap(),
+            );
+
+            info!(
+                self.log,
+                "is_empty non_destroyed_regions {} snapshots {} running_snapshots {}",
+                non_destroyed_regions,
+                snapshots,
+                running_snapshots,
+            );
+        }
+
+        empty
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use omicron_test_utils::dev::test_setup_log;
+
+    /// Validate that the Crucible agent reuses ports
+    #[test]
+    fn crucible_ports_get_reused() {
+        let logctx = test_setup_log("crucible_ports_get_reused");
+        let mut agent = CrucibleDataInner::new(logctx.log, 1000, 2000);
+
+        // Create a region, then delete it.
+
+        let region_id = Uuid::new_v4();
+        let region = agent.create(CreateRegion {
+            block_size: 512,
+            extent_count: 10,
+            extent_size: 10,
+            id: RegionId(region_id.to_string()),
+            encrypted: true,
+            cert_pem: None,
+            key_pem: None,
+            root_pem: None,
+        });
+
+        let first_region_port = region.port_number;
+
+        assert!(agent
+            .delete(RegionId(region_id.to_string()))
+            .unwrap()
+            .is_some());
+
+        // Create another region, make sure it gets the same port number, but
+        // don't delete it.
+
+        let second_region_id = Uuid::new_v4();
+        let second_region = agent.create(CreateRegion {
+            block_size: 512,
+            extent_count: 10,
+            extent_size: 10,
+            id: RegionId(second_region_id.to_string()),
+            encrypted: true,
+            cert_pem: None,
+            key_pem: None,
+            root_pem: None,
+        });
+
+        assert_eq!(second_region.port_number, first_region_port,);
+
+        // Create another region, delete it. After this, we still have the
+        // second region.
+
+        let third_region = agent.create(CreateRegion {
+            block_size: 512,
+            extent_count: 10,
+            extent_size: 10,
+            id: RegionId(Uuid::new_v4().to_string()),
+            encrypted: true,
+            cert_pem: None,
+            key_pem: None,
+            root_pem: None,
+        });
+
+        let third_region_port = third_region.port_number;
+
+        assert!(agent
+            .delete(RegionId(third_region.id.to_string()))
+            .unwrap()
+            .is_some());
+
+        // Create a running snapshot, make sure it gets the same port number
+        // as the third region did. This ensures that the Crucible agent shares
+        // ports between regions and running snapshots.
+
+        let snapshot_id = Uuid::new_v4();
+        agent.create_snapshot(second_region_id, snapshot_id).unwrap();
+
+        let running_snapshot = agent
+            .create_running_snapshot(
+                &RegionId(second_region_id.to_string()),
+                &snapshot_id.to_string(),
+            )
+            .unwrap();
+
+        assert_eq!(running_snapshot.port_number, third_region_port,);
+    }
+
+    /// Validate that users must delete snapshots before deleting the region
+    #[test]
+    fn must_delete_snapshots_first() {
+        let logctx = test_setup_log("must_delete_snapshots_first");
+        let mut agent = CrucibleDataInner::new(logctx.log, 1000, 2000);
+
+        let region_id = Uuid::new_v4();
+        let snapshot_id = Uuid::new_v4();
+
+        let _region = agent.create(CreateRegion {
+            block_size: 512,
+            extent_count: 10,
+            extent_size: 10,
+            id: RegionId(region_id.to_string()),
+            encrypted: true,
+            cert_pem: None,
+            key_pem: None,
+            root_pem: None,
+        });
+
+        agent.create_snapshot(region_id, snapshot_id).unwrap();
+
+        agent.delete(RegionId(region_id.to_string())).unwrap_err();
+    }
+
+    /// Validate that users cannot delete snapshots before deleting the "running
+    /// snapshots" (the read-only downstairs for that snapshot)
+    #[test]
+    fn must_delete_read_only_downstairs_first() {
+        let logctx = test_setup_log("must_delete_read_only_downstairs_first");
+        let mut agent = CrucibleDataInner::new(logctx.log, 1000, 2000);
+
+        let region_id = Uuid::new_v4();
+        let snapshot_id = Uuid::new_v4();
+
+        let _region = agent.create(CreateRegion {
+            block_size: 512,
+            extent_count: 10,
+            extent_size: 10,
+            id: RegionId(region_id.to_string()),
+            encrypted: true,
+            cert_pem: None,
+            key_pem: None,
+            root_pem: None,
+        });
+
+        agent.create_snapshot(region_id, snapshot_id).unwrap();
+
+        agent
+            .create_running_snapshot(
+                &RegionId(region_id.to_string()),
+                &snapshot_id.to_string(),
+            )
+            .unwrap();
+
+        agent
+            .delete_snapshot(
+                &RegionId(region_id.to_string()),
+                &snapshot_id.to_string(),
+            )
+            .unwrap_err();
+    }
+
+    /// Validate that users cannot boot a read-only downstairs for a snapshot
+    /// that does not exist.
+    #[test]
+    fn cannot_boot_read_only_downstairs_with_no_snapshot() {
+        let logctx =
+            test_setup_log("cannot_boot_read_only_downstairs_with_no_snapshot");
+        let mut agent = CrucibleDataInner::new(logctx.log, 1000, 2000);
+
+        let region_id = Uuid::new_v4();
+        let snapshot_id = Uuid::new_v4();
+
+        let _region = agent.create(CreateRegion {
+            block_size: 512,
+            extent_count: 10,
+            extent_size: 10,
+            id: RegionId(region_id.to_string()),
+            encrypted: true,
+            cert_pem: None,
+            key_pem: None,
+            root_pem: None,
+        });
+
+        agent
+            .create_running_snapshot(
+                &RegionId(region_id.to_string()),
+                &snapshot_id.to_string(),
+            )
+            .unwrap_err();
+    }
+
+    /// Validate that users cannot create a snapshot from a non-existent region
+    #[test]
+    fn snapshot_needs_region() {
+        let logctx = test_setup_log("snapshot_needs_region");
+        let mut agent = CrucibleDataInner::new(logctx.log, 1000, 2000);
+
+        let region_id = Uuid::new_v4();
+        let snapshot_id = Uuid::new_v4();
+
+        agent.create_snapshot(region_id, snapshot_id).unwrap_err();
+    }
+
+    /// Validate that users cannot create a "running" snapshot from a
+    /// non-existent region
+    #[test]
+    fn running_snapshot_needs_region() {
+        let logctx = test_setup_log("snapshot_needs_region");
+        let mut agent = CrucibleDataInner::new(logctx.log, 1000, 2000);
+
+        let region_id = Uuid::new_v4();
+        let snapshot_id = Uuid::new_v4();
+
+        agent
+            .create_running_snapshot(
+                &RegionId(region_id.to_string()),
+                &snapshot_id.to_string(),
+            )
+            .unwrap_err();
+    }
+
+    /// Validate that users cannot create snapshots for destroyed regions
+    #[test]
+    fn cannot_create_snapshot_for_destroyed_region() {
+        let logctx =
+            test_setup_log("cannot_create_snapshot_for_destroyed_region");
+        let mut agent = CrucibleDataInner::new(logctx.log, 1000, 2000);
+
+        let region_id = Uuid::new_v4();
+        let snapshot_id = Uuid::new_v4();
+
+        let _region = agent.create(CreateRegion {
+            block_size: 512,
+            extent_count: 10,
+            extent_size: 10,
+            id: RegionId(region_id.to_string()),
+            encrypted: true,
+            cert_pem: None,
+            key_pem: None,
+            root_pem: None,
+        });
+
+        agent.delete(RegionId(region_id.to_string())).unwrap();
+
+        agent.create_snapshot(region_id, snapshot_id).unwrap_err();
     }
 }
 
@@ -295,8 +593,12 @@ pub struct CrucibleData {
 }
 
 impl CrucibleData {
-    fn new(log: Logger, crucible_port: u16) -> Self {
-        Self { inner: Mutex::new(CrucibleDataInner::new(log, crucible_port)) }
+    fn new(log: Logger, start_port: u16, end_port: u16) -> Self {
+        Self {
+            inner: Mutex::new(CrucibleDataInner::new(
+                log, start_port, end_port,
+            )),
+        }
     }
 
     pub async fn set_create_callback(&self, callback: CreateCallback) {
@@ -319,20 +621,11 @@ impl CrucibleData {
         self.inner.lock().await.delete(id)
     }
 
-    pub async fn set_state(&self, id: &RegionId, state: State) {
-        self.inner
-            .lock()
-            .await
-            .get_mut(id)
-            .expect("region does not exist")
-            .state = state;
-    }
-
     pub async fn create_snapshot(
         &self,
         id: Uuid,
         snapshot_id: Uuid,
-    ) -> Snapshot {
+    ) -> Result<Snapshot> {
         self.inner.lock().await.create_snapshot(id, snapshot_id)
     }
 
@@ -397,13 +690,18 @@ pub struct CrucibleServer {
 }
 
 impl CrucibleServer {
-    fn new(log: &Logger, crucible_ip: IpAddr, crucible_port: u16) -> Self {
+    fn new(
+        log: &Logger,
+        crucible_ip: IpAddr,
+        start_port: u16,
+        end_port: u16,
+    ) -> Self {
         // SocketAddr::new with port set to 0 will grab any open port to host
         // the emulated crucible agent, but set the fake downstairs listen ports
         // to start at `crucible_port`.
         let data = Arc::new(CrucibleData::new(
-            log.new(slog::o!("port" => format!("{crucible_port}"))),
-            crucible_port,
+            log.new(slog::o!("start_port" => format!("{start_port}"), "end_port" => format!("{end_port}"))),
+            start_port, end_port,
         ));
         let config = dropshot::ConfigDropshot {
             bind_address: SocketAddr::new(crucible_ip, 0),
@@ -451,10 +749,13 @@ impl Zpool {
         log: &Logger,
         id: Uuid,
         crucible_ip: IpAddr,
-        crucible_port: u16,
+        start_port: u16,
+        end_port: u16,
     ) -> &CrucibleServer {
-        self.datasets
-            .insert(id, CrucibleServer::new(log, crucible_ip, crucible_port));
+        self.datasets.insert(
+            id,
+            CrucibleServer::new(log, crucible_ip, start_port, end_port),
+        );
         self.datasets
             .get(&id)
             .expect("Failed to get the dataset we just inserted")
@@ -476,19 +777,25 @@ impl Zpool {
         None
     }
 
-    pub async fn get_dataset_for_port(
-        &self,
-        port: u16,
-    ) -> Option<Arc<CrucibleData>> {
+    pub async fn get_region_for_port(&self, port: u16) -> Option<Region> {
+        let mut regions = vec![];
+
         for dataset in self.datasets.values() {
             for region in &dataset.data().list().await {
+                if region.state == State::Destroyed {
+                    continue;
+                }
+
                 if port == region.port_number {
-                    return Some(dataset.data());
+                    regions.push(region.clone());
                 }
             }
         }
 
-        None
+        // At most, 1 active region with a port should be returned.
+        assert!(regions.len() < 2);
+
+        regions.pop()
     }
 }
 
@@ -598,6 +905,7 @@ impl Storage {
                 dataset_id,
                 self.crucible_ip,
                 self.next_crucible_port,
+                self.next_crucible_port + 100,
             );
 
         self.next_crucible_port += 100;
@@ -648,17 +956,18 @@ impl Storage {
         None
     }
 
-    pub async fn get_dataset_for_port(
-        &self,
-        port: u16,
-    ) -> Option<Arc<CrucibleData>> {
+    pub async fn get_region_for_port(&self, port: u16) -> Option<Region> {
+        let mut regions = vec![];
         for zpool in self.zpools.values() {
-            if let Some(dataset) = zpool.get_dataset_for_port(port).await {
-                return Some(dataset);
+            if let Some(region) = zpool.get_region_for_port(port).await {
+                regions.push(region);
             }
         }
 
-        None
+        // At most, 1 active region with a port should be returned.
+        assert!(regions.len() < 2);
+
+        regions.pop()
     }
 }
 
