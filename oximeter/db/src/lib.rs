@@ -4,14 +4,21 @@
 
 //! Tools for interacting with the control plane telemetry database.
 
-// Copyright 2021 Oxide Computer Company
+// Copyright 2023 Oxide Computer Company
 
 use crate::query::StringFieldSelector;
-use chrono::{DateTime, Utc};
-use dropshot::{EmptyScanParams, PaginationParams};
-pub use oximeter::{DatumType, Field, FieldType, Measurement, Sample};
+use chrono::DateTime;
+use chrono::Utc;
+use dropshot::EmptyScanParams;
+use dropshot::PaginationParams;
+pub use oximeter::DatumType;
+pub use oximeter::Field;
+pub use oximeter::FieldType;
+pub use oximeter::Measurement;
+pub use oximeter::Sample;
 use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
+use serde::Serialize;
 use std::collections::BTreeMap;
 use std::convert::TryFrom;
 use std::num::NonZeroU32;
@@ -20,7 +27,8 @@ use thiserror::Error;
 mod client;
 pub mod model;
 pub mod query;
-pub use client::{Client, DbWrite};
+pub use client::Client;
+pub use client::DbWrite;
 
 #[derive(Clone, Debug, Error)]
 pub enum Error {

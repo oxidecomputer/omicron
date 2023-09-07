@@ -112,6 +112,7 @@ pub mod test_util;
 pub mod traits;
 pub mod types;
 
+pub mod id;
 pub use traits::Metric;
 pub use traits::Producer;
 pub use traits::Target;

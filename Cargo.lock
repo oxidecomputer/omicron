@@ -5503,6 +5503,7 @@ dependencies = [
  "serde",
  "thiserror",
  "trybuild",
+ "twox-hash",
  "uuid",
 ]
 

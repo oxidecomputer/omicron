@@ -14,6 +14,7 @@ oximeter-macro-impl.workspace = true
 schemars = { workspace = true, features = [ "uuid1", "bytes", "chrono" ] }
 serde.workspace = true
 thiserror.workspace = true
+twox-hash.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
