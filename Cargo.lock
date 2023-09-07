@@ -9717,6 +9717,7 @@ dependencies = [
  "display-error-chain",
  "dpd-client",
  "dropshot",
+ "either",
  "expectorate",
  "flate2",
  "flume",
