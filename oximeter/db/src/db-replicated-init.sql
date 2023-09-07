@@ -18,7 +18,7 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_bool ON CLUSTER oximeter_cluste
     timestamp DateTime64(9, 'UTC'),
     datum UInt8
 )
-ENGINE = Distributed('oximeter_cluster', 'oximeter', 'measurements_bool_local', timeseries_key);
+ENGINE = Distributed('oximeter_cluster', 'oximeter', 'measurements_bool_local', xxHash64(splitByChar(':', timeseries_name)[1]));
 --
 CREATE TABLE IF NOT EXISTS oximeter.measurements_i64_local ON CLUSTER oximeter_cluster
 (
@@ -38,7 +38,7 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_i64 ON CLUSTER oximeter_cluster
     timestamp DateTime64(9, 'UTC'),
     datum Int64
 )
-ENGINE = Distributed('oximeter_cluster', 'oximeter', 'measurements_i64_local', timeseries_key);
+ENGINE = Distributed('oximeter_cluster', 'oximeter', 'measurements_i64_local', xxHash64(splitByChar(':', timeseries_name)[1]));
 --
 CREATE TABLE IF NOT EXISTS oximeter.measurements_f64_local ON CLUSTER oximeter_cluster
 (
@@ -58,7 +58,7 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_f64 ON CLUSTER oximeter_cluster
     timestamp DateTime64(9, 'UTC'),
     datum Float64
 )
-ENGINE = Distributed('oximeter_cluster', 'oximeter', 'measurements_f64_local', timeseries_key);
+ENGINE = Distributed('oximeter_cluster', 'oximeter', 'measurements_f64_local', xxHash64(splitByChar(':', timeseries_name)[1]));
 --
 CREATE TABLE IF NOT EXISTS oximeter.measurements_string_local ON CLUSTER oximeter_cluster
 (
@@ -78,7 +78,7 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_string ON CLUSTER oximeter_clus
     timestamp DateTime64(9, 'UTC'),
     datum String
 )
-ENGINE = Distributed('oximeter_cluster', 'oximeter', 'measurements_string_local', timeseries_key);
+ENGINE = Distributed('oximeter_cluster', 'oximeter', 'measurements_string_local', xxHash64(splitByChar(':', timeseries_name)[1]));
 --
 CREATE TABLE IF NOT EXISTS oximeter.measurements_bytes_local ON CLUSTER oximeter_cluster
 (
@@ -98,7 +98,7 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_bytes ON CLUSTER oximeter_clust
     timestamp DateTime64(9, 'UTC'),
     datum Array(UInt8)
 )
-ENGINE = Distributed('oximeter_cluster', 'oximeter', 'measurements_bytes_local', timeseries_key);
+ENGINE = Distributed('oximeter_cluster', 'oximeter', 'measurements_bytes_local', xxHash64(splitByChar(':', timeseries_name)[1]));
 --
 CREATE TABLE IF NOT EXISTS oximeter.measurements_cumulativei64_local ON CLUSTER oximeter_cluster
 (
@@ -120,7 +120,7 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_cumulativei64 ON CLUSTER oximet
     timestamp DateTime64(9, 'UTC'),
     datum Int64
 )
-ENGINE = Distributed('oximeter_cluster', 'oximeter', 'measurements_cumulativei64_local', timeseries_key);
+ENGINE = Distributed('oximeter_cluster', 'oximeter', 'measurements_cumulativei64_local', xxHash64(splitByChar(':', timeseries_name)[1]));
 --
 CREATE TABLE IF NOT EXISTS oximeter.measurements_cumulativef64_local ON CLUSTER oximeter_cluster
 (
@@ -142,7 +142,7 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_cumulativef64 ON CLUSTER oximet
     timestamp DateTime64(9, 'UTC'),
     datum Float64
 )
-ENGINE = Distributed('oximeter_cluster', 'oximeter', 'measurements_cumulativef64_local', timeseries_key);
+ENGINE = Distributed('oximeter_cluster', 'oximeter', 'measurements_cumulativef64_local', xxHash64(splitByChar(':', timeseries_name)[1]));
 --
 CREATE TABLE IF NOT EXISTS oximeter.measurements_histogrami64_local ON CLUSTER oximeter_cluster
 (
@@ -166,7 +166,7 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_histogrami64 ON CLUSTER oximete
     bins Array(Int64),
     counts Array(UInt64)
 )
-ENGINE = Distributed('oximeter_cluster', 'oximeter', 'measurements_histogrami64_local', timeseries_key);
+ENGINE = Distributed('oximeter_cluster', 'oximeter', 'measurements_histogrami64_local', xxHash64(splitByChar(':', timeseries_name)[1]));
 --
 CREATE TABLE IF NOT EXISTS oximeter.measurements_histogramf64_local ON CLUSTER oximeter_cluster
 (
@@ -190,7 +190,7 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_histogramf64 ON CLUSTER oximete
     bins Array(Float64),
     counts Array(UInt64)
 )
-ENGINE = Distributed('oximeter_cluster', 'oximeter', 'measurements_histogramf64_local', timeseries_key);
+ENGINE = Distributed('oximeter_cluster', 'oximeter', 'measurements_histogramf64_local', xxHash64(splitByChar(':', timeseries_name)[1]));
 --
 CREATE TABLE IF NOT EXISTS oximeter.fields_bool ON CLUSTER oximeter_cluster
 (
@@ -200,7 +200,7 @@ CREATE TABLE IF NOT EXISTS oximeter.fields_bool ON CLUSTER oximeter_cluster
     field_value UInt8
 )
 ENGINE = ReplicatedReplacingMergeTree()
-ORDER BY (timeseries_name, field_name, field_value, timeseries_key);
+ORDER BY (timeseries_name, field_name, field_value, xxHash64(splitByChar(':', timeseries_name)[1]));
 --
 CREATE TABLE IF NOT EXISTS oximeter.fields_i64 ON CLUSTER oximeter_cluster
 (
@@ -210,7 +210,7 @@ CREATE TABLE IF NOT EXISTS oximeter.fields_i64 ON CLUSTER oximeter_cluster
     field_value Int64
 )
 ENGINE = ReplicatedReplacingMergeTree()
-ORDER BY (timeseries_name, field_name, field_value, timeseries_key);
+ORDER BY (timeseries_name, field_name, field_value, xxHash64(splitByChar(':', timeseries_name)[1]));
 --
 CREATE TABLE IF NOT EXISTS oximeter.fields_ipaddr ON CLUSTER oximeter_cluster
 (
@@ -220,7 +220,7 @@ CREATE TABLE IF NOT EXISTS oximeter.fields_ipaddr ON CLUSTER oximeter_cluster
     field_value IPv6
 )
 ENGINE = ReplicatedReplacingMergeTree()
-ORDER BY (timeseries_name, field_name, field_value, timeseries_key);
+ORDER BY (timeseries_name, field_name, field_value, xxHash64(splitByChar(':', timeseries_name)[1]));
 --
 CREATE TABLE IF NOT EXISTS oximeter.fields_string ON CLUSTER oximeter_cluster
 (
@@ -230,7 +230,7 @@ CREATE TABLE IF NOT EXISTS oximeter.fields_string ON CLUSTER oximeter_cluster
     field_value String
 )
 ENGINE = ReplicatedReplacingMergeTree()
-ORDER BY (timeseries_name, field_name, field_value, timeseries_key);
+ORDER BY (timeseries_name, field_name, field_value, xxHash64(splitByChar(':', timeseries_name)[1]));
 --
 CREATE TABLE IF NOT EXISTS oximeter.fields_uuid ON CLUSTER oximeter_cluster
 (
@@ -240,7 +240,7 @@ CREATE TABLE IF NOT EXISTS oximeter.fields_uuid ON CLUSTER oximeter_cluster
     field_value UUID
 )
 ENGINE = ReplicatedReplacingMergeTree()
-ORDER BY (timeseries_name, field_name, field_value, timeseries_key);
+ORDER BY (timeseries_name, field_name, field_value, xxHash64(splitByChar(':', timeseries_name)[1]));
 --
 CREATE TABLE IF NOT EXISTS oximeter.timeseries_schema ON CLUSTER oximeter_cluster
 (
