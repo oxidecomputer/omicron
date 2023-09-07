@@ -636,7 +636,6 @@ mod tests {
     use omicron_test_utils::dev::clickhouse::ClickHouseInstance;
     use oximeter::test_util;
     use oximeter::{Metric, Target};
-    use serial_test::serial;
     use slog::o;
     use std::time::Duration;
     use tokio::time::sleep;
@@ -669,7 +668,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[serial]
     async fn test_build_replicated() {
         let log = slog::Logger::root(slog::Discard, o!());
 
