@@ -248,6 +248,13 @@ impl Client {
         .map_err(|e| Error::Database(e.to_string()))
     }
 
+    // Verifies if instance is part of oximeter_cluster
+    pub async fn is_oximeter_cluster(&self) -> Result<bool, Error> {
+        let sql = String::from("SHOW CLUSTERS FORMAT JSONEachRow;");
+        let res = self.execute_with_body(sql).await?;
+        Ok(res.contains("oximeter_cluster"))
+    }
+
     // Verifies that the schema for a sample matches the schema in the database.
     //
     // If the schema exists in the database, and the sample matches that schema, `None` is
@@ -432,11 +439,17 @@ pub trait DbWrite {
     /// Insert the given samples into the database.
     async fn insert_samples(&self, samples: &[Sample]) -> Result<(), Error>;
 
-    /// Initialize the telemetry database, creating tables as needed.
-    async fn init_db(&self) -> Result<(), Error>;
+    /// Initialize the replicated telemetry database, creating tables as needed.
+    async fn init_replicated_db(&self) -> Result<(), Error>;
 
-    /// Wipe the ClickHouse database entirely.
-    async fn wipe_db(&self) -> Result<(), Error>;
+    /// Initialize a single node telemetry database, creating tables as needed.
+    async fn init_single_node_db(&self) -> Result<(), Error>;
+
+    /// Wipe the ClickHouse database entirely from a single node set up.
+    async fn wipe_single_node_db(&self) -> Result<(), Error>;
+
+    /// Wipe the ClickHouse database entirely from a replicated set up.
+    async fn wipe_replicated_db(&self) -> Result<(), Error>;
 }
 
 #[async_trait]
@@ -538,22 +551,41 @@ impl DbWrite for Client {
         Ok(())
     }
 
-    /// Initialize the telemetry database, creating tables as needed.
-    async fn init_db(&self) -> Result<(), Error> {
+    /// Initialize the replicated telemetry database, creating tables as needed.
+    async fn init_replicated_db(&self) -> Result<(), Error> {
         // The HTTP client doesn't support multiple statements per query, so we break them out here
         // manually.
         debug!(self.log, "initializing ClickHouse database");
-        let sql = include_str!("./db-init.sql");
+        let sql = include_str!("./db-replicated-init.sql");
         for query in sql.split("\n--\n") {
             self.execute(query.to_string()).await?;
         }
         Ok(())
     }
 
-    /// Wipe the ClickHouse database entirely.
-    async fn wipe_db(&self) -> Result<(), Error> {
+    /// Initialize a single node telemetry database, creating tables as needed.
+    async fn init_single_node_db(&self) -> Result<(), Error> {
+        // The HTTP client doesn't support multiple statements per query, so we break them out here
+        // manually.
+        debug!(self.log, "initializing ClickHouse database");
+        let sql = include_str!("./db-single-node-init.sql");
+        for query in sql.split("\n--\n") {
+            self.execute(query.to_string()).await?;
+        }
+        Ok(())
+    }
+
+    /// Wipe the ClickHouse database entirely from a single node set up.
+    async fn wipe_single_node_db(&self) -> Result<(), Error> {
         debug!(self.log, "wiping ClickHouse database");
-        let sql = include_str!("./db-wipe.sql").to_string();
+        let sql = include_str!("./db-wipe-single-node.sql").to_string();
+        self.execute(sql).await
+    }
+
+    /// Wipe the ClickHouse database entirely from a replicated set up.
+    async fn wipe_replicated_db(&self) -> Result<(), Error> {
+        debug!(self.log, "wiping ClickHouse database");
+        let sql = include_str!("./db-wipe-single-node.sql").to_string();
         self.execute(sql).await
     }
 }
@@ -605,6 +637,8 @@ mod tests {
     use oximeter::test_util;
     use oximeter::{Metric, Target};
     use slog::o;
+    use std::time::Duration;
+    use tokio::time::sleep;
 
     // NOTE: It's important that each test run the ClickHouse server with different ports.
     // The tests each require a clean slate. Previously, we ran the tests in a different thread,
@@ -621,13 +655,132 @@ mod tests {
         let log = slog::Logger::root(slog::Discard, o!());
 
         // Let the OS assign a port and discover it after ClickHouse starts
-        let mut db = ClickHouseInstance::new(0)
+        let mut db = ClickHouseInstance::new_single_node(0)
             .await
             .expect("Failed to start ClickHouse");
         let address = SocketAddr::new("::1".parse().unwrap(), db.port());
 
-        Client::new(address, &log).wipe_db().await.unwrap();
+        let client = Client::new(address, &log);
+        assert!(!client.is_oximeter_cluster().await.unwrap());
+
+        client.wipe_single_node_db().await.unwrap();
         db.cleanup().await.expect("Failed to cleanup ClickHouse server");
+    }
+
+    #[tokio::test]
+    // TODO(https://github.com/oxidecomputer/omicron/issues/4001): This job fails intermittently
+    // on the ubuntu CI job with "Failed to detect ClickHouse subprocess within timeout"
+    #[ignore]
+    async fn test_build_replicated() {
+        let log = slog::Logger::root(slog::Discard, o!());
+
+        // Start all Keeper coordinator nodes
+        let cur_dir = std::env::current_dir().unwrap();
+        let keeper_config =
+            cur_dir.as_path().join("src/configs/keeper_config.xml");
+
+        // Start Keeper 1
+        let k1_port = 9181;
+        let k1_id = 1;
+
+        let mut k1 = ClickHouseInstance::new_keeper(
+            k1_port,
+            k1_id,
+            keeper_config.clone(),
+        )
+        .await
+        .expect("Failed to start ClickHouse keeper 1");
+
+        // Start Keeper 2
+        let k2_port = 9182;
+        let k2_id = 2;
+
+        let mut k2 = ClickHouseInstance::new_keeper(
+            k2_port,
+            k2_id,
+            keeper_config.clone(),
+        )
+        .await
+        .expect("Failed to start ClickHouse keeper 2");
+
+        // Start Keeper 3
+        let k3_port = 9183;
+        let k3_id = 3;
+
+        let mut k3 =
+            ClickHouseInstance::new_keeper(k3_port, k3_id, keeper_config)
+                .await
+                .expect("Failed to start ClickHouse keeper 3");
+
+        // Start all replica nodes
+        let cur_dir = std::env::current_dir().unwrap();
+        let replica_config =
+            cur_dir.as_path().join("src/configs/replica_config.xml");
+
+        // Start Replica 1
+        let r1_port = 8123;
+        let r1_tcp_port = 9000;
+        let r1_interserver_port = 9009;
+        let r1_name = String::from("oximeter_cluster node 1");
+        let r1_number = String::from("01");
+        let mut db_1 = ClickHouseInstance::new_replicated(
+            r1_port,
+            r1_tcp_port,
+            r1_interserver_port,
+            r1_name,
+            r1_number,
+            replica_config.clone(),
+        )
+        .await
+        .expect("Failed to start ClickHouse node 1");
+        let r1_address =
+            SocketAddr::new("127.0.0.1".parse().unwrap(), db_1.port());
+
+        // Start Replica 2
+        let r2_port = 8124;
+        let r2_tcp_port = 9001;
+        let r2_interserver_port = 9010;
+        let r2_name = String::from("oximeter_cluster node 2");
+        let r2_number = String::from("02");
+        let mut db_2 = ClickHouseInstance::new_replicated(
+            r2_port,
+            r2_tcp_port,
+            r2_interserver_port,
+            r2_name,
+            r2_number,
+            replica_config,
+        )
+        .await
+        .expect("Failed to start ClickHouse node 2");
+        let r2_address =
+            SocketAddr::new("127.0.0.1".parse().unwrap(), db_2.port());
+
+        // Create database in node 1
+        let client_1 = Client::new(r1_address, &log);
+        assert!(client_1.is_oximeter_cluster().await.unwrap());
+        client_1
+            .init_replicated_db()
+            .await
+            .expect("Failed to initialize timeseries database");
+
+        // Wait to make sure data has been synchronised.
+        // TODO(https://github.com/oxidecomputer/omicron/issues/4001): Waiting for 5 secs is a bit sloppy,
+        // come up with a better way to do this.
+        sleep(Duration::from_secs(5)).await;
+
+        // Verify database exists in node 2
+        let client_2 = Client::new(r2_address, &log);
+        assert!(client_2.is_oximeter_cluster().await.unwrap());
+        let sql = String::from("SHOW DATABASES FORMAT JSONEachRow;");
+
+        let result = client_2.execute_with_body(sql).await.unwrap();
+        assert!(result.contains("oximeter"));
+
+        k1.cleanup().await.expect("Failed to cleanup ClickHouse keeper 1");
+        k2.cleanup().await.expect("Failed to cleanup ClickHouse keeper 2");
+        k3.cleanup().await.expect("Failed to cleanup ClickHouse keeper 3");
+        db_1.cleanup().await.expect("Failed to cleanup ClickHouse server 1");
+        db_2.cleanup().await.expect("Failed to cleanup ClickHouse server 2");
     }
 
     #[tokio::test]
@@ -635,14 +788,14 @@ mod tests {
         let log = slog::Logger::root(slog::Discard, o!());
 
         // Let the OS assign a port and discover it after ClickHouse starts
-        let mut db = ClickHouseInstance::new(0)
+        let mut db = ClickHouseInstance::new_single_node(0)
             .await
             .expect("Failed to start ClickHouse");
         let address = SocketAddr::new("::1".parse().unwrap(), db.port());
 
         let client = Client::new(address, &log);
         client
-            .init_db()
+            .init_single_node_db()
             .await
             .expect("Failed to initialize timeseries database");
         let samples = {
@@ -681,14 +834,14 @@ mod tests {
         let log = slog::Logger::root(slog::Discard, o!());
 
         // Let the OS assign a port and discover it after ClickHouse starts
-        let mut db = ClickHouseInstance::new(0)
+        let mut db = ClickHouseInstance::new_single_node(0)
             .await
             .expect("Failed to start ClickHouse");
         let address = SocketAddr::new("::1".parse().unwrap(), db.port());
 
         let client = Client::new(address, &log);
         client
-            .init_db()
+            .init_single_node_db()
             .await
             .expect("Failed to initialize timeseries database");
         let sample = test_util::make_sample();
@@ -715,14 +868,14 @@ mod tests {
         let log = slog::Logger::root(slog::Discard, o!());
 
         // Let the OS assign a port and discover it after ClickHouse starts
-        let mut db = ClickHouseInstance::new(0)
+        let mut db = ClickHouseInstance::new_single_node(0)
             .await
             .expect("Failed to start ClickHouse");
         let address = SocketAddr::new("::1".parse().unwrap(), db.port());
 
         let client = Client::new(address, &log);
         client
-            .init_db()
+            .init_single_node_db()
             .await
             .expect("Failed to initialize timeseries database");
         let sample = test_util::make_sample();
@@ -793,14 +946,14 @@ mod tests {
         let log = slog::Logger::root(slog_dtrace::Dtrace::new().0, o!());
 
         // Let the OS assign a port and discover it after ClickHouse starts
-        let db = ClickHouseInstance::new(0)
+        let db = ClickHouseInstance::new_single_node(0)
             .await
             .expect("Failed to start ClickHouse");
         let address = SocketAddr::new("::1".parse().unwrap(), db.port());
 
         let client = Client::new(address, &log);
         client
-            .init_db()
+            .init_single_node_db()
             .await
             .expect("Failed to initialize timeseries database");
 
@@ -991,14 +1144,14 @@ mod tests {
         let log = Logger::root(slog::Discard, o!());
 
         // Let the OS assign a port and discover it after ClickHouse starts
-        let db = ClickHouseInstance::new(0)
+        let db = ClickHouseInstance::new_single_node(0)
             .await
             .expect("Failed to start ClickHouse");
         let address = SocketAddr::new("::1".parse().unwrap(), db.port());
 
         let client = Client::new(address, &log);
         client
-            .init_db()
+            .init_single_node_db()
             .await
             .expect("Failed to initialize timeseries database");
 
@@ -1090,14 +1243,14 @@ mod tests {
         test_fn: impl Fn(&Service, &[RequestLatency], &[Sample], &[Timeseries]),
     ) {
         let (target, metrics, samples) = setup_select_test();
-        let mut db = ClickHouseInstance::new(0)
+        let mut db = ClickHouseInstance::new_single_node(0)
             .await
             .expect("Failed to start ClickHouse");
         let address = SocketAddr::new("::1".parse().unwrap(), db.port());
         let log = Logger::root(slog::Discard, o!());
         let client = Client::new(address, &log);
         client
-            .init_db()
+            .init_single_node_db()
             .await
             .expect("Failed to initialize timeseries database");
         client
@@ -1347,14 +1500,14 @@ mod tests {
     #[tokio::test]
     async fn test_select_timeseries_with_start_time() {
         let (_, metrics, samples) = setup_select_test();
-        let mut db = ClickHouseInstance::new(0)
+        let mut db = ClickHouseInstance::new_single_node(0)
             .await
             .expect("Failed to start ClickHouse");
         let address = SocketAddr::new("::1".parse().unwrap(), db.port());
         let log = Logger::root(slog::Discard, o!());
         let client = Client::new(address, &log);
         client
-            .init_db()
+            .init_single_node_db()
             .await
             .expect("Failed to initialize timeseries database");
         client
@@ -1391,14 +1544,14 @@ mod tests {
     #[tokio::test]
     async fn test_select_timeseries_with_limit() {
         let (_, _, samples) = setup_select_test();
-        let mut db = ClickHouseInstance::new(0)
+        let mut db = ClickHouseInstance::new_single_node(0)
             .await
             .expect("Failed to start ClickHouse");
         let address = SocketAddr::new("::1".parse().unwrap(), db.port());
         let log = Logger::root(slog::Discard, o!());
         let client = Client::new(address, &log);
         client
-            .init_db()
+            .init_single_node_db()
             .await
             .expect("Failed to initialize timeseries database");
         client
@@ -1509,14 +1662,14 @@ mod tests {
     #[tokio::test]
     async fn test_select_timeseries_with_order() {
         let (_, _, samples) = setup_select_test();
-        let mut db = ClickHouseInstance::new(0)
+        let mut db = ClickHouseInstance::new_single_node(0)
             .await
             .expect("Failed to start ClickHouse");
         let address = SocketAddr::new("::1".parse().unwrap(), db.port());
         let log = Logger::root(slog::Discard, o!());
         let client = Client::new(address, &log);
         client
-            .init_db()
+            .init_single_node_db()
             .await
             .expect("Failed to initialize timeseries database");
         client

@@ -171,7 +171,7 @@ impl RunnerCore {
         wicketd: Option<&WicketdHandle>,
     ) -> anyhow::Result<()> {
         let Some(action) = action else {
-         return Ok(());
+            return Ok(());
         };
 
         match action {

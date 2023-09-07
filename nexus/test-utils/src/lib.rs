@@ -321,7 +321,9 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
         let log = &self.logctx.log;
         debug!(log, "Starting Clickhouse");
         let clickhouse =
-            dev::clickhouse::ClickHouseInstance::new(0).await.unwrap();
+            dev::clickhouse::ClickHouseInstance::new_single_node(0)
+                .await
+                .unwrap();
         let port = clickhouse.port();
 
         let zpool_id = Uuid::new_v4();
@@ -653,10 +655,12 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
 
         let dns = dns_server::TransientServer::new(&log).await.unwrap();
 
-        let SocketAddr::V6(dns_address) = *dns.dns_server.local_address() else {
+        let SocketAddr::V6(dns_address) = *dns.dns_server.local_address()
+        else {
             panic!("Unsupported IPv4 DNS address");
         };
-        let SocketAddr::V6(dropshot_address) = dns.dropshot_server.local_addr() else {
+        let SocketAddr::V6(dropshot_address) = dns.dropshot_server.local_addr()
+        else {
             panic!("Unsupported IPv4 Dropshot address");
         };
 

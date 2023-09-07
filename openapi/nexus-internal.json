@@ -922,6 +922,7 @@
           "crucible",
           "cockroach",
           "clickhouse",
+          "clickhouse_keeper",
           "external_dns",
           "internal_dns"
         ]
@@ -2796,6 +2797,20 @@
                 "type": "string",
                 "enum": [
                   "clickhouse"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "clickhouse_keeper"
                 ]
               }
             },

@@ -825,8 +825,7 @@ async fn post_start_update(
     let Some(sp_state) = sp_state else {
         return Err(HttpError::for_bad_request(
             None,
-            "cannot update target sled (no inventory state present)"
-                .into(),
+            "cannot update target sled (no inventory state present)".into(),
         ));
     };
 

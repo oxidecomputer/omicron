@@ -3,7 +3,7 @@
 #: name = "helios / package"
 #: variety = "basic"
 #: target = "helios-2.0"
-#: rust_toolchain = "1.70.0"
+#: rust_toolchain = "1.72.0"
 #: output_rules = [
 #:	"=/work/version.txt",
 #:	"=/work/package.tar.gz",
@@ -104,6 +104,7 @@ ptime -m ./tools/build-global-zone-packages.sh "$tarball_src_dir" /work
 mkdir -p /work/zones
 zones=(
   out/clickhouse.tar.gz
+  out/clickhouse_keeper.tar.gz
   out/cockroachdb.tar.gz
   out/crucible-pantry.tar.gz
   out/crucible.tar.gz
