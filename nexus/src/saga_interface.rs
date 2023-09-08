@@ -5,18 +5,15 @@
 //! Interfaces available to saga actions and undo actions
 
 use crate::Nexus;
-use crate::{authz, db};
-use omicron_common::api::external::Error;
-use sled_agent_client::Client as SledAgentClient;
+use nexus_db_queries::{authz, db};
 use slog::Logger;
 use std::fmt;
 use std::sync::Arc;
-use uuid::Uuid;
 
 // TODO-design Should this be the same thing as ServerContext?  It's
 // very analogous, but maybe there's utility in having separate views for the
 // HTTP server and sagas.
-pub struct SagaContext {
+pub(crate) struct SagaContext {
     nexus: Arc<Nexus>,
     log: Logger,
     authz: Arc<authz::Authz>,
@@ -29,7 +26,7 @@ impl fmt::Debug for SagaContext {
 }
 
 impl SagaContext {
-    pub fn new(
+    pub(crate) fn new(
         nexus: Arc<Nexus>,
         log: Logger,
         authz: Arc<authz::Authz>,
@@ -37,26 +34,19 @@ impl SagaContext {
         SagaContext { authz, nexus, log }
     }
 
-    pub fn log(&self) -> &Logger {
+    pub(crate) fn log(&self) -> &Logger {
         &self.log
     }
 
-    pub fn authz(&self) -> &Arc<authz::Authz> {
+    pub(crate) fn authz(&self) -> &Arc<authz::Authz> {
         &self.authz
     }
 
-    pub fn nexus(&self) -> &Arc<Nexus> {
+    pub(crate) fn nexus(&self) -> &Arc<Nexus> {
         &self.nexus
     }
 
-    pub fn datastore(&self) -> &db::DataStore {
+    pub(crate) fn datastore(&self) -> &db::DataStore {
         self.nexus.datastore()
-    }
-
-    pub async fn sled_client(
-        &self,
-        sled_id: &Uuid,
-    ) -> Result<Arc<SledAgentClient>, Error> {
-        self.nexus.sled_client(sled_id).await
     }
 }

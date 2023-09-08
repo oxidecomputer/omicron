@@ -513,9 +513,8 @@ opt-level = 3
 opt-level = 3
 
 #
-# It's common during development to use a local copy of dropshot, propolis,
-# crucible, or steno in the parent directory.  If you want to use those,
-# uncomment one of these blocks.
+# It's common during development to use a local copy of various complex
+# dependencies.  If you want to use those, uncomment one of these blocks.
 #
 #[patch."https://github.com/oxidecomputer/dropshot"]
 #dropshot = { path = "../dropshot/dropshot" }
@@ -528,6 +527,10 @@ opt-level = 3
 #crucible-client-types = { path = "../crucible/crucible-client-types" }
 #crucible-pantry-client = { path = "../crucible/pantry-client" }
 #crucible-smf = { path = "../crucible/smf" }
+#[patch.crates-io]
+#diesel = { path = "../../diesel/diesel" }
+#[patch."https://github.com/oxidecomputer/diesel-dtrace"]
+#diesel-dtrace = { path = "../diesel-dtrace" }
 
 #
 # Local client generation during development.

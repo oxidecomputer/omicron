@@ -281,6 +281,7 @@ impl Driver {
     }
 
     /// Returns the runtime status of the background task
+    #[allow(dead_code)]
     pub fn status(&self, task: &TaskHandle) -> TaskStatus {
         // It should be hard to hit this in practice, since you'd have to have
         // gotten a TaskHandle from somewhere.  It would have to be another

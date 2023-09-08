@@ -14,13 +14,13 @@ use http::method::Method;
 use http::StatusCode;
 use httptest::{matchers::*, responders::*, Expectation, ServerBuilder};
 use lazy_static::lazy_static;
+use nexus_db_queries::authn::external::spoof;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::http_testing::TestResponse;
 use nexus_test_utils::resource_helpers::DiskTest;
 use nexus_test_utils_macros::nexus_test;
-use omicron_nexus::authn::external::spoof;
 
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
