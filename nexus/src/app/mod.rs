@@ -536,9 +536,9 @@ impl Nexus {
     ///
     /// ```
     /// use nexus_db_queries::context::OpContext;
+    /// use nexus_db_queries::db::DataStore;
     /// use omicron_nexus::app::Nexus;
     /// use omicron_nexus::app::Unimpl;
-    /// use omicron_nexus::db::DataStore;
     /// use omicron_common::api::external::Error;
     ///
     /// async fn my_things_list(
@@ -558,10 +558,10 @@ impl Nexus {
     ///
     /// ```
     /// use nexus_db_queries::context::OpContext;
+    /// use nexus_db_queries::db::model::Name;
+    /// use nexus_db_queries::db::DataStore;
     /// use omicron_nexus::app::Nexus;
     /// use omicron_nexus::app::Unimpl;
-    /// use omicron_nexus::db::model::Name;
-    /// use omicron_nexus::db::DataStore;
     /// use omicron_common::api::external::Error;
     /// use omicron_common::api::external::LookupType;
     /// use omicron_common::api::external::ResourceType;
@@ -599,13 +599,13 @@ impl Nexus {
     /// underneath Organizations:
     ///
     /// ```
+    /// use nexus_db_queries::authz;
     /// use nexus_db_queries::context::OpContext;
+    /// use nexus_db_queries::db::lookup::LookupPath;
+    /// use nexus_db_queries::db::model::Name;
+    /// use nexus_db_queries::db::DataStore;
     /// use omicron_nexus::app::Nexus;
     /// use omicron_nexus::app::Unimpl;
-    /// use omicron_nexus::authz;
-    /// use omicron_nexus::db::lookup::LookupPath;
-    /// use omicron_nexus::db::model::Name;
-    /// use omicron_nexus::db::DataStore;
     /// use omicron_common::api::external::Error;
     ///
     /// async fn project_list_my_thing(
@@ -629,13 +629,13 @@ impl Nexus {
     /// example stub for the "get" endpoint for that same resource:
     ///
     /// ```
+    /// use nexus_db_queries::authz;
     /// use nexus_db_queries::context::OpContext;
+    /// use nexus_db_queries::db::lookup::LookupPath;
+    /// use nexus_db_queries::db::model::Name;
+    /// use nexus_db_queries::db::DataStore;
     /// use omicron_nexus::app::Nexus;
     /// use omicron_nexus::app::Unimpl;
-    /// use omicron_nexus::authz;
-    /// use omicron_nexus::db::lookup::LookupPath;
-    /// use omicron_nexus::db::model::Name;
-    /// use omicron_nexus::db::DataStore;
     /// use omicron_common::api::external::Error;
     /// use omicron_common::api::external::LookupType;
     /// use omicron_common::api::external::ResourceType;
@@ -656,7 +656,7 @@ impl Nexus {
     ///     Err(nexus.unimplemented_todo(opctx, unimp).await)
     /// }
     /// ```
-    pub(crate) async fn unimplemented_todo(
+    pub async fn unimplemented_todo(
         &self,
         opctx: &OpContext,
         visibility: Unimpl,
