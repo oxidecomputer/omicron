@@ -171,13 +171,6 @@ impl super::Nexus {
         opctx: &OpContext,
         snapshot_lookup: &lookup::Snapshot<'_>,
     ) -> DeleteResult {
-        // TODO-correctness
-        // This also requires solving how to clean up the associated resources
-        // (on-disk snapshots, running read-only downstairs) because disks
-        // *could* still be using them (if the snapshot has not yet been turned
-        // into a regular crucible volume). It will involve some sort of
-        // reference counting for volumes.
-
         let (.., authz_snapshot, db_snapshot) =
             snapshot_lookup.fetch_for(authz::Action::Delete).await?;
 
@@ -186,10 +179,12 @@ impl super::Nexus {
             authz_snapshot,
             snapshot: db_snapshot,
         };
+
         self.execute_saga::<sagas::snapshot_delete::SagaSnapshotDelete>(
             saga_params,
         )
         .await?;
+
         Ok(())
     }
 }
