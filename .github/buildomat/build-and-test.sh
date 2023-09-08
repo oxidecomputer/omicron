@@ -71,6 +71,11 @@ ptime -m timeout 1h cargo test --doc --locked --verbose --no-fail-fast
 # to check is to try to remove it with `rmdir`.
 #
 unset TMPDIR
+
+# We expect the seed CRDB to be placed here, so we explicitly remove it. There
+# is no "final test", so cargo test wouldn't really know when to remove it.
+rm -rf "$TEST_TMPDIR/crdb-base"
+
 echo "files in $TEST_TMPDIR (none expected on success):" >&2
 find "$TEST_TMPDIR" -ls
 rmdir "$TEST_TMPDIR"
