@@ -6,12 +6,9 @@
 
 use crate::Nexus;
 use nexus_db_queries::{authz, db};
-use omicron_common::api::external::Error;
-use sled_agent_client::Client as SledAgentClient;
 use slog::Logger;
 use std::fmt;
 use std::sync::Arc;
-use uuid::Uuid;
 
 // TODO-design Should this be the same thing as ServerContext?  It's
 // very analogous, but maybe there's utility in having separate views for the
@@ -51,13 +48,5 @@ impl SagaContext {
 
     pub(crate) fn datastore(&self) -> &db::DataStore {
         self.nexus.datastore()
-    }
-
-    #[allow(dead_code)]
-    pub(crate) async fn sled_client(
-        &self,
-        sled_id: &Uuid,
-    ) -> Result<Arc<SledAgentClient>, Error> {
-        self.nexus.sled_client(sled_id).await
     }
 }
