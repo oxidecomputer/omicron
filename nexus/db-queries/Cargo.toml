@@ -15,7 +15,7 @@ base64.workspace = true
 bb8.workspace = true
 chrono.workspace = true
 cookie.workspace = true
-diesel = { workspace = true, features = ["postgres", "r2d2", "chrono", "serde_json", "network-address", "uuid"] }
+diesel.workspace = true
 diesel-dtrace.workspace = true
 dropshot.workspace = true
 futures.workspace = true
