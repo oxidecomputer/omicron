@@ -1185,8 +1185,8 @@ async fn test_multiple_deletes_not_sent(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(snapshot_2.disk_id, base_disk.identity.id);
     assert_eq!(snapshot_3.disk_id, base_disk.identity.id);
 
-    // Simulate all three of these have snapshot delete calls. First,
-    // concurrently delete the snapshot record:
+    // Simulate all three of these have snapshot delete sagas executing
+    // concurrently. First, delete the snapshot record:
 
     let opctx =
         OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
@@ -1257,13 +1257,13 @@ async fn test_multiple_deletes_not_sent(cptestctx: &ControlPlaneTestContext) {
         .await
         .unwrap();
 
-    // Then, concurrently call
-    // `decrease_crucible_resource_count_and_soft_delete_volume`. Make sure that
-    // each saga is deleting a unique set of resources, else they will be
-    // sending identical DELETE calls to Crucible agents. This is ok because the
-    // agents are idempotent, but if someone issues a DELETE for a read-only
-    // downstairs (called a "running snapshot") when the snapshot was deleted,
-    // they'll see a 404, which will cause the saga to fail.
+    // Continue pretending that each saga is executing concurrently: call
+    // `decrease_crucible_resource_count_and_soft_delete_volume` back to back.
+    // Make sure that each saga is deleting a unique set of resources, else they
+    // will be sending identical DELETE calls to Crucible agents. This is ok
+    // because the agents are idempotent, but if someone issues a DELETE for a
+    // read-only downstairs (called a "running snapshot") when the snapshot was
+    // deleted, they'll see a 404, which will cause the saga to fail.
 
     let resources_1 = datastore
         .decrease_crucible_resource_count_and_soft_delete_volume(
