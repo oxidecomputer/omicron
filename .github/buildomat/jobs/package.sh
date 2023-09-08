@@ -81,6 +81,10 @@ stamp_packages() {
 	done
 }
 
+# Keep the single-sled Nexus zone around for the deploy job. (The global zone
+# build below overwrites the file.)
+mv out/omicron-nexus.tar.gz out/omicron-nexus-single-sled.tar.gz
+
 # Build necessary for the global zone
 ptime -m cargo run --locked --release --bin omicron-package -- \
   -t host target create -i standard -m gimlet -s asic -r multi-sled
@@ -111,6 +115,7 @@ zones=(
   out/external-dns.tar.gz
   out/internal-dns.tar.gz
   out/omicron-nexus.tar.gz
+  out/omicron-nexus-single-sled.tar.gz
   out/oximeter-collector.tar.gz
   out/propolis-server.tar.gz
   out/switch-*.tar.gz
