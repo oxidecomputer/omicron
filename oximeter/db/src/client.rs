@@ -633,7 +633,7 @@ fn error_for_schema_mismatch(
 mod tests {
     use super::*;
     use crate::query;
-    use omicron_test_utils::dev::clickhouse::ClickHouseInstance;
+    use omicron_test_utils::dev::clickhouse::{ClickHouseInstance, ClickHouseCluster};
     use oximeter::test_util;
     use oximeter::{Metric, Target};
     use slog::o;
@@ -781,6 +781,56 @@ mod tests {
         k3.cleanup().await.expect("Failed to cleanup ClickHouse keeper 3");
         db_1.cleanup().await.expect("Failed to cleanup ClickHouse server 1");
         db_2.cleanup().await.expect("Failed to cleanup ClickHouse server 2");
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_build_replicated_2() {
+        let log = slog::Logger::root(slog::Discard, o!());
+
+    let mut cluster = ClickHouseCluster::new().await.expect("Failed to initialise ClickHouse Cluster");
+
+        // Create database in node 1
+        let client_1 = Client::new(cluster.replica_1.address.unwrap(), &log);
+        assert!(client_1.is_oximeter_cluster().await.unwrap());
+        client_1
+            .init_replicated_db()
+            .await
+            .expect("Failed to initialize timeseries database");
+
+        // Wait to make sure data has been synchronised.
+        // TODO(https://github.com/oxidecomputer/omicron/issues/4001): Waiting for 5 secs is a bit sloppy,
+        // come up with a better way to do this.
+        sleep(Duration::from_secs(5)).await;
+
+        // Verify database exists in node 2
+        let client_2 = Client::new(cluster.replica_2.address.unwrap(), &log);
+        assert!(client_2.is_oximeter_cluster().await.unwrap());
+        let sql = String::from("SHOW DATABASES FORMAT JSONEachRow;");
+        let result = client_2.execute_with_body(sql).await.unwrap();
+        assert!(result.contains("oximeter"));
+
+        // Insert row into one of the tables
+        let sql = String::from(
+            "INSERT INTO oximeter.measurements_string (datum) VALUES ('hiya');",
+        );
+        client_2.execute_with_body(sql).await.unwrap();
+
+        let sql = String::from(
+            "SELECT * FROM oximeter.measurements_string FORMAT JSONEachRow;",
+        );
+        let result = client_2.execute_with_body(sql.clone()).await.unwrap();
+        assert!(result.contains("hiya"));
+
+        // TODO(https://github.com/oxidecomputer/omicron/issues/4001): With distributed
+        // engine, it can take a long time to sync the data. This means it's tricky to
+        // test that the data exists on both nodes.
+
+        cluster.keeper_1.cleanup().await.expect("Failed to cleanup ClickHouse keeper 1");
+        cluster.keeper_2.cleanup().await.expect("Failed to cleanup ClickHouse keeper 2");
+        cluster.keeper_3.cleanup().await.expect("Failed to cleanup ClickHouse keeper 3");
+        cluster.replica_1.cleanup().await.expect("Failed to cleanup ClickHouse server 1");
+        cluster.replica_2.cleanup().await.expect("Failed to cleanup ClickHouse server 2");
     }
 
     #[tokio::test]
