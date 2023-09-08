@@ -11,6 +11,7 @@ use crate::bootstrap::early_networking::{
 use crate::bootstrap::params::StartSledAgentRequest;
 use crate::config::Config;
 use crate::instance_manager::InstanceManager;
+use crate::metrics::MetricsManager;
 use crate::nexus::{NexusClientWithResolver, NexusRequestQueue};
 use crate::params::{
     DiskStateRequested, InstanceHardware, InstanceMigrationSourceParams,
@@ -40,6 +41,7 @@ use omicron_common::address::{
     get_sled_address, get_switch_zone_address, Ipv6Subnet, SLED_PREFIX,
 };
 use omicron_common::api::external::Vni;
+use omicron_common::api::internal::nexus::ProducerEndpoint;
 use omicron_common::api::internal::nexus::{
     SledInstanceState, VmmRuntimeState,
 };
@@ -51,11 +53,13 @@ use omicron_common::api::{
     internal::nexus::UpdateArtifactId,
 };
 use omicron_common::backoff::{
-    retry_notify, retry_notify_ext, retry_policy_internal_service_aggressive,
-    BackoffError,
+    retry_notify, retry_notify_ext, retry_policy_internal_service,
+    retry_policy_internal_service_aggressive, BackoffError,
 };
+use oximeter::types::ProducerRegistry;
+use sled_hardware::underlay;
 use sled_hardware::HardwareManager;
-use sled_hardware::{underlay, underlay::BootstrapInterface, Baseboard};
+use sled_hardware::{underlay::BootstrapInterface, Baseboard};
 use slog::Logger;
 use std::collections::BTreeMap;
 use std::net::{Ipv6Addr, SocketAddr, SocketAddrV6};
@@ -134,6 +138,9 @@ pub enum Error {
 
     #[error("Zone bundle error: {0}")]
     ZoneBundle(#[from] BundleError),
+
+    #[error("Metrics error: {0}")]
+    Metrics(#[from] crate::metrics::Error),
 }
 
 impl From<Error> for omicron_common::api::external::Error {
@@ -251,6 +258,9 @@ struct SledAgentInner {
 
     // A handle to the bootstore.
     bootstore: bootstore::NodeHandle,
+
+    // Object handling production of metrics for oximeter.
+    metrics_manager: MetricsManager,
 }
 
 impl SledAgentInner {
@@ -452,6 +462,46 @@ impl SledAgent {
             rack_network_config.clone(),
         )?;
 
+        let mut metrics_manager = MetricsManager::new(
+            request.body.id,
+            request.body.rack_id,
+            hardware.baseboard(),
+            log.new(o!("component" => "MetricsManager")),
+        )?;
+
+        // Start tracking the underlay physical links.
+        for nic in underlay::find_nics(&config.data_links)? {
+            let link_name = nic.interface();
+            if let Err(e) = metrics_manager
+                .track_physical_link(
+                    link_name,
+                    crate::metrics::LINK_SAMPLE_INTERVAL,
+                )
+                .await
+            {
+                error!(
+                    log,
+                    "failed to start tracking physical link metrics";
+                    "link_name" => link_name,
+                    "error" => ?e,
+                );
+            }
+        }
+
+        // Spawn a task in the background to register our metric producer with
+        // Nexus. This should not block progress here.
+        let endpoint = ProducerEndpoint {
+            id: request.body.id,
+            address: sled_address.into(),
+            base_route: String::from("/metrics/collect"),
+            interval: crate::metrics::METRIC_COLLECTION_INTERVAL,
+        };
+        tokio::task::spawn(register_metric_producer_with_nexus(
+            log.clone(),
+            nexus_client.clone(),
+            endpoint,
+        ));
+
         let zone_bundler = storage.zone_bundler().clone();
         let sled_agent = SledAgent {
             inner: Arc::new(SledAgentInner {
@@ -476,6 +526,7 @@ impl SledAgent {
                 rack_network_config,
                 zone_bundler,
                 bootstore: bootstore.clone(),
+                metrics_manager,
             }),
             log: log.clone(),
         };
@@ -955,6 +1006,38 @@ impl SledAgent {
     pub fn bootstore(&self) -> bootstore::NodeHandle {
         self.inner.bootstore.clone()
     }
+
+    /// Return the metric producer registry.
+    pub fn metrics_registry(&self) -> &ProducerRegistry {
+        self.inner.metrics_manager.registry()
+    }
+}
+
+async fn register_metric_producer_with_nexus(
+    log: Logger,
+    client: NexusClientWithResolver,
+    endpoint: ProducerEndpoint,
+) {
+    let endpoint = nexus_client::types::ProducerEndpoint::from(&endpoint);
+    let register_with_nexus = || async {
+        client.client().cpapi_producers_post(&endpoint).await.map_err(|e| {
+            BackoffError::transient(format!("Metric registration error: {e}"))
+        })
+    };
+    retry_notify(
+        retry_policy_internal_service(),
+        register_with_nexus,
+        |error, delay| {
+            warn!(
+                log,
+                "failed to register as a metric producer with Nexus";
+                "error" => ?error,
+                "retry_after" => ?delay,
+            );
+        },
+    )
+    .await
+    .expect("Expected an infinite retry loop registering with Nexus");
 }
 
 #[derive(From, thiserror::Error, Debug)]
@@ -976,7 +1059,7 @@ pub enum AddSledError {
     },
 }
 
-/// Add a sled to an  
+/// Add a sled to an initialized rack.
 pub async fn add_sled_to_initialized_rack(
     log: Logger,
     sled_id: Baseboard,
