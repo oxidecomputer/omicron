@@ -1100,3 +1100,228 @@ async fn test_region_snapshot_create_idempotent(
 
     datastore.region_snapshot_create(region_snapshot).await.unwrap();
 }
+
+/// Test that multiple DELETE calls won't be sent to a Crucible agent for the
+/// same read-only downstairs
+#[nexus_test]
+async fn test_multiple_deletes_not_sent(cptestctx: &ControlPlaneTestContext) {
+    let client = &cptestctx.external_client;
+    let nexus = &cptestctx.server.apictx().nexus;
+    let datastore = nexus.datastore();
+    DiskTest::new(&cptestctx).await;
+    populate_ip_pool(&client, "default", None).await;
+    let _project_id = create_org_and_project(client).await;
+    let disks_url = get_disks_url();
+
+    // Create a blank disk
+    let disk_size = ByteCount::from_gibibytes_u32(2);
+    let base_disk_name: Name = "base-disk".parse().unwrap();
+    let base_disk = params::DiskCreate {
+        identity: IdentityMetadataCreateParams {
+            name: base_disk_name.clone(),
+            description: String::from("sells rainsticks"),
+        },
+        disk_source: params::DiskSource::Blank {
+            block_size: params::BlockSize::try_from(512).unwrap(),
+        },
+        size: disk_size,
+    };
+
+    let base_disk: Disk = NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &disks_url)
+            .body(Some(&base_disk))
+            .expect_status(Some(StatusCode::CREATED)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body()
+    .unwrap();
+
+    // Create three snapshots of this disk
+    let snapshots_url = format!("/v1/snapshots?project={}", PROJECT_NAME);
+
+    let snapshot_1: views::Snapshot = object_create(
+        client,
+        &snapshots_url,
+        &params::SnapshotCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "snapshot1".parse().unwrap(),
+                description: "not attached to instance".into(),
+            },
+            disk: base_disk_name.clone().into(),
+        },
+    )
+    .await;
+
+    let snapshot_2: views::Snapshot = object_create(
+        client,
+        &snapshots_url,
+        &params::SnapshotCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "snapshot2".parse().unwrap(),
+                description: "not attached to instance".into(),
+            },
+            disk: base_disk_name.clone().into(),
+        },
+    )
+    .await;
+
+    let snapshot_3: views::Snapshot = object_create(
+        client,
+        &snapshots_url,
+        &params::SnapshotCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "snapshot3".parse().unwrap(),
+                description: "not attached to instance".into(),
+            },
+            disk: base_disk_name.clone().into(),
+        },
+    )
+    .await;
+
+    assert_eq!(snapshot_1.disk_id, base_disk.identity.id);
+    assert_eq!(snapshot_2.disk_id, base_disk.identity.id);
+    assert_eq!(snapshot_3.disk_id, base_disk.identity.id);
+
+    // Simulate all three of these have snapshot delete sagas executing
+    // concurrently. First, delete the snapshot record:
+
+    let opctx =
+        OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
+
+    let (.., authz_snapshot_1, db_snapshot_1) =
+        LookupPath::new(&opctx, &datastore)
+            .snapshot_id(snapshot_1.identity.id)
+            .fetch_for(authz::Action::Delete)
+            .await
+            .unwrap();
+
+    datastore
+        .project_delete_snapshot(
+            &opctx,
+            &authz_snapshot_1,
+            &db_snapshot_1,
+            vec![
+                // This must match what is in the snapshot_delete saga!
+                db::model::SnapshotState::Ready,
+                db::model::SnapshotState::Faulted,
+                db::model::SnapshotState::Destroyed,
+            ],
+        )
+        .await
+        .unwrap();
+
+    let (.., authz_snapshot_2, db_snapshot_2) =
+        LookupPath::new(&opctx, &datastore)
+            .snapshot_id(snapshot_2.identity.id)
+            .fetch_for(authz::Action::Delete)
+            .await
+            .unwrap();
+
+    datastore
+        .project_delete_snapshot(
+            &opctx,
+            &authz_snapshot_2,
+            &db_snapshot_2,
+            vec![
+                // This must match what is in the snapshot_delete saga!
+                db::model::SnapshotState::Ready,
+                db::model::SnapshotState::Faulted,
+                db::model::SnapshotState::Destroyed,
+            ],
+        )
+        .await
+        .unwrap();
+
+    let (.., authz_snapshot_3, db_snapshot_3) =
+        LookupPath::new(&opctx, &datastore)
+            .snapshot_id(snapshot_3.identity.id)
+            .fetch_for(authz::Action::Delete)
+            .await
+            .unwrap();
+
+    datastore
+        .project_delete_snapshot(
+            &opctx,
+            &authz_snapshot_3,
+            &db_snapshot_3,
+            vec![
+                // This must match what is in the snapshot_delete saga!
+                db::model::SnapshotState::Ready,
+                db::model::SnapshotState::Faulted,
+                db::model::SnapshotState::Destroyed,
+            ],
+        )
+        .await
+        .unwrap();
+
+    // Continue pretending that each saga is executing concurrently: call
+    // `decrease_crucible_resource_count_and_soft_delete_volume` back to back.
+    // Make sure that each saga is deleting a unique set of resources, else they
+    // will be sending identical DELETE calls to Crucible agents. This is ok
+    // because the agents are idempotent, but if someone issues a DELETE for a
+    // read-only downstairs (called a "running snapshot") when the snapshot was
+    // deleted, they'll see a 404, which will cause the saga to fail.
+
+    let resources_1 = datastore
+        .decrease_crucible_resource_count_and_soft_delete_volume(
+            db_snapshot_1.volume_id,
+        )
+        .await
+        .unwrap();
+
+    let resources_2 = datastore
+        .decrease_crucible_resource_count_and_soft_delete_volume(
+            db_snapshot_2.volume_id,
+        )
+        .await
+        .unwrap();
+
+    let resources_3 = datastore
+        .decrease_crucible_resource_count_and_soft_delete_volume(
+            db_snapshot_3.volume_id,
+        )
+        .await
+        .unwrap();
+
+    let resources_1 = match resources_1 {
+        db::datastore::CrucibleResources::V1(resources_1) => resources_1,
+    };
+    let resources_2 = match resources_2 {
+        db::datastore::CrucibleResources::V1(resources_2) => resources_2,
+    };
+    let resources_3 = match resources_3 {
+        db::datastore::CrucibleResources::V1(resources_3) => resources_3,
+    };
+
+    // No region deletions yet, these are just snapshot deletes
+
+    assert!(resources_1.datasets_and_regions.is_empty());
+    assert!(resources_2.datasets_and_regions.is_empty());
+    assert!(resources_3.datasets_and_regions.is_empty());
+
+    // But there are snapshots to delete
+
+    assert!(!resources_1.datasets_and_snapshots.is_empty());
+    assert!(!resources_2.datasets_and_snapshots.is_empty());
+    assert!(!resources_3.datasets_and_snapshots.is_empty());
+
+    // Assert there are no overlaps in the datasets_and_snapshots to delete.
+
+    for tuple in &resources_1.datasets_and_snapshots {
+        assert!(!resources_2.datasets_and_snapshots.contains(tuple));
+        assert!(!resources_3.datasets_and_snapshots.contains(tuple));
+    }
+
+    for tuple in &resources_2.datasets_and_snapshots {
+        assert!(!resources_1.datasets_and_snapshots.contains(tuple));
+        assert!(!resources_3.datasets_and_snapshots.contains(tuple));
+    }
+
+    for tuple in &resources_3.datasets_and_snapshots {
+        assert!(!resources_1.datasets_and_snapshots.contains(tuple));
+        assert!(!resources_2.datasets_and_snapshots.contains(tuple));
+    }
+}
