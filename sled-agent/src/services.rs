@@ -272,7 +272,7 @@ impl Config {
 // TODO: Should this be here? Could be in a different file
 #[derive(Clone, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 pub struct AllZoneRequests {
-    generation: Generation,
+    pub generation: Generation,
     // TODO: Limit visibility
     pub requests: Vec<ZoneRequest>,
 }

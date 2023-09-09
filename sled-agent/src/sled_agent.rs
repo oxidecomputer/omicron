@@ -753,6 +753,13 @@ impl SledAgent {
             .filter_map(|service| service.dataset.clone())
             .collect();
 
+        // TODO-concurrency: Do we need to lock access to the ledger, somehow?
+        //
+        // Admittedly we are locking access to services, but it seems possible
+        // that multiple requests to "services_ensure" arrive concurrently.
+
+        let requested_generation = requested_services.generation;
+
         let service_paths = self.all_service_ledgers().await;
         let mut ledger = match Ledger::<AllZoneRequests>::new(
             &self.log,
@@ -762,10 +769,9 @@ impl SledAgent {
         {
             Some(ledger) => {
                 // If this is an old request, ignore it.
-                if *ledger.data().generation() >= requested_services.generation
-                {
+                if ledger.data().generation >= requested_generation {
                     return Ok(ServiceEnsureResponse {
-                        generation: *ledger.data().generation(),
+                        generation: ledger.data().generation,
                         status: ServiceEnsureStatus::NotUpdated,
                     });
                 }
@@ -807,8 +813,14 @@ impl SledAgent {
         ledger_zone_requests.requests.append(&mut zone_requests.requests);
         ledger.commit().await?;
 
+        // If we are asked to skip a generation, we should abide, and
+        // jump to the latest number provided.
+        if ledger.data().generation < requested_generation {
+            ledger.data_mut().generation = requested_generation;
+        }
+
         Ok(ServiceEnsureResponse {
-            generation: *ledger.data().generation(),
+            generation: ledger.data().generation,
             status: ServiceEnsureStatus::Updated,
         })
     }
