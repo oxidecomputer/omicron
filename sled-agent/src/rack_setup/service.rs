@@ -300,7 +300,10 @@ impl ServiceInner {
                         continue;
                     }
                     SledAgentTypes::ServiceEnsureStatus::Updated => {
-                        return Ok::<(), BackoffError<SledAgentError<SledAgentTypes::Error>>>(());
+                        return Ok::<
+                            (),
+                            BackoffError<SledAgentError<SledAgentTypes::Error>>,
+                        >(());
                     }
                 }
             }
