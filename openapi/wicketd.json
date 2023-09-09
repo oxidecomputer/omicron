@@ -598,6 +598,33 @@
         }
       }
     },
+    "/update": {
+      "post": {
+        "summary": "An endpoint to start updating one or more sleds, switches and PSCs.",
+        "operationId": "post_start_update",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StartUpdateParams"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/update/{type}/{slot}": {
       "get": {
         "summary": "An endpoint to get the status of any update being performed or recently",
@@ -633,51 +660,6 @@
                 }
               }
             }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      },
-      "post": {
-        "summary": "An endpoint to start updating a sled.",
-        "operationId": "post_start_update",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "slot",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "format": "uint32",
-              "minimum": 0
-            }
-          },
-          {
-            "in": "path",
-            "name": "type",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/SpType"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/StartUpdateOptions"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "204": {
-            "description": "resource updated"
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -2721,6 +2703,31 @@
         "required": [
           "skip_rot_version_check",
           "skip_sp_version_check"
+        ]
+      },
+      "StartUpdateParams": {
+        "type": "object",
+        "properties": {
+          "options": {
+            "description": "Options for the update.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/StartUpdateOptions"
+              }
+            ]
+          },
+          "targets": {
+            "description": "The SP identifiers to start the update with. Must be non-empty.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SpIdentifier"
+            },
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "options",
+          "targets"
         ]
       },
       "StepComponentSummaryForGenericSpec": {

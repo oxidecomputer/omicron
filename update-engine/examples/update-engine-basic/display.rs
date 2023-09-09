@@ -12,28 +12,60 @@ use indexmap::{map::Entry, IndexMap};
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use owo_colors::OwoColorize;
 use tokio::{sync::mpsc, task::JoinHandle};
-use update_engine::events::ProgressCounter;
+use update_engine::{
+    display::{LineDisplay, LineDisplayStyles},
+    events::ProgressCounter,
+};
 
-use crate::spec::{
-    Event, ExampleComponent, ExampleStepId, ExampleStepMetadata, ProgressEvent,
-    ProgressEventKind, StepEventKind, StepInfoWithMetadata, StepOutcome,
+use crate::{
+    spec::{
+        Event, EventBuffer, ExampleComponent, ExampleStepId,
+        ExampleStepMetadata, ProgressEvent, ProgressEventKind, StepEventKind,
+        StepInfoWithMetadata, StepOutcome,
+    },
+    DisplayStyle,
 };
 
 /// An example that displays an event stream on the command line.
 pub(crate) fn make_displayer(
     log: &slog::Logger,
+    display_style: DisplayStyle,
 ) -> (JoinHandle<Result<()>>, mpsc::Sender<Event>) {
     let (sender, receiver) = mpsc::channel(512);
     let log = log.clone();
-    let join_handle =
-        tokio::task::spawn(
-            async move { display_messages(&log, receiver).await },
-        );
+    let join_handle = match display_style {
+        DisplayStyle::ProgressBar => tokio::task::spawn(async move {
+            display_progress_bar(&log, receiver).await
+        }),
+        DisplayStyle::Line => {
+            tokio::task::spawn(
+                async move { display_line(&log, receiver).await },
+            )
+        }
+    };
 
     (join_handle, sender)
 }
 
-async fn display_messages(
+async fn display_line(
+    log: &slog::Logger,
+    mut receiver: mpsc::Receiver<Event>,
+) -> Result<()> {
+    slog::info!(log, "setting up display");
+    let mut buffer = EventBuffer::new(8);
+    let mut display = LineDisplay::new(std::io::stdout());
+    // For now, always colorize. TODO: figure out whether colorization should be
+    // done based on supports_color/always/auto/never etc.
+    display.set_styles(LineDisplayStyles::colorized());
+    while let Some(event) = receiver.recv().await {
+        buffer.add_event(event);
+        display.display_event_buffer(&buffer)?;
+    }
+
+    Ok(())
+}
+
+async fn display_progress_bar(
     log: &slog::Logger,
     mut receiver: mpsc::Receiver<Event>,
 ) -> Result<()> {

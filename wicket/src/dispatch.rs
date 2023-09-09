@@ -13,7 +13,8 @@ use omicron_common::{address::WICKETD_PORT, FileKv};
 use slog::Drain;
 
 use crate::{
-    preflight::PreflightArgs, rack_setup::SetupArgs, upload::UploadArgs, Runner,
+    preflight::PreflightArgs, rack_setup::SetupArgs,
+    rack_update::RackUpdateArgs, upload::UploadArgs, Runner,
 };
 
 pub fn exec() -> Result<()> {
@@ -35,6 +36,7 @@ pub fn exec() -> Result<()> {
         );
         match args {
             ShellCommand::UploadRepo(args) => args.exec(log, wicketd_addr),
+            ShellCommand::RackUpdate(args) => args.exec(log, wicketd_addr),
             ShellCommand::Setup(args) => args.exec(log, wicketd_addr),
             ShellCommand::Preflight(args) => args.exec(log, wicketd_addr),
         }
@@ -57,9 +59,15 @@ enum ShellCommand {
     /// Upload a TUF repository to wicketd.
     #[command(visible_alias = "upload")]
     UploadRepo(UploadArgs),
+
+    /// Perform a rack update.
+    #[command(subcommand)]
+    RackUpdate(RackUpdateArgs),
+
     /// Interact with rack setup configuration.
     #[command(subcommand)]
     Setup(SetupArgs),
+
     /// Run checks prior to setting up the rack.
     #[command(subcommand)]
     Preflight(PreflightArgs),

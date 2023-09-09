@@ -12,7 +12,7 @@ use tokio::time::{interval, Duration, MissedTickBehavior};
 use wicketd_client::types::{
     AbortUpdateOptions, ClearUpdateStateOptions, GetInventoryParams,
     GetInventoryResponse, GetLocationResponse, IgnitionCommand, SpIdentifier,
-    SpType, StartUpdateOptions,
+    SpType, StartUpdateOptions, StartUpdateParams,
 };
 
 use crate::events::EventReportMap;
@@ -40,7 +40,7 @@ const WICKETD_POLL_INTERVAL: Duration = Duration::from_millis(500);
 // WICKETD_TIMEOUT used to be 1 second, but that might be too short (and in
 // particular might be responsible for
 // https://github.com/oxidecomputer/omicron/issues/3103).
-const WICKETD_TIMEOUT: Duration = Duration::from_secs(5);
+pub(crate) const WICKETD_TIMEOUT: Duration = Duration::from_secs(5);
 
 // Assume that these requests are periodic on the order of seconds or the
 // result of human interaction. In either case, this buffer should be plenty
@@ -164,10 +164,11 @@ impl WicketdManager {
         tokio::spawn(async move {
             let update_client =
                 create_wicketd_client(&log, addr, WICKETD_TIMEOUT);
-            let sp: SpIdentifier = component_id.into();
-            let response = match update_client
-                .post_start_update(sp.type_, sp.slot, &options)
-                .await
+            let params = StartUpdateParams {
+                targets: vec![component_id.into()],
+                options,
+            };
+            let response = match update_client.post_start_update(&params).await
             {
                 Ok(_) => Ok(()),
                 Err(error) => Err(error.to_string()),

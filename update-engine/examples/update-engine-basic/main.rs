@@ -4,13 +4,14 @@
 
 // Copyright 2023 Oxide Computer Company
 
-use std::time::Duration;
+use std::{io::IsTerminal, time::Duration};
 
-use anyhow::{bail, Context};
+use anyhow::{bail, Context, Result};
 use buf_list::BufList;
 use bytes::Buf;
 use camino::Utf8PathBuf;
 use camino_tempfile::Utf8TempDir;
+use clap::{Parser, ValueEnum};
 use display::make_displayer;
 use omicron_test_utils::dev::test_setup_log;
 use spec::{
@@ -26,63 +27,105 @@ mod display;
 mod spec;
 
 #[tokio::main(worker_threads = 2)]
-async fn main() {
-    let logctx = test_setup_log("update_engine_basic_example");
+async fn main() -> Result<()> {
+    let app = App::parse();
+    app.exec().await
+}
 
-    let context = ExampleContext::new(&logctx.log);
-    let (display_handle, sender) = make_displayer(&logctx.log);
+#[derive(Debug, Parser)]
+struct App {
+    #[clap(long, short = 's', default_value_t, value_enum)]
+    display_style: DisplayStyleOpt,
+}
 
-    let engine = UpdateEngine::new(&logctx.log, sender);
+impl App {
+    async fn exec(self) -> Result<()> {
+        let logctx = test_setup_log("update_engine_basic_example");
 
-    // Download component 1.
-    let component_1 = engine.for_component(ExampleComponent::Component1);
-    let download_handle_1 = context.register_download_step(
-        &component_1,
-        "https://www.example.org".to_owned(),
-        1_048_576,
-    );
+        let display_style = match self.display_style {
+            DisplayStyleOpt::ProgressBar => DisplayStyle::ProgressBar,
+            DisplayStyleOpt::Line => DisplayStyle::Line,
+            DisplayStyleOpt::Auto => {
+                if std::io::stdout().is_terminal() {
+                    DisplayStyle::ProgressBar
+                } else {
+                    DisplayStyle::Line
+                }
+            }
+        };
 
-    // An example of a skipped step for component 1.
-    context.register_skipped_step(&component_1);
+        let context = ExampleContext::new(&logctx.log);
+        let (display_handle, sender) =
+            make_displayer(&logctx.log, display_style);
 
-    // Create temporary directories for component 1.
-    let temp_dirs_handle_1 =
-        context.register_create_temp_dirs_step(&component_1, 2);
+        let engine = UpdateEngine::new(&logctx.log, sender);
 
-    // Write component 1 out to disk.
-    context.register_write_step(
-        &component_1,
-        download_handle_1,
-        temp_dirs_handle_1,
-        None,
-    );
+        // Download component 1.
+        let component_1 = engine.for_component(ExampleComponent::Component1);
+        let download_handle_1 = context.register_download_step(
+            &component_1,
+            "https://www.example.org".to_owned(),
+            1_048_576,
+        );
 
-    // Download component 2.
-    let component_2 = engine.for_component(ExampleComponent::Component2);
-    let download_handle_2 = context.register_download_step(
-        &component_2,
-        "https://www.example.com".to_owned(),
-        1_048_576 * 8,
-    );
+        // An example of a skipped step for component 1.
+        context.register_skipped_step(&component_1);
 
-    // Create temporary directories for component 2.
-    let temp_dirs_handle_2 =
-        context.register_create_temp_dirs_step(&component_2, 3);
+        // Create temporary directories for component 1.
+        let temp_dirs_handle_1 =
+            context.register_create_temp_dirs_step(&component_1, 2);
 
-    // Now write component 2 out to disk.
-    context.register_write_step(
-        &component_2,
-        download_handle_2,
-        temp_dirs_handle_2,
-        Some(1),
-    );
+        // Write component 1 out to disk.
+        context.register_write_step(
+            &component_1,
+            download_handle_1,
+            temp_dirs_handle_1,
+            None,
+        );
 
-    _ = engine.execute().await;
+        // Download component 2.
+        let component_2 = engine.for_component(ExampleComponent::Component2);
+        let download_handle_2 = context.register_download_step(
+            &component_2,
+            "https://www.example.com".to_owned(),
+            1_048_576 * 8,
+        );
 
-    // Wait until all messages have been received by the displayer.
-    _ = display_handle.await;
+        // Create temporary directories for component 2.
+        let temp_dirs_handle_2 =
+            context.register_create_temp_dirs_step(&component_2, 3);
 
-    // Do not clean up the log file so people can inspect it.
+        // Now write component 2 out to disk.
+        context.register_write_step(
+            &component_2,
+            download_handle_2,
+            temp_dirs_handle_2,
+            Some(1),
+        );
+
+        _ = engine.execute().await;
+
+        // Wait until all messages have been received by the displayer.
+        _ = display_handle.await;
+
+        // Do not clean up the log file so people can inspect it.
+
+        Ok(())
+    }
+}
+
+#[derive(Copy, Clone, Debug, Default, ValueEnum)]
+enum DisplayStyleOpt {
+    ProgressBar,
+    Line,
+    #[default]
+    Auto,
+}
+
+#[derive(Copy, Clone, Debug)]
+enum DisplayStyle {
+    ProgressBar,
+    Line,
 }
 
 /// Context shared across steps. This forms the lifetime "'a" defined by the
