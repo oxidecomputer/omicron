@@ -7,6 +7,7 @@
 use crate::artifacts::ArtifactIdData;
 use crate::artifacts::UpdatePlan;
 use crate::artifacts::WicketdArtifactStore;
+use crate::helpers::sps_to_string;
 use crate::http_entrypoints::GetArtifactsAndEventReportsResponse;
 use crate::http_entrypoints::StartUpdateOptions;
 use crate::http_entrypoints::UpdateSimulatedResult;
@@ -21,7 +22,6 @@ use buf_list::BufList;
 use bytes::Bytes;
 use display_error_chain::DisplayErrorChain;
 use dropshot::HttpError;
-use futures::Future;
 use futures::TryStream;
 use gateway_client::types::HostPhase2Progress;
 use gateway_client::types::HostPhase2RecoveryImageId;
@@ -158,146 +158,23 @@ impl UpdateTracker {
 
     pub(crate) async fn start(
         &self,
-        sp: SpIdentifier,
-        update_id: Uuid,
+        sps: BTreeSet<SpIdentifier>,
         opts: StartUpdateOptions,
-    ) -> Result<(), StartUpdateError> {
-        self.start_impl(sp, |plan| async {
-            // Do we need to upload this plan's trampoline phase 2 to MGS?
-            let upload_trampoline_phase_2_to_mgs = {
-                let mut upload_trampoline_phase_2_to_mgs =
-                    self.upload_trampoline_phase_2_to_mgs.lock().await;
-
-                match upload_trampoline_phase_2_to_mgs.as_mut() {
-                    Some(prev) => {
-                        // We've previously started an upload - does it match
-                        // this artifact? If not, cancel the old task (which
-                        // might still be trying to upload) and start a new one
-                        // with our current image.
-                        if prev.status.borrow().hash
-                            != plan.trampoline_phase_2.hash
-                        {
-                            // It does _not_ match - we have a new plan with a
-                            // different trampoline image. If the old task is
-                            // still running, cancel it, and start a new one.
-                            prev.task.abort();
-                            *prev = self
-                                .spawn_upload_trampoline_phase_2_to_mgs(&plan);
-                        }
-                    }
-                    None => {
-                        *upload_trampoline_phase_2_to_mgs = Some(
-                            self.spawn_upload_trampoline_phase_2_to_mgs(&plan),
-                        );
-                    }
-                }
-
-                // Both branches above leave `upload_trampoline_phase_2_to_mgs`
-                // with data, so we can unwrap here to clone the `watch`
-                // channel.
-                upload_trampoline_phase_2_to_mgs
-                    .as_ref()
-                    .unwrap()
-                    .status
-                    .clone()
-            };
-
-            let event_buffer = Arc::new(StdMutex::new(EventBuffer::new(16)));
-            let ipr_start_receiver =
-                self.ipr_update_tracker.register(update_id);
-
-            let update_cx = UpdateContext {
-                update_id,
-                sp,
-                mgs_client: self.mgs_client.clone(),
-                upload_trampoline_phase_2_to_mgs,
-                log: self.log.new(o!(
-                    "sp" => format!("{sp:?}"),
-                    "update_id" => update_id.to_string(),
-                )),
-            };
-            // TODO do we need `UpdateDriver` as a distinct type?
-            let update_driver = UpdateDriver {};
-
-            // Using a oneshot channel to communicate the abort handle isn't
-            // ideal, but it works and is the easiest way to send it without
-            // restructuring this code.
-            let (abort_handle_sender, abort_handle_receiver) =
-                oneshot::channel();
-            let task = tokio::spawn(update_driver.run(
-                plan,
-                update_cx,
-                event_buffer.clone(),
-                ipr_start_receiver,
-                opts,
-                abort_handle_sender,
-            ));
-
-            let abort_handle = abort_handle_receiver
-                .await
-                .expect("abort handle is sent immediately");
-
-            SpUpdateData { task, abort_handle, event_buffer }
-        })
-        .await
+    ) -> Result<(), Vec<StartUpdateError>> {
+        let imp = RealSpawnUpdateDriver { update_tracker: self, opts };
+        self.start_impl(sps, Some(imp)).await
     }
 
     /// Starts a fake update that doesn't perform any steps, but simply waits
-    /// for a oneshot receiver to resolve.
+    /// for a watch receiver to resolve.
     #[doc(hidden)]
     pub async fn start_fake_update(
         &self,
-        sp: SpIdentifier,
-        oneshot_receiver: oneshot::Receiver<()>,
-    ) -> Result<(), StartUpdateError> {
-        self.start_impl(sp, |_plan| async move {
-            let (sender, mut receiver) = mpsc::channel(128);
-            let event_buffer = Arc::new(StdMutex::new(EventBuffer::new(16)));
-            let event_buffer_2 = event_buffer.clone();
-            let log = self.log.clone();
-
-            let engine = UpdateEngine::new(&log, sender);
-            let abort_handle = engine.abort_handle();
-
-            let task = tokio::spawn(async move {
-                // The step component and ID have been chosen arbitrarily here --
-                // they aren't important.
-                engine
-                    .new_step(
-                        UpdateComponent::Host,
-                        UpdateStepId::RunningInstallinator,
-                        "Fake step that waits for receiver to resolve",
-                        move |_cx| async move {
-                            _ = oneshot_receiver.await;
-                            StepSuccess::new(()).into()
-                        },
-                    )
-                    .register();
-
-                // Spawn a task to accept all events from the executing engine.
-                let event_receiving_task = tokio::spawn(async move {
-                    while let Some(event) = receiver.recv().await {
-                        event_buffer_2.lock().unwrap().add_event(event);
-                    }
-                });
-
-                match engine.execute().await {
-                    Ok(_cx) => (),
-                    Err(err) => {
-                        error!(log, "update failed"; "err" => %err);
-                    }
-                }
-
-                // Wait for all events to be received and written to the event
-                // buffer.
-                event_receiving_task
-                    .await
-                    .expect("event receiving task panicked");
-            });
-
-            SpUpdateData { task, abort_handle, event_buffer }
-        })
-        .await
+        sps: BTreeSet<SpIdentifier>,
+        watch_receiver: watch::Receiver<()>,
+    ) -> Result<(), Vec<StartUpdateError>> {
+        let imp = FakeUpdateDriver { watch_receiver, log: self.log.clone() };
+        self.start_impl(sps, Some(imp)).await
     }
 
     pub(crate) async fn clear_update_state(
@@ -317,40 +194,105 @@ impl UpdateTracker {
         update_data.abort_update(sp, message).await
     }
 
-    async fn start_impl<F, Fut>(
+    /// Checks whether an update can be started for the given SPs, without
+    /// actually starting it.
+    ///
+    /// This should only be used in situations where starting the update is not
+    /// desired (for example, if we've already encountered errors earlier in the
+    /// process and we're just adding to the list of errors). In cases where the
+    /// start method *is* desired, prefer the [`Self::start`] method, which also
+    /// performs the same checks.
+    pub(crate) async fn update_pre_checks(
         &self,
-        sp: SpIdentifier,
-        spawn_update_driver: F,
-    ) -> Result<(), StartUpdateError>
+        sps: BTreeSet<SpIdentifier>,
+    ) -> Result<(), Vec<StartUpdateError>> {
+        self.start_impl::<NeverUpdateDriver>(sps, None).await
+    }
+
+    async fn start_impl<Spawn>(
+        &self,
+        sps: BTreeSet<SpIdentifier>,
+        spawn_update_driver: Option<Spawn>,
+    ) -> Result<(), Vec<StartUpdateError>>
     where
-        F: FnOnce(UpdatePlan) -> Fut,
-        Fut: Future<Output = SpUpdateData> + Send,
+        Spawn: SpawnUpdateDriver,
     {
         let mut update_data = self.sp_update_data.lock().await;
 
-        let plan = update_data
-            .artifact_store
-            .current_plan()
-            .ok_or(StartUpdateError::TufRepositoryUnavailable)?;
+        let mut errors = Vec::new();
 
-        match update_data.sp_update_data.entry(sp) {
-            // Vacant: this is the first time we've started an update to this
-            // sp.
-            Entry::Vacant(slot) => {
-                slot.insert(spawn_update_driver(plan).await);
-                Ok(())
-            }
-            // Occupied: we've previously started an update to this sp; only
-            // allow this one if that update is no longer running.
-            Entry::Occupied(mut slot) => {
-                if slot.get().task.is_finished() {
-                    slot.insert(spawn_update_driver(plan).await);
-                    Ok(())
-                } else {
-                    Err(StartUpdateError::UpdateInProgress(sp))
+        let plan = update_data.artifact_store.current_plan();
+        if plan.is_none() {
+            errors.push(StartUpdateError::TufRepositoryUnavailable);
+        }
+
+        // Check that we're not already updating any of these SPs.
+        let update_in_progress: Vec<_> = sps
+            .iter()
+            .filter(|sp| {
+                // If we don't have any update data for this SP, it's not in
+                // progress.
+                //
+                // If we do, it's in progress if the task is not finished.
+                update_data
+                    .sp_update_data
+                    .get(sp)
+                    .map_or(false, |data| !data.task.is_finished())
+            })
+            .copied()
+            .collect();
+
+        if !update_in_progress.is_empty() {
+            errors.push(StartUpdateError::UpdateInProgress(update_in_progress));
+        }
+
+        // If there are any errors, return now.
+        if !errors.is_empty() {
+            return Err(errors);
+        }
+
+        let plan = plan.expect("we'd have returned an error if plan was None");
+
+        // Call the setup method now.
+        if let Some(mut spawn_update_driver) = spawn_update_driver {
+            let setup_data = spawn_update_driver.setup(&plan).await;
+
+            for sp in sps {
+                match update_data.sp_update_data.entry(sp) {
+                    // Vacant: this is the first time we've started an update to this
+                    // sp.
+                    Entry::Vacant(slot) => {
+                        slot.insert(
+                            spawn_update_driver
+                                .spawn_update_driver(
+                                    sp,
+                                    plan.clone(),
+                                    &setup_data,
+                                )
+                                .await,
+                        );
+                    }
+                    // Occupied: we've previously started an update to this sp.
+                    Entry::Occupied(mut slot) => {
+                        assert!(
+                            slot.get().task.is_finished(),
+                            "we just checked that the task was finished"
+                        );
+                        slot.insert(
+                            spawn_update_driver
+                                .spawn_update_driver(
+                                    sp,
+                                    plan.clone(),
+                                    &setup_data,
+                                )
+                                .await,
+                        );
+                    }
                 }
             }
         }
+
+        Ok(())
     }
 
     fn spawn_upload_trampoline_phase_2_to_mgs(
@@ -414,6 +356,224 @@ impl UpdateTracker {
                 slot.get().event_buffer.lock().unwrap().generate_report()
             }
         }
+    }
+}
+
+/// A trait that represents a backend implementation for spawning the update
+/// driver.
+#[async_trait::async_trait]
+trait SpawnUpdateDriver {
+    /// The type returned by the [`Self::setup`] method. This is passed in by
+    /// reference to [`Self::spawn_update_driver`].
+    type Setup;
+
+    /// Perform setup required to spawn the update driver.
+    ///
+    /// This is called *once*, before any calls to
+    /// [`Self::spawn_update_driver`].
+    async fn setup(&mut self, plan: &UpdatePlan) -> Self::Setup;
+
+    /// Spawn the update driver for the given SP.
+    ///
+    /// This is called once per SP.
+    async fn spawn_update_driver(
+        &mut self,
+        sp: SpIdentifier,
+        plan: UpdatePlan,
+        setup_data: &Self::Setup,
+    ) -> SpUpdateData;
+}
+
+/// The production implementation of [`SpawnUpdateDriver`].
+///
+/// This implementation spawns real update drivers.
+#[derive(Debug)]
+struct RealSpawnUpdateDriver<'tr> {
+    update_tracker: &'tr UpdateTracker,
+    opts: StartUpdateOptions,
+}
+
+#[async_trait::async_trait]
+impl<'tr> SpawnUpdateDriver for RealSpawnUpdateDriver<'tr> {
+    type Setup = watch::Receiver<UploadTrampolinePhase2ToMgsStatus>;
+
+    async fn setup(&mut self, plan: &UpdatePlan) -> Self::Setup {
+        // Do we need to upload this plan's trampoline phase 2 to MGS?
+
+        let mut upload_trampoline_phase_2_to_mgs =
+            self.update_tracker.upload_trampoline_phase_2_to_mgs.lock().await;
+
+        match upload_trampoline_phase_2_to_mgs.as_mut() {
+            Some(prev) => {
+                // We've previously started an upload - does it match
+                // this artifact? If not, cancel the old task (which
+                // might still be trying to upload) and start a new one
+                // with our current image.
+                if prev.status.borrow().hash != plan.trampoline_phase_2.hash {
+                    // It does _not_ match - we have a new plan with a
+                    // different trampoline image. If the old task is
+                    // still running, cancel it, and start a new one.
+                    prev.task.abort();
+                    *prev = self
+                        .update_tracker
+                        .spawn_upload_trampoline_phase_2_to_mgs(&plan);
+                }
+            }
+            None => {
+                *upload_trampoline_phase_2_to_mgs = Some(
+                    self.update_tracker
+                        .spawn_upload_trampoline_phase_2_to_mgs(&plan),
+                );
+            }
+        }
+
+        // Both branches above leave `upload_trampoline_phase_2_to_mgs`
+        // with data, so we can unwrap here to clone the `watch`
+        // channel.
+        upload_trampoline_phase_2_to_mgs.as_ref().unwrap().status.clone()
+    }
+
+    async fn spawn_update_driver(
+        &mut self,
+        sp: SpIdentifier,
+        plan: UpdatePlan,
+        setup_data: &Self::Setup,
+    ) -> SpUpdateData {
+        // Generate an ID for this update; the update tracker will send it to the
+        // sled as part of the InstallinatorImageId, and installinator will send it
+        // back to our artifact server with its progress reports.
+        let update_id = Uuid::new_v4();
+
+        let event_buffer = Arc::new(StdMutex::new(EventBuffer::new(16)));
+        let ipr_start_receiver =
+            self.update_tracker.ipr_update_tracker.register(update_id);
+
+        let update_cx = UpdateContext {
+            update_id,
+            sp,
+            mgs_client: self.update_tracker.mgs_client.clone(),
+            upload_trampoline_phase_2_to_mgs: setup_data.clone(),
+            log: self.update_tracker.log.new(o!(
+                "sp" => format!("{sp:?}"),
+                "update_id" => update_id.to_string(),
+            )),
+        };
+        // TODO do we need `UpdateDriver` as a distinct type?
+        let update_driver = UpdateDriver {};
+
+        // Using a oneshot channel to communicate the abort handle isn't
+        // ideal, but it works and is the easiest way to send it without
+        // restructuring this code.
+        let (abort_handle_sender, abort_handle_receiver) = oneshot::channel();
+        let task = tokio::spawn(update_driver.run(
+            plan,
+            update_cx,
+            event_buffer.clone(),
+            ipr_start_receiver,
+            self.opts.clone(),
+            abort_handle_sender,
+        ));
+
+        let abort_handle = abort_handle_receiver
+            .await
+            .expect("abort handle is sent immediately");
+
+        SpUpdateData { task, abort_handle, event_buffer }
+    }
+}
+
+/// A fake implementation of [`SpawnUpdateDriver`].
+///
+/// This implementation is only used by tests. It contains a single step that
+/// waits for a [`watch::Receiver`] to resolve.
+#[derive(Debug)]
+struct FakeUpdateDriver {
+    watch_receiver: watch::Receiver<()>,
+    log: Logger,
+}
+
+#[async_trait::async_trait]
+impl SpawnUpdateDriver for FakeUpdateDriver {
+    type Setup = ();
+
+    async fn setup(&mut self, _plan: &UpdatePlan) -> Self::Setup {}
+
+    async fn spawn_update_driver(
+        &mut self,
+        _sp: SpIdentifier,
+        _plan: UpdatePlan,
+        _setup_data: &Self::Setup,
+    ) -> SpUpdateData {
+        let (sender, mut receiver) = mpsc::channel(128);
+        let event_buffer = Arc::new(StdMutex::new(EventBuffer::new(16)));
+        let event_buffer_2 = event_buffer.clone();
+        let log = self.log.clone();
+
+        let engine = UpdateEngine::new(&log, sender);
+        let abort_handle = engine.abort_handle();
+
+        let mut watch_receiver = self.watch_receiver.clone();
+
+        let task = tokio::spawn(async move {
+            // The step component and ID have been chosen arbitrarily here --
+            // they aren't important.
+            engine
+                .new_step(
+                    UpdateComponent::Host,
+                    UpdateStepId::RunningInstallinator,
+                    "Fake step that waits for receiver to resolve",
+                    move |_cx| async move {
+                        // This will resolve as soon as the watch sender
+                        // (typically a test) sends a value over the watch
+                        // channel.
+                        _ = watch_receiver.changed().await;
+                        StepSuccess::new(()).into()
+                    },
+                )
+                .register();
+
+            // Spawn a task to accept all events from the executing engine.
+            let event_receiving_task = tokio::spawn(async move {
+                while let Some(event) = receiver.recv().await {
+                    event_buffer_2.lock().unwrap().add_event(event);
+                }
+            });
+
+            match engine.execute().await {
+                Ok(_cx) => (),
+                Err(err) => {
+                    error!(log, "update failed"; "err" => %err);
+                }
+            }
+
+            // Wait for all events to be received and written to the event
+            // buffer.
+            event_receiving_task.await.expect("event receiving task panicked");
+        });
+
+        SpUpdateData { task, abort_handle, event_buffer }
+    }
+}
+
+/// An implementation of [`SpawnUpdateDriver`] that cannot be constructed.
+///
+/// This is an uninhabited type (an empty enum), and is only used to provide a
+/// type parameter for the [`UpdateTracker::update_pre_checks`] method.
+enum NeverUpdateDriver {}
+
+#[async_trait::async_trait]
+impl SpawnUpdateDriver for NeverUpdateDriver {
+    type Setup = ();
+
+    async fn setup(&mut self, _plan: &UpdatePlan) -> Self::Setup {}
+
+    async fn spawn_update_driver(
+        &mut self,
+        _sp: SpIdentifier,
+        _plan: UpdatePlan,
+        _setup_data: &Self::Setup,
+    ) -> SpUpdateData {
+        unreachable!("this update driver cannot be constructed")
     }
 }
 
@@ -507,21 +667,8 @@ impl UpdateTrackerData {
 pub enum StartUpdateError {
     #[error("no TUF repository available")]
     TufRepositoryUnavailable,
-    #[error("target is already being updated: {0:?}")]
-    UpdateInProgress(SpIdentifier),
-}
-
-impl StartUpdateError {
-    pub(crate) fn to_http_error(&self) -> HttpError {
-        let message = DisplayErrorChain::new(self).to_string();
-
-        match self {
-            StartUpdateError::TufRepositoryUnavailable
-            | StartUpdateError::UpdateInProgress(_) => {
-                HttpError::for_bad_request(None, message)
-            }
-        }
-    }
+    #[error("targets are already being updated: {}", sps_to_string(.0))]
+    UpdateInProgress(Vec<SpIdentifier>),
 }
 
 #[derive(Debug, Clone, Error, Eq, PartialEq)]
