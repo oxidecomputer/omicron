@@ -627,6 +627,7 @@ impl Generation {
         Generation(1)
     }
 
+    #[must_use]
     pub fn next(&self) -> Generation {
         // It should technically be an operational error if this wraps or even
         // exceeds the value allowed by an i64.  But it seems unlikely enough to

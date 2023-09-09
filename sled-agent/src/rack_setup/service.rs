@@ -296,15 +296,14 @@ impl ServiceInner {
                 match response.status {
                     SledAgentTypes::ServiceEnsureStatus::NotUpdated => {
                         generation = response.generation.clone().into();
-                        generation.next();
+                        generation = generation.next();
                         continue;
                     }
                     SledAgentTypes::ServiceEnsureStatus::Updated => {
-                        break;
+                        return Ok::<(), BackoffError<SledAgentError<SledAgentTypes::Error>>>(());
                     }
                 }
             }
-            Ok::<(), BackoffError<SledAgentError<SledAgentTypes::Error>>>(())
         };
         let log_failure = |error, delay| {
             warn!(
