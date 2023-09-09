@@ -9,8 +9,8 @@ use crate::params::{
     CleanupContextUpdate, DiskEnsureBody, InstanceEnsureBody,
     InstancePutMigrationIdsBody, InstancePutStateBody,
     InstancePutStateResponse, InstanceUnregisterResponse, ServiceEnsureBody,
-    SledRole, TimeSync, VpcFirewallRulesEnsureBody, ZoneBundleId,
-    ZoneBundleMetadata, Zpool,
+    ServiceEnsureResponse, SledRole, TimeSync, VpcFirewallRulesEnsureBody,
+    ZoneBundleId, ZoneBundleMetadata, Zpool,
 };
 use crate::sled_agent::Error as SledAgentError;
 use crate::zone_bundle;
@@ -308,7 +308,7 @@ async fn zones_list(
 async fn services_put(
     rqctx: RequestContext<SledAgent>,
     body: TypedBody<ServiceEnsureBody>,
-) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+) -> Result<HttpResponseOk<ServiceEnsureResponse>, HttpError> {
     let sa = rqctx.context().clone();
     let body_args = body.into_inner();
 
@@ -319,7 +319,7 @@ async fn services_put(
     // oxidecomputer/omicron#3098.
     let handler = async move {
         match sa.services_ensure(body_args).await {
-            Ok(()) => Ok(()),
+            Ok(response) => Ok(response),
             Err(e) => {
                 // Log the error here to make things clear even if the client
                 // has already disconnected.
@@ -328,18 +328,16 @@ async fn services_put(
             }
         }
     };
-    match tokio::spawn(handler).await {
+    let response = match tokio::spawn(handler).await {
         Ok(result) => result.map_err(|e| Error::from(e))?,
-
         Err(e) => {
             return Err(HttpError::for_internal_error(format!(
                 "unexpected failure awaiting \"services_ensure\": {:#}",
                 e
             )));
         }
-    }
-
-    Ok(HttpResponseUpdatedNoContent())
+    };
+    Ok(HttpResponseOk(response))
 }
 
 #[endpoint {

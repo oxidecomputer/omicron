@@ -81,7 +81,7 @@ use omicron_common::backoff::{
     retry_notify, retry_policy_internal_service_aggressive, retry_policy_local,
     BackoffError,
 };
-use omicron_common::ledger::{self, Ledger, Ledgerable};
+use omicron_common::ledger::Ledgerable;
 use omicron_common::nexus_config::{
     self, ConfigDropshotWithTls, DeploymentConfig as NexusDeploymentConfig,
 };
@@ -133,9 +133,6 @@ pub enum Error {
 
     #[error("Failed to find device {device}")]
     MissingDevice { device: String },
-
-    #[error("Failed to access ledger: {0}")]
-    Ledger(#[from] ledger::Error),
 
     #[error("Sled Agent not initialized yet")]
     SledAgentNotReady,
@@ -270,15 +267,20 @@ impl Config {
     }
 }
 
-// The filename of the ledger, within the provided directory.
-const SERVICES_LEDGER_FILENAME: &str = "services.json";
-
-// A wrapper around `ZoneRequest`, which allows it to be serialized
-// to a JSON file.
+/// A wrapper around `ZoneRequest`, which allows it to be serialized
+/// to a JSON file.
+// TODO: Should this be here? Could be in a different file
 #[derive(Clone, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
-struct AllZoneRequests {
+pub struct AllZoneRequests {
     generation: Generation,
-    requests: Vec<ZoneRequest>,
+    // TODO: Limit visibility
+    pub requests: Vec<ZoneRequest>,
+}
+
+impl AllZoneRequests {
+    pub fn generation(&self) -> &Generation {
+        &self.generation
+    }
 }
 
 impl Default for AllZoneRequests {
@@ -300,7 +302,7 @@ impl Ledgerable for AllZoneRequests {
 // This struct represents the combo of "what zone did you ask for" + "where did
 // we put it".
 #[derive(Clone, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
-struct ZoneRequest {
+pub struct ZoneRequest {
     zone: ServiceZoneRequest,
     // TODO: Consider collapsing "root" into ServiceZoneRequest
     #[schemars(with = "String")]
@@ -372,7 +374,6 @@ pub struct ServiceManagerInner {
     switch_zone_bootstrap_address: Ipv6Addr,
     storage: StorageResources,
     zone_bundler: ZoneBundler,
-    ledger_directory_override: OnceCell<Utf8PathBuf>,
     image_directory_override: OnceCell<Utf8PathBuf>,
 }
 
@@ -449,15 +450,9 @@ impl ServiceManager {
                     .switch_zone_bootstrap_ip,
                 storage,
                 zone_bundler,
-                ledger_directory_override: OnceCell::new(),
                 image_directory_override: OnceCell::new(),
             }),
         }
-    }
-
-    #[cfg(test)]
-    fn override_ledger_directory(&self, path: Utf8PathBuf) {
-        self.inner.ledger_directory_override.set(path).unwrap();
     }
 
     #[cfg(test)]
@@ -469,19 +464,6 @@ impl ServiceManager {
         self.inner.switch_zone_bootstrap_address
     }
 
-    async fn all_service_ledgers(&self) -> Vec<Utf8PathBuf> {
-        if let Some(dir) = self.inner.ledger_directory_override.get() {
-            return vec![dir.join(SERVICES_LEDGER_FILENAME)];
-        }
-        self.inner
-            .storage
-            .all_m2_mountpoints(sled_hardware::disk::CONFIG_DATASET)
-            .await
-            .into_iter()
-            .map(|p| p.join(SERVICES_LEDGER_FILENAME))
-            .collect()
-    }
-
     // TODO(https://github.com/oxidecomputer/omicron/issues/2973):
     //
     // The sled agent retries this function indefinitely at the call-site, but
@@ -490,19 +472,11 @@ impl ServiceManager {
     // - If we know that disks are missing, we could wait for them
     // - We could permanently fail if we are able to distinguish other errors
     // more clearly.
-    pub async fn load_services(&self) -> Result<(), Error> {
-        let log = &self.inner.log;
-        let ledger_paths = self.all_service_ledgers().await;
-        info!(log, "Loading services from: {ledger_paths:?}");
-
+    pub async fn load_services(
+        &self,
+        services: &AllZoneRequests,
+    ) -> Result<(), Error> {
         let mut existing_zones = self.inner.zones.lock().await;
-        let Some(mut ledger) =
-            Ledger::<AllZoneRequests>::new(log, ledger_paths).await
-        else {
-            info!(log, "Loading services - No services detected");
-            return Ok(());
-        };
-        let services = ledger.data_mut();
 
         // Initialize internal DNS only first: we need it to look up the
         // boundary switch addresses. This dependency is implicit: when we call
@@ -513,20 +487,18 @@ impl ServiceManager {
             .ensure_all_services(
                 &mut existing_zones,
                 &AllZoneRequests::default(),
-                ServiceEnsureBody {
-                    services: services
-                        .requests
-                        .clone()
-                        .into_iter()
-                        .filter(|svc| {
-                            matches!(
-                                svc.zone.zone_type,
-                                ZoneType::InternalDns | ZoneType::Ntp
-                            )
-                        })
-                        .map(|zone_request| zone_request.zone)
-                        .collect(),
-                },
+                services
+                    .requests
+                    .clone()
+                    .into_iter()
+                    .filter(|svc| {
+                        matches!(
+                            svc.zone.zone_type,
+                            ZoneType::InternalDns | ZoneType::Ntp
+                        )
+                    })
+                    .map(|zone_request| zone_request.zone)
+                    .collect(),
             )
             .await?;
 
@@ -538,20 +510,18 @@ impl ServiceManager {
             .ensure_all_services(
                 &mut existing_zones,
                 &all_zones_request,
-                ServiceEnsureBody {
-                    services: services
-                        .requests
-                        .clone()
-                        .into_iter()
-                        .filter(|svc| {
-                            matches!(
-                                svc.zone.zone_type,
-                                ZoneType::InternalDns | ZoneType::Ntp
-                            )
-                        })
-                        .map(|zone_request| zone_request.zone)
-                        .collect(),
-                },
+                services
+                    .requests
+                    .clone()
+                    .into_iter()
+                    .filter(|svc| {
+                        matches!(
+                            svc.zone.zone_type,
+                            ZoneType::InternalDns | ZoneType::Ntp
+                        )
+                    })
+                    .map(|zone_request| zone_request.zone)
+                    .collect(),
             )
             .await?;
 
@@ -595,14 +565,12 @@ impl ServiceManager {
         self.ensure_all_services(
             &mut existing_zones,
             &all_zones_request,
-            ServiceEnsureBody {
-                services: services
-                    .requests
-                    .clone()
-                    .into_iter()
-                    .map(|zone_request| zone_request.zone)
-                    .collect(),
-            },
+            services
+                .requests
+                .clone()
+                .into_iter()
+                .map(|zone_request| zone_request.zone)
+                .collect(),
         )
         .await?;
         Ok(())
@@ -2090,6 +2058,7 @@ impl ServiceManager {
         Err(BundleError::NoSuchZone { name: name.to_string() })
     }
 
+    // TODO: Update docs, update name
     /// Ensures that particular services should be initialized.
     ///
     /// These services will be instantiated by this function, and will be
@@ -2098,40 +2067,17 @@ impl ServiceManager {
     pub async fn ensure_all_services_persistent(
         &self,
         request: ServiceEnsureBody,
-    ) -> Result<(), Error> {
-        let log = &self.inner.log;
-
+        // TODO: Do we need this argument? Couldn't we just conform
+        // the state of "zones" to match this?
+        old_request: &AllZoneRequests,
+    ) -> Result<AllZoneRequests, Error> {
         let mut existing_zones = self.inner.zones.lock().await;
-
-        // Read the existing set of services from the ledger.
-        let service_paths = self.all_service_ledgers().await;
-        let mut ledger =
-            match Ledger::<AllZoneRequests>::new(log, service_paths.clone())
-                .await
-            {
-                Some(ledger) => ledger,
-                None => Ledger::<AllZoneRequests>::new_with(
-                    log,
-                    service_paths.clone(),
-                    AllZoneRequests::default(),
-                ),
-            };
-        let ledger_zone_requests = ledger.data_mut();
-
-        let mut zone_requests = self
-            .ensure_all_services(
-                &mut existing_zones,
-                ledger_zone_requests,
-                request,
-            )
-            .await?;
-
-        // Update the services in the ledger and write it back to both M.2s
-        ledger_zone_requests.requests.clear();
-        ledger_zone_requests.requests.append(&mut zone_requests.requests);
-        ledger.commit().await?;
-
-        Ok(())
+        self.ensure_all_services(
+            &mut existing_zones,
+            old_request,
+            request.services,
+        )
+        .await
     }
 
     // Ensures that only the following services are running.
@@ -2142,7 +2088,7 @@ impl ServiceManager {
         &self,
         existing_zones: &mut MutexGuard<'_, BTreeMap<String, RunningZone>>,
         old_request: &AllZoneRequests,
-        request: ServiceEnsureBody,
+        services: Vec<ServiceZoneRequest>,
     ) -> Result<AllZoneRequests, Error> {
         let log = &self.inner.log;
 
@@ -2151,8 +2097,7 @@ impl ServiceManager {
         let old_services_set: HashSet<ServiceZoneRequest> = HashSet::from_iter(
             old_request.requests.iter().map(|r| r.zone.clone()),
         );
-        let requested_services_set =
-            HashSet::from_iter(request.services.into_iter());
+        let requested_services_set = HashSet::from_iter(services.into_iter());
 
         let zones_to_be_removed =
             old_services_set.difference(&requested_services_set);
@@ -2998,29 +2943,37 @@ mod test {
         ]
     }
 
+    fn service_under_test(id: Uuid) -> ServiceZoneRequest {
+        ServiceZoneRequest {
+            id,
+            zone_type: ZoneType::Oximeter,
+            addresses: vec![Ipv6Addr::LOCALHOST],
+            dataset: None,
+            services: vec![ServiceZoneService {
+                id,
+                details: ServiceType::Oximeter {
+                    address: SocketAddrV6::new(
+                        Ipv6Addr::LOCALHOST,
+                        OXIMETER_PORT,
+                        0,
+                        0,
+                    ),
+                },
+            }],
+        }
+    }
+
     // Prepare to call "ensure" for a new service, then actually call "ensure".
     async fn ensure_new_service(mgr: &ServiceManager, id: Uuid) {
         let _expectations = expect_new_service();
 
-        mgr.ensure_all_services_persistent(ServiceEnsureBody {
-            services: vec![ServiceZoneRequest {
-                id,
-                zone_type: ZoneType::Oximeter,
-                addresses: vec![Ipv6Addr::LOCALHOST],
-                dataset: None,
-                services: vec![ServiceZoneService {
-                    id,
-                    details: ServiceType::Oximeter {
-                        address: SocketAddrV6::new(
-                            Ipv6Addr::LOCALHOST,
-                            OXIMETER_PORT,
-                            0,
-                            0,
-                        ),
-                    },
-                }],
-            }],
-        })
+        mgr.ensure_all_services_persistent(
+            ServiceEnsureBody {
+                generation: Generation::new(),
+                services: vec![service_under_test(id)],
+            },
+            &AllZoneRequests::default(),
+        )
         .await
         .unwrap();
     }
@@ -3028,25 +2981,23 @@ mod test {
     // Prepare to call "ensure" for a service which already exists. We should
     // return the service without actually installing a new zone.
     async fn ensure_existing_service(mgr: &ServiceManager, id: Uuid) {
-        mgr.ensure_all_services_persistent(ServiceEnsureBody {
-            services: vec![ServiceZoneRequest {
-                id,
-                zone_type: ZoneType::Oximeter,
-                addresses: vec![Ipv6Addr::LOCALHOST],
-                dataset: None,
-                services: vec![ServiceZoneService {
-                    id,
-                    details: ServiceType::Oximeter {
-                        address: SocketAddrV6::new(
-                            Ipv6Addr::LOCALHOST,
-                            OXIMETER_PORT,
-                            0,
-                            0,
-                        ),
-                    },
-                }],
-            }],
-        })
+        // Construct state that tells the ServiceManager the service already
+        // exists...
+        let mut old_requests = AllZoneRequests::default();
+        old_requests.requests = vec![ZoneRequest {
+            zone: service_under_test(id),
+            root: Utf8PathBuf::new(),
+        }];
+        old_requests.generation_bump();
+
+        // ... Then request that same service.
+        mgr.ensure_all_services_persistent(
+            ServiceEnsureBody {
+                generation: Generation::new(),
+                services: vec![service_under_test(id)],
+            },
+            &old_requests,
+        )
         .await
         .unwrap();
     }
@@ -3089,7 +3040,6 @@ mod test {
 
         fn override_paths(&self, mgr: &ServiceManager) {
             let dir = self.config_dir.path();
-            mgr.override_ledger_directory(dir.to_path_buf());
             mgr.override_image_directory(dir.to_path_buf());
 
             // We test launching "fake" versions of the zones, but the
@@ -3214,7 +3164,9 @@ mod test {
         .unwrap();
 
         let id = Uuid::new_v4();
+        info!(log, "Ensuring new service");
         ensure_new_service(&mgr, id).await;
+        info!(log, "Ensuring existing service");
         ensure_existing_service(&mgr, id).await;
         drop_service_manager(mgr);
 
@@ -3273,94 +3225,6 @@ mod test {
         // Before we re-create the service manager - notably, using the same
         // config file! - expect that a service gets initialized.
         let _expectations = expect_new_service();
-        let mgr = ServiceManager::new(
-            &log,
-            ddmd_client,
-            bootstrap_networking,
-            SledMode::Auto,
-            Some(true),
-            SidecarRevision::Physical("rev-test".to_string()),
-            vec![],
-            resources.clone(),
-            zone_bundler.clone(),
-        );
-        test_config.override_paths(&mgr);
-
-        let port_manager = PortManager::new(
-            log.new(o!("component" => "PortManager")),
-            Ipv6Addr::new(0xfd00, 0x1de, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01),
-        );
-        mgr.sled_agent_started(
-            test_config.make_config(),
-            port_manager,
-            Ipv6Addr::LOCALHOST,
-            Uuid::new_v4(),
-            None,
-        )
-        .unwrap();
-
-        drop_service_manager(mgr);
-
-        logctx.cleanup_successful();
-    }
-
-    #[tokio::test]
-    #[serial_test::serial]
-    async fn test_services_do_not_persist_without_config() {
-        let logctx = omicron_test_utils::dev::test_setup_log(
-            "test_services_do_not_persist_without_config",
-        );
-        let log = logctx.log.clone();
-        let test_config = TestConfig::new().await;
-        let ddmd_client = DdmAdminClient::localhost(&log).unwrap();
-        let bootstrap_networking = make_bootstrap_networking_config();
-
-        // First, spin up a ServiceManager, create a new service, and tear it
-        // down.
-        let resources = StorageResources::new_for_test();
-        let zone_bundler = ZoneBundler::new(
-            log.clone(),
-            resources.clone(),
-            Default::default(),
-        );
-        let mgr = ServiceManager::new(
-            &log,
-            ddmd_client.clone(),
-            bootstrap_networking.clone(),
-            SledMode::Auto,
-            Some(true),
-            SidecarRevision::Physical("rev-test".to_string()),
-            vec![],
-            resources.clone(),
-            zone_bundler.clone(),
-        );
-        test_config.override_paths(&mgr);
-
-        let port_manager = PortManager::new(
-            log.new(o!("component" => "PortManager")),
-            Ipv6Addr::new(0xfd00, 0x1de, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01),
-        );
-        mgr.sled_agent_started(
-            test_config.make_config(),
-            port_manager,
-            Ipv6Addr::LOCALHOST,
-            Uuid::new_v4(),
-            None,
-        )
-        .unwrap();
-
-        let id = Uuid::new_v4();
-        ensure_new_service(&mgr, id).await;
-        drop_service_manager(mgr);
-
-        // Next, delete the ledger. This means the service we just created will
-        // not be remembered on the next initialization.
-        std::fs::remove_file(
-            test_config.config_dir.path().join(SERVICES_LEDGER_FILENAME),
-        )
-        .unwrap();
-
-        // Observe that the old service is not re-initialized.
         let mgr = ServiceManager::new(
             &log,
             ddmd_client,

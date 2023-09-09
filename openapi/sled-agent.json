@@ -303,8 +303,15 @@
           "required": true
         },
         "responses": {
-          "204": {
-            "description": "resource updated"
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceEnsureResponse"
+                }
+              }
+            }
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -2262,6 +2269,9 @@
         "description": "Used to request that the Sled initialize multiple services.",
         "type": "object",
         "properties": {
+          "generation": {
+            "$ref": "#/components/schemas/Generation"
+          },
           "services": {
             "type": "array",
             "items": {
@@ -2270,7 +2280,30 @@
           }
         },
         "required": [
+          "generation",
           "services"
+        ]
+      },
+      "ServiceEnsureResponse": {
+        "type": "object",
+        "properties": {
+          "generation": {
+            "$ref": "#/components/schemas/Generation"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ServiceEnsureStatus"
+          }
+        },
+        "required": [
+          "generation",
+          "status"
+        ]
+      },
+      "ServiceEnsureStatus": {
+        "type": "string",
+        "enum": [
+          "updated",
+          "not_updated"
         ]
       },
       "ServiceType": {

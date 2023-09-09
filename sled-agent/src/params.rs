@@ -8,6 +8,7 @@ pub use crate::zone_bundle::ZoneBundleId;
 pub use crate::zone_bundle::ZoneBundleMetadata;
 pub use illumos_utils::opte::params::VpcFirewallRule;
 pub use illumos_utils::opte::params::VpcFirewallRulesEnsureBody;
+use omicron_common::api::external::Generation;
 use omicron_common::api::internal::nexus::{
     DiskRuntimeState, InstanceRuntimeState,
 };
@@ -843,7 +844,23 @@ impl TryFrom<ServiceZoneService>
 /// Used to request that the Sled initialize multiple services.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 pub struct ServiceEnsureBody {
+    pub generation: Generation,
     pub services: Vec<ServiceZoneRequest>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum ServiceEnsureStatus {
+    Updated,
+    NotUpdated,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+pub struct ServiceEnsureResponse {
+    // Returns the current generation number.
+    pub generation: Generation,
+    // Identifies whether or not this request updated the services on the sled.
+    pub status: ServiceEnsureStatus,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]

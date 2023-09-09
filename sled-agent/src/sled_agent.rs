@@ -14,10 +14,11 @@ use crate::nexus::{NexusClientWithResolver, NexusRequestQueue};
 use crate::params::{
     DiskStateRequested, InstanceHardware, InstanceMigrationSourceParams,
     InstancePutStateResponse, InstanceStateRequested,
-    InstanceUnregisterResponse, ServiceEnsureBody, SledRole, TimeSync,
-    VpcFirewallRule, ZoneBundleMetadata, Zpool,
+    InstanceUnregisterResponse, ServiceEnsureBody, ServiceEnsureResponse,
+    ServiceEnsureStatus, SledRole, TimeSync, VpcFirewallRule,
+    ZoneBundleMetadata, Zpool,
 };
-use crate::services::{self, ServiceManager};
+use crate::services::{self, AllZoneRequests, ServiceManager};
 use crate::storage_manager::{self, StorageManager};
 use crate::updates::{ConfigUpdates, UpdateManager};
 use crate::zone_bundle;
@@ -42,6 +43,8 @@ use omicron_common::backoff::{
     retry_notify, retry_notify_ext, retry_policy_internal_service_aggressive,
     BackoffError,
 };
+use omicron_common::ledger::{self, Ledger};
+use once_cell::sync::OnceCell;
 use sled_hardware::underlay;
 use sled_hardware::HardwareManager;
 use slog::Logger;
@@ -80,6 +83,9 @@ pub enum Error {
 
     #[error(transparent)]
     Services(#[from] crate::services::Error),
+
+    #[error("Failed to access ledger: {0}")]
+    Ledger(#[from] ledger::Error),
 
     #[error("Failed to create Sled Subnet: {err}")]
     SledSubnet { err: illumos_utils::zone::EnsureGzAddressError },
@@ -215,6 +221,8 @@ struct SledAgentInner {
     // Other Oxide-controlled services running on this Sled.
     services: ServiceManager,
 
+    ledger_directory_override: OnceCell<Utf8PathBuf>,
+
     // Connection to Nexus.
     nexus_client: NexusClientWithResolver,
 
@@ -237,6 +245,9 @@ impl SledAgentInner {
         get_switch_zone_address(self.subnet)
     }
 }
+
+// The filename of the ledger, within the provided directory.
+const SERVICES_LEDGER_FILENAME: &str = "services.json";
 
 #[derive(Clone)]
 pub struct SledAgent {
@@ -430,6 +441,7 @@ impl SledAgent {
                 updates,
                 port_manager,
                 services,
+                ledger_directory_override: OnceCell::new(),
                 nexus_client,
 
                 // TODO(https://github.com/oxidecomputer/omicron/issues/1917):
@@ -463,9 +475,20 @@ impl SledAgent {
         retry_notify(
             retry_policy_internal_service_aggressive(),
             || async {
+                let log = &self.log;
+                let ledger_paths = self.all_service_ledgers().await;
+                info!(log, "Loading services from: {ledger_paths:?}");
+                let Some(ledger) =
+                    Ledger::<AllZoneRequests>::new(log, ledger_paths).await
+                else {
+                    info!(log, "Loading services - No services detected");
+                    return Ok(());
+                };
+                let services = ledger.data();
+
                 self.inner
                     .services
-                    .load_services()
+                    .load_services(services)
                     .await
                     .map_err(|err| BackoffError::transient(err))
             },
@@ -696,6 +719,26 @@ impl SledAgent {
         self.inner.zone_bundler.cleanup().await.map_err(Error::from)
     }
 
+    async fn all_service_ledgers(&self) -> Vec<Utf8PathBuf> {
+        if let Some(dir) = self.inner.ledger_directory_override.get() {
+            return vec![dir.join(SERVICES_LEDGER_FILENAME)];
+        }
+        self.inner
+            .storage
+            .resources()
+            .all_m2_mountpoints(sled_hardware::disk::CONFIG_DATASET)
+            .await
+            .into_iter()
+            .map(|p| p.join(SERVICES_LEDGER_FILENAME))
+            .collect()
+    }
+
+    #[cfg(test)]
+    #[allow(dead_code)]
+    fn override_ledger_directory(&self, path: Utf8PathBuf) {
+        self.inner.ledger_directory_override.set(path).unwrap();
+    }
+
     /// Ensures that particular services should be initialized.
     ///
     /// These services will be instantiated by this function, will be recorded
@@ -703,12 +746,37 @@ impl SledAgent {
     pub async fn services_ensure(
         &self,
         requested_services: ServiceEnsureBody,
-    ) -> Result<(), Error> {
+    ) -> Result<ServiceEnsureResponse, Error> {
         let datasets: Vec<_> = requested_services
             .services
             .iter()
             .filter_map(|service| service.dataset.clone())
             .collect();
+
+        let service_paths = self.all_service_ledgers().await;
+        let mut ledger = match Ledger::<AllZoneRequests>::new(
+            &self.log,
+            service_paths.clone(),
+        )
+        .await
+        {
+            Some(ledger) => {
+                // If this is an old request, ignore it.
+                if *ledger.data().generation() >= requested_services.generation
+                {
+                    return Ok(ServiceEnsureResponse {
+                        generation: *ledger.data().generation(),
+                        status: ServiceEnsureStatus::NotUpdated,
+                    });
+                }
+                ledger
+            }
+            None => Ledger::<AllZoneRequests>::new_with(
+                &self.log,
+                service_paths.clone(),
+                AllZoneRequests::default(),
+            ),
+        };
 
         // TODO:
         // - If these are the set of filesystems, we should also consider
@@ -723,11 +791,26 @@ impl SledAgent {
                 .await?;
         }
 
-        self.inner
+        let ledger_zone_requests = ledger.data_mut();
+
+        let mut zone_requests = self
+            .inner
             .services
-            .ensure_all_services_persistent(requested_services)
+            .ensure_all_services_persistent(
+                requested_services,
+                &ledger_zone_requests,
+            )
             .await?;
-        Ok(())
+
+        // Update the services in the ledger and write it back to both M.2s
+        ledger_zone_requests.requests.clear();
+        ledger_zone_requests.requests.append(&mut zone_requests.requests);
+        ledger.commit().await?;
+
+        Ok(ServiceEnsureResponse {
+            generation: *ledger.data().generation(),
+            status: ServiceEnsureStatus::Updated,
+        })
     }
 
     pub async fn cockroachdb_initialize(&self) -> Result<(), Error> {

@@ -83,6 +83,7 @@ use nexus_client::{
     types as NexusTypes, Client as NexusClient, Error as NexusError,
 };
 use omicron_common::address::get_sled_address;
+use omicron_common::api::external::Generation;
 use omicron_common::api::internal::shared::ExternalPortDiscovery;
 use omicron_common::backoff::{
     retry_notify, retry_policy_internal_service_aggressive, BackoffError,
@@ -281,13 +282,28 @@ impl ServiceInner {
 
         info!(self.log, "sending service requests...");
         let services_put = || async {
+            let mut generation = Generation::new();
             info!(self.log, "initializing sled services: {:?}", services);
-            client
-                .services_put(&SledAgentTypes::ServiceEnsureBody {
-                    services: services.clone(),
-                })
-                .await
-                .map_err(BackoffError::transient)?;
+            loop {
+                let response = client
+                    .services_put(&SledAgentTypes::ServiceEnsureBody {
+                        generation: generation.into(),
+                        services: services.clone(),
+                    })
+                    .await
+                    .map_err(BackoffError::transient)?;
+
+                match response.status {
+                    SledAgentTypes::ServiceEnsureStatus::NotUpdated => {
+                        generation = response.generation.clone().into();
+                        generation.next();
+                        continue;
+                    }
+                    SledAgentTypes::ServiceEnsureStatus::Updated => {
+                        break;
+                    }
+                }
+            }
             Ok::<(), BackoffError<SledAgentError<SledAgentTypes::Error>>>(())
         };
         let log_failure = |error, delay| {
