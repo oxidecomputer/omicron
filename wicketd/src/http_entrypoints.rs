@@ -31,6 +31,7 @@ use omicron_common::address;
 use omicron_common::api::external::SemverVersion;
 use omicron_common::api::internal::shared::RackNetworkConfig;
 use omicron_common::api::internal::shared::SwitchLocation;
+use omicron_common::update::ArtifactHashId;
 use omicron_common::update::ArtifactId;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -605,13 +606,33 @@ async fn put_repository(
     Ok(HttpResponseUpdatedNoContent())
 }
 
+#[derive(Clone, Debug, JsonSchema, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub struct InstallableArtifacts {
+    pub artifact_id: ArtifactId,
+    pub installable: Vec<ArtifactHashId>,
+}
+
 /// The response to a `get_artifacts` call: the system version, and the list of
 /// all artifacts currently held by wicketd.
 #[derive(Clone, Debug, JsonSchema, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub struct GetArtifactsAndEventReportsResponse {
     pub system_version: Option<SemverVersion>,
-    pub artifacts: Vec<ArtifactId>,
+
+    /// Map of artifacts we ingested from the most-recently-uploaded TUF
+    /// repository to a list of artifacts we're serving over the bootstrap
+    /// network. In some cases the list of artifacts being served will have
+    /// length 1 (when we're serving the artifact directly); in other cases the
+    /// artifact in the TUF repo contains multiple nested artifacts inside it
+    /// (e.g., RoT artifacts contain both A and B images), and we serve the list
+    /// of extracted artifacts but not the original combination.
+    ///
+    /// Conceptually, this is a `BTreeMap<ArtifactId, Vec<ArtifactHashId>>`, but
+    /// JSON requires string keys for maps, so we give back a vec of pairs
+    /// instead.
+    pub artifacts: Vec<InstallableArtifacts>,
+
     pub event_reports: BTreeMap<SpType, BTreeMap<u32, EventReport>>,
 }
 
