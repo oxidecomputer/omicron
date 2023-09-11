@@ -10,8 +10,8 @@ use hyper::Body;
 use installinator_artifactd::ArtifactGetter;
 use installinator_artifactd::EventReportStatus;
 use omicron_common::update::ArtifactHashId;
-use slog::Logger;
 use slog::error;
+use slog::Logger;
 use uuid::Uuid;
 
 /// The artifact server interface for wicketd.
