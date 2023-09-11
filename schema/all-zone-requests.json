@@ -720,6 +720,7 @@
       "minimum": 0.0
     },
     "ZoneRequest": {
+      "description": "The combo of \"what zone did you ask for\" + \"where did we put it\".",
       "type": "object",
       "required": [
         "root",

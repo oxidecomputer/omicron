@@ -18,7 +18,8 @@ use crate::params::{
     ServiceEnsureStatus, SledRole, TimeSync, VpcFirewallRule,
     ZoneBundleMetadata, Zpool,
 };
-use crate::services::{self, AllZoneRequests, ServiceManager};
+use crate::services::{self, ServiceManager};
+use crate::services_ledger::AllZoneRequests;
 use crate::storage_manager::{self, StorageManager};
 use crate::updates::{ConfigUpdates, UpdateManager};
 use crate::zone_bundle;
@@ -221,6 +222,7 @@ struct SledAgentInner {
     // Other Oxide-controlled services running on this Sled.
     services: ServiceManager,
 
+    // A test override option to change where ledgers are stored.
     ledger_directory_override: OnceCell<Utf8PathBuf>,
 
     // Connection to Nexus.
@@ -769,9 +771,9 @@ impl SledAgent {
         {
             Some(ledger) => {
                 // If this is an old request, ignore it.
-                if ledger.data().generation >= requested_generation {
+                if *ledger.data().generation() >= requested_generation {
                     return Ok(ServiceEnsureResponse {
-                        generation: ledger.data().generation,
+                        generation: *ledger.data().generation(),
                         status: ServiceEnsureStatus::NotUpdated,
                     });
                 }
@@ -799,28 +801,27 @@ impl SledAgent {
 
         let ledger_zone_requests = ledger.data_mut();
 
-        let mut zone_requests = self
+        let zone_requests = self
             .inner
             .services
-            .ensure_all_services_persistent(
-                requested_services,
-                &ledger_zone_requests,
-            )
+            .ensure_all_services(requested_services, &ledger_zone_requests)
             .await?;
 
         // Update the services in the ledger and write it back to both M.2s
-        ledger_zone_requests.requests.clear();
-        ledger_zone_requests.requests.append(&mut zone_requests.requests);
+        ledger_zone_requests.requests_mut().clear();
+        ledger_zone_requests
+            .requests_mut()
+            .append(&mut zone_requests.take_requests());
         ledger.commit().await?;
 
         // If we are asked to skip a generation, we should abide, and
         // jump to the latest number provided.
-        if ledger.data().generation < requested_generation {
-            ledger.data_mut().generation = requested_generation;
+        if *ledger.data().generation() < requested_generation {
+            ledger.data_mut().set_generation(requested_generation);
         }
 
         Ok(ServiceEnsureResponse {
-            generation: ledger.data().generation,
+            generation: *ledger.data().generation(),
             status: ServiceEnsureStatus::Updated,
         })
     }
