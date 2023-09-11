@@ -50,7 +50,22 @@ struct ArtifactsWithPlan {
     // The sum of the lengths of the values of this map will match the number of
     // entries in `by_hash`.
     by_id: BTreeMap<ArtifactId, Vec<ArtifactHashId>>,
+
+    // Map of the artifact hashes (and their associated kind) that we extracted
+    // from a TUF repository to a handle to the data of that artifact.
+    //
+    // An example of the difference between `by_id` and `by_hash`: An uploaded
+    // TUF repository will contain an artifact for the host OS (i.e.,
+    // `KnownArtifactKind::Host`). On ingest, we will unpack that artifact into
+    // the parts it contains: a phase 1 image (`ArtifactKind::HOST_PHASE_1`) and
+    // a phase 2 image (`ArtifactKind::HOST_PHASE_2`). We will hash each of
+    // those images and store them in a temporary directory. `by_id` will
+    // contain a single entry mapping the original TUF repository artifact ID
+    // to the two `ArtifactHashId`s extracted from that artifact, and `by_hash`
+    // will contain two entries mapping each of the images to their data.
     by_hash: DebugIgnore<HashMap<ArtifactHashId, ExtractedArtifactDataHandle>>,
+
+    // The plan to use to update a component within the rack.
     plan: UpdatePlan,
 }
 

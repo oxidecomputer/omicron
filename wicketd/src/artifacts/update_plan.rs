@@ -50,9 +50,22 @@ pub(super) struct UpdatePlanBuilder<'a> {
     sidecar_sp: BTreeMap<Board, ArtifactIdData>,
     sidecar_rot_a: Option<ArtifactIdData>,
     sidecar_rot_b: Option<ArtifactIdData>,
+
+    // We always send phase 1 images (regardless of host or trampoline) to the
+    // SP via MGS, so we retain their data.
     host_phase_1: Option<ArtifactIdData>,
     trampoline_phase_1: Option<ArtifactIdData>,
+
+    // Trampoline phase 2 images must be sent to MGS so that the SP is able to
+    // fetch it on demand while the trampoline OS is booting, so we need the
+    // data to send to MGS when we start an update.
     trampoline_phase_2: Option<ArtifactIdData>,
+
+    // In contrast to the trampoline phase 2 image, the host phase 2 image and
+    // the control plane are fetched by installinator from us over the bootstrap
+    // network. The only information we have to send to the SP via MGS is the
+    // hash of these two artifacts; we still hold the data in our `by_hash` map
+    // we build below, but we don't need the data when driving an update.
     host_phase_2_hash: Option<ArtifactHash>,
     control_plane_hash: Option<ArtifactHash>,
 
@@ -109,6 +122,10 @@ impl<'a> UpdatePlanBuilder<'a> {
             );
         };
 
+        // If we do know the artifact kind, we may have additional work to do,
+        // so we break each out into its own method. The particulars of that
+        // work varies based on the kind of artifact; for example, we have to
+        // unpack RoT artifacts into the A and B images they contain.
         match artifact_kind {
             KnownArtifactKind::GimletSp
             | KnownArtifactKind::PscSp
