@@ -417,9 +417,9 @@ checksum = "9e1b586273c5702936fe7b7d6896644d8be71e6314cfe09d3167c95f712589e8"
 
 [[package]]
 name = "base64"
-version = "0.21.3"
+version = "0.21.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "414dcefbc63d77c526a76b3afcf6fbb9b5e2791c19c3aa2297733208750c6e53"
+checksum = "9ba43ea6f343b788c8764558649e08df62f86c6ef251fdaeb1ffd010a9ae50a2"
 
 [[package]]
 name = "base64ct"
@@ -731,9 +731,9 @@ checksum = "14c189c53d098945499cdfa7ecc63567cf3886b3332b312a5b4585d8d3a6a610"
 
 [[package]]
 name = "bytes"
-version = "1.4.0"
+version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "89b2fd2a0dcf38d7971e2194b6b6eebab45ae01067456a7fd93d5547a61b70be"
+checksum = "a2bd12c1caf447e69cd4528f47f94d203fd2582878ecb9e9465484c4148a8223"
 dependencies = [
  "serde",
 ]
@@ -1384,7 +1384,7 @@ dependencies = [
  "anyhow",
  "async-recursion",
  "async-trait",
- "base64 0.21.3",
+ "base64 0.21.4",
  "bytes",
  "chrono",
  "crucible-client-types",
@@ -1439,7 +1439,7 @@ name = "crucible-client-types"
 version = "0.1.0"
 source = "git+https://github.com/oxidecomputer/crucible?rev=5dc77d87dec8bbf56a603821d67ad13f47f99f95#5dc77d87dec8bbf56a603821d67ad13f47f99f95"
 dependencies = [
- "base64 0.21.3",
+ "base64 0.21.4",
  "schemars",
  "serde",
  "serde_json",
@@ -1565,9 +1565,9 @@ dependencies = [
 
 [[package]]
 name = "curve25519-dalek"
-version = "4.0.0"
+version = "4.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f711ade317dd348950a9910f81c5947e3d8907ebd2b83f76203ff1807e6a2bc2"
+checksum = "622178105f911d937a42cdb140730ba4a3ed2becd8ae6ce39c7d28b5d75d4588"
 dependencies = [
  "cfg-if 1.0.0",
  "cpufeatures",
@@ -2086,11 +2086,11 @@ dependencies = [
 [[package]]
 name = "dropshot"
 version = "0.9.1-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#674642ed6fff7db222a97a73cfc6e6d4d67ecf88"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#99cea069c61d1ff5be0ff4f9d338f24bbea93128"
 dependencies = [
  "async-stream",
  "async-trait",
- "base64 0.21.3",
+ "base64 0.21.4",
  "bytes",
  "camino",
  "chrono",
@@ -2131,7 +2131,7 @@ dependencies = [
 [[package]]
 name = "dropshot_endpoint"
 version = "0.9.1-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#674642ed6fff7db222a97a73cfc6e6d4d67ecf88"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#99cea069c61d1ff5be0ff4f9d338f24bbea93128"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2244,7 +2244,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
- "base64 0.21.3",
+ "base64 0.21.4",
  "camino",
  "chrono",
  "futures",
@@ -2425,9 +2425,9 @@ dependencies = [
 
 [[package]]
 name = "fiat-crypto"
-version = "0.1.20"
+version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e825f6987101665dea6ec934c09ec6d721de7bc1bf92248e1d5810c8cd636b77"
+checksum = "d0870c84016d4b481be5c9f323c24f65e31e901ae618f0e80f4308fb00de1d2d"
 
 [[package]]
 name = "filetime"
@@ -2701,7 +2701,7 @@ dependencies = [
 name = "gateway-client"
 version = "0.1.0"
 dependencies = [
- "base64 0.21.3",
+ "base64 0.21.4",
  "chrono",
  "progenitor",
  "rand 0.8.5",
@@ -2950,7 +2950,7 @@ version = "0.3.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "06683b93020a07e3dbcf5f8c0f6d40080d725bea7936fc01ad345c01b97dc270"
 dependencies = [
- "base64 0.21.3",
+ "base64 0.21.4",
  "bytes",
  "headers-core",
  "http",
@@ -4264,7 +4264,7 @@ dependencies = [
  "async-bb8-diesel",
  "async-trait",
  "authz-macros",
- "base64 0.21.3",
+ "base64 0.21.4",
  "bb8",
  "chrono",
  "cookie",
@@ -4411,7 +4411,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "api_identity 0.1.0",
- "base64 0.21.3",
+ "base64 0.21.4",
  "chrono",
  "dns-service-client 0.1.0",
  "futures",
@@ -4873,7 +4873,7 @@ dependencies = [
  "assert_matches",
  "async-bb8-diesel",
  "async-trait",
- "base64 0.21.3",
+ "base64 0.21.4",
  "bb8",
  "camino",
  "cancel-safe-futures",
@@ -5049,7 +5049,7 @@ dependencies = [
  "anyhow",
  "assert_matches",
  "async-trait",
- "base64 0.21.3",
+ "base64 0.21.4",
  "bincode",
  "bootstore",
  "bootstrap-agent-client",
@@ -5250,9 +5250,9 @@ checksum = "ff011a302c396a5197692431fc1948019154afc178baf7d8e37367442a4601cf"
 
 [[package]]
 name = "openssl-sys"
-version = "0.9.92"
+version = "0.9.93"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "db7e971c2c2bba161b2d2fdf37080177eff520b3bc044787c7f1f5f9e78d869b"
+checksum = "db4d56a4c0478783083cfafcc42493dd4a981d41669da64b4572a2a089b51b1d"
 dependencies = [
  "cc",
  "libc",
@@ -5352,7 +5352,7 @@ name = "oxide-client"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "base64 0.21.3",
+ "base64 0.21.4",
  "chrono",
  "futures",
  "http",
@@ -6006,7 +6006,7 @@ version = "0.6.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "49b6c5ef183cd3ab4ba005f1ca64c21e8bd97ce4699cfea9e8d9a2c4958ca520"
 dependencies = [
- "base64 0.21.3",
+ "base64 0.21.4",
  "byteorder",
  "bytes",
  "fallible-iterator",
@@ -6176,7 +6176,7 @@ dependencies = [
 [[package]]
 name = "progenitor"
 version = "0.3.0"
-source = "git+https://github.com/oxidecomputer/progenitor?branch=main#ca8b4ef6f84760d493001aabee3826e315a84d05"
+source = "git+https://github.com/oxidecomputer/progenitor?branch=main#fa9329ea7aef75cdce6aa7f325c4306641fbc8e6"
 dependencies = [
  "progenitor-client",
  "progenitor-impl",
@@ -6187,7 +6187,7 @@ dependencies = [
 [[package]]
 name = "progenitor-client"
 version = "0.3.0"
-source = "git+https://github.com/oxidecomputer/progenitor?branch=main#ca8b4ef6f84760d493001aabee3826e315a84d05"
+source = "git+https://github.com/oxidecomputer/progenitor?branch=main#fa9329ea7aef75cdce6aa7f325c4306641fbc8e6"
 dependencies = [
  "bytes",
  "futures-core",
@@ -6201,7 +6201,7 @@ dependencies = [
 [[package]]
 name = "progenitor-impl"
 version = "0.3.0"
-source = "git+https://github.com/oxidecomputer/progenitor?branch=main#ca8b4ef6f84760d493001aabee3826e315a84d05"
+source = "git+https://github.com/oxidecomputer/progenitor?branch=main#fa9329ea7aef75cdce6aa7f325c4306641fbc8e6"
 dependencies = [
  "getopts",
  "heck 0.4.1",
@@ -6223,7 +6223,7 @@ dependencies = [
 [[package]]
 name = "progenitor-macro"
 version = "0.3.0"
-source = "git+https://github.com/oxidecomputer/progenitor?branch=main#ca8b4ef6f84760d493001aabee3826e315a84d05"
+source = "git+https://github.com/oxidecomputer/progenitor?branch=main#fa9329ea7aef75cdce6aa7f325c4306641fbc8e6"
 dependencies = [
  "openapiv3",
  "proc-macro2",
@@ -6276,7 +6276,7 @@ version = "0.1.0"
 source = "git+https://github.com/oxidecomputer/propolis?rev=f78820b1e1510e02dec63c6578c91a469d9f3aa4#f78820b1e1510e02dec63c6578c91a469d9f3aa4"
 dependencies = [
  "async-trait",
- "base64 0.21.3",
+ "base64 0.21.4",
  "crucible-client-types",
  "futures",
  "progenitor",
@@ -6302,7 +6302,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "atty",
- "base64 0.21.3",
+ "base64 0.21.4",
  "bit_field",
  "bitvec",
  "bytes",
@@ -6735,7 +6735,7 @@ version = "0.11.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3e9ad3fe7488d7e34558a2033d45a0c90b72d97b4f80705666fea71472e2e6a1"
 dependencies = [
- "base64 0.21.3",
+ "base64 0.21.4",
  "bytes",
  "encoding_rs",
  "futures-core",
@@ -6836,7 +6836,7 @@ version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b91f7eff05f748767f183df4320a63d6936e9c6107d97c9e6bdd9784f4289c94"
 dependencies = [
- "base64 0.21.3",
+ "base64 0.21.4",
  "bitflags 2.4.0",
  "serde",
  "serde_derive",
@@ -6988,7 +6988,7 @@ version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a5885493fdf0be6cdff808d1533ce878d21cfa49c7086fa00c66355cd9141bfc"
 dependencies = [
- "base64 0.21.3",
+ "base64 0.21.4",
  "blake2b_simd",
  "constant_time_eq 0.3.0",
  "crossbeam-utils",
@@ -7106,7 +7106,7 @@ version = "1.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2d3987094b1d07b653b7dfdc3f70ce9a1da9c51ac18c1b06b662e4f9a0e9f4b2"
 dependencies = [
- "base64 0.21.3",
+ "base64 0.21.4",
 ]
 
 [[package]]
@@ -7177,7 +7177,7 @@ name = "samael"
 version = "0.0.10"
 source = "git+https://github.com/njaremko/samael?branch=master#52028e45d11ceb7114bf0c730a9971207e965602"
 dependencies = [
- "base64 0.21.3",
+ "base64 0.21.4",
  "bindgen",
  "chrono",
  "data-encoding",
@@ -7422,9 +7422,9 @@ dependencies = [
 
 [[package]]
 name = "serde_json"
-version = "1.0.105"
+version = "1.0.106"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "693151e1ac27563d6dbcec9dee9fbd5da8539b20fa14ad3752b2e6d363ace360"
+checksum = "2cc66a619ed80bf7a0f6b17dd063a84b88f6dea1813737cf469aef1d081142c2"
 dependencies = [
  "itoa",
  "ryu",
@@ -8934,9 +8934,9 @@ checksum = "3528ecfd12c466c6f163363caf2d02a71161dd5e1cc6ae7b34207ea2d42d81ed"
 
 [[package]]
 name = "trybuild"
-version = "1.0.83"
+version = "1.0.84"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6df60d81823ed9c520ee897489573da4b1d79ffbe006b8134f46de1a1aa03555"
+checksum = "a5c89fd17b7536f2cf66c97cff6e811e89e728ca0ed13caeed610c779360d8b4"
 dependencies = [
  "basic-toml",
  "glob",
@@ -9085,7 +9085,7 @@ checksum = "497961ef93d974e23eb6f433eb5fe1b7930b659f06d12dec6fc44a8f554c0bba"
 [[package]]
 name = "typify"
 version = "0.0.13"
-source = "git+https://github.com/oxidecomputer/typify#17029cef776b604573d558a41cb19287022b3333"
+source = "git+https://github.com/oxidecomputer/typify#6cd9a7164a83169945be0bf697a43e6a7488fa31"
 dependencies = [
  "typify-impl",
  "typify-macro",
@@ -9094,7 +9094,7 @@ dependencies = [
 [[package]]
 name = "typify-impl"
 version = "0.0.13"
-source = "git+https://github.com/oxidecomputer/typify#17029cef776b604573d558a41cb19287022b3333"
+source = "git+https://github.com/oxidecomputer/typify#6cd9a7164a83169945be0bf697a43e6a7488fa31"
 dependencies = [
  "heck 0.4.1",
  "log",
@@ -9111,7 +9111,7 @@ dependencies = [
 [[package]]
 name = "typify-macro"
 version = "0.0.13"
-source = "git+https://github.com/oxidecomputer/typify#17029cef776b604573d558a41cb19287022b3333"
+source = "git+https://github.com/oxidecomputer/typify#6cd9a7164a83169945be0bf697a43e6a7488fa31"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -9442,9 +9442,9 @@ dependencies = [
 
 [[package]]
 name = "walkdir"
-version = "2.3.3"
+version = "2.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "36df944cda56c7d8d8b7496af378e6b16de9284591917d307c9b4d313c44e698"
+checksum = "d71d857dc86794ca4c280d616f7da00d2dbfd8cd788846559a6813e6aa4b54ee"
 dependencies = [
  "same-file",
  "winapi-util",

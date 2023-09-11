@@ -134,7 +134,7 @@ async-bb8-diesel = { git = "https://github.com/oxidecomputer/async-bb8-diesel", 
 async-trait = "0.1.73"
 authz-macros = { path = "nexus/authz-macros" }
 backoff = { version = "0.4.0", features = [ "tokio" ] }
-base64 = "0.21.3"
+base64 = "0.21.4"
 bb8 = "0.8.1"
 bcs = "0.1.5"
 bincode = "1.3.3"
@@ -142,7 +142,7 @@ bootstore = { path = "bootstore" }
 bootstrap-agent-client = { path = "bootstrap-agent-client" }
 buf-list = { version = "1.0.3", features = ["tokio1"] }
 byteorder = "1.4.3"
-bytes = "1.4.0"
+bytes = "1.5.0"
 bytesize = "1.3.0"
 camino = "1.1"
 camino-tempfile = "1.0.2"
@@ -294,7 +294,7 @@ semver = { version = "1.0.18", features = ["std", "serde"] }
 serde = { version = "1.0", default-features = false, features = [ "derive" ] }
 serde_derive = "1.0"
 serde_human_bytes = { git = "http://github.com/oxidecomputer/serde_human_bytes", branch = "main" }
-serde_json = "1.0.105"
+serde_json = "1.0.106"
 serde_path_to_error = "0.1.14"
 serde_tokenstream = "0.2"
 serde_urlencoded = "0.7.1"
@@ -351,7 +351,7 @@ trust-dns-client = "0.22"
 trust-dns-proto = "0.22"
 trust-dns-resolver = "0.22"
 trust-dns-server = "0.22"
-trybuild = "1.0.83"
+trybuild = "1.0.84"
 tufaceous = { path = "tufaceous" }
 tufaceous-lib = { path = "tufaceous-lib" }
 tui = "0.19.0"
@@ -359,7 +359,7 @@ unicode-width = "0.1.10"
 update-engine = { path = "update-engine" }
 uuid = { version = "1.4.1", features = ["serde", "v4"] }
 usdt = "0.3"
-walkdir = "2.3"
+walkdir = "2.4"
 wicket = { path = "wicket" }
 wicket-common = { path = "wicket-common" }
 wicketd-client = { path = "wicketd-client" }
