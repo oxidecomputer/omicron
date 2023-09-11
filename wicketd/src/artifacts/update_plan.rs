@@ -146,23 +146,17 @@ impl<'a> UpdatePlanBuilder<'a> {
                 by_id,
                 by_hash,
             ),
-            KnownArtifactKind::Host => self.add_host_artifact(
-                artifact_id,
-                artifact_kind,
-                reader,
-                by_id,
-                by_hash,
-            ),
+            KnownArtifactKind::Host => {
+                self.add_host_artifact(artifact_id, reader, by_id, by_hash)
+            }
             KnownArtifactKind::Trampoline => self.add_trampoline_artifact(
                 artifact_id,
-                artifact_kind,
                 reader,
                 by_id,
                 by_hash,
             ),
             KnownArtifactKind::ControlPlane => self.add_control_plane_artifact(
                 artifact_id,
-                artifact_kind,
                 artifact_hash,
                 reader,
                 by_id,
@@ -329,21 +323,19 @@ impl<'a> UpdatePlanBuilder<'a> {
     fn add_host_artifact(
         &mut self,
         artifact_id: ArtifactId,
-        artifact_kind: KnownArtifactKind,
         reader: io::BufReader<impl io::Read>,
         by_id: &mut BTreeMap<ArtifactId, Vec<ArtifactHashId>>,
         by_hash: &mut HashMap<ArtifactHashId, ExtractedArtifactDataHandle>,
     ) -> Result<(), RepositoryError> {
-        // We're only called for host (not trampoline!) artifacts.
-        assert_eq!(artifact_kind, KnownArtifactKind::Host);
-
         if self.host_phase_1.is_some() || self.host_phase_2_hash.is_some() {
-            return Err(RepositoryError::DuplicateArtifactKind(artifact_kind));
+            return Err(RepositoryError::DuplicateArtifactKind(
+                KnownArtifactKind::Host,
+            ));
         }
 
         let (phase_1_data, phase_2_data) = Self::extract_nested_artifact_pair(
             &mut self.extracted_artifacts,
-            artifact_kind,
+            KnownArtifactKind::Host,
             |out_1, out_2| HostPhaseImages::extract_into(reader, out_1, out_2),
         )?;
 
@@ -382,23 +374,21 @@ impl<'a> UpdatePlanBuilder<'a> {
     fn add_trampoline_artifact(
         &mut self,
         artifact_id: ArtifactId,
-        artifact_kind: KnownArtifactKind,
         reader: io::BufReader<impl io::Read>,
         by_id: &mut BTreeMap<ArtifactId, Vec<ArtifactHashId>>,
         by_hash: &mut HashMap<ArtifactHashId, ExtractedArtifactDataHandle>,
     ) -> Result<(), RepositoryError> {
-        // We're only called for trampoline (not host!) artifacts.
-        assert_eq!(artifact_kind, KnownArtifactKind::Trampoline);
-
         if self.trampoline_phase_1.is_some()
             || self.trampoline_phase_2.is_some()
         {
-            return Err(RepositoryError::DuplicateArtifactKind(artifact_kind));
+            return Err(RepositoryError::DuplicateArtifactKind(
+                KnownArtifactKind::Trampoline,
+            ));
         }
 
         let (phase_1_data, phase_2_data) = Self::extract_nested_artifact_pair(
             &mut self.extracted_artifacts,
-            artifact_kind,
+            KnownArtifactKind::Trampoline,
             |out_1, out_2| HostPhaseImages::extract_into(reader, out_1, out_2),
         )?;
 
@@ -444,16 +434,15 @@ impl<'a> UpdatePlanBuilder<'a> {
     fn add_control_plane_artifact(
         &mut self,
         artifact_id: ArtifactId,
-        artifact_kind: KnownArtifactKind,
         artifact_hash: ArtifactHash,
         reader: io::BufReader<impl io::Read>,
         by_id: &mut BTreeMap<ArtifactId, Vec<ArtifactHashId>>,
         by_hash: &mut HashMap<ArtifactHashId, ExtractedArtifactDataHandle>,
     ) -> Result<(), RepositoryError> {
-        // We're only called for control plane artifacts.
-        assert_eq!(artifact_kind, KnownArtifactKind::ControlPlane);
         if self.control_plane_hash.is_some() {
-            return Err(RepositoryError::DuplicateArtifactKind(artifact_kind));
+            return Err(RepositoryError::DuplicateArtifactKind(
+                KnownArtifactKind::ControlPlane,
+            ));
         }
 
         // The control plane artifact is the easiest one: we just need to copy
@@ -472,7 +461,7 @@ impl<'a> UpdatePlanBuilder<'a> {
             by_id,
             by_hash,
             data,
-            artifact_kind.into(),
+            KnownArtifactKind::ControlPlane.into(),
             self.log,
         )?;
 
