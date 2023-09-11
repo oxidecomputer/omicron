@@ -61,6 +61,11 @@ impl Artifact {
             kind: self.kind.clone(),
         }
     }
+
+    /// Returns the artifact ID for this artifact without clones.
+    pub fn into_id(self) -> ArtifactId {
+        ArtifactId { name: self.name, version: self.version, kind: self.kind }
+    }
 }
 
 /// An identifier for an artifact.

@@ -2,10 +2,10 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use super::RepositoryError;
+use super::error::RepositoryError;
 use anyhow::Context;
-use bytes::Bytes;
 use camino::Utf8PathBuf;
+use camino_tempfile::NamedUtf8TempFile;
 use camino_tempfile::Utf8TempDir;
 use omicron_common::update::ArtifactHash;
 use omicron_common::update::ArtifactHashId;
@@ -65,13 +65,6 @@ impl ExtractedArtifactDataHandle {
         self.file_size
     }
 
-    pub(super) fn read_to_vec(&self) -> Result<Vec<u8>, RepositoryError> {
-        let path = path_for_artifact(&self.tempdir, &self.hash_id);
-        std::fs::read(&path).map_err(|error| {
-            RepositoryError::ReadExtractedArtifact { path, error }
-        })
-    }
-
     pub(crate) fn hash(&self) -> ArtifactHash {
         self.hash_id.hash
     }
@@ -96,12 +89,12 @@ impl ExtractedArtifactDataHandle {
 /// `ExtractedArtifacts` is a temporary wrapper around a `Utf8TempDir` for use
 /// when ingesting a new TUF repository.
 ///
-/// It provides methods to copy artifacts into the tempdir (`store` and
-/// `store_and_hash`) that return `ExtractedArtifactDataHandle`. The handles
-/// keep shared references to the `Utf8TempDir`, so it will not be removed until
-/// all handles are dropped (e.g., when a new TUF repository is uploaded). The
-/// handles can be used to on-demand read files that were copied into the temp
-/// dir during ingest.
+/// It provides methods to copy artifacts into the tempdir (`store` and the
+/// combo of `new_tempfile` + `store_tempfile`) that return
+/// `ExtractedArtifactDataHandle`. The handles keep shared references to the
+/// `Utf8TempDir`, so it will not be removed until all handles are dropped
+/// (e.g., when a new TUF repository is uploaded). The handles can be used to
+/// on-demand read files that were copied into the temp dir during ingest.
 #[derive(Debug)]
 pub(crate) struct ExtractedArtifacts {
     // Directory in which we store extracted artifacts. This is currently a
@@ -123,6 +116,13 @@ impl ExtractedArtifacts {
         Ok(Self { tempdir: Arc::new(tempdir) })
     }
 
+    fn path_for_artifact(
+        &self,
+        artifact_hash_id: &ArtifactHashId,
+    ) -> Utf8PathBuf {
+        self.tempdir.path().join(format!("{}", artifact_hash_id.hash))
+    }
+
     /// Copy from `reader` into our temp directory, returning a handle to the
     /// extracted artifact on success.
     pub(super) fn store(
@@ -130,8 +130,7 @@ impl ExtractedArtifacts {
         artifact_hash_id: ArtifactHashId,
         mut reader: impl Read,
     ) -> Result<ExtractedArtifactDataHandle, RepositoryError> {
-        let output_path =
-            self.tempdir.path().join(format!("{}", artifact_hash_id.hash));
+        let output_path = self.path_for_artifact(&artifact_hash_id);
 
         let mut writer = BufWriter::new(
             File::create(&output_path)
@@ -166,16 +165,64 @@ impl ExtractedArtifacts {
         })
     }
 
-    /// Copy from `bytes` into our temp directory while computing its artifact
-    /// hash.
-    pub(super) fn store_and_hash(
-        &mut self,
+    /// Create a new temporary file inside this temporary directory.
+    ///
+    /// As the returned file is written to, the data will be hashed; once
+    /// writing is complete, call [`ExtractedArtifacts::store_tempfile()`] to
+    /// persist the temporary file into an [`ExtractedArtifactDataHandle()`].
+    pub(super) fn new_tempfile(
+        &self,
+    ) -> Result<HashingNamedUtf8TempFile, RepositoryError> {
+        let file = NamedUtf8TempFile::new_in(self.tempdir.path()).map_err(
+            |error| RepositoryError::TempFileCreate {
+                path: self.tempdir.path().to_owned(),
+                error,
+            },
+        )?;
+        Ok(HashingNamedUtf8TempFile {
+            file: io::BufWriter::new(file),
+            hasher: Sha256::new(),
+            bytes_written: 0,
+        })
+    }
+
+    /// Persist a temporary file that was returned by
+    /// [`ExtractedArtifacts::new_tempfile()`] as an extracted artifact.
+    pub(super) fn store_tempfile(
+        &self,
         kind: ArtifactKind,
-        data: &Bytes,
+        file: HashingNamedUtf8TempFile,
     ) -> Result<ExtractedArtifactDataHandle, RepositoryError> {
-        let hash = ArtifactHash(Sha256::digest(data).into());
+        let HashingNamedUtf8TempFile { file, hasher, bytes_written } = file;
+
+        // We don't need to `.flush()` explicitly: `into_inner()` does that for
+        // us.
+        let file = file
+            .into_inner()
+            .context("failed to flush temp file")
+            .map_err(|error| RepositoryError::CopyExtractedArtifact {
+                kind: kind.clone(),
+                error,
+            })?;
+
+        let hash = ArtifactHash(hasher.finalize().into());
         let artifact_hash_id = ArtifactHashId { kind, hash };
-        self.store(artifact_hash_id, io::Cursor::new(data))
+        let output_path = self.path_for_artifact(&artifact_hash_id);
+        file.persist(&output_path)
+            .map_err(|error| error.error)
+            .with_context(|| {
+                format!("failed to persist temp file to {output_path}")
+            })
+            .map_err(|error| RepositoryError::CopyExtractedArtifact {
+                kind: artifact_hash_id.kind.clone(),
+                error,
+            })?;
+
+        Ok(ExtractedArtifactDataHandle {
+            tempdir: Arc::clone(&self.tempdir),
+            file_size: bytes_written,
+            hash_id: artifact_hash_id,
+        })
     }
 }
 
@@ -184,4 +231,24 @@ fn path_for_artifact(
     artifact_hash_id: &ArtifactHashId,
 ) -> Utf8PathBuf {
     tempdir.path().join(format!("{}", artifact_hash_id.hash))
+}
+
+// Wrapper around a `NamedUtf8TempFile` that hashes contents as they're written.
+pub(super) struct HashingNamedUtf8TempFile {
+    file: io::BufWriter<NamedUtf8TempFile>,
+    hasher: Sha256,
+    bytes_written: usize,
+}
+
+impl Write for HashingNamedUtf8TempFile {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        let n = self.file.write(buf)?;
+        self.hasher.update(&buf[..n]);
+        self.bytes_written += n;
+        Ok(n)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.file.flush()
+    }
 }
