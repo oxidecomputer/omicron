@@ -359,7 +359,7 @@ unicode-width = "0.1.10"
 update-engine = { path = "update-engine" }
 uuid = { version = "1.4.1", features = ["serde", "v4"] }
 usdt = "0.3"
-walkdir = "2.3"
+walkdir = "2.4"
 wicket = { path = "wicket" }
 wicket-common = { path = "wicket-common" }
 wicketd-client = { path = "wicketd-client" }
