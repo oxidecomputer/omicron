@@ -8,13 +8,12 @@
 //! apply to which components; the ordering and application of the plan lives
 //! elsewhere.
 
+use super::error::RepositoryError;
 use super::extracted_artifacts::ExtractedArtifacts;
 use super::extracted_artifacts::HashingNamedUtf8TempFile;
 use super::ArtifactIdData;
 use super::Board;
 use super::ExtractedArtifactDataHandle;
-use super::RepositoryError;
-use super::UpdatePlan;
 use anyhow::anyhow;
 use hubtools::RawHubrisArchive;
 use omicron_common::api::external::SemverVersion;
@@ -32,6 +31,48 @@ use std::io;
 use std::io::Read;
 use tufaceous_lib::HostPhaseImages;
 use tufaceous_lib::RotArchives;
+
+/// The update plan currently in effect.
+///
+/// Exposed for testing.
+#[derive(Debug, Clone)]
+pub struct UpdatePlan {
+    pub(crate) system_version: SemverVersion,
+    pub(crate) gimlet_sp: BTreeMap<Board, ArtifactIdData>,
+    pub(crate) gimlet_rot_a: ArtifactIdData,
+    pub(crate) gimlet_rot_b: ArtifactIdData,
+    pub(crate) psc_sp: BTreeMap<Board, ArtifactIdData>,
+    pub(crate) psc_rot_a: ArtifactIdData,
+    pub(crate) psc_rot_b: ArtifactIdData,
+    pub(crate) sidecar_sp: BTreeMap<Board, ArtifactIdData>,
+    pub(crate) sidecar_rot_a: ArtifactIdData,
+    pub(crate) sidecar_rot_b: ArtifactIdData,
+
+    // Note: The Trampoline image is broken into phase1/phase2 as part of our
+    // update plan (because they go to different destinations), but the two
+    // phases will have the _same_ `ArtifactId` (i.e., the ID of the Host
+    // artifact from the TUF repository.
+    //
+    // The same would apply to the host phase1/phase2, but we don't actually
+    // need the `host_phase_2` data as part of this plan (we serve it from the
+    // artifact server instead).
+    pub(crate) host_phase_1: ArtifactIdData,
+    pub(crate) trampoline_phase_1: ArtifactIdData,
+    pub(crate) trampoline_phase_2: ArtifactIdData,
+
+    // We need to send installinator the hash of the host_phase_2 data it should
+    // fetch from us; we compute it while generating the plan.
+    //
+    // This is exposed for testing.
+    pub host_phase_2_hash: ArtifactHash,
+
+    // We also need to send installinator the hash of the control_plane image it
+    // should fetch from us. This is already present in the TUF repository, but
+    // we record it here for use by the update process.
+    //
+    // This is exposed for testing.
+    pub control_plane_hash: ArtifactHash,
+}
 
 /// `UpdatePlanBuilder` mirrors all the fields of `UpdatePlan`, but they're all
 /// optional: it can be filled in as we read a TUF repository.
