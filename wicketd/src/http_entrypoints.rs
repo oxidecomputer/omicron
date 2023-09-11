@@ -577,8 +577,7 @@ async fn put_repository(
     let mut tempfile =
         tokio::io::BufWriter::new(tokio::fs::File::from_std(tempfile));
 
-    let body = body.into_stream();
-    tokio::pin!(body);
+    let mut body = std::pin::pin!(body.into_stream());
 
     // Stream the uploaded body into our tempfile.
     while let Some(bytes) = body.try_next().await? {
