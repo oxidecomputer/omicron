@@ -551,6 +551,11 @@ impl RepositoryError {
     }
 }
 
+/// A pair containing both the ID of an artifact and a handle to its data.
+///
+/// Note that cloning an `ArtifactIdData` will clone the handle, which has
+/// implications on temporary directory cleanup. See
+/// [`ExtractedArtifactDataHandle`] for details.
 #[derive(Debug, Clone)]
 pub(crate) struct ArtifactIdData {
     pub(crate) id: ArtifactId,
