@@ -27,6 +27,17 @@ use tokio_util::io::ReaderStream;
 ///
 /// This does not contain the actual data; use `reader_stream()` to get a new
 /// handle to the underlying file to read it on demand.
+///
+/// Note that although this type implements `Clone` and that cloning is
+/// relatively cheap, it has additional implications on filesystem cleanup.
+/// `ExtractedArtifactDataHandle`s point to a file in a temporary directory
+/// created when a TUF repo is uploaded. That directory contains _all_
+/// extracted artifacts from the TUF repo, and the directory will not be
+/// cleaned up until all `ExtractedArtifactDataHandle`s that refer to files
+/// inside it have been dropped. Therefore, one must be careful not to squirrel
+/// away unneeded clones of `ExtractedArtifactDataHandle`s: only clone this in
+/// contexts where you need the data and need the temporary directory containing
+/// it to stick around.
 #[derive(Debug, Clone)]
 pub(crate) struct ExtractedArtifactDataHandle {
     tempdir: Arc<Utf8TempDir>,
