@@ -22,6 +22,9 @@ use uuid::Uuid;
 
 #[derive(Debug, Args)]
 pub struct DbArgs {
+    /// URL of the database SQL interface
+    db_url: PostgresConfigWithUrl,
+
     #[command(subcommand)]
     command: DbCommands,
 }
@@ -30,17 +33,10 @@ pub struct DbArgs {
 #[derive(Debug, Subcommand)]
 enum DbCommands {
     /// Print information about control plane services
-    Services {
-        /// URL of the database SQL interface
-        db_url: PostgresConfigWithUrl,
-    },
+    Services,
 
     /// Print information about sleds
-    Sleds {
-        // XXX-dap how to commonize this?
-        /// URL of the database SQL interface
-        db_url: PostgresConfigWithUrl,
-    },
+    Sleds,
 }
 
 impl DbArgs {
@@ -48,34 +44,30 @@ impl DbArgs {
         &self,
         log: &slog::Logger,
     ) -> Result<(), anyhow::Error> {
+        let db_config = db::Config { url: self.db_url.clone() };
+        let pool = Arc::new(db::Pool::new(&log.clone(), &db_config));
+
+        // Being a dev tool, we want this to try this operation regardless of
+        // whether the schema matches what we expect.
+        let datastore = Arc::new(
+            DataStore::new_unchecked(pool)
+                .map_err(|e| anyhow!(e).context("creating datastore"))?,
+        );
+
+        let opctx = OpContext::for_tests(log.clone(), datastore.clone());
+        // XXX-dap check schema version to report a warning if no good
+
         match &self.command {
-            DbCommands::Services { db_url } => {
-                cmd_db_services(log, db_url.clone()).await
-            }
-            DbCommands::Sleds { db_url } => {
-                cmd_db_sleds(log, db_url.clone()).await
-            }
+            DbCommands::Services => cmd_db_services(&opctx, &datastore).await,
+            DbCommands::Sleds => cmd_db_sleds(&opctx, &datastore).await,
         }
     }
 }
 
 async fn cmd_db_services(
-    log: &slog::Logger,
-    db_url: PostgresConfigWithUrl,
+    opctx: &OpContext,
+    datastore: &DataStore,
 ) -> Result<(), anyhow::Error> {
-    let db_config = db::Config { url: db_url };
-    let pool = Arc::new(db::Pool::new(&log.clone(), &db_config));
-
-    // Being a dev tool, we want this to try this operation regardless of
-    // whether the schema matches what we expect.
-    let datastore = Arc::new(
-        DataStore::new_unchecked(pool)
-            .map_err(|e| anyhow!(e).context("creating datastore"))?,
-    );
-
-    let opctx = OpContext::for_tests(log.clone(), datastore.clone());
-
-    // XXX-dap check schema version to report a warning if no good
     // XXX-dap check that we haven't hit the hardcoded limit here
     // XXX-dap join with sled information for a by-sled view
 
@@ -116,21 +108,9 @@ async fn cmd_db_services(
 
 // XXX-dap commonize
 async fn cmd_db_sleds(
-    log: &slog::Logger,
-    db_url: PostgresConfigWithUrl,
+    opctx: &OpContext,
+    datastore: &DataStore,
 ) -> Result<(), anyhow::Error> {
-    let db_config = db::Config { url: db_url };
-    let pool = Arc::new(db::Pool::new(&log.clone(), &db_config));
-
-    // Being a dev tool, we want this to try this operation regardless of
-    // whether the schema matches what we expect.
-    let datastore = Arc::new(
-        DataStore::new_unchecked(pool)
-            .map_err(|e| anyhow!(e).context("creating datastore"))?,
-    );
-
-    let opctx = OpContext::for_tests(log.clone(), datastore.clone());
-
     // XXX-dap check schema version to report a warning if no good
     // XXX-dap check that we haven't hit the hardcoded limit here
 
