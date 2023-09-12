@@ -110,7 +110,12 @@ impl RackUpdateState {
                     sp_type: &sp_type,
                     i: &i,
                 }) else {
-                    warn!(logger, "Invalid ComponentId in EventReport: {} {}", &sp_type, &i);
+                    warn!(
+                        logger,
+                        "Invalid ComponentId in EventReport: {} {}",
+                        &sp_type,
+                        &i
+                    );
                     continue;
                 };
                 let item_state = self.items.get_mut(&id).unwrap();

@@ -724,6 +724,25 @@
           "message"
         ]
       },
+      "ArtifactHashId": {
+        "description": "A hash-based identifier for an artifact.\n\nSome places, e.g. the installinator, request artifacts by hash rather than by name and version. This type indicates that.",
+        "type": "object",
+        "properties": {
+          "hash": {
+            "description": "The hash of the artifact.",
+            "type": "string",
+            "format": "hex string (32 bytes)"
+          },
+          "kind": {
+            "description": "The kind of artifact this is.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "hash",
+          "kind"
+        ]
+      },
       "ArtifactId": {
         "description": "An identifier for an artifact.\n\nThe kind is [`ArtifactKind`], indicating that it might represent an artifact whose kind is unknown.",
         "type": "object",
@@ -1154,9 +1173,10 @@
         "type": "object",
         "properties": {
           "artifacts": {
+            "description": "Map of artifacts we ingested from the most-recently-uploaded TUF repository to a list of artifacts we're serving over the bootstrap network. In some cases the list of artifacts being served will have length 1 (when we're serving the artifact directly); in other cases the artifact in the TUF repo contains multiple nested artifacts inside it (e.g., RoT artifacts contain both A and B images), and we serve the list of extracted artifacts but not the original combination.\n\nConceptually, this is a `BTreeMap<ArtifactId, Vec<ArtifactHashId>>`, but JSON requires string keys for maps, so we give back a vec of pairs instead.",
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/ArtifactId"
+              "$ref": "#/components/schemas/InstallableArtifacts"
             }
           },
           "event_reports": {
@@ -1300,6 +1320,24 @@
             ]
           }
         }
+      },
+      "InstallableArtifacts": {
+        "type": "object",
+        "properties": {
+          "artifact_id": {
+            "$ref": "#/components/schemas/ArtifactId"
+          },
+          "installable": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ArtifactHashId"
+            }
+          }
+        },
+        "required": [
+          "artifact_id",
+          "installable"
+        ]
       },
       "IpRange": {
         "oneOf": [

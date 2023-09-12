@@ -114,13 +114,43 @@ output.type = "zone"
 [package.clickhouse]
 service_name = "clickhouse"
 only_for_targets.image = "standard"
+source.type = "composite"
+source.packages = [ "clickhouse_svc.tar.gz", "internal-dns-cli.tar.gz" ]
+output.type = "zone"
+
+[package.clickhouse_svc]
+service_name = "clickhouse_svc"
+only_for_targets.image = "standard"
 source.type = "local"
 source.paths = [
   { from = "out/clickhouse", to = "/opt/oxide/clickhouse" },
   { from = "smf/clickhouse/manifest.xml", to = "/var/svc/manifest/site/clickhouse/manifest.xml" },
-  { from = "smf/clickhouse/method_script.sh", to = "/opt/oxide/lib/svc/manifest/clickhouse.sh" }
+  { from = "smf/clickhouse/method_script.sh", to = "/opt/oxide/lib/svc/manifest/clickhouse.sh" },
+  { from = "smf/clickhouse/config_replica.xml", to = "/opt/oxide/clickhouse/config.d/config_replica.xml" }
 ]
 output.type = "zone"
+output.intermediate_only = true
+setup_hint = "Run `./tools/ci_download_clickhouse` to download the necessary binaries"
+
+[package.clickhouse_keeper]
+service_name = "clickhouse_keeper"
+only_for_targets.image = "standard"
+source.type = "composite"
+source.packages = [ "clickhouse_keeper_svc.tar.gz", "internal-dns-cli.tar.gz" ]
+output.type = "zone"
+
+[package.clickhouse_keeper_svc]
+service_name = "clickhouse_keeper_svc"
+only_for_targets.image = "standard"
+source.type = "local"
+source.paths = [
+  { from = "out/clickhouse", to = "/opt/oxide/clickhouse_keeper" },
+  { from = "smf/clickhouse_keeper/manifest.xml", to = "/var/svc/manifest/site/clickhouse_keeper/manifest.xml" },
+  { from = "smf/clickhouse_keeper/method_script.sh", to = "/opt/oxide/lib/svc/manifest/clickhouse_keeper.sh" },
+  { from = "smf/clickhouse_keeper/keeper_config.xml", to = "/opt/oxide/clickhouse_keeper/keeper_config.xml" }
+]
+output.type = "zone"
+output.intermediate_only = true
 setup_hint = "Run `./tools/ci_download_clickhouse` to download the necessary binaries"
 
 [package.cockroachdb]
@@ -344,10 +374,10 @@ only_for_targets.image = "standard"
 # 3. Use source.type = "manual" instead of "prebuilt"
 source.type = "prebuilt"
 source.repo = "crucible"
-source.commit = "5dc77d87dec8bbf56a603821d67ad13f47f99f95"
+source.commit = "aeb69dda26c7e1a8b6eada425670cd4b83f91c07"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/crucible/image/<commit>/crucible.sha256.txt
-source.sha256 = "e8809a27721b6115fca763de7cca1e1e4b4c1c20e0917a52a38c67bd7844d371"
+source.sha256 = "3845327bde9df585ee8771c85eefc3e63a48981f14298d5fca62f4f6fe25c917"
 output.type = "zone"
 
 [package.crucible-pantry]
@@ -355,10 +385,10 @@ service_name = "crucible_pantry"
 only_for_targets.image = "standard"
 source.type = "prebuilt"
 source.repo = "crucible"
-source.commit = "5dc77d87dec8bbf56a603821d67ad13f47f99f95"
+source.commit = "aeb69dda26c7e1a8b6eada425670cd4b83f91c07"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/crucible/image/<commit>/crucible-pantry.sha256.txt
-source.sha256 = "f84344d14351beb6153a0394c2801eb47da98beb909f4aefb5b0323fce5410b5"
+source.sha256 = "a3f2fc92d9ae184a66c402dfe33b1d1c128f356d6be70671de421be600d4064a"
 output.type = "zone"
 
 # Refer to
@@ -369,10 +399,10 @@ service_name = "propolis-server"
 only_for_targets.image = "standard"
 source.type = "prebuilt"
 source.repo = "propolis"
-source.commit = "f78820b1e1510e02dec63c6578c91a469d9f3aa4"
+source.commit = "de6369aa45a255f896da0a3ddd2b7152c036a4e9"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/propolis/image/<commit>/propolis-server.sha256.txt
-source.sha256 = "38e710e47c8c277ae432d953bc6707796feaacf75224d56033e69aa82094ddba"
+source.sha256 = "182597a153793096826992f499a94be54c746e346a3566802e1fe7e78b2ccf2f"
 output.type = "zone"
 
 [package.maghemite]
@@ -421,8 +451,8 @@ only_for_targets.image = "standard"
 # 2. Copy dendrite.tar.gz from dendrite/out to omicron/out
 source.type = "prebuilt"
 source.repo = "dendrite"
-source.commit = "46e53d3914bb999b6368370987d1a4b465b19290"
-source.sha256 = "1f8b7468f894ad2fa03ca7e60fb4efa8787a313c10aa9aea334d19e248e56d32"
+source.commit = "363e365135cfa46d7f7558d8670f35aa8fe412e9"
+source.sha256 = "2dc34eaac7eb9d320594f3ac125df6a601fe020e0b3c7f16eb0a5ebddc8e18b9"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -446,8 +476,8 @@ only_for_targets.image = "standard"
 # 2. Copy the output zone image from dendrite/out to omicron/out
 source.type = "prebuilt"
 source.repo = "dendrite"
-source.commit = "46e53d3914bb999b6368370987d1a4b465b19290"
-source.sha256 = "b32717b4445931a6e5404a72f0519810a8f538102fb53119bd9cab71c16ad706"
+source.commit = "363e365135cfa46d7f7558d8670f35aa8fe412e9"
+source.sha256 = "1616eb25ab3d3a8b678b6cf3675af7ba61d455c3e6c2ba2a2d35a663861bc8e8"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -464,8 +494,8 @@ only_for_targets.image = "standard"
 # 2. Copy dendrite.tar.gz from dendrite/out to omicron/out/dendrite-softnpu.tar.gz
 source.type = "prebuilt"
 source.repo = "dendrite"
-source.commit = "46e53d3914bb999b6368370987d1a4b465b19290"
-source.sha256 = "1ba23ab45889793d1a8c3d0c01dc08c82d9ac7cacb38b89ac7ba0e0665358746"
+source.commit = "363e365135cfa46d7f7558d8670f35aa8fe412e9"
+source.sha256 = "a045e6dbb84dbceaf3a8a7dc33d283449fbeaf081442d0ae14ce8d8ffcdda4e9"
 output.type = "zone"
 output.intermediate_only = true
 

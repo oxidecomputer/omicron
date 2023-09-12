@@ -888,7 +888,8 @@ async fn find_archived_log_files(
                 match rd.next_entry().await {
                     Ok(None) => break,
                     Ok(Some(entry)) => {
-                        let Ok(path) = Utf8PathBuf::try_from(entry.path()) else {
+                        let Ok(path) = Utf8PathBuf::try_from(entry.path())
+                        else {
                             error!(
                                 log,
                                 "skipping possible archived log file with \
@@ -966,9 +967,9 @@ fn extract_zone_bundle_metadata_impl(
                 .unwrap_or(false)
         })
     else {
-        return Err(BundleError::from(
-            anyhow!("Zone bundle is missing metadata file")
-        ));
+        return Err(BundleError::from(anyhow!(
+            "Zone bundle is missing metadata file"
+        )));
     };
 
     // Extract its contents and parse as metadata.
@@ -1340,10 +1341,7 @@ async fn disk_usage(path: &Utf8PathBuf) -> Result<u64, BundleError> {
     let Some(line) = s.lines().next() else {
         return Err(err("no lines in du output"));
     };
-    let Some(part) = line
-        .trim()
-        .split_ascii_whitespace()
-        .next() else {
+    let Some(part) = line.trim().split_ascii_whitespace().next() else {
         return Err(err("no disk usage size computed in output"));
     };
     part.parse()

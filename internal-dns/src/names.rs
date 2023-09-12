@@ -17,6 +17,7 @@ pub const DNS_ZONE_EXTERNAL_TESTING: &str = "oxide-dev.test";
 #[derive(Clone, Debug, Hash, Eq, Ord, PartialEq, PartialOrd)]
 pub enum ServiceName {
     Clickhouse,
+    ClickhouseKeeper,
     Cockroach,
     InternalDns,
     ExternalDns,
@@ -38,6 +39,7 @@ impl ServiceName {
     fn service_kind(&self) -> &'static str {
         match self {
             ServiceName::Clickhouse => "clickhouse",
+            ServiceName::ClickhouseKeeper => "clickhouse-keeper",
             ServiceName::Cockroach => "cockroach",
             ServiceName::ExternalDns => "external-dns",
             ServiceName::InternalDns => "nameservice",
@@ -61,6 +63,7 @@ impl ServiceName {
     pub(crate) fn dns_name(&self) -> String {
         match self {
             ServiceName::Clickhouse
+            | ServiceName::ClickhouseKeeper
             | ServiceName::Cockroach
             | ServiceName::InternalDns
             | ServiceName::ExternalDns

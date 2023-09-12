@@ -29,7 +29,7 @@ async fn do_crdb_setup() {
 // Wraps exclusively the ClickhouseDB portion of setup/teardown.
 async fn do_clickhouse_setup() {
     let mut clickhouse =
-        dev::clickhouse::ClickHouseInstance::new(0).await.unwrap();
+        dev::clickhouse::ClickHouseInstance::new_single_node(0).await.unwrap();
     clickhouse.cleanup().await.unwrap();
 }
 

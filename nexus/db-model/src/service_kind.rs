@@ -18,6 +18,7 @@ impl_enum_type!(
 
     // Enum values
     Clickhouse => b"clickhouse"
+    ClickhouseKeeper => b"clickhouse_keeper"
     Cockroach => b"cockroach"
     Crucible => b"crucible"
     CruciblePantry => b"crucible_pantry"
@@ -53,6 +54,9 @@ impl From<internal_api::params::ServiceKind> for ServiceKind {
         match k {
             internal_api::params::ServiceKind::Clickhouse => {
                 ServiceKind::Clickhouse
+            }
+            internal_api::params::ServiceKind::ClickhouseKeeper => {
+                ServiceKind::ClickhouseKeeper
             }
             internal_api::params::ServiceKind::Cockroach => {
                 ServiceKind::Cockroach

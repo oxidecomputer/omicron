@@ -6,10 +6,7 @@
 
 use self::external_endpoints::NexusCertResolver;
 use crate::app::oximeter::LazyTimeseriesClient;
-use crate::authn;
-use crate::authz;
 use crate::config;
-use crate::db;
 use crate::populate::populate_start;
 use crate::populate::PopulateArgs;
 use crate::populate::PopulateStatus;
@@ -18,7 +15,10 @@ use crate::DropshotServer;
 use ::oximeter::types::ProducerRegistry;
 use anyhow::anyhow;
 use internal_dns::ServiceName;
+use nexus_db_queries::authn;
+use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db;
 use omicron_common::address::DENDRITE_PORT;
 use omicron_common::address::MGS_PORT;
 use omicron_common::api::external::Error;
@@ -32,12 +32,12 @@ use uuid::Uuid;
 // The implementation of Nexus is large, and split into a number of submodules
 // by resource.
 mod address_lot;
-pub mod background;
+pub(crate) mod background;
 mod certificate;
 mod device_auth;
 mod disk;
 mod external_dns;
-pub mod external_endpoints;
+pub(crate) mod external_endpoints;
 mod external_ip;
 mod iam;
 mod image;
@@ -48,7 +48,7 @@ mod network_interface;
 mod oximeter;
 mod project;
 mod rack;
-pub mod saga;
+pub(crate) mod saga;
 mod session;
 mod silo;
 mod sled;
@@ -66,7 +66,7 @@ mod vpc_subnet;
 
 // Sagas are not part of the "Nexus" implementation, but they are
 // application logic.
-pub mod sagas;
+pub(crate) mod sagas;
 
 // TODO: When referring to API types, we should try to include
 // the prefix unless it is unambiguous.
@@ -157,7 +157,7 @@ pub struct Nexus {
 impl Nexus {
     /// Create a new Nexus instance for the given rack id `rack_id`
     // TODO-polish revisit rack metadata
-    pub async fn new_with_id(
+    pub(crate) async fn new_with_id(
         rack_id: Uuid,
         log: Logger,
         resolver: internal_dns::resolver::Resolver,
@@ -382,7 +382,7 @@ impl Nexus {
         &self.tunables
     }
 
-    pub async fn wait_for_populate(&self) -> Result<(), anyhow::Error> {
+    pub(crate) async fn wait_for_populate(&self) -> Result<(), anyhow::Error> {
         let mut my_rx = self.populate_status.clone();
         loop {
             my_rx
@@ -399,7 +399,7 @@ impl Nexus {
         }
     }
 
-    pub async fn external_tls_config(
+    pub(crate) async fn external_tls_config(
         &self,
         tls_enabled: bool,
     ) -> Option<rustls::ServerConfig> {
@@ -440,7 +440,7 @@ impl Nexus {
         self.internal_server.lock().unwrap().replace(internal_server);
     }
 
-    pub async fn close_servers(&self) -> Result<(), String> {
+    pub(crate) async fn close_servers(&self) -> Result<(), String> {
         let external_server = self.external_server.lock().unwrap().take();
         if let Some(server) = external_server {
             server.close().await?;
@@ -452,7 +452,7 @@ impl Nexus {
         Ok(())
     }
 
-    pub async fn wait_for_shutdown(&self) -> Result<(), String> {
+    pub(crate) async fn wait_for_shutdown(&self) -> Result<(), String> {
         // The internal server is the last server to be closed.
         //
         // We don't wait for the external servers to be closed; we just expect
@@ -469,7 +469,7 @@ impl Nexus {
         Ok(())
     }
 
-    pub async fn get_external_server_address(
+    pub(crate) async fn get_external_server_address(
         &self,
     ) -> Option<std::net::SocketAddr> {
         self.external_server
@@ -479,7 +479,7 @@ impl Nexus {
             .map(|server| server.local_addr())
     }
 
-    pub async fn get_internal_server_address(
+    pub(crate) async fn get_internal_server_address(
         &self,
     ) -> Option<std::net::SocketAddr> {
         self.internal_server
@@ -495,7 +495,7 @@ impl Nexus {
     }
 
     /// Returns an [`OpContext`] used for balancing services.
-    pub fn opctx_for_service_balancer(&self) -> OpContext {
+    pub(crate) fn opctx_for_service_balancer(&self) -> OpContext {
         OpContext::for_background(
             self.log.new(o!("component" => "ServiceBalancer")),
             Arc::clone(&self.authz),
@@ -505,7 +505,7 @@ impl Nexus {
     }
 
     /// Returns an [`OpContext`] used for internal API calls.
-    pub fn opctx_for_internal_api(&self) -> OpContext {
+    pub(crate) fn opctx_for_internal_api(&self) -> OpContext {
         OpContext::for_background(
             self.log.new(o!("component" => "InternalApi")),
             Arc::clone(&self.authz),
@@ -536,9 +536,9 @@ impl Nexus {
     ///
     /// ```
     /// use nexus_db_queries::context::OpContext;
+    /// use nexus_db_queries::db::DataStore;
     /// use omicron_nexus::app::Nexus;
     /// use omicron_nexus::app::Unimpl;
-    /// use omicron_nexus::db::DataStore;
     /// use omicron_common::api::external::Error;
     ///
     /// async fn my_things_list(
@@ -558,10 +558,10 @@ impl Nexus {
     ///
     /// ```
     /// use nexus_db_queries::context::OpContext;
+    /// use nexus_db_queries::db::model::Name;
+    /// use nexus_db_queries::db::DataStore;
     /// use omicron_nexus::app::Nexus;
     /// use omicron_nexus::app::Unimpl;
-    /// use omicron_nexus::db::model::Name;
-    /// use omicron_nexus::db::DataStore;
     /// use omicron_common::api::external::Error;
     /// use omicron_common::api::external::LookupType;
     /// use omicron_common::api::external::ResourceType;
@@ -599,13 +599,13 @@ impl Nexus {
     /// underneath Organizations:
     ///
     /// ```
+    /// use nexus_db_queries::authz;
     /// use nexus_db_queries::context::OpContext;
+    /// use nexus_db_queries::db::lookup::LookupPath;
+    /// use nexus_db_queries::db::model::Name;
+    /// use nexus_db_queries::db::DataStore;
     /// use omicron_nexus::app::Nexus;
     /// use omicron_nexus::app::Unimpl;
-    /// use omicron_nexus::authz;
-    /// use omicron_nexus::db::lookup::LookupPath;
-    /// use omicron_nexus::db::model::Name;
-    /// use omicron_nexus::db::DataStore;
     /// use omicron_common::api::external::Error;
     ///
     /// async fn project_list_my_thing(
@@ -629,13 +629,13 @@ impl Nexus {
     /// example stub for the "get" endpoint for that same resource:
     ///
     /// ```
+    /// use nexus_db_queries::authz;
     /// use nexus_db_queries::context::OpContext;
+    /// use nexus_db_queries::db::lookup::LookupPath;
+    /// use nexus_db_queries::db::model::Name;
+    /// use nexus_db_queries::db::DataStore;
     /// use omicron_nexus::app::Nexus;
     /// use omicron_nexus::app::Unimpl;
-    /// use omicron_nexus::authz;
-    /// use omicron_nexus::db::lookup::LookupPath;
-    /// use omicron_nexus::db::model::Name;
-    /// use omicron_nexus::db::DataStore;
     /// use omicron_common::api::external::Error;
     /// use omicron_common::api::external::LookupType;
     /// use omicron_common::api::external::ResourceType;
@@ -704,22 +704,12 @@ impl Nexus {
         &self.db_datastore
     }
 
-    pub fn samael_max_issue_delay(&self) -> Option<chrono::Duration> {
+    pub(crate) fn samael_max_issue_delay(&self) -> Option<chrono::Duration> {
         let mid = self.samael_max_issue_delay.lock().unwrap();
         *mid
     }
 
-    // Convenience function that exists solely because writing
-    // LookupPath::new(&opctx, &nexus.datastore()) in an endpoint handler feels
-    // like too much
-    pub fn db_lookup<'a>(
-        &'a self,
-        opctx: &'a OpContext,
-    ) -> db::lookup::LookupPath {
-        db::lookup::LookupPath::new(opctx, &self.db_datastore)
-    }
-
-    pub async fn resolver(&self) -> internal_dns::resolver::Resolver {
+    pub(crate) async fn resolver(&self) -> internal_dns::resolver::Resolver {
         self.internal_resolver.clone()
     }
 }
@@ -735,6 +725,7 @@ impl Nexus {
 /// If you're not authorized to view it, you'll get a "404 Not Found".  It's
 /// `Unimpl::ProtectedLookup(LookupType::ByName("some-image"))`.
 pub enum Unimpl {
+    #[allow(unused)]
     Public,
     ProtectedLookup(Error),
 }

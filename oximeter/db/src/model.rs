@@ -91,8 +91,8 @@ impl From<DbFieldList> for Vec<FieldSchema> {
     fn from(list: DbFieldList) -> Self {
         list.names
             .into_iter()
-            .zip(list.types.into_iter())
-            .zip(list.sources.into_iter())
+            .zip(list.types)
+            .zip(list.sources)
             .map(|((name, ty), source)| FieldSchema {
                 name,
                 ty: ty.into(),
@@ -224,7 +224,7 @@ impl From<DbDatumType> for DatumType {
 // nanoseconds in our case. We opt for strings here, since we're using that anyway in the
 // input/output format for ClickHouse.
 mod serde_timestamp {
-    use chrono::{DateTime, TimeZone, Utc};
+    use chrono::{naive::NaiveDateTime, DateTime, Utc};
     use serde::{self, Deserialize, Deserializer, Serializer};
 
     pub fn serialize<S>(
@@ -245,7 +245,8 @@ mod serde_timestamp {
         D: Deserializer<'de>,
     {
         let s = String::deserialize(deserializer)?;
-        Utc.datetime_from_str(&s, crate::DATABASE_TIMESTAMP_FORMAT)
+        NaiveDateTime::parse_from_str(&s, crate::DATABASE_TIMESTAMP_FORMAT)
+            .map(|naive_date| naive_date.and_utc())
             .map_err(serde::de::Error::custom)
     }
 }
@@ -599,9 +600,9 @@ where
         FieldSchema { name: name.to_string(), ty: value.field_type(), source }
     };
     let target_field_schema =
-        target.field_names().iter().zip(target.field_values().into_iter());
+        target.field_names().iter().zip(target.field_values());
     let metric_field_schema =
-        metric.field_names().iter().zip(metric.field_values().into_iter());
+        metric.field_names().iter().zip(metric.field_values());
     let field_schema = target_field_schema
         .map(|(name, value)| {
             make_field_schema(name, value, FieldSource::Target)

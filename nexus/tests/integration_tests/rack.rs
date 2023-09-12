@@ -9,8 +9,8 @@ use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::TEST_SUITE_PASSWORD;
 use nexus_test_utils_macros::nexus_test;
-use omicron_nexus::external_api::params;
-use omicron_nexus::external_api::views::Rack;
+use nexus_types::external_api::params;
+use nexus_types::external_api::views::Rack;
 use omicron_nexus::TestInterfaces;
 
 type ControlPlaneTestContext =

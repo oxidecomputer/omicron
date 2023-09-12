@@ -118,8 +118,12 @@ impl HardwareSnapshot {
         let mut node_walker = device_info.walk_node();
 
         // First, check the root node. If we aren't running on a Gimlet, bail.
-        let Some(root) = node_walker.next().transpose().map_err(Error::DevInfo)? else {
-            return Err(Error::DevInfo(anyhow::anyhow!("No nodes in device tree")));
+        let Some(root) =
+            node_walker.next().transpose().map_err(Error::DevInfo)?
+        else {
+            return Err(Error::DevInfo(anyhow::anyhow!(
+                "No nodes in device tree"
+            )));
         };
         let root_node = root.node_name();
         if root_node != GIMLET_ROOT_NODE_NAME {
@@ -352,7 +356,10 @@ fn get_parent_node<'a>(
     expected_parent_driver_name: &'static str,
 ) -> Result<Node<'a>, Error> {
     let Some(parent) = node.parent().map_err(Error::DevInfo)? else {
-        return Err(Error::DevInfo(anyhow::anyhow!("{} has no parent node", node.node_name())));
+        return Err(Error::DevInfo(anyhow::anyhow!(
+            "{} has no parent node",
+            node.node_name()
+        )));
     };
     if parent.driver_name().as_deref() != Some(expected_parent_driver_name) {
         return Err(Error::DevInfo(anyhow::anyhow!(
@@ -482,7 +489,7 @@ fn poll_blkdev_node(
     )?;
     let Some(variant) = slot_to_disk_variant(slot) else {
         warn!(log, "Slot# {slot} is not recognized as a disk: {devfs_path}");
-        return Err(Error::UnrecognizedSlot { slot } );
+        return Err(Error::UnrecognizedSlot { slot });
     };
 
     let disk = UnparsedDisk::new(

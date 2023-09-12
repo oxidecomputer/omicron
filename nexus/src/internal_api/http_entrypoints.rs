@@ -46,7 +46,7 @@ use uuid::Uuid;
 type NexusApiDescription = ApiDescription<Arc<ServerContext>>;
 
 /// Returns a description of the internal nexus API
-pub fn internal_api() -> NexusApiDescription {
+pub(crate) fn internal_api() -> NexusApiDescription {
     fn register_endpoints(api: &mut NexusApiDescription) -> Result<(), String> {
         api.register(sled_agent_put)?;
         api.register(switch_put)?;

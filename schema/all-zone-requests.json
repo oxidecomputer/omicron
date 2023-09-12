@@ -72,6 +72,20 @@
             "type": {
               "type": "string",
               "enum": [
+                "clickhouse_keeper"
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "type"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
                 "external_dns"
               ]
             }
@@ -567,6 +581,24 @@
             "type": {
               "type": "string",
               "enum": [
+                "clickhouse_keeper"
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "address",
+            "type"
+          ],
+          "properties": {
+            "address": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "enum": [
                 "cockroach_db"
               ]
             }
@@ -706,6 +738,7 @@
       "type": "string",
       "enum": [
         "clickhouse",
+        "clickhouse_keeper",
         "cockroach_db",
         "crucible_pantry",
         "crucible",

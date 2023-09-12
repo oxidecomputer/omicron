@@ -36,6 +36,7 @@ pub const PROPOLIS_PORT: u16 = 12400;
 pub const COCKROACH_PORT: u16 = 32221;
 pub const CRUCIBLE_PORT: u16 = 32345;
 pub const CLICKHOUSE_PORT: u16 = 8123;
+pub const CLICKHOUSE_KEEPER_PORT: u16 = 9181;
 pub const OXIMETER_PORT: u16 = 12223;
 pub const DENDRITE_PORT: u16 = 12224;
 pub const DDMD_PORT: u16 = 8000;
@@ -140,9 +141,8 @@ const GZ_ADDRESS_INDEX: usize = 2;
 pub const RSS_RESERVED_ADDRESSES: u16 = 32;
 
 /// Wraps an [`Ipv6Network`] with a compile-time prefix length.
-#[derive(
-    Debug, Clone, Copy, JsonSchema, Serialize, Deserialize, Hash, PartialEq, Eq,
-)]
+#[derive(Debug, Clone, Copy, JsonSchema, Serialize, Hash, PartialEq, Eq)]
+#[schemars(rename = "Ipv6Subnet")]
 pub struct Ipv6Subnet<const N: u8> {
     net: Ipv6Net,
 }
@@ -159,6 +159,30 @@ impl<const N: u8> Ipv6Subnet<N> {
     /// Returns the underlying network.
     pub fn net(&self) -> Ipv6Network {
         self.net.0
+    }
+}
+
+// We need a custom Deserialize to ensure that the subnet is what we expect.
+impl<'de, const N: u8> Deserialize<'de> for Ipv6Subnet<N> {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        struct Inner {
+            net: Ipv6Net,
+        }
+
+        let Inner { net } = Inner::deserialize(deserializer)?;
+        if net.prefix() == N {
+            Ok(Self { net })
+        } else {
+            Err(<D::Error as serde::de::Error>::custom(format!(
+                "expected prefix {} but found {}",
+                N,
+                net.prefix(),
+            )))
+        }
     }
 }
 
@@ -537,6 +561,8 @@ impl Iterator for IpRangeIter {
 
 #[cfg(test)]
 mod test {
+    use serde_json::json;
+
     use super::*;
 
     #[test]
@@ -672,5 +698,15 @@ mod test {
                 Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 3),
             ]
         );
+    }
+
+    #[test]
+    fn test_ipv6_subnet_deserialize() {
+        let value = json!({
+            "net": "ff12::3456/64"
+        });
+
+        assert!(serde_json::from_value::<Ipv6Subnet<64>>(value.clone()).is_ok());
+        assert!(serde_json::from_value::<Ipv6Subnet<56>>(value).is_err());
     }
 }

@@ -7,7 +7,6 @@ license = "MPL-2.0"
 [dependencies]
 anyhow.workspace = true
 async-trait.workspace = true
-buf-list.workspace = true
 bytes.workspace = true
 camino.workspace = true
 camino-tempfile.workspace = true
@@ -34,6 +33,7 @@ slog-dtrace.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = [ "full" ] }
 tokio-stream.workspace = true
+tokio-util.workspace = true
 tough.workspace = true
 trust-dns-resolver.workspace = true
 snafu.workspace = true
