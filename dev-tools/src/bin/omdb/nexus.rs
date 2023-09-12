@@ -15,6 +15,9 @@ use nexus_client::types::LastResult;
 /// Arguments to the "omdb nexus" subcommand
 #[derive(Debug, Args)]
 pub struct NexusArgs {
+    /// URL of the Nexus internal API
+    nexus_internal_url: String,
+
     #[command(subcommand)]
     command: NexusCommands,
 }
@@ -23,59 +26,84 @@ pub struct NexusArgs {
 #[derive(Debug, Subcommand)]
 enum NexusCommands {
     /// print information about background tasks
-    BackgroundTasks {
-        /// URL of the Nexus internal API
-        nexus_internal_url: String,
-        /// print tasks with documentation details
-        #[clap(short = 'v', long = "verbose")]
-        verbose: bool,
-    },
+    BackgroundTask(BackgroundTaskArgs),
+}
+
+#[derive(Debug, Args)]
+struct BackgroundTaskArgs {
+    #[command(subcommand)]
+    command: BackgroundTaskCommands,
+}
+
+#[derive(Debug, Subcommand)]
+enum BackgroundTaskCommands {
+    /// List background tasks
+    List,
+    /// Print the status of all background tasks
+    Status,
 }
 
 impl NexusArgs {
+    /// Run a `omdb nexus` subcommand.
     pub async fn run_cmd(
         &self,
         log: &slog::Logger,
     ) -> Result<(), anyhow::Error> {
+        let client =
+            nexus_client::Client::new(&self.nexus_internal_url, log.clone());
+
         match &self.command {
-            NexusCommands::BackgroundTasks { nexus_internal_url, verbose } => {
-                cmd_nexus_background_tasks(log, nexus_internal_url, *verbose)
-                    .await
-            }
+            NexusCommands::BackgroundTask(BackgroundTaskArgs {
+                command: BackgroundTaskCommands::List,
+            }) => cmd_nexus_background_task_list(&client).await,
+            NexusCommands::BackgroundTask(BackgroundTaskArgs {
+                command: BackgroundTaskCommands::Status,
+            }) => cmd_nexus_background_task_status(&client).await,
         }
     }
 }
 
-async fn cmd_nexus_background_tasks(
-    log: &slog::Logger,
-    url: &str,
-    verbose: bool,
+/// Runs `omdb nexus background-task list`
+async fn cmd_nexus_background_task_list(
+    client: &nexus_client::Client,
 ) -> Result<(), anyhow::Error> {
-    let client = nexus_client::Client::new(url, log.clone());
     let response =
         client.bgtask_list().await.context("listing background tasks")?;
     let tasks = response.into_inner();
     for (_, bgtask) in &tasks {
-        print_task(bgtask, verbose);
-    }
-
-    Ok(())
-}
-
-fn print_task(bgtask: &BackgroundTask, verbose: bool) {
-    println!("task: {:?}", bgtask.name);
-    if verbose {
+        println!("task: {:?}", bgtask.name);
         println!(
             "{}",
             textwrap::fill(
                 &bgtask.description,
                 &textwrap::Options::new(80)
-                    .initial_indent("  description: ")
-                    .subsequent_indent("      ")
+                    .initial_indent("    ")
+                    .subsequent_indent("    ")
             )
         );
+
+        println!("\n");
     }
 
+    Ok(())
+}
+
+/// Runs `omdb nexus background-task status`
+async fn cmd_nexus_background_task_status(
+    client: &nexus_client::Client,
+) -> Result<(), anyhow::Error> {
+    let response =
+        client.bgtask_list().await.context("listing background tasks")?;
+    let tasks = response.into_inner();
+    for (_, bgtask) in &tasks {
+        print_task(bgtask);
+    }
+
+    Ok(())
+}
+
+fn print_task(bgtask: &BackgroundTask) {
+    println!("task: {:?}", bgtask.name);
     print!("  currently executing: ");
     match &bgtask.current {
         CurrentStatus::Idle => println!("no"),
@@ -117,6 +145,7 @@ fn print_task(bgtask: &BackgroundTask, verbose: bool) {
     println!("");
 }
 
+/// Summarizes an `ActivationReason`
 fn reason_str(reason: &ActivationReason) -> &'static str {
     match reason {
         ActivationReason::Signaled => "an explicit signal",
