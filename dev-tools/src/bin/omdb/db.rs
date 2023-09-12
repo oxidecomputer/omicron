@@ -47,25 +47,25 @@ enum DbCommands {
 }
 
 impl DbArgs {
+    /// Run a `omdb db` subcommand.
     pub async fn run_cmd(
         &self,
         log: &slog::Logger,
     ) -> Result<(), anyhow::Error> {
         let db_config = db::Config { url: self.db_url.clone() };
-        // XXX-dap want a pool that fails faster
         let pool = Arc::new(db::Pool::new(&log.clone(), &db_config));
 
-        // Being a dev tool, we want this to try this operation regardless of
-        // whether the schema matches what we expect.
+        // Being a dev tool, we want to try this operation even if the schema
+        // doesn't match what we expect.  So we use `DataStore::new_unchecked()`
+        // here.  We will then check the schema version explicitly and warn the
+        // user if it doesn't match.
         let datastore = Arc::new(
             DataStore::new_unchecked(pool)
                 .map_err(|e| anyhow!(e).context("creating datastore"))?,
         );
-
-        let opctx = OpContext::for_tests(log.clone(), datastore.clone());
-
         check_schema_version(&datastore).await;
 
+        let opctx = OpContext::for_tests(log.clone(), datastore.clone());
         match &self.command {
             DbCommands::Services => {
                 cmd_db_services(&opctx, &datastore, self.fetch_limit).await
@@ -118,6 +118,10 @@ async fn check_schema_version(datastore: &DataStore) {
     );
 }
 
+/// Check the result of a query to see if it hit the given limit.  If so, warn
+/// the user that our output may be incomplete and that they might try a larger
+/// one.  (We don't want to bail out, though.  Incomplete data is better than no
+/// data.)
 fn check_limit<I, F>(items: &[I], limit: NonZeroU32, context: F)
 where
     F: FnOnce() -> String,
@@ -125,13 +129,14 @@ where
     if items.len() == usize::try_from(limit.get()).unwrap() {
         eprintln!(
             "WARN: {}: found {} items (the limit).  There may be more items \
-            that were ignored.",
+            that were ignored.  Consider overriding with --fetch-limit.",
             context(),
             items.len(),
         );
     }
 }
 
+/// Run `omdb db services`.
 async fn cmd_db_services(
     opctx: &OpContext,
     datastore: &DataStore,
@@ -176,6 +181,7 @@ async fn cmd_db_services(
     Ok(())
 }
 
+/// Run `omdb db sleds`.
 async fn cmd_db_sleds(
     opctx: &OpContext,
     datastore: &DataStore,
