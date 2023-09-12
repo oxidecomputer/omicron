@@ -48,10 +48,11 @@ impl Certificate {
     ) -> Result<Self, CertificateError> {
         let validator = CertificateValidator::default();
 
-        // TODO-security: Could we have a hostname here to pass to `validate()`?
         validator.validate(
             params.cert.as_bytes(),
             &params.key.as_bytes(),
+            // TODO-correctness: We should pass a hostname here for cert
+            // validation: https://github.com/oxidecomputer/omicron/issues/4045
             None,
         )?;
 
