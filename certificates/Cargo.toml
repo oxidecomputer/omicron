@@ -5,9 +5,10 @@ edition = "2021"
 license = "MPL-2.0"
 
 [dependencies]
+foreign-types.workspace = true
 openssl.workspace = true
+openssl-sys.workspace = true
 thiserror.workspace = true
-trust-dns-proto.workspace = true
 x509-parser.workspace = true
 
 omicron-common.workspace = true

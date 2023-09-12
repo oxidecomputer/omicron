@@ -4761,12 +4761,13 @@ dependencies = [
 name = "omicron-certificates"
 version = "0.1.0"
 dependencies = [
+ "foreign-types 0.3.2",
  "omicron-common 0.1.0",
  "omicron-test-utils",
  "openssl",
+ "openssl-sys",
  "rcgen",
  "thiserror",
- "trust-dns-proto",
  "x509-parser",
 ]
 
@@ -10014,9 +10015,9 @@ dependencies = [
 
 [[package]]
 name = "x509-parser"
-version = "0.15.0"
+version = "0.15.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bab0c2f54ae1d92f4fcb99c0b7ccf0b1e3451cbd395e5f115ccbdbcb18d4f634"
+checksum = "7069fba5b66b9193bd2c5d3d4ff12b839118f6bcbef5328efafafb5395cf63da"
 dependencies = [
  "asn1-rs",
  "data-encoding",

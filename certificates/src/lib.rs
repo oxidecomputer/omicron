@@ -6,10 +6,13 @@
 
 use omicron_common::api::external::Error;
 use openssl::asn1::Asn1Time;
-use openssl::nid::Nid;
 use openssl::pkey::PKey;
 use openssl::x509::X509;
-use trust_dns_proto::rr::Name as DnsName;
+use std::ffi::CString;
+
+mod openssl_ext;
+
+use openssl_ext::X509Ext;
 
 #[derive(Debug, thiserror::Error)]
 pub enum CertificateError {
@@ -28,20 +31,11 @@ pub enum CertificateError {
     #[error("Certificate and private key do not match")]
     Mismatch,
 
-    #[error("Failed to convert common name to UTF8")]
-    NonUtf8CommonName(#[source] openssl::error::ErrorStack),
+    #[error("Hostname is invalid: {0:?}")]
+    InvalidHostname(String),
 
-    #[error("Certificate subject does not contain a common name")]
-    NoCommonName,
-
-    #[error("Certificate contains no subject alternate name dNSName entries and multiple common names")]
-    NoDnsNameSansMultipleCommonNames,
-
-    #[error("Certificate contains invalid DNS name")]
-    InvalidDnsName(#[source] trust_dns_proto::error::ProtoError),
-
-    #[error("Certificate common name is not a valid DNS name")]
-    InvalidCommonNameAsDnsName(#[source] trust_dns_proto::error::ProtoError),
+    #[error("Error validating certificate hostname")]
+    ErrorValidatingHostname(#[source] openssl::error::ErrorStack),
 
     #[error("Certificate does not match hostname {0:?}")]
     NoDnsNameMatchingHostname(String),
@@ -60,12 +54,9 @@ impl From<CertificateError> for Error {
             BadCertificate(_)
             | CertificateEmpty
             | CertificateExpired
-            | NonUtf8CommonName(_)
             | Mismatch
-            | NoCommonName
-            | NoDnsNameSansMultipleCommonNames
-            | InvalidDnsName(_)
-            | InvalidCommonNameAsDnsName(_)
+            | InvalidHostname(_)
+            | ErrorValidatingHostname(_)
             | NoDnsNameMatchingHostname(_)
             | UnsupportedPurpose => Error::InvalidValue {
                 label: String::from("certificate"),
@@ -143,12 +134,12 @@ impl CertificateValidator {
         let cert = certs.swap_remove(0);
 
         if let Some(hostname) = hostname {
-            let dns_names = cert_dns_names(&cert)?;
-            let hostname = DnsName::from_utf8(hostname)
-                .map_err(CertificateError::InvalidDnsName)?;
-            if !dns_names
-                .iter()
-                .any(|dns_name| dns_name_matches_hostname(dns_name, &hostname))
+            let c_hostname = CString::new(hostname).map_err(|_| {
+                CertificateError::InvalidHostname(hostname.to_string())
+            })?;
+            if !cert
+                .valid_for_hostname(&c_hostname)
+                .map_err(CertificateError::ErrorValidatingHostname)?
             {
                 return Err(CertificateError::NoDnsNameMatchingHostname(
                     hostname.to_string(),
@@ -236,86 +227,6 @@ fn validate_cert_der_extended_key_usage(
     Ok(())
 }
 
-fn cert_dns_names(cert: &X509) -> Result<Vec<DnsName>, CertificateError> {
-    let mut dns_names = Vec::new();
-
-    // Per RFC 2818 § 3.1:
-    //
-    // > If a subjectAltName extension of type dNSName is present, that MUST
-    // > be used as the identity. Otherwise, the (most specific) Common Name
-    // > field in the Subject field of the certificate MUST be used.
-    //
-    // we first check for any dnsname entries in `cert.subject_alt_names()`, and
-    // failing that we use the common name from the subject field.
-
-    if let Some(sans) = cert.subject_alt_names() {
-        for san in sans {
-            if let Some(dnsname) = san.dnsname() {
-                dns_names.push(
-                    DnsName::from_utf8(dnsname)
-                        .map_err(CertificateError::InvalidDnsName)?,
-                );
-            }
-        }
-    }
-
-    // If we found at least one dNSName in the SANs; we're done.
-    if !dns_names.is_empty() {
-        return Ok(dns_names);
-    }
-
-    let sn = cert.subject_name();
-
-    for cn in sn.entries_by_nid(Nid::COMMONNAME) {
-        let cn =
-            cn.data().as_utf8().map_err(CertificateError::NonUtf8CommonName)?;
-        dns_names.push(
-            DnsName::from_utf8(cn)
-                .map_err(CertificateError::InvalidCommonNameAsDnsName)?,
-        );
-    }
-
-    // Per the RFC, we should now choose the "most specific" common name, but
-    //
-    // (a) it doesn't say how to do that, and
-    // (b) we don't really expect to get here (we expect to find SANs)
-    //
-    // so we'll bail out if we found multiple common names. If we only found
-    // one, picking the most specific is easy!
-    //
-    // The crate we use for generating test cert parameters (rcgen) does not
-    // even support multiple common name entries.
-    match dns_names.len() {
-        0 => Err(CertificateError::NoCommonName),
-        1 => Ok(dns_names),
-        _ => Err(CertificateError::NoDnsNameSansMultipleCommonNames),
-    }
-}
-
-// Returns `Ok(true)` if `dns_name` (from a cert) matches `hostname`, including
-// handling a leading `*` wildcard:
-//
-// * If `hostname` begins with a wildcard, `dns_name` must be an exact match
-//   (including a leading wildcard).
-// * If neither `hostname` nor `dns_name` begin with a wildcard, they must match
-//   exactly.
-// * If `hostname` does not begin with a wildcard but `dns_name` does, the first
-//   portion of each will be removed, and the remainders must match exactly.
-fn dns_name_matches_hostname(dns_name: &DnsName, hostname: &DnsName) -> bool {
-    // If `hostname` starts with a wildcard _or_ `dns_name` does not, the only
-    // way for them to match is if they match exactly. (Note that `DnsName`
-    // provides _case insensitive_ equality, so "match exactly" means "match
-    // exactly but case insentively".)
-    if hostname.is_wildcard() || !dns_name.is_wildcard() {
-        hostname == dns_name
-    } else {
-        // dns_name has a leading wildcard but hostname does not: trim the
-        // wildcard off of dns_name and the leading part of hostname, and then
-        // compare.
-        dns_name.base_name() == hostname.base_name()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -323,95 +234,144 @@ mod tests {
     use rcgen::CertificateParams;
     use rcgen::DistinguishedName;
     use rcgen::DnType;
-    use rcgen::DnValue;
     use rcgen::ExtendedKeyUsagePurpose;
     use rcgen::KeyUsagePurpose;
     use rcgen::SanType;
 
+    fn validate_cert_with_params(
+        params: CertificateParams,
+        hostname: Option<&str>,
+    ) -> Result<(), CertificateError> {
+        let cert_chain = CertificateChain::with_params(params);
+        CertificateValidator::default().validate(
+            cert_chain.cert_chain_as_pem().as_bytes(),
+            cert_chain.end_cert_private_key_as_pem().as_bytes(),
+            hostname,
+        )
+    }
+
     #[test]
-    fn test_cert_dns_name_matches_hostname() {
+    fn test_subject_alternate_names_are_validated() {
         // Expected-successful matches
         for (dns_name, hostname) in &[
             ("oxide.computer", "oxide.computer"),
             ("*.oxide.computer", "*.oxide.computer"),
             ("*.oxide.computer", "foo.oxide.computer"),
         ] {
-            assert!(
-                dns_name_matches_hostname(
-                    &DnsName::from_utf8(dns_name).unwrap(),
-                    &DnsName::from_utf8(hostname).unwrap(),
+            let mut params = CertificateParams::new([]);
+            params.subject_alt_names =
+                vec![SanType::DnsName(dns_name.to_string())];
+            match validate_cert_with_params(params, Some(hostname)) {
+                Ok(()) => (),
+                Err(err) => panic!(
+                    "certificate with SAN {dns_name} \
+                     failed to validate for hostname {hostname}: {err}"
                 ),
-                "{dns_name} failed to match {hostname}"
-            );
+            }
         }
 
         // Expected-unsuccessful matches
-        for (dns_name, hostname) in &[
+        for &(dns_name, hostname) in &[
             ("oxide.computer", "foo.oxide.computer"),
             ("oxide.computer", "*.oxide.computer"),
             ("*.oxide.computer", "foo.bar.oxide.computer"),
         ] {
-            assert!(
-                !dns_name_matches_hostname(
-                    &DnsName::from_utf8(dns_name).unwrap(),
-                    &DnsName::from_utf8(hostname).unwrap(),
+            let mut params = CertificateParams::new([]);
+            params.subject_alt_names =
+                vec![SanType::DnsName(dns_name.to_string())];
+            match validate_cert_with_params(params, Some(hostname)) {
+                Ok(()) => panic!(
+                    "certificate with SAN {dns_name} \
+                     unexpectedly passed validation for hostname {hostname}"
                 ),
-                "{dns_name} failed to match {hostname}"
-            );
+                Err(CertificateError::NoDnsNameMatchingHostname(name)) => {
+                    assert_eq!(name, hostname);
+                }
+                Err(err) => panic!(
+                    "certificate with SAN {dns_name} \
+                     validation failed with unexpected error {err}"
+                ),
+            }
         }
     }
 
     #[test]
-    fn test_cert_dns_names() {
-        fn leaf_cert_with_params(params: CertificateParams) -> X509 {
-            let cert_chain = CertificateChain::with_params(params);
-            let mut certs =
-                X509::stack_from_pem(cert_chain.cert_chain_as_pem().as_bytes())
-                    .unwrap();
-            certs.swap_remove(0)
+    fn test_common_name_is_validated() {
+        // Expected-successful matches
+        for &(dns_name, hostname) in &[
+            ("oxide.computer", "oxide.computer"),
+            ("*.oxide.computer", "*.oxide.computer"),
+            ("*.oxide.computer", "foo.oxide.computer"),
+        ] {
+            let mut dn = DistinguishedName::new();
+            dn.push(DnType::CommonName, dns_name);
+            let mut params = CertificateParams::new([]);
+            params.distinguished_name = dn;
+
+            match validate_cert_with_params(params, Some(hostname)) {
+                Ok(()) => (),
+                Err(err) => panic!(
+                    "certificate with SAN {dns_name} \
+                     failed to validate for hostname {hostname}: {err}"
+                ),
+            }
         }
 
-        // "Normal" cert - we have some dNSName subject alt names; those should
-        // be returned, and non-DNS SANs and the common name should be ignored.
-        let mut params = CertificateParams::new([]);
-        params.subject_alt_names = vec![
-            SanType::DnsName("foo.oxide.computer".into()),
-            SanType::IpAddress("1.1.1.1".parse().unwrap()),
-            SanType::DnsName("*.sys.oxide.computer".into()),
-            SanType::Rfc822Name("root@oxide.computer".into()),
-            SanType::URI("http://oxide.computer".into()),
-        ];
-        params.distinguished_name = {
+        // Expected-unsuccessful matches
+        for &(dns_name, hostname) in &[
+            ("oxide.computer", "foo.oxide.computer"),
+            ("oxide.computer", "*.oxide.computer"),
+            ("*.oxide.computer", "foo.bar.oxide.computer"),
+        ] {
             let mut dn = DistinguishedName::new();
-            dn.push(
-                DnType::CommonName,
-                DnValue::PrintableString("bar.oxide.computer".into()),
-            );
-            dn
-        };
-        let cert = leaf_cert_with_params(params);
-        let dns_names = cert_dns_names(&cert).unwrap();
-        assert_eq!(
-            dns_names,
-            &[
-                "foo.oxide.computer".parse().unwrap(),
-                "*.sys.oxide.computer".parse().unwrap()
-            ]
-        );
+            dn.push(DnType::CommonName, dns_name);
+            let mut params = CertificateParams::new([]);
+            params.distinguished_name = dn;
 
-        // Cert with no subject alt names; we should get the common name.
+            match validate_cert_with_params(params, Some(hostname)) {
+                Ok(()) => panic!(
+                    "certificate with SAN {dns_name} \
+                     unexpectedly passed validation for hostname {hostname}"
+                ),
+                Err(CertificateError::NoDnsNameMatchingHostname(name)) => {
+                    assert_eq!(name, hostname);
+                }
+                Err(err) => panic!(
+                    "certificate with SAN {dns_name} \
+                     validation failed with unexpected error {err}"
+                ),
+            }
+        }
+    }
+
+    #[test]
+    fn common_name_is_ignored_if_subject_alternate_names_exist() {
+        // Set a common name that will pass validation, but a SAN that will not.
+        // If a SAN exists, the CN should not be used in validation.
+        const COMMON_NAME: &str = "*.oxide.computer";
+        const SUBJECT_ALT_NAME: &str = "bar.oxide.computer";
+        const HOSTNAME: &str = "foo.oxide.computer";
+
+        let mut dn = DistinguishedName::new();
+        dn.push(DnType::CommonName, COMMON_NAME);
+
         let mut params = CertificateParams::new([]);
-        params.distinguished_name = {
-            let mut dn = DistinguishedName::new();
-            dn.push(
-                DnType::CommonName,
-                DnValue::PrintableString("bar.oxide.computer".into()),
-            );
-            dn
-        };
-        let cert = leaf_cert_with_params(params);
-        let dns_names = cert_dns_names(&cert).unwrap();
-        assert_eq!(dns_names, &["bar.oxide.computer".parse().unwrap()]);
+        params.distinguished_name = dn;
+
+        params.subject_alt_names =
+            vec![SanType::DnsName(SUBJECT_ALT_NAME.to_string())];
+
+        match validate_cert_with_params(params, Some(HOSTNAME)) {
+            Ok(()) => panic!(
+                "certificate unexpectedly passed validation for hostname"
+            ),
+            Err(CertificateError::NoDnsNameMatchingHostname(name)) => {
+                assert_eq!(name, HOSTNAME);
+            }
+            Err(err) => panic!(
+                "certificate validation failed with unexpected error {err}"
+            ),
+        }
     }
 
     #[test]
