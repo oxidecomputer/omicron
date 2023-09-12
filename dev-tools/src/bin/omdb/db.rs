@@ -45,6 +45,7 @@ impl DbArgs {
         log: &slog::Logger,
     ) -> Result<(), anyhow::Error> {
         let db_config = db::Config { url: self.db_url.clone() };
+        // XXX-dap want a pool that fails faster
         let pool = Arc::new(db::Pool::new(&log.clone(), &db_config));
 
         // Being a dev tool, we want this to try this operation regardless of
@@ -55,13 +56,55 @@ impl DbArgs {
         );
 
         let opctx = OpContext::for_tests(log.clone(), datastore.clone());
-        // XXX-dap check schema version to report a warning if no good
+
+        check_schema_version(&datastore).await;
 
         match &self.command {
             DbCommands::Services => cmd_db_services(&opctx, &datastore).await,
             DbCommands::Sleds => cmd_db_sleds(&opctx, &datastore).await,
         }
     }
+}
+
+/// Check the version of the schema in the database and report whether it
+/// appears to be compatible with this tool.
+///
+/// This is just advisory.  We will not abort if the version appears
+/// incompatible because in practice it may well not matter and it's very
+/// valuable for this tool to work if it possibly can.
+async fn check_schema_version(datastore: &DataStore) {
+    let expected_version = nexus_db_model::schema::SCHEMA_VERSION;
+    let version_check = datastore.database_schema_version().await;
+
+    match version_check {
+        Ok(found_version) => {
+            if found_version == expected_version {
+                eprintln!(
+                    "note: schema version matches expected ({})",
+                    expected_version
+                );
+                return;
+            }
+
+            eprintln!(
+                "WARN: found schema version {}, expected {}",
+                found_version, expected_version
+            );
+        }
+        Err(error) => {
+            eprintln!("WARN: failed to query schema version: {:#}", error);
+        }
+    };
+
+    eprintln!(
+        "{}",
+        textwrap::fill(
+            "It's possible the database is running a version that's different \
+            from what this tool understands.  This may result in errors or \
+            incorrect output.",
+            80
+        )
+    );
 }
 
 async fn cmd_db_services(

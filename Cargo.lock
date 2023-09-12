@@ -4806,6 +4806,7 @@ dependencies = [
  "humantime",
  "libc",
  "nexus-client 0.1.0",
+ "nexus-db-model",
  "nexus-db-queries",
  "nexus-test-interface",
  "nexus-test-utils",
