@@ -9,7 +9,6 @@ foreign-types.workspace = true
 openssl.workspace = true
 openssl-sys.workspace = true
 thiserror.workspace = true
-x509-parser.workspace = true
 
 omicron-common.workspace = true
 

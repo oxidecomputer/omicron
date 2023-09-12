@@ -31,17 +31,28 @@ extern "C" {
 }
 
 pub(crate) trait X509Ext {
-    fn valid_for_hostname(&self, name: &CStr) -> Result<bool, ErrorStack>;
+    /// Check whether this cert is valid for the provided `hostname`.
+    fn valid_for_hostname(&self, hostname: &CStr) -> Result<bool, ErrorStack>;
+
+    /// Returns the extended key usage bitmask from
+    /// `X509_get_extended_key_usage()` if this cert has an EKU extension.
+    fn extended_key_usage(&self) -> Option<u32>;
 }
 
 impl X509Ext for X509Ref {
-    fn valid_for_hostname(&self, name: &CStr) -> Result<bool, ErrorStack> {
+    fn valid_for_hostname(&self, hostname: &CStr) -> Result<bool, ErrorStack> {
         // Safety: We know `self` is a valid X509Ref and `hostname` is a valid C
         // string. We pass a hostname length of 0 which instructs OpenSSL to use
         // `strlen()` to check its length. We do not pass any flags and do not
         // want the cert name returned to us.
         let rc = unsafe {
-            X509_check_host(self.as_ptr(), name.as_ptr(), 0, 0, ptr::null_mut())
+            X509_check_host(
+                self.as_ptr(),
+                hostname.as_ptr(),
+                0,
+                0,
+                ptr::null_mut(),
+            )
         };
 
         match rc {
@@ -49,5 +60,19 @@ impl X509Ext for X509Ref {
             0 => Ok(false),
             _ => Err(ErrorStack::get()),
         }
+    }
+
+    fn extended_key_usage(&self) -> Option<u32> {
+        let extension_flags =
+            unsafe { openssl_sys::X509_get_extension_flags(self.as_ptr()) };
+
+        if extension_flags & openssl_sys::EXFLAG_XKUSAGE == 0 {
+            return None;
+        }
+
+        let eku =
+            unsafe { openssl_sys::X509_get_extended_key_usage(self.as_ptr()) };
+
+        Some(eku)
     }
 }

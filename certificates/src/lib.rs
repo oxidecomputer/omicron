@@ -147,17 +147,13 @@ impl CertificateValidator {
             }
         }
 
-        // We want to check whether this cert is suitable for use by a web
-        // server, which requires checking the x509 extended attributes.
-        // Unfortunately, the openssl crate does not expose these
-        // (https://github.com/sfackler/rust-openssl/issues/373), so we'll do
-        // something pretty gross: convert this cert to DER, then re-parse it
-        // via the pure Rust x509-parser crate, which does. We want to err on
-        // the side of "allow the cert" here; we're using a non-openssl crate
-        // and manually checking some SSL extensions, so we will only fail if we
-        // _know_ the cert is not valid.
-        if let Ok(cert_der) = cert.to_der() {
-            validate_cert_der_extended_key_usage(&cert_der)?;
+        // If the cert has extended key usage bits set at all, require the bit
+        // for servers (`XKU_SSL_SERVER` corresponds to `id-kp-serverAuth`,
+        // which is "TLS WWW server authentication" from RFC 5280).
+        if let Some(extended_key_usage) = cert.extended_key_usage() {
+            if extended_key_usage & openssl_sys::XKU_SSL_SERVER == 0 {
+                return Err(CertificateError::UnsupportedPurpose);
+            }
         }
 
         // Checks on the private key.
@@ -178,55 +174,6 @@ impl CertificateValidator {
     }
 }
 
-// As noted above, this helper uses a different x509 parsing crate. We don't
-// want to fail spuriously here (e.g., if this function fails to parse, what
-// does that mean? we've already successfully parsed the cert via openssl), so
-// this function only fails if we successfully parse the extensions we want
-// _and_ they fail to satisfy the requirements from
-// https://man.openbsd.org/X509_check_purpose.3#X509_PURPOSE_SSL_SERVER.
-fn validate_cert_der_extended_key_usage(
-    der: &[u8],
-) -> Result<(), CertificateError> {
-    use x509_parser::certificate::X509CertificateParser;
-    use x509_parser::nom::Parser;
-
-    let mut parser = X509CertificateParser::new();
-    let Ok((_remaining, cert)) = parser.parse(der) else {
-        return Ok(());
-    };
-
-    if let Ok(Some(key_usage)) = cert.key_usage() {
-        dbg!(&key_usage);
-        // Per
-        // https://man.openbsd.org/X509_check_purpose.3#X509_PURPOSE_SSL_SERVER,
-        // if we have the Key Usage extension, we must have at least one of the
-        // digitalSignature / keyEncipherment bits set.
-        if !key_usage.value.digital_signature()
-            && !key_usage.value.key_encipherment()
-        {
-            return Err(CertificateError::UnsupportedPurpose);
-        }
-    }
-
-    if let Ok(Some(ext_key_usage)) = cert.extended_key_usage() {
-        dbg!(&ext_key_usage);
-        // Per
-        // https://man.openbsd.org/X509_check_purpose.3#X509_PURPOSE_SSL_SERVER,
-        // if we have the Extended Key Usage extension, we must have either the
-        // server auth bit or one of a couple proprietary (Netscape/Microsoft)
-        // bits; we'll ignore the proprietary bits and require server auth.
-        //
-        // TODO-correctness: Is it right to also accept "any" here?
-        if !ext_key_usage.value.any && !ext_key_usage.value.server_auth {
-            return Err(CertificateError::UnsupportedPurpose);
-        }
-    }
-
-    // We either don't have Key Usage / Extended Key Usage, or we do but they're
-    // satisfactory.
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -235,7 +182,6 @@ mod tests {
     use rcgen::DistinguishedName;
     use rcgen::DnType;
     use rcgen::ExtendedKeyUsagePurpose;
-    use rcgen::KeyUsagePurpose;
     use rcgen::SanType;
 
     fn validate_cert_with_params(
@@ -375,34 +321,12 @@ mod tests {
     }
 
     #[test]
-    fn test_cert_key_usage() {
+    fn test_cert_extended_key_usage() {
         const HOST: &str = "foo.oxide.computer";
 
         let mut validator = CertificateValidator::default();
         validator.danger_disable_expiration_validation();
 
-        let valid_key_usage = vec![
-            vec![],
-            vec![KeyUsagePurpose::DigitalSignature],
-            vec![KeyUsagePurpose::KeyEncipherment],
-            vec![
-                KeyUsagePurpose::DigitalSignature,
-                KeyUsagePurpose::KeyEncipherment,
-            ],
-            vec![
-                KeyUsagePurpose::DigitalSignature,
-                KeyUsagePurpose::CrlSign, // unrelated, but fine
-            ],
-            vec![
-                KeyUsagePurpose::KeyEncipherment,
-                KeyUsagePurpose::CrlSign, // unrelated, but fine
-            ],
-            vec![
-                KeyUsagePurpose::DigitalSignature,
-                KeyUsagePurpose::KeyEncipherment,
-                KeyUsagePurpose::CrlSign, // unrelated, but fine
-            ],
-        ];
         let valid_ext_key_usage = vec![
             vec![],
             // Restore once https://github.com/est31/rcgen/issues/130 is fixed
@@ -419,28 +343,20 @@ mod tests {
         ];
 
         // Valid certs: either no key usage values, or valid ones.
-        for key_usage in &valid_key_usage {
-            for ext_key_usage in &valid_ext_key_usage {
-                let mut params = CertificateParams::new(vec![HOST.to_string()]);
-                params.key_usages = key_usage.clone();
-                params.extended_key_usages = ext_key_usage.clone();
+        for ext_key_usage in &valid_ext_key_usage {
+            let mut params = CertificateParams::new(vec![HOST.to_string()]);
+            params.extended_key_usages = ext_key_usage.clone();
 
-                let cert_chain = CertificateChain::with_params(params);
-                let certs = cert_chain.cert_chain_as_pem();
-                let key = cert_chain.end_cert_private_key_as_pem();
-                assert!(
-                    validator
-                        .validate(certs.as_bytes(), key.as_bytes(), Some(HOST))
-                        .is_ok(),
-                    "unexpected failure with {key_usage:?}, {ext_key_usage:?}"
-                );
-            }
+            let cert_chain = CertificateChain::with_params(params);
+            let certs = cert_chain.cert_chain_as_pem();
+            let key = cert_chain.end_cert_private_key_as_pem();
+            assert!(
+                validator
+                    .validate(certs.as_bytes(), key.as_bytes(), Some(HOST))
+                    .is_ok(),
+                "unexpected failure with {ext_key_usage:?}"
+            );
         }
-
-        let invalid_key_usage = vec![
-            vec![KeyUsagePurpose::CrlSign],
-            vec![KeyUsagePurpose::CrlSign, KeyUsagePurpose::KeyCertSign],
-        ];
 
         let invalid_ext_key_usage = vec![
             vec![ExtendedKeyUsagePurpose::ClientAuth],
@@ -451,58 +367,24 @@ mod tests {
             ],
         ];
 
-        for key_usage in &invalid_key_usage {
-            // `key_usage` is invalid: we should fail with both valid and
-            // invalid ext_key_usage.
-            for ext_key_usage in
-                valid_ext_key_usage.iter().chain(invalid_ext_key_usage.iter())
-            {
-                let mut params = CertificateParams::new(vec![HOST.to_string()]);
-                params.key_usages = key_usage.clone();
-                params.extended_key_usages = ext_key_usage.clone();
-
-                let cert_chain = CertificateChain::with_params(params);
-                let certs = cert_chain.cert_chain_as_pem();
-                let key = cert_chain.end_cert_private_key_as_pem();
-                assert!(
-                    matches!(
-                        validator.validate(
-                            certs.as_bytes(),
-                            key.as_bytes(),
-                            Some(HOST)
-                        ),
-                        Err(CertificateError::UnsupportedPurpose)
-                    ),
-                    "unexpected success with {key_usage:?}, {ext_key_usage:?}"
-                );
-            }
-        }
-
         for ext_key_usage in &invalid_ext_key_usage {
-            // `ext_key_usage` is invalid: we should fail with both valid and
-            // invalid key_usage.
-            for key_usage in
-                valid_key_usage.iter().chain(invalid_key_usage.iter())
-            {
-                let mut params = CertificateParams::new(vec![HOST.to_string()]);
-                params.key_usages = key_usage.clone();
-                params.extended_key_usages = ext_key_usage.clone();
+            let mut params = CertificateParams::new(vec![HOST.to_string()]);
+            params.extended_key_usages = ext_key_usage.clone();
 
-                let cert_chain = CertificateChain::with_params(params);
-                let certs = cert_chain.cert_chain_as_pem();
-                let key = cert_chain.end_cert_private_key_as_pem();
-                assert!(
-                    matches!(
-                        validator.validate(
-                            certs.as_bytes(),
-                            key.as_bytes(),
-                            Some(HOST)
-                        ),
-                        Err(CertificateError::UnsupportedPurpose)
+            let cert_chain = CertificateChain::with_params(params);
+            let certs = cert_chain.cert_chain_as_pem();
+            let key = cert_chain.end_cert_private_key_as_pem();
+            assert!(
+                matches!(
+                    validator.validate(
+                        certs.as_bytes(),
+                        key.as_bytes(),
+                        Some(HOST)
                     ),
-                    "unexpected success with {key_usage:?}, {ext_key_usage:?}"
-                );
-            }
+                    Err(CertificateError::UnsupportedPurpose)
+                ),
+                "unexpected success with {ext_key_usage:?}"
+            );
         }
     }
 }
