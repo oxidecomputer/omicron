@@ -10,6 +10,7 @@ omicron-rpaths.workspace = true
 [dependencies]
 anyhow.workspace = true
 camino.workspace = true
+chrono.workspace = true
 clap.workspace = true
 dropshot.workspace = true
 futures.workspace = true
@@ -32,6 +33,7 @@ signal-hook.workspace = true
 signal-hook-tokio.workspace = true
 slog.workspace = true
 strum.workspace = true
+tabled.workspace = true
 textwrap.workspace = true
 tokio = { workspace = true, features = [ "full" ] }
 tokio-postgres.workspace = true

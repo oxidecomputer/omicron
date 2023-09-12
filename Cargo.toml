@@ -329,6 +329,7 @@ strum = { version = "0.25", features = [ "derive" ] }
 subprocess = "0.2.9"
 libsw = { version = "3.3.0", features = ["tokio"] }
 syn = { version = "2.0" }
+tabled = "0.14"
 tar = "0.4"
 tempdir = "0.3"
 tempfile = "3.6"
