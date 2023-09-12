@@ -4819,6 +4819,7 @@ dependencies = [
  "oxide-client",
  "pq-sys",
  "rcgen",
+ "serde_json",
  "signal-hook",
  "signal-hook-tokio",
  "slog",

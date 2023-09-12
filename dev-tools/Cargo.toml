@@ -27,6 +27,7 @@ omicron-sled-agent.workspace = true
 # See omicron-rpaths for more about the "pq-sys" dependency.
 pq-sys = "*"
 rcgen.workspace = true
+serde_json.workspace = true
 signal-hook.workspace = true
 signal-hook-tokio.workspace = true
 slog.workspace = true

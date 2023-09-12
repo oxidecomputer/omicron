@@ -15,11 +15,9 @@ mod nexus;
 async fn main() -> Result<(), anyhow::Error> {
     let args = Omdb::parse();
 
-    let log = dropshot::ConfigLogging::StderrTerminal {
-        level: dropshot::ConfigLoggingLevel::Warn,
-    }
-    .to_logger("omdb")
-    .context("failed to create logger")?;
+    let log = dropshot::ConfigLogging::StderrTerminal { level: args.log_level }
+        .to_logger("omdb")
+        .context("failed to create logger")?;
 
     match args.command {
         OmdbCommands::Nexus(nexus) => nexus.run_cmd(&log).await,
@@ -30,6 +28,15 @@ async fn main() -> Result<(), anyhow::Error> {
 /// Omicron debugger
 #[derive(Debug, Parser)]
 struct Omdb {
+    /// log level filter
+    #[arg(
+        env,
+        long,
+        value_parser = parse_dropshot_log_level,
+        default_value = "warn",
+    )]
+    log_level: dropshot::ConfigLoggingLevel,
+
     #[command(subcommand)]
     command: OmdbCommands,
 }
@@ -40,4 +47,10 @@ enum OmdbCommands {
     Db(db::DbArgs),
     /// Debug a specific Nexus instance
     Nexus(nexus::NexusArgs),
+}
+
+fn parse_dropshot_log_level(
+    s: &str,
+) -> Result<dropshot::ConfigLoggingLevel, anyhow::Error> {
+    serde_json::from_str(&format!("{:?}", s)).context("parsing log level")
 }
