@@ -34,6 +34,7 @@ use illumos_utils::zone::ZONE_PREFIX;
 use omicron_common::address::{
     get_sled_address, get_switch_zone_address, Ipv6Subnet, SLED_PREFIX,
 };
+use omicron_common::api::external::Generation;
 use omicron_common::api::external::Vni;
 use omicron_common::api::internal::shared::RackNetworkConfig;
 use omicron_common::api::{
@@ -45,13 +46,13 @@ use omicron_common::backoff::{
     BackoffError,
 };
 use omicron_common::ledger::{self, Ledger};
-use once_cell::sync::OnceCell;
 use sled_hardware::underlay;
 use sled_hardware::HardwareManager;
 use slog::Logger;
 use std::collections::BTreeMap;
 use std::net::{Ipv6Addr, SocketAddrV6};
 use std::sync::Arc;
+use tokio::sync::Mutex;
 use uuid::Uuid;
 
 #[cfg(not(test))]
@@ -222,8 +223,8 @@ struct SledAgentInner {
     // Other Oxide-controlled services running on this Sled.
     services: ServiceManager,
 
-    // A test override option to change where ledgers are stored.
-    ledger_directory_override: OnceCell<Utf8PathBuf>,
+    // Guards access to the ledger
+    ledger_guard: Mutex<()>,
 
     // Connection to Nexus.
     nexus_client: NexusClientWithResolver,
@@ -443,7 +444,7 @@ impl SledAgent {
                 updates,
                 port_manager,
                 services,
-                ledger_directory_override: OnceCell::new(),
+                ledger_guard: Mutex::new(()),
                 nexus_client,
 
                 // TODO(https://github.com/oxidecomputer/omicron/issues/1917):
@@ -722,9 +723,6 @@ impl SledAgent {
     }
 
     async fn all_service_ledgers(&self) -> Vec<Utf8PathBuf> {
-        if let Some(dir) = self.inner.ledger_directory_override.get() {
-            return vec![dir.join(SERVICES_LEDGER_FILENAME)];
-        }
         self.inner
             .storage
             .resources()
@@ -733,12 +731,6 @@ impl SledAgent {
             .into_iter()
             .map(|p| p.join(SERVICES_LEDGER_FILENAME))
             .collect()
-    }
-
-    #[cfg(test)]
-    #[allow(dead_code)]
-    fn override_ledger_directory(&self, path: Utf8PathBuf) {
-        self.inner.ledger_directory_override.set(path).unwrap();
     }
 
     /// Ensures that particular services should be initialized.
@@ -755,14 +747,16 @@ impl SledAgent {
             .filter_map(|service| service.dataset.clone())
             .collect();
 
-        // TODO-concurrency: Do we need to lock access to the ledger, somehow?
-        //
-        // Admittedly we are locking access to services, but it seems possible
-        // that multiple requests to "services_ensure" arrive concurrently.
-
         let requested_generation = requested_services.generation;
 
         let service_paths = self.all_service_ledgers().await;
+
+        // Guard against concurrent access to the ledger.
+        //
+        // Though services and datasets themselves are guarded, we would like
+        // to avoid two concurrent requests to modify the set of services from
+        // trampling on one another.
+        let _ledger_guard = self.inner.ledger_guard.lock().await;
         let mut ledger = match Ledger::<AllZoneRequests>::new(
             &self.log,
             service_paths.clone(),
@@ -812,13 +806,19 @@ impl SledAgent {
         ledger_zone_requests
             .requests_mut()
             .append(&mut zone_requests.take_requests());
-        ledger.commit().await?;
 
         // If we are asked to skip a generation, we should abide, and
         // jump to the latest number provided.
+        //
+        // Note that we set it to "requested_generation - 1" so that the
+        // "commit" calls bumps us to the appropriate generation numer.
         if *ledger.data().generation() < requested_generation {
-            ledger.data_mut().set_generation(requested_generation);
+            let gen_before_commit =
+                Generation::try_from(i64::from(&requested_generation) - 1)
+                    .unwrap();
+            ledger.data_mut().set_generation(gen_before_commit);
         }
+        ledger.commit().await?;
 
         Ok(ServiceEnsureResponse {
             generation: *ledger.data().generation(),
