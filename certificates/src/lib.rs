@@ -324,9 +324,6 @@ mod tests {
     fn test_cert_extended_key_usage() {
         const HOST: &str = "foo.oxide.computer";
 
-        let mut validator = CertificateValidator::default();
-        validator.danger_disable_expiration_validation();
-
         let valid_ext_key_usage = vec![
             vec![],
             // Restore once https://github.com/est31/rcgen/issues/130 is fixed
@@ -347,13 +344,8 @@ mod tests {
             let mut params = CertificateParams::new(vec![HOST.to_string()]);
             params.extended_key_usages = ext_key_usage.clone();
 
-            let cert_chain = CertificateChain::with_params(params);
-            let certs = cert_chain.cert_chain_as_pem();
-            let key = cert_chain.end_cert_private_key_as_pem();
             assert!(
-                validator
-                    .validate(certs.as_bytes(), key.as_bytes(), Some(HOST))
-                    .is_ok(),
+                validate_cert_with_params(params, Some(HOST)).is_ok(),
                 "unexpected failure with {ext_key_usage:?}"
             );
         }
@@ -371,16 +363,9 @@ mod tests {
             let mut params = CertificateParams::new(vec![HOST.to_string()]);
             params.extended_key_usages = ext_key_usage.clone();
 
-            let cert_chain = CertificateChain::with_params(params);
-            let certs = cert_chain.cert_chain_as_pem();
-            let key = cert_chain.end_cert_private_key_as_pem();
             assert!(
                 matches!(
-                    validator.validate(
-                        certs.as_bytes(),
-                        key.as_bytes(),
-                        Some(HOST)
-                    ),
+                    validate_cert_with_params(params, Some(HOST)),
                     Err(CertificateError::UnsupportedPurpose)
                 ),
                 "unexpected success with {ext_key_usage:?}"
