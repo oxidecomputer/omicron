@@ -9,6 +9,7 @@ omicron-rpaths.workspace = true
 
 [dependencies]
 anyhow.workspace = true
+assert_matches.workspace = true
 async-trait.workspace = true
 base64.workspace = true
 bb8.workspace = true
@@ -28,6 +29,7 @@ gateway-client.workspace = true
 headers.workspace = true
 hex.workspace = true
 http.workspace = true
+humantime.workspace = true
 hyper.workspace = true
 internal-dns.workspace = true
 ipnetwork.workspace = true
@@ -35,6 +37,7 @@ lazy_static.workspace = true
 macaddr.workspace = true
 mime_guess.workspace = true
 newtype_derive.workspace = true
+nexus-client.workspace = true
 # Not under "dev-dependencies"; these also need to be implemented for
 # integration tests.
 nexus-test-interface.workspace = true
@@ -70,6 +73,7 @@ slog-dtrace.workspace = true
 slog-term.workspace = true
 steno.workspace = true
 tempfile.workspace = true
+textwrap.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["full"] }
 tokio-postgres = { workspace = true, features = ["with-serde_json-1"] }
@@ -91,7 +95,6 @@ oximeter-producer.workspace = true
 rustls = { workspace = true }
 
 [dev-dependencies]
-assert_matches.workspace = true
 async-bb8-diesel.workspace = true
 criterion.workspace = true
 diesel.workspace = true

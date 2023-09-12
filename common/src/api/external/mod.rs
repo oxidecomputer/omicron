@@ -683,6 +683,7 @@ impl TryFrom<i64> for Generation {
 pub enum ResourceType {
     AddressLot,
     AddressLotBlock,
+    BackgroundTask,
     Fleet,
     Silo,
     SiloUser,

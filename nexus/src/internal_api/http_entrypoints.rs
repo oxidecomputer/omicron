@@ -27,6 +27,7 @@ use hyper::Body;
 use nexus_types::internal_api::params::SwitchPutRequest;
 use nexus_types::internal_api::params::SwitchPutResponse;
 use nexus_types::internal_api::views::to_list;
+use nexus_types::internal_api::views::BackgroundTask;
 use nexus_types::internal_api::views::Saga;
 use omicron_common::api::external::http_pagination::data_page_params_for;
 use omicron_common::api::external::http_pagination::PaginatedById;
@@ -42,6 +43,7 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use std::sync::Arc;
 use uuid::Uuid;
+use std::collections::BTreeMap;
 
 type NexusApiDescription = ApiDescription<Arc<ServerContext>>;
 
@@ -65,6 +67,9 @@ pub(crate) fn internal_api() -> NexusApiDescription {
 
         api.register(saga_list)?;
         api.register(saga_view)?;
+
+        api.register(bgtask_list)?;
+        api.register(bgtask_view)?;
 
         Ok(())
     }
@@ -447,7 +452,7 @@ async fn saga_list(
         let nexus = &apictx.nexus;
         let query = query_params.into_inner();
         let pagparams = data_page_params_for(&rqctx, &query)?;
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
         let saga_stream = nexus.sagas_list(&opctx, &pagparams).await?;
         let view_list = to_list(saga_stream).await;
         Ok(HttpResponseOk(ScanById::results_page(
@@ -456,7 +461,7 @@ async fn saga_list(
             &|_, saga: &Saga| saga.id,
         )?))
     };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+    apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
 /// Path parameters for Saga requests
@@ -476,11 +481,62 @@ async fn saga_view(
 ) -> Result<HttpResponseOk<Saga>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
         let nexus = &apictx.nexus;
         let path = path_params.into_inner();
         let saga = nexus.saga_get(&opctx, path.saga_id).await?;
         Ok(HttpResponseOk(saga))
     };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+    apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+// Background Tasks
+
+/// List background tasks
+///
+/// This is a list of discrete background activities that Nexus carries out.
+/// This is exposed for support and debugging.
+#[endpoint {
+    method = GET,
+    path = "/bgtasks",
+}]
+async fn bgtask_list(
+    rqctx: RequestContext<Arc<ServerContext>>,
+) -> Result<HttpResponseOk<BTreeMap<String, BackgroundTask>>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
+        let bgtask_list = nexus.bgtasks_list(&opctx).await?;
+        Ok(HttpResponseOk(bgtask_list))
+    };
+    apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Path parameters for Background Task requests
+#[derive(Deserialize, JsonSchema)]
+struct BackgroundTaskPathParam {
+    bgtask_name: String,
+}
+
+/// Fetch status of one background task
+///
+/// This is exposed for support and debugging.
+#[endpoint {
+    method = GET,
+    path = "/bgtasks/{bgtask_name}",
+}]
+async fn bgtask_view(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<BackgroundTaskPathParam>,
+) -> Result<HttpResponseOk<BackgroundTask>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let bgtask = nexus.bgtask_status(&opctx, &path.bgtask_name).await?;
+        Ok(HttpResponseOk(bgtask))
+    };
+    apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
