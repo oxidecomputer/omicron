@@ -25,6 +25,13 @@ pub struct DbArgs {
     /// URL of the database SQL interface
     db_url: PostgresConfigWithUrl,
 
+    /// limit to apply to queries that fetch rows
+    #[clap(
+        long = "fetch-limit",
+        default_value_t = NonZeroU32::new(100).unwrap()
+    )]
+    fetch_limit: NonZeroU32,
+
     #[command(subcommand)]
     command: DbCommands,
 }
@@ -60,8 +67,12 @@ impl DbArgs {
         check_schema_version(&datastore).await;
 
         match &self.command {
-            DbCommands::Services => cmd_db_services(&opctx, &datastore).await,
-            DbCommands::Sleds => cmd_db_sleds(&opctx, &datastore).await,
+            DbCommands::Services => {
+                cmd_db_services(&opctx, &datastore, self.fetch_limit).await
+            }
+            DbCommands::Sleds => {
+                cmd_db_sleds(&opctx, &datastore, self.fetch_limit).await
+            }
         }
     }
 }
@@ -107,11 +118,25 @@ async fn check_schema_version(datastore: &DataStore) {
     );
 }
 
+fn check_limit<I, F>(items: &[I], limit: NonZeroU32, context: F)
+where
+    F: FnOnce() -> String,
+{
+    if items.len() == usize::try_from(limit.get()).unwrap() {
+        eprintln!(
+            "WARN: {}: found {} items (the limit).  There may be more items \
+            that were ignored.",
+            context(),
+            items.len(),
+        );
+    }
+}
+
 async fn cmd_db_services(
     opctx: &OpContext,
     datastore: &DataStore,
+    limit: NonZeroU32,
 ) -> Result<(), anyhow::Error> {
-    // XXX-dap check that we haven't hit the hardcoded limit here
     // XXX-dap join with sled information for a by-sled view
 
     for service_kind in ServiceKind::iter() {
@@ -120,15 +145,17 @@ async fn cmd_db_services(
         let pagparams: DataPageParams<'_, Uuid> = DataPageParams {
             marker: None,
             direction: dropshot::PaginationOrder::Ascending,
-            limit: NonZeroU32::new(100).unwrap(),
+            limit,
         };
 
+        let context =
+            || format!("listing instances of kind {:?}", service_kind);
         let instances = datastore
             .services_list_kind(&opctx, service_kind, &pagparams)
             .await
-            .with_context(|| {
-                format!("listing instances of kind {:?}", service_kind)
-            })?;
+            .with_context(&context)?;
+        check_limit(&instances, limit, &context);
+
         print!(" (instances: {})\n", instances.len());
 
         for i in instances {
@@ -149,24 +176,22 @@ async fn cmd_db_services(
     Ok(())
 }
 
-// XXX-dap commonize
 async fn cmd_db_sleds(
     opctx: &OpContext,
     datastore: &DataStore,
+    limit: NonZeroU32,
 ) -> Result<(), anyhow::Error> {
-    // XXX-dap check schema version to report a warning if no good
-    // XXX-dap check that we haven't hit the hardcoded limit here
-
     let pagparams: DataPageParams<'_, Uuid> = DataPageParams {
         marker: None,
         direction: dropshot::PaginationOrder::Ascending,
-        limit: NonZeroU32::new(100).unwrap(),
+        limit,
     };
 
     let sleds = datastore
         .sled_list(&opctx, &pagparams)
         .await
         .context("listing sleds")?;
+    check_limit(&sleds, limit, || String::from("listing sleds"));
 
     for s in sleds {
         print!("sled {} IP {}", s.id(), s.ip());
