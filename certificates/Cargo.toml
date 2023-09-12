@@ -5,6 +5,7 @@ edition = "2021"
 license = "MPL-2.0"
 
 [dependencies]
+display-error-chain.workspace = true
 foreign-types.workspace = true
 openssl.workspace = true
 openssl-sys.workspace = true

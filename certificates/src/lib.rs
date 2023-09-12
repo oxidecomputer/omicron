@@ -4,6 +4,7 @@
 
 //! Utilities for validating X509 certificates, used by both nexus and wicketd.
 
+use display_error_chain::DisplayErrorChain;
 use omicron_common::api::external::Error;
 use openssl::asn1::Asn1Time;
 use openssl::pkey::PKey;
@@ -60,15 +61,15 @@ impl From<CertificateError> for Error {
             | NoDnsNameMatchingHostname(_)
             | UnsupportedPurpose => Error::InvalidValue {
                 label: String::from("certificate"),
-                message: format!("{error:#}"),
+                message: DisplayErrorChain::new(&error).to_string(),
             },
             BadPrivateKey(_) => Error::InvalidValue {
                 label: String::from("private-key"),
-                message: format!("{error:#}"),
+                message: DisplayErrorChain::new(&error).to_string(),
             },
-            Unexpected(_) => {
-                Error::InternalError { internal_message: format!("{error:#}") }
-            }
+            Unexpected(_) => Error::InternalError {
+                internal_message: DisplayErrorChain::new(&error).to_string(),
+            },
         }
     }
 }
