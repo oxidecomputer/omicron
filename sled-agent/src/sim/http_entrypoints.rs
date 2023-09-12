@@ -7,7 +7,7 @@
 use crate::params::{
     DiskEnsureBody, InstanceEnsureBody, InstancePutMigrationIdsBody,
     InstancePutStateBody, InstancePutStateResponse, InstanceUnregisterResponse,
-    VpcFirewallRulesEnsureBody,
+    ServiceEnsureBody, ServiceEnsureResponse, VpcFirewallRulesEnsureBody,
 };
 use dropshot::endpoint;
 use dropshot::ApiDescription;
@@ -38,6 +38,7 @@ pub fn api() -> SledApiDescription {
         api.register(instance_register)?;
         api.register(instance_unregister)?;
         api.register(instance_poke_post)?;
+        api.register(services_put)?;
         api.register(disk_put)?;
         api.register(disk_poke_post)?;
         api.register(update_artifact)?;
@@ -143,6 +144,20 @@ async fn instance_poke_post(
     let instance_id = path_params.into_inner().instance_id;
     sa.instance_poke(instance_id).await;
     Ok(HttpResponseUpdatedNoContent())
+}
+
+#[endpoint {
+    method = PUT,
+    path = "/services",
+}]
+async fn services_put(
+    rqctx: RequestContext<Arc<SledAgent>>,
+    body: TypedBody<ServiceEnsureBody>,
+) -> Result<HttpResponseOk<ServiceEnsureResponse>, HttpError> {
+    let sa = rqctx.context().clone();
+    let body_args = body.into_inner();
+    let response = sa.services_ensure(body_args).await?;
+    Ok(HttpResponseOk(response))
 }
 
 /// Path parameters for Disk requests (sled agent API)

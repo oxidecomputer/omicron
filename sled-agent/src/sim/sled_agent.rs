@@ -15,12 +15,15 @@ use crate::nexus::NexusClient;
 use crate::params::{
     DiskStateRequested, InstanceHardware, InstanceMigrationSourceParams,
     InstancePutStateResponse, InstanceStateRequested,
-    InstanceUnregisterResponse,
+    InstanceUnregisterResponse, ServiceEnsureBody, ServiceEnsureResponse,
+    ServiceEnsureStatus,
 };
 use crate::sim::simulatable::Simulatable;
 use crate::updates::UpdateManager;
 use futures::lock::Mutex;
-use omicron_common::api::external::{DiskState, Error, ResourceType};
+use omicron_common::api::external::{
+    DiskState, Error, Generation, ResourceType,
+};
 use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
 use slog::Logger;
@@ -55,6 +58,7 @@ pub struct SledAgent {
     disks: Arc<SimCollection<SimDisk>>,
     storage: Mutex<Storage>,
     updates: UpdateManager,
+    services: std::sync::Mutex<ServiceEnsureBody>,
     nexus_address: SocketAddr,
     pub nexus_client: Arc<NexusClient>,
     disk_id_to_region_ids: Mutex<HashMap<String, Vec<Uuid>>>,
@@ -145,6 +149,10 @@ impl SledAgent {
                 storage_log,
             )),
             updates: UpdateManager::new(config.updates.clone()),
+            services: std::sync::Mutex::new(ServiceEnsureBody {
+                generation: Generation::new(),
+                services: vec![],
+            }),
             nexus_address,
             nexus_client,
             disk_id_to_region_ids: Mutex::new(HashMap::new()),
@@ -449,6 +457,21 @@ impl SledAgent {
 
     pub async fn instance_poke(&self, id: Uuid) {
         self.instances.sim_poke(id, PokeMode::Drain).await;
+    }
+
+    pub async fn services_ensure(
+        &self,
+        request: ServiceEnsureBody,
+    ) -> Result<ServiceEnsureResponse, Error> {
+        let mut services = self.services.lock().unwrap();
+        let status = if request.generation > services.generation {
+            *services = request;
+            ServiceEnsureStatus::Updated
+        } else {
+            ServiceEnsureStatus::NotUpdated
+        };
+
+        Ok(ServiceEnsureResponse { generation: services.generation, status })
     }
 
     pub async fn disk_poke(&self, id: Uuid) {
