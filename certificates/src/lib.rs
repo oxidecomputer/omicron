@@ -31,8 +31,8 @@ pub enum CertificateError {
     #[error("Certificate and private key do not match")]
     Mismatch,
 
-    #[error("Hostname is invalid: {0:?}")]
-    InvalidHostname(String),
+    #[error("Hostname provided for validation is invalid: {0:?}")]
+    InvalidValidationHostname(String),
 
     #[error("Error validating certificate hostname")]
     ErrorValidatingHostname(#[source] openssl::error::ErrorStack),
@@ -55,7 +55,7 @@ impl From<CertificateError> for Error {
             | CertificateEmpty
             | CertificateExpired
             | Mismatch
-            | InvalidHostname(_)
+            | InvalidValidationHostname(_)
             | ErrorValidatingHostname(_)
             | NoDnsNameMatchingHostname(_)
             | UnsupportedPurpose => Error::InvalidValue {
@@ -135,7 +135,9 @@ impl CertificateValidator {
 
         if let Some(hostname) = hostname {
             let c_hostname = CString::new(hostname).map_err(|_| {
-                CertificateError::InvalidHostname(hostname.to_string())
+                CertificateError::InvalidValidationHostname(
+                    hostname.to_string(),
+                )
             })?;
             if !cert
                 .valid_for_hostname(&c_hostname)

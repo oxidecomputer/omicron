@@ -159,13 +159,16 @@ impl CurrentRssConfig {
         // name, so we skipped validating hostnames. We now _do_ know our
         // external DNS name, so repeat validation with that hostname.
         let mut cert_validator = CertificateValidator::default();
+
+        // We are running in 1986! We're in the code path where the operator is
+        // giving us NTP servers so we can find out the actual time, but any
+        // validation we attempt now must ignore certificate expiration (and in
+        // particular, we don't want to fail a "not before" check because we
+        // think the cert is from the next century).
         cert_validator.danger_disable_expiration_validation();
 
-        // This _requires_ all certs have wildcard entries; see
-        // https://github.com/oxidecomputer/omicron/issues/3163. We could check
-        // for only `recover.sys.{}` instead if we only want these certs to be
-        // usable for the recovery silo.
-        let silo_hostname = format!("*.sys.{}", self.external_dns_zone_name);
+        let silo_hostname =
+            format!("{RECOVERY_SILO_NAME}.sys.{}", self.external_dns_zone_name);
         for (i, pair) in self.external_certificates.iter().enumerate() {
             cert_validator
                 .validate(
