@@ -2,54 +2,61 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! CLI for querying Nexus internal state
+//! omdb commands that query or update specific Nexus instances
 
 use anyhow::Context;
-use clap::Parser;
+use clap::Args;
+use clap::Subcommand;
 use nexus_client::types::ActivationReason;
 use nexus_client::types::BackgroundTask;
 use nexus_client::types::CurrentStatus;
 use nexus_client::types::LastResult;
-use omicron_common::cmd::fatal;
-use omicron_common::cmd::CmdError;
 
-#[derive(Debug, Parser)]
-#[clap(name = "nexus-status", about = "View Nexus internal state")]
-struct Args {
-    #[clap(
-        help = "print task descriptions",
-        long = "verbose",
-        short = 'v',
-        action
-    )]
+/// Arguments to the "omdb nexus" subcommand
+#[derive(Debug, Args)]
+pub struct NexusArgs {
+    #[command(subcommand)]
+    command: NexusCommands,
+}
+
+/// Subcommands for the "omdb nexus" subcommand
+#[derive(Debug, Subcommand)]
+enum NexusCommands {
+    /// print information about background tasks
+    BackgroundTasks {
+        /// URL of the Nexus internal API
+        nexus_internal_url: String,
+        /// print tasks with documentation details
+        #[clap(short = 'v', long = "verbose")]
+        verbose: bool,
+    },
+}
+
+impl NexusArgs {
+    pub async fn run_cmd(
+        &self,
+        log: &slog::Logger,
+    ) -> Result<(), anyhow::Error> {
+        match &self.command {
+            NexusCommands::BackgroundTasks { nexus_internal_url, verbose } => {
+                cmd_nexus_background_tasks(log, nexus_internal_url, *verbose)
+                    .await
+            }
+        }
+    }
+}
+
+async fn cmd_nexus_background_tasks(
+    log: &slog::Logger,
+    url: &str,
     verbose: bool,
-
-    #[clap(help = "URL of Nexus internal API", action)]
-    nexus_internal_url: String,
-}
-
-#[tokio::main]
-async fn main() {
-    let args = Args::parse();
-    if let Err(cmd_error) = do_run(&args).await {
-        fatal(CmdError::Failure(format!("{:#}", cmd_error)));
-    }
-}
-
-async fn do_run(args: &Args) -> Result<(), anyhow::Error> {
-    let url = &args.nexus_internal_url;
-    let log = dropshot::ConfigLogging::StderrTerminal {
-        level: dropshot::ConfigLoggingLevel::Warn,
-    }
-    .to_logger("nexus-status")
-    .context("failed to create logger")?;
-
-    let client = nexus_client::Client::new(url, log);
+) -> Result<(), anyhow::Error> {
+    let client = nexus_client::Client::new(url, log.clone());
     let response =
         client.bgtask_list().await.context("listing background tasks")?;
     let tasks = response.into_inner();
     for (_, bgtask) in &tasks {
-        print_task(bgtask, args.verbose);
+        print_task(bgtask, verbose);
     }
 
     Ok(())
