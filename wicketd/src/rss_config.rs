@@ -21,8 +21,9 @@ use bootstrap_agent_client::types::Name;
 use bootstrap_agent_client::types::RackInitializeRequest;
 use bootstrap_agent_client::types::RecoverySiloConfig;
 use bootstrap_agent_client::types::UserId;
+use display_error_chain::DisplayErrorChain;
 use gateway_client::types::SpType;
-use omicron_certificates::CertificateValidator;
+use omicron_certificates::CertificateError;
 use omicron_common::address;
 use omicron_common::address::Ipv4Range;
 use omicron_common::api::internal::shared::RackNetworkConfig;
@@ -158,29 +159,16 @@ impl CurrentRssConfig {
         // When certs were uploaded we might not have known our external DNS
         // name, so we skipped validating hostnames. We now _do_ know our
         // external DNS name, so repeat validation with that hostname.
-        let mut cert_validator = CertificateValidator::default();
-
-        // We are running in 1986! We're in the code path where the operator is
-        // giving us NTP servers so we can find out the actual time, but any
-        // validation we attempt now must ignore certificate expiration (and in
-        // particular, we don't want to fail a "not before" check because we
-        // think the cert is from the next century).
-        cert_validator.danger_disable_expiration_validation();
-
-        let silo_hostname =
-            format!("{RECOVERY_SILO_NAME}.sys.{}", self.external_dns_zone_name);
+        let cert_validator =
+            CertificateValidator::new(Some(&self.external_dns_zone_name));
         for (i, pair) in self.external_certificates.iter().enumerate() {
-            cert_validator
-                .validate(
-                    pair.cert.as_bytes(),
-                    pair.key.as_bytes(),
-                    Some(&silo_hostname),
-                )
-                .with_context(|| {
+            cert_validator.validate(&pair.cert, &pair.key).with_context(
+                || {
                     let i = i + 1;
                     let tot = self.external_certificates.len();
                     format!("certificate {i} of {tot} is invalid")
-                })?;
+                },
+            )?;
         }
 
         let Some(recovery_silo_password_hash) =
@@ -324,17 +312,19 @@ impl CurrentRssConfig {
             (None, None) => unreachable!(),
         };
 
-        let mut validator = CertificateValidator::default();
+        // We store `external_dns_zone_name` as a `String` for simpler TOML
+        // parsing, but we want to convert an empty string to an option here so
+        // we don't reject certs if the external DNS zone name hasn't been set
+        // yet.
+        let external_dns_zone_name = if self.external_dns_zone_name.is_empty() {
+            None
+        } else {
+            Some(self.external_dns_zone_name.as_str())
+        };
 
-        // We are running pre-NTP, so we can't check cert expirations; nexus
-        // will have to do that.
-        validator.danger_disable_expiration_validation();
-
-        // We may not have the hostname yet, so pass `None` here: we'll
-        // revalidate later.
-        validator
-            .validate(cert.as_bytes(), key.as_bytes(), None)
-            .map_err(|err| err.to_string())?;
+        CertificateValidator::new(external_dns_zone_name)
+            .validate(cert, key)
+            .map_err(|err| DisplayErrorChain::new(&err).to_string())?;
 
         // Cert and key appear to be valid; steal them out of
         // `partial_external_certificate` and promote them to
@@ -521,4 +511,43 @@ fn validate_rack_network_config(
             })
             .collect(),
     })
+}
+
+// Thin wrapper around an `omicron_certificates::CertificateValidator` that we
+// use both when certs are uploaded and when we start RSS.
+struct CertificateValidator {
+    inner: omicron_certificates::CertificateValidator,
+    silo_dns_name: Option<String>,
+}
+
+impl CertificateValidator {
+    fn new(external_dns_zone_name: Option<&str>) -> Self {
+        let mut inner = omicron_certificates::CertificateValidator::default();
+
+        // We are running in 1986! We're in the code path where the operator is
+        // giving us NTP servers so we can find out the actual time, but any
+        // validation we attempt now must ignore certificate expiration (and in
+        // particular, we don't want to fail a "not before" check because we
+        // think the cert is from the next century).
+        inner.danger_disable_expiration_validation();
+
+        // We validate certificates both when they are uploaded and just before
+        // beginning RSS. In the former case we may not yet know our external
+        // DNS name (e.g., if certs are uploaded before the config TOML that
+        // provides the DNS name), but in the latter case we do.
+        let silo_dns_name =
+            external_dns_zone_name.map(|external_dns_zone_name| {
+                format!("{RECOVERY_SILO_NAME}.sys.{external_dns_zone_name}",)
+            });
+
+        Self { inner, silo_dns_name }
+    }
+
+    fn validate(&self, cert: &str, key: &str) -> Result<(), CertificateError> {
+        self.inner.validate(
+            cert.as_bytes(),
+            key.as_bytes(),
+            self.silo_dns_name.as_deref(),
+        )
+    }
 }
