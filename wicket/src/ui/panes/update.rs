@@ -20,13 +20,13 @@ use crate::ui::wrap::wrap_text;
 use crate::{Action, Cmd, Frame, State};
 use indexmap::IndexMap;
 use omicron_common::api::internal::nexus::KnownArtifactKind;
-use slog::{info, o, Logger};
-use tui::layout::{Alignment, Constraint, Direction, Layout, Rect};
-use tui::text::{Span, Spans, Text};
-use tui::widgets::{
+use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
+use ratatui::text::{Line, Span, Text};
+use ratatui::widgets::{
     Block, BorderType, Borders, Cell, List, ListItem, ListState, Paragraph,
     Row, Table,
 };
+use slog::{info, o, Logger};
 use tui_tree_widget::{Tree, TreeItem, TreeState};
 use update_engine::{
     AbortReason, ExecutionStatus, StepKey, WillNotBeRunReason,
@@ -233,7 +233,7 @@ impl UpdatePane {
             .expect("selected_key is always valid");
         let step_info = value.step_info();
 
-        let header = Spans::from(vec![
+        let header = Line::from(vec![
             Span::styled("Step: ", style::header(true)),
             Span::styled(step_info.description.clone(), style::header(true)),
         ]);
@@ -250,7 +250,7 @@ impl UpdatePane {
                         style::plain_text(),
                     ),
                 ];
-                body.lines.push(Spans::from(spans));
+                body.lines.push(Line::from(spans));
             }
             StepStatus::Running { progress_event, .. } => {
                 let mut spans = vec![
@@ -271,9 +271,9 @@ impl UpdatePane {
                         spans.push(Span::styled(")", style::plain_text()));
                     }
                 }
-                body.lines.push(Spans::from(spans));
+                body.lines.push(Line::from(spans));
 
-                body.lines.push(Spans::default());
+                body.lines.push(Line::default());
 
                 let progress_spans =
                     progress_event_spans(progress_event, "Progress:");
@@ -323,10 +323,10 @@ impl UpdatePane {
                     format!(" after {:.2?}", info.step_elapsed),
                     style::plain_text(),
                 ));
-                body.lines.push(Spans::from(spans));
+                body.lines.push(Line::from(spans));
 
                 if let Some(message) = message {
-                    body.lines.push(Spans::default());
+                    body.lines.push(Line::default());
                     let prefix =
                         vec![Span::styled("Message: ", style::selected())];
                     push_text_lines(&message, prefix, &mut body.lines);
@@ -335,7 +335,7 @@ impl UpdatePane {
             StepStatus::Completed { info: None } => {
                 // No information is available, so all we can do is say that
                 // this step is completed.
-                body.lines.push(Spans::from(vec![
+                body.lines.push(Line::from(vec![
                     Span::styled("Status: ", style::selected()),
                     Span::styled("Completed", style::successful_update_bold()),
                 ]));
@@ -358,9 +358,9 @@ impl UpdatePane {
                     format!(" after {:.2?}", info.step_elapsed),
                     style::plain_text(),
                 ));
-                body.lines.push(Spans::from(spans));
+                body.lines.push(Line::from(spans));
 
-                body.lines.push(Spans::default());
+                body.lines.push(Line::default());
 
                 // Show the message.
                 let prefix = vec![Span::styled("Message: ", style::selected())];
@@ -368,13 +368,13 @@ impl UpdatePane {
 
                 // Show causes.
                 if !info.causes.is_empty() {
-                    body.lines.push(Spans::default());
-                    body.lines.push(Spans::from(Span::styled(
+                    body.lines.push(Line::default());
+                    body.lines.push(Line::from(Span::styled(
                         "Caused by:",
                         style::selected(),
                     )));
                     for cause in &info.causes {
-                        body.lines.push(Spans::from(vec![
+                        body.lines.push(Line::from(vec![
                             Span::raw("-> "),
                             Span::styled(cause, style::plain_text()),
                         ]))
@@ -388,7 +388,7 @@ impl UpdatePane {
                     Span::styled("Status: ", style::selected()),
                     Span::styled("Failed", style::failed_update_bold()),
                 ];
-                body.lines.push(Spans::from(spans));
+                body.lines.push(Line::from(spans));
             }
             StepStatus::Aborted {
                 reason: AbortReason::StepAborted(info),
@@ -414,9 +414,9 @@ impl UpdatePane {
                     format!(" after {:.2?}", info.step_elapsed),
                     style::plain_text(),
                 ));
-                body.lines.push(Spans::from(spans));
+                body.lines.push(Line::from(spans));
 
-                body.lines.push(Spans::default());
+                body.lines.push(Line::default());
 
                 // Show the message.
                 let prefix = vec![Span::styled("Message: ", style::selected())];
@@ -426,7 +426,7 @@ impl UpdatePane {
                 if let Some(last_progress) = last_progress {
                     let progress_spans =
                         progress_event_spans(last_progress, "Last progress:");
-                    body.lines.push(Spans::default());
+                    body.lines.push(Line::default());
                     body.lines.push(progress_spans);
                 }
             }
@@ -448,13 +448,13 @@ impl UpdatePane {
                         style::selected(),
                     ));
                 }
-                body.lines.push(Spans::from(spans));
+                body.lines.push(Line::from(spans));
 
                 // Show last progress if available.
                 if let Some(last_progress) = last_progress {
                     let progress_spans =
                         progress_event_spans(last_progress, "Last progress:");
-                    body.lines.push(Spans::default());
+                    body.lines.push(Line::default());
                     body.lines.push(progress_spans);
                 }
             }
@@ -494,7 +494,7 @@ impl UpdatePane {
                         ));
                     };
                 }
-                body.lines.push(Spans::from(spans));
+                body.lines.push(Line::from(spans));
             }
         }
 
@@ -520,11 +520,11 @@ impl UpdatePane {
         frame: &mut Frame<'_>,
     ) {
         let popup_builder = PopupBuilder {
-            header: Spans::from(vec![Span::styled(
+            header: Line::from(vec![Span::styled(
                 format!("START UPDATE: {}", state.rack_state.selected),
                 style::header(true),
             )]),
-            body: Text::from(vec![Spans::from(vec![Span::styled(
+            body: Text::from(vec![Line::from(vec![Span::styled(
                 "Would you like to start an update?",
                 style::plain_text(),
             )])]),
@@ -550,11 +550,11 @@ impl UpdatePane {
         frame: &mut Frame<'_>,
     ) {
         let popup_builder = PopupBuilder {
-            header: Spans::from(vec![Span::styled(
+            header: Line::from(vec![Span::styled(
                 format!("START UPDATE: {}", state.rack_state.selected),
                 style::header(true),
             )]),
-            body: Text::from(vec![Spans::from(vec![Span::styled(
+            body: Text::from(vec![Line::from(vec![Span::styled(
                 "Waiting for update to start",
                 style::plain_text(),
             )])]),
@@ -583,7 +583,7 @@ impl UpdatePane {
         push_text_lines(message, prefix, &mut body.lines);
 
         let popup_builder = PopupBuilder {
-            header: Spans::from(vec![Span::styled(
+            header: Line::from(vec![Span::styled(
                 format!("START UPDATE FAILED: {}", state.rack_state.selected),
                 style::failed_update(),
             )]),
@@ -609,12 +609,12 @@ impl UpdatePane {
         frame: &mut Frame<'_>,
     ) {
         let mut body = Text::default();
-        body.lines.push(Spans::from(vec![Span::styled(
+        body.lines.push(Line::from(vec![Span::styled(
             "Would you like to abort this update?",
             style::plain_text(),
         )]));
-        body.lines.push(Spans::from(Vec::new()));
-        body.lines.push(Spans::from(vec![
+        body.lines.push(Line::from(Vec::new()));
+        body.lines.push(Line::from(vec![
             Span::styled("Warning: ", style::warning_update()),
             Span::styled(
                 "This might result in an inconsistent state. \
@@ -624,7 +624,7 @@ impl UpdatePane {
         ]));
 
         let popup_builder = PopupBuilder {
-            header: Spans::from(vec![Span::styled(
+            header: Line::from(vec![Span::styled(
                 format!("ABORT UPDATE: {}", state.rack_state.selected),
                 style::header(true),
             )]),
@@ -651,11 +651,11 @@ impl UpdatePane {
         frame: &mut Frame<'_>,
     ) {
         let popup_builder = PopupBuilder {
-            header: Spans::from(vec![Span::styled(
+            header: Line::from(vec![Span::styled(
                 format!("ABORT UPDATE: {}", state.rack_state.selected),
                 style::header(true),
             )]),
-            body: Text::from(vec![Spans::from(vec![Span::styled(
+            body: Text::from(vec![Line::from(vec![Span::styled(
                 "Waiting for update to be aborted",
                 style::plain_text(),
             )])]),
@@ -684,7 +684,7 @@ impl UpdatePane {
         push_text_lines(message, prefix, &mut body.lines);
 
         let popup_builder = PopupBuilder {
-            header: Spans::from(vec![Span::styled(
+            header: Line::from(vec![Span::styled(
                 format!("ABORT UPDATE FAILED: {}", state.rack_state.selected),
                 style::failed_update(),
             )]),
@@ -710,11 +710,11 @@ impl UpdatePane {
         frame: &mut Frame<'_>,
     ) {
         let popup_builder = PopupBuilder {
-            header: Spans::from(vec![Span::styled(
+            header: Line::from(vec![Span::styled(
                 format!("CLEAR UPDATE STATE: {}", state.rack_state.selected),
                 style::header(true),
             )]),
-            body: Text::from(vec![Spans::from(vec![Span::styled(
+            body: Text::from(vec![Line::from(vec![Span::styled(
                 "Waiting for update state to be cleared",
                 style::plain_text(),
             )])]),
@@ -743,7 +743,7 @@ impl UpdatePane {
         push_text_lines(message, prefix, &mut body.lines);
 
         let popup_builder = PopupBuilder {
-            header: Spans::from(vec![Span::styled(
+            header: Line::from(vec![Span::styled(
                 format!(
                     "CLEAR UPDATE STATE FAILED: {}",
                     state.rack_state.selected
@@ -1301,7 +1301,7 @@ impl UpdatePane {
             .style(border_style);
 
         // Draw the title/tab bar
-        let title_bar = Paragraph::new(Spans::from(vec![Span::styled(
+        let title_bar = Paragraph::new(Line::from(vec![Span::styled(
             "UPDATE STATUS",
             header_style,
         )]))
@@ -1366,7 +1366,7 @@ impl UpdatePane {
             .style(border_style);
 
         // Draw the title/tab bar
-        let title_bar = Paragraph::new(Spans::from(vec![
+        let title_bar = Paragraph::new(Line::from(vec![
             Span::styled("UPDATE STATUS / ", border_style),
             Span::styled(state.rack_state.selected.to_string(), header_style),
         ]))
@@ -1447,13 +1447,13 @@ impl UpdatePane {
 
                 // Show this command.
                 let text = Text::from(vec![
-                    Spans::from(Vec::new()),
-                    Spans::from(vec![Span::styled(
+                    Line::from(Vec::new()),
+                    Line::from(vec![Span::styled(
                         "Use the following command to transfer an update:",
                         style::plain_text(),
                     )]),
                     "".into(),
-                    Spans::from(vec![
+                    Line::from(vec![
                         Span::styled("cat", style::plain_text()),
                         Span::styled(" $UPDATE", style::popup_highlight()),
                         Span::styled(".zip | ssh", style::plain_text()),
@@ -1491,8 +1491,8 @@ impl UpdatePane {
                 // support today because updating the switch requires rebooting
                 // the sled).
                 let text = Text::from(vec![
-                    Spans::from(Vec::new()),
-                    Spans::from(vec![Span::styled(
+                    Line::from(Vec::new()),
+                    Line::from(vec![Span::styled(
                         format!(
                             "Update unavailable: You are connected to wicket \
                              via this {sled_or_switch}."
@@ -1510,8 +1510,8 @@ impl UpdatePane {
                 let force_update = ForceUpdateSelectionState::from(state);
                 let mut text = force_update.spans();
                 text.extend_from_slice(&[
-                    Spans::from(Vec::new()),
-                    Spans::from(vec![
+                    Line::from(Vec::new()),
+                    Line::from(vec![
                         Span::styled(
                             "Update ready: Press ",
                             style::plain_text(),
@@ -1543,7 +1543,7 @@ impl UpdatePane {
             UpdateItemState::UpdateStarted => {
                 // This should show up very briefly, if at all, and then
                 // be replaced with the events list.
-                let status_text = Text::from(Spans::from(vec![
+                let status_text = Text::from(Line::from(vec![
                     Span::styled("Update ", style::plain_text()),
                     Span::styled("started", style::successful_update_bold()),
                     Span::styled(", waiting for events", style::plain_text()),
@@ -1551,7 +1551,7 @@ impl UpdatePane {
 
                 // Don't display any text here; status_text should be
                 // enough for the user.
-                let message_text = Text::from(Vec::new());
+                let message_text = Text::default();
 
                 // Wrap the text to the screen width.
                 let options = crate::ui::wrap::Options {
@@ -1617,7 +1617,7 @@ impl UpdatePane {
 fn progress_event_spans(
     progress_event: &ProgressEvent,
     header: &str,
-) -> Spans<'static> {
+) -> Line<'static> {
     let mut progress_spans = Vec::new();
     progress_spans.push(Span::styled(header.to_owned(), style::selected()));
     progress_spans.push(Span::raw(" "));
@@ -1651,7 +1651,7 @@ fn progress_event_spans(
         ));
     }
 
-    Spans(progress_spans)
+    Line::from(progress_spans)
 }
 
 struct ComponentForceUpdateSelectionState {
@@ -1779,18 +1779,18 @@ impl ForceUpdateSelectionState {
         }
     }
 
-    fn spans(&self) -> Vec<Spans<'static>> {
+    fn spans(&self) -> Vec<Line<'static>> {
         fn make_spans(
             name: &str,
             c: &ComponentForceUpdateSelectionState,
-        ) -> Spans<'static> {
+        ) -> Line<'static> {
             let prefix = if c.toggled_on { "[✔]" } else { "[ ]" };
             let style = if c.selected {
                 style::highlighted()
             } else {
                 style::plain_text()
             };
-            Spans::from(vec![Span::styled(
+            Line::from(vec![Span::styled(
                 format!(
                     "{prefix} Force update {name} (version is already {})",
                     c.version
@@ -1813,7 +1813,7 @@ impl ForceUpdateSelectionState {
 #[derive(Debug, Default)]
 struct ComponentUpdateListState {
     event_buffer: EventBuffer,
-    status_text: Spans<'static>,
+    status_text: Line<'static>,
     list_items: IndexMap<StepKey, ListItem<'static>>,
     // The help text lives on the `UpdatePane`, not here, so all we can do here
     // is figure out which help text to show (if any).
@@ -2015,11 +2015,11 @@ impl ComponentUpdateListState {
             ));
 
             // Add step keys and items to the list.
-            list_items.insert(step_key, ListItem::new(Spans::from(item_spans)));
+            list_items.insert(step_key, ListItem::new(Line::from(item_spans)));
         }
 
         self.event_buffer = event_buffer;
-        self.status_text = Spans::from(status_text);
+        self.status_text = Line::from(status_text);
         self.show_help = show_help;
         self.list_items = list_items;
         let selected_needs_reset = match self.selected {

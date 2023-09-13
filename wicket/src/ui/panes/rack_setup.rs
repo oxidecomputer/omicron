@@ -18,18 +18,18 @@ use crate::Cmd;
 use crate::Control;
 use crate::Frame;
 use crate::State;
+use ratatui::layout::Constraint;
+use ratatui::layout::Direction;
+use ratatui::layout::Layout;
+use ratatui::layout::Rect;
+use ratatui::text::Line;
+use ratatui::text::Span;
+use ratatui::text::Text;
+use ratatui::widgets::Block;
+use ratatui::widgets::BorderType;
+use ratatui::widgets::Borders;
+use ratatui::widgets::Paragraph;
 use std::borrow::Cow;
-use tui::layout::Constraint;
-use tui::layout::Direction;
-use tui::layout::Layout;
-use tui::layout::Rect;
-use tui::text::Span;
-use tui::text::Spans;
-use tui::text::Text;
-use tui::widgets::Block;
-use tui::widgets::BorderType;
-use tui::widgets::Borders;
-use tui::widgets::Paragraph;
 use wicketd_client::types::Baseboard;
 use wicketd_client::types::CurrentRssUserConfig;
 use wicketd_client::types::IpRange;
@@ -204,11 +204,11 @@ fn draw_rack_setup_popup(
 
     match kind {
         PopupKind::Prompting => {
-            let header = Spans::from(vec![Span::styled(
+            let header = Line::from(vec![Span::styled(
                 "Start Rack Setup",
                 style::header(true),
             )]);
-            let body = Text::from(vec![Spans::from(vec![Span::styled(
+            let body = Text::from(vec![Line::from(vec![Span::styled(
                 "Would you like to begin rack setup?",
                 style::plain_text(),
             )])]);
@@ -220,11 +220,11 @@ fn draw_rack_setup_popup(
             frame.render_widget(popup, full_screen);
         }
         PopupKind::Waiting => {
-            let header = Spans::from(vec![Span::styled(
+            let header = Line::from(vec![Span::styled(
                 "Start Rack Setup",
                 style::header(true),
             )]);
-            let body = Text::from(vec![Spans::from(vec![Span::styled(
+            let body = Text::from(vec![Line::from(vec![Span::styled(
                 "Waiting for rack setup to start",
                 style::plain_text(),
             )])]);
@@ -235,7 +235,7 @@ fn draw_rack_setup_popup(
             frame.render_widget(popup, full_screen);
         }
         PopupKind::Failed { message, scroll_offset } => {
-            let header = Spans::from(vec![Span::styled(
+            let header = Line::from(vec![Span::styled(
                 "Start Rack Setup Failed",
                 style::failed_update(),
             )]);
@@ -268,11 +268,11 @@ fn draw_rack_reset_popup(
 
     match kind {
         PopupKind::Prompting => {
-            let header = Spans::from(vec![Span::styled(
+            let header = Line::from(vec![Span::styled(
                 "Rack Reset (DESTRUCTIVE!)",
                 style::header(true),
             )]);
-            let body = Text::from(vec![Spans::from(vec![Span::styled(
+            let body = Text::from(vec![Line::from(vec![Span::styled(
                 "Would you like to reset the rack to an uninitialized state?",
                 style::plain_text(),
             )])]);
@@ -284,11 +284,11 @@ fn draw_rack_reset_popup(
             frame.render_widget(popup, full_screen);
         }
         PopupKind::Waiting => {
-            let header = Spans::from(vec![Span::styled(
+            let header = Line::from(vec![Span::styled(
                 "Rack Reset",
                 style::header(true),
             )]);
-            let body = Text::from(vec![Spans::from(vec![Span::styled(
+            let body = Text::from(vec![Line::from(vec![Span::styled(
                 "Waiting for rack reset to start",
                 style::plain_text(),
             )])]);
@@ -299,7 +299,7 @@ fn draw_rack_reset_popup(
             frame.render_widget(popup, full_screen);
         }
         PopupKind::Failed { message, scroll_offset } => {
-            let header = Spans::from(vec![Span::styled(
+            let header = Line::from(vec![Span::styled(
                 "Rack Reset Failed",
                 style::failed_update(),
             )]);
@@ -323,7 +323,7 @@ fn draw_rack_status_details_popup(
     frame: &mut Frame<'_>,
     scroll_offset: &mut PopupScrollOffset,
 ) {
-    let header = Spans::from(vec![Span::styled(
+    let header = Line::from(vec![Span::styled(
         "Current Rack Setup Status",
         style::header(true),
     )]);
@@ -334,93 +334,93 @@ fn draw_rack_status_details_popup(
     let prefix = vec![Span::styled("Message: ", style::selected())];
     match state.rack_setup_state.as_ref() {
         Ok(RackOperationStatus::Uninitialized { reset_id }) => {
-            body.lines.push(Spans::from(vec![
+            body.lines.push(Line::from(vec![
                 status,
                 Span::styled("Uninitialized", style::plain_text()),
             ]));
             if let Some(id) = reset_id {
-                body.lines.push(Spans::from(vec![Span::styled(
+                body.lines.push(Line::from(vec![Span::styled(
                     format!("Last reset operation ID: {}", id.0),
                     style::plain_text(),
                 )]));
             }
         }
         Ok(RackOperationStatus::Initialized { id }) => {
-            body.lines.push(Spans::from(vec![
+            body.lines.push(Line::from(vec![
                 status,
                 Span::styled("Initialized", style::plain_text()),
             ]));
             if let Some(id) = id {
-                body.lines.push(Spans::from(vec![Span::styled(
+                body.lines.push(Line::from(vec![Span::styled(
                     format!("Last initialization operation ID: {}", id.0),
                     style::plain_text(),
                 )]));
             }
         }
         Ok(RackOperationStatus::InitializationFailed { id, message }) => {
-            body.lines.push(Spans::from(vec![
+            body.lines.push(Line::from(vec![
                 status,
                 Span::styled("Initialization Failed", style::plain_text()),
             ]));
-            body.lines.push(Spans::from(vec![Span::styled(
+            body.lines.push(Line::from(vec![Span::styled(
                 format!("Last initialization operation ID: {}", id.0),
                 style::plain_text(),
             )]));
             push_text_lines(message, prefix, &mut body.lines);
         }
         Ok(RackOperationStatus::InitializationPanicked { id }) => {
-            body.lines.push(Spans::from(vec![
+            body.lines.push(Line::from(vec![
                 status,
                 Span::styled("Initialization Panicked", style::plain_text()),
             ]));
-            body.lines.push(Spans::from(vec![Span::styled(
+            body.lines.push(Line::from(vec![Span::styled(
                 format!("Last initialization operation ID: {}", id.0),
                 style::plain_text(),
             )]));
         }
         Ok(RackOperationStatus::ResetFailed { id, message }) => {
-            body.lines.push(Spans::from(vec![
+            body.lines.push(Line::from(vec![
                 status,
                 Span::styled("Reset Failed", style::plain_text()),
             ]));
-            body.lines.push(Spans::from(vec![Span::styled(
+            body.lines.push(Line::from(vec![Span::styled(
                 format!("Last reset operation ID: {}", id.0),
                 style::plain_text(),
             )]));
             push_text_lines(message, prefix, &mut body.lines);
         }
         Ok(RackOperationStatus::ResetPanicked { id }) => {
-            body.lines.push(Spans::from(vec![
+            body.lines.push(Line::from(vec![
                 status,
                 Span::styled("Reset Panicked", style::plain_text()),
             ]));
-            body.lines.push(Spans::from(vec![Span::styled(
+            body.lines.push(Line::from(vec![Span::styled(
                 format!("Last reset operation ID: {}", id.0),
                 style::plain_text(),
             )]));
         }
         Ok(RackOperationStatus::Initializing { id }) => {
-            body.lines.push(Spans::from(vec![
+            body.lines.push(Line::from(vec![
                 status,
                 Span::styled("Initializing", style::plain_text()),
             ]));
-            body.lines.push(Spans::from(vec![Span::styled(
+            body.lines.push(Line::from(vec![Span::styled(
                 format!("Current operation ID: {}", id.0),
                 style::plain_text(),
             )]));
         }
         Ok(RackOperationStatus::Resetting { id }) => {
-            body.lines.push(Spans::from(vec![
+            body.lines.push(Line::from(vec![
                 status,
                 Span::styled("Resetting", style::plain_text()),
             ]));
-            body.lines.push(Spans::from(vec![Span::styled(
+            body.lines.push(Line::from(vec![Span::styled(
                 format!("Current operation ID: {}", id.0),
                 style::plain_text(),
             )]));
         }
         Err(message) => {
-            body.lines.push(Spans::from(vec![
+            body.lines.push(Line::from(vec![
                 status,
                 Span::styled(
                     "Unknown (request to wicketd failed)",
@@ -481,7 +481,7 @@ impl Control for RackSetupPane {
         &mut self,
         state: &State,
         frame: &mut Frame<'_>,
-        rect: tui::layout::Rect,
+        rect: ratatui::layout::Rect,
         active: bool,
     ) {
         let chunks = Layout::default()
@@ -505,7 +505,7 @@ impl Control for RackSetupPane {
             .style(border_style);
 
         // Draw the screen title (subview look)
-        let title_bar = Paragraph::new(Spans::from(vec![Span::styled(
+        let title_bar = Paragraph::new(Line::from(vec![Span::styled(
             "Oxide Rack Setup",
             border_style,
         )]))
@@ -618,11 +618,11 @@ fn rss_config_text<'a>(
     };
 
     let mut spans = vec![
-        Spans::from(vec![
+        Line::from(vec![
             Span::styled("Current rack status: ", label_style),
             setup_description,
         ]),
-        Spans::default(),
+        Line::default(),
     ];
 
     let Some(config) = config else {
@@ -634,14 +634,14 @@ fn rss_config_text<'a>(
 
     // Special single-line values, where we convert some kind of condition into
     // a user-appropriate string.
-    spans.push(Spans::from(vec![
+    spans.push(Line::from(vec![
         Span::styled("Uploaded cert/key pairs: ", label_style),
         Span::styled(
             sensitive.num_external_certificates.to_string(),
             dyn_style(sensitive.num_external_certificates > 0),
         ),
     ]));
-    spans.push(Spans::from(vec![
+    spans.push(Line::from(vec![
         Span::styled("Recovery password set: ", label_style),
         dyn_span(sensitive.recovery_silo_password_set, "Yes", "No"),
     ]));
@@ -666,7 +666,7 @@ fn rss_config_text<'a>(
                 .map_or("".into(), |c| c.infra_ip_last.to_string().into()),
         ),
     ] {
-        spans.push(Spans::from(vec![
+        spans.push(Line::from(vec![
             Span::styled(label, label_style),
             dyn_span(!contents.is_empty(), contents, "Not set"),
         ]));
@@ -674,21 +674,20 @@ fn rss_config_text<'a>(
 
     // Helper function for multivalued items: we either print "None" (in
     // bad_style) if there are no items, or return a the list of spans.
-    let append_list =
-        |spans: &mut Vec<Spans>, label_str, items: Vec<Vec<Span<'static>>>| {
-            let label = Span::styled(label_str, label_style);
-            if items.is_empty() {
-                spans.push(Spans::from(vec![
-                    label,
-                    Span::styled("None", bad_style),
-                ]));
-            } else {
-                spans.push(label.into());
-                for item in items {
-                    spans.push(Spans::from(item));
-                }
+    let append_list = |spans: &mut Vec<Line>,
+                       label_str,
+                       items: Vec<Vec<Span<'static>>>| {
+        let label = Span::styled(label_str, label_style);
+        if items.is_empty() {
+            spans
+                .push(Line::from(vec![label, Span::styled("None", bad_style)]));
+        } else {
+            spans.push(label.into());
+            for item in items {
+                spans.push(Line::from(item));
             }
-        };
+        }
+    };
 
     // Helper function to created a bulleted item for a single value.
     let plain_list_item = |item: String| {
@@ -819,7 +818,7 @@ fn rss_config_text<'a>(
     );
 
     // Add a "trailing newline" for scrolling to work correctly.
-    spans.push(Spans::default());
+    spans.push(Line::default());
 
     Text::from(spans)
 }

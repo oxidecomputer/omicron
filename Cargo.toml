@@ -277,6 +277,7 @@ propolis-server = { git = "https://github.com/oxidecomputer/propolis", rev = "de
 proptest = "1.2.0"
 quote = "1.0"
 rand = "0.8.5"
+ratatui = "0.23.0"
 rayon = "1.7"
 rcgen = "0.10.0"
 ref-cast = "1.0"
@@ -354,7 +355,6 @@ trust-dns-server = "0.22"
 trybuild = "1.0.84"
 tufaceous = { path = "tufaceous" }
 tufaceous-lib = { path = "tufaceous-lib" }
-tui = "0.19.0"
 unicode-width = "0.1.10"
 update-engine = { path = "update-engine" }
 uuid = { version = "1.4.1", features = ["serde", "v4"] }

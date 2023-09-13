@@ -11,8 +11,8 @@ use super::defaults::dimensions::RectExt;
 use super::defaults::style;
 use super::widgets::{Logo, LogoState, LOGO_HEIGHT, LOGO_WIDTH};
 use crate::{Cmd, Frame, Term};
-use tui::style::Style;
-use tui::widgets::Block;
+use ratatui::style::Style;
+use ratatui::widgets::Block;
 
 const TOTAL_FRAMES: usize = 100;
 
