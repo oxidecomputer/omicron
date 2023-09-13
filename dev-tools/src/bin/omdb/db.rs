@@ -145,7 +145,7 @@ struct ServiceInstanceRow {
     #[tabled(rename = "SERVICE")]
     kind: String,
     instance_id: Uuid,
-    ip: String,
+    addr: String,
     sled_serial: String,
 }
 
@@ -187,10 +187,18 @@ async fn cmd_db_services(
         check_limit(&instances, limit, &context);
 
         rows.extend(instances.into_iter().map(|instance| {
+            let addr = std::net::SocketAddrV6::new(
+                *instance.ip,
+                *instance.port,
+                0,
+                0,
+            )
+            .to_string();
+
             ServiceInstanceRow {
                 kind: format!("{:?}", service_kind),
                 instance_id: instance.id(),
-                ip: instance.ip.to_string(),
+                addr,
                 sled_serial: sleds
                     .get(&instance.sled_id)
                     .map(|s| s.serial_number())
