@@ -237,6 +237,11 @@ impl super::Nexus {
             self.background_tasks.activate(task);
         }
 
+        // Start executing service management tasks, now that Nexus knows about
+        // sleds and services.
+        self.background_tasks
+            .start_service_tasks(opctx, self.datastore().clone());
+
         // TODO - https://github.com/oxidecomputer/omicron/pull/3359
         // register all switches found during rack initialization
         // identify requested switch from config and associate

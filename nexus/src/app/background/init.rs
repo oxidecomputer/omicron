@@ -9,13 +9,17 @@ use super::dns_config;
 use super::dns_propagation;
 use super::dns_servers;
 use super::external_endpoints;
+use super::services_config;
+use super::services_propagation;
+use super::sled_servers;
 use nexus_db_model::DnsGroup;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use omicron_common::nexus_config::BackgroundTaskConfig;
 use omicron_common::nexus_config::DnsTasksConfig;
+use once_cell::sync::OnceCell;
 use std::collections::BTreeMap;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 /// Describes ongoing background tasks and provides interfaces for working with
 /// them
@@ -25,7 +29,7 @@ use std::sync::Arc;
 pub struct BackgroundTasks {
     /// interface for working with background tasks (activation, checking
     /// status, etc.)
-    pub driver: common::Driver,
+    pub driver: Mutex<common::Driver>,
 
     /// task handle for the internal DNS config background task
     pub task_internal_dns_config: common::TaskHandle,
@@ -35,6 +39,13 @@ pub struct BackgroundTasks {
     pub task_external_dns_config: common::TaskHandle,
     /// task handle for the external DNS servers background task
     pub task_external_dns_servers: common::TaskHandle,
+
+    /// task tracking the set of sleds in the fleet
+    pub task_sled_servers: OnceCell<common::TaskHandle>,
+    /// task tracking the services which should exist on those sleds
+    pub task_services_config: OnceCell<common::TaskHandle>,
+    /// task propagating the services which should exist on sleds
+    pub task_services_propagation: OnceCell<common::TaskHandle>,
 
     /// task handle for the task that keeps track of external endpoints
     pub task_external_endpoints: common::TaskHandle,
@@ -84,18 +95,70 @@ impl BackgroundTasks {
         };
 
         BackgroundTasks {
-            driver,
+            driver: Mutex::new(driver),
             task_internal_dns_config,
             task_internal_dns_servers,
             task_external_dns_config,
             task_external_dns_servers,
+            task_sled_servers: OnceCell::new(),
+            task_services_config: OnceCell::new(),
+            task_services_propagation: OnceCell::new(),
             task_external_endpoints,
             external_endpoints,
         }
     }
 
+    pub fn start_service_tasks(
+        &self,
+        opctx: &OpContext,
+        datastore: Arc<DataStore>,
+        // TODO: Use config? See omicron/common/src/nexus_config.rs
+    ) {
+        let sleds = sled_servers::SledAgentsWatcher::new(datastore.clone());
+        let sleds_watcher = sleds.watcher();
+        let services = services_config::ServiceConfigWatcher::new(
+            datastore,
+            sleds_watcher.clone(),
+        );
+        let services_watcher = services.watcher();
+        let max_concurrent_server_updates = 1;
+        let propagation = services_propagation::ServicePropagator::new(
+            services_watcher.clone(),
+            max_concurrent_server_updates,
+        );
+
+        let mut driver = self.driver.lock().unwrap();
+        let task_sled_servers = driver.register(
+            "sled_servers".to_string(),
+            std::time::Duration::from_secs(60),
+            Box::new(sleds),
+            opctx.child(BTreeMap::new()),
+            vec![],
+        );
+
+        let task_services_config = driver.register(
+            "services_config".to_string(),
+            std::time::Duration::from_secs(60),
+            Box::new(services),
+            opctx.child(BTreeMap::new()),
+            vec![Box::new(sleds_watcher)],
+        );
+
+        let task_propagation = driver.register(
+            "services_propagation".to_string(),
+            std::time::Duration::from_secs(60),
+            Box::new(propagation),
+            opctx.child(BTreeMap::new()),
+            vec![Box::new(services_watcher)],
+        );
+
+        self.task_sled_servers.set(task_sled_servers).unwrap();
+        self.task_services_config.set(task_services_config).unwrap();
+        self.task_services_propagation.set(task_propagation).unwrap();
+    }
+
     pub fn activate(&self, task: &common::TaskHandle) {
-        self.driver.activate(task);
+        self.driver.lock().unwrap().activate(task);
     }
 }
 

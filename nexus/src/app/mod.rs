@@ -364,8 +364,10 @@ impl Nexus {
                         task_log,
                         "populate complete; activating background tasks"
                     );
-                    for task in task_nexus.background_tasks.driver.tasks() {
-                        task_nexus.background_tasks.driver.activate(task);
+                    let driver =
+                        task_nexus.background_tasks.driver.lock().unwrap();
+                    for task in driver.tasks() {
+                        driver.activate(task);
                     }
                 }
                 Err(_) => {
