@@ -38,8 +38,8 @@ pub enum CertificateError {
     #[error("Error validating certificate hostname")]
     ErrorValidatingHostname(#[source] openssl::error::ErrorStack),
 
-    #[error("Certificate does not match hostname {0:?}")]
-    NoDnsNameMatchingHostname(String),
+    #[error("Certificate not valid for {hostname:?}: {cert_description:?}")]
+    NoDnsNameMatchingHostname { hostname: String, cert_description: String },
 
     #[error("Unsupported certificate purpose (not usable for server auth)")]
     UnsupportedPurpose,
@@ -58,7 +58,7 @@ impl From<CertificateError> for Error {
             | Mismatch
             | InvalidValidationHostname(_)
             | ErrorValidatingHostname(_)
-            | NoDnsNameMatchingHostname(_)
+            | NoDnsNameMatchingHostname { .. }
             | UnsupportedPurpose => Error::InvalidValue {
                 label: String::from("certificate"),
                 message: DisplayErrorChain::new(&error).to_string(),
@@ -144,9 +144,13 @@ impl CertificateValidator {
                 .valid_for_hostname(&c_hostname)
                 .map_err(CertificateError::ErrorValidatingHostname)?
             {
-                return Err(CertificateError::NoDnsNameMatchingHostname(
-                    hostname.to_string(),
-                ));
+                let cert_description = cert
+                    .hostname_description()
+                    .map_err(CertificateError::ErrorValidatingHostname)?;
+                return Err(CertificateError::NoDnsNameMatchingHostname {
+                    hostname: hostname.to_string(),
+                    cert_description,
+                });
             }
         }
 
@@ -220,7 +224,7 @@ mod tests {
         }
 
         // Expected-unsuccessful matches
-        for &(dns_name, hostname) in &[
+        for &(dns_name, server_hostname) in &[
             ("oxide.computer", "foo.oxide.computer"),
             ("oxide.computer", "*.oxide.computer"),
             ("*.oxide.computer", "foo.bar.oxide.computer"),
@@ -228,13 +232,17 @@ mod tests {
             let mut params = CertificateParams::new([]);
             params.subject_alt_names =
                 vec![SanType::DnsName(dns_name.to_string())];
-            match validate_cert_with_params(params, Some(hostname)) {
+            match validate_cert_with_params(params, Some(server_hostname)) {
                 Ok(()) => panic!(
-                    "certificate with SAN {dns_name} \
-                     unexpectedly passed validation for hostname {hostname}"
+                    "certificate with SAN {dns_name} unexpectedly \
+                     passed validation for hostname {server_hostname}"
                 ),
-                Err(CertificateError::NoDnsNameMatchingHostname(name)) => {
-                    assert_eq!(name, hostname);
+                Err(CertificateError::NoDnsNameMatchingHostname {
+                    hostname,
+                    cert_description,
+                }) => {
+                    assert_eq!(hostname, server_hostname);
+                    assert_eq!(cert_description, format!("SANs: {dns_name}"));
                 }
                 Err(err) => panic!(
                     "certificate with SAN {dns_name} \
@@ -267,7 +275,7 @@ mod tests {
         }
 
         // Expected-unsuccessful matches
-        for &(dns_name, hostname) in &[
+        for &(dns_name, server_hostname) in &[
             ("oxide.computer", "foo.oxide.computer"),
             ("oxide.computer", "*.oxide.computer"),
             ("*.oxide.computer", "foo.bar.oxide.computer"),
@@ -277,13 +285,17 @@ mod tests {
             let mut params = CertificateParams::new([]);
             params.distinguished_name = dn;
 
-            match validate_cert_with_params(params, Some(hostname)) {
+            match validate_cert_with_params(params, Some(server_hostname)) {
                 Ok(()) => panic!(
-                    "certificate with SAN {dns_name} \
-                     unexpectedly passed validation for hostname {hostname}"
+                    "certificate with SAN {dns_name} unexpectedly \
+                     passed validation for hostname {server_hostname}"
                 ),
-                Err(CertificateError::NoDnsNameMatchingHostname(name)) => {
-                    assert_eq!(name, hostname);
+                Err(CertificateError::NoDnsNameMatchingHostname {
+                    hostname,
+                    cert_description,
+                }) => {
+                    assert_eq!(hostname, server_hostname);
+                    assert_eq!(cert_description, format!("CN: {dns_name}"));
                 }
                 Err(err) => panic!(
                     "certificate with SAN {dns_name} \
@@ -314,8 +326,15 @@ mod tests {
             Ok(()) => panic!(
                 "certificate unexpectedly passed validation for hostname"
             ),
-            Err(CertificateError::NoDnsNameMatchingHostname(name)) => {
-                assert_eq!(name, HOSTNAME);
+            Err(CertificateError::NoDnsNameMatchingHostname {
+                hostname,
+                cert_description,
+            }) => {
+                assert_eq!(hostname, HOSTNAME);
+                assert_eq!(
+                    cert_description,
+                    format!("SANs: {SUBJECT_ALT_NAME}")
+                );
             }
             Err(err) => panic!(
                 "certificate validation failed with unexpected error {err}"
