@@ -129,7 +129,7 @@ impl CurrentRssConfig {
     }
 
     pub(crate) fn start_rss_request(
-        &self,
+        &mut self,
         bootstrap_peers: &BootstrapPeers,
         log: &slog::Logger,
     ) -> Result<RackInitializeRequest> {
@@ -156,19 +156,25 @@ impl CurrentRssConfig {
             bail!("at least one certificate/key pair is required");
         }
 
-        // When certs were uploaded we might not have known our external DNS
-        // name, so we skipped validating hostnames. We now _do_ know our
-        // external DNS name, so repeat validation with that hostname.
+        // We validated all the external certs as they were uploaded, but if we
+        // didn't yet have our `external_dns_zone_name` that validation would've
+        // skipped checking the hostname. Repeat validation on all certs now
+        // that we definitely have it.
         let cert_validator =
             CertificateValidator::new(Some(&self.external_dns_zone_name));
         for (i, pair) in self.external_certificates.iter().enumerate() {
-            cert_validator.validate(&pair.cert, &pair.key).with_context(
-                || {
+            if let Err(err) = cert_validator
+                .validate(&pair.cert, &pair.key)
+                .with_context(|| {
                     let i = i + 1;
                     let tot = self.external_certificates.len();
                     format!("certificate {i} of {tot} is invalid")
-                },
-            )?;
+                })
+            {
+                // Remove the invalid cert prior to returning.
+                self.external_certificates.remove(i);
+                return Err(err);
+            }
         }
 
         let Some(recovery_silo_password_hash) =
@@ -322,9 +328,15 @@ impl CurrentRssConfig {
             Some(self.external_dns_zone_name.as_str())
         };
 
-        CertificateValidator::new(external_dns_zone_name)
+        // If the certificate is invalid, clear out the cert and key before
+        // returning an error.
+        if let Err(err) = CertificateValidator::new(external_dns_zone_name)
             .validate(cert, key)
-            .map_err(|err| DisplayErrorChain::new(&err).to_string())?;
+        {
+            self.partial_external_certificate.cert = None;
+            self.partial_external_certificate.key = None;
+            return Err(DisplayErrorChain::new(&err).to_string());
+        }
 
         // Cert and key appear to be valid; steal them out of
         // `partial_external_certificate` and promote them to
