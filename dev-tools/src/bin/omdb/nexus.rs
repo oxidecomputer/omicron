@@ -124,7 +124,6 @@ async fn cmd_nexus_background_task_details(
     Ok(())
 }
 
-// XXX-dap
 fn print_task(bgtask: &BackgroundTask) {
     println!("task: {:?}", bgtask.name);
     print!("  currently executing: ");
@@ -179,7 +178,6 @@ fn reason_str(reason: &ActivationReason) -> &'static str {
 
 /// Used for printing background task status as a table
 #[derive(Tabled)]
-#[tabled(rename_all = "UPPERCASE")]
 struct BackgroundTaskStatusRow {
     task_name: String,
     #[tabled(rename = "PGEN#")]

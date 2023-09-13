@@ -8,6 +8,7 @@ use anyhow::anyhow;
 use anyhow::Context;
 use clap::Args;
 use clap::Subcommand;
+use nexus_db_model::Sled;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
 use nexus_db_queries::db::identity::Asset;
@@ -15,9 +16,11 @@ use nexus_db_queries::db::model::ServiceKind;
 use nexus_db_queries::db::DataStore;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::postgres_config::PostgresConfigWithUrl;
+use std::collections::BTreeMap;
 use std::num::NonZeroU32;
 use std::sync::Arc;
 use strum::IntoEnumIterator;
+use tabled::Tabled;
 use uuid::Uuid;
 
 #[derive(Debug, Args)]
@@ -136,17 +139,39 @@ where
     }
 }
 
+#[derive(Tabled)]
+#[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+struct ServiceInstanceRow {
+    #[tabled(rename = "SERVICE")]
+    kind: String,
+    instance_id: Uuid,
+    ip: String,
+    sled_serial: String,
+}
+
 /// Run `omdb db services`.
 async fn cmd_db_services(
     opctx: &OpContext,
     datastore: &DataStore,
     limit: NonZeroU32,
 ) -> Result<(), anyhow::Error> {
-    // XXX-dap join with sled information for a by-sled view
+    let pagparams: DataPageParams<'_, Uuid> = DataPageParams {
+        marker: None,
+        direction: dropshot::PaginationOrder::Ascending,
+        limit,
+    };
+    let sled_list = datastore
+        .sled_list(&opctx, &pagparams)
+        .await
+        .context("listing sleds")?;
+    check_limit(&sled_list, limit, || String::from("listing sleds"));
+
+    let sleds: BTreeMap<Uuid, Sled> =
+        sled_list.into_iter().map(|s| (s.id(), s)).collect();
+
+    let mut rows = vec![];
 
     for service_kind in ServiceKind::iter() {
-        print!("SERVICE: {:?}", service_kind);
-
         let pagparams: DataPageParams<'_, Uuid> = DataPageParams {
             marker: None,
             direction: dropshot::PaginationOrder::Ascending,
@@ -161,22 +186,26 @@ async fn cmd_db_services(
             .with_context(&context)?;
         check_limit(&instances, limit, &context);
 
-        print!(" (instances: {})\n", instances.len());
-
-        for i in instances {
-            println!(
-                "  IP {} id {} sled {} zone {}",
-                *i.ip,
-                i.id(),
-                i.sled_id,
-                i.zone_id
-                    .map(|z| z.to_string())
-                    .unwrap_or_else(|| String::from("(none)"))
-            );
-        }
-
-        println!("");
+        rows.extend(instances.into_iter().map(|instance| {
+            ServiceInstanceRow {
+                kind: format!("{:?}", service_kind),
+                instance_id: instance.id(),
+                ip: instance.ip.to_string(),
+                sled_serial: sleds
+                    .get(&instance.sled_id)
+                    .map(|s| s.serial_number())
+                    .unwrap_or("unknown")
+                    .to_string(),
+            }
+        }));
     }
+
+    let table = tabled::Table::new(rows)
+        .with(tabled::settings::Style::empty())
+        .with(tabled::settings::Padding::new(0, 1, 0, 0))
+        .to_string();
+
+    println!("{}", table);
 
     Ok(())
 }
