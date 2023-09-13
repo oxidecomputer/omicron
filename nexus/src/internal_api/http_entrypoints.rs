@@ -41,9 +41,9 @@ use oximeter::types::ProducerResults;
 use oximeter_producer::{collect, ProducerIdPathParams};
 use schemars::JsonSchema;
 use serde::Deserialize;
+use std::collections::BTreeMap;
 use std::sync::Arc;
 use uuid::Uuid;
-use std::collections::BTreeMap;
 
 type NexusApiDescription = ApiDescription<Arc<ServerContext>>;
 

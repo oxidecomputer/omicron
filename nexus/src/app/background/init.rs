@@ -78,7 +78,7 @@ impl BackgroundTasks {
                 String::from(
                     "reads config for silos and TLS certificates to determine \
                     the right set of HTTP endpoints, their HTTP server names, \
-                    and which TLS certificates to use on each one"
+                    and which TLS certificates to use on each one",
                 ),
                 config.external_endpoints.period_secs,
                 Box::new(watcher),
