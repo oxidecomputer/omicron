@@ -7,11 +7,11 @@
 use anyhow::anyhow;
 use omicron_common::api::internal::nexus::KnownArtifactKind;
 use once_cell::sync::Lazy;
+use ratatui::text::Text;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fmt::Display;
 use std::iter::Iterator;
-use tui::text::Text;
 use wicketd_client::types::{
     RackV1Inventory, RotInventory, RotSlot, SpComponentCaboose,
     SpComponentInfo, SpIgnition, SpState, SpType,

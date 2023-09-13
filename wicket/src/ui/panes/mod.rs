@@ -11,9 +11,9 @@ use crate::ui::defaults::style;
 use crate::Cmd;
 pub use overview::OverviewPane;
 pub use rack_setup::RackSetupPane;
-use tui::layout::{Constraint, Direction, Layout, Rect};
-use tui::text::{Span, Spans, Text};
-use tui::widgets::Paragraph;
+use ratatui::layout::{Constraint, Direction, Layout, Rect};
+use ratatui::text::{Line, Span, Text};
+use ratatui::widgets::Paragraph;
 pub use update::UpdatePane;
 
 /// Generate one line of text for the help bar in panes
@@ -26,16 +26,16 @@ pub fn help_text<'a>(data: &'a [(&'a str, &'a str)]) -> Paragraph<'a> {
         text.push(Span::styled(" | ", style::divider()));
     }
     text.pop();
-    Paragraph::new(Spans::from(text))
+    Paragraph::new(Line::from(text))
 }
 
-/// Split up a text into lines and push them into a `Spans` one at a time.
+/// Split up a text into lines and push them into a `Line` one at a time.
 ///
 /// This makes text wrapping offsets work correctly.
 pub fn push_text_lines<'a>(
     message: &str,
     prefix: Vec<Span<'a>>,
-    spans: &mut Vec<Spans<'a>>,
+    spans: &mut Vec<Line<'a>>,
 ) {
     // If the message has multiple lines of text, split them
     // into separate spans. This makes text wrapping offsets
@@ -43,7 +43,7 @@ pub fn push_text_lines<'a>(
     let mut next_line = prefix;
     for line in message.lines() {
         next_line.push(Span::styled(line.to_owned(), style::plain_text()));
-        spans.push(Spans::from(next_line));
+        spans.push(Line::from(next_line));
         next_line = Vec::new();
     }
 }
@@ -73,7 +73,7 @@ pub fn align_by(
         text.push(span);
         text.push(Span::raw(format!("{:spaces$}", "")));
     }
-    Text::from(Spans::from(text))
+    Text::from(Line::from(text))
 }
 
 /// A pending scroll command.

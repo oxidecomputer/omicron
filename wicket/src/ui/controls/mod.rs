@@ -3,10 +3,10 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::{Action, Cmd, Frame, State};
-use tui::layout::Rect;
+use ratatui::layout::Rect;
 
 /// A [`Control`] is the an item on a screen that can be selected and interacted with.
-/// Control's render [`tui::widgets::Widget`]s when drawn.
+/// Control's render [`ratatui::widgets::Widget`]s when drawn.
 ///
 ///
 /// Due to the rendering model of stateful widgets in `tui.rs`, `self` must
