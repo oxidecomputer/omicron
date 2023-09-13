@@ -1147,7 +1147,7 @@ impl DnsLookupStep {
             };
 
             match err.kind() {
-                // If `NoRecordsFound` is an acceptible end to this lookup,
+                // If `NoRecordsFound` is an acceptable end to this lookup,
                 // we're done.
                 ResolveErrorKind::NoRecordsFound { .. }
                     if options.is_no_records_found_okay =>
