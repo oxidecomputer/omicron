@@ -306,10 +306,7 @@ async fn cmd_db_services_list_by_sled(
     for (sled_id, instances) in services_by_sled {
         println!(
             "sled: {} (id {})\n",
-            sleds
-                .get(&sled_id)
-                .map(|s| s.serial_number())
-                .unwrap_or("unknown"),
+            sleds.get(&sled_id).map(|s| s.serial_number()).unwrap_or("unknown"),
             sled_id,
         );
         let table = tabled::Table::new(instances)
