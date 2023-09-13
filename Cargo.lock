@@ -4914,7 +4914,6 @@ dependencies = [
  "macaddr",
  "mime_guess",
  "newtype_derive",
- "nexus-client 0.1.0",
  "nexus-db-model",
  "nexus-db-queries",
  "nexus-defaults",

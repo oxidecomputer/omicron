@@ -287,7 +287,7 @@ impl Driver {
         // Driver instance.
         let task = self.tasks.get(task).unwrap_or_else(|| {
             panic!(
-                "attempted to wake up non-existent background task: {:?}",
+                "attempted to get docs for non-existent background task: {:?}",
                 task
             )
         });
