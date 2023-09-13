@@ -4805,16 +4805,11 @@ dependencies = [
  "anyhow",
  "camino",
  "camino-tempfile",
- "chrono",
  "clap 4.4.2",
  "dropshot",
  "expectorate",
  "futures",
- "humantime",
  "libc",
- "nexus-client 0.1.0",
- "nexus-db-model",
- "nexus-db-queries",
  "nexus-test-interface",
  "nexus-test-utils",
  "omicron-common 0.1.0",
@@ -4826,18 +4821,12 @@ dependencies = [
  "oxide-client",
  "pq-sys",
  "rcgen",
- "serde_json",
  "signal-hook",
  "signal-hook-tokio",
- "slog",
- "strum 0.25.0",
  "subprocess",
- "tabled",
- "textwrap 0.16.0",
  "tokio",
  "tokio-postgres",
  "toml 0.7.6",
- "uuid",
 ]
 
 [[package]]
@@ -4992,6 +4981,30 @@ dependencies = [
  "tough",
  "trust-dns-resolver",
  "usdt",
+ "uuid",
+]
+
+[[package]]
+name = "omicron-omdb"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "clap 4.4.2",
+ "dropshot",
+ "humantime",
+ "nexus-client 0.1.0",
+ "nexus-db-model",
+ "nexus-db-queries",
+ "omicron-common 0.1.0",
+ "omicron-rpaths",
+ "pq-sys",
+ "serde_json",
+ "slog",
+ "strum 0.25.0",
+ "tabled",
+ "textwrap 0.16.0",
+ "tokio",
  "uuid",
 ]
 
