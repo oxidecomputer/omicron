@@ -309,8 +309,7 @@ async fn cmd_db_services_list_by_sled(
             sleds
                 .get(&sled_id)
                 .map(|s| s.serial_number())
-                .unwrap_or("unknown")
-                .to_string(),
+                .unwrap_or("unknown"),
             sled_id,
         );
         let table = tabled::Table::new(instances)

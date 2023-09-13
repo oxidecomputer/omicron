@@ -42,6 +42,7 @@ struct Omdb {
 }
 
 #[derive(Debug, Subcommand)]
+#[allow(clippy::large_enum_variant)]
 enum OmdbCommands {
     /// Query the control plane database (CockroachDB)
     Db(db::DbArgs),
