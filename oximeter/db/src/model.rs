@@ -224,7 +224,7 @@ impl From<DbDatumType> for DatumType {
 // nanoseconds in our case. We opt for strings here, since we're using that anyway in the
 // input/output format for ClickHouse.
 mod serde_timestamp {
-    use chrono::{DateTime, TimeZone, Utc};
+    use chrono::{naive::NaiveDateTime, DateTime, Utc};
     use serde::{self, Deserialize, Deserializer, Serializer};
 
     pub fn serialize<S>(
@@ -245,7 +245,8 @@ mod serde_timestamp {
         D: Deserializer<'de>,
     {
         let s = String::deserialize(deserializer)?;
-        Utc.datetime_from_str(&s, crate::DATABASE_TIMESTAMP_FORMAT)
+        NaiveDateTime::parse_from_str(&s, crate::DATABASE_TIMESTAMP_FORMAT)
+            .map(|naive_date| naive_date.and_utc())
             .map_err(serde::de::Error::custom)
     }
 }

@@ -685,7 +685,7 @@ mod tests {
     use crate::FieldSchema;
     use crate::FieldSource;
     use crate::TimeseriesName;
-    use chrono::TimeZone;
+    use chrono::NaiveDateTime;
     use std::convert::TryFrom;
 
     #[test]
@@ -844,10 +844,14 @@ mod tests {
     fn test_time_range() {
         let s = "2021-01-01 01:01:01.123456789";
         let start_time =
-            Utc.datetime_from_str(s, crate::DATABASE_TIMESTAMP_FORMAT).unwrap();
+            NaiveDateTime::parse_from_str(s, crate::DATABASE_TIMESTAMP_FORMAT)
+                .unwrap()
+                .and_utc();
         let e = "2021-01-01 01:01:02.123456789";
         let end_time =
-            Utc.datetime_from_str(e, crate::DATABASE_TIMESTAMP_FORMAT).unwrap();
+            NaiveDateTime::parse_from_str(e, crate::DATABASE_TIMESTAMP_FORMAT)
+                .unwrap()
+                .and_utc();
         let range = TimeRange {
             start: Some(Timestamp::Inclusive(start_time)),
             end: Some(Timestamp::Exclusive(end_time)),

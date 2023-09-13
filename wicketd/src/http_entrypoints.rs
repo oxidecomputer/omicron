@@ -31,6 +31,7 @@ use omicron_common::address;
 use omicron_common::api::external::SemverVersion;
 use omicron_common::api::internal::shared::RackNetworkConfig;
 use omicron_common::api::internal::shared::SwitchLocation;
+use omicron_common::update::ArtifactHashId;
 use omicron_common::update::ArtifactId;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -38,9 +39,11 @@ use serde::Serialize;
 use sled_hardware::Baseboard;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
+use std::io;
 use std::net::IpAddr;
 use std::net::Ipv6Addr;
 use std::time::Duration;
+use tokio::io::AsyncWriteExt;
 use uuid::Uuid;
 use wicket_common::rack_setup::PutRssUserConfigInsensitive;
 use wicket_common::update_events::EventReport;
@@ -561,12 +564,53 @@ async fn put_repository(
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let rqctx = rqctx.context();
 
-    // TODO: do we need to return more information with the response?
+    // Create a temporary file to store the incoming archive.
+    let tempfile = tokio::task::spawn_blocking(|| {
+        camino_tempfile::tempfile().map_err(|err| {
+            HttpError::for_unavail(
+                None,
+                format!("failed to create temp file: {err}"),
+            )
+        })
+    })
+    .await
+    .unwrap()?;
+    let mut tempfile =
+        tokio::io::BufWriter::new(tokio::fs::File::from_std(tempfile));
 
-    let bytes = body.into_stream().try_collect().await?;
-    rqctx.update_tracker.put_repository(bytes).await?;
+    let mut body = std::pin::pin!(body.into_stream());
+
+    // Stream the uploaded body into our tempfile.
+    while let Some(bytes) = body.try_next().await? {
+        tempfile.write_all(&bytes).await.map_err(|err| {
+            HttpError::for_unavail(
+                None,
+                format!("failed to write to temp file: {err}"),
+            )
+        })?;
+    }
+
+    // Flush writes. We don't need to seek back to the beginning of the file
+    // because extracting the repository will do its own seeking as a part of
+    // unzipping this repo.
+    tempfile.flush().await.map_err(|err| {
+        HttpError::for_unavail(
+            None,
+            format!("failed to flush temp file: {err}"),
+        )
+    })?;
+
+    let tempfile = tempfile.into_inner().into_std().await;
+    rqctx.update_tracker.put_repository(io::BufReader::new(tempfile)).await?;
 
     Ok(HttpResponseUpdatedNoContent())
+}
+
+#[derive(Clone, Debug, JsonSchema, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub struct InstallableArtifacts {
+    pub artifact_id: ArtifactId,
+    pub installable: Vec<ArtifactHashId>,
 }
 
 /// The response to a `get_artifacts` call: the system version, and the list of
@@ -575,7 +619,20 @@ async fn put_repository(
 #[serde(rename_all = "snake_case")]
 pub struct GetArtifactsAndEventReportsResponse {
     pub system_version: Option<SemverVersion>,
-    pub artifacts: Vec<ArtifactId>,
+
+    /// Map of artifacts we ingested from the most-recently-uploaded TUF
+    /// repository to a list of artifacts we're serving over the bootstrap
+    /// network. In some cases the list of artifacts being served will have
+    /// length 1 (when we're serving the artifact directly); in other cases the
+    /// artifact in the TUF repo contains multiple nested artifacts inside it
+    /// (e.g., RoT artifacts contain both A and B images), and we serve the list
+    /// of extracted artifacts but not the original combination.
+    ///
+    /// Conceptually, this is a `BTreeMap<ArtifactId, Vec<ArtifactHashId>>`, but
+    /// JSON requires string keys for maps, so we give back a vec of pairs
+    /// instead.
+    pub artifacts: Vec<InstallableArtifacts>,
+
     pub event_reports: BTreeMap<SpType, BTreeMap<u32, EventReport>>,
 }
 
