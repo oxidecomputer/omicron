@@ -435,10 +435,9 @@ impl TaskExec {
 
         // Update our status with the driver.
         self.status_tx.send_modify(|status| {
-            let CurrentStatus::Running(current) = &status.current else {
-                panic!("finished task that was not running");
-            };
-            assert_eq!(iteration, current.iteration);
+            assert!(!status.current.is_idle());
+            let current = status.current.unwrap_running();
+            assert_eq!(current.iteration, iteration);
             *status = TaskStatus {
                 current: CurrentStatus::Idle,
                 last: LastResult::Completed(LastResultCompleted {
@@ -490,8 +489,6 @@ mod test {
     use futures::FutureExt;
     use nexus_db_queries::context::OpContext;
     use nexus_test_utils_macros::nexus_test;
-    use nexus_types::internal_api::views::CurrentStatus;
-    use nexus_types::internal_api::views::LastResult;
     use std::time::Duration;
     use std::time::Instant;
     use tokio::sync::mpsc;
@@ -617,9 +614,7 @@ mod test {
         assert!(duration.as_millis() >= 300);
         // Check how the last activation was reported.
         let status = driver.task_status(&h1);
-        let LastResult::Completed(last) = status.last else {
-            panic!("expected task to have completed");
-        };
+        let last = status.last.unwrap_completion();
         // It's conceivable that there's been another activation already.
         assert!(last.iteration == 3 || last.iteration == 4);
         assert!(last.start_time >= wall_start);
@@ -636,14 +631,10 @@ mod test {
         assert_eq!(*rx2.borrow(), 1);
         assert_eq!(*rx3.borrow(), 1);
         let status = driver.task_status(&h2);
-        let LastResult::Completed(last) = status.last else {
-            panic!("expected task to have completed");
-        };
+        let last = status.last.unwrap_completion();
         assert_eq!(last.iteration, 1);
         let status = driver.task_status(&h3);
-        let LastResult::Completed(last) = status.last else {
-            panic!("expected task to have completed");
-        };
+        let last = status.last.unwrap_completion();
         assert_eq!(last.iteration, 1);
 
         // Explicitly wake up all of our tasks by reporting that dep1 has
@@ -655,14 +646,10 @@ mod test {
         assert_eq!(*rx2.borrow(), 2);
         assert_eq!(*rx3.borrow(), 2);
         let status = driver.task_status(&h2);
-        let LastResult::Completed(last) = status.last else {
-            panic!("expected task to have completed");
-        };
+        let last = status.last.unwrap_completion();
         assert_eq!(last.iteration, 2);
         let status = driver.task_status(&h3);
-        let LastResult::Completed(last) = status.last else {
-            panic!("expected task to have completed");
-        };
+        let last = status.last.unwrap_completion();
         assert_eq!(last.iteration, 2);
 
         // Explicitly wake up just "t3" by reporting that dep2 has changed.
@@ -672,14 +659,10 @@ mod test {
         assert_eq!(*rx2.borrow(), 2);
         assert_eq!(*rx3.borrow(), 3);
         let status = driver.task_status(&h2);
-        let LastResult::Completed(last) = status.last else {
-            panic!("expected task to have completed");
-        };
+        let last = status.last.unwrap_completion();
         assert_eq!(last.iteration, 2);
         let status = driver.task_status(&h3);
-        let LastResult::Completed(last) = status.last else {
-            panic!("expected task to have completed");
-        };
+        let last = status.last.unwrap_completion();
         assert_eq!(last.iteration, 3);
 
         // Explicitly activate just "t3".
@@ -688,14 +671,10 @@ mod test {
         assert_eq!(*rx2.borrow(), 2);
         assert_eq!(*rx3.borrow(), 4);
         let status = driver.task_status(&h2);
-        let LastResult::Completed(last) = status.last else {
-            panic!("expected task to have completed");
-        };
+        let last = status.last.unwrap_completion();
         assert_eq!(last.iteration, 2);
         let status = driver.task_status(&h3);
-        let LastResult::Completed(last) = status.last else {
-            panic!("expected task to have completed");
-        };
+        let last = status.last.unwrap_completion();
         assert_eq!(last.iteration, 4);
     }
 
@@ -770,10 +749,8 @@ mod test {
         let after_instant = Instant::now();
         // Verify that it's a timeout-based activation.
         let status = driver.task_status(&h1);
-        assert_matches!(status.last, LastResult::NeverCompleted);
-        let CurrentStatus::Running(current) = status.current else {
-            panic!("expected task to be running");
-        };
+        assert!(!status.last.has_completed());
+        let current = status.current.unwrap_running();
         assert!(current.start_time >= before_wall);
         assert!(current.start_time <= after_wall);
         assert!(current.start_instant >= before_instant);
@@ -792,14 +769,10 @@ mod test {
         assert!(after_instant.elapsed().as_millis() < 5000);
         // Verify that it's a dependency-caused activation.
         let status = driver.task_status(&h1);
-        let LastResult::Completed(last) = status.last else {
-            panic!("expected task to have finished before");
-        };
+        let last = status.last.unwrap_completion();
         assert_eq!(last.start_time, current.start_time);
         assert_eq!(last.iteration, current.iteration);
-        let CurrentStatus::Running(current) = status.current else {
-            panic!("expected task to be running");
-        };
+        let current = status.current.unwrap_running();
         assert!(current.start_time >= after_wall);
         assert!(current.start_instant >= after_instant);
         assert_eq!(current.iteration, 2);
@@ -816,14 +789,10 @@ mod test {
         assert!(after_instant.elapsed().as_millis() < 10000);
         // Verify that it's a signal-caused activation.
         let status = driver.task_status(&h1);
-        let LastResult::Completed(last) = status.last else {
-            panic!("expected task to have finished before");
-        };
+        let last = status.last.unwrap_completion();
         assert_eq!(last.start_time, current.start_time);
         assert_eq!(last.iteration, current.iteration);
-        let CurrentStatus::Running(current) = status.current else {
-            panic!("expected task to be running");
-        };
+        let current = status.current.unwrap_running();
         assert_eq!(current.iteration, 3);
         assert_eq!(current.reason, ActivationReason::Signaled);
         // This time, queue up several explicit activations.
@@ -843,11 +812,8 @@ mod test {
         // expect to have seen it if it is coming.
         tokio::time::sleep(Duration::from_secs(1)).await;
         let status = driver.task_status(&h1);
-        assert_matches!(status.current, CurrentStatus::Idle);
-        let LastResult::Completed(last) = status.last else {
-            panic!("expected task to have finished before");
-        };
-        assert_eq!(last.iteration, 4);
+        assert!(status.current.is_idle());
+        assert_eq!(status.last.unwrap_completion().iteration, 4);
         assert_matches!(ready_rx1.try_recv(), Err(TryRecvError::Empty));
 
         // Now, trigger several dependency-based activations.  We should see the
@@ -860,11 +826,8 @@ mod test {
         tx1.send(()).await.unwrap();
         tokio::time::sleep(Duration::from_secs(1)).await;
         let status = driver.task_status(&h1);
-        assert_matches!(status.current, CurrentStatus::Idle);
-        let LastResult::Completed(last) = status.last else {
-            panic!("expected task to have finished before");
-        };
-        assert_eq!(last.iteration, 5);
+        assert!(status.current.is_idle());
+        assert_eq!(status.last.unwrap_completion().iteration, 5);
         assert_matches!(ready_rx1.try_recv(), Err(TryRecvError::Empty));
 
         // It would be nice to also verify that multiple time-based activations

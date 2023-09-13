@@ -218,6 +218,21 @@ pub enum CurrentStatus {
     Running(CurrentStatusRunning),
 }
 
+impl CurrentStatus {
+    pub fn is_idle(&self) -> bool {
+        matches!(self, CurrentStatus::Idle)
+    }
+
+    pub fn unwrap_running(&self) -> &CurrentStatusRunning {
+        match self {
+            CurrentStatus::Running(r) => r,
+            CurrentStatus::Idle => {
+                panic!("attempted to get running state of idle task")
+            }
+        }
+    }
+}
+
 #[derive(Clone, Debug, JsonSchema, Serialize)]
 pub struct CurrentStatusRunning {
     /// wall-clock time when the current activation started
@@ -241,6 +256,24 @@ pub enum LastResult {
     NeverCompleted,
     /// The task has completed at least one activation
     Completed(LastResultCompleted),
+}
+
+impl LastResult {
+    pub fn has_completed(&self) -> bool {
+        matches!(self, LastResult::Completed(_))
+    }
+
+    pub fn unwrap_completion(self) -> LastResultCompleted {
+        match self {
+            LastResult::Completed(r) => r,
+            LastResult::NeverCompleted => {
+                panic!(
+                    "attempted to get completion state of a task that \
+                    has never completed"
+                );
+            }
+        }
+    }
 }
 
 #[derive(Clone, Debug, JsonSchema, Serialize)]
