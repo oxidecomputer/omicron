@@ -4,10 +4,10 @@
 
 //! Animated Oxide logo used for the splash screen
 
-use tui::buffer::Buffer;
-use tui::layout::Rect;
-use tui::style::Style;
-use tui::widgets::Widget;
+use ratatui::buffer::Buffer;
+use ratatui::layout::Rect;
+use ratatui::style::Style;
+use ratatui::widgets::Widget;
 
 pub const LOGO_HEIGHT: u16 = 7;
 pub const LOGO_WIDTH: u16 = 46;

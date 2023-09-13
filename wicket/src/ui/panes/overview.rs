@@ -17,10 +17,10 @@ use crate::ui::widgets::IgnitionPopup;
 use crate::ui::widgets::{BoxConnector, BoxConnectorKind, Rack};
 use crate::ui::wrap::wrap_text;
 use crate::{Action, Cmd, Frame, State};
-use tui::layout::{Constraint, Direction, Layout, Rect};
-use tui::style::Style;
-use tui::text::{Span, Spans, Text};
-use tui::widgets::{Block, BorderType, Borders, Paragraph};
+use ratatui::layout::{Constraint, Direction, Layout, Rect};
+use ratatui::style::Style;
+use ratatui::text::{Line, Span, Text};
+use ratatui::widgets::{Block, BorderType, Borders, Paragraph};
 use wicketd_client::types::RotState;
 use wicketd_client::types::SpComponentCaboose;
 use wicketd_client::types::SpComponentInfo;
@@ -169,7 +169,7 @@ impl Control for RackView {
             .style(border_style);
 
         // Draw the sled title (subview look)
-        let title_bar = Paragraph::new(Spans::from(vec![Span::styled(
+        let title_bar = Paragraph::new(Line::from(vec![Span::styled(
             "OXIDE RACK",
             component_style,
         )]))
@@ -340,7 +340,7 @@ impl Control for InventoryView {
             .style(border_style);
 
         // Draw the sled title (subview look)
-        let title_bar = Paragraph::new(Spans::from(vec![
+        let title_bar = Paragraph::new(Line::from(vec![
             Span::styled("OXIDE RACK / ", border_style),
             Span::styled(
                 state.rack_state.selected.to_string(),
@@ -466,7 +466,7 @@ fn inventory_description(component: &Component) -> Text {
     let bullet = || Span::styled("  • ", label_style);
     let nest_bullet = || Span::styled("      • ", label_style);
 
-    let mut spans: Vec<Spans> = Vec::new();
+    let mut spans: Vec<Line> = Vec::new();
 
     // Describe ignition.
     let mut label = vec![Span::styled("Ignition: ", label_style)];
@@ -559,7 +559,7 @@ fn inventory_description(component: &Component) -> Text {
     }
 
     // blank line separator
-    spans.push(Spans::default());
+    spans.push(Line::default());
 
     // Describe the SP.
     let mut label = vec![Span::styled("Service Processor: ", label_style)];
@@ -668,7 +668,7 @@ fn inventory_description(component: &Component) -> Text {
     }
 
     // blank line separator
-    spans.push(Spans::default());
+    spans.push(Line::default());
 
     // Describe the RoT.
     let mut label = vec![Span::styled("Root of Trust: ", label_style)];
@@ -818,7 +818,7 @@ fn inventory_description(component: &Component) -> Text {
     }
 
     // blank line separator
-    spans.push(Spans::default());
+    spans.push(Line::default());
 
     // Describe all components.
     // TODO-correctness: component information will change with the IPCC /
@@ -872,7 +872,7 @@ fn inventory_description(component: &Component) -> Text {
 // Helper function for appending caboose details to a section of the
 // inventory (used for both SP and RoT above).
 fn append_caboose(
-    spans: &mut Vec<Spans>,
+    spans: &mut Vec<Line>,
     prefix: Span<'static>,
     caboose: &SpComponentCaboose,
 ) {

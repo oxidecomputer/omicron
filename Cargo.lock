@@ -1334,22 +1334,6 @@ dependencies = [
 
 [[package]]
 name = "crossterm"
-version = "0.25.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e64e6c0fbe2c17357405f7c758c1ef960fce08bdfb2c03d88d2a18d7e09c4b67"
-dependencies = [
- "bitflags 1.3.2",
- "crossterm_winapi",
- "libc",
- "mio",
- "parking_lot 0.12.1",
- "signal-hook",
- "signal-hook-mio",
- "winapi",
-]
-
-[[package]]
-name = "crossterm"
 version = "0.26.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a84cda67535339806297f1b331d6dd6320470d2a0fe65381e79ee9e156dd3d13"
@@ -1361,6 +1345,22 @@ dependencies = [
  "mio",
  "parking_lot 0.12.1",
  "serde",
+ "signal-hook",
+ "signal-hook-mio",
+ "winapi",
+]
+
+[[package]]
+name = "crossterm"
+version = "0.27.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f476fe445d41c9e991fd07515a6f463074b782242ccf4a5b7b1d1012e70824df"
+dependencies = [
+ "bitflags 2.4.0",
+ "crossterm_winapi",
+ "libc",
+ "mio",
+ "parking_lot 0.12.1",
  "signal-hook",
  "signal-hook-mio",
  "winapi",
@@ -3410,6 +3410,12 @@ name = "indoc"
 version = "1.0.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bfa799dd5ed20a7e349f3b4639aa80d74549c81716d9ec4f994c9b5815598306"
+
+[[package]]
+name = "indoc"
+version = "2.0.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2c785eefb63ebd0e33416dfcb8d6da0bf27ce752843a45632a67bf10d4d4b5c4"
 
 [[package]]
 name = "inout"
@@ -5948,7 +5954,7 @@ version = "0.26.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f3833746ee893099f2dff25267b8210394b63983525edb2fe5374bccfb2f77eb"
 dependencies = [
- "indoc",
+ "indoc 1.0.9",
  "js-sys",
  "lalrpop",
  "lalrpop-util",
@@ -6548,6 +6554,23 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d25bf25ec5ae4a3f1b92f929810509a2f53d7dca2f50b794ff57e3face536c8f"
 dependencies = [
  "rand_core 0.6.4",
+]
+
+[[package]]
+name = "ratatui"
+version = "0.23.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2e2e4cd95294a85c3b4446e63ef054eea43e0205b1fd60120c16b74ff7ff96ad"
+dependencies = [
+ "bitflags 2.4.0",
+ "cassowary",
+ "crossterm 0.27.0",
+ "indoc 2.0.3",
+ "itertools 0.11.0",
+ "paste",
+ "strum 0.25.0",
+ "unicode-segmentation",
+ "unicode-width",
 ]
 
 [[package]]
@@ -8957,25 +8980,12 @@ dependencies = [
 ]
 
 [[package]]
-name = "tui"
-version = "0.19.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ccdd26cbd674007e649a272da4475fb666d3aa0ad0531da7136db6fab0e5bad1"
-dependencies = [
- "bitflags 1.3.2",
- "cassowary",
- "crossterm 0.25.0",
- "unicode-segmentation",
- "unicode-width",
-]
-
-[[package]]
 name = "tui-tree-widget"
-version = "0.12.0"
+version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "af6ca306e86e263aa6dede6305d7d305dea942bde622d4f4910782434d0b98cb"
+checksum = "f01f9172fb8f4f925fb1e259c2f411be14af031ab8b35d517fd05cb78c0784d5"
 dependencies = [
- "tui",
+ "ratatui",
  "unicode-width",
 ]
 
@@ -9561,6 +9571,7 @@ dependencies = [
  "once_cell",
  "owo-colors",
  "proptest",
+ "ratatui",
  "reqwest",
  "rpassword",
  "semver 1.0.18",
@@ -9577,7 +9588,6 @@ dependencies = [
  "tokio-util",
  "toml 0.7.6",
  "toml_edit",
- "tui",
  "tui-tree-widget",
  "unicode-width",
  "update-engine",
@@ -9610,6 +9620,7 @@ dependencies = [
  "ciborium",
  "clap 4.4.2",
  "crossterm 0.26.1",
+ "ratatui",
  "reedline",
  "serde",
  "slog",
@@ -9617,7 +9628,6 @@ dependencies = [
  "slog-envlogger",
  "slog-term",
  "tokio",
- "tui",
  "wicket",
 ]
 

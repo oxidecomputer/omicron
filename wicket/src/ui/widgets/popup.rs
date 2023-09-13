@@ -4,11 +4,11 @@
 
 //! A popup dialog box widget
 
-use tui::{
+use ratatui::{
     buffer::Buffer,
     layout::{Constraint, Direction, Layout, Rect},
     style::Style,
-    text::{Span, Spans, Text},
+    text::{Line, Span, Text},
     widgets::{Block, BorderType, Borders, Clear, Paragraph, Widget},
 };
 
@@ -29,18 +29,18 @@ const BUTTON_HEIGHT: u16 = 3;
 
 #[derive(Clone, Debug)]
 pub struct ButtonText<'a> {
-    pub instruction: Spans<'a>,
-    pub key: Spans<'a>,
+    pub instruction: Line<'a>,
+    pub key: Line<'a>,
 }
 
 impl<'a> ButtonText<'a> {
     pub fn new(instruction: &'a str, key: &'a str) -> Self {
         Self {
-            instruction: Spans::from(Span::styled(
+            instruction: Line::from(Span::styled(
                 instruction,
                 Self::default_instruction_style(),
             )),
-            key: Spans::from(Span::styled(key, Self::default_key_style())),
+            key: Line::from(Span::styled(key, Self::default_key_style())),
         }
     }
 
@@ -55,7 +55,7 @@ impl<'a> ButtonText<'a> {
 
 #[derive(Default)]
 pub struct PopupBuilder<'a> {
-    pub header: Spans<'a>,
+    pub header: Line<'a>,
     pub body: Text<'a>,
     pub buttons: Vec<ButtonText<'a>>,
 }
@@ -175,7 +175,7 @@ impl PopupScrollability for Scrollable {
                             ButtonText::default_instruction_style(),
                         )
                         .into(),
-                        key: Spans::from(vec![
+                        key: Line::from(vec![
                             Span::styled("Up", up_style),
                             Span::styled("/", ButtonText::default_key_style()),
                             Span::styled("Down", down_style),
@@ -239,7 +239,7 @@ pub struct Popup<'a, S: PopupScrollability> {
 impl<'a, S: PopupScrollability> Popup<'a, S> {
     fn new(
         full_screen: Rect,
-        header: &'a Spans<'_>,
+        header: &'a Line<'_>,
         body: &'a Text<'_>,
         buttons: Vec<ButtonText<'a>>,
         scrollability: S,
@@ -289,7 +289,7 @@ impl<'a, S: PopupScrollability> Popup<'a, S> {
         Self {
             data,
             rect,
-            chunks,
+            chunks: chunks.to_vec(),
             body_rect,
             actual_scroll_offset: actual_scroll,
             _marker: PhantomData,
@@ -474,12 +474,12 @@ pub fn draw_buttons(
 
     for (i, button) in buttons.into_iter().enumerate() {
         let mut spans = vec![Span::raw(" ")];
-        spans.extend(button.instruction.0);
+        spans.extend(button.instruction.spans);
         spans.push(Span::styled(" <", ButtonText::default_key_style()));
-        spans.extend(button.key.0);
+        spans.extend(button.key.spans);
         spans.push(Span::styled(">", ButtonText::default_key_style()));
 
-        let b = Paragraph::new(Spans(spans)).block(block.clone());
+        let b = Paragraph::new(Line::from(spans)).block(block.clone());
         b.render(button_rects[i + 1], buf);
     }
 }

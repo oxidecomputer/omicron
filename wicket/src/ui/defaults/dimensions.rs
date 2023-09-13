@@ -4,7 +4,7 @@
 
 //! Default dimensions for various widgets common across screens
 
-use tui::layout::Rect;
+use ratatui::layout::Rect;
 
 // Extension trait for Rects that provide centering and placement capabilities
 pub trait RectExt {
