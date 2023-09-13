@@ -347,7 +347,7 @@ mod zenter {
             let fd = unsafe { libc::open(path.as_ptr(), libc::O_RDWR) };
             if fd < 0 {
                 let err = std::io::Error::last_os_error();
-                return Err(crate::ExecutionError::ZoneEnter { err });
+                return Err(crate::ExecutionError::ContractFailure { err });
             }
 
             // Initialize the contract template.
@@ -372,7 +372,7 @@ mod zenter {
                 || unsafe { ct_tmpl_activate(fd) } != 0
             {
                 let err = std::io::Error::last_os_error();
-                return Err(crate::ExecutionError::ZoneEnter { err });
+                return Err(crate::ExecutionError::ContractFailure { err });
             }
             Ok(Self { fd })
         }
@@ -440,6 +440,8 @@ impl RunningZone {
             })?);
         let tmpl = std::sync::Arc::clone(&template);
         let mut command = std::process::Command::new(crate::PFEXEC);
+        let logger = self.inner.log.clone();
+        let zone = self.name().to_string();
         command.env_clear();
         unsafe {
             command.pre_exec(move || {
@@ -452,7 +454,13 @@ impl RunningZone {
                 if zenter::zone_enter(id) == 0 {
                     Ok(())
                 } else {
-                    Err(std::io::Error::last_os_error())
+                    let err = std::io::Error::last_os_error();
+                    error!(
+                        logger,
+                        "failed to enter zone: {}", &err;
+                        "zone" => &zone,
+                    );
+                    Err(err)
                 }
             });
         }
