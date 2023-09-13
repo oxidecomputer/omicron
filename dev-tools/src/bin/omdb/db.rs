@@ -210,6 +210,26 @@ async fn cmd_db_services(
     Ok(())
 }
 
+#[derive(Tabled)]
+#[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+struct SledRow {
+    serial: String,
+    ip: String,
+    role: &'static str,
+    id: Uuid,
+}
+
+impl From<Sled> for SledRow {
+    fn from(s: Sled) -> Self {
+        SledRow {
+            id: s.id(),
+            serial: s.serial_number().to_string(),
+            ip: s.address().to_string(),
+            role: if s.is_scrimlet() { "scrimlet" } else { "-" },
+        }
+    }
+}
+
 /// Run `omdb db sleds`.
 async fn cmd_db_sleds(
     opctx: &OpContext,
@@ -228,16 +248,13 @@ async fn cmd_db_sleds(
         .context("listing sleds")?;
     check_limit(&sleds, limit, || String::from("listing sleds"));
 
-    for s in sleds {
-        print!("sled {} IP {}", s.id(), s.ip());
-        if s.is_scrimlet() {
-            println!(" (scrimlet)");
-        } else {
-            println!("");
-        }
-    }
+    let rows = sleds.into_iter().map(|s| SledRow::from(s));
+    let table = tabled::Table::new(rows)
+        .with(tabled::settings::Style::empty())
+        .with(tabled::settings::Padding::new(0, 1, 0, 0))
+        .to_string();
 
-    println!("");
+    println!("{}", table);
 
     Ok(())
 }
