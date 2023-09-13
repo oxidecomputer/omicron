@@ -25,7 +25,11 @@ async fn main() -> Result<(), anyhow::Error> {
     }
 }
 
-/// Omicron debugger
+/// Omicron debugger (unstable)
+///
+/// This tool provides commands for directly querying Omicron components about
+/// their internal state using internal APIs.  This is a prototype.  The
+/// commands and output are unstable and may change.
 #[derive(Debug, Parser)]
 struct Omdb {
     /// log level filter
