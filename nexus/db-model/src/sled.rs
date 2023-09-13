@@ -40,7 +40,8 @@ pub struct Sled {
     #[diesel(embed)]
     identity: SledIdentity,
     time_deleted: Option<DateTime<Utc>>,
-    rcgen: Generation,
+    #[diesel(column_name = rcgen)]
+    services_gen: Generation,
 
     pub rack_id: Uuid,
 
@@ -77,7 +78,7 @@ impl Sled {
         Self {
             identity: SledIdentity::new(id),
             time_deleted: None,
-            rcgen: Generation::new(),
+            services_gen: Generation::new(),
             rack_id,
             is_scrimlet: hardware.is_scrimlet,
             serial_number: baseboard.serial_number,
@@ -96,6 +97,10 @@ impl Sled {
 
     pub fn is_scrimlet(&self) -> bool {
         self.is_scrimlet
+    }
+
+    pub fn services_gen(&self) -> Generation {
+        self.services_gen
     }
 
     pub fn ip(&self) -> Ipv6Addr {
@@ -126,6 +131,10 @@ impl From<Sled> for views::Sled {
         }
     }
 }
+
+// TODO TODO TODO: Be careful here - is rcgen getting overloaded?
+// If we're using it to represent "servies" and also "physical disk insertions",
+// it's overloaded. We need something service specific.
 
 impl DatastoreCollectionConfig<super::PhysicalDisk> for Sled {
     type CollectionId = Uuid;

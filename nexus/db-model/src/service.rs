@@ -7,7 +7,7 @@ use crate::ipv6;
 use crate::schema::service;
 use crate::SqlU16;
 use db_macros::Asset;
-use std::net::SocketAddrV6;
+use std::net::{Ipv6Addr, SocketAddrV6};
 use uuid::Uuid;
 
 /// Representation of services which may run on Sleds.
@@ -40,5 +40,13 @@ impl Service {
             port: addr.port().into(),
             kind,
         }
+    }
+
+    pub fn ip(&self) -> Ipv6Addr {
+        self.ip.into()
+    }
+
+    pub fn address(&self) -> SocketAddrV6 {
+        SocketAddrV6::new(self.ip(), self.port.into(), 0, 0)
     }
 }

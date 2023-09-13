@@ -573,6 +573,7 @@ impl ServiceInner {
                 if let Some(dataset) = &service.dataset {
                     datasets.push(NexusTypes::DatasetCreateRequest {
                         zpool_id: dataset.name.pool().id(),
+                        // TODO: Service ID?
                         dataset_id: dataset.id,
                         request: NexusTypes::DatasetPutRequest {
                             address: dataset.service_address.to_string(),

@@ -100,6 +100,7 @@ impl super::Nexus {
                 db::model::Dataset::new(
                     dataset.dataset_id,
                     dataset.zpool_id,
+                    None, // TODO: ?
                     dataset.request.address,
                     dataset.request.kind.into(),
                 )

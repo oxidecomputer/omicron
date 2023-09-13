@@ -13,6 +13,7 @@ use crate::db::collection_insert::DatastoreCollection;
 use crate::db::error::public_error_from_diesel_pool;
 use crate::db::error::ErrorHandler;
 use crate::db::identity::Asset;
+use crate::db::model::Dataset;
 use crate::db::model::Service;
 use crate::db::model::Sled;
 use crate::db::pagination::paginated;
@@ -103,6 +104,33 @@ impl DataStore {
             .filter(dsl::kind.eq(kind))
             .select(Service::as_select())
             .load_async(self.pool_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+    }
+
+    /// List all services for a single sled, with their optional datasets
+    pub async fn services_list_for_sled(
+        &self,
+        opctx: &OpContext,
+        sled_id: Uuid,
+    ) -> ListResultVec<(Service, Option<Dataset>)> {
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+        use db::schema::dataset::dsl as dataset_dsl;
+        use db::schema::service::dsl as service_dsl;
+
+        // - Get all services with the corresponding sled_id
+        // - For each of those services, grab the corresponding Dataset, if one
+        // exists
+        service_dsl::service
+            .filter(service_dsl::sled_id.eq(sled_id))
+            .left_join(
+                db::schema::dataset::table
+                    .on(dataset_dsl::service_id.eq(service_dsl::id.nullable())),
+            )
+            .select((Service::as_select(), Option::<Dataset>::as_select()))
+            .load_async::<(Service, Option<Dataset>)>(
+                self.pool_authorized(opctx).await?,
+            )
             .await
             .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }

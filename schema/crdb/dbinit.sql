@@ -76,6 +76,8 @@ CREATE TABLE IF NOT EXISTS omicron.public.sled (
     time_created TIMESTAMPTZ NOT NULL,
     time_modified TIMESTAMPTZ NOT NULL,
     time_deleted TIMESTAMPTZ,
+
+    /* Specifically for service and dataset assignments */
     rcgen INT NOT NULL,
 
     /* FK into the Rack table */
@@ -101,7 +103,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.sled (
     /* The last address allocated to an Oxide service on this sled. */
     last_used_address INET NOT NULL,
 
-    -- This constraint should be upheld, even for deleted disks
+    -- This constraint should be upheld, even for deleted sleds
     -- in the fleet.
     CONSTRAINT serial_part_revision_unique UNIQUE (
       serial_number, part_number, revision
@@ -209,7 +211,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.service (
 
     /* FK into the Sled table */
     sled_id UUID NOT NULL,
-    /* For services in illumos zones, the zone's unique id (for debugging) */
+    /* For services in illumos zones, the zone's unique id */
     zone_id UUID,
     /* The IP address of the service. */
     ip INET NOT NULL,
@@ -410,6 +412,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.dataset (
 
     /* FK into the Pool table */
     pool_id UUID NOT NULL,
+
+    /* Optional FK into the Service table */
+    service_id UUID,
 
     /* Contact information for the dataset */
     ip INET NOT NULL,

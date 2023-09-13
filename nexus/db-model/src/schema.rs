@@ -825,6 +825,7 @@ table! {
         rcgen -> Int8,
 
         pool_id -> Uuid,
+        service_id -> Nullable<Uuid>,
 
         ip -> Inet,
         port -> Int4,

@@ -10,6 +10,9 @@ mod dns_propagation;
 mod dns_servers;
 mod external_endpoints;
 mod init;
+mod services_config;
+mod services_propagation;
+mod sled_servers;
 
 pub use common::Driver;
 pub use common::TaskHandle;

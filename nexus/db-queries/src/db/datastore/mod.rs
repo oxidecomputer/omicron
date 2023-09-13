@@ -736,6 +736,7 @@ mod test {
                 let dataset = Dataset::new(
                     id,
                     zpool_id,
+                    None,
                     bogus_addr,
                     DatasetKind::Crucible,
                 );
@@ -914,6 +915,7 @@ mod test {
                 let dataset = Dataset::new(
                     id,
                     zpool_id,
+                    None,
                     bogus_addr,
                     DatasetKind::Crucible,
                 );

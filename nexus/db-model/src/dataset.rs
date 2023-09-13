@@ -36,6 +36,8 @@ pub struct Dataset {
 
     pub pool_id: Uuid,
 
+    pub service_id: Option<Uuid>,
+
     ip: ipv6::Ipv6Addr,
     port: SqlU16,
 
@@ -47,6 +49,7 @@ impl Dataset {
     pub fn new(
         id: Uuid,
         pool_id: Uuid,
+        service_id: Option<Uuid>,
         addr: SocketAddrV6,
         kind: DatasetKind,
     ) -> Self {
@@ -59,6 +62,7 @@ impl Dataset {
             time_deleted: None,
             rcgen: Generation::new(),
             pool_id,
+            service_id,
             ip: addr.ip().into(),
             port: addr.port().into(),
             kind,

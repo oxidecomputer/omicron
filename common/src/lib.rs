@@ -36,6 +36,7 @@ macro_rules! generate_logging_api {
     ($path:literal) => {
         progenitor::generate_api!(
             spec = $path,
+            derives = [PartialEq],
             inner_type = slog::Logger,
             pre_hook = (|log: &slog::Logger, request: &reqwest::Request| {
                 slog::debug!(log, "client request";
