@@ -37,6 +37,7 @@ members = [
     "nexus/test-utils-macros",
     "nexus/test-utils",
     "nexus/types",
+    "omdb",
     "oxide-client",
     "oximeter-client",
     "oximeter/collector",
@@ -97,6 +98,7 @@ default-members = [
     "nexus/db-queries",
     "nexus/defaults",
     "nexus/types",
+    "omdb",
     "oxide-client",
     "oximeter-client",
     "oximeter/collector",
@@ -151,7 +153,7 @@ chacha20poly1305 = "0.10.1"
 ciborium = "0.2.1"
 cfg-if = "1.0"
 chrono = { version = "0.4", features = [ "serde" ] }
-clap = { version = "4.4", features = ["derive"] }
+clap = { version = "4.4", features = ["derive", "env"] }
 cookie = "0.16"
 criterion = { version = "0.5.1", features = [ "async_tokio" ] }
 crossbeam = "0.8"
@@ -233,6 +235,7 @@ omicron-common = { path = "common" }
 omicron-dev-tools = { path = "dev-tools" }
 omicron-gateway = { path = "gateway" }
 omicron-nexus = { path = "nexus" }
+omicron-omdb = { path = "omdb" }
 omicron-package = { path = "package" }
 omicron-rpaths = { path = "rpaths" }
 omicron-sled-agent = { path = "sled-agent" }
@@ -330,6 +333,7 @@ strum = { version = "0.25", features = [ "derive" ] }
 subprocess = "0.2.9"
 libsw = { version = "3.3.0", features = ["tokio"] }
 syn = { version = "2.0" }
+tabled = "0.14"
 tar = "0.4"
 tempdir = "0.3"
 tempfile = "3.6"
