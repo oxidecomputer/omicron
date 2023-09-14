@@ -110,7 +110,7 @@ impl BackgroundTask for DnsPropagator {
                 info!(&log, "DNS propagation: done");
             }
 
-            serde_json::to_value(
+            let server_results = serde_json::to_value(
                 result
                     .into_iter()
                     .map(|(e, r)| (e, r.map_err(|e| format!("{:#}", e))))
@@ -121,6 +121,11 @@ impl BackgroundTask for DnsPropagator {
                     "error":
                         format!("failed to serialize final value: {:#}", error)
                 })
+            });
+
+            json!({
+                "generation": dns_config.generation,
+                "server_results": server_results,
             })
         }
         .boxed()

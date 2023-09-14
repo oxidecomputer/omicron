@@ -120,10 +120,29 @@ async fn cmd_nexus_background_task_details(
 ) -> Result<(), anyhow::Error> {
     let response =
         client.bgtask_list().await.context("listing background tasks")?;
-    let tasks = response.into_inner();
+    let mut tasks = response.into_inner();
+
+    // We want to pick the order that we print some tasks intentionally.  Then
+    // we want to print anything else that we find.
+    for name in [
+        "dns_config_external",
+        "dns_servers_external",
+        "dns_propagation_external",
+        "dns_config_internal",
+        "dns_servers_internal",
+        "dns_propagation_internal",
+    ] {
+        if let Some(bgtask) = tasks.remove(name) {
+            print_task(&bgtask);
+        } else {
+            eprintln!("warning: expected to find background task {:?}", name);
+        }
+    }
+
     for (_, bgtask) in &tasks {
         print_task(bgtask);
     }
+
     Ok(())
 }
 
@@ -189,8 +208,7 @@ fn print_task(bgtask: &BackgroundTask) {
 /// we do warn the user if that happens.
 fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
     // All tasks might produce an "error" property.  If we find one, print that
-    // out.  We still proceed with any other task-specific interpretation in
-    // that case.
+    // out and stop.
     #[derive(Deserialize)]
     struct TaskError {
         error: String,
@@ -198,7 +216,9 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
     if let Ok(found_error) =
         serde_json::from_value::<TaskError>(details.clone())
     {
-        eprintln!("    last completion reported error: {}", found_error.error);
+        println!("    last completion reported error: {}", found_error.error);
+        println!("");
+        return;
     }
 
     // The rest is task-specific, keyed by the name.
@@ -235,7 +255,7 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
             ),
             Ok(found_dns_servers) => {
                 println!(
-                    "    servers found: {}:",
+                    "    servers found: {}",
                     found_dns_servers.addresses.len(),
                 );
                 for a in found_dns_servers.addresses {
@@ -249,6 +269,12 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
         // The "dns_propagation" tasks emit a mapping of (dns server address) to
         // (result of propagation attempt).  There's no data in the success
         // variant.  On error, there's an error message.
+        #[derive(Deserialize)]
+        struct DnsPropSuccess {
+            generation: usize,
+            server_results: BTreeMap<String, Result<(), String>>,
+        }
+
         #[derive(Tabled)]
         #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
         struct DnsPropRow<'a> {
@@ -256,23 +282,28 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
             last_result: String,
         }
 
-        match serde_json::from_value::<BTreeMap<String, Result<(), String>>>(
-            details.clone(),
-        ) {
+        match serde_json::from_value::<DnsPropSuccess>(details.clone()) {
             Err(error) => eprintln!(
                 "warning: failed to interpret task details: {:?}",
                 error
             ),
             Ok(details) => {
-                if details.len() != 0 {
-                    let rows =
-                        details.iter().map(|(addr, result)| DnsPropRow {
+                println!(
+                    "    attempt to propagate generation: {}",
+                    details.generation
+                );
+                let server_results = &details.server_results;
+
+                if server_results.len() != 0 {
+                    let rows = server_results.iter().map(|(addr, result)| {
+                        DnsPropRow {
                             dns_server_addr: addr,
                             last_result: match result {
                                 Ok(_) => "success".to_string(),
                                 Err(error) => format!("error: {}", error),
                             },
-                        });
+                        }
+                    });
 
                     let table = tabled::Table::new(rows)
                         .with(tabled::settings::Style::empty())
@@ -305,11 +336,7 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
             silo_id: Uuid,
             /// TLS certificates that could be used for this endpoint
             /// (digests only)
-            tls_certs: Vec<TlsCertificate>,
-        }
-        #[derive(Deserialize)]
-        struct TlsCertificate {
-            digest: String,
+            tls_certs: Vec<String>,
         }
 
         #[derive(Tabled)]
@@ -363,7 +390,7 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
                         endpoint
                             .tls_certs
                             .iter()
-                            .map(|t| TlsCertRow { dns_name, digest: &t.digest })
+                            .map(|digest| TlsCertRow { dns_name, digest })
                     })
                     .flatten()
                     .collect();
