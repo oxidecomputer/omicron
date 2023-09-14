@@ -1094,6 +1094,7 @@ async fn test_region_snapshot_create_idempotent(
         snapshot_addr: "[::]:12345".to_string(),
 
         volume_references: 1,
+        deleting: false,
     };
 
     datastore.region_snapshot_create(region_snapshot.clone()).await.unwrap();

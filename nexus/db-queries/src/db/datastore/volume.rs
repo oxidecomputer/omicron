@@ -120,6 +120,7 @@ impl DataStore {
                         .filter(
                             rs_dsl::snapshot_addr.eq(read_only_target.clone()),
                         )
+                        .filter(rs_dsl::deleting.eq(false))
                         .set(
                             rs_dsl::volume_references
                                 .eq(rs_dsl::volume_references + 1),
@@ -637,7 +638,9 @@ impl DataStore {
                     }
                 };
 
-                // Decrease the number of uses for each referenced region snapshot.
+                // Decrease the number of uses for each non-deleted referenced
+                // region snapshot.
+
                 use db::schema::region_snapshot::dsl;
 
                 diesel::update(dsl::region_snapshot)
@@ -645,7 +648,32 @@ impl DataStore {
                         dsl::snapshot_addr
                             .eq_any(&crucible_targets.read_only_targets),
                     )
+                    .filter(dsl::volume_references.gt(0))
+                    .filter(dsl::deleting.eq(false))
                     .set(dsl::volume_references.eq(dsl::volume_references - 1))
+                    .execute(conn)?;
+
+                // Then, note anything that was set to zero from the above
+                // UPDATE, and then mark all those as deleted.
+                let snapshots_to_delete: Vec<RegionSnapshot> =
+                    dsl::region_snapshot
+                        .filter(
+                            dsl::snapshot_addr
+                                .eq_any(&crucible_targets.read_only_targets),
+                        )
+                        .filter(dsl::volume_references.eq(0))
+                        .filter(dsl::deleting.eq(false))
+                        .select(RegionSnapshot::as_select())
+                        .load(conn)?;
+
+                diesel::update(dsl::region_snapshot)
+                    .filter(
+                        dsl::snapshot_addr
+                            .eq_any(&crucible_targets.read_only_targets),
+                    )
+                    .filter(dsl::volume_references.eq(0))
+                    .filter(dsl::deleting.eq(false))
+                    .set(dsl::deleting.eq(true))
                     .execute(conn)?;
 
                 // Return what results can be cleaned up
@@ -673,6 +701,7 @@ impl DataStore {
                                     .eq(region_dsl::id)
                                     .and(dsl::dataset_id.eq(dataset_dsl::id))),
                             )
+                            .filter(dsl::deleting.eq(true))
                             .filter(
                                 dsl::volume_references
                                     .eq(0)
@@ -707,12 +736,41 @@ impl DataStore {
                             // delete a read-only downstairs running for a
                             // snapshot that doesn't exist will return a 404,
                             // causing the saga to error and unwind.
+                            //
+                            // XXX are any other filters required, except the
+                            // three from snapshots_to_delete?
                             .filter(
                                 dsl::snapshot_addr.eq_any(
                                     &crucible_targets.read_only_targets,
                                 ),
                             )
-                            .filter(dsl::volume_references.eq(0))
+                            // XXX is there a better way to do this, rather than
+                            // one filter per struct field?
+                            .filter(
+                                dsl::dataset_id.eq_any(
+                                    snapshots_to_delete
+                                        .iter()
+                                        .map(|x| x.dataset_id),
+                                ),
+                            )
+                            .filter(dsl::region_id.eq_any(
+                                snapshots_to_delete.iter().map(|x| x.region_id),
+                            ))
+                            .filter(
+                                dsl::snapshot_id.eq_any(
+                                    snapshots_to_delete
+                                        .iter()
+                                        .map(|x| x.snapshot_id),
+                                ),
+                            )
+                            .filter(dsl::deleting.eq(true))
+                            .filter(
+                                dsl::volume_references
+                                    .eq(0)
+                                    // Despite the SQL specifying that this column is NOT NULL,
+                                    // this null check is required for this function to work!
+                                    .or(dsl::volume_references.is_null()),
+                            )
                             .inner_join(
                                 dataset_dsl::dataset
                                     .on(dsl::dataset_id.eq(dataset_dsl::id)),
@@ -960,7 +1018,7 @@ impl DataStore {
 
 #[derive(Default, Debug, Serialize, Deserialize)]
 pub struct CrucibleTargets {
-    read_only_targets: Vec<String>,
+    pub read_only_targets: Vec<String>,
 }
 
 // Serialize this enum into the `resources_to_clean_up` column to handle
