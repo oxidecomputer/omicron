@@ -12,6 +12,8 @@ headers.workspace = true
 http.workspace = true
 libc.workspace = true
 omicron-common.workspace = true
+pem.workspace = true
+rustls.workspace = true
 slog.workspace = true
 subprocess.workspace = true
 tempfile.workspace = true
@@ -19,6 +21,7 @@ thiserror.workspace = true
 tokio = { workspace = true, features = [ "full" ] }
 tokio-postgres.workspace = true
 usdt.workspace = true
+rcgen.workspace = true
 regex.workspace = true
 reqwest.workspace = true
 
