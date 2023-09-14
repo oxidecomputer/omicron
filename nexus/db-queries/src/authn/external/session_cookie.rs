@@ -60,13 +60,13 @@ pub const SESSION_COOKIE_SCHEME_NAME: authn::SchemeName =
 pub fn session_cookie_header_value(
     token: &str,
     max_age: Duration,
+    secure: bool,
 ) -> Result<HeaderValue, HttpError> {
-    // TODO-security:(https://github.com/oxidecomputer/omicron/issues/249): We
-    // should insert "Secure;" back into this string.
     let value = format!(
-        "{}={}; Path=/; HttpOnly; SameSite=Lax; Max-Age={}",
+        "{}={}; Path=/; HttpOnly; SameSite=Lax;{} Max-Age={}",
         SESSION_COOKIE_COOKIE_NAME,
         token,
+        if secure { " Secure;" } else { "" },
         max_age.num_seconds()
     );
     // this will only fail if we accidentally stick a \n in there or something
@@ -79,8 +79,10 @@ pub fn session_cookie_header_value(
 }
 
 /// Generate session cookie with empty token and max-age=0 so browser deletes it
-pub fn clear_session_cookie_header_value() -> Result<HeaderValue, HttpError> {
-    session_cookie_header_value("", Duration::zero())
+pub fn clear_session_cookie_header_value(
+    secure: bool,
+) -> Result<HeaderValue, HttpError> {
+    session_cookie_header_value("", Duration::zero(), secure)
 }
 
 /// Implements an authentication scheme where we check the DB to see if we have
@@ -423,27 +425,37 @@ mod test {
     #[test]
     fn test_session_cookie_value() {
         assert_eq!(
-            session_cookie_header_value("abc", Duration::seconds(5)).unwrap(),
+            session_cookie_header_value("abc", Duration::seconds(5), true)
+                .unwrap(),
+            "session=abc; Path=/; HttpOnly; SameSite=Lax; Secure; Max-Age=5"
+        );
+
+        assert_eq!(
+            session_cookie_header_value("abc", Duration::seconds(-5), true)
+                .unwrap(),
+            "session=abc; Path=/; HttpOnly; SameSite=Lax; Secure; Max-Age=-5"
+        );
+
+        assert_eq!(
+            session_cookie_header_value("", Duration::zero(), true).unwrap(),
+            "session=; Path=/; HttpOnly; SameSite=Lax; Secure; Max-Age=0"
+        );
+
+        // secure=false leaves out "Secure;"
+        assert_eq!(
+            session_cookie_header_value("abc", Duration::seconds(5), false)
+                .unwrap(),
             "session=abc; Path=/; HttpOnly; SameSite=Lax; Max-Age=5"
         );
-
-        assert_eq!(
-            session_cookie_header_value("abc", Duration::seconds(-5)).unwrap(),
-            "session=abc; Path=/; HttpOnly; SameSite=Lax; Max-Age=-5"
-        );
-
-        assert_eq!(
-            session_cookie_header_value("", Duration::zero()).unwrap(),
-            "session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0"
-        );
     }
+
     #[test]
     fn test_session_cookie_value_error() {
         assert_eq!(
-            session_cookie_header_value("abc\ndef", Duration::seconds(5))
+            session_cookie_header_value("abc\ndef", Duration::seconds(5), true)
                 .unwrap_err()
                 .internal_message,
-            "unsupported cookie value: session=abc\ndef; Path=/; HttpOnly; SameSite=Lax; Max-Age=5".to_string(),
+            "unsupported cookie value: session=abc\ndef; Path=/; HttpOnly; SameSite=Lax; Secure; Max-Age=5".to_string(),
         );
     }
 }

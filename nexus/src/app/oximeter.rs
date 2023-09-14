@@ -4,17 +4,16 @@
 
 //! Oximeter-related functionality
 
-use crate::db;
-use crate::db::identity::Asset;
 use crate::external_api::params::ResourceMetrics;
 use crate::internal_api::params::OximeterInfo;
 use dropshot::PaginationParams;
 use internal_dns::resolver::{ResolveError, Resolver};
 use internal_dns::ServiceName;
+use nexus_db_queries::db;
+use nexus_db_queries::db::identity::Asset;
 use omicron_common::address::CLICKHOUSE_PORT;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
-use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::PaginationOrder;
 use omicron_common::api::internal::nexus;
 use omicron_common::backoff;
@@ -55,7 +54,9 @@ impl LazyTimeseriesClient {
         Self { log, source: ClientSource::FromIp { address } }
     }
 
-    pub async fn get(&self) -> Result<oximeter_db::Client, ResolveError> {
+    pub(crate) async fn get(
+        &self,
+    ) -> Result<oximeter_db::Client, ResolveError> {
         let address = match &self.source {
             ClientSource::FromIp { address } => *address,
             ClientSource::FromDns { resolver } => SocketAddr::new(
@@ -70,7 +71,7 @@ impl LazyTimeseriesClient {
 
 impl super::Nexus {
     /// Insert a new record of an Oximeter collector server.
-    pub async fn upsert_oximeter_collector(
+    pub(crate) async fn upsert_oximeter_collector(
         &self,
         oximeter_info: &OximeterInfo,
     ) -> Result<(), Error> {
@@ -134,16 +135,8 @@ impl super::Nexus {
         Ok(())
     }
 
-    /// List all registered Oximeter collector instances.
-    pub async fn oximeter_list(
-        &self,
-        page_params: &DataPageParams<'_, Uuid>,
-    ) -> ListResultVec<db::model::OximeterInfo> {
-        self.db_datastore.oximeter_list(page_params).await
-    }
-
     /// Register as a metric producer with the oximeter metric collection server.
-    pub async fn register_as_producer(&self, address: SocketAddr) {
+    pub(crate) async fn register_as_producer(&self, address: SocketAddr) {
         let producer_endpoint = nexus::ProducerEndpoint {
             id: self.id,
             address,
@@ -172,7 +165,7 @@ impl super::Nexus {
     }
 
     /// Assign a newly-registered metric producer to an oximeter collector server.
-    pub async fn assign_producer(
+    pub(crate) async fn assign_producer(
         &self,
         producer_info: nexus::ProducerEndpoint,
     ) -> Result<(), Error> {
@@ -206,7 +199,7 @@ impl super::Nexus {
     /// results to return.
     /// * `limit`: The maximum number of results to return in a paginated
     /// request.
-    pub async fn select_timeseries(
+    pub(crate) async fn select_timeseries(
         &self,
         timeseries_name: &str,
         criteria: &[&str],

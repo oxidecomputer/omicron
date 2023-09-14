@@ -61,6 +61,70 @@
         }
       }
     },
+    "/bgtasks": {
+      "get": {
+        "summary": "List background tasks",
+        "description": "This is a list of discrete background activities that Nexus carries out. This is exposed for support and debugging.",
+        "operationId": "bgtask_list",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Map_of_BackgroundTask",
+                  "type": "object",
+                  "additionalProperties": {
+                    "$ref": "#/components/schemas/BackgroundTask"
+                  }
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/bgtasks/{bgtask_name}": {
+      "get": {
+        "summary": "Fetch status of one background task",
+        "description": "This is exposed for support and debugging.",
+        "operationId": "bgtask_view",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "bgtask_name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackgroundTask"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/disk/{disk_id}/remove-read-only-parent": {
       "post": {
         "summary": "Request removal of a read_only_parent from a disk",
@@ -628,6 +692,51 @@
       }
     },
     "schemas": {
+      "ActivationReason": {
+        "description": "Describes why a background task was activated\n\nThis is only used for debugging.  This is deliberately not made available to the background task itself.  See \"Design notes\" in the module-level documentation for details.",
+        "type": "string",
+        "enum": [
+          "signaled",
+          "timeout",
+          "dependency"
+        ]
+      },
+      "BackgroundTask": {
+        "description": "Background tasks\n\nThese are currently only intended for observability by developers.  We will eventually want to flesh this out into something more observable for end users.",
+        "type": "object",
+        "properties": {
+          "current": {
+            "description": "Describes the current task status",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/CurrentStatus"
+              }
+            ]
+          },
+          "description": {
+            "description": "brief summary (for developers) of what this task does",
+            "type": "string"
+          },
+          "last": {
+            "description": "Describes the last completed activation",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/LastResult"
+              }
+            ]
+          },
+          "name": {
+            "description": "unique identifier for this background task",
+            "type": "string"
+          }
+        },
+        "required": [
+          "current",
+          "description",
+          "last",
+          "name"
+        ]
+      },
       "Baseboard": {
         "description": "Describes properties that should uniquely identify Oxide manufactured hardware",
         "type": "object",
@@ -892,6 +1001,74 @@
         "required": [
           "start_time",
           "value"
+        ]
+      },
+      "CurrentStatus": {
+        "description": "Describes the current status of a background task",
+        "oneOf": [
+          {
+            "description": "The background task is not running\n\nTypically, the task would be waiting for its next activation, which would happen after a timeout or some other event that triggers activation",
+            "type": "object",
+            "properties": {
+              "current_status": {
+                "type": "string",
+                "enum": [
+                  "idle"
+                ]
+              }
+            },
+            "required": [
+              "current_status"
+            ]
+          },
+          {
+            "description": "The background task is currently running\n\nMore precisely, the task has been activated and has not yet finished this activation",
+            "type": "object",
+            "properties": {
+              "current_status": {
+                "type": "string",
+                "enum": [
+                  "running"
+                ]
+              },
+              "details": {
+                "$ref": "#/components/schemas/CurrentStatusRunning"
+              }
+            },
+            "required": [
+              "current_status",
+              "details"
+            ]
+          }
+        ]
+      },
+      "CurrentStatusRunning": {
+        "type": "object",
+        "properties": {
+          "iteration": {
+            "description": "which iteration this was (counter)",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "reason": {
+            "description": "what kind of event triggered this activation",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ActivationReason"
+              }
+            ]
+          },
+          "start_time": {
+            "description": "wall-clock time when the current activation started",
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "iteration",
+          "reason",
+          "start_time"
         ]
       },
       "DatasetCreateRequest": {
@@ -2079,6 +2256,86 @@
         "required": [
           "first",
           "last"
+        ]
+      },
+      "LastResult": {
+        "oneOf": [
+          {
+            "description": "The task has never completed an activation",
+            "type": "object",
+            "properties": {
+              "last_result": {
+                "type": "string",
+                "enum": [
+                  "never_completed"
+                ]
+              }
+            },
+            "required": [
+              "last_result"
+            ]
+          },
+          {
+            "description": "The task has completed at least one activation",
+            "type": "object",
+            "properties": {
+              "details": {
+                "$ref": "#/components/schemas/LastResultCompleted"
+              },
+              "last_result": {
+                "type": "string",
+                "enum": [
+                  "completed"
+                ]
+              }
+            },
+            "required": [
+              "details",
+              "last_result"
+            ]
+          }
+        ]
+      },
+      "LastResultCompleted": {
+        "type": "object",
+        "properties": {
+          "details": {
+            "description": "arbitrary datum emitted by the background task"
+          },
+          "elapsed": {
+            "description": "total time elapsed during the activation",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Duration"
+              }
+            ]
+          },
+          "iteration": {
+            "description": "which iteration this was (counter)",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "reason": {
+            "description": "what kind of event triggered this activation",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ActivationReason"
+              }
+            ]
+          },
+          "start_time": {
+            "description": "wall-clock time when the activation started",
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "details",
+          "elapsed",
+          "iteration",
+          "reason",
+          "start_time"
         ]
       },
       "MacAddr": {

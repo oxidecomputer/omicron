@@ -2,9 +2,9 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::db::lookup::LookupPath;
 use async_trait::async_trait;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db::lookup::LookupPath;
 use omicron_common::api::external::Error;
 use sled_agent_client::Client as SledAgentClient;
 use std::sync::Arc;

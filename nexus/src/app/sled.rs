@@ -5,18 +5,17 @@
 //! Sleds, and the hardware and services within them.
 
 use crate::app::sagas::retry_until_known_result;
-use crate::authz;
-use crate::db;
-use crate::db::identity::Asset;
-use crate::db::lookup::LookupPath;
-use crate::db::model::DatasetKind;
-use crate::db::model::ServiceKind;
 use crate::internal_api::params::{
     PhysicalDiskDeleteRequest, PhysicalDiskPutRequest, SledAgentStartupInfo,
     SledRole, ZpoolPutRequest,
 };
+use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db;
+use nexus_db_queries::db::identity::Asset;
 use nexus_db_queries::db::lookup;
+use nexus_db_queries::db::lookup::LookupPath;
+use nexus_db_queries::db::model::DatasetKind;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
@@ -26,6 +25,9 @@ use sled_agent_client::Client as SledAgentClient;
 use std::net::SocketAddrV6;
 use std::sync::Arc;
 use uuid::Uuid;
+
+#[cfg(test)]
+use nexus_db_queries::db::model::ServiceKind;
 
 impl super::Nexus {
     // Sleds
@@ -40,7 +42,7 @@ impl super::Nexus {
 
     // TODO-robustness we should have a limit on how many sled agents there can
     // be (for graceful degradation at large scale).
-    pub async fn upsert_sled(
+    pub(crate) async fn upsert_sled(
         &self,
         opctx: &OpContext,
         id: Uuid,
@@ -78,7 +80,7 @@ impl super::Nexus {
         Ok(())
     }
 
-    pub async fn sled_list(
+    pub(crate) async fn sled_list(
         &self,
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, Uuid>,
@@ -114,7 +116,7 @@ impl super::Nexus {
         )))
     }
 
-    pub async fn reserve_on_random_sled(
+    pub(crate) async fn reserve_on_random_sled(
         &self,
         resource_id: Uuid,
         resource_kind: db::model::SledResourceKind,
@@ -132,7 +134,7 @@ impl super::Nexus {
             .await
     }
 
-    pub async fn delete_sled_reservation(
+    pub(crate) async fn delete_sled_reservation(
         &self,
         resource_id: Uuid,
     ) -> Result<(), Error> {
@@ -143,7 +145,7 @@ impl super::Nexus {
 
     // Physical disks
 
-    pub async fn sled_list_physical_disks(
+    pub(crate) async fn sled_list_physical_disks(
         &self,
         opctx: &OpContext,
         sled_id: Uuid,
@@ -154,7 +156,7 @@ impl super::Nexus {
             .await
     }
 
-    pub async fn physical_disk_list(
+    pub(crate) async fn physical_disk_list(
         &self,
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, Uuid>,
@@ -163,7 +165,7 @@ impl super::Nexus {
     }
 
     /// Upserts a physical disk into the database, updating it if it already exists.
-    pub async fn upsert_physical_disk(
+    pub(crate) async fn upsert_physical_disk(
         &self,
         opctx: &OpContext,
         request: PhysicalDiskPutRequest,
@@ -189,7 +191,7 @@ impl super::Nexus {
     /// Removes a physical disk from the database.
     ///
     /// TODO: Remove Zpools and datasets contained within this disk.
-    pub async fn delete_physical_disk(
+    pub(crate) async fn delete_physical_disk(
         &self,
         opctx: &OpContext,
         request: PhysicalDiskDeleteRequest,
@@ -216,7 +218,7 @@ impl super::Nexus {
     // Zpools (contained within sleds)
 
     /// Upserts a Zpool into the database, updating it if it already exists.
-    pub async fn upsert_zpool(
+    pub(crate) async fn upsert_zpool(
         &self,
         opctx: &OpContext,
         id: Uuid,
@@ -247,7 +249,7 @@ impl super::Nexus {
     // Datasets (contained within zpools)
 
     /// Upserts a dataset into the database, updating it if it already exists.
-    pub async fn upsert_dataset(
+    pub(crate) async fn upsert_dataset(
         &self,
         id: Uuid,
         zpool_id: Uuid,
@@ -263,7 +265,8 @@ impl super::Nexus {
     // Services
 
     /// Upserts a Service into the database, updating it if it already exists.
-    pub async fn upsert_service(
+    #[cfg(test)]
+    pub(crate) async fn upsert_service(
         &self,
         opctx: &OpContext,
         id: Uuid,
@@ -295,7 +298,7 @@ impl super::Nexus {
     }
 
     /// Ensure firewall rules for internal services get reflected on all the relevant sleds.
-    pub async fn plumb_service_firewall_rules(
+    pub(crate) async fn plumb_service_firewall_rules(
         &self,
         opctx: &OpContext,
         sleds_filter: &[Uuid],
@@ -319,7 +322,7 @@ impl super::Nexus {
 
     /// Ensures that V2P mappings exist that indicate that the instance with ID
     /// `instance_id` is resident on the sled with ID `sled_id`.
-    pub async fn create_instance_v2p_mappings(
+    pub(crate) async fn create_instance_v2p_mappings(
         &self,
         opctx: &OpContext,
         instance_id: Uuid,
@@ -455,7 +458,7 @@ impl super::Nexus {
     }
 
     /// Ensure that the necessary v2p mappings for an instance are deleted
-    pub async fn delete_instance_v2p_mappings(
+    pub(crate) async fn delete_instance_v2p_mappings(
         &self,
         opctx: &OpContext,
         instance_id: Uuid,

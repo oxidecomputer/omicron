@@ -5,17 +5,17 @@
 //! Rack management
 
 use super::silo::silo_dns_name;
-use crate::authz;
-use crate::db;
-use crate::db::lookup::LookupPath;
 use crate::external_api::params::CertificateCreate;
 use crate::external_api::shared::ServiceUsingCertificate;
 use crate::internal_api::params::RackInitializationRequest;
 use nexus_db_model::DnsGroup;
 use nexus_db_model::InitialDnsGroup;
+use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db;
 use nexus_db_queries::db::datastore::DnsVersionUpdateBuilder;
 use nexus_db_queries::db::datastore::RackInit;
+use nexus_db_queries::db::lookup::LookupPath;
 use nexus_types::external_api::params::Address;
 use nexus_types::external_api::params::AddressConfig;
 use nexus_types::external_api::params::AddressLotBlockCreate;
@@ -48,7 +48,7 @@ use std::str::FromStr;
 use uuid::Uuid;
 
 impl super::Nexus {
-    pub async fn racks_list(
+    pub(crate) async fn racks_list(
         &self,
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, Uuid>,
@@ -56,7 +56,7 @@ impl super::Nexus {
         self.db_datastore.rack_list(&opctx, pagparams).await
     }
 
-    pub async fn rack_lookup(
+    pub(crate) async fn rack_lookup(
         &self,
         opctx: &OpContext,
         rack_id: &Uuid,
@@ -68,24 +68,10 @@ impl super::Nexus {
         Ok(db_rack)
     }
 
-    /// Ensures that a rack exists in the DB.
-    ///
-    /// If the rack already exists, this function is a no-op.
-    pub async fn rack_insert(
-        &self,
-        opctx: &OpContext,
-        rack_id: Uuid,
-    ) -> Result<(), Error> {
-        self.datastore()
-            .rack_insert(opctx, &db::model::Rack::new(rack_id))
-            .await?;
-        Ok(())
-    }
-
     /// Marks the rack as initialized with a set of services.
     ///
     /// This function is a no-op if the rack has already been initialized.
-    pub async fn rack_initialize(
+    pub(crate) async fn rack_initialize(
         &self,
         opctx: &OpContext,
         rack_id: Uuid,
@@ -537,7 +523,7 @@ impl super::Nexus {
     ///    initialized.
     ///
     /// See RFD 278 for additional context.
-    pub async fn await_rack_initialization(&self, opctx: &OpContext) {
+    pub(crate) async fn await_rack_initialization(&self, opctx: &OpContext) {
         loop {
             let result = self.rack_lookup(&opctx, &self.rack_id).await;
             match result {

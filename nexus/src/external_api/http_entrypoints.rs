@@ -12,10 +12,6 @@ use super::{
         UserBuiltin, Vpc, VpcRouter, VpcSubnet,
     },
 };
-use crate::authz;
-use crate::db;
-use crate::db::identity::Resource;
-use crate::db::model::Name;
 use crate::external_api::shared;
 use crate::ServerContext;
 use chrono::Utc;
@@ -39,8 +35,12 @@ use dropshot::{
     channel, endpoint, WebsocketChannelResult, WebsocketConnection,
 };
 use ipnetwork::IpNetwork;
+use nexus_db_queries::authz;
+use nexus_db_queries::db;
+use nexus_db_queries::db::identity::Resource;
 use nexus_db_queries::db::lookup::ImageLookup;
 use nexus_db_queries::db::lookup::ImageParentLookup;
+use nexus_db_queries::db::model::Name;
 use nexus_db_queries::{
     authz::ApiResource, db::fixed_data::silo::INTERNAL_SILO_ID,
 };
@@ -96,7 +96,7 @@ use uuid::Uuid;
 type NexusApiDescription = ApiDescription<Arc<ServerContext>>;
 
 /// Returns a description of the external nexus API
-pub fn external_api() -> NexusApiDescription {
+pub(crate) fn external_api() -> NexusApiDescription {
     fn register_endpoints(api: &mut NexusApiDescription) -> Result<(), String> {
         api.register(system_policy_view)?;
         api.register(system_policy_update)?;
@@ -419,7 +419,7 @@ async fn system_policy_update(
     path = "/v1/policy",
     tags = ["silos"],
  }]
-pub async fn policy_view(
+pub(crate) async fn policy_view(
     rqctx: RequestContext<Arc<ServerContext>>,
 ) -> Result<HttpResponseOk<shared::Policy<shared::SiloRole>>, HttpError> {
     let apictx = rqctx.context();
@@ -5046,7 +5046,7 @@ async fn role_view(
    path = "/v1/me",
    tags = ["session"],
 }]
-pub async fn current_user_view(
+pub(crate) async fn current_user_view(
     rqctx: RequestContext<Arc<ServerContext>>,
 ) -> Result<HttpResponseOk<views::CurrentUser>, HttpError> {
     let apictx = rqctx.context();
@@ -5069,7 +5069,7 @@ pub async fn current_user_view(
     path = "/v1/me/groups",
     tags = ["session"],
  }]
-pub async fn current_user_groups(
+pub(crate) async fn current_user_groups(
     rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<PaginatedById>,
 ) -> Result<HttpResponseOk<ResultsPage<views::Group>>, HttpError> {

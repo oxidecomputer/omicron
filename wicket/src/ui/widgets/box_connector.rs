@@ -2,9 +2,9 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use tui::buffer::Buffer;
-use tui::layout::Rect;
-use tui::widgets::Widget;
+use ratatui::buffer::Buffer;
+use ratatui::layout::Rect;
+use ratatui::widgets::Widget;
 
 /// Do we want to connect this box (bordered block) to the one above it, below
 /// it, or both?

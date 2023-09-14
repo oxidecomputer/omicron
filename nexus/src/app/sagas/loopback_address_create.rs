@@ -7,18 +7,18 @@ use crate::app::sagas::retry_until_known_result;
 use crate::app::sagas::{
     declare_saga_actions, ActionRegistry, NexusSaga, SagaInitError,
 };
-use crate::authn;
-use crate::authz;
-use crate::db::model::LoopbackAddress;
 use crate::external_api::params;
 use anyhow::Error;
+use nexus_db_queries::authn;
+use nexus_db_queries::authz;
+use nexus_db_queries::db::model::LoopbackAddress;
 use omicron_common::api::internal::shared::SwitchLocation;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use steno::ActionError;
 
 #[derive(Debug, Deserialize, Serialize)]
-pub struct Params {
+pub(crate) struct Params {
     pub serialized_authn: authn::saga::Serialized,
     pub loopback_address: params::LoopbackAddressCreate,
 }
@@ -35,7 +35,7 @@ declare_saga_actions! {
 }
 
 #[derive(Debug)]
-pub struct SagaLoopbackAddressCreate;
+pub(crate) struct SagaLoopbackAddressCreate;
 impl NexusSaga for SagaLoopbackAddressCreate {
     const NAME: &'static str = "loopback-address-create";
     type Params = Params;
@@ -152,7 +152,7 @@ async fn slc_loopback_address_create(
     .map_err(|e| ActionError::action_failed(e.to_string()))
 }
 
-pub async fn select_dendrite_client(
+pub(crate) async fn select_dendrite_client(
     sagactx: &NexusActionContext,
 ) -> Result<Arc<dpd_client::Client>, ActionError> {
     let osagactx = sagactx.user_data();
