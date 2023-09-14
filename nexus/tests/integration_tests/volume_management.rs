@@ -1835,7 +1835,7 @@ async fn test_disk_create_saga_unwinds_correctly(
         .sled_agent
         .get_crucible_dataset(zpool.id, dataset.id)
         .await
-        .set_region_creation_limit(0)
+        .set_region_creation_error(true)
         .await;
 
     let disk_size = ByteCount::from_gibibytes_u32(2);
@@ -1881,16 +1881,6 @@ async fn test_snapshot_create_saga_unwinds_correctly(
     let disks_url = get_disks_url();
     let base_disk_name: Name = "base-disk".parse().unwrap();
 
-    // Set the third agent to fail creating the region
-    let zpool = &disk_test.zpools[2];
-    let dataset = &zpool.datasets[0];
-    disk_test
-        .sled_agent
-        .get_crucible_dataset(zpool.id, dataset.id)
-        .await
-        .set_region_creation_limit(1)
-        .await;
-
     // Create a disk
 
     let disk_size = ByteCount::from_gibibytes_u32(2);
@@ -1906,6 +1896,16 @@ async fn test_snapshot_create_saga_unwinds_correctly(
     };
 
     let _disk: Disk = object_create(client, &disks_url, &base_disk).await;
+
+    // Set the third agent to fail creating the region for the snapshot
+    let zpool = &disk_test.zpools[2];
+    let dataset = &zpool.datasets[0];
+    disk_test
+        .sled_agent
+        .get_crucible_dataset(zpool.id, dataset.id)
+        .await
+        .set_region_creation_error(true)
+        .await;
 
     // Create a snapshot
     let snapshot_create = params::SnapshotCreate {

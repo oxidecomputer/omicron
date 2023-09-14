@@ -11,7 +11,7 @@
 use crate::nexus::NexusClient;
 use crate::sim::http_entrypoints_pantry::ExpectedDigest;
 use crate::sim::SledAgent;
-use anyhow::{bail, Result};
+use anyhow::{bail, Result, self};
 use chrono::prelude::*;
 use crucible_agent_client::types::{
     CreateRegion, Region, RegionId, RunningSnapshot, Snapshot, State,
@@ -39,7 +39,7 @@ struct CrucibleDataInner {
     snapshots: HashMap<Uuid, HashMap<String, Snapshot>>,
     running_snapshots: HashMap<Uuid, HashMap<String, RunningSnapshot>>,
     on_create: Option<CreateCallback>,
-    region_creation_limit: Option<usize>,
+    region_creation_error: bool,
     creating_a_running_snapshot_should_fail: bool,
     next_port: u16,
 }
@@ -52,7 +52,7 @@ impl CrucibleDataInner {
             snapshots: HashMap::new(),
             running_snapshots: HashMap::new(),
             on_create: None,
-            region_creation_limit: None,
+            region_creation_error: false,
             creating_a_running_snapshot_should_fail: false,
             next_port: crucible_port,
         }
@@ -75,12 +75,8 @@ impl CrucibleDataInner {
             State::Requested
         };
 
-        if let Some(region_creation_limit) = &mut self.region_creation_limit {
-            if *region_creation_limit == 0 {
-                bail!("cannot create region!");
-            }
-
-            *region_creation_limit -= 1;
+        if self.region_creation_error {
+            bail!("region creation error!");
         }
 
         let region = Region {
@@ -229,8 +225,8 @@ impl CrucibleDataInner {
         self.creating_a_running_snapshot_should_fail = true;
     }
 
-    fn set_region_creation_limit(&mut self, limit: usize) {
-        self.region_creation_limit = Some(limit);
+    fn set_region_creation_error(&mut self, value: bool) {
+        self.region_creation_error = value;
     }
 
     fn create_running_snapshot(
@@ -391,8 +387,8 @@ impl CrucibleData {
         self.inner.lock().await.set_creating_a_running_snapshot_should_fail();
     }
 
-    pub async fn set_region_creation_limit(&self, limit: usize) {
-        self.inner.lock().await.set_region_creation_limit(limit);
+    pub async fn set_region_creation_error(&self, value: bool) {
+        self.inner.lock().await.set_region_creation_error(value);
     }
 
     pub async fn create_running_snapshot(
