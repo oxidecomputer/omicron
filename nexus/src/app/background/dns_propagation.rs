@@ -14,6 +14,7 @@ use futures::FutureExt;
 use futures::StreamExt;
 use nexus_db_queries::context::OpContext;
 use serde_json::json;
+use std::collections::BTreeMap;
 use std::net::SocketAddr;
 use tokio::sync::watch;
 
@@ -103,7 +104,7 @@ impl BackgroundTask for DnsPropagator {
             .await;
 
             // Report results.
-            if result.iter().any(|r| r.is_err()) {
+            if result.iter().any(|(_, r)| r.is_err()) {
                 warn!(&log, "DNS propagation: failed");
             } else {
                 info!(&log, "DNS propagation: done");
@@ -112,8 +113,8 @@ impl BackgroundTask for DnsPropagator {
             serde_json::to_value(
                 result
                     .into_iter()
-                    .map(|r| r.map_err(|e| format!("{:#}", e)))
-                    .collect::<Vec<_>>(),
+                    .map(|(e, r)| (e, r.map_err(|e| format!("{:#}", e))))
+                    .collect::<BTreeMap<_, _>>(),
             )
             .unwrap_or_else(|error| {
                 json!({
@@ -131,10 +132,11 @@ async fn dns_propagate(
     dns_config: &DnsConfigParams,
     servers: &DnsServersList,
     max_concurrent_server_updates: usize,
-) -> Vec<anyhow::Result<()>> {
+) -> BTreeMap<String, anyhow::Result<()>> {
     stream::iter(servers.addresses.clone())
         .map(|server_addr| async move {
-            dns_propagate_one(log, dns_config, &server_addr).await
+            let result = dns_propagate_one(log, dns_config, &server_addr).await;
+            (server_addr.to_string(), result)
         })
         .buffered(max_concurrent_server_updates)
         .collect()

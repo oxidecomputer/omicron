@@ -5010,6 +5010,7 @@ dependencies = [
  "omicron-common 0.1.0",
  "omicron-rpaths",
  "pq-sys",
+ "serde",
  "serde_json",
  "slog",
  "strum",
@@ -6617,7 +6618,7 @@ dependencies = [
  "indoc 2.0.3",
  "itertools 0.11.0",
  "paste",
- "strum 0.25.0",
+ "strum",
  "unicode-segmentation",
  "unicode-width",
 ]

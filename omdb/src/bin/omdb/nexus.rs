@@ -12,7 +12,10 @@ use nexus_client::types::ActivationReason;
 use nexus_client::types::BackgroundTask;
 use nexus_client::types::CurrentStatus;
 use nexus_client::types::LastResult;
+use serde::Deserialize;
+use std::collections::BTreeMap;
 use tabled::Tabled;
+use uuid::Uuid;
 
 /// Arguments to the "omdb nexus" subcommand
 #[derive(Debug, Args)]
@@ -163,6 +166,204 @@ fn print_task(bgtask: &BackgroundTask) {
             );
         }
     };
+
+    // Print extra task-specific information.  This data is particularly
+    // unstable -- it gets exposed by background tasks as unstructured
+    // (schemaless) data.  We make a best effort to interpret it.
+    if let LastResult::Completed(completed) = &bgtask.last {
+        print_task_details(&bgtask, &completed.details);
+    }
+}
+
+fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
+    // XXX-dap TODO-doc
+    #[derive(Deserialize)]
+    struct TaskError {
+        error: String,
+    }
+
+    // First, all tasks might produce an "error" string.
+    if let Ok(found_error) =
+        serde_json::from_value::<TaskError>(details.clone())
+    {
+        eprintln!("    last completion reported error: {}", found_error.error);
+    }
+
+    let name = &bgtask.name;
+    if name == "dns_config_external" || name == "dns_config_internal" {
+        #[derive(Deserialize)]
+        struct DnsConfigSuccess {
+            generation: usize,
+        }
+
+        match serde_json::from_value::<DnsConfigSuccess>(details.clone()) {
+            Err(error) => eprintln!(
+                "warning: failed to interpret task details: {:?}",
+                error
+            ),
+            Ok(found_dns_config) => println!(
+                "    last generation found: {}",
+                found_dns_config.generation
+            ),
+        };
+    } else if name == "dns_servers_external" || name == "dns_servers_internal" {
+        #[derive(Deserialize)]
+        struct DnsServersSuccess {
+            addresses: Vec<String>,
+        }
+
+        match serde_json::from_value::<DnsServersSuccess>(details.clone()) {
+            Err(error) => eprintln!(
+                "warning: failed to interpret task details: {:?}",
+                error
+            ),
+            Ok(found_dns_servers) => {
+                println!(
+                    "    servers found: {}:",
+                    found_dns_servers.addresses.len(),
+                );
+                for a in found_dns_servers.addresses {
+                    println!("        server: {}", a);
+                }
+            }
+        }
+    } else if name == "external_endpoints" {
+        #[derive(Deserialize)]
+        struct EndpointsFound {
+            by_dns_name: BTreeMap<String, Endpoint>,
+            default_endpoint: Option<Endpoint>,
+            warnings: Vec<String>,
+        }
+        #[derive(Deserialize)]
+        struct Endpoint {
+            silo_id: Uuid,
+            tls_certs: Vec<TlsCertificate>,
+        }
+        #[derive(Deserialize)]
+        struct TlsCertificate {
+            digest: String,
+        }
+
+        #[derive(Tabled)]
+        #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+        struct EndpointRow<'a> {
+            silo_id: Uuid,
+            dns_name: &'a str,
+        }
+
+        #[derive(Tabled)]
+        #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+        struct TlsCertRow<'a> {
+            dns_name: &'a str,
+            digest: &'a str,
+        }
+
+        match serde_json::from_value::<EndpointsFound>(details.clone()) {
+            Err(error) => eprintln!(
+                "warning: failed to interpret task details: {:?}",
+                error
+            ),
+            Ok(details) => {
+                println!(
+                    "    external API endpoints: {}",
+                    details.by_dns_name.len()
+                );
+                let endpoint_rows =
+                    details.by_dns_name.iter().map(|(dns_name, endpoint)| {
+                        EndpointRow { silo_id: endpoint.silo_id, dns_name }
+                    });
+                let table = tabled::Table::new(endpoint_rows)
+                    .with(tabled::settings::Style::empty())
+                    .with(tabled::settings::Padding::new(0, 1, 0, 0))
+                    .to_string();
+                println!(
+                    "{}",
+                    textwrap::indent(&table.to_string(), "        ")
+                );
+                println!(
+                    "    default endpoint: {}",
+                    match &details.default_endpoint {
+                        Some(e) => format!("silo {}", e.silo_id),
+                        None => "none".to_string(),
+                    }
+                );
+
+                let tls_cert_rows: Vec<TlsCertRow> = details
+                    .by_dns_name
+                    .iter()
+                    .map(|(dns_name, endpoint)| {
+                        endpoint
+                            .tls_certs
+                            .iter()
+                            .map(|t| TlsCertRow { dns_name, digest: &t.digest })
+                    })
+                    .flatten()
+                    .collect();
+
+                println!("    TLS certificates: {}", tls_cert_rows.len());
+                if tls_cert_rows.len() > 0 {
+                    let table = tabled::Table::new(tls_cert_rows)
+                        .with(tabled::settings::Style::empty())
+                        .with(tabled::settings::Padding::new(0, 1, 0, 0))
+                        .to_string();
+                    println!(
+                        "{}",
+                        textwrap::indent(&table.to_string(), "        ")
+                    );
+                }
+
+                println!("    warnings: {}", details.warnings.len());
+                for w in &details.warnings {
+                    println!("        warning: {}", w);
+                }
+            }
+        }
+    } else if name == "dns_propagation_internal"
+        || name == "dns_propagation_external"
+    {
+        #[derive(Tabled)]
+        #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+        struct DnsPropRow<'a> {
+            dns_server_addr: &'a str,
+            last_result: String,
+        }
+
+        match serde_json::from_value::<BTreeMap<String, Result<(), String>>>(
+            details.clone(),
+        ) {
+            Err(error) => eprintln!(
+                "warning: failed to interpret task details: {:?}",
+                error
+            ),
+            Ok(details) => {
+                if details.len() != 0 {
+                    let rows =
+                        details.iter().map(|(addr, result)| DnsPropRow {
+                            dns_server_addr: addr,
+                            last_result: match result {
+                                Ok(_) => "success".to_string(),
+                                Err(error) => format!("error: {}", error),
+                            },
+                        });
+
+                    let table = tabled::Table::new(rows)
+                        .with(tabled::settings::Style::empty())
+                        .with(tabled::settings::Padding::new(0, 1, 0, 0))
+                        .to_string();
+                    println!(
+                        "{}",
+                        textwrap::indent(&table.to_string(), "    ")
+                    );
+                }
+            }
+        };
+    } else {
+        println!(
+            "warning: unknown background task: {:?} \
+            (don't know how to interpret details: {:?})",
+            name, details
+        );
+    }
 
     println!("");
 }
