@@ -144,9 +144,13 @@ impl CertificateValidator {
                 .valid_for_hostname(&c_hostname)
                 .map_err(CertificateError::ErrorValidatingHostname)?
             {
-                let cert_description = cert
-                    .hostname_description()
-                    .map_err(CertificateError::ErrorValidatingHostname)?;
+                let cert_description =
+                    cert.hostname_description().unwrap_or_else(|err| {
+                        format!(
+                            "Error reading cert hostname: {}",
+                            DisplayErrorChain::new(&err)
+                        )
+                    });
                 return Err(CertificateError::NoDnsNameMatchingHostname {
                     hostname: hostname.to_string(),
                     cert_description,
