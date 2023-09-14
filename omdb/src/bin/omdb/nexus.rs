@@ -175,22 +175,37 @@ fn print_task(bgtask: &BackgroundTask) {
     }
 }
 
+/// Interprets the unstable, schemaless output from each particular background
+/// task and print a human-readable summary
+///
+/// Each activation of a background task produces an arbitrary JSON value that
+/// gets passed to us here.  The task can put whatever status it wants here --
+/// it's solely for debugging.  This function decodes these values and prints
+/// them out.
+///
+/// As implied by not having a schema, the specific values are currently
+/// undocumented and unstable (subject to change).  That does make this code
+/// both ugly and brittle.  It's not a fatal error to fail to parse these, but
+/// we do warn the user if that happens.
 fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
-    // XXX-dap TODO-doc
+    // All tasks might produce an "error" property.  If we find one, print that
+    // out.  We still proceed with any other task-specific interpretation in
+    // that case.
     #[derive(Deserialize)]
     struct TaskError {
         error: String,
     }
-
-    // First, all tasks might produce an "error" string.
     if let Ok(found_error) =
         serde_json::from_value::<TaskError>(details.clone())
     {
         eprintln!("    last completion reported error: {}", found_error.error);
     }
 
+    // The rest is task-specific, keyed by the name.
     let name = &bgtask.name;
     if name == "dns_config_external" || name == "dns_config_internal" {
+        // The "dns_config" tasks emit the generation number of the config that
+        // they read.
         #[derive(Deserialize)]
         struct DnsConfigSuccess {
             generation: usize,
@@ -207,6 +222,7 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
             ),
         };
     } else if name == "dns_servers_external" || name == "dns_servers_internal" {
+        // The "dns_servers" tasks emit the list of servers that were found.
         #[derive(Deserialize)]
         struct DnsServersSuccess {
             addresses: Vec<String>,
@@ -227,16 +243,68 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
                 }
             }
         }
+    } else if name == "dns_propagation_internal"
+        || name == "dns_propagation_external"
+    {
+        // The "dns_propagation" tasks emit a mapping of (dns server address) to
+        // (result of propagation attempt).  There's no data in the success
+        // variant.  On error, there's an error message.
+        #[derive(Tabled)]
+        #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+        struct DnsPropRow<'a> {
+            dns_server_addr: &'a str,
+            last_result: String,
+        }
+
+        match serde_json::from_value::<BTreeMap<String, Result<(), String>>>(
+            details.clone(),
+        ) {
+            Err(error) => eprintln!(
+                "warning: failed to interpret task details: {:?}",
+                error
+            ),
+            Ok(details) => {
+                if details.len() != 0 {
+                    let rows =
+                        details.iter().map(|(addr, result)| DnsPropRow {
+                            dns_server_addr: addr,
+                            last_result: match result {
+                                Ok(_) => "success".to_string(),
+                                Err(error) => format!("error: {}", error),
+                            },
+                        });
+
+                    let table = tabled::Table::new(rows)
+                        .with(tabled::settings::Style::empty())
+                        .with(tabled::settings::Padding::new(0, 1, 0, 0))
+                        .to_string();
+                    println!(
+                        "{}",
+                        textwrap::indent(&table.to_string(), "    ")
+                    );
+                }
+            }
+        };
     } else if name == "external_endpoints" {
+        // The "external_endpoints" task emits somewhat complex data.
+        // This corresponds to the `ExternalEndpoints` type in Nexus.
         #[derive(Deserialize)]
         struct EndpointsFound {
+            /// mapping of DNS names on which we serve the API to "endpoint"
             by_dns_name: BTreeMap<String, Endpoint>,
+            /// an endpoint used when we cannot figure out the DNS name of an
+            /// incoming request
             default_endpoint: Option<Endpoint>,
+            /// pending problems related to DNS/TLS configuration
             warnings: Vec<String>,
         }
+
         #[derive(Deserialize)]
         struct Endpoint {
+            /// the silo id whose endpoint this is
             silo_id: Uuid,
+            /// TLS certificates that could be used for this endpoint
+            /// (digests only)
             tls_certs: Vec<TlsCertificate>,
         }
         #[derive(Deserialize)]
@@ -318,45 +386,6 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
                 }
             }
         }
-    } else if name == "dns_propagation_internal"
-        || name == "dns_propagation_external"
-    {
-        #[derive(Tabled)]
-        #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
-        struct DnsPropRow<'a> {
-            dns_server_addr: &'a str,
-            last_result: String,
-        }
-
-        match serde_json::from_value::<BTreeMap<String, Result<(), String>>>(
-            details.clone(),
-        ) {
-            Err(error) => eprintln!(
-                "warning: failed to interpret task details: {:?}",
-                error
-            ),
-            Ok(details) => {
-                if details.len() != 0 {
-                    let rows =
-                        details.iter().map(|(addr, result)| DnsPropRow {
-                            dns_server_addr: addr,
-                            last_result: match result {
-                                Ok(_) => "success".to_string(),
-                                Err(error) => format!("error: {}", error),
-                            },
-                        });
-
-                    let table = tabled::Table::new(rows)
-                        .with(tabled::settings::Style::empty())
-                        .with(tabled::settings::Padding::new(0, 1, 0, 0))
-                        .to_string();
-                    println!(
-                        "{}",
-                        textwrap::indent(&table.to_string(), "    ")
-                    );
-                }
-            }
-        };
     } else {
         println!(
             "warning: unknown background task: {:?} \
