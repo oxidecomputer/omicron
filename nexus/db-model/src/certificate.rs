@@ -53,7 +53,7 @@ impl Certificate {
             params.key.as_bytes(),
             // TODO-correctness: We should pass a hostname here for cert
             // validation: https://github.com/oxidecomputer/omicron/issues/4045
-            None,
+            &[] as &[&str],
         )?;
 
         Ok(Self::new_unvalidated(silo_id, id, service, params))

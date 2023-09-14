@@ -9,6 +9,7 @@ use omicron_common::api::external::Error;
 use openssl::asn1::Asn1Time;
 use openssl::pkey::PKey;
 use openssl::x509::X509;
+use std::borrow::Borrow;
 use std::ffi::CString;
 
 mod openssl_ext;
@@ -103,15 +104,15 @@ impl CertificateValidator {
     /// `key` is expected to be the private key for the leaf certificate of
     /// `certs` in PEM format.
     ///
-    /// If `hostname` is not `None`, the leaf certificate of `certs` must be
-    /// valid for `hostname`, as determined by a dNSName entry in its subject
-    /// alternate names or (if there are no dNSName SANs) the cert's common
-    /// name.
-    pub fn validate(
+    /// If `possible_hostnames` is empty, no hostname validation is performed.
+    /// If `possible_hostnames` is not empty, we require _at least one_ of its
+    /// hostnames to match the SANs (or CN, of no SANs are present) of the leaf
+    /// certificate.
+    pub fn validate<S: Borrow<str>>(
         &self,
         certs: &[u8],
         key: &[u8],
-        hostname: Option<&str>,
+        possible_hostnames: &[S],
     ) -> Result<(), CertificateError> {
         // Checks on the certs themselves.
         let mut certs = X509::stack_from_pem(certs)
@@ -134,16 +135,25 @@ impl CertificateValidator {
         // to use with verifying the private key.
         let cert = certs.swap_remove(0);
 
-        if let Some(hostname) = hostname {
-            let c_hostname = CString::new(hostname).map_err(|_| {
-                CertificateError::InvalidValidationHostname(
-                    hostname.to_string(),
-                )
-            })?;
-            if !cert
-                .valid_for_hostname(&c_hostname)
-                .map_err(CertificateError::ErrorValidatingHostname)?
-            {
+        if !possible_hostnames.is_empty() {
+            let mut found_valid_hostname = false;
+            for hostname in possible_hostnames {
+                let hostname = hostname.borrow();
+                let c_hostname = CString::new(hostname).map_err(|_| {
+                    CertificateError::InvalidValidationHostname(
+                        hostname.to_string(),
+                    )
+                })?;
+                if cert
+                    .valid_for_hostname(&c_hostname)
+                    .map_err(CertificateError::ErrorValidatingHostname)?
+                {
+                    found_valid_hostname = true;
+                    break;
+                }
+            }
+
+            if !found_valid_hostname {
                 let cert_description =
                     cert.hostname_description().unwrap_or_else(|err| {
                         format!(
@@ -152,7 +162,7 @@ impl CertificateValidator {
                         )
                     });
                 return Err(CertificateError::NoDnsNameMatchingHostname {
-                    hostname: hostname.to_string(),
+                    hostname: possible_hostnames.join(", "),
                     cert_description,
                 });
             }
@@ -197,13 +207,13 @@ mod tests {
 
     fn validate_cert_with_params(
         params: CertificateParams,
-        hostname: Option<&str>,
+        possible_hostnames: &[&str],
     ) -> Result<(), CertificateError> {
         let cert_chain = CertificateChain::with_params(params);
         CertificateValidator::default().validate(
             cert_chain.cert_chain_as_pem().as_bytes(),
             cert_chain.end_cert_private_key_as_pem().as_bytes(),
-            hostname,
+            possible_hostnames,
         )
     }
 
@@ -218,7 +228,7 @@ mod tests {
             let mut params = CertificateParams::new([]);
             params.subject_alt_names =
                 vec![SanType::DnsName(dns_name.to_string())];
-            match validate_cert_with_params(params, Some(hostname)) {
+            match validate_cert_with_params(params, &[hostname]) {
                 Ok(()) => (),
                 Err(err) => panic!(
                     "certificate with SAN {dns_name} \
@@ -236,7 +246,7 @@ mod tests {
             let mut params = CertificateParams::new([]);
             params.subject_alt_names =
                 vec![SanType::DnsName(dns_name.to_string())];
-            match validate_cert_with_params(params, Some(server_hostname)) {
+            match validate_cert_with_params(params, &[server_hostname]) {
                 Ok(()) => panic!(
                     "certificate with SAN {dns_name} unexpectedly \
                      passed validation for hostname {server_hostname}"
@@ -269,7 +279,7 @@ mod tests {
             let mut params = CertificateParams::new([]);
             params.distinguished_name = dn;
 
-            match validate_cert_with_params(params, Some(hostname)) {
+            match validate_cert_with_params(params, &[hostname]) {
                 Ok(()) => (),
                 Err(err) => panic!(
                     "certificate with SAN {dns_name} \
@@ -289,7 +299,7 @@ mod tests {
             let mut params = CertificateParams::new([]);
             params.distinguished_name = dn;
 
-            match validate_cert_with_params(params, Some(server_hostname)) {
+            match validate_cert_with_params(params, &[server_hostname]) {
                 Ok(()) => panic!(
                     "certificate with SAN {dns_name} unexpectedly \
                      passed validation for hostname {server_hostname}"
@@ -326,7 +336,7 @@ mod tests {
         params.subject_alt_names =
             vec![SanType::DnsName(SUBJECT_ALT_NAME.to_string())];
 
-        match validate_cert_with_params(params, Some(HOSTNAME)) {
+        match validate_cert_with_params(params, &[HOSTNAME]) {
             Ok(()) => panic!(
                 "certificate unexpectedly passed validation for hostname"
             ),
@@ -343,6 +353,40 @@ mod tests {
             Err(err) => panic!(
                 "certificate validation failed with unexpected error {err}"
             ),
+        }
+    }
+
+    #[test]
+    fn cert_validated_if_any_possible_hostname_is_valid() {
+        // Expected-successful matches that contain a mix of valid and invalid
+        // possible hostnames
+        for (dns_name, hostnames) in &[
+            (
+                "oxide.computer",
+                // Since "any valid hostname" is allowed, an empty list of
+                // hostnames is also allowed
+                &[] as &[&str],
+            ),
+            ("oxide.computer", &["oxide.computer", "not-oxide.computer"]),
+            (
+                "*.oxide.computer",
+                &["*.oxide.computer", "foo.bar.oxide.computer"],
+            ),
+            (
+                "*.oxide.computer",
+                &["foo.bar.not-oxide.computer", "foo.oxide.computer"],
+            ),
+        ] {
+            let mut params = CertificateParams::new([]);
+            params.subject_alt_names =
+                vec![SanType::DnsName(dns_name.to_string())];
+            match validate_cert_with_params(params, hostnames) {
+                Ok(()) => (),
+                Err(err) => panic!(
+                    "certificate with SAN {dns_name} \
+                     failed to validate for hostname {hostnames:?}: {err}"
+                ),
+            }
         }
     }
 
@@ -371,7 +415,7 @@ mod tests {
             params.extended_key_usages = ext_key_usage.clone();
 
             assert!(
-                validate_cert_with_params(params, Some(HOST)).is_ok(),
+                validate_cert_with_params(params, &[HOST]).is_ok(),
                 "unexpected failure with {ext_key_usage:?}"
             );
         }
@@ -391,7 +435,7 @@ mod tests {
 
             assert!(
                 matches!(
-                    validate_cert_with_params(params, Some(HOST)),
+                    validate_cert_with_params(params, &[HOST]),
                     Err(CertificateError::UnsupportedPurpose)
                 ),
                 "unexpected success with {ext_key_usage:?}"
