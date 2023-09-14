@@ -1020,17 +1020,40 @@ impl RunningZone {
         // See https://illumos.org/man/8/logadm for details on the naming
         // conventions around these files.
         let dir = current_log_file.parent().unwrap();
-        let mut rotated_files = Vec::new();
+        let mut rotated_files: Vec<Utf8PathBuf> = Vec::new();
         for entry in dir.read_dir_utf8()? {
             let entry = entry?;
             let path = entry.path();
-            if path != current_log_file && path.starts_with(&current_log_file) {
-                rotated_files
-                    .push(root.join(path.strip_prefix("/").unwrap_or(path)));
+
+            // Camino's Utf8Path only considers whole path components to match,
+            // so convert both paths into a String and use that object's
+            // starts_with. See the `camino_starts_with_behaviour` test.
+            if path != current_log_file
+                && path.to_string().starts_with(&current_log_file.to_string())
+            {
+                rotated_files.push(path.clone().into());
             }
         }
+
         Ok(Some((current_log_file, rotated_files)))
     }
+}
+
+#[test]
+fn camino_starts_with_behaviour() {
+    let logfile =
+        Utf8PathBuf::from("/zonepath/var/svc/log/oxide-nexus:default.log");
+    let rotated_logfile =
+        Utf8PathBuf::from("/zonepath/var/svc/log/oxide-nexus:default.log.0");
+
+    let logfile_as_string = logfile.to_string();
+    let rotated_logfile_as_string = rotated_logfile.to_string();
+
+    assert!(logfile != rotated_logfile);
+    assert!(logfile_as_string != rotated_logfile_as_string);
+
+    assert!(!rotated_logfile.starts_with(&logfile));
+    assert!(rotated_logfile_as_string.starts_with(&logfile_as_string));
 }
 
 impl Drop for RunningZone {
