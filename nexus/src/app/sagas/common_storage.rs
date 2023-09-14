@@ -157,6 +157,7 @@ pub(super) async fn delete_crucible_region(
     .await;
 
     if let Err(e) = result {
+        error!(log, "delete_crucible_region: region_get saw {:?}", e);
         match e {
             crucible_agent_client::Error::ErrorResponse(rv) => {
                 match rv.status() {
