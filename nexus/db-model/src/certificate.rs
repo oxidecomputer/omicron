@@ -50,7 +50,7 @@ impl Certificate {
 
         validator.validate(
             params.cert.as_bytes(),
-            &params.key.as_bytes(),
+            params.key.as_bytes(),
             // TODO-correctness: We should pass a hostname here for cert
             // validation: https://github.com/oxidecomputer/omicron/issues/4045
             None,
