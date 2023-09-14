@@ -1031,7 +1031,11 @@ pub(crate) mod test {
         let sled_agent = &cptestctx.sled_agent.sled_agent;
         let datastore = cptestctx.server.apictx().nexus.datastore();
 
-        crate::app::sagas::test_helpers::assert_no_failed_undo_steps(&cptestctx.logctx.log, datastore).await;
+        crate::app::sagas::test_helpers::assert_no_failed_undo_steps(
+            &cptestctx.logctx.log,
+            datastore,
+        )
+        .await;
         assert!(no_disk_records_exist(datastore).await);
         assert!(no_volume_records_exist(datastore).await);
         assert!(

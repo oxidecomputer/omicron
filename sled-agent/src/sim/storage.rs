@@ -11,7 +11,7 @@
 use crate::nexus::NexusClient;
 use crate::sim::http_entrypoints_pantry::ExpectedDigest;
 use crate::sim::SledAgent;
-use anyhow::{bail, Result, self};
+use anyhow::{self, bail, Result};
 use chrono::prelude::*;
 use crucible_agent_client::types::{
     CreateRegion, Region, RegionId, RunningSnapshot, Snapshot, State,
