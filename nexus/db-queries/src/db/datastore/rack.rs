@@ -32,6 +32,8 @@ use async_bb8_diesel::PoolError;
 use chrono::Utc;
 use diesel::prelude::*;
 use diesel::upsert::excluded;
+use nexus_db_model::DnsGroup;
+use nexus_db_model::DnsZone;
 use nexus_db_model::ExternalIp;
 use nexus_db_model::IncompleteNetworkInterface;
 use nexus_db_model::InitialDnsGroup;
@@ -65,6 +67,7 @@ pub struct RackInit {
     pub internal_dns: InitialDnsGroup,
     pub external_dns: InitialDnsGroup,
     pub recovery_silo: external_params::SiloCreate,
+    pub recovery_silo_fq_dns_name: String,
     pub recovery_user_id: external_params::UserId,
     pub recovery_user_password_hash: omicron_passwords::PasswordHashString,
     pub dns_update: DnsVersionUpdateBuilder,
@@ -197,6 +200,7 @@ impl DataStore {
         conn: &(impl AsyncConnection<DbConnection, ConnError> + Sync),
         log: &slog::Logger,
         recovery_silo: external_params::SiloCreate,
+        recovery_silo_fq_dns_name: String,
         recovery_user_id: external_params::UserId,
         recovery_user_password_hash: omicron_passwords::PasswordHashString,
         dns_update: DnsVersionUpdateBuilder,
@@ -210,7 +214,14 @@ impl DataStore {
             AsyncConnection<DbConnection, ConnError>,
     {
         let db_silo = self
-            .silo_create_conn(conn, opctx, opctx, recovery_silo, dns_update)
+            .silo_create_conn(
+                conn,
+                opctx,
+                opctx,
+                recovery_silo,
+                &[recovery_silo_fq_dns_name],
+                dns_update,
+            )
             .await
             .map_err(RackInitError::Silo)
             .map_err(TxnError::CustomError)?;
@@ -521,6 +532,7 @@ impl DataStore {
                     &conn,
                     &log,
                     rack_init.recovery_silo,
+                    rack_init.recovery_silo_fq_dns_name,
                     rack_init.recovery_user_id,
                     rack_init.recovery_user_password_hash,
                     rack_init.dns_update,
@@ -594,16 +606,16 @@ impl DataStore {
     pub async fn nexus_external_addresses(
         &self,
         opctx: &OpContext,
-    ) -> Result<Vec<IpAddr>, Error> {
+    ) -> Result<(Vec<IpAddr>, Vec<DnsZone>), Error> {
         opctx.authorize(authz::Action::Read, &authz::DNS_CONFIG).await?;
 
         use crate::db::schema::external_ip::dsl as extip_dsl;
         use crate::db::schema::service::dsl as service_dsl;
-        type TxnError = TransactionError<()>;
+        type TxnError = TransactionError<Error>;
         self.pool_authorized(opctx)
             .await?
             .transaction_async(|conn| async move {
-                Ok(extip_dsl::external_ip
+                let ips = extip_dsl::external_ip
                     .inner_join(
                         service_dsl::service.on(service_dsl::id
                             .eq(extip_dsl::parent_id.assume_not_null())),
@@ -617,11 +629,21 @@ impl DataStore {
                     .await?
                     .into_iter()
                     .map(|external_ip| external_ip.ip.ip())
-                    .collect())
+                    .collect();
+
+                let dns_zones = self
+                    .dns_zones_list_all_on_connection(
+                        opctx,
+                        &conn,
+                        DnsGroup::External,
+                    )
+                    .await?;
+
+                Ok((ips, dns_zones))
             })
             .await
             .map_err(|error: TxnError| match error {
-                TransactionError::CustomError(()) => unimplemented!(),
+                TransactionError::CustomError(err) => err,
                 TransactionError::Pool(e) => {
                     public_error_from_diesel_pool(e, ErrorHandler::Server)
                 }

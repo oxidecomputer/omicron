@@ -60,7 +60,18 @@ impl DataStore {
     ///
     /// We do not generally expect there to be more than 1-2 DNS zones in a
     /// group (and nothing today creates more than one).
-    async fn dns_zones_list_all<ConnErr>(
+    pub async fn dns_zones_list_all(
+        &self,
+        opctx: &OpContext,
+        dns_group: DnsGroup,
+    ) -> ListResultVec<DnsZone> {
+        let conn = self.pool_authorized(opctx).await?;
+        self.dns_zones_list_all_on_connection(opctx, conn, dns_group).await
+    }
+
+    /// Variant of [`Self::dns_zones_list_all`] which may be called from a
+    /// transaction context.
+    pub(crate) async fn dns_zones_list_all_on_connection<ConnErr>(
         &self,
         opctx: &OpContext,
         conn: &(impl async_bb8_diesel::AsyncConnection<
@@ -396,8 +407,7 @@ impl DataStore {
     /// **Callers almost certainly want to wake up the corresponding Nexus
     /// background task to cause these changes to be propagated to the
     /// corresponding DNS servers.**
-    #[must_use]
-    pub async fn dns_update<ConnErr>(
+    pub(crate) async fn dns_update<ConnErr>(
         &self,
         opctx: &OpContext,
         conn: &(impl async_bb8_diesel::AsyncConnection<
@@ -413,8 +423,9 @@ impl DataStore {
     {
         opctx.authorize(authz::Action::Modify, &authz::DNS_CONFIG).await?;
 
-        let zones =
-            self.dns_zones_list_all(opctx, conn, update.dns_group).await?;
+        let zones = self
+            .dns_zones_list_all_on_connection(opctx, conn, update.dns_group)
+            .await?;
 
         let result = conn
             .transaction_async(|c| async move {
