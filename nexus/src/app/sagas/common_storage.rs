@@ -159,11 +159,19 @@ pub(super) async fn delete_crucible_region(
     if let Err(e) = result {
         match e {
             crucible_agent_client::Error::ErrorResponse(rv) => {
-                if rv.status() == http::StatusCode::NOT_FOUND {
-                    // Bail out here!
-                    return Ok(());
-                } else {
-                    return Err(Error::internal_error(&rv.message));
+                match rv.status() {
+                    http::StatusCode::NOT_FOUND => {
+                        // Bail out here!
+                        return Ok(());
+                    }
+
+                    status if status.is_client_error() => {
+                        return Err(Error::invalid_request(&rv.message));
+                    }
+
+                    _ => {
+                        return Err(Error::internal_error(&rv.message));
+                    }
                 }
             }
 
