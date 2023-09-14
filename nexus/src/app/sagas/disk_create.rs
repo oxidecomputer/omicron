@@ -844,8 +844,6 @@ pub(crate) mod test {
     use omicron_common::api::external::IdentityMetadataCreateParams;
     use omicron_common::api::external::Name;
     use omicron_sled_agent::sim::SledAgent;
-    use slog::error;
-    use slog::Logger;
     use uuid::Uuid;
 
     type ControlPlaneTestContext =
@@ -912,41 +910,6 @@ pub(crate) mod test {
             .lookup_node_output::<crate::db::model::Disk>("created_disk")
             .unwrap();
         assert_eq!(disk.project_id, project_id);
-    }
-
-    async fn no_stuck_sagas(log: &Logger, datastore: &DataStore) -> bool {
-        use crate::db::model::saga_types::SagaNodeEvent;
-
-        let saga_node_events: Vec<SagaNodeEvent> = datastore
-            .pool_for_tests()
-            .await
-            .unwrap()
-            .transaction_async(|conn| async move {
-                use crate::db::schema::saga_node_event::dsl;
-
-                conn.batch_execute_async(
-                    nexus_test_utils::db::ALLOW_FULL_TABLE_SCAN_SQL,
-                )
-                .await
-                .unwrap();
-
-                Ok::<_, crate::db::TransactionError<()>>(
-                    dsl::saga_node_event
-                        .filter(dsl::event_type.eq(String::from("undo_failed")))
-                        .select(SagaNodeEvent::as_select())
-                        .load_async::<SagaNodeEvent>(&conn)
-                        .await
-                        .unwrap(),
-                )
-            })
-            .await
-            .unwrap();
-
-        for saga_node_event in &saga_node_events {
-            error!(log, "saga {:?} is stuck!", saga_node_event.saga_id);
-        }
-
-        saga_node_events.is_empty()
     }
 
     async fn no_disk_records_exist(datastore: &DataStore) -> bool {
@@ -1068,7 +1031,7 @@ pub(crate) mod test {
         let sled_agent = &cptestctx.sled_agent.sled_agent;
         let datastore = cptestctx.server.apictx().nexus.datastore();
 
-        assert!(no_stuck_sagas(&cptestctx.logctx.log, datastore).await);
+        crate::app::sagas::test_helpers::assert_no_failed_undo_steps(&cptestctx.logctx.log, datastore).await;
         assert!(no_disk_records_exist(datastore).await);
         assert!(no_volume_records_exist(datastore).await);
         assert!(

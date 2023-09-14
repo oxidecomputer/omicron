@@ -382,7 +382,7 @@ pub async fn action_failure_can_unwind_idempotently<'a, S, B, A>(
 
 /// Asserts that there are no sagas in the supplied `datastore` for which an
 /// undo step failed.
-async fn assert_no_failed_undo_steps(log: &Logger, datastore: &DataStore) {
+pub(crate) async fn assert_no_failed_undo_steps(log: &Logger, datastore: &DataStore) {
     use crate::db::model::saga_types::SagaNodeEvent;
 
     let saga_node_events: Vec<SagaNodeEvent> = datastore
