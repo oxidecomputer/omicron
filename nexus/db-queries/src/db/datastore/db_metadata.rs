@@ -8,7 +8,11 @@ use super::DataStore;
 use crate::db;
 use crate::db::error::public_error_from_diesel_pool;
 use crate::db::error::ErrorHandler;
-use async_bb8_diesel::{AsyncRunQueryDsl, AsyncSimpleConnection};
+use crate::db::TransactionError;
+use async_bb8_diesel::{
+    AsyncConnection, AsyncRunQueryDsl, AsyncSimpleConnection,
+};
+use camino::{Utf8Path, Utf8PathBuf};
 use chrono::Utc;
 use diesel::prelude::*;
 use omicron_common::api::external::Error;
@@ -18,6 +22,50 @@ use slog::Logger;
 use std::collections::BTreeSet;
 use std::ops::Bound;
 use std::str::FromStr;
+
+pub const EARLIEST_SUPPORTED_VERSION: &'static str = "1.0.0";
+
+/// Reads a "version directory" and reads all SQL changes into
+/// a result Vec.
+///
+/// Any file that starts with "up" and ends with "sql" is considered
+/// part of the migration, and fully read to a string.
+///
+/// These are sorted lexicographically.
+pub async fn all_sql_for_version_migration<P: AsRef<Utf8Path>>(
+    path: P,
+) -> Result<Vec<String>, String> {
+    let target_dir = path.as_ref();
+    let mut up_sqls = vec![];
+    let entries = target_dir
+        .read_dir_utf8()
+        .map_err(|e| format!("Failed to readdir {target_dir}: {e}"))?;
+    for entry in entries {
+        let entry = entry.map_err(|err| format!("Invalid entry: {err}"))?;
+        let pathbuf = entry.into_path();
+        let is_up = pathbuf
+            .file_name()
+            .map(|name| name.starts_with("up"))
+            .unwrap_or(false);
+        let is_sql = matches!(pathbuf.extension(), Some("sql"));
+        if is_up && is_sql {
+            up_sqls.push(pathbuf);
+        }
+    }
+    up_sqls.sort();
+
+    eprintln!("up_sqls: {:?}", up_sqls);
+
+    let mut result = vec![];
+    for path in up_sqls.into_iter() {
+        result.push(
+            tokio::fs::read_to_string(&path)
+                .await
+                .map_err(|e| format!("Cannot read {path}: {e}"))?,
+        );
+    }
+    Ok(result)
+}
 
 impl DataStore {
     // Ensures that the database schema matches "desired_version".
@@ -136,13 +184,12 @@ impl DataStore {
                 "target_version" => target_version.to_string(),
             );
 
-            let up = config
-                .schema_dir
-                .join(target_version.to_string())
-                .join("up.sql");
-            let sql = tokio::fs::read_to_string(&up).await.map_err(|e| {
-                format!("Cannot read {up}: {e}", up = up.display())
-            })?;
+            let target_dir = Utf8PathBuf::from_path_buf(
+                config.schema_dir.join(target_version.to_string()),
+            )
+            .map_err(|e| format!("Invalid schema path: {}", e.display()))?;
+
+            let up_sqls = all_sql_for_version_migration(&target_dir).await?;
 
             // Confirm the current version, set the "target_version"
             // column to indicate that a schema update is in-progress.
@@ -160,8 +207,16 @@ impl DataStore {
                 "target_version" => target_version.to_string(),
             );
 
-            // Perform the schema change.
-            self.apply_schema_update(&sql).await.map_err(|e| e.to_string())?;
+            for sql in &up_sqls {
+                // Perform the schema change.
+                self.apply_schema_update(
+                    &current_version,
+                    &target_version,
+                    &sql,
+                )
+                .await
+                .map_err(|e| e.to_string())?;
+            }
 
             info!(
                 log,
@@ -273,11 +328,37 @@ impl DataStore {
 
     // Applies a schema update, using raw SQL read from a caller-supplied
     // configuration file.
-    async fn apply_schema_update(&self, sql: &String) -> Result<(), Error> {
-        self.pool().batch_execute_async(&sql).await.map_err(|e| {
-            Error::internal_error(&format!("Failed to execute upgrade: {e}"))
-        })?;
-        Ok(())
+    async fn apply_schema_update(
+        &self,
+        current: &SemverVersion,
+        target: &SemverVersion,
+        sql: &String,
+    ) -> Result<(), Error> {
+        let result = self.pool().transaction_async(|conn| async move {
+            if target.to_string() != EARLIEST_SUPPORTED_VERSION {
+                let validate_version_query = format!("SELECT CAST(\
+                        IF(\
+                            (\
+                                SELECT version = '{current}' and target_version = '{target}'\
+                                FROM omicron.public.db_metadata WHERE singleton = true\
+                            ),\
+                            'true',\
+                            'Invalid starting version for schema change'\
+                        ) AS BOOL\
+                    );");
+                conn.batch_execute_async(&validate_version_query).await?;
+            }
+            conn.batch_execute_async(&sql).await?;
+            Ok::<_, TransactionError<()>>(())
+        }).await;
+
+        match result {
+            Ok(()) => Ok(()),
+            Err(TransactionError::CustomError(())) => panic!("No custom error"),
+            Err(TransactionError::Pool(e)) => {
+                Err(public_error_from_diesel_pool(e, ErrorHandler::Server))
+            }
+        }
     }
 
     // Completes a schema migration, upgrading to the new version.
@@ -392,50 +473,22 @@ mod test {
         // v0 to v1 to v2, but it doesn't need to re-apply it.
         add_upgrade(v0.clone(), "SELECT true;".to_string()).await;
 
-        // Ensure that all schema changes also validate the expected version
-        // information.
-        let wrap_in_version_checking_txn = |version, target, sql| -> String {
-            format!("BEGIN; \
-                SELECT CAST(\
-                    IF(\
-                        (\
-                            SELECT version = '{version}' and target_version = '{target}'\
-                            FROM omicron.public.db_metadata WHERE singleton = true\
-                        ),\
-                        'true',\
-                        'Invalid starting version for schema change'\
-                    ) AS BOOL\
-                );\
-                {sql};\
-                COMMIT;")
-        };
-
         // This version adds a new table, but it takes a little while.
         //
         // This delay is intentional, so that some Nexus instances issuing
         // the update act quickly, while others lag behind.
         add_upgrade(
             v1.clone(),
-            wrap_in_version_checking_txn(
-                &v0,
-                &v1,
-                "SELECT pg_sleep(RANDOM()); \
-                 CREATE TABLE IF NOT EXISTS widget(); \
-                 SELECT pg_sleep(RANDOM());",
-            ),
+            "SELECT pg_sleep(RANDOM() / 10); \
+             CREATE TABLE IF NOT EXISTS widget(); \
+             SELECT pg_sleep(RANDOM() / 10);"
+                .to_string(),
         )
         .await;
 
         // The table we just created is deleted by a subsequent update.
-        add_upgrade(
-            v2.clone(),
-            wrap_in_version_checking_txn(
-                &v1,
-                &v2,
-                "DROP TABLE IF EXISTS widget;",
-            ),
-        )
-        .await;
+        add_upgrade(v2.clone(), "DROP TABLE IF EXISTS widget;".to_string())
+            .await;
 
         // Show that the datastores can be created concurrently.
         let config =
