@@ -149,7 +149,7 @@ impl DataStore {
 
     /// List all DNS names in the given DNS zone at the given group version
     /// (paginated)
-    async fn dns_names_list(
+    pub async fn dns_names_list(
         &self,
         opctx: &OpContext,
         dns_zone_id: Uuid,

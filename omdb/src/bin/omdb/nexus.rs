@@ -48,7 +48,7 @@ enum BackgroundTaskCommands {
     /// Print a summary of the status of all background tasks
     List,
     /// Print human-readable summary of the status of each background task
-    Details,
+    Show,
 }
 
 impl NexusArgs {
@@ -68,8 +68,8 @@ impl NexusArgs {
                 command: BackgroundTaskCommands::List,
             }) => cmd_nexus_background_task_list(&client).await,
             NexusCommands::BackgroundTask(BackgroundTaskArgs {
-                command: BackgroundTaskCommands::Details,
-            }) => cmd_nexus_background_task_details(&client).await,
+                command: BackgroundTaskCommands::Show,
+            }) => cmd_nexus_background_task_show(&client).await,
         }
     }
 }
@@ -115,8 +115,8 @@ async fn cmd_nexus_background_task_list(
     Ok(())
 }
 
-/// Runs `omdb nexus background-task details`
-async fn cmd_nexus_background_task_details(
+/// Runs `omdb nexus background-task show`
+async fn cmd_nexus_background_task_show(
     client: &nexus_client::Client,
 ) -> Result<(), anyhow::Error> {
     let response =
@@ -126,12 +126,12 @@ async fn cmd_nexus_background_task_details(
     // We want to pick the order that we print some tasks intentionally.  Then
     // we want to print anything else that we find.
     for name in [
-        "dns_config_external",
-        "dns_servers_external",
-        "dns_propagation_external",
         "dns_config_internal",
         "dns_servers_internal",
         "dns_propagation_internal",
+        "dns_config_external",
+        "dns_servers_external",
+        "dns_propagation_external",
     ] {
         if let Some(bgtask) = tasks.remove(name) {
             print_task(&bgtask);
@@ -265,22 +265,27 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
                     found_dns_servers.addresses.len(),
                 );
 
-                #[derive(Tabled)]
-                #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
-                struct ServerRow<'a> {
-                    dns_server_addr: &'a str,
-                }
+                if !found_dns_servers.addresses.is_empty() {
+                    #[derive(Tabled)]
+                    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+                    struct ServerRow<'a> {
+                        dns_server_addr: &'a str,
+                    }
 
-                let mut addrs = found_dns_servers.addresses;
-                addrs.sort();
-                let rows = addrs
-                    .iter()
-                    .map(|dns_server_addr| ServerRow { dns_server_addr });
-                let table = tabled::Table::new(rows)
-                    .with(tabled::settings::Style::empty())
-                    .with(tabled::settings::Padding::new(0, 1, 0, 0))
-                    .to_string();
-                println!("{}", textwrap::indent(&table.to_string(), "      "));
+                    let mut addrs = found_dns_servers.addresses;
+                    addrs.sort();
+                    let rows = addrs
+                        .iter()
+                        .map(|dns_server_addr| ServerRow { dns_server_addr });
+                    let table = tabled::Table::new(rows)
+                        .with(tabled::settings::Style::empty())
+                        .with(tabled::settings::Padding::new(0, 1, 0, 0))
+                        .to_string();
+                    println!(
+                        "{}",
+                        textwrap::indent(&table.to_string(), "      ")
+                    );
+                }
             }
         }
     } else if name == "dns_propagation_internal"
@@ -299,7 +304,7 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
         #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
         struct DnsPropRow<'a> {
             dns_server_addr: &'a str,
-            last_result: String,
+            last_result: &'static str,
         }
 
         match serde_json::from_value::<DnsPropSuccess>(details.clone()) {
@@ -319,8 +324,8 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
                         DnsPropRow {
                             dns_server_addr: addr,
                             last_result: match result {
-                                Ok(_) => "success".to_string(),
-                                Err(_) => format!("error (see below)"),
+                                Ok(_) => "success",
+                                Err(_) => "error (see below)",
                             },
                         }
                     });
@@ -423,13 +428,12 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
                 let tls_cert_rows: Vec<TlsCertRow> = details
                     .by_dns_name
                     .iter()
-                    .map(|(dns_name, endpoint)| {
+                    .flat_map(|(dns_name, endpoint)| {
                         endpoint
                             .tls_certs
                             .iter()
                             .map(|digest| TlsCertRow { dns_name, digest })
                     })
-                    .flatten()
                     .collect();
 
                 println!("    warnings: {}", details.warnings.len());

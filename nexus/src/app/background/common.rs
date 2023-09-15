@@ -283,6 +283,8 @@ impl Driver {
         self.tasks.keys()
     }
 
+    // XXX-dap helper function
+
     /// Returns a summary of what this task does (for developers)
     pub fn task_description(&self, task: &TaskHandle) -> &str {
         // It should be hard to hit this in practice, since you'd have to have

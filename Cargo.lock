@@ -5007,6 +5007,7 @@ dependencies = [
  "nexus-client 0.1.0",
  "nexus-db-model",
  "nexus-db-queries",
+ "nexus-types",
  "omicron-common 0.1.0",
  "omicron-rpaths",
  "pq-sys",
