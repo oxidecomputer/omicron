@@ -5,12 +5,20 @@
 //! omdb commands that query or update the database
 
 use anyhow::anyhow;
+use anyhow::bail;
 use anyhow::Context;
+use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::SecondsFormat;
 use clap::Args;
 use clap::Subcommand;
 use clap::ValueEnum;
+use diesel::expression::SelectableHelper;
+use diesel::query_dsl::QueryDsl;
+use diesel::ExpressionMethods;
 use nexus_db_model::DnsGroup;
+use nexus_db_model::DnsName;
+use nexus_db_model::DnsVersion;
+use nexus_db_model::DnsZone;
 use nexus_db_model::Sled;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
@@ -185,7 +193,7 @@ async fn check_schema_version(datastore: &DataStore) {
         Ok(found_version) => {
             if found_version == expected_version {
                 eprintln!(
-                    "note: schema version matches expected ({})",
+                    "note: databaase schema version matches expected ({})",
                     expected_version
                 );
                 return;
@@ -216,9 +224,10 @@ async fn check_schema_version(datastore: &DataStore) {
 /// the user that our output may be incomplete and that they might try a larger
 /// one.  (We don't want to bail out, though.  Incomplete data is better than no
 /// data.)
-fn check_limit<I, F>(items: &[I], limit: NonZeroU32, context: F)
+fn check_limit<I, F, D>(items: &[I], limit: NonZeroU32, context: F)
 where
-    F: FnOnce() -> String,
+    F: FnOnce() -> D,
+    D: Display,
 {
     if items.len() == usize::try_from(limit.get()).unwrap() {
         eprintln!(
@@ -470,24 +479,12 @@ async fn cmd_db_dns_show(
     Ok(())
 }
 
-/// Run `omdb db dns diff`.
-async fn cmd_db_dns_diff(
-    _opctx: &OpContext,
-    _datastore: &DataStore,
-    _limit: NonZeroU32,
-    _args: &DnsVersionArgs,
-) -> Result<(), anyhow::Error> {
-    // XXX-dap
-    todo!();
-}
-
-/// Run `omdb db dns names`.
-async fn cmd_db_dns_names(
+async fn load_zones_version(
     opctx: &OpContext,
     datastore: &DataStore,
     limit: NonZeroU32,
     args: &DnsVersionArgs,
-) -> Result<(), anyhow::Error> {
+) -> Result<(Vec<DnsZone>, DnsVersion), anyhow::Error> {
     // The caller gave us a DNS group.  First we need to find the zones.
     let group = args.group.dns_group();
     let ctx = || format!("listing DNS zones for DNS group {:?}", group);
@@ -497,22 +494,112 @@ async fn cmd_db_dns_names(
         .with_context(ctx)?;
     check_limit(&group_zones, limit, ctx);
 
+    // Now load the full version info.
+    use nexus_db_queries::db::schema::dns_version::dsl;
+    let version = Generation::try_from(i64::from(args.version)).unwrap();
+    let versions = dsl::dns_version
+        .filter(dsl::dns_group.eq(group))
+        .filter(dsl::version.eq(nexus_db_model::Generation::from(version)))
+        .limit(1)
+        .select(DnsVersion::as_select())
+        .load_async(datastore.pool_for_tests().await?)
+        .await
+        .context("loading requested version")?;
+
+    let Some(version) = versions.into_iter().next() else {
+        bail!("no such DNS version: {}", args.version);
+    };
+
+    Ok((group_zones, version))
+}
+
+/// Run `omdb db dns diff`.
+async fn cmd_db_dns_diff(
+    opctx: &OpContext,
+    datastore: &DataStore,
+    limit: NonZeroU32,
+    args: &DnsVersionArgs,
+) -> Result<(), anyhow::Error> {
+    let (dns_zones, version) =
+        load_zones_version(opctx, datastore, limit, args).await?;
+
+    for zone in dns_zones {
+        println!(
+            "DNS zone:                   {} ({:?})",
+            zone.zone_name, args.group
+        );
+        println!(
+            "requested version:          {} (created at {})",
+            *version.version,
+            version.time_created.to_rfc3339_opts(SecondsFormat::Secs, true)
+        );
+        println!("version created by Nexus:   {}", version.creator);
+        println!("version created because:    {}", version.comment);
+
+        // Load the added and removed items.
+        use nexus_db_queries::db::schema::dns_name::dsl;
+
+        let added = dsl::dns_name
+            .filter(dsl::dns_zone_id.eq(zone.id))
+            .filter(dsl::version_added.eq(version.version))
+            .limit(i64::from(u32::from(limit)))
+            .select(DnsName::as_select())
+            .load_async(datastore.pool_for_tests().await?)
+            .await
+            .context("loading added names")?;
+        check_limit(&added, limit, || "loading added names");
+
+        let removed = dsl::dns_name
+            .filter(dsl::dns_zone_id.eq(zone.id))
+            .filter(dsl::version_removed.eq(version.version))
+            .limit(i64::from(u32::from(limit)))
+            .select(DnsName::as_select())
+            .load_async(datastore.pool_for_tests().await?)
+            .await
+            .context("loading added names")?;
+        check_limit(&added, limit, || "loading removed names");
+        println!(
+            "changes:                    names added: {}, names removed: {}",
+            added.len(),
+            removed.len()
+        );
+        println!("");
+
+        for a in added {
+            print_name("+", &a.name, a.records().context("parsing records"));
+        }
+
+        for r in removed {
+            print_name("-", &r.name, r.records().context("parsing records"));
+        }
+    }
+
+    Ok(())
+}
+
+/// Run `omdb db dns names`.
+async fn cmd_db_dns_names(
+    opctx: &OpContext,
+    datastore: &DataStore,
+    limit: NonZeroU32,
+    args: &DnsVersionArgs,
+) -> Result<(), anyhow::Error> {
+    let (group_zones, version) =
+        load_zones_version(opctx, datastore, limit, args).await?;
+
     if group_zones.is_empty() {
-        println!("no DNS zones found for group {:?}", group.to_string());
+        println!("no DNS zones found for group {:?}", args.group);
         return Ok(());
     }
 
     // There will almost never be more than one zone.  But just in case, we'll
     // iterate over whatever we find and print all the names in each one.
-    let version = Generation::try_from(i64::from(args.version)).unwrap();
-    // XXX-dap if we give a later version, we get the latest version!  maybe
-    // fetch version first?
     for zone in group_zones {
-        println!("{} zone: {}", group, zone.zone_name);
+        println!("{:?} zone: {}", args.group, zone.zone_name);
         println!("  {:50} {}", "NAME", "RECORDS");
         let ctx = || format!("listing names for zone {:?}", zone.zone_name);
         let mut names = datastore
-            .dns_names_list(opctx, zone.id, version.into(), &first_page(limit))
+            .dns_names_list(opctx, zone.id, version.version, &first_page(limit))
             .await
             .with_context(ctx)?;
         check_limit(&names, limit, ctx);
@@ -531,29 +618,50 @@ async fn cmd_db_dns_names(
                 _ => n1.cmp(n2),
             }
         });
-        for (name, records) in names {
-            if records.len() == 1 {
-                match &records[0] {
-                    DnsRecord::Srv(_) => (),
-                    DnsRecord::Aaaa(_) | DnsRecord::A(_) => {
-                        println!(
-                            "  {:50} {}",
-                            name,
-                            format_record(&records[0])
-                        );
-                        continue;
-                    }
-                }
-            }
 
-            println!("  {:50} (records: {})", name, records.len());
-            for r in &records {
-                println!("      {}", format_record(r));
-            }
+        for (name, records) in names {
+            print_name("", &name, Ok(records));
         }
     }
 
     Ok(())
+}
+
+fn print_name(
+    prefix: &str,
+    name: &str,
+    maybe_records: Result<Vec<DnsRecord>, anyhow::Error>,
+) {
+    let records = match maybe_records {
+        Ok(records) => records,
+        Err(error) => {
+            println!(
+                "{}  {:50} (failed to parse record data: {:#})",
+                prefix, name, error
+            );
+            return;
+        }
+    };
+
+    if records.len() == 1 {
+        match &records[0] {
+            DnsRecord::Srv(_) => (),
+            DnsRecord::Aaaa(_) | DnsRecord::A(_) => {
+                println!(
+                    "{}  {:50} {}",
+                    prefix,
+                    name,
+                    format_record(&records[0])
+                );
+                return;
+            }
+        }
+    }
+
+    println!("{}  {:50} (records: {})", prefix, name, records.len());
+    for r in &records {
+        println!("{}      {}", prefix, format_record(r));
+    }
 }
 
 fn format_record(record: &DnsRecord) -> impl Display {
