@@ -6,6 +6,7 @@
 
 use anyhow::Context;
 use chrono::SecondsFormat;
+use chrono::Utc;
 use clap::Args;
 use clap::Subcommand;
 use nexus_client::types::ActivationReason;
@@ -148,6 +149,10 @@ async fn cmd_nexus_background_task_details(
 
 fn print_task(bgtask: &BackgroundTask) {
     println!("task: {:?}", bgtask.name);
+    println!(
+        "  configured period: every {}",
+        humantime::format_duration(bgtask.period.clone().into())
+    );
     print!("  currently executing: ");
     match &bgtask.current {
         CurrentStatus::Idle => println!("no"),
@@ -179,8 +184,9 @@ fn print_task(bgtask: &BackgroundTask) {
                 reason_str(&last.reason)
             );
             print!(
-                "    started at {} and ran for {:.3}ms\n",
+                "    started at {} ({}s ago) and ran for {:.3}ms\n",
                 humantime::format_rfc3339_millis(last.start_time.into()),
+                (Utc::now() - last.start_time).num_seconds(),
                 std::time::Duration::from(last.elapsed.clone()).as_millis(),
             );
         }
@@ -255,12 +261,26 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
             ),
             Ok(found_dns_servers) => {
                 println!(
-                    "    servers found: {}",
+                    "    servers found: {}\n",
                     found_dns_servers.addresses.len(),
                 );
-                for a in found_dns_servers.addresses {
-                    println!("        server: {}", a);
+
+                #[derive(Tabled)]
+                #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+                struct ServerRow<'a> {
+                    dns_server_addr: &'a str,
                 }
+
+                let mut addrs = found_dns_servers.addresses;
+                addrs.sort();
+                let rows = addrs
+                    .iter()
+                    .map(|dns_server_addr| ServerRow { dns_server_addr });
+                let table = tabled::Table::new(rows)
+                    .with(tabled::settings::Style::empty())
+                    .with(tabled::settings::Padding::new(0, 1, 0, 0))
+                    .to_string();
+                println!("{}", textwrap::indent(&table.to_string(), "      "));
             }
         }
     } else if name == "dns_propagation_internal"
@@ -289,7 +309,7 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
             ),
             Ok(details) => {
                 println!(
-                    "    attempt to propagate generation: {}",
+                    "    attempt to propagate generation: {}\n",
                     details.generation
                 );
                 let server_results = &details.server_results;
@@ -311,7 +331,7 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
                         .to_string();
                     println!(
                         "{}",
-                        textwrap::indent(&table.to_string(), "    ")
+                        textwrap::indent(&table.to_string(), "      ")
                     );
                 }
 
@@ -354,6 +374,8 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
         #[derive(Tabled)]
         #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
         struct EndpointRow<'a> {
+            #[tabled(rename = " ")]
+            is_default: char,
             silo_id: Uuid,
             dns_name: &'a str,
         }
@@ -372,27 +394,30 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
             ),
             Ok(details) => {
                 println!(
-                    "    external API endpoints: {}",
+                    "    external API endpoints: {} \
+                    ('*' below marks default)\n",
                     details.by_dns_name.len()
                 );
                 let endpoint_rows =
                     details.by_dns_name.iter().map(|(dns_name, endpoint)| {
-                        EndpointRow { silo_id: endpoint.silo_id, dns_name }
+                        let is_default = match &details.default_endpoint {
+                            Some(e) if e.silo_id == endpoint.silo_id => '*',
+                            _ => ' ',
+                        };
+
+                        EndpointRow {
+                            silo_id: endpoint.silo_id,
+                            is_default,
+                            dns_name,
+                        }
                     });
                 let table = tabled::Table::new(endpoint_rows)
                     .with(tabled::settings::Style::empty())
                     .with(tabled::settings::Padding::new(0, 1, 0, 0))
                     .to_string();
                 println!(
-                    "{}",
+                    "{}\n",
                     textwrap::indent(&table.to_string(), "        ")
-                );
-                println!(
-                    "    default endpoint: {}",
-                    match &details.default_endpoint {
-                        Some(e) => format!("silo {}", e.silo_id),
-                        None => "none".to_string(),
-                    }
                 );
 
                 let tls_cert_rows: Vec<TlsCertRow> = details
@@ -407,6 +432,12 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
                     .flatten()
                     .collect();
 
+                println!("    warnings: {}", details.warnings.len());
+                for w in &details.warnings {
+                    println!("        warning: {}", w);
+                }
+
+                println!("");
                 println!("    TLS certificates: {}", tls_cert_rows.len());
                 if tls_cert_rows.len() > 0 {
                     let table = tabled::Table::new(tls_cert_rows)
@@ -417,11 +448,6 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
                         "{}",
                         textwrap::indent(&table.to_string(), "        ")
                     );
-                }
-
-                println!("    warnings: {}", details.warnings.len());
-                for w in &details.warnings {
-                    println!("        warning: {}", w);
                 }
             }
         }

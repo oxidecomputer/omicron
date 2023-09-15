@@ -26,10 +26,11 @@ impl Nexus {
             .map(|t| {
                 let name = t.name();
                 let description = driver.task_description(t);
+                let period = driver.task_period(t);
                 let status = driver.task_status(t);
                 (
                     name.to_owned(),
-                    BackgroundTask::new(name, description, status),
+                    BackgroundTask::new(name, description, period, status),
                 )
             })
             .collect())
@@ -49,6 +50,7 @@ impl Nexus {
             })?;
         let description = driver.task_description(task);
         let status = driver.task_status(task);
-        Ok(BackgroundTask::new(task.name(), description, status))
+        let period = driver.task_period(task);
+        Ok(BackgroundTask::new(task.name(), description, period, status))
     }
 }

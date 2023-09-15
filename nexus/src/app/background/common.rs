@@ -192,6 +192,8 @@ impl TaskHandle {
 struct Task {
     /// what this task does (for developers)
     description: String,
+    /// configured period of the task
+    period: Duration,
     /// channel used to receive updates from the background task's tokio task
     /// about what the background task is doing
     status: watch::Receiver<TaskStatus>,
@@ -261,7 +263,8 @@ impl Driver {
         // Create an object to track our side of the background task's state.
         // This just provides the handles we need to read status and wake up the
         // tokio task.
-        let task = Task { description, status: status_rx, tokio_task, notify };
+        let task =
+            Task { description, period, status: status_rx, tokio_task, notify };
         if self.tasks.insert(TaskHandle(name.clone()), task).is_some() {
             panic!("started two background tasks called {:?}", name);
         }
@@ -293,6 +296,17 @@ impl Driver {
         });
 
         &task.description
+    }
+
+    /// Returns the configured period of the task
+    pub fn task_period(&self, task: &TaskHandle) -> Duration {
+        let task = self.tasks.get(task).unwrap_or_else(|| {
+            panic!(
+                "attempted to get period of non-existent background task: {:?}",
+                task
+            )
+        });
+        task.period
     }
 
     /// Activate the specified background task
