@@ -407,7 +407,7 @@ impl DataStore {
     /// **Callers almost certainly want to wake up the corresponding Nexus
     /// background task to cause these changes to be propagated to the
     /// corresponding DNS servers.**
-    pub(crate) async fn dns_update<ConnErr>(
+    pub async fn dns_update<ConnErr>(
         &self,
         opctx: &OpContext,
         conn: &(impl async_bb8_diesel::AsyncConnection<
