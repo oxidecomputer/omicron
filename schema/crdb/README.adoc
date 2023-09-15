@@ -13,6 +13,11 @@ We use the following conventions:
 ** If more than one change is needed per version, any number of files starting with `up`
    and ending with `.sql` may be used. These files will be sorted in lexicographic order
    before being executed, and each will be executed in a separate transaction.
+** CockroachDB documentation recommends the following: "Execute schema changes... in a single
+   explicit transaction consisting of the single schema change statement".
+   Practically this means: If you want to change multiple tables, columns,
+   types, indices, or constraints, do so in separate files.
+** More information can be found here: https://www.cockroachlabs.com/docs/stable/online-schema-changes
 * `schema/crdb/dbinit.sql`: The necessary operations to create the latest version
   of the schema. Should be equivalent to running all `up.sql` migrations, in-order.
 * `schema/crdb/dbwipe.sql`: The necessary operations to delete the latest version
