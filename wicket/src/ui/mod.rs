@@ -11,6 +11,7 @@ mod widgets;
 mod wrap;
 
 use crate::{Action, Cmd, State, Term};
+use ratatui::prelude::Rect;
 use ratatui::widgets::ListState;
 use slog::{o, Logger};
 
@@ -25,47 +26,35 @@ pub use panes::UpdatePane;
 /// The primary display representation. It's sole purpose is to dispatch
 /// [`Cmd`]s to the underlying splash and main screens.
 ///
-// Note: It would be nice to use an enum here, but swapping between enum
-// variants requires taking the screen by value or having a wrapper struct with
-// an option so we can `take` the inner value. This is unergomic, so we just go
-// with the simple solution.
+/// We move controls out of their owning field's option and put them
+/// in current as necessary. We start out in `splash` and never
+/// transition back to it.
 pub struct Screen {
     #[allow(unused)]
     log: slog::Logger,
-    splash: Option<SplashScreen>,
-    main: MainScreen,
+    main: Option<Box<dyn Control>>,
+    current: Box<dyn Control>,
 }
 
 impl Screen {
     pub fn new(log: &Logger) -> Screen {
         let log = log.new(o!("component" => "Screen"));
-        Screen {
-            splash: Some(SplashScreen::new()),
-            main: MainScreen::new(&log),
-            log,
-        }
+        let main = Some(Box::new(MainScreen::new(&log)) as Box<dyn Control>);
+        let current = Box::new(SplashScreen::new()) as Box<dyn Control>;
+        Screen { log, main, current }
     }
 
-    /// Compute the layout of the `MainScreen`
+    /// Compute the layout of the current screen
     ///
     // A draw is issued after every resize, so no need to return an Action
     pub fn resize(&mut self, state: &mut State, width: u16, height: u16) {
         state.screen_width = width;
         state.screen_height = height;
-
-        // Size the main screen
-        self.main.resize(state, width, height);
+        self._resize(state);
     }
 
     pub fn on(&mut self, state: &mut State, cmd: Cmd) -> Option<Action> {
-        if let Some(splash) = &mut self.splash {
-            if splash.on(cmd) {
-                self.splash = None;
-            }
-            Some(Action::Redraw)
-        } else {
-            self.main.on(state, cmd)
-        }
+        self.current.on(state, cmd)
     }
 
     pub fn draw(
@@ -73,12 +62,28 @@ impl Screen {
         state: &State,
         terminal: &mut Term,
     ) -> anyhow::Result<()> {
-        if let Some(splash) = &self.splash {
-            splash.draw(terminal)?;
-        } else {
-            self.main.draw(state, terminal)?;
-        }
+        terminal.draw(|f| {
+            let active = true;
+            self.current.draw(state, f, f.size(), active);
+        })?;
         Ok(())
+    }
+
+    pub fn switch(&mut self, state: &mut State) {
+        if self.main.is_some() {
+            self.current = self.main.take().unwrap();
+            self._resize(state);
+        }
+    }
+
+    fn _resize(&mut self, state: &mut State) {
+        let rect = Rect {
+            x: 0,
+            y: 0,
+            width: state.screen_width,
+            height: state.screen_height,
+        };
+        self.current.resize(state, rect);
     }
 }
 

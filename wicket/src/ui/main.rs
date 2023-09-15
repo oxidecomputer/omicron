@@ -8,7 +8,7 @@ use super::{Control, OverviewPane, RackSetupPane, StatefulList, UpdatePane};
 use crate::ui::defaults::colors::*;
 use crate::ui::defaults::style;
 use crate::ui::widgets::Fade;
-use crate::{Action, Cmd, Frame, State, Term};
+use crate::{Action, Cmd, Frame, State};
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -35,94 +35,10 @@ pub struct MainScreen {
     pane_rect: Rect,
 }
 
-impl MainScreen {
-    pub fn new(log: &Logger) -> MainScreen {
-        // We want the sidebar ordered in this specific manner
-        let sidebar_ordered_panes = vec![
-            ("overview", Box::new(OverviewPane::new()) as Box<dyn Control>),
-            ("update", Box::new(UpdatePane::new(log))),
-            ("rack setup", Box::<RackSetupPane>::default()),
-        ];
-        let sidebar_keys: Vec<_> =
-            sidebar_ordered_panes.iter().map(|&(title, _)| title).collect();
-        let log = log.new(o!("component" => "MainScreen"));
-        MainScreen {
-            log,
-            sidebar: Sidebar::new(sidebar_keys),
-            panes: BTreeMap::from_iter(sidebar_ordered_panes),
-            rect: Rect::default(),
-            sidebar_rect: Rect::default(),
-            pane_rect: Rect::default(),
-        }
-    }
-
-    /// Draw the [`MainScreen`]
-    pub fn draw(
-        &mut self,
-        state: &State,
-        terminal: &mut Term,
-    ) -> anyhow::Result<()> {
-        terminal.draw(|frame| {
-            let mut rect = frame.size();
-
-            rect.height -= 1;
-            let statusbar_rect = Rect {
-                y: rect.height - 1,
-                height: 1,
-                x: 2,
-                width: rect.width - 3,
-            };
-
-            // Size the individual components of the screen
-            let chunks = Layout::default()
-                .direction(Direction::Horizontal)
-                .margin(1)
-                .constraints(
-                    [Constraint::Length(20), Constraint::Max(1000)].as_ref(),
-                )
-                .split(rect);
-
-            // Draw all the components, starting with the background
-            let background = Block::default().style(style::background());
-            frame.render_widget(background, frame.size());
-            self.sidebar.draw(state, frame, chunks[0], self.sidebar.active);
-            self.draw_pane(state, frame, chunks[1]);
-            self.draw_statusbar(state, frame, statusbar_rect);
-        })?;
-        Ok(())
-    }
-
-    /// Compute the layout of the [`Sidebar`] and pane
-    ///
-    // A draw is issued after every resize, so no need to return an Action
-    pub fn resize(&mut self, state: &mut State, width: u16, height: u16) {
-        self.rect = Rect { x: 0, y: 0, width, height };
-
-        // We have a 1 row status bar at the bottom when we draw. Subtract it
-        // from the height;
-        let mut layout_rect = self.rect;
-        layout_rect.height -= 1;
-
-        // Size the individual components of the screen
-        let chunks = Layout::default()
-            .direction(Direction::Horizontal)
-            .margin(1)
-            .constraints(
-                [Constraint::Length(20), Constraint::Max(1000)].as_ref(),
-            )
-            .split(layout_rect);
-
-        self.sidebar_rect = chunks[0];
-        self.pane_rect = chunks[1];
-
-        // Avoid borrow checker complaints
-        let pane_rect = self.pane_rect;
-        self.current_pane().resize(state, pane_rect);
-    }
-
+impl Control for MainScreen {
     /// Handle a [`Cmd`] to update state and output any necessary actions for the
     /// system to take.
-    pub fn on(&mut self, state: &mut State, cmd: Cmd) -> Option<Action> {
+    fn on(&mut self, state: &mut State, cmd: Cmd) -> Option<Action> {
         match cmd {
             // There's just two panes, so next and previous do the same thing
             // for now.
@@ -151,6 +67,84 @@ impl MainScreen {
         }
     }
 
+    fn draw(
+        &mut self,
+        state: &State,
+        frame: &mut Frame<'_>,
+        mut rect: Rect,
+        _: bool,
+    ) {
+        rect.height -= 1;
+        let statusbar_rect =
+            Rect { y: rect.height - 1, height: 1, x: 2, width: rect.width - 3 };
+
+        // Size the individual components of the screen
+        let chunks = Layout::default()
+            .direction(Direction::Horizontal)
+            .margin(1)
+            .constraints(
+                [Constraint::Length(20), Constraint::Max(1000)].as_ref(),
+            )
+            .split(rect);
+
+        // Draw all the components, starting with the background
+        let background = Block::default().style(style::background());
+        frame.render_widget(background, frame.size());
+        self.sidebar.draw(state, frame, chunks[0], self.sidebar.active);
+        self.draw_pane(state, frame, chunks[1]);
+        self.draw_statusbar(state, frame, statusbar_rect);
+    }
+
+    /// Compute the layout of the [`Sidebar`] and pane
+    ///
+    // A draw is issued after every resize, so no need to return an Action
+    fn resize(&mut self, state: &mut State, rect: Rect) {
+        self.rect = rect;
+
+        // We have a 1 row status bar at the bottom when we draw. Subtract it
+        // from the height;
+        let mut layout_rect = self.rect;
+        layout_rect.height -= 1;
+
+        // Size the individual components of the screen
+        let chunks = Layout::default()
+            .direction(Direction::Horizontal)
+            .margin(1)
+            .constraints(
+                [Constraint::Length(20), Constraint::Max(1000)].as_ref(),
+            )
+            .split(layout_rect);
+
+        self.sidebar_rect = chunks[0];
+        self.pane_rect = chunks[1];
+
+        // Avoid borrow checker complaints
+        let pane_rect = self.pane_rect;
+        self.current_pane().resize(state, pane_rect);
+    }
+}
+
+impl MainScreen {
+    pub fn new(log: &Logger) -> MainScreen {
+        // We want the sidebar ordered in this specific manner
+        let sidebar_ordered_panes = vec![
+            ("overview", Box::new(OverviewPane::new()) as Box<dyn Control>),
+            ("update", Box::new(UpdatePane::new(log))),
+            ("rack setup", Box::<RackSetupPane>::default()),
+        ];
+        let sidebar_keys: Vec<_> =
+            sidebar_ordered_panes.iter().map(|&(title, _)| title).collect();
+        let log = log.new(o!("component" => "MainScreen"));
+        MainScreen {
+            log,
+            sidebar: Sidebar::new(sidebar_keys),
+            panes: BTreeMap::from_iter(sidebar_ordered_panes),
+            rect: Rect::default(),
+            sidebar_rect: Rect::default(),
+            pane_rect: Rect::default(),
+        }
+    }
+
     fn dispatch_cmd(&mut self, state: &mut State, cmd: Cmd) -> Option<Action> {
         let current_pane = self.sidebar.selected_pane();
         if self.sidebar.active {
@@ -158,7 +152,7 @@ impl MainScreen {
             if self.sidebar.selected_pane() != current_pane {
                 // We need to inform the new pane, which may not have
                 // ever been drawn what its Rect is.
-                self.resize(state, self.rect.width, self.rect.height);
+                self.resize(state, self.rect);
                 Some(Action::Redraw)
             } else {
                 None

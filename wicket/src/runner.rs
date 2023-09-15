@@ -276,6 +276,10 @@ impl RunnerCore {
                         .blocking_send(wicketd::Request::StartRackReset)?;
                 }
             }
+            Action::SwitchScreen => {
+                self.screen.switch(&mut self.state);
+                self.screen.draw(&self.state, &mut self.terminal)?;
+            }
         }
         Ok(())
     }

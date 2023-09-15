@@ -10,7 +10,7 @@ use super::defaults::colors::*;
 use super::defaults::dimensions::RectExt;
 use super::defaults::style;
 use super::widgets::{Logo, LogoState, LOGO_HEIGHT, LOGO_WIDTH};
-use crate::{Cmd, Frame, Term};
+use crate::{Action, Cmd, Control, Frame};
 use ratatui::style::Style;
 use ratatui::widgets::Block;
 
@@ -56,25 +56,30 @@ impl SplashScreen {
     }
 }
 
-impl SplashScreen {
-    pub fn draw(&self, terminal: &mut Term) -> anyhow::Result<()> {
-        terminal.draw(|f| {
-            self.draw_background(f);
-            self.animate_logo(f);
-        })?;
-        Ok(())
+impl Control for SplashScreen {
+    fn draw(
+        &mut self,
+        _: &crate::State,
+        frame: &mut Frame<'_>,
+        _: ratatui::prelude::Rect,
+        _: bool,
+    ) {
+        self.draw_background(frame);
+        self.animate_logo(frame);
     }
 
-    /// Return true if the splash screen should transition to the main screen, false
-    /// if it should keep animating.
-    pub fn on(&mut self, cmd: Cmd) -> bool {
+    fn on(&mut self, _: &mut crate::State, cmd: Cmd) -> Option<crate::Action> {
         match cmd {
             Cmd::Tick => {
                 self.state.frame += 1;
-                self.state.frame >= TOTAL_FRAMES
+                if self.state.frame >= TOTAL_FRAMES {
+                    Some(Action::SwitchScreen)
+                } else {
+                    Some(Action::Redraw)
+                }
             }
             // Allow the user to skip the splash screen with any key press
-            _ => true,
+            _ => Some(Action::SwitchScreen),
         }
     }
 }

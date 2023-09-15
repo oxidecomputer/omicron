@@ -81,6 +81,7 @@ pub enum Action {
     Ignition(ComponentId, IgnitionCommand),
     StartRackSetup,
     StartRackReset,
+    SwitchScreen,
 }
 
 impl Action {
@@ -96,7 +97,8 @@ impl Action {
             | Action::ClearUpdateState(_)
             | Action::Ignition(_, _)
             | Action::StartRackSetup
-            | Action::StartRackReset => true,
+            | Action::StartRackReset
+            | Action::SwitchScreen => true,
         }
     }
 }
