@@ -300,7 +300,7 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
                             dns_server_addr: addr,
                             last_result: match result {
                                 Ok(_) => "success".to_string(),
-                                Err(error) => format!("error: {}", error),
+                                Err(_) => format!("error (see below)"),
                             },
                         }
                     });
@@ -313,6 +313,18 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
                         "{}",
                         textwrap::indent(&table.to_string(), "    ")
                     );
+                }
+
+                println!("");
+                for (addr, error) in
+                    server_results.iter().filter_map(|(addr, result)| {
+                        match result {
+                            Ok(_) => None,
+                            Err(error) => Some((addr, error)),
+                        }
+                    })
+                {
+                    println!("    error: server {}: {}", addr, error);
                 }
             }
         };
