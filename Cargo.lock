@@ -6617,7 +6617,7 @@ dependencies = [
  "indoc 2.0.3",
  "itertools 0.11.0",
  "paste",
- "strum 0.25.0",
+ "strum",
  "unicode-segmentation",
  "unicode-width",
 ]
