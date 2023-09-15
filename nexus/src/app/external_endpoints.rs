@@ -73,7 +73,6 @@ use uuid::Uuid;
 pub struct ExternalEndpoints {
     by_dns_name: BTreeMap<String, Arc<ExternalEndpoint>>,
     warnings: Vec<ExternalEndpointError>,
-    // XXX-dap should serialize some other way?
     default_endpoint: Option<Arc<ExternalEndpoint>>,
 }
 

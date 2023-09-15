@@ -283,32 +283,23 @@ impl Driver {
         self.tasks.keys()
     }
 
-    // XXX-dap helper function
+    fn task_required(&self, task: &TaskHandle) -> &Task {
+        // It should be hard to hit this in practice, since you'd have to have
+        // gotten a TaskHandle from somewhere.  It would have to be another
+        // Driver instance.  But it's generally a singleton.
+        self.tasks.get(task).unwrap_or_else(|| {
+            panic!("attempted to get non-existent background task: {:?}", task)
+        })
+    }
 
     /// Returns a summary of what this task does (for developers)
     pub fn task_description(&self, task: &TaskHandle) -> &str {
-        // It should be hard to hit this in practice, since you'd have to have
-        // gotten a TaskHandle from somewhere.  It would have to be another
-        // Driver instance.
-        let task = self.tasks.get(task).unwrap_or_else(|| {
-            panic!(
-                "attempted to get docs for non-existent background task: {:?}",
-                task
-            )
-        });
-
-        &task.description
+        &self.task_required(task).description
     }
 
     /// Returns the configured period of the task
     pub fn task_period(&self, task: &TaskHandle) -> Duration {
-        let task = self.tasks.get(task).unwrap_or_else(|| {
-            panic!(
-                "attempted to get period of non-existent background task: {:?}",
-                task
-            )
-        });
-        task.period
+        self.task_required(task).period
     }
 
     /// Activate the specified background task
@@ -316,35 +307,15 @@ impl Driver {
     /// If the task is currently running, it will be activated again when it
     /// finishes.
     pub fn activate(&self, task: &TaskHandle) {
-        // It should be hard to hit this in practice, since you'd have to have
-        // gotten a TaskHandle from somewhere.  It would have to be another
-        // Driver instance.
-        let task = self.tasks.get(task).unwrap_or_else(|| {
-            panic!(
-                "attempted to wake up non-existent background task: {:?}",
-                task
-            )
-        });
-
-        task.notify.notify_one();
+        self.task_required(task).notify.notify_one();
     }
 
     /// Returns the runtime status of the background task
     pub fn task_status(&self, task: &TaskHandle) -> TaskStatus {
-        // It should be hard to hit this in practice, since you'd have to have
-        // gotten a TaskHandle from somewhere.  It would have to be another
-        // Driver instance.
-        let task = self.tasks.get(task).unwrap_or_else(|| {
-            panic!(
-                "attempted to get status of non-existent background task: {:?}",
-                task
-            )
-        });
-
         // Borrowing from a watch channel's receiver blocks the sender.  Clone
         // the status to avoid an errant caller gumming up the works by hanging
         // on to a reference.
-        task.status.borrow().clone()
+        self.task_required(task).status.borrow().clone()
     }
 }
 

@@ -3,6 +3,14 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 //! omdb commands that query or update the database
+//!
+//! GROUND RULES: There aren't many ground rules (see top-level docs).  But
+//! where possible, stick to operations provided by `DataStore` rather than
+//! querying the database directly.  The DataStore operations generally provide
+//! a safer level of abstraction.  But there are cases where we want to do
+//! things that really don't need to be in the DataStore -- i.e., where `omdb`
+//! would be the only consumer -- and in that case it's okay to query the
+//! database directly.
 
 use anyhow::anyhow;
 use anyhow::bail;
@@ -435,7 +443,6 @@ async fn cmd_db_sleds(
 }
 
 // DNS
-// XXX-dap add "history" command?
 
 /// Run `omdb db dns show`.
 async fn cmd_db_dns_show(
