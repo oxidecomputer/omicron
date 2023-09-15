@@ -1,4 +1,4 @@
-Manage a local CockroachDB database for Omicron development
+Tools for working with a local Omicron deployment
 
 Usage: omicron-dev <COMMAND>
 

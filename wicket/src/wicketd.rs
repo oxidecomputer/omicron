@@ -446,7 +446,11 @@ impl WicketdManager {
                     Ok(val) => {
                         // TODO: Only send on changes
                         let rsp = val.into_inner();
-                        let artifacts = rsp.artifacts;
+                        let artifacts = rsp
+                            .artifacts
+                            .into_iter()
+                            .map(|artifact| artifact.artifact_id)
+                            .collect();
                         let system_version = rsp.system_version;
                         let event_reports: EventReportMap = rsp.event_reports;
                         let _ = tx.send(Event::ArtifactsAndEventReports {

@@ -9,10 +9,10 @@ use crate::app::sagas::switch_port_settings_apply::api_to_dpd_port_settings;
 use crate::app::sagas::{
     declare_saga_actions, ActionRegistry, NexusSaga, SagaInitError,
 };
-use crate::authn;
-use crate::db::datastore::UpdatePrecondition;
 use anyhow::Error;
 use dpd_client::types::PortId;
+use nexus_db_queries::authn;
+use nexus_db_queries::db::datastore::UpdatePrecondition;
 use omicron_common::api::external::{self, NameOrId};
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
@@ -20,7 +20,7 @@ use steno::ActionError;
 use uuid::Uuid;
 
 #[derive(Debug, Deserialize, Serialize)]
-pub struct Params {
+pub(crate) struct Params {
     pub serialized_authn: authn::saga::Serialized,
     pub switch_port_id: Uuid,
     pub port_name: String,
@@ -39,7 +39,7 @@ declare_saga_actions! {
 }
 
 #[derive(Debug)]
-pub struct SagaSwitchPortSettingsClear;
+pub(crate) struct SagaSwitchPortSettingsClear;
 impl NexusSaga for SagaSwitchPortSettingsClear {
     const NAME: &'static str = "switch-port-settings-clear";
     type Params = Params;

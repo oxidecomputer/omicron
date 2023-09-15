@@ -7,11 +7,11 @@
 use super::sagas::NexusSaga;
 use super::sagas::SagaInitError;
 use super::sagas::ACTION_REGISTRY;
-use crate::authz;
 use crate::saga_interface::SagaContext;
 use anyhow::Context;
 use futures::future::BoxFuture;
 use futures::StreamExt;
+use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
@@ -33,18 +33,19 @@ use uuid::Uuid;
 /// At this point, we've built the DAG, loaded it into the SEC, etc. but haven't
 /// started it running.  This is a useful point to inject errors, inspect the
 /// DAG, etc.
-pub struct RunnableSaga {
+pub(crate) struct RunnableSaga {
     id: SagaId,
     fut: BoxFuture<'static, SagaResult>,
 }
 
 impl RunnableSaga {
-    pub fn id(&self) -> SagaId {
+    #[cfg(test)]
+    pub(crate) fn id(&self) -> SagaId {
         self.id
     }
 }
 
-pub fn create_saga_dag<N: NexusSaga>(
+pub(crate) fn create_saga_dag<N: NexusSaga>(
     params: N::Params,
 ) -> Result<SagaDag, Error> {
     let builder = DagBuilder::new(SagaName::new(N::NAME));
@@ -56,7 +57,7 @@ pub fn create_saga_dag<N: NexusSaga>(
 }
 
 impl super::Nexus {
-    pub async fn sagas_list(
+    pub(crate) async fn sagas_list(
         &self,
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, Uuid>,
@@ -78,7 +79,7 @@ impl super::Nexus {
         Ok(futures::stream::iter(saga_list).boxed())
     }
 
-    pub async fn saga_get(
+    pub(crate) async fn saga_get(
         &self,
         opctx: &OpContext,
         id: Uuid,
@@ -94,7 +95,7 @@ impl super::Nexus {
             })?
     }
 
-    pub async fn create_runnable_saga(
+    pub(crate) async fn create_runnable_saga(
         self: &Arc<Self>,
         dag: SagaDag,
     ) -> Result<RunnableSaga, Error> {
@@ -104,7 +105,7 @@ impl super::Nexus {
         self.create_runnable_saga_with_id(dag, saga_id).await
     }
 
-    pub async fn create_runnable_saga_with_id(
+    pub(crate) async fn create_runnable_saga_with_id(
         self: &Arc<Self>,
         dag: SagaDag,
         saga_id: SagaId,
@@ -137,7 +138,7 @@ impl super::Nexus {
         Ok(RunnableSaga { id: saga_id, fut: future })
     }
 
-    pub async fn run_saga(
+    pub(crate) async fn run_saga(
         &self,
         runnable_saga: RunnableSaga,
     ) -> Result<SagaResultOk, Error> {
@@ -183,7 +184,7 @@ impl super::Nexus {
     /// logs messages on error conditions and has a standard mechanism for
     /// converting saga errors to generic Omicron errors).
     #[cfg(test)]
-    pub async fn run_saga_raw_result(
+    pub(crate) async fn run_saga_raw_result(
         &self,
         runnable_saga: RunnableSaga,
     ) -> Result<SagaResult, Error> {

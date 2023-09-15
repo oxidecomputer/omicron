@@ -4,8 +4,8 @@
 
 pub mod console_api;
 pub mod device_auth;
-pub mod http_entrypoints;
+pub(crate) mod http_entrypoints;
 
-pub use nexus_types::external_api::params;
-pub use nexus_types::external_api::shared;
-pub use nexus_types::external_api::views;
+pub(crate) use nexus_types::external_api::params;
+pub(crate) use nexus_types::external_api::shared;
+pub(crate) use nexus_types::external_api::views;
