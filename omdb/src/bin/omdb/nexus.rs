@@ -4,6 +4,7 @@
 
 //! omdb commands that query or update specific Nexus instances
 
+use anyhow::bail;
 use anyhow::Context;
 use chrono::SecondsFormat;
 use chrono::Utc;
@@ -22,7 +23,8 @@ use uuid::Uuid;
 #[derive(Debug, Args)]
 pub struct NexusArgs {
     /// URL of the Nexus internal API
-    nexus_internal_url: String,
+    #[clap(long, env("OMDB_NEXUS_URL"))]
+    nexus_internal_url: Option<String>,
 
     #[command(subcommand)]
     command: NexusCommands,
@@ -57,8 +59,15 @@ impl NexusArgs {
         &self,
         log: &slog::Logger,
     ) -> Result<(), anyhow::Error> {
-        let client =
-            nexus_client::Client::new(&self.nexus_internal_url, log.clone());
+        // This is a little goofy.  The database URL is required, but can come
+        // from the environment, in which case it won't be on the command line.
+        let Some(nexus_url) = &self.nexus_internal_url else {
+            bail!(
+                "nexus URL must be specified with --nexus-internal-url or \
+                OMDB_NEXUS_URL"
+            );
+        };
+        let client = nexus_client::Client::new(nexus_url, log.clone());
 
         match &self.command {
             NexusCommands::BackgroundTask(BackgroundTaskArgs {

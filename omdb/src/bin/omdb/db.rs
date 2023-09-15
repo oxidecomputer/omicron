@@ -42,7 +42,8 @@ use uuid::Uuid;
 #[derive(Debug, Args)]
 pub struct DbArgs {
     /// URL of the database SQL interface
-    db_url: PostgresConfigWithUrl,
+    #[clap(long, env("OMDB_DB_URL"))]
+    db_url: Option<PostgresConfigWithUrl>,
 
     /// limit to apply to queries that fetch rows
     #[clap(
@@ -126,7 +127,15 @@ impl DbArgs {
         &self,
         log: &slog::Logger,
     ) -> Result<(), anyhow::Error> {
-        let db_config = db::Config { url: self.db_url.clone() };
+        // This is a little goofy.  The database URL is required, but can come
+        // from the environment, in which case it won't be on the command line.
+        let Some(db_url) = &self.db_url else {
+            bail!(
+                "database URL must be specified with --db-url or OMDB_DB_URL"
+            );
+        };
+
+        let db_config = db::Config { url: db_url.clone() };
         let pool = Arc::new(db::Pool::new(&log.clone(), &db_config));
 
         // Being a dev tool, we want to try this operation even if the schema
