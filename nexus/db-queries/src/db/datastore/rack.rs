@@ -721,6 +721,10 @@ mod test {
                     tls_certificates: vec![],
                     mapped_fleet_roles: Default::default(),
                 },
+                recovery_silo_fq_dns_name: format!(
+                    "test-silo.sys.{}",
+                    internal_dns::DNS_ZONE
+                ),
                 recovery_user_id: "test-user".parse().unwrap(),
                 // empty string password
                 recovery_user_password_hash: "$argon2id$v=19$m=98304,t=13,\

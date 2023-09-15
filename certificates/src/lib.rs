@@ -39,7 +39,7 @@ pub enum CertificateError {
     #[error("Error validating certificate hostname")]
     ErrorValidatingHostname(#[source] openssl::error::ErrorStack),
 
-    #[error("Certificate not valid for {hostname:?}: {cert_description:?}")]
+    #[error("Certificate not valid for {hostname:?}: {cert_description}")]
     NoDnsNameMatchingHostname { hostname: String, cert_description: String },
 
     #[error("Unsupported certificate purpose (not usable for server auth)")]

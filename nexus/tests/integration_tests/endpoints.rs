@@ -334,7 +334,8 @@ lazy_static! {
     pub static ref DEMO_CERTIFICATES_URL: String = format!("/v1/certificates");
     pub static ref DEMO_CERTIFICATE_URL: String =
         format!("/v1/certificates/demo-certificate");
-    pub static ref DEMO_CERTIFICATE: CertificateChain = CertificateChain::new();
+    pub static ref DEMO_CERTIFICATE: CertificateChain =
+        CertificateChain::new("localhost");
     pub static ref DEMO_CERTIFICATE_CREATE: params::CertificateCreate =
         params::CertificateCreate {
             identity: IdentityMetadataCreateParams {
