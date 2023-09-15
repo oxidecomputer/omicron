@@ -248,8 +248,8 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
 
         match serde_json::from_value::<DnsConfigSuccess>(details.clone()) {
             Err(error) => eprintln!(
-                "warning: failed to interpret task details: {:?}",
-                error
+                "warning: failed to interpret task details: {:?}: {:?}",
+                error, details
             ),
             Ok(found_dns_config) => println!(
                 "    last generation found: {}",
@@ -265,8 +265,8 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
 
         match serde_json::from_value::<DnsServersSuccess>(details.clone()) {
             Err(error) => eprintln!(
-                "warning: failed to interpret task details: {:?}",
-                error
+                "warning: failed to interpret task details: {:?}: {:?}",
+                error, details
             ),
             Ok(found_dns_servers) => {
                 println!(
@@ -318,8 +318,8 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
 
         match serde_json::from_value::<DnsPropSuccess>(details.clone()) {
             Err(error) => eprintln!(
-                "warning: failed to interpret task details: {:?}",
-                error
+                "warning: failed to interpret task details: {:?}: {:?}",
+                error, details
             ),
             Ok(details) => {
                 println!(
@@ -403,8 +403,8 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
 
         match serde_json::from_value::<EndpointsFound>(details.clone()) {
             Err(error) => eprintln!(
-                "warning: failed to interpret task details: {:?}",
-                error
+                "warning: failed to interpret task details: {:?}: {:?}",
+                error, details
             ),
             Ok(details) => {
                 println!(
