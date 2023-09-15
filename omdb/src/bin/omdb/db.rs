@@ -505,6 +505,8 @@ async fn cmd_db_dns_names(
     // There will almost never be more than one zone.  But just in case, we'll
     // iterate over whatever we find and print all the names in each one.
     let version = Generation::try_from(i64::from(args.version)).unwrap();
+    // XXX-dap if we give a later version, we get the latest version!  maybe
+    // fetch version first?
     for zone in group_zones {
         println!("{} zone: {}", group, zone.zone_name);
         println!("  {:50} {}", "NAME", "RECORDS");
