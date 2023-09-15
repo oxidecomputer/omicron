@@ -4279,6 +4279,7 @@ dependencies = [
  "authz-macros",
  "base64 0.21.4",
  "bb8",
+ "camino",
  "chrono",
  "cookie",
  "db-macros",
