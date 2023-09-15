@@ -54,8 +54,6 @@ pub async fn all_sql_for_version_migration<P: AsRef<Utf8Path>>(
     }
     up_sqls.sort();
 
-    eprintln!("up_sqls: {:?}", up_sqls);
-
     let mut result = vec![];
     for path in up_sqls.into_iter() {
         result.push(
