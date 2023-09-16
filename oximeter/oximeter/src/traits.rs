@@ -280,14 +280,14 @@ impl Cumulative for f64 {}
 /// A trait identifying types used as gauges
 pub trait Gauge: Datum {}
 
-macro_rules! impl_guage {
+macro_rules! impl_gauge {
     ($($type:ty,)+) => {
         $(
             impl Gauge for $type {}
         )+
     };
 }
-impl_guage! { bool, i8, u8, i16, u16, i32, u32, i64, u64, f32, f64, String, Bytes, }
+impl_gauge! { bool, i8, u8, i16, u16, i32, u32, i64, u64, f32, f64, String, Bytes, }
 
 pub use crate::histogram::HistogramSupport;
 
