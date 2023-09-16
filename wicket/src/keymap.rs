@@ -119,6 +119,9 @@ pub enum Cmd {
 
     /// Write the current snapshot to a file
     DumpSnapshot,
+
+    /// Go to the game gcreen from the Main Screen
+    GameMode,
 }
 
 /// A command to display a popup.
@@ -216,6 +219,12 @@ impl KeyHandler {
                     {
                         self.seq = None;
                         return Some(Cmd::KnightRiderMode);
+                    }
+                    KeyCode::Char('g')
+                        if event.modifiers == KeyModifiers::CONTROL =>
+                    {
+                        self.seq = None;
+                        return Some(Cmd::GameMode);
                     }
                     _ => (),
                 },

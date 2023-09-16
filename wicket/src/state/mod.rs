@@ -5,6 +5,7 @@
 //! The global state manipulated by wicket.
 
 mod force_update;
+mod game;
 mod inventory;
 mod rack;
 mod status;
@@ -22,6 +23,7 @@ pub use update::{
     UpdateRunningState,
 };
 
+pub use game::{GameState, HorizontalDirection, HorizontalPosition};
 use serde::{Deserialize, Serialize};
 use wicketd_client::types::{
     CurrentRssUserConfig, GetLocationResponse, RackOperationStatus,
@@ -43,6 +45,7 @@ pub struct State {
     pub rss_config: Option<CurrentRssUserConfig>,
     pub rack_setup_state: Result<RackOperationStatus, String>,
     pub wicketd_location: GetLocationResponse,
+    pub game_state: GameState,
 }
 
 impl State {
@@ -63,6 +66,7 @@ impl State {
                 switch_baseboard: None,
                 switch_id: None,
             },
+            game_state: GameState::new(),
         }
     }
 

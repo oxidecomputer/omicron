@@ -63,6 +63,10 @@ impl Control for MainScreen {
                     self.current_pane().on(state, cmd)
                 }
             }
+            Cmd::GameMode => {
+                // The only other screen is the `GameScreen`
+                Some(Action::SwitchScreen)
+            }
             _ => self.dispatch_cmd(state, cmd),
         }
     }

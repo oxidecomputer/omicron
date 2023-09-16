@@ -4,6 +4,7 @@
 
 mod controls;
 pub mod defaults;
+mod game;
 mod main;
 mod panes;
 mod splash;
@@ -15,6 +16,7 @@ use ratatui::prelude::Rect;
 use ratatui::widgets::ListState;
 use slog::{o, Logger};
 
+use game::GameScreen;
 use main::MainScreen;
 use splash::SplashScreen;
 
@@ -33,6 +35,7 @@ pub struct Screen {
     #[allow(unused)]
     log: slog::Logger,
     main: Option<Box<dyn Control>>,
+    game: Option<Box<dyn Control>>,
     current: Box<dyn Control>,
 }
 
@@ -40,8 +43,9 @@ impl Screen {
     pub fn new(log: &Logger) -> Screen {
         let log = log.new(o!("component" => "Screen"));
         let main = Some(Box::new(MainScreen::new(&log)) as Box<dyn Control>);
+        let game = Some(Box::new(GameScreen::new()) as Box<dyn Control>);
         let current = Box::new(SplashScreen::new()) as Box<dyn Control>;
-        Screen { log, main, current }
+        Screen { log, main, game, current }
     }
 
     /// Compute the layout of the current screen
@@ -72,8 +76,10 @@ impl Screen {
     pub fn switch(&mut self, state: &mut State) {
         if self.main.is_some() {
             self.current = self.main.take().unwrap();
-            self._resize(state);
+        } else {
+            self.current = self.game.take().unwrap();
         }
+        self._resize(state);
     }
 
     fn _resize(&mut self, state: &mut State) {

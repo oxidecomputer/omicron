@@ -2,8 +2,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! The splash [`Screen']
-//!
 //! This is the first screen the user sees
 
 use super::defaults::colors::*;
