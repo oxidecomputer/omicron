@@ -90,6 +90,7 @@ async fn cmd_nexus_background_tasks_doc(
     let response =
         client.bgtask_list().await.context("listing background tasks")?;
     let tasks = response.into_inner();
+    let tasks: BTreeMap<_, _> = tasks.into_iter().collect();
     for (_, bgtask) in &tasks {
         println!("task: {:?}", bgtask.name);
         println!(

@@ -210,7 +210,7 @@ async fn check_schema_version(datastore: &DataStore) {
         Ok(found_version) => {
             if found_version == expected_version {
                 eprintln!(
-                    "note: databaase schema version matches expected ({})",
+                    "note: database schema version matches expected ({})",
                     expected_version
                 );
                 return;
