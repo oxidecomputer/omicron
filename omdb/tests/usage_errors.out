@@ -1,4 +1,4 @@
-EXECUTING COMMAND: /home/dap/omicron-multi-crdb/target/debug/omdb []
+EXECUTING COMMAND: omdb []
 termination: Exited(2)
 ---------------------------------------------
 stdout:
@@ -17,7 +17,7 @@ Options:
       --log-level <LOG_LEVEL>  log level filter [env: LOG_LEVEL=] [default: warn]
   -h, --help                   Print help (see more with '--help')
 =============================================
-EXECUTING COMMAND: /home/dap/omicron-multi-crdb/target/debug/omdb ["--help"]
+EXECUTING COMMAND: omdb ["--help"]
 termination: Exited(0)
 ---------------------------------------------
 stdout:
@@ -44,7 +44,7 @@ Options:
 ---------------------------------------------
 stderr:
 =============================================
-EXECUTING COMMAND: /home/dap/omicron-multi-crdb/target/debug/omdb ["not-a-command"]
+EXECUTING COMMAND: omdb ["not-a-command"]
 termination: Exited(2)
 ---------------------------------------------
 stdout:
@@ -56,7 +56,7 @@ Usage: omdb [OPTIONS] <COMMAND>
 
 For more information, try '--help'.
 =============================================
-EXECUTING COMMAND: /home/dap/omicron-multi-crdb/target/debug/omdb ["--not-a-command"]
+EXECUTING COMMAND: omdb ["--not-a-command"]
 termination: Exited(2)
 ---------------------------------------------
 stdout:
@@ -68,7 +68,7 @@ Usage: omdb [OPTIONS] <COMMAND>
 
 For more information, try '--help'.
 =============================================
-EXECUTING COMMAND: /home/dap/omicron-multi-crdb/target/debug/omdb ["db"]
+EXECUTING COMMAND: omdb ["db"]
 termination: Exited(2)
 ---------------------------------------------
 stdout:
@@ -89,7 +89,7 @@ Options:
       --fetch-limit <FETCH_LIMIT>  limit to apply to queries that fetch rows [default: 100]
   -h, --help                       Print help
 =============================================
-EXECUTING COMMAND: /home/dap/omicron-multi-crdb/target/debug/omdb ["db", "--help"]
+EXECUTING COMMAND: omdb ["db", "--help"]
 termination: Exited(0)
 ---------------------------------------------
 stdout:
@@ -110,7 +110,7 @@ Options:
 ---------------------------------------------
 stderr:
 =============================================
-EXECUTING COMMAND: /home/dap/omicron-multi-crdb/target/debug/omdb ["db", "dns"]
+EXECUTING COMMAND: omdb ["db", "dns"]
 termination: Exited(2)
 ---------------------------------------------
 stdout:
@@ -129,7 +129,7 @@ Commands:
 Options:
   -h, --help  Print help
 =============================================
-EXECUTING COMMAND: /home/dap/omicron-multi-crdb/target/debug/omdb ["db", "dns", "show"]
+EXECUTING COMMAND: omdb ["db", "dns", "show"]
 termination: Exited(1)
 ---------------------------------------------
 stdout:
@@ -137,7 +137,7 @@ stdout:
 stderr:
 Error: database URL must be specified with --db-url or OMDB_DB_URL
 =============================================
-EXECUTING COMMAND: /home/dap/omicron-multi-crdb/target/debug/omdb ["db", "dns", "diff"]
+EXECUTING COMMAND: omdb ["db", "dns", "diff"]
 termination: Exited(2)
 ---------------------------------------------
 stdout:
@@ -151,7 +151,7 @@ Usage: omdb db dns diff <GROUP> <VERSION>
 
 For more information, try '--help'.
 =============================================
-EXECUTING COMMAND: /home/dap/omicron-multi-crdb/target/debug/omdb ["db", "dns", "names"]
+EXECUTING COMMAND: omdb ["db", "dns", "names"]
 termination: Exited(2)
 ---------------------------------------------
 stdout:
@@ -165,7 +165,7 @@ Usage: omdb db dns names <GROUP> <VERSION>
 
 For more information, try '--help'.
 =============================================
-EXECUTING COMMAND: /home/dap/omicron-multi-crdb/target/debug/omdb ["db", "services"]
+EXECUTING COMMAND: omdb ["db", "services"]
 termination: Exited(2)
 ---------------------------------------------
 stdout:
@@ -183,7 +183,7 @@ Commands:
 Options:
   -h, --help  Print help
 =============================================
-EXECUTING COMMAND: /home/dap/omicron-multi-crdb/target/debug/omdb ["nexus"]
+EXECUTING COMMAND: omdb ["nexus"]
 termination: Exited(2)
 ---------------------------------------------
 stdout:
@@ -201,7 +201,7 @@ Options:
       --nexus-internal-url <NEXUS_INTERNAL_URL>  URL of the Nexus internal API [env: OMDB_NEXUS_URL=]
   -h, --help                                     Print help
 =============================================
-EXECUTING COMMAND: /home/dap/omicron-multi-crdb/target/debug/omdb ["nexus", "background-tasks"]
+EXECUTING COMMAND: omdb ["nexus", "background-tasks"]
 termination: Exited(2)
 ---------------------------------------------
 stdout:

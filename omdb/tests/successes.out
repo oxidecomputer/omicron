@@ -1,4 +1,4 @@
-EXECUTING COMMAND: /home/dap/omicron-multi-crdb/target/debug/omdb ["db", "dns", "show"]
+EXECUTING COMMAND: omdb ["db", "dns", "show"]
 termination: Exited(0)
 ---------------------------------------------
 stdout:
@@ -9,7 +9,7 @@ external oxide-dev.test               2   <REDACTED_TIMESTAMP> create silo: "tes
 stderr:
 note: database schema version matches expected (4.0.0)
 =============================================
-EXECUTING COMMAND: /home/dap/omicron-multi-crdb/target/debug/omdb ["db", "dns", "diff", "external", "2"]
+EXECUTING COMMAND: omdb ["db", "dns", "diff", "external", "2"]
 termination: Exited(0)
 ---------------------------------------------
 stdout:
@@ -24,7 +24,7 @@ changes:                    names added: 1, names removed: 0
 stderr:
 note: database schema version matches expected (4.0.0)
 =============================================
-EXECUTING COMMAND: /home/dap/omicron-multi-crdb/target/debug/omdb ["db", "dns", "names", "external", "2"]
+EXECUTING COMMAND: omdb ["db", "dns", "names", "external", "2"]
 termination: Exited(0)
 ---------------------------------------------
 stdout:
@@ -35,7 +35,7 @@ External zone: oxide-dev.test
 stderr:
 note: database schema version matches expected (4.0.0)
 =============================================
-EXECUTING COMMAND: /home/dap/omicron-multi-crdb/target/debug/omdb ["db", "services", "list-instances"]
+EXECUTING COMMAND: omdb ["db", "services", "list-instances"]
 termination: Exited(0)
 ---------------------------------------------
 stdout:
@@ -50,7 +50,7 @@ Nexus          REDACTED_UUID_REDACTED_UUID_REDACTED [::ffff:127.0.0.1]:REDACTED_
 stderr:
 note: database schema version matches expected (4.0.0)
 =============================================
-EXECUTING COMMAND: /home/dap/omicron-multi-crdb/target/debug/omdb ["db", "services", "list-by-sled"]
+EXECUTING COMMAND: omdb ["db", "services", "list-by-sled"]
 termination: Exited(0)
 ---------------------------------------------
 stdout:
@@ -68,7 +68,7 @@ sled: sim-b6d65341 (id REDACTED_UUID_REDACTED_UUID_REDACTED)
 stderr:
 note: database schema version matches expected (4.0.0)
 =============================================
-EXECUTING COMMAND: /home/dap/omicron-multi-crdb/target/debug/omdb ["db", "sleds"]
+EXECUTING COMMAND: omdb ["db", "sleds"]
 termination: Exited(0)
 ---------------------------------------------
 stdout:
@@ -78,7 +78,7 @@ sim-b6d65341 [::1]:REDACTED_PORT -    REDACTED_UUID_REDACTED_UUID_REDACTED
 stderr:
 note: database schema version matches expected (4.0.0)
 =============================================
-EXECUTING COMMAND: /home/dap/omicron-multi-crdb/target/debug/omdb ["nexus", "background-tasks", "doc"]
+EXECUTING COMMAND: omdb ["nexus", "background-tasks", "doc"]
 termination: Exited(0)
 ---------------------------------------------
 stdout:
@@ -119,7 +119,7 @@ task: "external_endpoints"
 ---------------------------------------------
 stderr:
 =============================================
-EXECUTING COMMAND: /home/dap/omicron-multi-crdb/target/debug/omdb ["nexus", "background-tasks", "show"]
+EXECUTING COMMAND: omdb ["nexus", "background-tasks", "show"]
 termination: Exited(0)
 ---------------------------------------------
 stdout:

@@ -158,7 +158,7 @@ async fn do_run<F>(
     write!(
         output,
         "EXECUTING COMMAND: {} {:?}\n",
-        cmd_path.display(),
+        cmd_path.file_name().expect("missing command").to_string_lossy(),
         args.iter().map(|r| redact_variable(r)).collect::<Vec<_>>(),
     )
     .unwrap();
