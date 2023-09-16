@@ -159,7 +159,7 @@ async fn do_run<F>(
         output,
         "EXECUTING COMMAND: {} {:?}\n",
         cmd_path.display(),
-        args.iter().map(|r| redact_variable(*r)).collect::<Vec<_>>(),
+        args.iter().map(|r| redact_variable(r)).collect::<Vec<_>>(),
     )
     .unwrap();
 
