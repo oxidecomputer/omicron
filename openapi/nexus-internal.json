@@ -728,13 +728,22 @@
           "name": {
             "description": "unique identifier for this background task",
             "type": "string"
+          },
+          "period": {
+            "description": "how long after an activation completes before another will be triggered automatically\n\n(activations can also be triggered for other reasons)",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Duration"
+              }
+            ]
           }
         },
         "required": [
           "current",
           "description",
           "last",
-          "name"
+          "name",
+          "period"
         ]
       },
       "Baseboard": {

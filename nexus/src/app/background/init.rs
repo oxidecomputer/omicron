@@ -380,7 +380,7 @@ pub mod test {
                         diesel::insert_into(dsl::dns_version)
                             .values(DnsVersion {
                                 dns_group: DnsGroup::Internal,
-                                version: Generation(2.try_into().unwrap()),
+                                version: Generation(2u32.try_into().unwrap()),
                                 time_created: chrono::Utc::now(),
                                 creator: String::from("test suite"),
                                 comment: String::from("test suite"),
@@ -399,7 +399,7 @@ pub mod test {
                                 DnsName::new(
                                     internal_dns_zone_id,
                                     String::from("we-got-beets"),
-                                    Generation(2.try_into().unwrap()),
+                                    Generation(2u32.try_into().unwrap()),
                                     None,
                                     vec![nexus_params::DnsRecord::Aaaa(
                                         "fe80::3".parse().unwrap(),
