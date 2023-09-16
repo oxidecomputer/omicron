@@ -34,17 +34,17 @@ pub struct NexusArgs {
 #[derive(Debug, Subcommand)]
 enum NexusCommands {
     /// print information about background tasks
-    BackgroundTask(BackgroundTaskArgs),
+    BackgroundTasks(BackgroundTasksArgs),
 }
 
 #[derive(Debug, Args)]
-struct BackgroundTaskArgs {
+struct BackgroundTasksArgs {
     #[command(subcommand)]
-    command: BackgroundTaskCommands,
+    command: BackgroundTasksCommands,
 }
 
 #[derive(Debug, Subcommand)]
-enum BackgroundTaskCommands {
+enum BackgroundTasksCommands {
     /// Show documentation about background tasks
     Doc,
     /// Print a summary of the status of all background tasks
@@ -70,21 +70,21 @@ impl NexusArgs {
         let client = nexus_client::Client::new(nexus_url, log.clone());
 
         match &self.command {
-            NexusCommands::BackgroundTask(BackgroundTaskArgs {
-                command: BackgroundTaskCommands::Doc,
-            }) => cmd_nexus_background_task_doc(&client).await,
-            NexusCommands::BackgroundTask(BackgroundTaskArgs {
-                command: BackgroundTaskCommands::List,
-            }) => cmd_nexus_background_task_list(&client).await,
-            NexusCommands::BackgroundTask(BackgroundTaskArgs {
-                command: BackgroundTaskCommands::Show,
-            }) => cmd_nexus_background_task_show(&client).await,
+            NexusCommands::BackgroundTasks(BackgroundTasksArgs {
+                command: BackgroundTasksCommands::Doc,
+            }) => cmd_nexus_background_tasks_doc(&client).await,
+            NexusCommands::BackgroundTasks(BackgroundTasksArgs {
+                command: BackgroundTasksCommands::List,
+            }) => cmd_nexus_background_tasks_list(&client).await,
+            NexusCommands::BackgroundTasks(BackgroundTasksArgs {
+                command: BackgroundTasksCommands::Show,
+            }) => cmd_nexus_background_tasks_show(&client).await,
         }
     }
 }
 
-/// Runs `omdb nexus background-task doc`
-async fn cmd_nexus_background_task_doc(
+/// Runs `omdb nexus background-tasks doc`
+async fn cmd_nexus_background_tasks_doc(
     client: &nexus_client::Client,
 ) -> Result<(), anyhow::Error> {
     let response =
@@ -108,8 +108,8 @@ async fn cmd_nexus_background_task_doc(
     Ok(())
 }
 
-/// Runs `omdb nexus background-task list`
-async fn cmd_nexus_background_task_list(
+/// Runs `omdb nexus background-tasks list`
+async fn cmd_nexus_background_tasks_list(
     client: &nexus_client::Client,
 ) -> Result<(), anyhow::Error> {
     let response =
@@ -124,8 +124,8 @@ async fn cmd_nexus_background_task_list(
     Ok(())
 }
 
-/// Runs `omdb nexus background-task show`
-async fn cmd_nexus_background_task_show(
+/// Runs `omdb nexus background-tasks show`
+async fn cmd_nexus_background_tasks_show(
     client: &nexus_client::Client,
 ) -> Result<(), anyhow::Error> {
     let response =
