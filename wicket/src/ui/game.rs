@@ -4,11 +4,14 @@
 
 //! A screen for playing terminal based games
 
-use crate::state::game::{SpecialDelivery, Truck};
+use crate::state::game::{Rack, SpecialDelivery, Truck};
 use crate::ui::defaults::colors::*;
 use crate::{Action, Cmd, Control, Frame, State, TICK_INTERVAL};
 use ratatui::prelude::*;
 use ratatui::widgets::Widget;
+
+// How fall a rack accelerates  in cells/ms^2
+const GRAVITY: f32 = 0.000_01;
 
 /// A screen for games
 ///
@@ -25,11 +28,13 @@ impl GameScreen {
     }
 
     pub fn update(&mut self, state: &mut SpecialDelivery) {
-        state.now_ms += u64::try_from(TICK_INTERVAL.as_millis()).unwrap();
+        let travel_time_ms = u64::try_from(TICK_INTERVAL.as_millis()).unwrap();
+        state.now_ms += travel_time_ms;
         if state.trucks.is_empty() {
             state.trucks.push(Truck::new(5, 10.0, state.now_ms));
         }
         self.compute_truck_positions(state);
+        self.computer_rack_positions(state, travel_time_ms);
     }
 
     fn compute_truck_positions(&self, state: &mut SpecialDelivery) {
@@ -38,6 +43,30 @@ impl GameScreen {
             truck.position =
                 (travel_time_ms as f32 * truck.speed).round() as u16;
             if truck.position + truck.bed_width > state.rect.width {
+                false
+            } else {
+                true
+            }
+        });
+    }
+
+    fn computer_rack_positions(
+        &self,
+        state: &mut SpecialDelivery,
+        travel_time_ms: u64,
+    ) {
+        state.racks.retain_mut(|rack| {
+            // Perform some lightweight numerical integration
+            // First we find our velocity change over the given travel time If
+            // you want to pretend this is calculus, just pretend the interval
+            // is infinitely small. Then we calculate the change in position
+            // during the travel time using the new velocity. Then, we see if
+            // the position advanced enough make it to the next cell.
+            let delta = travel_time_ms as f32 * GRAVITY;
+            rack.velocity += delta;
+            rack.vertical_pos += rack.velocity * travel_time_ms as f32;
+            rack.rect.y = rack.vertical_pos.round() as u16;
+            if rack.rect.y >= state.rect.height {
                 false
             } else {
                 true
@@ -58,6 +87,21 @@ impl Control for GameScreen {
             Cmd::Right => {
                 state.dropper_pos =
                     u16::min(state.dropper_pos + 1, state.rect.width - 2);
+            }
+            Cmd::GotoLeft => state.dropper_pos = 1,
+            Cmd::GotoRight => state.dropper_pos = state.rect.width - 2,
+            Cmd::GotoCenter => state.dropper_pos = state.rect.width / 2,
+            Cmd::Toggle => {
+                if state.racks_remaining > 0 {
+                    let mut rect = state.rect;
+                    rect.y = 1;
+                    rect.x = state.dropper_pos - 1;
+                    rect.height = 2;
+                    rect.width = 3;
+                    state.racks.push(Rack::new(rect));
+                    state.racks_remaining =
+                        state.racks_remaining.saturating_sub(1);
+                }
             }
             _ => return None,
         }
@@ -97,6 +141,13 @@ impl Control for GameScreen {
             rack_rect.y += 1;
             rack_rect.x -= 1;
             frame.render_widget(RackWidget {}, rack_rect);
+        }
+
+        // Draw the falling racks
+        for rack in &state.racks {
+            if rack.rect.y < rect.height - 1 {
+                frame.render_widget(RackWidget {}, rack.rect);
+            }
         }
     }
 

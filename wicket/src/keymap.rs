@@ -95,6 +95,15 @@ pub enum Cmd {
     /// Goto bottom of list/screen/etc...
     GotoBottom,
 
+    /// Goto left side of screen
+    GotoLeft,
+
+    /// Goto rigth side of screen
+    GotoRight,
+
+    /// Goto the center of the current row
+    GotoCenter,
+
     /// Decline
     No,
 
@@ -192,6 +201,18 @@ impl KeyHandler {
                     KeyCode::Char('e') => {
                         self.seq = None;
                         return Some(Cmd::GotoBottom);
+                    }
+                    KeyCode::Char('h') => {
+                        self.seq = None;
+                        return Some(Cmd::GotoLeft);
+                    }
+                    KeyCode::Char('l') => {
+                        self.seq = None;
+                        return Some(Cmd::GotoRight);
+                    }
+                    KeyCode::Char('m') => {
+                        self.seq = None;
+                        return Some(Cmd::GotoCenter);
                     }
                     _ => (),
                 },

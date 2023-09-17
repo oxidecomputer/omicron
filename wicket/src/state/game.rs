@@ -83,5 +83,13 @@ impl Truck {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Rack {
-    rect: Rect,
+    pub rect: Rect,
+    pub vertical_pos: f32,
+    pub velocity: f32,
+}
+
+impl Rack {
+    pub fn new(rect: Rect) -> Rack {
+        Rack { rect, velocity: 0.0, vertical_pos: 1.0 }
+    }
 }
