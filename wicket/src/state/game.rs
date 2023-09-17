@@ -64,7 +64,7 @@ pub enum HorizontalDirection {
 pub struct Truck {
     // position of front bumper = travel_time_ms * speed
     pub position: u16,
-    pub travel_time_ms: u32,
+    pub creation_time_ms: u64,
     pub bed_width: u16,
     pub speed: f32, // cells/ms
 }
@@ -72,9 +72,13 @@ pub struct Truck {
 impl Truck {
     // All trucks start with the front bumper visible from the left side of
     // the screen.
-    pub fn new(bed_width: u16, cells_per_sec: f32) -> Truck {
+    pub fn new(
+        bed_width: u16,
+        cells_per_sec: f32,
+        creation_time_ms: u64,
+    ) -> Truck {
         let speed = cells_per_sec / 1000.0;
-        Truck { position: 0, travel_time_ms: 0, speed, bed_width }
+        Truck { position: 0, creation_time_ms, speed, bed_width }
     }
 }
 

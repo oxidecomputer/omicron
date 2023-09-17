@@ -27,15 +27,16 @@ impl GameScreen {
     pub fn update(&mut self, state: &mut SpecialDelivery) {
         state.now_ms += u64::try_from(TICK_INTERVAL.as_millis()).unwrap();
         if state.trucks.is_empty() {
-            state.trucks.push(Truck::new(5, 3.0));
+            state.trucks.push(Truck::new(5, 10.0, state.now_ms));
         }
         self.compute_truck_positions(state);
     }
 
     fn compute_truck_positions(&mut self, state: &mut SpecialDelivery) {
         state.trucks.retain_mut(|truck| {
+            let travel_time_ms = state.now_ms - truck.creation_time_ms;
             truck.position =
-                (truck.travel_time_ms as f32 * truck.speed).ceil() as u16;
+                (travel_time_ms as f32 * truck.speed).round() as u16;
             if truck.position + truck.bed_width > state.rect.width {
                 false
             } else {
@@ -103,17 +104,17 @@ impl Widget for TruckWidget {
             buf.get_mut(1, 0).set_symbol(" ").set_bg(TUI_BLACK);
             buf.get_mut(1, 1).set_symbol(" ").set_bg(TUI_BLACK);
         */
-        // Draw the bed
+        // Draw the bed and wheels
         for i in 0..self.bed_width {
-            let x = rect.x + i;
-            buf.get_mut(x, rect.y).set_symbol(" ").set_bg(Color::White);
+            if self.position > i && (self.position + i) < rect.width {
+                let x = self.position - i;
+                buf.get_mut(x, rect.y).set_symbol(" ").set_bg(Color::White);
+                buf.get_mut(x, rect.y + 1).set_symbol("◎");
+            }
         }
         // Draw the front bumper
-        buf.get_mut(self.bed_width, rect.y).set_symbol("⬤");
-
-        // Draw the wheels
-        for i in 0..self.bed_width {
-            buf.get_mut(i, rect.y + 1).set_symbol("◎");
+        if self.position < rect.width {
+            buf.get_mut(self.position, rect.y).set_symbol("⬤");
         }
     }
 }
