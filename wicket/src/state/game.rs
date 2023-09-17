@@ -9,7 +9,6 @@
 
 use ratatui::prelude::Rect;
 use serde::{Deserialize, Serialize};
-use std::time::{Duration, Instant};
 
 /// The state of our [`crate::ui::game::GameScreen`]
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -32,7 +32,7 @@ impl GameScreen {
         self.compute_truck_positions(state);
     }
 
-    fn compute_truck_positions(&mut self, state: &mut SpecialDelivery) {
+    fn compute_truck_positions(&self, state: &mut SpecialDelivery) {
         state.trucks.retain_mut(|truck| {
             let travel_time_ms = state.now_ms - truck.creation_time_ms;
             truck.position =
@@ -49,9 +49,19 @@ impl GameScreen {
 impl Control for GameScreen {
     fn on(&mut self, state: &mut State, cmd: Cmd) -> Option<Action> {
         // Just one truck for now
-        if Cmd::Tick == cmd {
-            self.update(&mut state.game_state.delivery);
+        let state = &mut state.game_state.delivery;
+        match cmd {
+            Cmd::Tick => self.update(state),
+            Cmd::Left => {
+                state.dropper_pos = u16::max(state.dropper_pos - 1, 1);
+            }
+            Cmd::Right => {
+                state.dropper_pos =
+                    u16::min(state.dropper_pos + 1, state.rect.width - 2);
+            }
+            _ => return None,
         }
+
         Some(Action::Redraw)
     }
 
@@ -59,17 +69,34 @@ impl Control for GameScreen {
         &mut self,
         state: &State,
         frame: &mut Frame<'_>,
-        _: Rect,
+        rect: Rect,
         _active: bool,
     ) {
-        for truck in &state.game_state.delivery.trucks {
+        let state = &state.game_state.delivery;
+
+        // Draw the trucks
+        for truck in &state.trucks {
             let truck_widget = TruckWidget {
                 position: truck.position,
                 bed_width: truck.bed_width,
             };
-            let mut road_rect = frame.size();
+            let mut road_rect = rect;
             road_rect.y = road_rect.height - 2;
             frame.render_widget(truck_widget, road_rect);
+        }
+
+        // Draw the dropper
+        let mut dropper_rect = rect;
+        dropper_rect.y = 0;
+        dropper_rect.x = state.dropper_pos;
+        frame.render_widget(DropperWidget {}, dropper_rect);
+
+        // Draw the rack attached to the dropper if there are racks remaining
+        if state.racks_remaining > 0 {
+            let mut rack_rect = dropper_rect;
+            rack_rect.y += 1;
+            rack_rect.x -= 1;
+            frame.render_widget(RackWidget {}, rack_rect);
         }
     }
 
@@ -83,27 +110,13 @@ impl Control for GameScreen {
     }
 }
 
-pub struct TruckWidget {
+struct TruckWidget {
     position: u16,
     bed_width: u16,
 }
 
 impl Widget for TruckWidget {
     fn render(self, rect: Rect, buf: &mut Buffer) {
-        // Draw the middle of the truck
-        /*buf.get_mut(2, 0)
-            .set_symbol(RACK_TOP)
-            .set_fg(TUI_GREEN)
-            .set_bg(TUI_BLACK);
-        buf.get_mut(2, 1)
-            .set_symbol(RACK_BOTTOM)
-            .set_fg(TUI_GREEN)
-            .set_bg(TUI_BLACK);
-            buf.get_mut(3, 0).set_symbol(" ").set_bg(TUI_BLACK);
-            buf.get_mut(3, 1).set_symbol(" ").set_bg(TUI_BLACK);
-            buf.get_mut(1, 0).set_symbol(" ").set_bg(TUI_BLACK);
-            buf.get_mut(1, 1).set_symbol(" ").set_bg(TUI_BLACK);
-        */
         // Draw the bed and wheels
         for i in 0..self.bed_width {
             if self.position > i && (self.position + i) < rect.width {
@@ -121,3 +134,29 @@ impl Widget for TruckWidget {
 
 const RACK_TOP: &str = "☳";
 const RACK_BOTTOM: &str = "☶";
+struct RackWidget {}
+
+impl Widget for RackWidget {
+    fn render(self, rect: Rect, buf: &mut Buffer) {
+        buf.get_mut(rect.x + 1, rect.y)
+            .set_symbol(RACK_TOP)
+            .set_fg(TUI_GREEN)
+            .set_bg(TUI_BLACK);
+        buf.get_mut(rect.x + 1, rect.y + 1)
+            .set_symbol(RACK_BOTTOM)
+            .set_fg(TUI_GREEN)
+            .set_bg(TUI_BLACK);
+        buf.get_mut(rect.x + 2, rect.y).set_symbol(" ").set_bg(TUI_BLACK);
+        buf.get_mut(rect.x + 2, rect.y + 1).set_symbol(" ").set_bg(TUI_BLACK);
+        buf.get_mut(rect.x, rect.y).set_symbol(" ").set_bg(TUI_BLACK);
+        buf.get_mut(rect.x, rect.y + 1).set_symbol(" ").set_bg(TUI_BLACK);
+    }
+}
+
+struct DropperWidget {}
+
+impl Widget for DropperWidget {
+    fn render(self, rect: Rect, buf: &mut Buffer) {
+        buf.get_mut(rect.x, rect.y).set_symbol("⬇").set_fg(TUI_PURPLE);
+    }
+}
