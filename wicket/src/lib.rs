@@ -18,7 +18,7 @@ mod ui;
 mod upload;
 mod wicketd;
 
-pub const TICK_INTERVAL: Duration = Duration::from_millis(30);
+pub const TICK_INTERVAL: Duration = Duration::from_millis(25);
 
 pub use crate::dispatch::*;
 pub use crate::runner::*;

@@ -5,13 +5,14 @@
 //! The global state manipulated by wicket.
 
 mod force_update;
-mod game;
+pub(crate) mod game;
 mod inventory;
 mod rack;
 mod status;
 mod update;
 
 pub use force_update::ForceUpdateState;
+pub use game::GameState;
 pub use inventory::{
     Component, ComponentId, Inventory, ParsableComponentId, PowerState, Sp,
     ALL_COMPONENT_IDS,
@@ -23,7 +24,6 @@ pub use update::{
     UpdateRunningState,
 };
 
-pub use game::{GameState, HorizontalDirection, HorizontalPosition};
 use serde::{Deserialize, Serialize};
 use wicketd_client::types::{
     CurrentRssUserConfig, GetLocationResponse, RackOperationStatus,

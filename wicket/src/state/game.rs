@@ -9,11 +9,12 @@
 
 use ratatui::prelude::Rect;
 use serde::{Deserialize, Serialize};
+use std::time::{Duration, Instant};
 
 /// The state of our [`crate::ui::game::GameScreen`]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GameState {
-    delivery: SpecialDelivery,
+    pub delivery: SpecialDelivery,
 }
 
 impl GameState {
@@ -22,26 +23,34 @@ impl GameState {
     }
 }
 
+///
 /// The state for the game "Special Delivery"
+///
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SpecialDelivery {}
+pub struct SpecialDelivery {
+    // Time from the start of the game in ms
+    pub now_ms: u64,
+    pub rect: Rect,
+    pub racks_remaining: u32,
+    pub racks_delivered: u32,
+    pub trucks: Vec<Truck>,
+    pub racks: Vec<Rack>,
+    // The user controlled position of the rack to be dropped
+    pub dropper_pos: u16,
+}
 
 impl SpecialDelivery {
     fn new() -> SpecialDelivery {
-        SpecialDelivery {}
+        SpecialDelivery {
+            now_ms: 0,
+            rect: Rect::default(),
+            racks_remaining: 10,
+            racks_delivered: 0,
+            trucks: Vec::new(),
+            racks: Vec::new(),
+            dropper_pos: 0,
+        }
     }
-}
-
-/// The horizontal position of an entity on the grid in characters
-///
-/// Since entities may take multiple characters to draw, we must represent their
-/// positions to allow negatives, with a negative left position meaning shifted
-/// that amount of characters off screen. However, the width of the object takes
-/// up space so it can never be negative.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct HorizontalPosition {
-    pub left: i16,
-    pub width: u16,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -50,34 +59,26 @@ pub enum HorizontalDirection {
     Right,
 }
 
+// Truck position of front bumper = travel_time_ms * (speed / 1000)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Truck {
-    position: HorizontalPosition,
-    direction: HorizontalDirection,
-    speed: u16, // meters/second
-    bed_width: u16,
+    // position of front bumper = travel_time_ms * speed
+    pub position: u16,
+    pub travel_time_ms: u32,
+    pub bed_width: u16,
+    pub speed: f32, // cells/ms
 }
 
-//
-// Dimensions are in meters so that we can do physics pretending to be in the
-// real world. We'll convert these dimensions back into characters on the grid
-// for rendering.
-//
-const RACK_HEIGHT: f32 = 3.0;
-const RACK_WIDTH: f32 = 1.0;
-
-const CHAR_HEIGHT: f32 = RACK_HEIGHT;
-const CHAR_WIDTH: f32 = RACK_WIDTH;
-
-// The dimensions of the world in meters
-pub struct World {
-    width: f32,
-    height: f32,
-}
-
-impl World {
-    fn resize(&mut self, width: u16, height: u16) {
-        self.width = width as f32 * CHAR_WIDTH;
-        self.height = height as f32 * CHAR_HEIGHT;
+impl Truck {
+    // All trucks start with the front bumper visible from the left side of
+    // the screen.
+    pub fn new(bed_width: u16, cells_per_sec: f32) -> Truck {
+        let speed = cells_per_sec / 1000.0;
+        Truck { position: 0, travel_time_ms: 0, speed, bed_width }
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Rack {
+    rect: Rect,
 }
