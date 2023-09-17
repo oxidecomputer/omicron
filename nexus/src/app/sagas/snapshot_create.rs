@@ -100,12 +100,11 @@ use super::{
 };
 use crate::app::sagas::declare_saga_actions;
 use crate::app::sagas::retry_until_known_result;
+use crate::app::{authn, authz, db};
 use crate::external_api::params;
-use crate::{authn, authz, db};
 use anyhow::anyhow;
 use crucible_agent_client::{types::RegionId, Client as CrucibleAgentClient};
 use nexus_db_model::Generation;
-use nexus_db_queries::db::datastore::RegionAllocationStrategy;
 use nexus_db_queries::db::identity::{Asset, Resource};
 use nexus_db_queries::db::lookup::LookupPath;
 use omicron_common::api::external;

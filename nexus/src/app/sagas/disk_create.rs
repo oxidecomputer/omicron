@@ -12,11 +12,10 @@ use super::{
     ACTION_GENERATE_ID,
 };
 use crate::app::sagas::declare_saga_actions;
+use crate::app::{authn, authz, db};
 use crate::external_api::params;
-use nexus_db_queries::db::datastore::RegionAllocationStrategy;
 use nexus_db_queries::db::identity::{Asset, Resource};
 use nexus_db_queries::db::lookup::LookupPath;
-use crate::{authn, authz, db};
 use omicron_common::api::external::DiskState;
 use omicron_common::api::external::Error;
 use rand::{rngs::StdRng, RngCore, SeedableRng};
