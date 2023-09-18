@@ -43,7 +43,7 @@ impl Screen {
     pub fn new(log: &Logger) -> Screen {
         let log = log.new(o!("component" => "Screen"));
         let main = Some(Box::new(MainScreen::new(&log)) as Box<dyn Control>);
-        let game = Some(Box::new(GameScreen::new()) as Box<dyn Control>);
+        let game = Some(Box::new(GameScreen::new(&log)) as Box<dyn Control>);
         let current = Box::new(SplashScreen::new()) as Box<dyn Control>;
         Screen { log, main, game, current }
     }

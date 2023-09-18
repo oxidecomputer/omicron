@@ -8,33 +8,81 @@ use crate::state::game::{Rack, SpecialDelivery, Truck};
 use crate::ui::defaults::colors::*;
 use crate::{Action, Cmd, Control, Frame, State, TICK_INTERVAL};
 use ratatui::prelude::*;
-use ratatui::widgets::Widget;
+use ratatui::text::{Line, Span};
+use ratatui::widgets::{Block, Paragraph, Widget};
+use slog::{debug, o, Logger};
 
-// How fall a rack accelerates  in cells/ms^2
-const GRAVITY: f32 = 0.000_01;
+// How much a rack accelerates while falling in cells/ms^2
+const GRAVITY: f32 = 0.000_02;
+
+// The minimum distance that a truck can ever become to the truck in front of
+// it. We calculate the closest a truck can come to the truck in front of it
+// before we  spawn a truck, so that we can ensure they never crash into each
+// other.
+const MIN_DIST_BETWEEN_TRUCKS: u16 = 20;
+
+const MIN_TRUCK_SPEED: f32 = 10.0;
+const MAX_TRUCK_SPEED: f32 = 30.0;
 
 /// A screen for games
 ///
 /// This screen is separate from the [`crate::ui::main::MainScreen`] because we
 /// want games to be full screen and have as much real estate as possible.
 pub struct GameScreen {
+    #[allow(unused)]
+    log: Logger,
     // Whether the screen has been resized initially.
     initialized: bool,
 }
 
 impl GameScreen {
-    pub fn new() -> GameScreen {
-        GameScreen { initialized: false }
+    pub fn new(log: &Logger) -> GameScreen {
+        let log = log.new(o!("component" => "GameScreen"));
+        GameScreen { log, initialized: false }
     }
 
     pub fn update(&mut self, state: &mut SpecialDelivery) {
         let travel_time_ms = u64::try_from(TICK_INTERVAL.as_millis()).unwrap();
         state.now_ms += travel_time_ms;
-        if state.trucks.is_empty() {
-            state.trucks.push(Truck::new(5, 10.0, state.now_ms));
+        // TODO: Should we inject randomness in the event loop? This makes
+        // the games non-deterministic and inhibits the replay debugger.
+        let rand_speed = rand::random::<f32>()
+            * (MAX_TRUCK_SPEED - MIN_TRUCK_SPEED)
+            + MIN_TRUCK_SPEED;
+        if self.can_spawn_truck(state, rand_speed) {
+            state.trucks.push(Truck::new(5, rand_speed, state.now_ms));
+        } else {
         }
         self.compute_truck_positions(state);
         self.computer_rack_positions(state, travel_time_ms);
+    }
+
+    // Calculate when the tail of the last truck reaches `state.rect.width
+    // - MIN_DIST_BETWEEN_TRUCKS` and when the front bumper of a new truck
+    // driving at `speed` reaches `state.rect.width`. If the new truck reaches
+    // first, we can't spawn it.
+    fn can_spawn_truck(&self, state: &SpecialDelivery, speed: f32) -> bool {
+        let time_for_new_truck = (state.rect.width as f32 / speed) * 1000.0;
+        state.trucks.last().map_or(true, |truck| {
+            let dist_to_end = state.rect.width + MIN_DIST_BETWEEN_TRUCKS
+                - truck.position
+                + truck.bed_width;
+            // Stored speed is in cells/ms, but we pass in cells/s as that makes
+            // more sense to a human.
+            let time_for_last_truck = dist_to_end as f32 / (truck.speed);
+            debug!(
+                self.log,
+                "dist_to_end = {}, rect width = {}",
+                dist_to_end,
+                state.rect.width
+            );
+            debug!(self.log, "{} {}", time_for_last_truck, time_for_new_truck);
+            let maintains_distance = time_for_last_truck < time_for_new_truck
+                && truck.position > MIN_DIST_BETWEEN_TRUCKS + truck.bed_width;
+
+            // Only spawn 10% of the attempts
+            maintains_distance && rand::random::<f32>() < 0.1
+        })
     }
 
     fn compute_truck_positions(&self, state: &mut SpecialDelivery) {
@@ -149,6 +197,27 @@ impl Control for GameScreen {
                 frame.render_widget(RackWidget {}, rack.rect);
             }
         }
+
+        // Draw the scoreboard
+        let line = Line::styled(
+            format!("Racks Remaining: {}", state.racks_remaining),
+            Style::default().fg(OX_RED),
+        );
+        let mut remaining_rect = rect;
+        remaining_rect.x = 2;
+        remaining_rect.width = line.width() as u16;
+        let remaining = Paragraph::new(line);
+        frame.render_widget(remaining, remaining_rect);
+
+        let line = Line::styled(
+            format!("Racks Delivered: {}", state.racks_delivered),
+            Style::default().fg(TUI_GREEN),
+        );
+        let mut delivered_rect = rect;
+        delivered_rect.x = rect.width - line.width() as u16 - 2;
+        delivered_rect.width = line.width() as u16;
+        let delivered = Paragraph::new(line);
+        frame.render_widget(delivered, delivered_rect);
     }
 
     fn resize(&mut self, state: &mut State, rect: Rect) {
@@ -178,7 +247,7 @@ impl Widget for TruckWidget {
         }
         // Draw the front bumper
         if self.position < rect.width {
-            buf.get_mut(self.position, rect.y).set_symbol("⬤");
+            buf.get_mut(self.position + 1, rect.y).set_symbol("⬤");
         }
     }
 }

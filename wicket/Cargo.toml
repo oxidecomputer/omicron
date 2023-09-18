@@ -24,6 +24,7 @@ once_cell.workspace = true
 owo-colors.workspace = true
 ratatui.workspace = true
 reqwest.workspace = true
+rand.workspace = true
 rpassword.workspace = true
 semver.workspace = true
 serde.workspace = true
