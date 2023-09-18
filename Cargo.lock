@@ -1030,9 +1030,9 @@ dependencies = [
 
 [[package]]
 name = "clap"
-version = "4.4.2"
+version = "4.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6a13b88d2c62ff462f88e4a121f17a82c1af05693a2f192b5c38d14de73c19f6"
+checksum = "84ed82781cea27b43c9b106a979fe450a13a31aab0500595fb3fc06616de08e6"
 dependencies = [
  "clap_builder",
  "clap_derive 4.4.2",
@@ -1245,7 +1245,7 @@ dependencies = [
  "anes",
  "cast",
  "ciborium",
- "clap 4.4.2",
+ "clap 4.4.3",
  "criterion-plot",
  "futures",
  "is-terminal",
@@ -1989,7 +1989,7 @@ dependencies = [
  "anyhow",
  "camino",
  "chrono",
- "clap 4.4.2",
+ "clap 4.4.3",
  "dns-service-client 0.1.0",
  "dropshot",
  "expectorate",
@@ -2698,7 +2698,7 @@ name = "gateway-cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "clap 4.4.2",
+ "clap 4.4.3",
  "futures",
  "gateway-client",
  "gateway-messages",
@@ -3458,7 +3458,7 @@ dependencies = [
  "bytes",
  "camino",
  "cancel-safe-futures",
- "clap 4.4.2",
+ "clap 4.4.3",
  "ddm-admin-client",
  "display-error-chain",
  "futures",
@@ -3520,7 +3520,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "camino",
- "clap 4.4.2",
+ "clap 4.4.3",
  "dropshot",
  "expectorate",
  "hyper",
@@ -3616,7 +3616,7 @@ name = "internal-dns-cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "clap 4.4.2",
+ "clap 4.4.3",
  "dropshot",
  "internal-dns 0.1.0",
  "omicron-common 0.1.0",
@@ -3972,7 +3972,7 @@ version = "0.2.4"
 source = "git+https://github.com/oxidecomputer/lpc55_support#4051a3b9421573dc36ed6098b292a7609a3cf98b"
 dependencies = [
  "bitfield",
- "clap 4.4.2",
+ "clap 4.4.3",
  "packed_struct",
  "serde",
 ]
@@ -4850,7 +4850,7 @@ name = "omicron-deploy"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "clap 4.4.2",
+ "clap 4.4.3",
  "crossbeam",
  "omicron-package",
  "serde",
@@ -4866,7 +4866,7 @@ dependencies = [
  "anyhow",
  "camino",
  "camino-tempfile",
- "clap 4.4.2",
+ "clap 4.4.3",
  "dropshot",
  "expectorate",
  "futures",
@@ -4897,7 +4897,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "ciborium",
- "clap 4.4.2",
+ "clap 4.4.3",
  "crucible-smf",
  "dropshot",
  "expectorate",
@@ -4946,7 +4946,7 @@ dependencies = [
  "camino",
  "cancel-safe-futures",
  "chrono",
- "clap 4.4.2",
+ "clap 4.4.3",
  "cookie",
  "criterion",
  "crucible-agent-client",
@@ -5051,7 +5051,7 @@ dependencies = [
  "anyhow",
  "async-bb8-diesel",
  "chrono",
- "clap 4.4.2",
+ "clap 4.4.3",
  "diesel",
  "dropshot",
  "humantime",
@@ -5077,7 +5077,7 @@ name = "omicron-package"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "clap 4.4.2",
+ "clap 4.4.3",
  "expectorate",
  "futures",
  "hex",
@@ -5155,7 +5155,7 @@ dependencies = [
  "cancel-safe-futures",
  "cfg-if 1.0.0",
  "chrono",
- "clap 4.4.2",
+ "clap 4.4.3",
  "crucible-agent-client",
  "crucible-client-types",
  "ddm-admin-client",
@@ -5532,7 +5532,7 @@ dependencies = [
 name = "oximeter-collector"
 version = "0.1.0"
 dependencies = [
- "clap 4.4.2",
+ "clap 4.4.3",
  "dropshot",
  "expectorate",
  "futures",
@@ -5564,7 +5564,7 @@ dependencies = [
  "async-trait",
  "bytes",
  "chrono",
- "clap 4.4.2",
+ "clap 4.4.3",
  "dropshot",
  "itertools 0.11.0",
  "omicron-test-utils",
@@ -6422,7 +6422,7 @@ dependencies = [
  "bytes",
  "cfg-if 1.0.0",
  "chrono",
- "clap 4.4.2",
+ "clap 4.4.3",
  "const_format",
  "crucible-client-types",
  "dropshot",
@@ -8122,7 +8122,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
- "clap 4.4.2",
+ "clap 4.4.3",
  "dropshot",
  "futures",
  "gateway-messages",
@@ -9094,7 +9094,7 @@ dependencies = [
  "assert_cmd",
  "camino",
  "chrono",
- "clap 4.4.2",
+ "clap 4.4.3",
  "console",
  "datatest-stable",
  "fs-err",
@@ -9722,7 +9722,7 @@ dependencies = [
  "buf-list",
  "camino",
  "ciborium",
- "clap 4.4.2",
+ "clap 4.4.3",
  "crossterm 0.26.1",
  "futures",
  "hex",
@@ -9782,7 +9782,7 @@ dependencies = [
  "bytes",
  "camino",
  "ciborium",
- "clap 4.4.2",
+ "clap 4.4.3",
  "crossterm 0.26.1",
  "ratatui",
  "reedline",
@@ -9805,7 +9805,7 @@ dependencies = [
  "bytes",
  "camino",
  "camino-tempfile",
- "clap 4.4.2",
+ "clap 4.4.3",
  "ddm-admin-client",
  "debug-ignore",
  "display-error-chain",
@@ -10115,7 +10115,7 @@ dependencies = [
  "camino",
  "cargo_metadata",
  "cargo_toml",
- "clap 4.4.2",
+ "clap 4.4.3",
 ]
 
 [[package]]
