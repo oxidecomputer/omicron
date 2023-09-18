@@ -10,6 +10,7 @@
 use crate::integration_tests::unauthorized::HTTP_SERVER;
 use chrono::Utc;
 use http::method::Method;
+use internal_dns::names::DNS_ZONE_EXTERNAL_TESTING;
 use lazy_static::lazy_static;
 use nexus_db_queries::authn;
 use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
@@ -335,7 +336,7 @@ lazy_static! {
     pub static ref DEMO_CERTIFICATE_URL: String =
         format!("/v1/certificates/demo-certificate");
     pub static ref DEMO_CERTIFICATE: CertificateChain =
-        CertificateChain::new("localhost");
+        CertificateChain::new(format!("*.sys.{DNS_ZONE_EXTERNAL_TESTING}"));
     pub static ref DEMO_CERTIFICATE_CREATE: params::CertificateCreate =
         params::CertificateCreate {
             identity: IdentityMetadataCreateParams {
