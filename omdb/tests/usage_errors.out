@@ -23,7 +23,8 @@ termination: Exited(0)
 stdout:
 Omicron debugger (unstable)
 
-This tool provides commands for directly querying Omicron components about their internal state using internal APIs.  This is a prototype.  The commands and output are unstable and may change.
+This tool provides commands for directly querying Omicron components about their internal state
+using internal APIs.  This is a prototype.  The commands and output are unstable and may change.
 
 Usage: omdb [OPTIONS] <COMMAND>
 
@@ -198,7 +199,8 @@ Commands:
   help              Print this message or the help of the given subcommand(s)
 
 Options:
-      --nexus-internal-url <NEXUS_INTERNAL_URL>  URL of the Nexus internal API [env: OMDB_NEXUS_URL=]
+      --nexus-internal-url <NEXUS_INTERNAL_URL>  URL of the Nexus internal API [env:
+                                                 OMDB_NEXUS_URL=]
   -h, --help                                     Print help
 =============================================
 EXECUTING COMMAND: omdb ["nexus", "background-tasks"]
