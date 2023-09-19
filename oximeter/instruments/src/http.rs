@@ -71,8 +71,8 @@ impl RequestLatencyHistogram {
     pub fn with_latency_decades(
         request: &RequestInfo,
         status_code: StatusCode,
-        start_decade: i8,
-        end_decade: i8,
+        start_decade: i16,
+        end_decade: i16,
     ) -> Result<Self, MetricsError> {
         Ok(Self::new(
             request,
@@ -124,8 +124,8 @@ impl LatencyTracker {
     /// arguments.
     pub fn with_latency_decades(
         service: HttpService,
-        start_decade: i8,
-        end_decade: i8,
+        start_decade: i16,
+        end_decade: i16,
     ) -> Result<Self, MetricsError> {
         Ok(Self::new(
             service,
