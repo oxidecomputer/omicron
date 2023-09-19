@@ -174,7 +174,11 @@ async fn do_run<F>(
     let owned_args: Vec<_> = args.into_iter().map(|s| s.to_string()).collect();
     let (exit_status, stdout_text, stderr_text) =
         tokio::task::spawn_blocking(move || {
-            let exec = modexec(Exec::cmd(cmd_path).args(&owned_args));
+            let exec = modexec(
+                Exec::cmd(cmd_path)
+                    .env("OMDB_TEST_WIDTH", "1")
+                    .args(&owned_args),
+            );
             run_command(exec)
         })
         .await
