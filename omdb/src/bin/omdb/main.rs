@@ -20,8 +20,6 @@
 //!    much as they can!)
 
 use anyhow::Context;
-use clap::CommandFactory;
-use clap::FromArgMatches;
 use clap::Parser;
 use clap::Subcommand;
 
@@ -30,15 +28,7 @@ mod nexus;
 
 #[tokio::main]
 async fn main() -> Result<(), anyhow::Error> {
-    let mut cmd = Omdb::command();
-    // This is pretty cheesy, but appears the easiest way to get the automated
-    // tests to use a consistent terminal width.
-    if let Ok(width_override) = std::env::var("OMDB_TEST_WIDTH") {
-        if width_override.to_lowercase() == "1" {
-            cmd = cmd.max_term_width(80)
-        }
-    }
-    let args = Omdb::from_arg_matches(&cmd.get_matches()).context("omdb")?;
+    let args = Omdb::parse();
 
     let log = dropshot::ConfigLogging::StderrTerminal { level: args.log_level }
         .to_logger("omdb")
