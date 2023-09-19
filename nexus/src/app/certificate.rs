@@ -4,7 +4,6 @@
 
 //! x.509 Certificates
 
-use super::silo::silo_dns_name;
 use crate::external_api::params;
 use crate::external_api::shared;
 use nexus_db_queries::authz;
@@ -14,7 +13,6 @@ use nexus_db_queries::db::lookup;
 use nexus_db_queries::db::lookup::LookupPath;
 use nexus_db_queries::db::model::Name;
 use nexus_db_queries::db::model::ServiceKind;
-use nexus_types::identity::Resource;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DeleteResult;
@@ -76,25 +74,6 @@ impl super::Nexus {
                 Ok(cert)
             }
         }
-    }
-
-    async fn silo_fq_dns_names(
-        &self,
-        opctx: &OpContext,
-        silo_id: Uuid,
-    ) -> ListResultVec<String> {
-        let (_, silo) =
-            self.silo_lookup(opctx, silo_id.into())?.fetch().await?;
-        let silo_dns_name = silo_dns_name(&silo.name());
-        let external_dns_zones = self
-            .db_datastore
-            .dns_zones_list_all(opctx, nexus_db_model::DnsGroup::External)
-            .await?;
-
-        Ok(external_dns_zones
-            .into_iter()
-            .map(|zone| format!("{silo_dns_name}.{}", zone.zone_name))
-            .collect())
     }
 
     pub(crate) async fn certificates_list(

@@ -39,7 +39,7 @@ pub enum CertificateError {
     #[error("Error validating certificate hostname")]
     ErrorValidatingHostname(#[source] openssl::error::ErrorStack),
 
-    #[error("Certificate not valid for {hostname:?}: {cert_description}")]
+    #[error("Certificate not valid for given hostnames {hostname:?}: {cert_description}")]
     NoDnsNameMatchingHostname { hostname: String, cert_description: String },
 
     #[error("Unsupported certificate purpose (not usable for server auth)")]
@@ -106,7 +106,7 @@ impl CertificateValidator {
     ///
     /// If `possible_hostnames` is empty, no hostname validation is performed.
     /// If `possible_hostnames` is not empty, we require _at least one_ of its
-    /// hostnames to match the SANs (or CN, of no SANs are present) of the leaf
+    /// hostnames to match the SANs (or CN, if no SANs are present) of the leaf
     /// certificate.
     pub fn validate<S: Borrow<str>>(
         &self,
