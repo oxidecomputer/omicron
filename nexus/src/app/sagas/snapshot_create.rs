@@ -100,14 +100,14 @@ use super::{
 };
 use crate::app::sagas::declare_saga_actions;
 use crate::app::sagas::retry_until_known_result;
-use crate::db::identity::{Asset, Resource};
-use crate::db::lookup::LookupPath;
 use crate::external_api::params;
-use crate::{authn, authz, db};
 use anyhow::anyhow;
 use crucible_agent_client::{types::RegionId, Client as CrucibleAgentClient};
 use nexus_db_model::Generation;
 use nexus_db_queries::db::datastore::RegionAllocationStrategy;
+use nexus_db_queries::db::identity::{Asset, Resource};
+use nexus_db_queries::db::lookup::LookupPath;
+use nexus_db_queries::{authn, authz, db};
 use omicron_common::api::external;
 use omicron_common::api::external::Error;
 use rand::{rngs::StdRng, RngCore, SeedableRng};
@@ -126,7 +126,7 @@ use uuid::Uuid;
 // snapshot create saga: input parameters
 
 #[derive(Debug, Deserialize, Serialize)]
-pub struct Params {
+pub(crate) struct Params {
     pub serialized_authn: authn::saga::Serialized,
     pub silo_id: Uuid,
     pub project_id: Uuid,
@@ -142,9 +142,12 @@ declare_saga_actions! {
         + ssc_alloc_regions
         - ssc_alloc_regions_undo
     }
+    REGIONS_ENSURE_UNDO -> "regions_ensure_undo" {
+        + ssc_noop
+        - ssc_regions_ensure_undo
+    }
     REGIONS_ENSURE -> "regions_ensure" {
         + ssc_regions_ensure
-        - ssc_regions_ensure_undo
     }
     CREATE_DESTINATION_VOLUME_RECORD -> "created_destination_volume" {
         + ssc_create_destination_volume_record
@@ -203,7 +206,7 @@ declare_saga_actions! {
 // snapshot create saga: definition
 
 #[derive(Debug)]
-pub struct SagaSnapshotCreate;
+pub(crate) struct SagaSnapshotCreate;
 impl NexusSaga for SagaSnapshotCreate {
     const NAME: &'static str = "snapshot-create";
     type Params = Params;
@@ -239,6 +242,7 @@ impl NexusSaga for SagaSnapshotCreate {
         builder.append(regions_alloc_action());
         // (Sleds) Reaches out to each dataset, and ensures the regions exist
         // for the destination volume
+        builder.append(regions_ensure_undo_action());
         builder.append(regions_ensure_action());
         // (DB) Creates a record of the destination volume in the DB
         builder.append(create_destination_volume_record_action());
@@ -594,7 +598,16 @@ async fn ssc_create_snapshot_record_undo(
 
     osagactx
         .datastore()
-        .project_delete_snapshot(&opctx, &authz_snapshot, &db_snapshot)
+        .project_delete_snapshot(
+            &opctx,
+            &authz_snapshot,
+            &db_snapshot,
+            vec![
+                db::model::SnapshotState::Creating,
+                db::model::SnapshotState::Ready,
+                db::model::SnapshotState::Faulted,
+            ],
+        )
         .await?;
 
     Ok(())
@@ -1552,12 +1565,12 @@ mod test {
     use crate::app::saga::create_saga_dag;
     use crate::app::sagas::test_helpers;
     use crate::app::test_interfaces::TestInterfaces;
-    use crate::db::DataStore;
     use crate::external_api::shared::IpRange;
     use async_bb8_diesel::{AsyncRunQueryDsl, OptionalExtension};
     use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
     use dropshot::test_util::ClientTestContext;
     use nexus_db_queries::context::OpContext;
+    use nexus_db_queries::db::DataStore;
     use nexus_test_utils::resource_helpers::create_disk;
     use nexus_test_utils::resource_helpers::create_ip_pool;
     use nexus_test_utils::resource_helpers::create_project;
@@ -1858,7 +1871,7 @@ mod test {
         let output = nexus.run_saga(runnable_saga).await.unwrap();
 
         let snapshot = output
-            .lookup_node_output::<crate::db::model::Snapshot>(
+            .lookup_node_output::<nexus_db_queries::db::model::Snapshot>(
                 "finalized_snapshot",
             )
             .unwrap();
@@ -1866,8 +1879,8 @@ mod test {
     }
 
     async fn no_snapshot_records_exist(datastore: &DataStore) -> bool {
-        use crate::db::model::Snapshot;
-        use crate::db::schema::snapshot::dsl;
+        use nexus_db_queries::db::model::Snapshot;
+        use nexus_db_queries::db::schema::snapshot::dsl;
 
         dsl::snapshot
             .filter(dsl::time_deleted.is_null())
@@ -1880,8 +1893,8 @@ mod test {
     }
 
     async fn no_region_snapshot_records_exist(datastore: &DataStore) -> bool {
-        use crate::db::model::RegionSnapshot;
-        use crate::db::schema::region_snapshot::dsl;
+        use nexus_db_queries::db::model::RegionSnapshot;
+        use nexus_db_queries::db::schema::region_snapshot::dsl;
 
         dsl::region_snapshot
             .select(RegionSnapshot::as_select())

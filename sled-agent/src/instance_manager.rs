@@ -358,7 +358,9 @@ impl InstanceManager {
             .lock()
             .unwrap()
             .values()
-            .find(|(propolis_id, _instance)| name == propolis_zone_name(propolis_id))
+            .find(|(propolis_id, _instance)| {
+                name == propolis_zone_name(propolis_id)
+            })
             .cloned()
         else {
             return Err(BundleError::NoSuchZone { name: name.to_string() });

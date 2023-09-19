@@ -967,7 +967,9 @@ mod tests {
         Event, InstallinatorCompletionMetadata, InstallinatorComponent,
         InstallinatorStepId, StepEventKind, StepOutcome,
     };
-    use omicron_common::api::internal::nexus::KnownArtifactKind;
+    use omicron_common::{
+        api::internal::nexus::KnownArtifactKind, update::ArtifactKind,
+    };
     use omicron_test_utils::dev::test_setup_log;
     use partial_io::{
         proptest_types::{
@@ -1086,7 +1088,7 @@ mod tests {
             data2.into_iter().map(Bytes::from).collect();
 
         let host_id = ArtifactHashId {
-            kind: KnownArtifactKind::Host.into(),
+            kind: ArtifactKind::HOST_PHASE_2,
             hash: {
                 // The `validate_written_host_phase_2_hash()` will fail unless
                 // we give the actual hash of the host phase 2 data, so compute

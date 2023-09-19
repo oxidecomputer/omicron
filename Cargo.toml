@@ -37,6 +37,7 @@ members = [
     "nexus/test-utils-macros",
     "nexus/test-utils",
     "nexus/types",
+    "omdb",
     "oxide-client",
     "oximeter-client",
     "oximeter/collector",
@@ -100,6 +101,7 @@ default-members = [
     "nexus/db-queries",
     "nexus/defaults",
     "nexus/types",
+    "omdb",
     "oxide-client",
     "oximeter-client",
     "oximeter/collector",
@@ -134,13 +136,14 @@ resolver = "2"
 [workspace.dependencies]
 anyhow = "1.0"
 api_identity = { path = "api_identity" }
+approx = "0.5.1"
 assert_matches = "1.5.0"
 assert_cmd = "2.0.12"
 async-bb8-diesel = { git = "https://github.com/oxidecomputer/async-bb8-diesel", rev = "be3d9bce50051d8c0e0c06078e8066cc27db3001" }
 async-trait = "0.1.73"
 authz-macros = { path = "nexus/authz-macros" }
 backoff = { version = "0.4.0", features = [ "tokio" ] }
-base64 = "0.21.2"
+base64 = "0.21.4"
 bb8 = "0.8.1"
 bcs = "0.1.5"
 bincode = "1.3.3"
@@ -148,8 +151,8 @@ bootstore = { path = "bootstore" }
 bootstrap-agent-client = { path = "bootstrap-agent-client" }
 buf-list = { version = "1.0.3", features = ["tokio1"] }
 byteorder = "1.4.3"
-bytes = "1.4.0"
-bytesize = "1.2.0"
+bytes = "1.5.0"
+bytesize = "1.3.0"
 camino = "1.1"
 camino-tempfile = "1.0.2"
 cancel-safe-futures = "0.1.2"
@@ -157,24 +160,24 @@ chacha20poly1305 = "0.10.1"
 ciborium = "0.2.1"
 cfg-if = "1.0"
 chrono = { version = "0.4", features = [ "serde" ] }
-clap = { version = "4.3", features = ["derive"] }
+clap = { version = "4.4", features = ["derive", "env"] }
 cookie = "0.16"
 criterion = { version = "0.5.1", features = [ "async_tokio" ] }
 crossbeam = "0.8"
 crossterm = { version = "0.26.1", features = ["event-stream"] }
-crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "84507ed89aced20920de73342666a8abcb8237c1" }
-crucible-client-types = { git = "https://github.com/oxidecomputer/crucible", rev = "84507ed89aced20920de73342666a8abcb8237c1" }
-crucible-pantry-client = { git = "https://github.com/oxidecomputer/crucible", rev = "84507ed89aced20920de73342666a8abcb8237c1" }
-crucible-smf = { git = "https://github.com/oxidecomputer/crucible", rev = "84507ed89aced20920de73342666a8abcb8237c1" }
-curve25519-dalek = "3"
+crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "aeb69dda26c7e1a8b6eada425670cd4b83f91c07" }
+crucible-client-types = { git = "https://github.com/oxidecomputer/crucible", rev = "aeb69dda26c7e1a8b6eada425670cd4b83f91c07" }
+crucible-pantry-client = { git = "https://github.com/oxidecomputer/crucible", rev = "aeb69dda26c7e1a8b6eada425670cd4b83f91c07" }
+crucible-smf = { git = "https://github.com/oxidecomputer/crucible", rev = "aeb69dda26c7e1a8b6eada425670cd4b83f91c07" }
+curve25519-dalek = "4"
 datatest-stable = "0.1.3"
 display-error-chain = "0.1.1"
 ddm-admin-client = { path = "ddm-admin-client" }
 db-macros = { path = "nexus/db-macros" }
 debug-ignore = "1.0.5"
 derive_more = "0.99.17"
-derive-where = "1.2.1"
-diesel = { version = "2.1.0" }
+derive-where = "1.2.5"
+diesel = { version = "2.1.1", features = ["postgres", "r2d2", "chrono", "serde_json", "network-address", "uuid"] }
 diesel-dtrace = { git = "https://github.com/oxidecomputer/diesel-dtrace", branch = "main" }
 dns-server = { path = "dns-server" }
 dns-service-client = { path = "dns-service-client" }
@@ -185,6 +188,7 @@ expectorate = "1.0.7"
 fatfs = "0.3.6"
 flate2 = "1.0.27"
 flume = "0.11.0"
+foreign-types = "0.3.2"
 fs-err = "2.9.0"
 futures = "0.3.28"
 gateway-client = { path = "gateway-client" }
@@ -192,13 +196,13 @@ gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-
 gateway-sp-comms = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "1e180ae55e56bd17af35cb868ffbd18ce487351d" }
 gateway-test-utils = { path = "gateway-test-utils" }
 glob = "0.3.1"
-headers = "0.3.8"
+headers = "0.3.9"
 heck = "0.4"
 helios-fusion = { path = "helios/fusion" }
 helios-protostar = { path = "helios/protostar" }
 helios-tokamak = { path = "helios/tokamak" }
 hex = "0.4.3"
-hex-literal = "0.3.4"
+hex-literal = "0.4.1"
 hkdf = "0.12.3"
 http = "0.2.9"
 httptest = "0.15.4"
@@ -208,7 +212,7 @@ hyper = "0.14"
 hyper-rustls = "0.24.1"
 hyper-staticfile = "0.9.5"
 illumos-utils = { path = "illumos-utils" }
-indexmap = "1.9.3"
+indexmap = "2.0.0"
 indicatif = { version = "0.17.6", features = ["rayon"] }
 installinator = { path = "installinator" }
 installinator-artifactd = { path = "installinator-artifactd" }
@@ -236,11 +240,12 @@ nexus-test-utils-macros = { path = "nexus/test-utils-macros" }
 nexus-test-utils = { path = "nexus/test-utils" }
 nexus-types = { path = "nexus/types" }
 num-integer = "0.1.45"
-num-traits = "0.2.16"
+num = { version = "0.4.1", default-features = false, features = [ "libm" ] }
 omicron-common = { path = "common" }
 omicron-dev-tools = { path = "dev-tools" }
 omicron-gateway = { path = "gateway" }
 omicron-nexus = { path = "nexus" }
+omicron-omdb = { path = "omdb" }
 omicron-package = { path = "package" }
 omicron-rpaths = { path = "rpaths" }
 omicron-sled-agent = { path = "sled-agent" }
@@ -271,31 +276,32 @@ partial-io = { version = "0.5.4", features = ["proptest1", "tokio1"] }
 paste = "1.0.14"
 percent-encoding = "2.2.0"
 pem = "1.1"
-petgraph = "0.6.3"
-postgres-protocol = "0.6.5"
+petgraph = "0.6.4"
+postgres-protocol = "0.6.6"
 predicates = "3.0.3"
 pretty_assertions = "1.4.0"
 pretty-hex = "0.3.0"
 proc-macro2 = "1.0"
 progenitor = { git = "https://github.com/oxidecomputer/progenitor", branch = "main" }
 progenitor-client = { git = "https://github.com/oxidecomputer/progenitor", branch = "main" }
-bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "77a580b7e2d3fee85ffe8513a86d2c464b7b5ed3" }
-propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "77a580b7e2d3fee85ffe8513a86d2c464b7b5ed3", features = [ "generated-migration" ] }
-propolis-server = { git = "https://github.com/oxidecomputer/propolis", rev = "77a580b7e2d3fee85ffe8513a86d2c464b7b5ed3", default-features = false, features = ["mock-only"] }
-#propolis-server = { path = "../propolis/bin/propolis-server" }
+bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "de6369aa45a255f896da0a3ddd2b7152c036a4e9" }
+propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "de6369aa45a255f896da0a3ddd2b7152c036a4e9", features = [ "generated-migration" ] }
+propolis-server = { git = "https://github.com/oxidecomputer/propolis", rev = "de6369aa45a255f896da0a3ddd2b7152c036a4e9", default-features = false, features = ["mock-only"] }
 proptest = "1.2.0"
 quote = "1.0"
 rand = "0.8.5"
+ratatui = "0.23.0"
 rayon = "1.7"
 rcgen = "0.10.0"
 ref-cast = "1.0"
-regex = "1.9.3"
-regress = "0.6.0"
+regex = "1.9.5"
+regress = "0.7.1"
 reqwest = { version = "0.11", default-features = false }
 ring = "0.16"
 rpassword = "7.2.0"
+rstest = "0.18.2"
 rustfmt-wrapper = "0.2"
-rustls = "0.21.6"
+rustls = "0.21.7"
 samael = { git = "https://github.com/njaremko/samael", features = ["xmlsec"], branch = "master" }
 schemars = "0.8.12"
 secrecy = "0.8.0"
@@ -303,7 +309,7 @@ semver = { version = "1.0.18", features = ["std", "serde"] }
 serde = { version = "1.0", default-features = false, features = [ "derive" ] }
 serde_derive = "1.0"
 serde_human_bytes = { git = "http://github.com/oxidecomputer/serde_human_bytes", branch = "main" }
-serde_json = "1.0.105"
+serde_json = "1.0.106"
 serde_path_to_error = "0.1.14"
 serde_tokenstream = "0.2"
 serde_urlencoded = "0.7.1"
@@ -314,11 +320,12 @@ shell-words = "1.1.0"
 shlex = "1.1.0"
 signal-hook = "0.3"
 signal-hook-tokio = { version = "0.3", features = [ "futures-v0_3" ] }
+similar-asserts = "1.5.0"
 sled = "0.34"
 sled-agent-client = { path = "sled-agent-client" }
 sled-hardware = { path = "sled-hardware" }
 slog = { version = "2.7", features = [ "dynamic-keys", "max_level_trace", "release_max_level_debug" ] }
-slog-async = "2.7"
+slog-async = "2.8"
 slog-dtrace = "0.2"
 slog-envlogger = "2.2"
 slog-term = "2.9"
@@ -337,6 +344,7 @@ strum = { version = "0.25", features = [ "derive" ] }
 subprocess = "0.2.9"
 libsw = { version = "3.3.0", features = ["tokio"] }
 syn = { version = "2.0" }
+tabled = "0.14"
 tar = "0.4"
 tempdir = "0.3"
 tempfile = "3.6"
@@ -352,22 +360,21 @@ tokio-stream = "0.1.14"
 tokio-tungstenite = "0.18"
 tokio-util = "0.7.8"
 toml = "0.7.6"
-toml_edit = "0.19.14"
+toml_edit = "0.19.15"
 topological-sort = "0.2.2"
 tough = { version = "0.12", features = [ "http" ] }
 trust-dns-client = "0.22"
 trust-dns-proto = "0.22"
 trust-dns-resolver = "0.22"
 trust-dns-server = "0.22"
-trybuild = "1.0.83"
+trybuild = "1.0.84"
 tufaceous = { path = "tufaceous" }
 tufaceous-lib = { path = "tufaceous-lib" }
-tui = "0.19.0"
 unicode-width = "0.1.10"
 update-engine = { path = "update-engine" }
 uuid = { version = "1.4.1", features = ["serde", "v4"] }
 usdt = "0.3"
-walkdir = "2.3"
+walkdir = "2.4"
 wicket = { path = "wicket" }
 wicket-common = { path = "wicket-common" }
 wicketd-client = { path = "wicketd-client" }
@@ -377,6 +384,10 @@ zone = { version = "0.3", default-features = false, features = ["async"] }
 
 [profile.dev]
 panic = "abort"
+# See https://github.com/oxidecomputer/omicron/issues/4009 for some background context here.
+# By reducing the debug level (though keeping enough to have meaningful
+# backtraces), we reduce incremental build time and binary size significantly.
+debug = "line-tables-only"
 
 # `bindgen` is used by `samael`'s build script; building it with optimizations
 # makes that build script run ~5x faster, more than offsetting the additional
@@ -517,9 +528,8 @@ opt-level = 3
 opt-level = 3
 
 #
-# It's common during development to use a local copy of dropshot, propolis,
-# crucible, or steno in the parent directory.  If you want to use those,
-# uncomment one of these blocks.
+# It's common during development to use a local copy of various complex
+# dependencies.  If you want to use those, uncomment one of these blocks.
 #
 #[patch."https://github.com/oxidecomputer/dropshot"]
 #dropshot = { path = "../dropshot/dropshot" }
@@ -532,6 +542,10 @@ opt-level = 3
 #crucible-client-types = { path = "../crucible/crucible-client-types" }
 #crucible-pantry-client = { path = "../crucible/pantry-client" }
 #crucible-smf = { path = "../crucible/smf" }
+#[patch.crates-io]
+#diesel = { path = "../../diesel/diesel" }
+#[patch."https://github.com/oxidecomputer/diesel-dtrace"]
+#diesel-dtrace = { path = "../diesel-dtrace" }
 
 #
 # Local client generation during development.

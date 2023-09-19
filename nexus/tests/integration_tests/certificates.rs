@@ -16,11 +16,12 @@ use nexus_test_utils::load_test_config;
 use nexus_test_utils::resource_helpers::create_certificate;
 use nexus_test_utils::resource_helpers::delete_certificate;
 use nexus_test_utils_macros::nexus_test;
+use nexus_types::external_api::params;
+use nexus_types::external_api::shared;
 use nexus_types::external_api::views::Certificate;
 use nexus_types::internal_api::params as internal_params;
 use omicron_common::api::external::IdentityMetadataCreateParams;
-use omicron_nexus::external_api::params;
-use omicron_nexus::external_api::shared;
+use omicron_test_utils::certificates::CertificateChain;
 use omicron_test_utils::dev::poll::wait_for_condition;
 use omicron_test_utils::dev::poll::CondCheckError;
 use oxide_client::ClientSessionExt;
@@ -32,90 +33,6 @@ use std::time::Duration;
 
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
-
-// Utility structure for making a test certificate
-pub struct CertificateChain {
-    root_cert: rustls::Certificate,
-    intermediate_cert: rustls::Certificate,
-    end_cert: rustls::Certificate,
-    end_keypair: rcgen::Certificate,
-}
-
-impl CertificateChain {
-    pub fn new() -> Self {
-        let params = rcgen::CertificateParams::new(vec!["localhost".into()]);
-        Self::with_params(params)
-    }
-
-    pub fn with_params(params: rcgen::CertificateParams) -> Self {
-        let mut root_params = rcgen::CertificateParams::new(vec![]);
-        root_params.is_ca =
-            rcgen::IsCa::Ca(rcgen::BasicConstraints::Unconstrained);
-        let root_keypair = rcgen::Certificate::from_params(root_params)
-            .expect("failed to generate root keys");
-
-        let mut intermediate_params = rcgen::CertificateParams::new(vec![]);
-        intermediate_params.is_ca =
-            rcgen::IsCa::Ca(rcgen::BasicConstraints::Unconstrained);
-        let intermediate_keypair =
-            rcgen::Certificate::from_params(intermediate_params)
-                .expect("failed to generate intermediate keys");
-
-        let end_keypair = rcgen::Certificate::from_params(params)
-            .expect("failed to generate end-entity keys");
-
-        let root_cert = rustls::Certificate(
-            root_keypair
-                .serialize_der()
-                .expect("failed to serialize root cert"),
-        );
-        let intermediate_cert = rustls::Certificate(
-            intermediate_keypair
-                .serialize_der_with_signer(&root_keypair)
-                .expect("failed to serialize intermediate cert"),
-        );
-        let end_cert = rustls::Certificate(
-            end_keypair
-                .serialize_der_with_signer(&intermediate_keypair)
-                .expect("failed to serialize end-entity cert"),
-        );
-
-        Self { root_cert, intermediate_cert, end_cert, end_keypair }
-    }
-
-    pub fn end_cert_private_key_as_der(&self) -> Vec<u8> {
-        self.end_keypair.serialize_private_key_der()
-    }
-
-    pub fn end_cert_private_key_as_pem(&self) -> String {
-        self.end_keypair.serialize_private_key_pem()
-    }
-
-    fn cert_chain(&self) -> Vec<rustls::Certificate> {
-        vec![
-            self.end_cert.clone(),
-            self.intermediate_cert.clone(),
-            self.root_cert.clone(),
-        ]
-    }
-
-    pub fn cert_chain_as_pem(&self) -> String {
-        tls_cert_to_pem(&self.cert_chain())
-    }
-}
-
-fn tls_cert_to_pem(certs: &Vec<rustls::Certificate>) -> String {
-    let mut serialized_certs = String::new();
-    for cert in certs {
-        let encoded_cert = pem::encode(&pem::Pem {
-            tag: "CERTIFICATE".to_string(),
-            contents: cert.0.clone(),
-        });
-
-        serialized_certs.push_str(&encoded_cert);
-    }
-    serialized_certs
-}
 
 const CERTS_URL: &str = "/v1/certificates";
 const CERT_NAME: &str = "my-certificate";

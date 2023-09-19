@@ -98,7 +98,7 @@ where
     if let Some(with_roles) = resource.as_resource_with_roles() {
         let resource_type = resource.resource_type();
         let resource_id = with_roles.resource_id();
-        load_roles_for_resource(
+        load_directly_attached_roles(
             opctx,
             datastore,
             authn,
@@ -113,7 +113,7 @@ where
         if let Some((resource_type, resource_id)) =
             with_roles.conferred_roles_by(authn)?
         {
-            load_roles_for_resource(
+            load_directly_attached_roles(
                 opctx,
                 datastore,
                 authn,
@@ -141,7 +141,7 @@ where
     Ok(())
 }
 
-pub async fn load_roles_for_resource(
+async fn load_directly_attached_roles(
     opctx: &OpContext,
     datastore: &DataStore,
     authn: &authn::Context,

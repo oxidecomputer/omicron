@@ -8,6 +8,7 @@
 use dropshot::test_util::ClientTestContext;
 use http::method::Method;
 use http::StatusCode;
+use nexus_db_queries::db::DataStore;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
@@ -16,13 +17,12 @@ use nexus_test_utils::resource_helpers::object_create;
 use nexus_test_utils::resource_helpers::populate_ip_pool;
 use nexus_test_utils::resource_helpers::DiskTest;
 use nexus_test_utils_macros::nexus_test;
+use nexus_types::external_api::params;
+use nexus_types::external_api::views;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Disk;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::Name;
-use omicron_nexus::db::DataStore;
-use omicron_nexus::external_api::params;
-use omicron_nexus::external_api::views;
 use rand::prelude::SliceRandom;
 use rand::{rngs::StdRng, SeedableRng};
 use sled_agent_client::types::{CrucibleOpts, VolumeConstructionRequest};
@@ -1811,6 +1811,132 @@ async fn test_volume_checkout_updates_sparse_mid_multiple_gen(
     // Request again, we should see the incremented values now..
     let new_vol = datastore.volume_checkout(volume_id).await.unwrap();
     volume_match_gen(new_vol, vec![Some(8), None, Some(10)]);
+}
+
+#[nexus_test]
+async fn test_disk_create_saga_unwinds_correctly(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    // Test that Nexus properly unwinds when not all regions are successfully
+    // created.
+
+    let client = &cptestctx.external_client;
+    populate_ip_pool(&client, "default", None).await;
+    create_org_and_project(client).await;
+
+    let disk_test = DiskTest::new(&cptestctx).await;
+    let disks_url = get_disks_url();
+    let base_disk_name: Name = "base-disk".parse().unwrap();
+
+    // Set the third agent to fail creating the region
+    let zpool = &disk_test.zpools[2];
+    let dataset = &zpool.datasets[0];
+    disk_test
+        .sled_agent
+        .get_crucible_dataset(zpool.id, dataset.id)
+        .await
+        .set_region_creation_error(true)
+        .await;
+
+    let disk_size = ByteCount::from_gibibytes_u32(2);
+    let base_disk = params::DiskCreate {
+        identity: IdentityMetadataCreateParams {
+            name: base_disk_name.clone(),
+            description: String::from("sells rainsticks"),
+        },
+        disk_source: params::DiskSource::Blank {
+            block_size: params::BlockSize::try_from(512).unwrap(),
+        },
+        size: disk_size,
+    };
+
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &disks_url)
+            .body(Some(&base_disk))
+            .expect_status(Some(StatusCode::INTERNAL_SERVER_ERROR)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body::<dropshot::HttpErrorResponseBody>()
+    .unwrap();
+
+    // Assert everything was cleaned up
+    assert!(disk_test.crucible_resources_deleted().await);
+}
+
+#[nexus_test]
+async fn test_snapshot_create_saga_unwinds_correctly(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    // Test that Nexus properly unwinds when not all regions are successfully
+    // created.
+
+    let client = &cptestctx.external_client;
+    populate_ip_pool(&client, "default", None).await;
+    create_org_and_project(client).await;
+
+    let disk_test = DiskTest::new(&cptestctx).await;
+    let disks_url = get_disks_url();
+    let base_disk_name: Name = "base-disk".parse().unwrap();
+
+    // Create a disk
+
+    let disk_size = ByteCount::from_gibibytes_u32(2);
+    let base_disk = params::DiskCreate {
+        identity: IdentityMetadataCreateParams {
+            name: base_disk_name.clone(),
+            description: String::from("sells rainsticks"),
+        },
+        disk_source: params::DiskSource::Blank {
+            block_size: params::BlockSize::try_from(512).unwrap(),
+        },
+        size: disk_size,
+    };
+
+    let _disk: Disk = object_create(client, &disks_url, &base_disk).await;
+
+    // Set the third agent to fail creating the region for the snapshot
+    let zpool = &disk_test.zpools[2];
+    let dataset = &zpool.datasets[0];
+    disk_test
+        .sled_agent
+        .get_crucible_dataset(zpool.id, dataset.id)
+        .await
+        .set_region_creation_error(true)
+        .await;
+
+    // Create a snapshot
+    let snapshot_create = params::SnapshotCreate {
+        identity: IdentityMetadataCreateParams {
+            name: "a-snapshot".parse().unwrap(),
+            description: "a snapshot!".to_string(),
+        },
+        disk: base_disk_name.clone().into(),
+    };
+
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &get_snapshots_url())
+            .body(Some(&snapshot_create))
+            .expect_status(Some(StatusCode::INTERNAL_SERVER_ERROR)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body::<dropshot::HttpErrorResponseBody>()
+    .unwrap();
+
+    // Delete the disk
+    NexusRequest::object_delete(client, &get_disk_url("base-disk"))
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("failed to delete disk");
+
+    // Assert everything was cleaned up
+    assert!(disk_test.crucible_resources_deleted().await);
 }
 
 // Test function that creates a VolumeConstructionRequest::Region With gen,

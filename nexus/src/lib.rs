@@ -14,19 +14,18 @@
 
 pub mod app; // Public for documentation examples
 mod cidata;
-pub mod config; // Public for testing
-pub mod context; // Public for documentation examples
+mod config;
+mod context; // Public for documentation examples
 pub mod external_api; // Public for testing
-pub mod internal_api; // Public for testing
+mod internal_api;
 mod populate;
 mod saga_interface;
-pub mod updates; // public for testing
+mod updates; // public for testing
 
 pub use app::test_interfaces::TestInterfaces;
 pub use app::Nexus;
 pub use config::Config;
-pub use context::ServerContext;
-pub use crucible_agent_client;
+use context::ServerContext;
 use external_api::http_entrypoints::external_api;
 use internal_api::http_entrypoints::internal_api;
 use nexus_types::internal_api::params::ServiceKind;
@@ -40,10 +39,6 @@ use std::collections::HashMap;
 use std::net::{SocketAddr, SocketAddrV6};
 use std::sync::Arc;
 use uuid::Uuid;
-
-// These modules used to be within nexus, but have been moved to
-// nexus-db-queries. Keeping these around temporarily for migration reasons.
-pub use nexus_db_queries::{authn, authz, db};
 
 #[macro_use]
 extern crate slog;
@@ -74,9 +69,9 @@ pub fn run_openapi_internal() -> Result<(), String> {
 /// but is not ready to receive external requests.
 pub struct InternalServer {
     /// shared state used by API request handlers
-    pub apictx: Arc<ServerContext>,
+    apictx: Arc<ServerContext>,
     /// dropshot server for internal API
-    pub http_server_internal: dropshot::HttpServer<Arc<ServerContext>>,
+    http_server_internal: dropshot::HttpServer<Arc<ServerContext>>,
 
     config: Config,
     log: Logger,
@@ -111,7 +106,7 @@ impl InternalServer {
     }
 }
 
-pub type DropshotServer = dropshot::HttpServer<Arc<ServerContext>>;
+type DropshotServer = dropshot::HttpServer<Arc<ServerContext>>;
 
 /// Packages up a [`Nexus`], running both external and internal HTTP API servers
 /// wired up to Nexus
@@ -167,7 +162,7 @@ impl Server {
     /// Note that this doesn't initiate a graceful shutdown, so if you call this
     /// immediately after calling `start()`, the program will block indefinitely
     /// or until something else initiates a graceful shutdown.
-    pub async fn wait_for_finish(self) -> Result<(), String> {
+    pub(crate) async fn wait_for_finish(self) -> Result<(), String> {
         self.apictx.nexus.wait_for_shutdown().await
     }
 
@@ -287,7 +282,7 @@ impl nexus_test_interface::NexusServer for Server {
                 id,
                 zpool_id,
                 address,
-                crate::db::model::DatasetKind::Crucible,
+                nexus_db_queries::db::model::DatasetKind::Crucible,
             )
             .await
             .unwrap();
@@ -303,7 +298,7 @@ impl nexus_test_interface::NexusServer for Server {
     }
 }
 
-/// Run an instance of the [Server].
+/// Run an instance of the Nexus server.
 pub async fn run_server(config: &Config) -> Result<(), String> {
     use slog::Drain;
     let (drain, registration) =

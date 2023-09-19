@@ -39,7 +39,7 @@ async fn main() -> Result<(), anyhow::Error> {
     Ok(())
 }
 
-/// Manage a local CockroachDB database for Omicron development
+/// Tools for working with a local Omicron deployment
 #[derive(Debug, Parser)]
 #[clap(version)]
 enum OmicronDb {
@@ -268,7 +268,7 @@ async fn cmd_clickhouse_run(args: &ChRunArgs) -> Result<(), anyhow::Error> {
 
     // Start the database server process, possibly on a specific port
     let mut db_instance =
-        dev::clickhouse::ClickHouseInstance::new(args.port).await?;
+        dev::clickhouse::ClickHouseInstance::new_single_node(args.port).await?;
     println!(
         "omicron-dev: running ClickHouse with full command:\n\"clickhouse {}\"",
         db_instance.cmdline().join(" ")

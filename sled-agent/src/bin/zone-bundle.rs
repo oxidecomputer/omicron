@@ -7,7 +7,11 @@
 use anyhow::anyhow;
 use anyhow::bail;
 use anyhow::Context;
+use bytes::Buf;
+use bytes::BufMut;
+use bytes::BytesMut;
 use camino::Utf8PathBuf;
+use chrono::Local;
 use clap::Args;
 use clap::Parser;
 use clap::Subcommand;
@@ -24,8 +28,13 @@ use slog::LevelFilter;
 use slog::Logger;
 use slog_term::FullFormat;
 use slog_term::TermDecorator;
+use std::collections::BTreeSet;
 use std::net::Ipv6Addr;
+use std::time::SystemTime;
+use tar::Builder;
+use tar::Header;
 use tokio::io::AsyncWriteExt;
+use tokio::process::Command;
 use uuid::Uuid;
 
 fn parse_log_level(s: &str) -> anyhow::Result<Level> {
@@ -40,8 +49,12 @@ fn parse_log_level(s: &str) -> anyhow::Result<Level> {
 #[derive(Clone, Debug, Parser)]
 struct Cli {
     /// The IPv6 address for the sled agent to operate on.
-    #[arg(long, default_value_t = Ipv6Addr::LOCALHOST)]
-    host: Ipv6Addr,
+    ///
+    /// This attempts to find an address that looks like the sled-agent's, e.g.,
+    /// one on the addrobject `underlay0/sled6`. If one is not found, this will
+    /// use localhost, i.e., `::1`.
+    #[arg(long)]
+    host: Option<Ipv6Addr>,
     /// The port on which to connect to the sled agent.
     #[arg(long, default_value_t = SLED_AGENT_PORT)]
     port: u16,
@@ -189,6 +202,22 @@ enum Cmd {
     },
     /// Trigger an explicit request to cleanup low-priority zone bundles.
     Cleanup,
+    /// Create a bundle for all zones on a host.
+    ///
+    /// This is intended for use cases such as before a system update, in which
+    /// one wants to capture bundles from all extant zones before removing them.
+    /// All individual zone bundles will be placed into a single, final tarball.
+    BundleAll {
+        /// The output file.
+        ///
+        /// All individual bundles will be combined here. If not provided, the
+        /// file we be named based on the current hostname and local timestamp.
+        #[arg(long)]
+        output: Option<Utf8PathBuf>,
+        /// Print verbose progress information.
+        #[arg(long, short)]
+        verbose: bool,
+    },
 }
 
 // Number of expected sort dimensions. Must match
@@ -211,16 +240,89 @@ struct SetCleanupContextArgs {
     storage_limit: Option<u8>,
 }
 
+// Fetch an address on `underlay0/sled6` if it exists, or use localhost.
+async fn fetch_underlay_address() -> anyhow::Result<Ipv6Addr> {
+    #[cfg(not(target_os = "illumos"))]
+    return Ok(Ipv6Addr::LOCALHOST);
+    #[cfg(target_os = "illumos")]
+    {
+        const EXPECTED_ADDR_OBJ: &str = "underlay0/sled6";
+        let output = Command::new("ipadm")
+            .arg("show-addr")
+            .arg("-p")
+            .arg("-o")
+            .arg("addr")
+            .arg(EXPECTED_ADDR_OBJ)
+            .output()
+            .await?;
+        // If we failed because there was no such interface, then fall back to
+        // localhost.
+        if !output.status.success() {
+            match std::str::from_utf8(&output.stderr) {
+                Err(_) => bail!(
+                    "ipadm command failed unexpectedly, stderr:\n{}",
+                    String::from_utf8_lossy(&output.stderr)
+                ),
+                Ok(out) => {
+                    if out.contains("Address object not found") {
+                        eprintln!(
+                            "Expected addrobj '{}' not found, using localhost",
+                            EXPECTED_ADDR_OBJ,
+                        );
+                        return Ok(Ipv6Addr::LOCALHOST);
+                    } else {
+                        bail!(
+                            "ipadm subcommand failed unexpectedly, stderr:\n{}",
+                            String::from_utf8_lossy(&output.stderr),
+                        );
+                    }
+                }
+            }
+        }
+        let out = std::str::from_utf8(&output.stdout)
+            .context("non-UTF8 output in ipadm")?;
+        let lines: Vec<_> = out.trim().lines().collect();
+        anyhow::ensure!(
+            lines.len() == 1,
+            "No addresses or more than one address on expected interface '{}'",
+            EXPECTED_ADDR_OBJ
+        );
+        lines[0]
+            .trim()
+            .split_once('/')
+            .context("expected a /64 subnet")?
+            .0
+            .parse()
+            .context("invalid IPv6 address")
+    }
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let args = Cli::parse();
-    let addr = format!("http://[{}]:{}", args.host, args.port);
+    let host = match args.host {
+        Some(host) => host,
+        None => fetch_underlay_address()
+            .await
+            .context("failed to fetch underlay address")?,
+    };
+    let addr = format!("http://[{}]:{}", host, args.port);
     let decorator = TermDecorator::new().build();
     let drain = FullFormat::new(decorator).build().fuse();
     let drain = slog_async::Async::new(drain).build().fuse();
     let drain = LevelFilter::new(drain, args.log_level).fuse();
     let log = Logger::root(drain, slog::o!("unit" => "zone-bundle"));
-    let client = Client::new(&addr, log);
+
+    // Create a client.
+    //
+    // We'll build one manually first, because the default uses quite a low
+    // timeout, and some operations around creating or transferring bundles can
+    // take a bit.
+    let client = reqwest::ClientBuilder::new()
+        .timeout(std::time::Duration::from_secs(300))
+        .build()
+        .context("failed to build client")?;
+    let client = Client::new_with_client(&addr, client, log);
     match args.cmd {
         Cmd::ListZones => {
             let zones = client
@@ -382,7 +484,10 @@ async fn main() -> anyhow::Result<()> {
             let priority = match args.priority {
                 None => None,
                 Some(pri) => {
-                    let Ok(arr): Result<[PriorityDimension; EXPECTED_DIMENSIONS], _> = pri.try_into() else {
+                    let Ok(arr): Result<
+                        [PriorityDimension; EXPECTED_DIMENSIONS],
+                        _,
+                    > = pri.try_into() else {
                         bail!("must provide {EXPECTED_DIMENSIONS} priority dimensions");
                     };
                     Some(PriorityOrder::from(arr))
@@ -536,8 +641,140 @@ async fn main() -> anyhow::Result<()> {
                 }
             }
         }
+        Cmd::BundleAll { output, verbose } => {
+            let output = match output {
+                Some(output) => output,
+                None => create_megabundle_filename()
+                    .await
+                    .context("failed to create output file")?,
+            };
+            if verbose {
+                println!("Using {} for sled-agent host", host);
+                println!("Collecting all bundles, using {} as output", output);
+            }
+
+            // Open megabundle output file.
+            let f = tokio::fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .create(true)
+                .open(&output)
+                .await
+                .context("failed to open output file")?
+                .into_std()
+                .await;
+            let gz = flate2::GzBuilder::new()
+                .filename(output.as_str())
+                .write(f, flate2::Compression::best());
+            let mut builder = Builder::new(gz);
+
+            let mut seen_zones = BTreeSet::new();
+            loop {
+                // List all extant zones, pass over all of them that we've not
+                // yet seen.
+                let zones: BTreeSet<_> = client
+                    .zones_list()
+                    .await
+                    .context("failed to list zones")?
+                    .into_inner()
+                    .into_iter()
+                    .collect();
+                let new_zones: BTreeSet<_> =
+                    zones.difference(&seen_zones).cloned().collect();
+                if new_zones.is_empty() {
+                    break;
+                }
+
+                for new_zone in new_zones.into_iter() {
+                    if verbose {
+                        println!("Fetching bundle for new zone: {}", new_zone);
+                    }
+                    // Create and fetch the bundle.
+                    let metadata = client
+                        .zone_bundle_create(&new_zone)
+                        .await
+                        .context("failed to create zone bundle")?
+                        .into_inner();
+                    let bundle = client
+                        .zone_bundle_get(&new_zone, &metadata.id.bundle_id)
+                        .await
+                        .context("failed to get zone bundle")?
+                        .into_inner();
+
+                    // Fetch the byte stream for this tarball.
+                    let mut stream = bundle.into_inner();
+                    let mut buf = BytesMut::new();
+                    while let Some(maybe_bytes) = stream.next().await {
+                        let bytes = maybe_bytes
+                            .context("failed to fetch all bundle data")?;
+                        buf.put(bytes);
+                    }
+
+                    // Plop all the bytes into the archive, at a path defined by
+                    // the zone name and bundle ID.
+                    let mtime = SystemTime::now()
+                        .duration_since(SystemTime::UNIX_EPOCH)
+                        .context("failed to compute mtime")?
+                        .as_secs();
+
+                    // Add a "directory" for the zone name.
+                    let mut hdr = Header::new_ustar();
+                    hdr.set_size(0);
+                    hdr.set_mode(0o444);
+                    hdr.set_mtime(mtime);
+                    hdr.set_entry_type(tar::EntryType::Directory);
+                    hdr.set_path(&new_zone)
+                        .context("failed to set zone name directory path")?;
+                    hdr.set_cksum();
+
+                    // Add the bundle inside this zone.
+                    let mut hdr = Header::new_ustar();
+                    hdr.set_size(buf.remaining().try_into().unwrap());
+                    hdr.set_mode(0o444);
+                    hdr.set_mtime(mtime);
+                    hdr.set_entry_type(tar::EntryType::Regular);
+                    let bundle_path = format!(
+                        "{}/{}.tar.gz",
+                        new_zone, metadata.id.bundle_id
+                    );
+                    builder
+                        .append_data(&mut hdr, &bundle_path, buf.reader())
+                        .context(
+                            "failed to insert zone bundle into megabundle",
+                        )?;
+
+                    if verbose {
+                        println!("Added bundle: {}", bundle_path);
+                    }
+
+                    // Keep track of this zone.
+                    seen_zones.insert(new_zone);
+                }
+            }
+            if verbose {
+                println!(
+                    "Finished bundling {} zones into {}",
+                    seen_zones.len(),
+                    output
+                );
+            }
+        }
     }
     Ok(())
+}
+
+// Create a file used to store all bundles when running `bundle-all`.
+async fn create_megabundle_filename() -> anyhow::Result<Utf8PathBuf> {
+    let output = Command::new("hostname")
+        .output()
+        .await
+        .context("failed to launch `hostname` command")?;
+    anyhow::ensure!(output.status.success(), "failed to run hostname");
+    let hostname = String::from_utf8_lossy(&output.stdout);
+    let timestamp = Local::now().format("%Y-%m-%dT%H-%M-%S");
+    Utf8PathBuf::try_from(std::env::current_dir().context("failed to get CWD")?)
+        .context("failed to convert to UTF8 path")
+        .map(|p| p.join(format!("{}-{}.tar.gz", hostname.trim(), timestamp)))
 }
 
 // Compute used / avail as a percentage.

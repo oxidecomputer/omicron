@@ -1174,10 +1174,8 @@ async fn sp_host_phase2_progress_get(
     // this SP most recently requested. We'll treat that as "no progress
     // information", since it almost certainly means our progress info on this
     // SP is very stale.
-    let Ok(total_size) = apictx
-        .host_phase2_provider
-        .total_size(progress.hash)
-        .await
+    let Ok(total_size) =
+        apictx.host_phase2_provider.total_size(progress.hash).await
     else {
         return Ok(HttpResponseOk(HostPhase2Progress::None));
     };

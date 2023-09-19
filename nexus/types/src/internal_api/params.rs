@@ -125,6 +125,7 @@ pub enum DatasetKind {
     Crucible,
     Cockroach,
     Clickhouse,
+    ClickhouseKeeper,
     ExternalDns,
     InternalDns,
 }
@@ -136,6 +137,7 @@ impl fmt::Display for DatasetKind {
             Crucible => "crucible",
             Cockroach => "cockroach",
             Clickhouse => "clickhouse",
+            ClickhouseKeeper => "clickhouse_keeper",
             ExternalDns => "external_dns",
             InternalDns => "internal_dns",
         };
@@ -168,6 +170,7 @@ pub struct ServiceNic {
 #[serde(rename_all = "snake_case", tag = "type", content = "content")]
 pub enum ServiceKind {
     Clickhouse,
+    ClickhouseKeeper,
     Cockroach,
     Crucible,
     CruciblePantry,
@@ -186,6 +189,7 @@ impl fmt::Display for ServiceKind {
         use ServiceKind::*;
         let s = match self {
             Clickhouse => "clickhouse",
+            ClickhouseKeeper => "clickhouse_keeper",
             Cockroach => "cockroach",
             Crucible => "crucible",
             ExternalDns { .. } => "external_dns",

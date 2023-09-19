@@ -13,6 +13,8 @@ use crossterm::terminal::{
     LeaveAlternateScreen,
 };
 use futures::StreamExt;
+use ratatui::backend::CrosstermBackend;
+use ratatui::Terminal;
 use slog::Logger;
 use slog::{debug, error, info};
 use std::env::VarError;
@@ -23,8 +25,6 @@ use tokio::sync::mpsc::{
     unbounded_channel, UnboundedReceiver, UnboundedSender,
 };
 use tokio::time::{interval, Duration};
-use tui::backend::CrosstermBackend;
-use tui::Terminal;
 use wicketd_client::types::AbortUpdateOptions;
 use wicketd_client::types::ClearUpdateStateOptions;
 use wicketd_client::types::StartUpdateOptions;
@@ -38,7 +38,7 @@ use crate::{Action, Cmd, Event, KeyHandler, Recorder, State, TICK_INTERVAL};
 
 // We can avoid a bunch of unnecessary type parameters by picking them ahead of time.
 pub type Term = Terminal<CrosstermBackend<Stdout>>;
-pub type Frame<'a> = tui::Frame<'a, CrosstermBackend<Stdout>>;
+pub type Frame<'a> = ratatui::Frame<'a, CrosstermBackend<Stdout>>;
 
 const MAX_RECORDED_EVENTS: usize = 10000;
 
@@ -171,7 +171,7 @@ impl RunnerCore {
         wicketd: Option<&WicketdHandle>,
     ) -> anyhow::Result<()> {
         let Some(action) = action else {
-         return Ok(());
+            return Ok(());
         };
 
         match action {

@@ -3,23 +3,44 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 //! Rust client to ClickHouse database
-// Copyright 2021 Oxide Computer Company
 
-use crate::{
-    model, query, Error, Metric, Target, Timeseries, TimeseriesPageSelector,
-    TimeseriesScanParams, TimeseriesSchema,
-};
-use crate::{TimeseriesKey, TimeseriesName};
+// Copyright 2023 Oxide Computer Company
+
+use crate::model;
+use crate::query;
+use crate::Error;
+use crate::Metric;
+use crate::Target;
+use crate::Timeseries;
+use crate::TimeseriesKey;
+use crate::TimeseriesName;
+use crate::TimeseriesPageSelector;
+use crate::TimeseriesScanParams;
+use crate::TimeseriesSchema;
 use async_trait::async_trait;
-use dropshot::{EmptyScanParams, PaginationOrder, ResultsPage, WhichPage};
+use dropshot::EmptyScanParams;
+use dropshot::PaginationOrder;
+use dropshot::ResultsPage;
+use dropshot::WhichPage;
 use oximeter::types::Sample;
-use slog::{debug, error, trace, Logger};
-use std::collections::{btree_map::Entry, BTreeMap, BTreeSet};
+use slog::debug;
+use slog::error;
+use slog::trace;
+use slog::Logger;
+use std::collections::btree_map::Entry;
+use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::convert::TryFrom;
 use std::net::SocketAddr;
 use std::num::NonZeroU32;
 use std::sync::Mutex;
 use uuid::Uuid;
+
+#[usdt::provider(provider = "clickhouse__client")]
+mod probes {
+    fn query__start(_: &usdt::UniqueId, sql: &str) {}
+    fn query__done(_: &usdt::UniqueId) {}
+}
 
 /// A `Client` to the ClickHouse metrics database.
 #[derive(Debug)]
@@ -248,6 +269,13 @@ impl Client {
         .map_err(|e| Error::Database(e.to_string()))
     }
 
+    // Verifies if instance is part of oximeter_cluster
+    pub async fn is_oximeter_cluster(&self) -> Result<bool, Error> {
+        let sql = String::from("SHOW CLUSTERS FORMAT JSONEachRow;");
+        let res = self.execute_with_body(sql).await?;
+        Ok(res.contains("oximeter_cluster"))
+    }
+
     // Verifies that the schema for a sample matches the schema in the database.
     //
     // If the schema exists in the database, and the sample matches that schema, `None` is
@@ -357,7 +385,9 @@ impl Client {
     {
         let sql = sql.as_ref().to_string();
         trace!(self.log, "executing SQL query: {}", sql);
-        handle_db_response(
+        let id = usdt::UniqueId::new();
+        probes::query__start!(|| (&id, &sql));
+        let response = handle_db_response(
             self.client
                 .post(&self.url)
                 // See regression test `test_unquoted_64bit_integers` for details.
@@ -370,7 +400,9 @@ impl Client {
         .await?
         .text()
         .await
-        .map_err(|err| Error::Database(err.to_string()))
+        .map_err(|err| Error::Database(err.to_string()));
+        probes::query__done!(|| (&id));
+        response
     }
 
     async fn get_schema(&self) -> Result<(), Error> {
@@ -432,11 +464,17 @@ pub trait DbWrite {
     /// Insert the given samples into the database.
     async fn insert_samples(&self, samples: &[Sample]) -> Result<(), Error>;
 
-    /// Initialize the telemetry database, creating tables as needed.
-    async fn init_db(&self) -> Result<(), Error>;
+    /// Initialize the replicated telemetry database, creating tables as needed.
+    async fn init_replicated_db(&self) -> Result<(), Error>;
 
-    /// Wipe the ClickHouse database entirely.
-    async fn wipe_db(&self) -> Result<(), Error>;
+    /// Initialize a single node telemetry database, creating tables as needed.
+    async fn init_single_node_db(&self) -> Result<(), Error>;
+
+    /// Wipe the ClickHouse database entirely from a single node set up.
+    async fn wipe_single_node_db(&self) -> Result<(), Error>;
+
+    /// Wipe the ClickHouse database entirely from a replicated set up.
+    async fn wipe_replicated_db(&self) -> Result<(), Error>;
 }
 
 #[async_trait]
@@ -538,22 +576,41 @@ impl DbWrite for Client {
         Ok(())
     }
 
-    /// Initialize the telemetry database, creating tables as needed.
-    async fn init_db(&self) -> Result<(), Error> {
+    /// Initialize the replicated telemetry database, creating tables as needed.
+    async fn init_replicated_db(&self) -> Result<(), Error> {
         // The HTTP client doesn't support multiple statements per query, so we break them out here
         // manually.
         debug!(self.log, "initializing ClickHouse database");
-        let sql = include_str!("./db-init.sql");
+        let sql = include_str!("./db-replicated-init.sql");
         for query in sql.split("\n--\n") {
             self.execute(query.to_string()).await?;
         }
         Ok(())
     }
 
-    /// Wipe the ClickHouse database entirely.
-    async fn wipe_db(&self) -> Result<(), Error> {
+    /// Initialize a single node telemetry database, creating tables as needed.
+    async fn init_single_node_db(&self) -> Result<(), Error> {
+        // The HTTP client doesn't support multiple statements per query, so we break them out here
+        // manually.
+        debug!(self.log, "initializing ClickHouse database");
+        let sql = include_str!("./db-single-node-init.sql");
+        for query in sql.split("\n--\n") {
+            self.execute(query.to_string()).await?;
+        }
+        Ok(())
+    }
+
+    /// Wipe the ClickHouse database entirely from a single node set up.
+    async fn wipe_single_node_db(&self) -> Result<(), Error> {
         debug!(self.log, "wiping ClickHouse database");
-        let sql = include_str!("./db-wipe.sql").to_string();
+        let sql = include_str!("./db-wipe-single-node.sql").to_string();
+        self.execute(sql).await
+    }
+
+    /// Wipe the ClickHouse database entirely from a replicated set up.
+    async fn wipe_replicated_db(&self) -> Result<(), Error> {
+        debug!(self.log, "wiping ClickHouse database");
+        let sql = include_str!("./db-wipe-single-node.sql").to_string();
         self.execute(sql).await
     }
 }
@@ -601,10 +658,23 @@ fn error_for_schema_mismatch(
 mod tests {
     use super::*;
     use crate::query;
+    use crate::query::field_table_name;
+    use crate::query::measurement_table_name;
+    use chrono::Utc;
     use omicron_test_utils::dev::clickhouse::ClickHouseInstance;
+    use omicron_test_utils::dev::test_setup_log;
+    use oximeter::histogram::Histogram;
     use oximeter::test_util;
-    use oximeter::{Metric, Target};
+    use oximeter::Datum;
+    use oximeter::FieldValue;
+    use oximeter::Metric;
+    use oximeter::Target;
     use slog::o;
+    use std::net::Ipv4Addr;
+    use std::net::Ipv6Addr;
+    use std::time::Duration;
+    use tokio::time::sleep;
+    use uuid::Uuid;
 
     // NOTE: It's important that each test run the ClickHouse server with different ports.
     // The tests each require a clean slate. Previously, we ran the tests in a different thread,
@@ -618,16 +688,137 @@ mod tests {
 
     #[tokio::test]
     async fn test_build_client() {
-        let log = slog::Logger::root(slog::Discard, o!());
+        let logctx = test_setup_log("test_build_client");
+        let log = &logctx.log;
 
         // Let the OS assign a port and discover it after ClickHouse starts
-        let mut db = ClickHouseInstance::new(0)
+        let mut db = ClickHouseInstance::new_single_node(0)
             .await
             .expect("Failed to start ClickHouse");
         let address = SocketAddr::new("::1".parse().unwrap(), db.port());
 
-        Client::new(address, &log).wipe_db().await.unwrap();
+        let client = Client::new(address, &log);
+        assert!(!client.is_oximeter_cluster().await.unwrap());
+
+        client.wipe_single_node_db().await.unwrap();
         db.cleanup().await.expect("Failed to cleanup ClickHouse server");
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    // TODO(https://github.com/oxidecomputer/omicron/issues/4001): This job fails intermittently
+    // on the ubuntu CI job with "Failed to detect ClickHouse subprocess within timeout"
+    #[ignore]
+    async fn test_build_replicated() {
+        let log = slog::Logger::root(slog::Discard, o!());
+
+        // Start all Keeper coordinator nodes
+        let cur_dir = std::env::current_dir().unwrap();
+        let keeper_config =
+            cur_dir.as_path().join("src/configs/keeper_config.xml");
+
+        // Start Keeper 1
+        let k1_port = 9181;
+        let k1_id = 1;
+
+        let mut k1 = ClickHouseInstance::new_keeper(
+            k1_port,
+            k1_id,
+            keeper_config.clone(),
+        )
+        .await
+        .expect("Failed to start ClickHouse keeper 1");
+
+        // Start Keeper 2
+        let k2_port = 9182;
+        let k2_id = 2;
+
+        let mut k2 = ClickHouseInstance::new_keeper(
+            k2_port,
+            k2_id,
+            keeper_config.clone(),
+        )
+        .await
+        .expect("Failed to start ClickHouse keeper 2");
+
+        // Start Keeper 3
+        let k3_port = 9183;
+        let k3_id = 3;
+
+        let mut k3 =
+            ClickHouseInstance::new_keeper(k3_port, k3_id, keeper_config)
+                .await
+                .expect("Failed to start ClickHouse keeper 3");
+
+        // Start all replica nodes
+        let cur_dir = std::env::current_dir().unwrap();
+        let replica_config =
+            cur_dir.as_path().join("src/configs/replica_config.xml");
+
+        // Start Replica 1
+        let r1_port = 8123;
+        let r1_tcp_port = 9000;
+        let r1_interserver_port = 9009;
+        let r1_name = String::from("oximeter_cluster node 1");
+        let r1_number = String::from("01");
+        let mut db_1 = ClickHouseInstance::new_replicated(
+            r1_port,
+            r1_tcp_port,
+            r1_interserver_port,
+            r1_name,
+            r1_number,
+            replica_config.clone(),
+        )
+        .await
+        .expect("Failed to start ClickHouse node 1");
+        let r1_address =
+            SocketAddr::new("127.0.0.1".parse().unwrap(), db_1.port());
+
+        // Start Replica 2
+        let r2_port = 8124;
+        let r2_tcp_port = 9001;
+        let r2_interserver_port = 9010;
+        let r2_name = String::from("oximeter_cluster node 2");
+        let r2_number = String::from("02");
+        let mut db_2 = ClickHouseInstance::new_replicated(
+            r2_port,
+            r2_tcp_port,
+            r2_interserver_port,
+            r2_name,
+            r2_number,
+            replica_config,
+        )
+        .await
+        .expect("Failed to start ClickHouse node 2");
+        let r2_address =
+            SocketAddr::new("127.0.0.1".parse().unwrap(), db_2.port());
+
+        // Create database in node 1
+        let client_1 = Client::new(r1_address, &log);
+        assert!(client_1.is_oximeter_cluster().await.unwrap());
+        client_1
+            .init_replicated_db()
+            .await
+            .expect("Failed to initialize timeseries database");
+
+        // Wait to make sure data has been synchronised.
+        // TODO(https://github.com/oxidecomputer/omicron/issues/4001): Waiting for 5 secs is a bit sloppy,
+        // come up with a better way to do this.
+        sleep(Duration::from_secs(5)).await;
+
+        // Verify database exists in node 2
+        let client_2 = Client::new(r2_address, &log);
+        assert!(client_2.is_oximeter_cluster().await.unwrap());
+        let sql = String::from("SHOW DATABASES FORMAT JSONEachRow;");
+
+        let result = client_2.execute_with_body(sql).await.unwrap();
+        assert!(result.contains("oximeter"));
+
+        k1.cleanup().await.expect("Failed to cleanup ClickHouse keeper 1");
+        k2.cleanup().await.expect("Failed to cleanup ClickHouse keeper 2");
+        k3.cleanup().await.expect("Failed to cleanup ClickHouse keeper 3");
+        db_1.cleanup().await.expect("Failed to cleanup ClickHouse server 1");
+        db_2.cleanup().await.expect("Failed to cleanup ClickHouse server 2");
     }
 
     #[tokio::test]
@@ -635,14 +826,14 @@ mod tests {
         let log = slog::Logger::root(slog::Discard, o!());
 
         // Let the OS assign a port and discover it after ClickHouse starts
-        let mut db = ClickHouseInstance::new(0)
+        let mut db = ClickHouseInstance::new_single_node(0)
             .await
             .expect("Failed to start ClickHouse");
         let address = SocketAddr::new("::1".parse().unwrap(), db.port());
 
         let client = Client::new(address, &log);
         client
-            .init_db()
+            .init_single_node_db()
             .await
             .expect("Failed to initialize timeseries database");
         let samples = {
@@ -677,18 +868,456 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_recall_field_value_bool() {
+        let field = FieldValue::Bool(true);
+        let as_json = serde_json::Value::from(1_u64);
+        test_recall_field_value_impl(field, as_json).await;
+    }
+
+    #[tokio::test]
+    async fn test_recall_field_value_u8() {
+        let field = FieldValue::U8(1);
+        let as_json = serde_json::Value::from(1_u8);
+        test_recall_field_value_impl(field, as_json).await;
+    }
+
+    #[tokio::test]
+    async fn test_recall_field_value_i8() {
+        let field = FieldValue::I8(1);
+        let as_json = serde_json::Value::from(1_i8);
+        test_recall_field_value_impl(field, as_json).await;
+    }
+
+    #[tokio::test]
+    async fn test_recall_field_value_u16() {
+        let field = FieldValue::U16(1);
+        let as_json = serde_json::Value::from(1_u16);
+        test_recall_field_value_impl(field, as_json).await;
+    }
+
+    #[tokio::test]
+    async fn test_recall_field_value_i16() {
+        let field = FieldValue::I16(1);
+        let as_json = serde_json::Value::from(1_i16);
+        test_recall_field_value_impl(field, as_json).await;
+    }
+
+    #[tokio::test]
+    async fn test_recall_field_value_u32() {
+        let field = FieldValue::U32(1);
+        let as_json = serde_json::Value::from(1_u32);
+        test_recall_field_value_impl(field, as_json).await;
+    }
+
+    #[tokio::test]
+    async fn test_recall_field_value_i32() {
+        let field = FieldValue::I32(1);
+        let as_json = serde_json::Value::from(1_i32);
+        test_recall_field_value_impl(field, as_json).await;
+    }
+
+    #[tokio::test]
+    async fn test_recall_field_value_u64() {
+        let field = FieldValue::U64(1);
+        let as_json = serde_json::Value::from(1_u64);
+        test_recall_field_value_impl(field, as_json).await;
+    }
+
+    #[tokio::test]
+    async fn test_recall_field_value_i64() {
+        let field = FieldValue::I64(1);
+        let as_json = serde_json::Value::from(1_i64);
+        test_recall_field_value_impl(field, as_json).await;
+    }
+
+    #[tokio::test]
+    async fn test_recall_field_value_string() {
+        let field = FieldValue::String("foo".into());
+        let as_json = serde_json::Value::from("foo");
+        test_recall_field_value_impl(field, as_json).await;
+    }
+
+    #[tokio::test]
+    async fn test_recall_field_value_ipv4addr() {
+        let field = FieldValue::from(Ipv4Addr::LOCALHOST);
+        let as_json = serde_json::Value::from(
+            Ipv4Addr::LOCALHOST.to_ipv6_mapped().to_string(),
+        );
+        test_recall_field_value_impl(field, as_json).await;
+    }
+
+    #[tokio::test]
+    async fn test_recall_field_value_ipv6addr() {
+        let field = FieldValue::from(Ipv6Addr::LOCALHOST);
+        let as_json = serde_json::Value::from(Ipv6Addr::LOCALHOST.to_string());
+        test_recall_field_value_impl(field, as_json).await;
+    }
+
+    #[tokio::test]
+    async fn test_recall_field_value_uuid() {
+        let id = Uuid::new_v4();
+        let field = FieldValue::from(id);
+        let as_json = serde_json::Value::from(id.to_string());
+        test_recall_field_value_impl(field, as_json).await;
+    }
+
+    async fn test_recall_field_value_impl(
+        field_value: FieldValue,
+        as_json: serde_json::Value,
+    ) {
+        let logctx = test_setup_log(
+            format!("test_recall_field_value_{}", field_value.field_type())
+                .as_str(),
+        );
+        let log = &logctx.log;
+
+        // Let the OS assign a port and discover it after ClickHouse starts
+        let mut db = ClickHouseInstance::new_single_node(0)
+            .await
+            .expect("Failed to start ClickHouse");
+        let address = SocketAddr::new("::1".parse().unwrap(), db.port());
+
+        let client = Client::new(address, log);
+        client
+            .init_single_node_db()
+            .await
+            .expect("Failed to initialize timeseries database");
+
+        // Insert a record from this field.
+        const TIMESERIES_NAME: &str = "foo:bar";
+        const TIMESERIES_KEY: u64 = 101;
+        const FIELD_NAME: &str = "baz";
+
+        let mut inserted_row = serde_json::Map::new();
+        inserted_row
+            .insert("timeseries_name".to_string(), TIMESERIES_NAME.into());
+        inserted_row
+            .insert("timeseries_key".to_string(), TIMESERIES_KEY.into());
+        inserted_row.insert("field_name".to_string(), FIELD_NAME.into());
+        inserted_row.insert("field_value".to_string(), as_json);
+        let inserted_row = serde_json::Value::from(inserted_row);
+
+        let row = serde_json::to_string(&inserted_row).unwrap();
+        let field_table = field_table_name(field_value.field_type());
+        let insert_sql = format!(
+            "INSERT INTO oximeter.{field_table} FORMAT JSONEachRow {row}"
+        );
+        client.execute(insert_sql).await.expect("Failed to insert field row");
+
+        // Select it exactly back out.
+        let select_sql = format!(
+            "SELECT * FROM oximeter.{} LIMIT 1 FORMAT {};",
+            field_table_name(field_value.field_type()),
+            crate::DATABASE_SELECT_FORMAT,
+        );
+        let body = client
+            .execute_with_body(select_sql)
+            .await
+            .expect("Failed to select field row");
+        let actual_row: serde_json::Value = serde_json::from_str(&body)
+            .expect("Failed to parse field row JSON");
+        println!("{actual_row:?}");
+        println!("{inserted_row:?}");
+        assert_eq!(
+            actual_row, inserted_row,
+            "Actual and expected field rows do not match"
+        );
+        db.cleanup().await.expect("Failed to cleanup ClickHouse server");
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_recall_measurement_bool() {
+        let datum = Datum::Bool(true);
+        let as_json = serde_json::Value::from(1_u64);
+        test_recall_measurement_impl::<u8>(datum, None, as_json).await;
+    }
+
+    #[tokio::test]
+    async fn test_recall_measurement_i8() {
+        let datum = Datum::I8(1);
+        let as_json = serde_json::Value::from(1_i8);
+        test_recall_measurement_impl::<u8>(datum, None, as_json).await;
+    }
+
+    #[tokio::test]
+    async fn test_recall_measurement_u8() {
+        let datum = Datum::U8(1);
+        let as_json = serde_json::Value::from(1_u8);
+        test_recall_measurement_impl::<u8>(datum, None, as_json).await;
+    }
+
+    #[tokio::test]
+    async fn test_recall_measurement_i16() {
+        let datum = Datum::I16(1);
+        let as_json = serde_json::Value::from(1_i16);
+        test_recall_measurement_impl::<u8>(datum, None, as_json).await;
+    }
+
+    #[tokio::test]
+    async fn test_recall_measurement_u16() {
+        let datum = Datum::U16(1);
+        let as_json = serde_json::Value::from(1_u16);
+        test_recall_measurement_impl::<u8>(datum, None, as_json).await;
+    }
+
+    #[tokio::test]
+    async fn test_recall_measurement_i32() {
+        let datum = Datum::I32(1);
+        let as_json = serde_json::Value::from(1_i32);
+        test_recall_measurement_impl::<u8>(datum, None, as_json).await;
+    }
+
+    #[tokio::test]
+    async fn test_recall_measurement_u32() {
+        let datum = Datum::U32(1);
+        let as_json = serde_json::Value::from(1_u32);
+        test_recall_measurement_impl::<u8>(datum, None, as_json).await;
+    }
+
+    #[tokio::test]
+    async fn test_recall_measurement_i64() {
+        let datum = Datum::I64(1);
+        let as_json = serde_json::Value::from(1_i64);
+        test_recall_measurement_impl::<u8>(datum, None, as_json).await;
+    }
+
+    #[tokio::test]
+    async fn test_recall_measurement_u64() {
+        let datum = Datum::U64(1);
+        let as_json = serde_json::Value::from(1_u64);
+        test_recall_measurement_impl::<u8>(datum, None, as_json).await;
+    }
+
+    #[tokio::test]
+    async fn test_recall_measurement_f32() {
+        const VALUE: f32 = 1.1;
+        let datum = Datum::F32(VALUE);
+        // NOTE: This is intentionally an f64.
+        let as_json = serde_json::Value::from(1.1_f64);
+        test_recall_measurement_impl::<u8>(datum, None, as_json).await;
+    }
+
+    #[tokio::test]
+    async fn test_recall_measurement_f64() {
+        const VALUE: f64 = 1.1;
+        let datum = Datum::F64(VALUE);
+        let as_json = serde_json::Value::from(VALUE);
+        test_recall_measurement_impl::<u8>(datum, None, as_json).await;
+    }
+
+    #[tokio::test]
+    async fn test_recall_measurement_cumulative_i64() {
+        let datum = Datum::CumulativeI64(1.into());
+        let as_json = serde_json::Value::from(1_i64);
+        test_recall_measurement_impl::<u8>(datum, None, as_json).await;
+    }
+
+    #[tokio::test]
+    async fn test_recall_measurement_cumulative_u64() {
+        let datum = Datum::CumulativeU64(1.into());
+        let as_json = serde_json::Value::from(1_u64);
+        test_recall_measurement_impl::<u8>(datum, None, as_json).await;
+    }
+
+    #[tokio::test]
+    async fn test_recall_measurement_cumulative_f64() {
+        let datum = Datum::CumulativeF64(1.1.into());
+        let as_json = serde_json::Value::from(1.1_f64);
+        test_recall_measurement_impl::<u8>(datum, None, as_json).await;
+    }
+
+    async fn histogram_test_impl<T>(hist: Histogram<T>)
+    where
+        T: oximeter::histogram::HistogramSupport,
+        Datum: From<oximeter::histogram::Histogram<T>>,
+        serde_json::Value: From<T>,
+    {
+        let (bins, counts) = hist.to_arrays();
+        let datum = Datum::from(hist);
+        let as_json = serde_json::Value::Array(
+            counts.into_iter().map(Into::into).collect(),
+        );
+        test_recall_measurement_impl(datum, Some(bins), as_json).await;
+    }
+
+    #[tokio::test]
+    async fn test_recall_measurement_histogram_i8() {
+        let hist = Histogram::new(&[0i8, 1, 2]).unwrap();
+        histogram_test_impl(hist).await;
+    }
+
+    #[tokio::test]
+    async fn test_recall_measurement_histogram_u8() {
+        let hist = Histogram::new(&[0u8, 1, 2]).unwrap();
+        histogram_test_impl(hist).await;
+    }
+
+    #[tokio::test]
+    async fn test_recall_measurement_histogram_i16() {
+        let hist = Histogram::new(&[0i16, 1, 2]).unwrap();
+        histogram_test_impl(hist).await;
+    }
+
+    #[tokio::test]
+    async fn test_recall_measurement_histogram_u16() {
+        let hist = Histogram::new(&[0u16, 1, 2]).unwrap();
+        histogram_test_impl(hist).await;
+    }
+
+    #[tokio::test]
+    async fn test_recall_measurement_histogram_i32() {
+        let hist = Histogram::new(&[0i32, 1, 2]).unwrap();
+        histogram_test_impl(hist).await;
+    }
+
+    #[tokio::test]
+    async fn test_recall_measurement_histogram_u32() {
+        let hist = Histogram::new(&[0u32, 1, 2]).unwrap();
+        histogram_test_impl(hist).await;
+    }
+
+    #[tokio::test]
+    async fn test_recall_measurement_histogram_i64() {
+        let hist = Histogram::new(&[0i64, 1, 2]).unwrap();
+        histogram_test_impl(hist).await;
+    }
+
+    #[tokio::test]
+    async fn test_recall_measurement_histogram_u64() {
+        let hist = Histogram::new(&[0u64, 1, 2]).unwrap();
+        histogram_test_impl(hist).await;
+    }
+
+    // NOTE: This test is ignored intentionally.
+    //
+    // We're using the JSONEachRow format to return data, which loses precision
+    // for floating point values. This means we return the _double_ 0.1 from
+    // the database as a `Value::Number`, which fails to compare equal to the
+    // `Value::Number(0.1f32 as f64)` we sent in. That's because 0.1 is not
+    // exactly representable in an `f32`, but it's close enough that ClickHouse
+    // prints `0.1` in the result, which converts to a slightly different `f64`
+    // than `0.1_f32 as f64` does.
+    //
+    // See https://github.com/oxidecomputer/omicron/issues/4059 for related
+    // discussion.
+    #[tokio::test]
+    #[ignore]
+    async fn test_recall_measurement_histogram_f32() {
+        let hist = Histogram::new(&[0.1f32, 0.2, 0.3]).unwrap();
+        histogram_test_impl(hist).await;
+    }
+
+    #[tokio::test]
+    async fn test_recall_measurement_histogram_f64() {
+        let hist = Histogram::new(&[0.1f64, 0.2, 0.3]).unwrap();
+        histogram_test_impl(hist).await;
+    }
+
+    async fn test_recall_measurement_impl<T: Into<serde_json::Value> + Copy>(
+        datum: Datum,
+        maybe_bins: Option<Vec<T>>,
+        json_datum: serde_json::Value,
+    ) {
+        let logctx = test_setup_log(
+            format!("test_recall_measurement_{}", datum.datum_type()).as_str(),
+        );
+        let log = &logctx.log;
+
+        // Let the OS assign a port and discover it after ClickHouse starts
+        let mut db = ClickHouseInstance::new_single_node(0)
+            .await
+            .expect("Failed to start ClickHouse");
+        let address = SocketAddr::new("::1".parse().unwrap(), db.port());
+
+        let client = Client::new(address, log);
+        client
+            .init_single_node_db()
+            .await
+            .expect("Failed to initialize timeseries database");
+
+        // Insert a record from this datum.
+        const TIMESERIES_NAME: &str = "foo:bar";
+        const TIMESERIES_KEY: u64 = 101;
+        let mut inserted_row = serde_json::Map::new();
+        inserted_row
+            .insert("timeseries_name".to_string(), TIMESERIES_NAME.into());
+        inserted_row
+            .insert("timeseries_key".to_string(), TIMESERIES_KEY.into());
+        inserted_row.insert(
+            "timestamp".to_string(),
+            Utc::now()
+                .format(crate::DATABASE_TIMESTAMP_FORMAT)
+                .to_string()
+                .into(),
+        );
+
+        // Insert the start time and possibly bins.
+        if let Some(start_time) = datum.start_time() {
+            inserted_row.insert(
+                "start_time".to_string(),
+                start_time
+                    .format(crate::DATABASE_TIMESTAMP_FORMAT)
+                    .to_string()
+                    .into(),
+            );
+        }
+        if let Some(bins) = &maybe_bins {
+            let bins = serde_json::Value::Array(
+                bins.iter().copied().map(Into::into).collect(),
+            );
+            inserted_row.insert("bins".to_string(), bins);
+            inserted_row.insert("counts".to_string(), json_datum);
+        } else {
+            inserted_row.insert("datum".to_string(), json_datum);
+        }
+        let inserted_row = serde_json::Value::from(inserted_row);
+
+        let measurement_table = measurement_table_name(datum.datum_type());
+        let row = serde_json::to_string(&inserted_row).unwrap();
+        let insert_sql = format!(
+            "INSERT INTO oximeter.{measurement_table} FORMAT JSONEachRow {row}",
+        );
+        client
+            .execute(insert_sql)
+            .await
+            .expect("Failed to insert measurement row");
+
+        // Select it exactly back out.
+        let select_sql = format!(
+            "SELECT * FROM oximeter.{} LIMIT 1 FORMAT {};",
+            measurement_table,
+            crate::DATABASE_SELECT_FORMAT,
+        );
+        let body = client
+            .execute_with_body(select_sql)
+            .await
+            .expect("Failed to select measurement row");
+        let actual_row: serde_json::Value = serde_json::from_str(&body)
+            .expect("Failed to parse measurement row JSON");
+        println!("{actual_row:?}");
+        println!("{inserted_row:?}");
+        assert_eq!(
+            actual_row, inserted_row,
+            "Actual and expected measurement rows do not match"
+        );
+        db.cleanup().await.expect("Failed to cleanup ClickHouse server");
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
     async fn test_schema_mismatch() {
         let log = slog::Logger::root(slog::Discard, o!());
 
         // Let the OS assign a port and discover it after ClickHouse starts
-        let mut db = ClickHouseInstance::new(0)
+        let mut db = ClickHouseInstance::new_single_node(0)
             .await
             .expect("Failed to start ClickHouse");
         let address = SocketAddr::new("::1".parse().unwrap(), db.port());
 
         let client = Client::new(address, &log);
         client
-            .init_db()
+            .init_single_node_db()
             .await
             .expect("Failed to initialize timeseries database");
         let sample = test_util::make_sample();
@@ -715,14 +1344,14 @@ mod tests {
         let log = slog::Logger::root(slog::Discard, o!());
 
         // Let the OS assign a port and discover it after ClickHouse starts
-        let mut db = ClickHouseInstance::new(0)
+        let mut db = ClickHouseInstance::new_single_node(0)
             .await
             .expect("Failed to start ClickHouse");
         let address = SocketAddr::new("::1".parse().unwrap(), db.port());
 
         let client = Client::new(address, &log);
         client
-            .init_db()
+            .init_single_node_db()
             .await
             .expect("Failed to initialize timeseries database");
         let sample = test_util::make_sample();
@@ -793,14 +1422,14 @@ mod tests {
         let log = slog::Logger::root(slog_dtrace::Dtrace::new().0, o!());
 
         // Let the OS assign a port and discover it after ClickHouse starts
-        let db = ClickHouseInstance::new(0)
+        let db = ClickHouseInstance::new_single_node(0)
             .await
             .expect("Failed to start ClickHouse");
         let address = SocketAddr::new("::1".parse().unwrap(), db.port());
 
         let client = Client::new(address, &log);
         client
-            .init_db()
+            .init_single_node_db()
             .await
             .expect("Failed to initialize timeseries database");
 
@@ -991,14 +1620,14 @@ mod tests {
         let log = Logger::root(slog::Discard, o!());
 
         // Let the OS assign a port and discover it after ClickHouse starts
-        let db = ClickHouseInstance::new(0)
+        let db = ClickHouseInstance::new_single_node(0)
             .await
             .expect("Failed to start ClickHouse");
         let address = SocketAddr::new("::1".parse().unwrap(), db.port());
 
         let client = Client::new(address, &log);
         client
-            .init_db()
+            .init_single_node_db()
             .await
             .expect("Failed to initialize timeseries database");
 
@@ -1090,14 +1719,14 @@ mod tests {
         test_fn: impl Fn(&Service, &[RequestLatency], &[Sample], &[Timeseries]),
     ) {
         let (target, metrics, samples) = setup_select_test();
-        let mut db = ClickHouseInstance::new(0)
+        let mut db = ClickHouseInstance::new_single_node(0)
             .await
             .expect("Failed to start ClickHouse");
         let address = SocketAddr::new("::1".parse().unwrap(), db.port());
         let log = Logger::root(slog::Discard, o!());
         let client = Client::new(address, &log);
         client
-            .init_db()
+            .init_single_node_db()
             .await
             .expect("Failed to initialize timeseries database");
         client
@@ -1347,14 +1976,14 @@ mod tests {
     #[tokio::test]
     async fn test_select_timeseries_with_start_time() {
         let (_, metrics, samples) = setup_select_test();
-        let mut db = ClickHouseInstance::new(0)
+        let mut db = ClickHouseInstance::new_single_node(0)
             .await
             .expect("Failed to start ClickHouse");
         let address = SocketAddr::new("::1".parse().unwrap(), db.port());
         let log = Logger::root(slog::Discard, o!());
         let client = Client::new(address, &log);
         client
-            .init_db()
+            .init_single_node_db()
             .await
             .expect("Failed to initialize timeseries database");
         client
@@ -1391,14 +2020,14 @@ mod tests {
     #[tokio::test]
     async fn test_select_timeseries_with_limit() {
         let (_, _, samples) = setup_select_test();
-        let mut db = ClickHouseInstance::new(0)
+        let mut db = ClickHouseInstance::new_single_node(0)
             .await
             .expect("Failed to start ClickHouse");
         let address = SocketAddr::new("::1".parse().unwrap(), db.port());
         let log = Logger::root(slog::Discard, o!());
         let client = Client::new(address, &log);
         client
-            .init_db()
+            .init_single_node_db()
             .await
             .expect("Failed to initialize timeseries database");
         client
@@ -1509,14 +2138,14 @@ mod tests {
     #[tokio::test]
     async fn test_select_timeseries_with_order() {
         let (_, _, samples) = setup_select_test();
-        let mut db = ClickHouseInstance::new(0)
+        let mut db = ClickHouseInstance::new_single_node(0)
             .await
             .expect("Failed to start ClickHouse");
         let address = SocketAddr::new("::1".parse().unwrap(), db.port());
         let log = Logger::root(slog::Discard, o!());
         let client = Client::new(address, &log);
         client
-            .init_db()
+            .init_single_node_db()
             .await
             .expect("Failed to initialize timeseries database");
         client

@@ -35,6 +35,10 @@ zpools = [
   "oxp_f4b4dc87-ab46-49fb-a4b4-d361ae214c03",
   "oxp_14b4dc87-ab46-49fb-a4b4-d361ae214c03",
   "oxp_24b4dc87-ab46-49fb-a4b4-d361ae214c03",
+  "oxp_cd70d7f6-2354-4bf2-8012-55bf9eaf7930",
+  "oxp_ceb4461c-cf56-4719-ad3c-14430bfdfb60",
+  "oxp_31bd71cd-4736-4a12-a387-9b74b050396f",
+  "oxp_616b26df-e62a-4c68-b506-f4a923d8aaf7",
 ]
 
 # Percentage of usable physical DRAM to use for the VMM reservoir, which

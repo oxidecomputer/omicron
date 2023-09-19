@@ -11,7 +11,7 @@
 use crate::nexus::NexusClient;
 use crate::sim::http_entrypoints_pantry::ExpectedDigest;
 use crate::sim::SledAgent;
-use anyhow::{bail, Result};
+use anyhow::{self, bail, Result};
 use chrono::prelude::*;
 use crucible_agent_client::types::{
     CreateRegion, Region, RegionId, RunningSnapshot, Snapshot, State,
@@ -39,6 +39,7 @@ struct CrucibleDataInner {
     snapshots: HashMap<Uuid, HashMap<String, Snapshot>>,
     running_snapshots: HashMap<Uuid, HashMap<String, RunningSnapshot>>,
     on_create: Option<CreateCallback>,
+    region_creation_error: bool,
     creating_a_running_snapshot_should_fail: bool,
     next_port: u16,
 }
@@ -51,6 +52,7 @@ impl CrucibleDataInner {
             snapshots: HashMap::new(),
             running_snapshots: HashMap::new(),
             on_create: None,
+            region_creation_error: false,
             creating_a_running_snapshot_should_fail: false,
             next_port: crucible_port,
         }
@@ -64,7 +66,7 @@ impl CrucibleDataInner {
         self.regions.values().cloned().collect()
     }
 
-    fn create(&mut self, params: CreateRegion) -> Region {
+    fn create(&mut self, params: CreateRegion) -> Result<Region> {
         let id = Uuid::from_str(&params.id.0).unwrap();
 
         let state = if let Some(on_create) = &self.on_create {
@@ -72,6 +74,10 @@ impl CrucibleDataInner {
         } else {
             State::Requested
         };
+
+        if self.region_creation_error {
+            bail!("region creation error!");
+        }
 
         let region = Region {
             id: params.id,
@@ -86,15 +92,19 @@ impl CrucibleDataInner {
             key_pem: None,
             root_pem: None,
         };
+
         let old = self.regions.insert(id, region.clone());
+
         if let Some(old) = old {
             assert_eq!(
                 old.id.0, region.id.0,
                 "Region already exists, but with a different ID"
             );
         }
+
         self.next_port += 1;
-        region
+
+        Ok(region)
     }
 
     fn get(&self, id: RegionId) -> Option<Region> {
@@ -120,7 +130,13 @@ impl CrucibleDataInner {
         }
 
         let id = Uuid::from_str(&id.0).unwrap();
-        if let Some(mut region) = self.regions.get_mut(&id) {
+        if let Some(region) = self.regions.get_mut(&id) {
+            if region.state == State::Failed {
+                // The real Crucible agent would not let a Failed region be
+                // deleted
+                bail!("cannot delete in state Failed");
+            }
+
             region.state = State::Destroyed;
             Ok(Some(region.clone()))
         } else {
@@ -207,6 +223,10 @@ impl CrucibleDataInner {
 
     fn set_creating_a_running_snapshot_should_fail(&mut self) {
         self.creating_a_running_snapshot_should_fail = true;
+    }
+
+    fn set_region_creation_error(&mut self, value: bool) {
+        self.region_creation_error = value;
     }
 
     fn create_running_snapshot(
@@ -307,7 +327,7 @@ impl CrucibleData {
         self.inner.lock().await.list()
     }
 
-    pub async fn create(&self, params: CreateRegion) -> Region {
+    pub async fn create(&self, params: CreateRegion) -> Result<Region> {
         self.inner.lock().await.create(params)
     }
 
@@ -365,6 +385,10 @@ impl CrucibleData {
 
     pub async fn set_creating_a_running_snapshot_should_fail(&self) {
         self.inner.lock().await.set_creating_a_running_snapshot_should_fail();
+    }
+
+    pub async fn set_region_creation_error(&self, value: bool) {
+        self.inner.lock().await.set_region_creation_error(value);
     }
 
     pub async fn create_running_snapshot(

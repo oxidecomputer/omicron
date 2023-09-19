@@ -67,7 +67,6 @@ slog-async.workspace = true
 slog-dtrace.workspace = true
 slog-term.workspace = true
 smf.workspace = true
-sp-sim.workspace = true
 tar.workspace = true
 thiserror.workspace = true
 tofino.workspace = true

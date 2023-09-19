@@ -149,7 +149,7 @@ impl DataStore {
 
     /// List all DNS names in the given DNS zone at the given group version
     /// (paginated)
-    async fn dns_names_list(
+    pub async fn dns_names_list(
         &self,
         opctx: &OpContext,
         dns_zone_id: Uuid,
@@ -873,7 +873,7 @@ mod test {
                 NonZeroU32::new(1).unwrap(),
                 &DnsVersion {
                     dns_group: DnsGroup::Internal,
-                    version: Generation(1.try_into().unwrap()),
+                    version: Generation(1u32.try_into().unwrap()),
                     time_created: dns_config.time_created,
                     creator: "unused".to_string(),
                     comment: "unused".to_string(),
@@ -938,9 +938,9 @@ mod test {
         let z2_id = Uuid::new_v4();
         let z3_id = Uuid::new_v4();
         let zinternal_id = Uuid::new_v4();
-        let g1 = Generation(1.try_into().unwrap());
-        let g2 = Generation(2.try_into().unwrap());
-        let g3 = Generation(3.try_into().unwrap());
+        let g1 = Generation(1u32.try_into().unwrap());
+        let g2 = Generation(2u32.try_into().unwrap());
+        let g3 = Generation(3u32.try_into().unwrap());
         let v1 = DnsVersion {
             dns_group: DnsGroup::External,
             version: g1,
@@ -1320,8 +1320,8 @@ mod test {
             use crate::db::schema::dns_name::dsl;
             let dns_zone_id = Uuid::new_v4();
             let name = "n1".to_string();
-            let g1 = Generation(1.try_into().unwrap());
-            let g2 = Generation(2.try_into().unwrap());
+            let g1 = Generation(1u32.try_into().unwrap());
+            let g2 = Generation(2u32.try_into().unwrap());
             let r1 = DnsRecord::Aaaa("fe80::1:2:3:4".parse().unwrap());
             let r2 = DnsRecord::Aaaa("fe80::1:1:1:1".parse().unwrap());
 

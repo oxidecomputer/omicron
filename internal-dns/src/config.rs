@@ -422,6 +422,10 @@ mod test {
     #[test]
     fn display_srv_service() {
         assert_eq!(ServiceName::Clickhouse.dns_name(), "_clickhouse._tcp",);
+        assert_eq!(
+            ServiceName::ClickhouseKeeper.dns_name(),
+            "_clickhouse-keeper._tcp",
+        );
         assert_eq!(ServiceName::Cockroach.dns_name(), "_cockroach._tcp",);
         assert_eq!(ServiceName::InternalDns.dns_name(), "_nameservice._tcp",);
         assert_eq!(ServiceName::Nexus.dns_name(), "_nexus._tcp",);
@@ -578,7 +582,7 @@ mod test {
             error.to_string(),
             "multiple definitions for sled \
             001de000-51ed-4000-8000-000000000001 (previously ::1, \
-            now ::0.0.0.2)"
+            now ::2)"
         );
 
         // Duplicate zone, with both the same IP and a different one.
@@ -588,15 +592,15 @@ mod test {
         assert_eq!(
             error.to_string(),
             "multiple definitions for zone \
-            001de000-c04e-4000-8000-000000000001 (previously ::0.1.0.1, \
-            now ::0.1.0.1)"
+            001de000-c04e-4000-8000-000000000001 (previously ::1:1, \
+            now ::1:1)"
         );
         let error = builder.host_zone(zone1_uuid, ZONE2_IP).unwrap_err();
         assert_eq!(
             error.to_string(),
             "multiple definitions for zone \
-            001de000-c04e-4000-8000-000000000001 (previously ::0.1.0.1, \
-            now ::0.1.0.2)"
+            001de000-c04e-4000-8000-000000000001 (previously ::1:1, \
+            now ::1:2)"
         );
 
         // Specify an undefined zone or sled.  (This requires a second builder.)

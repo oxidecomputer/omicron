@@ -1,6 +1,6 @@
-use crate::authz::ApiResource;
-use crate::db::queries::network_interface;
+use nexus_db_queries::authz::ApiResource;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db::queries::network_interface;
 use nexus_types::external_api::params;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DeleteResult;
@@ -13,9 +13,9 @@ use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::UpdateResult;
 use uuid::Uuid;
 
-use crate::authz;
-use crate::db;
-use crate::db::lookup::{self, LookupPath};
+use nexus_db_queries::authz;
+use nexus_db_queries::db;
+use nexus_db_queries::db::lookup::{self, LookupPath};
 
 impl super::Nexus {
     pub fn instance_network_interface_lookup<'a>(
@@ -64,7 +64,7 @@ impl super::Nexus {
     // TODO-performance: Add a version of this that accepts the instance ID
     // directly. This will avoid all the internal database lookups in the event
     // that we create many NICs for the same instance, such as in a saga.
-    pub async fn network_interface_create(
+    pub(crate) async fn network_interface_create(
         &self,
         opctx: &OpContext,
         instance_lookup: &lookup::Instance<'_>,
@@ -124,7 +124,7 @@ impl super::Nexus {
     }
 
     /// Lists network interfaces attached to the instance.
-    pub async fn instance_network_interface_list(
+    pub(crate) async fn instance_network_interface_list(
         &self,
         opctx: &OpContext,
         instance_lookup: &lookup::Instance<'_>,
@@ -138,7 +138,7 @@ impl super::Nexus {
     }
 
     /// Update a network interface for the given instance.
-    pub async fn instance_network_interface_update(
+    pub(crate) async fn instance_network_interface_update(
         &self,
         opctx: &OpContext,
         network_interface_lookup: &lookup::InstanceNetworkInterface<'_>,
@@ -160,7 +160,7 @@ impl super::Nexus {
     ///
     /// Note that the primary interface for an instance cannot be deleted if
     /// there are any secondary interfaces.
-    pub async fn instance_network_interface_delete(
+    pub(crate) async fn instance_network_interface_delete(
         &self,
         opctx: &OpContext,
         network_interface_lookup: &lookup::InstanceNetworkInterface<'_>,

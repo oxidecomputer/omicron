@@ -74,7 +74,7 @@ const MAX_PORT: u16 = u16::MAX;
 ///
 /// In general, the query:
 ///
-/// - Selects the next available IP address and port range from _any_ IP Pool
+/// - Selects the next available IP address and port range from the specified IP pool
 /// - Inserts that record into the `external_ip` table
 /// - Updates the rcgen and time modified of the parent `ip_pool_range` table
 ///
@@ -861,14 +861,20 @@ mod tests {
             Self { logctx, opctx, db, db_datastore }
         }
 
-        async fn create_ip_pool(&self, name: &str, range: IpRange) {
-            let internal = false;
+        async fn create_ip_pool(
+            &self,
+            name: &str,
+            range: IpRange,
+            is_default: bool,
+        ) {
+            let silo_id = self.opctx.authn.silo_required().unwrap().id();
             let pool = IpPool::new(
                 &IdentityMetadataCreateParams {
                     name: String::from(name).parse().unwrap(),
                     description: format!("ip pool {}", name),
                 },
-                internal,
+                Some(silo_id),
+                is_default,
             );
 
             use crate::db::schema::ip_pool::dsl as ip_pool_dsl;
@@ -916,12 +922,9 @@ mod tests {
         }
 
         async fn default_pool_id(&self) -> Uuid {
-            let (.., pool) = self
+            let pool = self
                 .db_datastore
-                .ip_pools_fetch_default_for(
-                    &self.opctx,
-                    crate::authz::Action::ListChildren,
-                )
+                .ip_pools_fetch_default(&self.opctx)
                 .await
                 .expect("Failed to lookup default ip pool");
             pool.identity.id
@@ -1706,7 +1709,7 @@ mod tests {
             Ipv4Addr::new(10, 0, 0, 6),
         ))
         .unwrap();
-        context.create_ip_pool("p1", second_range).await;
+        context.create_ip_pool("p1", second_range, /*default*/ false).await;
 
         // Allocating an address on an instance in the second pool should be
         // respected, even though there are IPs available in the first.
@@ -1749,7 +1752,7 @@ mod tests {
         let last_address = Ipv4Addr::new(10, 0, 0, 6);
         let second_range =
             IpRange::try_from((first_address, last_address)).unwrap();
-        context.create_ip_pool("p1", second_range).await;
+        context.create_ip_pool("p1", second_range, /* default */ false).await;
 
         // Allocate all available addresses in the second pool.
         let instance_id = Uuid::new_v4();

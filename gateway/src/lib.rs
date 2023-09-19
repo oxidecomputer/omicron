@@ -100,10 +100,12 @@ fn start_dropshot_server(
     let http_server_starter = dropshot::HttpServerStarter::new(
         &dropshot,
         http_entrypoints::api(),
-        Arc::clone(&apictx),
+        Arc::clone(apictx),
         &log.new(o!("component" => "dropshot")),
     )
-    .map_err(|error| format!("initializing http server: {}", error))?;
+    .map_err(|error| {
+        format!("initializing http server listening at {addr}: {}", error)
+    })?;
 
     match http_servers.entry(addr) {
         Entry::Vacant(slot) => {

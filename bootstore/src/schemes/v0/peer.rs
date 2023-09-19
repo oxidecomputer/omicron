@@ -566,6 +566,24 @@ impl Node {
                         ),
                         current_gen
                     );
+                    // We currently return an error here, because RSS is the
+                    // only entity that triggers this code path and we want
+                    // the error  to show up in wicket. This indicates that the
+                    // `clean-slate` script didn't properly clear out the
+                    // `/pool/int/*/cluster` directories residing on the M.2
+                    // devices before RSS was run. The fix is to re-run clean-
+                    // slate, ensure the cluster directories are empty and then
+                    // re-run RSS.
+                    //
+                    // Eventually, however, we may want to not return an error
+                    // on an idempotent update from Nexus via RPW, but we'll
+                    // cross that bridge when we have that code written.
+                    let _ = responder.send(Err(
+                        NodeRequestError::StaleNetworkConfig {
+                            attempted_update_generation: config.generation,
+                            current_generation: current_gen,
+                        },
+                    ));
                 } else {
                     self.network_config = Some(config.clone());
                     NetworkConfig::save(
@@ -762,8 +780,8 @@ impl Node {
                 peer_id,
             } => {
                 let Some(accepted_handle) =
-                   self.accepted_connections.remove(&accepted_addr) else
-                {
+                    self.accepted_connections.remove(&accepted_addr)
+                else {
                     warn!(
                         self.log,
                         concat!(

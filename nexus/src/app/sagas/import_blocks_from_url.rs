@@ -11,9 +11,9 @@ use super::NexusActionContext;
 use super::NexusSaga;
 use super::SagaInitError;
 use crate::app::sagas::retry_until_known_result;
-use crate::db::lookup::LookupPath;
-use crate::{authn, authz};
 use nexus_db_model::Generation;
+use nexus_db_queries::db::lookup::LookupPath;
+use nexus_db_queries::{authn, authz};
 use nexus_types::external_api::params;
 use omicron_common::api::external;
 use omicron_common::api::external::Error;
@@ -24,7 +24,7 @@ use steno::ActionError;
 use uuid::Uuid;
 
 #[derive(Debug, Deserialize, Serialize)]
-pub struct Params {
+pub(crate) struct Params {
     pub serialized_authn: authn::saga::Serialized,
     pub disk_id: Uuid,
 
@@ -52,7 +52,7 @@ declare_saga_actions! {
 }
 
 #[derive(Debug)]
-pub struct SagaImportBlocksFromUrl;
+pub(crate) struct SagaImportBlocksFromUrl;
 impl NexusSaga for SagaImportBlocksFromUrl {
     const NAME: &'static str = "import-blocks-from-url";
     type Params = Params;

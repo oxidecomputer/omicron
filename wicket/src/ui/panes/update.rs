@@ -5,7 +5,7 @@
 use std::borrow::Cow;
 use std::collections::BTreeMap;
 
-use super::{align_by, help_text, push_text_lines, Control};
+use super::{align_by, help_text, push_text_lines, Control, PendingScroll};
 use crate::keymap::ShowPopupCmd;
 use crate::state::{
     update_component_title, ComponentId, Inventory, UpdateItemState,
@@ -14,19 +14,19 @@ use crate::state::{
 use crate::ui::defaults::style;
 use crate::ui::widgets::{
     BoxConnector, BoxConnectorKind, ButtonText, IgnitionPopup, PopupBuilder,
-    PopupScrollKind, StatusView,
+    PopupScrollOffset, StatusView,
 };
 use crate::ui::wrap::wrap_text;
 use crate::{Action, Cmd, Frame, State};
 use indexmap::IndexMap;
 use omicron_common::api::internal::nexus::KnownArtifactKind;
-use slog::{info, o, Logger};
-use tui::layout::{Alignment, Constraint, Direction, Layout, Rect};
-use tui::text::{Span, Spans, Text};
-use tui::widgets::{
+use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
+use ratatui::text::{Line, Span, Text};
+use ratatui::widgets::{
     Block, BorderType, Borders, Cell, List, ListItem, ListState, Paragraph,
     Row, Table,
 };
+use slog::{info, o, Logger};
 use tui_tree_widget::{Tree, TreeItem, TreeState};
 use update_engine::{
     AbortReason, ExecutionStatus, StepKey, WillNotBeRunReason,
@@ -40,41 +40,49 @@ use wicketd_client::types::{RotSlot, SemverVersion};
 const MAX_COLUMN_WIDTH: u16 = 25;
 
 #[derive(Debug)]
-struct UpdatePanePopup {
-    kind: PopupKind,
-    scroll_kind: PopupScrollKind,
-}
-
-impl UpdatePanePopup {
-    fn new(kind: PopupKind) -> Self {
-        let scroll_kind = if kind.is_scrollable() {
-            PopupScrollKind::enabled()
-        } else {
-            PopupScrollKind::Disabled
-        };
-
-        Self { kind, scroll_kind }
-    }
-}
-
-#[derive(Debug)]
-enum PopupKind {
+enum UpdatePanePopup {
     StartUpdate { popup_state: StartUpdatePopupState },
-    StepLogs,
+    StepLogs { scroll_offset: PopupScrollOffset },
     Ignition,
     AbortUpdate { popup_state: AbortUpdatePopupState },
     ClearUpdateState { popup_state: ClearUpdateStatePopupState },
 }
 
-impl PopupKind {
-    fn is_scrollable(&self) -> bool {
+impl UpdatePanePopup {
+    fn new_start_update() -> Self {
+        Self::StartUpdate { popup_state: StartUpdatePopupState::Prompting }
+    }
+
+    fn new_step_logs() -> Self {
+        Self::StepLogs { scroll_offset: PopupScrollOffset::default() }
+    }
+
+    fn new_ignition() -> Self {
+        Self::Ignition
+    }
+
+    fn new_abort_update() -> Self {
+        Self::AbortUpdate { popup_state: AbortUpdatePopupState::Prompting }
+    }
+
+    fn new_clear_update_state() -> Self {
+        Self::ClearUpdateState {
+            popup_state: ClearUpdateStatePopupState::Waiting,
+        }
+    }
+
+    fn scroll_offset_mut(&mut self) -> Option<&mut PopupScrollOffset> {
         match self {
-            Self::StartUpdate { popup_state } => popup_state.is_scrollable(),
-            Self::StepLogs => true,
-            Self::Ignition => false,
-            Self::AbortUpdate { popup_state } => popup_state.is_scrollable(),
+            Self::StartUpdate { popup_state } => {
+                popup_state.scroll_offset_mut()
+            }
+            Self::StepLogs { scroll_offset } => Some(scroll_offset),
+            Self::Ignition => None,
+            Self::AbortUpdate { popup_state } => {
+                popup_state.scroll_offset_mut()
+            }
             Self::ClearUpdateState { popup_state } => {
-                popup_state.is_scrollable()
+                popup_state.scroll_offset_mut()
             }
         }
     }
@@ -84,14 +92,14 @@ impl PopupKind {
 enum StartUpdatePopupState {
     Prompting,
     Waiting,
-    Failed { message: String },
+    Failed { message: String, scroll_offset: PopupScrollOffset },
 }
 
 impl StartUpdatePopupState {
-    fn is_scrollable(&self) -> bool {
+    fn scroll_offset_mut(&mut self) -> Option<&mut PopupScrollOffset> {
         match self {
-            Self::Prompting | Self::Waiting => false,
-            Self::Failed { .. } => true,
+            Self::Prompting | Self::Waiting => None,
+            Self::Failed { scroll_offset, .. } => Some(scroll_offset),
         }
     }
 }
@@ -100,14 +108,14 @@ impl StartUpdatePopupState {
 enum AbortUpdatePopupState {
     Prompting,
     Waiting,
-    Failed { message: String },
+    Failed { message: String, scroll_offset: PopupScrollOffset },
 }
 
 impl AbortUpdatePopupState {
-    fn is_scrollable(&self) -> bool {
+    fn scroll_offset_mut(&mut self) -> Option<&mut PopupScrollOffset> {
         match self {
-            Self::Prompting | Self::Waiting => false,
-            Self::Failed { .. } => true,
+            Self::Prompting | Self::Waiting => None,
+            Self::Failed { scroll_offset, .. } => Some(scroll_offset),
         }
     }
 }
@@ -115,14 +123,14 @@ impl AbortUpdatePopupState {
 #[derive(Debug)]
 enum ClearUpdateStatePopupState {
     Waiting,
-    Failed { message: String },
+    Failed { message: String, scroll_offset: PopupScrollOffset },
 }
 
 impl ClearUpdateStatePopupState {
-    fn is_scrollable(&self) -> bool {
+    fn scroll_offset_mut(&mut self) -> Option<&mut PopupScrollOffset> {
         match self {
-            Self::Waiting => false,
-            Self::Failed { .. } => true,
+            Self::Waiting => None,
+            Self::Failed { scroll_offset, .. } => Some(scroll_offset),
         }
     }
 }
@@ -205,8 +213,8 @@ impl UpdatePane {
         &mut self,
         state: &State,
         frame: &mut Frame<'_>,
-        scroll_kind: PopupScrollKind,
-    ) -> PopupScrollKind {
+        scroll_offset: PopupScrollOffset,
+    ) -> Option<PopupScrollOffset> {
         let selected = state.rack_state.selected;
         let id_state = self.component_state.get(&selected).unwrap();
         // We only open the popup if id_state.selected is not None, but in some cases
@@ -216,7 +224,7 @@ impl UpdatePane {
             Some(key) => key,
             None => {
                 self.popup = None;
-                return PopupScrollKind::Disabled;
+                return None;
             }
         };
         let value = id_state
@@ -225,7 +233,7 @@ impl UpdatePane {
             .expect("selected_key is always valid");
         let step_info = value.step_info();
 
-        let header = Spans::from(vec![
+        let header = Line::from(vec![
             Span::styled("Step: ", style::header(true)),
             Span::styled(step_info.description.clone(), style::header(true)),
         ]);
@@ -242,7 +250,7 @@ impl UpdatePane {
                         style::plain_text(),
                     ),
                 ];
-                body.lines.push(Spans::from(spans));
+                body.lines.push(Line::from(spans));
             }
             StepStatus::Running { progress_event, .. } => {
                 let mut spans = vec![
@@ -263,9 +271,9 @@ impl UpdatePane {
                         spans.push(Span::styled(")", style::plain_text()));
                     }
                 }
-                body.lines.push(Spans::from(spans));
+                body.lines.push(Line::from(spans));
 
-                body.lines.push(Spans::default());
+                body.lines.push(Line::default());
 
                 let progress_spans =
                     progress_event_spans(progress_event, "Progress:");
@@ -315,10 +323,10 @@ impl UpdatePane {
                     format!(" after {:.2?}", info.step_elapsed),
                     style::plain_text(),
                 ));
-                body.lines.push(Spans::from(spans));
+                body.lines.push(Line::from(spans));
 
                 if let Some(message) = message {
-                    body.lines.push(Spans::default());
+                    body.lines.push(Line::default());
                     let prefix =
                         vec![Span::styled("Message: ", style::selected())];
                     push_text_lines(&message, prefix, &mut body.lines);
@@ -327,7 +335,7 @@ impl UpdatePane {
             StepStatus::Completed { info: None } => {
                 // No information is available, so all we can do is say that
                 // this step is completed.
-                body.lines.push(Spans::from(vec![
+                body.lines.push(Line::from(vec![
                     Span::styled("Status: ", style::selected()),
                     Span::styled("Completed", style::successful_update_bold()),
                 ]));
@@ -350,9 +358,9 @@ impl UpdatePane {
                     format!(" after {:.2?}", info.step_elapsed),
                     style::plain_text(),
                 ));
-                body.lines.push(Spans::from(spans));
+                body.lines.push(Line::from(spans));
 
-                body.lines.push(Spans::default());
+                body.lines.push(Line::default());
 
                 // Show the message.
                 let prefix = vec![Span::styled("Message: ", style::selected())];
@@ -360,13 +368,13 @@ impl UpdatePane {
 
                 // Show causes.
                 if !info.causes.is_empty() {
-                    body.lines.push(Spans::default());
-                    body.lines.push(Spans::from(Span::styled(
+                    body.lines.push(Line::default());
+                    body.lines.push(Line::from(Span::styled(
                         "Caused by:",
                         style::selected(),
                     )));
                     for cause in &info.causes {
-                        body.lines.push(Spans::from(vec![
+                        body.lines.push(Line::from(vec![
                             Span::raw("-> "),
                             Span::styled(cause, style::plain_text()),
                         ]))
@@ -380,7 +388,7 @@ impl UpdatePane {
                     Span::styled("Status: ", style::selected()),
                     Span::styled("Failed", style::failed_update_bold()),
                 ];
-                body.lines.push(Spans::from(spans));
+                body.lines.push(Line::from(spans));
             }
             StepStatus::Aborted {
                 reason: AbortReason::StepAborted(info),
@@ -406,9 +414,9 @@ impl UpdatePane {
                     format!(" after {:.2?}", info.step_elapsed),
                     style::plain_text(),
                 ));
-                body.lines.push(Spans::from(spans));
+                body.lines.push(Line::from(spans));
 
-                body.lines.push(Spans::default());
+                body.lines.push(Line::default());
 
                 // Show the message.
                 let prefix = vec![Span::styled("Message: ", style::selected())];
@@ -418,7 +426,7 @@ impl UpdatePane {
                 if let Some(last_progress) = last_progress {
                     let progress_spans =
                         progress_event_spans(last_progress, "Last progress:");
-                    body.lines.push(Spans::default());
+                    body.lines.push(Line::default());
                     body.lines.push(progress_spans);
                 }
             }
@@ -440,13 +448,13 @@ impl UpdatePane {
                         style::selected(),
                     ));
                 }
-                body.lines.push(Spans::from(spans));
+                body.lines.push(Line::from(spans));
 
                 // Show last progress if available.
                 if let Some(last_progress) = last_progress {
                     let progress_spans =
                         progress_event_spans(last_progress, "Last progress:");
-                    body.lines.push(Spans::default());
+                    body.lines.push(Line::default());
                     body.lines.push(progress_spans);
                 }
             }
@@ -486,7 +494,7 @@ impl UpdatePane {
                         ));
                     };
                 }
-                body.lines.push(Spans::from(spans));
+                body.lines.push(Line::from(spans));
             }
         }
 
@@ -500,24 +508,23 @@ impl UpdatePane {
         };
 
         let popup_builder = PopupBuilder { header, body, buttons };
-        let popup = popup_builder.build(full_screen, scroll_kind);
-        let actual_scroll_kind = popup.actual_scroll_kind();
+        let popup = popup_builder.build_scrollable(full_screen, scroll_offset);
+        let actual_scroll_offset = popup.actual_scroll_offset();
         frame.render_widget(popup, full_screen);
-        actual_scroll_kind
+        Some(actual_scroll_offset)
     }
 
     pub fn draw_start_update_prompting_popup(
         &mut self,
         state: &State,
         frame: &mut Frame<'_>,
-        scroll_kind: PopupScrollKind,
-    ) -> PopupScrollKind {
+    ) {
         let popup_builder = PopupBuilder {
-            header: Spans::from(vec![Span::styled(
+            header: Line::from(vec![Span::styled(
                 format!("START UPDATE: {}", state.rack_state.selected),
                 style::header(true),
             )]),
-            body: Text::from(vec![Spans::from(vec![Span::styled(
+            body: Text::from(vec![Line::from(vec![Span::styled(
                 "Would you like to start an update?",
                 style::plain_text(),
             )])]),
@@ -533,24 +540,21 @@ impl UpdatePane {
             y: 0,
         };
 
-        let popup = popup_builder.build(full_screen, scroll_kind);
-        let actual_scroll_kind = popup.actual_scroll_kind();
+        let popup = popup_builder.build(full_screen);
         frame.render_widget(popup, full_screen);
-        actual_scroll_kind
     }
 
     fn draw_start_update_waiting_popup(
         &self,
         state: &State,
         frame: &mut Frame<'_>,
-        scroll_kind: PopupScrollKind,
-    ) -> PopupScrollKind {
+    ) {
         let popup_builder = PopupBuilder {
-            header: Spans::from(vec![Span::styled(
+            header: Line::from(vec![Span::styled(
                 format!("START UPDATE: {}", state.rack_state.selected),
                 style::header(true),
             )]),
-            body: Text::from(vec![Spans::from(vec![Span::styled(
+            body: Text::from(vec![Line::from(vec![Span::styled(
                 "Waiting for update to start",
                 style::plain_text(),
             )])]),
@@ -563,10 +567,8 @@ impl UpdatePane {
             y: 0,
         };
 
-        let popup = popup_builder.build(full_screen, scroll_kind);
-        let actual_scroll_kind = popup.actual_scroll_kind();
+        let popup = popup_builder.build(full_screen);
         frame.render_widget(popup, full_screen);
-        actual_scroll_kind
     }
 
     fn draw_start_update_failed_popup(
@@ -574,14 +576,14 @@ impl UpdatePane {
         state: &State,
         message: &str,
         frame: &mut Frame<'_>,
-        scroll_kind: PopupScrollKind,
-    ) -> PopupScrollKind {
+        scroll_offset: PopupScrollOffset,
+    ) -> PopupScrollOffset {
         let mut body = Text::default();
         let prefix = vec![Span::styled("Message: ", style::selected())];
         push_text_lines(message, prefix, &mut body.lines);
 
         let popup_builder = PopupBuilder {
-            header: Spans::from(vec![Span::styled(
+            header: Line::from(vec![Span::styled(
                 format!("START UPDATE FAILED: {}", state.rack_state.selected),
                 style::failed_update(),
             )]),
@@ -595,25 +597,24 @@ impl UpdatePane {
             y: 0,
         };
 
-        let popup = popup_builder.build(full_screen, scroll_kind);
-        let actual_scroll_kind = popup.actual_scroll_kind();
+        let popup = popup_builder.build_scrollable(full_screen, scroll_offset);
+        let actual_scroll_offset = popup.actual_scroll_offset();
         frame.render_widget(popup, full_screen);
-        actual_scroll_kind
+        actual_scroll_offset
     }
 
     pub fn draw_abort_update_prompting_popup(
         &mut self,
         state: &State,
         frame: &mut Frame<'_>,
-        scroll_kind: PopupScrollKind,
-    ) -> PopupScrollKind {
+    ) {
         let mut body = Text::default();
-        body.lines.push(Spans::from(vec![Span::styled(
+        body.lines.push(Line::from(vec![Span::styled(
             "Would you like to abort this update?",
             style::plain_text(),
         )]));
-        body.lines.push(Spans::from(Vec::new()));
-        body.lines.push(Spans::from(vec![
+        body.lines.push(Line::from(Vec::new()));
+        body.lines.push(Line::from(vec![
             Span::styled("Warning: ", style::warning_update()),
             Span::styled(
                 "This might result in an inconsistent state. \
@@ -623,7 +624,7 @@ impl UpdatePane {
         ]));
 
         let popup_builder = PopupBuilder {
-            header: Spans::from(vec![Span::styled(
+            header: Line::from(vec![Span::styled(
                 format!("ABORT UPDATE: {}", state.rack_state.selected),
                 style::header(true),
             )]),
@@ -640,24 +641,21 @@ impl UpdatePane {
             y: 0,
         };
 
-        let popup = popup_builder.build(full_screen, scroll_kind);
-        let actual_scroll_kind = popup.actual_scroll_kind();
+        let popup = popup_builder.build(full_screen);
         frame.render_widget(popup, full_screen);
-        actual_scroll_kind
     }
 
     fn draw_abort_update_waiting_popup(
         &self,
         state: &State,
         frame: &mut Frame<'_>,
-        scroll_kind: PopupScrollKind,
-    ) -> PopupScrollKind {
+    ) {
         let popup_builder = PopupBuilder {
-            header: Spans::from(vec![Span::styled(
+            header: Line::from(vec![Span::styled(
                 format!("ABORT UPDATE: {}", state.rack_state.selected),
                 style::header(true),
             )]),
-            body: Text::from(vec![Spans::from(vec![Span::styled(
+            body: Text::from(vec![Line::from(vec![Span::styled(
                 "Waiting for update to be aborted",
                 style::plain_text(),
             )])]),
@@ -670,10 +668,8 @@ impl UpdatePane {
             y: 0,
         };
 
-        let popup = popup_builder.build(full_screen, scroll_kind);
-        let actual_scroll_kind = popup.actual_scroll_kind();
+        let popup = popup_builder.build(full_screen);
         frame.render_widget(popup, full_screen);
-        actual_scroll_kind
     }
 
     fn draw_abort_update_failed_popup(
@@ -681,14 +677,14 @@ impl UpdatePane {
         state: &State,
         message: &str,
         frame: &mut Frame<'_>,
-        scroll_kind: PopupScrollKind,
-    ) -> PopupScrollKind {
+        scroll_offset: PopupScrollOffset,
+    ) -> PopupScrollOffset {
         let mut body = Text::default();
         let prefix = vec![Span::styled("Message: ", style::selected())];
         push_text_lines(message, prefix, &mut body.lines);
 
         let popup_builder = PopupBuilder {
-            header: Spans::from(vec![Span::styled(
+            header: Line::from(vec![Span::styled(
                 format!("ABORT UPDATE FAILED: {}", state.rack_state.selected),
                 style::failed_update(),
             )]),
@@ -702,24 +698,23 @@ impl UpdatePane {
             y: 0,
         };
 
-        let popup = popup_builder.build(full_screen, scroll_kind);
-        let actual_scroll_kind = popup.actual_scroll_kind();
+        let popup = popup_builder.build_scrollable(full_screen, scroll_offset);
+        let actual_scroll_offset = popup.actual_scroll_offset();
         frame.render_widget(popup, full_screen);
-        actual_scroll_kind
+        actual_scroll_offset
     }
 
     fn draw_clear_update_state_waiting_popup(
         &self,
         state: &State,
         frame: &mut Frame<'_>,
-        scroll_kind: PopupScrollKind,
-    ) -> PopupScrollKind {
+    ) {
         let popup_builder = PopupBuilder {
-            header: Spans::from(vec![Span::styled(
+            header: Line::from(vec![Span::styled(
                 format!("CLEAR UPDATE STATE: {}", state.rack_state.selected),
                 style::header(true),
             )]),
-            body: Text::from(vec![Spans::from(vec![Span::styled(
+            body: Text::from(vec![Line::from(vec![Span::styled(
                 "Waiting for update state to be cleared",
                 style::plain_text(),
             )])]),
@@ -732,10 +727,8 @@ impl UpdatePane {
             y: 0,
         };
 
-        let popup = popup_builder.build(full_screen, scroll_kind);
-        let actual_scroll_kind = popup.actual_scroll_kind();
+        let popup = popup_builder.build(full_screen);
         frame.render_widget(popup, full_screen);
-        actual_scroll_kind
     }
 
     fn draw_clear_update_state_failed_popup(
@@ -743,14 +736,14 @@ impl UpdatePane {
         state: &State,
         message: &str,
         frame: &mut Frame<'_>,
-        scroll_kind: PopupScrollKind,
-    ) -> PopupScrollKind {
+        scroll_offset: PopupScrollOffset,
+    ) -> PopupScrollOffset {
         let mut body = Text::default();
         let prefix = vec![Span::styled("Message: ", style::selected())];
         push_text_lines(message, prefix, &mut body.lines);
 
         let popup_builder = PopupBuilder {
-            header: Spans::from(vec![Span::styled(
+            header: Line::from(vec![Span::styled(
                 format!(
                     "CLEAR UPDATE STATE FAILED: {}",
                     state.rack_state.selected
@@ -767,18 +760,17 @@ impl UpdatePane {
             y: 0,
         };
 
-        let popup = popup_builder.build(full_screen, scroll_kind);
-        let actual_scroll_kind = popup.actual_scroll_kind();
+        let popup = popup_builder.build_scrollable(full_screen, scroll_offset);
+        let actual_scroll_offset = popup.actual_scroll_offset();
         frame.render_widget(popup, full_screen);
-        actual_scroll_kind
+        actual_scroll_offset
     }
 
     pub fn draw_ignition_popup(
         &mut self,
         state: &State,
         frame: &mut Frame<'_>,
-        scroll_kind: PopupScrollKind,
-    ) -> PopupScrollKind {
+    ) {
         let full_screen = Rect {
             width: state.screen_width,
             height: state.screen_height,
@@ -788,17 +780,8 @@ impl UpdatePane {
         let popup_builder =
             self.ignition.to_popup_builder(state.rack_state.selected);
 
-        // The scroll offset here should always be disabled, but make it a
-        // parameter for uniformity with the other popups.
-        debug_assert_eq!(
-            scroll_kind,
-            PopupScrollKind::Disabled,
-            "scrolling in ignition popup is always disabled"
-        );
-        let popup = popup_builder.build(full_screen, scroll_kind);
-        let actual_scroll_kind = popup.actual_scroll_kind();
+        let popup = popup_builder.build(full_screen);
         frame.render_widget(popup, full_screen);
-        actual_scroll_kind
     }
 
     fn update_items(&mut self, state: &State) {
@@ -919,8 +902,7 @@ impl UpdatePane {
                     .get(&state.rack_state.selected)
                     .unwrap();
                 if id_state.selected.is_some() {
-                    self.popup =
-                        Some(UpdatePanePopup::new(PopupKind::StepLogs));
+                    self.popup = Some(UpdatePanePopup::new_step_logs());
                     Some(Action::Redraw)
                 } else {
                     None
@@ -943,11 +925,7 @@ impl UpdatePane {
                     UpdateItemState::NotStarted => {
                         // If an update hasn't been started or has failed to
                         // start, "Press ... to start" is displayed.
-                        self.popup = Some(UpdatePanePopup::new(
-                            PopupKind::StartUpdate {
-                                popup_state: StartUpdatePopupState::Prompting,
-                            },
-                        ));
+                        self.popup = Some(UpdatePanePopup::new_start_update());
                         Some(Action::Redraw)
                     }
                     UpdateItemState::AwaitingRepository
@@ -994,12 +972,8 @@ impl UpdatePane {
                     match summary.execution_status {
                         ExecutionStatus::Running { .. } => {
                             // If execution is still running, we can abort it.
-                            self.popup = Some(UpdatePanePopup::new(
-                                PopupKind::AbortUpdate {
-                                    popup_state:
-                                        AbortUpdatePopupState::Prompting,
-                                },
-                            ));
+                            self.popup =
+                                Some(UpdatePanePopup::new_abort_update());
                             Some(Action::Redraw)
                         }
 
@@ -1041,12 +1015,8 @@ impl UpdatePane {
                         | ExecutionStatus::Aborted { .. } => {
                             // If execution has reached a terminal
                             // state, we can clear it.
-                            self.popup = Some(UpdatePanePopup::new(
-                                PopupKind::ClearUpdateState {
-                                    popup_state:
-                                        ClearUpdateStatePopupState::Waiting,
-                                },
-                            ));
+                            self.popup =
+                                Some(UpdatePanePopup::new_clear_update_state());
                             Some(Action::ClearUpdateState(selected))
                         }
                         ExecutionStatus::NotStarted
@@ -1084,23 +1054,15 @@ impl UpdatePane {
         }
         let popup = self.popup.as_mut().unwrap();
 
-        if popup.scroll_kind.is_scrollable() {
-            // Handle up or down commands here.
-            match cmd {
-                Cmd::Up => {
-                    popup.scroll_kind.scroll_up();
-                    return Some(Action::Redraw);
-                }
-                Cmd::Down => {
-                    popup.scroll_kind.scroll_down();
-                    return Some(Action::Redraw);
-                }
-                _ => {}
+        if let Some(offset) = popup.scroll_offset_mut() {
+            if let Some(pending_scroll) = PendingScroll::from_cmd(&cmd) {
+                offset.set_pending_scroll(pending_scroll);
+                return Some(Action::Redraw);
             }
         }
 
-        match &mut popup.kind {
-            PopupKind::StepLogs => match cmd {
+        match popup {
+            UpdatePanePopup::StepLogs { .. } => match cmd {
                 // TODO: up/down for scrolling popup data
                 Cmd::Left => {
                     let id_state = self
@@ -1120,7 +1082,7 @@ impl UpdatePane {
                 }
                 _ => None,
             },
-            PopupKind::Ignition => match cmd {
+            UpdatePanePopup::Ignition => match cmd {
                 Cmd::Up => {
                     self.ignition.key_up();
                     Some(Action::Redraw)
@@ -1141,7 +1103,7 @@ impl UpdatePane {
                 }
                 _ => None,
             },
-            PopupKind::StartUpdate { popup_state } => {
+            UpdatePanePopup::StartUpdate { popup_state } => {
                 match (popup_state, cmd) {
                     (
                         popup_state @ StartUpdatePopupState::Prompting,
@@ -1173,8 +1135,10 @@ impl UpdatePane {
                                 Some(Action::Redraw)
                             }
                             (true, Err(message)) => {
-                                *popup_state =
-                                    StartUpdatePopupState::Failed { message };
+                                *popup_state = StartUpdatePopupState::Failed {
+                                    message,
+                                    scroll_offset: PopupScrollOffset::default(),
+                                };
                                 Some(Action::Redraw)
                             }
                             (false, _) => {
@@ -1198,7 +1162,7 @@ impl UpdatePane {
                     _ => None,
                 }
             }
-            PopupKind::AbortUpdate { popup_state } => {
+            UpdatePanePopup::AbortUpdate { popup_state } => {
                 match (popup_state, cmd) {
                     (
                         popup_state @ AbortUpdatePopupState::Prompting,
@@ -1230,8 +1194,10 @@ impl UpdatePane {
                                 Some(Action::Redraw)
                             }
                             (true, Err(message)) => {
-                                *popup_state =
-                                    AbortUpdatePopupState::Failed { message };
+                                *popup_state = AbortUpdatePopupState::Failed {
+                                    message,
+                                    scroll_offset: PopupScrollOffset::default(),
+                                };
                                 Some(Action::Redraw)
                             }
                             (false, _) => {
@@ -1256,7 +1222,7 @@ impl UpdatePane {
                 }
             }
 
-            PopupKind::ClearUpdateState { popup_state } => {
+            UpdatePanePopup::ClearUpdateState { popup_state } => {
                 // The popup state doesn't matter here.
                 match cmd {
                     Cmd::ShowPopup(
@@ -1277,6 +1243,8 @@ impl UpdatePane {
                                 *popup_state =
                                     ClearUpdateStatePopupState::Failed {
                                         message,
+                                        scroll_offset:
+                                            PopupScrollOffset::default(),
                                     };
                                 Some(Action::Redraw)
                             }
@@ -1333,7 +1301,7 @@ impl UpdatePane {
             .style(border_style);
 
         // Draw the title/tab bar
-        let title_bar = Paragraph::new(Spans::from(vec![Span::styled(
+        let title_bar = Paragraph::new(Line::from(vec![Span::styled(
             "UPDATE STATUS",
             header_style,
         )]))
@@ -1398,7 +1366,7 @@ impl UpdatePane {
             .style(border_style);
 
         // Draw the title/tab bar
-        let title_bar = Paragraph::new(Spans::from(vec![
+        let title_bar = Paragraph::new(Line::from(vec![
             Span::styled("UPDATE STATUS / ", border_style),
             Span::styled(state.rack_state.selected.to_string(), header_style),
         ]))
@@ -1479,13 +1447,13 @@ impl UpdatePane {
 
                 // Show this command.
                 let text = Text::from(vec![
-                    Spans::from(Vec::new()),
-                    Spans::from(vec![Span::styled(
+                    Line::from(Vec::new()),
+                    Line::from(vec![Span::styled(
                         "Use the following command to transfer an update:",
                         style::plain_text(),
                     )]),
                     "".into(),
-                    Spans::from(vec![
+                    Line::from(vec![
                         Span::styled("cat", style::plain_text()),
                         Span::styled(" $UPDATE", style::popup_highlight()),
                         Span::styled(".zip | ssh", style::plain_text()),
@@ -1523,8 +1491,8 @@ impl UpdatePane {
                 // support today because updating the switch requires rebooting
                 // the sled).
                 let text = Text::from(vec![
-                    Spans::from(Vec::new()),
-                    Spans::from(vec![Span::styled(
+                    Line::from(Vec::new()),
+                    Line::from(vec![Span::styled(
                         format!(
                             "Update unavailable: You are connected to wicket \
                              via this {sled_or_switch}."
@@ -1542,8 +1510,8 @@ impl UpdatePane {
                 let force_update = ForceUpdateSelectionState::from(state);
                 let mut text = force_update.spans();
                 text.extend_from_slice(&[
-                    Spans::from(Vec::new()),
-                    Spans::from(vec![
+                    Line::from(Vec::new()),
+                    Line::from(vec![
                         Span::styled(
                             "Update ready: Press ",
                             style::plain_text(),
@@ -1575,7 +1543,7 @@ impl UpdatePane {
             UpdateItemState::UpdateStarted => {
                 // This should show up very briefly, if at all, and then
                 // be replaced with the events list.
-                let status_text = Text::from(Spans::from(vec![
+                let status_text = Text::from(Line::from(vec![
                     Span::styled("Update ", style::plain_text()),
                     Span::styled("started", style::successful_update_bold()),
                     Span::styled(", waiting for events", style::plain_text()),
@@ -1583,7 +1551,7 @@ impl UpdatePane {
 
                 // Don't display any text here; status_text should be
                 // enough for the user.
-                let message_text = Text::from(Vec::new());
+                let message_text = Text::default();
 
                 // Wrap the text to the screen width.
                 let options = crate::ui::wrap::Options {
@@ -1649,7 +1617,7 @@ impl UpdatePane {
 fn progress_event_spans(
     progress_event: &ProgressEvent,
     header: &str,
-) -> Spans<'static> {
+) -> Line<'static> {
     let mut progress_spans = Vec::new();
     progress_spans.push(Span::styled(header.to_owned(), style::selected()));
     progress_spans.push(Span::raw(" "));
@@ -1683,7 +1651,7 @@ fn progress_event_spans(
         ));
     }
 
-    Spans(progress_spans)
+    Line::from(progress_spans)
 }
 
 struct ComponentForceUpdateSelectionState {
@@ -1811,18 +1779,18 @@ impl ForceUpdateSelectionState {
         }
     }
 
-    fn spans(&self) -> Vec<Spans<'static>> {
+    fn spans(&self) -> Vec<Line<'static>> {
         fn make_spans(
             name: &str,
             c: &ComponentForceUpdateSelectionState,
-        ) -> Spans<'static> {
+        ) -> Line<'static> {
             let prefix = if c.toggled_on { "[✔]" } else { "[ ]" };
             let style = if c.selected {
                 style::highlighted()
             } else {
                 style::plain_text()
             };
-            Spans::from(vec![Span::styled(
+            Line::from(vec![Span::styled(
                 format!(
                     "{prefix} Force update {name} (version is already {})",
                     c.version
@@ -1845,7 +1813,7 @@ impl ForceUpdateSelectionState {
 #[derive(Debug, Default)]
 struct ComponentUpdateListState {
     event_buffer: EventBuffer,
-    status_text: Spans<'static>,
+    status_text: Line<'static>,
     list_items: IndexMap<StepKey, ListItem<'static>>,
     // The help text lives on the `UpdatePane`, not here, so all we can do here
     // is figure out which help text to show (if any).
@@ -2047,11 +2015,11 @@ impl ComponentUpdateListState {
             ));
 
             // Add step keys and items to the list.
-            list_items.insert(step_key, ListItem::new(Spans::from(item_spans)));
+            list_items.insert(step_key, ListItem::new(Line::from(item_spans)));
         }
 
         self.event_buffer = event_buffer;
-        self.status_text = Spans::from(status_text);
+        self.status_text = Line::from(status_text);
         self.show_help = show_help;
         self.list_items = list_items;
         let selected_needs_reset = match self.selected {
@@ -2387,7 +2355,7 @@ impl Control for UpdatePane {
             }
             Cmd::Ignition => {
                 self.ignition.reset();
-                self.popup = Some(UpdatePanePopup::new(PopupKind::Ignition));
+                self.popup = Some(UpdatePanePopup::new_ignition());
                 Some(Action::Redraw)
             }
             Cmd::GotoTop => {
@@ -2419,81 +2387,97 @@ impl Control for UpdatePane {
             self.draw_tree_view(state, frame, active);
         }
 
-        let mut actual_scroll_kind = None;
-
         if let Some(popup) = &self.popup {
             // The functions called return the effective scroll offset.
-            actual_scroll_kind = Some(match &popup.kind {
-                PopupKind::StepLogs => {
-                    self.draw_step_log_popup(state, frame, popup.scroll_kind)
+            let new_scroll_offset = match popup {
+                UpdatePanePopup::StepLogs { scroll_offset } => {
+                    // This returns None if it sets self.popup to None. (Maybe
+                    // this should return an indication to close the popup
+                    // instead of poking directly at self.popup, and we use that
+                    // indication over here to close the popup. But that's for
+                    // another day.)
+                    self.draw_step_log_popup(state, frame, *scroll_offset)
                 }
-                PopupKind::StartUpdate { popup_state } => match popup_state {
-                    StartUpdatePopupState::Prompting => self
-                        .draw_start_update_prompting_popup(
-                            state,
-                            frame,
-                            popup.scroll_kind,
-                        ),
-                    StartUpdatePopupState::Waiting => self
-                        .draw_start_update_waiting_popup(
-                            state,
-                            frame,
-                            popup.scroll_kind,
-                        ),
-                    StartUpdatePopupState::Failed { message } => self
-                        .draw_start_update_failed_popup(
-                            state,
-                            &message,
-                            frame,
-                            popup.scroll_kind,
-                        ),
-                },
-                PopupKind::AbortUpdate { popup_state } => match popup_state {
-                    AbortUpdatePopupState::Prompting => self
-                        .draw_abort_update_prompting_popup(
-                            state,
-                            frame,
-                            popup.scroll_kind,
-                        ),
-                    AbortUpdatePopupState::Waiting => self
-                        .draw_abort_update_waiting_popup(
-                            state,
-                            frame,
-                            popup.scroll_kind,
-                        ),
-                    AbortUpdatePopupState::Failed { message } => self
-                        .draw_abort_update_failed_popup(
-                            state,
-                            &message,
-                            frame,
-                            popup.scroll_kind,
-                        ),
-                },
-                PopupKind::ClearUpdateState { popup_state } => {
+                UpdatePanePopup::StartUpdate { popup_state } => {
                     match popup_state {
-                        ClearUpdateStatePopupState::Waiting => self
-                            .draw_clear_update_state_waiting_popup(
-                                state,
-                                frame,
-                                popup.scroll_kind,
-                            ),
-                        ClearUpdateStatePopupState::Failed { message } => self
-                            .draw_clear_update_state_failed_popup(
-                                state,
-                                message,
-                                frame,
-                                popup.scroll_kind,
-                            ),
+                        StartUpdatePopupState::Prompting => {
+                            self.draw_start_update_prompting_popup(
+                                state, frame,
+                            );
+                            None
+                        }
+                        StartUpdatePopupState::Waiting => {
+                            self.draw_start_update_waiting_popup(state, frame);
+                            None
+                        }
+                        StartUpdatePopupState::Failed {
+                            message,
+                            scroll_offset,
+                        } => Some(self.draw_start_update_failed_popup(
+                            state,
+                            &message,
+                            frame,
+                            *scroll_offset,
+                        )),
                     }
                 }
-                PopupKind::Ignition => {
-                    self.draw_ignition_popup(state, frame, popup.scroll_kind)
+                UpdatePanePopup::AbortUpdate { popup_state } => {
+                    match popup_state {
+                        AbortUpdatePopupState::Prompting => {
+                            self.draw_abort_update_prompting_popup(
+                                state, frame,
+                            );
+                            None
+                        }
+                        AbortUpdatePopupState::Waiting => {
+                            self.draw_abort_update_waiting_popup(state, frame);
+                            None
+                        }
+                        AbortUpdatePopupState::Failed {
+                            message,
+                            scroll_offset,
+                        } => Some(self.draw_abort_update_failed_popup(
+                            state,
+                            &message,
+                            frame,
+                            *scroll_offset,
+                        )),
+                    }
                 }
-            });
-        }
+                UpdatePanePopup::ClearUpdateState { popup_state } => {
+                    match popup_state {
+                        ClearUpdateStatePopupState::Waiting => {
+                            self.draw_clear_update_state_waiting_popup(
+                                state, frame,
+                            );
+                            None
+                        }
+                        ClearUpdateStatePopupState::Failed {
+                            message,
+                            scroll_offset,
+                        } => Some(self.draw_clear_update_state_failed_popup(
+                            state,
+                            message,
+                            frame,
+                            *scroll_offset,
+                        )),
+                    }
+                }
+                UpdatePanePopup::Ignition => {
+                    self.draw_ignition_popup(state, frame);
+                    None
+                }
+            };
 
-        if let Some(popup) = &mut self.popup {
-            popup.scroll_kind = actual_scroll_kind.unwrap();
+            // Some of the functions above might have reset self.popup to None.
+            if let Some(popup) = &mut self.popup {
+                if let Some(scroll_offset) = popup.scroll_offset_mut() {
+                    *scroll_offset = new_scroll_offset.expect(
+                        "new_scroll_offset must be set \
+                            if scroll_offset is available",
+                    )
+                }
+            }
         }
     }
 }

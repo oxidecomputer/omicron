@@ -6,7 +6,6 @@ license = "MPL-2.0"
 
 [dependencies]
 anyhow.workspace = true
-assert_matches.workspace = true
 chrono.workspace = true
 dns-service-client.workspace = true
 futures.workspace = true
@@ -20,6 +19,7 @@ trust-dns-resolver.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
+assert_matches.workspace = true
 dropshot.workspace = true
 dns-server.workspace = true
 expectorate.workspace = true

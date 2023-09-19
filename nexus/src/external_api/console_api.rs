@@ -8,18 +8,7 @@
 //! external API, but in order to avoid CORS issues for now, we are serving
 //! these routes directly from the external API.
 
-use crate::authn::silos::IdentityProviderType;
 use crate::ServerContext;
-use crate::{
-    authn::external::{
-        cookies::Cookies,
-        session_cookie::{
-            clear_session_cookie_header_value, session_cookie_header_value,
-            SessionStore, SESSION_COOKIE_COOKIE_NAME,
-        },
-    },
-    db::identity::Asset,
-};
 use anyhow::Context;
 use dropshot::{
     endpoint, http_response_found, http_response_see_other, HttpError,
@@ -31,7 +20,18 @@ use hyper::Body;
 use lazy_static::lazy_static;
 use mime_guess;
 use nexus_db_model::AuthenticationMode;
+use nexus_db_queries::authn::silos::IdentityProviderType;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::{
+    authn::external::{
+        cookies::Cookies,
+        session_cookie::{
+            clear_session_cookie_header_value, session_cookie_header_value,
+            SessionStore, SESSION_COOKIE_COOKIE_NAME,
+        },
+    },
+    db::identity::Asset,
+};
 use nexus_types::external_api::params;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::http_pagination::PaginatedBy;
@@ -183,8 +183,8 @@ use std::{collections::HashSet, ffi::OsString, path::PathBuf, sync::Arc};
 
 #[derive(Deserialize, JsonSchema)]
 pub struct LoginToProviderPathParam {
-    pub silo_name: crate::db::model::Name,
-    pub provider_name: crate::db::model::Name,
+    pub silo_name: nexus_db_queries::db::model::Name,
+    pub provider_name: nexus_db_queries::db::model::Name,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
@@ -222,7 +222,7 @@ impl RelayState {
    tags = ["login"],
    unpublished = true,
 }]
-pub async fn login_saml_begin(
+pub(crate) async fn login_saml_begin(
     rqctx: RequestContext<Arc<ServerContext>>,
     _path_params: Path<LoginToProviderPathParam>,
     _query_params: Query<LoginUrlQuery>,
@@ -241,7 +241,7 @@ pub async fn login_saml_begin(
    tags = ["login"],
    unpublished = true,
 }]
-pub async fn login_saml_redirect(
+pub(crate) async fn login_saml_redirect(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<LoginToProviderPathParam>,
     query_params: Query<LoginUrlQuery>,
@@ -296,7 +296,7 @@ pub async fn login_saml_redirect(
    path = "/login/{silo_name}/saml/{provider_name}",
    tags = ["login"],
 }]
-pub async fn login_saml(
+pub(crate) async fn login_saml(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<LoginToProviderPathParam>,
     body_bytes: dropshot::UntypedBody,
@@ -364,6 +364,7 @@ pub async fn login_saml(
                 // browser expiration is mostly for convenience, as the API will
                 // reject requests with an expired session regardless
                 apictx.session_absolute_timeout(),
+                apictx.external_tls_enabled,
             )?;
             headers.append(header::SET_COOKIE, cookie);
         }
@@ -374,7 +375,7 @@ pub async fn login_saml(
 
 #[derive(Deserialize, JsonSchema)]
 pub struct LoginPathParam {
-    pub silo_name: crate::db::model::Name,
+    pub silo_name: nexus_db_queries::db::model::Name,
 }
 
 #[endpoint {
@@ -383,7 +384,7 @@ pub struct LoginPathParam {
    tags = ["login"],
    unpublished = true,
 }]
-pub async fn login_local_begin(
+pub(crate) async fn login_local_begin(
     rqctx: RequestContext<Arc<ServerContext>>,
     _path_params: Path<LoginPathParam>,
     _query_params: Query<LoginUrlQuery>,
@@ -401,7 +402,7 @@ pub async fn login_local_begin(
    path = "/v1/login/{silo_name}/local",
    tags = ["login"],
 }]
-pub async fn login_local(
+pub(crate) async fn login_local(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<LoginPathParam>,
     credentials: dropshot::TypedBody<params::UsernamePasswordCredentials>,
@@ -432,6 +433,7 @@ pub async fn login_local(
                 // browser expiration is mostly for convenience, as the API will
                 // reject requests with an expired session regardless
                 apictx.session_absolute_timeout(),
+                apictx.external_tls_enabled,
             )?;
             headers.append(header::SET_COOKIE, cookie);
         }
@@ -443,8 +445,8 @@ pub async fn login_local(
 async fn create_session(
     opctx: &OpContext,
     apictx: &ServerContext,
-    user: Option<crate::db::model::SiloUser>,
-) -> Result<crate::db::model::ConsoleSession, HttpError> {
+    user: Option<nexus_db_queries::db::model::SiloUser>,
+) -> Result<nexus_db_queries::db::model::ConsoleSession, HttpError> {
     let nexus = &apictx.nexus;
     let session = match user {
         Some(user) => nexus.session_create(&opctx, user.id()).await?,
@@ -464,7 +466,7 @@ async fn create_session(
    path = "/v1/logout",
    tags = ["hidden"],
 }]
-pub async fn logout(
+pub(crate) async fn logout(
     rqctx: RequestContext<Arc<ServerContext>>,
     cookies: Cookies,
 ) -> Result<HttpResponseHeaders<HttpResponseUpdatedNoContent>, HttpError> {
@@ -495,7 +497,7 @@ pub async fn logout(
             let headers = response.headers_mut();
             headers.append(
                 header::SET_COOKIE,
-                clear_session_cookie_header_value()?,
+                clear_session_cookie_header_value(apictx.external_tls_enabled)?,
             );
         };
 
@@ -624,7 +626,7 @@ async fn get_login_url(
    path = "/login",
    unpublished = true,
 }]
-pub async fn login_begin(
+pub(crate) async fn login_begin(
     rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<LoginUrlQuery>,
 ) -> Result<HttpResponseFound, HttpError> {
@@ -637,7 +639,7 @@ pub async fn login_begin(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-pub async fn console_index_or_login_redirect(
+pub(crate) async fn console_index_or_login_redirect(
     rqctx: RequestContext<Arc<ServerContext>>,
 ) -> Result<Response<Body>, HttpError> {
     let opctx = crate::context::op_context_for_external_api(&rqctx).await;
@@ -673,7 +675,7 @@ pub async fn console_index_or_login_redirect(
 macro_rules! console_page {
     ($name:ident, $path:literal) => {
         #[endpoint { method = GET, path = $path, unpublished = true, }]
-        pub async fn $name(
+        pub(crate) async fn $name(
             rqctx: RequestContext<Arc<ServerContext>>,
         ) -> Result<Response<Body>, HttpError> {
             console_index_or_login_redirect(rqctx).await
@@ -685,7 +687,7 @@ macro_rules! console_page {
 macro_rules! console_page_wildcard {
     ($name:ident, $path:literal) => {
         #[endpoint { method = GET, path = $path, unpublished = true, }]
-        pub async fn $name(
+        pub(crate) async fn $name(
             rqctx: RequestContext<Arc<ServerContext>>,
             _path_params: Path<RestPathParam>,
         ) -> Result<Response<Body>, HttpError> {
@@ -724,7 +726,7 @@ fn with_gz_ext(path: &PathBuf) -> PathBuf {
    path = "/assets/{path:.*}",
    unpublished = true,
 }]
-pub async fn asset(
+pub(crate) async fn asset(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<RestPathParam>,
 ) -> Result<Response<Body>, HttpError> {
@@ -784,7 +786,7 @@ pub async fn asset(
     Ok(resp.body(file_contents.into())?)
 }
 
-pub async fn serve_console_index(
+pub(crate) async fn serve_console_index(
     apictx: &ServerContext,
 ) -> Result<Response<Body>, HttpError> {
     let static_dir = &apictx

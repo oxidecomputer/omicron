@@ -56,7 +56,12 @@ const CRDB_COUNT: usize = 5;
 const OXIMETER_COUNT: usize = 1;
 // TODO(https://github.com/oxidecomputer/omicron/issues/732): Remove
 // when Nexus provisions Clickhouse.
+// TODO(https://github.com/oxidecomputer/omicron/issues/4000): Set to 2 once we enable replicated ClickHouse
 const CLICKHOUSE_COUNT: usize = 1;
+// TODO(https://github.com/oxidecomputer/omicron/issues/732): Remove
+// when Nexus provisions Clickhouse keeper.
+// TODO(https://github.com/oxidecomputer/omicron/issues/4000): Set to 3 once we enable replicated ClickHouse
+const CLICKHOUSE_KEEPER_COUNT: usize = 0;
 // TODO(https://github.com/oxidecomputer/omicron/issues/732): Remove.
 // when Nexus provisions Crucible.
 const MINIMUM_U2_ZPOOL_COUNT: usize = 3;
@@ -548,6 +553,46 @@ impl Plan {
                 services: vec![ServiceZoneService {
                     id,
                     details: ServiceType::Clickhouse { address },
+                }],
+            });
+        }
+
+        // Provision Clickhouse Keeper zones, continuing to stripe across sleds.
+        // TODO(https://github.com/oxidecomputer/omicron/issues/732): Remove
+        // Temporary linter rule until replicated Clickhouse is enabled
+        #[allow(clippy::reversed_empty_ranges)]
+        for _ in 0..CLICKHOUSE_KEEPER_COUNT {
+            let sled = {
+                let which_sled =
+                    sled_allocator.next().ok_or(PlanError::NotEnoughSleds)?;
+                &mut sled_info[which_sled]
+            };
+            let id = Uuid::new_v4();
+            let ip = sled.addr_alloc.next().expect("Not enough addrs");
+            let port = omicron_common::address::CLICKHOUSE_KEEPER_PORT;
+            let address = SocketAddrV6::new(ip, port, 0, 0);
+            let zone = dns_builder.host_zone(id, ip).unwrap();
+            dns_builder
+                .service_backend_zone(
+                    ServiceName::ClickhouseKeeper,
+                    &zone,
+                    port,
+                )
+                .unwrap();
+            let dataset_name =
+                sled.alloc_from_u2_zpool(DatasetKind::ClickhouseKeeper)?;
+            sled.request.services.push(ServiceZoneRequest {
+                id,
+                zone_type: ZoneType::ClickhouseKeeper,
+                addresses: vec![ip],
+                dataset: Some(DatasetRequest {
+                    id,
+                    name: dataset_name,
+                    service_address: address,
+                }),
+                services: vec![ServiceZoneService {
+                    id,
+                    details: ServiceType::ClickhouseKeeper { address },
                 }],
             });
         }

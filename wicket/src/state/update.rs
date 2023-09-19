@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use tui::style::Style;
+use ratatui::style::Style;
 use wicket_common::update_events::{
     EventReport, ProgressEventKind, StepEventKind, UpdateComponent,
     UpdateStepId,
@@ -110,7 +110,12 @@ impl RackUpdateState {
                     sp_type: &sp_type,
                     i: &i,
                 }) else {
-                    warn!(logger, "Invalid ComponentId in EventReport: {} {}", &sp_type, &i);
+                    warn!(
+                        logger,
+                        "Invalid ComponentId in EventReport: {} {}",
+                        &sp_type,
+                        &i
+                    );
                     continue;
                 };
                 let item_state = self.items.get_mut(&id).unwrap();

@@ -6,7 +6,7 @@
 //!
 //! Thanks for the idea JMC!
 
-use tui::style::Color;
+use ratatui::style::Color;
 
 pub const OX_YELLOW: Color = Color::Rgb(0xF5, 0xCF, 0x65);
 pub const OX_OFF_WHITE: Color = Color::Rgb(0xE0, 0xE0, 0xE0);

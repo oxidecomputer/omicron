@@ -9,9 +9,9 @@ use super::NexusActionContext;
 use super::NexusSaga;
 use crate::app::sagas::declare_saga_actions;
 use crate::app::sagas::retry_until_known_result;
-use crate::db;
-use crate::db::lookup::LookupPath;
-use crate::{authn, authz};
+use nexus_db_queries::db;
+use nexus_db_queries::db::lookup::LookupPath;
+use nexus_db_queries::{authn, authz};
 use nexus_types::identity::Resource;
 use omicron_common::api::external::{Error, ResourceType};
 use omicron_common::api::internal::shared::SwitchLocation;
@@ -22,7 +22,7 @@ use steno::ActionError;
 // instance delete saga: input parameters
 
 #[derive(Debug, Deserialize, Serialize)]
-pub struct Params {
+pub(crate) struct Params {
     pub serialized_authn: authn::saga::Serialized,
     pub authz_instance: authz::Instance,
     pub instance: db::model::Instance,
@@ -63,7 +63,7 @@ declare_saga_actions! {
 // instance delete saga: definition
 
 #[derive(Debug)]
-pub struct SagaInstanceDelete;
+pub(crate) struct SagaInstanceDelete;
 impl NexusSaga for SagaInstanceDelete {
     const NAME: &'static str = "instance-delete";
     type Params = Params;
@@ -347,12 +347,12 @@ mod test {
         app::saga::create_saga_dag,
         app::sagas::instance_create::test::verify_clean_slate,
         app::sagas::instance_delete::Params,
-        app::sagas::instance_delete::SagaInstanceDelete,
-        authn::saga::Serialized, db, db::lookup::LookupPath,
-        external_api::params,
+        app::sagas::instance_delete::SagaInstanceDelete, external_api::params,
     };
     use dropshot::test_util::ClientTestContext;
-    use nexus_db_queries::context::OpContext;
+    use nexus_db_queries::{
+        authn::saga::Serialized, context::OpContext, db, db::lookup::LookupPath,
+    };
     use nexus_test_utils::resource_helpers::create_disk;
     use nexus_test_utils::resource_helpers::create_project;
     use nexus_test_utils::resource_helpers::populate_ip_pool;

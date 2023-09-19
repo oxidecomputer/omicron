@@ -62,18 +62,52 @@ async fn test_updates() {
         .expect("get_artifacts_and_event_reports succeeded")
         .into_inner();
 
+    // We should have an artifact for every known artifact kind...
+    let expected_kinds: BTreeSet<_> =
+        KnownArtifactKind::iter().map(ArtifactKind::from).collect();
+
+    // ... and installable artifacts that replace the top level host,
+    // trampoline, and RoT with their inner parts (phase1/phase2 for OS images
+    // and A/B images for the RoT) during import.
+    let mut expected_installable_kinds = expected_kinds.clone();
+    for remove in [
+        KnownArtifactKind::Host,
+        KnownArtifactKind::Trampoline,
+        KnownArtifactKind::GimletRot,
+        KnownArtifactKind::PscRot,
+        KnownArtifactKind::SwitchRot,
+    ] {
+        assert!(expected_installable_kinds.remove(&remove.into()));
+    }
+    for add in [
+        ArtifactKind::HOST_PHASE_1,
+        ArtifactKind::HOST_PHASE_2,
+        ArtifactKind::TRAMPOLINE_PHASE_1,
+        ArtifactKind::TRAMPOLINE_PHASE_2,
+        ArtifactKind::GIMLET_ROT_IMAGE_A,
+        ArtifactKind::GIMLET_ROT_IMAGE_B,
+        ArtifactKind::PSC_ROT_IMAGE_A,
+        ArtifactKind::PSC_ROT_IMAGE_B,
+        ArtifactKind::SWITCH_ROT_IMAGE_A,
+        ArtifactKind::SWITCH_ROT_IMAGE_B,
+    ] {
+        assert!(expected_installable_kinds.insert(add));
+    }
+
     // Ensure that this is a sensible result.
-    let kinds = response
-        .artifacts
-        .iter()
-        .map(|artifact| {
-            artifact.kind.parse::<KnownArtifactKind>().unwrap_or_else(|error| {
-                panic!("unrecognized artifact kind {}: {error}", artifact.kind)
-            })
-        })
-        .collect();
-    let expected_kinds: BTreeSet<_> = KnownArtifactKind::iter().collect();
+    let mut kinds = BTreeSet::new();
+    let mut installable_kinds = BTreeSet::new();
+    for artifact in response.artifacts {
+        kinds.insert(artifact.artifact_id.kind.parse().unwrap());
+        for installable in artifact.installable {
+            installable_kinds.insert(installable.kind.parse().unwrap());
+        }
+    }
     assert_eq!(expected_kinds, kinds, "all expected kinds present");
+    assert_eq!(
+        expected_installable_kinds, installable_kinds,
+        "all expected installable kinds present"
+    );
 
     let target_sp = SpIdentifier { type_: SpType::Sled, slot: 0 };
 
@@ -194,8 +228,7 @@ async fn test_installinator_fetch() {
         wicketd_testctx
             .server
             .artifact_store
-            .get_by_hash(&host_phase_2_id)
-            .is_some(),
+            .contains_by_hash(&host_phase_2_id),
         "host phase 2 ID found by hash"
     );
 
@@ -207,8 +240,7 @@ async fn test_installinator_fetch() {
         wicketd_testctx
             .server
             .artifact_store
-            .get_by_hash(&control_plane_id)
-            .is_some(),
+            .contains_by_hash(&control_plane_id),
         "control plane ID found by hash"
     );
 
@@ -222,7 +254,18 @@ async fn test_installinator_fetch() {
     // Create a new update ID and register it. This is required to ensure the
     // installinator reaches completion.
     let update_id = Uuid::new_v4();
-    wicketd_testctx.server.ipr_update_tracker.register(update_id);
+    let start_receiver =
+        wicketd_testctx.server.ipr_update_tracker.register(update_id);
+
+    // Process the receiver rather than dropping it, since dropping it causes
+    // 410 Gone errors.
+    let recv_handle = tokio::task::spawn(async move {
+        let mut receiver =
+            start_receiver.await.expect("start_receiver succeeded");
+        while receiver.changed().await.is_ok() {
+            // TODO: do something with the reports?
+        }
+    });
 
     let update_id_str = update_id.to_string();
     let dest_path = temp_dir.path().join("installinator-out");
@@ -268,6 +311,8 @@ async fn test_installinator_fetch() {
         let path = dest_path.join(file_name);
         assert!(path.is_file(), "{path} was written out");
     }
+
+    recv_handle.await.expect("recv_handle succeeded");
 
     wicketd_testctx.teardown().await;
 }

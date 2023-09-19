@@ -11,17 +11,17 @@ camino.workspace = true
 ciborium.workspace = true
 clap.workspace = true
 crossterm.workspace = true
+ratatui.workspace = true
 serde.workspace = true
 slog.workspace = true
 slog-async.workspace = true
 slog-term.workspace = true
 slog-envlogger.workspace = true
 tokio = { workspace = true, features = ["full"] }
-tui.workspace = true
 wicket.workspace = true
 
 # used only by wicket-dbg binary
-reedline = "0.22.0"
+reedline = "0.23.0"
 
 [[bin]]
 name = "wicket-dbg"

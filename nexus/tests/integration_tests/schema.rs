@@ -2,9 +2,13 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use camino::Utf8PathBuf;
 use chrono::{DateTime, Utc};
 use dropshot::test_util::LogContext;
 use nexus_db_model::schema::SCHEMA_VERSION as LATEST_SCHEMA_VERSION;
+use nexus_db_queries::db::datastore::{
+    all_sql_for_version_migration, EARLIEST_SUPPORTED_VERSION,
+};
 use nexus_test_utils::{db, load_test_config, ControlPlaneTestContextBuilder};
 use omicron_common::api::external::SemverVersion;
 use omicron_common::api::internal::shared::SwitchLocation;
@@ -12,6 +16,7 @@ use omicron_common::nexus_config::Config;
 use omicron_common::nexus_config::SchemaConfig;
 use omicron_test_utils::dev::db::CockroachInstance;
 use pretty_assertions::assert_eq;
+use similar_asserts;
 use slog::Logger;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
@@ -21,7 +26,6 @@ use uuid::Uuid;
 
 const SCHEMA_DIR: &'static str =
     concat!(env!("CARGO_MANIFEST_DIR"), "/../schema/crdb");
-const EARLIEST_SUPPORTED_VERSION: &'static str = "1.0.0";
 
 async fn test_setup_just_crdb<'a>(
     log: &Logger,
@@ -70,6 +74,7 @@ async fn apply_update(
     // We skip this for the earliest supported version because these tables
     // might not exist yet.
     if version != EARLIEST_SUPPORTED_VERSION {
+        info!(log, "Updating schema version in db_metadata (setting target)");
         let sql = format!("UPDATE omicron.public.db_metadata SET target_version = '{}' WHERE singleton = true;", version);
         client
             .batch_execute(&sql)
@@ -77,24 +82,32 @@ async fn apply_update(
             .expect("Failed to bump version number");
     }
 
-    let file = "up.sql";
-    let sql = tokio::fs::read_to_string(
-        PathBuf::from(SCHEMA_DIR).join(version).join(file),
-    )
-    .await
-    .unwrap();
+    let target_dir = Utf8PathBuf::from(SCHEMA_DIR).join(version);
+    let sqls = all_sql_for_version_migration(&target_dir).await.unwrap();
 
     for _ in 0..times_to_apply {
-        client.batch_execute(&sql).await.expect("failed to apply update");
+        for sql in sqls.iter() {
+            client
+                .batch_execute("BEGIN;")
+                .await
+                .expect("Failed to BEGIN update");
+            client.batch_execute(&sql).await.expect("Failed to execute update");
+            client
+                .batch_execute("COMMIT;")
+                .await
+                .expect("Failed to COMMIT update");
+        }
     }
 
     // Normally, Nexus actually bumps the version number.
     //
     // We do so explicitly here.
+    info!(log, "Updating schema version in db_metadata (removing target)");
     let sql = format!("UPDATE omicron.public.db_metadata SET version = '{}', target_version = NULL WHERE singleton = true;", version);
     client.batch_execute(&sql).await.expect("Failed to bump version number");
 
     client.cleanup().await.expect("cleaning up after wipe");
+    info!(log, "Update to {version} applied successfully");
 }
 
 async fn query_crdb_schema_version(crdb: &CockroachInstance) -> String {
@@ -470,16 +483,24 @@ struct InformationSchema {
 
 impl InformationSchema {
     fn pretty_assert_eq(&self, other: &Self) {
-        // TODO: We could manually iterate here too - the Debug outputs for
-        // each of these is pretty large, and can be kinda painful to read
-        // when comparing e.g. "All columns that exist in the database".
-        assert_eq!(self.columns, other.columns);
-        assert_eq!(self.check_constraints, other.check_constraints);
-        assert_eq!(self.key_column_usage, other.key_column_usage);
-        assert_eq!(self.referential_constraints, other.referential_constraints);
-        assert_eq!(self.views, other.views);
-        assert_eq!(self.statistics, other.statistics);
-        assert_eq!(self.tables, other.tables);
+        // similar_asserts gets us nice diff that only includes the relevant context.
+        // the columns diff especially needs this: it can be 20k lines otherwise
+        similar_asserts::assert_eq!(self.columns, other.columns);
+        similar_asserts::assert_eq!(
+            self.check_constraints,
+            other.check_constraints
+        );
+        similar_asserts::assert_eq!(
+            self.key_column_usage,
+            other.key_column_usage
+        );
+        similar_asserts::assert_eq!(
+            self.referential_constraints,
+            other.referential_constraints
+        );
+        similar_asserts::assert_eq!(self.views, other.views);
+        similar_asserts::assert_eq!(self.statistics, other.statistics);
+        similar_asserts::assert_eq!(self.tables, other.tables);
     }
 
     async fn new(crdb: &CockroachInstance) -> Self {

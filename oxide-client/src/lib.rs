@@ -139,7 +139,7 @@ pub async fn login(
             anyhow!("unexpected key parsing session token: {:?}", key).into()
         );
     }
-    if !rest.contains("Path=/; HttpOnly; SameSite=Lax; Max-Age=") {
+    if !rest.contains("Path=/; HttpOnly; SameSite=Lax;") {
         return Err(anyhow!(
             "unexpected cookie header format: {:?}",
             session_cookie

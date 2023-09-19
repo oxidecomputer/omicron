@@ -8,8 +8,8 @@ use super::NexusSaga;
 use crate::app::sagas::declare_saga_actions;
 use crate::app::sagas::volume_delete;
 use crate::app::sagas::SagaInitError;
-use crate::authn;
-use crate::db;
+use nexus_db_queries::authn;
+use nexus_db_queries::db;
 use omicron_common::api::external::DiskState;
 use serde::Deserialize;
 use serde::Serialize;
@@ -20,7 +20,7 @@ use uuid::Uuid;
 // disk delete saga: input parameters
 
 #[derive(Debug, Deserialize, Serialize)]
-pub struct Params {
+pub(crate) struct Params {
     pub serialized_authn: authn::saga::Serialized,
     pub project_id: Uuid,
     pub disk_id: Uuid,
@@ -46,7 +46,7 @@ declare_saga_actions! {
 // disk delete saga: definition
 
 #[derive(Debug)]
-pub struct SagaDiskDelete;
+pub(crate) struct SagaDiskDelete;
 impl NexusSaga for SagaDiskDelete {
     const NAME: &'static str = "disk-delete";
     type Params = Params;
@@ -169,10 +169,11 @@ async fn sdd_account_space_undo(
 pub(crate) mod test {
     use crate::{
         app::saga::create_saga_dag, app::sagas::disk_delete::Params,
-        app::sagas::disk_delete::SagaDiskDelete, authn::saga::Serialized,
+        app::sagas::disk_delete::SagaDiskDelete,
     };
     use dropshot::test_util::ClientTestContext;
     use nexus_db_model::Disk;
+    use nexus_db_queries::authn::saga::Serialized;
     use nexus_db_queries::context::OpContext;
     use nexus_test_utils::resource_helpers::create_ip_pool;
     use nexus_test_utils::resource_helpers::create_project;

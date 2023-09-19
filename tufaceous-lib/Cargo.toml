@@ -2,6 +2,7 @@
 name = "tufaceous-lib"
 version = "0.1.0"
 edition = "2021"
+license = "MPL-2.0"
 publish = false
 
 [dependencies]
@@ -29,5 +30,8 @@ slog.workspace = true
 tar.workspace = true
 toml.workspace = true
 tough.workspace = true
-url = "2.4.0"
+url = "2.4.1"
 zip.workspace = true
+
+[dev-dependencies]
+omicron-test-utils.workspace = true

@@ -6,17 +6,17 @@
 
 use crate::state::Inventory;
 use crate::state::{ComponentId, KnightRiderMode, RackState};
+use ratatui::buffer::Buffer;
+use ratatui::layout::Alignment;
+use ratatui::layout::Rect;
+use ratatui::style::Color;
+use ratatui::style::Style;
+use ratatui::text::Text;
+use ratatui::widgets::Block;
+use ratatui::widgets::Borders;
+use ratatui::widgets::Paragraph;
+use ratatui::widgets::Widget;
 use std::collections::BTreeMap;
-use tui::buffer::Buffer;
-use tui::layout::Alignment;
-use tui::layout::Rect;
-use tui::style::Color;
-use tui::style::Style;
-use tui::text::Text;
-use tui::widgets::Block;
-use tui::widgets::Borders;
-use tui::widgets::Paragraph;
-use tui::widgets::Widget;
 use wicketd_client::types::SpIgnition;
 
 #[derive(Debug, Clone)]

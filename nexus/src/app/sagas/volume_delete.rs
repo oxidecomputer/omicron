@@ -30,8 +30,8 @@ use super::ActionRegistry;
 use super::NexusActionContext;
 use super::NexusSaga;
 use crate::app::sagas::declare_saga_actions;
-use crate::authn;
-use crate::db::datastore::CrucibleResources;
+use nexus_db_queries::authn;
+use nexus_db_queries::db::datastore::CrucibleResources;
 use nexus_types::identity::Asset;
 use serde::Deserialize;
 use serde::Serialize;
@@ -41,7 +41,7 @@ use uuid::Uuid;
 // volume delete saga: input parameters
 
 #[derive(Debug, Deserialize, Serialize)]
-pub struct Params {
+pub(crate) struct Params {
     pub serialized_authn: authn::saga::Serialized,
     pub volume_id: Uuid,
 }
@@ -103,7 +103,7 @@ pub fn create_dag(
 }
 
 #[derive(Debug)]
-pub struct SagaVolumeDelete;
+pub(crate) struct SagaVolumeDelete;
 impl NexusSaga for SagaVolumeDelete {
     const NAME: &'static str = "volume-delete";
     type Params = Params;

@@ -14,6 +14,7 @@ use dpd_client::types::PortSpeed as DpdPortSpeed;
 use dpd_client::types::RouteSettingsV4;
 use dpd_client::Client as DpdClient;
 use dpd_client::ClientState as DpdClientState;
+use either::Either;
 use helios_fusion::PFEXEC;
 use illumos_utils::zone::SVCCFG;
 use omicron_common::address::DENDRITE_PORT;
@@ -43,8 +44,9 @@ use tokio::sync::mpsc;
 use trust_dns_resolver::config::NameServerConfigGroup;
 use trust_dns_resolver::config::ResolverConfig;
 use trust_dns_resolver::config::ResolverOpts;
+use trust_dns_resolver::error::ResolveError;
 use trust_dns_resolver::error::ResolveErrorKind;
-use trust_dns_resolver::AsyncResolver;
+use trust_dns_resolver::TokioAsyncResolver;
 use update_engine::StepSpec;
 
 const DNS_PORT: u16 = 53;
@@ -457,12 +459,9 @@ fn add_steps_for_single_local_uplink_preflight_check<'a>(
                     }
                 };
 
-                let step_impl = DnsLookupStep::new(
-                    dns_servers,
-                    ntp_servers,
-                    dns_name_to_query,
-                );
-                let ntp_ips_result = step_impl.run(&cx).await;
+                let ntp_ips_result = DnsLookupStep::default()
+                    .run(dns_servers, ntp_servers, dns_name_to_query, &cx)
+                    .await;
 
                 Ok(ntp_ips_result.map(|ntp_ips| Ok((level2, ntp_ips))))
             },
@@ -926,60 +925,70 @@ impl StepSpec for UplinkPreflightCheckSpec {
 
 update_engine::define_update_engine!(pub(super) UplinkPreflightCheckSpec);
 
-// If we have been given DNS names for the NTP servers, this step serves a dual
-// purpose: check connectivity to DNS servers, and use them to resolve the NTP
-// servers. If we've been given IPs for the NTP servers, we only need to check
-// connectivity to the DNS servers, and will query for a stock DNS name instead.
-struct DnsLookupStep<'a> {
-    dns_servers: &'a [IpAddr],
-    ntp_names_to_resolve: Vec<&'a str>,
-    dns_name_to_query: Option<&'a str>,
-
+#[derive(Debug, Default)]
+struct DnsLookupStep {
     // Usable output of this step: IP addrs of the NTP servers to use.
     ntp_ips: BTreeSet<IpAddr>,
+
+    messages: Vec<String>,
+    warnings: Vec<String>,
 }
 
-impl<'a> DnsLookupStep<'a> {
-    fn new(
-        dns_servers: &'a [IpAddr],
-        ntp_servers: &'a [String],
-        dns_name_to_query: Option<&'a str>,
-    ) -> Self {
-        let mut ntp_ips = BTreeSet::new();
+impl DnsLookupStep {
+    /// If we have been given DNS names for the NTP servers, this step serves a
+    /// dual purpose: check connectivity to DNS servers, and use them to resolve
+    /// the NTP servers. If we've been given IPs for the NTP servers, we only
+    /// need to check connectivity to the DNS servers, and will query for a
+    /// stock DNS name (or the provided DNS name) instead.
+    async fn run(
+        mut self,
+        dns_servers: &[IpAddr],
+        ntp_servers: &[String],
+        dns_name_to_query: Option<&str>,
+        cx: &StepContext,
+    ) -> StepResult<Vec<IpAddr>> {
+        // Partition `ntp_servers` into IP addrs (added to `self.ntp_ips`) and
+        // DNS names (added to `ntp_names_to_resolve`).
         let mut ntp_names_to_resolve = Vec::new();
         for ntp_server in ntp_servers {
             match ntp_server.parse::<IpAddr>() {
                 Ok(ip) => {
-                    ntp_ips.insert(ip);
+                    self.ntp_ips.insert(ip);
                 }
                 Err(_) => {
                     ntp_names_to_resolve.push(ntp_server.as_str());
                 }
             }
         }
-        Self { dns_servers, ntp_names_to_resolve, dns_name_to_query, ntp_ips }
-    }
 
-    async fn run(mut self, cx: &StepContext) -> StepResult<Vec<IpAddr>> {
-        let mut messages = vec![];
-        let mut warnings = vec![];
+        // When looking up NTP servers, we need to find a record and we need to
+        // record the resulting IP(s) in `self.ntp_ips`.
+        let ntp_name_options = DnsLookupOptions {
+            is_ntp_server: true,
+            is_no_records_found_okay: false,
+        };
 
-        for &dns_ip in self.dns_servers {
-            let resolver = match AsyncResolver::tokio(
-                ResolverConfig::from_parts(
-                    None,
-                    vec![],
-                    NameServerConfigGroup::from_ips_clear(
-                        &[dns_ip],
-                        DNS_PORT,
-                        true,
-                    ),
-                ),
-                ResolverOpts::default(),
-            ) {
+        // If we were given an explicity `--query-dns some.host`, we expect it
+        // to resolve, but it's not an NTP server.
+        let dns_name_to_query_options = DnsLookupOptions {
+            is_ntp_server: false,
+            is_no_records_found_okay: false,
+        };
+
+        // If we don't have any NTP server names or an explicit `--query-dns`,
+        // we will try querying for a fixed name. This will only resolve if the
+        // server can respond to public DNS entries, so we don't treat a failure
+        // to find a record as a failure of this step.
+        let fallback_name_to_query_options = DnsLookupOptions {
+            is_ntp_server: false,
+            is_no_records_found_okay: true,
+        };
+
+        'dns_servers: for &dns_ip in dns_servers {
+            let resolver = match self.build_resolver(dns_ip) {
                 Ok(resolver) => resolver,
                 Err(err) => {
-                    warnings.push(format!(
+                    self.warnings.push(format!(
                         "failed to create resolver for {dns_ip}: {}",
                         DisplayErrorChain::new(&err)
                     ));
@@ -988,58 +997,36 @@ impl<'a> DnsLookupStep<'a> {
             };
 
             // Attempt to resolve any NTP servers that aren't IP addresses.
-            for &ntp_name in &self.ntp_names_to_resolve {
-                match resolver.lookup_ip(ntp_name).await {
-                    Ok(ips) => {
-                        for ip in ips {
-                            let message = format!(
-                                "resolved {ntp_name} to {ip} \
-                                 via DNS server {dns_ip}"
-                            );
-                            messages.push(message.clone());
-
-                            cx.send_progress(StepProgress::Progress {
-                                progress: None,
-                                metadata: message,
-                            })
-                            .await;
-                            self.ntp_ips.insert(ip);
-                        }
-                    }
-                    Err(err) => {
-                        warnings.push(format!(
-                            "failed to look up {ntp_name} via DNS server \
-                             {dns_ip}: {}",
-                            DisplayErrorChain::new(&err)
-                        ));
-                    }
+            for &ntp_name in &ntp_names_to_resolve {
+                match self
+                    .lookup_ip(
+                        dns_ip,
+                        &resolver,
+                        ntp_name,
+                        ntp_name_options,
+                        cx,
+                    )
+                    .await
+                {
+                    Ok(()) => (),
+                    Err(StopTryingServer) => continue 'dns_servers,
                 }
             }
 
             // If we were given a DNS name to query, we'll query that too.
-            if let Some(dns_name) = self.dns_name_to_query {
-                match resolver.lookup_ip(dns_name).await {
-                    Ok(ips) => {
-                        for ip in ips {
-                            let message = format!(
-                                "resolved {dns_name} to {ip} \
-                                 via DNS server {dns_ip}"
-                            );
-                            messages.push(message.clone());
-                            cx.send_progress(StepProgress::Progress {
-                                progress: None,
-                                metadata: message,
-                            })
-                            .await;
-                        }
-                    }
-                    Err(err) => {
-                        warnings.push(format!(
-                            "failed to look up {dns_name} via DNS server \
-                             {dns_ip}: {}",
-                            DisplayErrorChain::new(&err)
-                        ));
-                    }
+            if let Some(dns_name) = dns_name_to_query {
+                match self
+                    .lookup_ip(
+                        dns_ip,
+                        &resolver,
+                        dns_name,
+                        dns_name_to_query_options,
+                        cx,
+                    )
+                    .await
+                {
+                    Ok(()) => (),
+                    Err(StopTryingServer) => continue 'dns_servers,
                 }
             }
 
@@ -1050,56 +1037,250 @@ impl<'a> DnsLookupStep<'a> {
             // general public DNS names; we treat such a failure at the DNS
             // level as successes, because we're trying to check uplink
             // connectivity.
-            if self.ntp_names_to_resolve.is_empty()
-                && self.dns_name_to_query.is_none()
-            {
-                match resolver.lookup_ip(DNS_NAME_TO_QUERY).await {
-                    Ok(ips) => {
-                        for ip in ips {
-                            let message = format!(
-                                "resolved {DNS_NAME_TO_QUERY} to {ip} \
-                                 via DNS server {dns_ip}"
-                            );
-                            messages.push(message.clone());
-                            cx.send_progress(StepProgress::Progress {
-                                progress: None,
-                                metadata: message,
-                            })
-                            .await;
-                        }
-                    }
-                    Err(err) => match err.kind() {
-                        ResolveErrorKind::NoRecordsFound { .. } => {
-                            let message = format!(
-                                "no DNS records found for {DNS_NAME_TO_QUERY}; \
-                                 connectivity to DNS server appears good"
-                            );
-                            messages.push(message.clone());
-                            cx.send_progress(StepProgress::Progress {
-                                progress: None,
-                                metadata: message,
-                            })
-                            .await;
-                        }
-                        _ => {
-                            warnings.push(format!(
-                                "failed to look up {DNS_NAME_TO_QUERY} via \
-                                 DNS server {dns_ip}: {}",
-                                DisplayErrorChain::new(&err)
-                            ));
-                        }
-                    },
+            if ntp_names_to_resolve.is_empty() && dns_name_to_query.is_none() {
+                match self
+                    .lookup_ip(
+                        dns_ip,
+                        &resolver,
+                        DNS_NAME_TO_QUERY,
+                        fallback_name_to_query_options,
+                        cx,
+                    )
+                    .await
+                {
+                    Ok(()) => (),
+                    Err(StopTryingServer) => continue 'dns_servers,
                 }
             }
         }
 
         let ntp_ips = self.ntp_ips.into_iter().collect();
-        if warnings.is_empty() {
-            StepSuccess::new(ntp_ips).with_metadata(messages).build()
+        if self.warnings.is_empty() {
+            StepSuccess::new(ntp_ips).with_metadata(self.messages).build()
         } else {
-            StepWarning::new(ntp_ips, warnings.join("\n"))
-                .with_metadata(messages)
+            StepWarning::new(ntp_ips, self.warnings.join("\n"))
+                .with_metadata(self.messages)
                 .build()
         }
     }
+
+    /// Attempt to look up `name` via `resolver`.
+    ///
+    /// Based on the options and result of the query, we may add an IP to
+    /// `self.ntp_ips` (if we succeed and `options` indicates this is the name
+    /// of an NTP server) and will either:
+    ///
+    /// * append the results of the query to `self.messages` (if we succeed)
+    /// * append the results of the query to `self.warnings` (if we fail)
+    ///
+    /// If we fail in a way that indicates we shouldn't bother trying to contact
+    /// this DNS server any more, we return `Err(StopTryingServer)`. We may
+    /// return `Ok(_)` even if the specific DNS query we performed failed (e.g.,
+    /// if a record wasn't found) as long as we were able to contact the server.
+    async fn lookup_ip(
+        &mut self,
+        dns_ip: IpAddr,
+        resolver: &TokioAsyncResolver,
+        name: &str,
+        options: DnsLookupOptions,
+        cx: &StepContext,
+    ) -> Result<(), StopTryingServer> {
+        // How long are we willing to retry in the face of errors?
+        const RETRY_TIMEOUT: Duration = Duration::from_secs(30);
+
+        // We may have a mix of failures followed by success, so we don't know
+        // (as we're looping below) whether we want to append to `self.messages`
+        // or `self.warnings`. We'll append to this local vec for now, then move
+        // its contents into one or the other when we're done.
+        let mut query_results = Vec::new();
+        let start = Instant::now();
+
+        // Query for an A record first; we'll switch to AAAA if we get a
+        // `NoRecordsFound` error from our A query.
+        let mut query_ipv4 = true;
+        let mut attempt = 0;
+
+        loop {
+            attempt += 1;
+
+            let (query_type, result) = if query_ipv4 {
+                (
+                    "A",
+                    resolver.ipv4_lookup(name).await.map(|records| {
+                        Either::Left(records.into_iter().map(IpAddr::V4))
+                    }),
+                )
+            } else {
+                (
+                    "AAAA",
+                    resolver.ipv6_lookup(name).await.map(|records| {
+                        Either::Right(records.into_iter().map(IpAddr::V6))
+                    }),
+                )
+            };
+
+            let err = match result {
+                // If our query succeeded, we're done.
+                Ok(records) => {
+                    for ip in records {
+                        let message = format!(
+                            "DNS server {dns_ip} \
+                             {query_type} query attempt {attempt}: \
+                             resolved {name} to {ip}"
+                        );
+                        query_results.push(message.clone());
+
+                        if options.is_ntp_server {
+                            self.ntp_ips.insert(ip);
+                        }
+
+                        cx.send_progress(StepProgress::Progress {
+                            progress: None,
+                            metadata: message,
+                        })
+                        .await;
+                    }
+                    self.messages.append(&mut query_results);
+                    return Ok(());
+                }
+                Err(err) => err,
+            };
+
+            match err.kind() {
+                // If `NoRecordsFound` is an acceptable end to this lookup,
+                // we're done.
+                ResolveErrorKind::NoRecordsFound { .. }
+                    if options.is_no_records_found_okay =>
+                {
+                    let message = format!(
+                        "DNS server {dns_ip} \
+                         {query_type} query attempt {attempt}: \
+                         no record found for {name}; \
+                         connectivity to DNS server appears good"
+                    );
+                    query_results.push(message.clone());
+                    cx.send_progress(StepProgress::Progress {
+                        progress: None,
+                        metadata: message,
+                    })
+                    .await;
+
+                    self.messages.append(&mut query_results);
+                    return Ok(());
+                }
+
+                // Otherwise, `NoRecordsFound` means we should either switch to
+                // AAAA queries (if this was A) or we're done (and failed).
+                ResolveErrorKind::NoRecordsFound { .. } => {
+                    let message = format!(
+                        "DNS server {dns_ip} \
+                         {query_type} query attempt {attempt}: \
+                         failed to look up {name}: {}",
+                        DisplayErrorChain::new(&err)
+                    );
+                    query_results.push(message.clone());
+                    cx.send_progress(StepProgress::Progress {
+                        progress: None,
+                        metadata: message,
+                    })
+                    .await;
+
+                    // If this was an A query, switch to AAAA and reset the
+                    // attempt counter; otherwise, we're done (and we failed
+                    // to resolve the name).
+                    if query_ipv4 {
+                        query_ipv4 = false;
+                        attempt = 0;
+                        continue;
+                    } else {
+                        self.warnings.append(&mut query_results);
+                        return Ok(());
+                    }
+                }
+
+                // For any other error, we're done (and failed) if we've passed
+                // `RETRY_TIMEOUT`; otherwise, we sleep briefly and then retry.
+                _ => {
+                    let message = format!(
+                        "DNS server {dns_ip} \
+                         {query_type} query attempt {attempt}: \
+                         failed to look up {name}: {}",
+                        DisplayErrorChain::new(&err)
+                    );
+                    query_results.push(message.clone());
+                    cx.send_progress(StepProgress::Progress {
+                        progress: None,
+                        metadata: message,
+                    })
+                    .await;
+
+                    if start.elapsed() < RETRY_TIMEOUT {
+                        tokio::time::sleep(Duration::from_secs(1)).await;
+                        continue;
+                    } else {
+                        self.warnings.append(&mut query_results);
+                        return Err(StopTryingServer);
+                    }
+                }
+            }
+        }
+    }
+
+    /// Returns a `TokioAsyncResolver` if we're able to build one.
+    ///
+    /// If building it fails, we'll append to our internal `warnings` and return
+    /// `None`.
+    fn build_resolver(
+        &mut self,
+        dns_ip: IpAddr,
+    ) -> Result<TokioAsyncResolver, ResolveError> {
+        let mut options = ResolverOpts::default();
+
+        // We will retry ourselves; we don't want the resolver
+        // retrying internally too.
+        options.attempts = 1;
+
+        // We're only using this resolver temporarily; we don't want
+        // or need it to cache anything.
+        options.cache_size = 0;
+
+        // We only want to query the DNS server, not /etc/hosts.
+        options.use_hosts_file = false;
+
+        // This is currently the default for `ResolverOpts`, but it
+        // doesn't hurt to specify it in case that changes.
+        options.timeout = Duration::from_secs(5);
+
+        // We're only specifying one server, so this setting
+        // _probably_ doesn't matter.
+        options.num_concurrent_reqs = 1;
+
+        TokioAsyncResolver::tokio(
+            ResolverConfig::from_parts(
+                None,
+                vec![],
+                NameServerConfigGroup::from_ips_clear(
+                    &[dns_ip],
+                    DNS_PORT,
+                    true,
+                ),
+            ),
+            options,
+        )
+    }
+}
+
+struct StopTryingServer;
+
+#[derive(Debug, Clone, Copy)]
+struct DnsLookupOptions {
+    // Is this DNS name an NTP server? If so, we'll add any IPs found to
+    // `self.ntp_ips`.
+    is_ntp_server: bool,
+
+    // If we're looking up our hard-coded `DNS_NAME_TO_QUERY`, we don't know
+    // whether or not we expect to get an actual answer; it depends on whether
+    // the server can handle requests for public DNS records. If this is true,
+    // we'll treat `NoRecordsFound` as a success instead of a failure.
+    is_no_records_found_okay: bool,
 }
