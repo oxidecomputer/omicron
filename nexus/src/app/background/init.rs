@@ -74,7 +74,12 @@ impl BackgroundTasks {
                 external_endpoints::ExternalEndpointsWatcher::new(datastore);
             let watcher_channel = watcher.watcher();
             let task = driver.register(
-                "external_endpoints".to_string(),
+                String::from("external_endpoints"),
+                String::from(
+                    "reads config for silos and TLS certificates to determine \
+                    the right set of HTTP endpoints, their HTTP server names, \
+                    and which TLS certificates to use on each one",
+                ),
                 config.external_endpoints.period_secs,
                 Box::new(watcher),
                 opctx.child(BTreeMap::new()),
@@ -113,8 +118,10 @@ fn init_dns(
     let dns_config =
         dns_config::DnsConfigWatcher::new(Arc::clone(&datastore), dns_group);
     let dns_config_watcher = dns_config.watcher();
+    let task_name_config = format!("dns_config_{}", dns_group);
     let task_config = driver.register(
-        format!("dns_config_{}", dns_group),
+        task_name_config.clone(),
+        format!("watches {} DNS data stored in CockroachDB", dns_group),
         config.period_secs_config,
         Box::new(dns_config),
         opctx.child(metadata.clone()),
@@ -124,8 +131,13 @@ fn init_dns(
     // Background task: DNS server list watcher
     let dns_servers = dns_servers::DnsServersWatcher::new(datastore, dns_group);
     let dns_servers_watcher = dns_servers.watcher();
+    let task_name_servers = format!("dns_servers_{}", dns_group);
     let task_servers = driver.register(
-        format!("dns_servers_{}", dns_group),
+        task_name_servers.clone(),
+        format!(
+            "watches list of {} DNS servers stored in CockroachDB",
+            dns_group,
+        ),
         config.period_secs_servers,
         Box::new(dns_servers),
         opctx.child(metadata.clone()),
@@ -140,6 +152,12 @@ fn init_dns(
     );
     driver.register(
         format!("dns_propagation_{}", dns_group),
+        format!(
+            "propagates latest {} DNS configuration (from {:?} background \
+            task) to the latest list of DNS servers (from {:?} background \
+            task)",
+            dns_group, task_name_config, task_name_servers,
+        ),
         config.period_secs_propagation,
         Box::new(dns_propagate),
         opctx.child(metadata),
@@ -362,7 +380,7 @@ pub mod test {
                         diesel::insert_into(dsl::dns_version)
                             .values(DnsVersion {
                                 dns_group: DnsGroup::Internal,
-                                version: Generation(2.try_into().unwrap()),
+                                version: Generation(2u32.try_into().unwrap()),
                                 time_created: chrono::Utc::now(),
                                 creator: String::from("test suite"),
                                 comment: String::from("test suite"),
@@ -381,7 +399,7 @@ pub mod test {
                                 DnsName::new(
                                     internal_dns_zone_id,
                                     String::from("we-got-beets"),
-                                    Generation(2.try_into().unwrap()),
+                                    Generation(2u32.try_into().unwrap()),
                                     None,
                                     vec![nexus_params::DnsRecord::Aaaa(
                                         "fe80::3".parse().unwrap(),

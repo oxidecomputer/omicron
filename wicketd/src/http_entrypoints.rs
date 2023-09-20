@@ -418,7 +418,7 @@ async fn post_run_rack_setup(
         .map_err(|err| HttpError::for_bad_request(None, format!("{err:#}")))?;
 
     let request = {
-        let config = ctx.rss_config.lock().unwrap();
+        let mut config = ctx.rss_config.lock().unwrap();
         config.start_rss_request(&ctx.bootstrap_peers, log).map_err(|err| {
             HttpError::for_bad_request(None, format!("{err:#}"))
         })?

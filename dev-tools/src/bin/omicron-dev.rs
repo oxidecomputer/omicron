@@ -39,7 +39,7 @@ async fn main() -> Result<(), anyhow::Error> {
     Ok(())
 }
 
-/// Manage a local CockroachDB database for Omicron development
+/// Tools for working with a local Omicron deployment
 #[derive(Debug, Parser)]
 #[clap(version)]
 enum OmicronDb {
