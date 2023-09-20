@@ -174,7 +174,15 @@ async fn do_run<F>(
     let owned_args: Vec<_> = args.into_iter().map(|s| s.to_string()).collect();
     let (exit_status, stdout_text, stderr_text) =
         tokio::task::spawn_blocking(move || {
-            let exec = modexec(Exec::cmd(cmd_path).args(&owned_args));
+            let exec = modexec(
+                Exec::cmd(cmd_path)
+                    // Set RUST_BACKTRACE for consistency between CI and
+                    // developers' local runs.  We set it to 0 only to match
+                    // what someone would see who wasn't debugging it, but we
+                    // could as well use 1 or "full" to store that instead.
+                    .env("RUST_BACKTRACE", "0")
+                    .args(&owned_args),
+            );
             run_command(exec)
         })
         .await
