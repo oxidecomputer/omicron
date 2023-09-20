@@ -556,10 +556,14 @@ impl CertificateValidator {
     }
 
     fn validate(&self, cert: &str, key: &str) -> Result<(), CertificateError> {
-        self.inner.validate(
-            cert.as_bytes(),
-            key.as_bytes(),
-            self.silo_dns_name.as_deref(),
-        )
+        // Cert validation accepts multiple possible silo DNS names, but at rack
+        // setup time we only have one. Stuff it into a Vec.
+        let silo_dns_names =
+            if let Some(silo_dns_name) = self.silo_dns_name.as_deref() {
+                vec![silo_dns_name]
+            } else {
+                vec![]
+            };
+        self.inner.validate(cert.as_bytes(), key.as_bytes(), &silo_dns_names)
     }
 }

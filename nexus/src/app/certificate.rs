@@ -46,12 +46,17 @@ impl super::Nexus {
             .authn
             .silo_required()
             .internal_context("creating a Certificate")?;
+
+        let silo_fq_dns_names =
+            self.silo_fq_dns_names(opctx, authz_silo.id()).await?;
+
         let kind = params.service;
         let new_certificate = db::model::Certificate::new(
             authz_silo.id(),
             Uuid::new_v4(),
             kind.into(),
             params,
+            &silo_fq_dns_names,
         )?;
         let cert = self
             .db_datastore

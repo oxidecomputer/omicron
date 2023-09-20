@@ -150,7 +150,7 @@ async fn test_crud(cptestctx: &ControlPlaneTestContext) {
     let certs = certs_list(&client).await;
     assert!(certs.is_empty());
 
-    let chain = CertificateChain::new();
+    let chain = CertificateChain::new(cptestctx.wildcard_silo_dns_name());
     let (cert, key) =
         (chain.cert_chain_as_pem(), chain.end_cert_private_key_as_pem());
 
@@ -190,14 +190,19 @@ async fn test_cannot_create_certificate_with_bad_key(
 ) {
     let client = &cptestctx.external_client;
 
-    let chain = CertificateChain::new();
+    let chain = CertificateChain::new(cptestctx.wildcard_silo_dns_name());
     let (cert, der_key) =
         (chain.cert_chain_as_pem(), chain.end_cert_private_key_as_der());
 
     let key = String::from_utf8_lossy(&der_key).to_string();
 
     // Cannot create a certificate with a bad key (e.g. not PEM encoded)
-    cert_create_expect_error(&client, CERT_NAME, cert, key).await;
+    let error = cert_create_expect_error(&client, CERT_NAME, cert, key).await;
+    let expected = "Failed to parse private key";
+    assert!(
+        error.contains(expected),
+        "{error:?} does not contain {expected:?}"
+    );
 }
 
 #[nexus_test]
@@ -206,14 +211,19 @@ async fn test_cannot_create_certificate_with_mismatched_key(
 ) {
     let client = &cptestctx.external_client;
 
-    let chain1 = CertificateChain::new();
+    let chain1 = CertificateChain::new(cptestctx.wildcard_silo_dns_name());
     let cert1 = chain1.cert_chain_as_pem();
 
-    let chain2 = CertificateChain::new();
+    let chain2 = CertificateChain::new(cptestctx.wildcard_silo_dns_name());
     let key2 = chain2.end_cert_private_key_as_pem();
 
     // Cannot create a certificate with a key that doesn't match the cert
-    cert_create_expect_error(&client, CERT_NAME, cert1, key2).await;
+    let error = cert_create_expect_error(&client, CERT_NAME, cert1, key2).await;
+    let expected = "Certificate and private key do not match";
+    assert!(
+        error.contains(expected),
+        "{error:?} does not contain {expected:?}"
+    );
 }
 
 #[nexus_test]
@@ -222,7 +232,7 @@ async fn test_cannot_create_certificate_with_bad_cert(
 ) {
     let client = &cptestctx.external_client;
 
-    let chain = CertificateChain::new();
+    let chain = CertificateChain::new(cptestctx.wildcard_silo_dns_name());
     let (cert, key) =
         (chain.cert_chain_as_pem(), chain.end_cert_private_key_as_pem());
 
@@ -231,7 +241,15 @@ async fn test_cannot_create_certificate_with_bad_cert(
 
     let cert = String::from_utf8(tmp).unwrap();
 
-    cert_create_expect_error(&client, CERT_NAME, cert, key).await;
+    let error = cert_create_expect_error(&client, CERT_NAME, cert, key).await;
+
+    // TODO-correctness It's suprising this is the error we get back instead of
+    // "Failed to parse certificate". Why?
+    let expected = "Certificate exists, but is empty";
+    assert!(
+        error.contains(expected),
+        "{error:?} does not contain {expected:?}"
+    );
 }
 
 #[nexus_test]
@@ -240,14 +258,45 @@ async fn test_cannot_create_certificate_with_expired_cert(
 ) {
     let client = &cptestctx.external_client;
 
-    let mut params = rcgen::CertificateParams::new(vec!["localhost".into()]);
+    let mut params =
+        rcgen::CertificateParams::new(vec![cptestctx.wildcard_silo_dns_name()]);
     params.not_after = std::time::SystemTime::UNIX_EPOCH.into();
 
     let chain = CertificateChain::with_params(params);
     let (cert, key) =
         (chain.cert_chain_as_pem(), chain.end_cert_private_key_as_pem());
 
-    cert_create_expect_error(&client, CERT_NAME, cert, key).await;
+    let error = cert_create_expect_error(&client, CERT_NAME, cert, key).await;
+    let expected = "Certificate exists, but is expired";
+    assert!(
+        error.contains(expected),
+        "{error:?} does not contain {expected:?}"
+    );
+}
+
+#[nexus_test]
+async fn test_cannot_create_certificate_with_incorrect_subject_alt_name(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+
+    let bad_subject_alt_name =
+        format!("some-other-silo.sys.{}", cptestctx.external_dns_zone_name);
+
+    let chain = CertificateChain::new(&bad_subject_alt_name);
+    let (cert, key) =
+        (chain.cert_chain_as_pem(), chain.end_cert_private_key_as_pem());
+
+    let error = cert_create_expect_error(&client, CERT_NAME, cert, key).await;
+    for expected in [
+        "Certificate not valid for".to_string(),
+        format!("SANs: {bad_subject_alt_name}"),
+    ] {
+        assert!(
+            error.contains(&expected),
+            "{error:?} does not contain {expected:?}"
+        );
+    }
 }
 
 #[tokio::test]
