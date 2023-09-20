@@ -31,6 +31,15 @@ textwrap.workspace = true
 tokio = { workspace = true, features = [ "full" ] }
 uuid.workspace = true
 
+[dev-dependencies]
+expectorate.workspace = true
+nexus-test-utils.workspace = true
+nexus-test-utils-macros.workspace = true
+omicron-nexus.workspace = true
+omicron-test-utils.workspace = true
+regex.workspace = true
+subprocess.workspace = true
+
 # Disable doc builds by default for our binaries to work around issue
 # rust-lang/cargo#8373.  These docs would not be very useful anyway.
 [[bin]]
