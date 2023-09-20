@@ -773,6 +773,7 @@ impl super::Nexus {
 
         // Gather the SSH public keys of the actor make the request so
         // that they may be injected into the new image via cloud-init.
+        // TODO-security: this should be replaced with a lookup based on
         // on `SiloUser` role assignments once those are in place.
         let actor = opctx.authn.actor_required().internal_context(
             "loading current user's ssh keys for new Instance",
