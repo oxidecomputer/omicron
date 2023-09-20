@@ -442,7 +442,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/SetVirtualNetworkInterfaceHost"
+                "$ref": "#/components/schemas/DeleteVirtualNetworkInterfaceHost"
               }
             }
           },
@@ -1169,6 +1169,29 @@
           "id",
           "name",
           "service_address"
+        ]
+      },
+      "DeleteVirtualNetworkInterfaceHost": {
+        "description": "The data needed to identify a virtual IP for which a sled maintains an OPTE virtual-to-physical mapping such that that mapping can be deleted.",
+        "type": "object",
+        "properties": {
+          "virtual_ip": {
+            "description": "The virtual IP whose mapping should be deleted.",
+            "type": "string",
+            "format": "ip"
+          },
+          "vni": {
+            "description": "The VNI for the network containing the virtual IP whose mapping should be deleted.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Vni"
+              }
+            ]
+          }
+        },
+        "required": [
+          "virtual_ip",
+          "vni"
         ]
       },
       "DiskEnsureBody": {
