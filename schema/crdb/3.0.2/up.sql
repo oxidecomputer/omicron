@@ -1,16 +1,3 @@
-BEGIN;
-
-SELECT CAST(
-    IF(
-        (
-            SELECT version = '3.0.1' and target_version = '3.0.2'
-            FROM omicron.public.db_metadata WHERE singleton = true
-        ),
-        'true',
-        'Invalid starting version for schema change'
-    ) AS BOOL
-);
-
 -- to get ready to drop the internal column, take any IP pools with internal =
 -- true and set silo_id = INTERNAL_SILO_ID
 
@@ -21,5 +8,3 @@ UPDATE omicron.public.ip_pool
 UPDATE omicron.public.ip_pool
     SET is_default = true
     WHERE name = 'default' and time_deleted is null;
-
-COMMIT;

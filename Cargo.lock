@@ -200,6 +200,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "approx"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cab112f0a86d568ea0e627cc1d6be74a1e9cd55214684db5561995f6dad897c6"
+dependencies = [
+ "num-traits",
+]
+
+[[package]]
 name = "arc-swap"
 version = "1.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -399,7 +408,7 @@ dependencies = [
  "cfg-if 1.0.0",
  "libc",
  "miniz_oxide",
- "object 0.32.0",
+ "object 0.32.1",
  "rustc-demangle",
 ]
 
@@ -724,6 +733,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a3e2c3daef883ecc1b5d58c15adae93470a91d425f3532ba1695849656af3fc1"
 
 [[package]]
+name = "bytecount"
+version = "0.6.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2c676a478f63e9fa2dd5368a42f28bba0d6c560b775f38583c8bbaa7fcd67c9c"
+
+[[package]]
 name = "byteorder"
 version = "1.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1015,9 +1030,9 @@ dependencies = [
 
 [[package]]
 name = "clap"
-version = "4.4.2"
+version = "4.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6a13b88d2c62ff462f88e4a121f17a82c1af05693a2f192b5c38d14de73c19f6"
+checksum = "84ed82781cea27b43c9b106a979fe450a13a31aab0500595fb3fc06616de08e6"
 dependencies = [
  "clap_builder",
  "clap_derive 4.4.2",
@@ -1230,7 +1245,7 @@ dependencies = [
  "anes",
  "cast",
  "ciborium",
- "clap 4.4.2",
+ "clap 4.4.3",
  "criterion-plot",
  "futures",
  "is-terminal",
@@ -1974,7 +1989,7 @@ dependencies = [
  "anyhow",
  "camino",
  "chrono",
- "clap 4.4.2",
+ "clap 4.4.3",
  "dns-service-client 0.1.0",
  "dropshot",
  "expectorate",
@@ -2646,6 +2661,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "76d3d132be6c0e6aa1534069c705a74a5997a356c0dc2f86a47765e5617c5b65"
 
 [[package]]
+name = "futures-timer"
+version = "3.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e64b03909df88034c26dc1547e8970b91f98bdb65165d6a4e9110d94263dbb2c"
+
+[[package]]
 name = "futures-util"
 version = "0.3.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2677,7 +2698,7 @@ name = "gateway-cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "clap 4.4.2",
+ "clap 4.4.3",
  "futures",
  "gateway-client",
  "gateway-messages",
@@ -3437,7 +3458,7 @@ dependencies = [
  "bytes",
  "camino",
  "cancel-safe-futures",
- "clap 4.4.2",
+ "clap 4.4.3",
  "ddm-admin-client",
  "display-error-chain",
  "futures",
@@ -3499,7 +3520,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "camino",
- "clap 4.4.2",
+ "clap 4.4.3",
  "dropshot",
  "expectorate",
  "hyper",
@@ -3595,7 +3616,7 @@ name = "internal-dns-cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "clap 4.4.2",
+ "clap 4.4.3",
  "dropshot",
  "internal-dns 0.1.0",
  "omicron-common 0.1.0",
@@ -3951,7 +3972,7 @@ version = "0.2.4"
 source = "git+https://github.com/oxidecomputer/lpc55_support#4051a3b9421573dc36ed6098b292a7609a3cf98b"
 dependencies = [
  "bitfield",
- "clap 4.4.2",
+ "clap 4.4.3",
  "packed_struct",
  "serde",
 ]
@@ -4273,6 +4294,7 @@ dependencies = [
  "authz-macros",
  "base64 0.21.4",
  "bb8",
+ "camino",
  "chrono",
  "cookie",
  "db-macros",
@@ -4505,6 +4527,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "num"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b05180d69e3da0e530ba2a1dae5110317e49e3b7f3d41be227dc5f92e49ee7af"
+dependencies = [
+ "num-complex",
+ "num-integer",
+ "num-iter",
+ "num-rational",
+ "num-traits",
+]
+
+[[package]]
 name = "num-bigint"
 version = "0.4.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4535,6 +4570,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "num-complex"
+version = "0.4.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1ba157ca0885411de85d6ca030ba7e2a83a28636056c7c699b07c8b6f7383214"
+dependencies = [
+ "num-traits",
+]
+
+[[package]]
 name = "num-derive"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4560,6 +4604,17 @@ name = "num-iter"
 version = "0.1.43"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7d03e6c028c5dc5cac6e2dec0efda81fc887605bb3d884578bb6d6bf7514e252"
+dependencies = [
+ "autocfg",
+ "num-integer",
+ "num-traits",
+]
+
+[[package]]
+name = "num-rational"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0638a1c9d0a3c0914158145bc76cff373a75a627e6ecbfb71cbe6f453a5a19b0"
 dependencies = [
  "autocfg",
  "num-integer",
@@ -4672,9 +4727,9 @@ dependencies = [
 
 [[package]]
 name = "object"
-version = "0.32.0"
+version = "0.32.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "77ac5bbd07aea88c60a577a1ce218075ffd59208b2d7ca97adf9bfc5aeb21ebe"
+checksum = "9cf5f9dd3933bd50a9e1f149ec995f39ae2c496d31fd772c1fd45ebc27e902b0"
 dependencies = [
  "memchr",
 ]
@@ -4694,8 +4749,13 @@ dependencies = [
 name = "omicron-certificates"
 version = "0.1.0"
 dependencies = [
+ "display-error-chain",
+ "foreign-types 0.3.2",
  "omicron-common 0.1.0",
+ "omicron-test-utils",
  "openssl",
+ "openssl-sys",
+ "rcgen",
  "thiserror",
 ]
 
@@ -4790,7 +4850,7 @@ name = "omicron-deploy"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "clap 4.4.2",
+ "clap 4.4.3",
  "crossbeam",
  "omicron-package",
  "serde",
@@ -4806,7 +4866,7 @@ dependencies = [
  "anyhow",
  "camino",
  "camino-tempfile",
- "clap 4.4.2",
+ "clap 4.4.3",
  "dropshot",
  "expectorate",
  "futures",
@@ -4837,7 +4897,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "ciborium",
- "clap 4.4.2",
+ "clap 4.4.3",
  "crucible-smf",
  "dropshot",
  "expectorate",
@@ -4886,7 +4946,7 @@ dependencies = [
  "camino",
  "cancel-safe-futures",
  "chrono",
- "clap 4.4.2",
+ "clap 4.4.3",
  "cookie",
  "criterion",
  "crucible-agent-client",
@@ -4985,11 +5045,46 @@ dependencies = [
 ]
 
 [[package]]
+name = "omicron-omdb"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-bb8-diesel",
+ "chrono",
+ "clap 4.4.3",
+ "diesel",
+ "dropshot",
+ "expectorate",
+ "humantime",
+ "nexus-client 0.1.0",
+ "nexus-db-model",
+ "nexus-db-queries",
+ "nexus-test-utils",
+ "nexus-test-utils-macros",
+ "nexus-types",
+ "omicron-common 0.1.0",
+ "omicron-nexus",
+ "omicron-rpaths",
+ "omicron-test-utils",
+ "pq-sys",
+ "regex",
+ "serde",
+ "serde_json",
+ "slog",
+ "strum",
+ "subprocess",
+ "tabled",
+ "textwrap 0.16.0",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "omicron-package"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "clap 4.4.2",
+ "clap 4.4.3",
  "expectorate",
  "futures",
  "hex",
@@ -5067,7 +5162,7 @@ dependencies = [
  "cancel-safe-futures",
  "cfg-if 1.0.0",
  "chrono",
- "clap 4.4.2",
+ "clap 4.4.3",
  "crucible-agent-client",
  "crucible-client-types",
  "ddm-admin-client",
@@ -5148,8 +5243,11 @@ dependencies = [
  "http",
  "libc",
  "omicron-common 0.1.0",
+ "pem",
+ "rcgen",
  "regex",
  "reqwest",
+ "rustls",
  "slog",
  "subprocess",
  "tempfile",
@@ -5394,11 +5492,13 @@ dependencies = [
 name = "oximeter"
 version = "0.1.0"
 dependencies = [
+ "approx",
  "bytes",
  "chrono",
- "num-traits",
+ "num",
  "omicron-common 0.1.0",
  "oximeter-macro-impl 0.1.0",
+ "rstest",
  "schemars",
  "serde",
  "thiserror",
@@ -5439,7 +5539,7 @@ dependencies = [
 name = "oximeter-collector"
 version = "0.1.0"
 dependencies = [
- "clap 4.4.2",
+ "clap 4.4.3",
  "dropshot",
  "expectorate",
  "futures",
@@ -5471,7 +5571,7 @@ dependencies = [
  "async-trait",
  "bytes",
  "chrono",
- "clap 4.4.2",
+ "clap 4.4.3",
  "dropshot",
  "itertools 0.11.0",
  "omicron-test-utils",
@@ -5487,6 +5587,7 @@ dependencies = [
  "slog-term",
  "thiserror",
  "tokio",
+ "usdt",
  "uuid",
 ]
 
@@ -5581,6 +5682,17 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 1.0.109",
+]
+
+[[package]]
+name = "papergrid"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a2ccbe15f2b6db62f9a9871642746427e297b0ceb85f9a7f1ee5ff47d184d0c8"
+dependencies = [
+ "bytecount",
+ "fnv",
+ "unicode-width",
 ]
 
 [[package]]
@@ -6175,9 +6287,9 @@ dependencies = [
 
 [[package]]
 name = "proc-macro2"
-version = "1.0.66"
+version = "1.0.67"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "18fb31db3f9bddb2ea821cde30a9f70117e3f119938b5ee630b7403aa6e2ead9"
+checksum = "3d433d9f1a3e8c1263d9456598b16fec66f4acc9a74dacffd35c7bb09b3a1328"
 dependencies = [
  "unicode-ident",
 ]
@@ -6317,7 +6429,7 @@ dependencies = [
  "bytes",
  "cfg-if 1.0.0",
  "chrono",
- "clap 4.4.2",
+ "clap 4.4.3",
  "const_format",
  "crucible-client-types",
  "dropshot",
@@ -6568,7 +6680,7 @@ dependencies = [
  "indoc 2.0.3",
  "itertools 0.11.0",
  "paste",
- "strum 0.25.0",
+ "strum",
  "unicode-segmentation",
  "unicode-width",
 ]
@@ -6737,6 +6849,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "relative-path"
+version = "1.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c707298afce11da2efef2f600116fa93ffa7a032b5d7b628aa17711ec81383ca"
+
+[[package]]
 name = "remove_dir_all"
 version = "0.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6891,6 +7009,35 @@ dependencies = [
  "spki",
  "subtle",
  "zeroize",
+]
+
+[[package]]
+name = "rstest"
+version = "0.18.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "97eeab2f3c0a199bc4be135c36c924b6590b88c377d416494288c14f2db30199"
+dependencies = [
+ "futures",
+ "futures-timer",
+ "rstest_macros",
+ "rustc_version 0.4.0",
+]
+
+[[package]]
+name = "rstest_macros"
+version = "0.18.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d428f8247852f894ee1be110b375111b586d4fa431f6c46e64ba5a0dcccbe605"
+dependencies = [
+ "cfg-if 1.0.0",
+ "glob",
+ "proc-macro2",
+ "quote",
+ "regex",
+ "relative-path",
+ "rustc_version 0.4.0",
+ "syn 2.0.32",
+ "unicode-ident",
 ]
 
 [[package]]
@@ -7417,9 +7564,9 @@ dependencies = [
 
 [[package]]
 name = "serde_json"
-version = "1.0.106"
+version = "1.0.107"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2cc66a619ed80bf7a0f6b17dd063a84b88f6dea1813737cf469aef1d081142c2"
+checksum = "6b420ce6e3d8bd882e9b243c6eed35dbc9a6110c9769e74b584e0d68d1f20c65"
 dependencies = [
  "itoa",
  "ryu",
@@ -7982,7 +8129,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
- "clap 4.4.2",
+ "clap 4.4.3",
  "dropshot",
  "futures",
  "gateway-messages",
@@ -8259,6 +8406,30 @@ dependencies = [
  "quote",
  "syn 1.0.109",
  "unicode-xid",
+]
+
+[[package]]
+name = "tabled"
+version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dfe9c3632da101aba5131ed63f9eed38665f8b3c68703a6bb18124835c1a5d22"
+dependencies = [
+ "papergrid",
+ "tabled_derive",
+ "unicode-width",
+]
+
+[[package]]
+name = "tabled_derive"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "99f688a08b54f4f02f0a3c382aefdb7884d3d69609f785bd253dc033243e3fe4"
+dependencies = [
+ "heck 0.4.1",
+ "proc-macro-error",
+ "proc-macro2",
+ "quote",
+ "syn 1.0.109",
 ]
 
 [[package]]
@@ -8909,9 +9080,9 @@ checksum = "3528ecfd12c466c6f163363caf2d02a71161dd5e1cc6ae7b34207ea2d42d81ed"
 
 [[package]]
 name = "trybuild"
-version = "1.0.84"
+version = "1.0.85"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a5c89fd17b7536f2cf66c97cff6e811e89e728ca0ed13caeed610c779360d8b4"
+checksum = "196a58260a906cedb9bf6d8034b6379d0c11f552416960452f267402ceeddff1"
 dependencies = [
  "basic-toml",
  "glob",
@@ -8930,7 +9101,7 @@ dependencies = [
  "assert_cmd",
  "camino",
  "chrono",
- "clap 4.4.2",
+ "clap 4.4.3",
  "console",
  "datatest-stable",
  "fs-err",
@@ -9034,7 +9205,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "97fee6b57c6a41524a810daee9286c02d7752c4253064d0b05472833a438f675"
 dependencies = [
  "cfg-if 1.0.0",
- "rand 0.4.6",
+ "rand 0.8.5",
  "static_assertions",
 ]
 
@@ -9558,7 +9729,7 @@ dependencies = [
  "buf-list",
  "camino",
  "ciborium",
- "clap 4.4.2",
+ "clap 4.4.3",
  "crossterm 0.26.1",
  "futures",
  "hex",
@@ -9618,7 +9789,7 @@ dependencies = [
  "bytes",
  "camino",
  "ciborium",
- "clap 4.4.2",
+ "clap 4.4.3",
  "crossterm 0.26.1",
  "ratatui",
  "reedline",
@@ -9641,7 +9812,7 @@ dependencies = [
  "bytes",
  "camino",
  "camino-tempfile",
- "clap 4.4.2",
+ "clap 4.4.3",
  "ddm-admin-client",
  "debug-ignore",
  "display-error-chain",
@@ -9951,7 +10122,7 @@ dependencies = [
  "camino",
  "cargo_metadata",
  "cargo_toml",
- "clap 4.4.2",
+ "clap 4.4.3",
 ]
 
 [[package]]

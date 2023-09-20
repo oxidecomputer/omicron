@@ -166,7 +166,35 @@ impl SelectQueryBuilder {
         }
         let field_value = match field_schema.ty {
             FieldType::String => FieldValue::from(&selector.value),
+            FieldType::I8 => parse_selector_field_value::<i8>(
+                &field_schema,
+                &selector.value,
+            )?,
+            FieldType::U8 => parse_selector_field_value::<u8>(
+                &field_schema,
+                &selector.value,
+            )?,
+            FieldType::I16 => parse_selector_field_value::<i16>(
+                &field_schema,
+                &selector.value,
+            )?,
+            FieldType::U16 => parse_selector_field_value::<u16>(
+                &field_schema,
+                &selector.value,
+            )?,
+            FieldType::I32 => parse_selector_field_value::<i32>(
+                &field_schema,
+                &selector.value,
+            )?,
+            FieldType::U32 => parse_selector_field_value::<u32>(
+                &field_schema,
+                &selector.value,
+            )?,
             FieldType::I64 => parse_selector_field_value::<i64>(
+                &field_schema,
+                &selector.value,
+            )?,
+            FieldType::U64 => parse_selector_field_value::<u64>(
                 &field_schema,
                 &selector.value,
             )?,
@@ -267,7 +295,7 @@ impl SelectQueryBuilder {
     }
 }
 
-fn measurement_table_name(ty: DatumType) -> String {
+pub(crate) fn measurement_table_name(ty: DatumType) -> String {
     format!("measurements_{}", ty.to_string().to_lowercase())
 }
 
@@ -306,7 +334,7 @@ pub struct FieldSelector {
     comparison: Option<FieldComparison>,
 }
 
-fn field_table_name(ty: FieldType) -> String {
+pub(crate) fn field_table_name(ty: FieldType) -> String {
     format!("fields_{}", ty.to_string().to_lowercase())
 }
 
@@ -666,7 +694,14 @@ fn field_as_db_str(value: &FieldValue) -> String {
         FieldValue::Bool(ref inner) => {
             format!("{}", if *inner { 1 } else { 0 })
         }
+        FieldValue::I8(ref inner) => format!("{}", inner),
+        FieldValue::U8(ref inner) => format!("{}", inner),
+        FieldValue::I16(ref inner) => format!("{}", inner),
+        FieldValue::U16(ref inner) => format!("{}", inner),
+        FieldValue::I32(ref inner) => format!("{}", inner),
+        FieldValue::U32(ref inner) => format!("{}", inner),
         FieldValue::I64(ref inner) => format!("{}", inner),
+        FieldValue::U64(ref inner) => format!("{}", inner),
         FieldValue::IpAddr(ref inner) => {
             let addr = match inner {
                 IpAddr::V4(ref v4) => v4.to_ipv6_mapped(),
@@ -950,7 +985,7 @@ mod tests {
                 ty: FieldType::I64,
                 comparison: Some(FieldComparison {
                     op: FieldCmp::Eq,
-                    value: FieldValue::from(0),
+                    value: FieldValue::from(0i64),
                 }),
             },
             "Expected an exact comparison when building a query from parts",

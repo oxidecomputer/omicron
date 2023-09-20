@@ -109,6 +109,10 @@ impl Sled {
     pub fn address_with_port(&self, port: u16) -> SocketAddrV6 {
         SocketAddrV6::new(self.ip(), port, 0, 0)
     }
+
+    pub fn serial_number(&self) -> &str {
+        &self.serial_number
+    }
 }
 
 impl From<Sled> for views::Sled {

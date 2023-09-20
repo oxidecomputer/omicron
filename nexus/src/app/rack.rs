@@ -161,7 +161,7 @@ impl super::Nexus {
             .collect();
         let mut dns_update = DnsVersionUpdateBuilder::new(
             DnsGroup::External,
-            format!("create silo: {:?}", silo_name),
+            format!("create silo: {:?}", silo_name.as_str()),
             self.id.to_string(),
         );
         dns_update.add_name(silo_dns_name(silo_name), dns_records)?;

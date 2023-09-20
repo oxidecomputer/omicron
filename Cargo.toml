@@ -37,6 +37,7 @@ members = [
     "nexus/test-utils-macros",
     "nexus/test-utils",
     "nexus/types",
+    "omdb",
     "oxide-client",
     "oximeter-client",
     "oximeter/collector",
@@ -97,6 +98,7 @@ default-members = [
     "nexus/db-queries",
     "nexus/defaults",
     "nexus/types",
+    "omdb",
     "oxide-client",
     "oximeter-client",
     "oximeter/collector",
@@ -128,6 +130,7 @@ resolver = "2"
 [workspace.dependencies]
 anyhow = "1.0"
 api_identity = { path = "api_identity" }
+approx = "0.5.1"
 assert_matches = "1.5.0"
 assert_cmd = "2.0.12"
 async-bb8-diesel = { git = "https://github.com/oxidecomputer/async-bb8-diesel", rev = "be3d9bce50051d8c0e0c06078e8066cc27db3001" }
@@ -151,7 +154,7 @@ chacha20poly1305 = "0.10.1"
 ciborium = "0.2.1"
 cfg-if = "1.0"
 chrono = { version = "0.4", features = [ "serde" ] }
-clap = { version = "4.4", features = ["derive"] }
+clap = { version = "4.4", features = ["derive", "env", "wrap_help"] }
 cookie = "0.16"
 criterion = { version = "0.5.1", features = [ "async_tokio" ] }
 crossbeam = "0.8"
@@ -179,6 +182,7 @@ expectorate = "1.0.7"
 fatfs = "0.3.6"
 flate2 = "1.0.27"
 flume = "0.11.0"
+foreign-types = "0.3.2"
 fs-err = "2.9.0"
 futures = "0.3.28"
 gateway-client = { path = "gateway-client" }
@@ -228,11 +232,12 @@ nexus-test-utils-macros = { path = "nexus/test-utils-macros" }
 nexus-test-utils = { path = "nexus/test-utils" }
 nexus-types = { path = "nexus/types" }
 num-integer = "0.1.45"
-num-traits = "0.2.16"
+num = { version = "0.4.1", default-features = false, features = [ "libm" ] }
 omicron-common = { path = "common" }
 omicron-dev-tools = { path = "dev-tools" }
 omicron-gateway = { path = "gateway" }
 omicron-nexus = { path = "nexus" }
+omicron-omdb = { path = "omdb" }
 omicron-package = { path = "package" }
 omicron-rpaths = { path = "rpaths" }
 omicron-sled-agent = { path = "sled-agent" }
@@ -286,6 +291,7 @@ regress = "0.7.1"
 reqwest = { version = "0.11", default-features = false }
 ring = "0.16"
 rpassword = "7.2.0"
+rstest = "0.18.2"
 rustfmt-wrapper = "0.2"
 rustls = "0.21.7"
 samael = { git = "https://github.com/njaremko/samael", features = ["xmlsec"], branch = "master" }
@@ -295,7 +301,7 @@ semver = { version = "1.0.18", features = ["std", "serde"] }
 serde = { version = "1.0", default-features = false, features = [ "derive" ] }
 serde_derive = "1.0"
 serde_human_bytes = { git = "http://github.com/oxidecomputer/serde_human_bytes", branch = "main" }
-serde_json = "1.0.106"
+serde_json = "1.0.107"
 serde_path_to_error = "0.1.14"
 serde_tokenstream = "0.2"
 serde_urlencoded = "0.7.1"
@@ -330,6 +336,7 @@ strum = { version = "0.25", features = [ "derive" ] }
 subprocess = "0.2.9"
 libsw = { version = "3.3.0", features = ["tokio"] }
 syn = { version = "2.0" }
+tabled = "0.14"
 tar = "0.4"
 tempdir = "0.3"
 tempfile = "3.6"
@@ -352,7 +359,7 @@ trust-dns-client = "0.22"
 trust-dns-proto = "0.22"
 trust-dns-resolver = "0.22"
 trust-dns-server = "0.22"
-trybuild = "1.0.84"
+trybuild = "1.0.85"
 tufaceous = { path = "tufaceous" }
 tufaceous-lib = { path = "tufaceous-lib" }
 unicode-width = "0.1.10"

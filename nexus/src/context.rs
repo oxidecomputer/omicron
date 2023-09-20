@@ -94,8 +94,8 @@ impl ServerContext {
                 name: name.to_string(),
                 id: config.deployment.id,
             };
-            const START_LATENCY_DECADE: i8 = -6;
-            const END_LATENCY_DECADE: i8 = 3;
+            const START_LATENCY_DECADE: i16 = -6;
+            const END_LATENCY_DECADE: i16 = 3;
             LatencyTracker::with_latency_decades(
                 target,
                 START_LATENCY_DECADE,
