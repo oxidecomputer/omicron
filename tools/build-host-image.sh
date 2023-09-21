@@ -113,7 +113,7 @@ function main
     # Build an image name that includes the omicron and host OS hashes
     IMAGE_NAME="$IMAGE_PREFIX ${GITHUB_SHA:0:7}"
     # The ${os_short_commit} token will be expanded by `helios-build`
-    IMAGE_NAME+="/${os_short_commit}"
+    IMAGE_NAME+='/${os_short_commit}'
     IMAGE_NAME+=" $(date +'%Y-%m-%d %H:%M')"
 
     ./helios-build experiment-image \
