@@ -17,9 +17,7 @@ use crate::db::model::Service;
 use crate::db::model::Sled;
 use crate::db::pagination::paginated;
 use crate::db::pool::DbConnection;
-use async_bb8_diesel::AsyncConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
-use async_bb8_diesel::PoolError;
 use chrono::Utc;
 use diesel::prelude::*;
 use diesel::upsert::excluded;
@@ -39,20 +37,16 @@ impl DataStore {
         opctx: &OpContext,
         service: Service,
     ) -> CreateResult<Service> {
-        let conn = self.pool_authorized(opctx).await?;
-        self.service_upsert_conn(conn, service).await
+        let conn = self.pool_connection_authorized(opctx).await?;
+        self.service_upsert_conn(&*conn, service).await
     }
 
     /// Stores a new service in the database (using an existing db connection).
-    pub(crate) async fn service_upsert_conn<ConnError>(
+    pub(crate) async fn service_upsert_conn(
         &self,
-        conn: &(impl AsyncConnection<DbConnection, ConnError> + Sync),
+        conn: &async_bb8_diesel::Connection<DbConnection>,
         service: Service,
-    ) -> CreateResult<Service>
-    where
-        ConnError: From<diesel::result::Error> + Send + 'static,
-        PoolError: From<ConnError>,
-    {
+    ) -> CreateResult<Service> {
         use db::schema::service::dsl;
 
         let service_id = service.id();

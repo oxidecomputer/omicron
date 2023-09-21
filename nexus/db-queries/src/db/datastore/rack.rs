@@ -12,6 +12,7 @@ use crate::context::OpContext;
 use crate::db;
 use crate::db::collection_insert::AsyncInsertError;
 use crate::db::collection_insert::DatastoreCollection;
+use crate::db::error::public_error_from_diesel;
 use crate::db::error::public_error_from_diesel_pool;
 use crate::db::error::ErrorHandler;
 use crate::db::error::TransactionError;
@@ -155,9 +156,9 @@ impl DataStore {
         use db::schema::rack::dsl;
         paginated(dsl::rack, dsl::id, pagparams)
             .select(Rack::as_select())
-            .load_async(self.pool_authorized(opctx).await?)
+            .load_async(&*self.pool_connection_authorized(opctx).await?)
             .await
-            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     /// Stores a new rack in the database.
@@ -177,10 +178,10 @@ impl DataStore {
             // This is a no-op, since we conflicted on the ID.
             .set(dsl::id.eq(excluded(dsl::id)))
             .returning(Rack::as_returning())
-            .get_result_async(self.pool_authorized(opctx).await?)
+            .get_result_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| {
-                public_error_from_diesel_pool(
+                public_error_from_diesel(
                     e,
                     ErrorHandler::Conflict(
                         ResourceType::Rack,
@@ -194,25 +195,17 @@ impl DataStore {
     // which comes from the transaction created in `rack_set_initialized`.
 
     #[allow(clippy::too_many_arguments)]
-    async fn rack_create_recovery_silo<ConnError>(
+    async fn rack_create_recovery_silo(
         &self,
         opctx: &OpContext,
-        conn: &(impl AsyncConnection<DbConnection, ConnError> + Sync),
+        conn: &async_bb8_diesel::Connection<DbConnection>,
         log: &slog::Logger,
         recovery_silo: external_params::SiloCreate,
         recovery_silo_fq_dns_name: String,
         recovery_user_id: external_params::UserId,
         recovery_user_password_hash: omicron_passwords::PasswordHashString,
         dns_update: DnsVersionUpdateBuilder,
-    ) -> Result<(), TxnError>
-    where
-        ConnError: From<diesel::result::Error> + Send + 'static,
-        PoolError: From<ConnError>,
-        TransactionError<Error>: From<ConnError>,
-        TxnError: From<ConnError>,
-        async_bb8_diesel::Connection<DbConnection>:
-            AsyncConnection<DbConnection, ConnError>,
-    {
+    ) -> Result<(), TxnError> {
         let db_silo = self
             .silo_create_conn(
                 conn,
@@ -289,17 +282,13 @@ impl DataStore {
         Ok(())
     }
 
-    async fn rack_populate_service_records<ConnError>(
+    async fn rack_populate_service_records(
         &self,
-        conn: &(impl AsyncConnection<DbConnection, ConnError> + Sync),
+        conn: &async_bb8_diesel::Connection<DbConnection>,
         log: &slog::Logger,
         service_pool: &db::model::IpPool,
         service: internal_params::ServicePutRequest,
-    ) -> Result<(), TxnError>
-    where
-        ConnError: From<diesel::result::Error> + Send + 'static,
-        PoolError: From<ConnError>,
-    {
+    ) -> Result<(), TxnError> {
         use internal_params::ServiceKind;
 
         let service_db = db::model::Service::new(
@@ -612,7 +601,7 @@ impl DataStore {
         use crate::db::schema::external_ip::dsl as extip_dsl;
         use crate::db::schema::service::dsl as service_dsl;
         type TxnError = TransactionError<Error>;
-        self.pool_authorized(opctx)
+        self.pool_connection_authorized(opctx)
             .await?
             .transaction_async(|conn| async move {
                 let ips = extip_dsl::external_ip

@@ -217,6 +217,27 @@ impl DataStore {
         Ok(self.pool.pool())
     }
 
+    pub(super) async fn pool_connection_authorized(
+        &self,
+        opctx: &OpContext,
+    ) -> Result<bb8::PooledConnection<ConnectionManager<DbConnection>>, Error> {
+        let pool = self.pool_authorized(opctx).await?;
+        let connection = pool.get()
+            .await
+            .map_err(|err| Error::internal_error(&format!("Failed to access DB connection: {err}")))?;
+        Ok(connection)
+    }
+
+    pub(super) async fn pool_connection_unauthorized(
+        &self,
+    ) -> Result<bb8::PooledConnection<ConnectionManager<DbConnection>>, Error> {
+        let connection = self.pool().get()
+            .await
+            .map_err(|err| Error::internal_error(&format!("Failed to access DB connection: {err}")))?;
+        Ok(connection)
+    }
+
+
     /// For testing only. This isn't cfg(test) because nexus needs access to it.
     #[doc(hidden)]
     pub async fn pool_for_tests(

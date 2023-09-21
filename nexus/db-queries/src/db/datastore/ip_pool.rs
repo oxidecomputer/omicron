@@ -22,7 +22,7 @@ use crate::db::model::Name;
 use crate::db::pagination::paginated;
 use crate::db::pool::DbConnection;
 use crate::db::queries::ip_pool::FilterOverlappingIpRanges;
-use async_bb8_diesel::{AsyncRunQueryDsl, PoolError};
+use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
 use ipnetwork::IpNetwork;
@@ -285,24 +285,19 @@ impl DataStore {
         authz_pool: &authz::IpPool,
         range: &IpRange,
     ) -> CreateResult<IpPoolRange> {
-        let conn = self.pool_authorized(opctx).await?;
-        Self::ip_pool_add_range_on_connection(conn, opctx, authz_pool, range)
+        let conn = self.pool_connection_authorized(opctx).await?;
+        Self::ip_pool_add_range_on_connection(&conn, opctx, authz_pool, range)
             .await
     }
 
     /// Variant of [Self::ip_pool_add_range] which may be called from a
     /// transaction context.
-    pub(crate) async fn ip_pool_add_range_on_connection<ConnErr>(
-        conn: &(impl async_bb8_diesel::AsyncConnection<DbConnection, ConnErr>
-              + Sync),
+    pub(crate) async fn ip_pool_add_range_on_connection(
+        conn: &async_bb8_diesel::Connection<DbConnection>,
         opctx: &OpContext,
         authz_pool: &authz::IpPool,
         range: &IpRange,
-    ) -> CreateResult<IpPoolRange>
-    where
-        ConnErr: From<diesel::result::Error> + Send + 'static,
-        PoolError: From<ConnErr>,
-    {
+    ) -> CreateResult<IpPoolRange> {
         use db::schema::ip_pool_range::dsl;
         opctx.authorize(authz::Action::CreateChild, authz_pool).await?;
         let pool_id = authz_pool.id();

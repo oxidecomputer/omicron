@@ -13,6 +13,7 @@ use crate::db::collection_detach_many::DatastoreDetachManyTarget;
 use crate::db::collection_detach_many::DetachManyError;
 use crate::db::collection_insert::AsyncInsertError;
 use crate::db::collection_insert::DatastoreCollection;
+use crate::db::error::public_error_from_diesel;
 use crate::db::error::public_error_from_diesel_pool;
 use crate::db::error::ErrorHandler;
 use crate::db::identity::Resource;
@@ -84,7 +85,7 @@ impl DataStore {
                 .do_update()
                 .set(dsl::time_modified.eq(dsl::time_modified)),
         )
-        .insert_and_get_result_async(self.pool_authorized(opctx).await?)
+        .insert_and_get_result_async(&*self.pool_connection_authorized(opctx).await?)
         .await
         .map_err(|e| match e {
             AsyncInsertError::CollectionNotFound => authz_project.not_found(),
@@ -135,9 +136,9 @@ impl DataStore {
         .filter(dsl::project_id.eq(authz_project.id()))
         .filter(dsl::time_deleted.is_null())
         .select(Instance::as_select())
-        .load_async::<Instance>(self.pool_authorized(opctx).await?)
+        .load_async::<Instance>(&*self.pool_connection_authorized(opctx).await?)
         .await
-        .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     /// Fetches information about an Instance that the caller has previously
@@ -178,10 +179,10 @@ impl DataStore {
             .filter(dsl::id.eq(authz_instance.id()))
             .filter(dsl::time_deleted.is_not_null())
             .select(Instance::as_select())
-            .get_result_async(self.pool_authorized(opctx).await?)
+            .get_result_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| {
-                public_error_from_diesel_pool(
+                public_error_from_diesel(
                     e,
                     ErrorHandler::NotFoundByLookup(
                         ResourceType::Instance,
@@ -225,7 +226,7 @@ impl DataStore {
             )
             .set(new_runtime.clone())
             .check_if_exists::<Instance>(*instance_id)
-            .execute_and_check(self.pool())
+            .execute_and_check(&*self.pool_connection_unauthorized().await?)
             .await
             .map(|r| match r.status {
                 UpdateStatus::Updated => true,
@@ -288,7 +289,7 @@ impl DataStore {
                 disk::dsl::slot.eq(Option::<i16>::None),
             )),
         )
-        .detach_and_get_result_async(self.pool_authorized(opctx).await?)
+        .detach_and_get_result_async(&*self.pool_connection_authorized(opctx).await?)
         .await
         .map_err(|e| match e {
             DetachManyError::CollectionNotFound => Error::not_found_by_id(

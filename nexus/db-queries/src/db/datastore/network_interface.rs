@@ -27,7 +27,6 @@ use crate::db::pool::DbConnection;
 use crate::db::queries::network_interface;
 use async_bb8_diesel::AsyncConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
-use async_bb8_diesel::PoolError;
 use chrono::Utc;
 use diesel::prelude::*;
 use omicron_common::api::external;
@@ -156,21 +155,17 @@ impl DataStore {
         interface: IncompleteNetworkInterface,
     ) -> Result<NetworkInterface, network_interface::InsertError> {
         let conn = self
-            .pool_authorized(opctx)
+            .pool_connection_authorized(opctx)
             .await
             .map_err(network_interface::InsertError::External)?;
-        self.create_network_interface_raw_conn(conn, interface).await
+        self.create_network_interface_raw_conn(&*conn, interface).await
     }
 
-    pub(crate) async fn create_network_interface_raw_conn<ConnErr>(
+    pub(crate) async fn create_network_interface_raw_conn(
         &self,
-        conn: &(impl AsyncConnection<DbConnection, ConnErr> + Sync),
+        conn: &async_bb8_diesel::Connection<DbConnection>,
         interface: IncompleteNetworkInterface,
-    ) -> Result<NetworkInterface, network_interface::InsertError>
-    where
-        ConnErr: From<diesel::result::Error> + Send + 'static,
-        PoolError: From<ConnErr>,
-    {
+    ) -> Result<NetworkInterface, network_interface::InsertError> {
         use db::schema::network_interface::dsl;
         let subnet_id = interface.subnet.identity.id;
         let query = network_interface::InsertQuery::new(interface.clone());

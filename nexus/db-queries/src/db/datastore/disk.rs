@@ -15,6 +15,7 @@ use crate::db::collection_detach::DatastoreDetachTarget;
 use crate::db::collection_detach::DetachError;
 use crate::db::collection_insert::AsyncInsertError;
 use crate::db::collection_insert::DatastoreCollection;
+use crate::db::error::public_error_from_diesel;
 use crate::db::error::public_error_from_diesel_pool;
 use crate::db::error::ErrorHandler;
 use crate::db::identity::Resource;
@@ -71,9 +72,9 @@ impl DataStore {
         .filter(dsl::time_deleted.is_null())
         .filter(dsl::attach_instance_id.eq(authz_instance.id()))
         .select(Disk::as_select())
-        .load_async::<Disk>(self.pool_authorized(opctx).await?)
+        .load_async::<Disk>(&*self.pool_connection_authorized(opctx).await?)
         .await
-        .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     pub async fn project_create_disk(
@@ -98,7 +99,7 @@ impl DataStore {
                 .do_update()
                 .set(dsl::time_modified.eq(dsl::time_modified)),
         )
-        .insert_and_get_result_async(self.pool_authorized(opctx).await?)
+        .insert_and_get_result_async(&*self.pool_connection_authorized(opctx).await?)
         .await
         .map_err(|e| match e {
             AsyncInsertError::CollectionNotFound => authz_project.not_found(),
@@ -146,9 +147,9 @@ impl DataStore {
         .filter(dsl::time_deleted.is_null())
         .filter(dsl::project_id.eq(authz_project.id()))
         .select(Disk::as_select())
-        .load_async::<Disk>(self.pool_authorized(opctx).await?)
+        .load_async::<Disk>(&*self.pool_connection_authorized(opctx).await?)
         .await
-        .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     /// Attaches a disk to an instance, if both objects:
@@ -199,7 +200,7 @@ impl DataStore {
             diesel::update(disk::dsl::disk).set(attach_update),
         );
 
-        let (instance, disk) = query.attach_and_get_result_async(self.pool_authorized(opctx).await?)
+        let (instance, disk) = query.attach_and_get_result_async(&*self.pool_connection_authorized(opctx).await?)
         .await
         .or_else(|e| {
             match e {
@@ -331,7 +332,7 @@ impl DataStore {
                     disk::dsl::slot.eq(Option::<i16>::None)
                 ))
         )
-        .detach_and_get_result_async(self.pool_authorized(opctx).await?)
+        .detach_and_get_result_async(&*self.pool_connection_authorized(opctx).await?)
         .await
         .or_else(|e| {
             match e {
@@ -405,7 +406,7 @@ impl DataStore {
                     }
                 },
                 DetachError::DatabaseError(e) => {
-                    Err(public_error_from_diesel_pool(e, ErrorHandler::Server))
+                    Err(public_error_from_diesel(e, ErrorHandler::Server))
                 },
             }
         })?;
@@ -469,7 +470,7 @@ impl DataStore {
             .filter(dsl::id.eq(disk_id))
             .set(dsl::pantry_address.eq(pantry_address.to_string()))
             .check_if_exists::<Disk>(disk_id)
-            .execute_and_check(self.pool_authorized(opctx).await?)
+            .execute_and_check(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map(|r| match r.status {
                 UpdateStatus::Updated => true,
@@ -499,7 +500,7 @@ impl DataStore {
             .filter(dsl::id.eq(disk_id))
             .set(&DiskUpdate { pantry_address: None })
             .check_if_exists::<Disk>(disk_id)
-            .execute_and_check(self.pool_authorized(opctx).await?)
+            .execute_and_check(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map(|r| match r.status {
                 UpdateStatus::Updated => true,

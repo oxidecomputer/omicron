@@ -131,21 +131,16 @@ impl DataStore {
         opctx: &OpContext,
         data: IncompleteExternalIp,
     ) -> CreateResult<ExternalIp> {
-        let conn = self.pool_authorized(opctx).await?;
-        Self::allocate_external_ip_on_connection(conn, data).await
+        let conn = self.pool_connection_authorized(opctx).await?;
+        Self::allocate_external_ip_on_connection(&*conn, data).await
     }
 
     /// Variant of [Self::allocate_external_ip] which may be called from a
     /// transaction context.
-    pub(crate) async fn allocate_external_ip_on_connection<ConnErr>(
-        conn: &(impl async_bb8_diesel::AsyncConnection<DbConnection, ConnErr>
-              + Sync),
+    pub(crate) async fn allocate_external_ip_on_connection(
+        conn: &async_bb8_diesel::Connection<DbConnection>,
         data: IncompleteExternalIp,
-    ) -> CreateResult<ExternalIp>
-    where
-        ConnErr: From<diesel::result::Error> + Send + 'static,
-        PoolError: From<ConnErr>,
-    {
+    ) -> CreateResult<ExternalIp> {
         let explicit_ip = data.explicit_ip().is_some();
         NextExternalIp::new(data).get_result_async(conn).await.map_err(|e| {
             use async_bb8_diesel::ConnectionError::Query;

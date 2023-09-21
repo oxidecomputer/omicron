@@ -182,22 +182,24 @@ where
     ISR: 'static + Send,
     InsertIntoCollectionStatement<ResourceType, ISR, C>: Send,
 {
+
+
+    // TODO: LOOK FOR ALL "impl.*AsyncConnection" cases, make 'em act on the
+    // One True Connection only (monomorphin' time)
+
     /// Issues the CTE asynchronously and parses the result.
     ///
     /// The three outcomes are:
     /// - Ok(new row)
     /// - Error(collection not found)
     /// - Error(other diesel error)
-    pub async fn insert_and_get_result_async<ConnErr>(
+    pub async fn insert_and_get_result_async(
         self,
-        conn: &(impl async_bb8_diesel::AsyncConnection<DbConnection, ConnErr>
-              + Sync),
+        conn: &async_bb8_diesel::Connection<DbConnection>
     ) -> AsyncInsertIntoCollectionResult<ResourceType>
     where
         // We require this bound to ensure that "Self" is runnable as query.
         Self: query_methods::LoadQuery<'static, DbConnection, ResourceType>,
-        ConnErr: From<diesel::result::Error> + Send + 'static,
-        PoolError: From<ConnErr>,
     {
         self.get_result_async::<ResourceType>(conn)
             .await
@@ -563,7 +565,7 @@ mod test {
                 resource::dsl::collection_id.eq(collection_id),
             )),
         )
-        .insert_and_get_result_async(pool.pool())
+        .insert_and_get_result_async(&pool.pool().get().await.unwrap())
         .await;
         assert!(matches!(insert, Err(AsyncInsertError::CollectionNotFound)));
 
@@ -583,6 +585,8 @@ mod test {
         let collection_id = uuid::Uuid::new_v4();
         let resource_id = uuid::Uuid::new_v4();
 
+        let conn = pool.pool().get().await.unwrap();
+
         // Insert the collection so it's present later
         diesel::insert_into(collection::table)
             .values(vec![(
@@ -593,7 +597,7 @@ mod test {
                 collection::dsl::time_modified.eq(Utc::now()),
                 collection::dsl::rcgen.eq(1),
             )])
-            .execute_async(pool.pool())
+            .execute_async(&*conn)
             .await
             .unwrap();
 
@@ -614,7 +618,7 @@ mod test {
                 resource::dsl::collection_id.eq(collection_id),
             )]),
         )
-        .insert_and_get_result_async(pool.pool())
+        .insert_and_get_result_async(&conn)
         .await
         .unwrap();
         assert_eq!(resource.id(), resource_id);
@@ -627,7 +631,7 @@ mod test {
         let collection_rcgen = collection::table
             .find(collection_id)
             .select(collection::dsl::rcgen)
-            .first_async::<i64>(pool.pool())
+            .first_async::<i64>(&*conn)
             .await
             .unwrap();
 

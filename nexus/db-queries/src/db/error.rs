@@ -4,7 +4,7 @@
 
 //! Error handling and conversions.
 
-use async_bb8_diesel::{ConnectionError, PoolError, PoolResult};
+use async_bb8_diesel::{ConnectionError, PoolError};
 use diesel::result::DatabaseErrorInformation;
 use diesel::result::DatabaseErrorKind as DieselErrorKind;
 use diesel::result::Error as DieselError;
@@ -110,9 +110,25 @@ fn format_database_error(
 /// Like [`diesel::result::OptionalExtension<T>::optional`]. This turns Ok(v)
 /// into Ok(Some(v)), Err("NotFound") into Ok(None), and leave all other values
 /// unchanged.
+pub fn diesel_result_optional<T>(
+    result: Result<T, ConnectionError>,
+) -> Result<Option<T>, ConnectionError> {
+    match result {
+        Ok(v) => Ok(Some(v)),
+        Err(ConnectionError::Query(
+            DieselError::NotFound,
+        )) => Ok(None),
+        Err(e) => Err(e),
+    }
+}
+
+// TODO: DEPRECATED
+/// Like [`diesel::result::OptionalExtension<T>::optional`]. This turns Ok(v)
+/// into Ok(Some(v)), Err("NotFound") into Ok(None), and leave all other values
+/// unchanged.
 pub fn diesel_pool_result_optional<T>(
-    result: PoolResult<T>,
-) -> PoolResult<Option<T>> {
+    result: Result<T, PoolError>,
+) -> Result<Option<T>, PoolError> {
     match result {
         Ok(v) => Ok(Some(v)),
         Err(PoolError::Connection(ConnectionError::Query(
@@ -153,6 +169,45 @@ pub enum ErrorHandler<'a> {
     Server,
 }
 
+/// Converts a Diesel connection error to a public-facing error.
+///
+/// [`ErrorHandler`] may be used to add additional handlers for the error
+/// being returned.
+pub fn public_error_from_diesel(
+    error: ConnectionError,
+    handler: ErrorHandler<'_>,
+) -> PublicError {
+    match error {
+        ConnectionError::Connection(error) => {
+            PublicError::unavail(
+                &format!("Failed to access connection pool: {}", error),
+            )
+        },
+        ConnectionError::Query(error) => {
+            match handler {
+                ErrorHandler::NotFoundByResource(resource) => {
+                    public_error_from_diesel_lookup(
+                        error,
+                        resource.resource_type(),
+                        resource.lookup_type(),
+                    )
+                }
+                ErrorHandler::NotFoundByLookup(resource_type, lookup_type) => {
+                    public_error_from_diesel_lookup(error, resource_type, &lookup_type)
+                }
+                ErrorHandler::Conflict(resource_type, object_name) => {
+                    public_error_from_diesel_create(error, resource_type, object_name)
+                }
+                ErrorHandler::Server => PublicError::internal_error(&format!(
+                    "unexpected database error: {:#}",
+                    error
+                )),
+            }
+        }
+    }
+}
+
+// TODO: Deprecate me?
 /// Converts a Diesel pool error to a public-facing error.
 ///
 /// [`ErrorHandler`] may be used to add additional handlers for the error

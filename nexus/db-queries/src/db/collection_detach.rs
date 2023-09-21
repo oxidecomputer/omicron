@@ -16,7 +16,7 @@ use super::cte_utils::{
     QueryFromClause, QuerySqlType,
 };
 use super::pool::DbConnection;
-use async_bb8_diesel::{AsyncRunQueryDsl, PoolError};
+use async_bb8_diesel::{AsyncRunQueryDsl, ConnectionError};
 use diesel::associations::HasTable;
 use diesel::expression::{AsExpression, Expression};
 use diesel::helper_types::*;
@@ -230,7 +230,7 @@ where
 
 /// Result of [`DetachFromCollectionStatement`] when executed asynchronously
 pub type AsyncDetachFromCollectionResult<ResourceType, C> =
-    Result<ResourceType, DetachError<ResourceType, C, PoolError>>;
+    Result<ResourceType, DetachError<ResourceType, C, ConnectionError>>;
 
 /// Errors returned by [`DetachFromCollectionStatement`].
 #[derive(Debug)]
@@ -265,8 +265,7 @@ where
     /// Issues the CTE asynchronously and parses the result.
     pub async fn detach_and_get_result_async(
         self,
-        conn: &(impl async_bb8_diesel::AsyncConnection<DbConnection, PoolError>
-              + Sync),
+        conn: &async_bb8_diesel::Connection<DbConnection>,
     ) -> AsyncDetachFromCollectionResult<ResourceType, C>
     where
         // We require this bound to ensure that "Self" is runnable as query.
@@ -789,7 +788,7 @@ mod test {
             diesel::update(resource::table)
                 .set(resource::dsl::collection_id.eq(Option::<Uuid>::None)),
         )
-        .detach_and_get_result_async(pool.pool())
+        .detach_and_get_result_async(&pool.pool().get().await.unwrap())
         .await;
 
         assert!(matches!(detach, Err(DetachError::CollectionNotFound)));
@@ -823,7 +822,7 @@ mod test {
             diesel::update(resource::table)
                 .set(resource::dsl::collection_id.eq(Option::<Uuid>::None)),
         )
-        .detach_and_get_result_async(pool.pool())
+        .detach_and_get_result_async(&pool.pool().get().await.unwrap())
         .await;
 
         assert!(matches!(detach, Err(DetachError::ResourceNotFound)));
@@ -861,7 +860,7 @@ mod test {
             diesel::update(resource::table)
                 .set(resource::dsl::collection_id.eq(Option::<Uuid>::None)),
         )
-        .detach_and_get_result_async(pool.pool())
+        .detach_and_get_result_async(&pool.pool().get().await.unwrap())
         .await;
 
         // "detach_and_get_result_async" should return the "detached" resource.
@@ -900,7 +899,7 @@ mod test {
             diesel::update(resource::table)
                 .set(resource::dsl::collection_id.eq(Option::<Uuid>::None)),
         )
-        .detach_and_get_result_async(pool.pool())
+        .detach_and_get_result_async(&pool.pool().get().await.unwrap())
         .await;
         assert_eq!(
             detach.expect("Detach should have worked").id(),
@@ -916,7 +915,7 @@ mod test {
             diesel::update(resource::table)
                 .set(resource::dsl::collection_id.eq(Option::<Uuid>::None)),
         )
-        .detach_and_get_result_async(pool.pool())
+        .detach_and_get_result_async(&pool.pool().get().await.unwrap())
         .await;
         let err = detach.expect_err("Should have failed to detach");
 
@@ -974,7 +973,7 @@ mod test {
             diesel::update(resource::table)
                 .set(resource::dsl::collection_id.eq(collection_id)),
         )
-        .detach_and_get_result_async(pool.pool())
+        .detach_and_get_result_async(&pool.pool().get().await.unwrap())
         .await;
         assert!(matches!(detach, Err(DetachError::ResourceNotFound)));
 
@@ -1017,7 +1016,7 @@ mod test {
             diesel::update(resource::table)
                 .set(resource::dsl::collection_id.eq(Option::<Uuid>::None)),
         )
-        .detach_and_get_result_async(pool.pool())
+        .detach_and_get_result_async(&pool.pool().get().await.unwrap())
         .await;
 
         let returned_resource = detach.expect("Detach should have worked");

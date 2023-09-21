@@ -39,7 +39,7 @@ impl DataStore {
                     dsl::total_size.eq(excluded(dsl::total_size)),
                 )),
         )
-        .insert_and_get_result_async(self.pool())
+        .insert_and_get_result_async(&*self.pool_connection_unauthorized().await?)
         .await
         .map_err(|e| match e {
             AsyncInsertError::CollectionNotFound => Error::ObjectNotFound {
