@@ -221,19 +221,26 @@ impl Control for GameScreen {
         dropper_rect.x = state.dropper_pos;
         frame.render_widget(DropperWidget {}, dropper_rect);
 
-        // Draw the rack attached to the dropper if there are racks remaining
-        if state.racks_remaining > 0 {
-            let mut rack_rect = dropper_rect;
-            rack_rect.y += 1;
-            rack_rect.x -= 1;
-            frame.render_widget(RackWidget {}, rack_rect);
-        }
+        // Only draw the rack attache to the dropper if there isn't one falling in
+        // that space currently.
+        let mut draw_dropper_rack = true;
 
         // Draw the falling racks
         for rack in &state.racks {
             if rack.rect.y < rect.height - 1 {
                 frame.render_widget(RackWidget {}, rack.rect);
             }
+            if rack.rect.y < rect.height / 2 {
+                draw_dropper_rack = false;
+            }
+        }
+
+        // Draw the rack attached to the dropper if there are racks remaining
+        if state.racks_remaining > 0 && draw_dropper_rack {
+            let mut rack_rect = dropper_rect;
+            rack_rect.y += 1;
+            rack_rect.x -= 1;
+            frame.render_widget(RackWidget {}, rack_rect);
         }
 
         // Draw the scoreboard
