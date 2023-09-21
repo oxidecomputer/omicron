@@ -474,7 +474,10 @@ impl super::Nexus {
                         "failed to delete nat entry via dpd: {e}"
                     ));
 
-                    error!(log, "error deleting nat mapping: {e:#?}");
+                    error!(log, "error deleting nat mapping: {e:#?}";
+                           "instance_id" => %instance_id,
+                           "switch" => switch.to_string(),
+                           "entry" => #?entry);
                     errors.push(e);
                 } else {
                     debug!(log, "deleting nat mapping successful";
@@ -485,8 +488,8 @@ impl super::Nexus {
             }
         }
 
-        if let Some(error) = errors.first() {
-            return Err(error.clone());
+        if let Some(e) = errors.into_iter().nth(0) {
+            return Err(e);
         }
 
         Ok(())
