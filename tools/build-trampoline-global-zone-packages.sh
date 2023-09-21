@@ -5,18 +5,18 @@ set -eux
 TOOLS_DIR="$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 
 # Use the default "out" dir in omicron to find the needed packages if one isn't given
-tarball_src_dir="$(readlink -f ${1:-"$TOOLS_DIR/../out"})"
+tarball_src_dir="$(readlink -f "${1:-"$TOOLS_DIR/../out"}")"
 # Stash the final tgz in the given src dir if a different target isn't given
-out_dir="$(readlink -f ${2:-$tarball_src_dir})"
+out_dir="$(readlink -f "${2:-$tarball_src_dir}")"
 
 # Make sure needed packages exist
 deps=(
-    $tarball_src_dir/installinator.tar
-    $tarball_src_dir/maghemite.tar
+    "$tarball_src_dir"/installinator.tar
+    "tarball_src_dir"/maghemite.tar
 )
-for dep in ${deps[@]}; do
+for dep in "${deps[@]}"; do
     if [[ ! -e $dep ]]; then
-        echo "Missing Trampoline Global Zone dep: $(basename $dep)"
+        echo "Missing Trampoline Global Zone dep: $(basename "$dep")"
         exit 1
     fi
 done
@@ -48,4 +48,4 @@ tar -xvfz "$tarball_src_dir/maghemite.tar"
 cd -
 
 # Create the final output and we're done
-cd "$tmp_trampoline" && tar cvfz $out_dir/trampoline-global-zone-packages.tar.gz oxide.json root
+cd "$tmp_trampoline" && tar cvfz "$out_dir"/trampoline-global-zone-packages.tar.gz oxide.json root
