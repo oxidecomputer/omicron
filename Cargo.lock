@@ -4860,7 +4860,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "omicron-dev-tools"
+name = "omicron-dev"
 version = "0.1.0"
 dependencies = [
  "anyhow",
