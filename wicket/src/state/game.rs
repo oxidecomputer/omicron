@@ -58,14 +58,21 @@ pub enum HorizontalDirection {
     Right,
 }
 
-// Truck position of front bumper = travel_time_ms * (speed / 1000)
+// Truck position = travel_time_ms * (speed / 1000)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Truck {
-    // position of front bumper = travel_time_ms * speed
+    // The right bumper of the truck
+    //
+    // We use the right bumper so that we can have the truck start off the left
+    // side of the screen without having to use signed integers.
     pub position: u16,
     pub creation_time_ms: u64,
     pub bed_width: u16,
     pub speed: f32, // cells/ms
+
+    // Bed position of racks that landed on the tucks
+    // The position is where the left of the rack lands
+    pub landed_racks: Vec<u16>,
 }
 
 impl Truck {
@@ -77,7 +84,17 @@ impl Truck {
         creation_time_ms: u64,
     ) -> Truck {
         let speed = cells_per_sec / 1000.0;
-        Truck { position: 0, creation_time_ms, speed, bed_width }
+        Truck {
+            position: 0,
+            creation_time_ms,
+            speed,
+            bed_width,
+            landed_racks: vec![],
+        }
+    }
+
+    pub fn width(&self) -> u16 {
+        self.bed_width + 1
     }
 }
 

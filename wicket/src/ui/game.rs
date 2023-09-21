@@ -13,7 +13,7 @@ use ratatui::widgets::{Block, Paragraph, Widget};
 use slog::{debug, o, Logger};
 
 // How much a rack accelerates while falling in cells/ms^2
-const GRAVITY: f32 = 0.000_02;
+const GRAVITY: f32 = 0.000_01;
 
 // The minimum distance that a truck can ever become to the truck in front of
 // it. We calculate the closest a truck can come to the truck in front of it
@@ -23,6 +23,7 @@ const MIN_DIST_BETWEEN_TRUCKS: u16 = 20;
 
 const MIN_TRUCK_SPEED: f32 = 10.0;
 const MAX_TRUCK_SPEED: f32 = 30.0;
+const ROAD_HEIGHT: u16 = 2;
 
 /// A screen for games
 ///
@@ -54,7 +55,8 @@ impl GameScreen {
         } else {
         }
         self.compute_truck_positions(state);
-        self.computer_rack_positions(state, travel_time_ms);
+        self.compute_rack_positions(state, travel_time_ms);
+        self.detect_collisions(state);
     }
 
     // Calculate when the tail of the last truck reaches `state.rect.width
@@ -65,8 +67,7 @@ impl GameScreen {
         let time_for_new_truck = (state.rect.width as f32 / speed) * 1000.0;
         state.trucks.last().map_or(true, |truck| {
             let dist_to_end = state.rect.width + MIN_DIST_BETWEEN_TRUCKS
-                - truck.position
-                + truck.bed_width;
+                - (truck.position + truck.width());
             // Stored speed is in cells/ms, but we pass in cells/s as that makes
             // more sense to a human.
             let time_for_last_truck = dist_to_end as f32 / (truck.speed);
@@ -78,7 +79,7 @@ impl GameScreen {
             );
             debug!(self.log, "{} {}", time_for_last_truck, time_for_new_truck);
             let maintains_distance = time_for_last_truck < time_for_new_truck
-                && truck.position > MIN_DIST_BETWEEN_TRUCKS + truck.bed_width;
+                && truck.position > MIN_DIST_BETWEEN_TRUCKS;
 
             // Only spawn 10% of the attempts
             maintains_distance && rand::random::<f32>() < 0.1
@@ -90,7 +91,8 @@ impl GameScreen {
             let travel_time_ms = state.now_ms - truck.creation_time_ms;
             truck.position =
                 (travel_time_ms as f32 * truck.speed).round() as u16;
-            if truck.position + truck.bed_width > state.rect.width {
+
+            if truck.position >= state.rect.width {
                 false
             } else {
                 true
@@ -98,7 +100,7 @@ impl GameScreen {
         });
     }
 
-    fn computer_rack_positions(
+    fn compute_rack_positions(
         &self,
         state: &mut SpecialDelivery,
         travel_time_ms: u64,
@@ -120,6 +122,33 @@ impl GameScreen {
                 true
             }
         });
+    }
+
+    fn detect_collisions(&self, state: &mut SpecialDelivery) {
+        state.racks.retain(|rack| {
+            // If the rack can possibly be on a truck, then scan the trucks
+            if rack.rect.y + 1 == state.rect.height - ROAD_HEIGHT {
+                for truck in &mut state.trucks {
+                    if Self::rack_on_truck(rack, truck) {
+                        truck
+                            .landed_racks
+                            .push(truck.position.saturating_sub(rack.rect.x));
+                        // We remove the rack from the "falling" racks set
+                        // We end up just drawing it on top of the truck at
+                        // the recorded position.
+                        return false;
+                    }
+                }
+            }
+            true
+        });
+    }
+
+    // Return true if the rack is positioned on a truck
+    fn rack_on_truck(rack: &Rack, truck: &Truck) -> bool {
+        let rack_right_pos = rack.rect.x + rack.rect.width;
+        rack.rect.x >= truck.position
+            && rack_right_pos < truck.position + truck.width()
     }
 }
 
@@ -173,8 +202,17 @@ impl Control for GameScreen {
                 bed_width: truck.bed_width,
             };
             let mut road_rect = rect;
-            road_rect.y = road_rect.height - 2;
+            road_rect.y = road_rect.height - ROAD_HEIGHT;
             frame.render_widget(truck_widget, road_rect);
+
+            // Draw any racks on top of trucks
+            // TODO: Allow more than one rack to land and detect rack collisions
+            if let Some(x) = truck.landed_racks.get(0) {
+                let x = truck.position.saturating_sub(*x) + 1;
+                let rack_rect =
+                    Rect { x, y: road_rect.y - 2, width: 3, height: 2 };
+                frame.render_widget(RackWidget {}, rack_rect);
+            }
         }
 
         // Draw the dropper
@@ -238,15 +276,16 @@ struct TruckWidget {
 impl Widget for TruckWidget {
     fn render(self, rect: Rect, buf: &mut Buffer) {
         // Draw the bed and wheels
+
         for i in 0..self.bed_width {
             if self.position > i && (self.position + i) < rect.width {
-                let x = self.position - i;
+                let x = self.position.saturating_sub(i);
                 buf.get_mut(x, rect.y).set_symbol(" ").set_bg(Color::White);
                 buf.get_mut(x, rect.y + 1).set_symbol("◎");
             }
         }
         // Draw the front bumper
-        if self.position < rect.width {
+        if self.position + 1 < rect.width {
             buf.get_mut(self.position + 1, rect.y).set_symbol("⬤");
         }
     }
