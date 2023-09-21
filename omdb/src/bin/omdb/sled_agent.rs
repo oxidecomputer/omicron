@@ -11,18 +11,18 @@ use clap::Subcommand;
 
 /// Arguments to the "omdb sled" subcommand
 #[derive(Debug, Args)]
-pub struct SledArgs {
+pub struct SledAgentArgs {
     /// URL of the Sled internal API
-    #[clap(long, env("OMDB_SLED_URL"))]
-    sled_url: Option<String>,
+    #[clap(long, env("OMDB_SLED_AGENT_URL"))]
+    sled_agent_url: Option<String>,
 
     #[command(subcommand)]
-    command: SledCommands,
+    command: SledAgentCommands,
 }
 
 /// Subcommands for the "omdb sled" subcommand
 #[derive(Debug, Subcommand)]
-enum SledCommands {
+enum SledAgentCommands {
     /// print information about zones
     #[clap(subcommand)]
     Zones(ZoneCommands),
@@ -34,17 +34,17 @@ enum SledCommands {
 
 #[derive(Debug, Subcommand)]
 enum ZoneCommands {
-    /// Print list of all zones
+    /// Print list of all running control plane zones
     List,
 }
 
 #[derive(Debug, Subcommand)]
 enum ZpoolCommands {
-    /// Print list of all zpools
+    /// Print list of all zpools managed by the sled agent
     List,
 }
 
-impl SledArgs {
+impl SledAgentArgs {
     /// Run a `omdb sled` subcommand.
     pub async fn run_cmd(
         &self,
@@ -52,19 +52,20 @@ impl SledArgs {
     ) -> Result<(), anyhow::Error> {
         // This is a little goofy. The sled URL is required, but can come
         // from the environment, in which case it won't be on the command line.
-        let Some(sled_url) = &self.sled_url else {
+        let Some(sled_agent_url) = &self.sled_agent_url else {
             bail!(
-                "sled URL must be specified with --sled-url or \
-                OMDB_SLED_URL"
+                "sled URL must be specified with --sled-agent-url or \
+                OMDB_SLED_AGENT_URL"
             );
         };
-        let client = sled_agent_client::Client::new(sled_url, log.clone());
+        let client =
+            sled_agent_client::Client::new(sled_agent_url, log.clone());
 
         match &self.command {
-            SledCommands::Zones(ZoneCommands::List) => {
+            SledAgentCommands::Zones(ZoneCommands::List) => {
                 cmd_zones_list(&client).await
             }
-            SledCommands::Zpools(ZpoolCommands::List) => {
+            SledAgentCommands::Zpools(ZpoolCommands::List) => {
                 cmd_zpools_list(&client).await
             }
         }

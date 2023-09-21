@@ -25,7 +25,7 @@ use clap::Subcommand;
 
 mod db;
 mod nexus;
-mod sled;
+mod sled_agent;
 
 #[tokio::main]
 async fn main() -> Result<(), anyhow::Error> {
@@ -38,7 +38,7 @@ async fn main() -> Result<(), anyhow::Error> {
     match args.command {
         OmdbCommands::Db(db) => db.run_cmd(&log).await,
         OmdbCommands::Nexus(nexus) => nexus.run_cmd(&log).await,
-        OmdbCommands::Sled(sled) => sled.run_cmd(&log).await,
+        OmdbCommands::SledAgent(sled) => sled.run_cmd(&log).await,
     }
 }
 
@@ -70,7 +70,7 @@ enum OmdbCommands {
     /// Debug a specific Nexus instance
     Nexus(nexus::NexusArgs),
     /// Debug a specific Sled
-    Sled(sled::SledArgs),
+    SledAgent(sled_agent::SledAgentArgs),
 }
 
 fn parse_dropshot_log_level(
