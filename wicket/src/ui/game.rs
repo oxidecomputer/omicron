@@ -51,7 +51,7 @@ impl GameScreen {
             * (MAX_TRUCK_SPEED - MIN_TRUCK_SPEED)
             + MIN_TRUCK_SPEED;
         if self.can_spawn_truck(state, rand_speed) {
-            state.trucks.push(Truck::new(5, rand_speed, state.now_ms));
+            state.trucks.push(Truck::new(10, rand_speed, state.now_ms));
         } else {
         }
         self.compute_truck_positions(state);
@@ -93,6 +93,8 @@ impl GameScreen {
                 (travel_time_ms as f32 * truck.speed).round() as u16;
 
             if truck.position >= state.rect.width {
+                state.racks_remaining += truck.landed_racks.len() as u32;
+                state.racks_delivered += truck.landed_racks.len() as u32;
                 false
             } else {
                 true
@@ -147,8 +149,8 @@ impl GameScreen {
     // Return true if the rack is positioned on a truck
     fn rack_on_truck(rack: &Rack, truck: &Truck) -> bool {
         let rack_right_pos = rack.rect.x + rack.rect.width;
-        rack.rect.x >= truck.position
-            && rack_right_pos < truck.position + truck.width()
+        rack.rect.x > truck.position.saturating_sub(truck.width())
+            && rack_right_pos < truck.position
     }
 }
 
@@ -288,7 +290,9 @@ impl Widget for TruckWidget {
             if self.position > i && (self.position + i) < rect.width {
                 let x = self.position.saturating_sub(i);
                 buf.get_mut(x, rect.y).set_symbol(" ").set_bg(Color::White);
-                buf.get_mut(x, rect.y + 1).set_symbol("◎");
+                if (i + 1) % 3 != 0 {
+                    buf.get_mut(x, rect.y + 1).set_symbol("◎");
+                }
             }
         }
         // Draw the front bumper
@@ -304,6 +308,10 @@ struct RackWidget {}
 
 impl Widget for RackWidget {
     fn render(self, rect: Rect, buf: &mut Buffer) {
+        // Left black border
+        buf.get_mut(rect.x, rect.y).set_symbol(" ").set_bg(TUI_BLACK);
+        buf.get_mut(rect.x, rect.y + 1).set_symbol(" ").set_bg(TUI_BLACK);
+        // Rack Itself
         buf.get_mut(rect.x + 1, rect.y)
             .set_symbol(RACK_TOP)
             .set_fg(TUI_GREEN)
@@ -312,10 +320,9 @@ impl Widget for RackWidget {
             .set_symbol(RACK_BOTTOM)
             .set_fg(TUI_GREEN)
             .set_bg(TUI_BLACK);
+        // Right black border
         buf.get_mut(rect.x + 2, rect.y).set_symbol(" ").set_bg(TUI_BLACK);
         buf.get_mut(rect.x + 2, rect.y + 1).set_symbol(" ").set_bg(TUI_BLACK);
-        buf.get_mut(rect.x, rect.y).set_symbol(" ").set_bg(TUI_BLACK);
-        buf.get_mut(rect.x, rect.y + 1).set_symbol(" ").set_bg(TUI_BLACK);
     }
 }
 
