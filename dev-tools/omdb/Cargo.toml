@@ -15,6 +15,7 @@ clap.workspace = true
 diesel.workspace = true
 dropshot.workspace = true
 humantime.workspace = true
+internal-dns.workspace = true
 nexus-client.workspace = true
 nexus-db-model.workspace = true
 nexus-db-queries.workspace = true

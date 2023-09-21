@@ -4,6 +4,7 @@
 
 //! omdb commands that query or update specific Sleds
 
+use crate::Omdb;
 use anyhow::bail;
 use anyhow::Context;
 use clap::Args;
@@ -46,8 +47,9 @@ enum ZpoolCommands {
 
 impl SledAgentArgs {
     /// Run a `omdb sled` subcommand.
-    pub async fn run_cmd(
+    pub(crate) async fn run_cmd(
         &self,
+        _omdb: &Omdb,
         log: &slog::Logger,
     ) -> Result<(), anyhow::Error> {
         // This is a little goofy. The sled URL is required, but can come

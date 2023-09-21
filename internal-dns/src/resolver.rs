@@ -55,7 +55,7 @@ impl Resolver {
     /// Construct a new DNS resolver from specific DNS server addresses.
     pub fn new_from_addrs(
         log: slog::Logger,
-        dns_addrs: Vec<SocketAddr>,
+        dns_addrs: &[SocketAddr],
     ) -> Result<Self, ResolveError> {
         info!(log, "new DNS resolver"; "addresses" => ?dns_addrs);
 
@@ -63,7 +63,7 @@ impl Resolver {
         let dns_server_count = dns_addrs.len();
         for socket_addr in dns_addrs.into_iter() {
             rc.add_name_server(NameServerConfig {
-                socket_addr,
+                socket_addr: *socket_addr,
                 protocol: Protocol::Udp,
                 tls_dns_name: None,
                 trust_nx_responses: false,
@@ -137,7 +137,7 @@ impl Resolver {
         subnet: Ipv6Subnet<AZ_PREFIX>,
     ) -> Result<Self, ResolveError> {
         let dns_ips = Self::servers_from_subnet(subnet);
-        Resolver::new_from_addrs(log, dns_ips)
+        Resolver::new_from_addrs(log, &dns_ips)
     }
 
     /// Remove all entries from the resolver's cache.
