@@ -1,5 +1,5 @@
 [package]
-name = "omicron-dev-tools"
+name = "omicron-dev"
 version = "0.1.0"
 edition = "2021"
 license = "MPL-2.0"
