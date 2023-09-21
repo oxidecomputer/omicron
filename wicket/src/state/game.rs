@@ -7,10 +7,10 @@
 //! We store the state in the global state struct so that
 //! we can use the replay debugger.
 
-use std::time::Duration;
-
 use ratatui::prelude::Rect;
 use serde::{Deserialize, Serialize};
+
+const NUM_RACKS: u32 = 10;
 
 /// The state of our [`crate::ui::game::GameScreen`]
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -39,7 +39,7 @@ pub struct SpecialDelivery {
     // The user controlled position of the rack to be dropped
     pub dropper_pos: u16,
 
-    pub game_over_start: Option<Duration>,
+    pub game_over: bool,
 }
 
 impl SpecialDelivery {
@@ -47,13 +47,23 @@ impl SpecialDelivery {
         SpecialDelivery {
             now_ms: 0,
             rect: Rect::default(),
-            racks_remaining: 10,
+            racks_remaining: NUM_RACKS,
             racks_delivered: 0,
             trucks: Vec::new(),
             racks: Vec::new(),
             dropper_pos: 0,
-            game_over_start: None,
+            game_over: false,
         }
+    }
+
+    pub fn new_game(&mut self) {
+        self.now_ms = 0;
+        self.racks_remaining = NUM_RACKS;
+        self.racks_delivered = 0;
+        self.trucks.clear();
+        self.racks.clear();
+        self.dropper_pos = self.rect.width / 2;
+        self.game_over = false;
     }
 }
 

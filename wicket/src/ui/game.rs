@@ -4,8 +4,6 @@
 
 //! A screen for playing terminal based games
 
-use std::time::Duration;
-
 use crate::state::game::{Rack, SpecialDelivery, Truck};
 use crate::ui::defaults::colors::*;
 use crate::{Action, Cmd, Control, Frame, State, TICK_INTERVAL};
@@ -28,7 +26,6 @@ const MIN_DIST_BETWEEN_TRUCKS: u16 = 20;
 const MIN_TRUCK_SPEED: f32 = 10.0;
 const MAX_TRUCK_SPEED: f32 = 30.0;
 const ROAD_HEIGHT: u16 = 2;
-const MAX_GAME_OVER_VIEW_TIME: Duration = Duration::from_secs(5);
 
 /// A screen for games
 ///
@@ -65,18 +62,12 @@ impl GameScreen {
     }
 
     fn compute_game_over(state: &mut SpecialDelivery) {
-        if state.game_over_start.is_none() && state.racks_remaining == 0 {
-            if state.trucks.iter().all(|truck| truck.landed_racks.is_empty())
-                && state.racks.is_empty()
-            {
-                state.game_over_start =
-                    Some(Duration::from_millis(state.now_ms));
-            } else if let Some(game_over_start) = state.game_over_start {
-                let now = Duration::from_millis(state.now_ms);
-                if now - game_over_start >= MAX_GAME_OVER_VIEW_TIME {
-                    *state = SpecialDelivery::new();
-                }
-            }
+        if !state.game_over
+            && state.racks_remaining == 0
+            && state.racks.is_empty()
+            && state.trucks.iter().all(|truck| truck.landed_racks.is_empty())
+        {
+            state.game_over = true;
         }
     }
 
@@ -206,6 +197,11 @@ impl Control for GameScreen {
                         state.racks_remaining.saturating_sub(1);
                 }
             }
+            Cmd::Enter => {
+                if state.game_over {
+                    state.new_game();
+                }
+            }
             _ => return None,
         }
 
@@ -222,7 +218,7 @@ impl Control for GameScreen {
         let state = &state.game_state.delivery;
 
         // Is the game over?
-        if state.game_over_start.is_some() {
+        if state.game_over {
             let rect = rect.center_horizontally(66).center_vertically(45);
             let text = Text::from(GRUMPY_CAT);
             let paragraph =
