@@ -93,6 +93,10 @@ pub struct ControlPlaneTestContext<N> {
 }
 
 impl<N: NexusServer> ControlPlaneTestContext<N> {
+    pub fn wildcard_silo_dns_name(&self) -> String {
+        format!("*.sys.{}", self.external_dns_zone_name)
+    }
+
     pub async fn teardown(mut self) {
         self.server.close().await;
         self.database.cleanup().await.unwrap();
