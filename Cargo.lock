@@ -5070,6 +5070,7 @@ dependencies = [
  "regex",
  "serde",
  "serde_json",
+ "sled-agent-client",
  "slog",
  "strum",
  "subprocess",

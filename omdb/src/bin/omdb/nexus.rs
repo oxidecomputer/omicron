@@ -59,7 +59,7 @@ impl NexusArgs {
         &self,
         log: &slog::Logger,
     ) -> Result<(), anyhow::Error> {
-        // This is a little goofy.  The database URL is required, but can come
+        // This is a little goofy.  The nexus URL is required, but can come
         // from the environment, in which case it won't be on the command line.
         let Some(nexus_url) = &self.nexus_internal_url else {
             bail!(
