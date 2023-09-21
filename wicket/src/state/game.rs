@@ -38,6 +38,7 @@ pub struct SpecialDelivery {
     pub racks: Vec<Rack>,
     // The user controlled position of the rack to be dropped
     pub dropper_pos: u16,
+    pub crashes: Vec<Crash>,
 
     pub game_over: bool,
 }
@@ -52,6 +53,7 @@ impl SpecialDelivery {
             trucks: Vec::new(),
             racks: Vec::new(),
             dropper_pos: 0,
+            crashes: Vec::new(),
             game_over: false,
         }
     }
@@ -63,8 +65,17 @@ impl SpecialDelivery {
         self.trucks.clear();
         self.racks.clear();
         self.dropper_pos = self.rect.width / 2;
+        self.crashes.clear();
         self.game_over = false;
     }
+}
+
+// A rack that has crashed into the ground, another rack, or the front of
+// a truck.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct Crash {
+    pub rect: Rect,
+    pub creation_time_ms: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

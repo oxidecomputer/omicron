@@ -4,7 +4,7 @@
 
 //! A screen for playing terminal based games
 
-use crate::state::game::{Rack, SpecialDelivery, Truck};
+use crate::state::game::{Crash, Rack, SpecialDelivery, Truck};
 use crate::ui::defaults::colors::*;
 use crate::{Action, Cmd, Control, Frame, State, TICK_INTERVAL};
 use ratatui::prelude::*;
@@ -26,6 +26,7 @@ const MIN_DIST_BETWEEN_TRUCKS: u16 = 20;
 const MIN_TRUCK_SPEED: f32 = 10.0;
 const MAX_TRUCK_SPEED: f32 = 30.0;
 const ROAD_HEIGHT: u16 = 2;
+const MAX_CRASH_DURATION_MS: u64 = 500;
 
 /// A screen for games
 ///
@@ -58,7 +59,14 @@ impl GameScreen {
         self.compute_truck_positions(state);
         self.compute_rack_positions(state, travel_time_ms);
         self.detect_collisions(state);
+        Self::clear_crashes(state);
         Self::compute_game_over(state);
+    }
+
+    fn clear_crashes(state: &mut SpecialDelivery) {
+        state.crashes.retain(|crash| {
+            state.now_ms - crash.creation_time_ms < MAX_CRASH_DURATION_MS
+        });
     }
 
     fn compute_game_over(state: &mut SpecialDelivery) {
@@ -131,6 +139,14 @@ impl GameScreen {
             rack.vertical_pos += rack.velocity * travel_time_ms as f32;
             rack.rect.y = rack.vertical_pos.round() as u16;
             if rack.rect.y >= state.rect.height {
+                let mut crash_rect = rack.rect;
+                crash_rect.y = state.rect.height - 1;
+                crash_rect.height = 1;
+                //crash_rect.width = 1;
+                state.crashes.push(Crash {
+                    rect: crash_rect,
+                    creation_time_ms: state.now_ms,
+                });
                 false
             } else {
                 true
@@ -155,10 +171,23 @@ impl GameScreen {
                         // the recorded position.
                         return false;
                     }
+                    if Self::rack_crash_into_front_of_truck(rack, truck) {
+                        let mut crash_rect = rack.rect;
+                        crash_rect.height = 1;
+                        state.crashes.push(Crash {
+                            rect: crash_rect,
+                            creation_time_ms: state.now_ms,
+                        });
+                    }
                 }
             }
             true
         });
+    }
+
+    // Return true if the rack doesn't land on the bed of the truck
+    fn rack_crash_into_front_of_truck(rack: &Rack, truck: &Truck) -> bool {
+        truck.position < rack.rect.x + 3 && truck.position >= rack.rect.x
     }
 
     // Return true if the rack is positioned on a truck
@@ -225,6 +254,13 @@ impl Control for GameScreen {
                 Paragraph::new(text).style(Style::default().fg(OX_PINK));
             frame.render_widget(paragraph, rect);
             return;
+        }
+
+        // Draw any crashes
+        for crash in &state.crashes {
+            let line = Line::from("🔥");
+            let fire = Paragraph::new(line);
+            frame.render_widget(fire, crash.rect);
         }
 
         // Draw the trucks
