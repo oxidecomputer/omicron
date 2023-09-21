@@ -142,7 +142,6 @@ impl GameScreen {
                 let mut crash_rect = rack.rect;
                 crash_rect.y = state.rect.height - 1;
                 crash_rect.height = 1;
-                //crash_rect.width = 1;
                 state.crashes.push(Crash {
                     rect: crash_rect,
                     creation_time_ms: state.now_ms,
@@ -178,6 +177,7 @@ impl GameScreen {
                             rect: crash_rect,
                             creation_time_ms: state.now_ms,
                         });
+                        return false;
                     }
                 }
             }
@@ -258,7 +258,7 @@ impl Control for GameScreen {
 
         // Draw any crashes
         for crash in &state.crashes {
-            let line = Line::from("🔥");
+            let line = Line::from("🔥🔥🔥");
             let fire = Paragraph::new(line);
             frame.render_widget(fire, crash.rect);
         }
