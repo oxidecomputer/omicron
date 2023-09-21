@@ -31,8 +31,10 @@ use nexus_db_model::Sled;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
 use nexus_db_queries::db::identity::Asset;
+use nexus_db_queries::db::lookup::LookupPath;
 use nexus_db_queries::db::model::ServiceKind;
 use nexus_db_queries::db::DataStore;
+use nexus_types::identity::Resource;
 use nexus_types::internal_api::params::DnsRecord;
 use nexus_types::internal_api::params::Srv;
 use omicron_common::api::external::DataPageParams;
@@ -67,12 +69,34 @@ pub struct DbArgs {
 /// Subcommands that query or update the database
 #[derive(Debug, Subcommand)]
 enum DbCommands {
+    /// Print information about disks
+    Disks(DiskArgs),
     /// Print information about internal and external DNS
     Dns(DnsArgs),
     /// Print information about control plane services
     Services(ServicesArgs),
     /// Print information about sleds
     Sleds,
+}
+
+#[derive(Debug, Args)]
+struct DiskArgs {
+    #[command(subcommand)]
+    command: DiskCommands,
+}
+
+#[derive(Debug, Subcommand)]
+enum DiskCommands {
+    /// Get info for a specific disk
+    Info(DiskInfoArgs),
+    /// Summarize current disks
+    List,
+}
+
+#[derive(Debug, Args)]
+struct DiskInfoArgs {
+    /// The UUID of the volume
+    uuid: Uuid,
 }
 
 #[derive(Debug, Args)]
@@ -158,6 +182,12 @@ impl DbArgs {
 
         let opctx = OpContext::for_tests(log.clone(), datastore.clone());
         match &self.command {
+            DbCommands::Disks(DiskArgs {
+                command: DiskCommands::Info(uuid),
+            }) => cmd_db_disk_info(&opctx, &datastore, uuid).await,
+            DbCommands::Disks(DiskArgs { command: DiskCommands::List }) => {
+                cmd_db_disk_list(&opctx, &datastore, self.fetch_limit).await
+            }
             DbCommands::Dns(DnsArgs { command: DnsCommands::Show }) => {
                 cmd_db_dns_show(&opctx, &datastore, self.fetch_limit).await
             }
@@ -264,6 +294,168 @@ fn first_page<'a, T>(limit: NonZeroU32) -> DataPageParams<'a, T> {
         direction: dropshot::PaginationOrder::Ascending,
         limit,
     }
+}
+
+// Disks
+
+/// Run `omdb db disk list`.
+async fn cmd_db_disk_list(
+    opctx: &OpContext,
+    datastore: &DataStore,
+    limit: NonZeroU32,
+) -> Result<(), anyhow::Error> {
+    #[derive(Tabled)]
+    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+    struct DiskRow {
+        name: String,
+        id: String,
+        size: String,
+        state: String,
+        attached_to: String,
+    }
+
+    let mut rows = Vec::with_capacity(2);
+    let ctx = || "listing disks".to_string();
+
+    let disks = datastore
+        .disk_list_all(opctx, &first_page(limit))
+        .await
+        .with_context(ctx)?;
+
+    check_limit(&disks, limit, ctx);
+
+    rows.extend(disks.into_iter().map(|disk| DiskRow {
+        name: disk.name().to_string(),
+        id: disk.id().to_string(),
+        size: disk.size.to_string(),
+        state: disk.runtime().disk_state,
+        attached_to: match disk.runtime().attach_instance_id {
+            Some(uuid) => uuid.to_string(),
+            None => "-".to_string(),
+        },
+    }));
+    let table = tabled::Table::new(rows)
+        .with(tabled::settings::Style::empty())
+        .with(tabled::settings::Padding::new(0, 1, 0, 0))
+        .to_string();
+
+    println!("{}", table);
+
+    Ok(())
+}
+
+/// Run `omdb db disk info <UUID>`.
+async fn cmd_db_disk_info(
+    opctx: &OpContext,
+    datastore: &DataStore,
+    args: &DiskInfoArgs,
+) -> Result<(), anyhow::Error> {
+    // The row describing the instance
+    #[derive(Tabled)]
+    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+    struct UpstairsRow {
+        host_serial: String,
+        disk_name: String,
+        instance_name: String,
+        propolis_zone: String,
+    }
+
+    // The rows describing the downstairs regions for this disk/volume
+    #[derive(Tabled)]
+    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+    struct DownstairsRow {
+        host_serial: String,
+        region: String,
+        zone: String,
+        physical_disk: String,
+    }
+
+    let ctx = || "Getting disk info".to_string();
+
+    let disk = datastore.disk_get(args.uuid).await.with_context(ctx)?;
+
+    // For information about where this disk is attached.
+    let mut rows = Vec::new();
+
+    // If the disk is attached to an instance, show information
+    // about that instance.
+    if let Some(instanc_uuid) = disk.runtime().attach_instance_id {
+        // Get the instance this disk is attached to
+        let instance =
+            datastore.instance_get(instanc_uuid).await.with_context(ctx)?;
+
+        let instance_name = instance.name().to_string();
+        let propolis_id = instance.runtime().propolis_id.to_string();
+        let my_sled_id = instance.runtime().sled_id;
+
+        let (_, my_sled) = LookupPath::new(opctx, datastore)
+            .sled_id(my_sled_id)
+            .fetch()
+            .await
+            .context("failed to look up sled")?;
+
+        let usr = UpstairsRow {
+            host_serial: my_sled.serial_number().to_string(),
+            disk_name: disk.name().to_string(),
+            instance_name,
+            propolis_zone: format!("oxz_propolis-server_{}", propolis_id),
+        };
+        rows.push(usr);
+    } else {
+        // The instance is not attached to anything, just print empty
+        // fields.
+        let usr = UpstairsRow {
+            host_serial: "-".to_string(),
+            disk_name: disk.name().to_string(),
+            instance_name: "-".to_string(),
+            propolis_zone: "-".to_string(),
+        };
+        rows.push(usr);
+    }
+
+    let table = tabled::Table::new(rows)
+        .with(tabled::settings::Style::empty())
+        .with(tabled::settings::Padding::new(0, 1, 0, 0))
+        .to_string();
+
+    println!("{}", table);
+
+    // Get the dataset backing this volume.
+    let regions = datastore.get_allocated_regions(disk.volume_id).await?;
+
+    let mut rows = Vec::with_capacity(3);
+    for (dataset, region) in regions {
+        let my_pool_id = dataset.pool_id;
+        let (_, my_zpool) = LookupPath::new(opctx, datastore)
+            .zpool_id(my_pool_id)
+            .fetch()
+            .await
+            .context("failed to look up zpool")?;
+
+        let my_sled_id = my_zpool.sled_id;
+
+        let (_, my_sled) = LookupPath::new(opctx, datastore)
+            .sled_id(my_sled_id)
+            .fetch()
+            .await
+            .context("failed to look up sled")?;
+
+        rows.push(DownstairsRow {
+            host_serial: my_sled.serial_number().to_string(),
+            region: region.id().to_string(),
+            zone: format!("oxz_crucible_{}", dataset.id()),
+            physical_disk: my_zpool.physical_disk_id.to_string(),
+        });
+    }
+
+    let table = tabled::Table::new(rows)
+        .with(tabled::settings::Style::empty())
+        .with(tabled::settings::Padding::new(0, 1, 0, 0))
+        .to_string();
+
+    println!("{}", table);
+
+    Ok(())
 }
 
 // SERVICES

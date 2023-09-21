@@ -347,6 +347,10 @@ impl<'a> LookupPath<'a> {
         Sled::PrimaryKey(Root { lookup_root: self }, id)
     }
 
+    pub fn zpool_id(self, id: Uuid) -> Zpool<'a> {
+        Zpool::PrimaryKey(Root { lookup_root: self }, id)
+    }
+
     /// Select a resource of type Service, identified by its id
     pub fn service_id(self, id: Uuid) -> Service<'a> {
         Service::PrimaryKey(Root { lookup_root: self }, id)
@@ -781,6 +785,15 @@ lookup_resource! {
 
 lookup_resource! {
     name = "Sled",
+    ancestors = [],
+    children = [],
+    lookup_by_name = false,
+    soft_deletes = true,
+    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
+}
+
+lookup_resource! {
+    name = "Zpool",
     ancestors = [],
     children = [],
     lookup_by_name = false,

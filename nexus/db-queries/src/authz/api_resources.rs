@@ -906,6 +906,14 @@ authz_resource! {
 }
 
 authz_resource! {
+    name = "Zpool",
+    parent = "Fleet",
+    primary_key = Uuid,
+    roles_allowed = false,
+    polar_snippet = FleetChild,
+}
+
+authz_resource! {
     name = "SledInstance",
     parent = "Fleet",
     primary_key = Uuid,
