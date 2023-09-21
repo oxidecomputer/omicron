@@ -57,7 +57,7 @@ pub struct DbArgs {
     /// limit to apply to queries that fetch rows
     #[clap(
         long = "fetch-limit",
-        default_value_t = NonZeroU32::new(100).unwrap()
+        default_value_t = NonZeroU32::new(500).unwrap()
     )]
     fetch_limit: NonZeroU32,
 

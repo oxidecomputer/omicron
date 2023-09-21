@@ -44,6 +44,9 @@ async fn test_omdb_usage_errors() {
         &["db", "services"],
         &["nexus"],
         &["nexus", "background-tasks"],
+        &["sled-agent"],
+        &["sled-agent", "zones"],
+        &["sled-agent", "zpools"],
     ];
 
     for args in invocations {
@@ -69,6 +72,9 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
         &["db", "sleds"],
         &["nexus", "background-tasks", "doc"],
         &["nexus", "background-tasks", "show"],
+        // We can't easily test the sled agent output because that's only
+        // provided by a real sled agent, which is not available in the
+        // ControlPlaneTestContext.
     ];
 
     for args in invocations {
@@ -102,6 +108,7 @@ async fn test_omdb_env_settings(cptestctx: &ControlPlaneTestContext) {
     let postgres_url = cptestctx.database.listen_url().to_string();
     let nexus_internal_url =
         format!("http://{}", cptestctx.internal_client.bind_address);
+    let dns_sockaddr = *cptestctx.internal_dns.dns_server.local_address();
     let mut output = String::new();
 
     // Database URL
@@ -109,12 +116,12 @@ async fn test_omdb_env_settings(cptestctx: &ControlPlaneTestContext) {
     let args = &["db", "--db-url", &postgres_url, "sleds"];
     do_run(&mut output, |exec| exec, &cmd_path, args).await;
 
-    // Case 2: specified in both places.
+    // Case 2: specified in multiple places (command-line argument wins)
     let args = &["db", "--db-url", "junk", "sleds"];
     let p = postgres_url.clone();
     do_run(
         &mut output,
-        move |exec| exec.env("ODMB_DB_URL", &p),
+        move |exec| exec.env("OMDB_DB_URL", &p),
         &cmd_path,
         args,
     )
@@ -131,17 +138,50 @@ async fn test_omdb_env_settings(cptestctx: &ControlPlaneTestContext) {
     ];
     do_run(&mut output, |exec| exec, &cmd_path.clone(), args).await;
 
-    // Case 2: specified in both places.
+    // Case 2: specified in multiple places (command-line argument wins)
     let args =
         &["nexus", "--nexus-internal-url", "junk", "background-tasks", "doc"];
-    let p = postgres_url.clone();
+    let n = nexus_internal_url.clone();
     do_run(
         &mut output,
-        move |exec| exec.env("ODMB_DB_URL", &p),
+        move |exec| exec.env("OMDB_NEXUS_URL", &n),
         &cmd_path,
         args,
     )
     .await;
+
+    // Verify that if you provide a working internal DNS server, you can omit
+    // the URLs.  That's true regardless of whether you pass it on the command
+    // line or via an environment variable.
+    let args = &["nexus", "background-tasks", "doc"];
+    do_run(
+        &mut output,
+        move |exec| exec.env("OMDB_DNS_SERVER", dns_sockaddr.to_string()),
+        &cmd_path,
+        args,
+    )
+    .await;
+
+    let args = &[
+        "--dns-server",
+        &dns_sockaddr.to_string(),
+        "nexus",
+        "background-tasks",
+        "doc",
+    ];
+    do_run(&mut output, move |exec| exec, &cmd_path, args).await;
+
+    let args = &["db", "sleds"];
+    do_run(
+        &mut output,
+        move |exec| exec.env("OMDB_DNS_SERVER", dns_sockaddr.to_string()),
+        &cmd_path,
+        args,
+    )
+    .await;
+
+    let args = &["--dns-server", &dns_sockaddr.to_string(), "db", "sleds"];
+    do_run(&mut output, move |exec| exec, &cmd_path, args).await;
 
     assert_contents("tests/env.out", &output);
 }
@@ -194,7 +234,7 @@ async fn do_run<F>(
     output.push_str(&redact_variable(&stdout_text));
     write!(output, "---------------------------------------------\n").unwrap();
     write!(output, "stderr:\n").unwrap();
-    output.push_str(&stderr_text);
+    output.push_str(&redact_variable(&stderr_text));
     write!(output, "=============================================\n").unwrap();
 }
 
