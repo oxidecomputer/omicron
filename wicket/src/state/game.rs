@@ -7,6 +7,8 @@
 //! We store the state in the global state struct so that
 //! we can use the replay debugger.
 
+use std::time::Duration;
+
 use ratatui::prelude::Rect;
 use serde::{Deserialize, Serialize};
 
@@ -36,10 +38,12 @@ pub struct SpecialDelivery {
     pub racks: Vec<Rack>,
     // The user controlled position of the rack to be dropped
     pub dropper_pos: u16,
+
+    pub game_over_start: Option<Duration>,
 }
 
 impl SpecialDelivery {
-    fn new() -> SpecialDelivery {
+    pub fn new() -> SpecialDelivery {
         SpecialDelivery {
             now_ms: 0,
             rect: Rect::default(),
@@ -48,6 +52,7 @@ impl SpecialDelivery {
             trucks: Vec::new(),
             racks: Vec::new(),
             dropper_pos: 0,
+            game_over_start: None,
         }
     }
 }

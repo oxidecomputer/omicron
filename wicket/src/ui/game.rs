@@ -4,12 +4,14 @@
 
 //! A screen for playing terminal based games
 
+use std::time::Duration;
+
 use crate::state::game::{Rack, SpecialDelivery, Truck};
 use crate::ui::defaults::colors::*;
 use crate::{Action, Cmd, Control, Frame, State, TICK_INTERVAL};
 use ratatui::prelude::*;
-use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Paragraph, Widget};
+use ratatui::text::Line;
+use ratatui::widgets::{Paragraph, Widget};
 use slog::{debug, o, Logger};
 
 use super::defaults::dimensions::RectExt;
@@ -26,6 +28,7 @@ const MIN_DIST_BETWEEN_TRUCKS: u16 = 20;
 const MIN_TRUCK_SPEED: f32 = 10.0;
 const MAX_TRUCK_SPEED: f32 = 30.0;
 const ROAD_HEIGHT: u16 = 2;
+const MAX_GAME_OVER_VIEW_TIME: Duration = Duration::from_secs(5);
 
 /// A screen for games
 ///
@@ -54,11 +57,27 @@ impl GameScreen {
             + MIN_TRUCK_SPEED;
         if self.can_spawn_truck(state, rand_speed) {
             state.trucks.push(Truck::new(10, rand_speed, state.now_ms));
-        } else {
         }
         self.compute_truck_positions(state);
         self.compute_rack_positions(state, travel_time_ms);
         self.detect_collisions(state);
+        Self::compute_game_over(state);
+    }
+
+    fn compute_game_over(state: &mut SpecialDelivery) {
+        if state.game_over_start.is_none() && state.racks_remaining == 0 {
+            if state.trucks.iter().all(|truck| truck.landed_racks.is_empty())
+                && state.racks.is_empty()
+            {
+                state.game_over_start =
+                    Some(Duration::from_millis(state.now_ms));
+            } else if let Some(game_over_start) = state.game_over_start {
+                let now = Duration::from_millis(state.now_ms);
+                if now - game_over_start >= MAX_GAME_OVER_VIEW_TIME {
+                    *state = SpecialDelivery::new();
+                }
+            }
+        }
     }
 
     // Calculate when the tail of the last truck reaches `state.rect.width
@@ -203,16 +222,13 @@ impl Control for GameScreen {
         let state = &state.game_state.delivery;
 
         // Is the game over?
-        if state.racks_remaining == 0 {
-            if state.trucks.iter().all(|truck| truck.landed_racks.is_empty())
-                && state.racks.is_empty()
-            {
-                let rect = rect.center_horizontally(66).center_vertically(45);
-                let text = Text::from(GRUMPY_CAT);
-                let paragraph = Paragraph::new(text);
-                frame.render_widget(paragraph, rect);
-                return;
-            }
+        if state.game_over_start.is_some() {
+            let rect = rect.center_horizontally(66).center_vertically(45);
+            let text = Text::from(GRUMPY_CAT);
+            let paragraph =
+                Paragraph::new(text).style(Style::default().fg(OX_PINK));
+            frame.render_widget(paragraph, rect);
+            return;
         }
 
         // Draw the trucks
