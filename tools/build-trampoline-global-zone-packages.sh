@@ -12,7 +12,7 @@ out_dir="$(readlink -f "${2:-$tarball_src_dir}")"
 # Make sure needed packages exist
 deps=(
     "$tarball_src_dir"/installinator.tar
-    "tarball_src_dir"/maghemite.tar
+    "$tarball_src_dir"/maghemite.tar
 )
 for dep in "${deps[@]}"; do
     if [[ ! -e $dep ]]; then
