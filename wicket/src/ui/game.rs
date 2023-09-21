@@ -129,7 +129,10 @@ impl GameScreen {
     fn detect_collisions(&self, state: &mut SpecialDelivery) {
         state.racks.retain(|rack| {
             // If the rack can possibly be on a truck, then scan the trucks
-            if rack.rect.y + 1 == state.rect.height - ROAD_HEIGHT {
+            //
+            // We account for acceleration jumping more than one cell by allowing
+            // the bottom of the ract to not be exactly on top of the truck
+            if rack.rect.y + 1 >= state.rect.height - ROAD_HEIGHT {
                 for truck in &mut state.trucks {
                     if Self::rack_on_truck(rack, truck) {
                         truck
@@ -149,7 +152,7 @@ impl GameScreen {
     // Return true if the rack is positioned on a truck
     fn rack_on_truck(rack: &Rack, truck: &Truck) -> bool {
         let rack_right_pos = rack.rect.x + rack.rect.width;
-        rack.rect.x > truck.position.saturating_sub(truck.width())
+        rack.rect.x > truck.position.saturating_sub(truck.bed_width)
             && rack_right_pos < truck.position
     }
 }
@@ -210,7 +213,7 @@ impl Control for GameScreen {
             // Draw any racks on top of trucks
             // TODO: Allow more than one rack to land and detect rack collisions
             if let Some(x) = truck.landed_racks.get(0) {
-                let x = truck.position.saturating_sub(*x) + 1;
+                let x = truck.position.saturating_sub(*x);
                 let rack_rect =
                     Rect { x, y: road_rect.y - 2, width: 3, height: 2 };
                 frame.render_widget(RackWidget {}, rack_rect);
@@ -265,6 +268,9 @@ impl Control for GameScreen {
         delivered_rect.width = line.width() as u16;
         let delivered = Paragraph::new(line);
         frame.render_widget(delivered, delivered_rect);
+
+        // Draw the entry and exit tunnels
+        frame.render_widget(TunnelWidget {}, rect);
     }
 
     fn resize(&mut self, state: &mut State, rect: Rect) {
@@ -273,6 +279,26 @@ impl Control for GameScreen {
         if !self.initialized {
             self.initialized = true;
             game_state.dropper_pos = rect.width / 2;
+        }
+    }
+}
+
+struct TunnelWidget {}
+
+impl Widget for TunnelWidget {
+    fn render(self, rect: Rect, buf: &mut Buffer) {
+        // Draw the entry tunnel
+        for x in 0..3 {
+            for y in rect.height - ROAD_HEIGHT - 3..rect.height {
+                buf.get_mut(x, y).set_symbol(" ").set_bg(Color::Black);
+            }
+        }
+
+        // Draw the exit tunnel
+        for x in rect.width - 3..rect.width {
+            for y in rect.height - ROAD_HEIGHT - 3..rect.height {
+                buf.get_mut(x, y).set_symbol(" ").set_bg(Color::Black);
+            }
         }
     }
 }
