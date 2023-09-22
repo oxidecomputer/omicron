@@ -61,9 +61,9 @@ impl Resolver {
 
         let mut rc = ResolverConfig::new();
         let dns_server_count = dns_addrs.len();
-        for socket_addr in dns_addrs.into_iter() {
+        for &socket_addr in dns_addrs.into_iter() {
             rc.add_name_server(NameServerConfig {
-                socket_addr: *socket_addr,
+                socket_addr,
                 protocol: Protocol::Udp,
                 tls_dns_name: None,
                 trust_nx_responses: false,
