@@ -12,6 +12,7 @@
 //! would be the only consumer -- and in that case it's okay to query the
 //! database directly.
 
+use crate::Omdb;
 use anyhow::anyhow;
 use anyhow::bail;
 use anyhow::Context;
@@ -56,7 +57,7 @@ pub struct DbArgs {
     /// limit to apply to queries that fetch rows
     #[clap(
         long = "fetch-limit",
-        default_value_t = NonZeroU32::new(100).unwrap()
+        default_value_t = NonZeroU32::new(500).unwrap()
     )]
     fetch_limit: NonZeroU32,
 
@@ -131,17 +132,38 @@ enum ServicesCommands {
 
 impl DbArgs {
     /// Run a `omdb db` subcommand.
-    pub async fn run_cmd(
+    pub(crate) async fn run_cmd(
         &self,
+        omdb: &Omdb,
         log: &slog::Logger,
     ) -> Result<(), anyhow::Error> {
-        // This is a little goofy.  The database URL is required, but can come
-        // from the environment, in which case it won't be on the command line.
-        let Some(db_url) = &self.db_url else {
-            bail!(
-                "database URL must be specified with --db-url or OMDB_DB_URL"
-            );
+        let db_url = match &self.db_url {
+            Some(cli_or_env_url) => cli_or_env_url.clone(),
+            None => {
+                eprintln!(
+                    "note: database URL not specified.  Will search DNS."
+                );
+                eprintln!("note: (override with --db-url or OMDB_DB_URL)");
+                let addrs = omdb
+                    .dns_lookup_all(
+                        log.clone(),
+                        internal_dns::ServiceName::Cockroach,
+                    )
+                    .await?;
+
+                format!(
+                    "postgresql://root@{}/omicron?sslmode=disable",
+                    addrs
+                        .into_iter()
+                        .map(|a| a.to_string())
+                        .collect::<Vec<_>>()
+                        .join(",")
+                )
+                .parse()
+                .context("failed to parse constructed postgres URL")?
+            }
         };
+        eprintln!("note: using database URL {}", &db_url);
 
         let db_config = db::Config { url: db_url.clone() };
         let pool = Arc::new(db::Pool::new(&log.clone(), &db_config));

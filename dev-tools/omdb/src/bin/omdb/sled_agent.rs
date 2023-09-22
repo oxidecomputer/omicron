@@ -4,12 +4,13 @@
 
 //! omdb commands that query or update specific Sleds
 
+use crate::Omdb;
 use anyhow::bail;
 use anyhow::Context;
 use clap::Args;
 use clap::Subcommand;
 
-/// Arguments to the "omdb sled" subcommand
+/// Arguments to the "omdb sled-agent" subcommand
 #[derive(Debug, Args)]
 pub struct SledAgentArgs {
     /// URL of the Sled internal API
@@ -20,7 +21,7 @@ pub struct SledAgentArgs {
     command: SledAgentCommands,
 }
 
-/// Subcommands for the "omdb sled" subcommand
+/// Subcommands for the "omdb sled-agent" subcommand
 #[derive(Debug, Subcommand)]
 enum SledAgentCommands {
     /// print information about zones
@@ -45,9 +46,10 @@ enum ZpoolCommands {
 }
 
 impl SledAgentArgs {
-    /// Run a `omdb sled` subcommand.
-    pub async fn run_cmd(
+    /// Run a `omdb sled-agent` subcommand.
+    pub(crate) async fn run_cmd(
         &self,
+        _omdb: &Omdb,
         log: &slog::Logger,
     ) -> Result<(), anyhow::Error> {
         // This is a little goofy. The sled URL is required, but can come
@@ -72,7 +74,7 @@ impl SledAgentArgs {
     }
 }
 
-/// Runs `omdb sled zones list`
+/// Runs `omdb sled-agent zones list`
 async fn cmd_zones_list(
     client: &sled_agent_client::Client,
 ) -> Result<(), anyhow::Error> {
@@ -91,7 +93,7 @@ async fn cmd_zones_list(
     Ok(())
 }
 
-/// Runs `omdb sled zpools list`
+/// Runs `omdb sled-agent zpools list`
 async fn cmd_zpools_list(
     client: &sled_agent_client::Client,
 ) -> Result<(), anyhow::Error> {
