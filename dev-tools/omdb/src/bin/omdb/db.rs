@@ -315,7 +315,6 @@ async fn cmd_db_disk_list(
         attached_to: String,
     }
 
-    let mut rows = Vec::with_capacity(2);
     let ctx = || "listing disks".to_string();
 
     use db::schema::disk::dsl;
@@ -329,7 +328,7 @@ async fn cmd_db_disk_list(
 
     check_limit(&disks, limit, ctx);
 
-    rows.extend(disks.into_iter().map(|disk| DiskRow {
+    let rows = disks.into_iter().map(|disk| DiskRow {
         name: disk.name().to_string(),
         id: disk.id().to_string(),
         size: disk.size.to_string(),
@@ -338,7 +337,7 @@ async fn cmd_db_disk_list(
             Some(uuid) => uuid.to_string(),
             None => "-".to_string(),
         },
-    }));
+    });
     let table = tabled::Table::new(rows)
         .with(tabled::settings::Style::empty())
         .with(tabled::settings::Padding::new(0, 1, 0, 0))
@@ -427,7 +426,7 @@ async fn cmd_db_disk_info(
         };
         rows.push(usr);
     } else {
-        // The instance is not attached to anything, just print empty
+        // If the disk is not attached to anything, just print empty
         // fields.
         let usr = UpstairsRow {
             host_serial: "-".to_string(),
