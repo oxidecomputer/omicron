@@ -140,21 +140,6 @@ impl DataStore {
         .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
-    /// Fetches the instance with the given UUID
-    pub async fn instance_get(
-        &self,
-        instance_uuid: Uuid,
-    ) -> Result<Instance, Error> {
-        use db::schema::instance::dsl as instance_dsl;
-
-        instance_dsl::instance
-            .filter(instance_dsl::id.eq(instance_uuid))
-            .select(Instance::as_select())
-            .first_async::<Instance>(self.pool())
-            .await
-            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
-    }
-
     /// Fetches information about an Instance that the caller has previously
     /// fetched
     ///

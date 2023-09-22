@@ -23,10 +23,12 @@ use clap::ValueEnum;
 use diesel::expression::SelectableHelper;
 use diesel::query_dsl::QueryDsl;
 use diesel::ExpressionMethods;
+use nexus_db_model::Disk;
 use nexus_db_model::DnsGroup;
 use nexus_db_model::DnsName;
 use nexus_db_model::DnsVersion;
 use nexus_db_model::DnsZone;
+use nexus_db_model::Instance;
 use nexus_db_model::Sled;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
@@ -186,7 +188,7 @@ impl DbArgs {
                 command: DiskCommands::Info(uuid),
             }) => cmd_db_disk_info(&opctx, &datastore, uuid).await,
             DbCommands::Disks(DiskArgs { command: DiskCommands::List }) => {
-                cmd_db_disk_list(&opctx, &datastore, self.fetch_limit).await
+                cmd_db_disk_list(&datastore, self.fetch_limit).await
             }
             DbCommands::Dns(DnsArgs { command: DnsCommands::Show }) => {
                 cmd_db_dns_show(&opctx, &datastore, self.fetch_limit).await
@@ -300,7 +302,6 @@ fn first_page<'a, T>(limit: NonZeroU32) -> DataPageParams<'a, T> {
 
 /// Run `omdb db disk list`.
 async fn cmd_db_disk_list(
-    opctx: &OpContext,
     datastore: &DataStore,
     limit: NonZeroU32,
 ) -> Result<(), anyhow::Error> {
@@ -317,10 +318,14 @@ async fn cmd_db_disk_list(
     let mut rows = Vec::with_capacity(2);
     let ctx = || "listing disks".to_string();
 
-    let disks = datastore
-        .disk_list_all(opctx, &first_page(limit))
-        .await
-        .with_context(ctx)?;
+    use db::schema::disk::dsl;
+    let disks = dsl::disk
+            .filter(dsl::time_deleted.is_null())
+            .limit(i64::from(u32::from(limit)))
+            .select(Disk::as_select())
+            .load_async(datastore.pool_for_tests().await?)
+            .await
+            .context("loading disks")?;
 
     check_limit(&disks, limit, ctx);
 
@@ -370,19 +375,40 @@ async fn cmd_db_disk_info(
         physical_disk: String,
     }
 
-    let ctx = || "Getting disk info".to_string();
+    use db::schema::disk::dsl as disk_dsl;
 
-    let disk = datastore.disk_get(args.uuid).await.with_context(ctx)?;
+    let disk = disk_dsl::disk
+            .filter(disk_dsl::id.eq(args.uuid))
+            .limit(1)
+            .select(Disk::as_select())
+            .load_async(datastore.pool_for_tests().await?)
+            .await
+            .context("loading requested disk")?;
+
+    let Some(disk) = disk.into_iter().next() else {
+        bail!("no disk: {} found", args.uuid);
+    };
 
     // For information about where this disk is attached.
     let mut rows = Vec::new();
 
     // If the disk is attached to an instance, show information
     // about that instance.
-    if let Some(instanc_uuid) = disk.runtime().attach_instance_id {
+    if let Some(instance_uuid) = disk.runtime().attach_instance_id {
         // Get the instance this disk is attached to
+        use db::schema::instance::dsl as instance_dsl;
         let instance =
-            datastore.instance_get(instanc_uuid).await.with_context(ctx)?;
+            instance_dsl::instance
+            .filter(instance_dsl::id.eq(instance_uuid))
+            .limit(1)
+            .select(Instance::as_select())
+            .load_async(datastore.pool_for_tests().await?)
+            .await
+            .context("loading requested instance")?;
+
+		let Some(instance) = instance.into_iter().next() else {
+			bail!("no instance: {} found", instance_uuid);
+		};
 
         let instance_name = instance.name().to_string();
         let propolis_id = instance.runtime().propolis_id.to_string();

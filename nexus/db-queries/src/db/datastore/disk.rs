@@ -35,7 +35,6 @@ use diesel::prelude::*;
 use omicron_common::api;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
-use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
@@ -150,35 +149,6 @@ impl DataStore {
         .load_async::<Disk>(self.pool_authorized(opctx).await?)
         .await
         .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
-    }
-
-    /// Fetch all disks (subject to pagparams)
-    pub async fn disk_list_all(
-        &self,
-        opctx: &OpContext,
-        pagparams: &DataPageParams<'_, String>,
-    ) -> ListResultVec<Disk> {
-        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
-
-        use db::schema::disk::dsl;
-        paginated(dsl::disk, dsl::name, pagparams)
-            .filter(dsl::time_deleted.is_null())
-            .select(Disk::as_select())
-            .load_async::<Disk>(self.pool_authorized(opctx).await?)
-            .await
-            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
-    }
-
-    /// Fetches the disk with the given UUID
-    pub async fn disk_get(&self, disk_uuid: Uuid) -> Result<Disk, Error> {
-        use db::schema::disk::dsl as disk_dsl;
-
-        disk_dsl::disk
-            .filter(disk_dsl::id.eq(disk_uuid))
-            .select(Disk::as_select())
-            .first_async::<Disk>(self.pool())
-            .await
-            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
     /// Attaches a disk to an instance, if both objects:
