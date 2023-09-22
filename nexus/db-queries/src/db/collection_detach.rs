@@ -591,7 +591,7 @@ mod test {
 
         diesel::insert_into(collection::table)
             .values(c)
-            .execute_async(&*conn)
+            .execute_async(conn)
             .await
             .unwrap();
 
@@ -605,7 +605,7 @@ mod test {
         collection::table
             .find(id)
             .select(Collection::as_select())
-            .first_async(&*conn)
+            .first_async(conn)
             .await
             .unwrap()
     }
@@ -626,7 +626,7 @@ mod test {
 
         diesel::insert_into(resource::table)
             .values(r)
-            .execute_async(&*conn)
+            .execute_async(conn)
             .await
             .unwrap();
 
@@ -659,7 +659,7 @@ mod test {
         resource::table
             .find(id)
             .select(Resource::as_select())
-            .first_async(&*conn)
+            .first_async(conn)
             .await
             .unwrap()
     }
@@ -984,7 +984,7 @@ mod test {
             diesel::update(resource::table)
                 .set(resource::dsl::collection_id.eq(collection_id)),
         )
-        .detach_and_get_result_async(&*conn)
+        .detach_and_get_result_async(&conn)
         .await;
         assert!(matches!(detach, Err(DetachError::ResourceNotFound)));
 

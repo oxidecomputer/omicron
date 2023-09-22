@@ -1032,7 +1032,7 @@ mod test {
             diesel::update(resource::table)
                 .set(resource::dsl::collection_id.eq(Option::<Uuid>::None)),
         )
-        .detach_and_get_result_async(&*conn)
+        .detach_and_get_result_async(&conn)
         .await;
 
         let err = detach.expect_err("Expected this detach to fail");
@@ -1092,7 +1092,7 @@ mod test {
             diesel::update(resource::table)
                 .set(resource::dsl::collection_id.eq(collection_id)),
         )
-        .detach_and_get_result_async(&*conn)
+        .detach_and_get_result_async(&conn)
         .await;
 
         assert_eq!(
@@ -1157,7 +1157,7 @@ mod test {
             diesel::update(resource::table)
                 .set(resource::dsl::collection_id.eq(Option::<Uuid>::None)),
         )
-        .detach_and_get_result_async(&*conn)
+        .detach_and_get_result_async(&conn)
         .await;
 
         let returned_resource = detach.expect("Detach should have worked");

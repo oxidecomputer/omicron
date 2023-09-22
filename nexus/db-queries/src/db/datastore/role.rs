@@ -197,7 +197,7 @@ impl DataStore {
         authz_resource: &T,
     ) -> ListResultVec<db::model::RoleAssignment> {
         let conn = self.pool_connection_authorized(opctx).await?;
-        self.role_assignment_fetch_visible_conn(opctx, authz_resource, &*conn)
+        self.role_assignment_fetch_visible_conn(opctx, authz_resource, &conn)
             .await
     }
 

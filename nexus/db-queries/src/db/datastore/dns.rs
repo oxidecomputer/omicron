@@ -88,7 +88,7 @@ impl DataStore {
             .order(dsl::zone_name.asc())
             .limit(i64::try_from(LIMIT).unwrap())
             .select(DnsZone::as_select())
-            .load_async(&*conn)
+            .load_async(conn)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
@@ -128,7 +128,7 @@ impl DataStore {
             .order_by(dsl::version.desc())
             .limit(1)
             .select(DnsVersion::as_select())
-            .load_async(&*conn)
+            .load_async(conn)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 

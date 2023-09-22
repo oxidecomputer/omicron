@@ -318,7 +318,7 @@ impl DataStore {
             project_id,
             diesel::insert_into(dsl::vpc).values(vpc_query),
         )
-        .insert_and_get_result_async(&*conn)
+        .insert_and_get_result_async(&conn)
         .await
         .map_err(|e| match e {
             AsyncInsertError::CollectionNotFound => Error::ObjectNotFound {

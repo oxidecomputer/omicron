@@ -158,7 +158,7 @@ impl DataStore {
             .pool_connection_authorized(opctx)
             .await
             .map_err(network_interface::InsertError::External)?;
-        self.create_network_interface_raw_conn(&*conn, interface).await
+        self.create_network_interface_raw_conn(&conn, interface).await
     }
 
     pub(crate) async fn create_network_interface_raw_conn(

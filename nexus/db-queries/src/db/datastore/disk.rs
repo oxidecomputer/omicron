@@ -588,7 +588,7 @@ impl DataStore {
             .filter(dsl::attach_instance_id.is_null())
             .set((dsl::disk_state.eq(destroyed), dsl::time_deleted.eq(now)))
             .check_if_exists::<Disk>(*disk_id)
-            .execute_and_check(&*conn)
+            .execute_and_check(&conn)
             .await
             .map_err(|e| {
                 public_error_from_diesel_pool(

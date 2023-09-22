@@ -38,7 +38,7 @@ impl DataStore {
         service: Service,
     ) -> CreateResult<Service> {
         let conn = self.pool_connection_authorized(opctx).await?;
-        self.service_upsert_conn(&*conn, service).await
+        self.service_upsert_conn(&conn, service).await
     }
 
     /// Stores a new service in the database (using an existing db connection).

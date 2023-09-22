@@ -133,7 +133,7 @@ impl DataStore {
         data: IncompleteExternalIp,
     ) -> CreateResult<ExternalIp> {
         let conn = self.pool_connection_authorized(opctx).await?;
-        Self::allocate_external_ip_on_connection(&*conn, data).await
+        Self::allocate_external_ip_on_connection(&conn, data).await
     }
 
     /// Variant of [Self::allocate_external_ip] which may be called from a

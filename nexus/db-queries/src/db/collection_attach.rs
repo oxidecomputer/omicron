@@ -677,7 +677,7 @@ mod test {
 
         diesel::insert_into(collection::table)
             .values(c)
-            .execute_async(&*conn)
+            .execute_async(conn)
             .await
             .unwrap();
 
@@ -726,7 +726,7 @@ mod test {
         resource::table
             .find(id)
             .select(Resource::as_select())
-            .first_async(&*conn)
+            .first_async(conn)
             .await
             .unwrap()
     }
