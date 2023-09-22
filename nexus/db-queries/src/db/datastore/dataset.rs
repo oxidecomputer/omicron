@@ -8,7 +8,7 @@ use super::DataStore;
 use crate::db;
 use crate::db::collection_insert::AsyncInsertError;
 use crate::db::collection_insert::DatastoreCollection;
-use crate::db::error::public_error_from_diesel_pool;
+use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
 use crate::db::identity::Asset;
 use crate::db::model::Dataset;
@@ -54,7 +54,7 @@ impl DataStore {
                 lookup_type: LookupType::ById(zpool_id),
             },
             AsyncInsertError::DatabaseError(e) => {
-                public_error_from_diesel_pool(
+                public_error_from_diesel(
                     e,
                     ErrorHandler::Conflict(
                         ResourceType::Dataset,

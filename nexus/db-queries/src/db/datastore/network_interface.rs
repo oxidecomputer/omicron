@@ -11,6 +11,7 @@ use crate::db;
 use crate::db::collection_insert::AsyncInsertError;
 use crate::db::collection_insert::DatastoreCollection;
 use crate::db::cte_utils::BoxedQuery;
+use crate::db::error::public_error_from_diesel;
 use crate::db::error::public_error_from_diesel_pool;
 use crate::db::error::ErrorHandler;
 use crate::db::error::TransactionError;
@@ -185,7 +186,7 @@ impl DataStore {
                 )
             }
             AsyncInsertError::DatabaseError(e) => {
-                network_interface::InsertError::from_pool(e, &interface)
+                network_interface::InsertError::from_diesel(e, &interface)
             }
         })
     }
@@ -205,10 +206,10 @@ impl DataStore {
             .filter(dsl::kind.eq(NetworkInterfaceKind::Instance))
             .filter(dsl::time_deleted.is_null())
             .set(dsl::time_deleted.eq(now))
-            .execute_async(self.pool_authorized(opctx).await?)
+            .execute_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| {
-                public_error_from_diesel_pool(
+                public_error_from_diesel(
                     e,
                     ErrorHandler::NotFoundByResource(authz_instance),
                 )
@@ -238,13 +239,13 @@ impl DataStore {
         query
             .clone()
             .execute_async(
-                self.pool_authorized(opctx)
+                &*self.pool_connection_authorized(opctx)
                     .await
                     .map_err(network_interface::DeleteError::External)?,
             )
             .await
             .map_err(|e| {
-                network_interface::DeleteError::from_pool(e, &query)
+                network_interface::DeleteError::from_diesel(e, &query)
             })?;
         Ok(())
     }

@@ -326,7 +326,7 @@ impl DataStore {
                 lookup_type: LookupType::ById(project_id),
             },
             AsyncInsertError::DatabaseError(e) => {
-                public_error_from_diesel_pool(
+                public_error_from_diesel(
                     e,
                     ErrorHandler::Conflict(ResourceType::Vpc, name.as_str()),
                 )
@@ -972,7 +972,7 @@ impl DataStore {
                 lookup_type: LookupType::ById(router_id),
             },
             AsyncInsertError::DatabaseError(e) => {
-                public_error_from_diesel_pool(
+                public_error_from_diesel(
                     e,
                     ErrorHandler::Conflict(
                         ResourceType::RouterRoute,

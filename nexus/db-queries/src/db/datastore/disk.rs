@@ -106,7 +106,7 @@ impl DataStore {
         .map_err(|e| match e {
             AsyncInsertError::CollectionNotFound => authz_project.not_found(),
             AsyncInsertError::DatabaseError(e) => {
-                public_error_from_diesel_pool(
+                public_error_from_diesel(
                     e,
                     ErrorHandler::Conflict(ResourceType::Disk, name.as_str()),
                 )

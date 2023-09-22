@@ -10,6 +10,7 @@ use crate::context::OpContext;
 use crate::db;
 use crate::db::collection_insert::AsyncInsertError;
 use crate::db::collection_insert::DatastoreCollection;
+use crate::db::error::public_error_from_diesel;
 use crate::db::error::public_error_from_diesel_pool;
 use crate::db::error::ErrorHandler;
 use crate::db::model::PhysicalDisk;
@@ -70,7 +71,7 @@ impl DataStore {
                 lookup_type: LookupType::ById(sled_id),
             },
             AsyncInsertError::DatabaseError(e) => {
-                public_error_from_diesel_pool(e, ErrorHandler::Server)
+                public_error_from_diesel(e, ErrorHandler::Server)
             }
         })?;
 
@@ -104,9 +105,9 @@ impl DataStore {
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::sled_id.eq(sled_id))
             .select(PhysicalDisk::as_select())
-            .load_async(self.pool_authorized(opctx).await?)
+            .load_async(&*self.pool_connection_authorized(opctx).await?)
             .await
-            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     /// Deletes a disk from the database.
@@ -127,10 +128,10 @@ impl DataStore {
             .filter(dsl::model.eq(model))
             .filter(dsl::sled_id.eq(sled_id))
             .set(dsl::time_deleted.eq(now))
-            .execute_async(self.pool())
+            .execute_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map(|_rows_modified| ())
-            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 }
 

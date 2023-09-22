@@ -102,7 +102,7 @@ impl From<TxnError> for Error {
                     lookup_type: LookupType::ById(zpool_id),
                 },
                 AsyncInsertError::DatabaseError(e) => {
-                    public_error_from_diesel_pool(e, ErrorHandler::Server)
+                    public_error_from_diesel(e, ErrorHandler::Server)
                 }
             },
             TxnError::CustomError(RackInitError::ServiceInsert(err)) => {

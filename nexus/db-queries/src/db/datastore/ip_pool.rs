@@ -11,6 +11,7 @@ use crate::db;
 use crate::db::collection_insert::AsyncInsertError;
 use crate::db::collection_insert::DatastoreCollection;
 use crate::db::error::diesel_pool_result_optional;
+use crate::db::error::public_error_from_diesel;
 use crate::db::error::public_error_from_diesel_pool;
 use crate::db::error::ErrorHandler;
 use crate::db::fixed_data::silo::INTERNAL_SILO_ID;
@@ -310,13 +311,18 @@ impl DataStore {
             .await
             .map_err(|e| {
                 use async_bb8_diesel::ConnectionError::Query;
-                use async_bb8_diesel::PoolError::Connection;
                 use diesel::result::Error::NotFound;
 
                 match e {
-                    AsyncInsertError::DatabaseError(Connection(Query(
+                    AsyncInsertError::CollectionNotFound => {
+                        Error::ObjectNotFound {
+                            type_name: ResourceType::IpPool,
+                            lookup_type: LookupType::ById(pool_id),
+                        }
+                    }
+                    AsyncInsertError::DatabaseError(Query(
                         NotFound,
-                    ))) => {
+                    )) => {
                         // We've filtered out the IP addresses the client provided,
                         // i.e., there's some overlap with existing addresses.
                         Error::invalid_request(
@@ -329,14 +335,8 @@ impl DataStore {
                             .as_str(),
                         )
                     }
-                    AsyncInsertError::CollectionNotFound => {
-                        Error::ObjectNotFound {
-                            type_name: ResourceType::IpPool,
-                            lookup_type: LookupType::ById(pool_id),
-                        }
-                    }
                     AsyncInsertError::DatabaseError(err) => {
-                        public_error_from_diesel_pool(err, ErrorHandler::Server)
+                        public_error_from_diesel(err, ErrorHandler::Server)
                     }
                 }
             })

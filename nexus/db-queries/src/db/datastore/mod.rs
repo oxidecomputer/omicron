@@ -209,6 +209,7 @@ impl DataStore {
         self.pool.pool()
     }
 
+    // TODO: Deprecate?
     pub(super) async fn pool_authorized(
         &self,
         opctx: &OpContext,
@@ -244,6 +245,7 @@ impl DataStore {
     }
 
     /// For testing only. This isn't cfg(test) because nexus needs access to it.
+    // TODO: Deprecate?
     #[doc(hidden)]
     pub async fn pool_for_tests(
         &self,

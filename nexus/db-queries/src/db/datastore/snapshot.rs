@@ -10,6 +10,7 @@ use crate::context::OpContext;
 use crate::db;
 use crate::db::collection_insert::AsyncInsertError;
 use crate::db::collection_insert::DatastoreCollection;
+use crate::db::error::public_error_from_diesel;
 use crate::db::error::public_error_from_diesel_pool;
 use crate::db::error::ErrorHandler;
 use crate::db::model::Generation;
@@ -63,7 +64,7 @@ impl DataStore {
         let project_id = snapshot.project_id;
 
         let snapshot: Snapshot = self
-            .pool_authorized(opctx)
+            .pool_connection_authorized(opctx)
             .await?
             .transaction_async(|conn| async move {
                 use db::schema::snapshot::dsl;
@@ -157,7 +158,7 @@ impl DataStore {
                             }
                         }
                         AsyncInsertError::DatabaseError(e) => {
-                            public_error_from_diesel_pool(
+                            public_error_from_diesel(
                                 e,
                                 ErrorHandler::Server,
                             )
@@ -203,10 +204,10 @@ impl DataStore {
             .filter(dsl::gen.eq(old_gen))
             .set((dsl::state.eq(new_state), dsl::gen.eq(next_gen)))
             .returning(Snapshot::as_returning())
-            .get_result_async(self.pool_authorized(opctx).await?)
+            .get_result_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| {
-                public_error_from_diesel_pool(
+                public_error_from_diesel(
                     e,
                     ErrorHandler::NotFoundByResource(authz_snapshot),
                 )
@@ -235,9 +236,9 @@ impl DataStore {
         .filter(dsl::time_deleted.is_null())
         .filter(dsl::project_id.eq(authz_project.id()))
         .select(Snapshot::as_select())
-        .load_async::<Snapshot>(self.pool_authorized(opctx).await?)
+        .load_async::<Snapshot>(&*self.pool_connection_authorized(opctx).await?)
         .await
-        .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     pub async fn project_delete_snapshot(
@@ -273,10 +274,10 @@ impl DataStore {
                 dsl::state.eq(SnapshotState::Destroyed),
             ))
             .check_if_exists::<Snapshot>(snapshot_id)
-            .execute_async(self.pool_authorized(&opctx).await?)
+            .execute_async(&*self.pool_connection_authorized(&opctx).await?)
             .await
             .map_err(|e| {
-                public_error_from_diesel_pool(e, ErrorHandler::Server)
+                public_error_from_diesel(e, ErrorHandler::Server)
             })?;
 
         if updated_rows == 0 {

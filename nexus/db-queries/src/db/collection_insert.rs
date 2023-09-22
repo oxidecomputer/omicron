@@ -10,7 +10,7 @@
 //! 3) inserts the child resource row
 
 use super::pool::DbConnection;
-use async_bb8_diesel::{AsyncRunQueryDsl, ConnectionError, PoolError};
+use async_bb8_diesel::{AsyncRunQueryDsl, ConnectionError};
 use diesel::associations::HasTable;
 use diesel::helper_types::*;
 use diesel::pg::Pg;
@@ -170,7 +170,7 @@ pub enum AsyncInsertError {
     /// The collection that the query was inserting into does not exist
     CollectionNotFound,
     /// Other database error
-    DatabaseError(PoolError),
+    DatabaseError(ConnectionError),
 }
 
 impl<ResourceType, ISR, C> InsertIntoCollectionStatement<ResourceType, ISR, C>
@@ -201,7 +201,7 @@ where
     {
         self.get_result_async::<ResourceType>(conn)
             .await
-            .map_err(|e| Self::translate_async_error(PoolError::from(e)))
+            .map_err(|e| Self::translate_async_error(ConnectionError::from(e)))
     }
 
     /// Issues the CTE asynchronously and parses the result.
@@ -220,7 +220,7 @@ where
     {
         self.get_results_async::<ResourceType>(conn)
             .await
-            .map_err(|e| Self::translate_async_error(PoolError::from(e)))
+            .map_err(|e| Self::translate_async_error(ConnectionError::from(e)))
     }
 
     /// Check for the intentional division by zero error
@@ -241,10 +241,9 @@ where
 
     /// Translate from diesel errors into AsyncInsertError, handling the
     /// intentional division-by-zero error in the CTE.
-    fn translate_async_error(err: PoolError) -> AsyncInsertError {
+    fn translate_async_error(err: ConnectionError) -> AsyncInsertError {
         match err {
-            PoolError::Connection(ConnectionError::Query(err))
-                if Self::error_is_division_by_zero(&err) =>
+            ConnectionError::Query(err) if Self::error_is_division_by_zero(&err) =>
             {
                 AsyncInsertError::CollectionNotFound
             }
