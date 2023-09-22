@@ -347,6 +347,7 @@ impl<'a> LookupPath<'a> {
         Sled::PrimaryKey(Root { lookup_root: self }, id)
     }
 
+    /// Select a resource of type Zpool, identified by its id
     pub fn zpool_id(self, id: Uuid) -> Zpool<'a> {
         Zpool::PrimaryKey(Root { lookup_root: self }, id)
     }
