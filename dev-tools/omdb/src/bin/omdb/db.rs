@@ -320,12 +320,12 @@ async fn cmd_db_disk_list(
 
     use db::schema::disk::dsl;
     let disks = dsl::disk
-            .filter(dsl::time_deleted.is_null())
-            .limit(i64::from(u32::from(limit)))
-            .select(Disk::as_select())
-            .load_async(datastore.pool_for_tests().await?)
-            .await
-            .context("loading disks")?;
+        .filter(dsl::time_deleted.is_null())
+        .limit(i64::from(u32::from(limit)))
+        .select(Disk::as_select())
+        .load_async(datastore.pool_for_tests().await?)
+        .await
+        .context("loading disks")?;
 
     check_limit(&disks, limit, ctx);
 
@@ -378,12 +378,12 @@ async fn cmd_db_disk_info(
     use db::schema::disk::dsl as disk_dsl;
 
     let disk = disk_dsl::disk
-            .filter(disk_dsl::id.eq(args.uuid))
-            .limit(1)
-            .select(Disk::as_select())
-            .load_async(datastore.pool_for_tests().await?)
-            .await
-            .context("loading requested disk")?;
+        .filter(disk_dsl::id.eq(args.uuid))
+        .limit(1)
+        .select(Disk::as_select())
+        .load_async(datastore.pool_for_tests().await?)
+        .await
+        .context("loading requested disk")?;
 
     let Some(disk) = disk.into_iter().next() else {
         bail!("no disk: {} found", args.uuid);
@@ -397,8 +397,7 @@ async fn cmd_db_disk_info(
     if let Some(instance_uuid) = disk.runtime().attach_instance_id {
         // Get the instance this disk is attached to
         use db::schema::instance::dsl as instance_dsl;
-        let instance =
-            instance_dsl::instance
+        let instance = instance_dsl::instance
             .filter(instance_dsl::id.eq(instance_uuid))
             .limit(1)
             .select(Instance::as_select())
@@ -406,9 +405,9 @@ async fn cmd_db_disk_info(
             .await
             .context("loading requested instance")?;
 
-		let Some(instance) = instance.into_iter().next() else {
-			bail!("no instance: {} found", instance_uuid);
-		};
+        let Some(instance) = instance.into_iter().next() else {
+            bail!("no instance: {} found", instance_uuid);
+        };
 
         let instance_name = instance.name().to_string();
         let propolis_id = instance.runtime().propolis_id.to_string();
