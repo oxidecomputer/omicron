@@ -107,7 +107,7 @@ async fn test_omdb_env_settings(cptestctx: &ControlPlaneTestContext) {
     let postgres_url = cptestctx.database.listen_url().to_string();
     let nexus_internal_url =
         format!("http://{}", cptestctx.internal_client.bind_address);
-    let dns_sockaddr = *cptestctx.internal_dns.dns_server.local_address();
+    let dns_sockaddr = cptestctx.internal_dns.dns_server.local_address();
     let mut output = String::new();
 
     // Database URL
