@@ -219,9 +219,7 @@ impl DataStore {
             .limit(1)
             .first_async::<Uuid>(&*conn)
             .await
-            .map_err(|e| {
-                public_error_from_diesel(e, ErrorHandler::Server)
-            })?;
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
         Ok(address_lot_id)
     }

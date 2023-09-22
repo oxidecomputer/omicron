@@ -9,6 +9,7 @@ use crate::authz;
 use crate::authz::ApiResource;
 use crate::context::OpContext;
 use crate::db;
+use crate::db::error::public_error_from_diesel;
 use crate::db::error::public_error_from_diesel_pool;
 use crate::db::error::ErrorHandler;
 use crate::db::lookup::LookupPath;
@@ -233,7 +234,7 @@ impl DataStore {
             .filter(dsl::id.eq(ip_id))
             .set(dsl::time_deleted.eq(now))
             .check_if_exists::<ExternalIp>(ip_id)
-            .execute_and_check(self.pool_authorized(opctx).await?)
+            .execute_and_check(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map(|r| match r.status {
                 UpdateStatus::Updated => true,
@@ -263,9 +264,9 @@ impl DataStore {
             .filter(dsl::parent_id.eq(instance_id))
             .filter(dsl::kind.ne(IpKind::Floating))
             .set(dsl::time_deleted.eq(now))
-            .execute_async(self.pool_authorized(opctx).await?)
+            .execute_async(&*self.pool_connection_authorized(opctx).await?)
             .await
-            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     /// Fetch all external IP addresses of any kind for the provided instance
@@ -280,8 +281,8 @@ impl DataStore {
             .filter(dsl::parent_id.eq(instance_id))
             .filter(dsl::time_deleted.is_null())
             .select(ExternalIp::as_select())
-            .get_results_async(self.pool_authorized(opctx).await?)
+            .get_results_async(&*self.pool_connection_authorized(opctx).await?)
             .await
-            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 }

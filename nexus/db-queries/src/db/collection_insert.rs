@@ -182,8 +182,6 @@ where
     ISR: 'static + Send,
     InsertIntoCollectionStatement<ResourceType, ISR, C>: Send,
 {
-
-
     // TODO: LOOK FOR ALL "impl.*AsyncConnection" cases, make 'em act on the
     // One True Connection only (monomorphin' time)
 
@@ -195,7 +193,7 @@ where
     /// - Error(other diesel error)
     pub async fn insert_and_get_result_async(
         self,
-        conn: &async_bb8_diesel::Connection<DbConnection>
+        conn: &async_bb8_diesel::Connection<DbConnection>,
     ) -> AsyncInsertIntoCollectionResult<ResourceType>
     where
         // We require this bound to ensure that "Self" is runnable as query.
@@ -212,16 +210,13 @@ where
     /// - Ok(Vec of new rows)
     /// - Error(collection not found)
     /// - Error(other diesel error)
-    pub async fn insert_and_get_results_async<ConnErr>(
+    pub async fn insert_and_get_results_async(
         self,
-        conn: &(impl async_bb8_diesel::AsyncConnection<DbConnection, ConnErr>
-              + Sync),
+        conn: &async_bb8_diesel::Connection<DbConnection>,
     ) -> AsyncInsertIntoCollectionResult<Vec<ResourceType>>
     where
         // We require this bound to ensure that "Self" is runnable as query.
         Self: query_methods::LoadQuery<'static, DbConnection, ResourceType>,
-        ConnErr: From<diesel::result::Error> + Send + 'static,
-        PoolError: From<ConnErr>,
     {
         self.get_results_async::<ResourceType>(conn)
             .await

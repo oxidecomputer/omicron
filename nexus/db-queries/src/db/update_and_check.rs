@@ -153,16 +153,13 @@ where
     /// - Ok(Row exists and was updated)
     /// - Ok(Row exists, but was not updated)
     /// - Error (row doesn't exist, or other diesel error)
-    pub async fn execute_and_check<ConnErr>(
+    pub async fn execute_and_check(
         self,
-        conn: &(impl async_bb8_diesel::AsyncConnection<DbConnection, ConnErr>
-              + Sync),
+        conn: &async_bb8_diesel::Connection<DbConnection>,
     ) -> Result<UpdateAndQueryResult<Q>, PoolError>
     where
         // We require this bound to ensure that "Self" is runnable as query.
         Self: LoadQuery<'static, DbConnection, (Option<K>, Option<K>, Q)>,
-        ConnErr: From<diesel::result::Error> + Send + 'static,
-        PoolError: From<ConnErr>,
     {
         let (id0, id1, found) =
             self.get_result_async::<(Option<K>, Option<K>, Q)>(conn).await?;

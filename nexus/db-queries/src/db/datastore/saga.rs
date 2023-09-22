@@ -75,7 +75,7 @@ impl DataStore {
             .filter(dsl::adopt_generation.eq(current_adopt_generation))
             .set(dsl::saga_state.eq(db::saga_types::SagaCachedState(new_state)))
             .check_if_exists::<db::saga_types::Saga>(saga_id)
-            .execute_and_check(self.pool())
+            .execute_and_check(&*self.pool_connection_unauthorized().await?)
             .await
             .map_err(|e| {
                 public_error_from_diesel_pool(

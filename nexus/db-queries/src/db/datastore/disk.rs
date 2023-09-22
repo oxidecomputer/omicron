@@ -99,7 +99,9 @@ impl DataStore {
                 .do_update()
                 .set(dsl::time_modified.eq(dsl::time_modified)),
         )
-        .insert_and_get_result_async(&*self.pool_connection_authorized(opctx).await?)
+        .insert_and_get_result_async(
+            &*self.pool_connection_authorized(opctx).await?,
+        )
         .await
         .map_err(|e| match e {
             AsyncInsertError::CollectionNotFound => authz_project.not_found(),
@@ -439,7 +441,7 @@ impl DataStore {
             .filter(dsl::state_generation.lt(new_runtime.gen))
             .set(new_runtime.clone())
             .check_if_exists::<Disk>(disk_id)
-            .execute_and_check(self.pool())
+            .execute_and_check(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map(|r| match r.status {
                 UpdateStatus::Updated => true,
@@ -572,7 +574,7 @@ impl DataStore {
         ok_to_delete_states: &[api::external::DiskState],
     ) -> Result<db::model::Disk, Error> {
         use db::schema::disk::dsl;
-        let pool = self.pool();
+        let conn = self.pool_connection_unauthorized().await?;
         let now = Utc::now();
 
         let ok_to_delete_state_labels: Vec<_> =
@@ -586,7 +588,7 @@ impl DataStore {
             .filter(dsl::attach_instance_id.is_null())
             .set((dsl::disk_state.eq(destroyed), dsl::time_deleted.eq(now)))
             .check_if_exists::<Disk>(*disk_id)
-            .execute_and_check(pool)
+            .execute_and_check(&*conn)
             .await
             .map_err(|e| {
                 public_error_from_diesel_pool(

@@ -115,9 +115,7 @@ pub fn diesel_result_optional<T>(
 ) -> Result<Option<T>, ConnectionError> {
     match result {
         Ok(v) => Ok(Some(v)),
-        Err(ConnectionError::Query(
-            DieselError::NotFound,
-        )) => Ok(None),
+        Err(ConnectionError::Query(DieselError::NotFound)) => Ok(None),
         Err(e) => Err(e),
     }
 }
@@ -178,32 +176,37 @@ pub fn public_error_from_diesel(
     handler: ErrorHandler<'_>,
 ) -> PublicError {
     match error {
-        ConnectionError::Connection(error) => {
-            PublicError::unavail(
-                &format!("Failed to access connection pool: {}", error),
-            )
-        },
-        ConnectionError::Query(error) => {
-            match handler {
-                ErrorHandler::NotFoundByResource(resource) => {
-                    public_error_from_diesel_lookup(
-                        error,
-                        resource.resource_type(),
-                        resource.lookup_type(),
-                    )
-                }
-                ErrorHandler::NotFoundByLookup(resource_type, lookup_type) => {
-                    public_error_from_diesel_lookup(error, resource_type, &lookup_type)
-                }
-                ErrorHandler::Conflict(resource_type, object_name) => {
-                    public_error_from_diesel_create(error, resource_type, object_name)
-                }
-                ErrorHandler::Server => PublicError::internal_error(&format!(
-                    "unexpected database error: {:#}",
-                    error
-                )),
+        ConnectionError::Connection(error) => PublicError::unavail(&format!(
+            "Failed to access connection pool: {}",
+            error
+        )),
+        ConnectionError::Query(error) => match handler {
+            ErrorHandler::NotFoundByResource(resource) => {
+                public_error_from_diesel_lookup(
+                    error,
+                    resource.resource_type(),
+                    resource.lookup_type(),
+                )
             }
-        }
+            ErrorHandler::NotFoundByLookup(resource_type, lookup_type) => {
+                public_error_from_diesel_lookup(
+                    error,
+                    resource_type,
+                    &lookup_type,
+                )
+            }
+            ErrorHandler::Conflict(resource_type, object_name) => {
+                public_error_from_diesel_create(
+                    error,
+                    resource_type,
+                    object_name,
+                )
+            }
+            ErrorHandler::Server => PublicError::internal_error(&format!(
+                "unexpected database error: {:#}",
+                error
+            )),
+        },
     }
 }
 

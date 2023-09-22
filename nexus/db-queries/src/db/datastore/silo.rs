@@ -126,9 +126,9 @@ impl DataStore {
         new_silo_dns_names: &[String],
         dns_update: DnsVersionUpdateBuilder,
     ) -> CreateResult<Silo> {
-        let conn = self.pool_authorized(opctx).await?;
+        let conn = self.pool_connection_authorized(opctx).await?;
         self.silo_create_conn(
-            conn,
+            &conn,
             opctx,
             nexus_opctx,
             new_silo_params,
@@ -138,27 +138,15 @@ impl DataStore {
         .await
     }
 
-    pub async fn silo_create_conn<ConnErr, CalleeConnErr>(
+    pub async fn silo_create_conn(
         &self,
-        conn: &(impl async_bb8_diesel::AsyncConnection<DbConnection, ConnErr>
-              + Sync),
+        conn: &async_bb8_diesel::Connection<DbConnection>,
         opctx: &OpContext,
         nexus_opctx: &OpContext,
         new_silo_params: params::SiloCreate,
         new_silo_dns_names: &[String],
         dns_update: DnsVersionUpdateBuilder,
-    ) -> CreateResult<Silo>
-    where
-        ConnErr: From<diesel::result::Error> + Send + 'static,
-        PoolError: From<ConnErr>,
-        TransactionError<Error>: From<ConnErr>,
-
-        CalleeConnErr: From<diesel::result::Error> + Send + 'static,
-        PoolError: From<CalleeConnErr>,
-        TransactionError<Error>: From<CalleeConnErr>,
-        async_bb8_diesel::Connection<DbConnection>:
-            AsyncConnection<DbConnection, CalleeConnErr>,
-    {
+    ) -> CreateResult<Silo> {
         let silo_id = Uuid::new_v4();
         let silo_group_id = Uuid::new_v4();
 

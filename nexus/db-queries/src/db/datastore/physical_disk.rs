@@ -60,7 +60,9 @@ impl DataStore {
                     dsl::time_modified.eq(now),
                 )),
         )
-        .insert_and_get_result_async(&*self.pool_connection_authorized(&opctx).await?)
+        .insert_and_get_result_async(
+            &*self.pool_connection_authorized(&opctx).await?,
+        )
         .await
         .map_err(|e| match e {
             AsyncInsertError::CollectionNotFound => Error::ObjectNotFound {

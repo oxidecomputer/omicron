@@ -600,7 +600,10 @@ mod test {
         get_collection(id, conn).await
     }
 
-    async fn get_collection(id: Uuid, conn: &async_bb8_diesel::Connection<DbConnection>) -> Collection {
+    async fn get_collection(
+        id: Uuid,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+    ) -> Collection {
         collection::table
             .find(id)
             .select(Collection::as_select())
@@ -635,7 +638,7 @@ mod test {
     async fn attach_resource(
         collection_id: Uuid,
         resource_id: Uuid,
-        conn: &async_bb8_diesel::Connection<DbConnection>
+        conn: &async_bb8_diesel::Connection<DbConnection>,
     ) {
         Collection::attach_resource(
             collection_id,
@@ -651,7 +654,10 @@ mod test {
         .unwrap();
     }
 
-    async fn get_resource(id: Uuid, conn: &async_bb8_diesel::Connection<DbConnection>) -> Resource {
+    async fn get_resource(
+        id: Uuid,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+    ) -> Resource {
         resource::table
             .find(id)
             .select(Resource::as_select())

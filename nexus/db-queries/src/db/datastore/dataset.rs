@@ -44,7 +44,9 @@ impl DataStore {
                     dsl::kind.eq(excluded(dsl::kind)),
                 )),
         )
-        .insert_and_get_result_async(&*self.pool_connection_unauthorized().await?)
+        .insert_and_get_result_async(
+            &*self.pool_connection_unauthorized().await?,
+        )
         .await
         .map_err(|e| match e {
             AsyncInsertError::CollectionNotFound => Error::ObjectNotFound {

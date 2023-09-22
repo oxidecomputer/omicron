@@ -877,7 +877,11 @@ mod tests {
                 is_default,
             );
 
-            let conn = self.db_datastore.pool_connection_authorized(&self.opctx).await.unwrap();
+            let conn = self
+                .db_datastore
+                .pool_connection_authorized(&self.opctx)
+                .await
+                .unwrap();
 
             use crate::db::schema::ip_pool::dsl as ip_pool_dsl;
             diesel::insert_into(ip_pool_dsl::ip_pool)
@@ -892,7 +896,11 @@ mod tests {
         async fn initialize_ip_pool(&self, name: &str, range: IpRange) {
             // Find the target IP pool
             use crate::db::schema::ip_pool::dsl as ip_pool_dsl;
-            let conn = self.db_datastore.pool_connection_authorized(&self.opctx).await.unwrap();
+            let conn = self
+                .db_datastore
+                .pool_connection_authorized(&self.opctx)
+                .await
+                .unwrap();
             let pool = ip_pool_dsl::ip_pool
                 .filter(ip_pool_dsl::name.eq(name.to_string()))
                 .filter(ip_pool_dsl::time_deleted.is_null())
@@ -908,7 +916,11 @@ mod tests {
             )
             .values(pool_range)
             .execute_async(
-                &*self.db_datastore.pool_connection_authorized(&self.opctx).await.unwrap(),
+                &*self
+                    .db_datastore
+                    .pool_connection_authorized(&self.opctx)
+                    .await
+                    .unwrap(),
             )
             .await
             .expect("Failed to create IP Pool range");

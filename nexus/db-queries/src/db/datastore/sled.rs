@@ -200,9 +200,7 @@ impl DataStore {
             .filter(resource_dsl::id.eq(resource_id))
             .execute_async(&*self.pool_connection_authorized(opctx).await?)
             .await
-            .map_err(|e| {
-                public_error_from_diesel(e, ErrorHandler::Server)
-            })?;
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
         Ok(())
     }
 }

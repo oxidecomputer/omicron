@@ -11,8 +11,8 @@ use crate::context::OpContext;
 use crate::db;
 use crate::db::datastore::RunnableQuery;
 use crate::db::datastore::RunnableQueryNoReturn;
-use crate::db::error::public_error_from_diesel_pool;
 use crate::db::error::public_error_from_diesel;
+use crate::db::error::public_error_from_diesel_pool;
 use crate::db::error::ErrorHandler;
 use crate::db::error::TransactionError;
 use crate::db::fixed_data::role_assignment::BUILTIN_ROLE_ASSIGNMENTS;
@@ -25,7 +25,6 @@ use crate::db::pagination::paginated_multicolumn;
 use crate::db::pool::DbConnection;
 use async_bb8_diesel::AsyncConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
-use async_bb8_diesel::PoolError;
 use diesel::prelude::*;
 use nexus_types::external_api::shared;
 use omicron_common::api::external::DataPageParams;
@@ -85,9 +84,7 @@ impl DataStore {
             .do_nothing()
             .execute_async(&*conn)
             .await
-            .map_err(|e| {
-                public_error_from_diesel(e, ErrorHandler::Server)
-            })?;
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
         info!(opctx.log, "created {} built-in roles", count);
         Ok(())
     }
@@ -116,9 +113,7 @@ impl DataStore {
             .do_nothing()
             .execute_async(&*conn)
             .await
-            .map_err(|e| {
-                public_error_from_diesel(e, ErrorHandler::Server)
-            })?;
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
         info!(opctx.log, "created {} built-in role assignments", count);
         Ok(())
     }
@@ -202,28 +197,18 @@ impl DataStore {
         authz_resource: &T,
     ) -> ListResultVec<db::model::RoleAssignment> {
         let conn = self.pool_connection_authorized(opctx).await?;
-        self.role_assignment_fetch_visible_conn(
-            opctx,
-            authz_resource,
-            &*conn
-        )
-        .await
+        self.role_assignment_fetch_visible_conn(opctx, authz_resource, &*conn)
+            .await
     }
 
     pub async fn role_assignment_fetch_visible_conn<
         T: authz::ApiResourceWithRoles + AuthorizedResource + Clone,
-        ConnErr,
     >(
         &self,
         opctx: &OpContext,
         authz_resource: &T,
-        conn: &(impl async_bb8_diesel::AsyncConnection<DbConnection, ConnErr>
-              + Sync),
-    ) -> ListResultVec<db::model::RoleAssignment>
-    where
-        ConnErr: From<diesel::result::Error> + Send + 'static,
-        PoolError: From<ConnErr>,
-    {
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+    ) -> ListResultVec<db::model::RoleAssignment> {
         opctx.authorize(authz::Action::ReadPolicy, authz_resource).await?;
         let resource_type = authz_resource.resource_type();
         let resource_id = authz_resource.resource_id();

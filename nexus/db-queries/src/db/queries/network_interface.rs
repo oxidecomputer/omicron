@@ -1883,7 +1883,8 @@ mod tests {
                 db_datastore.project_create(&opctx, project).await.unwrap();
 
             use crate::db::schema::vpc_subnet::dsl::vpc_subnet;
-            let conn = db_datastore.pool_connection_authorized(&opctx).await.unwrap();
+            let conn =
+                db_datastore.pool_connection_authorized(&opctx).await.unwrap();
             let net1 = Network::new(n_subnets);
             let net2 = Network::new(n_subnets);
             for subnet in net1.subnets.iter().chain(net2.subnets.iter()) {

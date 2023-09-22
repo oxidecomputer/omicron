@@ -398,7 +398,9 @@ impl DataStore {
                 .filter(vpc_subnet::dsl::time_deleted.is_null())
                 .select(vpc_subnet::dsl::id)
                 .limit(1)
-                .first_async::<Uuid>(&*self.pool_connection_authorized(opctx).await?)
+                .first_async::<Uuid>(
+                    &*self.pool_connection_authorized(opctx).await?,
+                )
                 .await,
         )
         .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?
@@ -674,7 +676,8 @@ impl DataStore {
     ) -> Result<VpcSubnet, SubnetError> {
         use db::schema::vpc_subnet::dsl;
         let values = FilterConflictingVpcSubnetRangesQuery::new(subnet.clone());
-        let conn = self.pool_connection_unauthorized()
+        let conn = self
+            .pool_connection_unauthorized()
             .await
             .map_err(SubnetError::External)?;
 
@@ -822,7 +825,9 @@ impl DataStore {
         .filter(dsl::time_deleted.is_null())
         .filter(dsl::vpc_id.eq(authz_vpc.id()))
         .select(VpcRouter::as_select())
-        .load_async::<db::model::VpcRouter>(&*self.pool_connection_authorized(opctx).await?)
+        .load_async::<db::model::VpcRouter>(
+            &*self.pool_connection_authorized(opctx).await?,
+        )
         .await
         .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
@@ -957,7 +962,9 @@ impl DataStore {
             router_id,
             diesel::insert_into(dsl::router_route).values(route),
         )
-        .insert_and_get_result_async(&*self.pool_connection_authorized(opctx).await?)
+        .insert_and_get_result_async(
+            &*self.pool_connection_authorized(opctx).await?,
+        )
         .await
         .map_err(|e| match e {
             AsyncInsertError::CollectionNotFound => Error::ObjectNotFound {
@@ -1049,11 +1056,11 @@ impl DataStore {
                 vpc_subnet::ipv4_block,
                 vpc_subnet::ipv6_block,
             ))
-            .get_results_async::<SubnetIps>(&*self.pool_connection_unauthorized().await?)
+            .get_results_async::<SubnetIps>(
+                &*self.pool_connection_unauthorized().await?,
+            )
             .await
-            .map_err(|e| {
-                public_error_from_diesel(e, ErrorHandler::Server)
-            })?;
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
         let mut result = BTreeMap::new();
         for subnet in subnets {

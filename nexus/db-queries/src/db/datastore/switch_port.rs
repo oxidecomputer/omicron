@@ -1123,7 +1123,9 @@ impl DataStore {
             // pagination in the future, or maybe a way to constrain the query to
             // a rack?
             .limit(64)
-            .load_async::<SwitchPort>(&*self.pool_connection_authorized(opctx).await?)
+            .load_async::<SwitchPort>(
+                &*self.pool_connection_authorized(opctx).await?,
+            )
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }

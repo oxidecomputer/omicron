@@ -43,32 +43,26 @@ impl SubnetError {
         const NAME_CONFLICT_CONSTRAINT: &str = "vpc_subnet_vpc_id_name_key";
         match e {
             // Attempt to insert overlapping IPv4 subnet
-            ConnectionError::Query(
-                Error::DatabaseError(
-                    DatabaseErrorKind::NotNullViolation,
-                    ref info,
-                ),
-            ) if info.message() == IPV4_OVERLAP_ERROR_MESSAGE => {
+            ConnectionError::Query(Error::DatabaseError(
+                DatabaseErrorKind::NotNullViolation,
+                ref info,
+            )) if info.message() == IPV4_OVERLAP_ERROR_MESSAGE => {
                 SubnetError::OverlappingIpRange(subnet.ipv4_block.0 .0.into())
             }
 
             // Attempt to insert overlapping IPv6 subnet
-            ConnectionError::Query(
-                Error::DatabaseError(
-                    DatabaseErrorKind::NotNullViolation,
-                    ref info,
-                ),
-            ) if info.message() == IPV6_OVERLAP_ERROR_MESSAGE => {
+            ConnectionError::Query(Error::DatabaseError(
+                DatabaseErrorKind::NotNullViolation,
+                ref info,
+            )) if info.message() == IPV6_OVERLAP_ERROR_MESSAGE => {
                 SubnetError::OverlappingIpRange(subnet.ipv6_block.0 .0.into())
             }
 
             // Conflicting name for the subnet within a VPC
-            ConnectionError::Query(
-                Error::DatabaseError(
-                    DatabaseErrorKind::UniqueViolation,
-                    ref info,
-                ),
-            ) if info.constraint_name() == Some(NAME_CONFLICT_CONSTRAINT) => {
+            ConnectionError::Query(Error::DatabaseError(
+                DatabaseErrorKind::UniqueViolation,
+                ref info,
+            )) if info.constraint_name() == Some(NAME_CONFLICT_CONSTRAINT) => {
                 SubnetError::External(error::public_error_from_diesel(
                     e,
                     error::ErrorHandler::Conflict(

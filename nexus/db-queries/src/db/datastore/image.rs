@@ -107,7 +107,9 @@ impl DataStore {
                 .do_update()
                 .set(dsl::time_modified.eq(dsl::time_modified)),
         )
-        .insert_and_get_result_async(&*self.pool_connection_authorized(opctx).await?)
+        .insert_and_get_result_async(
+            &*self.pool_connection_authorized(opctx).await?,
+        )
         .await
         .map_err(|e| match e {
             AsyncInsertError::CollectionNotFound => authz_silo.not_found(),
@@ -145,7 +147,9 @@ impl DataStore {
                 .do_update()
                 .set(dsl::time_modified.eq(dsl::time_modified)),
         )
-        .insert_and_get_result_async(&*self.pool_connection_authorized(opctx).await?)
+        .insert_and_get_result_async(
+            &*self.pool_connection_authorized(opctx).await?,
+        )
         .await
         .map_err(|e| match e {
             AsyncInsertError::CollectionNotFound => authz_project.not_found(),
