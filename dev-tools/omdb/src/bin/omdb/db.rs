@@ -226,7 +226,10 @@ impl DbArgs {
             }
             DbCommands::Disks(DiskArgs {
                 command: DiskCommands::Physical(uuid),
-            }) => cmd_db_disk_physical(&opctx, &datastore, self.fetch_limit, uuid).await,
+            }) => {
+                cmd_db_disk_physical(&opctx, &datastore, self.fetch_limit, uuid)
+                    .await
+            }
             DbCommands::Dns(DnsArgs { command: DnsCommands::Show }) => {
                 cmd_db_dns_show(&opctx, &datastore, self.fetch_limit).await
             }
@@ -526,7 +529,6 @@ async fn cmd_db_disk_physical(
     limit: NonZeroU32,
     args: &DiskPhysicalArgs,
 ) -> Result<(), anyhow::Error> {
-
     // We start by finding any zpools that are using the physical disk.
     use db::schema::zpool::dsl as zpool_dsl;
     let zpools = zpool_dsl::zpool
@@ -572,7 +574,8 @@ async fn cmd_db_disk_physical(
             .await
             .context("failed to look up sled")?;
 
-        println!("Physical disk: {} found on sled: {}",
+        println!(
+            "Physical disk: {} found on sled: {}",
             args.uuid,
             my_sled.serial_number()
         );
@@ -626,7 +629,9 @@ async fn cmd_db_disk_physical(
         if volume_ids.contains(&disk.volume_id) {
             // If the disk is attached to an instance, determine the name of the
             // instance.
-            let instance_name = if let Some(instance_uuid) = disk.runtime().attach_instance_id {
+            let instance_name = if let Some(instance_uuid) =
+                disk.runtime().attach_instance_id
+            {
                 // Get the instance this disk is attached to
                 use db::schema::instance::dsl as instance_dsl;
                 let instance = instance_dsl::instance
@@ -646,7 +651,7 @@ async fn cmd_db_disk_physical(
                 "-".to_string()
             };
 
-            rows.push( DiskRow {
+            rows.push(DiskRow {
                 name: disk.name().to_string(),
                 id: disk.id().to_string(),
                 state: disk.runtime().disk_state,
