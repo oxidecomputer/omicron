@@ -7,7 +7,6 @@ use crate::authz;
 use crate::context::OpContext;
 use crate::db;
 use crate::db::error::public_error_from_diesel;
-use crate::db::error::public_error_from_diesel_pool;
 use crate::db::error::ErrorHandler;
 use crate::db::model::DnsGroup;
 use crate::db::model::DnsName;
@@ -162,11 +161,9 @@ impl DataStore {
                     .or(dsl::version_removed.gt(version)),
             )
             .select(DnsName::as_select())
-            .load_async(self.pool_authorized(opctx).await?)
+            .load_async(&*self.pool_connection_authorized(opctx).await?)
             .await
-            .map_err(|e| {
-                public_error_from_diesel_pool(e, ErrorHandler::Server)
-            })?
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?
             .into_iter()
             .filter_map(|n: DnsName| match n.records() {
                 Ok(records) => Some((n.name, records)),
@@ -323,10 +320,7 @@ impl DataStore {
                 .execute_async(conn)
                 .await
                 .map_err(|e| {
-                    public_error_from_diesel_pool(
-                        e.into(),
-                        ErrorHandler::Server,
-                    )
+                    public_error_from_diesel(e.into(), ErrorHandler::Server)
                 })?;
         }
 
@@ -339,10 +333,7 @@ impl DataStore {
                 .execute_async(conn)
                 .await
                 .map_err(|e| {
-                    public_error_from_diesel_pool(
-                        e.into(),
-                        ErrorHandler::Server,
-                    )
+                    public_error_from_diesel(e.into(), ErrorHandler::Server)
                 })?;
         }
 
@@ -355,10 +346,7 @@ impl DataStore {
                 .execute_async(conn)
                 .await
                 .map_err(|e| {
-                    public_error_from_diesel_pool(
-                        e.into(),
-                        ErrorHandler::Server,
-                    )
+                    public_error_from_diesel(e.into(), ErrorHandler::Server)
                 })?;
         }
 
@@ -407,8 +395,8 @@ impl DataStore {
         match result {
             Ok(()) => Ok(()),
             Err(TransactionError::CustomError(e)) => Err(e),
-            Err(TransactionError::Pool(e)) => {
-                Err(public_error_from_diesel_pool(e, ErrorHandler::Server))
+            Err(TransactionError::Connection(e)) => {
+                Err(public_error_from_diesel(e, ErrorHandler::Server))
             }
         }
     }
@@ -469,10 +457,7 @@ impl DataStore {
                 .execute_async(conn)
                 .await
                 .map_err(|e| {
-                    public_error_from_diesel_pool(
-                        e.into(),
-                        ErrorHandler::Server,
-                    )
+                    public_error_from_diesel(e.into(), ErrorHandler::Server)
                 })?;
         }
 
@@ -497,7 +482,7 @@ impl DataStore {
             .execute_async(conn)
             .await
             .map_err(|e| {
-                public_error_from_diesel_pool(e.into(), ErrorHandler::Server)
+                public_error_from_diesel(e.into(), ErrorHandler::Server)
             })?;
 
             bail_unless!(
@@ -514,10 +499,7 @@ impl DataStore {
                 .execute_async(conn)
                 .await
                 .map_err(|e| {
-                    public_error_from_diesel_pool(
-                        e.into(),
-                        ErrorHandler::Server,
-                    )
+                    public_error_from_diesel(e.into(), ErrorHandler::Server)
                 })?;
 
             bail_unless!(

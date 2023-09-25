@@ -52,7 +52,9 @@ impl DataStore {
         .filter(project_dsl::time_deleted.is_null())
         .filter(project_dsl::project_id.eq(authz_project.id()))
         .select(ProjectImage::as_select())
-        .load_async::<ProjectImage>(&*self.pool_connection_authorized(opctx).await?)
+        .load_async::<ProjectImage>(
+            &*self.pool_connection_authorized(opctx).await?,
+        )
         .await
         .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
         .map(|v| v.into_iter().map(|v| v.into()).collect())
@@ -80,7 +82,9 @@ impl DataStore {
         .filter(dsl::time_deleted.is_null())
         .filter(dsl::silo_id.eq(authz_silo.id()))
         .select(SiloImage::as_select())
-        .load_async::<SiloImage>(&*self.pool_connection_authorized(opctx).await?)
+        .load_async::<SiloImage>(
+            &*self.pool_connection_authorized(opctx).await?,
+        )
         .await
         .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
         .map(|v| v.into_iter().map(|v| v.into()).collect())
@@ -113,15 +117,13 @@ impl DataStore {
         .await
         .map_err(|e| match e {
             AsyncInsertError::CollectionNotFound => authz_silo.not_found(),
-            AsyncInsertError::DatabaseError(e) => {
-                public_error_from_diesel(
-                    e,
-                    ErrorHandler::Conflict(
-                        ResourceType::ProjectImage,
-                        name.as_str(),
-                    ),
-                )
-            }
+            AsyncInsertError::DatabaseError(e) => public_error_from_diesel(
+                e,
+                ErrorHandler::Conflict(
+                    ResourceType::ProjectImage,
+                    name.as_str(),
+                ),
+            ),
         })?;
         Ok(image)
     }
@@ -153,15 +155,13 @@ impl DataStore {
         .await
         .map_err(|e| match e {
             AsyncInsertError::CollectionNotFound => authz_project.not_found(),
-            AsyncInsertError::DatabaseError(e) => {
-                public_error_from_diesel(
-                    e,
-                    ErrorHandler::Conflict(
-                        ResourceType::ProjectImage,
-                        name.as_str(),
-                    ),
-                )
-            }
+            AsyncInsertError::DatabaseError(e) => public_error_from_diesel(
+                e,
+                ErrorHandler::Conflict(
+                    ResourceType::ProjectImage,
+                    name.as_str(),
+                ),
+            ),
         })?;
         Ok(image)
     }

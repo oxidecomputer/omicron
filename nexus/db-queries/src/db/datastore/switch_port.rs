@@ -10,7 +10,6 @@ use crate::db::datastore::address_lot::{
 };
 use crate::db::datastore::UpdatePrecondition;
 use crate::db::error::public_error_from_diesel;
-use crate::db::error::public_error_from_diesel_pool;
 use crate::db::error::ErrorHandler;
 use crate::db::error::TransactionError;
 use crate::db::model::{
@@ -21,9 +20,7 @@ use crate::db::model::{
     SwitchVlanInterfaceConfig,
 };
 use crate::db::pagination::paginated;
-use async_bb8_diesel::{
-    AsyncConnection, AsyncRunQueryDsl, ConnectionError, PoolError,
-};
+use async_bb8_diesel::{AsyncConnection, AsyncRunQueryDsl, ConnectionError};
 use diesel::result::Error as DieselError;
 use diesel::{
     ExpressionMethods, JoinOnDsl, NullableExpressionMethods, QueryDsl,
@@ -372,7 +369,7 @@ impl DataStore {
                                     SwitchPortSettingsCreateError::ReserveBlock(err)
                                 )
                             }
-                            ReserveBlockTxnError::Pool(err) => TxnError::Pool(err),
+                            ReserveBlockTxnError::Connection(err) => TxnError::Connection(err),
                         })?;
 
                     address_config.push(SwitchPortAddressConfig::new(
@@ -419,17 +416,17 @@ impl DataStore {
                     ReserveBlockError::AddressNotInLot
                 )
             ) => Error::invalid_request("address not in lot"),
-            TxnError::Pool(e) => match e {
-                PoolError::Connection(ConnectionError::Query(
+            TxnError::Connection(e) => match e {
+                ConnectionError::Query(
                     DieselError::DatabaseError(_, _),
-                )) => public_error_from_diesel_pool(
+                ) => public_error_from_diesel(
                     e,
                     ErrorHandler::Conflict(
                         ResourceType::SwitchPortSettings,
                         params.identity.name.as_str(),
                     ),
                 ),
-                _ => public_error_from_diesel_pool(e, ErrorHandler::Server),
+                _ => public_error_from_diesel(e, ErrorHandler::Server),
             },
         })
     }
@@ -602,15 +599,15 @@ impl DataStore {
                 SwitchPortSettingsDeleteError::SwitchPortSettingsNotFound) => {
                 Error::invalid_request("port settings not found")
             }
-            TxnError::Pool(e) => match e {
-                PoolError::Connection(ConnectionError::Query(
+            TxnError::Connection(e) => match e {
+                ConnectionError::Query(
                     DieselError::DatabaseError(_, _),
-                )) => {
+                ) => {
                     let name = match &params.port_settings {
                         Some(name_or_id) => name_or_id.to_string(),
                         None => String::new(),
                     };
-                    public_error_from_diesel_pool(
+                    public_error_from_diesel(
                         e,
                         ErrorHandler::Conflict(
                             ResourceType::SwitchPortSettings,
@@ -618,7 +615,7 @@ impl DataStore {
                         ),
                     )
                 },
-                _ => public_error_from_diesel_pool(e, ErrorHandler::Server),
+                _ => public_error_from_diesel(e, ErrorHandler::Server),
             },
         })
     }
@@ -807,12 +804,12 @@ impl DataStore {
                 SwitchPortSettingsGetError::NotFound(name)) => {
                 Error::not_found_by_name(ResourceType::SwitchPortSettings, &name)
             }
-            TxnError::Pool(e) => match e {
-                PoolError::Connection(ConnectionError::Query(
+            TxnError::Connection(e) => match e {
+                ConnectionError::Query(
                     DieselError::DatabaseError(_, _),
-                )) => {
+                ) => {
                     let name = name_or_id.to_string();
-                    public_error_from_diesel_pool(
+                    public_error_from_diesel(
                         e,
                         ErrorHandler::Conflict(
                             ResourceType::SwitchPortSettings,
@@ -820,7 +817,7 @@ impl DataStore {
                         ),
                     )
                 },
-                _ => public_error_from_diesel_pool(e, ErrorHandler::Server),
+                _ => public_error_from_diesel(e, ErrorHandler::Server),
             },
         })
     }
@@ -881,17 +878,20 @@ impl DataStore {
             TxnError::CustomError(SwitchPortCreateError::RackNotFound) => {
                 Error::invalid_request("rack not found")
             }
-            TxnError::Pool(e) => match e {
-                PoolError::Connection(ConnectionError::Query(
-                    DieselError::DatabaseError(_, _),
-                )) => public_error_from_diesel_pool(
-                    e,
-                    ErrorHandler::Conflict(
-                        ResourceType::SwitchPort,
-                        &format!("{}/{}/{}", rack_id, &switch_location, &port,),
-                    ),
-                ),
-                _ => public_error_from_diesel_pool(e, ErrorHandler::Server),
+            TxnError::Connection(e) => match e {
+                ConnectionError::Query(DieselError::DatabaseError(_, _)) => {
+                    public_error_from_diesel(
+                        e,
+                        ErrorHandler::Conflict(
+                            ResourceType::SwitchPort,
+                            &format!(
+                                "{}/{}/{}",
+                                rack_id, &switch_location, &port,
+                            ),
+                        ),
+                    )
+                }
+                _ => public_error_from_diesel(e, ErrorHandler::Server),
             },
         })
     }
@@ -958,8 +958,8 @@ impl DataStore {
             TxnError::CustomError(SwitchPortDeleteError::ActiveSettings) => {
                 Error::invalid_request("must clear port settings first")
             }
-            TxnError::Pool(e) => {
-                public_error_from_diesel_pool(e, ErrorHandler::Server)
+            TxnError::Connection(e) => {
+                public_error_from_diesel(e, ErrorHandler::Server)
             }
         })
     }

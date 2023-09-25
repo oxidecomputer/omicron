@@ -9,8 +9,7 @@ use crate::authz;
 use crate::context::OpContext;
 use crate::db;
 use crate::db::error::{
-    public_error_from_diesel, public_error_from_diesel_pool, ErrorHandler,
-    TransactionError,
+    public_error_from_diesel, ErrorHandler, TransactionError,
 };
 use crate::db::model::{
     ComponentUpdate, SemverVersion, SystemUpdate, UpdateArtifact,
@@ -165,7 +164,7 @@ impl DataStore {
             .await
             .map_err(|e| match e {
                 TransactionError::CustomError(e) => e,
-                TransactionError::Pool(e) => public_error_from_diesel_pool(
+                TransactionError::Connection(e) => public_error_from_diesel(
                     e,
                     ErrorHandler::Conflict(
                         ResourceType::ComponentUpdate,

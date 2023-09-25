@@ -17,7 +17,7 @@ use super::cte_utils::{
     QueryFromClause, QuerySqlType, TableDefaultWhereClause,
 };
 use super::pool::DbConnection;
-use async_bb8_diesel::{AsyncRunQueryDsl, PoolError};
+use async_bb8_diesel::{AsyncRunQueryDsl, ConnectionError};
 use diesel::associations::HasTable;
 use diesel::expression::{AsExpression, Expression};
 use diesel::helper_types::*;
@@ -299,7 +299,7 @@ where
 
 /// Result of [`AttachToCollectionStatement`] when executed asynchronously
 pub type AsyncAttachToCollectionResult<ResourceType, C> =
-    Result<(C, ResourceType), AttachError<ResourceType, C, PoolError>>;
+    Result<(C, ResourceType), AttachError<ResourceType, C, ConnectionError>>;
 
 /// Errors returned by [`AttachToCollectionStatement`].
 #[derive(Debug)]
@@ -347,7 +347,7 @@ where
         self.get_result_async::<RawOutput<ResourceType, C>>(conn)
             .await
             // If the database returns an error, propagate it right away.
-            .map_err(|e| AttachError::DatabaseError(PoolError::from(e)))
+            .map_err(|e| AttachError::DatabaseError(e))
             // Otherwise, parse the output to determine if the CTE succeeded.
             .and_then(Self::parse_result)
     }
@@ -567,6 +567,7 @@ mod test {
     };
     use async_bb8_diesel::{
         AsyncConnection, AsyncRunQueryDsl, AsyncSimpleConnection,
+        ConnectionManager,
     };
     use chrono::Utc;
     use db_macros::Resource;
@@ -602,7 +603,9 @@ mod test {
         }
     }
 
-    async fn setup_db(pool: &crate::db::Pool) {
+    async fn setup_db(
+        pool: &crate::db::Pool,
+    ) -> bb8::PooledConnection<ConnectionManager<DbConnection>> {
         let connection = pool.pool().get().await.unwrap();
         (*connection)
             .batch_execute_async(
@@ -630,6 +633,7 @@ mod test {
             )
             .await
             .unwrap();
+        connection
     }
 
     /// Describes a resource within the database.
@@ -859,8 +863,7 @@ mod test {
         let cfg = db::Config { url: db.pg_config().clone() };
         let pool = db::Pool::new(&logctx.log, &cfg);
 
-        setup_db(&pool).await;
-        let conn = pool.pool().get().await.unwrap();
+        let conn = setup_db(&pool).await;
 
         let collection_id = uuid::Uuid::new_v4();
         let resource_id = uuid::Uuid::new_v4();
@@ -889,8 +892,7 @@ mod test {
         let cfg = db::Config { url: db.pg_config().clone() };
         let pool = db::Pool::new(&logctx.log, &cfg);
 
-        setup_db(&pool).await;
-        let conn = pool.pool().get().await.unwrap();
+        let conn = setup_db(&pool).await;
 
         let collection_id = uuid::Uuid::new_v4();
         let resource_id = uuid::Uuid::new_v4();
@@ -927,8 +929,7 @@ mod test {
         let cfg = db::Config { url: db.pg_config().clone() };
         let pool = db::Pool::new(&logctx.log, &cfg);
 
-        setup_db(&pool).await;
-        let conn = pool.pool().get().await.unwrap();
+        let conn = setup_db(&pool).await;
 
         let collection_id = uuid::Uuid::new_v4();
         let resource_id = uuid::Uuid::new_v4();
@@ -976,8 +977,7 @@ mod test {
         let cfg = db::Config { url: db.pg_config().clone() };
         let pool = db::Pool::new(&logctx.log, &cfg);
 
-        setup_db(&pool).await;
-        let conn = pool.pool().get().await.unwrap();
+        let conn = setup_db(&pool).await;
 
         let collection_id = uuid::Uuid::new_v4();
         let resource_id = uuid::Uuid::new_v4();
@@ -998,8 +998,9 @@ mod test {
                 .set(resource::dsl::collection_id.eq(collection_id)),
         );
 
-        type TxnError =
-            TransactionError<AttachError<Resource, Collection, PoolError>>;
+        type TxnError = TransactionError<
+            AttachError<Resource, Collection, ConnectionError>,
+        >;
         let result = conn
             .transaction_async(|conn| async move {
                 attach_query.attach_and_get_result_async(&conn).await.map_err(
@@ -1036,8 +1037,7 @@ mod test {
         let cfg = db::Config { url: db.pg_config().clone() };
         let pool = db::Pool::new(&logctx.log, &cfg);
 
-        setup_db(&pool).await;
-        let conn = pool.pool().get().await.unwrap();
+        let conn = setup_db(&pool).await;
 
         const RESOURCE_COUNT: u32 = 5;
 
@@ -1093,8 +1093,7 @@ mod test {
         let cfg = db::Config { url: db.pg_config().clone() };
         let pool = db::Pool::new(&logctx.log, &cfg);
 
-        setup_db(&pool).await;
-        let conn = pool.pool().get().await.unwrap();
+        let conn = setup_db(&pool).await;
 
         let collection_id = uuid::Uuid::new_v4();
 
@@ -1158,8 +1157,7 @@ mod test {
         let cfg = db::Config { url: db.pg_config().clone() };
         let pool = db::Pool::new(&logctx.log, &cfg);
 
-        setup_db(&pool).await;
-        let conn = pool.pool().get().await.unwrap();
+        let conn = setup_db(&pool).await;
 
         let collection_id = uuid::Uuid::new_v4();
 
@@ -1266,8 +1264,7 @@ mod test {
         let cfg = db::Config { url: db.pg_config().clone() };
         let pool = db::Pool::new(&logctx.log, &cfg);
 
-        setup_db(&pool).await;
-        let conn = pool.pool().get().await.unwrap();
+        let conn = setup_db(&pool).await;
 
         let collection_id = uuid::Uuid::new_v4();
         let resource_id = uuid::Uuid::new_v4();
@@ -1322,8 +1319,7 @@ mod test {
         let cfg = db::Config { url: db.pg_config().clone() };
         let pool = db::Pool::new(&logctx.log, &cfg);
 
-        setup_db(&pool).await;
-        let conn = pool.pool().get().await.unwrap();
+        let conn = setup_db(&pool).await;
 
         let collection_id = uuid::Uuid::new_v4();
         let resource_id = uuid::Uuid::new_v4();
@@ -1368,8 +1364,7 @@ mod test {
         let cfg = db::Config { url: db.pg_config().clone() };
         let pool = db::Pool::new(&logctx.log, &cfg);
 
-        setup_db(&pool).await;
-        let conn = pool.pool().get().await.unwrap();
+        let conn = setup_db(&pool).await;
 
         let collection_id = uuid::Uuid::new_v4();
 

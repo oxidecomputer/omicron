@@ -481,7 +481,9 @@ mod test {
     use super::*;
     use crate::db::collection_attach::DatastoreAttachTarget;
     use crate::db::{self, identity::Resource as IdentityResource};
-    use async_bb8_diesel::{AsyncRunQueryDsl, AsyncSimpleConnection};
+    use async_bb8_diesel::{
+        AsyncRunQueryDsl, AsyncSimpleConnection, ConnectionManager,
+    };
     use chrono::Utc;
     use db_macros::Resource;
     use diesel::expression_methods::ExpressionMethods;
@@ -516,7 +518,9 @@ mod test {
         }
     }
 
-    async fn setup_db(pool: &crate::db::Pool) {
+    async fn setup_db(
+        pool: &crate::db::Pool,
+    ) -> bb8::PooledConnection<ConnectionManager<DbConnection>> {
         let connection = pool.pool().get().await.unwrap();
         (*connection)
             .batch_execute_async(
@@ -544,6 +548,7 @@ mod test {
             )
             .await
             .unwrap();
+        connection
     }
 
     /// Describes a resource within the database.
@@ -782,8 +787,7 @@ mod test {
         let cfg = db::Config { url: db.pg_config().clone() };
         let pool = db::Pool::new(&logctx.log, &cfg);
 
-        setup_db(&pool).await;
-        let conn = pool.pool().get().await.unwrap();
+        let conn = setup_db(&pool).await;
 
         let collection_id = uuid::Uuid::new_v4();
         let resource_id = uuid::Uuid::new_v4();
@@ -811,8 +815,7 @@ mod test {
         let cfg = db::Config { url: db.pg_config().clone() };
         let pool = db::Pool::new(&logctx.log, &cfg);
 
-        setup_db(&pool).await;
-        let conn = pool.pool().get().await.unwrap();
+        let conn = setup_db(&pool).await;
 
         let collection_id = uuid::Uuid::new_v4();
         let resource_id = uuid::Uuid::new_v4();
@@ -848,8 +851,7 @@ mod test {
         let cfg = db::Config { url: db.pg_config().clone() };
         let pool = db::Pool::new(&logctx.log, &cfg);
 
-        setup_db(&pool).await;
-        let conn = pool.pool().get().await.unwrap();
+        let conn = setup_db(&pool).await;
 
         let collection_id = uuid::Uuid::new_v4();
         let resource_id = uuid::Uuid::new_v4();
@@ -889,8 +891,7 @@ mod test {
         let cfg = db::Config { url: db.pg_config().clone() };
         let pool = db::Pool::new(&logctx.log, &cfg);
 
-        setup_db(&pool).await;
-        let conn = pool.pool().get().await.unwrap();
+        let conn = setup_db(&pool).await;
 
         let collection_id = uuid::Uuid::new_v4();
 
@@ -954,8 +955,7 @@ mod test {
         let cfg = db::Config { url: db.pg_config().clone() };
         let pool = db::Pool::new(&logctx.log, &cfg);
 
-        setup_db(&pool).await;
-        let conn = pool.pool().get().await.unwrap();
+        let conn = setup_db(&pool).await;
 
         let collection_id = uuid::Uuid::new_v4();
         let resource_id = uuid::Uuid::new_v4();
@@ -999,8 +999,7 @@ mod test {
         let cfg = db::Config { url: db.pg_config().clone() };
         let pool = db::Pool::new(&logctx.log, &cfg);
 
-        setup_db(&pool).await;
-        let conn = pool.pool().get().await.unwrap();
+        let conn = setup_db(&pool).await;
 
         let collection_id = uuid::Uuid::new_v4();
 

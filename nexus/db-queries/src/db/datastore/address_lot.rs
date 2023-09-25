@@ -8,14 +8,13 @@ use crate::context::OpContext;
 use crate::db;
 use crate::db::datastore::PgConnection;
 use crate::db::error::public_error_from_diesel;
-use crate::db::error::public_error_from_diesel_pool;
 use crate::db::error::ErrorHandler;
 use crate::db::error::TransactionError;
 use crate::db::model::Name;
 use crate::db::model::{AddressLot, AddressLotBlock, AddressLotReservedBlock};
 use crate::db::pagination::paginated;
 use async_bb8_diesel::{
-    AsyncConnection, AsyncRunQueryDsl, Connection, ConnectionError, PoolError,
+    AsyncConnection, AsyncRunQueryDsl, Connection, ConnectionError,
 };
 use chrono::Utc;
 use diesel::result::Error as DieselError;
@@ -85,16 +84,16 @@ impl DataStore {
             })
             .await
             .map_err(|e| match e {
-                PoolError::Connection(ConnectionError::Query(
-                    DieselError::DatabaseError(_, _),
-                )) => public_error_from_diesel_pool(
-                    e,
-                    ErrorHandler::Conflict(
-                        ResourceType::AddressLot,
-                        &params.identity.name.as_str(),
-                    ),
-                ),
-                _ => public_error_from_diesel_pool(e, ErrorHandler::Server),
+                ConnectionError::Query(DieselError::DatabaseError(_, _)) => {
+                    public_error_from_diesel(
+                        e,
+                        ErrorHandler::Conflict(
+                            ResourceType::AddressLot,
+                            &params.identity.name.as_str(),
+                        ),
+                    )
+                }
+                _ => public_error_from_diesel(e, ErrorHandler::Server),
             })
     }
 
@@ -152,8 +151,8 @@ impl DataStore {
         })
         .await
         .map_err(|e| match e {
-            TxnError::Pool(e) => {
-                public_error_from_diesel_pool(e, ErrorHandler::Server)
+            TxnError::Connection(e) => {
+                public_error_from_diesel(e, ErrorHandler::Server)
             }
             TxnError::CustomError(AddressLotDeleteError::LotInUse) => {
                 Error::invalid_request("lot is in use")

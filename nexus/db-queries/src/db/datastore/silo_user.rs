@@ -11,7 +11,6 @@ use crate::context::OpContext;
 use crate::db;
 use crate::db::datastore::IdentityMetadataCreateParams;
 use crate::db::error::public_error_from_diesel;
-use crate::db::error::public_error_from_diesel_pool;
 use crate::db::error::ErrorHandler;
 use crate::db::model::Name;
 use crate::db::model::Silo;
@@ -150,7 +149,7 @@ impl DataStore {
             })
             .await
             .map_err(|e| {
-                public_error_from_diesel_pool(
+                public_error_from_diesel(
                     e,
                     ErrorHandler::NotFoundByResource(authz_silo_user),
                 )

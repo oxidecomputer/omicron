@@ -10,7 +10,6 @@ use crate::authz::ApiResource;
 use crate::context::OpContext;
 use crate::db;
 use crate::db::error::public_error_from_diesel;
-use crate::db::error::public_error_from_diesel_pool;
 use crate::db::error::ErrorHandler;
 use crate::db::lookup::LookupPath;
 use crate::db::model::ExternalIp;
@@ -21,7 +20,7 @@ use crate::db::pool::DbConnection;
 use crate::db::queries::external_ip::NextExternalIp;
 use crate::db::update_and_check::UpdateAndCheck;
 use crate::db::update_and_check::UpdateStatus;
-use async_bb8_diesel::{AsyncRunQueryDsl, PoolError};
+use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
 use nexus_types::identity::Resource;
@@ -145,11 +144,9 @@ impl DataStore {
         let explicit_ip = data.explicit_ip().is_some();
         NextExternalIp::new(data).get_result_async(conn).await.map_err(|e| {
             use async_bb8_diesel::ConnectionError::Query;
-            use async_bb8_diesel::PoolError::Connection;
             use diesel::result::Error::NotFound;
-            let e = PoolError::from(e);
             match e {
-                Connection(Query(NotFound)) => {
+                Query(NotFound) => {
                     if explicit_ip {
                         Error::invalid_request(
                             "Requested external IP address not available",
@@ -160,7 +157,7 @@ impl DataStore {
                         )
                     }
                 }
-                _ => crate::db::queries::external_ip::from_pool(e),
+                _ => crate::db::queries::external_ip::from_diesel(e),
             }
         })
     }
@@ -240,7 +237,7 @@ impl DataStore {
                 UpdateStatus::Updated => true,
                 UpdateStatus::NotUpdatedButExists => false,
             })
-            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     /// Delete all external IP addresses associated with the provided instance

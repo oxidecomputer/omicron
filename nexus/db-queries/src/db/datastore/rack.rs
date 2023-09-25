@@ -13,7 +13,6 @@ use crate::db;
 use crate::db::collection_insert::AsyncInsertError;
 use crate::db::collection_insert::DatastoreCollection;
 use crate::db::error::public_error_from_diesel;
-use crate::db::error::public_error_from_diesel_pool;
 use crate::db::error::ErrorHandler;
 use crate::db::error::TransactionError;
 use crate::db::fixed_data::silo::INTERNAL_SILO_ID;
@@ -29,7 +28,6 @@ use crate::db::pagination::paginated;
 use crate::db::pool::DbConnection;
 use async_bb8_diesel::AsyncConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
-use async_bb8_diesel::PoolError;
 use chrono::Utc;
 use diesel::prelude::*;
 use diesel::upsert::excluded;
@@ -81,7 +79,7 @@ enum RackInitError {
     AddingNic(Error),
     ServiceInsert(Error),
     DatasetInsert { err: AsyncInsertError, zpool_id: Uuid },
-    RackUpdate { err: PoolError, rack_id: Uuid },
+    RackUpdate { err: async_bb8_diesel::ConnectionError, rack_id: Uuid },
     DnsSerialization(Error),
     Silo(Error),
     RoleAssignment(Error),
@@ -114,7 +112,7 @@ impl From<TxnError> for Error {
             TxnError::CustomError(RackInitError::RackUpdate {
                 err,
                 rack_id,
-            }) => public_error_from_diesel_pool(
+            }) => public_error_from_diesel(
                 err,
                 ErrorHandler::NotFoundByLookup(
                     ResourceType::Rack,
@@ -139,7 +137,7 @@ impl From<TxnError> for Error {
                     err
                 ))
             }
-            TxnError::Pool(e) => {
+            TxnError::Connection(e) => {
                 Error::internal_error(&format!("Transaction error: {}", e))
             }
         }
@@ -420,7 +418,7 @@ impl DataStore {
         // the low-frequency of calls, this optimization has been deferred.
         let log = opctx.log.clone();
         let rack = self
-            .pool_authorized(opctx)
+            .pool_connection_authorized(opctx)
             .await?
             .transaction_async(|conn| async move {
                 // Early exit if the rack has already been initialized.
@@ -432,7 +430,7 @@ impl DataStore {
                     .map_err(|e| {
                         warn!(log, "Initializing Rack: Rack UUID not found");
                         TxnError::CustomError(RackInitError::RackUpdate {
-                            err: PoolError::from(e),
+                            err: e,
                             rack_id,
                         })
                     })?;
@@ -537,9 +535,9 @@ impl DataStore {
                     .returning(Rack::as_returning())
                     .get_result_async::<Rack>(&conn)
                     .await
-                    .map_err(|e| {
+                    .map_err(|err| {
                         TxnError::CustomError(RackInitError::RackUpdate {
-                            err: PoolError::from(e),
+                            err,
                             rack_id,
                         })
                     })?;
@@ -633,8 +631,8 @@ impl DataStore {
             .await
             .map_err(|error: TxnError| match error {
                 TransactionError::CustomError(err) => err,
-                TransactionError::Pool(e) => {
-                    public_error_from_diesel_pool(e, ErrorHandler::Server)
+                TransactionError::Connection(e) => {
+                    public_error_from_diesel(e, ErrorHandler::Server)
                 }
             })
     }
@@ -868,7 +866,7 @@ mod test {
                 async fn [<get_all_ $table s>](db: &DataStore) -> Vec<$model> {
                     use crate::db::schema::$table::dsl;
                     use nexus_test_utils::db::ALLOW_FULL_TABLE_SCAN_SQL;
-                    db.pool_for_tests()
+                    db.pool_connection_for_tests()
                         .await
                         .unwrap()
                         .transaction_async(|conn| async move {

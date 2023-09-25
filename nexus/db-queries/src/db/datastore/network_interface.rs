@@ -12,7 +12,6 @@ use crate::db::collection_insert::AsyncInsertError;
 use crate::db::collection_insert::DatastoreCollection;
 use crate::db::cte_utils::BoxedQuery;
 use crate::db::error::public_error_from_diesel;
-use crate::db::error::public_error_from_diesel_pool;
 use crate::db::error::ErrorHandler;
 use crate::db::error::TransactionError;
 use crate::db::model::IncompleteNetworkInterface;
@@ -239,7 +238,8 @@ impl DataStore {
         query
             .clone()
             .execute_async(
-                &*self.pool_connection_authorized(opctx)
+                &*self
+                    .pool_connection_authorized(opctx)
                     .await
                     .map_err(network_interface::DeleteError::External)?,
             )
@@ -287,11 +287,11 @@ impl DataStore {
                 network_interface::is_primary,
                 network_interface::slot,
             ))
-            .get_results_async::<NicInfo>(self.pool_authorized(opctx).await?)
+            .get_results_async::<NicInfo>(
+                &*self.pool_connection_authorized(opctx).await?,
+            )
             .await
-            .map_err(|e| {
-                public_error_from_diesel_pool(e, ErrorHandler::Server)
-            })?;
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
         Ok(rows
             .into_iter()
             .map(sled_client_types::NetworkInterface::from)
@@ -382,10 +382,10 @@ impl DataStore {
         .filter(dsl::instance_id.eq(authz_instance.id()))
         .select(InstanceNetworkInterface::as_select())
         .load_async::<InstanceNetworkInterface>(
-            self.pool_authorized(opctx).await?,
+            &*self.pool_connection_authorized(opctx).await?,
         )
         .await
-        .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     /// Update a network interface associated with a given instance.
@@ -467,9 +467,9 @@ impl DataStore {
         }
         type TxnError = TransactionError<NetworkInterfaceUpdateError>;
 
-        let pool = self.pool_authorized(opctx).await?;
+        let conn = self.pool_connection_authorized(opctx).await?;
         if primary {
-            pool.transaction_async(|conn| async move {
+            conn.transaction_async(|conn| async move {
                 let instance_state = instance_query
                     .get_result_async(&conn)
                     .await?
@@ -513,7 +513,7 @@ impl DataStore {
             // be done there. The other columns always need to be updated, and
             // we're only hitting a single row. Note that we still need to
             // verify the instance is stopped.
-            pool.transaction_async(|conn| async move {
+            conn.transaction_async(|conn| async move {
                 let instance_state = instance_query
                     .get_result_async(&conn)
                     .await?

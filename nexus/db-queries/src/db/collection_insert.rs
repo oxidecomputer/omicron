@@ -243,7 +243,8 @@ where
     /// intentional division-by-zero error in the CTE.
     fn translate_async_error(err: ConnectionError) -> AsyncInsertError {
         match err {
-            ConnectionError::Query(err) if Self::error_is_division_by_zero(&err) =>
+            ConnectionError::Query(err)
+                if Self::error_is_division_by_zero(&err) =>
             {
                 AsyncInsertError::CollectionNotFound
             }
@@ -389,7 +390,9 @@ where
 mod test {
     use super::*;
     use crate::db::{self, identity::Resource as IdentityResource};
-    use async_bb8_diesel::{AsyncRunQueryDsl, AsyncSimpleConnection};
+    use async_bb8_diesel::{
+        AsyncRunQueryDsl, AsyncSimpleConnection, ConnectionManager,
+    };
     use chrono::{NaiveDateTime, TimeZone, Utc};
     use db_macros::Resource;
     use diesel::expression_methods::ExpressionMethods;
@@ -422,7 +425,9 @@ mod test {
         }
     }
 
-    async fn setup_db(pool: &crate::db::Pool) {
+    async fn setup_db(
+        pool: &crate::db::Pool,
+    ) -> bb8::PooledConnection<ConnectionManager<DbConnection>> {
         let connection = pool.pool().get().await.unwrap();
         (*connection)
             .batch_execute_async(
@@ -448,6 +453,7 @@ mod test {
             )
             .await
             .unwrap();
+        connection
     }
 
     /// Describes an organization within the database.
@@ -544,7 +550,7 @@ mod test {
         let cfg = db::Config { url: db.pg_config().clone() };
         let pool = db::Pool::new(&logctx.log, &cfg);
 
-        setup_db(&pool).await;
+        let conn = setup_db(&pool).await;
 
         let collection_id = uuid::Uuid::new_v4();
         let resource_id = uuid::Uuid::new_v4();
@@ -559,7 +565,7 @@ mod test {
                 resource::dsl::collection_id.eq(collection_id),
             )),
         )
-        .insert_and_get_result_async(&pool.pool().get().await.unwrap())
+        .insert_and_get_result_async(&conn)
         .await;
         assert!(matches!(insert, Err(AsyncInsertError::CollectionNotFound)));
 
@@ -574,12 +580,10 @@ mod test {
         let cfg = db::Config { url: db.pg_config().clone() };
         let pool = db::Pool::new(&logctx.log, &cfg);
 
-        setup_db(&pool).await;
+        let conn = setup_db(&pool).await;
 
         let collection_id = uuid::Uuid::new_v4();
         let resource_id = uuid::Uuid::new_v4();
-
-        let conn = pool.pool().get().await.unwrap();
 
         // Insert the collection so it's present later
         diesel::insert_into(collection::table)

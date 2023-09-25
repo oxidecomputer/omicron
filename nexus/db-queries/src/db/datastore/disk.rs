@@ -16,7 +16,6 @@ use crate::db::collection_detach::DetachError;
 use crate::db::collection_insert::AsyncInsertError;
 use crate::db::collection_insert::DatastoreCollection;
 use crate::db::error::public_error_from_diesel;
-use crate::db::error::public_error_from_diesel_pool;
 use crate::db::error::ErrorHandler;
 use crate::db::identity::Resource;
 use crate::db::lookup::LookupPath;
@@ -105,12 +104,10 @@ impl DataStore {
         .await
         .map_err(|e| match e {
             AsyncInsertError::CollectionNotFound => authz_project.not_found(),
-            AsyncInsertError::DatabaseError(e) => {
-                public_error_from_diesel(
-                    e,
-                    ErrorHandler::Conflict(ResourceType::Disk, name.as_str()),
-                )
-            }
+            AsyncInsertError::DatabaseError(e) => public_error_from_diesel(
+                e,
+                ErrorHandler::Conflict(ResourceType::Disk, name.as_str()),
+            ),
         })?;
 
         let runtime = disk.runtime();
@@ -281,7 +278,7 @@ impl DataStore {
                     }
                 },
                 AttachError::DatabaseError(e) => {
-                    Err(public_error_from_diesel_pool(e, ErrorHandler::Server))
+                    Err(public_error_from_diesel(e, ErrorHandler::Server))
                 },
             }
         })?;
@@ -448,7 +445,7 @@ impl DataStore {
                 UpdateStatus::NotUpdatedButExists => false,
             })
             .map_err(|e| {
-                public_error_from_diesel_pool(
+                public_error_from_diesel(
                     e,
                     ErrorHandler::NotFoundByResource(authz_disk),
                 )
@@ -479,7 +476,7 @@ impl DataStore {
                 UpdateStatus::NotUpdatedButExists => false,
             })
             .map_err(|e| {
-                public_error_from_diesel_pool(
+                public_error_from_diesel(
                     e,
                     ErrorHandler::NotFoundByResource(authz_disk),
                 )
@@ -509,7 +506,7 @@ impl DataStore {
                 UpdateStatus::NotUpdatedButExists => false,
             })
             .map_err(|e| {
-                public_error_from_diesel_pool(
+                public_error_from_diesel(
                     e,
                     ErrorHandler::NotFoundByResource(authz_disk),
                 )
@@ -591,7 +588,7 @@ impl DataStore {
             .execute_and_check(&conn)
             .await
             .map_err(|e| {
-                public_error_from_diesel_pool(
+                public_error_from_diesel(
                     e,
                     ErrorHandler::NotFoundByLookup(
                         ResourceType::Disk,

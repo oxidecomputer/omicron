@@ -9,7 +9,6 @@ use crate::authz;
 use crate::context::OpContext;
 use crate::db;
 use crate::db::error::public_error_from_diesel;
-use crate::db::error::public_error_from_diesel_pool;
 use crate::db::error::ErrorHandler;
 use crate::db::error::TransactionError;
 use crate::db::identity::Asset;
@@ -47,10 +46,10 @@ impl DataStore {
                 dsl::reservoir_size.eq(sled.reservoir_size),
             ))
             .returning(Sled::as_returning())
-            .get_result_async(self.pool())
+            .get_result_async(&*self.pool_connection_unauthorized().await?)
             .await
             .map_err(|e| {
-                public_error_from_diesel_pool(
+                public_error_from_diesel(
                     e,
                     ErrorHandler::Conflict(
                         ResourceType::Sled,
@@ -184,8 +183,8 @@ impl DataStore {
                         "No sleds can fit the requested instance",
                     )
                 }
-                TxnError::Pool(e) => {
-                    public_error_from_diesel_pool(e, ErrorHandler::Server)
+                TxnError::Connection(e) => {
+                    public_error_from_diesel(e, ErrorHandler::Server)
                 }
             })
     }

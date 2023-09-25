@@ -5,7 +5,7 @@
 //! Utility allowing Diesel to EXPLAIN queries.
 
 use super::pool::DbConnection;
-use async_bb8_diesel::{AsyncRunQueryDsl, ConnectionManager, PoolError};
+use async_bb8_diesel::{AsyncRunQueryDsl, PoolError};
 use async_trait::async_trait;
 use diesel::pg::Pg;
 use diesel::prelude::*;
@@ -48,7 +48,7 @@ pub trait ExplainableAsync<Q> {
     /// Asynchronously issues an explain statement.
     async fn explain_async(
         self,
-        pool: &bb8::Pool<ConnectionManager<DbConnection>>,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
     ) -> Result<String, PoolError>;
 }
 
@@ -64,10 +64,10 @@ where
 {
     async fn explain_async(
         self,
-        pool: &bb8::Pool<ConnectionManager<DbConnection>>,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
     ) -> Result<String, PoolError> {
         Ok(ExplainStatement { query: self }
-            .get_results_async::<String>(pool)
+            .get_results_async::<String>(conn)
             .await?
             .join("\n"))
     }
@@ -167,6 +167,7 @@ mod test {
         let mut db = test_setup_database(&logctx.log).await;
         let cfg = db::Config { url: db.pg_config().clone() };
         let pool = db::Pool::new(&logctx.log, &cfg);
+        let conn = pool.pool().get().await.unwrap();
 
         create_schema(&pool).await;
 
@@ -174,7 +175,7 @@ mod test {
         let explanation = dsl::test_users
             .filter(dsl::id.eq(Uuid::nil()))
             .select(User::as_select())
-            .explain_async(pool.pool())
+            .explain_async(&*conn)
             .await
             .unwrap();
 
@@ -190,6 +191,7 @@ mod test {
         let mut db = test_setup_database(&logctx.log).await;
         let cfg = db::Config { url: db.pg_config().clone() };
         let pool = db::Pool::new(&logctx.log, &cfg);
+        let conn = pool.pool().get().await.unwrap();
 
         create_schema(&pool).await;
 
@@ -197,7 +199,7 @@ mod test {
         let explanation = dsl::test_users
             .filter(dsl::age.eq(2))
             .select(User::as_select())
-            .explain_async(pool.pool())
+            .explain_async(&*conn)
             .await
             .unwrap();
 

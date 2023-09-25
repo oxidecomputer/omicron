@@ -53,15 +53,13 @@ impl DataStore {
                 type_name: ResourceType::Zpool,
                 lookup_type: LookupType::ById(zpool_id),
             },
-            AsyncInsertError::DatabaseError(e) => {
-                public_error_from_diesel(
-                    e,
-                    ErrorHandler::Conflict(
-                        ResourceType::Dataset,
-                        &dataset.id().to_string(),
-                    ),
-                )
-            }
+            AsyncInsertError::DatabaseError(e) => public_error_from_diesel(
+                e,
+                ErrorHandler::Conflict(
+                    ResourceType::Dataset,
+                    &dataset.id().to_string(),
+                ),
+            ),
         })
     }
 }

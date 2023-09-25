@@ -518,7 +518,7 @@ async fn load_zones_version(
         .filter(dsl::version.eq(nexus_db_model::Generation::from(version)))
         .limit(1)
         .select(DnsVersion::as_select())
-        .load_async(datastore.pool_for_tests().await?)
+        .load_async(&*datastore.pool_connection_for_tests().await?)
         .await
         .context("loading requested version")?;
 
@@ -560,7 +560,7 @@ async fn cmd_db_dns_diff(
             .filter(dsl::version_added.eq(version.version))
             .limit(i64::from(u32::from(limit)))
             .select(DnsName::as_select())
-            .load_async(datastore.pool_for_tests().await?)
+            .load_async(&*datastore.pool_connection_for_tests().await?)
             .await
             .context("loading added names")?;
         check_limit(&added, limit, || "loading added names");
@@ -570,7 +570,7 @@ async fn cmd_db_dns_diff(
             .filter(dsl::version_removed.eq(version.version))
             .limit(i64::from(u32::from(limit)))
             .select(DnsName::as_select())
-            .load_async(datastore.pool_for_tests().await?)
+            .load_async(&*datastore.pool_connection_for_tests().await?)
             .await
             .context("loading added names")?;
         check_limit(&added, limit, || "loading removed names");

@@ -12,7 +12,6 @@ use crate::db;
 use crate::db::datastore::RunnableQuery;
 use crate::db::datastore::RunnableQueryNoReturn;
 use crate::db::error::public_error_from_diesel;
-use crate::db::error::public_error_from_diesel_pool;
 use crate::db::error::ErrorHandler;
 use crate::db::error::TransactionError;
 use crate::db::fixed_data::role_assignment::BUILTIN_ROLE_ASSIGNMENTS;
@@ -222,9 +221,7 @@ impl DataStore {
             .select(RoleAssignment::as_select())
             .load_async::<RoleAssignment>(conn)
             .await
-            .map_err(|e| {
-                public_error_from_diesel_pool(e.into(), ErrorHandler::Server)
-            })
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     /// Removes all existing externally-visble role assignments on
@@ -283,8 +280,8 @@ impl DataStore {
             .await
             .map_err(|e| match e {
                 TransactionError::CustomError(e) => e,
-                TransactionError::Pool(e) => {
-                    public_error_from_diesel_pool(e, ErrorHandler::Server)
+                TransactionError::Connection(e) => {
+                    public_error_from_diesel(e, ErrorHandler::Server)
                 }
             })
     }

@@ -5,7 +5,7 @@
 //! CTE implementation for "UPDATE with extended return status".
 
 use super::pool::DbConnection;
-use async_bb8_diesel::{AsyncRunQueryDsl, PoolError};
+use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::associations::HasTable;
 use diesel::pg::Pg;
 use diesel::prelude::*;
@@ -156,7 +156,7 @@ where
     pub async fn execute_and_check(
         self,
         conn: &async_bb8_diesel::Connection<DbConnection>,
-    ) -> Result<UpdateAndQueryResult<Q>, PoolError>
+    ) -> Result<UpdateAndQueryResult<Q>, async_bb8_diesel::ConnectionError>
     where
         // We require this bound to ensure that "Self" is runnable as query.
         Self: LoadQuery<'static, DbConnection, (Option<K>, Option<K>, Q)>,

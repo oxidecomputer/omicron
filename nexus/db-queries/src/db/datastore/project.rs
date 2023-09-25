@@ -13,7 +13,6 @@ use crate::db::collection_insert::AsyncInsertError;
 use crate::db::collection_insert::DatastoreCollection;
 use crate::db::error::diesel_result_optional;
 use crate::db::error::public_error_from_diesel;
-use crate::db::error::public_error_from_diesel_pool;
 use crate::db::error::ErrorHandler;
 use crate::db::error::TransactionError;
 use crate::db::fixed_data::project::SERVICES_PROJECT;
@@ -26,7 +25,7 @@ use crate::db::model::ProjectUpdate;
 use crate::db::model::Silo;
 use crate::db::model::VirtualProvisioningCollection;
 use crate::db::pagination::paginated;
-use async_bb8_diesel::{AsyncConnection, AsyncRunQueryDsl, PoolError};
+use async_bb8_diesel::{AsyncConnection, AsyncRunQueryDsl};
 use chrono::Utc;
 use diesel::prelude::*;
 use omicron_common::api::external::http_pagination::PaginatedBy;
@@ -194,8 +193,8 @@ impl DataStore {
             .await
             .map_err(|e| match e {
                 TransactionError::CustomError(e) => e,
-                TransactionError::Pool(e) => {
-                    public_error_from_diesel_pool(e, ErrorHandler::Server)
+                TransactionError::Connection(e) => {
+                    public_error_from_diesel(e, ErrorHandler::Server)
                 }
             })?;
 
@@ -247,8 +246,8 @@ impl DataStore {
                     .execute_async(&conn)
                     .await
                     .map_err(|e| {
-                        public_error_from_diesel_pool(
-                            PoolError::from(e),
+                        public_error_from_diesel(
+                            e,
                             ErrorHandler::NotFoundByResource(authz_project),
                         )
                     })?;
@@ -271,8 +270,8 @@ impl DataStore {
             .await
             .map_err(|e| match e {
                 TxnError::CustomError(e) => e,
-                TxnError::Pool(e) => {
-                    public_error_from_diesel_pool(e, ErrorHandler::Server)
+                TxnError::Connection(e) => {
+                    public_error_from_diesel(e, ErrorHandler::Server)
                 }
             })?;
         Ok(())

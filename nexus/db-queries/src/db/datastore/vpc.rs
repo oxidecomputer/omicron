@@ -12,7 +12,6 @@ use crate::db::collection_insert::AsyncInsertError;
 use crate::db::collection_insert::DatastoreCollection;
 use crate::db::error::diesel_result_optional;
 use crate::db::error::public_error_from_diesel;
-use crate::db::error::public_error_from_diesel_pool;
 use crate::db::error::ErrorHandler;
 use crate::db::error::TransactionError;
 use crate::db::fixed_data::vpc::SERVICES_VPC_ID;
@@ -325,12 +324,10 @@ impl DataStore {
                 type_name: ResourceType::Project,
                 lookup_type: LookupType::ById(project_id),
             },
-            AsyncInsertError::DatabaseError(e) => {
-                public_error_from_diesel(
-                    e,
-                    ErrorHandler::Conflict(ResourceType::Vpc, name.as_str()),
-                )
-            }
+            AsyncInsertError::DatabaseError(e) => public_error_from_diesel(
+                e,
+                ErrorHandler::Conflict(ResourceType::Vpc, name.as_str()),
+            ),
         })?;
         Ok((
             authz::Vpc::new(
@@ -559,7 +556,7 @@ impl DataStore {
                 TxnError::CustomError(
                     FirewallUpdateError::CollectionNotFound,
                 ) => Error::not_found_by_id(ResourceType::Vpc, &authz_vpc.id()),
-                TxnError::Pool(e) => public_error_from_diesel_pool(
+                TxnError::Connection(e) => public_error_from_diesel(
                     e,
                     ErrorHandler::NotFoundByResource(authz_vpc),
                 ),
@@ -971,15 +968,13 @@ impl DataStore {
                 type_name: ResourceType::VpcRouter,
                 lookup_type: LookupType::ById(router_id),
             },
-            AsyncInsertError::DatabaseError(e) => {
-                public_error_from_diesel(
-                    e,
-                    ErrorHandler::Conflict(
-                        ResourceType::RouterRoute,
-                        name.as_str(),
-                    ),
-                )
-            }
+            AsyncInsertError::DatabaseError(e) => public_error_from_diesel(
+                e,
+                ErrorHandler::Conflict(
+                    ResourceType::RouterRoute,
+                    name.as_str(),
+                ),
+            ),
         })
     }
 

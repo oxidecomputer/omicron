@@ -11,7 +11,6 @@ use crate::db;
 use crate::db::collection_insert::AsyncInsertError;
 use crate::db::collection_insert::DatastoreCollection;
 use crate::db::error::public_error_from_diesel;
-use crate::db::error::public_error_from_diesel_pool;
 use crate::db::error::ErrorHandler;
 use crate::db::model::Generation;
 use crate::db::model::Name;
@@ -158,16 +157,13 @@ impl DataStore {
                             }
                         }
                         AsyncInsertError::DatabaseError(e) => {
-                            public_error_from_diesel(
-                                e,
-                                ErrorHandler::Server,
-                            )
+                            public_error_from_diesel(e, ErrorHandler::Server)
                         }
                     },
                 },
 
-                TxnError::Pool(e) => {
-                    public_error_from_diesel_pool(e, ErrorHandler::Server)
+                TxnError::Connection(e) => {
+                    public_error_from_diesel(e, ErrorHandler::Server)
                 }
             })?;
 
@@ -276,9 +272,7 @@ impl DataStore {
             .check_if_exists::<Snapshot>(snapshot_id)
             .execute_async(&*self.pool_connection_authorized(&opctx).await?)
             .await
-            .map_err(|e| {
-                public_error_from_diesel(e, ErrorHandler::Server)
-            })?;
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
         if updated_rows == 0 {
             // Either:
