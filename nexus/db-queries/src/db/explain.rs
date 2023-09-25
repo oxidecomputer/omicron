@@ -5,7 +5,7 @@
 //! Utility allowing Diesel to EXPLAIN queries.
 
 use super::pool::DbConnection;
-use async_bb8_diesel::{AsyncRunQueryDsl, PoolError};
+use async_bb8_diesel::{AsyncRunQueryDsl, ConnectionError};
 use async_trait::async_trait;
 use diesel::pg::Pg;
 use diesel::prelude::*;
@@ -49,7 +49,7 @@ pub trait ExplainableAsync<Q> {
     async fn explain_async(
         self,
         conn: &async_bb8_diesel::Connection<DbConnection>,
-    ) -> Result<String, PoolError>;
+    ) -> Result<String, ConnectionError>;
 }
 
 #[async_trait]
@@ -65,7 +65,7 @@ where
     async fn explain_async(
         self,
         conn: &async_bb8_diesel::Connection<DbConnection>,
-    ) -> Result<String, PoolError> {
+    ) -> Result<String, ConnectionError> {
         Ok(ExplainStatement { query: self }
             .get_results_async::<String>(conn)
             .await?
@@ -175,7 +175,7 @@ mod test {
         let explanation = dsl::test_users
             .filter(dsl::id.eq(Uuid::nil()))
             .select(User::as_select())
-            .explain_async(&*conn)
+            .explain_async(&conn)
             .await
             .unwrap();
 
@@ -199,7 +199,7 @@ mod test {
         let explanation = dsl::test_users
             .filter(dsl::age.eq(2))
             .select(User::as_select())
-            .explain_async(&*conn)
+            .explain_async(&conn)
             .await
             .unwrap();
 

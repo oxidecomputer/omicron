@@ -320,7 +320,7 @@ impl DataStore {
                 .execute_async(conn)
                 .await
                 .map_err(|e| {
-                    public_error_from_diesel(e.into(), ErrorHandler::Server)
+                    public_error_from_diesel(e, ErrorHandler::Server)
                 })?;
         }
 
@@ -333,7 +333,7 @@ impl DataStore {
                 .execute_async(conn)
                 .await
                 .map_err(|e| {
-                    public_error_from_diesel(e.into(), ErrorHandler::Server)
+                    public_error_from_diesel(e, ErrorHandler::Server)
                 })?;
         }
 
@@ -346,7 +346,7 @@ impl DataStore {
                 .execute_async(conn)
                 .await
                 .map_err(|e| {
-                    public_error_from_diesel(e.into(), ErrorHandler::Server)
+                    public_error_from_diesel(e, ErrorHandler::Server)
                 })?;
         }
 
@@ -457,7 +457,7 @@ impl DataStore {
                 .execute_async(conn)
                 .await
                 .map_err(|e| {
-                    public_error_from_diesel(e.into(), ErrorHandler::Server)
+                    public_error_from_diesel(e, ErrorHandler::Server)
                 })?;
         }
 
@@ -481,9 +481,7 @@ impl DataStore {
             .set(dsl::version_removed.eq(new_version_num))
             .execute_async(conn)
             .await
-            .map_err(|e| {
-                public_error_from_diesel(e.into(), ErrorHandler::Server)
-            })?;
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
             bail_unless!(
                 nremoved == ntoremove,
@@ -499,7 +497,7 @@ impl DataStore {
                 .execute_async(conn)
                 .await
                 .map_err(|e| {
-                    public_error_from_diesel(e.into(), ErrorHandler::Server)
+                    public_error_from_diesel(e, ErrorHandler::Server)
                 })?;
 
             bail_unless!(

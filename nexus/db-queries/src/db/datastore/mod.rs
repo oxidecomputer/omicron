@@ -200,15 +200,6 @@ impl DataStore {
             .unwrap();
     }
 
-    // TODO-security This should be deprecated in favor of
-    // pool_connection_authorized(), which gives us the chance to do a minimal
-    // security check before hitting the database. Eventually, this function
-    // should only be used for doing authentication in the first place (since we
-    // can't do an authz check in that case).
-    fn pool(&self) -> &bb8::Pool<ConnectionManager<DbConnection>> {
-        self.pool.pool()
-    }
-
     async fn pool_authorized(
         &self,
         opctx: &OpContext,
@@ -241,7 +232,7 @@ impl DataStore {
         &self,
     ) -> Result<bb8::PooledConnection<ConnectionManager<DbConnection>>, Error>
     {
-        let connection = self.pool().get().await.map_err(|err| {
+        let connection = self.pool.pool().get().await.map_err(|err| {
             Error::internal_error(&format!(
                 "Failed to access DB connection: {err}"
             ))

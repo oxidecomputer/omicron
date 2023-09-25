@@ -75,10 +75,7 @@ impl DataStore {
                     .optional()
                     .map_err(|e| {
                         TxnError::CustomError(VolumeCreationError::Public(
-                            public_error_from_diesel(
-                                e.into(),
-                                ErrorHandler::Server,
-                            ),
+                            public_error_from_diesel(e, ErrorHandler::Server),
                         ))
                     })?;
 
@@ -103,7 +100,7 @@ impl DataStore {
                     .map_err(|e| {
                         TxnError::CustomError(VolumeCreationError::Public(
                             public_error_from_diesel(
-                                e.into(),
+                                e,
                                 ErrorHandler::Conflict(
                                     ResourceType::Volume,
                                     volume.id().to_string().as_str(),
@@ -131,7 +128,7 @@ impl DataStore {
                         .map_err(|e| {
                             TxnError::CustomError(VolumeCreationError::Public(
                                 public_error_from_diesel(
-                                    e.into(),
+                                    e,
                                     ErrorHandler::Server,
                                 ),
                             ))

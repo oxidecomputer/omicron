@@ -182,9 +182,6 @@ where
     ISR: 'static + Send,
     InsertIntoCollectionStatement<ResourceType, ISR, C>: Send,
 {
-    // TODO: LOOK FOR ALL "impl.*AsyncConnection" cases, make 'em act on the
-    // One True Connection only (monomorphin' time)
-
     /// Issues the CTE asynchronously and parses the result.
     ///
     /// The three outcomes are:
@@ -201,7 +198,7 @@ where
     {
         self.get_result_async::<ResourceType>(conn)
             .await
-            .map_err(|e| Self::translate_async_error(ConnectionError::from(e)))
+            .map_err(|e| Self::translate_async_error(e))
     }
 
     /// Issues the CTE asynchronously and parses the result.
@@ -220,7 +217,7 @@ where
     {
         self.get_results_async::<ResourceType>(conn)
             .await
-            .map_err(|e| Self::translate_async_error(ConnectionError::from(e)))
+            .map_err(|e| Self::translate_async_error(e))
     }
 
     /// Check for the intentional division by zero error
