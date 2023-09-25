@@ -933,6 +933,7 @@ mod test {
             Uuid::new_v4(),
             ServiceKind::Nexus,
             cert_create,
+            &["dummy.sys.oxide1.test".to_string()],
         )
         .unwrap();
         let ee2 = ExternalEndpoints::new(vec![], vec![cert], vec![]);
@@ -962,6 +963,7 @@ mod test {
             Uuid::new_v4(),
             ServiceKind::Nexus,
             cert_create,
+            &["dummy.sys.oxide1.test".to_string()],
         )
         .unwrap();
 
@@ -1095,6 +1097,7 @@ mod test {
             Uuid::new_v4(),
             ServiceKind::Nexus,
             silo1_cert1_params,
+            &["silo1.sys.oxide1.test".to_string()],
         )
         .unwrap();
         let silo1_cert2_params =
@@ -1120,6 +1123,7 @@ mod test {
             Uuid::new_v4(),
             ServiceKind::Nexus,
             silo2_cert2_params,
+            &["silo2.sys.oxide1.test".to_string()],
         )
         .unwrap();
         let silo3_cert_params =
@@ -1129,6 +1133,7 @@ mod test {
             Uuid::new_v4(),
             ServiceKind::Nexus,
             silo3_cert_params,
+            &["silo3.sys.oxide1.test".to_string()],
         )
         .unwrap();
         // Corrupt a byte of this last certificate.  (This has to be done after

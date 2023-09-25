@@ -164,7 +164,10 @@ impl super::Nexus {
             format!("create silo: {:?}", silo_name.as_str()),
             self.id.to_string(),
         );
-        dns_update.add_name(silo_dns_name(silo_name), dns_records)?;
+        let silo_dns_name = silo_dns_name(silo_name);
+        let recovery_silo_fq_dns_name =
+            format!("{silo_dns_name}.{}", request.external_dns_zone_name);
+        dns_update.add_name(silo_dns_name, dns_records)?;
 
         // Administrators of the Recovery Silo are automatically made
         // administrators of the Fleet.
@@ -196,6 +199,7 @@ impl super::Nexus {
                     internal_dns,
                     external_dns,
                     recovery_silo,
+                    recovery_silo_fq_dns_name,
                     recovery_user_id: request.recovery_silo.user_name,
                     recovery_user_password_hash: request
                         .recovery_silo

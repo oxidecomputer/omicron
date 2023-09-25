@@ -13,8 +13,9 @@ pub struct CertificateChain {
 }
 
 impl CertificateChain {
-    pub fn new() -> Self {
-        let params = rcgen::CertificateParams::new(vec!["localhost".into()]);
+    pub fn new<S: Into<String>>(subject_alt_name: S) -> Self {
+        let params =
+            rcgen::CertificateParams::new(vec![subject_alt_name.into()]);
         Self::with_params(params)
     }
 
