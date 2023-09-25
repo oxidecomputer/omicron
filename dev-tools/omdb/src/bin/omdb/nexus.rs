@@ -4,7 +4,7 @@
 
 //! omdb commands that query or update specific Nexus instances
 
-use anyhow::bail;
+use crate::Omdb;
 use anyhow::Context;
 use chrono::SecondsFormat;
 use chrono::Utc;
@@ -55,19 +55,32 @@ enum BackgroundTasksCommands {
 
 impl NexusArgs {
     /// Run a `omdb nexus` subcommand.
-    pub async fn run_cmd(
+    pub(crate) async fn run_cmd(
         &self,
+        omdb: &Omdb,
         log: &slog::Logger,
     ) -> Result<(), anyhow::Error> {
-        // This is a little goofy.  The nexus URL is required, but can come
-        // from the environment, in which case it won't be on the command line.
-        let Some(nexus_url) = &self.nexus_internal_url else {
-            bail!(
-                "nexus URL must be specified with --nexus-internal-url or \
-                OMDB_NEXUS_URL"
-            );
+        let nexus_url = match &self.nexus_internal_url {
+            Some(cli_or_env_url) => cli_or_env_url.clone(),
+            None => {
+                eprintln!(
+                    "note: Nexus URL not specified.  Will pick one from DNS."
+                );
+                let addrs = omdb
+                    .dns_lookup_all(
+                        log.clone(),
+                        internal_dns::ServiceName::Nexus,
+                    )
+                    .await?;
+                let addr = addrs.into_iter().next().expect(
+                    "expected at least one Nexus address from \
+                    successful DNS lookup",
+                );
+                format!("http://{}", addr)
+            }
         };
-        let client = nexus_client::Client::new(nexus_url, log.clone());
+        eprintln!("note: using Nexus URL {}", &nexus_url);
+        let client = nexus_client::Client::new(&nexus_url, log.clone());
 
         match &self.command {
             NexusCommands::BackgroundTasks(BackgroundTasksArgs {

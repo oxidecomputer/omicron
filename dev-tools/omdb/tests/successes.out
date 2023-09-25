@@ -7,6 +7,7 @@ internal control-plane.oxide.internal 1   <REDACTED_TIMESTAMP> rack setup
 external oxide-dev.test               2   <REDACTED_TIMESTAMP> create silo: "test-suite-silo" 
 ---------------------------------------------
 stderr:
+note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
 note: database schema version matches expected (4.0.0)
 =============================================
 EXECUTING COMMAND: omdb ["db", "dns", "diff", "external", "2"]
@@ -22,6 +23,7 @@ changes:                    names added: 1, names removed: 0
 +  test-suite-silo.sys                                A    127.0.0.1
 ---------------------------------------------
 stderr:
+note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
 note: database schema version matches expected (4.0.0)
 =============================================
 EXECUTING COMMAND: omdb ["db", "dns", "names", "external", "2"]
@@ -33,6 +35,7 @@ External zone: oxide-dev.test
   test-suite-silo.sys                                A    127.0.0.1
 ---------------------------------------------
 stderr:
+note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
 note: database schema version matches expected (4.0.0)
 =============================================
 EXECUTING COMMAND: omdb ["db", "services", "list-instances"]
@@ -48,6 +51,7 @@ InternalDns    REDACTED_UUID_REDACTED_UUID_REDACTED [::1]:REDACTED_PORT         
 Nexus          REDACTED_UUID_REDACTED_UUID_REDACTED [::ffff:127.0.0.1]:REDACTED_PORT sim-b6d65341 
 ---------------------------------------------
 stderr:
+note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
 note: database schema version matches expected (4.0.0)
 =============================================
 EXECUTING COMMAND: omdb ["db", "services", "list-by-sled"]
@@ -66,6 +70,7 @@ sled: sim-b6d65341 (id REDACTED_UUID_REDACTED_UUID_REDACTED)
 
 ---------------------------------------------
 stderr:
+note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
 note: database schema version matches expected (4.0.0)
 =============================================
 EXECUTING COMMAND: omdb ["db", "sleds"]
@@ -76,6 +81,7 @@ SERIAL       IP          ROLE ID
 sim-b6d65341 [::1]:REDACTED_PORT -    REDACTED_UUID_REDACTED_UUID_REDACTED 
 ---------------------------------------------
 stderr:
+note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
 note: database schema version matches expected (4.0.0)
 =============================================
 EXECUTING COMMAND: omdb ["nexus", "background-tasks", "doc"]
@@ -118,6 +124,7 @@ task: "external_endpoints"
 
 ---------------------------------------------
 stderr:
+note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
 =============================================
 EXECUTING COMMAND: omdb ["nexus", "background-tasks", "show"]
 termination: Exited(0)
@@ -198,4 +205,5 @@ task: "external_endpoints"
 
 ---------------------------------------------
 stderr:
+note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
 =============================================

@@ -41,7 +41,7 @@ async fn test_nexus_boots_before_cockroach() {
         omicron_common::nexus_config::Database::FromDns;
     builder.config.deployment.internal_dns =
         omicron_common::nexus_config::InternalDns::FromAddress {
-            address: *builder
+            address: builder
                 .internal_dns
                 .as_ref()
                 .expect("Must start Internal DNS before acquiring an address")
@@ -121,7 +121,7 @@ async fn test_nexus_boots_before_dendrite() {
     builder.config.pkg.dendrite = HashMap::new();
     builder.config.deployment.internal_dns =
         omicron_common::nexus_config::InternalDns::FromAddress {
-            address: *builder
+            address: builder
                 .internal_dns
                 .as_ref()
                 .expect("Must start Internal DNS before acquiring an address")

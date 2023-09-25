@@ -433,7 +433,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
 
         self.config.deployment.internal_dns =
             nexus_config::InternalDns::FromAddress {
-                address: *self
+                address: self
                     .internal_dns
                     .as_ref()
                     .expect("Must initialize internal DNS server first")
@@ -659,8 +659,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
 
         let dns = dns_server::TransientServer::new(&log).await.unwrap();
 
-        let SocketAddr::V6(dns_address) = *dns.dns_server.local_address()
-        else {
+        let SocketAddr::V6(dns_address) = dns.dns_server.local_address() else {
             panic!("Unsupported IPv4 DNS address");
         };
         let SocketAddr::V6(dropshot_address) = dns.dropshot_server.local_addr()
@@ -998,7 +997,7 @@ pub async fn start_dns_server(
 
     let mut resolver_config = ResolverConfig::new();
     resolver_config.add_name_server(NameServerConfig {
-        socket_addr: *dns_server.local_address(),
+        socket_addr: dns_server.local_address(),
         protocol: Protocol::Udp,
         tls_dns_name: None,
         trust_nx_responses: false,
