@@ -43,7 +43,7 @@ function ensure_simulated_links {
     done
 
     if [[ -z "$(get_vnic_name_if_exists "sc0_1")" ]]; then
-        dladm create-vnic -t "sc0_1" -l $PHYSICAL_LINK -m a8:e1:de:01:70:1d
+        dladm create-vnic -t "sc0_1" -l "$PHYSICAL_LINK" -m a8:e1:de:01:70:1d
     fi
     success "Vnic sc0_1 exists"
 }
@@ -60,7 +60,7 @@ function ensure_softnpu_zone {
             --ports sc0_0,tfportrear0_0 \
             --ports sc0_1,tfportqsfp0_0
     }
-    $SOURCE_DIR/scrimlet/softnpu-init.sh
+    "$SOURCE_DIR"/scrimlet/softnpu-init.sh
     success "softnpu zone exists"
 }
 

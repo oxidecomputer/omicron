@@ -65,6 +65,25 @@ impl super::Nexus {
         }
     }
 
+    pub(crate) async fn silo_fq_dns_names(
+        &self,
+        opctx: &OpContext,
+        silo_id: Uuid,
+    ) -> ListResultVec<String> {
+        let (_, silo) =
+            self.silo_lookup(opctx, silo_id.into())?.fetch().await?;
+        let silo_dns_name = silo_dns_name(&silo.name());
+        let external_dns_zones = self
+            .db_datastore
+            .dns_zones_list_all(opctx, nexus_db_model::DnsGroup::External)
+            .await?;
+
+        Ok(external_dns_zones
+            .into_iter()
+            .map(|zone| format!("{silo_dns_name}.{}", zone.zone_name))
+            .collect())
+    }
+
     pub(crate) async fn silo_create(
         &self,
         opctx: &OpContext,
@@ -79,9 +98,9 @@ impl super::Nexus {
 
         // Set up an external DNS name for this Silo's API and console
         // endpoints (which are the same endpoint).
-        let dns_records: Vec<DnsRecord> = datastore
-            .nexus_external_addresses(nexus_opctx)
-            .await?
+        let (nexus_external_ips, nexus_external_dns_zones) =
+            datastore.nexus_external_addresses(nexus_opctx).await?;
+        let dns_records: Vec<DnsRecord> = nexus_external_ips
             .into_iter()
             .map(|addr| match addr {
                 IpAddr::V4(addr) => DnsRecord::A(addr),
@@ -95,10 +114,22 @@ impl super::Nexus {
             format!("create silo: {:?}", silo_name.as_str()),
             self.id.to_string(),
         );
-        dns_update.add_name(silo_dns_name(silo_name), dns_records)?;
+        let silo_dns_name = silo_dns_name(silo_name);
+        let new_silo_dns_names = nexus_external_dns_zones
+            .into_iter()
+            .map(|zone| format!("{silo_dns_name}.{}", zone.zone_name))
+            .collect::<Vec<_>>();
+
+        dns_update.add_name(silo_dns_name, dns_records)?;
 
         let silo = datastore
-            .silo_create(&opctx, &nexus_opctx, new_silo_params, dns_update)
+            .silo_create(
+                &opctx,
+                &nexus_opctx,
+                new_silo_params,
+                &new_silo_dns_names,
+                dns_update,
+            )
             .await?;
         self.background_tasks
             .activate(&self.background_tasks.task_external_dns_config);
