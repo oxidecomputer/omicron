@@ -33,7 +33,6 @@ use omicron_common::api::external::Name;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::RouteDestination;
 use omicron_common::api::external::RouteTarget;
-use omicron_common::api::external::SemverVersion;
 use omicron_common::api::external::VpcFirewallRuleUpdateParams;
 use omicron_test_utils::certificates::CertificateChain;
 use std::net::IpAddr;
@@ -510,12 +509,6 @@ lazy_static! {
 
     pub static ref DEMO_SPECIFIC_SSHKEY_URL: String =
         format!("{}/{}", *DEMO_SSHKEYS_URL, *DEMO_SSHKEY_NAME);
-
-    // System update
-
-    pub static ref DEMO_SYSTEM_UPDATE_PARAMS: params::SystemUpdatePath = params::SystemUpdatePath {
-        version: SemverVersion::new(1,0,0),
-    };
 }
 
 lazy_static! {
@@ -1578,86 +1571,6 @@ lazy_static! {
             visibility: Visibility::Public,
             unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![AllowedMethod::Get],
-        },
-
-        /* Updates */
-
-        VerifyEndpoint {
-            url: "/v1/system/update/refresh",
-            visibility: Visibility::Public,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![AllowedMethod::Post(
-                serde_json::Value::Null
-            )],
-        },
-
-        VerifyEndpoint {
-            url: "/v1/system/update/version",
-            visibility: Visibility::Public,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![AllowedMethod::Get],
-        },
-
-        VerifyEndpoint {
-            url: "/v1/system/update/components",
-            visibility: Visibility::Public,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![AllowedMethod::Get],
-        },
-
-        VerifyEndpoint {
-            url: "/v1/system/update/updates",
-            visibility: Visibility::Public,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![AllowedMethod::Get],
-        },
-
-        // TODO: make system update endpoints work instead of expecting 404
-
-        VerifyEndpoint {
-            url: "/v1/system/update/updates/1.0.0",
-            visibility: Visibility::Public,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![AllowedMethod::Get],
-        },
-
-        VerifyEndpoint {
-            url: "/v1/system/update/updates/1.0.0/components",
-            visibility: Visibility::Public,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![AllowedMethod::Get],
-        },
-
-        VerifyEndpoint {
-            url: "/v1/system/update/start",
-            visibility: Visibility::Public,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![AllowedMethod::Post(
-                serde_json::to_value(&*DEMO_SYSTEM_UPDATE_PARAMS).unwrap()
-            )],
-        },
-
-        VerifyEndpoint {
-            url: "/v1/system/update/stop",
-            visibility: Visibility::Public,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![AllowedMethod::Post(
-                serde_json::Value::Null
-            )],
-        },
-
-        VerifyEndpoint {
-            url: "/v1/system/update/deployments",
-            visibility: Visibility::Public,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![AllowedMethod::Get],
-        },
-
-        VerifyEndpoint {
-            url: "/v1/system/update/deployments/120bbb6f-660a-440c-8cb7-199be202ddff",
-            visibility: Visibility::Public,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![AllowedMethod::GetNonexistent],
         },
 
         /* Metrics */

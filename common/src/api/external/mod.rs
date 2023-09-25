@@ -730,13 +730,7 @@ pub enum ResourceType {
     Oximeter,
     MetricProducer,
     RoleBuiltin,
-    UpdateArtifact,
     SwitchPort,
-    SystemUpdate,
-    ComponentUpdate,
-    SystemUpdateComponentUpdate,
-    UpdateDeployment,
-    UpdateableComponent,
     UserBuiltin,
     Zpool,
 }

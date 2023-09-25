@@ -6,7 +6,7 @@
 
 use crate::api::external::{
     ByteCount, DiskState, Generation, InstanceCpuCount, InstanceState, IpNet,
-    SemverVersion, Vni,
+    Vni,
 };
 use chrono::{DateTime, Utc};
 use parse_display::{Display, FromStr};
@@ -80,30 +80,6 @@ impl ProducerEndpoint {
     pub fn collection_route(&self) -> String {
         format!("{}/{}", &self.base_route, &self.id)
     }
-}
-
-/// An identifier for a single update artifact.
-#[derive(
-    Clone,
-    Debug,
-    Eq,
-    PartialEq,
-    Hash,
-    Ord,
-    PartialOrd,
-    Deserialize,
-    Serialize,
-    JsonSchema,
-)]
-pub struct UpdateArtifactId {
-    /// The artifact's name.
-    pub name: String,
-
-    /// The artifact's version.
-    pub version: SemverVersion,
-
-    /// The kind of update artifact this is.
-    pub kind: KnownArtifactKind,
 }
 
 // Adding a new KnownArtifactKind

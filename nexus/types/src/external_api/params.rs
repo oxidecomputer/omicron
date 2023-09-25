@@ -12,7 +12,6 @@ use omicron_common::api::external::{
     AddressLotKind, ByteCount, IdentityMetadataCreateParams,
     IdentityMetadataUpdateParams, InstanceCpuCount, IpNet, Ipv4Net, Ipv6Net,
     Name, NameOrId, PaginationOrder, RouteDestination, RouteTarget,
-    SemverVersion,
 };
 use schemars::JsonSchema;
 use serde::{
@@ -1638,36 +1637,4 @@ pub struct ResourceMetrics {
     pub end_time: DateTime<Utc>,
     /// Query result order
     pub order: Option<PaginationOrder>,
-}
-
-// SYSTEM UPDATE
-
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct SystemUpdatePath {
-    pub version: SemverVersion,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct SystemUpdateStart {
-    pub version: SemverVersion,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct SystemUpdateCreate {
-    pub version: SemverVersion,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct ComponentUpdateCreate {
-    pub version: SemverVersion,
-    pub component_type: shared::UpdateableComponentType,
-    pub system_update_id: Uuid,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct UpdateableComponentCreate {
-    pub version: SemverVersion,
-    pub system_version: SemverVersion,
-    pub component_type: shared::UpdateableComponentType,
-    pub device_id: String,
 }

@@ -228,23 +228,6 @@ pub enum IpKind {
     Floating,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum UpdateableComponentType {
-    BootloaderForRot,
-    BootloaderForSp,
-    BootloaderForHostProc,
-    HubrisForPscRot,
-    HubrisForPscSp,
-    HubrisForSidecarRot,
-    HubrisForSidecarSp,
-    HubrisForGimletRot,
-    HubrisForGimletSp,
-    HeliosHostPhase1,
-    HeliosHostPhase2,
-    HostOmicron,
-}
-
 #[cfg(test)]
 mod test {
     use super::Policy;
