@@ -123,6 +123,7 @@ impl DataStore {
         opctx: &OpContext,
         nexus_opctx: &OpContext,
         new_silo_params: params::SiloCreate,
+        new_silo_dns_names: &[String],
         dns_update: DnsVersionUpdateBuilder,
     ) -> CreateResult<Silo> {
         let conn = self.pool_authorized(opctx).await?;
@@ -131,6 +132,7 @@ impl DataStore {
             opctx,
             nexus_opctx,
             new_silo_params,
+            new_silo_dns_names,
             dns_update,
         )
         .await
@@ -143,6 +145,7 @@ impl DataStore {
         opctx: &OpContext,
         nexus_opctx: &OpContext,
         new_silo_params: params::SiloCreate,
+        new_silo_dns_names: &[String],
         dns_update: DnsVersionUpdateBuilder,
     ) -> CreateResult<Silo>
     where
@@ -253,6 +256,7 @@ impl DataStore {
                         Uuid::new_v4(),
                         ServiceKind::Nexus,
                         c,
+                        new_silo_dns_names,
                     )
                 })
                 .collect::<Result<Vec<_>, _>>()

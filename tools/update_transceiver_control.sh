@@ -4,7 +4,6 @@ set -o pipefail
 set -o errexit
 
 SOURCE_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
-ARG0="$(basename "${BASH_SOURCE[0]}")"
 
 function usage {
     echo "usage: $0 [-c COMMIT] [-n]"
@@ -14,10 +13,6 @@ function usage {
     echo "  -n          Dry-run"
     exit 1
 }
-
-PACKAGES=(
-  "xcvradm"
-)
 
 REPO="oxidecomputer/transceiver-control"
 
@@ -37,7 +32,7 @@ function update_transceiver_control {
     fi
     echo "Updating transceiver control from: $TARGET_COMMIT"
     set -x
-    echo "$OUTPUT" > $OPENAPI_PATH
+    echo "$OUTPUT" > "$OPENAPI_PATH"
     set +x
 }
 

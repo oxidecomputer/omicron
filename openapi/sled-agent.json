@@ -2755,6 +2755,17 @@
             "format": "uint32",
             "minimum": 0
           },
+          "ref_time": {
+            "description": "The NTP reference time (i.e. what chrony thinks the current time is, not necessarily the current system time).",
+            "type": "number",
+            "format": "double"
+          },
+          "stratum": {
+            "description": "The NTP stratum (our upstream's stratum plus one).",
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0
+          },
           "sync": {
             "description": "The synchronization state of the sled, true when the system clock and the NTP clock are in sync (to within a small window).",
             "type": "boolean"
@@ -2764,6 +2775,8 @@
           "correction",
           "ip_addr",
           "ref_id",
+          "ref_time",
+          "stratum",
           "sync"
         ]
       },

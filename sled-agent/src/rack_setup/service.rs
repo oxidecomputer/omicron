@@ -455,6 +455,8 @@ impl ServiceInner {
             sync: ts.sync,
             ref_id: ts.ref_id,
             ip_addr: ts.ip_addr,
+            stratum: ts.stratum,
+            ref_time: ts.ref_time,
             correction: ts.correction,
         })
     }
