@@ -216,9 +216,7 @@ impl DataStore {
     {
         let pool = self.pool_authorized(opctx).await?;
         let connection = pool.get().await.map_err(|err| {
-            Error::internal_error(&format!(
-                "Failed to access DB connection: {err}"
-            ))
+            Error::unavail(&format!("Failed to access DB connection: {err}"))
         })?;
         Ok(connection)
     }
@@ -233,9 +231,7 @@ impl DataStore {
     ) -> Result<bb8::PooledConnection<ConnectionManager<DbConnection>>, Error>
     {
         let connection = self.pool.pool().get().await.map_err(|err| {
-            Error::internal_error(&format!(
-                "Failed to access DB connection: {err}"
-            ))
+            Error::unavail(&format!("Failed to access DB connection: {err}"))
         })?;
         Ok(connection)
     }
