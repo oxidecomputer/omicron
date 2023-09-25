@@ -24,7 +24,6 @@ use illumos_utils::opte::params::SetVirtualNetworkInterfaceHost;
 use omicron_common::api::external::Error;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
-use omicron_common::api::internal::nexus::UpdateArtifactId;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -57,7 +56,6 @@ pub fn api() -> SledApiDescription {
         api.register(set_v2p)?;
         api.register(del_v2p)?;
         api.register(timesync_get)?;
-        api.register(update_artifact)?;
         api.register(vpc_firewall_rules_put)?;
         api.register(zpools_get)?;
 
@@ -479,19 +477,6 @@ async fn disk_put(
         .await
         .map_err(|e| Error::from(e))?,
     ))
-}
-
-#[endpoint {
-    method = POST,
-    path = "/update"
-}]
-async fn update_artifact(
-    rqctx: RequestContext<SledAgent>,
-    artifact: TypedBody<UpdateArtifactId>,
-) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-    let sa = rqctx.context();
-    sa.update_artifact(artifact.into_inner()).await.map_err(Error::from)?;
-    Ok(HttpResponseUpdatedNoContent())
 }
 
 #[derive(Deserialize, JsonSchema)]

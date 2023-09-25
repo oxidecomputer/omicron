@@ -10,4 +10,3 @@
 pub use omicron_common::nexus_config::Config;
 pub(crate) use omicron_common::nexus_config::SchemeName;
 pub(crate) use omicron_common::nexus_config::Tunables;
-pub(crate) use omicron_common::nexus_config::UpdatesConfig;

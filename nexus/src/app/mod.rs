@@ -59,7 +59,6 @@ mod switch;
 mod switch_interface;
 mod switch_port;
 pub mod test_interfaces;
-mod update;
 mod volume;
 mod vpc;
 mod vpc_router;
@@ -121,9 +120,6 @@ pub struct Nexus {
 
     /// Client to the timeseries database.
     timeseries_client: LazyTimeseriesClient,
-
-    /// Contents of the trusted root role for the TUF repository.
-    updates_config: Option<config::UpdatesConfig>,
 
     /// The tunable parameters from a configuration file
     tunables: config::Tunables,
@@ -306,7 +302,6 @@ impl Nexus {
             internal_server: std::sync::Mutex::new(None),
             populate_status,
             timeseries_client,
-            updates_config: config.pkg.updates.clone(),
             tunables: config.pkg.tunables.clone(),
             opctx_alloc: OpContext::for_background(
                 log.new(o!("component" => "InstanceAllocator")),

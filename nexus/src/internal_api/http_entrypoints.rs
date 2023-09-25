@@ -13,7 +13,6 @@ use super::params::{
 };
 use dropshot::endpoint;
 use dropshot::ApiDescription;
-use dropshot::FreeformBody;
 use dropshot::HttpError;
 use dropshot::HttpResponseDeleted;
 use dropshot::HttpResponseOk;
@@ -23,7 +22,6 @@ use dropshot::Query;
 use dropshot::RequestContext;
 use dropshot::ResultsPage;
 use dropshot::TypedBody;
-use hyper::Body;
 use nexus_types::internal_api::params::SwitchPutRequest;
 use nexus_types::internal_api::params::SwitchPutResponse;
 use nexus_types::internal_api::views::to_list;
@@ -36,7 +34,6 @@ use omicron_common::api::external::http_pagination::ScanParams;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
 use omicron_common::api::internal::nexus::ProducerEndpoint;
-use omicron_common::api::internal::nexus::UpdateArtifactId;
 use oximeter::types::ProducerResults;
 use oximeter_producer::{collect, ProducerIdPathParams};
 use schemars::JsonSchema;
@@ -63,7 +60,6 @@ pub(crate) fn internal_api() -> NexusApiDescription {
         api.register(cpapi_producers_post)?;
         api.register(cpapi_collectors_post)?;
         api.register(cpapi_metrics_collect)?;
-        api.register(cpapi_artifact_download)?;
 
         api.register(saga_list)?;
         api.register(saga_view)?;
@@ -414,26 +410,6 @@ async fn cpapi_metrics_collect(
         .internal_latencies
         .instrument_dropshot_handler(&request_context, handler)
         .await
-}
-
-/// Endpoint used by Sled Agents to download cached artifacts.
-#[endpoint {
-    method = GET,
-    path = "/artifacts/{kind}/{name}/{version}",
-}]
-async fn cpapi_artifact_download(
-    request_context: RequestContext<Arc<ServerContext>>,
-    path_params: Path<UpdateArtifactId>,
-) -> Result<HttpResponseOk<FreeformBody>, HttpError> {
-    let context = request_context.context();
-    let nexus = &context.nexus;
-    let opctx =
-        crate::context::op_context_for_internal_api(&request_context).await;
-    // TODO: return 404 if the error we get here says that the record isn't found
-    let body =
-        nexus.download_artifact(&opctx, path_params.into_inner()).await?;
-
-    Ok(HttpResponseOk(Body::from(body).into()))
 }
 
 // Sagas
