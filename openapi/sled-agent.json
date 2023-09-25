@@ -361,32 +361,6 @@
         }
       }
     },
-    "/update": {
-      "post": {
-        "operationId": "update_artifact",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/UpdateArtifactId"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "204": {
-            "description": "resource updated"
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
     "/v2p/{interface_id}": {
       "put": {
         "summary": "Create a mapping from a virtual NIC to a physical host",
@@ -2092,21 +2066,6 @@
         "type": "string",
         "pattern": "^([fF][dD])[0-9a-fA-F]{2}:(([0-9a-fA-F]{1,4}:){6}[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,6}:)([0-9a-fA-F]{1,4})?\\/([0-9]|[1-9][0-9]|1[0-1][0-9]|12[0-8])$"
       },
-      "KnownArtifactKind": {
-        "description": "Kinds of update artifacts, as used by Nexus to determine what updates are available and by sled-agent to determine how to apply an update when asked.",
-        "type": "string",
-        "enum": [
-          "gimlet_sp",
-          "gimlet_rot",
-          "host",
-          "trampoline",
-          "control_plane",
-          "psc_sp",
-          "psc_rot",
-          "switch_sp",
-          "switch_rot"
-        ]
-      },
       "L4PortRange": {
         "example": "22",
         "title": "A range of IP ports",
@@ -2253,10 +2212,6 @@
         },
         "minItems": 2,
         "maxItems": 2
-      },
-      "SemverVersion": {
-        "type": "string",
-        "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$"
       },
       "ServiceEnsureBody": {
         "description": "Used to request that the Sled initialize multiple services.",
@@ -2778,37 +2733,6 @@
           "ref_time",
           "stratum",
           "sync"
-        ]
-      },
-      "UpdateArtifactId": {
-        "description": "An identifier for a single update artifact.",
-        "type": "object",
-        "properties": {
-          "kind": {
-            "description": "The kind of update artifact this is.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/KnownArtifactKind"
-              }
-            ]
-          },
-          "name": {
-            "description": "The artifact's name.",
-            "type": "string"
-          },
-          "version": {
-            "description": "The artifact's version.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/SemverVersion"
-              }
-            ]
-          }
-        },
-        "required": [
-          "kind",
-          "name",
-          "version"
         ]
       },
       "Vni": {

@@ -15276,9 +15276,6 @@
       }
     },
     {
-      "name": "system/update"
-    },
-    {
       "name": "vpcs",
       "description": "Virtual Private Clouds (VPCs) provide isolated network environments for managing and deploying services.",
       "externalDocs": {

@@ -34,35 +34,6 @@
         }
       }
     },
-    "/components": {
-      "get": {
-        "summary": "Provides a list of components known to the bootstrap agent.",
-        "description": "This API is intended to allow early boot services (such as Wicket) to query the underlying component versions installed on a sled.",
-        "operationId": "components_get",
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "title": "Array_of_Component",
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/Component"
-                  }
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
     "/rack-initialize": {
       "get": {
         "summary": "Get the current status of rack initialization or reset.",
@@ -297,21 +268,6 @@
         "required": [
           "cert",
           "key"
-        ]
-      },
-      "Component": {
-        "type": "object",
-        "properties": {
-          "name": {
-            "type": "string"
-          },
-          "version": {
-            "$ref": "#/components/schemas/SemverVersion"
-          }
-        },
-        "required": [
-          "name",
-          "version"
         ]
       },
       "Error": {
@@ -746,10 +702,6 @@
           "user_name",
           "user_password_hash"
         ]
-      },
-      "SemverVersion": {
-        "type": "string",
-        "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$"
       },
       "SwitchLocation": {
         "description": "Identifies switch physical location",
