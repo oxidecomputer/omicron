@@ -36,9 +36,6 @@ mod swap_device;
 mod updates;
 mod zone_bundle;
 
-#[cfg(test)]
-mod fakes;
-
 #[macro_use]
 extern crate slog;
 

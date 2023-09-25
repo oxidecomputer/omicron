@@ -13,8 +13,6 @@ use super::RssAccessError;
 use crate::bootstrap::params::RackInitializeRequest;
 use crate::bootstrap::rack_ops::{RackInitId, RackResetId};
 use crate::storage_manager::StorageResources;
-use crate::updates::ConfigUpdates;
-use crate::updates::{Component, UpdateManager};
 use bootstore::schemes::v0 as bootstore;
 use dropshot::{
     endpoint, ApiDescription, HttpError, HttpResponseOk,
@@ -37,7 +35,6 @@ pub(crate) struct BootstrapServerContext {
     pub(crate) bootstore_node_handle: bootstore::NodeHandle,
     pub(crate) baseboard: Baseboard,
     pub(crate) rss_access: RssAccess,
-    pub(crate) updates: ConfigUpdates,
     pub(crate) sled_reset_tx:
         mpsc::Sender<oneshot::Sender<Result<(), BootstrapError>>>,
 }
@@ -65,7 +62,6 @@ pub(crate) fn api() -> BootstrapApiDescription {
         api: &mut BootstrapApiDescription,
     ) -> Result<(), String> {
         api.register(baseboard_get)?;
-        api.register(components_get)?;
         api.register(rack_initialization_status)?;
         api.register(rack_initialize)?;
         api.register(rack_reset)?;
@@ -129,26 +125,6 @@ async fn baseboard_get(
 ) -> Result<HttpResponseOk<Baseboard>, HttpError> {
     let ctx = rqctx.context();
     Ok(HttpResponseOk(ctx.baseboard.clone()))
-}
-
-/// Provides a list of components known to the bootstrap agent.
-///
-/// This API is intended to allow early boot services (such as Wicket)
-/// to query the underlying component versions installed on a sled.
-#[endpoint {
-    method = GET,
-    path = "/components",
-}]
-async fn components_get(
-    rqctx: RequestContext<BootstrapServerContext>,
-) -> Result<HttpResponseOk<Vec<Component>>, HttpError> {
-    let ctx = rqctx.context();
-    let updates = UpdateManager::new(ctx.updates.clone());
-    let components = updates
-        .components_get()
-        .await
-        .map_err(|err| HttpError::for_internal_error(err.to_string()))?;
-    Ok(HttpResponseOk(components))
 }
 
 /// Get the current status of rack initialization or reset.

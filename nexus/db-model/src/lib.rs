@@ -47,7 +47,6 @@ mod project;
 mod semver_version;
 mod switch_interface;
 mod switch_port;
-mod system_update;
 // These actually represent subqueries, not real table.
 // However, they must be defined in the same crate as our tables
 // for join-based marker trait generation.
@@ -73,7 +72,6 @@ mod snapshot;
 mod ssh_key;
 mod switch;
 mod unsigned;
-mod update_artifact;
 mod user_builtin;
 mod virtual_provisioning_collection;
 mod virtual_provisioning_resource;
@@ -151,8 +149,6 @@ pub use ssh_key::*;
 pub use switch::*;
 pub use switch_interface::*;
 pub use switch_port::*;
-pub use system_update::*;
-pub use update_artifact::*;
 pub use user_builtin::*;
 pub use virtual_provisioning_collection::*;
 pub use virtual_provisioning_resource::*;

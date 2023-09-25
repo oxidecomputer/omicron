@@ -4,18 +4,11 @@
 
 //! Management of per-sled updates
 
-use crate::nexus::NexusClient;
 use camino::{Utf8Path, Utf8PathBuf};
-use camino_tempfile::NamedUtf8TempFile;
-use futures::{TryFutureExt, TryStreamExt};
 use omicron_common::api::external::SemverVersion;
-use omicron_common::api::internal::nexus::{
-    KnownArtifactKind, UpdateArtifactId,
-};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::io::Read;
-use tokio::io::AsyncWriteExt;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -28,12 +21,6 @@ pub enum Error {
 
     #[error("Utf-8 error converting path: {0}")]
     FromPathBuf(#[from] camino::FromPathBufError),
-
-    #[error(
-        "sled-agent only supports applying zones, found artifact ID {}/{} with kind {}",
-        .0.name, .0.version, .0.kind
-    )]
-    UnsupportedKind(UpdateArtifactId),
 
     #[error("Version not found in artifact {}", 0)]
     VersionNotFound(Utf8PathBuf),
@@ -93,80 +80,6 @@ pub struct UpdateManager {
 impl UpdateManager {
     pub fn new(config: ConfigUpdates) -> Self {
         Self { config }
-    }
-
-    pub async fn download_artifact(
-        &self,
-        artifact: UpdateArtifactId,
-        nexus: &NexusClient,
-    ) -> Result<(), Error> {
-        match artifact.kind {
-            // TODO This is a demo for tests, for now.
-            KnownArtifactKind::ControlPlane => {
-                let directory = &self.config.zone_artifact_path.as_path();
-                tokio::fs::create_dir_all(&directory).await.map_err(|err| {
-                    Error::Io {
-                        message: format!("creating directory {directory:?}"),
-                        err,
-                    }
-                })?;
-
-                // We download the file to a temporary file. We then rename it to
-                // "<artifact-name>" after it has successfully downloaded, to
-                // signify that it is ready for usage.
-                let (file, temp_path) = NamedUtf8TempFile::new_in(&directory)
-                    .map_err(|err| Error::Io {
-                        message: "create temp file".to_string(),
-                        err,
-                    })?
-                    .into_parts();
-                let mut file = tokio::fs::File::from_std(file);
-
-                // Fetch the artifact and write to the file in its entirety,
-                // replacing it if it exists.
-
-                let response = nexus
-                    .cpapi_artifact_download(
-                        nexus_client::types::KnownArtifactKind::ControlPlane,
-                        &artifact.name,
-                        &artifact.version.clone().into(),
-                    )
-                    .await
-                    .map_err(Error::Response)?;
-
-                let mut stream = response.into_inner_stream();
-                while let Some(chunk) = stream
-                    .try_next()
-                    .await
-                    .map_err(|e| Error::Response(e.into()))?
-                {
-                    file.write_all(&chunk)
-                        .map_err(|err| Error::Io {
-                            message: "write_all".to_string(),
-                            err,
-                        })
-                        .await?;
-                }
-                file.flush().await.map_err(|err| Error::Io {
-                    message: "flush temp file".to_string(),
-                    err,
-                })?;
-                drop(file);
-
-                // Move the file to its final path.
-                let destination = directory.join(artifact.name);
-                temp_path.persist(&destination).map_err(|err| Error::Io {
-                    message: format!(
-                        "renaming {:?} to {destination:?}",
-                        err.path
-                    ),
-                    err: err.error,
-                })?;
-
-                Ok(())
-            }
-            _ => Err(Error::UnsupportedKind(artifact)),
-        }
     }
 
     // Gets the component version information from a single zone artifact.
@@ -258,72 +171,10 @@ impl UpdateManager {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::fakes::nexus::FakeNexusServer;
+    use camino_tempfile::NamedUtf8TempFile;
     use flate2::write::GzEncoder;
-    use nexus_client::Client as NexusClient;
-    use omicron_common::api::external::Error;
-    use omicron_common::api::internal::nexus::UpdateArtifactId;
-    use omicron_test_utils::dev::test_setup_log;
     use std::io::Write;
     use tar::Builder;
-
-    #[tokio::test]
-    async fn test_write_artifact_to_filesystem() {
-        let logctx = test_setup_log("test_write_artifact_to_filesystem");
-        let log = &logctx.log;
-        // The (completely fabricated) artifact we'd like to download.
-        let expected_name = "test_artifact";
-        const EXPECTED_CONTENTS: &'static str = "test_artifact contents";
-        let artifact = UpdateArtifactId {
-            name: expected_name.to_string(),
-            version: "0.0.0".parse().unwrap(),
-            kind: KnownArtifactKind::ControlPlane,
-        };
-
-        let tempdir =
-            camino_tempfile::tempdir().expect("Failed to make tempdir");
-        let expected_path = tempdir.path().join(expected_name);
-
-        // Remove the file if it already exists.
-        let _ = tokio::fs::remove_file(&expected_path).await;
-
-        // Let's pretend this is an artifact Nexus can actually give us.
-        struct NexusServer {}
-        impl FakeNexusServer for NexusServer {
-            fn cpapi_artifact_download(
-                &self,
-                artifact_id: UpdateArtifactId,
-            ) -> Result<Vec<u8>, Error> {
-                assert_eq!(artifact_id.name, "test_artifact");
-                assert_eq!(artifact_id.version.to_string(), "0.0.0");
-                assert_eq!(artifact_id.kind.to_string(), "control_plane");
-
-                Ok(EXPECTED_CONTENTS.as_bytes().to_vec())
-            }
-        }
-
-        let nexus_server = crate::fakes::nexus::start_test_server(
-            log.clone(),
-            Box::new(NexusServer {}),
-        );
-        let nexus_client = NexusClient::new(
-            &format!("http://{}", nexus_server.local_addr()),
-            log.clone(),
-        );
-
-        let config =
-            ConfigUpdates { zone_artifact_path: tempdir.path().into() };
-        let updates = UpdateManager { config };
-        // This should download the file to our local filesystem.
-        updates.download_artifact(artifact, &nexus_client).await.unwrap();
-
-        // Confirm the download succeeded.
-        assert!(expected_path.exists());
-        let contents = tokio::fs::read(&expected_path).await.unwrap();
-        assert_eq!(std::str::from_utf8(&contents).unwrap(), EXPECTED_CONTENTS);
-
-        logctx.cleanup_successful();
-    }
 
     #[tokio::test]
     async fn test_query_no_components() {

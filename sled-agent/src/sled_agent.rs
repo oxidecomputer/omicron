@@ -19,7 +19,6 @@ use crate::params::{
 };
 use crate::services::{self, ServiceManager};
 use crate::storage_manager::{self, StorageManager};
-use crate::updates::{ConfigUpdates, UpdateManager};
 use crate::zone_bundle;
 use crate::zone_bundle::BundleError;
 use bootstore::schemes::v0 as bootstore;
@@ -36,7 +35,6 @@ use omicron_common::api::external::Vni;
 use omicron_common::api::internal::shared::RackNetworkConfig;
 use omicron_common::api::{
     internal::nexus::DiskRuntimeState, internal::nexus::InstanceRuntimeState,
-    internal::nexus::UpdateArtifactId,
 };
 use omicron_common::backoff::{
     retry_notify, retry_notify_ext, retry_policy_internal_service_aggressive,
@@ -206,9 +204,6 @@ struct SledAgentInner {
     // Component of Sled Agent responsible for monitoring hardware.
     hardware: HardwareManager,
 
-    // Component of Sled Agent responsible for managing updates.
-    updates: UpdateManager,
-
     // Component of Sled Agent responsible for managing OPTE ports.
     port_manager: PortManager,
 
@@ -364,11 +359,6 @@ impl SledAgent {
             }
         }
 
-        let update_config = ConfigUpdates {
-            zone_artifact_path: Utf8PathBuf::from("/opt/oxide"),
-        };
-        let updates = UpdateManager::new(update_config);
-
         let svc_config =
             services::Config::new(request.id, config.sidecar_revision.clone());
 
@@ -427,7 +417,6 @@ impl SledAgent {
                 storage,
                 instances,
                 hardware,
-                updates,
                 port_manager,
                 services,
                 nexus_client,
@@ -823,18 +812,6 @@ impl SledAgent {
         _target: DiskStateRequested,
     ) -> Result<DiskRuntimeState, Error> {
         todo!("Disk attachment not yet implemented");
-    }
-
-    /// Downloads and applies an artifact.
-    pub async fn update_artifact(
-        &self,
-        artifact: UpdateArtifactId,
-    ) -> Result<(), Error> {
-        self.inner
-            .updates
-            .download_artifact(artifact, &self.inner.nexus_client.client())
-            .await?;
-        Ok(())
     }
 
     /// Issue a snapshot request for a Crucible disk attached to an instance

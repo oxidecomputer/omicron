@@ -20,7 +20,6 @@ use dropshot::TypedBody;
 use illumos_utils::opte::params::SetVirtualNetworkInterfaceHost;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
-use omicron_common::api::internal::nexus::UpdateArtifactId;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -40,7 +39,6 @@ pub fn api() -> SledApiDescription {
         api.register(instance_poke_post)?;
         api.register(disk_put)?;
         api.register(disk_poke_post)?;
-        api.register(update_artifact)?;
         api.register(instance_issue_disk_snapshot_request)?;
         api.register(vpc_firewall_rules_put)?;
         api.register(set_v2p)?;
@@ -184,25 +182,6 @@ async fn disk_poke_post(
     let sa = rqctx.context();
     let disk_id = path_params.into_inner().disk_id;
     sa.disk_poke(disk_id).await;
-    Ok(HttpResponseUpdatedNoContent())
-}
-
-#[endpoint {
-    method = POST,
-    path = "/update"
-}]
-async fn update_artifact(
-    rqctx: RequestContext<Arc<SledAgent>>,
-    artifact: TypedBody<UpdateArtifactId>,
-) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-    let sa = rqctx.context();
-    sa.updates()
-        .download_artifact(
-            artifact.into_inner(),
-            rqctx.context().nexus_client.as_ref(),
-        )
-        .await
-        .map_err(|e| HttpError::for_internal_error(e.to_string()))?;
     Ok(HttpResponseUpdatedNoContent())
 }
 

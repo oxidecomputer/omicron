@@ -259,7 +259,6 @@ impl Server {
             bootstore_node_handle: bootstore_handles.node_handle.clone(),
             baseboard: managers.hardware.baseboard(),
             rss_access,
-            updates: config.updates.clone(),
             sled_reset_tx,
         };
         let bootstrap_http_server = start_dropshot_server(bootstrap_context)?;

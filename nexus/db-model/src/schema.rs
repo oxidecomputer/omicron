@@ -1048,74 +1048,6 @@ table! {
 }
 
 table! {
-    update_artifact (name, version, kind) {
-        name -> Text,
-        version -> Text,
-        kind -> crate::KnownArtifactKindEnum,
-        targets_role_version -> Int8,
-        valid_until -> Timestamptz,
-        target_name -> Text,
-        target_sha256 -> Text,
-        target_length -> Int8,
-    }
-}
-
-table! {
-    system_update (id) {
-        id -> Uuid,
-        time_created -> Timestamptz,
-        time_modified -> Timestamptz,
-
-        version -> Text,
-    }
-}
-
-table! {
-    update_deployment (id) {
-        id -> Uuid,
-        time_created -> Timestamptz,
-        time_modified -> Timestamptz,
-
-        version -> Text,
-        status -> crate::UpdateStatusEnum,
-        // TODO: status reason for updateable_component
-    }
-}
-
-table! {
-    component_update (id) {
-        id -> Uuid,
-        time_created -> Timestamptz,
-        time_modified -> Timestamptz,
-
-        version -> Text,
-        component_type -> crate::UpdateableComponentTypeEnum,
-    }
-}
-
-table! {
-    updateable_component (id) {
-        id -> Uuid,
-        time_created -> Timestamptz,
-        time_modified -> Timestamptz,
-
-        device_id -> Text,
-        version -> Text,
-        system_version -> Text,
-        component_type -> crate::UpdateableComponentTypeEnum,
-        status -> crate::UpdateStatusEnum,
-        // TODO: status reason for updateable_component
-    }
-}
-
-table! {
-    system_update_component_update (system_update_id, component_update_id) {
-        system_update_id -> Uuid,
-        component_update_id -> Uuid,
-    }
-}
-
-table! {
     db_metadata (singleton) {
         singleton -> Bool,
         time_created -> Timestamptz,
@@ -1131,13 +1063,6 @@ table! {
 /// This should be updated whenever the schema is changed. For more details,
 /// refer to: schema/crdb/README.adoc
 pub const SCHEMA_VERSION: SemverVersion = SemverVersion::new(4, 0, 0);
-
-allow_tables_to_appear_in_same_query!(
-    system_update,
-    component_update,
-    system_update_component_update,
-);
-joinable!(system_update_component_update -> component_update (component_update_id));
 
 allow_tables_to_appear_in_same_query!(ip_pool_range, ip_pool);
 joinable!(ip_pool_range -> ip_pool (ip_pool_id));
