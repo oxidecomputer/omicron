@@ -344,7 +344,7 @@ async fn cmd_db_disk_list(
         .filter(dsl::time_deleted.is_null())
         .limit(i64::from(u32::from(limit)))
         .select(Disk::as_select())
-        .load_async(datastore.pool_for_tests().await?)
+        .load_async(&*datastore.pool_connection_for_tests().await?)
         .await
         .context("loading disks")?;
 
@@ -398,11 +398,13 @@ async fn cmd_db_disk_info(
 
     use db::schema::disk::dsl as disk_dsl;
 
+    let conn = datastore.pool_connection_for_tests().await?;
+
     let disk = disk_dsl::disk
         .filter(disk_dsl::id.eq(args.uuid))
         .limit(1)
         .select(Disk::as_select())
-        .load_async(datastore.pool_for_tests().await?)
+        .load_async(&*conn)
         .await
         .context("loading requested disk")?;
 
@@ -422,7 +424,7 @@ async fn cmd_db_disk_info(
             .filter(instance_dsl::id.eq(instance_uuid))
             .limit(1)
             .select(Instance::as_select())
-            .load_async(datastore.pool_for_tests().await?)
+            .load_async(&*conn)
             .await
             .context("loading requested instance")?;
 
