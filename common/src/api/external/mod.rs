@@ -912,17 +912,6 @@ pub struct InstanceRuntimeState {
     pub time_run_state_updated: DateTime<Utc>,
 }
 
-impl From<crate::api::internal::nexus::InstanceRuntimeState>
-    for InstanceRuntimeState
-{
-    fn from(state: crate::api::internal::nexus::InstanceRuntimeState) -> Self {
-        InstanceRuntimeState {
-            run_state: state.run_state,
-            time_run_state_updated: state.time_updated,
-        }
-    }
-}
-
 /// View of an Instance
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct Instance {
