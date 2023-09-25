@@ -281,7 +281,7 @@ impl DnsConfigBuilder {
 
         let set = self
             .service_instances_zones
-            .entry(service.clone())
+            .entry(service)
             .or_insert_with(BTreeMap::new);
         match set.insert(zone.clone(), port) {
             None => Ok(()),
@@ -320,7 +320,7 @@ impl DnsConfigBuilder {
 
         let set = self
             .service_instances_sleds
-            .entry(service.clone())
+            .entry(service)
             .or_insert_with(BTreeMap::new);
         let sled_id = sled.0;
         match set.insert(sled.clone(), port) {

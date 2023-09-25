@@ -185,7 +185,9 @@ async fn do_target(
     subcommand: &TargetCommand,
 ) -> Result<()> {
     let target_dir = artifact_dir.join("target");
-    tokio::fs::create_dir_all(&target_dir).await?;
+    tokio::fs::create_dir_all(&target_dir).await.with_context(|| {
+        format!("failed to create directory {}", target_dir.display())
+    })?;
     match subcommand {
         TargetCommand::Create { image, machine, switch } => {
             let target = KnownTarget::new(
@@ -195,7 +197,11 @@ async fn do_target(
             )?;
 
             let path = get_single_target(&target_dir, name).await?;
-            tokio::fs::write(&path, Target::from(target).to_string()).await?;
+            tokio::fs::write(&path, Target::from(target).to_string())
+                .await
+                .with_context(|| {
+                    format!("failed to write target to {}", path.display())
+                })?;
 
             replace_active_link(&name, &target_dir).await?;
 
@@ -263,7 +269,13 @@ async fn replace_active_link(
         bail!("Target file {} does not exist", src.display());
     }
     let _ = tokio::fs::remove_file(&dst).await;
-    tokio::fs::symlink(src, dst).await?;
+    tokio::fs::symlink(src, &dst).await.with_context(|| {
+        format!(
+            "failed creating symlink to {} at {}",
+            src.display(),
+            dst.display()
+        )
+    })?;
     Ok(())
 }
 
@@ -881,7 +893,9 @@ async fn main() -> Result<()> {
     if let Ok(manifest) = env::var("CARGO_MANIFEST_DIR") {
         let manifest_dir = PathBuf::from(manifest);
         let root = manifest_dir.parent().unwrap();
-        env::set_current_dir(&root)?;
+        env::set_current_dir(root).with_context(|| {
+            format!("failed to set current directory to {}", root.display())
+        })?;
     }
 
     match &args.subcommand {

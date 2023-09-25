@@ -11,7 +11,7 @@ set -o xtrace
 set -o errexit
 
 SOURCE_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
-ARG0="$(basename ${BASH_SOURCE[0]})"
+ARG0="$(basename "${BASH_SOURCE[0]}")"
 
 TARGET_DIR="out"
 # Location where intermediate artifacts are downloaded / unpacked.
@@ -89,7 +89,7 @@ function main
 
 function fail
 {
-	echo "$ARG0: $@" >&2
+	echo "$ARG0: $*" >&2
 	exit 1
 }
 
@@ -124,7 +124,6 @@ function configure_os
 	TARBALL_FILENAME="$TARBALL_DIRNAME$CIDL_DASHREV.$CIDL_PLATFORM.tar.gz"
 
 	TARBALL_FILE="$DOWNLOAD_DIR/$TARBALL_FILENAME"
-	TARBALL_DIR="$DOWNLOAD_DIR/$TARBALL_DIRNAME"
 }
 
 function do_download_curl

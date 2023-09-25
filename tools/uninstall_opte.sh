@@ -95,7 +95,7 @@ function to_stock_helios {
 
     # If we have packages to reject, prompt the user to confirm.
     if [[ ${#PKGS_TO_REJECT[@]} -gt 0 ]]; then
-        echo "These packages will be removed: ${PKGS_TO_REJECT[@]}"
+        echo "These packages will be removed: ${PKGS_TO_REJECT[*]}"
         read -p "Confirm (Y/n): " RESPONSE
         case $(echo $RESPONSE | tr '[A-Z]' '[a-z]') in
             n|no )
@@ -122,7 +122,7 @@ function to_stock_helios {
     pkg set-publisher --sticky --search-first "$HELIOS_PUBLISHER"
 
     # Now install stock consolidation but reject the packages we don't want.
-    pkg install --no-refresh -v ${REJECT_ARGS[@]} "$CONSOLIDATION"
+    pkg install --no-refresh -v "${REJECT_ARGS[@]}" "$CONSOLIDATION"
 }
 
 # If helios-dev exists, echo the full osnet-incorporation package we'll be

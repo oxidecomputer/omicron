@@ -2373,6 +2373,8 @@ impl ServiceManager {
                 sync: true,
                 ref_id: 0,
                 ip_addr: IPV6_UNSPECIFIED,
+                stratum: 0,
+                ref_time: 0.0,
                 correction: 0.00,
             });
         };
@@ -2401,6 +2403,10 @@ impl ServiceManager {
                         .map_err(|_| Error::NtpZoneNotReady)?;
                     let ip_addr =
                         IpAddr::from_str(v[1]).unwrap_or(IPV6_UNSPECIFIED);
+                    let stratum = u8::from_str(v[2])
+                        .map_err(|_| Error::NtpZoneNotReady)?;
+                    let ref_time = f64::from_str(v[3])
+                        .map_err(|_| Error::NtpZoneNotReady)?;
                     let correction = f64::from_str(v[4])
                         .map_err(|_| Error::NtpZoneNotReady)?;
 
@@ -2410,13 +2416,23 @@ impl ServiceManager {
                     let peer_sync = !ip_addr.is_unspecified()
                         || (ref_id != 0 && ref_id != 0x7f7f0101);
 
-                    let sync = peer_sync && correction.abs() <= 0.05;
+                    let sync = stratum < 10
+                        && ref_time > 1234567890.0
+                        && peer_sync
+                        && correction.abs() <= 0.05;
 
                     if sync {
                         self.boottime_rewrite(existing_zones.values());
                     }
 
-                    Ok(TimeSync { sync, ref_id, ip_addr, correction })
+                    Ok(TimeSync {
+                        sync,
+                        ref_id,
+                        ip_addr,
+                        stratum,
+                        ref_time,
+                        correction,
+                    })
                 } else {
                     Err(Error::NtpZoneNotReady)
                 }

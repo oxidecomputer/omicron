@@ -4,7 +4,7 @@
 
 //! omdb commands that query or update specific Nexus instances
 
-use anyhow::bail;
+use crate::Omdb;
 use anyhow::Context;
 use chrono::SecondsFormat;
 use chrono::Utc;
@@ -34,17 +34,17 @@ pub struct NexusArgs {
 #[derive(Debug, Subcommand)]
 enum NexusCommands {
     /// print information about background tasks
-    BackgroundTask(BackgroundTaskArgs),
+    BackgroundTasks(BackgroundTasksArgs),
 }
 
 #[derive(Debug, Args)]
-struct BackgroundTaskArgs {
+struct BackgroundTasksArgs {
     #[command(subcommand)]
-    command: BackgroundTaskCommands,
+    command: BackgroundTasksCommands,
 }
 
 #[derive(Debug, Subcommand)]
-enum BackgroundTaskCommands {
+enum BackgroundTasksCommands {
     /// Show documentation about background tasks
     Doc,
     /// Print a summary of the status of all background tasks
@@ -55,41 +55,55 @@ enum BackgroundTaskCommands {
 
 impl NexusArgs {
     /// Run a `omdb nexus` subcommand.
-    pub async fn run_cmd(
+    pub(crate) async fn run_cmd(
         &self,
+        omdb: &Omdb,
         log: &slog::Logger,
     ) -> Result<(), anyhow::Error> {
-        // This is a little goofy.  The database URL is required, but can come
-        // from the environment, in which case it won't be on the command line.
-        let Some(nexus_url) = &self.nexus_internal_url else {
-            bail!(
-                "nexus URL must be specified with --nexus-internal-url or \
-                OMDB_NEXUS_URL"
-            );
+        let nexus_url = match &self.nexus_internal_url {
+            Some(cli_or_env_url) => cli_or_env_url.clone(),
+            None => {
+                eprintln!(
+                    "note: Nexus URL not specified.  Will pick one from DNS."
+                );
+                let addrs = omdb
+                    .dns_lookup_all(
+                        log.clone(),
+                        internal_dns::ServiceName::Nexus,
+                    )
+                    .await?;
+                let addr = addrs.into_iter().next().expect(
+                    "expected at least one Nexus address from \
+                    successful DNS lookup",
+                );
+                format!("http://{}", addr)
+            }
         };
-        let client = nexus_client::Client::new(nexus_url, log.clone());
+        eprintln!("note: using Nexus URL {}", &nexus_url);
+        let client = nexus_client::Client::new(&nexus_url, log.clone());
 
         match &self.command {
-            NexusCommands::BackgroundTask(BackgroundTaskArgs {
-                command: BackgroundTaskCommands::Doc,
-            }) => cmd_nexus_background_task_doc(&client).await,
-            NexusCommands::BackgroundTask(BackgroundTaskArgs {
-                command: BackgroundTaskCommands::List,
-            }) => cmd_nexus_background_task_list(&client).await,
-            NexusCommands::BackgroundTask(BackgroundTaskArgs {
-                command: BackgroundTaskCommands::Show,
-            }) => cmd_nexus_background_task_show(&client).await,
+            NexusCommands::BackgroundTasks(BackgroundTasksArgs {
+                command: BackgroundTasksCommands::Doc,
+            }) => cmd_nexus_background_tasks_doc(&client).await,
+            NexusCommands::BackgroundTasks(BackgroundTasksArgs {
+                command: BackgroundTasksCommands::List,
+            }) => cmd_nexus_background_tasks_list(&client).await,
+            NexusCommands::BackgroundTasks(BackgroundTasksArgs {
+                command: BackgroundTasksCommands::Show,
+            }) => cmd_nexus_background_tasks_show(&client).await,
         }
     }
 }
 
-/// Runs `omdb nexus background-task doc`
-async fn cmd_nexus_background_task_doc(
+/// Runs `omdb nexus background-tasks doc`
+async fn cmd_nexus_background_tasks_doc(
     client: &nexus_client::Client,
 ) -> Result<(), anyhow::Error> {
     let response =
         client.bgtask_list().await.context("listing background tasks")?;
     let tasks = response.into_inner();
+    let tasks: BTreeMap<_, _> = tasks.into_iter().collect();
     for (_, bgtask) in &tasks {
         println!("task: {:?}", bgtask.name);
         println!(
@@ -108,8 +122,8 @@ async fn cmd_nexus_background_task_doc(
     Ok(())
 }
 
-/// Runs `omdb nexus background-task list`
-async fn cmd_nexus_background_task_list(
+/// Runs `omdb nexus background-tasks list`
+async fn cmd_nexus_background_tasks_list(
     client: &nexus_client::Client,
 ) -> Result<(), anyhow::Error> {
     let response =
@@ -124,8 +138,8 @@ async fn cmd_nexus_background_task_list(
     Ok(())
 }
 
-/// Runs `omdb nexus background-task show`
-async fn cmd_nexus_background_task_show(
+/// Runs `omdb nexus background-tasks show`
+async fn cmd_nexus_background_tasks_show(
     client: &nexus_client::Client,
 ) -> Result<(), anyhow::Error> {
     let response =
