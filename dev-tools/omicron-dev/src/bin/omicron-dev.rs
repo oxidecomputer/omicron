@@ -327,7 +327,7 @@ async fn cmd_run_all(args: &RunAllArgs) -> Result<(), anyhow::Error> {
     let mut signal_stream = signals.fuse();
 
     // Read configuration.
-    let config_str = include_str!("../../../nexus/examples/config.toml");
+    let config_str = include_str!("../../../../nexus/examples/config.toml");
     let mut config: omicron_common::nexus_config::Config =
         toml::from_str(config_str).context("parsing example config")?;
     config.pkg.log = dropshot::ConfigLogging::File {

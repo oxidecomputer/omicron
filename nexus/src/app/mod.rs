@@ -42,6 +42,7 @@ mod external_ip;
 mod iam;
 mod image;
 mod instance;
+mod instance_network;
 mod ip_pool;
 mod metrics;
 mod network_interface;

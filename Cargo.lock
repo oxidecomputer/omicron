@@ -853,7 +853,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "599aa35200ffff8f04c1925aa1acc92fa2e08874379ef42e210a80e527e60838"
 dependencies = [
  "serde",
- "toml 0.7.6",
+ "toml 0.7.8",
 ]
 
 [[package]]
@@ -934,9 +934,9 @@ dependencies = [
 
 [[package]]
 name = "chrono"
-version = "0.4.30"
+version = "0.4.31"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "defd4e7873dbddba6c7c91e199c7fcb946abc4a6a4ac3195400bcfb01b5de877"
+checksum = "7f2c685bad3eb3d45a01354cedb7d5faa66194d1d58ba6e267a8de788f79db38"
 dependencies = [
  "android-tzdata",
  "iana-time-zone",
@@ -1355,7 +1355,6 @@ checksum = "a84cda67535339806297f1b331d6dd6320470d2a0fe65381e79ee9e156dd3d13"
 dependencies = [
  "bitflags 1.3.2",
  "crossterm_winapi",
- "futures-core",
  "libc",
  "mio",
  "parking_lot 0.12.1",
@@ -1373,6 +1372,7 @@ checksum = "f476fe445d41c9e991fd07515a6f463074b782242ccf4a5b7b1d1012e70824df"
 dependencies = [
  "bitflags 2.4.0",
  "crossterm_winapi",
+ "futures-core",
  "libc",
  "mio",
  "parking_lot 0.12.1",
@@ -1427,7 +1427,7 @@ dependencies = [
  "tokio",
  "tokio-rustls",
  "tokio-util",
- "toml 0.7.6",
+ "toml 0.7.8",
  "tracing",
  "usdt",
  "uuid",
@@ -1482,7 +1482,7 @@ dependencies = [
  "tempfile",
  "thiserror",
  "tokio-rustls",
- "toml 0.7.6",
+ "toml 0.7.8",
  "twox-hash",
  "uuid",
  "vergen",
@@ -1739,7 +1739,7 @@ dependencies = [
  "slog",
  "thiserror",
  "tokio",
- "toml 0.7.6",
+ "toml 0.7.8",
 ]
 
 [[package]]
@@ -2011,7 +2011,7 @@ dependencies = [
  "tempfile",
  "thiserror",
  "tokio",
- "toml 0.7.6",
+ "toml 0.7.8",
  "trust-dns-client",
  "trust-dns-proto",
  "trust-dns-resolver",
@@ -2093,14 +2093,14 @@ dependencies = [
  "serde",
  "serde_json",
  "slog",
- "toml 0.7.6",
+ "toml 0.7.8",
  "uuid",
 ]
 
 [[package]]
 name = "dropshot"
 version = "0.9.1-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#99cea069c61d1ff5be0ff4f9d338f24bbea93128"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#fa728d07970824fd5f3bd57a3d4dc0fdbea09bfd"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -2116,6 +2116,7 @@ dependencies = [
  "http",
  "hyper",
  "indexmap 2.0.0",
+ "multer",
  "openapiv3",
  "paste",
  "percent-encoding",
@@ -2135,7 +2136,7 @@ dependencies = [
  "slog-term",
  "tokio",
  "tokio-rustls",
- "toml 0.7.6",
+ "toml 0.7.8",
  "usdt",
  "uuid",
  "version_check",
@@ -2145,7 +2146,7 @@ dependencies = [
 [[package]]
 name = "dropshot_endpoint"
 version = "0.9.1-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#99cea069c61d1ff5be0ff4f9d338f24bbea93128"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#fa728d07970824fd5f3bd57a3d4dc0fdbea09bfd"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2272,7 +2273,7 @@ dependencies = [
  "russh-keys",
  "serde_json",
  "tokio",
- "toml 0.7.6",
+ "toml 0.7.8",
  "trust-dns-resolver",
  "uuid",
 ]
@@ -3189,7 +3190,7 @@ dependencies = [
 [[package]]
 name = "hubtools"
 version = "0.4.1"
-source = "git+https://github.com/oxidecomputer/hubtools.git?branch=main#2481445b80f8476041f62a1c8b6301e4918c63ed"
+source = "git+https://github.com/oxidecomputer/hubtools.git?branch=main#0c642f6e1f83b74725c7119a546bc26ac7452a48"
 dependencies = [
  "lpc55_areas",
  "lpc55_sign",
@@ -3199,7 +3200,7 @@ dependencies = [
  "thiserror",
  "tlvc 0.3.1 (git+https://github.com/oxidecomputer/tlvc.git)",
  "tlvc-text",
- "toml 0.7.6",
+ "toml 0.7.8",
  "x509-cert",
  "zerocopy 0.6.3",
  "zip",
@@ -3374,7 +3375,7 @@ dependencies = [
  "smf",
  "thiserror",
  "tokio",
- "toml 0.7.6",
+ "toml 0.7.8",
  "uuid",
  "zone",
 ]
@@ -3491,7 +3492,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "tokio-stream",
- "toml 0.7.6",
+ "toml 0.7.8",
  "tufaceous-lib",
  "update-engine",
  "uuid",
@@ -3969,7 +3970,7 @@ checksum = "b5e6163cb8c49088c2c36f57875e58ccd8c87c7427f7fbd50ea6710b2f3f2e8f"
 [[package]]
 name = "lpc55_areas"
 version = "0.2.4"
-source = "git+https://github.com/oxidecomputer/lpc55_support#6df13b9cb5126d9a4875ec2ee273d7c5b9ff894f"
+source = "git+https://github.com/oxidecomputer/lpc55_support#4051a3b9421573dc36ed6098b292a7609a3cf98b"
 dependencies = [
  "bitfield",
  "clap 4.4.3",
@@ -3979,8 +3980,8 @@ dependencies = [
 
 [[package]]
 name = "lpc55_sign"
-version = "0.3.3"
-source = "git+https://github.com/oxidecomputer/lpc55_support#6df13b9cb5126d9a4875ec2ee273d7c5b9ff894f"
+version = "0.3.2"
+source = "git+https://github.com/oxidecomputer/lpc55_support#4051a3b9421573dc36ed6098b292a7609a3cf98b"
 dependencies = [
  "byteorder",
  "const-oid",
@@ -4157,6 +4158,24 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 1.0.109",
+]
+
+[[package]]
+name = "multer"
+version = "2.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "01acbdc23469fd8fe07ab135923371d5f5a422fbf9c522158677c8eb15bc51c2"
+dependencies = [
+ "bytes",
+ "encoding_rs",
+ "futures-util",
+ "http",
+ "httparse",
+ "log",
+ "memchr",
+ "mime",
+ "spin 0.9.8",
+ "version_check",
 ]
 
 [[package]]
@@ -4356,7 +4375,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "tokio-postgres",
- "toml 0.7.6",
+ "toml 0.7.8",
  "usdt",
  "uuid",
 ]
@@ -4801,7 +4820,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "tokio-postgres",
- "toml 0.7.6",
+ "toml 0.7.8",
  "uuid",
 ]
 
@@ -4841,7 +4860,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "tokio-postgres",
- "toml 0.7.6",
+ "toml 0.7.8",
  "uuid",
 ]
 
@@ -4856,11 +4875,11 @@ dependencies = [
  "serde",
  "serde_derive",
  "thiserror",
- "toml 0.7.6",
+ "toml 0.7.8",
 ]
 
 [[package]]
-name = "omicron-dev-tools"
+name = "omicron-dev"
 version = "0.1.0"
 dependencies = [
  "anyhow",
@@ -4887,7 +4906,7 @@ dependencies = [
  "subprocess",
  "tokio",
  "tokio-postgres",
- "toml 0.7.6",
+ "toml 0.7.8",
 ]
 
 [[package]]
@@ -4929,7 +4948,7 @@ dependencies = [
  "tokio-stream",
  "tokio-tungstenite 0.18.0",
  "tokio-util",
- "toml 0.7.6",
+ "toml 0.7.8",
  "uuid",
 ]
 
@@ -5037,7 +5056,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "tokio-postgres",
- "toml 0.7.6",
+ "toml 0.7.8",
  "tough",
  "trust-dns-resolver",
  "usdt",
@@ -5054,18 +5073,27 @@ dependencies = [
  "clap 4.4.3",
  "diesel",
  "dropshot",
+ "expectorate",
  "humantime",
+ "internal-dns 0.1.0",
  "nexus-client 0.1.0",
  "nexus-db-model",
  "nexus-db-queries",
+ "nexus-test-utils",
+ "nexus-test-utils-macros",
  "nexus-types",
  "omicron-common 0.1.0",
+ "omicron-nexus",
  "omicron-rpaths",
+ "omicron-test-utils",
  "pq-sys",
+ "regex",
  "serde",
  "serde_json",
+ "sled-agent-client",
  "slog",
  "strum",
+ "subprocess",
  "tabled",
  "textwrap 0.16.0",
  "tokio",
@@ -5102,7 +5130,7 @@ dependencies = [
  "tempfile",
  "thiserror",
  "tokio",
- "toml 0.7.6",
+ "toml 0.7.8",
  "topological-sort",
  "walkdir",
 ]
@@ -5217,7 +5245,7 @@ dependencies = [
  "tofino",
  "tokio",
  "tokio-tungstenite 0.18.0",
- "toml 0.7.6",
+ "toml 0.7.8",
  "usdt",
  "uuid",
  "zeroize",
@@ -5270,7 +5298,7 @@ dependencies = [
  "tempfile",
  "thiserror",
  "tokio",
- "toml 0.7.6",
+ "toml 0.7.8",
  "walkdir",
 ]
 
@@ -5552,7 +5580,7 @@ dependencies = [
  "subprocess",
  "thiserror",
  "tokio",
- "toml 0.7.6",
+ "toml 0.7.8",
  "uuid",
 ]
 
@@ -6280,9 +6308,9 @@ dependencies = [
 
 [[package]]
 name = "proc-macro2"
-version = "1.0.66"
+version = "1.0.67"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "18fb31db3f9bddb2ea821cde30a9f70117e3f119938b5ee630b7403aa6e2ead9"
+checksum = "3d433d9f1a3e8c1263d9456598b16fec66f4acc9a74dacffd35c7bb09b3a1328"
 dependencies = [
  "unicode-ident",
 ]
@@ -6290,7 +6318,7 @@ dependencies = [
 [[package]]
 name = "progenitor"
 version = "0.3.0"
-source = "git+https://github.com/oxidecomputer/progenitor?branch=main#3734e566108a173ce0cdad2d917bacc85d8090fc"
+source = "git+https://github.com/oxidecomputer/progenitor?branch=main#5c941c0b41b0235031f3ade33a9c119945f1fd51"
 dependencies = [
  "progenitor-client",
  "progenitor-impl",
@@ -6301,7 +6329,7 @@ dependencies = [
 [[package]]
 name = "progenitor-client"
 version = "0.3.0"
-source = "git+https://github.com/oxidecomputer/progenitor?branch=main#3734e566108a173ce0cdad2d917bacc85d8090fc"
+source = "git+https://github.com/oxidecomputer/progenitor?branch=main#5c941c0b41b0235031f3ade33a9c119945f1fd51"
 dependencies = [
  "bytes",
  "futures-core",
@@ -6315,7 +6343,7 @@ dependencies = [
 [[package]]
 name = "progenitor-impl"
 version = "0.3.0"
-source = "git+https://github.com/oxidecomputer/progenitor?branch=main#3734e566108a173ce0cdad2d917bacc85d8090fc"
+source = "git+https://github.com/oxidecomputer/progenitor?branch=main#5c941c0b41b0235031f3ade33a9c119945f1fd51"
 dependencies = [
  "getopts",
  "heck 0.4.1",
@@ -6337,7 +6365,7 @@ dependencies = [
 [[package]]
 name = "progenitor-macro"
 version = "0.3.0"
-source = "git+https://github.com/oxidecomputer/progenitor?branch=main#3734e566108a173ce0cdad2d917bacc85d8090fc"
+source = "git+https://github.com/oxidecomputer/progenitor?branch=main#5c941c0b41b0235031f3ade33a9c119945f1fd51"
 dependencies = [
  "openapiv3",
  "proc-macro2",
@@ -6456,7 +6484,7 @@ dependencies = [
  "tokio",
  "tokio-tungstenite 0.17.2",
  "tokio-util",
- "toml 0.7.6",
+ "toml 0.7.8",
  "usdt",
  "uuid",
 ]
@@ -6469,7 +6497,7 @@ dependencies = [
  "serde",
  "serde_derive",
  "thiserror",
- "toml 0.7.6",
+ "toml 0.7.8",
 ]
 
 [[package]]
@@ -8135,7 +8163,7 @@ dependencies = [
  "sprockets-rot",
  "thiserror",
  "tokio",
- "toml 0.7.6",
+ "toml 0.7.8",
 ]
 
 [[package]]
@@ -8861,9 +8889,9 @@ dependencies = [
 
 [[package]]
 name = "toml"
-version = "0.7.6"
+version = "0.7.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c17e963a819c331dcacd7ab957d80bc2b9a9c1e71c804826d2f283dd65306542"
+checksum = "dd79e69d3b627db300ff956027cc6c3798cef26d22526befdfcd12feeb6d2257"
 dependencies = [
  "serde",
  "serde_spanned",
@@ -9137,7 +9165,7 @@ dependencies = [
  "sha2",
  "slog",
  "tar",
- "toml 0.7.6",
+ "toml 0.7.8",
  "tough",
  "url",
  "zip",
@@ -9198,7 +9226,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "97fee6b57c6a41524a810daee9286c02d7752c4253064d0b05472833a438f675"
 dependencies = [
  "cfg-if 0.1.10",
- "rand 0.4.6",
+ "rand 0.8.5",
  "static_assertions",
 ]
 
@@ -9211,7 +9239,7 @@ checksum = "497961ef93d974e23eb6f433eb5fe1b7930b659f06d12dec6fc44a8f554c0bba"
 [[package]]
 name = "typify"
 version = "0.0.13"
-source = "git+https://github.com/oxidecomputer/typify#6cd9a7164a83169945be0bf697a43e6a7488fa31"
+source = "git+https://github.com/oxidecomputer/typify#de16c4238a2b34400d0fece086a6469951c3236b"
 dependencies = [
  "typify-impl",
  "typify-macro",
@@ -9220,7 +9248,7 @@ dependencies = [
 [[package]]
 name = "typify-impl"
 version = "0.0.13"
-source = "git+https://github.com/oxidecomputer/typify#6cd9a7164a83169945be0bf697a43e6a7488fa31"
+source = "git+https://github.com/oxidecomputer/typify#de16c4238a2b34400d0fece086a6469951c3236b"
 dependencies = [
  "heck 0.4.1",
  "log",
@@ -9237,7 +9265,7 @@ dependencies = [
 [[package]]
 name = "typify-macro"
 version = "0.0.13"
-source = "git+https://github.com/oxidecomputer/typify#6cd9a7164a83169945be0bf697a43e6a7488fa31"
+source = "git+https://github.com/oxidecomputer/typify#de16c4238a2b34400d0fece086a6469951c3236b"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -9278,9 +9306,9 @@ checksum = "92888ba5573ff080736b3648696b70cafad7d250551175acbaa4e0385b3e1460"
 
 [[package]]
 name = "unicode-ident"
-version = "1.0.11"
+version = "1.0.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "301abaae475aa91687eb82514b328ab47a211a533026cb25fc3e519b86adfc3c"
+checksum = "3354b9ac3fae1ff6755cb6db53683adb661634f67557942dea4facebec0fee4b"
 
 [[package]]
 name = "unicode-linebreak"
@@ -9723,7 +9751,7 @@ dependencies = [
  "camino",
  "ciborium",
  "clap 4.4.3",
- "crossterm 0.26.1",
+ "crossterm 0.27.0",
  "futures",
  "hex",
  "humantime",
@@ -9750,7 +9778,7 @@ dependencies = [
  "textwrap 0.16.0",
  "tokio",
  "tokio-util",
- "toml 0.7.6",
+ "toml 0.7.8",
  "toml_edit",
  "tui-tree-widget",
  "unicode-width",
@@ -9783,7 +9811,7 @@ dependencies = [
  "camino",
  "ciborium",
  "clap 4.4.3",
- "crossterm 0.26.1",
+ "crossterm 0.27.0",
  "ratatui",
  "reedline",
  "serde",
@@ -9851,7 +9879,7 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tokio-util",
- "toml 0.7.6",
+ "toml 0.7.8",
  "tough",
  "trust-dns-resolver",
  "tufaceous",

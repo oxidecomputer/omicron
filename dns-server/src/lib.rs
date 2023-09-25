@@ -164,7 +164,7 @@ impl TransientServer {
     pub async fn resolver(&self) -> Result<TokioAsyncResolver, anyhow::Error> {
         let mut resolver_config = ResolverConfig::new();
         resolver_config.add_name_server(NameServerConfig {
-            socket_addr: *self.dns_server.local_address(),
+            socket_addr: self.dns_server.local_address(),
             protocol: Protocol::Udp,
             tls_dns_name: None,
             trust_nx_responses: false,
