@@ -35,29 +35,35 @@ impl_enum_type!(
     Loopback => b"loopback"
 );
 
-impl From<params::SwitchInterfaceKind> for DbSwitchInterfaceKind {
-    fn from(k: params::SwitchInterfaceKind) -> Self {
+impl From<params::SwitchInterfaceKindCreate> for DbSwitchInterfaceKind {
+    fn from(k: params::SwitchInterfaceKindCreate) -> Self {
         match k {
-            params::SwitchInterfaceKind::Primary => {
+            params::SwitchInterfaceKindCreate::Primary => {
                 DbSwitchInterfaceKind::Primary
             }
-            params::SwitchInterfaceKind::Vlan(_) => DbSwitchInterfaceKind::Vlan,
-            params::SwitchInterfaceKind::Loopback => {
+            params::SwitchInterfaceKindCreate::Vlan(_) => {
+                DbSwitchInterfaceKind::Vlan
+            }
+            params::SwitchInterfaceKindCreate::Loopback => {
                 DbSwitchInterfaceKind::Loopback
             }
         }
     }
 }
 
-impl Into<external::SwitchInterfaceKind> for DbSwitchInterfaceKind {
-    fn into(self) -> external::SwitchInterfaceKind {
+impl Into<nexus_types::external_api::networking::SwitchInterfaceKind>
+    for DbSwitchInterfaceKind
+{
+    fn into(
+        self,
+    ) -> nexus_types::external_api::networking::SwitchInterfaceKind {
         match self {
             DbSwitchInterfaceKind::Primary => {
-                external::SwitchInterfaceKind::Primary
+                nexus_types::external_api::networking::SwitchInterfaceKind::Primary
             }
-            DbSwitchInterfaceKind::Vlan => external::SwitchInterfaceKind::Vlan,
+            DbSwitchInterfaceKind::Vlan => nexus_types::external_api::networking::SwitchInterfaceKind::Vlan,
             DbSwitchInterfaceKind::Loopback => {
-                external::SwitchInterfaceKind::Loopback
+                nexus_types::external_api::networking::SwitchInterfaceKind::Loopback
             }
         }
     }
@@ -78,9 +84,13 @@ impl SwitchVlanInterfaceConfig {
     }
 }
 
-impl Into<external::SwitchVlanInterfaceConfig> for SwitchVlanInterfaceConfig {
-    fn into(self) -> external::SwitchVlanInterfaceConfig {
-        external::SwitchVlanInterfaceConfig {
+impl Into<nexus_types::external_api::networking::SwitchVlanInterfaceConfig>
+    for SwitchVlanInterfaceConfig
+{
+    fn into(
+        self,
+    ) -> nexus_types::external_api::networking::SwitchVlanInterfaceConfig {
+        nexus_types::external_api::networking::SwitchVlanInterfaceConfig {
             interface_config_id: self.interface_config_id,
             vlan_id: self.vid.into(),
         }

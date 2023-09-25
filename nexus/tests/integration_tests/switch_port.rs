@@ -8,15 +8,19 @@ use http::method::Method;
 use http::StatusCode;
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use nexus_test_utils_macros::nexus_test;
+use nexus_types::external_api::networking::{
+    SwitchPort, SwitchPortSettingsView,
+};
 use nexus_types::external_api::params::{
-    Address, AddressConfig, AddressLotBlockCreate, AddressLotCreate,
-    LinkConfig, LldpServiceConfig, Route, RouteConfig, SwitchInterfaceConfig,
-    SwitchInterfaceKind, SwitchPortApplySettings, SwitchPortSettingsCreate,
+    Address, AddressLotBlockCreate, AddressLotCreate, LinkConfig,
+    LldpServiceConfigCreate, Route, SwitchInterfaceConfigCreate,
+    SwitchInterfaceKindCreate, SwitchPortAddressConfigCreate,
+    SwitchPortApplySettings, SwitchPortRouteConfigCreate,
+    SwitchPortSettingsCreate,
 };
 use nexus_types::external_api::views::Rack;
 use omicron_common::api::external::{
-    self, AddressLotKind, IdentityMetadataCreateParams, NameOrId, SwitchPort,
-    SwitchPortSettingsView,
+    AddressLotKind, IdentityMetadataCreateParams, NameOrId,
 };
 
 type ControlPlaneTestContext =
@@ -60,32 +64,32 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
         "phy0".into(),
         LinkConfig {
             mtu: 4700,
-            lldp: LldpServiceConfig { enabled: false, lldp_config: None },
+            lldp: LldpServiceConfigCreate { enabled: false, lldp_config: None },
         },
     );
     // interfaces
     settings.interfaces.insert(
         "phy0".into(),
-        SwitchInterfaceConfig {
+        SwitchInterfaceConfigCreate {
             v6_enabled: true,
-            kind: SwitchInterfaceKind::Primary,
+            kind: SwitchInterfaceKindCreate::Primary,
         },
     );
     // routes
     settings.routes.insert(
         "phy0".into(),
-        RouteConfig {
+        SwitchPortRouteConfigCreate {
             routes: vec![Route {
                 dst: "1.2.3.0/24".parse().unwrap(),
                 gw: "1.2.3.4".parse().unwrap(),
-                vid: None,
+                vlan_id: None,
             }],
         },
     );
     // addresses
     settings.addresses.insert(
         "phy0".into(),
-        AddressConfig {
+        SwitchPortAddressConfigCreate {
             addresses: vec![Address {
                 address: "203.0.113.10/24".parse().unwrap(),
                 address_lot: NameOrId::Name("parkinglot".parse().unwrap()),
@@ -120,7 +124,7 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
     let ifx0 = &created.interfaces[0];
     assert_eq!(&ifx0.interface_name, "phy0");
     assert_eq!(ifx0.v6_enabled, true);
-    assert_eq!(ifx0.kind, external::SwitchInterfaceKind::Primary);
+    assert_eq!(ifx0.kind, nexus_types::external_api::networking::switch_port::SwitchInterfaceKind::Primary);
 
     let route0 = &created.routes[0];
     assert_eq!(route0.dst, "1.2.3.0/24".parse().unwrap());
@@ -156,7 +160,7 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
     let ifx0 = &roundtrip.interfaces[0];
     assert_eq!(&ifx0.interface_name, "phy0");
     assert_eq!(ifx0.v6_enabled, true);
-    assert_eq!(ifx0.kind, external::SwitchInterfaceKind::Primary);
+    assert_eq!(ifx0.kind, nexus_types::external_api::networking::switch_port::SwitchInterfaceKind::Primary);
 
     let route0 = &roundtrip.routes[0];
     assert_eq!(route0.dst, "1.2.3.0/24".parse().unwrap());

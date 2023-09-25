@@ -7,7 +7,6 @@ use crate::SqlU32;
 use db_macros::Resource;
 use ipnetwork::IpNetwork;
 use nexus_types::identity::Resource;
-use omicron_common::api::external;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -29,9 +28,9 @@ pub struct BgpConfig {
     pub vrf: Option<String>,
 }
 
-impl Into<external::BgpConfig> for BgpConfig {
-    fn into(self) -> external::BgpConfig {
-        external::BgpConfig {
+impl Into<nexus_types::external_api::networking::BgpConfig> for BgpConfig {
+    fn into(self) -> nexus_types::external_api::networking::BgpConfig {
+        nexus_types::external_api::networking::BgpConfig {
             identity: self.identity(),
             asn: self.asn.into(),
             vrf: self.vrf,
@@ -55,9 +54,13 @@ pub struct BgpAnnounceSet {
     pub identity: BgpAnnounceSetIdentity,
 }
 
-impl Into<external::BgpAnnounceSet> for BgpAnnounceSet {
-    fn into(self) -> external::BgpAnnounceSet {
-        external::BgpAnnounceSet { identity: self.identity() }
+impl Into<nexus_types::external_api::networking::BgpAnnounceSet>
+    for BgpAnnounceSet
+{
+    fn into(self) -> nexus_types::external_api::networking::BgpAnnounceSet {
+        nexus_types::external_api::networking::BgpAnnounceSet {
+            identity: self.identity(),
+        }
     }
 }
 
@@ -71,9 +74,11 @@ pub struct BgpAnnouncement {
     pub network: IpNetwork,
 }
 
-impl Into<external::BgpAnnouncement> for BgpAnnouncement {
-    fn into(self) -> external::BgpAnnouncement {
-        external::BgpAnnouncement {
+impl Into<nexus_types::external_api::networking::BgpAnnouncement>
+    for BgpAnnouncement
+{
+    fn into(self) -> nexus_types::external_api::networking::BgpAnnouncement {
+        nexus_types::external_api::networking::BgpAnnouncement {
             announce_set_id: self.announce_set_id,
             address_lot_block_id: self.address_lot_block_id,
             network: self.network.into(),

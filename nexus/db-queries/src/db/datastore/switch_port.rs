@@ -67,11 +67,13 @@ impl SwitchPortSettingsCombinedResult {
     }
 }
 
-impl Into<external::SwitchPortSettingsView>
+impl Into<nexus_types::external_api::networking::SwitchPortSettingsView>
     for SwitchPortSettingsCombinedResult
 {
-    fn into(self) -> external::SwitchPortSettingsView {
-        external::SwitchPortSettingsView {
+    fn into(
+        self,
+    ) -> nexus_types::external_api::networking::SwitchPortSettingsView {
+        nexus_types::external_api::networking::SwitchPortSettingsView {
             settings: self.settings.into(),
             port: self.port.into(),
             groups: self.groups.into_iter().map(Into::into).collect(),
@@ -146,7 +148,7 @@ impl DataStore {
             // add the port config
             let port_config = SwitchPortConfig::new(
                 psid,
-                params.port_config.geometry.into(),
+                params.port_config.geometry.clone().into(),
             );
 
             let db_port_config: SwitchPortConfig =
@@ -215,7 +217,7 @@ impl DataStore {
                     i.kind.into(),
                 );
                 interface_config.push(ifx_config.clone());
-                if let params::SwitchInterfaceKind::Vlan(vlan_if) = i.kind {
+                if let params::SwitchInterfaceKindCreate::Vlan(vlan_if) = i.kind {
                     vlan_interface_config.push(SwitchVlanInterfaceConfig::new(
                         ifx_config.id,
                         vlan_if.vid,
@@ -246,7 +248,7 @@ impl DataStore {
                         interface_name.clone(),
                         route.dst.into(),
                         route.gw.into(),
-                        route.vid.map(Into::into),
+                        route.vlan_id.map(Into::into),
                     ));
                 }
             }

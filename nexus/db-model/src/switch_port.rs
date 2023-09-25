@@ -13,7 +13,6 @@ use crate::schema::{
 use crate::SqlU16;
 use db_macros::Resource;
 use ipnetwork::IpNetwork;
-use nexus_types::external_api::params;
 use nexus_types::identity::Resource;
 use omicron_common::api::external;
 use serde::{Deserialize, Serialize};
@@ -42,31 +41,38 @@ impl_enum_type!(
     Sfp28x4 => b"Sfp28x4"
 );
 
-impl From<params::SwitchPortGeometry> for SwitchPortGeometry {
-    fn from(g: params::SwitchPortGeometry) -> Self {
+impl
+    From<nexus_types::external_api::networking::switch_port::SwitchPortGeometry>
+    for SwitchPortGeometry
+{
+    fn from(
+        g: nexus_types::external_api::networking::switch_port::SwitchPortGeometry,
+    ) -> Self {
         match g {
-            params::SwitchPortGeometry::Qsfp28x1 => {
+            nexus_types::external_api::networking::switch_port::SwitchPortGeometry::Qsfp28x1 => {
                 SwitchPortGeometry::Qsfp28x1
             }
-            params::SwitchPortGeometry::Qsfp28x2 => {
+            nexus_types::external_api::networking::switch_port::SwitchPortGeometry::Qsfp28x2 => {
                 SwitchPortGeometry::Qsfp28x2
             }
-            params::SwitchPortGeometry::Sfp28x4 => SwitchPortGeometry::Sfp28x4,
+            nexus_types::external_api::networking::switch_port::SwitchPortGeometry::Sfp28x4 => SwitchPortGeometry::Sfp28x4,
         }
     }
 }
 
-impl Into<external::SwitchPortGeometry> for SwitchPortGeometry {
-    fn into(self) -> external::SwitchPortGeometry {
+impl Into<nexus_types::external_api::networking::SwitchPortGeometry>
+    for SwitchPortGeometry
+{
+    fn into(self) -> nexus_types::external_api::networking::SwitchPortGeometry {
         match self {
             SwitchPortGeometry::Qsfp28x1 => {
-                external::SwitchPortGeometry::Qsfp28x1
+                nexus_types::external_api::networking::SwitchPortGeometry::Qsfp28x1
             }
             SwitchPortGeometry::Qsfp28x2 => {
-                external::SwitchPortGeometry::Qsfp28x2
+                nexus_types::external_api::networking::SwitchPortGeometry::Qsfp28x2
             }
             SwitchPortGeometry::Sfp28x4 => {
-                external::SwitchPortGeometry::Sfp28x4
+                nexus_types::external_api::networking::SwitchPortGeometry::Sfp28x4
             }
         }
     }
@@ -111,9 +117,9 @@ impl SwitchPort {
     }
 }
 
-impl Into<external::SwitchPort> for SwitchPort {
-    fn into(self) -> external::SwitchPort {
-        external::SwitchPort {
+impl Into<nexus_types::external_api::networking::SwitchPort> for SwitchPort {
+    fn into(self) -> nexus_types::external_api::networking::SwitchPort {
+        nexus_types::external_api::networking::SwitchPort {
             id: self.id,
             rack_id: self.rack_id,
             switch_location: self.switch_location,
@@ -150,9 +156,13 @@ impl SwitchPortSettings {
     }
 }
 
-impl Into<external::SwitchPortSettings> for SwitchPortSettings {
-    fn into(self) -> external::SwitchPortSettings {
-        external::SwitchPortSettings { identity: self.identity() }
+impl Into<nexus_types::external_api::networking::SwitchPortSettings>
+    for SwitchPortSettings
+{
+    fn into(self) -> nexus_types::external_api::networking::SwitchPortSettings {
+        nexus_types::external_api::networking::SwitchPortSettings {
+            identity: self.identity(),
+        }
     }
 }
 
@@ -165,9 +175,13 @@ pub struct SwitchPortSettingsGroups {
     pub port_settings_group_id: Uuid,
 }
 
-impl Into<external::SwitchPortSettingsGroups> for SwitchPortSettingsGroups {
-    fn into(self) -> external::SwitchPortSettingsGroups {
-        external::SwitchPortSettingsGroups {
+impl Into<nexus_types::external_api::networking::SwitchPortSettingsGroups>
+    for SwitchPortSettingsGroups
+{
+    fn into(
+        self,
+    ) -> nexus_types::external_api::networking::SwitchPortSettingsGroups {
+        nexus_types::external_api::networking::SwitchPortSettingsGroups {
             port_settings_id: self.port_settings_id,
             port_settings_group_id: self.port_settings_group_id,
         }
@@ -191,9 +205,13 @@ pub struct SwitchPortSettingsGroup {
     pub port_settings_id: Uuid,
 }
 
-impl Into<external::SwitchPortSettingsGroup> for SwitchPortSettingsGroup {
-    fn into(self) -> external::SwitchPortSettingsGroup {
-        external::SwitchPortSettingsGroup {
+impl Into<nexus_types::external_api::networking::SwitchPortSettingsGroup>
+    for SwitchPortSettingsGroup
+{
+    fn into(
+        self,
+    ) -> nexus_types::external_api::networking::SwitchPortSettingsGroup {
+        nexus_types::external_api::networking::SwitchPortSettingsGroup {
             identity: self.identity(),
             port_settings_id: self.port_settings_id,
         }
@@ -215,9 +233,11 @@ impl SwitchPortConfig {
     }
 }
 
-impl Into<external::SwitchPortConfig> for SwitchPortConfig {
-    fn into(self) -> external::SwitchPortConfig {
-        external::SwitchPortConfig {
+impl Into<nexus_types::external_api::networking::SwitchPortConfig>
+    for SwitchPortConfig
+{
+    fn into(self) -> nexus_types::external_api::networking::SwitchPortConfig {
+        nexus_types::external_api::networking::SwitchPortConfig {
             port_settings_id: self.port_settings_id,
             geometry: self.geometry.into(),
         }
@@ -251,9 +271,13 @@ impl SwitchPortLinkConfig {
     }
 }
 
-impl Into<external::SwitchPortLinkConfig> for SwitchPortLinkConfig {
-    fn into(self) -> external::SwitchPortLinkConfig {
-        external::SwitchPortLinkConfig {
+impl Into<nexus_types::external_api::networking::SwitchPortLinkConfig>
+    for SwitchPortLinkConfig
+{
+    fn into(
+        self,
+    ) -> nexus_types::external_api::networking::SwitchPortLinkConfig {
+        nexus_types::external_api::networking::SwitchPortLinkConfig {
             port_settings_id: self.port_settings_id,
             lldp_service_config_id: self.lldp_service_config_id,
             link_name: self.link_name.clone(),
@@ -278,9 +302,11 @@ impl LldpServiceConfig {
     }
 }
 
-impl Into<external::LldpServiceConfig> for LldpServiceConfig {
-    fn into(self) -> external::LldpServiceConfig {
-        external::LldpServiceConfig {
+impl Into<nexus_types::external_api::networking::LldpServiceConfig>
+    for LldpServiceConfig
+{
+    fn into(self) -> nexus_types::external_api::networking::LldpServiceConfig {
+        nexus_types::external_api::networking::LldpServiceConfig {
             id: self.id,
             lldp_config_id: self.lldp_config_id,
             enabled: self.enabled,
@@ -308,9 +334,9 @@ pub struct LldpConfig {
     pub management_ip: IpNetwork,
 }
 
-impl Into<external::LldpConfig> for LldpConfig {
-    fn into(self) -> external::LldpConfig {
-        external::LldpConfig {
+impl Into<nexus_types::external_api::networking::LldpConfig> for LldpConfig {
+    fn into(self) -> nexus_types::external_api::networking::LldpConfig {
+        nexus_types::external_api::networking::LldpConfig {
             identity: self.identity(),
             chassis_id: self.chassis_id.clone(),
             system_name: self.system_name.clone(),
@@ -349,9 +375,13 @@ impl SwitchInterfaceConfig {
     }
 }
 
-impl Into<external::SwitchInterfaceConfig> for SwitchInterfaceConfig {
-    fn into(self) -> external::SwitchInterfaceConfig {
-        external::SwitchInterfaceConfig {
+impl Into<nexus_types::external_api::networking::SwitchInterfaceConfig>
+    for SwitchInterfaceConfig
+{
+    fn into(
+        self,
+    ) -> nexus_types::external_api::networking::SwitchInterfaceConfig {
+        nexus_types::external_api::networking::SwitchInterfaceConfig {
             port_settings_id: self.port_settings_id,
             id: self.id,
             interface_name: self.interface_name,
@@ -385,9 +415,13 @@ impl SwitchPortRouteConfig {
     }
 }
 
-impl Into<external::SwitchPortRouteConfig> for SwitchPortRouteConfig {
-    fn into(self) -> external::SwitchPortRouteConfig {
-        external::SwitchPortRouteConfig {
+impl Into<nexus_types::external_api::networking::SwitchPortRouteConfig>
+    for SwitchPortRouteConfig
+{
+    fn into(
+        self,
+    ) -> nexus_types::external_api::networking::SwitchPortRouteConfig {
+        nexus_types::external_api::networking::SwitchPortRouteConfig {
             port_settings_id: self.port_settings_id,
             interface_name: self.interface_name.clone(),
             dst: self.dst.into(),
@@ -427,9 +461,13 @@ impl SwitchPortBgpPeerConfig {
     }
 }
 
-impl Into<external::SwitchPortBgpPeerConfig> for SwitchPortBgpPeerConfig {
-    fn into(self) -> external::SwitchPortBgpPeerConfig {
-        external::SwitchPortBgpPeerConfig {
+impl Into<nexus_types::external_api::networking::SwitchPortBgpPeerConfig>
+    for SwitchPortBgpPeerConfig
+{
+    fn into(
+        self,
+    ) -> nexus_types::external_api::networking::SwitchPortBgpPeerConfig {
+        nexus_types::external_api::networking::SwitchPortBgpPeerConfig {
             port_settings_id: self.port_settings_id,
             bgp_announce_set_id: self.bgp_announce_set_id,
             bgp_config_id: self.bgp_config_id,
@@ -469,9 +507,13 @@ impl SwitchPortAddressConfig {
     }
 }
 
-impl Into<external::SwitchPortAddressConfig> for SwitchPortAddressConfig {
-    fn into(self) -> external::SwitchPortAddressConfig {
-        external::SwitchPortAddressConfig {
+impl Into<nexus_types::external_api::networking::SwitchPortAddressConfig>
+    for SwitchPortAddressConfig
+{
+    fn into(
+        self,
+    ) -> nexus_types::external_api::networking::SwitchPortAddressConfig {
+        nexus_types::external_api::networking::SwitchPortAddressConfig {
             port_settings_id: self.port_settings_id,
             address_lot_block_id: self.address_lot_block_id,
             address: self.address.into(),

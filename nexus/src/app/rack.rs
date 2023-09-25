@@ -17,10 +17,10 @@ use nexus_db_queries::db::datastore::DnsVersionUpdateBuilder;
 use nexus_db_queries::db::datastore::RackInit;
 use nexus_db_queries::db::lookup::LookupPath;
 use nexus_types::external_api::params::Address;
-use nexus_types::external_api::params::AddressConfig;
 use nexus_types::external_api::params::AddressLotBlockCreate;
-use nexus_types::external_api::params::RouteConfig;
+use nexus_types::external_api::params::SwitchPortAddressConfigCreate;
 use nexus_types::external_api::params::SwitchPortConfig;
+use nexus_types::external_api::params::SwitchPortRouteConfigCreate;
 use nexus_types::external_api::params::{
     AddressLotCreate, LoopbackAddressCreate, Route, SiloCreate,
     SwitchPortSettingsCreate,
@@ -434,9 +434,8 @@ impl super::Nexus {
                     description: "initial uplink configuration".to_string(),
                 };
 
-                let port_config = SwitchPortConfig {
-                    geometry: nexus_types::external_api::params::SwitchPortGeometry::Qsfp28x1,
-                };
+                let port_config =
+                    SwitchPortConfig { geometry: nexus_types::external_api::networking::SwitchPortGeometry::Qsfp28x1 };
 
                 let mut port_settings_params = SwitchPortSettingsCreate {
                     identity,
@@ -457,7 +456,7 @@ impl super::Nexus {
                 };
                 port_settings_params.addresses.insert(
                     "phy0".to_string(),
-                    AddressConfig { addresses: vec![address] },
+                    SwitchPortAddressConfigCreate { addresses: vec![address] },
                 );
 
                 let dst = IpNet::from_str("0.0.0.0/0").map_err(|e| {
@@ -467,12 +466,12 @@ impl super::Nexus {
                 })?;
 
                 let gw = IpAddr::V4(uplink_config.gateway_ip);
-                let vid = uplink_config.uplink_vid;
-                let route = Route { dst, gw, vid };
+                let vlan_id = uplink_config.uplink_vid;
+                let route = Route { dst, gw, vlan_id };
 
                 port_settings_params.routes.insert(
                     "phy0".to_string(),
-                    RouteConfig { routes: vec![route] },
+                    SwitchPortRouteConfigCreate { routes: vec![route] },
                 );
 
                 match self

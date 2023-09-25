@@ -1277,13 +1277,13 @@ pub struct SwitchPortSettingsCreate {
     /// phy0-phy3, etc.
     pub links: HashMap<String, LinkConfig>,
     /// Interfaces indexed by link name.
-    pub interfaces: HashMap<String, SwitchInterfaceConfig>,
+    pub interfaces: HashMap<String, SwitchInterfaceConfigCreate>,
     /// Routes indexed by interface name.
-    pub routes: HashMap<String, RouteConfig>,
+    pub routes: HashMap<String, SwitchPortRouteConfigCreate>,
     /// BGP peers indexed by interface name.
-    pub bgp_peers: HashMap<String, BgpPeerConfig>,
+    pub bgp_peers: HashMap<String, SwitchPortBgpPeerConfigCreate>,
     /// Addresses indexed by interface name.
-    pub addresses: HashMap<String, AddressConfig>,
+    pub addresses: HashMap<String, SwitchPortAddressConfigCreate>,
 }
 
 impl SwitchPortSettingsCreate {
@@ -1291,7 +1291,7 @@ impl SwitchPortSettingsCreate {
         Self {
             identity,
             port_config: SwitchPortConfig {
-                geometry: SwitchPortGeometry::Qsfp28x1,
+                geometry: super::networking::SwitchPortGeometry::Qsfp28x1,
             },
             groups: Vec::new(),
             links: HashMap::new(),
@@ -1308,21 +1308,7 @@ impl SwitchPortSettingsCreate {
 #[serde(rename_all = "snake_case")]
 pub struct SwitchPortConfig {
     /// Link geometry for the switch port.
-    pub geometry: SwitchPortGeometry,
-}
-
-/// The link geometry associated with a switch port.
-#[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum SwitchPortGeometry {
-    /// The port contains a single QSFP28 link with four lanes.
-    Qsfp28x1,
-
-    /// The port contains two QSFP28 links each with two lanes.
-    Qsfp28x2,
-
-    /// The port contains four SFP28 links each with one lane.
-    Sfp28x4,
+    pub geometry: super::networking::SwitchPortGeometry,
 }
 
 /// Switch link configuration.
@@ -1332,13 +1318,13 @@ pub struct LinkConfig {
     pub mtu: u16,
 
     /// The link-layer discovery protocol (LLDP) configuration for the link.
-    pub lldp: LldpServiceConfig,
+    pub lldp: LldpServiceConfigCreate,
 }
 
 /// The LLDP configuration associated with a port. LLDP may be either enabled or
 /// disabled, if enabled, an LLDP configuration must be provided by name or id.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct LldpServiceConfig {
+pub struct LldpServiceConfigCreate {
     /// Whether or not LLDP is enabled.
     pub enabled: bool,
 
@@ -1350,18 +1336,18 @@ pub struct LldpServiceConfig {
 /// A layer-3 switch interface configuration. When IPv6 is enabled, a link local
 /// address will be created for the interface.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct SwitchInterfaceConfig {
+pub struct SwitchInterfaceConfigCreate {
     /// Whether or not IPv6 is enabled.
     pub v6_enabled: bool,
 
     /// What kind of switch interface this configuration represents.
-    pub kind: SwitchInterfaceKind,
+    pub kind: SwitchInterfaceKindCreate,
 }
 
 /// Indicates the kind for a switch interface.
 #[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
-pub enum SwitchInterfaceKind {
+pub enum SwitchInterfaceKindCreate {
     /// Primary interfaces are associated with physical links. There is exactly
     /// one primary interface per physical link.
     Primary,
@@ -1388,7 +1374,7 @@ pub struct SwitchVlanInterface {
 
 /// Route configuration data associated with a switch port configuration.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct RouteConfig {
+pub struct SwitchPortRouteConfigCreate {
     /// The set of routes assigned to a switch port.
     pub routes: Vec<Route>,
 }
@@ -1403,7 +1389,7 @@ pub struct Route {
     pub gw: IpAddr,
 
     /// VLAN id the gateway is reachable over.
-    pub vid: Option<u16>,
+    pub vlan_id: Option<u16>,
 }
 
 /// A BGP peer configuration for an interface. Includes the set of announcements
@@ -1411,7 +1397,7 @@ pub struct Route {
 /// parameter is a reference to global BGP parameters. The `interface_name`
 /// indicates what interface the peer should be contacted on.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct BgpPeerConfig {
+pub struct SwitchPortBgpPeerConfigCreate {
     /// The set of announcements advertised by the peer.
     pub bgp_announce_set: NameOrId,
 
@@ -1419,6 +1405,7 @@ pub struct BgpPeerConfig {
     /// peer.
     pub bgp_config: NameOrId,
 
+    // TODO: should be a Name
     /// The name of interface to peer on. This is relative to the port
     /// configuration this BGP peer configuration is a part of. For example this
     /// value could be phy0 to refer to a primary physical interface. Or it
@@ -1466,7 +1453,7 @@ pub struct CreateBgpConfig {
 
 /// A set of addresses associated with a port configuration.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct AddressConfig {
+pub struct SwitchPortAddressConfigCreate {
     /// The set of addresses assigned to the port configuration.
     pub addresses: Vec<Address>,
 }
