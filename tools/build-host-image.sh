@@ -86,7 +86,7 @@ function main
     if [ "x$BUILD_STANDARD" != "x" ]; then
         mkdir -p "$tmp_gz/root/root"
         echo "# Add opteadm, ddmadm to PATH" >> "$tmp_gz/root/root/.profile"
-        echo "export PATH=$PATH:/opt/oxide/opte/bin:/opt/oxide/mg-ddm" >> "$tmp_gz/root/root/.profile"
+        echo 'export PATH=$PATH:/opt/oxide/opte/bin:/opt/oxide/mg-ddm' >> "$tmp_gz/root/root/.profile"
     fi
 
     # Move to the helios checkout
