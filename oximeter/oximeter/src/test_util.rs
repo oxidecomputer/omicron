@@ -104,3 +104,19 @@ pub fn generate_test_samples(
     }
     samples
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_gen_test_samples() {
+        let (n_projects, n_instances, n_cpus, n_samples) = (2, 2, 2, 2);
+        let samples =
+            generate_test_samples(n_projects, n_instances, n_cpus, n_samples);
+        assert_eq!(
+            samples.len(),
+            n_projects * n_instances * n_cpus * n_samples
+        );
+    }
+}

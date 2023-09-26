@@ -50,7 +50,6 @@ pub struct ClickHouseCluster {
     pub keeper_3: ClickHouseInstance,
 }
 
-
 #[derive(Debug, Error)]
 pub enum ClickHouseError {
     #[error("Failed to open ClickHouse log file")]
@@ -109,7 +108,9 @@ impl ClickHouseInstance {
             })?;
 
         let data_path = data_dir.path().to_path_buf();
+        println!("port before: {}", port);
         let port = wait_for_port(log_path).await?;
+        println!("port after: {}", port);
 
         Ok(Self {
             data_dir: Some(data_dir),
@@ -177,7 +178,8 @@ impl ClickHouseInstance {
             })?;
 
         let data_path = data_dir.path().to_path_buf();
-        let address = SocketAddr::new("127.0.0.1".parse().unwrap(), port.clone());
+        let address =
+            SocketAddr::new("127.0.0.1".parse().unwrap(), port.clone());
 
         let result = wait_for_ready(log_path).await;
         match result {
@@ -334,101 +336,99 @@ impl Drop for ClickHouseInstance {
 
 impl ClickHouseCluster {
     pub async fn new() -> Result<Self, anyhow::Error> {
-         // Start all Keeper coordinator nodes
-         let cur_dir = std::env::current_dir().unwrap();
-         let keeper_config =
-             cur_dir.as_path().join("src/configs/keeper_config.xml");
- 
-         // Start Keeper 1
-         let k1_port = 9181;
-         let k1_id = 1;
- 
-         let k1 = ClickHouseInstance::new_keeper(
-             k1_port,
-             k1_id,
-             keeper_config.clone(),
-         )
-         .await?;
+        // Start all Keeper coordinator nodes
+        let cur_dir = std::env::current_dir().unwrap();
+        let keeper_config =
+            cur_dir.as_path().join("src/configs/keeper_config.xml");
+
+        // Start Keeper 1
+        let k1_port = 9181;
+        let k1_id = 1;
+
+        let k1 = ClickHouseInstance::new_keeper(
+            k1_port,
+            k1_id,
+            keeper_config.clone(),
+        )
+        .await?;
         // TODO: include the number of the instance that failed
-//         .map_err(|e| ("Failed to start ClickHouse keeper 1", e))?;
-//         .expect("Failed to start ClickHouse keeper 1");
- 
-         // Start Keeper 2
-         let k2_port = 9182;
-         let k2_id = 2;
- 
-         let k2 = ClickHouseInstance::new_keeper(
-             k2_port,
-             k2_id,
-             keeper_config.clone(),
-         )
-         .await?;
-               // TODO: include the number of the instance that failed
-//         .expect("Failed to start ClickHouse keeper 2");
- 
-         // Start Keeper 3
-         let k3_port = 9183;
-         let k3_id = 3;
- 
-         let k3 =
-             ClickHouseInstance::new_keeper(k3_port, k3_id, keeper_config)
-                 .await?;
-                       // TODO: include the number of the instance that failed
-//                 .expect("Failed to start ClickHouse keeper 3");
- 
-         // Start all replica nodes
-         let cur_dir = std::env::current_dir().unwrap();
-         let replica_config =
-             cur_dir.as_path().join("src/configs/replica_config.xml");
- 
-         // Start Replica 1
-         let r1_port = 8123;
-         let r1_tcp_port = 9000;
-         let r1_interserver_port = 9009;
-         let r1_name = String::from("oximeter_cluster node 1");
-         let r1_number = String::from("01");
-         let r1 = ClickHouseInstance::new_replicated(
-             r1_port,
-             r1_tcp_port,
-             r1_interserver_port,
-             r1_name,
-             r1_number,
-             replica_config.clone(),
-         )
-         .await?;
-      // TODO: include the number of the instance that failed
+        //         .map_err(|e| ("Failed to start ClickHouse keeper 1", e))?;
+        //         .expect("Failed to start ClickHouse keeper 1");
+
+        // Start Keeper 2
+        let k2_port = 9182;
+        let k2_id = 2;
+
+        let k2 = ClickHouseInstance::new_keeper(
+            k2_port,
+            k2_id,
+            keeper_config.clone(),
+        )
+        .await?;
+        // TODO: include the number of the instance that failed
+        //         .expect("Failed to start ClickHouse keeper 2");
+
+        // Start Keeper 3
+        let k3_port = 9183;
+        let k3_id = 3;
+
+        let k3 = ClickHouseInstance::new_keeper(k3_port, k3_id, keeper_config)
+            .await?;
+        // TODO: include the number of the instance that failed
+        //                 .expect("Failed to start ClickHouse keeper 3");
+
+        // Start all replica nodes
+        let cur_dir = std::env::current_dir().unwrap();
+        let replica_config =
+            cur_dir.as_path().join("src/configs/replica_config.xml");
+
+        // Start Replica 1
+        let r1_port = 8123;
+        let r1_tcp_port = 9000;
+        let r1_interserver_port = 9009;
+        let r1_name = String::from("oximeter_cluster node 1");
+        let r1_number = String::from("01");
+        let r1 = ClickHouseInstance::new_replicated(
+            r1_port,
+            r1_tcp_port,
+            r1_interserver_port,
+            r1_name,
+            r1_number,
+            replica_config.clone(),
+        )
+        .await?;
+        // TODO: include the number of the instance that failed
         // .expect("Failed to start ClickHouse node 1");
-       //  let r1_address =
-         //    SocketAddr::new("127.0.0.1".parse().unwrap(), r1.port());
- 
-         // Start Replica 2
-         let r2_port = 8124;
-         let r2_tcp_port = 9001;
-         let r2_interserver_port = 9010;
-         let r2_name = String::from("oximeter_cluster node 2");
-         let r2_number = String::from("02");
-         let r2 = ClickHouseInstance::new_replicated(
-             r2_port,
-             r2_tcp_port,
-             r2_interserver_port,
-             r2_name,
-             r2_number,
-             replica_config,
-         )
-         .await?;
-               // TODO: include the number of the instance that failed
-//         .expect("Failed to start ClickHouse node 2");
+        //  let r1_address =
+        //    SocketAddr::new("127.0.0.1".parse().unwrap(), r1.port());
+
+        // Start Replica 2
+        let r2_port = 8124;
+        let r2_tcp_port = 9001;
+        let r2_interserver_port = 9010;
+        let r2_name = String::from("oximeter_cluster node 2");
+        let r2_number = String::from("02");
+        let r2 = ClickHouseInstance::new_replicated(
+            r2_port,
+            r2_tcp_port,
+            r2_interserver_port,
+            r2_name,
+            r2_number,
+            replica_config,
+        )
+        .await?;
+        // TODO: include the number of the instance that failed
+        //         .expect("Failed to start ClickHouse node 2");
         // let r2_address =
-          //   SocketAddr::new("127.0.0.1".parse().unwrap(), r2.port());
-             
-             Ok(Self {
-                    replica_1: r1,
-                    replica_2: r2,
-                    keeper_1: k1,
-                    keeper_2: k2,
-                    keeper_3: k3,
-                })
-            
+        //   SocketAddr::new("127.0.0.1".parse().unwrap(), r2.port());
+
+        Ok(Self {
+            replica_1: r1,
+            replica_2: r2,
+            keeper_1: k1,
+            keeper_2: k2,
+            keeper_3: k3,
+        })
     }
 }
 
