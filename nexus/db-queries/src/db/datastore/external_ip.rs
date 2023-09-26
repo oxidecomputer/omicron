@@ -282,4 +282,18 @@ impl DataStore {
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
+
+    /// Fetch all external IP addresses of any kind for the provided instance
+    pub async fn lookup_external_ips(
+        &self,
+        opctx: &OpContext,
+    ) -> LookupResult<Vec<ExternalIp>> {
+        use db::schema::external_ip::dsl;
+        dsl::external_ip
+            .filter(dsl::time_deleted.is_null())
+            .select(ExternalIp::as_select())
+            .get_results_async(self.pool_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+    }
 }
