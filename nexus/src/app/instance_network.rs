@@ -12,6 +12,7 @@ use nexus_db_queries::db::lookup::LookupPath;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::internal::shared::SwitchLocation;
+use sled_agent_client::types::DeleteVirtualNetworkInterfaceHost;
 use sled_agent_client::types::SetVirtualNetworkInterfaceHost;
 use std::collections::HashSet;
 use std::str::FromStr;
@@ -186,25 +187,15 @@ impl super::Nexus {
         // For every sled that isn't the sled this instance was allocated to, delete
         // the virtual to physical mapping for each of this instance's NICs. If
         // there isn't a V2P mapping, del_v2p should be a no-op.
-        let (.., authz_instance, db_instance) =
-            LookupPath::new(&opctx, &self.db_datastore)
-                .instance_id(instance_id)
-                .fetch_for(authz::Action::Read)
-                .await?;
+        let (.., authz_instance) = LookupPath::new(&opctx, &self.db_datastore)
+            .instance_id(instance_id)
+            .lookup_for(authz::Action::Read)
+            .await?;
 
         let instance_nics = self
             .db_datastore
             .derive_guest_network_interface_info(&opctx, &authz_instance)
             .await?;
-
-        // Lookup the physical host IP of the sled hosting this instance
-        let instance_sled_id = db_instance.runtime().sled_id;
-        let physical_host_ip = *self
-            .sled_lookup(&self.opctx_alloc, &instance_sled_id)?
-            .fetch()
-            .await?
-            .1
-            .ip;
 
         let mut last_sled_id: Option<Uuid> = None;
 
@@ -221,22 +212,11 @@ impl super::Nexus {
                 Vec::with_capacity(sleds_page.len() * instance_nics.len());
 
             for sled in &sleds_page {
-                // del_v2p not required for sled instance was allocated to, OPTE
-                // currently does that automatically
-                //
-                // TODO(#3107): Remove this when XDE stops deleting mappings
-                // implicitly.
-                if sled.id() == instance_sled_id {
-                    continue;
-                }
-
                 for nic in &instance_nics {
                     let client = self.sled_client(&sled.id()).await?;
                     let nic_id = nic.id;
-                    let mapping = SetVirtualNetworkInterfaceHost {
+                    let mapping = DeleteVirtualNetworkInterfaceHost {
                         virtual_ip: nic.ip,
-                        virtual_mac: nic.mac.clone(),
-                        physical_host_ip,
                         vni: nic.vni.clone(),
                     };
 
