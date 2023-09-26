@@ -68,10 +68,10 @@ enum Args {
     ///
     /// In this mode, `oximeter` can be used to test the collection of metrics
     /// from producers, without requiring all the normal machinery of the
-    /// control plane. The collector is run as usual, but additionally starts an
+    /// control plane. The collector is run as usual, but additionally starts a
     /// API server to stand-in for Nexus. The registrations of the producers and
-    /// collectors occurs through the normal code path, but uses this standalone
-    /// Nexus instead of the real thing.
+    /// collectors occurs through the normal code path, but uses this mock Nexus
+    /// instead of the real thing.
     Standalone {
         /// The ID for the collector.
         ///
@@ -89,9 +89,9 @@ enum Args {
         )]
         address: SocketAddrV6,
 
-        /// The address for the fake Nexus server used to register.
+        /// The address for the mock Nexus server used to register.
         ///
-        /// This program starts a fake version of Nexus, which is used only to
+        /// This program starts a mock version of Nexus, which is used only to
         /// register the producers and collectors. This allows them to operate
         /// as they usually would, registering each other with Nexus so that an
         /// assignment between them can be made.
