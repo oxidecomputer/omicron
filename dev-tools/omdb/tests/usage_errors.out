@@ -86,11 +86,12 @@ Query the control plane database (CockroachDB)
 Usage: omdb db [OPTIONS] <COMMAND>
 
 Commands:
-  disks     Print information about disks
-  dns       Print information about internal and external DNS
-  services  Print information about control plane services
-  sleds     Print information about sleds
-  help      Print this message or the help of the given subcommand(s)
+  disks      Print information about disks
+  dns        Print information about internal and external DNS
+  services   Print information about control plane services
+  sleds      Print information about sleds
+  instances  Print information about customer instances
+  help       Print this message or the help of the given subcommand(s)
 
 Options:
       --db-url <DB_URL>            URL of the database SQL interface [env: OMDB_DB_URL=]
@@ -106,11 +107,12 @@ Query the control plane database (CockroachDB)
 Usage: omdb db [OPTIONS] <COMMAND>
 
 Commands:
-  disks     Print information about disks
-  dns       Print information about internal and external DNS
-  services  Print information about control plane services
-  sleds     Print information about sleds
-  help      Print this message or the help of the given subcommand(s)
+  disks      Print information about disks
+  dns        Print information about internal and external DNS
+  services   Print information about control plane services
+  sleds      Print information about sleds
+  instances  Print information about customer instances
+  help       Print this message or the help of the given subcommand(s)
 
 Options:
       --db-url <DB_URL>            URL of the database SQL interface [env: OMDB_DB_URL=]
