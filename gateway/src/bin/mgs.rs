@@ -117,13 +117,13 @@ async fn do_run() -> Result<(), CmdError> {
                                         .to_string()
                                 ));
                             }
+                            server.set_rack_id(new_config.rack_id);
                             server
                                 .adjust_dropshot_addresses(&new_config.addresses)
                                 .await
                                 .map_err(|err| CmdError::Failure(
                                     format!("config refresh failed: {err}")
                                 ))?;
-                            server.set_rack_id(new_config.rack_id);
                         }
                         // We only register `SIGUSR1` and never close the
                         // handle, so we never expect `None` or any other

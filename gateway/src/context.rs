@@ -6,7 +6,7 @@ use crate::error::StartupError;
 use crate::management_switch::ManagementSwitch;
 use crate::management_switch::SwitchConfig;
 use gateway_sp_comms::InMemoryHostPhase2Provider;
-use slog::{error, info, Logger};
+use slog::{info, Logger};
 use std::sync::Arc;
 use std::sync::OnceLock;
 use uuid::Uuid;
@@ -30,17 +30,12 @@ impl ServerContext {
             ManagementSwitch::new(switch_config, &host_phase2_provider, log)
                 .await?;
 
-        let rack_id = OnceLock::new();
-        if let Some(id) = rack_id_config {
-            info!(log, "Setting rack_id: {id} for MGS");
-            match rack_id.set(id) {
-                Ok(()) => info!(log, "Setting rack_id: {id} for MGS"),
-                Err(existing) => error!(
-                    log,
-                    "Failed to set rack_id: {id}. Already set to {existing}"
-                ),
-            }
-        }
+        let rack_id = if let Some(id) = rack_id_config {
+            info!(log, "Setting rack_id"; "rack_id" => %id);
+            OnceLock::from(id)
+        } else {
+            OnceLock::new()
+        };
 
         Ok(Arc::new(ServerContext {
             mgmt_switch,

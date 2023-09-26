@@ -293,10 +293,11 @@ impl Server {
             if *val != rack_id {
                 error!(
                     self.apictx.log,
-                    "Rack ID changed from {} to {}", val, rack_id
-                );
+                    "Ignoring attempted change to rack ID";
+                    "current_rack_id" => %val,
+                    "ignored_new_rack_id" => %rack_id);
             } else {
-                info!(self.apictx.log, "Set rack_id: {rack_id} for MGS");
+                info!(self.apictx.log, "Set rack_id"; "rack_id" => %rack_id);
             }
         } else {
             warn!(self.apictx.log, "SMF refresh called without a rack id");
