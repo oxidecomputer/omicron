@@ -56,6 +56,7 @@ enum Args {
 struct ConfigProperties {
     id: Uuid,
     addresses: Vec<SocketAddrV6>,
+    rack_id: Option<Uuid>,
 }
 
 #[tokio::main]
@@ -91,15 +92,17 @@ async fn do_run() -> Result<(), CmdError> {
                     ))
                 })?;
 
-            let (id, addresses) = if id_and_address_from_smf {
+            let (id, addresses, rack_id) = if id_and_address_from_smf {
                 let config = read_smf_config()?;
-                (config.id, config.addresses)
+                (config.id, config.addresses, config.rack_id)
             } else {
-                // Clap ensures these are present if `id_and_address_from_smf`
-                // is false, so we can safely unwrap.
-                (id.unwrap(), vec![address.unwrap()])
+                // Does it matter if `rack_id` is always `None` in this case?
+                let rack_id = None;
+                // Clap ensures the first two fields are present if
+                // `id_and_address_from_smf` is false, so we can safely unwrap.
+                (id.unwrap(), vec![address.unwrap()], rack_id)
             };
-            let args = MgsArguments { id, addresses };
+            let args = MgsArguments { id, addresses, rack_id };
             let mut server =
                 start_server(config, args).await.map_err(CmdError::Failure)?;
 
@@ -120,6 +123,7 @@ async fn do_run() -> Result<(), CmdError> {
                                 .map_err(|err| CmdError::Failure(
                                     format!("config refresh failed: {err}")
                                 ))?;
+                            server.set_rack_id(new_config.rack_id);
                         }
                         // We only register `SIGUSR1` and never close the
                         // handle, so we never expect `None` or any other
@@ -147,6 +151,9 @@ fn read_smf_config() -> Result<ConfigProperties, CmdError> {
 
     // Name of the property within CONFIG_PG for our server addresses.
     const PROP_ADDR: &str = "address";
+
+    // Name of the property within CONFIG_PG for our rack ID.
+    const PROP_RACK_ID: &str = "rack_id";
 
     // This function is pretty boilerplate-y; we can reduce it by using this
     // error type to help us construct a `CmdError::Failure(_)` string. It
@@ -210,6 +217,26 @@ fn read_smf_config() -> Result<ConfigProperties, CmdError> {
         ))
     })?;
 
+    let prop_rack_id = config
+        .get_property(PROP_RACK_ID)
+        .map_err(|err| Error::GetProperty { prop: PROP_RACK_ID, err })?
+        .ok_or_else(|| Error::MissingProperty { prop: PROP_RACK_ID })?
+        .value()
+        .map_err(|err| Error::GetValue { prop: PROP_RACK_ID, err })?
+        .ok_or(Error::MissingValue { prop: PROP_RACK_ID })?
+        .as_string()
+        .map_err(|err| Error::ValueAsString { prop: PROP_RACK_ID, err })?;
+
+    let rack_id = if prop_rack_id.as_str() == "unknown" {
+        None
+    } else {
+        Some(Uuid::try_parse(&prop_rack_id).map_err(|err| {
+            CmdError::Failure(format!(
+                "failed to parse `{CONFIG_PG}/{PROP_RACK_ID}` ({prop_rack_id:?}) as a UUID: {err}"
+            ))
+        })?)
+    };
+
     let prop_addr = config
         .get_property(PROP_ADDR)
         .map_err(|err| Error::GetProperty { prop: PROP_ADDR, err })?
@@ -236,7 +263,7 @@ fn read_smf_config() -> Result<ConfigProperties, CmdError> {
             "no addresses specified by `{CONFIG_PG}/{PROP_ADDR}`"
         )))
     } else {
-        Ok(ConfigProperties { id: prop_id, addresses })
+        Ok(ConfigProperties { id: prop_id, addresses, rack_id })
     }
 }
 

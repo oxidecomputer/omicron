@@ -1645,6 +1645,10 @@ impl ServiceManager {
                         }
                     }
 
+                    if let Some(info) = self.inner.sled_info.get() {
+                        smfh.setprop("config/rack_id", info.rack_id)?;
+                    }
+
                     smfh.refresh()?;
                 }
                 ServiceType::SpSim => {
@@ -2753,6 +2757,10 @@ impl ServiceManager {
                                 "config/address",
                                 &format!("[{address}]:{MGS_PORT}"),
                             )?;
+
+                            if let Some(info) = self.inner.sled_info.get() {
+                                smfh.setprop("config/rack_id", info.rack_id)?;
+                            }
 
                             smfh.refresh()?;
                         }
