@@ -69,6 +69,7 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
         &["db", "services", "list-instances"],
         &["db", "services", "list-by-sled"],
         &["db", "sleds"],
+        &["db", "network"],
         &["nexus", "background-tasks", "doc"],
         &["nexus", "background-tasks", "show"],
         // We can't easily test the sled agent output because that's only

@@ -181,6 +181,7 @@ struct NetworkArgs {
     #[command(subcommand)]
     command: NetworkCommands,
 
+    /// Print out raw data structures from the data store.
     #[clap(long)]
     verbose: bool,
 }
@@ -1177,14 +1178,18 @@ async fn cmd_db_eips(
         owner: Owner,
     }
 
+    if verbose {
+        for ip in &ips {
+            if verbose {
+                println!("{ip:#?}");
+            }
+        }
+        return Ok(());
+    }
+
     let mut rows = Vec::new();
 
     for ip in &ips {
-        if verbose {
-            println!("{ip:#?}");
-            continue;
-        }
-
         let owner = if let Some(owner_id) = ip.parent_id {
             if ip.is_service {
                 let service = LookupPath::new(opctx, datastore)
@@ -1202,7 +1207,7 @@ async fn cmd_db_eips(
                     .await
                     .context("loading requested instance")?
                     .pop()
-                    .context("loading requested instance")?;
+                    .context("requested instance not found")?;
 
                 use db::schema::project::dsl as project_dsl;
                 let project = project_dsl::project
@@ -1213,7 +1218,7 @@ async fn cmd_db_eips(
                     .await
                     .context("loading requested project")?
                     .pop()
-                    .context("loading requested instance")?;
+                    .context("requested project not found")?;
 
                 Owner::Instance {
                     project: project.name().to_string(),
@@ -1236,14 +1241,12 @@ async fn cmd_db_eips(
         rows.push(row);
     }
 
-    if !verbose {
-        rows.sort_by(|a, b| a.ip.cmp(&b.ip));
-        let table = tabled::Table::new(rows)
-            .with(tabled::settings::Style::empty())
-            .to_string();
+    rows.sort_by(|a, b| a.ip.cmp(&b.ip));
+    let table = tabled::Table::new(rows)
+        .with(tabled::settings::Style::empty())
+        .to_string();
 
-        println!("{}", table);
-    }
+    println!("{}", table);
 
     Ok(())
 }
