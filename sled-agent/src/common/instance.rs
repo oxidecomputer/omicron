@@ -162,27 +162,15 @@ impl ObservedPropolisState {
 /// Destroyed states are reserved for Nexus to use for instances that are being
 /// created for the very first time or have been explicitly deleted.
 pub enum PublishedVmmState {
-    Starting,
-    Running,
     Stopping,
-    Stopped,
     Rebooting,
-    Migrating,
-    Repairing,
-    Failed,
 }
 
 impl From<PublishedVmmState> for ApiInstanceState {
     fn from(value: PublishedVmmState) -> Self {
         match value {
-            PublishedVmmState::Starting => ApiInstanceState::Starting,
-            PublishedVmmState::Running => ApiInstanceState::Running,
             PublishedVmmState::Stopping => ApiInstanceState::Stopping,
-            PublishedVmmState::Stopped => ApiInstanceState::Stopped,
             PublishedVmmState::Rebooting => ApiInstanceState::Rebooting,
-            PublishedVmmState::Migrating => ApiInstanceState::Migrating,
-            PublishedVmmState::Repairing => ApiInstanceState::Repairing,
-            PublishedVmmState::Failed => ApiInstanceState::Failed,
         }
     }
 }
@@ -393,12 +381,63 @@ impl InstanceStates {
         self.instance.time_updated = now;
     }
 
-    /// Transitions to a new InstanceState value, updating the timestamp and
-    /// generation number.
-    pub(crate) fn transition(&mut self, next: PublishedVmmState) {
+    /// Forcibly transitions this instance's VMM into the specified `next`
+    /// state and updates its generation number.
+    pub(crate) fn transition_vmm(
+        &mut self,
+        next: PublishedVmmState,
+        now: DateTime<Utc>,
+    ) {
         self.vmm.state = next.into();
         self.vmm.gen = self.vmm.gen.next();
-        self.vmm.time_updated = Utc::now();
+        self.vmm.time_updated = now;
+    }
+
+    /// Updates the state of this instance in response to a rude termination of
+    /// its Propolis zone, marking the VMM as destroyed and applying any
+    /// consequent state updates.
+    ///
+    /// # Synchronization
+    ///
+    /// A caller who is rudely terminating a Propolis zone must hold locks
+    /// sufficient to ensure that no other Propolis observations arrive in the
+    /// transaction that terminates the zone and then calls this function.
+    ///
+    /// This function does not synchronize with ongoing live migrations. Sled
+    /// agent's callers are responsible for tearing down all of a migrating
+    /// instance's VMMs in a safe order when asking to rudely terminate a VMM
+    /// (targets before sources).
+    pub(crate) fn terminate_rudely(&mut self) {
+        // Construct a fake Propolis observation that reports that the VMM is
+        // destroyed.
+        //
+        // Doing this with a live migration in progress is perilous because of
+        // the following race:
+        //
+        // 1. The source and target VMMs agree the migration has completed
+        //    successfully.
+        // 2. Before either sled agent observes that the migration has finished,
+        //    the source is rudely terminated.
+        // 3. The instance is now running in the target VMM, but the source
+        //    sled, thinking that it still hosts the active VMM, clears the
+        //    active Propolis ID and migration IDs.
+        //
+        // There is no way to resolve this problem in the sled agent; callers
+        // who want to terminate an instance's VMMs need to do it from the
+        // "outside in" and terminate migration targets before migration
+        // sources to avoid this issue (or terminate VMMs only in situations
+        // where it is known that they cannot be participating in a migration).
+        let fake_observed = ObservedPropolisState {
+            vmm_state: PropolisInstanceState(PropolisApiState::Destroyed),
+            migration_status: if self.instance.migration_id.is_some() {
+                ObservedMigrationStatus::Failed
+            } else {
+                ObservedMigrationStatus::NoMigration
+            },
+            time: Utc::now(),
+        };
+
+        self.apply_propolis_observation(&fake_observed);
     }
 
     /// Sets or clears this instance's migration IDs and advances its Propolis
