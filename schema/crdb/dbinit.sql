@@ -390,7 +390,8 @@ CREATE TABLE IF NOT EXISTS omicron.public.zpool (
 
 /* Create an index on the physical disk id */
 CREATE INDEX IF NOT EXISTS lookup_zpool_by_disk on omicron.public.zpool (
-    physical_disk_id
+    physical_disk_id,
+    id
 ) WHERE physical_disk_id IS NOT NULL AND time_deleted IS NULL;
 
 CREATE TYPE IF NOT EXISTS omicron.public.dataset_kind AS ENUM (
@@ -444,7 +445,8 @@ CREATE INDEX IF NOT EXISTS lookup_dataset_by_size_used on omicron.public.dataset
 
 /* Create an index on the zpool id */
 CREATE INDEX IF NOT EXISTS lookup_dataset_by_zpool on omicron.public.dataset (
-    pool_id
+    pool_id,
+    id
 ) WHERE pool_id IS NOT NULL AND time_deleted IS NULL;
 
 /*
