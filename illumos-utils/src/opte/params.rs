@@ -38,3 +38,15 @@ pub struct SetVirtualNetworkInterfaceHost {
     pub physical_host_ip: Ipv6Addr,
     pub vni: external::Vni,
 }
+
+/// The data needed to identify a virtual IP for which a sled maintains an OPTE
+/// virtual-to-physical mapping such that that mapping can be deleted.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct DeleteVirtualNetworkInterfaceHost {
+    /// The virtual IP whose mapping should be deleted.
+    pub virtual_ip: IpAddr,
+
+    /// The VNI for the network containing the virtual IP whose mapping should
+    /// be deleted.
+    pub vni: external::Vni,
+}

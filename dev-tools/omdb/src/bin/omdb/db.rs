@@ -80,6 +80,8 @@ enum DbCommands {
     Services(ServicesArgs),
     /// Print information about sleds
     Sleds,
+    /// Print information about customer instances
+    Instances,
 }
 
 #[derive(Debug, Args)]
@@ -245,6 +247,9 @@ impl DbArgs {
             }
             DbCommands::Sleds => {
                 cmd_db_sleds(&opctx, &datastore, self.fetch_limit).await
+            }
+            DbCommands::Instances => {
+                cmd_db_instances(&datastore, self.fetch_limit).await
             }
         }
     }
@@ -672,6 +677,53 @@ async fn cmd_db_sleds(
     check_limit(&sleds, limit, || String::from("listing sleds"));
 
     let rows = sleds.into_iter().map(|s| SledRow::from(s));
+    let table = tabled::Table::new(rows)
+        .with(tabled::settings::Style::empty())
+        .with(tabled::settings::Padding::new(0, 1, 0, 0))
+        .to_string();
+
+    println!("{}", table);
+
+    Ok(())
+}
+
+#[derive(Tabled)]
+#[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+struct CustomerInstanceRow {
+    id: Uuid,
+    state: String,
+    propolis_id: Uuid,
+    sled_id: Uuid,
+}
+
+impl From<Instance> for CustomerInstanceRow {
+    fn from(i: Instance) -> Self {
+        CustomerInstanceRow {
+            id: i.id(),
+            state: format!("{:?}", i.runtime_state.state.0),
+            propolis_id: i.runtime_state.propolis_id,
+            sled_id: i.runtime_state.sled_id,
+        }
+    }
+}
+
+/// Run `omdb db instances`: list data about customer VMs.
+async fn cmd_db_instances(
+    datastore: &DataStore,
+    limit: NonZeroU32,
+) -> Result<(), anyhow::Error> {
+    use db::schema::instance::dsl;
+    let instances = dsl::instance
+        .limit(i64::from(u32::from(limit)))
+        .select(Instance::as_select())
+        .load_async(datastore.pool_for_tests().await?)
+        .await
+        .context("loading instances")?;
+
+    let ctx = || "listing instances".to_string();
+    check_limit(&instances, limit, ctx);
+
+    let rows = instances.into_iter().map(|i| CustomerInstanceRow::from(i));
     let table = tabled::Table::new(rows)
         .with(tabled::settings::Style::empty())
         .with(tabled::settings::Padding::new(0, 1, 0, 0))

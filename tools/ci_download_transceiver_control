@@ -74,7 +74,7 @@ function main
 
 function fail
 {
-	echo "$ARG0: $@" >&2
+	echo "$ARG0: $*" >&2
 	exit 1
 }
 

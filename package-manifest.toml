@@ -259,7 +259,10 @@ service_name = "mgs"
 only_for_targets.image = "standard"
 only_for_targets.switch = "stub"
 source.type = "local"
-source.paths = [ { from = "smf/mgs-sim", to = "/var/svc/manifest/site/mgs" } ]
+source.paths = [ 
+  { from = "smf/mgs/manifest.xml", to = "/var/svc/manifest/site/mgs/manifest.xml" }, 
+  { from = "smf/mgs-sim/config.toml", to = "/var/svc/manifest/site/mgs/config.toml" } 
+]
 output.intermediate_only = true
 output.type = "zone"
 
@@ -268,7 +271,10 @@ service_name = "mgs"
 only_for_targets.image = "standard"
 only_for_targets.switch = "softnpu"
 source.type = "local"
-source.paths = [ { from = "smf/mgs-sim", to = "/var/svc/manifest/site/mgs" } ]
+source.paths = [ 
+  { from = "smf/mgs/manifest.xml", to = "/var/svc/manifest/site/mgs/manifest.xml" }, 
+  { from = "smf/mgs-sim/config.toml", to = "/var/svc/manifest/site/mgs/config.toml" } 
+]
 output.intermediate_only = true
 output.type = "zone"
 
