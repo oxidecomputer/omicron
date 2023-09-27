@@ -20,8 +20,6 @@ fn seed_dir() -> Utf8PathBuf {
     // The setup script should set this environment variable.
     let seed_dir = std::env::var("CRDB_SEED_DIR")
         .expect("CRDB_SEED_DIR missing -- are you running this test with `cargo nextest run`?");
-    // TODO: replace with temp dir written out by nextest
-    // Use "out/" for now.
     seed_dir.into()
 }
 
