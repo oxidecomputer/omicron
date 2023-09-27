@@ -638,7 +638,6 @@ mod tests {
     };
     use oximeter::test_util;
     use oximeter::{Metric, Target};
-    use serial_test::serial;
     use slog::o;
     use std::time::Duration;
     use tokio::time::sleep;
@@ -652,7 +651,6 @@ mod tests {
     // TODO-robustness TODO-correctness: Figure out the ClickHouse options we need.
 
     #[tokio::test]
-    #[serial]
     async fn test_single_node() {
         let log = slog::Logger::root(slog::Discard, o!());
 
@@ -670,100 +668,81 @@ mod tests {
         ));
 
         // Tests that a new client has started and it is not part of a cluster
-        let client = Client::new(address, &log);
-        assert!(!client.is_oximeter_cluster().await.unwrap());
-        client.wipe_single_node_db().await.unwrap();
+        is_not_oximeter_cluster_test(address, &log).await.unwrap();
 
         // Tests that data can be inserted via the client
-        let client = Client::new(address, &log);
-        let client = insert_samples_test(client).await.unwrap();
-        client.wipe_single_node_db().await.unwrap();
+        insert_samples_test(address, &log).await.unwrap();
 
         // Tests for a schema mismatch
-        let client = Client::new(address, &log);
-        let client = schema_mismatch_test(client).await.unwrap();
-        client.wipe_single_node_db().await.unwrap();
+        schema_mismatch_test(address, &log).await.unwrap();
 
         // Tests for a schema update
-        let client = Client::new(address, &log);
-        let client = schema_updated_test(client).await.unwrap();
-        client.wipe_single_node_db().await.unwrap();
+        schema_updated_test(address, &log).await.unwrap();
 
         // Tests for specific timeseries selection
-        let client = Client::new(address, &log);
-        let client = client_select_timeseries_one_test(client).await.unwrap();
-        client.wipe_single_node_db().await.unwrap();
+        client_select_timeseries_one_test(address, &log).await.unwrap();
 
         // Tests for specific timeseries selection
-        let client = Client::new(address, &log);
-        let client = field_record_count_test(client).await.unwrap();
-        client.wipe_single_node_db().await.unwrap();
+        field_record_count_test(address, &log).await.unwrap();
 
         // ClickHouse regression test
-        let client = Client::new(address, &log);
-        let client = unquoted_64bit_integers_test(client).await.unwrap();
-        client.wipe_single_node_db().await.unwrap();
+        unquoted_64bit_integers_test(address, &log).await.unwrap();
 
         // Tests to verify that we can distinguish between metrics by name
-        let client = Client::new(address, &log);
-        let client = differentiate_by_timeseries_name_test(client).await.unwrap();
-        client.wipe_single_node_db().await.unwrap();
+        differentiate_by_timeseries_name_test(address, &log).await.unwrap();
 
         // Tests selecting a single timeseries
-        let client = Client::new(address, &log);
-        let client = select_timeseries_with_select_one_test(client).await.unwrap();
-        client.wipe_single_node_db().await.unwrap();
+        select_timeseries_with_select_one_test(address, &log).await.unwrap();
 
         // Tests selecting two timeseries
-        let client = Client::new(address, &log);
-        let client = select_timeseries_with_select_one_field_with_multiple_values_test(client).await.unwrap();
-        client.wipe_single_node_db().await.unwrap();
+        select_timeseries_with_select_one_field_with_multiple_values_test(
+            address, &log,
+        )
+        .await
+        .unwrap();
 
         // Tests selecting multiple timeseries
-        let client = Client::new(address, &log);
-        let client = select_timeseries_with_select_multiple_fields_with_multiple_values_test(client).await.unwrap();
-        client.wipe_single_node_db().await.unwrap();
+        select_timeseries_with_select_multiple_fields_with_multiple_values_test(address, &log).await.unwrap();
 
         // Tests selecting all timeseries
-        let client = Client::new(address, &log);
-        let client = select_timeseries_with_all_test(client).await.unwrap();
-        client.wipe_single_node_db().await.unwrap();
+        select_timeseries_with_all_test(address, &log).await.unwrap();
 
         // Tests selecting all timeseries with start time
-        let client = Client::new(address, &log);
-        let client = select_timeseries_with_start_time_test(client).await.unwrap();
-        client.wipe_single_node_db().await.unwrap();
+        select_timeseries_with_start_time_test(address, &log).await.unwrap();
 
         // Tests selecting all timeseries with start time
-        let client = Client::new(address, &log);
-        let client = select_timeseries_with_limit_test(client).await.unwrap();
-        client.wipe_single_node_db().await.unwrap();
+        select_timeseries_with_limit_test(address, &log).await.unwrap();
 
         // Tests selecting all timeseries with order
-        let client = Client::new(address, &log);
-        let client = select_timeseries_with_order_test(client).await.unwrap();
-        client.wipe_single_node_db().await.unwrap();
+        select_timeseries_with_order_test(address, &log).await.unwrap();
 
         // Tests schema does not change
-        let client = Client::new(address, &log);
-        let client = get_schema_no_new_values_test(client).await.unwrap();
-        client.wipe_single_node_db().await.unwrap();
+        get_schema_no_new_values_test(address, &log).await.unwrap();
 
         // Tests listing timeseries schema
-        let client = Client::new(address, &log);
-        let client = timeseries_schema_list_test(client).await.unwrap();
-        client.wipe_single_node_db().await.unwrap();
+        timeseries_schema_list_test(address, &log).await.unwrap();
 
         // Tests listing timeseries
-        let client = Client::new(address, &log);
-        let client = list_timeseries_test(client).await.unwrap();
-        client.wipe_single_node_db().await.unwrap();
+        list_timeseries_test(address, &log).await.unwrap();
 
         db.cleanup().await.expect("Failed to cleanup ClickHouse server");
     }
 
-    // Return the client with inserted samples
-    async fn insert_samples_test(client: Client) -> Result<Client, Error> {
+    async fn is_not_oximeter_cluster_test(
+        address: SocketAddr,
+        log: &Logger,
+    ) -> Result<(), Error> {
+        let client = Client::new(address, &log);
+        assert!(!client.is_oximeter_cluster().await.unwrap());
+        client.wipe_single_node_db().await.unwrap();
+        Ok(())
+    }
+
+    async fn insert_samples_test(
+        address: SocketAddr,
+        log: &Logger,
+    ) -> Result<(), Error> {
+        let client = Client::new(address, &log);
         client
             .init_single_node_db()
             .await
@@ -776,7 +755,8 @@ mod tests {
             s
         };
         client.insert_samples(&samples).await.unwrap();
-        Ok(client)
+        client.wipe_single_node_db().await.unwrap();
+        Ok(())
     }
 
     // This is a target with the same name as that in `lib.rs` used for other tests, but with a
@@ -790,8 +770,11 @@ mod tests {
         }
     }
 
-    // Return client with mismatched schema
-    async fn schema_mismatch_test(client: Client) -> Result<Client, Error> {
+    async fn schema_mismatch_test(
+        address: SocketAddr,
+        log: &Logger,
+    ) -> Result<(), Error> {
+        let client = Client::new(address, &log);
         client
             .init_single_node_db()
             .await
@@ -812,80 +795,87 @@ mod tests {
         let sample = Sample::new(&bad_name, &metric).unwrap();
         let result = client.verify_sample_schema(&sample).await;
         assert!(matches!(result, Err(Error::SchemaMismatch { .. })));
-        Ok(client)
+        client.wipe_single_node_db().await.unwrap();
+        Ok(())
     }
 
-    // Return client with updated schema
-    async fn schema_updated_test(client: Client) -> Result<Client, Error> {
+    async fn schema_updated_test(
+        address: SocketAddr,
+        log: &Logger,
+    ) -> Result<(), Error> {
+        let client = Client::new(address, &log);
         client
             .init_single_node_db()
             .await
             .expect("Failed to initialize timeseries database");
         let sample = test_util::make_sample();
-    
-            // Verify that this sample is considered new, i.e., we return rows to update the timeseries
-            // schema table.
-            let result = client.verify_sample_schema(&sample).await.unwrap();
-            assert!(
+
+        // Verify that this sample is considered new, i.e., we return rows to update the timeseries
+        // schema table.
+        let result = client.verify_sample_schema(&sample).await.unwrap();
+        assert!(
                 matches!(result, Some(_)),
                 "When verifying a new sample, the rows to be inserted should be returned"
             );
-    
-            // Clear the internal caches of seen schema
-            client.schema.lock().unwrap().clear();
-    
-            // Insert the new sample
-            client.insert_samples(&[sample.clone()]).await.unwrap();
-    
-            // The internal map should now contain both the new timeseries schema
-            let actual_schema = model::schema_for(&sample);
-            let timeseries_name =
-                TimeseriesName::try_from(sample.timeseries_name.as_str()).unwrap();
-            let expected_schema = client
-                .schema
-                .lock()
-                .unwrap()
-                .get(&timeseries_name)
-                .expect(
-                    "After inserting a new sample, its schema should be included",
-                )
-                .clone();
-            assert_eq!(
+
+        // Clear the internal caches of seen schema
+        client.schema.lock().unwrap().clear();
+
+        // Insert the new sample
+        client.insert_samples(&[sample.clone()]).await.unwrap();
+
+        // The internal map should now contain both the new timeseries schema
+        let actual_schema = model::schema_for(&sample);
+        let timeseries_name =
+            TimeseriesName::try_from(sample.timeseries_name.as_str()).unwrap();
+        let expected_schema = client
+            .schema
+            .lock()
+            .unwrap()
+            .get(&timeseries_name)
+            .expect(
+                "After inserting a new sample, its schema should be included",
+            )
+            .clone();
+        assert_eq!(
                 actual_schema,
                 expected_schema,
                 "The timeseries schema for a new sample was not correctly inserted into internal cache",
             );
-    
-            // This should no longer return a new row to be inserted for the schema of this sample, as
-            // any schema have been included above.
-            let result = client.verify_sample_schema(&sample).await.unwrap();
-            assert!(
-                matches!(result, None),
-                "After inserting new schema, it should no longer be considered new"
-            );
-    
-            // Verify that it's actually in the database!
-            let sql = String::from(
-                "SELECT * FROM oximeter.timeseries_schema FORMAT JSONEachRow;",
-            );
-            let result = client.execute_with_body(sql).await.unwrap();
-            let schema = result
-                .lines()
-                .map(|line| {
-                    TimeseriesSchema::from(
-                        serde_json::from_str::<model::DbTimeseriesSchema>(&line)
-                            .unwrap(),
-                    )
-                })
-                .collect::<Vec<_>>();
-            assert_eq!(schema.len(), 1);
-            assert_eq!(expected_schema, schema[0]);
-        Ok(client)
+
+        // This should no longer return a new row to be inserted for the schema of this sample, as
+        // any schema have been included above.
+        let result = client.verify_sample_schema(&sample).await.unwrap();
+        assert!(
+            matches!(result, None),
+            "After inserting new schema, it should no longer be considered new"
+        );
+
+        // Verify that it's actually in the database!
+        let sql = String::from(
+            "SELECT * FROM oximeter.timeseries_schema FORMAT JSONEachRow;",
+        );
+        let result = client.execute_with_body(sql).await.unwrap();
+        let schema = result
+            .lines()
+            .map(|line| {
+                TimeseriesSchema::from(
+                    serde_json::from_str::<model::DbTimeseriesSchema>(&line)
+                        .unwrap(),
+                )
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(schema.len(), 1);
+        assert_eq!(expected_schema, schema[0]);
+        client.wipe_single_node_db().await.unwrap();
+        Ok(())
     }
 
     async fn client_select_timeseries_one_test(
-        client: Client,
-    ) -> Result<Client, Error> {
+        address: SocketAddr,
+        log: &Logger,
+    ) -> Result<(), Error> {
+        let client = Client::new(address, &log);
         client
             .init_single_node_db()
             .await
@@ -961,16 +951,19 @@ mod tests {
             .iter()
             .all(|field| field_cmp(field, sample.metric_fields()));
 
-        Ok(client)
+        client.wipe_single_node_db().await.unwrap();
+        Ok(())
     }
 
     async fn field_record_count_test(
-        client: Client,
-    ) -> Result<Client, Error> {
+        address: SocketAddr,
+        log: &Logger,
+    ) -> Result<(), Error> {
         // This test verifies that the number of records in the field tables is as expected.
         //
         // Because of the schema change, inserting field records per field per unique timeseries,
         // we'd like to exercise the logic of ClickHouse's replacing merge tree engine.
+        let client = Client::new(address, &log);
         client
             .init_single_node_db()
             .await
@@ -1011,9 +1004,10 @@ mod tests {
         )
         .await;
 
-        Ok(client)
+        client.wipe_single_node_db().await.unwrap();
+        Ok(())
     }
-    
+
     // Regression test verifying that integers are returned in the expected format from the
     // database.
     //
@@ -1021,9 +1015,11 @@ mod tests {
     // implementations of JSON. See https://github.com/ClickHouse/ClickHouse/issues/2375 for
     // details. This test verifies that we get back _unquoted_ integers from the database.
     async fn unquoted_64bit_integers_test(
-        client: Client,
-    ) -> Result<Client, Error> {
+        address: SocketAddr,
+        log: &Logger,
+    ) -> Result<(), Error> {
         use serde_json::Value;
+        let client = Client::new(address, &log);
         client
             .init_single_node_db()
             .await
@@ -1037,12 +1033,14 @@ mod tests {
         let json: Value = serde_json::from_str(&output).unwrap();
         assert_eq!(json["foo"], Value::Number(1u64.into()));
 
-        Ok(client)
+        client.wipe_single_node_db().await.unwrap();
+        Ok(())
     }
 
     async fn differentiate_by_timeseries_name_test(
-        client: Client,
-    ) -> Result<Client, Error> {
+        address: SocketAddr,
+        log: &Logger,
+    ) -> Result<(), Error> {
         #[derive(Debug, Default, PartialEq, oximeter::Target)]
         struct MyTarget {
             id: i64,
@@ -1061,6 +1059,7 @@ mod tests {
             datum: i64,
         }
 
+        let client = Client::new(address, &log);
         client
             .init_single_node_db()
             .await
@@ -1101,14 +1100,17 @@ mod tests {
         assert_eq!(timeseries.target.name, "my_target");
         assert_eq!(timeseries.metric.name, "second_metric");
 
-        Ok(client)
+        client.wipe_single_node_db().await.unwrap();
+        Ok(())
     }
 
     async fn select_timeseries_with_select_one_test(
-        client: Client,
-    ) -> Result<Client, Error> {
+        address: SocketAddr,
+        log: &Logger,
+    ) -> Result<(), Error> {
         let (target, metrics, samples) = setup_select_test();
 
+        let client = Client::new(address, &log);
         client
             .init_single_node_db()
             .await
@@ -1117,7 +1119,7 @@ mod tests {
             .insert_samples(&samples)
             .await
             .expect("Failed to insert samples");
-    
+
         let timeseries_name = "service:request_latency";
         // This set of criteria should select exactly one timeseries, with two measurements.
         // The target is the same in all cases, but we're looking for the first of the metrics, and
@@ -1157,14 +1159,17 @@ mod tests {
         verify_target(&timeseries.target, &target);
         verify_metric(&timeseries.metric, metrics.get(0).unwrap());
 
-        Ok(client)
+        client.wipe_single_node_db().await.unwrap();
+        Ok(())
     }
 
     async fn select_timeseries_with_select_one_field_with_multiple_values_test(
-        client: Client,
-    ) -> Result<Client, Error> {
+        address: SocketAddr,
+        log: &Logger,
+    ) -> Result<(), Error> {
         let (target, metrics, samples) = setup_select_test();
 
+        let client = Client::new(address, &log);
         client
             .init_single_node_db()
             .await
@@ -1173,7 +1178,7 @@ mod tests {
             .insert_samples(&samples)
             .await
             .expect("Failed to insert samples");
-    
+
         let timeseries_name = "service:request_latency";
         // This set of criteria should select the last two metrics, and so the last two
         // timeseries. The target is the same in all cases.
@@ -1219,14 +1224,17 @@ mod tests {
             verify_metric(&ts.metric, metric);
         }
 
-        Ok(client)
+        client.wipe_single_node_db().await.unwrap();
+        Ok(())
     }
 
     async fn select_timeseries_with_select_multiple_fields_with_multiple_values_test(
-        client: Client,
-    ) -> Result<Client, Error> {
+        address: SocketAddr,
+        log: &Logger,
+    ) -> Result<(), Error> {
         let (target, metrics, samples) = setup_select_test();
 
+        let client = Client::new(address, &log);
         client
             .init_single_node_db()
             .await
@@ -1235,7 +1243,7 @@ mod tests {
             .insert_samples(&samples)
             .await
             .expect("Failed to insert samples");
-    
+
         let timeseries_name = "service:request_latency";
         // This is non-selective for the route, which is the "second axis", and has two values for
         // the third axis, status code. There should be a total of 4 timeseries, since there are
@@ -1289,14 +1297,17 @@ mod tests {
             }
         }
 
-        Ok(client)
+        client.wipe_single_node_db().await.unwrap();
+        Ok(())
     }
 
     async fn select_timeseries_with_all_test(
-        client: Client,
-    ) -> Result<Client, Error> {
+        address: SocketAddr,
+        log: &Logger,
+    ) -> Result<(), Error> {
         let (target, metrics, samples) = setup_select_test();
 
+        let client = Client::new(address, &log);
         client
             .init_single_node_db()
             .await
@@ -1305,7 +1316,7 @@ mod tests {
             .insert_samples(&samples)
             .await
             .expect("Failed to insert samples");
-    
+
         let timeseries_name = "service:request_latency";
         let mut timeseries = client
             .select_timeseries_with(
@@ -1344,14 +1355,17 @@ mod tests {
             verify_metric(&ts.metric, metrics.get(i).unwrap());
         }
 
-        Ok(client)
+        client.wipe_single_node_db().await.unwrap();
+        Ok(())
     }
 
     async fn select_timeseries_with_start_time_test(
-        client: Client,
-    ) -> Result<Client, Error> {
+        address: SocketAddr,
+        log: &Logger,
+    ) -> Result<(), Error> {
         let (_, metrics, samples) = setup_select_test();
 
+        let client = Client::new(address, &log);
         client
             .init_single_node_db()
             .await
@@ -1360,7 +1374,7 @@ mod tests {
             .insert_samples(&samples)
             .await
             .expect("Failed to insert samples");
-    
+
         let timeseries_name = "service:request_latency";
         let start_time = samples[samples.len() / 2].measurement.timestamp();
         let mut timeseries = client
@@ -1389,14 +1403,17 @@ mod tests {
             }
         }
 
-        Ok(client)
+        client.wipe_single_node_db().await.unwrap();
+        Ok(())
     }
 
     async fn select_timeseries_with_limit_test(
-        client: Client,
-    ) -> Result<Client, Error> {
+        address: SocketAddr,
+        log: &Logger,
+    ) -> Result<(), Error> {
         let (_, _, samples) = setup_select_test();
 
+        let client = Client::new(address, &log);
         client
             .init_single_node_db()
             .await
@@ -1405,7 +1422,7 @@ mod tests {
             .insert_samples(&samples)
             .await
             .expect("Failed to insert samples");
-    
+
         let timeseries_name = "service:request_latency";
         // We have to define criteria that resolve to a single timeseries
         let criteria =
@@ -1502,14 +1519,17 @@ mod tests {
             timeseries.measurements
         );
 
-        Ok(client)
+        client.wipe_single_node_db().await.unwrap();
+        Ok(())
     }
 
     async fn select_timeseries_with_order_test(
-        client: Client,
-    ) -> Result<Client, Error> {
+        address: SocketAddr,
+        log: &Logger,
+    ) -> Result<(), Error> {
         let (_, _, samples) = setup_select_test();
 
+        let client = Client::new(address, &log);
         client
             .init_single_node_db()
             .await
@@ -1518,7 +1538,7 @@ mod tests {
             .insert_samples(&samples)
             .await
             .expect("Failed to insert samples");
-    
+
         let timeseries_name = "service:request_latency";
         // Limits only work with a single timeseries, so we have to use criteria
         // that resolve to a single timeseries
@@ -1598,12 +1618,15 @@ mod tests {
             timeseries_asc.last().unwrap()
         );
 
-        Ok(client)
+        client.wipe_single_node_db().await.unwrap();
+        Ok(())
     }
 
     async fn get_schema_no_new_values_test(
-        client: Client,
-    ) -> Result<Client, Error> {
+        address: SocketAddr,
+        log: &Logger,
+    ) -> Result<(), Error> {
+        let client = Client::new(address, &log);
         client
             .init_single_node_db()
             .await
@@ -1619,12 +1642,15 @@ mod tests {
             "Schema shouldn't change"
         );
 
-        Ok(client)
+        client.wipe_single_node_db().await.unwrap();
+        Ok(())
     }
 
     async fn timeseries_schema_list_test(
-        client: Client,
-    ) -> Result<Client, Error> {
+        address: SocketAddr,
+        log: &Logger,
+    ) -> Result<(), Error> {
+        let client = Client::new(address, &log);
         client
             .init_single_node_db()
             .await
@@ -1650,12 +1676,15 @@ mod tests {
             result.next_page.is_none(),
             "Expected the next page token to be None"
         );
-        Ok(client)
+        client.wipe_single_node_db().await.unwrap();
+        Ok(())
     }
 
     async fn list_timeseries_test(
-        client: Client,
-    ) -> Result<Client, Error> {
+        address: SocketAddr,
+        log: &Logger,
+    ) -> Result<(), Error> {
+        let client = Client::new(address, &log);
         client
             .init_single_node_db()
             .await
@@ -1722,13 +1751,13 @@ mod tests {
             "Paginating should pick up where it left off"
         );
 
-        Ok(client)
+        client.wipe_single_node_db().await.unwrap();
+        Ok(())
     }
 
     // TODO(https://github.com/oxidecomputer/omicron/issues/4001): This job fails intermittently
     // on the ubuntu CI job with "Failed to detect ClickHouse subprocess within timeout"
     #[tokio::test]
-    #[serial]
     async fn test_build_replicated() {
         let log = slog::Logger::root(slog::Discard, o!());
 
@@ -1799,13 +1828,13 @@ mod tests {
             .expect("Failed to cleanup ClickHouse server 2");
     }
 
-    // TODO: Move to test_util
+    // Testing helper functions
+
     #[derive(Debug, Clone, oximeter::Target)]
     struct Service {
         name: String,
         id: uuid::Uuid,
     }
-    // TODO: Move to test_util
     #[derive(Debug, Clone, oximeter::Metric)]
     struct RequestLatency {
         route: String,
@@ -1815,9 +1844,7 @@ mod tests {
         latency: f64,
     }
 
-    // TODO: Move to test_util
     const SELECT_TEST_ID: &str = "4fa827ea-38bb-c37e-ac2d-f8432ca9c76e";
-    // TODO: Move to test_util
     fn setup_select_test() -> (Service, Vec<RequestLatency>, Vec<Sample>) {
         // One target
         let id = SELECT_TEST_ID.parse().unwrap();
@@ -1848,8 +1875,7 @@ mod tests {
         (target, metrics, samples)
     }
 
-    // TODO: Move to test_util
-    // Small helper to go from a mulidimensional index to a flattened array index.
+    // Small helper to go from a multidimensional index to a flattened array index.
     fn unravel_index(idx: &[usize; 4]) -> usize {
         let strides = [12, 6, 2, 1];
         let mut index = 0;
@@ -1859,7 +1885,6 @@ mod tests {
         index
     }
 
-    // TODO: Move to test_util
     #[test]
     fn test_unravel_index() {
         assert_eq!(unravel_index(&[0, 0, 0, 0]), 0);
@@ -1870,7 +1895,6 @@ mod tests {
         assert_eq!(unravel_index(&[1, 1, 2, 1]), 23);
     }
 
-    // TODO: Move to test_util
     fn verify_measurements(
         measurements: &[oximeter::Measurement],
         samples: &[Sample],
@@ -1883,7 +1907,6 @@ mod tests {
         }
     }
 
-    // TODO: Move to test_util
     fn verify_target(actual: &crate::Target, expected: &Service) {
         assert_eq!(actual.name, expected.name());
         for (field_name, field_value) in expected
@@ -1903,7 +1926,6 @@ mod tests {
         }
     }
 
-    // TODO: Move to test_util
     fn verify_metric(actual: &crate::Metric, expected: &RequestLatency) {
         assert_eq!(actual.name, expected.name());
         for (field_name, field_value) in expected

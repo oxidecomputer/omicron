@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::Duration;
 
-use anyhow::Context;
+use anyhow::{anyhow, Context};
 use std::net::SocketAddr;
 use tempfile::{Builder, TempDir};
 use thiserror::Error;
@@ -21,8 +21,7 @@ use tokio::{
 use crate::dev::poll;
 
 // Timeout used when starting up ClickHouse subprocess.
-// build-and-test (ubuntu-20.04) needs a little longer to get going
-const CLICKHOUSE_TIMEOUT: Duration = Duration::from_secs(90);
+const CLICKHOUSE_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// A `ClickHouseInstance` is used to start and manage a ClickHouse single node server process.
 #[derive(Debug)]
@@ -180,8 +179,7 @@ impl ClickHouseInstance {
             })?;
 
         let data_path = data_dir.path().to_path_buf();
-        let address =
-            SocketAddr::new("127.0.0.1".parse().unwrap(), port.clone());
+        let address = SocketAddr::new("127.0.0.1".parse().unwrap(), port);
 
         let result = wait_for_ready(log_path).await;
         match result {
@@ -352,10 +350,8 @@ impl ClickHouseCluster {
             k1_id,
             keeper_config.clone(),
         )
-        .await?;
-        // TODO: include the number of the instance that failed
-        //         .map_err(|e| ("Failed to start ClickHouse keeper 1", e))?;
-        //         .expect("Failed to start ClickHouse keeper 1");
+        .await
+        .map_err(|e| anyhow!("Failed to start ClickHouse keeper 1: {}", e))?;
 
         // Start Keeper 2
         let k2_port = 9182;
@@ -366,18 +362,18 @@ impl ClickHouseCluster {
             k2_id,
             keeper_config.clone(),
         )
-        .await?;
-        // TODO: include the number of the instance that failed
-        //         .expect("Failed to start ClickHouse keeper 2");
+        .await
+        .map_err(|e| anyhow!("Failed to start ClickHouse keeper 2: {}", e))?;
 
         // Start Keeper 3
         let k3_port = 9183;
         let k3_id = 3;
 
         let k3 = ClickHouseInstance::new_keeper(k3_port, k3_id, keeper_config)
-            .await?;
-        // TODO: include the number of the instance that failed
-        //                 .expect("Failed to start ClickHouse keeper 3");
+            .await
+            .map_err(|e| {
+                anyhow!("Failed to start ClickHouse keeper 3: {}", e)
+            })?;
 
         // Start all replica nodes
         let cur_dir = std::env::current_dir().unwrap();
@@ -398,11 +394,8 @@ impl ClickHouseCluster {
             r1_number,
             replica_config.clone(),
         )
-        .await?;
-        // TODO: include the number of the instance that failed
-        // .expect("Failed to start ClickHouse node 1");
-        //  let r1_address =
-        //    SocketAddr::new("127.0.0.1".parse().unwrap(), r1.port());
+        .await
+        .map_err(|e| anyhow!("Failed to start ClickHouse node 1: {}", e))?;
 
         // Start Replica 2
         let r2_port = 8124;
@@ -418,11 +411,8 @@ impl ClickHouseCluster {
             r2_number,
             replica_config,
         )
-        .await?;
-        // TODO: include the number of the instance that failed
-        //         .expect("Failed to start ClickHouse node 2");
-        // let r2_address =
-        //   SocketAddr::new("127.0.0.1".parse().unwrap(), r2.port());
+        .await
+        .map_err(|e| anyhow!("Failed to start ClickHouse node 2: {}", e))?;
 
         Ok(Self {
             replica_1: r1,
@@ -431,24 +421,6 @@ impl ClickHouseCluster {
             keeper_2: k2,
             keeper_3: k3,
         })
-    }
-}
-
-impl Drop for ClickHouseCluster {
-    fn drop(&mut self) {
-//        if self.child.is_some() || self.data_dir.is_some() {
-//            eprintln!(
-//                "WARN: dropped ClickHouseInstance without cleaning it up first \
-//                (there may still be a child process running and a \
-//                temporary directory leaked)"
-//            );
-//            if let Some(child) = self.child.as_mut() {
-//                let _ = child.start_kill();
-//            }
-//            if let Some(dir) = self.data_dir.take() {
-//                let _ = dir.close();
-//            }
-//        }
     }
 }
 
