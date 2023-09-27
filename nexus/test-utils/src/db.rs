@@ -4,9 +4,9 @@
 
 //! Database testing facilities.
 
+use camino::Utf8PathBuf;
 use omicron_test_utils::dev;
 use slog::Logger;
-use std::path::PathBuf;
 
 /// Path to the "seed" CockroachDB directory.
 ///
@@ -16,8 +16,13 @@ use std::path::PathBuf;
 /// By creating a "seed" version of the database, we can cut down
 /// on the time spent performing this operation. Instead, we opt
 /// to copy the database from this seed location.
-fn seed_dir() -> PathBuf {
-    PathBuf::from(concat!(env!("OUT_DIR"), "/crdb-base"))
+fn seed_dir() -> Utf8PathBuf {
+    // The setup script should set this environment variable.
+    let seed_dir = std::env::var("CRDB_SEED_DIR")
+        .expect("CRDB_SEED_DIR missing -- are you running this test with `cargo nextest run`?");
+    // TODO: replace with temp dir written out by nextest
+    // Use "out/" for now.
+    seed_dir.into()
 }
 
 /// Wrapper around [`dev::test_setup_database`] which uses a a
