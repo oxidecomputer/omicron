@@ -470,12 +470,11 @@ impl DataStore {
         let conn = self.pool_connection_authorized(opctx).await?;
         if primary {
             conn.transaction_async(|conn| async move {
-                let instance_state = instance_query
-                    .get_result_async(&conn)
-                    .await?
-                    .runtime_state
-                    .state;
-                if instance_state != stopped {
+                let instance_runtime =
+                    instance_query.get_result_async(&conn).await?.runtime_state;
+                if instance_runtime.propolis_id.is_some()
+                    || instance_runtime.fallback_state != stopped
+                {
                     return Err(TxnError::CustomError(
                         NetworkInterfaceUpdateError::InstanceNotStopped,
                     ));
@@ -514,12 +513,11 @@ impl DataStore {
             // we're only hitting a single row. Note that we still need to
             // verify the instance is stopped.
             conn.transaction_async(|conn| async move {
-                let instance_state = instance_query
-                    .get_result_async(&conn)
-                    .await?
-                    .runtime_state
-                    .state;
-                if instance_state != stopped {
+                let instance_state =
+                    instance_query.get_result_async(&conn).await?.runtime_state;
+                if instance_state.propolis_id.is_some()
+                    || instance_state.fallback_state != stopped
+                {
                     return Err(TxnError::CustomError(
                         NetworkInterfaceUpdateError::InstanceNotStopped,
                     ));

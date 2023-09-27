@@ -574,7 +574,7 @@ impl DataStore {
         // Sleds to notify when firewall rules change.
         use db::schema::{
             instance, instance_network_interface, service,
-            service_network_interface, sled,
+            service_network_interface, sled, vmm,
         };
 
         let instance_query = instance_network_interface::table
@@ -583,10 +583,15 @@ impl DataStore {
                     .on(instance::id
                         .eq(instance_network_interface::instance_id)),
             )
-            .inner_join(sled::table.on(sled::id.eq(instance::active_sled_id)))
+            .inner_join(
+                vmm::table
+                    .on(vmm::id.nullable().eq(instance::active_propolis_id)),
+            )
+            .inner_join(sled::table.on(sled::id.eq(vmm::sled_id)))
             .filter(instance_network_interface::vpc_id.eq(vpc_id))
             .filter(instance_network_interface::time_deleted.is_null())
             .filter(instance::time_deleted.is_null())
+            .filter(vmm::time_deleted.is_null())
             .select(Sled::as_select());
 
         let service_query = service_network_interface::table

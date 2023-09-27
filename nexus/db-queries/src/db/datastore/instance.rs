@@ -21,6 +21,7 @@ use crate::db::model::Instance;
 use crate::db::model::InstanceRuntimeState;
 use crate::db::model::Name;
 use crate::db::model::Project;
+use crate::db::model::Vmm;
 use crate::db::pagination::paginated;
 use crate::db::update_and_check::UpdateAndCheck;
 use crate::db::update_and_check::UpdateStatus;
@@ -39,6 +40,48 @@ use omicron_common::api::external::ResourceType;
 use omicron_common::bail_unless;
 use ref_cast::RefCast;
 use uuid::Uuid;
+
+/// Wraps a record of an `Instance` along with its active `Vmm`, if it has one.
+#[derive(Clone, Debug)]
+pub struct InstanceAndActiveVmm {
+    instance: Instance,
+    vmm: Option<Vmm>,
+}
+
+impl InstanceAndActiveVmm {
+    pub fn instance(&self) -> &Instance {
+        &self.instance
+    }
+
+    pub fn vmm(&self) -> &Option<Vmm> {
+        &self.vmm
+    }
+}
+
+impl From<InstanceAndActiveVmm> for omicron_common::api::external::Instance {
+    fn from(value: InstanceAndActiveVmm) -> Self {
+        let (run_state, time_run_state_updated) = if let Some(vmm) = value.vmm {
+            (vmm.runtime.state, vmm.runtime.time_state_updated)
+        } else {
+            (
+                value.instance.runtime_state.fallback_state.clone(),
+                value.instance.runtime_state.time_updated,
+            )
+        };
+
+        Self {
+            identity: value.instance.identity(),
+            project_id: value.instance.project_id,
+            ncpus: value.instance.ncpus.into(),
+            memory: value.instance.memory.into(),
+            hostname: value.instance.hostname,
+            runtime: omicron_common::api::external::InstanceRuntimeState {
+                run_state: *run_state.state(),
+                time_run_state_updated,
+            },
+        }
+    }
+}
 
 impl DataStore {
     /// Idempotently insert a database record for an Instance
@@ -97,10 +140,10 @@ impl DataStore {
         })?;
 
         bail_unless!(
-            instance.runtime().state.state()
+            instance.runtime().fallback_state.state()
                 == &api::external::InstanceState::Creating,
             "newly-created Instance has unexpected state: {:?}",
-            instance.runtime().state
+            instance.runtime().fallback_state
         );
         bail_unless!(
             instance.runtime().gen == gen,
@@ -115,11 +158,12 @@ impl DataStore {
         opctx: &OpContext,
         authz_project: &authz::Project,
         pagparams: &PaginatedBy<'_>,
-    ) -> ListResultVec<Instance> {
+    ) -> ListResultVec<InstanceAndActiveVmm> {
         opctx.authorize(authz::Action::ListChildren, authz_project).await?;
 
         use db::schema::instance::dsl;
-        match pagparams {
+        use db::schema::vmm::dsl as vmm_dsl;
+        Ok(match pagparams {
             PaginatedBy::Id(pagparams) => {
                 paginated(dsl::instance, dsl::id, &pagparams)
             }
@@ -131,10 +175,28 @@ impl DataStore {
         }
         .filter(dsl::project_id.eq(authz_project.id()))
         .filter(dsl::time_deleted.is_null())
+<<<<<<< HEAD
         .select(Instance::as_select())
         .load_async::<Instance>(&*self.pool_connection_authorized(opctx).await?)
         .await
         .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+=======
+        .left_join(
+            vmm_dsl::vmm.on(vmm_dsl::id
+                .nullable()
+                .eq(dsl::active_propolis_id)
+                .and(vmm_dsl::time_deleted.is_null())),
+        )
+        .select((Instance::as_select(), Option::<Vmm>::as_select()))
+        .load_async::<(Instance, Option<Vmm>)>(
+            self.pool_authorized(opctx).await?,
+        )
+        .await
+        .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))?
+        .into_iter()
+        .map(|(instance, vmm)| InstanceAndActiveVmm { instance, vmm })
+        .collect())
+>>>>>>> f0fe4e890 (nexus: adapt some db queries to instance/vmm split)
     }
 
     /// Fetches information about an Instance that the caller has previously
@@ -158,6 +220,43 @@ impl DataStore {
                 e => e,
             })?;
         Ok(db_instance)
+    }
+
+    pub async fn instance_fetch_with_vmm(
+        &self,
+        opctx: &OpContext,
+        authz_instance: &authz::Instance,
+    ) -> LookupResult<InstanceAndActiveVmm> {
+        opctx.authorize(authz::Action::Read, authz_instance).await?;
+
+        use db::schema::instance::dsl as instance_dsl;
+        use db::schema::vmm::dsl as vmm_dsl;
+
+        let (instance, vmm) = instance_dsl::instance
+            .filter(instance_dsl::id.eq(authz_instance.id()))
+            .filter(instance_dsl::time_deleted.is_null())
+            .left_join(
+                vmm_dsl::vmm.on(vmm_dsl::id
+                    .nullable()
+                    .eq(instance_dsl::active_propolis_id)
+                    .and(vmm_dsl::time_deleted.is_null())),
+            )
+            .select((Instance::as_select(), Option::<Vmm>::as_select()))
+            .get_result_async::<(Instance, Option<Vmm>)>(
+                self.pool_authorized(opctx).await?,
+            )
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ErrorHandler::NotFoundByLookup(
+                        ResourceType::Instance,
+                        LookupType::ById(authz_instance.id()),
+                    ),
+                )
+            })?;
+
+        Ok(InstanceAndActiveVmm { instance, vmm })
     }
 
     /// Fetches information about a deleted instance. This can be used to
@@ -211,15 +310,7 @@ impl DataStore {
             // - the active Propolis ID will not change, the state generation
             //   increased, and the Propolis generation will not change, or
             // - the Propolis generation increased.
-            .filter(
-                (dsl::active_propolis_id
-                    .eq(new_runtime.propolis_id)
-                    .and(dsl::state_generation.lt(new_runtime.gen))
-                    .and(
-                        dsl::propolis_generation.eq(new_runtime.propolis_gen),
-                    ))
-                .or(dsl::propolis_generation.lt(new_runtime.propolis_gen)),
-            )
+            .filter(dsl::state_generation.lt(new_runtime.gen))
             .set(new_runtime.clone())
             .check_if_exists::<Instance>(*instance_id)
             .execute_and_check(&*self.pool_connection_unauthorized().await?)
@@ -270,7 +361,9 @@ impl DataStore {
         let _instance = Instance::detach_resources(
             authz_instance.id(),
             instance::table.into_boxed().filter(
-                instance::dsl::state.eq_any(ok_to_delete_instance_states),
+                instance::dsl::state
+                    .eq_any(ok_to_delete_instance_states)
+                    .and(instance::dsl::active_propolis_id.is_null()),
             ),
             disk::table.into_boxed().filter(
                 disk::dsl::disk_state.eq_any(ok_to_detach_disk_state_labels),
@@ -295,7 +388,14 @@ impl DataStore {
                 &authz_instance.id(),
             ),
             DetachManyError::NoUpdate { collection } => {
-                let instance_state = collection.runtime_state.state.state();
+                if collection.runtime_state.propolis_id.is_some() {
+                    return Error::invalid_request(&format!(
+                        "cannot delete instance: instance is running or has \
+                                not yet fully stopped"
+                    ));
+                }
+                let instance_state =
+                    collection.runtime_state.fallback_state.state();
                 match instance_state {
                     api::external::InstanceState::Stopped
                     | api::external::InstanceState::Failed => {

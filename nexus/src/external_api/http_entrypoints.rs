@@ -1910,8 +1910,13 @@ async fn instance_view(
         };
         let instance_lookup =
             nexus.instance_lookup(&opctx, instance_selector)?;
-        let (.., instance) = instance_lookup.fetch().await?;
-        Ok(HttpResponseOk(instance.into()))
+        let (.., authz_instance) =
+            instance_lookup.lookup_for(authz::Action::Read).await?;
+        let instance_and_vmm = nexus
+            .datastore()
+            .instance_fetch_with_vmm(&opctx, &authz_instance)
+            .await?;
+        Ok(HttpResponseOk(instance_and_vmm.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
