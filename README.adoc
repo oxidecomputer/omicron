@@ -156,7 +156,7 @@ Use Cargo's `-p PACKAGE` to check/build/test only the package you're working on.
 
 Omicron uses `cargo-hakari` to ensure that all workspace dependencies enable the same set of features. This dramatically improves compilation time when switching between different subsets of packages (e.g. `-p wicket` or `-p nexus-db-model`), because the sets of enabled features remain consistent.
 
-`cargo hakari`'s status is checked in CI; if the CI check fails, then update the configuration locally with
+`cargo hakari` status is checked in CI; if the CI check fails, then update the configuration locally with
 
 ```
 cargo install cargo-hakari --locked # only needed on the first run
