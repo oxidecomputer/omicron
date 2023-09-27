@@ -399,7 +399,7 @@ dependencies = [
  "cfg-if 1.0.0",
  "libc",
  "miniz_oxide",
- "object 0.32.0",
+ "object 0.32.1",
  "rustc-demangle",
 ]
 
@@ -4678,9 +4678,9 @@ dependencies = [
 
 [[package]]
 name = "object"
-version = "0.32.0"
+version = "0.32.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "77ac5bbd07aea88c60a577a1ce218075ffd59208b2d7ca97adf9bfc5aeb21ebe"
+checksum = "9cf5f9dd3933bd50a9e1f149ec995f39ae2c496d31fd772c1fd45ebc27e902b0"
 dependencies = [
  "memchr",
 ]
@@ -4700,8 +4700,13 @@ dependencies = [
 name = "omicron-certificates"
 version = "0.1.0"
 dependencies = [
+ "display-error-chain",
+ "foreign-types 0.3.2",
  "omicron-common 0.1.0",
+ "omicron-test-utils",
  "openssl",
+ "openssl-sys",
+ "rcgen",
  "thiserror",
 ]
 
@@ -5178,8 +5183,11 @@ dependencies = [
  "http",
  "libc",
  "omicron-common 0.1.0",
+ "pem",
+ "rcgen",
  "regex",
  "reqwest",
+ "rustls",
  "slog",
  "subprocess",
  "tempfile",
@@ -6609,7 +6617,7 @@ dependencies = [
  "indoc 2.0.3",
  "itertools 0.11.0",
  "paste",
- "strum 0.25.0",
+ "strum",
  "unicode-segmentation",
  "unicode-width",
 ]
