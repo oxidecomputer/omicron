@@ -6,6 +6,7 @@ members = [
     "caboose-util",
     "certificates",
     "common",
+    "crdb-seed",
     "ddm-admin-client",
     "deploy",
     "dev-tools/omdb",

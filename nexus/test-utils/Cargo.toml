@@ -39,8 +39,3 @@ trust-dns-proto.workspace = true
 trust-dns-resolver.workspace = true
 uuid.workspace = true
 omicron-workspace-hack = { version = "0.1", path = "../../workspace-hack" }
-
-[build-dependencies]
-dropshot.workspace = true
-omicron-test-utils.workspace = true
-tokio.workspace = true
