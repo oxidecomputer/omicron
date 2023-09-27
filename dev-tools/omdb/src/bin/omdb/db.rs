@@ -606,6 +606,7 @@ async fn cmd_db_disk_physical(
     use db::schema::disk::dsl;
     let disks = dsl::disk
         .filter(dsl::time_deleted.is_null())
+        .filter(dsl::volume_id.eq_any(volume_ids))
         .limit(i64::from(u32::from(limit)))
         .select(Disk::as_select())
         .load_async(datastore.pool_for_tests().await?)
@@ -626,12 +627,10 @@ async fn cmd_db_disk_physical(
     let mut rows = Vec::new();
 
     for disk in disks {
-        if volume_ids.contains(&disk.volume_id) {
-            // If the disk is attached to an instance, determine the name of the
-            // instance.
-            let instance_name = if let Some(instance_uuid) =
-                disk.runtime().attach_instance_id
-            {
+        // If the disk is attached to an instance, determine the name of the
+        // instance.
+        let instance_name =
+            if let Some(instance_uuid) = disk.runtime().attach_instance_id {
                 // Get the instance this disk is attached to
                 use db::schema::instance::dsl as instance_dsl;
                 let instance = instance_dsl::instance
@@ -651,13 +650,12 @@ async fn cmd_db_disk_physical(
                 "-".to_string()
             };
 
-            rows.push(DiskRow {
-                name: disk.name().to_string(),
-                id: disk.id().to_string(),
-                state: disk.runtime().disk_state,
-                instance_name: instance_name,
-            });
-        }
+        rows.push(DiskRow {
+            name: disk.name().to_string(),
+            id: disk.id().to_string(),
+            state: disk.runtime().disk_state,
+            instance_name: instance_name,
+        });
     }
 
     let table = tabled::Table::new(rows)
