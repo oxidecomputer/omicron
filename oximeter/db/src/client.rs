@@ -845,7 +845,7 @@ mod tests {
     ) -> Result<(), Error> {
         let client = Client::new(address, &log);
         assert!(!client.is_oximeter_cluster().await.unwrap());
-        client.wipe_single_node_db().await.unwrap();
+        client.wipe_single_node_db().await?;
         Ok(())
     }
 
@@ -865,8 +865,8 @@ mod tests {
             }
             s
         };
-        client.insert_samples(&samples).await.unwrap();
-        client.wipe_single_node_db().await.unwrap();
+        client.insert_samples(&samples).await?;
+        client.wipe_single_node_db().await?;
         Ok(())
     }
 
@@ -915,7 +915,7 @@ mod tests {
         let sample = Sample::new(&bad_name, &metric).unwrap();
         let result = client.verify_sample_schema(&sample).await;
         assert!(matches!(result, Err(Error::SchemaMismatch { .. })));
-        client.wipe_single_node_db().await.unwrap();
+        client.wipe_single_node_db().await?;
         Ok(())
     }
 
@@ -987,7 +987,7 @@ mod tests {
             .collect::<Vec<_>>();
         assert_eq!(schema.len(), 1);
         assert_eq!(expected_schema, schema[0]);
-        client.wipe_single_node_db().await.unwrap();
+        client.wipe_single_node_db().await?;
         Ok(())
     }
 
@@ -1001,7 +1001,7 @@ mod tests {
             .await
             .expect("Failed to initialize timeseries database");
         let samples = test_util::generate_test_samples(2, 2, 2, 2);
-        client.insert_samples(&samples).await.unwrap();
+        client.insert_samples(&samples).await?;
 
         let sample = samples.first().unwrap();
         let target_fields = sample.target_fields().collect::<Vec<_>>();
@@ -1071,7 +1071,7 @@ mod tests {
             .iter()
             .all(|field| field_cmp(field, sample.metric_fields()));
 
-        client.wipe_single_node_db().await.unwrap();
+        client.wipe_single_node_db().await?;
         Ok(())
     }
 
@@ -1089,7 +1089,7 @@ mod tests {
             .await
             .expect("Failed to initialize timeseries database");
         let samples = test_util::generate_test_samples(2, 2, 2, 2);
-        client.insert_samples(&samples).await.unwrap();
+        client.insert_samples(&samples).await?;
 
         async fn assert_table_count(
             client: &Client,
@@ -1124,7 +1124,7 @@ mod tests {
         )
         .await;
 
-        client.wipe_single_node_db().await.unwrap();
+        client.wipe_single_node_db().await?;
         Ok(())
     }
 
@@ -1153,7 +1153,7 @@ mod tests {
         let json: Value = serde_json::from_str(&output).unwrap();
         assert_eq!(json["foo"], Value::Number(1u64.into()));
 
-        client.wipe_single_node_db().await.unwrap();
+        client.wipe_single_node_db().await?;
         Ok(())
     }
 
@@ -1220,7 +1220,7 @@ mod tests {
         assert_eq!(timeseries.target.name, "my_target");
         assert_eq!(timeseries.metric.name, "second_metric");
 
-        client.wipe_single_node_db().await.unwrap();
+        client.wipe_single_node_db().await?;
         Ok(())
     }
 
@@ -1279,7 +1279,7 @@ mod tests {
         verify_target(&timeseries.target, &target);
         verify_metric(&timeseries.metric, metrics.get(0).unwrap());
 
-        client.wipe_single_node_db().await.unwrap();
+        client.wipe_single_node_db().await?;
         Ok(())
     }
 
@@ -1344,7 +1344,7 @@ mod tests {
             verify_metric(&ts.metric, metric);
         }
 
-        client.wipe_single_node_db().await.unwrap();
+        client.wipe_single_node_db().await?;
         Ok(())
     }
 
@@ -1417,7 +1417,7 @@ mod tests {
             }
         }
 
-        client.wipe_single_node_db().await.unwrap();
+        client.wipe_single_node_db().await?;
         Ok(())
     }
 
@@ -1475,7 +1475,7 @@ mod tests {
             verify_metric(&ts.metric, metrics.get(i).unwrap());
         }
 
-        client.wipe_single_node_db().await.unwrap();
+        client.wipe_single_node_db().await?;
         Ok(())
     }
 
@@ -1523,7 +1523,7 @@ mod tests {
             }
         }
 
-        client.wipe_single_node_db().await.unwrap();
+        client.wipe_single_node_db().await?;
         Ok(())
     }
 
@@ -1639,7 +1639,7 @@ mod tests {
             timeseries.measurements
         );
 
-        client.wipe_single_node_db().await.unwrap();
+        client.wipe_single_node_db().await?;
         Ok(())
     }
 
@@ -1738,7 +1738,7 @@ mod tests {
             timeseries_asc.last().unwrap()
         );
 
-        client.wipe_single_node_db().await.unwrap();
+        client.wipe_single_node_db().await?;
         Ok(())
     }
 
@@ -1752,7 +1752,7 @@ mod tests {
             .await
             .expect("Failed to initialize timeseries database");
         let samples = test_util::generate_test_samples(2, 2, 2, 2);
-        client.insert_samples(&samples).await.unwrap();
+        client.insert_samples(&samples).await?;
 
         let schema = &client.schema.lock().unwrap().clone();
         client.get_schema().await.expect("Failed to get timeseries schema");
@@ -1762,7 +1762,7 @@ mod tests {
             "Schema shouldn't change"
         );
 
-        client.wipe_single_node_db().await.unwrap();
+        client.wipe_single_node_db().await?;
         Ok(())
     }
 
@@ -1776,7 +1776,7 @@ mod tests {
             .await
             .expect("Failed to initialize timeseries database");
         let samples = test_util::generate_test_samples(2, 2, 2, 2);
-        client.insert_samples(&samples).await.unwrap();
+        client.insert_samples(&samples).await?;
 
         let limit = 100u32.try_into().unwrap();
         let page = dropshot::WhichPage::First(dropshot::EmptyScanParams {});
@@ -1796,7 +1796,7 @@ mod tests {
             result.next_page.is_none(),
             "Expected the next page token to be None"
         );
-        client.wipe_single_node_db().await.unwrap();
+        client.wipe_single_node_db().await?;
         Ok(())
     }
 
@@ -1810,7 +1810,7 @@ mod tests {
             .await
             .expect("Failed to initialize timeseries database");
         let samples = test_util::generate_test_samples(2, 2, 2, 2);
-        client.insert_samples(&samples).await.unwrap();
+        client.insert_samples(&samples).await?;
 
         let limit = 7u32.try_into().unwrap();
         let params = crate::TimeseriesScanParams {
@@ -1871,7 +1871,7 @@ mod tests {
             "Paginating should pick up where it left off"
         );
 
-        client.wipe_single_node_db().await.unwrap();
+        client.wipe_single_node_db().await?;
         Ok(())
     }
 
@@ -2052,7 +2052,7 @@ mod tests {
             "Actual and expected field rows do not match"
         );
         //db.cleanup().await.expect("Failed to cleanup ClickHouse server");
-        client.wipe_single_node_db().await.unwrap();
+        client.wipe_single_node_db().await?;
         logctx.cleanup_successful();
         Ok(())
     }
@@ -2394,7 +2394,7 @@ mod tests {
             actual_row, inserted_row,
             "Actual and expected measurement rows do not match"
         );
-        client.wipe_single_node_db().await.unwrap();
+        client.wipe_single_node_db().await?;
         logctx.cleanup_successful();
         Ok(())
     }

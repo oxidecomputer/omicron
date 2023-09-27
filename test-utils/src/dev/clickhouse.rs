@@ -107,11 +107,7 @@ impl ClickHouseInstance {
             })?;
 
         let data_path = data_dir.path().to_path_buf();
-        // TODO: Remove before merging
-        println!("port before: {}", port);
         let port = wait_for_port(log_path).await?;
-        // TODO: Remove before merging
-        println!("port after: {}", port);
 
         Ok(Self {
             data_dir: Some(data_dir),
