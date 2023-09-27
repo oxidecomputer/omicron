@@ -109,8 +109,6 @@ uplink_cidr = "192.168.1.30/32"
 # "switch0" (upper slot) or "switch1" (lower slot). For single-node softnpu
 # and dendrite stub environments, use "switch0"
 switch = "switch0"
-# TODO: restore before merging
-uplink_ip = "192.168.1.30"
 
 # Configuration for the initial Silo, user, and password.
 #
