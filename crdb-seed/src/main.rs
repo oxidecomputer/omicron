@@ -33,8 +33,7 @@ async fn ensure_seed_directory_exists(log: &Logger) -> Utf8PathBuf {
     if !desired_seed_dir.exists() {
         let tmp_seed_dir =
             camino_tempfile::Utf8TempDir::new_in(base_seed_dir).unwrap();
-        dev::test_setup_database_seed(log, tmp_seed_dir.path())
-            .await;
+        dev::test_setup_database_seed(log, tmp_seed_dir.path()).await;
 
         // If we can successfully perform the rename, we made the seed directory
         // faster than other tests.
