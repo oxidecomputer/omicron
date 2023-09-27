@@ -9,10 +9,13 @@ nextest-version = { required = "0.9.55", recommended = "0.9.57" }
 fail-fast = false
 
 # TODO(https://github.com/oxidecomputer/omicron/issues/4000): 
-# Remove this override once replicated ClickHouse is the sole modality
+# Remove this override once replicated ClickHouse is the sole modality.
 # It is not possible to install both single node and a replicated cluster
 # on the same server. This means that while we are testing both modalities,
-# sometimes the replicated cluster will fail to start due to parallelism.
-[[profile.ci.overrides]]
-filter = 'test(/\btest_build_replicated/)'
-retries = 2
+# clickhouse tests should run serially
+[test-groups]
+serial-clickhouse = { max-threads = 1 }
+
+[[profile.default.overrides]]
+filter = 'package(oximeter-db)'
+test-group = 'serial-clickhouse'
