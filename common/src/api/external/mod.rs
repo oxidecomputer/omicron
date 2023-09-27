@@ -866,25 +866,6 @@ impl InstanceState {
             InstanceState::Destroyed => "destroyed",
         }
     }
-
-    /// Returns true if the given state represents a fully stopped Instance.
-    /// This means that a transition from an !is_stopped() state must go
-    /// through Stopping.
-    pub fn is_stopped(&self) -> bool {
-        match self {
-            InstanceState::Starting => false,
-            InstanceState::Running => false,
-            InstanceState::Stopping => false,
-            InstanceState::Rebooting => false,
-            InstanceState::Migrating => false,
-
-            InstanceState::Creating => true,
-            InstanceState::Stopped => true,
-            InstanceState::Repairing => true,
-            InstanceState::Failed => true,
-            InstanceState::Destroyed => true,
-        }
-    }
 }
 
 /// The number of CPUs in an Instance
