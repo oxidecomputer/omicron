@@ -658,12 +658,12 @@ fn error_for_schema_mismatch(
 mod tests {
     use super::*;
     use crate::query;
-    use omicron_test_utils::dev::clickhouse::{
-        ClickHouseCluster, ClickHouseInstance,
-    };
     use crate::query::field_table_name;
     use crate::query::measurement_table_name;
     use chrono::Utc;
+    use omicron_test_utils::dev::clickhouse::{
+        ClickHouseCluster, ClickHouseInstance,
+    };
     use omicron_test_utils::dev::test_setup_log;
     use oximeter::histogram::Histogram;
     use oximeter::test_util;
@@ -762,6 +762,79 @@ mod tests {
         // Tests listing timeseries
         list_timeseries_test(address, &log).await.unwrap();
 
+        // Tests for fields and measurements
+        recall_field_value_bool_test(address).await.unwrap();
+
+        recall_field_value_u8_test(address).await.unwrap();
+
+        recall_field_value_i8_test(address).await.unwrap();
+
+        recall_field_value_u16_test(address).await.unwrap();
+
+        recall_field_value_i16_test(address).await.unwrap();
+
+        recall_field_value_u32_test(address).await.unwrap();
+
+        recall_field_value_i32_test(address).await.unwrap();
+
+        recall_field_value_u64_test(address).await.unwrap();
+
+        recall_field_value_i64_test(address).await.unwrap();
+
+        recall_field_value_string_test(address).await.unwrap();
+
+        recall_field_value_ipv4addr_test(address).await.unwrap();
+
+        recall_field_value_ipv6addr_test(address).await.unwrap();
+
+        recall_field_value_uuid_test(address).await.unwrap();
+
+        recall_measurement_bool_test(address).await.unwrap();
+
+        recall_measurement_i8_test(address).await.unwrap();
+
+        recall_measurement_u8_test(address).await.unwrap();
+
+        recall_measurement_i16_test(address).await.unwrap();
+
+        recall_measurement_u16_test(address).await.unwrap();
+
+        recall_measurement_i32_test(address).await.unwrap();
+
+        recall_measurement_u32_test(address).await.unwrap();
+
+        recall_measurement_i64_test(address).await.unwrap();
+
+        recall_measurement_u64_test(address).await.unwrap();
+
+        recall_measurement_f32_test(address).await.unwrap();
+
+        recall_measurement_f64_test(address).await.unwrap();
+
+        recall_measurement_cumulative_i64_test(address).await.unwrap();
+
+        recall_measurement_cumulative_u64_test(address).await.unwrap();
+
+        recall_measurement_cumulative_f64_test(address).await.unwrap();
+
+        recall_measurement_histogram_i8_test(address).await.unwrap();
+
+        recall_measurement_histogram_u8_test(address).await.unwrap();
+
+        recall_measurement_histogram_i16_test(address).await.unwrap();
+
+        recall_measurement_histogram_u16_test(address).await.unwrap();
+
+        recall_measurement_histogram_i32_test(address).await.unwrap();
+
+        recall_measurement_histogram_u32_test(address).await.unwrap();
+
+        recall_measurement_histogram_i64_test(address).await.unwrap();
+
+        recall_measurement_histogram_u64_test(address).await.unwrap();
+
+        recall_measurement_histogram_f64_test(address).await.unwrap();
+
         db.cleanup().await.expect("Failed to cleanup ClickHouse server");
         logctx.cleanup_successful();
     }
@@ -815,444 +888,6 @@ mod tests {
             pub name2: String,
             pub num: i64,
         }
-    }
-
-    #[tokio::test]
-    async fn test_recall_field_value_bool() {
-        let field = FieldValue::Bool(true);
-        let as_json = serde_json::Value::from(1_u64);
-        test_recall_field_value_impl(field, as_json).await;
-    }
-
-    #[tokio::test]
-    async fn test_recall_field_value_u8() {
-        let field = FieldValue::U8(1);
-        let as_json = serde_json::Value::from(1_u8);
-        test_recall_field_value_impl(field, as_json).await;
-    }
-
-    #[tokio::test]
-    async fn test_recall_field_value_i8() {
-        let field = FieldValue::I8(1);
-        let as_json = serde_json::Value::from(1_i8);
-        test_recall_field_value_impl(field, as_json).await;
-    }
-
-    #[tokio::test]
-    async fn test_recall_field_value_u16() {
-        let field = FieldValue::U16(1);
-        let as_json = serde_json::Value::from(1_u16);
-        test_recall_field_value_impl(field, as_json).await;
-    }
-
-    #[tokio::test]
-    async fn test_recall_field_value_i16() {
-        let field = FieldValue::I16(1);
-        let as_json = serde_json::Value::from(1_i16);
-        test_recall_field_value_impl(field, as_json).await;
-    }
-
-    #[tokio::test]
-    async fn test_recall_field_value_u32() {
-        let field = FieldValue::U32(1);
-        let as_json = serde_json::Value::from(1_u32);
-        test_recall_field_value_impl(field, as_json).await;
-    }
-
-    #[tokio::test]
-    async fn test_recall_field_value_i32() {
-        let field = FieldValue::I32(1);
-        let as_json = serde_json::Value::from(1_i32);
-        test_recall_field_value_impl(field, as_json).await;
-    }
-
-    #[tokio::test]
-    async fn test_recall_field_value_u64() {
-        let field = FieldValue::U64(1);
-        let as_json = serde_json::Value::from(1_u64);
-        test_recall_field_value_impl(field, as_json).await;
-    }
-
-    #[tokio::test]
-    async fn test_recall_field_value_i64() {
-        let field = FieldValue::I64(1);
-        let as_json = serde_json::Value::from(1_i64);
-        test_recall_field_value_impl(field, as_json).await;
-    }
-
-    #[tokio::test]
-    async fn test_recall_field_value_string() {
-        let field = FieldValue::String("foo".into());
-        let as_json = serde_json::Value::from("foo");
-        test_recall_field_value_impl(field, as_json).await;
-    }
-
-    #[tokio::test]
-    async fn test_recall_field_value_ipv4addr() {
-        let field = FieldValue::from(Ipv4Addr::LOCALHOST);
-        let as_json = serde_json::Value::from(
-            Ipv4Addr::LOCALHOST.to_ipv6_mapped().to_string(),
-        );
-        test_recall_field_value_impl(field, as_json).await;
-    }
-
-    #[tokio::test]
-    async fn test_recall_field_value_ipv6addr() {
-        let field = FieldValue::from(Ipv6Addr::LOCALHOST);
-        let as_json = serde_json::Value::from(Ipv6Addr::LOCALHOST.to_string());
-        test_recall_field_value_impl(field, as_json).await;
-    }
-
-    #[tokio::test]
-    async fn test_recall_field_value_uuid() {
-        let id = Uuid::new_v4();
-        let field = FieldValue::from(id);
-        let as_json = serde_json::Value::from(id.to_string());
-        test_recall_field_value_impl(field, as_json).await;
-    }
-
-    async fn test_recall_field_value_impl(
-        field_value: FieldValue,
-        as_json: serde_json::Value,
-    ) {
-        let logctx = test_setup_log(
-            format!("test_recall_field_value_{}", field_value.field_type())
-                .as_str(),
-        );
-        let log = &logctx.log;
-
-        // Let the OS assign a port and discover it after ClickHouse starts
-        let mut db = ClickHouseInstance::new_single_node(0)
-            .await
-            .expect("Failed to start ClickHouse");
-        let address = SocketAddr::new("::1".parse().unwrap(), db.port());
-
-        let client = Client::new(address, log);
-        client
-            .init_single_node_db()
-            .await
-            .expect("Failed to initialize timeseries database");
-
-        // Insert a record from this field.
-        const TIMESERIES_NAME: &str = "foo:bar";
-        const TIMESERIES_KEY: u64 = 101;
-        const FIELD_NAME: &str = "baz";
-
-        let mut inserted_row = serde_json::Map::new();
-        inserted_row
-            .insert("timeseries_name".to_string(), TIMESERIES_NAME.into());
-        inserted_row
-            .insert("timeseries_key".to_string(), TIMESERIES_KEY.into());
-        inserted_row.insert("field_name".to_string(), FIELD_NAME.into());
-        inserted_row.insert("field_value".to_string(), as_json);
-        let inserted_row = serde_json::Value::from(inserted_row);
-
-        let row = serde_json::to_string(&inserted_row).unwrap();
-        let field_table = field_table_name(field_value.field_type());
-        let insert_sql = format!(
-            "INSERT INTO oximeter.{field_table} FORMAT JSONEachRow {row}"
-        );
-        client.execute(insert_sql).await.expect("Failed to insert field row");
-
-        // Select it exactly back out.
-        let select_sql = format!(
-            "SELECT * FROM oximeter.{} LIMIT 1 FORMAT {};",
-            field_table_name(field_value.field_type()),
-            crate::DATABASE_SELECT_FORMAT,
-        );
-        let body = client
-            .execute_with_body(select_sql)
-            .await
-            .expect("Failed to select field row");
-        let actual_row: serde_json::Value = serde_json::from_str(&body)
-            .expect("Failed to parse field row JSON");
-        println!("{actual_row:?}");
-        println!("{inserted_row:?}");
-        assert_eq!(
-            actual_row, inserted_row,
-            "Actual and expected field rows do not match"
-        );
-        db.cleanup().await.expect("Failed to cleanup ClickHouse server");
-        logctx.cleanup_successful();
-    }
-
-    #[tokio::test]
-    async fn test_recall_measurement_bool() {
-        let datum = Datum::Bool(true);
-        let as_json = serde_json::Value::from(1_u64);
-        test_recall_measurement_impl::<u8>(datum, None, as_json).await;
-    }
-
-    #[tokio::test]
-    async fn test_recall_measurement_i8() {
-        let datum = Datum::I8(1);
-        let as_json = serde_json::Value::from(1_i8);
-        test_recall_measurement_impl::<u8>(datum, None, as_json).await;
-    }
-
-    #[tokio::test]
-    async fn test_recall_measurement_u8() {
-        let datum = Datum::U8(1);
-        let as_json = serde_json::Value::from(1_u8);
-        test_recall_measurement_impl::<u8>(datum, None, as_json).await;
-    }
-
-    #[tokio::test]
-    async fn test_recall_measurement_i16() {
-        let datum = Datum::I16(1);
-        let as_json = serde_json::Value::from(1_i16);
-        test_recall_measurement_impl::<u8>(datum, None, as_json).await;
-    }
-
-    #[tokio::test]
-    async fn test_recall_measurement_u16() {
-        let datum = Datum::U16(1);
-        let as_json = serde_json::Value::from(1_u16);
-        test_recall_measurement_impl::<u8>(datum, None, as_json).await;
-    }
-
-    #[tokio::test]
-    async fn test_recall_measurement_i32() {
-        let datum = Datum::I32(1);
-        let as_json = serde_json::Value::from(1_i32);
-        test_recall_measurement_impl::<u8>(datum, None, as_json).await;
-    }
-
-    #[tokio::test]
-    async fn test_recall_measurement_u32() {
-        let datum = Datum::U32(1);
-        let as_json = serde_json::Value::from(1_u32);
-        test_recall_measurement_impl::<u8>(datum, None, as_json).await;
-    }
-
-    #[tokio::test]
-    async fn test_recall_measurement_i64() {
-        let datum = Datum::I64(1);
-        let as_json = serde_json::Value::from(1_i64);
-        test_recall_measurement_impl::<u8>(datum, None, as_json).await;
-    }
-
-    #[tokio::test]
-    async fn test_recall_measurement_u64() {
-        let datum = Datum::U64(1);
-        let as_json = serde_json::Value::from(1_u64);
-        test_recall_measurement_impl::<u8>(datum, None, as_json).await;
-    }
-
-    #[tokio::test]
-    async fn test_recall_measurement_f32() {
-        const VALUE: f32 = 1.1;
-        let datum = Datum::F32(VALUE);
-        // NOTE: This is intentionally an f64.
-        let as_json = serde_json::Value::from(1.1_f64);
-        test_recall_measurement_impl::<u8>(datum, None, as_json).await;
-    }
-
-    #[tokio::test]
-    async fn test_recall_measurement_f64() {
-        const VALUE: f64 = 1.1;
-        let datum = Datum::F64(VALUE);
-        let as_json = serde_json::Value::from(VALUE);
-        test_recall_measurement_impl::<u8>(datum, None, as_json).await;
-    }
-
-    #[tokio::test]
-    async fn test_recall_measurement_cumulative_i64() {
-        let datum = Datum::CumulativeI64(1.into());
-        let as_json = serde_json::Value::from(1_i64);
-        test_recall_measurement_impl::<u8>(datum, None, as_json).await;
-    }
-
-    #[tokio::test]
-    async fn test_recall_measurement_cumulative_u64() {
-        let datum = Datum::CumulativeU64(1.into());
-        let as_json = serde_json::Value::from(1_u64);
-        test_recall_measurement_impl::<u8>(datum, None, as_json).await;
-    }
-
-    #[tokio::test]
-    async fn test_recall_measurement_cumulative_f64() {
-        let datum = Datum::CumulativeF64(1.1.into());
-        let as_json = serde_json::Value::from(1.1_f64);
-        test_recall_measurement_impl::<u8>(datum, None, as_json).await;
-    }
-
-    async fn histogram_test_impl<T>(hist: Histogram<T>)
-    where
-        T: oximeter::histogram::HistogramSupport,
-        Datum: From<oximeter::histogram::Histogram<T>>,
-        serde_json::Value: From<T>,
-    {
-        let (bins, counts) = hist.to_arrays();
-        let datum = Datum::from(hist);
-        let as_json = serde_json::Value::Array(
-            counts.into_iter().map(Into::into).collect(),
-        );
-        test_recall_measurement_impl(datum, Some(bins), as_json).await;
-    }
-
-    #[tokio::test]
-    async fn test_recall_measurement_histogram_i8() {
-        let hist = Histogram::new(&[0i8, 1, 2]).unwrap();
-        histogram_test_impl(hist).await;
-    }
-
-    #[tokio::test]
-    async fn test_recall_measurement_histogram_u8() {
-        let hist = Histogram::new(&[0u8, 1, 2]).unwrap();
-        histogram_test_impl(hist).await;
-    }
-
-    #[tokio::test]
-    async fn test_recall_measurement_histogram_i16() {
-        let hist = Histogram::new(&[0i16, 1, 2]).unwrap();
-        histogram_test_impl(hist).await;
-    }
-
-    #[tokio::test]
-    async fn test_recall_measurement_histogram_u16() {
-        let hist = Histogram::new(&[0u16, 1, 2]).unwrap();
-        histogram_test_impl(hist).await;
-    }
-
-    #[tokio::test]
-    async fn test_recall_measurement_histogram_i32() {
-        let hist = Histogram::new(&[0i32, 1, 2]).unwrap();
-        histogram_test_impl(hist).await;
-    }
-
-    #[tokio::test]
-    async fn test_recall_measurement_histogram_u32() {
-        let hist = Histogram::new(&[0u32, 1, 2]).unwrap();
-        histogram_test_impl(hist).await;
-    }
-
-    #[tokio::test]
-    async fn test_recall_measurement_histogram_i64() {
-        let hist = Histogram::new(&[0i64, 1, 2]).unwrap();
-        histogram_test_impl(hist).await;
-    }
-
-    #[tokio::test]
-    async fn test_recall_measurement_histogram_u64() {
-        let hist = Histogram::new(&[0u64, 1, 2]).unwrap();
-        histogram_test_impl(hist).await;
-    }
-
-    // NOTE: This test is ignored intentionally.
-    //
-    // We're using the JSONEachRow format to return data, which loses precision
-    // for floating point values. This means we return the _double_ 0.1 from
-    // the database as a `Value::Number`, which fails to compare equal to the
-    // `Value::Number(0.1f32 as f64)` we sent in. That's because 0.1 is not
-    // exactly representable in an `f32`, but it's close enough that ClickHouse
-    // prints `0.1` in the result, which converts to a slightly different `f64`
-    // than `0.1_f32 as f64` does.
-    //
-    // See https://github.com/oxidecomputer/omicron/issues/4059 for related
-    // discussion.
-    #[tokio::test]
-    #[ignore]
-    async fn test_recall_measurement_histogram_f32() {
-        let hist = Histogram::new(&[0.1f32, 0.2, 0.3]).unwrap();
-        histogram_test_impl(hist).await;
-    }
-
-    #[tokio::test]
-    async fn test_recall_measurement_histogram_f64() {
-        let hist = Histogram::new(&[0.1f64, 0.2, 0.3]).unwrap();
-        histogram_test_impl(hist).await;
-    }
-
-    async fn test_recall_measurement_impl<T: Into<serde_json::Value> + Copy>(
-        datum: Datum,
-        maybe_bins: Option<Vec<T>>,
-        json_datum: serde_json::Value,
-    ) {
-        let logctx = test_setup_log(
-            format!("test_recall_measurement_{}", datum.datum_type()).as_str(),
-        );
-        let log = &logctx.log;
-
-        // Let the OS assign a port and discover it after ClickHouse starts
-        let mut db = ClickHouseInstance::new_single_node(0)
-            .await
-            .expect("Failed to start ClickHouse");
-        let address = SocketAddr::new("::1".parse().unwrap(), db.port());
-
-        let client = Client::new(address, log);
-        client
-            .init_single_node_db()
-            .await
-            .expect("Failed to initialize timeseries database");
-
-        // Insert a record from this datum.
-        const TIMESERIES_NAME: &str = "foo:bar";
-        const TIMESERIES_KEY: u64 = 101;
-        let mut inserted_row = serde_json::Map::new();
-        inserted_row
-            .insert("timeseries_name".to_string(), TIMESERIES_NAME.into());
-        inserted_row
-            .insert("timeseries_key".to_string(), TIMESERIES_KEY.into());
-        inserted_row.insert(
-            "timestamp".to_string(),
-            Utc::now()
-                .format(crate::DATABASE_TIMESTAMP_FORMAT)
-                .to_string()
-                .into(),
-        );
-
-        // Insert the start time and possibly bins.
-        if let Some(start_time) = datum.start_time() {
-            inserted_row.insert(
-                "start_time".to_string(),
-                start_time
-                    .format(crate::DATABASE_TIMESTAMP_FORMAT)
-                    .to_string()
-                    .into(),
-            );
-        }
-        if let Some(bins) = &maybe_bins {
-            let bins = serde_json::Value::Array(
-                bins.iter().copied().map(Into::into).collect(),
-            );
-            inserted_row.insert("bins".to_string(), bins);
-            inserted_row.insert("counts".to_string(), json_datum);
-        } else {
-            inserted_row.insert("datum".to_string(), json_datum);
-        }
-        let inserted_row = serde_json::Value::from(inserted_row);
-
-        let measurement_table = measurement_table_name(datum.datum_type());
-        let row = serde_json::to_string(&inserted_row).unwrap();
-        let insert_sql = format!(
-            "INSERT INTO oximeter.{measurement_table} FORMAT JSONEachRow {row}",
-        );
-        client
-            .execute(insert_sql)
-            .await
-            .expect("Failed to insert measurement row");
-
-        // Select it exactly back out.
-        let select_sql = format!(
-            "SELECT * FROM oximeter.{} LIMIT 1 FORMAT {};",
-            measurement_table,
-            crate::DATABASE_SELECT_FORMAT,
-        );
-        let body = client
-            .execute_with_body(select_sql)
-            .await
-            .expect("Failed to select measurement row");
-        let actual_row: serde_json::Value = serde_json::from_str(&body)
-            .expect("Failed to parse measurement row JSON");
-        println!("{actual_row:?}");
-        println!("{inserted_row:?}");
-        assert_eq!(
-            actual_row, inserted_row,
-            "Actual and expected measurement rows do not match"
-        );
-        db.cleanup().await.expect("Failed to cleanup ClickHouse server");
-        logctx.cleanup_successful();
     }
 
     async fn schema_mismatch_test(
@@ -2240,8 +1875,530 @@ mod tests {
         Ok(())
     }
 
-    // TODO(https://github.com/oxidecomputer/omicron/issues/4001): This job fails intermittently
-    // on the ubuntu CI job with "Failed to detect ClickHouse subprocess within timeout"
+    async fn recall_field_value_bool_test(
+        address: SocketAddr,
+    ) -> Result<(), Error> {
+        let field = FieldValue::Bool(true);
+        let as_json = serde_json::Value::from(1_u64);
+        test_recall_field_value_impl(address, field, as_json).await?;
+        Ok(())
+    }
+
+    async fn recall_field_value_u8_test(
+        address: SocketAddr,
+    ) -> Result<(), Error> {
+        let field = FieldValue::U8(1);
+        let as_json = serde_json::Value::from(1_u8);
+        test_recall_field_value_impl(address, field, as_json).await?;
+        Ok(())
+    }
+
+    async fn recall_field_value_i8_test(
+        address: SocketAddr,
+    ) -> Result<(), Error> {
+        let field = FieldValue::I8(1);
+        let as_json = serde_json::Value::from(1_i8);
+        test_recall_field_value_impl(address, field, as_json).await?;
+        Ok(())
+    }
+
+    async fn recall_field_value_u16_test(
+        address: SocketAddr,
+    ) -> Result<(), Error> {
+        let field = FieldValue::U16(1);
+        let as_json = serde_json::Value::from(1_u16);
+        test_recall_field_value_impl(address, field, as_json).await?;
+        Ok(())
+    }
+
+    async fn recall_field_value_i16_test(
+        address: SocketAddr,
+    ) -> Result<(), Error> {
+        let field = FieldValue::I16(1);
+        let as_json = serde_json::Value::from(1_i16);
+        test_recall_field_value_impl(address, field, as_json).await?;
+        Ok(())
+    }
+
+    async fn recall_field_value_u32_test(
+        address: SocketAddr,
+    ) -> Result<(), Error> {
+        let field = FieldValue::U32(1);
+        let as_json = serde_json::Value::from(1_u32);
+        test_recall_field_value_impl(address, field, as_json).await?;
+        Ok(())
+    }
+
+    async fn recall_field_value_i32_test(
+        address: SocketAddr,
+    ) -> Result<(), Error> {
+        let field = FieldValue::I32(1);
+        let as_json = serde_json::Value::from(1_i32);
+        test_recall_field_value_impl(address, field, as_json).await?;
+        Ok(())
+    }
+
+    async fn recall_field_value_u64_test(
+        address: SocketAddr,
+    ) -> Result<(), Error> {
+        let field = FieldValue::U64(1);
+        let as_json = serde_json::Value::from(1_u64);
+        test_recall_field_value_impl(address, field, as_json).await?;
+        Ok(())
+    }
+
+    async fn recall_field_value_i64_test(
+        address: SocketAddr,
+    ) -> Result<(), Error> {
+        let field = FieldValue::I64(1);
+        let as_json = serde_json::Value::from(1_i64);
+        test_recall_field_value_impl(address, field, as_json).await?;
+        Ok(())
+    }
+
+    async fn recall_field_value_string_test(
+        address: SocketAddr,
+    ) -> Result<(), Error> {
+        let field = FieldValue::String("foo".into());
+        let as_json = serde_json::Value::from("foo");
+        test_recall_field_value_impl(address, field, as_json).await?;
+        Ok(())
+    }
+
+    async fn recall_field_value_ipv4addr_test(
+        address: SocketAddr,
+    ) -> Result<(), Error> {
+        let field = FieldValue::from(Ipv4Addr::LOCALHOST);
+        let as_json = serde_json::Value::from(
+            Ipv4Addr::LOCALHOST.to_ipv6_mapped().to_string(),
+        );
+        test_recall_field_value_impl(address, field, as_json).await?;
+        Ok(())
+    }
+
+    async fn recall_field_value_ipv6addr_test(
+        address: SocketAddr,
+    ) -> Result<(), Error> {
+        let field = FieldValue::from(Ipv6Addr::LOCALHOST);
+        let as_json = serde_json::Value::from(Ipv6Addr::LOCALHOST.to_string());
+        test_recall_field_value_impl(address, field, as_json).await?;
+        Ok(())
+    }
+
+    async fn recall_field_value_uuid_test(
+        address: SocketAddr,
+    ) -> Result<(), Error> {
+        let id = Uuid::new_v4();
+        let field = FieldValue::from(id);
+        let as_json = serde_json::Value::from(id.to_string());
+        test_recall_field_value_impl(address, field, as_json).await?;
+        Ok(())
+    }
+
+    async fn test_recall_field_value_impl(
+        address: SocketAddr,
+        field_value: FieldValue,
+        as_json: serde_json::Value,
+    ) -> Result<(), Error> {
+        let logctx = test_setup_log(
+            format!("test_recall_field_value_{}", field_value.field_type())
+                .as_str(),
+        );
+        let log = &logctx.log;
+
+        let client = Client::new(address, log);
+        client
+            .init_single_node_db()
+            .await
+            .expect("Failed to initialize timeseries database");
+
+        // Insert a record from this field.
+        const TIMESERIES_NAME: &str = "foo:bar";
+        const TIMESERIES_KEY: u64 = 101;
+        const FIELD_NAME: &str = "baz";
+
+        let mut inserted_row = serde_json::Map::new();
+        inserted_row
+            .insert("timeseries_name".to_string(), TIMESERIES_NAME.into());
+        inserted_row
+            .insert("timeseries_key".to_string(), TIMESERIES_KEY.into());
+        inserted_row.insert("field_name".to_string(), FIELD_NAME.into());
+        inserted_row.insert("field_value".to_string(), as_json);
+        let inserted_row = serde_json::Value::from(inserted_row);
+
+        let row = serde_json::to_string(&inserted_row).unwrap();
+        let field_table = field_table_name(field_value.field_type());
+        let insert_sql = format!(
+            "INSERT INTO oximeter.{field_table} FORMAT JSONEachRow {row}"
+        );
+        client.execute(insert_sql).await.expect("Failed to insert field row");
+
+        // Select it exactly back out.
+        let select_sql = format!(
+            "SELECT * FROM oximeter.{} LIMIT 1 FORMAT {};",
+            field_table_name(field_value.field_type()),
+            crate::DATABASE_SELECT_FORMAT,
+        );
+        let body = client
+            .execute_with_body(select_sql)
+            .await
+            .expect("Failed to select field row");
+        let actual_row: serde_json::Value = serde_json::from_str(&body)
+            .expect("Failed to parse field row JSON");
+        println!("{actual_row:?}");
+        println!("{inserted_row:?}");
+        assert_eq!(
+            actual_row, inserted_row,
+            "Actual and expected field rows do not match"
+        );
+        //db.cleanup().await.expect("Failed to cleanup ClickHouse server");
+        client.wipe_single_node_db().await.unwrap();
+        logctx.cleanup_successful();
+        Ok(())
+    }
+
+    async fn recall_measurement_bool_test(
+        address: SocketAddr,
+    ) -> Result<(), Error> {
+        let datum = Datum::Bool(true);
+        let as_json = serde_json::Value::from(1_u64);
+        test_recall_measurement_impl::<u8>(address, datum, None, as_json)
+            .await?;
+        Ok(())
+    }
+
+    async fn recall_measurement_i8_test(
+        address: SocketAddr,
+    ) -> Result<(), Error> {
+        let datum = Datum::I8(1);
+        let as_json = serde_json::Value::from(1_i8);
+        test_recall_measurement_impl::<u8>(address, datum, None, as_json)
+            .await?;
+        Ok(())
+    }
+
+    async fn recall_measurement_u8_test(
+        address: SocketAddr,
+    ) -> Result<(), Error> {
+        let datum = Datum::U8(1);
+        let as_json = serde_json::Value::from(1_u8);
+        test_recall_measurement_impl::<u8>(address, datum, None, as_json)
+            .await?;
+        Ok(())
+    }
+
+    async fn recall_measurement_i16_test(
+        address: SocketAddr,
+    ) -> Result<(), Error> {
+        let datum = Datum::I16(1);
+        let as_json = serde_json::Value::from(1_i16);
+        test_recall_measurement_impl::<u8>(address, datum, None, as_json)
+            .await?;
+        Ok(())
+    }
+
+    async fn recall_measurement_u16_test(
+        address: SocketAddr,
+    ) -> Result<(), Error> {
+        let datum = Datum::U16(1);
+        let as_json = serde_json::Value::from(1_u16);
+        test_recall_measurement_impl::<u8>(address, datum, None, as_json)
+            .await?;
+        Ok(())
+    }
+
+    async fn recall_measurement_i32_test(
+        address: SocketAddr,
+    ) -> Result<(), Error> {
+        let datum = Datum::I32(1);
+        let as_json = serde_json::Value::from(1_i32);
+        test_recall_measurement_impl::<u8>(address, datum, None, as_json)
+            .await?;
+        Ok(())
+    }
+
+    async fn recall_measurement_u32_test(
+        address: SocketAddr,
+    ) -> Result<(), Error> {
+        let datum = Datum::U32(1);
+        let as_json = serde_json::Value::from(1_u32);
+        test_recall_measurement_impl::<u8>(address, datum, None, as_json)
+            .await?;
+        Ok(())
+    }
+
+    async fn recall_measurement_i64_test(
+        address: SocketAddr,
+    ) -> Result<(), Error> {
+        let datum = Datum::I64(1);
+        let as_json = serde_json::Value::from(1_i64);
+        test_recall_measurement_impl::<u8>(address, datum, None, as_json)
+            .await?;
+        Ok(())
+    }
+
+    async fn recall_measurement_u64_test(
+        address: SocketAddr,
+    ) -> Result<(), Error> {
+        let datum = Datum::U64(1);
+        let as_json = serde_json::Value::from(1_u64);
+        test_recall_measurement_impl::<u8>(address, datum, None, as_json)
+            .await?;
+        Ok(())
+    }
+
+    async fn recall_measurement_f32_test(
+        address: SocketAddr,
+    ) -> Result<(), Error> {
+        const VALUE: f32 = 1.1;
+        let datum = Datum::F32(VALUE);
+        // NOTE: This is intentionally an f64.
+        let as_json = serde_json::Value::from(1.1_f64);
+        test_recall_measurement_impl::<u8>(address, datum, None, as_json)
+            .await?;
+        Ok(())
+    }
+
+    async fn recall_measurement_f64_test(
+        address: SocketAddr,
+    ) -> Result<(), Error> {
+        const VALUE: f64 = 1.1;
+        let datum = Datum::F64(VALUE);
+        let as_json = serde_json::Value::from(VALUE);
+        test_recall_measurement_impl::<u8>(address, datum, None, as_json)
+            .await?;
+        Ok(())
+    }
+
+    async fn recall_measurement_cumulative_i64_test(
+        address: SocketAddr,
+    ) -> Result<(), Error> {
+        let datum = Datum::CumulativeI64(1.into());
+        let as_json = serde_json::Value::from(1_i64);
+        test_recall_measurement_impl::<u8>(address, datum, None, as_json)
+            .await?;
+        Ok(())
+    }
+
+    async fn recall_measurement_cumulative_u64_test(
+        address: SocketAddr,
+    ) -> Result<(), Error> {
+        let datum = Datum::CumulativeU64(1.into());
+        let as_json = serde_json::Value::from(1_u64);
+        test_recall_measurement_impl::<u8>(address, datum, None, as_json)
+            .await?;
+        Ok(())
+    }
+
+    async fn recall_measurement_cumulative_f64_test(
+        address: SocketAddr,
+    ) -> Result<(), Error> {
+        let datum = Datum::CumulativeF64(1.1.into());
+        let as_json = serde_json::Value::from(1.1_f64);
+        test_recall_measurement_impl::<u8>(address, datum, None, as_json)
+            .await?;
+        Ok(())
+    }
+
+    async fn histogram_test_impl<T>(
+        address: SocketAddr,
+        hist: Histogram<T>,
+    ) -> Result<(), Error>
+    where
+        T: oximeter::histogram::HistogramSupport,
+        Datum: From<oximeter::histogram::Histogram<T>>,
+        serde_json::Value: From<T>,
+    {
+        let (bins, counts) = hist.to_arrays();
+        let datum = Datum::from(hist);
+        let as_json = serde_json::Value::Array(
+            counts.into_iter().map(Into::into).collect(),
+        );
+        test_recall_measurement_impl(address, datum, Some(bins), as_json)
+            .await?;
+        Ok(())
+    }
+
+    async fn recall_measurement_histogram_i8_test(
+        address: SocketAddr,
+    ) -> Result<(), Error> {
+        let hist = Histogram::new(&[0i8, 1, 2]).unwrap();
+        histogram_test_impl(address, hist).await?;
+        Ok(())
+    }
+
+    async fn recall_measurement_histogram_u8_test(
+        address: SocketAddr,
+    ) -> Result<(), Error> {
+        let hist = Histogram::new(&[0u8, 1, 2]).unwrap();
+        histogram_test_impl(address, hist).await?;
+        Ok(())
+    }
+
+    async fn recall_measurement_histogram_i16_test(
+        address: SocketAddr,
+    ) -> Result<(), Error> {
+        let hist = Histogram::new(&[0i16, 1, 2]).unwrap();
+        histogram_test_impl(address, hist).await?;
+        Ok(())
+    }
+
+    async fn recall_measurement_histogram_u16_test(
+        address: SocketAddr,
+    ) -> Result<(), Error> {
+        let hist = Histogram::new(&[0u16, 1, 2]).unwrap();
+        histogram_test_impl(address, hist).await?;
+        Ok(())
+    }
+
+    async fn recall_measurement_histogram_i32_test(
+        address: SocketAddr,
+    ) -> Result<(), Error> {
+        let hist = Histogram::new(&[0i32, 1, 2]).unwrap();
+        histogram_test_impl(address, hist).await?;
+        Ok(())
+    }
+
+    async fn recall_measurement_histogram_u32_test(
+        address: SocketAddr,
+    ) -> Result<(), Error> {
+        let hist = Histogram::new(&[0u32, 1, 2]).unwrap();
+        histogram_test_impl(address, hist).await?;
+        Ok(())
+    }
+
+    async fn recall_measurement_histogram_i64_test(
+        address: SocketAddr,
+    ) -> Result<(), Error> {
+        let hist = Histogram::new(&[0i64, 1, 2]).unwrap();
+        histogram_test_impl(address, hist).await?;
+        Ok(())
+    }
+
+    async fn recall_measurement_histogram_u64_test(
+        address: SocketAddr,
+    ) -> Result<(), Error> {
+        let hist = Histogram::new(&[0u64, 1, 2]).unwrap();
+        histogram_test_impl(address, hist).await?;
+        Ok(())
+    }
+
+    // NOTE: This test is ignored intentionally.
+    //
+    // We're using the JSONEachRow format to return data, which loses precision
+    // for floating point values. This means we return the _double_ 0.1 from
+    // the database as a `Value::Number`, which fails to compare equal to the
+    // `Value::Number(0.1f32 as f64)` we sent in. That's because 0.1 is not
+    // exactly representable in an `f32`, but it's close enough that ClickHouse
+    // prints `0.1` in the result, which converts to a slightly different `f64`
+    // than `0.1_f32 as f64` does.
+    //
+    // See https://github.com/oxidecomputer/omicron/issues/4059 for related
+    // discussion.
+    #[allow(dead_code)]
+    async fn recall_measurement_histogram_f32_test(
+        address: SocketAddr,
+    ) -> Result<(), Error> {
+        let hist = Histogram::new(&[0.1f32, 0.2, 0.3]).unwrap();
+        histogram_test_impl(address, hist).await?;
+        Ok(())
+    }
+
+    async fn recall_measurement_histogram_f64_test(
+        address: SocketAddr,
+    ) -> Result<(), Error> {
+        let hist = Histogram::new(&[0.1f64, 0.2, 0.3]).unwrap();
+        histogram_test_impl(address, hist).await?;
+        Ok(())
+    }
+
+    async fn test_recall_measurement_impl<T: Into<serde_json::Value> + Copy>(
+        address: SocketAddr,
+        datum: Datum,
+        maybe_bins: Option<Vec<T>>,
+        json_datum: serde_json::Value,
+    ) -> Result<(), Error> {
+        let logctx = test_setup_log(
+            format!("test_recall_measurement_{}", datum.datum_type()).as_str(),
+        );
+        let log = &logctx.log;
+
+        let client = Client::new(address, log);
+        client
+            .init_single_node_db()
+            .await
+            .expect("Failed to initialize timeseries database");
+
+        // Insert a record from this datum.
+        const TIMESERIES_NAME: &str = "foo:bar";
+        const TIMESERIES_KEY: u64 = 101;
+        let mut inserted_row = serde_json::Map::new();
+        inserted_row
+            .insert("timeseries_name".to_string(), TIMESERIES_NAME.into());
+        inserted_row
+            .insert("timeseries_key".to_string(), TIMESERIES_KEY.into());
+        inserted_row.insert(
+            "timestamp".to_string(),
+            Utc::now()
+                .format(crate::DATABASE_TIMESTAMP_FORMAT)
+                .to_string()
+                .into(),
+        );
+
+        // Insert the start time and possibly bins.
+        if let Some(start_time) = datum.start_time() {
+            inserted_row.insert(
+                "start_time".to_string(),
+                start_time
+                    .format(crate::DATABASE_TIMESTAMP_FORMAT)
+                    .to_string()
+                    .into(),
+            );
+        }
+        if let Some(bins) = &maybe_bins {
+            let bins = serde_json::Value::Array(
+                bins.iter().copied().map(Into::into).collect(),
+            );
+            inserted_row.insert("bins".to_string(), bins);
+            inserted_row.insert("counts".to_string(), json_datum);
+        } else {
+            inserted_row.insert("datum".to_string(), json_datum);
+        }
+        let inserted_row = serde_json::Value::from(inserted_row);
+
+        let measurement_table = measurement_table_name(datum.datum_type());
+        let row = serde_json::to_string(&inserted_row).unwrap();
+        let insert_sql = format!(
+            "INSERT INTO oximeter.{measurement_table} FORMAT JSONEachRow {row}",
+        );
+        client
+            .execute(insert_sql)
+            .await
+            .expect("Failed to insert measurement row");
+
+        // Select it exactly back out.
+        let select_sql = format!(
+            "SELECT * FROM oximeter.{} LIMIT 1 FORMAT {};",
+            measurement_table,
+            crate::DATABASE_SELECT_FORMAT,
+        );
+        let body = client
+            .execute_with_body(select_sql)
+            .await
+            .expect("Failed to select measurement row");
+        let actual_row: serde_json::Value = serde_json::from_str(&body)
+            .expect("Failed to parse measurement row JSON");
+        println!("{actual_row:?}");
+        println!("{inserted_row:?}");
+        assert_eq!(
+            actual_row, inserted_row,
+            "Actual and expected measurement rows do not match"
+        );
+        client.wipe_single_node_db().await.unwrap();
+        logctx.cleanup_successful();
+        Ok(())
+    }
+
     #[tokio::test]
     async fn test_build_replicated() {
         let log = slog::Logger::root(slog::Discard, o!());
