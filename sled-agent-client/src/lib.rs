@@ -23,7 +23,14 @@ impl From<omicron_common::api::internal::nexus::InstanceRuntimeState>
     fn from(
         s: omicron_common::api::internal::nexus::InstanceRuntimeState,
     ) -> Self {
-        todo!("regenerate openapi");
+        Self {
+            fallback_state: s.fallback_state.into(),
+            propolis_id: s.propolis_id,
+            dst_propolis_id: s.dst_propolis_id,
+            migration_id: s.migration_id,
+            gen: s.gen.into(),
+            time_updated: s.time_updated,
+        }
     }
 }
 
@@ -71,7 +78,14 @@ impl From<types::InstanceRuntimeState>
     for omicron_common::api::internal::nexus::InstanceRuntimeState
 {
     fn from(s: types::InstanceRuntimeState) -> Self {
-        todo!("regenerate openapi");
+        Self {
+            fallback_state: s.fallback_state.into(),
+            propolis_id: s.propolis_id,
+            dst_propolis_id: s.dst_propolis_id,
+            migration_id: s.migration_id,
+            gen: s.gen.into(),
+            time_updated: s.time_updated,
+        }
     }
 }
 
