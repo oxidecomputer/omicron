@@ -1250,6 +1250,7 @@ dependencies = [
  "dropshot",
  "hex",
  "omicron-test-utils",
+ "omicron-workspace-hack",
  "ring",
  "slog",
  "tokio",
