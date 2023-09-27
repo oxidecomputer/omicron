@@ -28,6 +28,7 @@ signal-hook-tokio.workspace = true
 tokio = { workspace = true, features = [ "full" ] }
 tokio-postgres.workspace = true
 toml.workspace = true
+omicron-workspace-hack = { version = "0.1", path = "../../workspace-hack" }
 
 [dev-dependencies]
 camino-tempfile.workspace = true
