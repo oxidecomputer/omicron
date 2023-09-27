@@ -545,7 +545,7 @@ mod test {
             instance.transition(InstanceStateRequested::Running).unwrap();
         assert!(dropped.is_none());
         assert!(instance.object.desired().is_some());
-        assert!(rx.try_next().is_ok());
+        assert!(rx.try_next().is_err());
 
         // The VMM should still be Starting and its generation should not have
         // changed (the transition to Running is queued but hasn't executed).

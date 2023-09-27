@@ -572,8 +572,8 @@ mod test {
         let mut state = make_instance();
         state.vmm.state = ApiInstanceState::Migrating;
         state.instance.migration_id = Some(Uuid::new_v4());
-        state.instance.dst_propolis_id =
-            Some(state.instance.propolis_id.unwrap());
+        state.propolis_id = Uuid::new_v4();
+        state.instance.dst_propolis_id = Some(state.propolis_id);
         state
     }
 
@@ -614,7 +614,7 @@ mod test {
                 prev.instance.dst_propolis_id,
                 next.instance.dst_propolis_id
             );
-            assert_eq!(prev.instance.migration_id, next.instance.propolis_id);
+            assert_eq!(prev.instance.migration_id, next.instance.migration_id);
         } else {
             assert!(
                 (prev.instance.fallback_state != next.instance.fallback_state)
@@ -629,10 +629,11 @@ mod test {
             );
         }
 
+        // Propolis is free to publish no-op VMM state updates (e.g. when an
+        // in-progress migration's state changes but the migration is not yet
+        // complete), so don't test the converse here.
         if prev.vmm.gen == next.vmm.gen {
             assert_eq!(prev.vmm.state, next.vmm.state);
-        } else {
-            assert_ne!(prev.vmm.state, next.vmm.state);
         }
     }
 
@@ -759,7 +760,9 @@ mod test {
         assert!(state.instance.gen > prev.instance.gen);
         assert_eq!(state.vmm.gen, prev.vmm.gen);
 
-        // Mark that the new migration out is in progress.
+        // Mark that the new migration out is in progress. This doesn't change
+        // anything in the instance runtime state, but does update the VMM state
+        // generation.
         let prev = state.clone();
         observed.vmm_state = PropolisInstanceState(Observed::Migrating);
         observed.migration_status = ObservedMigrationStatus::InProgress;
@@ -775,7 +778,7 @@ mod test {
         );
         assert_eq!(state.vmm.state, ApiInstanceState::Migrating);
         assert!(state.vmm.gen > prev.vmm.gen);
-        assert!(state.instance.gen > prev.instance.gen);
+        assert_eq!(state.instance.gen, prev.instance.gen);
 
         // Propolis will publish that the migration succeeds before changing any
         // state. This should transfer control to the target but should not

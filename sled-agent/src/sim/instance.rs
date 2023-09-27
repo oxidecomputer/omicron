@@ -168,7 +168,10 @@ impl SimInstanceInner {
             }
             InstanceStateRequested::Stopped => {
                 match self.next_resting_state() {
-                    ApiInstanceState::Creating => {
+                    ApiInstanceState::Creating => unreachable!(
+                        "VMMs should never try to reach the Creating state"
+                    ),
+                    ApiInstanceState::Starting => {
                         self.state.terminate_rudely();
                     }
                     ApiInstanceState::Running => {
