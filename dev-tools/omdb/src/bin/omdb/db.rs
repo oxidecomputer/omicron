@@ -716,7 +716,7 @@ async fn cmd_db_instances(
     let instances = dsl::instance
         .limit(i64::from(u32::from(limit)))
         .select(Instance::as_select())
-        .load_async(datastore.pool_for_tests().await?)
+        .load_async(&*datastore.pool_connection_for_tests().await?)
         .await
         .context("loading instances")?;
 
