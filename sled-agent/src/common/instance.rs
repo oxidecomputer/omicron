@@ -87,7 +87,7 @@ pub enum ObservedMigrationStatus {
 
 /// The information observed by the instance's Propolis state monitor.
 #[derive(Clone, Copy, Debug)]
-pub struct ObservedPropolisState {
+pub(crate) struct ObservedPropolisState {
     /// The state reported by Propolis's instance state monitor API.
     pub vmm_state: PropolisInstanceState,
 
@@ -230,7 +230,7 @@ impl InstanceStates {
 
     /// Update the known state of an instance based on an observed state from
     /// Propolis.
-    pub fn apply_propolis_observation(
+    pub(crate) fn apply_propolis_observation(
         &mut self,
         observed: &ObservedPropolisState,
     ) -> Option<Action> {

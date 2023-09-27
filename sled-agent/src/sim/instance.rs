@@ -255,11 +255,6 @@ impl SimInstanceInner {
         }
     }
 
-    /// Yields the current simulated instance runtime state.
-    fn current(&self) -> SledInstanceState {
-        self.state.sled_instance_state()
-    }
-
     /// If the state change queue contains at least once instance state change,
     /// returns the requested instance state associated with the last instance
     /// state on the queue. Returns None otherwise.

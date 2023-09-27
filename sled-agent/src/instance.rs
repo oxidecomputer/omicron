@@ -8,7 +8,7 @@ use crate::common::instance::{
     Action as InstanceAction, InstanceStates, ObservedPropolisState,
     PublishedVmmState,
 };
-use crate::instance_manager::InstanceTicket;
+use crate::instance_manager::{InstanceManagerServices, InstanceTicket};
 use crate::nexus::NexusClientWithResolver;
 use crate::params::ZoneBundleCause;
 use crate::params::ZoneBundleMetadata;
@@ -34,7 +34,7 @@ use illumos_utils::zone::PROPOLIS_ZONE_PREFIX;
 use omicron_common::address::NEXUS_INTERNAL_PORT;
 use omicron_common::address::PROPOLIS_PORT;
 use omicron_common::api::internal::nexus::{
-    InstanceRuntimeState, SledInstanceState,
+    InstanceRuntimeState, SledInstanceState, VmmRuntimeState,
 };
 use omicron_common::api::internal::shared::{
     NetworkInterface, SourceNatConfig,
@@ -266,7 +266,7 @@ impl InstanceInner {
         &self.propolis_id
     }
 
-    async fn publish_state_to_nexus(&self) -> Result<(), Error> {
+    async fn publish_state_to_nexus(&self) {
         // Retry until Nexus acknowledges that it has applied this state update.
         // Note that Nexus may receive this call but then fail while reacting
         // to it. If that failure is transient, Nexus expects this routine to
@@ -344,11 +344,7 @@ impl InstanceInner {
                 "Failed to publish state to Nexus, will not retry: {:?}", e;
                 "instance_id" => %self.id()
             );
-
-            return Err(e.into());
         }
-
-        Ok(())
     }
 
     /// Processes a Propolis state change observed by the Propolis monitoring
@@ -586,59 +582,79 @@ pub struct Instance {
     inner: Arc<Mutex<InstanceInner>>,
 }
 
+#[derive(Debug)]
+pub(crate) struct InstanceInitialState {
+    pub hardware: InstanceHardware,
+    pub instance_runtime: InstanceRuntimeState,
+    pub vmm_runtime: VmmRuntimeState,
+}
+
 impl Instance {
     /// Creates a new (not yet running) instance object.
     ///
-    /// Arguments:
+    /// # Arguments
+    ///
     /// * `log`: Logger for dumping debug information.
     /// * `id`: UUID of the instance to be created.
-    /// * `initial`: State of the instance at initialization time.
-    /// * `vnic_allocator`: A unique (to the sled) ID generator to
-    /// refer to a VNIC. (This exists because of a restriction on VNIC name
-    /// lengths, otherwise the UUID would be used instead).
-    /// * `port_manager`: Handle to the object responsible for managing OPTE
-    /// ports.
-    /// * `nexus_client`: Connection to Nexus, used for sending notifications.
-    // TODO: This arg list is getting a little long; can we clean this up?
-    #[allow(clippy::too_many_arguments)]
-    pub fn new(
+    /// * `propolis_id`: UUID for the VMM to be created.
+    /// * `ticket`: A ticket that ensures this instance is a member of its
+    ///   instance manager's tracking table.
+    /// * `state`: The initial state of this instance.
+    /// * `services`: A set of instance manager-provided services.
+    pub(crate) fn new(
         log: Logger,
         id: Uuid,
+        propolis_id: Uuid,
         ticket: InstanceTicket,
-        initial: InstanceHardware,
-        vnic_allocator: VnicAllocator<Etherstub>,
-        port_manager: PortManager,
-        nexus_client: NexusClientWithResolver,
-        storage: StorageResources,
-        zone_bundler: ZoneBundler,
+        state: InstanceInitialState,
+        services: InstanceManagerServices,
     ) -> Result<Self, Error> {
-        info!(log, "Instance::new w/initial HW: {:?}", initial);
+        info!(log, "initializing new Instance";
+              "instance_id" => %id,
+              "propolis_id" => %propolis_id,
+              "state" => ?state);
+
+        let InstanceInitialState { hardware, instance_runtime, vmm_runtime } =
+            state;
+
+        let InstanceManagerServices {
+            nexus_client,
+            vnic_allocator,
+            port_manager,
+            storage,
+            zone_bundler,
+        } = services;
+
         let instance = InstanceInner {
             log: log.new(o!("instance_id" => id.to_string())),
             // NOTE: Mostly lies.
             properties: propolis_client::api::InstanceProperties {
                 id,
-                name: initial.runtime.hostname.clone(),
+                name: hardware.properties.hostname.clone(),
                 description: "Test description".to_string(),
                 image_id: Uuid::nil(),
                 bootrom_id: Uuid::nil(),
                 // TODO: Align the byte type w/propolis.
-                memory: initial.runtime.memory.to_whole_mebibytes(),
+                memory: hardware.properties.memory.to_whole_mebibytes(),
                 // TODO: we should probably make propolis aligned with
                 // InstanceCpuCount here, to avoid any casting...
-                vcpus: initial.runtime.ncpus.0 as u8,
+                vcpus: hardware.properties.ncpus.0 as u8,
             },
-            propolis_id: initial.runtime.propolis_id,
-            propolis_ip: initial.runtime.propolis_addr.unwrap().ip(),
+            propolis_id,
+            propolis_ip: vmm_runtime.propolis_addr.ip(),
             vnic_allocator,
             port_manager,
-            requested_nics: initial.nics,
-            source_nat: initial.source_nat,
-            external_ips: initial.external_ips,
-            firewall_rules: initial.firewall_rules,
-            requested_disks: initial.disks,
-            cloud_init_bytes: initial.cloud_init_bytes,
-            state: InstanceStates::new(initial.runtime),
+            requested_nics: hardware.nics,
+            source_nat: hardware.source_nat,
+            external_ips: hardware.external_ips,
+            firewall_rules: hardware.firewall_rules,
+            requested_disks: hardware.disks,
+            cloud_init_bytes: hardware.cloud_init_bytes,
+            state: InstanceStates::new(
+                instance_runtime,
+                vmm_runtime,
+                propolis_id,
+            ),
             running_state: None,
             nexus_client,
             storage,

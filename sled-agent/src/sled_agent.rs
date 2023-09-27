@@ -35,6 +35,9 @@ use omicron_common::address::{
     get_sled_address, get_switch_zone_address, Ipv6Subnet, SLED_PREFIX,
 };
 use omicron_common::api::external::Vni;
+use omicron_common::api::internal::nexus::{
+    SledInstanceState, VmmRuntimeState,
+};
 use omicron_common::api::internal::shared::RackNetworkConfig;
 use omicron_common::api::{
     internal::nexus::DiskRuntimeState, internal::nexus::InstanceRuntimeState,
@@ -758,11 +761,20 @@ impl SledAgent {
     pub async fn instance_ensure_registered(
         &self,
         instance_id: Uuid,
-        initial: InstanceHardware,
-    ) -> Result<InstanceRuntimeState, Error> {
+        propolis_id: Uuid,
+        hardware: InstanceHardware,
+        instance_runtime: InstanceRuntimeState,
+        vmm_runtime: VmmRuntimeState,
+    ) -> Result<SledInstanceState, Error> {
         self.inner
             .instances
-            .ensure_registered(instance_id, initial)
+            .ensure_registered(
+                instance_id,
+                propolis_id,
+                hardware,
+                instance_runtime,
+                vmm_runtime,
+            )
             .await
             .map_err(|e| Error::Instance(e))
     }
@@ -806,7 +818,7 @@ impl SledAgent {
         instance_id: Uuid,
         old_runtime: &InstanceRuntimeState,
         migration_ids: &Option<InstanceMigrationSourceParams>,
-    ) -> Result<InstanceRuntimeState, Error> {
+    ) -> Result<SledInstanceState, Error> {
         self.inner
             .instances
             .put_migration_ids(instance_id, old_runtime, migration_ids)
