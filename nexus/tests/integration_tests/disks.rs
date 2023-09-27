@@ -6,12 +6,13 @@
 
 use super::metrics::{get_latest_silo_metric, query_for_metrics};
 use chrono::Utc;
-use crucible_agent_client::types::State as RegionState;
 use dropshot::test_util::ClientTestContext;
 use dropshot::HttpErrorResponseBody;
 use http::method::Method;
 use http::StatusCode;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db::fixed_data::{silo::SILO_ID, FLEET_ID};
+use nexus_db_queries::db::lookup::LookupPath;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::Collection;
 use nexus_test_utils::http_testing::NexusRequest;
@@ -25,6 +26,7 @@ use nexus_test_utils::resource_helpers::objects_list_page_authz;
 use nexus_test_utils::resource_helpers::populate_ip_pool;
 use nexus_test_utils::resource_helpers::DiskTest;
 use nexus_test_utils_macros::nexus_test;
+use nexus_types::external_api::params;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Disk;
 use omicron_common::api::external::DiskState;
@@ -33,10 +35,8 @@ use omicron_common::api::external::Instance;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::NameOrId;
 use omicron_nexus::app::{MAX_DISK_SIZE_BYTES, MIN_DISK_SIZE_BYTES};
-use omicron_nexus::db::fixed_data::{silo::SILO_ID, FLEET_ID};
-use omicron_nexus::db::lookup::LookupPath;
+use omicron_nexus::Nexus;
 use omicron_nexus::TestInterfaces as _;
-use omicron_nexus::{external_api::params, Nexus};
 use oximeter::types::Datum;
 use oximeter::types::Measurement;
 use sled_agent_client::TestInterfaces as _;
@@ -728,38 +728,10 @@ async fn test_disk_region_creation_failure(
     .await
     .unwrap();
 
-    // After the failed allocation, the disk should not exist.
+    // After the failed allocation, the disk should be Faulted
     let disks = disks_list(&client, &disks_url).await;
-    assert_eq!(disks.len(), 0);
-
-    // After the failed allocation, regions will exist, but be "Failed".
-    for zpool in &test.zpools {
-        for dataset in &zpool.datasets {
-            let crucible = test
-                .sled_agent
-                .get_crucible_dataset(zpool.id, dataset.id)
-                .await;
-            let regions = crucible.list().await;
-            assert_eq!(regions.len(), 1);
-            assert_eq!(regions[0].state, RegionState::Failed);
-        }
-    }
-
-    // Validate that the underlying regions were released as a part of
-    // unwinding the failed disk allocation, by performing another disk
-    // allocation that should succeed.
-    for zpool in &test.zpools {
-        for dataset in &zpool.datasets {
-            let crucible = test
-                .sled_agent
-                .get_crucible_dataset(zpool.id, dataset.id)
-                .await;
-            crucible
-                .set_create_callback(Box::new(|_| RegionState::Created))
-                .await;
-        }
-    }
-    let _ = create_disk(client, PROJECT_NAME, DISK_NAME).await;
+    assert_eq!(disks.len(), 1);
+    assert_eq!(disks[0].state, DiskState::Faulted);
 }
 
 // Tests that invalid block sizes are rejected

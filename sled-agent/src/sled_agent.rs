@@ -25,7 +25,9 @@ use crate::zone_bundle::BundleError;
 use bootstore::schemes::v0 as bootstore;
 use camino::Utf8PathBuf;
 use dropshot::HttpError;
-use illumos_utils::opte::params::SetVirtualNetworkInterfaceHost;
+use illumos_utils::opte::params::{
+    DeleteVirtualNetworkInterfaceHost, SetVirtualNetworkInterfaceHost,
+};
 use illumos_utils::opte::PortManager;
 use illumos_utils::zone::PROPOLIS_ZONE_PREFIX;
 use illumos_utils::zone::ZONE_PREFIX;
@@ -878,7 +880,7 @@ impl SledAgent {
 
     pub async fn unset_virtual_nic_host(
         &self,
-        mapping: &SetVirtualNetworkInterfaceHost,
+        mapping: &DeleteVirtualNetworkInterfaceHost,
     ) -> Result<(), Error> {
         self.inner
             .port_manager

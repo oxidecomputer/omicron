@@ -87,6 +87,9 @@ mod vpc;
 mod zpool;
 
 pub use address_lot::AddressLotCreateResult;
+pub use db_metadata::{
+    all_sql_for_version_migration, EARLIEST_SUPPORTED_VERSION,
+};
 pub use dns::DnsVersionUpdateBuilder;
 pub use rack::RackInit;
 pub use silo::Discoverability;

@@ -16,11 +16,12 @@ use nexus_test_utils::load_test_config;
 use nexus_test_utils::resource_helpers::create_certificate;
 use nexus_test_utils::resource_helpers::delete_certificate;
 use nexus_test_utils_macros::nexus_test;
+use nexus_types::external_api::params;
+use nexus_types::external_api::shared;
 use nexus_types::external_api::views::Certificate;
 use nexus_types::internal_api::params as internal_params;
 use omicron_common::api::external::IdentityMetadataCreateParams;
-use omicron_nexus::external_api::params;
-use omicron_nexus::external_api::shared;
+use omicron_test_utils::certificates::CertificateChain;
 use omicron_test_utils::dev::poll::wait_for_condition;
 use omicron_test_utils::dev::poll::CondCheckError;
 use oxide_client::ClientSessionExt;
@@ -32,90 +33,6 @@ use std::time::Duration;
 
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
-
-// Utility structure for making a test certificate
-pub struct CertificateChain {
-    root_cert: rustls::Certificate,
-    intermediate_cert: rustls::Certificate,
-    end_cert: rustls::Certificate,
-    end_keypair: rcgen::Certificate,
-}
-
-impl CertificateChain {
-    pub fn new() -> Self {
-        let params = rcgen::CertificateParams::new(vec!["localhost".into()]);
-        Self::with_params(params)
-    }
-
-    pub fn with_params(params: rcgen::CertificateParams) -> Self {
-        let mut root_params = rcgen::CertificateParams::new(vec![]);
-        root_params.is_ca =
-            rcgen::IsCa::Ca(rcgen::BasicConstraints::Unconstrained);
-        let root_keypair = rcgen::Certificate::from_params(root_params)
-            .expect("failed to generate root keys");
-
-        let mut intermediate_params = rcgen::CertificateParams::new(vec![]);
-        intermediate_params.is_ca =
-            rcgen::IsCa::Ca(rcgen::BasicConstraints::Unconstrained);
-        let intermediate_keypair =
-            rcgen::Certificate::from_params(intermediate_params)
-                .expect("failed to generate intermediate keys");
-
-        let end_keypair = rcgen::Certificate::from_params(params)
-            .expect("failed to generate end-entity keys");
-
-        let root_cert = rustls::Certificate(
-            root_keypair
-                .serialize_der()
-                .expect("failed to serialize root cert"),
-        );
-        let intermediate_cert = rustls::Certificate(
-            intermediate_keypair
-                .serialize_der_with_signer(&root_keypair)
-                .expect("failed to serialize intermediate cert"),
-        );
-        let end_cert = rustls::Certificate(
-            end_keypair
-                .serialize_der_with_signer(&intermediate_keypair)
-                .expect("failed to serialize end-entity cert"),
-        );
-
-        Self { root_cert, intermediate_cert, end_cert, end_keypair }
-    }
-
-    pub fn end_cert_private_key_as_der(&self) -> Vec<u8> {
-        self.end_keypair.serialize_private_key_der()
-    }
-
-    pub fn end_cert_private_key_as_pem(&self) -> String {
-        self.end_keypair.serialize_private_key_pem()
-    }
-
-    fn cert_chain(&self) -> Vec<rustls::Certificate> {
-        vec![
-            self.end_cert.clone(),
-            self.intermediate_cert.clone(),
-            self.root_cert.clone(),
-        ]
-    }
-
-    pub fn cert_chain_as_pem(&self) -> String {
-        tls_cert_to_pem(&self.cert_chain())
-    }
-}
-
-fn tls_cert_to_pem(certs: &Vec<rustls::Certificate>) -> String {
-    let mut serialized_certs = String::new();
-    for cert in certs {
-        let encoded_cert = pem::encode(&pem::Pem {
-            tag: "CERTIFICATE".to_string(),
-            contents: cert.0.clone(),
-        });
-
-        serialized_certs.push_str(&encoded_cert);
-    }
-    serialized_certs
-}
 
 const CERTS_URL: &str = "/v1/certificates";
 const CERT_NAME: &str = "my-certificate";
@@ -233,7 +150,7 @@ async fn test_crud(cptestctx: &ControlPlaneTestContext) {
     let certs = certs_list(&client).await;
     assert!(certs.is_empty());
 
-    let chain = CertificateChain::new();
+    let chain = CertificateChain::new(cptestctx.wildcard_silo_dns_name());
     let (cert, key) =
         (chain.cert_chain_as_pem(), chain.end_cert_private_key_as_pem());
 
@@ -273,14 +190,19 @@ async fn test_cannot_create_certificate_with_bad_key(
 ) {
     let client = &cptestctx.external_client;
 
-    let chain = CertificateChain::new();
+    let chain = CertificateChain::new(cptestctx.wildcard_silo_dns_name());
     let (cert, der_key) =
         (chain.cert_chain_as_pem(), chain.end_cert_private_key_as_der());
 
     let key = String::from_utf8_lossy(&der_key).to_string();
 
     // Cannot create a certificate with a bad key (e.g. not PEM encoded)
-    cert_create_expect_error(&client, CERT_NAME, cert, key).await;
+    let error = cert_create_expect_error(&client, CERT_NAME, cert, key).await;
+    let expected = "Failed to parse private key";
+    assert!(
+        error.contains(expected),
+        "{error:?} does not contain {expected:?}"
+    );
 }
 
 #[nexus_test]
@@ -289,14 +211,19 @@ async fn test_cannot_create_certificate_with_mismatched_key(
 ) {
     let client = &cptestctx.external_client;
 
-    let chain1 = CertificateChain::new();
+    let chain1 = CertificateChain::new(cptestctx.wildcard_silo_dns_name());
     let cert1 = chain1.cert_chain_as_pem();
 
-    let chain2 = CertificateChain::new();
+    let chain2 = CertificateChain::new(cptestctx.wildcard_silo_dns_name());
     let key2 = chain2.end_cert_private_key_as_pem();
 
     // Cannot create a certificate with a key that doesn't match the cert
-    cert_create_expect_error(&client, CERT_NAME, cert1, key2).await;
+    let error = cert_create_expect_error(&client, CERT_NAME, cert1, key2).await;
+    let expected = "Certificate and private key do not match";
+    assert!(
+        error.contains(expected),
+        "{error:?} does not contain {expected:?}"
+    );
 }
 
 #[nexus_test]
@@ -305,7 +232,7 @@ async fn test_cannot_create_certificate_with_bad_cert(
 ) {
     let client = &cptestctx.external_client;
 
-    let chain = CertificateChain::new();
+    let chain = CertificateChain::new(cptestctx.wildcard_silo_dns_name());
     let (cert, key) =
         (chain.cert_chain_as_pem(), chain.end_cert_private_key_as_pem());
 
@@ -314,7 +241,15 @@ async fn test_cannot_create_certificate_with_bad_cert(
 
     let cert = String::from_utf8(tmp).unwrap();
 
-    cert_create_expect_error(&client, CERT_NAME, cert, key).await;
+    let error = cert_create_expect_error(&client, CERT_NAME, cert, key).await;
+
+    // TODO-correctness It's suprising this is the error we get back instead of
+    // "Failed to parse certificate". Why?
+    let expected = "Certificate exists, but is empty";
+    assert!(
+        error.contains(expected),
+        "{error:?} does not contain {expected:?}"
+    );
 }
 
 #[nexus_test]
@@ -323,14 +258,45 @@ async fn test_cannot_create_certificate_with_expired_cert(
 ) {
     let client = &cptestctx.external_client;
 
-    let mut params = rcgen::CertificateParams::new(vec!["localhost".into()]);
+    let mut params =
+        rcgen::CertificateParams::new(vec![cptestctx.wildcard_silo_dns_name()]);
     params.not_after = std::time::SystemTime::UNIX_EPOCH.into();
 
     let chain = CertificateChain::with_params(params);
     let (cert, key) =
         (chain.cert_chain_as_pem(), chain.end_cert_private_key_as_pem());
 
-    cert_create_expect_error(&client, CERT_NAME, cert, key).await;
+    let error = cert_create_expect_error(&client, CERT_NAME, cert, key).await;
+    let expected = "Certificate exists, but is expired";
+    assert!(
+        error.contains(expected),
+        "{error:?} does not contain {expected:?}"
+    );
+}
+
+#[nexus_test]
+async fn test_cannot_create_certificate_with_incorrect_subject_alt_name(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+
+    let bad_subject_alt_name =
+        format!("some-other-silo.sys.{}", cptestctx.external_dns_zone_name);
+
+    let chain = CertificateChain::new(&bad_subject_alt_name);
+    let (cert, key) =
+        (chain.cert_chain_as_pem(), chain.end_cert_private_key_as_pem());
+
+    let error = cert_create_expect_error(&client, CERT_NAME, cert, key).await;
+    for expected in [
+        "Certificate not valid for".to_string(),
+        format!("SANs: {bad_subject_alt_name}"),
+    ] {
+        assert!(
+            error.contains(&expected),
+            "{error:?} does not contain {expected:?}"
+        );
+    }
 }
 
 #[tokio::test]
@@ -394,7 +360,7 @@ async fn test_silo_certificates() {
     // create the other Silos and their users.
     let resolver = Arc::new(
         CustomDnsResolver::new(
-            *cptestctx.external_dns.dns_server.local_address(),
+            cptestctx.external_dns.dns_server.local_address(),
         )
         .unwrap(),
     );

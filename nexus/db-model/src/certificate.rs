@@ -45,9 +45,15 @@ impl Certificate {
         id: Uuid,
         service: ServiceKind,
         params: params::CertificateCreate,
+        possible_dns_names: &[String],
     ) -> Result<Self, CertificateError> {
         let validator = CertificateValidator::default();
-        validator.validate(params.cert.as_bytes(), params.key.as_bytes())?;
+
+        validator.validate(
+            params.cert.as_bytes(),
+            params.key.as_bytes(),
+            possible_dns_names,
+        )?;
 
         Ok(Self::new_unvalidated(silo_id, id, service, params))
     }

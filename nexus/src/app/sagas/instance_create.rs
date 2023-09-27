@@ -11,15 +11,15 @@ use crate::app::{
     MAX_DISKS_PER_INSTANCE, MAX_EXTERNAL_IPS_PER_INSTANCE,
     MAX_NICS_PER_INSTANCE,
 };
-use crate::db::identity::Resource;
-use crate::db::lookup::LookupPath;
-use crate::db::model::ByteCount as DbByteCount;
-use crate::db::queries::network_interface::InsertError as InsertNicError;
 use crate::external_api::params;
-use crate::{authn, authz, db};
 use chrono::Utc;
 use nexus_db_model::NetworkInterfaceKind;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db::identity::Resource;
+use nexus_db_queries::db::lookup::LookupPath;
+use nexus_db_queries::db::model::ByteCount as DbByteCount;
+use nexus_db_queries::db::queries::network_interface::InsertError as InsertNicError;
+use nexus_db_queries::{authn, authz, db};
 use nexus_defaults::DEFAULT_PRIMARY_NIC_NAME;
 use nexus_types::external_api::params::InstanceDiskAttachment;
 use omicron_common::api::external::Error;
@@ -45,7 +45,7 @@ use uuid::Uuid;
 // instance create saga: input parameters
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct Params {
+pub(crate) struct Params {
     pub serialized_authn: authn::saga::Serialized,
     pub project_id: Uuid,
     pub create_params: params::InstanceCreate,
@@ -137,7 +137,7 @@ declare_saga_actions! {
 // instance create saga: definition
 
 #[derive(Debug)]
-pub struct SagaInstanceCreate;
+pub(crate) struct SagaInstanceCreate;
 impl NexusSaga for SagaInstanceCreate {
     const NAME: &'static str = "instance-create";
     type Params = Params;
@@ -1368,8 +1368,7 @@ pub mod test {
     use crate::{
         app::saga::create_saga_dag, app::sagas::instance_create::Params,
         app::sagas::instance_create::SagaInstanceCreate,
-        app::sagas::test_helpers, authn::saga::Serialized,
-        db::datastore::DataStore, external_api::params,
+        app::sagas::test_helpers, external_api::params,
     };
     use async_bb8_diesel::{
         AsyncConnection, AsyncRunQueryDsl, AsyncSimpleConnection,
@@ -1379,7 +1378,9 @@ pub mod test {
         BoolExpressionMethods, ExpressionMethods, QueryDsl, SelectableHelper,
     };
     use dropshot::test_util::ClientTestContext;
+    use nexus_db_queries::authn::saga::Serialized;
     use nexus_db_queries::context::OpContext;
+    use nexus_db_queries::db::datastore::DataStore;
     use nexus_test_utils::resource_helpers::create_disk;
     use nexus_test_utils::resource_helpers::create_project;
     use nexus_test_utils::resource_helpers::populate_ip_pool;
@@ -1460,8 +1461,8 @@ pub mod test {
     }
 
     async fn no_instance_records_exist(datastore: &DataStore) -> bool {
-        use crate::db::model::Instance;
-        use crate::db::schema::instance::dsl;
+        use nexus_db_queries::db::model::Instance;
+        use nexus_db_queries::db::schema::instance::dsl;
 
         dsl::instance
             .filter(dsl::time_deleted.is_null())
@@ -1474,9 +1475,9 @@ pub mod test {
     }
 
     async fn no_network_interface_records_exist(datastore: &DataStore) -> bool {
-        use crate::db::model::NetworkInterface;
-        use crate::db::model::NetworkInterfaceKind;
-        use crate::db::schema::network_interface::dsl;
+        use nexus_db_queries::db::model::NetworkInterface;
+        use nexus_db_queries::db::model::NetworkInterfaceKind;
+        use nexus_db_queries::db::schema::network_interface::dsl;
 
         dsl::network_interface
             .filter(dsl::time_deleted.is_null())
@@ -1492,8 +1493,8 @@ pub mod test {
     }
 
     async fn no_external_ip_records_exist(datastore: &DataStore) -> bool {
-        use crate::db::model::ExternalIp;
-        use crate::db::schema::external_ip::dsl;
+        use nexus_db_queries::db::model::ExternalIp;
+        use nexus_db_queries::db::schema::external_ip::dsl;
 
         dsl::external_ip
             .filter(dsl::time_deleted.is_null())
@@ -1511,8 +1512,8 @@ pub mod test {
     async fn no_sled_resource_instance_records_exist(
         datastore: &DataStore,
     ) -> bool {
-        use crate::db::model::SledResource;
-        use crate::db::schema::sled_resource::dsl;
+        use nexus_db_queries::db::model::SledResource;
+        use nexus_db_queries::db::schema::sled_resource::dsl;
 
         datastore
             .pool_for_tests()
@@ -1525,11 +1526,11 @@ pub mod test {
                 .await
                 .unwrap();
 
-                Ok::<_, crate::db::TransactionError<()>>(
+                Ok::<_, nexus_db_queries::db::TransactionError<()>>(
                     dsl::sled_resource
                         .filter(
                             dsl::kind.eq(
-                                crate::db::model::SledResourceKind::Instance,
+                                nexus_db_queries::db::model::SledResourceKind::Instance,
                             ),
                         )
                         .select(SledResource::as_select())
@@ -1546,8 +1547,8 @@ pub mod test {
     async fn no_virtual_provisioning_resource_records_exist(
         datastore: &DataStore,
     ) -> bool {
-        use crate::db::model::VirtualProvisioningResource;
-        use crate::db::schema::virtual_provisioning_resource::dsl;
+        use nexus_db_queries::db::model::VirtualProvisioningResource;
+        use nexus_db_queries::db::schema::virtual_provisioning_resource::dsl;
 
         datastore.pool_for_tests()
             .await
@@ -1558,9 +1559,9 @@ pub mod test {
                     .await
                     .unwrap();
 
-                Ok::<_, crate::db::TransactionError<()>>(
+                Ok::<_, nexus_db_queries::db::TransactionError<()>>(
                     dsl::virtual_provisioning_resource
-                        .filter(dsl::resource_type.eq(crate::db::model::ResourceTypeProvisioned::Instance.to_string()))
+                        .filter(dsl::resource_type.eq(nexus_db_queries::db::model::ResourceTypeProvisioned::Instance.to_string()))
                         .select(VirtualProvisioningResource::as_select())
                         .get_results_async::<VirtualProvisioningResource>(&conn)
                         .await
@@ -1573,8 +1574,8 @@ pub mod test {
     async fn no_virtual_provisioning_collection_records_using_instances(
         datastore: &DataStore,
     ) -> bool {
-        use crate::db::model::VirtualProvisioningCollection;
-        use crate::db::schema::virtual_provisioning_collection::dsl;
+        use nexus_db_queries::db::model::VirtualProvisioningCollection;
+        use nexus_db_queries::db::schema::virtual_provisioning_collection::dsl;
 
         datastore
             .pool_for_tests()
@@ -1586,7 +1587,7 @@ pub mod test {
                 )
                 .await
                 .unwrap();
-                Ok::<_, crate::db::TransactionError<()>>(
+                Ok::<_, nexus_db_queries::db::TransactionError<()>>(
                     dsl::virtual_provisioning_collection
                         .filter(
                             dsl::cpus_provisioned
@@ -1607,8 +1608,8 @@ pub mod test {
     }
 
     async fn disk_is_detached(datastore: &DataStore) -> bool {
-        use crate::db::model::Disk;
-        use crate::db::schema::disk::dsl;
+        use nexus_db_queries::db::model::Disk;
+        use nexus_db_queries::db::schema::disk::dsl;
 
         dsl::disk
             .filter(dsl::time_deleted.is_null())

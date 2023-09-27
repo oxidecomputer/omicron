@@ -75,9 +75,9 @@ upon event receipt, and that a screen never processes an event that can mutate
 the global state and render in the same method. However, due to the stateful
 rendering model of `tui.rs`, we do allow `Controls` to mutate their internal
 state when executing the `draw` method. This allows reuse of `tui.rs` stateful
-widgets like `list`. `Controls` create `tui::widget::Widgets` on demand during
+widgets like `list`. `Controls` create `ratatui::widget::Widgets` on demand during
 rendering, which themselves display to a given subset of the terminal, known
-as a `tui::layout::Rect`. If necessary, custom `Widgets` can be created, as
+as a `ratatui::layout::Rect`. If necessary, custom `Widgets` can be created, as
 we have done with the `Rack` and `BoxConnector` widgets. Custom widgets can be
 found in `src/ui/widgets`.
 

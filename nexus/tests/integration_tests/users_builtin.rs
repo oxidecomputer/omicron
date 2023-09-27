@@ -1,11 +1,11 @@
 //! Sanity-tests for built-in users
 
 use dropshot::ResultsPage;
+use nexus_db_queries::authn;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils_macros::nexus_test;
-use omicron_nexus::authn;
-use omicron_nexus::external_api::views::UserBuiltin;
+use nexus_types::external_api::views::UserBuiltin;
 use std::collections::BTreeMap;
 
 type ControlPlaneTestContext =

@@ -652,6 +652,12 @@ impl From<&Generation> for i64 {
     }
 }
 
+impl From<u32> for Generation {
+    fn from(value: u32) -> Self {
+        Generation(u64::from(value))
+    }
+}
+
 impl TryFrom<i64> for Generation {
     type Error = anyhow::Error;
 
@@ -683,6 +689,7 @@ impl TryFrom<i64> for Generation {
 pub enum ResourceType {
     AddressLot,
     AddressLotBlock,
+    BackgroundTask,
     Fleet,
     Silo,
     SiloUser,
