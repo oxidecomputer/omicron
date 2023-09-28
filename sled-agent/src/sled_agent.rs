@@ -67,6 +67,7 @@ use std::sync::Arc;
 use tokio::sync::oneshot;
 use uuid::Uuid;
 
+use illumos_utils::running_zone::ZoneBuilderFactory;
 #[cfg(not(test))]
 use illumos_utils::{dladm::Dladm, zone::Zones};
 #[cfg(test)]
@@ -381,6 +382,7 @@ impl SledAgent {
             port_manager.clone(),
             storage_manager.clone(),
             long_running_task_handles.zone_bundler.clone(),
+            ZoneBuilderFactory::default(),
         )?;
 
         // Configure the VMM reservoir as either a percentage of DRAM or as an
