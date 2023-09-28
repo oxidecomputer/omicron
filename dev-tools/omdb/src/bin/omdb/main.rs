@@ -41,6 +41,7 @@ use std::net::SocketAddr;
 use std::net::SocketAddrV6;
 
 mod db;
+mod mgs;
 mod nexus;
 mod sled_agent;
 
@@ -56,6 +57,7 @@ async fn main() -> Result<(), anyhow::Error> {
 
     match &args.command {
         OmdbCommands::Db(db) => db.run_cmd(&args, &log).await,
+        OmdbCommands::Mgs(mgs) => mgs.run_cmd(&args, &log).await,
         OmdbCommands::Nexus(nexus) => nexus.run_cmd(&args, &log).await,
         OmdbCommands::SledAgent(sled) => sled.run_cmd(&args, &log).await,
     }
@@ -153,6 +155,8 @@ impl Omdb {
 enum OmdbCommands {
     /// Query the control plane database (CockroachDB)
     Db(db::DbArgs),
+    /// Debug a specific Management Gateway Service instance
+    Mgs(mgs::MgsArgs),
     /// Debug a specific Nexus instance
     Nexus(nexus::NexusArgs),
     /// Debug a specific Sled
