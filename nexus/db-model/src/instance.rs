@@ -172,3 +172,20 @@ impl InstanceRuntimeState {
         }
     }
 }
+
+impl From<omicron_common::api::internal::nexus::InstanceRuntimeState>
+    for InstanceRuntimeState
+{
+    fn from(
+        state: omicron_common::api::internal::nexus::InstanceRuntimeState,
+    ) -> Self {
+        Self {
+            fallback_state: InstanceState::new(state.fallback_state),
+            time_updated: state.time_updated,
+            gen: state.gen.into(),
+            propolis_id: state.propolis_id,
+            dst_propolis_id: state.dst_propolis_id,
+            migration_id: state.migration_id,
+        }
+    }
+}
