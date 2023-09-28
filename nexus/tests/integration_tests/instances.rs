@@ -645,7 +645,12 @@ async fn test_instance_migrate(cptestctx: &ControlPlaneTestContext) {
     let instance_next = instance_get(&client, &instance_url).await;
     assert_eq!(instance_next.runtime.run_state, InstanceState::Running);
 
-    let original_sled = nexus.instance_sled_id(&instance_id).await.unwrap();
+    let original_sled = nexus
+        .instance_sled_id(&instance_id)
+        .await
+        .unwrap()
+        .expect("running instance should have a sled");
+
     let dst_sled_id = if original_sled == default_sled_id {
         other_sled_id
     } else {
@@ -666,7 +671,12 @@ async fn test_instance_migrate(cptestctx: &ControlPlaneTestContext) {
     .parsed_body::<Instance>()
     .unwrap();
 
-    let current_sled = nexus.instance_sled_id(&instance_id).await.unwrap();
+    let current_sled = nexus
+        .instance_sled_id(&instance_id)
+        .await
+        .unwrap()
+        .expect("running instance should have a sled");
+
     assert_eq!(current_sled, original_sled);
 
     // Explicitly simulate the migration action on the target. Simulated
@@ -678,7 +688,12 @@ async fn test_instance_migrate(cptestctx: &ControlPlaneTestContext) {
     let instance = instance_get(&client, &instance_url).await;
     assert_eq!(instance.runtime.run_state, InstanceState::Running);
 
-    let current_sled = nexus.instance_sled_id(&instance_id).await.unwrap();
+    let current_sled = nexus
+        .instance_sled_id(&instance_id)
+        .await
+        .unwrap()
+        .expect("migrated instance should still have a sled");
+
     assert_eq!(current_sled, dst_sled_id);
 }
 
@@ -752,7 +767,11 @@ async fn test_instance_migrate_v2p(cptestctx: &ControlPlaneTestContext) {
         .derive_guest_network_interface_info(&opctx, &authz_instance)
         .await
         .unwrap();
-    let original_sled_id = nexus.instance_sled_id(&instance_id).await.unwrap();
+    let original_sled_id = nexus
+        .instance_sled_id(&instance_id)
+        .await
+        .unwrap()
+        .expect("running instance should have a sled");
 
     let mut sled_agents = vec![cptestctx.sled_agent.sled_agent.clone()];
     sled_agents.extend(other_sleds.iter().map(|tup| tup.1.sled_agent.clone()));
@@ -806,7 +825,11 @@ async fn test_instance_migrate_v2p(cptestctx: &ControlPlaneTestContext) {
     instance_simulate_on_sled(cptestctx, nexus, dst_sled_id, instance_id).await;
     let instance = instance_get(&client, &instance_url).await;
     assert_eq!(instance.runtime.run_state, InstanceState::Running);
-    let current_sled = nexus.instance_sled_id(&instance_id).await.unwrap();
+    let current_sled = nexus
+        .instance_sled_id(&instance_id)
+        .await
+        .unwrap()
+        .expect("migrated instance should have a sled");
     assert_eq!(current_sled, dst_sled_id);
 
     for sled_agent in &sled_agents {
@@ -2816,16 +2839,22 @@ async fn test_disks_detached_when_instance_destroyed(
         assert!(matches!(disk.state, DiskState::Attached(_)));
     }
 
-    // Stop and delete instance
+    // Stash the instance's current sled agent for later disk simulation. This
+    // needs to be done before the instance is stopped and dissociated from its
+    // sled.
     let instance_url = format!("/v1/instances/nfs?project={}", PROJECT_NAME);
-    let instance =
-        instance_post(&client, instance_name, InstanceOp::Stop).await;
-
+    let instance = instance_get(&client, &instance_url).await;
     let apictx = &cptestctx.server.apictx();
     let nexus = &apictx.nexus;
+    let sa = nexus
+        .instance_sled_by_id(&instance.identity.id)
+        .await
+        .unwrap()
+        .expect("instance should be on a sled while it's running");
 
-    // Store the sled agent for this instance for later disk simulation
-    let sa = nexus.instance_sled_by_id(&instance.identity.id).await.unwrap();
+    // Stop and delete instance
+    let instance =
+        instance_post(&client, instance_name, InstanceOp::Stop).await;
 
     instance_simulate(nexus, &instance.identity.id).await;
     let instance = instance_get(&client, &instance_url).await;
@@ -3765,7 +3794,11 @@ async fn assert_sled_v2p_mappings(
 /// instance, and then tell it to finish simulating whatever async transition is
 /// going on.
 pub async fn instance_simulate(nexus: &Arc<Nexus>, id: &Uuid) {
-    let sa = nexus.instance_sled_by_id(id).await.unwrap();
+    let sa = nexus
+        .instance_sled_by_id(id)
+        .await
+        .unwrap()
+        .expect("instance must be on a sled to simulate a state change");
     sa.instance_finish_transition(*id).await;
 }
 

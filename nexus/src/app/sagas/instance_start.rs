@@ -571,17 +571,6 @@ mod test {
         db_instance
     }
 
-    async fn instance_simulate(
-        cptestctx: &ControlPlaneTestContext,
-        nexus: &Arc<Nexus>,
-        instance_id: &Uuid,
-    ) {
-        info!(&cptestctx.logctx.log, "Poking simulated instance";
-              "instance_id" => %instance_id);
-        let sa = nexus.instance_sled_by_id(instance_id).await.unwrap();
-        sa.instance_finish_transition(*instance_id).await;
-    }
-
     #[nexus_test(server = crate::Server)]
     async fn test_saga_basic_usage_succeeds(
         cptestctx: &ControlPlaneTestContext,
@@ -604,7 +593,7 @@ mod test {
         let saga = nexus.create_runnable_saga(dag).await.unwrap();
         nexus.run_saga(saga).await.expect("Start saga should succeed");
 
-        instance_simulate(cptestctx, nexus, &instance.identity.id).await;
+        test_helpers::instance_simulate(cptestctx, &instance.identity.id).await;
         let db_instance =
             fetch_db_instance(cptestctx, &opctx, instance.identity.id).await;
         assert_eq!(db_instance.runtime().state.0, InstanceState::Running);
@@ -692,7 +681,7 @@ mod test {
 
         let dag = create_saga_dag::<SagaInstanceStart>(params).unwrap();
         test_helpers::actions_succeed_idempotently(nexus, dag).await;
-        instance_simulate(cptestctx, nexus, &instance.identity.id).await;
+        test_helpers::instance_simulate(cptestctx, &instance.identity.id).await;
         let new_db_instance =
             fetch_db_instance(cptestctx, &opctx, instance.identity.id).await;
 

@@ -1964,8 +1964,11 @@ mod test {
 
         // cannot snapshot attached disk for instance in state starting
         let nexus = &cptestctx.server.apictx().nexus;
-        let sa =
-            nexus.instance_sled_by_id(&instance.identity.id).await.unwrap();
+        let sa = nexus
+            .instance_sled_by_id(&instance.identity.id)
+            .await
+            .unwrap()
+            .expect("started instance should have a sled");
         sa.instance_finish_transition(instance.identity.id).await;
     }
 

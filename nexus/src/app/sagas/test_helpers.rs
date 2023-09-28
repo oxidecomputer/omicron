@@ -123,7 +123,12 @@ pub(crate) async fn instance_simulate(
     info!(&cptestctx.logctx.log, "Poking simulated instance";
           "instance_id" => %instance_id);
     let nexus = &cptestctx.server.apictx().nexus;
-    let sa = nexus.instance_sled_by_id(instance_id).await.unwrap();
+    let sa = nexus
+        .instance_sled_by_id(instance_id)
+        .await
+        .unwrap()
+        .expect("instance must be on a sled to simulate a state change");
+
     sa.instance_finish_transition(*instance_id).await;
 }
 
@@ -147,7 +152,11 @@ pub(crate) async fn instance_simulate_by_name(
     let instance_lookup =
         nexus.instance_lookup(&opctx, instance_selector).unwrap();
     let (.., instance) = instance_lookup.fetch().await.unwrap();
-    let sa = nexus.instance_sled_by_id(&instance.id()).await.unwrap();
+    let sa = nexus
+        .instance_sled_by_id(&instance.id())
+        .await
+        .unwrap()
+        .expect("instance must be on a sled to simulate a state change");
     sa.instance_finish_transition(instance.id()).await;
 }
 
