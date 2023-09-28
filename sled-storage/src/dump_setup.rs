@@ -1,3 +1,10 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+//! Dump dataset setup
+
+use crate::dataset::{CRASH_DATASET, DUMP_DATASET};
 use crate::disk::DiskWrapper;
 use camino::Utf8PathBuf;
 use derive_more::{AsRef, Deref, From};
@@ -70,11 +77,11 @@ trait GetMountpoint: std::ops::Deref<Target = ZpoolName> {
 }
 impl GetMountpoint for DebugZpool {
     type NewType = DebugDataset;
-    const MOUNTPOINT: &'static str = sled_hardware::disk::DUMP_DATASET;
+    const MOUNTPOINT: &'static str = DUMP_DATASET;
 }
 impl GetMountpoint for CoreZpool {
     type NewType = CoreDataset;
-    const MOUNTPOINT: &'static str = sled_hardware::disk::CRASH_DATASET;
+    const MOUNTPOINT: &'static str = CRASH_DATASET;
 }
 
 struct DumpSetupWorker {

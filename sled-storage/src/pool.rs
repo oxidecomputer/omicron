@@ -9,9 +9,9 @@ use illumos_utils::zpool::{ZpoolInfo, ZpoolName};
 use omicron_common::disk::DiskIdentity;
 
 #[cfg(test)]
-use illumos_utils::{zfs::MockZfs as Zfs, zpool::MockZpool as Zpool};
+use illumos_utils::zpool::MockZpool as Zpool;
 #[cfg(not(test))]
-use illumos_utils::{zfs::Zfs, zpool::Zpool};
+use illumos_utils::zpool::Zpool;
 
 /// A ZFS storage pool
 #[derive(Debug, Clone)]
@@ -25,12 +25,12 @@ impl Pool {
     /// Queries for an existing Zpool by name.
     ///
     /// Returns Ok if the pool exists.
-    fn new(name: ZpoolName, parent: DiskIdentity) -> Result<Pool, Error> {
+    pub fn new(name: ZpoolName, parent: DiskIdentity) -> Result<Pool, Error> {
         let info = Zpool::get_info(&name.to_string())?;
         Ok(Pool { name, info, parent })
     }
 
-    fn parent(&self) -> &DiskIdentity {
+    pub fn parent(&self) -> &DiskIdentity {
         &self.parent
     }
 }

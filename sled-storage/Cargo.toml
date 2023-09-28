@@ -14,6 +14,7 @@ key-manager.workspace = true
 # We could put this in the nexus-client instead
 nexus-client.workspace = true
 omicron-common.workspace = true
+rand.workspace = true
 schemars = { workspace = true, features = [ "chrono", "uuid1" ] }
 serde.workspace = true
 serde_json.workspace = true
@@ -25,3 +26,7 @@ slog.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 uuid.workspace = true
+
+[dev-dependencies]
+illumos-utils = { workspace = true, features = ["testing"] }
+omicron-test-utils.workspace = true

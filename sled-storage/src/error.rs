@@ -12,7 +12,7 @@ use uuid::Uuid;
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
     #[error(transparent)]
-    DiskError(#[from] sled_hardware::DiskError),
+    DiskError(#[from] sled_hardware::PooledDiskError),
 
     // TODO: We could add the context of "why are we doint this op", maybe?
     #[error(transparent)]

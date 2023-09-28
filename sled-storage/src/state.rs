@@ -4,6 +4,7 @@
 
 //! The internal state of the storage manager task
 
+use crate::dataset::M2_DEBUG_DATASET;
 use crate::disk::DiskWrapper;
 use crate::pool::Pool;
 use camino::Utf8PathBuf;
@@ -110,7 +111,7 @@ impl State {
 
     /// Return the directories for storing zone service bundles.
     pub fn all_zone_bundle_directories(&self) -> Vec<Utf8PathBuf> {
-        self.all_m2_mountpoints(sled_hardware::disk::M2_DEBUG_DATASET)
+        self.all_m2_mountpoints(M2_DEBUG_DATASET)
             .into_iter()
             .map(|p| p.join(BUNDLE_DIRECTORY).join(ZONE_BUNDLE_DIRECTORY))
             .collect()

@@ -50,7 +50,7 @@ static KEY_MANAGER_READY: OnceLock<()> = OnceLock::new();
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
     #[error(transparent)]
-    DiskError(#[from] sled_hardware::DiskError),
+    DiskError(#[from] sled_hardware::PooledDiskError),
 
     // TODO: We could add the context of "why are we doint this op", maybe?
     #[error(transparent)]
@@ -610,7 +610,7 @@ impl StorageWorker {
         &mut self,
         unparsed_disk: UnparsedDisk,
         queued_u2_drives: &mut Option<HashSet<QueuedDiskCreate>>,
-    ) -> Result<Disk, sled_hardware::DiskError> {
+    ) -> Result<Disk, sled_hardware::PooledDiskError> {
         match sled_hardware::Disk::new(
             &self.log,
             unparsed_disk.clone(),
@@ -619,7 +619,7 @@ impl StorageWorker {
         .await
         {
             Ok(disk) => Ok(disk),
-            Err(sled_hardware::DiskError::KeyManager(err)) => {
+            Err(sled_hardware::PooledDiskError::KeyManager(err)) => {
                 warn!(
                     self.log,
                     "Transient error: {err} - queuing disk {:?}", unparsed_disk
@@ -630,7 +630,7 @@ impl StorageWorker {
                     *queued_u2_drives =
                         Some(HashSet::from([unparsed_disk.into()]));
                 }
-                Err(sled_hardware::DiskError::KeyManager(err))
+                Err(sled_hardware::PooledDiskError::KeyManager(err))
             }
             Err(err) => {
                 error!(
@@ -651,7 +651,7 @@ impl StorageWorker {
         &mut self,
         zpool_name: ZpoolName,
         queued_u2_drives: &mut Option<HashSet<QueuedDiskCreate>>,
-    ) -> Result<(), sled_hardware::DiskError> {
+    ) -> Result<(), sled_hardware::PooledDiskError> {
         let synthetic_id = DiskIdentity {
             vendor: "fake_vendor".to_string(),
             serial: "fake_serial".to_string(),
@@ -666,7 +666,7 @@ impl StorageWorker {
         .await
         {
             Ok(()) => Ok(()),
-            Err(sled_hardware::DiskError::KeyManager(err)) => {
+            Err(sled_hardware::PooledDiskError::KeyManager(err)) => {
                 warn!(
                     self.log,
                     "Transient error: {err} - queuing synthetic disk: {:?}",
@@ -678,7 +678,7 @@ impl StorageWorker {
                     *queued_u2_drives =
                         Some(HashSet::from([zpool_name.into()]));
                 }
-                Err(sled_hardware::DiskError::KeyManager(err))
+                Err(sled_hardware::PooledDiskError::KeyManager(err))
             }
             Err(err) => {
                 error!(
