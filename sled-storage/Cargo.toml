@@ -1,0 +1,27 @@
+[package]
+name = "omicron-sled-storage"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+async-trait.workspace = true
+camino.workspace = true
+derive_more.workspace = true
+glob.workspace = true
+illumos-utils.workspace = true
+key-manager.workspace = true
+# Needed strictly for parameter type conversion
+# We could put this in the nexus-client instead
+nexus-client.workspace = true
+omicron-common.workspace = true
+schemars = { workspace = true, features = [ "chrono", "uuid1" ] }
+serde.workspace = true
+serde_json.workspace = true
+# Needed strictly for parameter type conversion
+# We could put this in the sled-agent-client instead
+sled-agent-client.workspace = true
+sled-hardware.workspace = true
+slog.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+uuid.workspace = true

@@ -5266,6 +5266,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "omicron-sled-storage"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "camino",
+ "derive_more",
+ "glob",
+ "illumos-utils",
+ "key-manager",
+ "nexus-client 0.1.0",
+ "omicron-common 0.1.0",
+ "schemars",
+ "serde",
+ "serde_json",
+ "sled-agent-client",
+ "sled-hardware",
+ "slog",
+ "thiserror",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "omicron-test-utils"
 version = "0.1.0"
 dependencies = [
