@@ -449,6 +449,11 @@ impl InstanceTicket {
         InstanceTicket { id, inner: Some(inner) }
     }
 
+    #[cfg(test)]
+    pub(crate) fn new_without_manager_for_test(id: Uuid) -> Self {
+        Self { id, inner: None }
+    }
+
     /// Idempotently removes this instance from the tracked set of
     /// instances. This acts as an "upcall" for instances to remove
     /// themselves after stopping.
