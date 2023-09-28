@@ -20,8 +20,6 @@ use anyhow::ensure;
 use anyhow::Context;
 use display_error_chain::DisplayErrorChain;
 use dropshot::HttpError;
-use futures::Future;
-use futures::TryStream;
 use gateway_client::types::HostPhase2Progress;
 use gateway_client::types::HostPhase2RecoveryImageId;
 use gateway_client::types::HostStartupOptions;
@@ -160,91 +158,9 @@ impl UpdateTracker {
         &self,
         sps: BTreeSet<SpIdentifier>,
         opts: StartUpdateOptions,
-<<<<<<< HEAD
-    ) -> Result<(), StartUpdateError> {
-        self.start_impl(sp, |plan| async {
-            // Do we need to upload this plan's trampoline phase 2 to MGS?
-            let upload_trampoline_phase_2_to_mgs = {
-                let mut upload_trampoline_phase_2_to_mgs =
-                    self.upload_trampoline_phase_2_to_mgs.lock().await;
-
-                match upload_trampoline_phase_2_to_mgs.as_mut() {
-                    Some(prev) => {
-                        // We've previously started an upload - does it match
-                        // this artifact? If not, cancel the old task (which
-                        // might still be trying to upload) and start a new one
-                        // with our current image.
-                        if prev.status.borrow().hash
-                            != plan.trampoline_phase_2.data.hash()
-                        {
-                            // It does _not_ match - we have a new plan with a
-                            // different trampoline image. If the old task is
-                            // still running, cancel it, and start a new one.
-                            prev.task.abort();
-                            *prev = self
-                                .spawn_upload_trampoline_phase_2_to_mgs(&plan);
-                        }
-                    }
-                    None => {
-                        *upload_trampoline_phase_2_to_mgs = Some(
-                            self.spawn_upload_trampoline_phase_2_to_mgs(&plan),
-                        );
-                    }
-                }
-
-                // Both branches above leave `upload_trampoline_phase_2_to_mgs`
-                // with data, so we can unwrap here to clone the `watch`
-                // channel.
-                upload_trampoline_phase_2_to_mgs
-                    .as_ref()
-                    .unwrap()
-                    .status
-                    .clone()
-            };
-
-            let event_buffer = Arc::new(StdMutex::new(EventBuffer::new(16)));
-            let ipr_start_receiver =
-                self.ipr_update_tracker.register(update_id);
-
-            let update_cx = UpdateContext {
-                update_id,
-                sp,
-                mgs_client: self.mgs_client.clone(),
-                upload_trampoline_phase_2_to_mgs,
-                log: self.log.new(o!(
-                    "sp" => format!("{sp:?}"),
-                    "update_id" => update_id.to_string(),
-                )),
-            };
-            // TODO do we need `UpdateDriver` as a distinct type?
-            let update_driver = UpdateDriver {};
-
-            // Using a oneshot channel to communicate the abort handle isn't
-            // ideal, but it works and is the easiest way to send it without
-            // restructuring this code.
-            let (abort_handle_sender, abort_handle_receiver) =
-                oneshot::channel();
-            let task = tokio::spawn(update_driver.run(
-                plan,
-                update_cx,
-                event_buffer.clone(),
-                ipr_start_receiver,
-                opts,
-                abort_handle_sender,
-            ));
-
-            let abort_handle = abort_handle_receiver
-                .await
-                .expect("abort handle is sent immediately");
-
-            SpUpdateData { task, abort_handle, event_buffer }
-        })
-        .await
-=======
     ) -> Result<(), Vec<StartUpdateError>> {
         let imp = RealSpawnUpdateDriver { update_tracker: self, opts };
         self.start_impl(sps, Some(imp)).await
->>>>>>> 2f8b62050 ([wicketd] allow starting multiple updates with one API call)
     }
 
     /// Starts a fake update that doesn't perform any steps, but simply waits
@@ -501,7 +417,9 @@ impl<'tr> SpawnUpdateDriver for RealSpawnUpdateDriver<'tr> {
                 // this artifact? If not, cancel the old task (which
                 // might still be trying to upload) and start a new one
                 // with our current image.
-                if prev.status.borrow().hash != plan.trampoline_phase_2.hash {
+                if prev.status.borrow().hash
+                    != plan.trampoline_phase_2.data.hash()
+                {
                     // It does _not_ match - we have a new plan with a
                     // different trampoline image. If the old task is
                     // still running, cancel it, and start a new one.

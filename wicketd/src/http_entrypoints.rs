@@ -46,7 +46,6 @@ use std::net::IpAddr;
 use std::net::Ipv6Addr;
 use std::time::Duration;
 use tokio::io::AsyncWriteExt;
-use uuid::Uuid;
 use wicket_common::rack_setup::PutRssUserConfigInsensitive;
 use wicket_common::update_events::EventReport;
 
