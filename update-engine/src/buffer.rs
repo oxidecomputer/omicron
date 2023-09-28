@@ -1391,7 +1391,6 @@ mod tests {
                 "all events passed in",
                 |buffer, event| {
                     buffer.add_event(event.clone());
-                    true
                 },
                 WithDeltas::No,
             )
@@ -1403,9 +1402,8 @@ mod tests {
                 |buffer, event| match event {
                     Event::Step(event) => {
                         buffer.add_step_event(event.clone());
-                        true
                     }
-                    Event::Progress(_) => false,
+                    Event::Progress(_) => {}
                 },
                 WithDeltas::Both,
             )
@@ -1418,13 +1416,11 @@ mod tests {
                     Event::Step(event) => match event.kind.priority() {
                         StepEventPriority::High => {
                             buffer.add_step_event(event.clone());
-                            true
                         }
-                        StepEventPriority::Low => false,
+                        StepEventPriority::Low => {}
                     },
                     Event::Progress(event) => {
                         buffer.add_progress_event(event.clone());
-                        true
                     }
                 },
                 WithDeltas::Both,
@@ -1438,13 +1434,11 @@ mod tests {
                     Event::Step(event) => match event.kind.priority() {
                         StepEventPriority::High => {
                             buffer.add_step_event(event.clone());
-                            true
                         }
-                        StepEventPriority::Low => false,
+                        StepEventPriority::Low => {}
                     },
                     Event::Progress(_) => {
                         // Don't add progress events.
-                        false
                     }
                 },
                 WithDeltas::Both,
@@ -1576,10 +1570,7 @@ mod tests {
         fn run_filtered_test(
             &self,
             event_fn_description: &str,
-            mut event_fn: impl FnMut(
-                &mut EventBuffer<TestSpec>,
-                &Event<TestSpec>,
-            ) -> bool,
+            mut event_fn: impl FnMut(&mut EventBuffer<TestSpec>, &Event<TestSpec>),
             with_deltas: WithDeltas,
         ) -> anyhow::Result<()> {
             match with_deltas {
@@ -1604,10 +1595,7 @@ mod tests {
 
         fn run_filtered_test_inner(
             &self,
-            mut event_fn: impl FnMut(
-                &mut EventBuffer<TestSpec>,
-                &Event<TestSpec>,
-            ) -> bool,
+            mut event_fn: impl FnMut(&mut EventBuffer<TestSpec>, &Event<TestSpec>),
             with_deltas: bool,
         ) -> anyhow::Result<()> {
             let description = format!("with deltas = {with_deltas}");
