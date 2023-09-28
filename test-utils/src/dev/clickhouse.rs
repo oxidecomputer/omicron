@@ -378,7 +378,7 @@ impl ClickHouseCluster {
 
         // Start Replica 1
         let r1_port = 8123;
-        let r1_tcp_port = 9000;
+        let r1_tcp_port = 9001;
         let r1_interserver_port = 9009;
         let r1_name = String::from("oximeter_cluster node 1");
         let r1_number = String::from("01");
@@ -395,7 +395,7 @@ impl ClickHouseCluster {
 
         // Start Replica 2
         let r2_port = 8124;
-        let r2_tcp_port = 9001;
+        let r2_tcp_port = 9002;
         let r2_interserver_port = 9010;
         let r2_name = String::from("oximeter_cluster node 2");
         let r2_number = String::from("02");
