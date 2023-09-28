@@ -5,7 +5,7 @@
 //! Disk related types shared among crates
 
 /// Uniquely identifies a disk.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Ord, PartialOrd)]
 pub struct DiskIdentity {
     pub vendor: String,
     pub serial: String,

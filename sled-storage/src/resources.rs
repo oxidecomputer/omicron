@@ -2,13 +2,15 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! The internal state of the storage manager task
+//! Discovered and usable disks and zpools
 
 use crate::dataset::M2_DEBUG_DATASET;
-use crate::disk::DiskWrapper;
+use crate::disk::{Disk, DiskWrapper};
+use crate::error::Error;
 use crate::pool::Pool;
 use camino::Utf8PathBuf;
 use illumos_utils::zpool::ZpoolName;
+use omicron_common::api::external::{ByteCount, ByteCountRangeError};
 use omicron_common::disk::DiskIdentity;
 use sled_hardware::DiskVariant;
 use std::collections::BTreeMap;
@@ -21,7 +23,7 @@ const BUNDLE_DIRECTORY: &str = "bundle";
 // The directory for zone bundles.
 const ZONE_BUNDLE_DIRECTORY: &str = "zone";
 
-/// Storage related state
+/// Storage related resources: disks and zpools
 ///
 /// This state is internal to the [`crate::StorageManager`] task. Clones
 /// of this state, or subsets of it, can be retrieved by requests to the
@@ -34,10 +36,10 @@ const ZONE_BUNDLE_DIRECTORY: &str = "zone";
 /// inside the `StorageManager` task if there are any outstanding copies.
 /// Therefore, we only pay the cost to update infrequently, and no locks are
 /// required by callers when operating on cloned data. The only contention here
-/// is for the refrence counters of the internal Arcs when `State` gets cloned
+/// is for the refrence counters of the internal Arcs when `StorageResources` gets cloned
 /// or dropped.
-#[derive(Debug, Clone)]
-pub struct State {
+#[derive(Debug, Clone, Default)]
+pub struct StorageResources {
     // All disks, real and synthetic, being managed by this sled
     disks: Arc<BTreeMap<DiskIdentity, DiskWrapper>>,
 
@@ -45,7 +47,21 @@ pub struct State {
     pools: Arc<BTreeMap<Uuid, Pool>>,
 }
 
-impl State {
+impl StorageResources {
+    /// Insert a disk and its zpool
+    pub(crate) fn insert_real_disk(&mut self, disk: Disk) -> Result<(), Error> {
+        let parent = disk.identity().clone();
+        let zpool_name = disk.zpool_name().clone();
+        let disk = DiskWrapper::Real {
+            disk: disk.clone(),
+            devfs_path: disk.devfs_path().clone(),
+        };
+        Arc::make_mut(&mut self.disks).insert(disk.identity(), disk);
+        let zpool = Pool::new(zpool_name, parent)?;
+        Arc::make_mut(&mut self.pools).insert(zpool.name.id(), zpool);
+        Ok(())
+    }
+
     /// Returns the identity of the boot disk.
     ///
     /// If this returns `None`, we have not processed the boot disk yet.

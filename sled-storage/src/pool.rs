@@ -16,9 +16,9 @@ use illumos_utils::zpool::Zpool;
 /// A ZFS storage pool
 #[derive(Debug, Clone)]
 pub struct Pool {
-    name: ZpoolName,
-    info: ZpoolInfo,
-    parent: DiskIdentity,
+    pub name: ZpoolName,
+    pub info: ZpoolInfo,
+    pub parent: DiskIdentity,
 }
 
 impl Pool {
@@ -28,9 +28,5 @@ impl Pool {
     pub fn new(name: ZpoolName, parent: DiskIdentity) -> Result<Pool, Error> {
         let info = Zpool::get_info(&name.to_string())?;
         Ok(Pool { name, info, parent })
-    }
-
-    pub fn parent(&self) -> &DiskIdentity {
-        &self.parent
     }
 }

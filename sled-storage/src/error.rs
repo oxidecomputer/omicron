@@ -5,6 +5,7 @@
 //! Storage related errors
 
 use crate::dataset::DatasetName;
+use crate::disk::DiskError;
 use camino::Utf8PathBuf;
 use omicron_common::api::external::ByteCountRangeError;
 use uuid::Uuid;
@@ -12,7 +13,7 @@ use uuid::Uuid;
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
     #[error(transparent)]
-    DiskError(#[from] sled_hardware::PooledDiskError),
+    DiskError(#[from] DiskError),
 
     // TODO: We could add the context of "why are we doint this op", maybe?
     #[error(transparent)]

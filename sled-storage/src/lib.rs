@@ -13,5 +13,6 @@ pub(crate) mod disk;
 pub(crate) mod dump_setup;
 pub mod error;
 pub(crate) mod keyfile;
+pub mod manager;
 pub(crate) mod pool;
-pub mod state;
+pub mod resources;
