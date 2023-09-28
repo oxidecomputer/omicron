@@ -8,10 +8,10 @@
 //! through wicketd.
 
 use crate::ui::defaults::style;
+use ratatui::style::Style;
+use ratatui::text::Span;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
-use tui::style::Style;
-use tui::text::Span;
 
 // This should be greater than the highest poll value for each service
 const LIVENESS_THRESHOLD: Duration = Duration::from_secs(30);

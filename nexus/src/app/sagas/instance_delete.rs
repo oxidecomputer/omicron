@@ -8,10 +8,9 @@ use super::ActionRegistry;
 use super::NexusActionContext;
 use super::NexusSaga;
 use crate::app::sagas::declare_saga_actions;
-use crate::app::sagas::retry_until_known_result;
-use crate::db;
-use crate::db::lookup::LookupPath;
-use crate::{authn, authz};
+use nexus_db_queries::db;
+use nexus_db_queries::db::lookup::LookupPath;
+use nexus_db_queries::{authn, authz};
 use nexus_types::identity::Resource;
 use omicron_common::api::external::{Error, ResourceType};
 use omicron_common::api::internal::shared::SwitchLocation;
@@ -22,7 +21,7 @@ use steno::ActionError;
 // instance delete saga: input parameters
 
 #[derive(Debug, Deserialize, Serialize)]
-pub struct Params {
+pub(crate) struct Params {
     pub serialized_authn: authn::saga::Serialized,
     pub authz_instance: authz::Instance,
     pub instance: db::model::Instance,
@@ -63,7 +62,7 @@ declare_saga_actions! {
 // instance delete saga: definition
 
 #[derive(Debug)]
-pub struct SagaInstanceDelete;
+pub(crate) struct SagaInstanceDelete;
 impl NexusSaga for SagaInstanceDelete {
     const NAME: &'static str = "instance-delete";
     type Params = Params;
@@ -151,70 +150,14 @@ async fn sid_delete_network_config(
         &sagactx,
         &params.serialized_authn,
     );
+    let authz_instance = &params.authz_instance;
     let osagactx = sagactx.user_data();
 
-    let datastore = &osagactx.datastore();
-    let log = sagactx.user_data().log();
-
-    debug!(log, "fetching external ip addresses");
-
-    let external_ips = &datastore
-        .instance_lookup_external_ips(&opctx, params.authz_instance.id())
+    osagactx
+        .nexus()
+        .instance_delete_dpd_config(&opctx, authz_instance)
         .await
-        .map_err(ActionError::action_failed)?;
-
-    let mut errors: Vec<ActionError> = vec![];
-
-    // Here we are attempting to delete every existing NAT entry while deferring
-    // any error handling. If we don't defer error handling, we might end up
-    // bailing out before we've attempted deletion of all entries.
-    for entry in external_ips {
-        for switch in &params.boundary_switches {
-            debug!(log, "deleting nat mapping"; "switch" => switch.to_string(), "entry" => #?entry);
-
-            let client_result =
-                osagactx.nexus().dpd_clients.get(switch).ok_or_else(|| {
-                    ActionError::action_failed(Error::internal_error(&format!(
-                        "unable to find dendrite client for {switch}"
-                    )))
-                });
-
-            let dpd_client = match client_result {
-                Ok(client) => client,
-                Err(new_error) => {
-                    errors.push(new_error);
-                    continue;
-                }
-            };
-
-            let result = retry_until_known_result(log, || async {
-                dpd_client
-                    .ensure_nat_entry_deleted(log, entry.ip, *entry.first_port)
-                    .await
-            })
-            .await;
-
-            match result {
-                Ok(_) => {
-                    debug!(log, "deleting nat mapping successful"; "switch" => switch.to_string(), "entry" => format!("{entry:#?}"));
-                }
-                Err(e) => {
-                    let new_error =
-                        ActionError::action_failed(Error::internal_error(
-                            &format!("failed to delete nat entry via dpd: {e}"),
-                        ));
-                    error!(log, "{new_error:#?}");
-                    errors.push(new_error);
-                }
-            }
-        }
-    }
-
-    if let Some(error) = errors.first() {
-        return Err(error.clone());
-    }
-
-    Ok(())
+        .map_err(ActionError::action_failed)
 }
 
 async fn sid_delete_instance_record(
@@ -347,12 +290,12 @@ mod test {
         app::saga::create_saga_dag,
         app::sagas::instance_create::test::verify_clean_slate,
         app::sagas::instance_delete::Params,
-        app::sagas::instance_delete::SagaInstanceDelete,
-        authn::saga::Serialized, db, db::lookup::LookupPath,
-        external_api::params,
+        app::sagas::instance_delete::SagaInstanceDelete, external_api::params,
     };
     use dropshot::test_util::ClientTestContext;
-    use nexus_db_queries::context::OpContext;
+    use nexus_db_queries::{
+        authn::saga::Serialized, context::OpContext, db, db::lookup::LookupPath,
+    };
     use nexus_test_utils::resource_helpers::create_disk;
     use nexus_test_utils::resource_helpers::create_project;
     use nexus_test_utils::resource_helpers::populate_ip_pool;

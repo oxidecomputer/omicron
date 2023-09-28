@@ -3,14 +3,14 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::app::sagas;
-use crate::authn;
-use crate::authz;
-use crate::db;
-use crate::db::datastore::UpdatePrecondition;
-use crate::db::model::{SwitchPort, SwitchPortSettings};
 use crate::external_api::params;
 use db::datastore::SwitchPortSettingsCombinedResult;
+use nexus_db_queries::authn;
+use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db;
+use nexus_db_queries::db::datastore::UpdatePrecondition;
+use nexus_db_queries::db::model::{SwitchPort, SwitchPortSettings};
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::{
     self, CreateResult, DataPageParams, DeleteResult, ListResultVec,
@@ -20,7 +20,7 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 impl super::Nexus {
-    pub async fn switch_port_settings_create(
+    pub(crate) async fn switch_port_settings_create(
         &self,
         opctx: &OpContext,
         params: params::SwitchPortSettingsCreate,
@@ -29,7 +29,7 @@ impl super::Nexus {
         self.db_datastore.switch_port_settings_create(opctx, &params).await
     }
 
-    pub async fn switch_port_settings_delete(
+    pub(crate) async fn switch_port_settings_delete(
         &self,
         opctx: &OpContext,
         params: &params::SwitchPortSettingsSelector,
@@ -38,7 +38,7 @@ impl super::Nexus {
         self.db_datastore.switch_port_settings_delete(opctx, params).await
     }
 
-    pub async fn switch_port_settings_list(
+    pub(crate) async fn switch_port_settings_list(
         &self,
         opctx: &OpContext,
         pagparams: &PaginatedBy<'_>,
@@ -47,7 +47,7 @@ impl super::Nexus {
         self.db_datastore.switch_port_settings_list(opctx, pagparams).await
     }
 
-    pub async fn switch_port_settings_get(
+    pub(crate) async fn switch_port_settings_get(
         &self,
         opctx: &OpContext,
         name_or_id: &NameOrId,
@@ -73,7 +73,7 @@ impl super::Nexus {
             .await
     }
 
-    pub async fn switch_port_list(
+    pub(crate) async fn switch_port_list(
         &self,
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, Uuid>,
@@ -82,7 +82,7 @@ impl super::Nexus {
         self.db_datastore.switch_port_list(opctx, pagparams).await
     }
 
-    pub async fn get_switch_port(
+    pub(crate) async fn get_switch_port(
         &self,
         opctx: &OpContext,
         params: uuid::Uuid,
@@ -91,7 +91,7 @@ impl super::Nexus {
         self.db_datastore.switch_port_get(opctx, params).await
     }
 
-    pub async fn list_switch_ports_with_uplinks(
+    pub(crate) async fn list_switch_ports_with_uplinks(
         &self,
         opctx: &OpContext,
     ) -> ListResultVec<SwitchPort> {
@@ -99,7 +99,7 @@ impl super::Nexus {
         self.db_datastore.switch_ports_with_uplinks(opctx).await
     }
 
-    pub async fn set_switch_port_settings_id(
+    pub(crate) async fn set_switch_port_settings_id(
         &self,
         opctx: &OpContext,
         switch_port_id: Uuid,
@@ -117,7 +117,7 @@ impl super::Nexus {
             .await
     }
 
-    pub async fn switch_port_apply_settings(
+    pub(crate) async fn switch_port_apply_settings(
         self: &Arc<Self>,
         opctx: &OpContext,
         port: &Name,
@@ -159,7 +159,7 @@ impl super::Nexus {
         Ok(())
     }
 
-    pub async fn switch_port_clear_settings(
+    pub(crate) async fn switch_port_clear_settings(
         self: &Arc<Self>,
         opctx: &OpContext,
         port: &Name,
@@ -190,7 +190,7 @@ impl super::Nexus {
         Ok(())
     }
 
-    pub async fn populate_switch_ports(
+    pub(crate) async fn populate_switch_ports(
         &self,
         opctx: &OpContext,
         ports: &[Name],

@@ -18,7 +18,7 @@ use steno::ActionError;
 // test saga: input parameters
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct Params {}
+pub(crate) struct Params {}
 
 // test saga: actions
 
@@ -37,7 +37,7 @@ declare_saga_actions! {
 // test saga: definition
 
 #[derive(Debug)]
-pub struct SagaTest;
+pub(crate) struct SagaTest;
 impl NexusSaga for SagaTest {
     const NAME: &'static str = "test-saga";
     type Params = Params;

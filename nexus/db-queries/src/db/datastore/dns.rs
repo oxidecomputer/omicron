@@ -60,7 +60,18 @@ impl DataStore {
     ///
     /// We do not generally expect there to be more than 1-2 DNS zones in a
     /// group (and nothing today creates more than one).
-    async fn dns_zones_list_all<ConnErr>(
+    pub async fn dns_zones_list_all(
+        &self,
+        opctx: &OpContext,
+        dns_group: DnsGroup,
+    ) -> ListResultVec<DnsZone> {
+        let conn = self.pool_authorized(opctx).await?;
+        self.dns_zones_list_all_on_connection(opctx, conn, dns_group).await
+    }
+
+    /// Variant of [`Self::dns_zones_list_all`] which may be called from a
+    /// transaction context.
+    pub(crate) async fn dns_zones_list_all_on_connection<ConnErr>(
         &self,
         opctx: &OpContext,
         conn: &(impl async_bb8_diesel::AsyncConnection<
@@ -149,7 +160,7 @@ impl DataStore {
 
     /// List all DNS names in the given DNS zone at the given group version
     /// (paginated)
-    async fn dns_names_list(
+    pub async fn dns_names_list(
         &self,
         opctx: &OpContext,
         dns_zone_id: Uuid,
@@ -396,7 +407,6 @@ impl DataStore {
     /// **Callers almost certainly want to wake up the corresponding Nexus
     /// background task to cause these changes to be propagated to the
     /// corresponding DNS servers.**
-    #[must_use]
     pub async fn dns_update<ConnErr>(
         &self,
         opctx: &OpContext,
@@ -413,8 +423,9 @@ impl DataStore {
     {
         opctx.authorize(authz::Action::Modify, &authz::DNS_CONFIG).await?;
 
-        let zones =
-            self.dns_zones_list_all(opctx, conn, update.dns_group).await?;
+        let zones = self
+            .dns_zones_list_all_on_connection(opctx, conn, update.dns_group)
+            .await?;
 
         let result = conn
             .transaction_async(|c| async move {
@@ -873,7 +884,7 @@ mod test {
                 NonZeroU32::new(1).unwrap(),
                 &DnsVersion {
                     dns_group: DnsGroup::Internal,
-                    version: Generation(1.try_into().unwrap()),
+                    version: Generation(1u32.try_into().unwrap()),
                     time_created: dns_config.time_created,
                     creator: "unused".to_string(),
                     comment: "unused".to_string(),
@@ -938,9 +949,9 @@ mod test {
         let z2_id = Uuid::new_v4();
         let z3_id = Uuid::new_v4();
         let zinternal_id = Uuid::new_v4();
-        let g1 = Generation(1.try_into().unwrap());
-        let g2 = Generation(2.try_into().unwrap());
-        let g3 = Generation(3.try_into().unwrap());
+        let g1 = Generation(1u32.try_into().unwrap());
+        let g2 = Generation(2u32.try_into().unwrap());
+        let g3 = Generation(3u32.try_into().unwrap());
         let v1 = DnsVersion {
             dns_group: DnsGroup::External,
             version: g1,
@@ -1320,8 +1331,8 @@ mod test {
             use crate::db::schema::dns_name::dsl;
             let dns_zone_id = Uuid::new_v4();
             let name = "n1".to_string();
-            let g1 = Generation(1.try_into().unwrap());
-            let g2 = Generation(2.try_into().unwrap());
+            let g1 = Generation(1u32.try_into().unwrap());
+            let g2 = Generation(2u32.try_into().unwrap());
             let r1 = DnsRecord::Aaaa("fe80::1:2:3:4".parse().unwrap());
             let r2 = DnsRecord::Aaaa("fe80::1:1:1:1".parse().unwrap());
 

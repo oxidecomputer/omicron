@@ -11,21 +11,20 @@ use super::MAX_NICS_PER_INSTANCE;
 use super::MAX_VCPU_PER_INSTANCE;
 use super::MIN_MEMORY_BYTES_PER_INSTANCE;
 use crate::app::sagas;
-use crate::app::sagas::retry_until_known_result;
-use crate::authn;
-use crate::authz;
 use crate::cidata::InstanceCiData;
-use crate::db;
-use crate::db::identity::Resource;
-use crate::db::lookup;
-use crate::db::lookup::LookupPath;
 use crate::external_api::params;
 use cancel_safe_futures::prelude::*;
 use futures::future::Fuse;
 use futures::{FutureExt, SinkExt, StreamExt};
 use nexus_db_model::IpKind;
+use nexus_db_queries::authn;
+use nexus_db_queries::authz;
 use nexus_db_queries::authz::ApiResource;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db;
+use nexus_db_queries::db::identity::Resource;
+use nexus_db_queries::db::lookup;
+use nexus_db_queries::db::lookup::LookupPath;
 use omicron_common::address::PROPOLIS_PORT;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::ByteCount;
@@ -41,7 +40,6 @@ use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::Vni;
 use omicron_common::api::internal::nexus;
-use omicron_common::api::internal::shared::SwitchLocation;
 use propolis_client::support::tungstenite::protocol::frame::coding::CloseCode;
 use propolis_client::support::tungstenite::protocol::CloseFrame;
 use propolis_client::support::tungstenite::Message as WebSocketMessage;
@@ -54,9 +52,7 @@ use sled_agent_client::types::InstancePutStateBody;
 use sled_agent_client::types::InstanceStateRequested;
 use sled_agent_client::types::SourceNatConfig;
 use sled_agent_client::Client as SledAgentClient;
-use std::collections::HashSet;
 use std::net::SocketAddr;
-use std::str::FromStr;
 use std::sync::Arc;
 use tokio::io::{AsyncRead, AsyncWrite};
 use uuid::Uuid;
@@ -108,7 +104,7 @@ impl super::Nexus {
         }
     }
 
-    pub async fn project_create_instance(
+    pub(crate) async fn project_create_instance(
         self: &Arc<Self>,
         opctx: &OpContext,
         project_lookup: &lookup::Project<'_>,
@@ -267,7 +263,7 @@ impl super::Nexus {
         Ok(db_instance)
     }
 
-    pub async fn instance_list(
+    pub(crate) async fn instance_list(
         &self,
         opctx: &OpContext,
         project_lookup: &lookup::Project<'_>,
@@ -281,7 +277,7 @@ impl super::Nexus {
     // This operation may only occur on stopped instances, which implies that
     // the attached disks do not have any running "upstairs" process running
     // within the sled.
-    pub async fn project_destroy_instance(
+    pub(crate) async fn project_destroy_instance(
         self: &Arc<Self>,
         opctx: &OpContext,
         instance_lookup: &lookup::Instance<'_>,
@@ -313,7 +309,7 @@ impl super::Nexus {
         Ok(())
     }
 
-    pub async fn project_instance_migrate(
+    pub(crate) async fn project_instance_migrate(
         self: &Arc<Self>,
         opctx: &OpContext,
         instance_lookup: &lookup::Instance<'_>,
@@ -370,7 +366,7 @@ impl super::Nexus {
     ///
     /// Asserts that `db_instance` has no migration ID or destination Propolis
     /// ID set.
-    pub async fn instance_set_migration_ids(
+    pub(crate) async fn instance_set_migration_ids(
         &self,
         opctx: &OpContext,
         instance_id: Uuid,
@@ -432,7 +428,7 @@ impl super::Nexus {
     ///
     /// Asserts that `db_instance` has a migration ID and destination Propolis
     /// ID set.
-    pub async fn instance_clear_migration_ids(
+    pub(crate) async fn instance_clear_migration_ids(
         &self,
         instance_id: Uuid,
         db_instance: &db::model::Instance,
@@ -459,7 +455,7 @@ impl super::Nexus {
     }
 
     /// Reboot the specified instance.
-    pub async fn instance_reboot(
+    pub(crate) async fn instance_reboot(
         &self,
         opctx: &OpContext,
         instance_lookup: &lookup::Instance<'_>,
@@ -476,7 +472,7 @@ impl super::Nexus {
     }
 
     /// Attempts to start an instance if it is currently stopped.
-    pub async fn instance_start(
+    pub(crate) async fn instance_start(
         self: &Arc<Self>,
         opctx: &OpContext,
         instance_lookup: &lookup::Instance<'_>,
@@ -527,7 +523,7 @@ impl super::Nexus {
     }
 
     /// Make sure the given Instance is stopped.
-    pub async fn instance_stop(
+    pub(crate) async fn instance_stop(
         &self,
         opctx: &OpContext,
         instance_lookup: &lookup::Instance<'_>,
@@ -950,7 +946,7 @@ impl super::Nexus {
     }
 
     /// Lists disks attached to the instance.
-    pub async fn instance_list_disks(
+    pub(crate) async fn instance_list_disks(
         &self,
         opctx: &OpContext,
         instance_lookup: &lookup::Instance<'_>,
@@ -964,7 +960,7 @@ impl super::Nexus {
     }
 
     /// Attach a disk to an instance.
-    pub async fn instance_attach_disk(
+    pub(crate) async fn instance_attach_disk(
         &self,
         opctx: &OpContext,
         instance_lookup: &lookup::Instance<'_>,
@@ -1024,7 +1020,7 @@ impl super::Nexus {
     }
 
     /// Detach a disk from an instance.
-    pub async fn instance_detach_disk(
+    pub(crate) async fn instance_detach_disk(
         &self,
         opctx: &OpContext,
         instance_lookup: &lookup::Instance<'_>,
@@ -1067,7 +1063,7 @@ impl super::Nexus {
 
     /// Invoked by a sled agent to publish an updated runtime state for an
     /// Instance.
-    pub async fn notify_instance_updated(
+    pub(crate) async fn notify_instance_updated(
         &self,
         opctx: &OpContext,
         id: &Uuid,
@@ -1227,146 +1223,6 @@ impl super::Nexus {
                 dpd_client,
             )
             .await?;
-        }
-
-        Ok(())
-    }
-
-    // Switches with uplinks configured and boundary services enabled
-    pub async fn boundary_switches(
-        &self,
-        opctx: &OpContext,
-    ) -> Result<HashSet<SwitchLocation>, Error> {
-        let mut boundary_switches: HashSet<SwitchLocation> = HashSet::new();
-        let uplinks = self.list_switch_ports_with_uplinks(opctx).await?;
-        for uplink in &uplinks {
-            let location: SwitchLocation =
-                uplink.switch_location.parse().map_err(|_| {
-                    Error::internal_error(&format!(
-                        "invalid switch location in uplink config: {}",
-                        uplink.switch_location
-                    ))
-                })?;
-            boundary_switches.insert(location);
-        }
-        Ok(boundary_switches)
-    }
-
-    /// Ensures that the Dendrite configuration for the supplied instance is
-    /// up-to-date.
-    ///
-    /// # Parameters
-    ///
-    /// - `opctx`: An operation context that grants read and list-children
-    ///   permissions on the identified instance.
-    /// - `instance_id`: The ID of the instance to act on.
-    /// - `sled_ip_address`: The internal IP address assigned to the sled's
-    ///   sled agent.
-    /// - `ip_index_filter`: An optional filter on the index into the instance's
-    ///   external IP array.
-    ///   - If this is `Some(n)`, this routine configures DPD state for only the
-    ///     Nth external IP in the collection returned from CRDB. The caller is
-    ///     responsible for ensuring that the IP collection has stable indices
-    ///     when making this call.
-    ///   - If this is `None`, this routine configures DPD for all external
-    ///     IPs.
-    pub(crate) async fn instance_ensure_dpd_config(
-        &self,
-        opctx: &OpContext,
-        instance_id: Uuid,
-        sled_ip_address: &std::net::SocketAddrV6,
-        ip_index_filter: Option<usize>,
-        dpd_client: &Arc<dpd_client::Client>,
-    ) -> Result<(), Error> {
-        let log = &self.log;
-
-        info!(log, "looking up instance's primary network interface";
-              "instance_id" => %instance_id);
-
-        let (.., authz_instance) = LookupPath::new(opctx, &self.db_datastore)
-            .instance_id(instance_id)
-            .lookup_for(authz::Action::ListChildren)
-            .await?;
-
-        // All external IPs map to the primary network interface, so find that
-        // interface. If there is no such interface, there's no way to route
-        // traffic destined to those IPs, so there's nothing to configure and
-        // it's safe to return early.
-        let network_interface = match self
-            .db_datastore
-            .derive_guest_network_interface_info(&opctx, &authz_instance)
-            .await?
-            .into_iter()
-            .find(|interface| interface.primary)
-        {
-            Some(interface) => interface,
-            None => {
-                info!(log, "Instance has no primary network interface";
-                      "instance_id" => %instance_id);
-                return Ok(());
-            }
-        };
-
-        let mac_address =
-            macaddr::MacAddr6::from_str(&network_interface.mac.to_string())
-                .map_err(|e| {
-                    Error::internal_error(&format!(
-                        "failed to convert mac address: {e}"
-                    ))
-                })?;
-
-        let vni: u32 = network_interface.vni.into();
-
-        info!(log, "looking up instance's external IPs";
-              "instance_id" => %instance_id);
-
-        let ips = self
-            .db_datastore
-            .instance_lookup_external_ips(&opctx, instance_id)
-            .await?;
-
-        if let Some(wanted_index) = ip_index_filter {
-            if let None = ips.get(wanted_index) {
-                return Err(Error::internal_error(&format!(
-                    "failed to find external ip address at index: {}",
-                    wanted_index
-                )));
-            }
-        }
-
-        for target_ip in ips
-            .iter()
-            .enumerate()
-            .filter(|(index, _)| {
-                if let Some(wanted_index) = ip_index_filter {
-                    *index == wanted_index
-                } else {
-                    true
-                }
-            })
-            .map(|(_, ip)| ip)
-        {
-            retry_until_known_result(log, || async {
-                dpd_client
-                    .ensure_nat_entry(
-                        &log,
-                        target_ip.ip,
-                        dpd_client::types::MacAddr {
-                            a: mac_address.into_array(),
-                        },
-                        *target_ip.first_port,
-                        *target_ip.last_port,
-                        vni,
-                        sled_ip_address.ip(),
-                    )
-                    .await
-            })
-            .await
-            .map_err(|e| {
-                Error::internal_error(&format!(
-                    "failed to ensure dpd entry: {e}"
-                ))
-            })?;
         }
 
         Ok(())

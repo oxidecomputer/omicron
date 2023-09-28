@@ -75,7 +75,7 @@ function generate_config_file {
 
 function start_daemon {
 	echo "* Starting daemon"
-	/usr/sbin/chronyd -f "$file"
+	/usr/sbin/chronyd -d -f "$file" &
 }
 
 function stop_daemon {

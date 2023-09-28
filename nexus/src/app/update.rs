@@ -4,14 +4,14 @@
 
 //! Software Updates
 
-use crate::authz;
-use crate::db;
-use crate::db::identity::Asset;
-use crate::db::lookup::LookupPath;
-use crate::db::model::KnownArtifactKind;
 use chrono::Utc;
 use hex;
+use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db;
+use nexus_db_queries::db::identity::Asset;
+use nexus_db_queries::db::lookup::LookupPath;
+use nexus_db_queries::db::model::KnownArtifactKind;
 use nexus_types::external_api::{params, shared};
 use omicron_common::api::external::{
     self, CreateResult, DataPageParams, Error, ListResultVec, LookupResult,
@@ -40,7 +40,7 @@ impl super::Nexus {
         }))
     }
 
-    pub async fn updates_refresh_metadata(
+    pub(crate) async fn updates_refresh_metadata(
         &self,
         opctx: &OpContext,
     ) -> Result<(), Error> {
@@ -130,7 +130,7 @@ impl super::Nexus {
     }
 
     /// Downloads a file from within [`BASE_ARTIFACT_DIR`].
-    pub async fn download_artifact(
+    pub(crate) async fn download_artifact(
         &self,
         opctx: &OpContext,
         artifact: UpdateArtifactId,
@@ -313,7 +313,7 @@ impl super::Nexus {
             .await
     }
 
-    pub async fn system_update_fetch_by_version(
+    pub(crate) async fn system_update_fetch_by_version(
         &self,
         opctx: &OpContext,
         version: &external::SemverVersion,
@@ -325,7 +325,7 @@ impl super::Nexus {
             .await
     }
 
-    pub async fn system_updates_list_by_id(
+    pub(crate) async fn system_updates_list_by_id(
         &self,
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, Uuid>,
@@ -334,7 +334,7 @@ impl super::Nexus {
         self.db_datastore.system_updates_list_by_id(opctx, pagparams).await
     }
 
-    pub async fn system_update_list_components(
+    pub(crate) async fn system_update_list_components(
         &self,
         opctx: &OpContext,
         version: &external::SemverVersion,
@@ -361,7 +361,7 @@ impl super::Nexus {
         self.db_datastore.create_updateable_component(opctx, component).await
     }
 
-    pub async fn updateable_components_list_by_id(
+    pub(crate) async fn updateable_components_list_by_id(
         &self,
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, Uuid>,
@@ -371,7 +371,7 @@ impl super::Nexus {
             .await
     }
 
-    pub async fn create_update_deployment(
+    pub(crate) async fn create_update_deployment(
         &self,
         opctx: &OpContext,
         start: params::SystemUpdateStart,
@@ -404,7 +404,7 @@ impl super::Nexus {
 
     /// If there's a running update, change it to steady. Otherwise do nothing.
     // TODO: codify the state machine around update deployments
-    pub async fn steady_update_deployment(
+    pub(crate) async fn steady_update_deployment(
         &self,
         opctx: &OpContext,
     ) -> UpdateResult<db::model::UpdateDeployment> {
@@ -417,7 +417,7 @@ impl super::Nexus {
         self.db_datastore.steady_update_deployment(opctx, latest.id()).await
     }
 
-    pub async fn update_deployments_list_by_id(
+    pub(crate) async fn update_deployments_list_by_id(
         &self,
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, Uuid>,
@@ -425,7 +425,7 @@ impl super::Nexus {
         self.db_datastore.update_deployments_list_by_id(opctx, pagparams).await
     }
 
-    pub async fn update_deployment_fetch_by_id(
+    pub(crate) async fn update_deployment_fetch_by_id(
         &self,
         opctx: &OpContext,
         deployment_id: &Uuid,
@@ -438,21 +438,21 @@ impl super::Nexus {
         Ok(db_deployment)
     }
 
-    pub async fn latest_update_deployment(
+    pub(crate) async fn latest_update_deployment(
         &self,
         opctx: &OpContext,
     ) -> LookupResult<db::model::UpdateDeployment> {
         self.db_datastore.latest_update_deployment(opctx).await
     }
 
-    pub async fn lowest_component_system_version(
+    pub(crate) async fn lowest_component_system_version(
         &self,
         opctx: &OpContext,
     ) -> LookupResult<db::model::SemverVersion> {
         self.db_datastore.lowest_component_system_version(opctx).await
     }
 
-    pub async fn highest_component_system_version(
+    pub(crate) async fn highest_component_system_version(
         &self,
         opctx: &OpContext,
     ) -> LookupResult<db::model::SemverVersion> {
@@ -557,7 +557,7 @@ impl super::Nexus {
     /// times. The service functions we call to create these resources will
     /// error on ID or version conflicts, so to remain idempotent we can simply
     /// ignore those errors. We let other errors through.
-    pub async fn populate_mock_system_updates(
+    pub(crate) async fn populate_mock_system_updates(
         &self,
         opctx: &OpContext,
     ) -> CreateResult<()> {
@@ -579,9 +579,9 @@ mod tests {
     use assert_matches::assert_matches;
     use std::num::NonZeroU32;
 
-    use crate::db::model::UpdateStatus;
     use dropshot::PaginationOrder;
     use nexus_db_queries::context::OpContext;
+    use nexus_db_queries::db::model::UpdateStatus;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::external_api::{
         params::{

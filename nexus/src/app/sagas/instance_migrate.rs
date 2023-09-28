@@ -6,9 +6,9 @@ use super::instance_create::allocate_sled_ipv6;
 use super::{NexusActionContext, NexusSaga, ACTION_GENERATE_ID};
 use crate::app::instance::WriteBackUpdatedInstance;
 use crate::app::sagas::declare_saga_actions;
-use crate::db::{identity::Resource, lookup::LookupPath};
 use crate::external_api::params;
-use crate::{authn, authz, db};
+use nexus_db_queries::db::{identity::Resource, lookup::LookupPath};
+use nexus_db_queries::{authn, authz, db};
 use omicron_common::api::external::InstanceState;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
 use serde::Deserialize;
@@ -26,7 +26,7 @@ use uuid::Uuid;
 // instance migrate saga: input parameters
 
 #[derive(Debug, Deserialize, Serialize)]
-pub struct Params {
+pub(crate) struct Params {
     pub serialized_authn: authn::saga::Serialized,
     pub instance: db::model::Instance,
     pub migrate_params: params::InstanceMigrate,
@@ -171,7 +171,7 @@ declare_saga_actions! {
 }
 
 #[derive(Debug)]
-pub struct SagaInstanceMigrate;
+pub(crate) struct SagaInstanceMigrate;
 impl NexusSaga for SagaInstanceMigrate {
     const NAME: &'static str = "instance-migrate";
     type Params = Params;

@@ -6,13 +6,14 @@ use super::impl_enum_type;
 use external_api::shared::ServiceUsingCertificate;
 use nexus_types::{external_api, internal_api};
 use serde::{Deserialize, Serialize};
+use strum::EnumIter;
 
 impl_enum_type!(
     #[derive(Clone, SqlType, Debug, QueryId)]
     #[diesel(postgres_type(name = "service_kind"))]
     pub struct ServiceKindEnum;
 
-    #[derive(Clone, Copy, Debug, Eq, AsExpression, FromSqlRow, Serialize, Deserialize, PartialEq)]
+    #[derive(Clone, Copy, Debug, Eq, AsExpression, FromSqlRow, Serialize, Deserialize, PartialEq, EnumIter)]
     #[diesel(sql_type = ServiceKindEnum)]
     pub enum ServiceKind;
 
