@@ -1236,6 +1236,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "crdb-seed"
+version = "0.1.0"
+dependencies = [
+ "camino",
+ "camino-tempfile",
+ "dropshot",
+ "hex",
+ "omicron-test-utils",
+ "ring",
+ "slog",
+ "tokio",
+]
+
+[[package]]
 name = "criterion"
 version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4437,7 +4451,6 @@ dependencies = [
  "serde_urlencoded",
  "slog",
  "tempfile",
- "tokio",
  "trust-dns-proto",
  "trust-dns-resolver",
  "uuid",
@@ -5256,6 +5269,7 @@ name = "omicron-test-utils"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "camino",
  "dropshot",
  "expectorate",
  "futures",
