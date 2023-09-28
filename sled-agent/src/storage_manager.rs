@@ -38,7 +38,6 @@ use tokio::task::JoinHandle;
 use tokio::time::{interval, MissedTickBehavior};
 use uuid::Uuid;
 
-use illumos_utils::dumpadm::DumpHdrError;
 #[cfg(test)]
 use illumos_utils::{zfs::MockZfs as Zfs, zpool::MockZpool as Zpool};
 #[cfg(not(test))]
@@ -114,32 +113,8 @@ pub enum Error {
     #[error("Zpool Not Found: {0}")]
     ZpoolNotFound(String),
 
-    #[error("Failed to serialize toml (intended for {path:?}): {err}")]
-    Serialize {
-        path: Utf8PathBuf,
-        #[source]
-        err: toml::ser::Error,
-    },
-
-    #[error("Failed to deserialize toml from {path:?}: {err}")]
-    Deserialize {
-        path: Utf8PathBuf,
-        #[source]
-        err: toml::de::Error,
-    },
-
-    #[error("Failed to perform I/O: {message}: {err}")]
-    Io {
-        message: String,
-        #[source]
-        err: std::io::Error,
-    },
-
     #[error("Underlay not yet initialized")]
     UnderlayNotInitialized,
-
-    #[error("Encountered error checking dump device flags: {0}")]
-    DumpHdr(#[from] DumpHdrError),
 }
 
 /// A ZFS storage pool.

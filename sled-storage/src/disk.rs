@@ -10,8 +10,8 @@ use omicron_common::disk::DiskIdentity;
 use sled_hardware::{Disk, DiskVariant};
 
 /// A wrapper around real disks or synthetic disks backed by a file
-#[derive(PartialEq, Eq, Clone)]
-pub(crate) enum DiskWrapper {
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub enum DiskWrapper {
     Real { disk: Disk, devfs_path: Utf8PathBuf },
     Synthetic { zpool_name: ZpoolName },
 }
@@ -24,7 +24,7 @@ impl From<Disk> for DiskWrapper {
 }
 
 impl DiskWrapper {
-    fn identity(&self) -> DiskIdentity {
+    pub fn identity(&self) -> DiskIdentity {
         match self {
             DiskWrapper::Real { disk, .. } => disk.identity().clone(),
             DiskWrapper::Synthetic { zpool_name } => {
@@ -38,7 +38,7 @@ impl DiskWrapper {
         }
     }
 
-    fn variant(&self) -> DiskVariant {
+    pub fn variant(&self) -> DiskVariant {
         match self {
             DiskWrapper::Real { disk, .. } => disk.variant(),
             DiskWrapper::Synthetic { zpool_name } => match zpool_name.kind() {
@@ -48,7 +48,7 @@ impl DiskWrapper {
         }
     }
 
-    fn zpool_name(&self) -> &ZpoolName {
+    pub fn zpool_name(&self) -> &ZpoolName {
         match self {
             DiskWrapper::Real { disk, .. } => disk.zpool_name(),
             DiskWrapper::Synthetic { zpool_name } => zpool_name,
