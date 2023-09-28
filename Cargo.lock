@@ -9896,6 +9896,7 @@ dependencies = [
  "installinator-artifact-client",
  "installinator-artifactd",
  "installinator-common",
+ "itertools 0.11.0",
  "omicron-certificates",
  "omicron-common 0.1.0",
  "omicron-passwords 0.1.0",
