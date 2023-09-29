@@ -730,24 +730,6 @@ async fn ensure_instance_disk_attach_state(
     Ok(())
 }
 
-/// Helper function to allocate a new IPv6 address for an Oxide service running
-/// on the provided sled.
-///
-/// `sled_id_name` is the name of the serialized output containing the UUID for
-/// the targeted sled.
-pub(super) async fn allocate_sled_ipv6(
-    opctx: &OpContext,
-    sagactx: NexusActionContext,
-    sled_uuid: Uuid,
-) -> Result<Ipv6Addr, ActionError> {
-    let osagactx = sagactx.user_data();
-    osagactx
-        .datastore()
-        .next_ipv6_address(opctx, sled_uuid)
-        .await
-        .map_err(ActionError::action_failed)
-}
-
 async fn sic_account_virtual_resources(
     sagactx: NexusActionContext,
 ) -> Result<(), ActionError> {

@@ -579,8 +579,7 @@ impl super::Nexus {
 
         let saga_params = sagas::instance_start::Params {
             serialized_authn: authn::saga::Serialized::for_opctx(opctx),
-            instance: instance.clone(),
-            ensure_network: true,
+            db_instance: instance.clone(),
         };
 
         self.execute_saga::<sagas::instance_start::SagaInstanceStart>(
