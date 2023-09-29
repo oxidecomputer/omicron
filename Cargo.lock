@@ -3029,6 +3029,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "itertools 0.11.0",
+ "omicron-workspace-hack 0.1.0",
  "shlex",
  "slog",
  "thiserror",
@@ -3049,6 +3050,7 @@ dependencies = [
  "libc",
  "omicron-common 0.1.0",
  "omicron-test-utils",
+ "omicron-workspace-hack 0.1.0",
  "schemars",
  "serde",
  "shlex",
@@ -3074,6 +3076,7 @@ dependencies = [
  "libc",
  "omicron-common 0.1.0",
  "omicron-test-utils",
+ "omicron-workspace-hack 0.1.0",
  "schemars",
  "serde",
  "shlex",
