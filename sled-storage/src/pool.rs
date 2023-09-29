@@ -5,13 +5,8 @@
 //! ZFS storage pool
 
 use crate::error::Error;
-use illumos_utils::zpool::{ZpoolInfo, ZpoolName};
+use illumos_utils::zpool::{Zpool, ZpoolInfo, ZpoolName};
 use omicron_common::disk::DiskIdentity;
-
-#[cfg(test)]
-use illumos_utils::zpool::MockZpool as Zpool;
-#[cfg(not(test))]
-use illumos_utils::zpool::Zpool;
 
 /// A ZFS storage pool
 #[derive(Debug, Clone)]
