@@ -47,10 +47,10 @@ use propolis_client::support::InstanceSerialConsoleHelper;
 use propolis_client::support::WSClientOffset;
 use propolis_client::support::WebSocketStream;
 use sled_agent_client::types::InstanceMigrationSourceParams;
+use sled_agent_client::types::InstanceMigrationTargetParams;
 use sled_agent_client::types::InstanceProperties;
 use sled_agent_client::types::InstancePutMigrationIdsBody;
 use sled_agent_client::types::InstancePutStateBody;
-use sled_agent_client::types::InstanceStateRequested;
 use sled_agent_client::types::SourceNatConfig;
 use sled_agent_client::Client as SledAgentClient;
 use std::net::SocketAddr;
@@ -59,6 +59,41 @@ use tokio::io::{AsyncRead, AsyncWrite};
 use uuid::Uuid;
 
 const MAX_KEYS_PER_INSTANCE: u32 = 8;
+
+/// The kinds of state changes that can be requested of an instance's active
+/// sled agent.
+pub(crate) enum InstanceStateChangeRequest {
+    Run,
+    Reboot,
+    Stop,
+    Migrate(InstanceMigrationTargetParams),
+}
+
+impl From<InstanceStateChangeRequest>
+    for sled_agent_client::types::InstanceStateRequested
+{
+    fn from(value: InstanceStateChangeRequest) -> Self {
+        match value {
+            InstanceStateChangeRequest::Run => Self::Running,
+            InstanceStateChangeRequest::Reboot => Self::Reboot,
+            InstanceStateChangeRequest::Stop => Self::Stopped,
+            InstanceStateChangeRequest::Migrate(params) => {
+                Self::MigrationTarget(params)
+            }
+        }
+    }
+}
+
+/// The actions that can be taken in response to an
+/// [`InstanceStateChangeRequest`].
+enum InstanceStateChangeRequestAction {
+    /// The instance is already in the correct state, so no action is needed.
+    AlreadyDone,
+
+    /// Request the appropriate state change from the sled with the specified
+    /// UUID.
+    SendToSled(Uuid),
+}
 
 pub(crate) enum WriteBackUpdatedInstance {
     WriteBack,
@@ -457,12 +492,20 @@ impl super::Nexus {
         opctx: &OpContext,
         instance_lookup: &lookup::Instance<'_>,
     ) -> UpdateResult<InstanceAndActiveVmm> {
-        let (.., authz_instance, db_instance) = instance_lookup.fetch().await?;
+        let (.., authz_instance) =
+            instance_lookup.lookup_for(authz::Action::Modify).await?;
+
+        let state = self
+            .db_datastore
+            .instance_fetch_with_vmm(opctx, &authz_instance)
+            .await?;
+
         self.instance_request_state(
             opctx,
             &authz_instance,
-            &db_instance,
-            InstanceStateRequested::Reboot,
+            state.instance(),
+            state.vmm(),
+            InstanceStateChangeRequest::Reboot,
         )
         .await?;
         self.db_datastore.instance_fetch_with_vmm(opctx, &authz_instance).await
@@ -549,7 +592,8 @@ impl super::Nexus {
             opctx,
             &authz_instance,
             state.instance(),
-            InstanceStateRequested::Stopped,
+            state.vmm(),
+            InstanceStateChangeRequest::Stop,
         )
         .await?;
 
@@ -598,45 +642,146 @@ impl super::Nexus {
         self.sled_client(&sa_id).await
     }
 
-    fn check_runtime_change_allowed(
+    /// Determines the action to take on an instance's active VMM given a
+    /// request to change its state.
+    ///
+    /// # Arguments
+    ///
+    /// - instance_state: The prior state of the instance as recorded in CRDB
+    ///   and obtained by the caller.
+    /// - vmm_state: The prior state of the instance's active VMM as recorded in
+    ///   CRDB and obtained by the caller. `None` if the instance has no active
+    ///   VMM.
+    /// - requested: The state change being requested.
+    ///
+    /// # Return value
+    ///
+    /// - `Ok(action)` if the request is allowed to proceed. The result payload
+    ///   specifies how to handle the request.
+    /// - `Err` if the request should be denied.
+    fn select_runtime_change_action(
         &self,
-        runtime: &nexus::InstanceRuntimeState,
-        requested: &InstanceStateRequested,
-    ) -> Result<(), Error> {
-        // Users are allowed to request a start or stop even if the instance is
-        // already in the desired state (or moving to it), and we will issue a
-        // request to the SA to make the state change in these cases in case the
-        // runtime state we saw here was stale.
-        //
-        // Users cannot change the state of a failed or destroyed instance.
-        // TODO(#2825): Failed instances should be allowed to stop.
-        //
-        // Migrating instances can't change state until they're done migrating,
-        // but for idempotency, a request to make an incarnation of an instance
-        // into a migration target is allowed if the incarnation is already a
-        // migration target.
-        let allowed = match runtime.run_state {
-            InstanceState::Creating => true,
-            InstanceState::Starting => true,
-            InstanceState::Running => true,
-            InstanceState::Stopping => true,
-            InstanceState::Stopped => true,
-            InstanceState::Rebooting => true,
-            InstanceState::Migrating => {
-                matches!(requested, InstanceStateRequested::MigrationTarget(_))
+        instance_state: &db::model::Instance,
+        vmm_state: &Option<db::model::Vmm>,
+        requested: &InstanceStateChangeRequest,
+    ) -> Result<InstanceStateChangeRequestAction, Error> {
+        let effective_state = if let Some(vmm) = vmm_state {
+            vmm.runtime.state.0
+        } else {
+            instance_state.runtime().fallback_state.0
+        };
+
+        // Requests that operate on active instances have to be directed to the
+        // instance's current sled agent. If there is none, the request needs to
+        // be handled specially based on its type.
+        let sled_id = if let Some(vmm) = vmm_state {
+            vmm.sled_id
+        } else {
+            match effective_state {
+                // If there's no active sled because the instance is stopped,
+                // allow requests to stop to succeed silently for idempotency,
+                // but reject requests to do anything else.
+                InstanceState::Stopped => match requested {
+                    InstanceStateChangeRequest::Run => {
+                        return Err(Error::invalid_request(&format!(
+                            "cannot run an instance in state {} with no VMM",
+                            effective_state
+                        )))
+                    }
+                    InstanceStateChangeRequest::Stop => {
+                        return Ok(InstanceStateChangeRequestAction::AlreadyDone);
+                    }
+                    InstanceStateChangeRequest::Reboot => {
+                        return Err(Error::invalid_request(&format!(
+                            "cannot reboot an instance in state {} with no VMM",
+                            effective_state
+                        )))
+                    }
+                    InstanceStateChangeRequest::Migrate(_) => {
+                        return Err(Error::invalid_request(&format!(
+                            "cannot migrate an instance in state {} with no VMM",
+                            effective_state
+                        )))
+                    }
+                },
+
+                // If the instance is still being created (such that it hasn't
+                // even begun to start yet), no runtime state change is valid.
+                // Return a specific error message explaining the problem.
+                InstanceState::Creating => {
+                    return Err(Error::invalid_request(&format!(
+                                "cannot change instance state while it is \
+                                still being created"
+                                )))
+                }
+
+                // If the instance has no sled beacuse it's been destroyed or
+                // has fallen over, reject the state change.
+                //
+                // TODO(#2825): Failed instances should be allowed to stop, but
+                // this requires a special action because there is no sled to
+                // send the request to.
+                InstanceState::Failed | InstanceState::Destroyed => {
+                    return Err(Error::invalid_request(&format!(
+                        "instance state cannot be changed from {}",
+                        effective_state
+                    )))
+                }
+
+                // In other states, the instance should have a sled, and an
+                // internal invariant has been violated if it doesn't have one.
+                _ => {
+                    error!(self.log, "instance has no sled but isn't halted";
+                           "instance_id" => %instance_state.id(),
+                           "state" => ?effective_state);
+
+                    return Err(Error::internal_error(
+                        "instance is active but not resident on a sled"
+                    ));
+                }
             }
-            InstanceState::Repairing => false,
-            InstanceState::Failed => false,
-            InstanceState::Destroyed => false,
+        };
+
+        // The instance has an active sled. Allow the sled agent to decide how
+        // to handle the request unless the instance is being recovered or the
+        // underlying VMM has been destroyed.
+        //
+        // TODO(#2825): Failed instances should be allowed to stop. See above.
+        let allowed = match requested {
+            InstanceStateChangeRequest::Run
+            | InstanceStateChangeRequest::Reboot
+            | InstanceStateChangeRequest::Stop => match effective_state {
+                InstanceState::Creating
+                | InstanceState::Starting
+                | InstanceState::Running
+                | InstanceState::Stopping
+                | InstanceState::Stopped
+                | InstanceState::Rebooting
+                | InstanceState::Migrating => true,
+                InstanceState::Repairing | InstanceState::Failed => false,
+                InstanceState::Destroyed => false,
+            },
+            InstanceStateChangeRequest::Migrate(_) => match effective_state {
+                InstanceState::Running
+                | InstanceState::Rebooting
+                | InstanceState::Migrating => true,
+                InstanceState::Creating
+                | InstanceState::Starting
+                | InstanceState::Stopping
+                | InstanceState::Stopped
+                | InstanceState::Repairing
+                | InstanceState::Failed
+                | InstanceState::Destroyed => false,
+            },
         };
 
         if allowed {
-            Ok(())
+            Ok(InstanceStateChangeRequestAction::SendToSled(sled_id))
         } else {
             Err(Error::InvalidRequest {
                 message: format!(
                     "instance state cannot be changed from state \"{}\"",
-                    runtime.run_state
+                    effective_state
                 ),
             })
         }
@@ -646,31 +791,39 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         authz_instance: &authz::Instance,
-        db_instance: &db::model::Instance,
-        requested: InstanceStateRequested,
+        prev_instance_state: &db::model::Instance,
+        prev_vmm_state: &Option<db::model::Vmm>,
+        requested: InstanceStateChangeRequest,
     ) -> Result<(), Error> {
         opctx.authorize(authz::Action::Modify, authz_instance).await?;
-        self.check_runtime_change_allowed(
-            &db_instance.runtime().clone().into(),
+        let instance_id = authz_instance.id();
+
+        match self.select_runtime_change_action(
+            prev_instance_state,
+            prev_vmm_state,
             &requested,
-        )?;
+        )? {
+            InstanceStateChangeRequestAction::AlreadyDone => Ok(()),
+            InstanceStateChangeRequestAction::SendToSled(sled_id) => {
+                let sa = self.sled_client(&sled_id).await?;
+                let instance_put_result = sa
+                    .instance_put_state(
+                        &instance_id,
+                        &InstancePutStateBody { state: requested.into() },
+                    )
+                    .await
+                    .map(|res| res.into_inner().updated_runtime)
+                    .map(|state| state.map(Into::into));
 
-        let sa = self.instance_sled(&db_instance).await?;
-        let instance_put_result = sa
-            .instance_put_state(
-                &db_instance.id(),
-                &InstancePutStateBody { state: requested },
-            )
-            .await
-            .map(|res| res.into_inner().updated_runtime);
-
-        self.handle_instance_put_result(
-            &db_instance.id(),
-            db_instance,
-            instance_put_result.map(|state| state.map(Into::into)),
-        )
-        .await
-        .map(|_| ())
+                self.handle_instance_put_result(
+                    &instance_id,
+                    prev_instance_state,
+                    instance_put_result,
+                )
+                .await
+                .map(|_| ())
+            }
+        }
     }
 
     /// Modifies the runtime state of the Instance as requested.  This generally
