@@ -24,7 +24,7 @@ use crate::authz;
 use crate::context::OpContext;
 use crate::db::{
     self,
-    error::{public_error_from_diesel_pool, ErrorHandler},
+    error::{public_error_from_diesel, ErrorHandler},
 };
 use ::oximeter::types::ProducerRegistry;
 use async_bb8_diesel::{AsyncRunQueryDsl, ConnectionManager};
@@ -200,16 +200,7 @@ impl DataStore {
             .unwrap();
     }
 
-    // TODO-security This should be deprecated in favor of pool_authorized(),
-    // which gives us the chance to do a minimal security check before hitting
-    // the database.  Eventually, this function should only be used for doing
-    // authentication in the first place (since we can't do an authz check in
-    // that case).
-    fn pool(&self) -> &bb8::Pool<ConnectionManager<DbConnection>> {
-        self.pool.pool()
-    }
-
-    pub(super) async fn pool_authorized(
+    async fn pool_authorized(
         &self,
         opctx: &OpContext,
     ) -> Result<&bb8::Pool<ConnectionManager<DbConnection>>, Error> {
@@ -217,12 +208,41 @@ impl DataStore {
         Ok(self.pool.pool())
     }
 
+    /// Returns a connection to a connection from the database connection pool.
+    pub(super) async fn pool_connection_authorized(
+        &self,
+        opctx: &OpContext,
+    ) -> Result<bb8::PooledConnection<ConnectionManager<DbConnection>>, Error>
+    {
+        let pool = self.pool_authorized(opctx).await?;
+        let connection = pool.get().await.map_err(|err| {
+            Error::unavail(&format!("Failed to access DB connection: {err}"))
+        })?;
+        Ok(connection)
+    }
+
+    /// Returns an unauthorized connection to a connection from the database
+    /// connection pool.
+    ///
+    /// TODO-security: This should be deprecated in favor of
+    /// "pool_connection_authorized".
+    pub(super) async fn pool_connection_unauthorized(
+        &self,
+    ) -> Result<bb8::PooledConnection<ConnectionManager<DbConnection>>, Error>
+    {
+        let connection = self.pool.pool().get().await.map_err(|err| {
+            Error::unavail(&format!("Failed to access DB connection: {err}"))
+        })?;
+        Ok(connection)
+    }
+
     /// For testing only. This isn't cfg(test) because nexus needs access to it.
     #[doc(hidden)]
-    pub async fn pool_for_tests(
+    pub async fn pool_connection_for_tests(
         &self,
-    ) -> Result<&bb8::Pool<ConnectionManager<DbConnection>>, Error> {
-        Ok(self.pool.pool())
+    ) -> Result<bb8::PooledConnection<ConnectionManager<DbConnection>>, Error>
+    {
+        self.pool_connection_unauthorized().await
     }
 
     /// Return the next available IPv6 address for an Oxide service running on
@@ -238,10 +258,10 @@ impl DataStore {
         )
         .set(dsl::last_used_address.eq(dsl::last_used_address + 1))
         .returning(dsl::last_used_address)
-        .get_result_async(self.pool_authorized(opctx).await?)
+        .get_result_async(&*self.pool_connection_authorized(opctx).await?)
         .await
         .map_err(|e| {
-            public_error_from_diesel_pool(
+            public_error_from_diesel(
                 e,
                 ErrorHandler::NotFoundByLookup(
                     ResourceType::Sled,
@@ -266,19 +286,17 @@ impl DataStore {
     #[cfg(test)]
     async fn test_try_table_scan(&self, opctx: &OpContext) -> Error {
         use db::schema::project::dsl;
-        let conn = self.pool_authorized(opctx).await;
+        let conn = self.pool_connection_authorized(opctx).await;
         if let Err(error) = conn {
             return error;
         }
         let result = dsl::project
             .select(diesel::dsl::count_star())
-            .first_async::<i64>(conn.unwrap())
+            .first_async::<i64>(&*conn.unwrap())
             .await;
         match result {
             Ok(_) => Error::internal_error("table scan unexpectedly succeeded"),
-            Err(error) => {
-                public_error_from_diesel_pool(error, ErrorHandler::Server)
-            }
+            Err(error) => public_error_from_diesel(error, ErrorHandler::Server),
         }
     }
 }
@@ -1000,9 +1018,9 @@ mod test {
         let pool = db::Pool::new(&logctx.log, &cfg);
         let datastore =
             DataStore::new(&logctx.log, Arc::new(pool), None).await.unwrap();
-
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
         let explanation = DataStore::get_allocated_regions_query(Uuid::nil())
-            .explain_async(datastore.pool())
+            .explain_async(&conn)
             .await
             .unwrap();
         assert!(
@@ -1027,7 +1045,7 @@ mod test {
                 .values(values)
                 .returning(VpcSubnet::as_returning());
         println!("{}", diesel::debug_query(&query));
-        let explanation = query.explain_async(datastore.pool()).await.unwrap();
+        let explanation = query.explain_async(&conn).await.unwrap();
         assert!(
             !explanation.contains("FULL SCAN"),
             "Found an unexpected FULL SCAN: {}",
@@ -1403,6 +1421,7 @@ mod test {
         );
         let mut db = test_setup_database(&logctx.log).await;
         let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
 
         // Create a few records.
         let now = Utc::now();
@@ -1429,7 +1448,7 @@ mod test {
             .collect::<Vec<_>>();
         diesel::insert_into(dsl::external_ip)
             .values(ips.clone())
-            .execute_async(datastore.pool())
+            .execute_async(&*conn)
             .await
             .unwrap();
 
@@ -1464,6 +1483,7 @@ mod test {
             dev::test_setup_log("test_deallocate_external_ip_is_idempotent");
         let mut db = test_setup_database(&logctx.log).await;
         let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
 
         // Create a record.
         let now = Utc::now();
@@ -1487,7 +1507,7 @@ mod test {
         };
         diesel::insert_into(dsl::external_ip)
             .values(ip.clone())
-            .execute_async(datastore.pool())
+            .execute_async(&*conn)
             .await
             .unwrap();
 
@@ -1522,13 +1542,13 @@ mod test {
         use crate::db::model::IpKind;
         use crate::db::schema::external_ip::dsl;
         use async_bb8_diesel::ConnectionError::Query;
-        use async_bb8_diesel::PoolError::Connection;
         use diesel::result::DatabaseErrorKind::CheckViolation;
         use diesel::result::Error::DatabaseError;
 
         let logctx = dev::test_setup_log("test_external_ip_check_constraints");
         let mut db = test_setup_database(&logctx.log).await;
         let (_opctx, datastore) = datastore_test(&logctx, &db).await;
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
         let now = Utc::now();
 
         // Create a mostly-populated record, for a floating IP
@@ -1582,7 +1602,7 @@ mod test {
                         };
                         let res = diesel::insert_into(dsl::external_ip)
                             .values(new_ip)
-                            .execute_async(datastore.pool())
+                            .execute_async(&*conn)
                             .await;
                         if name.is_some() && description.is_some() {
                             // Name/description must be non-NULL, instance ID can be
@@ -1607,10 +1627,10 @@ mod test {
                             assert!(
                                 matches!(
                                     err,
-                                    Connection(Query(DatabaseError(
+                                    Query(DatabaseError(
                                         CheckViolation,
                                         _
-                                    )))
+                                    ))
                                 ),
                                 "Expected a CHECK violation when inserting a \
                                  Floating IP record with NULL name and/or description",
@@ -1639,7 +1659,7 @@ mod test {
                             };
                             let res = diesel::insert_into(dsl::external_ip)
                                 .values(new_ip.clone())
-                                .execute_async(datastore.pool())
+                                .execute_async(&*conn)
                                 .await;
                             let ip_type =
                                 if is_service { "Service" } else { "Instance" };
@@ -1656,10 +1676,10 @@ mod test {
                                     assert!(
                                         matches!(
                                             err,
-                                            Connection(Query(DatabaseError(
+                                            Query(DatabaseError(
                                                 CheckViolation,
                                                 _
-                                            )))
+                                            ))
                                         ),
                                         "Expected a CHECK violation when inserting an \
                                          Ephemeral Service IP",
@@ -1687,10 +1707,10 @@ mod test {
                                 assert!(
                                     matches!(
                                         err,
-                                        Connection(Query(DatabaseError(
+                                        Query(DatabaseError(
                                             CheckViolation,
                                             _
-                                        )))
+                                        ))
                                     ),
                                     "Expected a CHECK violation when inserting a \
                                      {:?} IP record with non-NULL name, description, \
