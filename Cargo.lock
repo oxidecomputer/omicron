@@ -4406,6 +4406,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "nexus-inventory"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "futures",
+ "gateway-client",
+ "gateway-messages",
+ "nexus-db-model",
+ "nexus-db-queries",
+ "strum",
+ "uuid",
+]
+
+[[package]]
 name = "nexus-test-interface"
 version = "0.1.0"
 dependencies = [
