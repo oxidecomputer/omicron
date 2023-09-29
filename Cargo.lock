@@ -5424,7 +5424,6 @@ dependencies = [
  "semver 1.0.19",
  "serde",
  "sha2",
- "signature 2.1.0",
  "similar",
  "slog",
  "spin 0.9.8",
