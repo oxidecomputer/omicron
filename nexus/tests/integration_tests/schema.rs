@@ -15,7 +15,7 @@ use omicron_common::api::internal::shared::SwitchLocation;
 use omicron_common::nexus_config::Config;
 use omicron_common::nexus_config::SchemaConfig;
 use omicron_test_utils::dev::db::CockroachInstance;
-use pretty_assertions::assert_eq;
+use pretty_assertions::{assert_eq, assert_ne};
 use similar_asserts;
 use slog::Logger;
 use std::collections::{BTreeMap, BTreeSet};
@@ -132,6 +132,7 @@ enum AnySqlType {
     String(String),
     Bool(bool),
     Uuid(Uuid),
+    Int8(i64),
     // TODO: This isn't exhaustive, feel free to add more.
     //
     // These should only be necessary for rows where the database schema changes also choose to
@@ -166,6 +167,9 @@ impl<'a> tokio_postgres::types::FromSql<'a> for AnySqlType {
         }
         if Uuid::accepts(ty) {
             return Ok(AnySqlType::Uuid(Uuid::from_sql(ty, raw)?));
+        }
+        if i64::accepts(ty) {
+            return Ok(AnySqlType::Int8(i64::from_sql(ty, raw)?));
         }
         Err(anyhow::anyhow!(
             "Cannot parse type {ty}. If you're trying to use this type in a table which is populated \
@@ -432,6 +436,16 @@ const CHECK_CONSTRAINTS: [&'static str; 4] = [
     "check_clause",
 ];
 
+const CONSTRAINT_COLUMN_USAGE: [&'static str; 7] = [
+    "table_catalog",
+    "table_schema",
+    "table_name",
+    "column_name",
+    "constraint_catalog",
+    "constraint_schema",
+    "constraint_name",
+];
+
 const KEY_COLUMN_USAGE: [&'static str; 7] = [
     "constraint_catalog",
     "constraint_schema",
@@ -456,29 +470,50 @@ const REFERENTIAL_CONSTRAINTS: [&'static str; 8] = [
 const VIEWS: [&'static str; 4] =
     ["table_catalog", "table_schema", "table_name", "view_definition"];
 
-const STATISTICS: [&'static str; 8] = [
+const STATISTICS: [&'static str; 11] = [
     "table_catalog",
     "table_schema",
     "table_name",
     "non_unique",
     "index_schema",
     "index_name",
+    "seq_in_index",
     "column_name",
     "direction",
+    "storing",
+    "implicit",
 ];
+
+const PG_INDEXES: [&'static str; 5] =
+    ["schemaname", "tablename", "indexname", "tablespace", "indexdef"];
 
 const TABLES: [&'static str; 4] =
     ["table_catalog", "table_schema", "table_name", "table_type"];
+
+const TABLE_CONSTRAINTS: [&'static str; 9] = [
+    "constraint_catalog",
+    "constraint_schema",
+    "constraint_name",
+    "table_catalog",
+    "table_schema",
+    "table_name",
+    "constraint_type",
+    "is_deferrable",
+    "initially_deferred",
+];
 
 #[derive(Eq, PartialEq, Debug)]
 struct InformationSchema {
     columns: Vec<Row>,
     check_constraints: Vec<Row>,
+    constraint_column_usage: Vec<Row>,
     key_column_usage: Vec<Row>,
     referential_constraints: Vec<Row>,
     views: Vec<Row>,
     statistics: Vec<Row>,
+    pg_indexes: Vec<Row>,
     tables: Vec<Row>,
+    table_constraints: Vec<Row>,
 }
 
 impl InformationSchema {
@@ -491,6 +526,10 @@ impl InformationSchema {
             other.check_constraints
         );
         similar_asserts::assert_eq!(
+            self.constraint_column_usage,
+            other.constraint_column_usage
+        );
+        similar_asserts::assert_eq!(
             self.key_column_usage,
             other.key_column_usage
         );
@@ -500,7 +539,12 @@ impl InformationSchema {
         );
         similar_asserts::assert_eq!(self.views, other.views);
         similar_asserts::assert_eq!(self.statistics, other.statistics);
+        similar_asserts::assert_eq!(self.pg_indexes, other.pg_indexes);
         similar_asserts::assert_eq!(self.tables, other.tables);
+        similar_asserts::assert_eq!(
+            self.table_constraints,
+            other.table_constraints
+        );
     }
 
     async fn new(crdb: &CockroachInstance) -> Self {
@@ -520,6 +564,14 @@ impl InformationSchema {
             crdb,
             CHECK_CONSTRAINTS.as_slice().into(),
             "information_schema.check_constraints",
+            None,
+        )
+        .await;
+
+        let constraint_column_usage = query_crdb_for_rows_of_strings(
+            crdb,
+            CONSTRAINT_COLUMN_USAGE.as_slice().into(),
+            "information_schema.constraint_column_usage",
             None,
         )
         .await;
@@ -556,6 +608,14 @@ impl InformationSchema {
         )
         .await;
 
+        let pg_indexes = query_crdb_for_rows_of_strings(
+            crdb,
+            PG_INDEXES.as_slice().into(),
+            "pg_indexes",
+            Some("schemaname = 'public'"),
+        )
+        .await;
+
         let tables = query_crdb_for_rows_of_strings(
             crdb,
             TABLES.as_slice().into(),
@@ -564,14 +624,25 @@ impl InformationSchema {
         )
         .await;
 
+        let table_constraints = query_crdb_for_rows_of_strings(
+            crdb,
+            TABLE_CONSTRAINTS.as_slice().into(),
+            "information_schema.table_constraints",
+            Some("table_schema = 'public'"),
+        )
+        .await;
+
         Self {
             columns,
             check_constraints,
+            constraint_column_usage,
             key_column_usage,
             referential_constraints,
             views,
             statistics,
+            pg_indexes,
             tables,
+            table_constraints,
         }
     }
 
@@ -657,5 +728,104 @@ async fn dbinit_equals_sum_of_all_up() {
     assert_eq!(observed_data, expected_data);
 
     crdb.cleanup().await.unwrap();
+    logctx.cleanup_successful();
+}
+
+// Returns the InformationSchema object for a database populated via `sql`.
+async fn get_information_schema(log: &Logger, sql: &str) -> InformationSchema {
+    let populate = false;
+    let mut crdb = test_setup_just_crdb(&log, populate).await;
+
+    let client = crdb.connect().await.expect("failed to connect");
+    client.batch_execute(sql).await.expect("failed to apply SQL");
+
+    let observed_schema = InformationSchema::new(&crdb).await;
+    crdb.cleanup().await.unwrap();
+    observed_schema
+}
+
+// Reproduction case for https://github.com/oxidecomputer/omicron/issues/4143
+#[tokio::test]
+async fn compare_index_creation_differing_where_clause() {
+    let config = load_test_config();
+    let logctx = LogContext::new(
+        "compare_index_creation_differing_where_clause",
+        &config.pkg.log,
+    );
+    let log = &logctx.log;
+
+    let schema1 = get_information_schema(log, "
+        CREATE DATABASE omicron;
+        CREATE TABLE omicron.public.animal (
+            id UUID PRIMARY KEY,
+            name TEXT,
+            time_deleted TIMESTAMPTZ
+        );
+
+        CREATE INDEX IF NOT EXISTS lookup_animal_by_name ON omicron.public.animal (
+            name, id
+        ) WHERE name IS NOT NULL AND time_deleted IS NULL;
+    ").await;
+
+    let schema2 = get_information_schema(log, "
+        CREATE DATABASE omicron;
+        CREATE TABLE omicron.public.animal (
+            id UUID PRIMARY KEY,
+            name TEXT,
+            time_deleted TIMESTAMPTZ
+        );
+
+        CREATE INDEX IF NOT EXISTS lookup_animal_by_name ON omicron.public.animal (
+            name, id
+        ) WHERE time_deleted IS NULL;
+    ").await;
+
+    // pg_indexes includes a column "indexdef" that compares partial indexes.
+    // This should catch the differing "WHERE" clause.
+    assert_ne!(schema1.pg_indexes, schema2.pg_indexes);
+
+    logctx.cleanup_successful();
+}
+
+// Reproduction case for https://github.com/oxidecomputer/omicron/issues/4143
+#[tokio::test]
+async fn compare_index_creation_differing_columns() {
+    let config = load_test_config();
+    let logctx = LogContext::new(
+        "compare_index_creation_differing_columns",
+        &config.pkg.log,
+    );
+    let log = &logctx.log;
+
+    let schema1 = get_information_schema(log, "
+        CREATE DATABASE omicron;
+        CREATE TABLE omicron.public.animal (
+            id UUID PRIMARY KEY,
+            name TEXT,
+            time_deleted TIMESTAMPTZ
+        );
+
+        CREATE INDEX IF NOT EXISTS lookup_animal_by_name ON omicron.public.animal (
+            name
+        ) WHERE name IS NOT NULL AND time_deleted IS NULL;
+    ").await;
+
+    let schema2 = get_information_schema(log, "
+        CREATE DATABASE omicron;
+        CREATE TABLE omicron.public.animal (
+            id UUID PRIMARY KEY,
+            name TEXT,
+            time_deleted TIMESTAMPTZ
+        );
+
+        CREATE INDEX IF NOT EXISTS lookup_animal_by_name ON omicron.public.animal (
+            name, id
+        ) WHERE name IS NOT NULL AND time_deleted IS NULL;
+    ").await;
+
+    // "statistics" identifies table indices.
+    // These tables should differ in the "implicit" column.
+    assert_ne!(schema1.statistics, schema2.statistics);
+
     logctx.cleanup_successful();
 }
