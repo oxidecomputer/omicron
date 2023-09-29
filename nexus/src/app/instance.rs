@@ -94,11 +94,6 @@ enum InstanceStateChangeRequestAction {
     SendToSled(Uuid),
 }
 
-pub(crate) enum WriteBackUpdatedInstance {
-    WriteBack,
-    Drop,
-}
-
 impl super::Nexus {
     pub fn instance_lookup<'a>(
         &'a self,
@@ -377,6 +372,7 @@ impl super::Nexus {
         let saga_params = sagas::instance_migrate::Params {
             serialized_authn: authn::saga::Serialized::for_opctx(opctx),
             instance: instance.clone(),
+            src_vmm: vmm.clone(),
             migrate_params: params,
         };
         self.execute_saga::<sagas::instance_migrate::SagaInstanceMigrate>(
@@ -625,7 +621,6 @@ impl super::Nexus {
         authz_instance: &authz::Instance,
         sled_id: &Uuid,
         prev_instance_runtime: &db::model::InstanceRuntimeState,
-        write_back: WriteBackUpdatedInstance,
     ) -> Result<(), Error> {
         opctx.authorize(authz::Action::Modify, authz_instance).await?;
         let sa = self.sled_client(&sled_id).await?;
@@ -634,20 +629,13 @@ impl super::Nexus {
             .await
             .map(|res| res.into_inner().updated_runtime);
 
-        match write_back {
-            WriteBackUpdatedInstance::WriteBack => self
-                .handle_instance_put_result(
-                    &authz_instance.id(),
-                    prev_instance_runtime,
-                    result.map(|state| state.map(Into::into)),
-                )
-                .await
-                .map(|_| ()),
-            WriteBackUpdatedInstance::Drop => {
-                result?;
-                Ok(())
-            }
-        }
+        self.handle_instance_put_result(
+            &authz_instance.id(),
+            prev_instance_runtime,
+            result.map(|state| state.map(Into::into)),
+        )
+        .await
+        .map(|_| ())
     }
 
     /// Determines the action to take on an instance's active VMM given a

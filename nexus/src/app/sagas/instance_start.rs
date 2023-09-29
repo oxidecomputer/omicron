@@ -10,10 +10,7 @@ use super::{
     instance_common::allocate_sled_ipv6, NexusActionContext, NexusSaga,
     SagaInitError, ACTION_GENERATE_ID,
 };
-use crate::app::{
-    instance::WriteBackUpdatedInstance,
-    sagas::{declare_saga_actions, retry_until_known_result},
-};
+use crate::app::sagas::{declare_saga_actions, retry_until_known_result};
 use chrono::Utc;
 use nexus_db_queries::db::{identity::Resource, lookup::LookupPath};
 use nexus_db_queries::{authn, authz, db};
@@ -533,7 +530,6 @@ async fn sis_ensure_registered_undo(
             &authz_instance,
             &sled_id,
             db_instance.runtime(),
-            WriteBackUpdatedInstance::WriteBack,
         )
         .await
         .map_err(ActionError::action_failed)?;

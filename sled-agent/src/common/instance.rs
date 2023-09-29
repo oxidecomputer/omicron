@@ -727,6 +727,24 @@ mod test {
         assert!(state.vmm.gen > prev.vmm.gen);
     }
 
+    // Verifies that the rude-termination state change doesn't update the
+    // instance record if the VMM under consideration is a migration target.
+    //
+    // The live migration saga relies on this property for correctness (it needs
+    // to know that unwinding its "create destination VMM" step will not produce
+    // an updated instance record).
+    #[test]
+    fn rude_terminate_of_migration_target_does_not_transition_instance() {
+        let mut state = make_migration_target_instance();
+        assert_eq!(state.propolis_role(), PropolisRole::MigrationTarget);
+
+        let prev = state.clone();
+        state.terminate_rudely();
+
+        assert_state_change_has_gen_change(&prev, &state);
+        assert_eq!(state.instance.gen, prev.instance.gen);
+    }
+
     #[test]
     fn migration_out_after_migration_in() {
         let mut state = make_migration_target_instance();
