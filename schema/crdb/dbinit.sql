@@ -2543,6 +2543,142 @@ CREATE TABLE IF NOT EXISTS omicron.public.switch_port_settings_address_config (
 
 /*******************************************************************/
 
+/* Hardware inventory */
+
+/* baseboard ids: this table assigns uuids to distinct part/serial values */
+CREATE TABLE IF NOT EXISTS omicron.public.hw_baseboard_id (
+    id UUID PRIMARY KEY,
+    part_number TEXT NOT NULL,
+    serial_number TEXT NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_baseboard_id_by_props
+    ON omicron.public.hw_baseboard_id (part_number, serial_number);
+
+/* power states reportable by the SP */
+CREATE TYPE IF NOT EXISTS omicron.public.hw_power_state AS ENUM (
+    'A0',
+    'A1',
+    'A2'
+);
+
+/* root of trust firmware slots */
+CREATE TYPE IF NOT EXISTS omicron.public.hw_rot_slot AS ENUM (
+    'A',
+    'B'
+);
+
+/* cabooses: assigns unique ids to distinct caboose contents */
+CREATE TABLE IF NOT EXISTS omicron.public.sw_caboose (
+    id UUID PRIMARY KEY,
+    board TEXT NOT NULL,
+    git_commit TEXT NOT NULL,
+    name TEXT NOT NULL,
+    version TEXT NOT NULL -- TODO-doc explain why this is not nullable
+);
+CREATE UNIQUE INDEX IF NOT EXISTS caboose_properties
+    on omicron.public.sw_caboose (board, git_commit, name, version);
+
+
+/* Collections */
+
+-- list of all collections
+CREATE TABLE IF NOT EXISTS inv_collection (
+    id UUID PRIMARY KEY,
+    time_started TIMESTAMPTZ NOT NULL,
+    time_done TIMESTAMPTZ,
+    collector UUID NOT NULL,
+    comment TEXT NOT NULL
+);
+-- Supports: finding latest collection to use, finding oldest collection to
+-- clean up
+CREATE INDEX IF NOT EXISTS inv_collection_by_time
+    ON omicron.public.inv_collection (time_done);
+
+-- list of errors generated during a collection
+CREATE TABLE IF NOT EXISTS omicron.public.inv_collection_errors (
+    inv_collection_id UUID NOT NULL,
+    i INT4 NOT NULL,
+    message TEXT
+);
+CREATE INDEX IF NOT EXISTS errors_by_collection
+    ON omicron.public.inv_collection_errors (inv_collection_id, i);
+
+-- observations from and about service processors
+-- also see inv_root_of_trust
+CREATE TABLE IF NOT EXISTS omicron.public.inv_service_processor (
+    -- where this observation came from
+    -- (foreign key into `inv_collection` table)
+    inv_collection_id UUID NOT NULL,
+    -- which system this SP reports it is part of
+    -- (foreign key into `hw_baseboard_id` table)
+    hw_baseboard_id UUID NOT NULL,
+    -- when this observation was made
+    time_collected TIMESTAMPTZ NOT NULL,
+    -- which MGS instance reported this data
+    source TEXT NOT NULL,
+
+    -- Data from MGS "Get SP Info" API.  See MGS API documentation.
+    baseboard_revision INT4 NOT NULL,
+    hubris_archive_id TEXT NOT NULL,
+    power_state omicron.public.hw_power_state NOT NULL,
+
+    PRIMARY KEY (inv_collection_id, hw_baseboard_id)
+);
+
+-- root of trust information reported by SP
+-- There's usually one row here for each row in inv_service_processor, but not
+-- necessarily.
+CREATE TABLE IF NOT EXISTS omicron.public.inv_root_of_trust (
+    -- where this observation came from
+    -- (foreign key into `inv_collection` table)
+    inv_collection_id UUID NOT NULL,
+    -- which system this SP reports it is part of
+    -- (foreign key into `hw_baseboard_id` table)
+    hw_baseboard_id UUID NOT NULL,
+    -- when this observation was made
+    time_collected TIMESTAMPTZ NOT NULL,
+    -- which MGS instance reported this data
+    source TEXT NOT NULL,
+
+    rot_slot_active omicron.public.hw_rot_slot NOT NULL,
+    rot_slot_boot_pref_transient omicron.public.hw_rot_slot, -- nullable
+    rot_slot_boot_pref_persistent omicron.public.hw_rot_slot NOT NULL,
+    rot_slot_boot_pref_persistent_pending omicron.public.hw_rot_slot, -- nullable
+    rot_slot_a_sha3_256 TEXT NOT NULL,
+    rot_slot_b_sha3_256 TEXT NOT NULL,
+
+    PRIMARY KEY (inv_collection_id, hw_baseboard_id)
+);
+
+CREATE TYPE IF NOT EXISTS omicron.public.caboose_which AS ENUM (
+    'sp_slot_0',
+    'sp_slot_1',
+    'rot_slot_A',
+    'rot_slot_B'
+);
+
+-- cabooses found
+CREATE TABLE IF NOT EXISTS omicron.public.inv_caboose (
+    -- where this observation came from
+    -- (foreign key into `inv_collection` table)
+    inv_collection_id UUID NOT NULL,
+    -- which system this SP reports it is part of
+    -- (foreign key into `hw_baseboard_id` table)
+    hw_baseboard_id UUID NOT NULL,
+    -- when this observation was made
+    time_collected TIMESTAMPTZ NOT NULL,
+    -- which MGS instance reported this data
+    source TEXT NOT NULL,
+
+    which omicron.public.caboose_which NOT NULL,
+    sw_caboose_id UUID NOT NULL,
+
+    PRIMARY KEY (inv_collection_id, hw_baseboard_id, which)
+);
+
+
+/*******************************************************************/
+
 /*
  * Metadata for the schema itself. This version number isn't great, as there's
  * nothing to ensure it gets bumped when it should be, but it's a start.

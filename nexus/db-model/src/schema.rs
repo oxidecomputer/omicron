@@ -1115,6 +1115,85 @@ table! {
     }
 }
 
+/* hardware inventory */
+
+table! {
+    hw_baseboard_id (id) {
+        id -> Uuid,
+        part_number -> Text,
+        serial_number -> Text,
+    }
+}
+
+table! {
+    sw_caboose (id) {
+        id -> Uuid,
+        board -> Text,
+        git_commit -> Text,
+        name -> Text,
+        version -> Text,
+    }
+}
+
+table! {
+    inv_collection (id) {
+        id -> Uuid,
+        time_started -> Timestamptz,
+        time_done -> Nullable<Timestamptz>,
+        collector -> Text,
+        comment -> Text,
+    }
+}
+
+table! {
+    inv_collection_errors (inv_collection_id, i) {
+        inv_collection_id -> Uuid,
+        i -> Int4,
+        message -> Text,
+    }
+}
+
+table! {
+    inv_service_processor (inv_collection_id, hw_baseboard_id) {
+        inv_collection_id -> Uuid,
+        hw_baseboard_id -> Uuid,
+        time_collected -> Timestamptz,
+        source -> Text,
+
+        baseboard_revision -> Int4,
+        hubris_archive_id -> Text,
+        power_state -> crate::HwPowerStateEnum,
+    }
+}
+
+table! {
+    inv_root_of_trust (inv_collection_id, hw_baseboard_id) {
+        inv_collection_id -> Uuid,
+        hw_baseboard_id -> Uuid,
+        time_collected -> Timestamptz,
+        source -> Text,
+
+        rot_slot_active -> crate::HwRotSlotEnum,
+        rot_slot_boot_pref_transient -> Nullable<crate::HwRotSlotEnum>,
+        rot_slot_boot_pref_persistent -> crate::HwRotSlotEnum,
+        rot_slot_boot_pref_persistent_pending -> Nullable<crate::HwRotSlotEnum>,
+        rot_slot_a_sha3_256 -> Text,
+        rot_slot_b_sha3_256 -> Text,
+    }
+}
+
+table! {
+    inv_caboose (inv_collection_id, hw_baseboard_id, which) {
+        inv_collection_id -> Uuid,
+        hw_baseboard_id -> Uuid,
+        time_collected -> Timestamptz,
+        source -> Text,
+
+        which -> crate::CabooseWhichEnum,
+        sw_caboose_id -> Uuid,
+    }
+}
+
 table! {
     db_metadata (singleton) {
         singleton -> Bool,
