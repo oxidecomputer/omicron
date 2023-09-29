@@ -189,3 +189,18 @@ impl From<omicron_common::api::internal::nexus::InstanceRuntimeState>
         }
     }
 }
+
+impl From<InstanceRuntimeState>
+    for sled_agent_client::types::InstanceRuntimeState
+{
+    fn from(state: InstanceRuntimeState) -> Self {
+        Self {
+            dst_propolis_id: state.dst_propolis_id,
+            fallback_state: state.fallback_state.into(),
+            gen: state.gen.into(),
+            migration_id: state.migration_id,
+            propolis_id: state.propolis_id,
+            time_updated: state.time_updated,
+        }
+    }
+}

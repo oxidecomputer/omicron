@@ -48,6 +48,7 @@ use propolis_client::support::InstanceSerialConsoleHelper;
 use propolis_client::support::WSClientOffset;
 use propolis_client::support::WebSocketStream;
 use sled_agent_client::types::InstanceMigrationSourceParams;
+use sled_agent_client::types::InstanceProperties;
 use sled_agent_client::types::InstancePutMigrationIdsBody;
 use sled_agent_client::types::InstancePutStateBody;
 use sled_agent_client::types::InstanceStateRequested;
@@ -110,7 +111,7 @@ impl super::Nexus {
         opctx: &OpContext,
         project_lookup: &lookup::Project<'_>,
         params: &params::InstanceCreate,
-    ) -> CreateResult<db::model::Instance> {
+    ) -> CreateResult<InstanceAndActiveVmm> {
         let (.., authz_project) =
             project_lookup.lookup_for(authz::Action::CreateChild).await?;
 
@@ -191,7 +192,7 @@ impl super::Nexus {
             });
         }
 
-        // Reject instances where the memory is greated than the limit
+        // Reject instances where the memory is greater than the limit
         if params.memory.to_bytes() > MAX_MEMORY_BYTES_PER_INSTANCE {
             return Err(Error::InvalidValue {
                 label: String::from("size"),
@@ -222,46 +223,25 @@ impl super::Nexus {
             .map_err(|e| Error::internal_error(&format!("{:#}", &e)))
             .internal_context("looking up output from instance create saga")?;
 
-        // TODO-correctness TODO-robustness TODO-design It's not quite correct
-        // to take this instance id and look it up again.  It's possible that
-        // it's been modified or even deleted since the saga executed.  In that
-        // case, we might return a different state of the Instance than the one
-        // that the user created or even fail with a 404!  Both of those are
-        // wrong behavior -- we should be returning the very instance that the
-        // user created.
+        // TODO: This operation should return the instance as it was created.
+        // Refetching the instance state here won't return that version of the
+        // instance if its state changed between the time the saga finished and
+        // the time this lookup was performed.
         //
-        // How can we fix this?  Right now we have internal representations like
-        // Instance and analaogous end-user-facing representations like
-        // Instance.  The former is not even serializable.  The saga
-        // _could_ emit the View version, but that's not great for two (related)
-        // reasons: (1) other sagas might want to provision instances and get
-        // back the internal representation to do other things with the
-        // newly-created instance, and (2) even within a saga, it would be
-        // useful to pass a single Instance representation along the saga,
-        // but they probably would want the internal representation, not the
-        // view.
-        //
-        // The saga could emit an Instance directly.  Today, Instance
-        // etc. aren't supposed to even be serializable -- we wanted to be able
-        // to have other datastore state there if needed.  We could have a third
-        // InstanceInternalView...but that's starting to feel pedantic.  We
-        // could just make Instance serializable, store that, and call it a
-        // day.  Does it matter that we might have many copies of the same
-        // objects in memory?
-        //
-        // If we make these serializable, it would be nice if we could leverage
-        // the type system to ensure that we never accidentally send them out a
-        // dropshot endpoint.  (On the other hand, maybe we _do_ want to do
-        // that, for internal interfaces!  Can we do this on a
-        // per-dropshot-server-basis?)
-        //
-        // TODO Even worse, post-authz, we do two lookups here instead of one.
-        // Maybe sagas should be able to emit `authz::Instance`-type objects.
-        let (.., db_instance) = LookupPath::new(opctx, &self.db_datastore)
+        // Because the create saga has to synthesize an instance record (and
+        // possibly a VMM record), and these are serializable, it should be
+        // possible to yank the outputs out of the appropriate saga steps and
+        // return them here.
+
+        let (.., authz_instance) = LookupPath::new(opctx, &self.db_datastore)
             .instance_id(instance_id)
-            .fetch()
+            .lookup_for(authz::Action::Read)
             .await?;
-        Ok(db_instance)
+
+        Ok(self
+            .db_datastore
+            .instance_fetch_with_vmm(opctx, &authz_instance)
+            .await?)
     }
 
     pub(crate) async fn instance_list(
@@ -315,30 +295,39 @@ impl super::Nexus {
         opctx: &OpContext,
         instance_lookup: &lookup::Instance<'_>,
         params: params::InstanceMigrate,
-    ) -> UpdateResult<db::model::Instance> {
-        let (.., authz_instance, db_instance) =
-            instance_lookup.fetch_for(authz::Action::Modify).await?;
+    ) -> UpdateResult<InstanceAndActiveVmm> {
+        let (.., authz_instance) =
+            instance_lookup.lookup_for(authz::Action::Modify).await?;
 
-        if db_instance.runtime().state.0 != InstanceState::Running {
+        let state = self
+            .db_datastore
+            .instance_fetch_with_vmm(opctx, &authz_instance)
+            .await?;
+        let (instance, vmm) = (state.instance(), state.vmm());
+
+        if vmm.is_none()
+            || vmm.as_ref().unwrap().runtime.state.0 != InstanceState::Running
+        {
             return Err(Error::invalid_request(
                 "instance must be running before it can migrate",
             ));
         }
 
-        if db_instance.runtime().sled_id == params.dst_sled_id {
+        let vmm = vmm.as_ref().unwrap();
+        if vmm.sled_id == params.dst_sled_id {
             return Err(Error::invalid_request(
                 "instance is already running on destination sled",
             ));
         }
 
-        if db_instance.runtime().migration_id.is_some() {
+        if instance.runtime().migration_id.is_some() {
             return Err(Error::unavail("instance is already migrating"));
         }
 
         // Kick off the migration saga
         let saga_params = sagas::instance_migrate::Params {
             serialized_authn: authn::saga::Serialized::for_opctx(opctx),
-            instance: db_instance,
+            instance: instance.clone(),
             migrate_params: params,
         };
         self.execute_saga::<sagas::instance_migrate::SagaInstanceMigrate>(
@@ -349,7 +338,7 @@ impl super::Nexus {
         // TODO correctness TODO robustness TODO design
         // Should we lookup the instance again here?
         // See comment in project_create_instance.
-        self.db_datastore.instance_refetch(opctx, &authz_instance).await
+        self.db_datastore.instance_fetch_with_vmm(opctx, &authz_instance).await
     }
 
     /// Attempts to set the migration IDs for the supplied instance via the
@@ -460,7 +449,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         instance_lookup: &lookup::Instance<'_>,
-    ) -> UpdateResult<db::model::Instance> {
+    ) -> UpdateResult<InstanceAndActiveVmm> {
         let (.., authz_instance, db_instance) = instance_lookup.fetch().await?;
         self.instance_request_state(
             opctx,
@@ -469,7 +458,7 @@ impl super::Nexus {
             InstanceStateRequested::Reboot,
         )
         .await?;
-        self.db_datastore.instance_refetch(opctx, &authz_instance).await
+        self.db_datastore.instance_fetch_with_vmm(opctx, &authz_instance).await
     }
 
     /// Attempts to start an instance if it is currently stopped.
@@ -477,41 +466,53 @@ impl super::Nexus {
         self: &Arc<Self>,
         opctx: &OpContext,
         instance_lookup: &lookup::Instance<'_>,
-    ) -> UpdateResult<db::model::Instance> {
-        let (.., authz_instance, db_instance) =
-            instance_lookup.fetch_for(authz::Action::Modify).await?;
+    ) -> UpdateResult<InstanceAndActiveVmm> {
+        let (.., authz_instance) =
+            instance_lookup.lookup_for(authz::Action::Modify).await?;
 
-        // If the instance is already starting or running, succeed immediately
-        // for idempotency. If the instance is stopped, try to start it. In all
-        // other cases return an error describing the state conflict.
-        //
-        // The "Creating" state is not permitted here (even though a request to
-        // create can include a request to start the instance) because an
-        // instance that is still being created may not be ready to start yet
-        // (e.g. its disks may not yet be attached).
-        //
-        // If the instance is stopped, the start saga will try to change the
-        // instance's state to Starting and increment the instance's state
-        // generation number. If this increment fails (because someone else has
-        // changed the state), the saga fails. See the saga comments for more
-        // details on how this synchronization works.
-        match db_instance.runtime_state.state.0 {
-            InstanceState::Starting | InstanceState::Running => {
-                return Ok(db_instance)
-            }
-            InstanceState::Stopped => {}
-            _ => {
-                return Err(Error::conflict(&format!(
-                    "instance is in state {} but must be {} to be started",
-                    db_instance.runtime_state.state.0,
-                    InstanceState::Stopped
-                )))
+        let state = self
+            .db_datastore
+            .instance_fetch_with_vmm(opctx, &authz_instance)
+            .await?;
+        let (instance, vmm) = (state.instance(), state.vmm());
+
+        if let Some(vmm) = vmm {
+            match vmm.runtime.state.0 {
+                InstanceState::Starting
+                | InstanceState::Running
+                | InstanceState::Rebooting => {
+                    debug!(self.log, "asked to start an active instance";
+                           "instance_id" => %authz_instance.id());
+
+                    return Ok(state);
+                }
+                InstanceState::Stopped => {
+                    let propolis_id = instance
+                        .runtime()
+                        .propolis_id
+                        .expect("needed a VMM ID to fetch a VMM record");
+                    error!(self.log,
+                           "instance is stopped but still has an active VMM";
+                           "instance_id" => %authz_instance.id(),
+                           "propolis_id" => %propolis_id);
+
+                    return Err(Error::internal_error(
+                        "instance is stopped but still has an active VMM",
+                    ));
+                }
+                _ => {
+                    return Err(Error::conflict(&format!(
+                        "instance is in state {} but must be {} to be started",
+                        vmm.runtime.state.0,
+                        InstanceState::Stopped
+                    )));
+                }
             }
         }
 
         let saga_params = sagas::instance_start::Params {
             serialized_authn: authn::saga::Serialized::for_opctx(opctx),
-            instance: db_instance,
+            instance: instance.clone(),
             ensure_network: true,
         };
 
@@ -520,7 +521,7 @@ impl super::Nexus {
         )
         .await?;
 
-        self.db_datastore.instance_refetch(opctx, &authz_instance).await
+        self.db_datastore.instance_fetch_with_vmm(opctx, &authz_instance).await
     }
 
     /// Make sure the given Instance is stopped.
@@ -528,16 +529,24 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         instance_lookup: &lookup::Instance<'_>,
-    ) -> UpdateResult<db::model::Instance> {
-        let (.., authz_instance, db_instance) = instance_lookup.fetch().await?;
+    ) -> UpdateResult<InstanceAndActiveVmm> {
+        let (.., authz_instance) =
+            instance_lookup.lookup_for(authz::Action::Modify).await?;
+
+        let state = self
+            .db_datastore
+            .instance_fetch_with_vmm(opctx, &authz_instance)
+            .await?;
+
         self.instance_request_state(
             opctx,
             &authz_instance,
-            &db_instance,
+            state.instance(),
             InstanceStateRequested::Stopped,
         )
         .await?;
-        self.db_datastore.instance_refetch(opctx, &authz_instance).await
+
+        self.db_datastore.instance_fetch_with_vmm(opctx, &authz_instance).await
     }
 
     /// Idempotently ensures that the sled specified in `db_instance` does not
@@ -806,9 +815,11 @@ impl super::Nexus {
         // beat us to it.
 
         let instance_hardware = sled_agent_client::types::InstanceHardware {
-            runtime: sled_agent_client::types::InstanceRuntimeState::from(
-                db_instance.runtime().clone(),
-            ),
+            properties: InstanceProperties {
+                ncpus: db_instance.ncpus.into(),
+                memory: db_instance.memory.into(),
+                hostname: db_instance.hostname.clone(),
+            },
             nics,
             source_nat,
             external_ips,
@@ -984,10 +995,11 @@ impl super::Nexus {
             .await?;
 
         // TODO-v1: Write test to verify this case
-        // Because both instance and disk can be provided by ID it's possible for someone
-        // to specify resources from different projects. The lookups would resolve the resources
-        // (assuming the user had sufficient permissions on both) without verifying the shared hierarchy.
-        // To mitigate that we verify that their parent projects have the same ID.
+        // Because both instance and disk can be provided by ID it's possible
+        // for someone to specify resources from different projects. The lookups
+        // would resolve the resources (assuming the user had sufficient
+        // permissions on both) without verifying the shared hierarchy. To
+        // mitigate that we verify that their parent projects have the same ID.
         if authz_project.id() != authz_project_disk.id() {
             return Err(Error::InvalidRequest {
                 message: "disk must be in the same project as the instance"
@@ -1233,11 +1245,16 @@ impl super::Nexus {
     /// provided they are still in the propolis-server's cache.
     pub(crate) async fn instance_serial_console_data(
         &self,
+        opctx: &OpContext,
         instance_lookup: &lookup::Instance<'_>,
         params: &params::InstanceSerialConsoleRequest,
     ) -> Result<params::InstanceSerialConsoleData, Error> {
         let client = self
-            .propolis_client_for_instance(instance_lookup, authz::Action::Read)
+            .propolis_client_for_instance(
+                opctx,
+                instance_lookup,
+                authz::Action::Read,
+            )
             .await?;
         let mut request = client.instance_serial_history_get();
         if let Some(max_bytes) = params.max_bytes {
@@ -1252,9 +1269,11 @@ impl super::Nexus {
         let data = request
             .send()
             .await
-            .map_err(|_| {
+            .map_err(|e| {
                 Error::internal_error(
-                    "websocket connection to instance's serial port failed",
+                    "websocket connection to instance's serial port failed: \
+                        {:?}",
+                    e,
                 )
             })?
             .into_inner();
@@ -1266,12 +1285,17 @@ impl super::Nexus {
 
     pub(crate) async fn instance_serial_console_stream(
         &self,
+        opctx: &OpContext,
         mut client_stream: WebSocketStream<impl AsyncRead + AsyncWrite + Unpin>,
         instance_lookup: &lookup::Instance<'_>,
         params: &params::InstanceSerialConsoleStreamRequest,
     ) -> Result<(), Error> {
         let client_addr = match self
-            .propolis_addr_for_instance(instance_lookup, authz::Action::Modify)
+            .propolis_addr_for_instance(
+                opctx,
+                instance_lookup,
+                authz::Action::Modify,
+            )
             .await
         {
             Ok(x) => x,
@@ -1323,48 +1347,64 @@ impl super::Nexus {
 
     async fn propolis_addr_for_instance(
         &self,
+        opctx: &OpContext,
         instance_lookup: &lookup::Instance<'_>,
         action: authz::Action,
     ) -> Result<SocketAddr, Error> {
-        let (.., authz_instance, instance) =
-            instance_lookup.fetch_for(action).await?;
-        match instance.runtime_state.state.0 {
-            InstanceState::Running
-            | InstanceState::Rebooting
-            | InstanceState::Migrating
-            | InstanceState::Repairing => {
-                let ip_addr = instance
-                    .runtime_state
-                    .propolis_ip
-                    .ok_or_else(|| {
-                        Error::internal_error(
-                            "instance's hypervisor IP address not found",
-                        )
-                    })?
-                    .ip();
-                Ok(SocketAddr::new(ip_addr, PROPOLIS_PORT))
+        let (.., authz_instance) = instance_lookup.lookup_for(action).await?;
+
+        let state = self
+            .db_datastore
+            .instance_fetch_with_vmm(opctx, &authz_instance)
+            .await?;
+
+        let (instance, vmm) = (state.instance(), state.vmm());
+        if let Some(vmm) = vmm {
+            match vmm.runtime.state.0 {
+                InstanceState::Running
+                | InstanceState::Rebooting
+                | InstanceState::Migrating
+                | InstanceState::Repairing => {
+                    Ok(SocketAddr::new(vmm.propolis_ip.ip(), PROPOLIS_PORT))
+                }
+                InstanceState::Creating
+                | InstanceState::Starting
+                | InstanceState::Stopping
+                | InstanceState::Stopped
+                | InstanceState::Failed => Err(Error::ServiceUnavailable {
+                    internal_message: format!(
+                        "cannot connect to serial console of instance in state \
+                            {:?}",
+                        vmm.runtime.state.0
+                    ),
+                }),
+                InstanceState::Destroyed => Err(Error::ServiceUnavailable {
+                    internal_message: format!(
+                        "cannot connect to serial console of instance in state \
+                        {:?}",
+                        InstanceState::Stopped),
+                }),
             }
-            InstanceState::Creating
-            | InstanceState::Starting
-            | InstanceState::Stopping
-            | InstanceState::Stopped
-            | InstanceState::Failed => Err(Error::ServiceUnavailable {
+        } else {
+            Err(Error::ServiceUnavailable {
                 internal_message: format!(
-                    "Cannot connect to hypervisor of instance in state {:?}",
-                    instance.runtime_state.state
-                ),
-            }),
-            InstanceState::Destroyed => Err(authz_instance.not_found()),
+                    "instance is in state {:?} and has no active serial console \
+                    server",
+                    instance.runtime().fallback_state
+                )
+            })
         }
     }
 
     async fn propolis_client_for_instance(
         &self,
+        opctx: &OpContext,
         instance_lookup: &lookup::Instance<'_>,
         action: authz::Action,
     ) -> Result<propolis_client::Client, Error> {
-        let client_addr =
-            self.propolis_addr_for_instance(instance_lookup, action).await?;
+        let client_addr = self
+            .propolis_addr_for_instance(opctx, instance_lookup, action)
+            .await?;
         Ok(propolis_client::Client::new(&format!("http://{}", client_addr)))
     }
 
