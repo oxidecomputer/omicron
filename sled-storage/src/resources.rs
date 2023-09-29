@@ -62,6 +62,19 @@ impl StorageResources {
         Ok(())
     }
 
+    /// Insert a synthetic disk and its zpool
+    pub(crate) fn insert_synthetic_disk(
+        &mut self,
+        zpool_name: ZpoolName,
+    ) -> Result<(), Error> {
+        let disk = DiskWrapper::Synthetic { zpool_name: zpool_name.clone() };
+        let parent = disk.identity().clone();
+        Arc::make_mut(&mut self.disks).insert(disk.identity(), disk);
+        let zpool = Pool::new(zpool_name, parent)?;
+        Arc::make_mut(&mut self.pools).insert(zpool.name.id(), zpool);
+        Ok(())
+    }
+
     /// Returns the identity of the boot disk.
     ///
     /// If this returns `None`, we have not processed the boot disk yet.
