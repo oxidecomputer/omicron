@@ -921,7 +921,9 @@ pub(crate) mod test {
         dsl::disk
             .filter(dsl::time_deleted.is_null())
             .select(Disk::as_select())
-            .first_async::<Disk>(datastore.pool_for_tests().await.unwrap())
+            .first_async::<Disk>(
+                &*datastore.pool_connection_for_tests().await.unwrap(),
+            )
             .await
             .optional()
             .unwrap()
@@ -935,7 +937,9 @@ pub(crate) mod test {
         dsl::volume
             .filter(dsl::time_deleted.is_null())
             .select(Volume::as_select())
-            .first_async::<Volume>(datastore.pool_for_tests().await.unwrap())
+            .first_async::<Volume>(
+                &*datastore.pool_connection_for_tests().await.unwrap(),
+            )
             .await
             .optional()
             .unwrap()
@@ -951,7 +955,7 @@ pub(crate) mod test {
         dsl::virtual_provisioning_resource
             .select(VirtualProvisioningResource::as_select())
             .first_async::<VirtualProvisioningResource>(
-                datastore.pool_for_tests().await.unwrap(),
+                &*datastore.pool_connection_for_tests().await.unwrap(),
             )
             .await
             .optional()
@@ -966,7 +970,7 @@ pub(crate) mod test {
         use nexus_db_queries::db::schema::virtual_provisioning_collection::dsl;
 
         datastore
-            .pool_for_tests()
+            .pool_connection_for_tests()
             .await
             .unwrap()
             .transaction_async(|conn| async move {

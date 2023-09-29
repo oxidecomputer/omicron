@@ -36,7 +36,7 @@ const NOT_ENOUGH_UNIQUE_ZPOOLS_SENTINEL: &'static str =
 
 /// Translates a generic pool error to an external error based
 /// on messages which may be emitted during region provisioning.
-pub fn from_pool(e: async_bb8_diesel::PoolError) -> external::Error {
+pub fn from_diesel(e: async_bb8_diesel::ConnectionError) -> external::Error {
     use crate::db::error;
 
     let sentinels = [
@@ -66,7 +66,7 @@ pub fn from_pool(e: async_bb8_diesel::PoolError) -> external::Error {
         }
     }
 
-    error::public_error_from_diesel_pool(e, error::ErrorHandler::Server)
+    error::public_error_from_diesel(e, error::ErrorHandler::Server)
 }
 
 /// A subquery to find all old regions associated with a particular volume.

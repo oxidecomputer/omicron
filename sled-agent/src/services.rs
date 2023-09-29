@@ -1645,6 +1645,10 @@ impl ServiceManager {
                         }
                     }
 
+                    if let Some(info) = self.inner.sled_info.get() {
+                        smfh.setprop("config/rack_id", info.rack_id)?;
+                    }
+
                     smfh.refresh()?;
                 }
                 ServiceType::SpSim => {
@@ -2753,6 +2757,20 @@ impl ServiceManager {
                                 "config/address",
                                 &format!("[{address}]:{MGS_PORT}"),
                             )?;
+
+                            // It should be impossible for the `sled_info` not to be set here,
+                            // as the underlay is set at the same time.
+                            if let Some(info) = self.inner.sled_info.get() {
+                                smfh.setprop("config/rack_id", info.rack_id)?;
+                            } else {
+                                error!(
+                                    self.inner.log,
+                                    concat!(
+                                        "rack_id not present,",
+                                        " even though underlay address exists"
+                                    )
+                                );
+                            }
 
                             smfh.refresh()?;
                         }

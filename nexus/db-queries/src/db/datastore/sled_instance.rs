@@ -3,7 +3,7 @@ use super::DataStore;
 use crate::authz;
 use crate::context::OpContext;
 use crate::db;
-use crate::db::error::public_error_from_diesel_pool;
+use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
 use crate::db::pagination::paginated;
 use async_bb8_diesel::AsyncRunQueryDsl;
@@ -25,8 +25,10 @@ impl DataStore {
         paginated(dsl::sled_instance, dsl::id, &pagparams)
             .filter(dsl::active_sled_id.eq(authz_sled.id()))
             .select(SledInstance::as_select())
-            .load_async::<SledInstance>(self.pool_authorized(opctx).await?)
+            .load_async::<SledInstance>(
+                &*self.pool_connection_authorized(opctx).await?,
+            )
             .await
-            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 }
