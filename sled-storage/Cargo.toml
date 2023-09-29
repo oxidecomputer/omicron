@@ -28,5 +28,6 @@ tokio.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
+illumos-utils = { workspace = true, features = ["tmp_keypath"] }
 omicron-test-utils.workspace = true
 camino-tempfile.workspace = true

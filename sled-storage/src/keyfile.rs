@@ -9,14 +9,6 @@ use slog::{info, Logger};
 use tokio::fs::{remove_file, File};
 use tokio::io::{AsyncSeekExt, AsyncWriteExt, SeekFrom};
 
-/// This path is intentionally on a `tmpfs` to prevent copy-on-write behavior
-/// and to ensure it goes away on power off.
-///
-/// We want minimize the time the key files are in memory, and so we rederive
-/// the keys and recreate the files on demand when creating and mounting
-/// encrypted filesystems. We then zero them and unlink them.
-pub const KEYPATH_ROOT: &str = "/var/run/oxide/";
-
 /// A file that wraps a zfs encryption key.
 ///
 /// We put this in a RAM backed filesystem and zero and delete it when we are
