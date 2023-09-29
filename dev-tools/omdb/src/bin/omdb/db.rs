@@ -542,7 +542,7 @@ async fn cmd_db_disk_physical(
         .filter(zpool_dsl::time_deleted.is_null())
         .filter(zpool_dsl::physical_disk_id.eq(args.uuid))
         .select(Zpool::as_select())
-        .load_async(datastore.pool_for_tests().await?)
+        .load_async(&*datastore.pool_connection_for_tests().await?)
         .await
         .context("loading zpool from pysical disk id")?;
 
@@ -562,7 +562,7 @@ async fn cmd_db_disk_physical(
             .filter(dataset_dsl::time_deleted.is_null())
             .filter(dataset_dsl::pool_id.eq(zp.id()))
             .select(Dataset::as_select())
-            .load_async(datastore.pool_for_tests().await?)
+            .load_async(&*datastore.pool_connection_for_tests().await?)
             .await
             .context("loading dataset")?;
 
@@ -597,7 +597,7 @@ async fn cmd_db_disk_physical(
         let regions = region_dsl::region
             .filter(region_dsl::dataset_id.eq(did))
             .select(Region::as_select())
-            .load_async(datastore.pool_for_tests().await?)
+            .load_async(&*datastore.pool_connection_for_tests().await?)
             .await
             .context("loading region")?;
 
@@ -616,7 +616,7 @@ async fn cmd_db_disk_physical(
         .filter(dsl::volume_id.eq_any(volume_ids))
         .limit(i64::from(u32::from(limit)))
         .select(Disk::as_select())
-        .load_async(datastore.pool_for_tests().await?)
+        .load_async(&*datastore.pool_connection_for_tests().await?)
         .await
         .context("loading disks")?;
 
@@ -644,7 +644,7 @@ async fn cmd_db_disk_physical(
                     .filter(instance_dsl::id.eq(instance_uuid))
                     .limit(1)
                     .select(Instance::as_select())
-                    .load_async(datastore.pool_for_tests().await?)
+                    .load_async(&*datastore.pool_connection_for_tests().await?)
                     .await
                     .context("loading requested instance")?;
 
