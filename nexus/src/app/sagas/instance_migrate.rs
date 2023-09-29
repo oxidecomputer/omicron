@@ -653,6 +653,7 @@ mod tests {
                         .vmm()
                         .as_ref()
                         .expect("instance should have a vmm before migrating");
+
                     let dst_sled_id =
                         select_first_alternate_sled(old_vmm, &other_sleds);
 

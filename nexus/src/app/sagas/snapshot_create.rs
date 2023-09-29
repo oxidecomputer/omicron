@@ -1960,11 +1960,10 @@ mod test {
             .await
             .unwrap();
 
-        let vmm = instance_state
-            .vmm()
-            .as_ref()
+        let sled_id = instance_state
+            .sled_id()
             .expect("starting instance should have a sled");
-        let sa = nexus.sled_client(&vmm.sled_id).await.unwrap();
+        let sa = nexus.sled_client(&sled_id).await.unwrap();
 
         sa.instance_finish_transition(instance.identity.id).await;
         let instance_state = nexus
@@ -2083,10 +2082,8 @@ mod test {
                             .await;
 
                             let sled_id = state
-                                .vmm()
-                                .as_ref()
-                                .expect("running instance should have a vmm")
-                                .sled_id;
+                                .sled_id()
+                                .expect("running instance should have a vmm");
 
                             Some((state.instance().id(), sled_id))
                         } else {
@@ -2369,10 +2366,8 @@ mod test {
         .await;
 
         let sled_id = instance_state
-            .vmm()
-            .as_ref()
-            .expect("running instance should have a sled")
-            .sled_id;
+            .sled_id()
+            .expect("running instance should have a vmm");
 
         // Rerun the saga
         let params = new_test_params(

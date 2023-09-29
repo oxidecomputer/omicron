@@ -574,11 +574,19 @@ async fn test_instance_start_creates_networking_state(
     let opctx =
         OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
 
-    let (.., authz_instance, db_instance) = LookupPath::new(&opctx, &datastore)
+    let (.., authz_instance) = LookupPath::new(&opctx, &datastore)
         .instance_id(instance.identity.id)
-        .fetch()
+        .lookup_for(nexus_db_queries::authz::Action::Read)
         .await
         .unwrap();
+
+    let instance_state = datastore
+        .instance_fetch_with_vmm(&opctx, &authz_instance)
+        .await
+        .unwrap();
+
+    let sled_id =
+        instance_state.sled_id().expect("running instance should have a sled");
 
     let guest_nics = datastore
         .derive_guest_network_interface_info(&opctx, &authz_instance)
@@ -589,7 +597,7 @@ async fn test_instance_start_creates_networking_state(
     for agent in &sled_agents {
         // TODO(#3107) Remove this bifurcation when Nexus programs all mappings
         // itself.
-        if agent.id != db_instance.runtime().sled_id {
+        if agent.id != sled_id {
             assert_sled_v2p_mappings(
                 agent,
                 &nics[0],
@@ -3644,16 +3652,25 @@ async fn test_instance_v2p_mappings(cptestctx: &ControlPlaneTestContext) {
     let opctx =
         OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
 
-    let (.., authz_instance, db_instance) = LookupPath::new(&opctx, &datastore)
+    let (.., authz_instance) = LookupPath::new(&opctx, &datastore)
         .instance_id(instance.identity.id)
-        .fetch()
+        .lookup_for(nexus_db_queries::authz::Action::Read)
         .await
         .unwrap();
+
+    let instance_state = datastore
+        .instance_fetch_with_vmm(&opctx, &authz_instance)
+        .await
+        .unwrap();
+
+    let sled_id =
+        instance_state.sled_id().expect("running instance should have a sled");
 
     let guest_nics = datastore
         .derive_guest_network_interface_info(&opctx, &authz_instance)
         .await
         .unwrap();
+
     assert_eq!(guest_nics.len(), 1);
 
     let mut sled_agents: Vec<&Arc<SledAgent>> =
@@ -3663,7 +3680,7 @@ async fn test_instance_v2p_mappings(cptestctx: &ControlPlaneTestContext) {
     for sled_agent in &sled_agents {
         // TODO(#3107) Remove this bifurcation when Nexus programs all mappings
         // itself.
-        if sled_agent.id != db_instance.runtime().sled_id {
+        if sled_agent.id != sled_id {
             assert_sled_v2p_mappings(
                 sled_agent,
                 &nics[0],

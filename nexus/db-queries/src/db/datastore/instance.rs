@@ -57,6 +57,10 @@ impl InstanceAndActiveVmm {
     pub fn vmm(&self) -> &Option<Vmm> {
         &self.vmm
     }
+
+    pub fn sled_id(&self) -> Option<Uuid> {
+        self.vmm.as_ref().map(|v| v.sled_id)
+    }
 }
 
 impl From<InstanceAndActiveVmm> for omicron_common::api::external::Instance {

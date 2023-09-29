@@ -92,8 +92,7 @@ impl TestInterfaces for super::Nexus {
             .datastore()
             .instance_fetch_with_vmm(&opctx, &authz_instance)
             .await?
-            .vmm()
-            .map(|vmm| vmm.sled_id))
+            .sled_id())
     }
 
     async fn set_disk_as_faulted(&self, disk_id: &Uuid) -> Result<bool, Error> {
