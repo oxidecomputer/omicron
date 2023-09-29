@@ -256,6 +256,22 @@ impl super::Nexus {
             .map_err(|e| Error::internal_error(&format!("{:#}", &e)))
             .internal_context("looking up output from instance create saga")?;
 
+        // If the caller asked to start the instance, kick off that saga.
+        // There's a window in which the instance is stopped and can be deleted,
+        // so this is not guaranteed to succeed, and its result should not
+        // affect the result of the attempt to create the instance.
+        if params.start {
+            let lookup = LookupPath::new(opctx, &self.db_datastore)
+                .instance_id(instance_id);
+
+            let start_result = self.instance_start(opctx, &lookup).await;
+            if let Err(e) = start_result {
+                info!(self.log, "failed to start newly-created instance";
+                      "instance_id" => %instance_id,
+                      "error" => ?e);
+            }
+        }
+
         // TODO: This operation should return the instance as it was created.
         // Refetching the instance state here won't return that version of the
         // instance if its state changed between the time the saga finished and
