@@ -123,7 +123,7 @@ fn internal_ensure_partition_layout<GPT: gpt::LibEfiGpt>(
                     info!(log, "Formatting zpool on disk {}", paths.devfs_path);
                     // If a zpool does not already exist, create one.
                     let zpool_name = ZpoolName::new_external(Uuid::new_v4());
-                    Zpool::create(zpool_name, dev_path)?;
+                    Zpool::create(&zpool_name, dev_path)?;
                     return Ok(vec![Partition::ZfsPool]);
                 }
                 DiskVariant::M2 => {

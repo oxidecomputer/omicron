@@ -15,7 +15,7 @@ use illumos_utils::zpool::{ZpoolKind, ZpoolName};
 use key_manager::StorageKeyRequester;
 use omicron_common::disk::DiskIdentity;
 use sled_hardware::{DiskVariant, UnparsedDisk};
-use slog::{error, info, o, warn, Logger};
+use slog::{debug, error, info, o, warn, Logger};
 use tokio::sync::{mpsc, oneshot};
 
 // The size of the mpsc bounded channel used to communicate
@@ -114,6 +114,7 @@ impl StorageManager {
         zpool_name: ZpoolName,
     ) -> Result<(), Error> {
         if self.stage != StorageManagerStage::Normal {
+            info!(self.log, "Queuing synthetic U.2 drive: {zpool_name}");
             self.queued_synthetic_u2_drives.insert(zpool_name);
             return Ok(());
         }
@@ -123,6 +124,8 @@ impl StorageManager {
             serial: "fake_serial".to_string(),
             model: zpool_name.id().to_string(),
         };
+
+        debug!(self.log, "Ensure zpool has datasets: {zpool_name}");
         match dataset::ensure_zpool_has_datasets(
             &self.log,
             &zpool_name,
@@ -131,7 +134,7 @@ impl StorageManager {
         )
         .await
         {
-            Ok(disk) => self.resources.insert_synthetic_disk(zpool_name),
+            Ok(()) => self.resources.insert_synthetic_disk(zpool_name),
             Err(err @ DatasetError::KeyManager(_)) => {
                 warn!(
                     self.log,
@@ -159,16 +162,16 @@ impl StorageManager {
 mod tests {
     use super::*;
     use async_trait::async_trait;
+    use camino::{Utf8Path, Utf8PathBuf};
+    use camino_tempfile::tempdir;
+    use illumos_utils::zpool::Zpool;
     use key_manager::{
         KeyManager, SecretRetriever, SecretRetrieverError, SecretState,
         VersionedIkm,
     };
+    use omicron_test_utils::dev::test_setup_log;
+    use std::fs::File;
     use uuid::Uuid;
-
-    pub fn log() -> slog::Logger {
-        let drain = slog::Discard;
-        slog::Logger::root(drain, o!())
-    }
 
     /// A [`key-manager::SecretRetriever`] that only returns hardcoded IKM for
     /// epoch 0
@@ -199,11 +202,29 @@ mod tests {
         }
     }
 
+    // 64 MiB (min size of zpool)
+    const DISK_SIZE: u64 = 64 * 1024 * 1024;
+
+    // Create a synthetic disk with a zpool backed by a file
+    fn new_disk(dir: &Utf8Path, zpool_name: &ZpoolName) -> Utf8PathBuf {
+        let path = dir.join(zpool_name.to_string());
+        let file = File::create(&path).unwrap();
+        file.set_len(DISK_SIZE).unwrap();
+        drop(file);
+        Zpool::create(zpool_name, &path).unwrap();
+        Zpool::import(zpool_name).unwrap();
+        Zpool::set_failmode_continue(zpool_name).unwrap();
+        path
+    }
+
     #[tokio::test]
     async fn add_u2_disk_while_not_in_normal_stage_and_ensure_it_gets_queued() {
+        let logctx = test_setup_log(
+            "add_u2_disk_while_not_in_normal_stage_and_ensure_it_gets_queued",
+        );
         let (mut _key_manager, key_requester) =
-            KeyManager::new(&log(), HardcodedSecretRetriever {});
-        let (mut manager, _) = StorageManager::new(&log(), key_requester);
+            KeyManager::new(&logctx.log, HardcodedSecretRetriever {});
+        let (mut manager, _) = StorageManager::new(&logctx.log, key_requester);
         let zpool_name = ZpoolName::new_external(Uuid::new_v4());
         assert_eq!(StorageManagerStage::WaitingForBootDisk, manager.stage);
         manager.add_synthetic_u2_disk(zpool_name.clone()).await.unwrap();
@@ -227,5 +248,24 @@ mod tests {
                 HashSet::from([zpool_name.clone()])
             );
         }
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn ensure_u2_gets_added_to_resources() {
+        let logctx = test_setup_log("ensure_u2_gets_added_to_resources");
+        let (mut key_manager, key_requester) =
+            KeyManager::new(&logctx.log, HardcodedSecretRetriever {});
+        let (mut manager, _) = StorageManager::new(&logctx.log, key_requester);
+        let zpool_name = ZpoolName::new_external(Uuid::new_v4());
+        let dir = tempdir().unwrap();
+        let _ = new_disk(dir.path(), &zpool_name);
+        // Spawn the key_manager so that it will respond to requests for encryption keys
+        tokio::spawn(async move { key_manager.run().await });
+        manager.stage = StorageManagerStage::Normal;
+        manager.add_synthetic_u2_disk(zpool_name.clone()).await.unwrap();
+        assert_eq!(manager.resources.all_u2_zpools().len(), 1);
+        Zpool::destroy(&zpool_name).unwrap();
+        logctx.cleanup_successful();
     }
 }

@@ -29,3 +29,4 @@ uuid.workspace = true
 
 [dev-dependencies]
 omicron-test-utils.workspace = true
+camino-tempfile.workspace = true

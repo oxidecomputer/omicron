@@ -40,6 +40,13 @@ pub struct CreateError {
 }
 
 #[derive(thiserror::Error, Debug)]
+#[error("Failed to destroy zpool: {err}")]
+pub struct DestroyError {
+    #[from]
+    err: Error,
+}
+
+#[derive(thiserror::Error, Debug)]
 #[error("Failed to list zpools: {err}")]
 pub struct ListError {
     #[from]
@@ -167,7 +174,10 @@ pub struct Zpool {}
 
 #[cfg_attr(any(test, feature = "testing"), mockall::automock, allow(dead_code))]
 impl Zpool {
-    pub fn create(name: ZpoolName, vdev: &Utf8Path) -> Result<(), CreateError> {
+    pub fn create(
+        name: &ZpoolName,
+        vdev: &Utf8Path,
+    ) -> Result<(), CreateError> {
         let mut cmd = std::process::Command::new(PFEXEC);
         cmd.env_clear();
         cmd.env("LC_ALL", "C.UTF-8");
@@ -189,7 +199,17 @@ impl Zpool {
         Ok(())
     }
 
-    pub fn import(name: ZpoolName) -> Result<(), Error> {
+    pub fn destroy(name: &ZpoolName) -> Result<(), DestroyError> {
+        let mut cmd = std::process::Command::new(PFEXEC);
+        cmd.env_clear();
+        cmd.env("LC_ALL", "C.UTF-8");
+        cmd.arg(ZPOOL).arg("destroy");
+        cmd.arg(&name.to_string());
+        execute(&mut cmd).map_err(Error::from)?;
+        Ok(())
+    }
+
+    pub fn import(name: &ZpoolName) -> Result<(), Error> {
         let mut cmd = std::process::Command::new(PFEXEC);
         cmd.env_clear();
         cmd.env("LC_ALL", "C.UTF-8");

@@ -253,11 +253,11 @@ impl PooledDisk {
                     DiskVariant::M2 => ZpoolName::new_internal(Uuid::new_v4()),
                     DiskVariant::U2 => ZpoolName::new_external(Uuid::new_v4()),
                 };
-                Zpool::create(zpool_name.clone(), &zpool_path)?;
+                Zpool::create(&zpool_name, &zpool_path)?;
                 zpool_name
             }
         };
-        Zpool::import(zpool_name.clone()).map_err(|e| {
+        Zpool::import(&zpool_name).map_err(|e| {
             warn!(log, "Failed to import zpool {zpool_name}: {e}");
             PooledDiskError::ZpoolImport(e)
         })?;
@@ -269,7 +269,7 @@ impl PooledDisk {
         log: &Logger,
         zpool_name: &ZpoolName,
     ) -> Result<(), PooledDiskError> {
-        Zpool::import(zpool_name.clone()).map_err(|e| {
+        Zpool::import(&zpool_name).map_err(|e| {
             warn!(log, "Failed to import zpool {zpool_name}: {e}");
             PooledDiskError::ZpoolImport(e)
         })?;

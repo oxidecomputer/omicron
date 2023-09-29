@@ -260,33 +260,39 @@ pub async fn ensure_zpool_has_datasets(
         let mountpoint = zpool_name.dataset_mountpoint(dataset);
         let keypath: Keypath = disk_identity.into();
 
-        let epoch =
-            if let Ok(epoch_str) = Zfs::get_oxide_value(dataset, "epoch") {
-                if let Ok(epoch) = epoch_str.parse::<u64>() {
-                    epoch
-                } else {
-                    return Err(DatasetError::CannotParseEpochProperty(
-                        dataset.to_string(),
-                    ));
-                }
+        let epoch = if let Ok(epoch_str) =
+            Zfs::get_oxide_value(dataset, "epoch")
+        {
+            if let Ok(epoch) = epoch_str.parse::<u64>() {
+                epoch
             } else {
-                // We got an error trying to call `Zfs::get_oxide_value`
-                // which indicates that the dataset doesn't exist or there
-                // was a problem  running the command.
-                //
-                // Note that `Zfs::get_oxide_value` will succeed even if
-                // the epoch is missing. `epoch_str` will show up as a dash
-                // (`-`) and will not parse into a `u64`. So we don't have
-                // to worry about that case here as it is handled above.
-                //
-                // If the error indicated that the command failed for some
-                // other reason, but the dataset actually existed, we will
-                // try to create the dataset below and that will fail. So
-                // there is no harm in just loading the latest secret here.
-                key_requester.load_latest_secret().await?
-            };
+                return Err(DatasetError::CannotParseEpochProperty(
+                    dataset.to_string(),
+                ));
+            }
+        } else {
+            // We got an error trying to call `Zfs::get_oxide_value`
+            // which indicates that the dataset doesn't exist or there
+            // was a problem  running the command.
+            //
+            // Note that `Zfs::get_oxide_value` will succeed even if
+            // the epoch is missing. `epoch_str` will show up as a dash
+            // (`-`) and will not parse into a `u64`. So we don't have
+            // to worry about that case here as it is handled above.
+            //
+            // If the error indicated that the command failed for some
+            // other reason, but the dataset actually existed, we will
+            // try to create the dataset below and that will fail. So
+            // there is no harm in just loading the latest secret here.
+            info!(log, "Loading latest secret"; "disk_id"=>#?disk_identity);
+            let epoch = key_requester.load_latest_secret().await?;
+            info!(log, "Loaded latest secret"; "epoch"=>%epoch, "disk_id"=>#?disk_identity);
+            epoch
+        };
 
+        info!(log, "Retrieving key"; "epoch"=>%epoch, "disk_id"=>#?disk_identity);
         let key = key_requester.get_key(epoch, disk_identity.clone()).await?;
+        info!(log, "Got key"; "epoch"=>%epoch, "disk_id"=>#?disk_identity);
 
         let mut keyfile =
             KeyFile::create(keypath.clone(), key.expose_secret(), log)
