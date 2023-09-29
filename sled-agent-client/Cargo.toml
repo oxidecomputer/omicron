@@ -15,3 +15,4 @@ reqwest = { workspace = true, features = [ "json", "rustls-tls", "stream" ] }
 serde.workspace = true
 slog.workspace = true
 uuid.workspace = true
+omicron-workspace-hack = { version = "0.1", path = "../workspace-hack" }

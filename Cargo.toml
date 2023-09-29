@@ -64,6 +64,7 @@ members = [
     "wicket",
     "wicketd-client",
     "wicketd",
+    "workspace-hack",
 ]
 
 default-members = [
