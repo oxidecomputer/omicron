@@ -59,6 +59,7 @@ mod external_ip;
 mod identity_provider;
 mod image;
 mod instance;
+mod inventory;
 mod ip_pool;
 mod network_interface;
 mod oximeter;

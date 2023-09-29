@@ -1160,7 +1160,7 @@ table! {
         time_collected -> Timestamptz,
         source -> Text,
 
-        baseboard_revision -> Int4,
+        baseboard_revision -> Int8,
         hubris_archive_id -> Text,
         power_state -> crate::HwPowerStateEnum,
     }

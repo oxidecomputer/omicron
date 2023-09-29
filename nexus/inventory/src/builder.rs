@@ -32,7 +32,7 @@ pub enum CabooseWhich {
 pub struct CollectionBuilder {
     errors: Vec<anyhow::Error>,
     time_started: DateTime<Utc>,
-    creator: String,
+    collector: String,
     comment: String,
     baseboards: BTreeSet<Arc<BaseboardId>>,
     cabooses: BTreeSet<Arc<Caboose>>,
@@ -40,11 +40,11 @@ pub struct CollectionBuilder {
 }
 
 impl CollectionBuilder {
-    pub fn new(creator: &str, comment: &str) -> Self {
+    pub fn new(collector: &str, comment: &str) -> Self {
         CollectionBuilder {
             errors: vec![],
             time_started: Utc::now(),
-            creator: creator.to_owned(),
+            collector: collector.to_owned(),
             comment: comment.to_owned(),
             baseboards: BTreeSet::new(),
             cabooses: BTreeSet::new(),
@@ -57,7 +57,7 @@ impl CollectionBuilder {
             errors: self.errors,
             time_started: self.time_started,
             time_done: Utc::now(),
-            creator: self.creator,
+            collector: self.collector,
             comment: self.comment,
             baseboards: self.baseboards,
             cabooses: self.cabooses,

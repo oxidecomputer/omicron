@@ -4,11 +4,15 @@
 
 use crate::impl_enum_type;
 use crate::schema::{
-    hw_baseboard_id, inv_caboose, inv_root_of_trust, inv_service_processor,
-    sw_caboose,
+    hw_baseboard_id, inv_caboose, inv_collection, inv_root_of_trust,
+    inv_service_processor, sw_caboose,
 };
+use chrono::DateTime;
+use chrono::Utc;
 use db_macros::Asset;
+use diesel::expression::AsExpression;
 use nexus_types::identity::Asset;
+use nexus_types::inventory::{BaseboardId, Collection, PowerState};
 use uuid::Uuid;
 
 impl_enum_type!(
@@ -25,6 +29,16 @@ impl_enum_type!(
     A1 => b"A1"
     A2 => b"A2"
 );
+
+impl From<PowerState> for HwPowerState {
+    fn from(p: PowerState) -> Self {
+        match p {
+            PowerState::A0 => HwPowerState::A0,
+            PowerState::A1 => HwPowerState::A1,
+            PowerState::A2 => HwPowerState::A2,
+        }
+    }
+}
 
 impl_enum_type!(
     #[derive(SqlType, Debug, QueryId)]
@@ -55,3 +69,43 @@ impl_enum_type!(
     RotSlotA => b"rot_slot_A"
     RotSlotB => b"rot_slot_B"
 );
+
+#[derive(Queryable, Insertable, Clone, Debug, Selectable)]
+#[diesel(table_name = inv_collection)]
+pub struct InvCollection {
+    pub id: Uuid,
+    pub time_started: DateTime<Utc>,
+    pub time_done: DateTime<Utc>,
+    pub collector: String,
+    pub comment: String,
+}
+
+impl<'a> From<&'a Collection> for InvCollection {
+    fn from(c: &'a Collection) -> Self {
+        InvCollection {
+            id: Uuid::new_v4(),
+            time_started: c.time_started,
+            time_done: c.time_done,
+            collector: c.collector.clone(),
+            comment: c.comment.clone(),
+        }
+    }
+}
+
+#[derive(Queryable, Insertable, Clone, Debug, Selectable)]
+#[diesel(table_name = hw_baseboard_id)]
+pub struct HwBaseboardId {
+    pub id: Uuid,
+    pub part_number: String,
+    pub serial_number: String,
+}
+
+impl<'a> From<&'a BaseboardId> for HwBaseboardId {
+    fn from(c: &'a BaseboardId) -> Self {
+        HwBaseboardId {
+            id: Uuid::new_v4(),
+            part_number: c.part_number.clone(),
+            serial_number: c.serial_number.clone(),
+        }
+    }
+}

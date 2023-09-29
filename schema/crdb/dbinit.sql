@@ -2592,7 +2592,7 @@ CREATE TABLE IF NOT EXISTS inv_collection (
 -- Supports: finding latest collection to use, finding oldest collection to
 -- clean up
 CREATE INDEX IF NOT EXISTS inv_collection_by_time
-    ON omicron.public.inv_collection (time_done);
+    ON omicron.public.inv_collection (time_done) WHERE time_done IS NOT NULL;
 
 -- list of errors generated during a collection
 CREATE TABLE IF NOT EXISTS omicron.public.inv_collection_errors (
@@ -2618,7 +2618,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_service_processor (
     source TEXT NOT NULL,
 
     -- Data from MGS "Get SP Info" API.  See MGS API documentation.
-    baseboard_revision INT4 NOT NULL,
+    baseboard_revision INT8 NOT NULL,
     hubris_archive_id TEXT NOT NULL,
     power_state omicron.public.hw_power_state NOT NULL,
 

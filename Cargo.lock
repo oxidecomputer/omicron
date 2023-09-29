@@ -4416,6 +4416,7 @@ dependencies = [
  "gateway-messages",
  "nexus-db-model",
  "nexus-db-queries",
+ "nexus-types",
  "strum",
  "uuid",
 ]
@@ -4491,6 +4492,7 @@ dependencies = [
  "chrono",
  "dns-service-client 0.1.0",
  "futures",
+ "gateway-client",
  "newtype_derive",
  "omicron-common 0.1.0",
  "omicron-passwords 0.1.0",
