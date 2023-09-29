@@ -89,6 +89,32 @@ impl From<types::InstanceRuntimeState>
     }
 }
 
+impl From<types::VmmRuntimeState>
+    for omicron_common::api::internal::nexus::VmmRuntimeState
+{
+    fn from(s: types::VmmRuntimeState) -> Self {
+        Self {
+            state: s.state.into(),
+            gen: s.gen.into(),
+            sled_id: s.sled_id,
+            propolis_addr: s.propolis_addr.parse().unwrap(),
+            time_updated: s.time_updated,
+        }
+    }
+}
+
+impl From<types::SledInstanceState>
+    for omicron_common::api::internal::nexus::SledInstanceState
+{
+    fn from(s: types::SledInstanceState) -> Self {
+        Self {
+            instance_state: s.instance_state.into(),
+            vmm_id: s.vmm_id,
+            vmm_state: s.vmm_state.into(),
+        }
+    }
+}
+
 impl From<types::InstanceState>
     for omicron_common::api::external::InstanceState
 {

@@ -19,7 +19,6 @@ use futures::{FutureExt, SinkExt, StreamExt};
 use nexus_db_model::IpKind;
 use nexus_db_queries::authn;
 use nexus_db_queries::authz;
-use nexus_db_queries::authz::ApiResource;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
 use nexus_db_queries::db::datastore::InstanceAndActiveVmm;
@@ -387,8 +386,12 @@ impl super::Nexus {
         // outright fails, this operation fails. If the operation nominally
         // succeeds but nothing was updated, this action is outdated and the
         // caller should not proceed with migration.
-        let updated = self
-            .handle_instance_put_result(&db_instance, instance_put_result)
+        let (updated, _) = self
+            .handle_instance_put_result(
+                &instance_id,
+                &db_instance,
+                instance_put_result.map(|state| state.map(Into::into)),
+            )
             .await?;
 
         if updated {
@@ -438,8 +441,12 @@ impl super::Nexus {
             .await
             .map(|res| Some(res.into_inner()));
 
-        self.handle_instance_put_result(&db_instance, instance_put_result)
-            .await?;
+        self.handle_instance_put_result(
+            &instance_id,
+            &db_instance,
+            instance_put_result.map(|state| state.map(Into::into)),
+        )
+        .await?;
 
         Ok(())
     }
@@ -568,7 +575,11 @@ impl super::Nexus {
 
         match write_back {
             WriteBackUpdatedInstance::WriteBack => self
-                .handle_instance_put_result(db_instance, result)
+                .handle_instance_put_result(
+                    &db_instance.id(),
+                    db_instance,
+                    result.map(|state| state.map(Into::into)),
+                )
                 .await
                 .map(|_| ()),
             WriteBackUpdatedInstance::Drop => {
@@ -653,9 +664,13 @@ impl super::Nexus {
             .await
             .map(|res| res.into_inner().updated_runtime);
 
-        self.handle_instance_put_result(db_instance, instance_put_result)
-            .await
-            .map(|_| ())
+        self.handle_instance_put_result(
+            &db_instance.id(),
+            db_instance,
+            instance_put_result.map(|state| state.map(Into::into)),
+        )
+        .await
+        .map(|_| ())
     }
 
     /// Modifies the runtime state of the Instance as requested.  This generally
@@ -843,9 +858,13 @@ impl super::Nexus {
             .await
             .map(|res| Some(res.into_inner()));
 
-        self.handle_instance_put_result(db_instance, instance_register_result)
-            .await
-            .map(|_| ())
+        self.handle_instance_put_result(
+            &db_instance.id(),
+            db_instance,
+            instance_register_result.map(|state| state.map(Into::into)),
+        )
+        .await
+        .map(|_| ())
     }
 
     /// Updates an instance's CRDB record based on the result of a call to sled
@@ -872,34 +891,38 @@ impl super::Nexus {
     ///   error while trying to update CRDB.
     async fn handle_instance_put_result(
         &self,
+        instance_id: &Uuid,
         db_instance: &db::model::Instance,
         result: Result<
-            Option<sled_agent_client::types::InstanceRuntimeState>,
+            Option<nexus::SledInstanceState>,
             sled_agent_client::Error<sled_agent_client::types::Error>,
         >,
-    ) -> Result<bool, Error> {
+    ) -> Result<(bool, bool), Error> {
         slog::debug!(&self.log, "Handling sled agent instance PUT result";
+                     "instance_id" => %instance_id,
                      "result" => ?result);
 
         match result {
-            Ok(Some(new_runtime)) => {
-                let new_runtime: nexus::InstanceRuntimeState =
-                    new_runtime.into();
-
+            Ok(Some(new_state)) => {
                 let update_result = self
                     .db_datastore
-                    .instance_update_runtime(
-                        &db_instance.id(),
-                        &new_runtime.into(),
+                    .instance_and_vmm_update_runtime(
+                        instance_id,
+                        &new_state.instance_state.into(),
+                        &new_state.vmm_id,
+                        &new_state.vmm_state.into(),
                     )
                     .await;
 
                 slog::debug!(&self.log,
                              "Attempted DB update after instance PUT";
+                             "instance_id" => %instance_id,
+                             "vmm_id" => %new_state.vmm_id,
                              "result" => ?update_result);
+
                 update_result
             }
-            Ok(None) => Ok(false),
+            Ok(None) => Ok((false, false)),
             Err(e) => {
                 // The sled-agent has told us that it can't do what we
                 // requested, but does that mean a failure? One example would be
@@ -910,13 +933,15 @@ impl super::Nexus {
                 //
                 // Without a richer error type, let the sled-agent tell Nexus
                 // what to do with status codes.
-                error!(self.log, "saw {} from instance_put!", e);
+                error!(self.log, "received error from instance PUT";
+                       "instance_id" => %instance_id,
+                       "error" => ?e);
 
                 // Convert to the Omicron API error type.
                 //
-                // N.B. The match below assumes that this conversion will turn
-                //      any 400-level error status from sled agent into an
-                //      `Error::InvalidRequest`.
+                // TODO(#3238): This is an extremely lossy conversion: if the
+                // operation failed without getting a response from sled agent,
+                // this unconditionally converts to Error::InternalError.
                 let e = e.into();
 
                 match &e {
@@ -926,11 +951,26 @@ impl super::Nexus {
                     // Internal server error (or anything else) should change
                     // the instance state to failed, we don't know what state
                     // the instance is in.
+                    //
+                    // TODO(#XXX): This logic needs to be revisited:
+                    // - Some errors that don't get classified as
+                    //   Error::InvalidRequest (timeouts, disconnections due to
+                    //   network weather, etc.) are not necessarily fatal to the
+                    //   instance and shouldn't mark it as Failed.
+                    // - If the instance still has a running VMM, this operation
+                    //   won't terminate it or reclaim its resources. (The
+                    //   resources will be reclaimed if the sled later reports
+                    //   that the VMM is gone, however.)
                     _ => {
                         let new_runtime = db::model::InstanceRuntimeState {
-                            state: db::model::InstanceState::new(
+                            fallback_state: db::model::InstanceState::new(
                                 InstanceState::Failed,
                             ),
+
+                            // TODO(#XXX): Clearing the Propolis ID is required
+                            // to allow the instance to be deleted, but this
+                            // doesn't actually terminate the VMM (see above).
+                            propolis_id: None,
                             gen: db_instance.runtime_state.gen.next().into(),
                             ..db_instance.runtime_state.clone()
                         };
@@ -938,16 +978,14 @@ impl super::Nexus {
                         // XXX what if this fails?
                         let result = self
                             .db_datastore
-                            .instance_update_runtime(
-                                &db_instance.id(),
-                                &new_runtime,
-                            )
+                            .instance_update_runtime(&instance_id, &new_runtime)
                             .await;
 
                         error!(
                             self.log,
-                            "saw {:?} from setting InstanceState::Failed after bad instance_put",
-                            result,
+                            "failed to set instance to Failed after bad put";
+                            "instance_id" => %instance_id,
+                            "result" => ?result,
                         );
 
                         Err(e)
