@@ -4,10 +4,10 @@
 
 //! Metrics
 
-use crate::authz;
 use crate::external_api::http_entrypoints::SystemMetricName;
 use crate::external_api::params::ResourceMetrics;
 use dropshot::PaginationParams;
+use nexus_db_queries::authz;
 use nexus_db_queries::{
     context::OpContext,
     db::{fixed_data::FLEET_ID, lookup},
@@ -17,7 +17,7 @@ use oximeter_db::Measurement;
 use std::num::NonZeroU32;
 
 impl super::Nexus {
-    pub async fn system_metric_list(
+    pub(crate) async fn system_metric_list(
         &self,
         opctx: &OpContext,
         metric_name: SystemMetricName,
@@ -56,7 +56,7 @@ impl super::Nexus {
         .await
     }
 
-    pub async fn silo_metric_list(
+    pub(crate) async fn silo_metric_list(
         &self,
         opctx: &OpContext,
         metric_name: SystemMetricName,

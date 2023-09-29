@@ -18,11 +18,8 @@ use anyhow::anyhow;
 use anyhow::bail;
 use anyhow::ensure;
 use anyhow::Context;
-use buf_list::BufList;
-use bytes::Bytes;
 use display_error_chain::DisplayErrorChain;
 use dropshot::HttpError;
-use futures::TryStream;
 use gateway_client::types::HostPhase2Progress;
 use gateway_client::types::HostPhase2RecoveryImageId;
 use gateway_client::types::HostStartupOptions;
@@ -48,6 +45,7 @@ use slog::Logger;
 use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
+use std::io;
 use std::net::SocketAddrV6;
 use std::sync::Arc;
 use std::sync::Mutex as StdMutex;
@@ -221,11 +219,6 @@ impl UpdateTracker {
 
         let mut errors = Vec::new();
 
-        let plan = update_data.artifact_store.current_plan();
-        if plan.is_none() {
-            errors.push(StartUpdateError::TufRepositoryUnavailable);
-        }
-
         // Check that we're not already updating any of these SPs.
         let update_in_progress: Vec<_> = sps
             .iter()
@@ -246,12 +239,19 @@ impl UpdateTracker {
             errors.push(StartUpdateError::UpdateInProgress(update_in_progress));
         }
 
+        let plan = update_data.artifact_store.current_plan();
+        if plan.is_none() {
+            // (1), referred to below.
+            errors.push(StartUpdateError::TufRepositoryUnavailable);
+        }
+
         // If there are any errors, return now.
         if !errors.is_empty() {
             return Err(errors);
         }
 
-        let plan = plan.expect("we'd have returned an error if plan was None");
+        let plan =
+            plan.expect("we'd have returned an error at (1) if plan was None");
 
         // Call the setup method now.
         if let Some(mut spawn_update_driver) = spawn_update_driver {
@@ -302,7 +302,7 @@ impl UpdateTracker {
         let artifact = plan.trampoline_phase_2.clone();
         let (status_tx, status_rx) =
             watch::channel(UploadTrampolinePhase2ToMgsStatus {
-                hash: artifact.hash,
+                hash: artifact.data.hash(),
                 uploaded_image_id: None,
             });
         let task = tokio::spawn(upload_trampoline_phase_2_to_mgs(
@@ -315,12 +315,15 @@ impl UpdateTracker {
     }
 
     /// Updates the repository stored inside the update tracker.
-    pub(crate) async fn put_repository(
+    pub(crate) async fn put_repository<T>(
         &self,
-        bytes: BufList,
-    ) -> Result<(), HttpError> {
+        data: T,
+    ) -> Result<(), HttpError>
+    where
+        T: io::Read + io::Seek + Send + 'static,
+    {
         let mut update_data = self.sp_update_data.lock().await;
-        update_data.put_repository(bytes)
+        update_data.put_repository(data).await
     }
 
     /// Gets a list of artifacts stored in the update repository.
@@ -329,8 +332,15 @@ impl UpdateTracker {
     ) -> GetArtifactsAndEventReportsResponse {
         let update_data = self.sp_update_data.lock().await;
 
-        let (system_version, artifacts) =
-            update_data.artifact_store.system_version_and_artifact_ids();
+        let (system_version, artifacts) = match update_data
+            .artifact_store
+            .system_version_and_artifact_ids()
+        {
+            Some((system_version, artifacts)) => {
+                (Some(system_version), artifacts)
+            }
+            None => (None, Vec::new()),
+        };
 
         let mut event_reports = BTreeMap::new();
         for (sp, update_data) in &update_data.sp_update_data {
@@ -409,7 +419,9 @@ impl<'tr> SpawnUpdateDriver for RealSpawnUpdateDriver<'tr> {
                 // this artifact? If not, cancel the old task (which
                 // might still be trying to upload) and start a new one
                 // with our current image.
-                if prev.status.borrow().hash != plan.trampoline_phase_2.hash {
+                if prev.status.borrow().hash
+                    != plan.trampoline_phase_2.data.hash()
+                {
                     // It does _not_ match - we have a new plan with a
                     // different trampoline image. If the old task is
                     // still running, cancel it, and start a new one.
@@ -636,7 +648,10 @@ impl UpdateTrackerData {
         }
     }
 
-    fn put_repository(&mut self, bytes: BufList) -> Result<(), HttpError> {
+    async fn put_repository<T>(&mut self, data: T) -> Result<(), HttpError>
+    where
+        T: io::Read + io::Seek + Send + 'static,
+    {
         // Are there any updates currently running? If so, then reject the new
         // repository.
         let running_sps = self
@@ -654,7 +669,7 @@ impl UpdateTrackerData {
         }
 
         // Put the repository into the artifact store.
-        self.artifact_store.put_repository(bytes)?;
+        self.artifact_store.put_repository(data).await?;
 
         // Reset all running data: a new repository means starting afresh.
         self.sp_update_data.clear();
@@ -1917,12 +1932,6 @@ enum ComponentUpdateStage {
     InProgress,
 }
 
-fn buf_list_to_try_stream(
-    data: BufList,
-) -> impl TryStream<Ok = Bytes, Error = std::convert::Infallible> {
-    futures::stream::iter(data.into_iter().map(Ok))
-}
-
 async fn upload_trampoline_phase_2_to_mgs(
     mgs_client: gateway_client::Client,
     artifact: ArtifactIdData,
@@ -1930,14 +1939,25 @@ async fn upload_trampoline_phase_2_to_mgs(
     log: Logger,
 ) {
     let data = artifact.data;
+    let hash = data.hash();
     let upload_task = move || {
         let mgs_client = mgs_client.clone();
-        let image =
-            buf_list_to_try_stream(BufList::from_iter([data.0.clone()]));
+        let data = data.clone();
 
         async move {
+            let image_stream = data.reader_stream().await.map_err(|e| {
+                // TODO-correctness If we get an I/O error opening the file
+                // associated with `data`, is it actually a transient error? If
+                // we change this to `permanent` we'll have to do some different
+                // error handling below and at our call site to retry. We
+                // _shouldn't_ get errors from `reader_stream()` in general, so
+                // it's probably okay either way?
+                backoff::BackoffError::transient(format!("{e:#}"))
+            })?;
             mgs_client
-                .recovery_host_phase2_upload(reqwest::Body::wrap_stream(image))
+                .recovery_host_phase2_upload(reqwest::Body::wrap_stream(
+                    image_stream,
+                ))
                 .await
                 .map_err(|e| backoff::BackoffError::transient(e.to_string()))
         }
@@ -1965,7 +1985,7 @@ async fn upload_trampoline_phase_2_to_mgs(
 
     // Notify all receivers that we've uploaded the image.
     _ = status.send(UploadTrampolinePhase2ToMgsStatus {
-        hash: artifact.hash,
+        hash,
         uploaded_image_id: Some(uploaded_image_id),
     });
 
@@ -2009,6 +2029,18 @@ impl<'a> SpComponentUpdateContext<'a> {
                 SpComponentUpdateStepId::Sending,
                 format!("Sending data to MGS (slot {firmware_slot})"),
                 move |_cx| async move {
+                    let data_stream = artifact
+                        .data
+                        .reader_stream()
+                        .await
+                        .map_err(|error| {
+                            SpComponentUpdateTerminalError::SpComponentUpdateFailed {
+                                stage: SpComponentUpdateStage::Sending,
+                                artifact: artifact.id.clone(),
+                                error,
+                            }
+                        })?;
+
                     // TODO: we should be able to report some sort of progress
                     // here for the file upload.
                     update_cx
@@ -2019,9 +2051,7 @@ impl<'a> SpComponentUpdateContext<'a> {
                             component_name,
                             firmware_slot,
                             &update_id,
-                            reqwest::Body::wrap_stream(buf_list_to_try_stream(
-                                BufList::from_iter([artifact.data.0.clone()]),
-                            )),
+                            reqwest::Body::wrap_stream(data_stream),
                         )
                         .await
                         .map_err(|error| {

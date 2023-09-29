@@ -6,6 +6,7 @@ use chrono::Utc;
 use dropshot::test_util::ClientTestContext;
 use dropshot::ResultsPage;
 use http::{Method, StatusCode};
+use nexus_db_queries::db::fixed_data::silo::SILO_ID;
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use nexus_test_utils::resource_helpers::{
     create_disk, create_instance, create_project, objects_list_page_authz,
@@ -13,7 +14,6 @@ use nexus_test_utils::resource_helpers::{
 };
 use nexus_test_utils::ControlPlaneTestContext;
 use nexus_test_utils_macros::nexus_test;
-use omicron_nexus::db::fixed_data::silo::SILO_ID;
 use oximeter::types::Datum;
 use oximeter::types::Measurement;
 use uuid::Uuid;

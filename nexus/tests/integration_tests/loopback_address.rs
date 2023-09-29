@@ -9,13 +9,13 @@ use http::method::Method;
 use http::StatusCode;
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use nexus_test_utils_macros::nexus_test;
+use nexus_types::external_api::params::{
+    AddressLotBlockCreate, AddressLotCreate, LoopbackAddressCreate,
+};
+use nexus_types::external_api::views::Rack;
 use omicron_common::api::external::{
     AddressLotKind, IdentityMetadataCreateParams, LoopbackAddress, NameOrId,
 };
-use omicron_nexus::external_api::params::{
-    AddressLotBlockCreate, AddressLotCreate, LoopbackAddressCreate,
-};
-use omicron_nexus::external_api::views::Rack;
 
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
