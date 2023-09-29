@@ -52,7 +52,6 @@ use sled_agent_client::types::InstanceProperties;
 use sled_agent_client::types::InstancePutMigrationIdsBody;
 use sled_agent_client::types::InstancePutStateBody;
 use sled_agent_client::types::SourceNatConfig;
-use sled_agent_client::Client as SledAgentClient;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::io::{AsyncRead, AsyncWrite};
@@ -394,23 +393,24 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         instance_id: Uuid,
-        db_instance: &db::model::Instance,
+        sled_id: Uuid,
+        prev_instance_runtime: &db::model::InstanceRuntimeState,
         migration_params: InstanceMigrationSourceParams,
     ) -> UpdateResult<db::model::Instance> {
-        assert!(db_instance.runtime().migration_id.is_none());
-        assert!(db_instance.runtime().dst_propolis_id.is_none());
+        assert!(prev_instance_runtime.migration_id.is_none());
+        assert!(prev_instance_runtime.dst_propolis_id.is_none());
 
         let (.., authz_instance) = LookupPath::new(opctx, &self.db_datastore)
             .instance_id(instance_id)
             .lookup_for(authz::Action::Modify)
             .await?;
 
-        let sa = self.instance_sled(&db_instance).await?;
+        let sa = self.sled_client(&sled_id).await?;
         let instance_put_result = sa
             .instance_put_migration_ids(
                 &instance_id,
                 &InstancePutMigrationIdsBody {
-                    old_runtime: db_instance.runtime().clone().into(),
+                    old_runtime: prev_instance_runtime.clone().into(),
                     migration_params: Some(migration_params),
                 },
             )
@@ -424,7 +424,7 @@ impl super::Nexus {
         let (updated, _) = self
             .handle_instance_put_result(
                 &instance_id,
-                &db_instance,
+                prev_instance_runtime,
                 instance_put_result.map(|state| state.map(Into::into)),
             )
             .await?;
@@ -459,17 +459,18 @@ impl super::Nexus {
     pub(crate) async fn instance_clear_migration_ids(
         &self,
         instance_id: Uuid,
-        db_instance: &db::model::Instance,
+        sled_id: Uuid,
+        prev_instance_runtime: &db::model::InstanceRuntimeState,
     ) -> Result<(), Error> {
-        assert!(db_instance.runtime().migration_id.is_some());
-        assert!(db_instance.runtime().dst_propolis_id.is_some());
+        assert!(prev_instance_runtime.migration_id.is_some());
+        assert!(prev_instance_runtime.dst_propolis_id.is_some());
 
-        let sa = self.instance_sled(&db_instance).await?;
+        let sa = self.sled_client(&sled_id).await?;
         let instance_put_result = sa
             .instance_put_migration_ids(
                 &instance_id,
                 &InstancePutMigrationIdsBody {
-                    old_runtime: db_instance.runtime().clone().into(),
+                    old_runtime: prev_instance_runtime.clone().into(),
                     migration_params: None,
                 },
             )
@@ -478,7 +479,7 @@ impl super::Nexus {
 
         self.handle_instance_put_result(
             &instance_id,
-            &db_instance,
+            prev_instance_runtime,
             instance_put_result.map(|state| state.map(Into::into)),
         )
         .await?;
@@ -607,21 +608,22 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         authz_instance: &authz::Instance,
-        db_instance: &db::model::Instance,
+        sled_id: &Uuid,
+        prev_instance_runtime: &db::model::InstanceRuntimeState,
         write_back: WriteBackUpdatedInstance,
     ) -> Result<(), Error> {
         opctx.authorize(authz::Action::Modify, authz_instance).await?;
-        let sa = self.instance_sled(&db_instance).await?;
+        let sa = self.sled_client(&sled_id).await?;
         let result = sa
-            .instance_unregister(&db_instance.id())
+            .instance_unregister(&authz_instance.id())
             .await
             .map(|res| res.into_inner().updated_runtime);
 
         match write_back {
             WriteBackUpdatedInstance::WriteBack => self
                 .handle_instance_put_result(
-                    &db_instance.id(),
-                    db_instance,
+                    &authz_instance.id(),
+                    prev_instance_runtime,
                     result.map(|state| state.map(Into::into)),
                 )
                 .await
@@ -631,15 +633,6 @@ impl super::Nexus {
                 Ok(())
             }
         }
-    }
-
-    /// Returns the SledAgentClient for the host where this Instance is running.
-    pub(crate) async fn instance_sled(
-        &self,
-        instance: &db::model::Instance,
-    ) -> Result<Arc<SledAgentClient>, Error> {
-        let sa_id = &instance.runtime().sled_id;
-        self.sled_client(&sa_id).await
     }
 
     /// Determines the action to take on an instance's active VMM given a
@@ -817,7 +810,7 @@ impl super::Nexus {
 
                 self.handle_instance_put_result(
                     &instance_id,
-                    prev_instance_state,
+                    prev_instance_state.runtime(),
                     instance_put_result,
                 )
                 .await
@@ -833,6 +826,8 @@ impl super::Nexus {
         opctx: &OpContext,
         authz_instance: &authz::Instance,
         db_instance: &db::model::Instance,
+        vmm_id: &Uuid,
+        initial_vmm: &db::model::Vmm,
     ) -> Result<(), Error> {
         opctx.authorize(authz::Action::Modify, authz_instance).await?;
 
@@ -862,7 +857,7 @@ impl super::Nexus {
                     error!(self.log, "attached disk has no PCI slot assignment";
                        "disk_id" => %disk.id(),
                        "disk_name" => disk.name().to_string(),
-                       "instance" => ?disk.runtime_state.attach_instance_id);
+                       "instance_id" => ?disk.runtime_state.attach_instance_id);
 
                     return Err(Error::internal_error(&format!(
                         "disk {} is attached but has no PCI slot assignment",
@@ -999,13 +994,15 @@ impl super::Nexus {
             )),
         };
 
-        let sa = self.instance_sled(&db_instance).await?;
-
+        let sa = self.sled_client(&initial_vmm.sled_id).await?;
         let instance_register_result = sa
             .instance_register(
                 &db_instance.id(),
                 &sled_agent_client::types::InstanceEnsureBody {
-                    initial: instance_hardware,
+                    hardware: instance_hardware,
+                    instance_runtime: db_instance.runtime().clone().into(),
+                    vmm_runtime: initial_vmm.clone().into(),
+                    propolis_id: *vmm_id,
                 },
             )
             .await
@@ -1013,7 +1010,7 @@ impl super::Nexus {
 
         self.handle_instance_put_result(
             &db_instance.id(),
-            db_instance,
+            db_instance.runtime(),
             instance_register_result.map(|state| state.map(Into::into)),
         )
         .await
@@ -1045,7 +1042,7 @@ impl super::Nexus {
     async fn handle_instance_put_result(
         &self,
         instance_id: &Uuid,
-        db_instance: &db::model::Instance,
+        prev_instance_runtime: &db::model::InstanceRuntimeState,
         result: Result<
             Option<nexus::SledInstanceState>,
             sled_agent_client::Error<sled_agent_client::types::Error>,
@@ -1124,8 +1121,8 @@ impl super::Nexus {
                             // to allow the instance to be deleted, but this
                             // doesn't actually terminate the VMM (see above).
                             propolis_id: None,
-                            gen: db_instance.runtime_state.gen.next().into(),
-                            ..db_instance.runtime_state.clone()
+                            gen: prev_instance_runtime.gen.next().into(),
+                            ..prev_instance_runtime.clone()
                         };
 
                         // XXX what if this fails?
