@@ -68,7 +68,7 @@ pub struct KnownTarget {
     image: Image,
     machine: Option<Machine>,
     switch: Option<Switch>,
-    rack_topology: Option<RackTopology>,
+    rack_topology: RackTopology,
 }
 
 impl KnownTarget {
@@ -76,7 +76,7 @@ impl KnownTarget {
         image: Image,
         machine: Option<Machine>,
         switch: Option<Switch>,
-        rack_topology: Option<RackTopology>,
+        rack_topology: RackTopology,
     ) -> Result<Self> {
         if matches!(image, Image::Trampoline) {
             if machine.is_some() {
@@ -103,7 +103,7 @@ impl Default for KnownTarget {
             image: Image::Standard,
             machine: Some(Machine::NonGimlet),
             switch: Some(Switch::Stub),
-            rack_topology: Some(RackTopology::MultiSled),
+            rack_topology: RackTopology::MultiSled,
         }
     }
 }
@@ -118,9 +118,7 @@ impl From<KnownTarget> for Target {
         if let Some(switch) = kt.switch {
             map.insert("switch".to_string(), switch.to_string());
         }
-        if let Some(rack_topology) = kt.rack_topology {
-            map.insert("rack-topology".to_string(), rack_topology.to_string());
-        }
+        map.insert("rack-topology".to_string(), kt.rack_topology.to_string());
         Target(map)
     }
 }
@@ -170,6 +168,11 @@ impl std::str::FromStr for KnownTarget {
                 }
             }
         }
-        KnownTarget::new(image, machine, switch, rack_topology)
+        KnownTarget::new(
+            image,
+            machine,
+            switch,
+            rack_topology.unwrap_or(RackTopology::MultiSled),
+        )
     }
 }

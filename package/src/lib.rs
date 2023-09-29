@@ -50,9 +50,25 @@ pub enum TargetCommand {
         #[clap(
             short,
             long,
-            default_value_if("image", "standard", "single-sled")
+            default_value_if("image", "trampoline", Some("single-sled")),
+
+            // This opt is required, and clap will enforce that even with
+            // `required = false`, since it's not an Option. But the
+            // default_value_if only works if we set `required` to false. It's
+            // jank, but it is what it is.
+            // https://github.com/clap-rs/clap/issues/4086
+            required = false
         )]
-        rack_topology: Option<crate::target::RackTopology>,
+        /// Specify whether nexus will run in a single-sled or multi-sled
+        /// environment.
+        ///
+        /// Set single-sled for dev purposes when you're running a single
+        /// sled-agent. Set multi-sled if you're running with mulitple sleds.
+        /// Currently this only affects the crucible disk allocation strategy-
+        /// VM disks will require 3 distinct sleds with `multi-sled`, which will
+        /// fail in a single-sled environment. `single-sled` relaxes this
+        /// requirement.
+        rack_topology: crate::target::RackTopology,
     },
     /// List all existing targets
     List,
