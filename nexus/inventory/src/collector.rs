@@ -4,13 +4,13 @@
 
 //! Collection of inventory from Omicron components
 
-use crate::builder::CabooseWhich;
 use crate::builder::CollectionBuilder;
 use crate::Caboose;
 use crate::Collection;
 use anyhow::Context;
 use std::sync::Arc;
 use strum::IntoEnumIterator;
+use nexus_types::inventory::CabooseWhich;
 
 // XXX-dap rename to Enumerator?
 pub struct Collector {

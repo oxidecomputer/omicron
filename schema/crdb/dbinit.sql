@@ -2644,8 +2644,8 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_root_of_trust (
     rot_slot_boot_pref_transient omicron.public.hw_rot_slot, -- nullable
     rot_slot_boot_pref_persistent omicron.public.hw_rot_slot NOT NULL,
     rot_slot_boot_pref_persistent_pending omicron.public.hw_rot_slot, -- nullable
-    rot_slot_a_sha3_256 TEXT NOT NULL,
-    rot_slot_b_sha3_256 TEXT NOT NULL,
+    rot_slot_a_sha3_256 TEXT, -- nullable
+    rot_slot_b_sha3_256 TEXT, -- nullable
 
     PRIMARY KEY (inv_collection_id, hw_baseboard_id)
 );

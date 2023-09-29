@@ -9,15 +9,14 @@
 //! nexus/inventory does not currently know about nexus/db-model and it's
 //! convenient to separate these concerns.)
 
-use anyhow::anyhow;
 use chrono::DateTime;
 use chrono::Utc;
-use gateway_client::types::RotSlot;
+pub use gateway_client::types::PowerState;
+pub use gateway_client::types::RotSlot;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::sync::Arc;
-
-pub type PowerState = gateway_client::types::PowerState;
+use strum::EnumIter;
 
 /// Results of collecting inventory from various Omicron components
 #[derive(Debug)]
@@ -36,6 +35,9 @@ pub struct Collection {
     pub baseboards: BTreeSet<Arc<BaseboardId>>,
     pub cabooses: BTreeSet<Arc<Caboose>>,
     pub sps: BTreeMap<Arc<BaseboardId>, ServiceProcessor>,
+    pub rots: BTreeMap<Arc<BaseboardId>, RotState>,
+    pub cabooses_found:
+        BTreeMap<CabooseWhich, BTreeMap<Arc<BaseboardId>, Arc<Caboose>>>,
 }
 
 #[derive(Clone, Debug, Ord, Eq, PartialOrd, PartialEq)]
@@ -68,23 +70,19 @@ impl From<gateway_client::types::SpComponentCaboose> for Caboose {
 
 #[derive(Clone, Debug, Ord, Eq, PartialOrd, PartialEq)]
 pub struct ServiceProcessor {
-    pub baseboard: Arc<BaseboardId>,
     pub time_collected: DateTime<Utc>,
     pub source: String,
 
     pub baseboard_revision: u32,
     pub hubris_archive: String,
     pub power_state: PowerState,
-    pub rot: Option<RotState>,
-
-    pub sp_slot0_caboose: Option<Arc<Caboose>>,
-    pub sp_slot1_caboose: Option<Arc<Caboose>>,
-    pub rot_slot_a_caboose: Option<Arc<Caboose>>,
-    pub rot_slot_b_caboose: Option<Arc<Caboose>>,
 }
 
 #[derive(Clone, Debug, Ord, Eq, PartialOrd, PartialEq)]
 pub struct RotState {
+    pub time_collected: DateTime<Utc>,
+    pub source: String,
+
     pub active_slot: RotSlot,
     pub persistent_boot_preference: RotSlot,
     pub pending_persistent_boot_preference: Option<RotSlot>,
@@ -93,30 +91,10 @@ pub struct RotState {
     pub slot_b_sha3_256_digest: Option<String>,
 }
 
-impl TryFrom<gateway_client::types::RotState> for RotState {
-    type Error = anyhow::Error;
-    fn try_from(
-        value: gateway_client::types::RotState,
-    ) -> Result<Self, Self::Error> {
-        match value {
-            gateway_client::types::RotState::Enabled {
-                active,
-                pending_persistent_boot_preference,
-                persistent_boot_preference,
-                slot_a_sha3_256_digest,
-                slot_b_sha3_256_digest,
-                transient_boot_preference,
-            } => Ok(RotState {
-                active_slot: active,
-                persistent_boot_preference,
-                pending_persistent_boot_preference,
-                transient_boot_preference,
-                slot_a_sha3_256_digest,
-                slot_b_sha3_256_digest,
-            }),
-            gateway_client::types::RotState::CommunicationFailed {
-                message,
-            } => Err(anyhow!("communication with SP failed: {}", message)),
-        }
-    }
+#[derive(Clone, Copy, Debug, EnumIter, PartialEq, Eq, PartialOrd, Ord)]
+pub enum CabooseWhich {
+    SpSlot0,
+    SpSlot1,
+    RotSlotA,
+    RotSlotB,
 }

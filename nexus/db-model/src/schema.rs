@@ -1177,8 +1177,8 @@ table! {
         rot_slot_boot_pref_transient -> Nullable<crate::HwRotSlotEnum>,
         rot_slot_boot_pref_persistent -> crate::HwRotSlotEnum,
         rot_slot_boot_pref_persistent_pending -> Nullable<crate::HwRotSlotEnum>,
-        rot_slot_a_sha3_256 -> Text,
-        rot_slot_b_sha3_256 -> Text,
+        rot_slot_a_sha3_256 -> Nullable<Text>,
+        rot_slot_b_sha3_256 -> Nullable<Text>,
     }
 }
 

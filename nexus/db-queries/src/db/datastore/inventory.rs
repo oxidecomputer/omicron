@@ -11,11 +11,15 @@ use crate::db::error::ErrorHandler;
 use crate::db::TransactionError;
 use async_bb8_diesel::AsyncConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
-use diesel::query_dsl::methods::SelectDsl;
+use diesel::sql_types::Nullable;
+use diesel::ExpressionMethods;
 use diesel::IntoSql;
+use diesel::QueryDsl;
 use nexus_db_model::HwBaseboardId;
 use nexus_db_model::HwPowerState;
 use nexus_db_model::HwPowerStateEnum;
+use nexus_db_model::HwRotSlot;
+use nexus_db_model::HwRotSlotEnum;
 use nexus_db_model::InvCollection;
 use nexus_db_model::InvCollectionError;
 use nexus_db_model::SwCaboose;
@@ -133,9 +137,9 @@ impl DataStore {
                 use db::schema::hw_baseboard_id::dsl as baseboard_dsl;
                 use db::schema::inv_service_processor::dsl as sp_dsl;
 
-                for (_, sp) in &collection.sps {
-                    let selection =
-                        db::schema::hw_baseboard_id::table.select((
+                for (baseboard_id, sp) in &collection.sps {
+                    let selection = db::schema::hw_baseboard_id::table
+                        .select((
                             collection_id.into_sql::<diesel::sql_types::Uuid>(),
                             baseboard_dsl::id,
                             sp.time_collected
@@ -150,7 +154,15 @@ impl DataStore {
                                 .into_sql::<diesel::sql_types::Text>(),
                             HwPowerState::from(sp.power_state)
                                 .into_sql::<HwPowerStateEnum>(),
-                        ));
+                        ))
+                        .filter(
+                            baseboard_dsl::part_number
+                                .eq(baseboard_id.part_number.clone()),
+                        )
+                        .filter(
+                            baseboard_dsl::serial_number
+                                .eq(baseboard_id.serial_number.clone()),
+                        );
 
                     let _ = diesel::insert_into(
                         db::schema::inv_service_processor::table,
@@ -179,9 +191,85 @@ impl DataStore {
                 }
             }
 
-            // XXX-dap Insert the root-of-trust information.
+            // Insert rows for the roots of trust that we found.  Like service
+            // processors, we do this using INSERT INTO ... SELECT.
+            {
+                use db::schema::hw_baseboard_id::dsl as baseboard_dsl;
+                use db::schema::inv_root_of_trust::dsl as rot_dsl;
+
+                // XXX-dap is there some way to make this fail to column if,
+                // say, we add another column to one of these tables?  Maybe a
+                // match on a struct and make sure we get all the fields?
+                for (baseboard_id, rot) in &collection.rots {
+                    let selection = db::schema::hw_baseboard_id::table
+                        .select((
+                            collection_id.into_sql::<diesel::sql_types::Uuid>(),
+                            baseboard_dsl::id,
+                            rot.time_collected
+                                .into_sql::<diesel::sql_types::Timestamptz>(),
+                            rot.source
+                                .clone()
+                                .into_sql::<diesel::sql_types::Text>(),
+                            HwRotSlot::from(rot.active_slot)
+                                .into_sql::<HwRotSlotEnum>(),
+                            HwRotSlot::from(rot.persistent_boot_preference)
+                                .into_sql::<HwRotSlotEnum>(),
+                            rot.pending_persistent_boot_preference
+                                .map(HwRotSlot::from)
+                                .into_sql::<Nullable<HwRotSlotEnum>>(),
+                            rot.transient_boot_preference
+                                .map(HwRotSlot::from)
+                                .into_sql::<Nullable<HwRotSlotEnum>>(),
+                            rot.slot_a_sha3_256_digest
+                                .clone()
+                                .into_sql::<Nullable<diesel::sql_types::Text>>(
+                                ),
+                            rot.slot_b_sha3_256_digest
+                                .clone()
+                                .into_sql::<Nullable<diesel::sql_types::Text>>(
+                                ),
+                        ))
+                        .filter(
+                            baseboard_dsl::part_number
+                                .eq(baseboard_id.part_number.clone()),
+                        )
+                        .filter(
+                            baseboard_dsl::serial_number
+                                .eq(baseboard_id.serial_number.clone()),
+                        );
+
+                    let _ = diesel::insert_into(
+                        db::schema::inv_root_of_trust::table,
+                    )
+                    .values(selection)
+                    .into_columns((
+                        rot_dsl::inv_collection_id,
+                        rot_dsl::hw_baseboard_id,
+                        rot_dsl::time_collected,
+                        rot_dsl::source,
+                        rot_dsl::rot_slot_active,
+                        rot_dsl::rot_slot_boot_pref_persistent,
+                        rot_dsl::rot_slot_boot_pref_persistent_pending,
+                        rot_dsl::rot_slot_boot_pref_transient,
+                        rot_dsl::rot_slot_a_sha3_256,
+                        rot_dsl::rot_slot_b_sha3_256,
+                    ))
+                    .execute_async(&conn)
+                    .await
+                    .map_err(|e| {
+                        TransactionError::CustomError(
+                            public_error_from_diesel_pool(
+                                e.into(),
+                                ErrorHandler::Server,
+                            )
+                            .internal_context("inserting service processor"),
+                        )
+                    });
+                }
+            }
+
             // XXX-dap Insert the "found cabooses" information.
-            // XXX-dap the various loops here could probably be INSERTs of Vecs
+            {}
 
             // Finally, insert the list of errors.
             {

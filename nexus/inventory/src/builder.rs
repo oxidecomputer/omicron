@@ -13,20 +13,12 @@ use anyhow::anyhow;
 use chrono::DateTime;
 use chrono::Utc;
 use gateway_client::types::SpState;
+use nexus_types::inventory::CabooseWhich;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::sync::Arc;
-use strum::EnumIter;
 
 // XXX-dap add rack id
-
-#[derive(Clone, Copy, Debug, EnumIter)]
-pub enum CabooseWhich {
-    SpSlot0,
-    SpSlot1,
-    RotSlotA,
-    RotSlotB,
-}
 
 #[derive(Debug)]
 pub struct CollectionBuilder {
@@ -37,6 +29,9 @@ pub struct CollectionBuilder {
     baseboards: BTreeSet<Arc<BaseboardId>>,
     cabooses: BTreeSet<Arc<Caboose>>,
     sps: BTreeMap<Arc<BaseboardId>, ServiceProcessor>,
+    rots: BTreeMap<Arc<BaseboardId>, RotState>,
+    cabooses_found:
+        BTreeMap<CabooseWhich, BTreeMap<Arc<BaseboardId>, Arc<Caboose>>>,
 }
 
 impl CollectionBuilder {
@@ -49,6 +44,8 @@ impl CollectionBuilder {
             baseboards: BTreeSet::new(),
             cabooses: BTreeSet::new(),
             sps: BTreeMap::new(),
+            rots: BTreeMap::new(),
+            cabooses_found: BTreeMap::new(),
         }
     }
 
@@ -62,6 +59,8 @@ impl CollectionBuilder {
             baseboards: self.baseboards,
             cabooses: self.cabooses,
             sps: self.sps,
+            rots: self.rots,
+            cabooses_found: self.cabooses_found,
         }
     }
 
@@ -78,22 +77,51 @@ impl CollectionBuilder {
             },
         );
 
-        let rot = RotState::try_from(sp_state.rot).ok();
+        let now = Utc::now();
         let _ = self.sps.entry(baseboard.clone()).or_insert_with(|| {
             ServiceProcessor {
-                baseboard: baseboard.clone(),
-                time_collected: Utc::now(),
+                time_collected: now,
                 source: source.to_owned(),
                 baseboard_revision: sp_state.revision,
                 hubris_archive: sp_state.hubris_archive_id,
                 power_state: sp_state.power_state,
-                rot,
-                sp_slot0_caboose: None,
-                sp_slot1_caboose: None,
-                rot_slot_a_caboose: None,
-                rot_slot_b_caboose: None,
             }
         });
+
+        match sp_state.rot {
+            gateway_client::types::RotState::Enabled {
+                active,
+                pending_persistent_boot_preference,
+                persistent_boot_preference,
+                slot_a_sha3_256_digest,
+                slot_b_sha3_256_digest,
+                transient_boot_preference,
+            } => {
+                let _ =
+                    self.rots.entry(baseboard.clone()).or_insert_with(|| {
+                        RotState {
+                            time_collected: now,
+                            source: source.to_owned(),
+                            active_slot: active,
+                            persistent_boot_preference,
+                            pending_persistent_boot_preference,
+                            transient_boot_preference,
+                            slot_a_sha3_256_digest,
+                            slot_b_sha3_256_digest,
+                        }
+                    });
+            }
+            gateway_client::types::RotState::CommunicationFailed {
+                message,
+            } => {
+                self.found_error(anyhow!(
+                    "MGS {:?}: reading RoT state for {:?}: {}",
+                    source,
+                    baseboard,
+                    message
+                ));
+            }
+        }
 
         baseboard
     }
@@ -103,17 +131,9 @@ impl CollectionBuilder {
         baseboard: &BaseboardId,
         which: CabooseWhich,
     ) -> bool {
-        self.sps
-            .get(baseboard)
-            .map(|sp| {
-                let ptr = match which {
-                    CabooseWhich::SpSlot0 => &sp.sp_slot0_caboose,
-                    CabooseWhich::SpSlot1 => &sp.sp_slot1_caboose,
-                    CabooseWhich::RotSlotA => &sp.rot_slot_a_caboose,
-                    CabooseWhich::RotSlotB => &sp.rot_slot_b_caboose,
-                };
-                ptr.is_some()
-            })
+        self.cabooses_found
+            .get(&which)
+            .map(|map| map.contains_key(baseboard))
             .unwrap_or(false)
     }
 
@@ -124,24 +144,24 @@ impl CollectionBuilder {
         caboose: Caboose,
     ) -> Result<(), anyhow::Error> {
         let caboose = Self::enum_item(&mut self.cabooses, caboose);
-        let sp = self.sps.get_mut(baseboard).ok_or_else(|| {
-            anyhow!("reporting caboose for unknown baseboard: {:?}", baseboard)
-        })?;
-        let ptr = match which {
-            CabooseWhich::SpSlot0 => &mut sp.sp_slot0_caboose,
-            CabooseWhich::SpSlot1 => &mut sp.sp_slot1_caboose,
-            CabooseWhich::RotSlotA => &mut sp.rot_slot_a_caboose,
-            CabooseWhich::RotSlotB => &mut sp.rot_slot_b_caboose,
-        };
-
-        if let Some(already) = ptr {
-            let error = if *already == caboose {
+        let (baseboard, _) =
+            self.sps.get_key_value(baseboard).ok_or_else(|| {
+                anyhow!(
+                    "reporting caboose for unknown baseboard: {:?}",
+                    baseboard
+                )
+            })?;
+        let by_id =
+            self.cabooses_found.entry(which).or_insert_with(|| BTreeMap::new());
+        if let Some(previous) = by_id.insert(baseboard.clone(), caboose.clone())
+        {
+            let error = if *previous == *caboose {
                 anyhow!("reported multiple times (same value)",)
             } else {
                 anyhow!(
                     "reported caboose multiple times (previously {:?}, \
-                    now {:?}, keeping only the first one)",
-                    already,
+                    now {:?})",
+                    previous,
                     caboose
                 )
             };
@@ -150,7 +170,6 @@ impl CollectionBuilder {
                 baseboard, which
             )))
         } else {
-            *ptr = Some(caboose);
             Ok(())
         }
     }

@@ -9,7 +9,9 @@ use crate::schema::{
 use chrono::DateTime;
 use chrono::Utc;
 use diesel::expression::AsExpression;
-use nexus_types::inventory::{BaseboardId, Caboose, Collection, PowerState};
+use nexus_types::inventory::{
+    BaseboardId, Caboose, Collection, PowerState, RotSlot,
+};
 use uuid::Uuid;
 
 impl_enum_type!(
@@ -50,6 +52,15 @@ impl_enum_type!(
     A => b"A"
     B => b"B"
 );
+
+impl From<RotSlot> for HwRotSlot {
+    fn from(value: RotSlot) -> Self {
+        match value {
+            RotSlot::A => HwRotSlot::A,
+            RotSlot::B => HwRotSlot::B,
+        }
+    }
+}
 
 impl_enum_type!(
     #[derive(SqlType, Debug, QueryId)]
